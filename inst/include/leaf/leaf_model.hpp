@@ -98,7 +98,6 @@ public:
   double leaf_specific_conductance_max_;
   double sapwood_volume_per_leaf_area_;
   double k_s_;
-  double root_mass_;
   std::vector<double> c_r_V_;
   std::vector<double> c_r_H_;
   double area_leaf_;

@@ -418,7 +418,22 @@ project observes this would make TF24f's whole acclimation-tracking apparatus
 redundant. Which makes this item and item 12 the same argument arriving from two
 directions.
 
-## 10. Fix the parameter naming hazards while it is still cheap
+## 10. Fix the API while it is still cheap
+
+Two halves: get the *names* right (10a) and get the *input set* right (10b). Both
+are far cheaper now, with no downstream users, than after item 6 builds an R
+interface and item 3 lands in plant.
+
+The governing principle for 10b: **the leaf takes leaf-level quantities only.**
+Anything that is whole-plant allometry gets computed on the plant side and passed
+in already reduced. `leaf_specific_conductance_max` is the model to copy — plant
+computes `kmax = K_s·θ/(h·η_c)` in `tf24_strategy.cpp:377` and hands the leaf a
+scalar, so which conductance-versus-height model is in force is plant's business,
+not the leaf's. That matters concretely: the open question over whether α = 1 in
+`kmax ~ h^-α` is defensible at all (item 14) can be settled without touching this
+package.
+
+### 10a. The naming hazards
 
 A new package with no downstream users is the one moment when renames are free.
 These are not cosmetic — each has already cost someone real numbers, and the list
@@ -450,6 +465,97 @@ extraction.
 
 Do this before item 6 builds an R interface, so the R names are right the first
 time, and coordinate with plant, since renames cross the shim.
+
+### 10b. Shrink the input set
+
+Audited `set_physiology`'s fourteen arguments, the constructor's nineteen, and the
+constants header. Findings, in order of how free they are.
+
+**Already dead — two removed, three blocked on plant.** These are stored and never
+read:
+
+| | status |
+|---|---|
+| `root_mass_` (member) | never even *assigned*. **Removed.** |
+| `vcmax_25_to_jmax_25` (constant, 1.67) | zero uses, like the `n` constant. **Removed.** |
+| `rho` (`set_physiology` arg) | stored, never read |
+| `a_bio` (arg) | stored, never read |
+| `sapwood_volume_per_leaf_area` (arg) | stored, never read — and plant *computes* it (`pars.theta·height·η_c`, `tf24_strategy.cpp:383`) purely to throw away |
+
+The last three are still `access: field` in plant's `inst/RcppR6_classes.yml`, and
+plant's `test-leaf.r` asserts they start as `NA`, so removing them needs an RcppR6
+regeneration and a test edit. Do it with item 6. Removing them cannot change a
+result — nothing reads them — and takes `set_physiology` from fourteen arguments
+to eleven.
+
+**Move to the plant side.**
+
+- **`area_leaf`.** Its only use is `1.0/area_leaf_`, normalising soil uptake to a
+  per-leaf-area basis (`E_from_Soil_to_Root_Collar`,
+  `dE_from_soil_dpsi_collar`). If plant passes root carbon already per unit leaf
+  area, the leaf becomes *purely intensive* — no extensive quantity anywhere in it,
+  which is a much cleaner contract and one sentence to document.
+- **The whole root architecture**: root carbon per layer, `soil_depth`,
+  `beta_R_H`, `beta_R_V`, and the hard-coded 1/3 : 2/3 split of root carbon into
+  vertical and horizontal components. This is a root-system model living inside a
+  class called `Leaf`. It is item 7b, and plant already owns the neighbouring
+  parameters (`root_mass_carbon_scale`, `rooting_depth_max`, both file-static and
+  TODO-flagged in `tf24_strategy.cpp`).
+
+**Constants that are really parameters.** `constexpr` asserts that a value is not
+a modelling choice. Several of these are:
+
+- **The six Arrhenius shape parameters** — `vcmax_ha`, `vcmax_H_d`, `vcmax_d_S`,
+  `jmax_ha`, `jmax_H_d`, `jmax_d_S`. These are exactly `plantecophys`'s `EaV`,
+  `EdVC`, `delsC`, `EaJ`, `EdVJ`, `delsJ`, which are *user parameters* there — and
+  whose **defaults it changed at v1.4 after a literature review**. They are also
+  precisely what thermal acclimation modifies, so TF24t needs them mutable. This is
+  the strongest case in the list.
+- **`H2O_CO2_stom_diff_ratio = 1.67`** where the g1 literature uses 1.6 — see
+  item 8.
+- **The PM energy-balance block**, most of which the header comments already
+  concede: `longwave_net_offset = -40` is an explicit placeholder (plant #581);
+  `sw_abs_per_par = 2.0` folds in leaf absorptance, which both `tealeaves`
+  (`abs_s`, `abs_l`) and `plantecophys` (`LeafAbs`) expose; `latent_heat_vap` is
+  fixed at 25 °C where `plantecophys` makes it temperature-dependent;
+  `vol_heat_cap_air` is fixed where `plantecophys` derives air density from `Patm`
+  and `Tair`; `aerodynamic_resistance_coef`/`_fixed` are boundary-layer
+  coefficients that both comparators derive from leaf size and wind.
+- The nine Bernacchi kinetic constants (`gamma_*`, `kc_*`, `ko_*`) are a weaker
+  case — enzyme kinetics vary less among species — but `bigleaf` exposes them and
+  they do get revised.
+
+**Numerical control is currently mixed in with traits.** `GSS_tol_abs`,
+`ci_abs_tol`, `ci_niter` and `vulnerability_curve_ncontrol` are *constructor
+arguments sitting among the physiological traits*, and `leaf_temp_min`/`_max` and
+`integration_tol_` are scattered elsewhere. Collect them into a `Control` struct —
+which is plant's own pattern (`plant/control.h`). Tolerances are not traits, and
+mixing them means a trait-calibration loop (item 12) has to know which of its
+nineteen constructor arguments are not traits.
+
+### 10c. Two latent inconsistencies found during the audit
+
+**`umol_per_mol_to_Pa = 0.1013` silently hard-codes atmospheric pressure.** It
+converts µmol mol⁻¹ to a partial pressure in Pa, which requires the total
+pressure: `0.1013 = 1e-6 × 101300 Pa`. So the constant *is* P = 101.3 kPa in
+disguise — while `atm_kpa_` is a live, settable input used on the conductance side
+(`stom_cond_CO2`, `assim_minus_stom_cond_CO2`, the Medlyn coupling). The model is
+therefore **internally inconsistent away from sea level**: raise `atm_kpa` to
+simulate altitude and the stomatal side responds while Γ*, Kc, Ko, Km and the ci
+root-find bounds all keep assuming 101.3 kPa.
+
+This is the same trap `plantecophys` warns about in bold — that setting `Patm`
+alone "does not correct for atmospheric pressure effects on photosynthesis rates"
+— except there it is documented and here it is not. Fix by deriving the conversion
+from `atm_kpa_` rather than hard-coding it. That *will* change results wherever
+`atm_kpa != 101.3`, so quantify first; if the driver never varies pressure the
+change is a no-op and can land cheaply.
+
+**`kg_to_mol_h2o` and `kg_per_mol_h2o` are not reciprocals.** `1/55.4939 =
+0.0180200` against `kg_per_mol_h2o = 0.018015`, a 0.028% discrepancy. The header
+comment already admits this is deliberate, "kept at the historical 0.018015 to
+preserve results". Worth unifying once there is a bit-identity baseline (item 1) so
+the change can be shown to be 0.028% and nothing else.
 
 ## 11. Template `Leaf` on its scalar type
 

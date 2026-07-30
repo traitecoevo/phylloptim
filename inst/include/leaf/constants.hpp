@@ -23,9 +23,6 @@
 namespace leaf {
 
 // double check best namespace for constants (private vs global)
-// converts vcmax to jmax 25 unitless (Sperry et el. (2017))
-inline constexpr double vcmax_25_to_jmax_25 = 1.67;
-
 // kJ mol ^-1
 inline constexpr double vcmax_ha = 60000;
 // kJ mol ^-1
