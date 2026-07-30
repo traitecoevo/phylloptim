@@ -18,6 +18,32 @@ This code was developed as the TF24 strategy inside
 [traitecoevo/plant](https://github.com/traitecoevo/plant) and is extracted here
 so it can be tested, profiled, extended and embedded on its own.
 
+## Why a separate package
+
+**A home for several stomatal models, not just ours.** The package carries our
+hydraulic gain-risk formulation, and it already contains two alternatives — the
+Sperry et al. (2017) cost formulation and the Medlyn et al. (2011) optimal
+stomatal model — inherited from plant. Today those are second-class: `optimise_psi_stem_Sperry`
+is hardwired to a single soil layer, and the Medlyn path bypasses the hydraulic
+solve altogether, so neither can be swapped in as a like-for-like alternative.
+The goal is to make each one a **first-class member**, selectable and runnable
+against identical drivers, and to add the Prentice et al. (2014) least-cost
+formulation alongside them. Structured that way, the package becomes the natural
+place to *compare* stomatal theories rather than another implementation of one —
+which is something none of the existing R packages can do, because each commits
+to a single scheme. See [PLAN.md](PLAN.md) item 7.
+
+**Fast and differentiable, so it is built for calibration.** A full hydraulic
+solve costs ~4 µs, and forward-mode AD (XAD) gives exact derivatives rather than
+finite differences. That combination is what calibration wants: gradient-based
+optimisers and Hamiltonian samplers need many evaluations *and* clean gradients,
+and finite-differencing a nested root-find through a golden-section search is
+exactly the case where numerical gradients are noisiest. Two honest caveats: the
+AD currently differentiates with respect to the collar potential only, not with
+respect to traits, and getting trait gradients needs the templated `Leaf<T>` of
+[PLAN.md](PLAN.md) item 8; and there is no worked example yet — a calibration
+vignette is item 9 and is the demonstration this claim needs.
+
 ## Status
 
 **v0.0.1 — early.** The model itself is mature and in production use inside

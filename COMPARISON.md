@@ -30,6 +30,9 @@ source read at 1.0.6.1). All three are **pure R with no compiled code**.
 | Profit / gain-risk optimisation | **yes** | Cowan-Farquhar with fixed λ | no | no |
 | Thermal acclimation or damage | yes (in plant's TF24t) | no | no | no |
 | Fits to measured data | **no** | yes (A-Ci, Ball-Berry) | no | yes (that's the point) |
+| Swappable *empirical* gs schemes | Medlyn present, not dispatched | **yes — 4, plus Tuzet** | n/a | n/a |
+| Swappable *hydraulic optimality* schemes | **planned — TF24, Sperry, Prentice14** | no (none are hydraulic) | no | no |
+| Exact derivatives | **yes — forward-mode AD (XAD)** | no | no | no |
 | Language | C++ header-only | R | R | R |
 | Cost per solve | ~4 µs | not measured; `mapply` over scalars | one `uniroot` per leaf | vectorised over time series |
 | Licence | AGPL-3+ | GPL | MIT | GPL-2+ |
@@ -138,7 +141,7 @@ balance costs: one `uniroot` per leaf, per condition, scalar internals,
 parallelised by `furrr` rather than vectorised. `leaf` runs ~10³ inner
 evaluations inside a golden-section search per solve, millions of times per
 model run. Nesting a `tealeaves`-grade energy balance inside that is the trade
-discussed in PLAN.md item 8 — and the reason the free-convection term, which is
+discussed in PLAN.md item 10 — and the reason the free-convection term, which is
 what makes the balance implicit, is the piece explicitly *not* recommended.
 
 `tealeaves` also models **equilibrium, not transient** temperature: no thermal
@@ -209,14 +212,46 @@ no counterpart in any of the three. So does the C++ implementation: this is the
 only one of the four designed to be embedded in a larger model rather than driven
 from a console.
 
+Two things follow from that, and they are the reasons this is worth being a
+package rather than a file inside plant.
+
+**It can become a platform for comparing hydraulic optimality theories, which
+none of these can.** Note the distinction carefully, because it is easy to
+overclaim. `plantecophys` is already a good comparison platform for *empirical*
+stomatal schemes — `gsmodel=` switches between Ball-Berry, Leuning and Medlyn/USO,
+`PhotosynTuzet` adds a water-potential feedback, and `FARAO` adds Cowan-Farquhar
+optimal. What it cannot do is compare **hydraulically explicit** formulations,
+because none of its schemes has a vulnerability curve. And that is exactly where
+the live theoretical argument sits: Sperry-style gain-risk against Prentice
+least-cost against the various carbon-maximisation and Wolf-Anderegg-Pacala
+variants. This package already contains the TF24 gain-risk formulation and, as
+inherited second-class code, both Sperry (2017) and Medlyn (2011). Promoting them
+to first-class members and adding Prentice (2014) — PLAN.md item 7 — would give a
+single implementation of the hydraulic machinery with the cost function swapped
+out, which is the only honest way to compare the theories. Running four
+formulations against identical drivers is a more interesting contribution than a
+fourth implementation of one.
+
+**It is fast and differentiable, which makes calibration tractable.** None of the
+three has automatic differentiation; all three finite-difference or grid-search
+when they need gradients (`fitaci`'s 25×25 brute-force start grid is the
+tell — it exists because `nls` on this objective is fragile). Forward-mode AD at
+4 µs a solve is a different regime. The caveat, stated in full in PLAN.md item 9:
+AD currently differentiates with respect to the collar potential, not with respect
+to traits, so this is an argument about an architecture until the templated
+`Leaf<T>` of item 8 lands and a calibration vignette demonstrates it. Worth noting
+that plant already has direct evidence for the underlying claim — the analytic
+`dprofit_droot_collar_psi` exists precisely because finite-differencing this
+objective was too noisy to drive acclimation tracking.
+
 The gaps run the other way just as clearly, and they are the roadmap:
 
 1. **No inversion.** `plantecophys::fitaci` is the single most-used function in
    this space and `leaf` has no equivalent. Fitting *hydraulic* traits from
    measured A/gs/ψ data would be a new capability rather than a reimplementation
-   — see PLAN.md item 10.
+   — see PLAN.md item 9.
 2. **A weaker energy balance than either leaf-scale competitor**, and one that is
-   off by default. PLAN.md item 8 sets out which parts are worth fixing (the
+   off by default. PLAN.md item 10 sets out which parts are worth fixing (the
    leaf-to-air VPD, immediately) and which are not (free convection, on speed
    grounds).
 3. **No R interface at all yet.** PLAN.md item 6.

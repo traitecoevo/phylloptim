@@ -155,7 +155,46 @@ While doing it, take the chance to give the R side a saner surface than the
 C++ one: `set_physiology()` takes fourteen positional arguments, which is
 tolerable from a strategy that calls it once and painful from a console.
 
-## 7. Template `Leaf` on its scalar type
+## 7. Make the alternative stomatal models first class
+
+**This is the argument for the package being a package rather than a file.**
+
+Three formulations already live in `leaf_model.hpp`, but only one of them is a
+real citizen:
+
+| formulation | what exists | status |
+|---|---|---|
+| **TF24** gain-risk | `hydraulic_cost_TF`, `profit_psi_stem_TF`, `optimise_psi_stem_TF`, and the multi-layer `find_root_collar_psi` | the production path |
+| **Sperry et al. (2017)** | `hydraulic_cost_Sperry`, `profit_psi_stem_Sperry`, `optimise_psi_stem_Sperry` | second class — `optimise_psi_stem_Sperry` is hardwired to `psi_soil_[0]`, so single-layer only, and nothing routes to it |
+| **Medlyn et al. (2011)** | `medlyn_model_gs`, `solve_medlyn_ci_numerical`, `solve_medlyn_ci_analytical` | second class — its own comment says it is "NOT used by the TF24 compute path"; it bypasses the hydraulic solve entirely |
+
+So you cannot presently run the same drivers through Sperry and TF24 and compare,
+which is the obvious thing to want. Make each one selectable and give all of them
+the same contract: multi-layer soil, the same `set_physiology` inputs, the same
+outputs, driven through one entry point. Then add **Prentice et al. (2014)**
+least-cost alongside them.
+
+Design notes:
+
+- Prefer compile-time dispatch (a policy template parameter, or a
+  `Leaf<Formulation>`) over a runtime `enum` and a `switch`. This is a
+  header-only library whose whole point is that the hot loop inlines; a virtual
+  call or a branch per profit evaluation would land inside a golden-section search
+  running ~10³ inner evaluations. Composes naturally with item 8.
+- Medlyn is the awkward one, because it is not a profit model — it prescribes
+  `gs` and has no hydraulic cost. It needs either a shim that maps its `gs` onto a
+  `psi_stem` through the supply curve, or an honest admission that it sits at a
+  different interface. Decide which before writing the dispatch, not after.
+- Keep `optimise_psi_stem_*`'s single-layer forms as the unit-test entry points
+  even after the multi-layer versions exist; they are much easier to reason about.
+
+Why this matters beyond tidiness: every R package in this space commits to one
+stomatal scheme (see [COMPARISON.md](COMPARISON.md)), so **none of them can
+compare schemes**. A package that runs four formulations against identical
+drivers, at 4 µs a solve, is a different and more interesting contribution than a
+fourth implementation of one of them.
+
+## 8. Template `Leaf` on its scalar type
 
 This is the strongest technical argument for the package being header-only, and
 the reason to have done the split at all.
@@ -176,7 +215,61 @@ on its scalar type, so the spline side already supports it.
 Do this *after* item 1, so there is a bit-identity baseline to check against.
 Expect the `double` instantiation to be unchanged and verify it.
 
-## 8. Energy balance — the full cut
+There is a second, larger payoff, which is item 9: templating on the scalar type
+is what turns "we have AD" into "we can calibrate". See below.
+
+## 9. Demonstrate calibration — and then consider inversion
+
+**The claim.** ~4 µs per solve *and* exact derivatives rather than finite
+differences makes this an unusually good target for calibration. Gradient-based
+optimisers and Hamiltonian samplers want both: many evaluations, and gradients
+that are not numerical noise. And this model is close to the worst case for
+finite differencing — a golden-section search wrapped around two nested
+root-finds, so the objective is only piecewise smooth in its inputs and a
+difference quotient picks up the solver tolerances as much as the physics. plant
+already hit exactly this: the analytic `dprofit_droot_collar_psi` exists precisely
+because the finite-difference gradient was too noisy for TF24f's acclimation
+tracking, and #576 turned out to be an AD-versus-finite-difference branch
+asymmetry.
+
+**The honest state of it.** The claim is not yet demonstrated, and it is not yet
+fully true:
+
+- AD currently differentiates with respect to the **collar potential only**.
+  Calibration needs derivatives with respect to **traits** — `vcmax_25`, `b`, `c`,
+  `g1_TF24`, `beta2`, the root parameters. Those do not exist. Item 8 is the
+  enabler: a `Leaf<T>` seeded on a trait rather than on `psi_stem` gives them
+  directly.
+- There is no worked example. Until there is, this is a plausible claim about an
+  architecture rather than a capability anyone can check.
+
+**So the deliverable is a vignette**, and it should be a real one:
+
+- Take measured or synthetic `A`, `gs` and `psi_leaf` under a few soil-moisture
+  and light conditions.
+- Fit hydraulic and photosynthetic traits by gradient-based optimisation, using AD
+  derivatives.
+- Show the thing that makes the argument: **compare against finite differences**
+  — same optimiser, same starting point — and report iterations to convergence,
+  wall time, and whether the FD version converges at all at realistic solver
+  tolerances. If AD does not win convincingly, say so; that is a useful result
+  too, and better found in a vignette than in a paper.
+- Report the wall time for the whole fit. If it is seconds, that is the headline.
+
+Do this after item 8. Attempting it before will produce a vignette that
+finite-differences trait gradients, which is precisely the thing being argued
+against.
+
+**Then the bigger question: inversion.** The clearest capability gap against
+`plantecophys` is that `fitaci` inverts A-Ci curves for Vcmax/Jmax/Rd and this
+package cannot invert anything. Calibrating *hydraulic* traits — P50-type
+vulnerability parameters, root conductances — from gas-exchange and water-potential
+data would be a genuinely new capability rather than a reimplementation of
+`fitaci`, and the AD story is what would make it tractable. Scope it properly
+before committing; it is a project, not a task, and it needs someone to decide
+what data it is meant to consume.
+
+## 10. Energy balance — the full cut
 
 The Penman-Monteith path (`use_energy_balance_`, default off) is a deliberate
 minimal core. Compared with `plantecophys::PhotosynEB` and `tealeaves` it is
@@ -200,7 +293,7 @@ expensive. In priority order:
    temperature accuracy under low wind ever becomes the priority, prefer a
    one-step correction over a converged inner solve.
 
-## 9. Naming, home, publication
+## 11. Naming, home, publication
 
 - **Package name.** `leaf` is clear inside this family and too generic outside
   it. Decide before anything is published: `leafhydro`, `hydroleaf` and
@@ -212,7 +305,7 @@ expensive. In priority order:
   one derives stomatal behaviour from hydraulics instead. See
   [COMPARISON.md](COMPARISON.md).
 
-## 10. Housekeeping
+## 12. Housekeeping
 
 - **CI.** GitHub Actions matrix building `tests/cpp` on gcc and clang, Linux and
   macOS. The suite needs no R, so this is fast and catches the portability
@@ -222,8 +315,3 @@ expensive. In priority order:
   when a header breaks.
 - **Doxygen or roxygen for the C++ API.** The header comments are unusually
   good — they explain why, not what — and are worth rendering.
-- **Consider fitting functions.** The clearest capability gap against
-  `plantecophys` is that it can fit A-Ci curves (`fitaci`) and this cannot invert
-  anything. Fitting hydraulic traits from measured `A`/`gs`/`psi` data would be a
-  genuinely new capability rather than a reimplementation. Scope it before
-  committing; it is a project, not a task.
