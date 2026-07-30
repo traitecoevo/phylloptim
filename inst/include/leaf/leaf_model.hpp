@@ -237,6 +237,23 @@ public:
                                                std::vector<double>& y_integral);
   void setup_clean_leaf();
 
+  // Absolute tolerance for the direct quadrature in
+  // transpiration_full_integration (leaf/quadrature.hpp). Not used anywhere on
+  // the production path, which reads the pre-integrated spline instead.
+  double integration_tol_ = 1e-8;
+
+  // Retained for API compatibility with plant's R bindings, which expose this
+  // method. In plant it configured a compiled adaptive Gauss-Kronrod integrator
+  // (plant::quadrature::QAG); that dependency is gone, so `integration_tol` now
+  // sets the tolerance of the header-only adaptive Simpson quadrature and
+  // `integration_rule` is accepted but ignored -- Simpson has no rule order to
+  // choose. Only affects transpiration_full_integration.
+  void initialize_integrator(int integration_rule = 21,
+                             double integration_tol = 1e-8) {
+    static_cast<void>(integration_rule);
+    integration_tol_ = integration_tol;
+  }
+
   // Medlyn stomatal-conductance model (from develop #450); R-callable, standalone.
   double medlyn_model_gs(double assim_colimited_);
   double medlyn_stom_cond_minus_coupled_stom_cond(double x);
@@ -1538,7 +1555,8 @@ inline double Leaf::transpiration_full_integration(double psi_stem, double psi_u
     return proportion_of_conductivity(psi);
   };
   return leaf_specific_conductance_max_ *
-         quadrature::adaptive_simpson(f, psi_upstream, psi_stem);
+         quadrature::adaptive_simpson(f, psi_upstream, psi_stem,
+                                      integration_tol_);
 }
 
 //calculates supply-side transpiration from psi_stem and root_collar_psi_, returns kg h20 s^-1 m^-2 LA
