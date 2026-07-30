@@ -103,6 +103,17 @@ to keep the `plant::Leaf` alias permanently or migrate plant's ~12,000 lines of
 generated RcppR6/RcppExports code to `leaf::Leaf`. The alias is much cheaper and
 costs nothing at runtime.
 
+**There is at least one external consumer of plant's leaf headers to check
+against.** `Falster-stomatal_analytical_analysis/notes/tf24_closed_form_bench.cpp`
+is an Rcpp translation unit that `#include <plant/leaf_model.h>`, does
+`using plant::Leaf;`, links against the installed `plant.so`, and reads public
+`Leaf` members (`l.b`, `l.c`, `l.beta2`, `l.transpiration(...)`). The shim keeps all
+of that working unchanged — which is the main argument for having written a shim
+rather than migrating call sites. Checked: it declares locals named `n` and `R`,
+which merely shadowed `plant::n` and `plant::R`, so dropping those two names is
+safe and in fact removes the shadowing. Build that file against the branch as part
+of verifying it.
+
 ## 4. Drop the last R coupling
 
 The leaf model is R-free. odelia is not: `odelia/ode_util.hpp` includes
@@ -175,24 +186,66 @@ real citizen:
 | **Medlyn et al. (2011)** | `medlyn_model_gs`, `solve_medlyn_ci_numerical`, `solve_medlyn_ci_analytical` | second class — its own comment says it is "NOT used by the TF24 compute path"; it bypasses the hydraulic solve entirely |
 
 So you cannot presently run the same drivers through Sperry and TF24 and compare,
-which is the obvious thing to want. Make each one selectable and give all of them
-the same contract: multi-layer soil, the same `set_physiology` inputs, the same
-outputs, driven through one entry point. Then add **Prentice et al. (2014)**
-least-cost alongside them.
+which is the obvious thing to want.
 
-Design notes:
+**But do not build the dispatch around the cost function.** The
+`Falster-stomatal_analytical_analysis` project (`atelier/2-research/active/`, draft
+manuscript *"The marginal cost of water as a common currency for stomatal
+optimality models"*) has already worked out the right abstraction, and it is one
+level deeper. Its central result: six widely used models — Cowan-Farquhar,
+Medlyn USO, Prentice least-cost, Sperry gain-risk, TF24, Potkay — all maximise a
+profit, therefore all satisfy the *same* first-order condition
 
-- Prefer compile-time dispatch (a policy template parameter, or a
-  `Leaf<Formulation>`) over a runtime `enum` and a `switch`. This is a
+```
+dA/dE = λ
+```
+
+and differ **only** in the function λ(state). Given λ, each collapses to the
+Medlyn USO functional form, `ci/ca = g1_eff/(g1_eff + sqrt(D))` with
+`g1_eff = sqrt(3·Γ*·Patm/(1.6·λ))` — so USO "is not a model but the generic
+solution of the family". Verified against plant: solving `dA/dE = λ_TF24`
+reproduces TF24's optimum to **0.02% max relative error in ci/ca across 767
+operating points**.
+
+That changes the design. What should be pluggable is **λ(state)**, not the whole
+optimiser:
+
+```cpp
+struct MarginalCost {                       // concept
+  double lambda(const Leaf& l, double psi) const;
+  double dlambda_dpsi(const Leaf& l, double psi) const;   // analytic
+};
+```
+
+Six models then become six small functions rather than six solvers, they share
+one tested numerical core, and — the point — a comparison is *guaranteed* to be
+apples-to-apples, because only λ differs. That is a far stronger claim than "we
+implemented them all in one package", and it is the claim the manuscript needs
+code to support. The λ table is `main.tex` Table `tab:lambda`; hand-written
+`lambda_TF24` and `dlambda_TF24` already exist in that project's
+`notes/tf24_common.R` and `notes/tf24_closed_form_bench.cpp`.
+
+Remaining design notes:
+
+- Prefer compile-time dispatch (a policy template parameter, or
+  `Leaf<MarginalCost>`) over a runtime `enum` and a `switch`. This is a
   header-only library whose whole point is that the hot loop inlines; a virtual
   call or a branch per profit evaluation would land inside a golden-section search
-  running ~10³ inner evaluations. Composes naturally with item 8.
-- Medlyn is the awkward one, because it is not a profit model — it prescribes
-  `gs` and has no hydraulic cost. It needs either a shim that maps its `gs` onto a
-  `psi_stem` through the supply curve, or an honest admission that it sits at a
-  different interface. Decide which before writing the dispatch, not after.
+  running ~10³ inner evaluations. Composes naturally with item 11.
+- **Prentice least-cost is the one that does not fit cleanly**, and it is not
+  Medlyn. Its cost is a *ratio*, `(aE + bV)/A`, not an additive `λE`, so it is only
+  a member of the family after a transformation; the project records that
+  `A − λE` was "verified numerically" to reproduce its optimal ci, but that
+  verification code is not in the repo. Reproduce it before relying on it.
+- Medlyn is easy under this scheme, not awkward as previously noted here: it *is*
+  the generic solution, with λ constant and fitted. The existing standalone
+  `solve_medlyn_ci_*` becomes the λ = const case.
 - Keep `optimise_psi_stem_*`'s single-layer forms as the unit-test entry points
   even after the multi-layer versions exist; they are much easier to reason about.
+- Beware the **two vulnerability curves**. Stem (`b`, `c`) drives
+  `hydraulic_cost_TF`; root (`root_b`, `root_c`) drives uptake. Using the root
+  parameters for the cost gave that project a published-draft λ ∝ ψ^3.02 where it
+  should have been ψ^0.64. See item 10.
 
 Why this matters beyond tidiness: every R package in this space commits to one
 *hydraulically explicit* scheme, or to none (see
@@ -278,10 +331,127 @@ Four reasons this is worth doing rather than merely tidy:
    that soil-to-root conductance is not implemented. This is an asset, not
    baggage; the point is to make it *optional*, not to lose it.
 
-Do 7b before 7a: the supply interface is the thing the alternative cost functions
-need to plug into.
+**Independent confirmation that this is the right interface.** The
+`Falster-stomatal_analytical_analysis` project derives the multi-layer correction
+to the marginal cost of water and verifies it as an identity
+(`notes/tf24_multilayer_lambda.R`, central-difference ratio 1.0000):
 
-## 8. Template `Leaf` on its scalar type
+```
+λ_multi = λ_TF24 · [1 + kmax·f(ψ_r)/S]        S = dE_up/dψ_r
+```
+
+`S` — the root-network conductance at the collar — is *exactly* `duptake_dpsi` in
+the interface above. So the two methods this interface needs are the two the
+multi-layer theory needs, which is a good sign the boundary is in the right place.
+Note the size of the effect: single-layer λ **always understates** the marginal
+cost, by a factor of 2 to 12, and the correction flattens the height scaling of
+`g1_eff` from `h^-0.30` to `h^-0.15`. That project records the multi-layer λ as
+"the one genuine gap, and the blocker for any plant implementation" — so
+implementing it here, behind this interface, unblocks their work.
+
+Do 7b before 7a: the supply interface is the thing the λ functions plug into.
+
+## 8. Report λ and g1_eff as first-class outputs
+
+**Small, and the analytical project asks for it first.** Its
+`notes/proposed changes to plant.md` item 1 is "Report `g1_eff` as an aux
+variable… Do this one first."
+
+The leaf currently reports `ci_`, `gs`, `A`, `E`, `psi`, `profit_`. It does not
+report the marginal cost of water λ, or the equivalent Medlyn slope
+`g1_eff = sqrt(3·Γ*·Patm/(1.6·λ))`. Those two are the quantities that make the
+model *comparable to the literature*: `g1_eff` is directly comparable to fitted g1
+values in the Lin et al. (2015) database and to `plantecophys::fitBB` output, and λ
+is the common currency of item 7a.
+
+Both are cheap — λ is analytic given the cost function, and `g1_eff` is one
+`sqrt`. Add them as members alongside the existing outputs, and expose them
+through whatever R interface item 6 builds.
+
+One unit trap to document while doing it: plant uses **1.67** for the H₂O:CO₂
+stomatal diffusion ratio (`H2O_CO2_stom_diff_ratio` in `leaf/constants.hpp`),
+whereas Medlyn (2011) and the g1 literature use **1.6**. That is a 2.2% offset in
+g1, which matters when comparing against fitted values. Either expose the ratio as
+a settable parameter or report `g1_eff` both ways; do not leave it implicit.
+
+## 9. Add the closed-form fast path
+
+**Speed, and it is already written.** The analytical project derived a closed-form
+approximation to the TF24 optimum and benchmarked it in C++ against the real
+`plant::Leaf` (`notes/tf24_closed_form_bench.cpp`, 226 lines):
+
+| solver | per solve | speedup |
+|---|---|---|
+| exact `optimise_psi_stem_TF` | 2.611 µs | 1× |
+| power law + 1 Newton step | 0.241 µs | **10.8×** |
+| explicit form, β₂ = 1/c | 0.056 µs | **47×** |
+
+At β₂ = 1/c the solve is fully explicit and 0.051 of the 0.056 µs is
+`set_physiology`, i.e. the leaf solve itself has essentially vanished. That is a
+much larger win than anything else on this list — for comparison, header-only
+conversion and LTO both measured at zero (see the family memory note), and the
+multi-layer case is a *three*-level nest, so the project expects "the prize there
+is larger than 10.8×, not smaller".
+
+That project also notes the C++ "reads only public `Leaf` members, so dropping it
+in as a `Leaf` method is close to copy-paste". Bring it over as a selectable
+solver: exact search / power law + k Newton steps / explicit β₂ = 1/c.
+
+Four things not to get wrong:
+
+- **The Newton step count is 1, deliberately.** k = 2 is *worse* in the tail.
+  Do not "improve" it.
+- **The guard tests an output** (`ci/ca > 0.5`), so it must be applied post hoc
+  with a fallback to the exact solve — you cannot branch on it up front.
+- **Report the realised speedup, not the best case.** With a fallback fraction φ
+  the realised gain is `1/[φ + (1−φ)/10.8]` — 3.6× at φ = 0.2, not 10.8×.
+  Measuring φ on a real water-limited scenario is an open item over there.
+- **Smoothness of the argmax is a hard constraint.** plant chose golden-section
+  over Brent specifically because its argmax varies smoothly with inputs, which
+  the demographic growth-rate gradient depends on (the comment survives in
+  `leaf/optimize.hpp`). Any replacement solver must preserve that; the project
+  measures it as roughness in dA/dh — 0.0015 closed form against 0.0011 exact.
+
+The larger prize is that the closed form is **analytically differentiable**, so
+the demographic gradient could become exact rather than finite-differenced. That
+project observes this would make TF24f's whole acclimation-tracking apparatus
+redundant. Which makes this item and item 12 the same argument arriving from two
+directions.
+
+## 10. Fix the parameter naming hazards while it is still cheap
+
+A new package with no downstream users is the one moment when renames are free.
+These are not cosmetic — each has already cost someone real numbers, and the list
+is from `notes/proposed changes to plant.md` §7 plus what surfaced during the
+extraction.
+
+- **`b` / `c` → `stem_b` / `stem_c`.** This is the expensive one. There are *two*
+  Weibull curves: stem (`b`, `c`) driving `hydraulic_cost_TF`, and root
+  (`root_b`, `root_c`) driving uptake. The unmarked default is the stem, which is
+  not obvious, and the analytical project used root parameters for the stem cost
+  and carried λ ∝ ψ^3.02 into a manuscript draft where it should have been ψ^0.64.
+  Never leave an unmarked default for a parameter that exists in two versions.
+- **`mass_root_prop` → `root_carbon_per_layer`.** It is not a proportion of mass.
+- **`g1_TF24` → `cost_scale_TF24`.** It is not a g1 and invites confusion with
+  Medlyn's g1 — doubly so once item 8 starts reporting an actual `g1_eff`.
+- **Signed-versus-magnitude water potentials belong in the type, not a comment.**
+  The convention is currently held together by a comment block above
+  `E_from_Soil_to_Root_Collar` and by suffix conventions
+  (`psi_soil_` positive, `psi_soil_inverted_` negative). A one-line strong type —
+  or at minimum a consistent naming rule enforced in review — removes a whole
+  class of sign error. This code already has form here: plant #584 is a dead
+  `std::max` clamp caused by a sign slip.
+- **`R` and `n` are already gone** from the public namespace (see item 1). Worth
+  recording *why* it mattered: the analytical project's
+  `tf24_closed_form_bench.cpp` declares locals `const double n = l.c*l.beta2 - 1.0`
+  and a Newton residual `R`, both inside a scope where `plant::R` and `plant::n`
+  were visible. It compiles only because the locals shadow them. Removing the
+  namespace-scope names makes that file strictly safer.
+
+Do this before item 6 builds an R interface, so the R names are right the first
+time, and coordinate with plant, since renames cross the shim.
+
+## 11. Template `Leaf` on its scalar type
 
 This is the strongest technical argument for the package being header-only, and
 the reason to have done the split at all.
@@ -302,10 +472,10 @@ on its scalar type, so the spline side already supports it.
 Do this *after* item 1, so there is a bit-identity baseline to check against.
 Expect the `double` instantiation to be unchanged and verify it.
 
-There is a second, larger payoff, which is item 9: templating on the scalar type
+There is a second, larger payoff, which is item 12: templating on the scalar type
 is what turns "we have AD" into "we can calibrate". See below.
 
-## 9. Demonstrate calibration — and then consider inversion
+## 12. Demonstrate calibration — and then consider inversion
 
 **The claim.** ~4 µs per solve *and* exact derivatives rather than finite
 differences makes this an unusually good target for calibration. Gradient-based
@@ -343,7 +513,7 @@ fully true:
   too, and better found in a vignette than in a paper.
 - Report the wall time for the whole fit. If it is seconds, that is the headline.
 
-Do this after item 8. Attempting it before will produce a vignette that
+Do this after item 11. Attempting it before will produce a vignette that
 finite-differences trait gradients, which is precisely the thing being argued
 against.
 
@@ -356,7 +526,7 @@ data would be a genuinely new capability rather than a reimplementation of
 before committing; it is a project, not a task, and it needs someone to decide
 what data it is meant to consume.
 
-## 10. Energy balance — the full cut
+## 13. Energy balance — the full cut
 
 The Penman-Monteith path (`use_energy_balance_`, default off) is a deliberate
 minimal core. Compared with `plantecophys::PhotosynEB` and `tealeaves` it is
@@ -380,19 +550,45 @@ expensive. In priority order:
    temperature accuracy under low wind ever becomes the priority, prefer a
    one-step correction over a converged inner solve.
 
-## 11. Naming, home, publication
+## 14. Naming, home, publication
 
 - **Package name.** `leaf` is clear inside this family and too generic outside
   it. Decide before anything is published: `leafhydro`, `hydroleaf` and
   `leafoptim` all say more.
 - **Repository home.** DESCRIPTION points at `traitecoevo/leaf`; create it, or
   change the URL.
-- **Paper.** The natural framing is the one gap in the existing R landscape:
-  every leaf gas-exchange package assumes a stomatal conductance model, and this
-  one derives stomatal behaviour from hydraulics instead. See
-  [COMPARISON.md](COMPARISON.md).
+- **Paper.** Two candidate framings, and they are not the same paper.
 
-## 12. Housekeeping
+  The **software** paper writes itself from [COMPARISON.md](COMPARISON.md): every
+  leaf gas-exchange package in R assumes a stomatal conductance model, and this
+  one derives stomatal behaviour from hydraulics instead.
+
+  But the more interesting one is already in progress and is not primarily about
+  this package: `Falster-stomatal_analytical_analysis` (`atelier/2-research/active/`),
+  draft manuscript *"The marginal cost of water as a common currency for stomatal
+  optimality models: size dependence, testable contrasts, and a diagnosis"*,
+  targeting *New Phytologist* or *PC&E*. Its argument is that six models share
+  `dA/dE = λ` and differ only in λ(state), so USO is the generic solution of the
+  family rather than a model — which relocates the empirical question onto the
+  *shape* of λ. That paper currently has no code artefact beyond TF24-against-plant
+  scripts. Items 7a, 8 and 9 would give it one, and a package that runs six λ
+  functions through one tested numerical core is much stronger evidence for the
+  unification claim than a symbolic derivation alone.
+
+  Sequencing matters here: **that manuscript is the software's first customer, not
+  a downstream user.** Its blockers are ours. In particular it records the
+  multi-layer λ as "the one genuine gap, and the blocker for any plant
+  implementation" — which is item 7b — and its highest-priority open science
+  question is whether TF24's `kmax = Ks·θ/(h·η_c)` (Shinozaki's uniform-diameter
+  pipe model, with α = 1 in `kmax ~ h^-α`) is defensible at all, given Koçillari
+  et al. 2021 find no height trend in leaf-area-specific conductance across 103
+  plants. If α is near zero rather than one, "much of the seedling and tall-tree
+  diagnosis may be an artefact of the conductance model rather than the cost
+  function". That is a modelling decision this package should make configurable
+  rather than hard-code — worth folding into item 7b, since `kmax(h)` sits on the
+  supply side.
+
+## 15. Housekeeping
 
 - **CI.** GitHub Actions matrix building `tests/cpp` on gcc and clang, Linux and
   macOS. The suite needs no R, so this is fast and catches the portability

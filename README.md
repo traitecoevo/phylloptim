@@ -23,16 +23,22 @@ so it can be tested, profiled, extended and embedded on its own.
 **A home for several stomatal models, not just ours.** The package carries our
 hydraulic gain-risk formulation, and it already contains two alternatives — the
 Sperry et al. (2017) cost formulation and the Medlyn et al. (2011) optimal
-stomatal model — inherited from plant. Today those are second-class: `optimise_psi_stem_Sperry`
-is hardwired to a single soil layer, and the Medlyn path bypasses the hydraulic
-solve altogether, so neither can be swapped in as a like-for-like alternative.
-The goal is to make each one a **first-class member**, selectable and runnable
-against identical drivers, and to add the Prentice et al. (2014) least-cost
-formulation alongside them. Structured that way, the package becomes the natural
-place to *compare* stomatal theories rather than another implementation of one —
-which is something none of the existing R packages can do, because each commits
-to a single hydraulically explicit scheme, or to none. See
-[PLAN.md](PLAN.md) item 7a.
+stomatal model — inherited from plant. Today those are second-class:
+`optimise_psi_stem_Sperry` is hardwired to a single soil layer, and the Medlyn path
+bypasses the hydraulic solve altogether, so neither can be swapped in as a
+like-for-like alternative. The goal is to make each one a **first-class member**,
+selectable and runnable against identical drivers, alongside Prentice et al. (2014)
+least-cost and Cowan-Farquhar.
+
+The right way to do that turns out to be one level deeper than swapping cost
+functions. Those models all maximise a profit, so they all satisfy the same
+first-order condition `dA/dE = λ` and differ **only** in the function λ(state) —
+the marginal cost of water. So what should be pluggable is λ. Six models become
+six small functions sharing one tested numerical core, which makes a comparison
+apples-to-apples by construction rather than by careful bookkeeping. This is the
+central result of a companion manuscript (see [PLAN.md](PLAN.md) item 14), and it
+is something none of the existing R packages can support, because each commits to
+a single hydraulically explicit scheme or to none. See [PLAN.md](PLAN.md) item 7a.
 
 The same refactor applies from the other side, to the **water supply path**. The
 gas-exchange core is already entirely soil-agnostic — the multi-layer soil and
@@ -52,8 +58,8 @@ and finite-differencing a nested root-find through a golden-section search is
 exactly the case where numerical gradients are noisiest. Two honest caveats: the
 AD currently differentiates with respect to the collar potential only, not with
 respect to traits, and getting trait gradients needs the templated `Leaf<T>` of
-[PLAN.md](PLAN.md) item 8; and there is no worked example yet — a calibration
-vignette is item 9 and is the demonstration this claim needs.
+[PLAN.md](PLAN.md) item 11; and there is no worked example yet — a calibration
+vignette is item 12 and is the demonstration this claim needs.
 
 ## Status
 

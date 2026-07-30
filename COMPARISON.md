@@ -141,7 +141,7 @@ balance costs: one `uniroot` per leaf, per condition, scalar internals,
 parallelised by `furrr` rather than vectorised. `leaf` runs ~10³ inner
 evaluations inside a golden-section search per solve, millions of times per
 model run. Nesting a `tealeaves`-grade energy balance inside that is the trade
-discussed in PLAN.md item 10 — and the reason the free-convection term, which is
+discussed in PLAN.md item 13 — and the reason the free-convection term, which is
 what makes the balance implicit, is the piece explicitly *not* recommended.
 
 `tealeaves` also models **equilibrium, not transient** temperature: no thermal
@@ -225,21 +225,27 @@ because none of its schemes has a vulnerability curve. And that is exactly where
 the live theoretical argument sits: Sperry-style gain-risk against Prentice
 least-cost against the various carbon-maximisation and Wolf-Anderegg-Pacala
 variants. This package already contains the TF24 gain-risk formulation and, as
-inherited second-class code, both Sperry (2017) and Medlyn (2011). Promoting them
-to first-class members and adding Prentice (2014) — PLAN.md item 7 — would give a
-single implementation of the hydraulic machinery with the cost function swapped
-out, which is the only honest way to compare the theories. Running four
-formulations against identical drivers is a more interesting contribution than a
-fourth implementation of one.
+inherited second-class code, both Sperry (2017) and Medlyn (2011).
+
+And there is a sharper version of the claim available, from a companion manuscript
+(`Falster-stomatal_analytical_analysis`): those models all maximise a profit, so
+they all satisfy `dA/dE = λ` and differ **only** in λ(state), the marginal cost of
+water. Given λ, each one collapses to the Medlyn USO functional form — so USO is
+the generic solution of the family rather than a competing model, which is why
+mutually incompatible schemes fit gas-exchange data equally well. If λ is what
+differs, then λ is what should be pluggable, and a package that runs six λ
+functions through one shared numerical core makes the comparison apples-to-apples
+*by construction*. That is PLAN.md item 7a, and it is a different and more
+interesting contribution than a fourth implementation of one scheme.
 
 **It is fast and differentiable, which makes calibration tractable.** None of the
 three has automatic differentiation; all three finite-difference or grid-search
 when they need gradients (`fitaci`'s 25×25 brute-force start grid is the
 tell — it exists because `nls` on this objective is fragile). Forward-mode AD at
-4 µs a solve is a different regime. The caveat, stated in full in PLAN.md item 9:
+4 µs a solve is a different regime. The caveat, stated in full in PLAN.md item 12:
 AD currently differentiates with respect to the collar potential, not with respect
 to traits, so this is an argument about an architecture until the templated
-`Leaf<T>` of item 8 lands and a calibration vignette demonstrates it. Worth noting
+`Leaf<T>` of item 11 lands and a calibration vignette demonstrates it. Worth noting
 that plant already has direct evidence for the underlying claim — the analytic
 `dprofit_droot_collar_psi` exists precisely because finite-differencing this
 objective was too noisy to drive acclimation tracking.
@@ -249,9 +255,9 @@ The gaps run the other way just as clearly, and they are the roadmap:
 1. **No inversion.** `plantecophys::fitaci` is the single most-used function in
    this space and `leaf` has no equivalent. Fitting *hydraulic* traits from
    measured A/gs/ψ data would be a new capability rather than a reimplementation
-   — see PLAN.md item 9.
+   — see PLAN.md item 12.
 2. **A weaker energy balance than either leaf-scale competitor**, and one that is
-   off by default. PLAN.md item 10 sets out which parts are worth fixing (the
+   off by default. PLAN.md item 13 sets out which parts are worth fixing (the
    leaf-to-air VPD, immediately) and which are not (free convection, on speed
    grounds).
 3. **No R interface at all yet.** PLAN.md item 6.
