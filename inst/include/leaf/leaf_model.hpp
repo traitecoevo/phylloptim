@@ -13,6 +13,7 @@
 
 #include <odelia/interpolator.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <string>
@@ -925,6 +926,29 @@ inline void Leaf::set_shutdown_state(double root_collar) {
   root_collar_psi_ = root_collar;
   opt_psi_stem_ = psi_crit;
   profit_ = -R_d_ - hydraulic_cost_TF(psi_crit);
+
+  // Write the flux outputs too. Before this they were left holding whatever the
+  // PREVIOUS solve on this object put there, and set_physiology did not reset them
+  // either (setup_clean_leaf runs from the constructors only) -- so a reused Leaf
+  // reported the previous plant's water and carbon use after a shutdown. plant
+  // holds one persistent Leaf per TF24_Strategy and drives every node, height and
+  // timestep through it, and soil_consumption_ feeds the patch water balance, so
+  // this was a live water-balance error on the dry margin. plant #578, #577.
+  //
+  // The values are the ones consistent with the profit already set above: the leaf
+  // is holding at psi_crit, so it moves no water at all, but it IS respiring --
+  // profit_ is -R_d_ - hydraulic_cost, so assimilation is -R_d_, not zero. ci sits
+  // at the CO2 compensation point, matching the two zero-transpiration branches in
+  // set_leaf_states_rates_from_psi_stem.
+  transpiration_ = 0.0;
+  stom_cond_CO2_ = 0.0;
+  assim_colimited_ = -R_d_;
+  ci_ = gamma_ * umol_per_mol_to_Pa;
+  E_up_ = 0.0;
+  std::fill(soil_consumption_.begin(), soil_consumption_.end(), 0.0);
+  // Invalidate the transpiration memo: it is keyed on (psi_stem, psi_upstream) and
+  // we have just written transpiration_ without going through transpiration().
+  transpiration_cached_ = false;
 }
 
 // Shared setup + feasibility handling for the root-collar solve. Extracted

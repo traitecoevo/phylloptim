@@ -72,9 +72,9 @@ plant. The *packaging* is new, and two things are not done yet:
 
 It also carries one inherited defect worth knowing about before you use it: on
 the hydraulic-shutdown path, transpiration, assimilation and soil water uptake
-are left holding the previous solve's values. See "Fix the shutdown-state leak"
-in [PLAN.md](PLAN.md); the behaviour is pinned by a test so the fix will be
-deliberate and visible.
+are left holding the previous solve's values (plant #578). `main` reproduces
+plant's behaviour exactly, including this; the fix is on the `feature/api-cleanup`
+branch alongside the other changes that alter results or the API.
 
 ## Use from C++
 

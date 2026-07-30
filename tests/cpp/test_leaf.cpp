@@ -221,21 +221,12 @@ void test_shutdown_when_soil_is_drier_than_psi_crit() {
   near(l.opt_psi_stem_, l.psi_crit, 1e-12, "stem is held at psi_crit");
 }
 
-// KNOWN DEFECT, inherited from plant unchanged -- see PLAN.md, "Fix the
-// shutdown-state leak". set_shutdown_state() writes only root_collar_psi_,
-// opt_psi_stem_ and profit_. It does NOT reset transpiration_,
-// assim_colimited_, stom_cond_CO2_, ci_, E_up_ or soil_consumption_, and
-// set_physiology() does not either (setup_clean_leaf() runs from the
-// constructors only). So a Leaf object reused across solves -- which is exactly
-// how plant uses it, one persistent Leaf per TF24_Strategy driving every node
-// and timestep -- reports the PREVIOUS solve's water and carbon fluxes after a
-// shutdown.
-//
-// This test pins the broken behaviour deliberately, so that the fix is a
-// visible, deliberate change rather than a silent one. When the leak is fixed,
-// these assertions flip to expecting zeros.
-void test_shutdown_leaves_stale_state_known_defect() {
-  printf("shutdown state leak (known defect, pinned)\n");
+// The shutdown path used to leak the previous solve's fluxes (plant #578/#577).
+// set_shutdown_state now writes them, so this asserts the fixed behaviour: a
+// shut-down leaf moves no water, respires at R_d, and sits at the CO2
+// compensation point -- and, critically, none of that depends on what ran before.
+void test_shutdown_writes_its_own_fluxes() {
+  printf("shutdown writes its own fluxes (plant #578 fixed)\n");
   Drivers d;
   leaf::Leaf l;
   l.setup_transpiration(100);
@@ -248,27 +239,34 @@ void test_shutdown_leaves_stale_state_known_defect() {
                      d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
     l.find_root_collar_psi();
   };
+
   solve(4.0); // wet enough to transpire
-  const double E_wet = l.transpiration_;
-  const double A_wet = l.assim_colimited_;
-  const double S_wet = l.soil_consumption_[0];
-  ok(E_wet > 0.0, "the wet solve transpires");
+  ok(l.transpiration_ > 0.0, "the wet solve transpires");
 
   solve(20.0); // far drier than psi_crit: the leaf shuts down
   ok(l.profit_ < 0.0, "the dry solve is a shutdown (profit < 0)");
-  ok(l.transpiration_ == E_wet,
-     "DEFECT: transpiration_ still holds the wet value");
-  ok(l.assim_colimited_ == A_wet,
-     "DEFECT: assim_colimited_ still holds the wet value");
-  ok(l.soil_consumption_[0] == S_wet,
-     "DEFECT: soil_consumption_ still holds the wet value");
+  near(l.transpiration_, 0.0, 1e-300, "transpiration is zero, not stale");
+  near(l.stom_cond_CO2_, 0.0, 1e-300, "conductance is zero, not stale");
+  near(l.E_up_, 0.0, 1e-300, "soil uptake is zero, not stale");
+  for (double s : l.soil_consumption_) {
+    near(s, 0.0, 1e-300, "per-layer consumption is zero, not stale");
+  }
+  // Respiring, not simply idle: profit_ is -R_d_ - hydraulic_cost, so the
+  // consistent assimilation is -R_d_. Zero would be inconsistent with profit_.
+  ok(l.assim_colimited_ < 0.0, "assimilation is negative (respiring)");
+  near(l.assim_colimited_, l.profit_ + l.hydraulic_cost_TF(l.psi_crit), 1e-12,
+       "assimilation is consistent with profit and the hydraulic cost");
+  ok(std::isfinite(l.ci_), "ci is set to the compensation point, not left stale");
 
-  // A freshly constructed leaf shows the same hole from the other side: the
-  // fluxes are never written at all, so they stay at the NA sentinel.
+  // Order independence is the property that was actually broken: a fresh leaf
+  // taken straight to dry must report exactly the same thing.
   leaf::Leaf fresh = make_leaf(d, {20.0}, {1.0});
   fresh.find_root_collar_psi();
-  ok(!std::isfinite(fresh.transpiration_),
-     "DEFECT: a never-transpired shutdown leaves transpiration_ unset");
+  ok(fresh.transpiration_ == l.transpiration_,
+     "a fresh leaf gives the same transpiration");
+  ok(fresh.assim_colimited_ == l.assim_colimited_,
+     "a fresh leaf gives the same assimilation");
+  ok(fresh.profit_ == l.profit_, "a fresh leaf gives the same profit");
 }
 
 void test_analytic_gradient_matches_finite_difference() {
@@ -725,7 +723,7 @@ int main() {
   test_light_response();
   test_multi_layer_soil();
   test_shutdown_when_soil_is_drier_than_psi_crit();
-  test_shutdown_leaves_stale_state_known_defect();
+  test_shutdown_writes_its_own_fluxes();
   test_analytic_gradient_matches_finite_difference();
   test_lambda_equals_dA_dE_single_layer();
   test_multilayer_lambda_identity();
