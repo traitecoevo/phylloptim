@@ -400,6 +400,111 @@ void test_energy_balance_path_runs() {
      "leaf temperature stays inside the physical clamp");
 }
 
+// The closed-form fast path (leaf/closed_form.hpp). Two things matter: that it is
+// actually fast, and that its error is characterised honestly rather than asserted
+// to be small.
+void test_closed_form() {
+  printf("closed-form fast path\n");
+  // Reference geometry, matching the companion analysis: collar held at zero,
+  // single layer, kmax from height.
+  const double eta = 12.0, eta_c = 1 - 2 / (1 + eta) + 1 / (1 + 2 * eta);
+  const double theta = 1.0 / 4669.0;
+  const auto setp = [&](leaf::Leaf &l, double h, double vpd) {
+    std::vector<double> ps{0.0}, dp{1.0}, rt{1.0};
+    l.set_physiology(1.0, rt, 608.0, 0.0245, 900.0, ps, dp,
+                     1.0 * theta / (h * eta_c), vpd, 40.0, theta * h, 25.0, 21.0,
+                     101.3);
+  };
+  leaf::Leaf l;
+
+  // Near the wet end, where the leading-order expansion is centred, it should be
+  // very accurate.
+  setp(l, 1.0, 2.0);
+  l.optimise_psi_stem_TF();
+  const double A_wet = l.assim_colimited_;
+  setp(l, 1.0, 2.0);
+  const leaf::closed_form::Solution wet = leaf::closed_form::solve(l, 1);
+  ok(std::abs(wet.assim / A_wet - 1.0) < 2e-3,
+     "closed form is within 0.2% of the exact solve at h=1 m");
+  ok(leaf::closed_form::within_guard(l, wet), "h=1 m passes the guard");
+
+  // Error grows steeply as the leaf moves away from the wet end. These bounds
+  // record measured behaviour -- they are deliberately loose enough to be stable
+  // and tight enough to catch a regression.
+  struct Case {
+    double h, max_err;
+  };
+  for (const Case &cs : {Case{3.0, 2e-3}, Case{8.0, 1.5e-2}, Case{12.0, 4e-2}}) {
+    setp(l, cs.h, 2.0);
+    l.optimise_psi_stem_TF();
+    const double A_ex = l.assim_colimited_;
+    setp(l, cs.h, 2.0);
+    const double A_cf = leaf::closed_form::solve(l, 1).assim;
+    ok(std::abs(A_cf / A_ex - 1.0) < cs.max_err,
+       "closed-form error is bounded at h=" + std::to_string(cs.h) + " m");
+  }
+
+  // The guard is coarse, and saying so is the point. It admits ~2% error in A at
+  // h = 12 m (ci/ca ~ 0.55) and only rejects once the error is ~8% (h = 20 m).
+  // So it is a filter on gross failure, not an error bound -- and note that the
+  // heights it rejects are the dominant canopy trees.
+  setp(l, 20.0, 2.0);
+  l.optimise_psi_stem_TF();
+  const double A_tall = l.assim_colimited_;
+  setp(l, 20.0, 2.0);
+  const leaf::closed_form::Solution tall = leaf::closed_form::solve(l, 1);
+  ok(!leaf::closed_form::within_guard(l, tall), "h=20 m is rejected by the guard");
+  ok(std::abs(tall.assim / A_tall - 1.0) > 3e-2,
+     "and it is rejected because the error really is large there");
+
+  // The beta2 = 1/c leaf, where xi is constant and nothing needs solving.
+  leaf::Leaf exact_leaf(96.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
+                        5.870283, 1.0 / 2.680147, 157.44, 0.30, 0.7, 0.99, 1e-3,
+                        100, 1e-3, 1000, 7.5, 3.4e2, 9.4e3);
+  ok(leaf::closed_form::beta2_is_exact(exact_leaf),
+     "beta2_is_exact recognises beta2 = 1/c");
+  ok(!leaf::closed_form::beta2_is_exact(l), "and rejects the default beta2 = 1.5");
+  setp(exact_leaf, 5.0, 1.5);
+  exact_leaf.optimise_psi_stem_TF();
+  const double A_ref = exact_leaf.assim_colimited_;
+  setp(exact_leaf, 5.0, 1.5);
+  const leaf::closed_form::Solution ex =
+      leaf::closed_form::solve_exact_beta2(exact_leaf);
+  ok(std::isnan(ex.psi_stem),
+     "the explicit form reports no psi_stem -- it never solves for one");
+  ok(std::abs(ex.assim / A_ref - 1.0) < 4e-2,
+     "the explicit form is within a few percent of the exact solve");
+
+  // Timing, reported rather than asserted: absolute microseconds are
+  // machine-dependent, so a hard threshold would be a flaky test.
+  const std::vector<double> hs{1, 2, 3, 5, 8, 12}, ds{0.8, 1.0, 1.5, 2.0};
+  const int reps = 20000;
+  double sink = 0;
+  const auto time_it = [&](leaf::Leaf &leaf_ref, auto fn) {
+    const auto t0 = std::chrono::steady_clock::now();
+    for (int r = 0; r < reps; ++r) {
+      setp(leaf_ref, hs[r % 6], ds[r % 4]);
+      sink += fn();
+    }
+    const auto t1 = std::chrono::steady_clock::now();
+    return std::chrono::duration<double, std::micro>(t1 - t0).count() / reps;
+  };
+  const double t_setp = time_it(l, [&] { return l.ca_; });
+  const double t_exact = time_it(l, [&] {
+    l.optimise_psi_stem_TF();
+    return l.assim_colimited_;
+  });
+  const double t_cf =
+      time_it(l, [&] { return leaf::closed_form::solve(l, 1).assim; });
+  const double t_expl = time_it(
+      exact_leaf, [&] { return leaf::closed_form::solve_exact_beta2(exact_leaf).assim; });
+  printf("    set_physiology %.3f us | exact %.3f us | 1-Newton %.3f us (%.1fx) |"
+         " explicit %.3f us (%.1fx)\n",
+         t_setp, t_exact, t_cf, t_exact / t_cf, t_expl, t_exact / t_expl);
+  ok(t_cf < t_exact, "the closed form is faster than the exact solve");
+  ok(sink != 0.0, "timing loop was not optimised away");
+}
+
 void test_bad_input_throws() {
   printf("input validation\n");
   Drivers d;
@@ -455,6 +560,7 @@ int main() {
   test_multilayer_lambda_identity();
   test_g1_eff();
   test_energy_balance_path_runs();
+  test_closed_form();
   test_bad_input_throws();
   benchmark();
 

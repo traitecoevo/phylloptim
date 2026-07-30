@@ -22,6 +22,7 @@
 //                    leaf_temp, atm_o2_kpa, atm_kpa);
 //   l.find_root_collar_psi();           // solve; results in l.opt_psi_stem_ etc.
 
+#include <leaf/closed_form.hpp>
 #include <leaf/constants.hpp>
 #include <leaf/leaf_model.hpp>
 #include <leaf/optimize.hpp>
