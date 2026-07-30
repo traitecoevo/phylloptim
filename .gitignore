@@ -12,6 +12,7 @@
 *.so
 *.dylib
 tests/cpp/test_leaf
+tests/cpp/test_golden
 tests/cpp/*.dSYM/
 
 # macOS
