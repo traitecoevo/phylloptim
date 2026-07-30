@@ -155,9 +155,15 @@ While doing it, take the chance to give the R side a saner surface than the
 C++ one: `set_physiology()` takes fourteen positional arguments, which is
 tolerable from a strategy that calls it once and painful from a console.
 
-## 7. Make the alternative stomatal models first class
+## 7. Make the components swappable
 
-**This is the argument for the package being a package rather than a file.**
+**This is the argument for the package being a package rather than a file**, and
+it is one refactor approached from two directions: make the *cost function*
+swappable (7a) and make the *water supply path* swappable (7b). Both serve the
+same end — running alternative formulations against identical drivers — and both
+are what a fair model comparison requires.
+
+### 7a. The stomatal / optimality formulations
 
 Three formulations already live in `leaf_model.hpp`, but only one of them is a
 real citizen:
@@ -189,10 +195,91 @@ Design notes:
   even after the multi-layer versions exist; they are much easier to reason about.
 
 Why this matters beyond tidiness: every R package in this space commits to one
-stomatal scheme (see [COMPARISON.md](COMPARISON.md)), so **none of them can
-compare schemes**. A package that runs four formulations against identical
+*hydraulically explicit* scheme, or to none (see
+[COMPARISON.md](COMPARISON.md)), so none of them can compare the formulations
+where the live argument actually is. A package that runs four against identical
 drivers, at 4 µs a solve, is a different and more interesting contribution than a
 fourth implementation of one of them.
+
+### 7b. The soil-and-root water supply path
+
+**Does the leaf need to know about soil layers?** No — and this is worth acting
+on, because the separation is already almost clean.
+
+Measured on the current code. The soil/root transport is 257 of the 1,117 lines of
+member-function body (**23%**), plus 13 state members and a block of
+`set_physiology`, dominated by `E_from_Soil_to_Root_Collar` (153 lines) and
+`dE_from_soil_dpsi_collar` (58). But the *gas-exchange core is entirely
+soil-agnostic*. Every one of these never touches soil state:
+
+`transpiration`, `transpiration_to_psi_stem`, `proportion_of_conductivity`,
+`psi_stem_to_ci`, `assim_colimited`, `assim_rubisco_limited`,
+`assim_electron_limited`, `electron_transport`, `hydraulic_cost_TF`,
+`hydraulic_cost_Sperry`, `profit_psi_stem_TF`, `profit_psi_stem_Sperry`,
+`set_leaf_states_rates_from_psi_stem`, every temperature and energy-balance
+function, and every Medlyn function.
+
+The coupling runs through a single scalar. `find_psi_stem_from_psi_root` is six
+lines:
+
+```cpp
+E_from_Soil_to_Root_Collar(psi_root, psi_soil);          // soil -> E_up_
+double psi_stem = transpiration_to_psi_stem(E_up_, psi_root);
+```
+
+So the soil enters the optimisation *only* as a supply function
+`E_up = f(P_collar)` — plus its derivative, which
+`dE_from_soil_dpsi_collar` already provides. And note that
+`optimise_psi_stem_TF` and `optimise_psi_stem_Sperry` already run off
+`psi_soil_[0]`, i.e. a single scalar potential: the soil-free path exists.
+
+**So: isolate it, but keep it here — do not push it up into plant.** The reason
+not to move it to plant is that the coupling point is not at plant's level. The
+golden-section search evaluates the supply function at every candidate collar
+potential, inside the inner loop. plant would have to inject a callback into the
+leaf optimiser's hot path, which is a worse boundary than the one that exists now.
+
+Extract it instead as a swappable component *within* the package:
+
+```cpp
+struct SupplyPath {                              // concept, not a base class
+  double uptake(double P_collar) const;          // E_up, kg H2O m-2 leaf s-1
+  double duptake_dpsi(double P_collar) const;    // analytic derivative
+  double wettest_potential() const;              // for bracketing the solve
+};
+```
+
+with (at least) two implementations: `MultiLayerRoots` — today's behaviour, with
+per-layer vulnerability, root resistance and gravitational head — and
+`SinglePotential`, which is one ψ_soil and either infinite or constant
+conductance. Template `Leaf` on it so the calls still inline; a `std::function`
+or a virtual base would put an indirect call inside a loop running ~10³ inner
+evaluations, which is the thing to avoid.
+
+Four reasons this is worth doing rather than merely tidy:
+
+1. **It is what makes model comparison fair.** To compare cost functions you must
+   hold the supply side fixed; to compare supply representations you must hold the
+   cost function fixed. Right now neither is possible because they are one object.
+   And the alternatives 7a wants to add — Medlyn, Prentice least-cost,
+   Cowan-Farquhar — are all formulated against a *single* soil water potential, so
+   without this the comparison is either unfair or impossible.
+2. **The bare-leaf user should not have to build a root system.** Someone coming
+   from `plantecophys` has one ψ_soil and no root-mass profile.
+   `set_physiology`'s fourteen arguments include three parallel soil vectors;
+   `SinglePotential` removes that barrier to entry entirely.
+3. **It quarantines the bug-prone part.** Both currently open defects in this code
+   — plant #577 (`resize` that should be `assign`) and #578 (the shutdown leak,
+   item 2 here) — are in the soil path. It is the most intricate 23% of the model
+   and it currently has no independent test surface.
+4. **It keeps a genuinely novel capability.** Multi-layer root water uptake with
+   per-layer vulnerability curves and gravitational head has no counterpart in
+   `plantecophys`, `tealeaves` or `bigleaf` — `plantecophys` explicitly documents
+   that soil-to-root conductance is not implemented. This is an asset, not
+   baggage; the point is to make it *optional*, not to lose it.
+
+Do 7b before 7a: the supply interface is the thing the alternative cost functions
+need to plug into.
 
 ## 8. Template `Leaf` on its scalar type
 

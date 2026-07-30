@@ -25,7 +25,7 @@ source read at 1.0.6.1). All three are **pure R with no compiled code**.
 | Stomatal conductance | **emergent from hydraulics** | 4 empirical models + Tuzet | fixed input trait | fitted as regression |
 | Leaf energy balance | minimal, default off | full, iterated | **full nonlinear root-find** | no leaf; PM at surface |
 | Xylem / root vulnerability | **yes** | no | no | no |
-| Soil water potential | **yes, multi-layer** | prescribed scalar (Tuzet only) | no | no |
+| Soil water potential | **yes, multi-layer** (separable — PLAN 7b) | prescribed scalar (Tuzet only) | no | no |
 | Root resistance | **yes, per layer** | explicitly not implemented | no | no |
 | Profit / gain-risk optimisation | **yes** | Cowan-Farquhar with fixed λ | no | no |
 | Thermal acclimation or damage | yes (in plant's TF24t) | no | no | no |

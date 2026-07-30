@@ -31,7 +31,18 @@ against identical drivers, and to add the Prentice et al. (2014) least-cost
 formulation alongside them. Structured that way, the package becomes the natural
 place to *compare* stomatal theories rather than another implementation of one —
 which is something none of the existing R packages can do, because each commits
-to a single scheme. See [PLAN.md](PLAN.md) item 7.
+to a single hydraulically explicit scheme, or to none. See
+[PLAN.md](PLAN.md) item 7a.
+
+The same refactor applies from the other side, to the **water supply path**. The
+gas-exchange core is already entirely soil-agnostic — the multi-layer soil and
+root system enter the solve only as a single supply function `E_up = f(P_collar)`,
+so pulling them behind an interface would let the multi-layer root system be
+swapped for a single soil water potential. That both lowers the barrier for a
+bare-leaf user (no root-mass profile to construct) and is what makes comparison
+*fair*: the alternative formulations worth comparing against are all written for
+one ψ_soil, so you have to be able to hold the supply side fixed. [PLAN.md](PLAN.md)
+item 7b.
 
 **Fast and differentiable, so it is built for calibration.** A full hydraulic
 solve costs ~4 µs, and forward-mode AD (XAD) gives exact derivatives rather than
