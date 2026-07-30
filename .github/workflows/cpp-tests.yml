@@ -1,0 +1,74 @@
+name: C++ tests
+
+# The test suite needs no R, so this is fast and can run on every push. It also
+# catches the portability problems that have bitten this code before -- long double
+# width and FMA contraction differing between compilers and architectures (see the
+# arm64 note in Leaf::hydraulic_cost_Sperry), which a single-platform build misses.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, cxx: g++ }
+          - { os: ubuntu-latest, cxx: clang++ }
+          - { os: macos-latest, cxx: clang++ }
+
+    name: ${{ matrix.os }} / ${{ matrix.cxx }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # odelia supplies the spline interpolator and the vendored XAD headers. Both
+      # are header-only, so a shallow checkout of the sibling repo is enough --
+      # nothing needs installing or building.
+      - name: Check out odelia (header-only dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: traitecoevo/odelia
+          path: odelia
+          fetch-depth: 1
+
+      - name: Install Boost headers (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libboost-dev
+
+      - name: Install Boost headers (macOS)
+        if: runner.os == 'macOS'
+        run: brew install boost
+
+      - name: Resolve Boost include path
+        id: boost
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            echo "inc=$(brew --prefix boost)/include" >> "$GITHUB_OUTPUT"
+          else
+            echo "inc=/usr/include" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and run
+        env:
+          CXX: ${{ matrix.cxx }}
+        run: |
+          make -C tests/cpp \
+            CXX="$CXX" \
+            ODELIA_INC="$GITHUB_WORKSPACE/odelia/inst/include" \
+            BH_INC="${{ steps.boost.outputs.inc }}"
+
+      # The golden file records exact floating-point output, so a mismatch here is
+      # either a real regression or a genuine cross-platform numerical difference.
+      # Either way it is worth knowing about, which is why it is not tolerance-based.
+      - name: Note on failure
+        if: failure()
+        run: |
+          echo "If only the golden test failed, check whether this is a real"
+          echo "regression or a platform floating-point difference before"
+          echo "regenerating. See tests/cpp/test_golden.cpp."
