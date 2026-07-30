@@ -28,8 +28,8 @@ public:
   Leaf();
   
   Leaf(double vcmax_25, 
-       double c, 
-       double b, 
+       double stem_c, 
+       double stem_b, 
        double psi_crit,
        double root_c,
        double root_b,
@@ -43,7 +43,7 @@ public:
        double vulnerability_curve_ncontrol,
        double ci_abs_tol,
        double ci_niter,
-      double g1_TF24,
+      double cost_scale_TF24,
     double beta_R_H,
     double beta_R_V); 
         
@@ -129,8 +129,15 @@ public:
   // psi_from_E
 
   double vcmax_25;
-  double c;
-  double b;
+  // NAMED stem_* deliberately. There are TWO Weibull vulnerability curves in this
+  // model -- stem (stem_b, stem_c), which drives hydraulic_cost_TF, and root
+  // (root_b, root_c), which drives uptake -- and these used to be the unmarked
+  // default `b` and `c`. That is not a style question: the companion analysis used
+  // the root parameters for the stem cost and carried lambda ~ psi^3.02 into a
+  // manuscript draft where it should have been psi^0.64. Never leave an unmarked
+  // default for a parameter that exists in two versions.
+  double stem_c;
+  double stem_b;
   double psi_crit;  // derived from b and c
   double beta2;
   double jmax_25;
@@ -141,7 +148,7 @@ public:
   double vulnerability_curve_ncontrol;
   double ci_abs_tol;
   double ci_niter;
-  double g1_TF24;
+  double cost_scale_TF24;
 
   double ci_;
   double stom_cond_CO2_;
@@ -276,12 +283,15 @@ public:
   }
   // Forwards to leaf::cumulative_vulnerability_integral, which now lives in
   // vulnerability.hpp because it is shared by the stem and the root curves and
-  // so belongs to neither.
-  void build_cumulative_vulnerability_integral(double b, double c,
+  // so belongs to neither. The parameters are deliberately neutral names, not
+  // stem_*: this is called with (stem_b, stem_c) from setup_transpiration and
+  // with (root_b, root_c) from setup_root_vulnerability.
+  void build_cumulative_vulnerability_integral(double weibull_b, double weibull_c,
                                                double resolution,
                                                std::vector<double>& x,
                                                std::vector<double>& y_integral) {
-    cumulative_vulnerability_integral(b, c, resolution, x, y_integral);
+    cumulative_vulnerability_integral(weibull_b, weibull_c, resolution, x,
+                                      y_integral);
   }
   void setup_clean_leaf();
 
@@ -444,8 +454,9 @@ public:
   // lambda at an arbitrary stem water potential (positive magnitude, MPa), in
   // umol CO2 (kg H2O)^-1. Analytic, from the TF24 cost function:
   //
-  //   C(psi)     = g1_TF24 * (1 - f(psi))^beta2,    f(psi) = exp(-(psi/b)^c)
-  //   dC/dpsi    = g1_TF24 * beta2 * (1-f)^(beta2-1) * (c/b)(psi/b)^(c-1) * f
+  //   C(psi)   = cost_scale_TF24 * (1 - f)^beta2,   f(psi) = exp(-(psi/stem_b)^stem_c)
+  //   dC/dpsi  = cost_scale_TF24 * beta2 * (1-f)^(beta2-1) *
+  //              (stem_c/stem_b)(psi/stem_b)^(stem_c-1) * f
   //   E(psi)     = kmax * integral of f,  so  dE/dpsi = kmax * f
   //   lambda     = (dC/dpsi) / (dE/dpsi)
   //
@@ -520,15 +531,16 @@ T assim_colimited_ad(T ci, double vcmax, double et, double gstar_Pa, double km,
   return (s - sqrt(s * s - 4.0 * curv * ar * ae)) / (2.0 * curv) - R_d;
 }
 template <typename T>
-T hydraulic_cost_ad(T psi_stem, double b, double c, double g1, double beta2) {
-  return g1 * pow(1.0 - exp(-pow(psi_stem / b, c)), beta2);
+T hydraulic_cost_ad(T psi_stem, double stem_b, double stem_c, double cost_scale,
+                    double beta2) {
+  return cost_scale * pow(1.0 - exp(-pow(psi_stem / stem_b, stem_c)), beta2);
 }
 }  // namespace detail
 inline Leaf::Leaf()
     :
     vcmax_25(96), // umol m^-2 s^-1 
-    c(2.680147), //unitless
-    b(3.898245), //-MPa
+    stem_c(2.680147), //unitless
+    stem_b(3.898245), //-MPa
     psi_crit(5.870283), //-MPa
     beta2(1.5), //exponent for effect of hydraulic risk (unitless)
     jmax_25(157.44), // maximum electron transport rate umol m^-2 s^-1
@@ -539,7 +551,7 @@ inline Leaf::Leaf()
     vulnerability_curve_ncontrol(100),
     ci_abs_tol(1e-3),
     ci_niter(1000),
-    g1_TF24(7.5) //cost parameter for TF24 profit model umol m^-2 s^-1
+    cost_scale_TF24(7.5) //cost parameter for TF24 profit model umol m^-2 s^-1
    {
       // The root traits (root_c/root_b/root_psi_crit) and the two beta_R_*
       // resistance constants keep their defaults in MultiLayerRoots, which owns
@@ -550,7 +562,7 @@ inline Leaf::Leaf()
       setup_clean_leaf();
 }
 
-inline Leaf::Leaf(double vcmax_25, double c, double b,
+inline Leaf::Leaf(double vcmax_25, double stem_c, double stem_b,
            double psi_crit, // derived from b and c,
            double root_c,
            double root_b,
@@ -561,12 +573,12 @@ inline Leaf::Leaf(double vcmax_25, double c, double b,
            double vulnerability_curve_ncontrol,
            double ci_abs_tol,
            double ci_niter,
-           double g1_TF24,
+           double cost_scale_TF24,
            double beta_R_H,
            double beta_R_V)
     : vcmax_25(vcmax_25), // umol m^-2 s^-1 
-    c(c), //unitless
-    b(b), //-MPa
+    stem_c(stem_c), //unitless
+    stem_b(stem_b), //-MPa
     psi_crit(psi_crit), //-MPa
     beta2(beta2), //exponent for effect of hydraulic risk (unitless)
     jmax_25(jmax_25), // maximum electron transport rate umol m^-2 s^-1
@@ -577,7 +589,7 @@ inline Leaf::Leaf(double vcmax_25, double c, double b,
     vulnerability_curve_ncontrol(vulnerability_curve_ncontrol),
     ci_abs_tol(ci_abs_tol),
     ci_niter(ci_niter),
-    g1_TF24(g1_TF24) //cost parameter for TF24 profit model umol m^-2 s^-1
+    cost_scale_TF24(cost_scale_TF24) //cost parameter for TF24 profit model umol m^-2 s^-1
    {
       // The root traits and the two resistance constants belong to the supply
       // path, so hand them over before its vulnerability curve is built.
@@ -1174,7 +1186,7 @@ inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi) {
                          R_d_, curv_fact_colim));
   AD ps_ad = psi_stem;      xad::derivative(ps_ad) = 1.0;
   const double C_prime = xad::derivative(
-      detail::hydraulic_cost_ad(ps_ad, b, c, g1_TF24, beta2));
+      detail::hydraulic_cost_ad(ps_ad, stem_b, stem_c, cost_scale_TF24, beta2));
 
   // Stomatal-conductance supply coefficient gc and its partials. gc =
   // gc_const * transpiration(psi_stem, psi); transpiration is conductance_max *
@@ -1280,13 +1292,13 @@ inline double Leaf::leaf_temp_from_E(double E) const {
 // returns proportion of conductance taken from hydraulic vulnerability curve (unitless)
 inline double Leaf::proportion_of_conductivity(double psi) const {
 
-  return exp(-pow((psi / b), c));
+  return exp(-pow((psi / stem_b), stem_c));
 }
 
 // set spline for proportion of conductivity
 inline void Leaf::setup_transpiration(double resolution) {
   std::vector<double> x_psi_, y_cumulative_transpiration_;
-  build_cumulative_vulnerability_integral(b, c, resolution, x_psi_,
+  build_cumulative_vulnerability_integral(stem_b, stem_c, resolution, x_psi_,
                                           y_cumulative_transpiration_);
 
   // setup interpolator
@@ -1523,7 +1535,7 @@ inline double Leaf::hydraulic_cost_Sperry(double psi_stem, double psi_upstream) 
 
 inline double Leaf::lambda_TF24(double psi_stem) const {
   const double f = proportion_of_conductivity(psi_stem);
-  return g1_TF24 * beta2 * (c / b) * pow(psi_stem / b, c - 1.0) *
+  return cost_scale_TF24 * beta2 * (stem_c / stem_b) * pow(psi_stem / stem_b, stem_c - 1.0) *
          pow(1.0 - f, beta2 - 1.0) / leaf_specific_conductance_max_;
 }
 
@@ -1563,7 +1575,7 @@ inline double Leaf::g1_eff() const {
 
 inline double Leaf::hydraulic_cost_TF(double psi_stem) {
 
-  hydraulic_cost_ = g1_TF24 * pow((1 - proportion_of_conductivity(psi_stem)), beta2);
+  hydraulic_cost_ = cost_scale_TF24 * pow((1 - proportion_of_conductivity(psi_stem)), beta2);
 
 return hydraulic_cost_;
 }

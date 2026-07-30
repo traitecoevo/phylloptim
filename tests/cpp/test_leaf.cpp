@@ -88,7 +88,7 @@ void test_vulnerability_curve() {
   // is a different and larger potential.) Asserting the closed form rather than a
   // round number so this stays honest if the defaults change.
   near(l.proportion_of_conductivity(l.psi_crit),
-       std::exp(-std::pow(l.psi_crit / l.b, l.c)), 1e-12,
+       std::exp(-std::pow(l.psi_crit / l.stem_b, l.stem_c)), 1e-12,
        "conductivity at psi_crit matches the Weibull closed form");
   ok(l.proportion_of_conductivity(l.psi_crit) < 0.06,
      "conductivity at psi_crit is a few percent");
@@ -187,11 +187,11 @@ void test_light_response() {
   dim.PPFD = 200;
   bright.PPFD = 1800;
   leaf::Leaf a = make_leaf(dim, {2.0}, {1.0});
-  leaf::Leaf b = make_leaf(bright, {2.0}, {1.0});
+  leaf::Leaf stem_b = make_leaf(bright, {2.0}, {1.0});
   a.find_root_collar_psi();
-  b.find_root_collar_psi();
-  ok(b.assim_colimited_ > a.assim_colimited_, "brighter light assimilates more");
-  ok(b.transpiration_ > a.transpiration_, "brighter light transpires more");
+  stem_b.find_root_collar_psi();
+  ok(stem_b.assim_colimited_ > a.assim_colimited_, "brighter light assimilates more");
+  ok(stem_b.transpiration_ > a.transpiration_, "brighter light transpires more");
 }
 
 void test_multi_layer_soil() {
@@ -457,7 +457,7 @@ void test_closed_form() {
                         5.870283, 1.0 / 2.680147, 157.44, 0.30, 0.7, 0.99, 1e-3,
                         100, 1e-3, 1000, 7.5, 3.4e2, 9.4e3);
   ok(leaf::closed_form::beta2_is_exact(exact_leaf),
-     "beta2_is_exact recognises beta2 = 1/c");
+     "beta2_is_exact recognises beta2 = 1/stem_c");
   ok(!leaf::closed_form::beta2_is_exact(l), "and rejects the default beta2 = 1.5");
   setp(exact_leaf, 5.0, 1.5);
   exact_leaf.optimise_psi_stem_TF();

@@ -129,11 +129,11 @@ int generate() {
 
 // Exact equality, with NaN treated as equal to NaN -- some grid points shut down
 // and legitimately produce the NA sentinel (see PLAN.md item 2).
-bool same(double a, double b) {
-  if (std::isnan(a) && std::isnan(b)) {
+bool same(double got, double want) {
+  if (std::isnan(got) && std::isnan(want)) {
     return true;
   }
-  return a == b;
+  return got == want;
 }
 
 // Relative difference, used both to decide the tolerant comparison and to report
