@@ -525,9 +525,9 @@ void test_leaf_on_single_potential() {
   // set_physiology keeps its signature; on this path only psi_soil[0] is read,
   // so the depth and root-mass vectors are ignored rather than forbidden.
   std::vector<double> psi_soil{1.0}, depth{1.0}, root{1.0};
-  l.set_physiology(d.area_leaf, root, d.rho, d.a_bio, d.PPFD, psi_soil, depth,
-                   d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.theta * d.h,
-                   d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  l.set_physiology(d.area_leaf, root, d.PPFD, psi_soil, depth,
+                   d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                   d.atm_o2_kpa, d.atm_kpa);
   l.find_root_collar_psi();
 
   ok(std::isfinite(l.profit_), "single-potential solve gives a finite profit");
@@ -552,9 +552,9 @@ void test_leaf_on_single_potential() {
   dry.supply_kind_ = leaf::Leaf::SupplyKind::SinglePotential;
   dry.single_.resistance_ = 2.0e4;
   std::vector<double> psi_dry{3.0};
-  dry.set_physiology(d.area_leaf, root, d.rho, d.a_bio, d.PPFD, psi_dry, depth,
-                     d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.theta * d.h,
-                     d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  dry.set_physiology(d.area_leaf, root, d.PPFD, psi_dry, depth,
+                     d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                     d.atm_o2_kpa, d.atm_kpa);
   dry.find_root_collar_psi();
   ok(dry.profit_ < l.profit_, "drier soil yields less profit");
 
@@ -565,9 +565,9 @@ void test_leaf_on_single_potential() {
   tight.setup_root_vulnerability(100);
   tight.supply_kind_ = leaf::Leaf::SupplyKind::SinglePotential;
   tight.single_.resistance_ = 2.0e5;
-  tight.set_physiology(d.area_leaf, root, d.rho, d.a_bio, d.PPFD, psi_soil, depth,
-                       d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.theta * d.h,
-                       d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  tight.set_physiology(d.area_leaf, root, d.PPFD, psi_soil, depth,
+                       d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                       d.atm_o2_kpa, d.atm_kpa);
   tight.find_root_collar_psi();
   ok(tight.profit_ <= l.profit_, "a higher series resistance does not help");
 
@@ -671,6 +671,58 @@ void test_root_network_from_carbon() {
   ok(threw, "negative root carbon throws");
 }
 
+// The temperature-response parameters were constexpr constants; they are now
+// settable members. This checks the point of that change -- that setting them
+// actually moves the model -- rather than just that they compile.
+void test_temperature_parameters_are_settable() {
+  printf("temperature-response parameters are settable\n");
+  Drivers d;
+  leaf::Leaf base = make_leaf(d, {2.0}, {1.0});
+  base.find_root_collar_psi();
+  const double A_base = base.assim_colimited_;
+
+  // Defaults must equal the published constants, so this is a no-op refactor for
+  // anyone who does not touch them.
+  ok(base.vcmax_ha_ == leaf::vcmax_ha, "vcmax_ha_ defaults to the constant");
+  ok(base.jmax_d_S_ == leaf::jmax_d_S, "jmax_d_S_ defaults to the constant");
+  ok(base.gamma_25_ == leaf::gamma_25, "gamma_25_ defaults to the constant");
+  near(base.rd_to_vcmax_ratio_, 0.015, 1e-12, "rd_to_vcmax_ratio_ default");
+
+  // Raising the Vcmax activation energy raises Vcmax above the 25 C reference,
+  // so a 25 C leaf should be unaffected but a warm one should assimilate more.
+  {
+    leaf::Leaf warm = make_leaf(d, {2.0}, {1.0});
+    leaf::Leaf warm_hi = make_leaf(d, {2.0}, {1.0});
+    warm_hi.vcmax_ha_ = leaf::vcmax_ha * 1.5;
+    // set_physiology already ran, so push the change through the T-response block.
+    warm.update_temperature_dependent_params(35.0);
+    warm_hi.update_temperature_dependent_params(35.0);
+    ok(warm_hi.vcmax_ > warm.vcmax_,
+       "a larger activation energy gives a larger vcmax at 35 C");
+  }
+
+  // Respiration fraction: doubling it must lower assimilation.
+  {
+    leaf::Leaf r2 = make_leaf(d, {2.0}, {1.0});
+    r2.rd_to_vcmax_ratio_ = 0.030;
+    r2.update_temperature_dependent_params(d.leaf_temp);
+    r2.find_root_collar_psi();
+    ok(r2.assim_colimited_ < A_base,
+       "doubling the respiration fraction lowers assimilation");
+    ok(r2.R_d_ > base.R_d_, "and raises R_d");
+  }
+
+  // The CO2 compensation point feeds photorespiration, so raising it lowers A.
+  {
+    leaf::Leaf g2 = make_leaf(d, {2.0}, {1.0});
+    g2.gamma_25_ = leaf::gamma_25 * 1.5;
+    g2.update_temperature_dependent_params(d.leaf_temp);
+    g2.find_root_collar_psi();
+    ok(g2.assim_colimited_ < A_base,
+       "raising the compensation point lowers assimilation");
+  }
+}
+
 void test_bad_input_throws() {
   printf("input validation\n");
   Drivers d;
@@ -730,6 +782,7 @@ int main() {
   test_single_potential();
   test_leaf_on_single_potential();
   test_root_network_from_carbon();
+  test_temperature_parameters_are_settable();
   test_bad_input_throws();
   benchmark();
 

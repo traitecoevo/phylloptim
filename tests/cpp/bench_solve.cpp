@@ -91,9 +91,8 @@ double pass(std::vector<leaf::Leaf> &leaves, const std::vector<Point> &pts) {
   for (size_t i = 0; i < pts.size(); ++i) {
     const Point &pt = pts[i];
     leaf::Leaf &l = leaves[i];
-    l.set_physiology(kAreaLeaf, pt.root, kRho, kABio, pt.ppfd, pt.ps, pt.depth,
-                     kKs * kTheta / kH, pt.vpd, kCa, kTheta * kH, kTleaf, kO2,
-                     kPatm);
+    l.set_physiology(kAreaLeaf, pt.root, pt.ppfd, pt.ps, pt.depth,
+                     kKs * kTheta / kH, pt.vpd, kCa, kTleaf, kO2, kPatm);
     l.find_root_collar_psi();
     for (double v : {l.opt_psi_stem_, l.root_collar_psi_, l.ci_,
                      l.assim_colimited_, l.transpiration_, l.stom_cond_CO2_,

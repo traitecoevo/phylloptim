@@ -196,6 +196,37 @@ public:
   double PPFD_;
   double atm_vpd_;
   double atm_o2_kpa_;
+
+  // --- Temperature-response parameters ---------------------------------------
+  // Settable, NOT constexpr, and that is a deliberate correction. These are
+  // exactly plantecophys's EaV / EdVC / delsC / EaJ / EdVJ / delsJ, which are
+  // *user parameters* there -- and whose defaults that package revised at v1.4
+  // after a literature review. They are also precisely what thermal acclimation
+  // modifies (Kattge & Knorr), so TF24t needs them mutable. `constexpr` asserted
+  // that they were not modelling choices, which was wrong.
+  //
+  // Defaults are the constants in leaf/constants.hpp, so there is still one source
+  // of truth for the published values.
+  double vcmax_ha_ = leaf::vcmax_ha;    // activation energy, J mol^-1
+  double vcmax_H_d_ = leaf::vcmax_H_d;  // deactivation energy, J mol^-1
+  double vcmax_d_S_ = leaf::vcmax_d_S;  // entropy term, J mol^-1 K^-1
+  double jmax_ha_ = leaf::jmax_ha;
+  double jmax_H_d_ = leaf::jmax_H_d;
+  double jmax_d_S_ = leaf::jmax_d_S;
+  // Bernacchi kinetics: reference value at 25 C and activation energy. Weaker case
+  // for being settable than the six above -- enzyme kinetics vary less among
+  // species -- but they are literature values that get revised, and bigleaf
+  // exposes them.
+  double gamma_25_ = leaf::gamma_25;    // CO2 compensation point, umol mol^-1
+  double gamma_ha_ = leaf::gamma_ha;
+  double kc_25_ = leaf::kc_25;          // Rubisco Km for CO2, umol mol^-1
+  double kc_ha_ = leaf::kc_ha;
+  double ko_25_ = leaf::ko_25;          // Rubisco Km for O2, umol mol^-1
+  double ko_ha_ = leaf::ko_ha;
+  // Dark respiration as a fraction of vcmax. Was the bare literal 0.015 inline in
+  // update_temperature_dependent_params -- a named, species-variable parameter
+  // (Collatz/Farquhar) hiding as a magic number.
+  double rd_to_vcmax_ratio_ = 0.015;
   double atm_kpa_;
   // Conversion from a mixing ratio (umol mol^-1) to a partial pressure (Pa).
   // DERIVED from atm_kpa_, not a constant: it is 1e-6 * P, so the old
@@ -1256,12 +1287,13 @@ inline double Leaf::peak_arrh_curve(double Ea, double ref_value, double leaf_tem
 // depends on the per-call PPFD_ and is (re)computed here from the just-updated
 // jmax_ -- on the non-PM cache-hit path set_physiology refreshes it separately.
 inline void Leaf::update_temperature_dependent_params(double leaf_temp) {
-  vcmax_ = peak_arrh_curve(vcmax_ha, vcmax_25, leaf_temp, vcmax_H_d, vcmax_d_S);
-  jmax_ = peak_arrh_curve(jmax_ha, jmax_25, leaf_temp, jmax_H_d, jmax_d_S);
-  gamma_ = arrh_curve(gamma_ha, gamma_25, leaf_temp);
-  ko_ = arrh_curve(ko_ha, ko_25, leaf_temp);
-  kc_ = arrh_curve(kc_ha, kc_25, leaf_temp);
-  R_d_ = vcmax_*0.015;
+  vcmax_ =
+      peak_arrh_curve(vcmax_ha_, vcmax_25, leaf_temp, vcmax_H_d_, vcmax_d_S_);
+  jmax_ = peak_arrh_curve(jmax_ha_, jmax_25, leaf_temp, jmax_H_d_, jmax_d_S_);
+  gamma_ = arrh_curve(gamma_ha_, gamma_25_, leaf_temp);
+  ko_ = arrh_curve(ko_ha_, ko_25_, leaf_temp);
+  kc_ = arrh_curve(kc_ha_, kc_25_, leaf_temp);
+  R_d_ = vcmax_ * rd_to_vcmax_ratio_;
   km_ = (kc_*umol_per_mol_to_Pa_)*(1 + (atm_o2_kpa_*kPa_to_Pa)/(ko_*umol_per_mol_to_Pa_));
   electron_transport_ = electron_transport();
 }
