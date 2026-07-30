@@ -161,14 +161,11 @@ public:
   double km_;
   double R_d_;
   double leaf_specific_conductance_max_;
-  double sapwood_volume_per_leaf_area_;
   double k_s_;
   double area_leaf_;
-  double rho_;
   double vcmax_;
   double jmax_;
   double lma_; //kg m^-2
-  double a_bio_;
   
   double leaf_temp_;
   // Penman-Monteith leaf energy balance state (#523), only meaningful on the
@@ -260,7 +257,7 @@ public:
 
   
   // set-up functions
-  void set_physiology(double area_leaf, const std::vector<double>& mass_root_prop, double rho, double a_bio, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double sapwood_volume_per_leaf_area, double leaf_temp, double atm_o2_kpa, double atm_kpa);
+  void set_physiology(double area_leaf, const std::vector<double>& root_carbon_per_layer, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double leaf_temp, double atm_o2_kpa, double atm_kpa);
   void setup_transpiration(double resolution);
   // Forwards to roots_.setup_vulnerability. Kept on Leaf because it is part of
   // the published construction sequence (see the umbrella header) and plant's
@@ -603,12 +600,9 @@ inline void Leaf::setup_clean_leaf() {
   km_= util::na_value;
   R_d_= util::na_value;
   leaf_specific_conductance_max_= util::na_value; //kg m^-2 s^-1 MPa^-1 
-  sapwood_volume_per_leaf_area_ = util::na_value; //m^3 SA m^-2 LA
   area_leaf_ = util::na_value;
-  rho_= util::na_value; //kg m^-3
   vcmax_= util::na_value; //kg m^-3
   jmax_= util::na_value; //kg m^-3
-  a_bio_= util::na_value; //kg mol^-1
   root_collar_psi_ = util::na_value; //-MPa
   leaf_temp_= util::na_value; // deg C
   Tair_= util::na_value; // deg C
@@ -652,14 +646,13 @@ inline void Leaf::setup_clean_leaf() {
 // every call; see the optimisation notes / caching opportunity.
 //
 //sets various parameters which are constant for a given node at a given time
-inline void Leaf::set_physiology(double area_leaf, const std::vector<double>& mass_root_prop, double rho, double a_bio, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double sapwood_volume_per_leaf_area, double leaf_temp, double atm_o2_kpa, double atm_kpa) {
-    if (psi_soil.size() != soil_depth.size() || mass_root_prop.size() != soil_depth.size()) {
-    util::stop("soil_depth, psi_soil and mass_root_prop must have the same number of elements");
+inline void Leaf::set_physiology(double area_leaf, const std::vector<double>& root_carbon_per_layer, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double leaf_temp, double atm_o2_kpa, double atm_kpa) {
+    if (psi_soil.size() != soil_depth.size() || root_carbon_per_layer.size() != soil_depth.size()) {
+    util::stop("soil_depth, psi_soil and root_carbon_per_layer must have the same number of elements");
   }
-  if (!std::isfinite(area_leaf) || !std::isfinite(rho) || !std::isfinite(a_bio) ||
-      !std::isfinite(PPFD) || !std::isfinite(leaf_specific_conductance_max) ||
+  if (!std::isfinite(area_leaf) || !std::isfinite(PPFD) || !std::isfinite(leaf_specific_conductance_max) ||
       !std::isfinite(atm_vpd) || !std::isfinite(ca) ||
-      !std::isfinite(sapwood_volume_per_leaf_area) || !std::isfinite(leaf_temp) ||
+      !std::isfinite(leaf_temp) ||
       !std::isfinite(atm_o2_kpa) || !std::isfinite(atm_kpa)) {
     util::stop("set_physiology received non-finite scalar input");
   }
@@ -672,14 +665,12 @@ inline void Leaf::set_physiology(double area_leaf, const std::vector<double>& ma
       util::stop("set_physiology received non-finite soil_depth at layer=" + std::to_string(i) +
                  "; soil_depth=" + util::to_string(soil_depth[i]));
     }
-    if (!std::isfinite(mass_root_prop[i])) {
-      util::stop("set_physiology received non-finite mass_root_prop at layer=" + std::to_string(i) +
-                 "; mass_root_prop=" + util::to_string(mass_root_prop[i]));
+    if (!std::isfinite(root_carbon_per_layer[i])) {
+      util::stop("set_physiology received non-finite root_carbon_per_layer at layer=" + std::to_string(i) +
+                 "; root_carbon_per_layer=" + util::to_string(root_carbon_per_layer[i]));
     }
   }
   area_leaf_ = area_leaf;
-  rho_ = rho;
-   a_bio_ = a_bio;
    atm_vpd_ = atm_vpd;
    leaf_temp_ = leaf_temp;
    atm_kpa_ = atm_kpa;
@@ -700,7 +691,6 @@ inline void Leaf::set_physiology(double area_leaf, const std::vector<double>& ma
    leaf_specific_conductance_max_ = leaf_specific_conductance_max;
    // conductance changed -> invalidate the transpiration() memo
    transpiration_cached_ = false;
-   sapwood_volume_per_leaf_area_ = sapwood_volume_per_leaf_area;
    ca_ = ca;
    // Penman-Monteith leaf energy-balance inputs (#523). Reinterpret the incoming
    // leaf_temp driver as air temperature; derive net radiation from the absorbed
@@ -753,7 +743,7 @@ inline void Leaf::set_physiology(double area_leaf, const std::vector<double>& ma
   // root_network_from_carbon. This is the leaf-side half of that split -- moving
   // the call itself up to plant is an API change and belongs with item 10b.
   if (supply_kind_ == SupplyKind::MultiLayer) {
-    roots_.set_root_network_from_carbon(mass_root_prop);
+    roots_.set_root_network_from_carbon(root_carbon_per_layer);
   }
 
   // Set up vector of root water uptake from layer. Stays on Leaf: plant writes

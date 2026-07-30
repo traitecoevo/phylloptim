@@ -51,8 +51,6 @@ struct Drivers {
   double leaf_temp = 25.0;
   double atm_kpa = 101.3;
   double area_leaf = 0.05;
-  double rho = 608.0;
-  double a_bio = 0.0245;
 };
 
 leaf::Leaf make_leaf(const Drivers &d, std::vector<double> psi_soil,
@@ -62,9 +60,9 @@ leaf::Leaf make_leaf(const Drivers &d, std::vector<double> psi_soil,
   l.setup_root_vulnerability(100);
   std::vector<double> mass_root_prop(psi_soil.size(),
                                      1.0 / double(psi_soil.size()));
-  l.set_physiology(d.area_leaf, mass_root_prop, d.rho, d.a_bio, d.PPFD, psi_soil,
-                   soil_depth, d.K_s * d.theta / d.h, d.atm_vpd, d.ca,
-                   d.theta * d.h, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  l.set_physiology(d.area_leaf, mass_root_prop, d.PPFD, psi_soil, soil_depth,
+                   d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                   d.atm_o2_kpa, d.atm_kpa);
   return l;
 }
 
@@ -234,9 +232,9 @@ void test_shutdown_writes_its_own_fluxes() {
   std::vector<double> mrp{1.0}, depth{1.0};
   const auto solve = [&](double psi) {
     std::vector<double> ps{psi};
-    l.set_physiology(d.area_leaf, mrp, d.rho, d.a_bio, d.PPFD, ps, depth,
-                     d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.theta * d.h,
-                     d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+    l.set_physiology(d.area_leaf, mrp, d.PPFD, ps, depth,
+                     d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                     d.atm_o2_kpa, d.atm_kpa);
     l.find_root_collar_psi();
   };
 
@@ -409,9 +407,8 @@ void test_closed_form() {
   const double theta = 1.0 / 4669.0;
   const auto setp = [&](leaf::Leaf &l, double h, double vpd) {
     std::vector<double> ps{0.0}, dp{1.0}, rt{1.0};
-    l.set_physiology(1.0, rt, 608.0, 0.0245, 900.0, ps, dp,
-                     1.0 * theta / (h * eta_c), vpd, 40.0, theta * h, 25.0, 21.0,
-                     101.3);
+    l.set_physiology(1.0, rt, 900.0, ps, dp, 1.0 * theta / (h * eta_c), vpd, 40.0,
+                     25.0, 21.0, 101.3);
   };
   leaf::Leaf l;
 
@@ -683,9 +680,9 @@ void test_bad_input_throws() {
   bool threw = false;
   try {
     std::vector<double> psi_soil{2.0}, depth{1.0, 2.0}, mrp{1.0};
-    l.set_physiology(d.area_leaf, mrp, d.rho, d.a_bio, d.PPFD, psi_soil, depth,
-                     d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.theta * d.h,
-                     d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+    l.set_physiology(d.area_leaf, mrp, d.PPFD, psi_soil, depth,
+                     d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                     d.atm_o2_kpa, d.atm_kpa);
   } catch (const std::runtime_error &) {
     threw = true;
   }

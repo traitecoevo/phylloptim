@@ -87,15 +87,14 @@ leaf::Leaf l;                   // default Eucalyptus saligna traits
 l.setup_transpiration(100);     // build the xylem vulnerability splines
 l.setup_root_vulnerability(100);
 
-std::vector<double> psi_soil{2.0};      // positive suction, MPa
-std::vector<double> soil_depth{1.0};    // m
-std::vector<double> mass_root_prop{1.0};
+std::vector<double> psi_soil{2.0};             // positive suction, MPa
+std::vector<double> soil_depth{1.0};           // m
+std::vector<double> root_carbon_per_layer{1.0};
 
-l.set_physiology(/*area_leaf*/ 0.05, mass_root_prop, /*rho*/ 608, /*a_bio*/ 0.0245,
-                 /*PPFD*/ 900, psi_soil, soil_depth,
+l.set_physiology(/*area_leaf*/ 0.05, root_carbon_per_layer, /*PPFD*/ 900,
+                 psi_soil, soil_depth,
                  /*leaf_specific_conductance_max*/ 3.14e-5,
                  /*atm_vpd*/ 2.0, /*ca*/ 40.0,
-                 /*sapwood_volume_per_leaf_area*/ 7.85e-4,
                  /*leaf_temp*/ 25.0, /*atm_o2_kpa*/ 21.0, /*atm_kpa*/ 101.3);
 
 l.find_root_collar_psi();       // solve

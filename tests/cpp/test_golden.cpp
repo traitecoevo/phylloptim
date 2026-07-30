@@ -46,7 +46,7 @@ struct Row {
 
 // Trait values and fixed drivers from plant's tests/testthat/test-leaf.r.
 const double kTheta = 0.000157, kKs = 1.0, kH = 5.0;
-const double kAreaLeaf = 0.05, kRho = 608.0, kABio = 0.0245;
+const double kAreaLeaf = 0.05;
 const double kCa = 40.0, kO2 = 21.0, kTleaf = 25.0, kPatm = 101.3;
 
 Row solve(double psi_soil, double ppfd, double vpd, int layers) {
@@ -64,8 +64,8 @@ Row solve(double psi_soil, double ppfd, double vpd, int layers) {
     root[i] = 1.0 / layers;
   }
 
-  l.set_physiology(kAreaLeaf, root, kRho, kABio, ppfd, ps, depth,
-                   kKs * kTheta / kH, vpd, kCa, kTheta * kH, kTleaf, kO2, kPatm);
+  l.set_physiology(kAreaLeaf, root, ppfd, ps, depth, kKs * kTheta / kH, vpd, kCa,
+                   kTleaf, kO2, kPatm);
   l.find_root_collar_psi();
 
   double uptake = 0.0;
