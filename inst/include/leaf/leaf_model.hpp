@@ -1,14 +1,367 @@
-#include <plant/leaf_model.h>
+// -*-c++-*-
+#ifndef LEAF_LEAF_MODEL_HPP_
+#define LEAF_LEAF_MODEL_HPP_
+
+#include <leaf/constants.hpp>
+#include <leaf/util.hpp>
+#include <leaf/uniroot.hpp>
+#include <leaf/optimize.hpp>
+#include <leaf/quadrature.hpp>
+
+#include <odelia/interpolator.hpp>
+
 #include <cmath>
 #include <limits>
-#include <exception>
+#include <string>
+#include <vector>
 #include <boost/math/special_functions/gamma.hpp>
-#include <plant/models/tf24_environment.h>
 #include <XAD/XAD.hpp>
 
-namespace plant {
+namespace leaf {
 
-namespace {
+class Leaf {
+public:
+  //anonymous Leaf function as in canopy.h
+  Leaf();
+  
+  Leaf(double vcmax_25, 
+       double c, 
+       double b, 
+       double psi_crit,
+       double root_c,
+       double root_b,
+       double root_psi_crit,
+       double beta2, 
+       double jmax_25, 
+       double a, 
+       double curv_fact_elec_trans, 
+       double curv_fact_colim,
+       double GSS_tol_abs,
+       double vulnerability_curve_ncontrol,
+       double ci_abs_tol,
+       double ci_niter,
+      double g1_TF24,
+    double beta_R_H,
+    double beta_R_V); 
+        
+  odelia::interpolator::Interpolator transpiration_from_psi;
+  odelia::interpolator::Interpolator psi_from_transpiration;
+  // pre-computed root vulnerability curve (same role as transpiration_from_psi for xylem)
+  odelia::interpolator::Interpolator root_vuln_from_psi;
+  // cumulative integral of the root vulnerability curve, G(m) = int_0^m f_r(s) ds,
+  // indexed by magnitude m = -psi. Lets E_from_Soil_to_Root_Collar obtain the
+  // mean conductivity over a potential interval from 2 evals instead of (n+1)
+  // (same pre-integrated-curve trick as transpiration_from_psi for the xylem).
+  odelia::interpolator::Interpolator root_vuln_integral_from_psi;
+
+  // psi_from_E
+
+  double vcmax_25;
+  double c;
+  double b;
+  double psi_crit;  // derived from b and c
+  double root_c;
+  double root_b;
+  double root_psi_crit;
+  double beta2;
+  double jmax_25;
+  double a;
+  double curv_fact_elec_trans; // unitless - obtained from Smith and Keenan (2020)
+  double curv_fact_colim;
+  double GSS_tol_abs;
+  double vulnerability_curve_ncontrol;
+  double ci_abs_tol;
+  double ci_niter;
+  double g1_TF24;
+  double beta_R_H;
+  double beta_R_V;
+  double soil_number_of_depths_;
+  int max_soil_layer;
+
+  double ci_;
+  double stom_cond_CO2_;
+  double assim_colimited_;
+  double transpiration_;
+  std::vector<double> soil_consumption_;
+  double profit_;
+  double psi_stem;
+  double lambda_;
+  double lambda_analytical_;
+  double hydraulic_cost_;
+  
+  double electron_transport_;
+  double gamma_;
+  double ko_;
+  double kc_;
+  double km_;
+  double R_d_;
+  double leaf_specific_conductance_max_;
+  double sapwood_volume_per_leaf_area_;
+  double k_s_;
+  double root_mass_;
+  std::vector<double> c_r_V_;
+  std::vector<double> c_r_H_;
+  double area_leaf_;
+  double rho_;
+  double vcmax_;
+  double jmax_;
+  double lma_; //kg m^-2
+  double a_bio_;
+  
+  std::vector<double> psi_soil_;
+  std::vector<double> psi_soil_inverted_;
+  // Per-layer cache of root_vuln_integral_from_psi.eval(-psi_soil_inverted_[i]).
+  // psi_soil_inverted_ is fixed for the whole find_root_collar_psi solve, so the
+  // soil-side endpoint of the cumulative-integral lookup in
+  // E_from_Soil_to_Root_Collar is constant across every (re)evaluation of the
+  // nested root-finders. Precomputing it once per solve (alongside the
+  // P_x_r-side eval, hoisted out of the layer loop) collapses ~2 spline evals
+  // per layer to ~1 per call. Rebuilt in find_root_collar_psi.
+  std::vector<double> root_vuln_integral_soil_;
+  std::vector<double> soil_depth_;
+  std::vector<double> z_soil_mid_;
+  // Per-layer gravitational head gravity_head * z_soil_mid_[i], precomputed once
+  // per solve in set_physiology (z_soil_mid_ is fixed across find_root_collar_psi).
+  // Used three times per layer in E_from_Soil_to_Root_Collar's hot loop; caching
+  // it removes a redundant multiply per layer per (re)evaluation.
+  std::vector<double> grav_head_z_;
+  bool use_precomputed_z_soil_mid_;
+  double dz_;
+  std::vector<double> r_R_H_min;
+        // vertical root resistance
+    std::vector<double> r_R_V;
+
+            // cumulative vertical sum of root resistance
+    std::vector<double> r_R_V_sum;
+    
+
+  double leaf_temp_;
+  // Penman-Monteith leaf energy balance state (#523), only meaningful on the
+  // use_energy_balance_ path. Set once per set_physiology; Tleaf itself is a
+  // per-operating-point quantity computed in set_leaf_states_rates_from_psi_stem.
+  double Tair_;  // air temperature, deg C (reinterprets the leaf_temp driver)
+  double Rn_;    // net radiation at the leaf, W m^-2
+  double ra_;    // aerodynamic (boundary-layer) resistance, s m^-1
+  // Gate for the PM leaf energy balance. Default OFF: today's path runs
+  // (prescribed leaf_temp, single-shot cached Arrhenius). R-settable (#523 full
+  // cut) so TF24 (via pars.use_energy_balance) and the leaf-level demo can
+  // turn PM on; default preserves backward compatibility.
+  bool use_energy_balance_ = false;
+  // Boundary-layer inputs for ra = C_ra*sqrt(d/U0) (doc 4.1). d is a per-strategy
+  // trait (set from pars.d in prepare_strategy); wind_speed_ is the per-timestep
+  // above-canopy driver (set from the environment before set_physiology). Both
+  // R-settable so a bare Leaf can exercise the wind model; if either is unusable
+  // set_physiology falls back to the fixed ra. Only read on the PM path.
+  double d_ = 0.05;          // characteristic leaf dimension, m
+  double wind_speed_ = 2.0;  // above-canopy wind speed U0, m s^-1
+  double PPFD_;
+  double atm_vpd_;
+  double atm_o2_kpa_;
+  double atm_kpa_;
+  double ca_;
+  double root_collar_psi_;
+  double assim_max_;
+
+  
+  double opt_psi_stem_;
+  double opt_ci_;
+  double count;
+  double E_up_;
+
+  // --- Medlyn stomatal-conductance model (from develop #450) ------------------
+  // Standalone, R-callable alternative to the root-collar profit optimisation
+  // (solve_medlyn_ci_*); NOT used by the TF24 compute path, which optimises
+  // psi_stem directly. g0/g1 default to the published values and are exposed as
+  // settable fields. beta_ (soil-moisture stress) uses theta_/theta_w_/theta_fc_,
+  // set from the default soil-moisture members in set_physiology.
+  double g0 = 0.022;        // residual stomatal conductance (umol m^-2 s^-1)
+  double g1 = 2.57;         // sensitivity to vpd (kPa^0.5)
+  double medlyn_model_gs_;  // mol CO2 m^-2 s^-1
+  double theta_w_;          // current soil water content at wilting point (m^3 m^-3)
+  double theta_fc_;         // current soil water content at field capacity (m^3 m^-3)
+  double theta_;            // current soil water content (m^3 m^-3)
+
+  // 1-entry memo for transpiration(). Within a single root-collar/profit solve
+  // leaf_specific_conductance_max_ and the transpiration spline are fixed, so
+  // supply-side transpiration depends only on (psi_stem, psi_upstream). That
+  // pair is queried repeatedly with identical values per profit evaluation
+  // (psi_stem_to_ci -> stom_cond_CO2 -> transpiration, then transpiration again
+  // for transpiration_). Caching the last result avoids the redundant spline
+  // lookups; it is invalidated in set_physiology when conductance/soil change.
+  bool   transpiration_cached_ = false;
+  double transpiration_cache_psi_stem_ = 0.0;
+  double transpiration_cache_psi_upstream_ = 0.0;
+  double transpiration_cache_value_ = 0.0;
+
+  // Cache for the temperature/O2-dependent photosynthesis parameters set in
+  // set_physiology (vcmax_, jmax_, gamma_, ko_, kc_, R_d_, km_). They are pure
+  // functions of (leaf_temp_, atm_o2_kpa_) and constants, so when the key is
+  // unchanged the Arrhenius transcendentals are skipped and the members reused
+  // (bit-identical: same inputs -> same outputs). In the current driver
+  // leaf_temp_/atm_o2_kpa_ are constant across the run, so this fires once.
+  // NOTE: electron_transport_ is deliberately NOT cached here -- it also depends
+  // on the per-call PPFD_ and is recomputed every call.
+  bool   photo_temp_cached_ = false;
+  double photo_temp_cache_leaf_temp_ = 0.0;
+  double photo_temp_cache_atm_o2_kpa_ = 0.0;
+  std::vector<double> f_r;
+  // TODO: move into environment?
+
+  // TODO: atm_vpd - now set in set_physiology although ideally should be moved to enviroment
+  double atm_vpd = 2.0; //kPa
+  double ca = 40.0; // Pa
+  double atm_kpa = 101.3; //kPa
+  //partial pressure o2 (kPa)
+  double atm_o2_kpa = 21;
+  //leaf temperature (deg C)
+  double leaf_temp = 25;
+  // default soil-moisture content used by the Medlyn beta_ stress factor
+  // (matches the fixed values develop's TF24 caller passed to set_physiology)
+  double theta_w = 0.2;  //m^3 m^-3
+  double theta_fc = 0.5; //m^3 m^-3
+  double theta = 0.3;    //m^3 m^-3
+  // density of water
+
+
+  
+  // set-up functions
+  void set_physiology(double area_leaf, const std::vector<double>& mass_root_prop, double rho, double a_bio, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double sapwood_volume_per_leaf_area, double leaf_temp, double atm_o2_kpa, double atm_kpa);
+  void setup_transpiration(double resolution);
+  void setup_root_vulnerability(double resolution);
+  // Shared builder for the knot grid {0, step, .., <= psi_max} and the
+  // cumulative vulnerability integral G(m) = int_0^m exp(-(s/b)^c) ds, seeded
+  // from its gamma closed form. Used by both setup_* functions (see #468).
+  void build_cumulative_vulnerability_integral(double b, double c,
+                                               double resolution,
+                                               std::vector<double>& x,
+                                               std::vector<double>& y_integral);
+  void setup_clean_leaf();
+
+  // Medlyn stomatal-conductance model (from develop #450); R-callable, standalone.
+  double medlyn_model_gs(double assim_colimited_);
+  double medlyn_stom_cond_minus_coupled_stom_cond(double x);
+  void solve_medlyn_ci_numerical();
+  void solve_medlyn_ci_analytical();
+  // std::vector<double> root_collar_psi(std::vector<double> soil_moist_);
+
+  void E_from_Soil_to_Root_Collar(double P_x_r, const std::vector<double>& psi_soil);
+  void find_root_collar_psi();
+  // Shared setup for the root-collar solve: builds the soil-side caches, handles
+  // every feasibility early-exit (shutdown / assim<0 / collapsed interval) by
+  // setting the final operating point itself, and otherwise returns the feasible
+  // collar-potential interval [bound_a, bound_b] (positive magnitudes). Returns
+  // false when the operating point is already fully determined (caller is done),
+  // true when there is a real interval to choose a collar potential within.
+  bool prepare_collar_solve(double& bound_a, double& bound_b);
+  // Evaluate the leaf at a *given* root-collar potential (positive magnitude)
+  // rather than optimising it: reuses prepare_collar_solve, clamps the target to
+  // the feasible interval, and evaluates there (no golden-section search). Leaves
+  // exactly the same outputs as find_root_collar_psi and returns profit_. Used by
+  // TF24f's gradient-ascent acclimation (#525).
+  double evaluate_root_collar_psi(double target_opt_root_psi);
+  // Evaluate profit at a given root-collar potential (positive magnitude)
+  // *assuming prepare_collar_solve has already run this step* (soil-side caches
+  // built, feasible interval [bound_a, bound_b] known). Clamps the target into
+  // the interval and sets the operating point (opt_psi_stem_, root_collar_psi_,
+  // profit_), returning profit_. This is the post-prepare body of
+  // evaluate_root_collar_psi, factored out so the centred finite-difference leaf
+  // solve can share one prepare_collar_solve across its three profit evals (#530).
+  double profit_at_collar_psi(double target_opt_root_psi,
+                              double bound_a, double bound_b);
+  // Exact d(profit)/d(opt_root_psi) at a given root-collar potential (positive
+  // magnitude), for TF24f's acclimation tracking (#525/#527). Combines
+  // forward-mode AD for the analytic photosynthesis/cost algebra, the
+  // implicit-function theorem at the psi_stem_to_ci root-find, and analytic
+  // spline derivatives (Interpolator::deriv) for the smooth transport. Replaces
+  // the noisy finite-difference gradient. Assumes prepare_collar_solve setup has
+  // run (psi_soil_inverted_ etc.), as evaluate_root_collar_psi does.
+  double dprofit_droot_collar_psi(double opt_root_psi);
+  // Analytic d(E_up_)/d(collar potential) for the soil->root-collar uptake
+  // (kg H2O m^-2 s^-1 per MPa of signed collar potential P_x_r), mirroring the
+  // general branch of E_from_Soil_to_Root_Collar layer by layer. The integral's
+  // derivative collapses to +/- root_vuln_integral_from_psi.deriv (the analytic
+  // slope of the same pre-integrated vulnerability curve used for the value, so
+  // it stays consistent even where that spline extrapolates), so no finite
+  // difference is needed.
+  // Returns NaN when any layer sits on a branch kink (P_x_r == psi_soil[i], the
+  // gravity-balance point, or P_x_r == 0); the caller (dprofit_droot_collar_psi)
+  // then falls back to a central difference. Used only on the TF24f acclimation
+  // gradient path, not the base TF24 value path.
+  double dE_from_soil_dpsi_collar(double P_x_r, const std::vector<double>& psi_soil);
+  // Shut-down operating point used by the find_root_collar_psi early-exits: stem
+  // held at psi_crit (no transpiration), paying only respiration + hydraulic
+  // cost. Only root_collar_psi_ differs between the cases, so it is the argument.
+  void set_shutdown_state(double root_collar);
+  double find_root_psi(double wettest_soil_layer, const std::vector<double>& psi_soil, int find_root_crit);
+  double find_psi_stem_from_psi_root(double psi_root, const std::vector<double>& psi_soil);
+  double E_column(double x, const std::vector<double>& psi_soil, double psi_leaf);
+  double E_column_zero(double x, const std::vector<double>& psi_soil);
+  
+  double arrh_curve(double Ea, double ref_value, double leaf_temp) const;
+  double peak_arrh_curve(double Ea, double ref_value, double leaf_temp, double H_d, double d_S) const;
+
+  // --- Penman-Monteith leaf energy balance (minimal core; #523) ---------------
+  // Recompute the temperature-dependent photosynthetic parameters (vcmax_,
+  // jmax_, gamma_, ko_, kc_, R_d_, km_, electron_transport_) at a given leaf
+  // temperature. Extracted verbatim from the inline block in set_physiology so
+  // the non-PM path is bit-identical; on the PM path it is called per
+  // operating point with the energy-balance Tleaf (defeating the photo_temp
+  // cache, as intended).
+  void update_temperature_dependent_params(double leaf_temp);
+  // Saturation vapour pressure es(T) (kPa) and its slope Delta(T) (kPa K^-1),
+  // Tetens formula. Not wired into the minimal-cut solve (prescribed atm_vpd is
+  // kept); provided and unit-tested for the leaf-to-air VPD in the full cut.
+  double saturation_vapour_pressure(double temp) const;
+  double saturation_vapour_pressure_slope(double temp) const;
+  // Explicit leaf energy balance: Tleaf = Tair + (Rn - lambda*E) * ra / (rho*cp).
+  // E is the hydraulically-pinned transpiration (kg H2O m^-2 s^-1); no PM
+  // inversion and no A->E feedback, so this is a single algebraic forward pass.
+  double leaf_temp_from_E(double E) const;
+
+  // transpiration functions
+
+  // proportion of conductivity in xylem at a given water potential (return: unitless)
+  double proportion_of_conductivity(double psi) const;
+
+  // supply-side transpiration for a given water potential gradient between leaves and soil, 
+  // references setup_transpiraiton for values (return: kg h20 s^-1 m^-2 LA)
+  // should be renamed to reflect supply-side
+  double transpiration(double psi_stem, double psi_upstream);
+  // supply-side transpiration for a given water potential gradient between leaves and soil, integrated internally (return: kg h20 s^-1 m^-2 LA)
+  // should be renamed to reflect supply-side
+  double transpiration_full_integration(double psi_stem, double psi_upstream);                    
+  // stomatal conductance rate of c02 (return: mol CO2 m^-2 s^-1)
+  double stom_cond_CO2(double psi_stem, double psi_upstream); // define as a constant
+  // converts transpiration in kg h20 s^-1 m^-2 LA to psi_stem (return: -MPa)
+  double transpiration_to_psi_stem(double transpiration_, double psi_upstream);
+  
+  // assimilation functions
+
+  //
+  double assim_rubisco_limited(double ci_);
+  double electron_transport();
+  double assim_electron_limited(double ci_);
+  double assim_colimited(double ci_);
+  double assim_minus_stom_cond_CO2(double x, double psi_stem, double psi_upstream);
+  double psi_stem_to_ci(double psi_stem, double psi_upstream);
+  void set_leaf_states_rates_from_psi_stem(double psi_stem, double psi_upstream);
+
+
+// leaf economics functions
+  double hydraulic_cost_Sperry(double psi_stem, double psi_upstream);
+  double hydraulic_cost_TF(double psi_stem);
+
+  double profit_psi_stem_Sperry(double psi_stem, double psi_upstream);
+  double profit_psi_stem_TF(double psi_stem, double psi_upstream);
+
+// optimiser functions
+  void optimise_psi_stem_Sperry();
+  void optimise_psi_stem_TF();
+
+};
+
+
+namespace detail {
 // Templated replicas of the analytic profit algebra, so forward-mode AD gives
 // their exact derivatives (used by Leaf::dprofit_droot_collar_psi). They mirror
 // Leaf::assim_colimited and Leaf::hydraulic_cost_TF exactly.
@@ -24,8 +377,8 @@ template <typename T>
 T hydraulic_cost_ad(T psi_stem, double b, double c, double g1, double beta2) {
   return g1 * pow(1.0 - exp(-pow(psi_stem / b, c)), beta2);
 }
-}  // namespace
-Leaf::Leaf()
+}  // namespace detail
+inline Leaf::Leaf()
     :
     vcmax_25(96), // umol m^-2 s^-1 
     c(2.680147), //unitless
@@ -52,7 +405,7 @@ Leaf::Leaf()
       setup_clean_leaf();
 }
 
-Leaf::Leaf(double vcmax_25, double c, double b,
+inline Leaf::Leaf(double vcmax_25, double c, double b,
            double psi_crit, // derived from b and c,
            double root_c,
            double root_b,
@@ -92,45 +445,45 @@ Leaf::Leaf(double vcmax_25, double c, double b,
 }
 
 // set various states and physiology parameters obtained from TF24 to NA to clean leaf object
-void Leaf::setup_clean_leaf() {
-  ci_ = NA_REAL; // Pa
-  stom_cond_CO2_= NA_REAL; //mol Co2 m^-2 s^-1 
-  assim_colimited_= NA_REAL; // umol C m^-2 s^-1 
-  transpiration_= NA_REAL; // kg m^-2 s^-1 
-  profit_= NA_REAL; // umol C m^-2 s^-1 
-  lambda_= NA_REAL; // umol C m^-2 s^-1 kg^-1 m^2 s^1
-  lambda_analytical_= NA_REAL; // umol C m^-2 s^-1 kg^-1 m^2 s^1
-  hydraulic_cost_= NA_REAL; // umol C m^-2 s^-1 
-  electron_transport_= NA_REAL; //electron transport rate umol m^-2 s^-1
-  gamma_= NA_REAL;
-  ko_= NA_REAL;
-  kc_= NA_REAL;
-  km_= NA_REAL;
-  R_d_= NA_REAL;
-  leaf_specific_conductance_max_= NA_REAL; //kg m^-2 s^-1 MPa^-1 
-  sapwood_volume_per_leaf_area_ = NA_REAL; //m^3 SA m^-2 LA
-  area_leaf_ = NA_REAL;
-  rho_= NA_REAL; //kg m^-3
-  vcmax_= NA_REAL; //kg m^-3
-  jmax_= NA_REAL; //kg m^-3
-  a_bio_= NA_REAL; //kg mol^-1
-  root_collar_psi_ = NA_REAL; //-MPa
-  leaf_temp_= NA_REAL; // deg C
-  Tair_= NA_REAL; // deg C
-  Rn_= NA_REAL; // W m^-2
-  ra_= NA_REAL; // s m^-1
-  PPFD_= NA_REAL; //umol m^-2 s^-1
-  atm_vpd_= NA_REAL; //kPa 
-  atm_o2_kpa_= NA_REAL; // kPa
-  atm_kpa_= NA_REAL; // kPa
-  ca_= NA_REAL; //Pa
-  opt_psi_stem_= NA_REAL; //-MPa 
-  opt_ci_= NA_REAL; //Pa
-  E_up_ = NA_REAL;
-  medlyn_model_gs_ = NA_REAL; // mol CO2 m^-2 s^-1 (Medlyn model, develop #450)
-  theta_w_ = NA_REAL;
-  theta_fc_ = NA_REAL;
-  theta_ = NA_REAL;
+inline void Leaf::setup_clean_leaf() {
+  ci_ = util::na_value; // Pa
+  stom_cond_CO2_= util::na_value; //mol Co2 m^-2 s^-1 
+  assim_colimited_= util::na_value; // umol C m^-2 s^-1 
+  transpiration_= util::na_value; // kg m^-2 s^-1 
+  profit_= util::na_value; // umol C m^-2 s^-1 
+  lambda_= util::na_value; // umol C m^-2 s^-1 kg^-1 m^2 s^1
+  lambda_analytical_= util::na_value; // umol C m^-2 s^-1 kg^-1 m^2 s^1
+  hydraulic_cost_= util::na_value; // umol C m^-2 s^-1 
+  electron_transport_= util::na_value; //electron transport rate umol m^-2 s^-1
+  gamma_= util::na_value;
+  ko_= util::na_value;
+  kc_= util::na_value;
+  km_= util::na_value;
+  R_d_= util::na_value;
+  leaf_specific_conductance_max_= util::na_value; //kg m^-2 s^-1 MPa^-1 
+  sapwood_volume_per_leaf_area_ = util::na_value; //m^3 SA m^-2 LA
+  area_leaf_ = util::na_value;
+  rho_= util::na_value; //kg m^-3
+  vcmax_= util::na_value; //kg m^-3
+  jmax_= util::na_value; //kg m^-3
+  a_bio_= util::na_value; //kg mol^-1
+  root_collar_psi_ = util::na_value; //-MPa
+  leaf_temp_= util::na_value; // deg C
+  Tair_= util::na_value; // deg C
+  Rn_= util::na_value; // W m^-2
+  ra_= util::na_value; // s m^-1
+  PPFD_= util::na_value; //umol m^-2 s^-1
+  atm_vpd_= util::na_value; //kPa 
+  atm_o2_kpa_= util::na_value; // kPa
+  atm_kpa_= util::na_value; // kPa
+  ca_= util::na_value; //Pa
+  opt_psi_stem_= util::na_value; //-MPa 
+  opt_ci_= util::na_value; //Pa
+  E_up_ = util::na_value;
+  medlyn_model_gs_ = util::na_value; // mol CO2 m^-2 s^-1 (Medlyn model, develop #450)
+  theta_w_ = util::na_value;
+  theta_fc_ = util::na_value;
+  theta_ = util::na_value;
   psi_soil_.clear();
   soil_depth_.clear();
   z_soil_mid_.clear();  // ADD THIS LINE
@@ -143,8 +496,8 @@ void Leaf::setup_clean_leaf() {
   r_R_V_sum.clear(); // summed vertical root resistance as depth increase;
   soil_consumption_.clear(); // soil consumption mol  m^-2 s^-1;
 
-  soil_number_of_depths_ = NA_INTEGER;
-  max_soil_layer = NA_INTEGER; // number of soil layers with root mass greater than 0;
+  soil_number_of_depths_ = util::na_value_int;
+  max_soil_layer = util::na_value_int; // number of soil layers with root mass greater than 0;
 
   transpiration_cached_ = false; // invalidate transpiration() memo
   photo_temp_cached_ = false;    // members above set to NA; force recompute
@@ -175,7 +528,7 @@ void Leaf::setup_clean_leaf() {
 // every call; see the optimisation notes / caching opportunity.
 //
 //sets various parameters which are constant for a given node at a given time
-void Leaf::set_physiology(double area_leaf, const std::vector<double>& mass_root_prop, double rho, double a_bio, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double sapwood_volume_per_leaf_area, double leaf_temp, double atm_o2_kpa, double atm_kpa) {
+inline void Leaf::set_physiology(double area_leaf, const std::vector<double>& mass_root_prop, double rho, double a_bio, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double sapwood_volume_per_leaf_area, double leaf_temp, double atm_o2_kpa, double atm_kpa) {
     if (psi_soil.size() != soil_depth.size() || mass_root_prop.size() != soil_depth.size()) {
     util::stop("soil_depth, psi_soil and mass_root_prop must have the same number of elements");
   }
@@ -304,7 +657,7 @@ void Leaf::set_physiology(double area_leaf, const std::vector<double>& mass_root
 
   const double dz_sq = dz_ * dz_;
   double vertical_resistance_sum = 0.0;
-  for (size_t i = 0; i < max_soil_layer; ++i) {
+  for (int i = 0; i < max_soil_layer; ++i) {
     if(mass_root_prop[i] < 0){
             util::stop("Root mass lower than 0");
     }
@@ -425,7 +778,7 @@ void Leaf::set_physiology(double area_leaf, const std::vector<double>& mass_root
 //
 // This function calculates the total transpiration from the soil based on the
 // root collar pressure and the respective soil layer pressures
-void Leaf::E_from_Soil_to_Root_Collar(double P_x_r, const std::vector<double>& psi_soil){
+inline void Leaf::E_from_Soil_to_Root_Collar(double P_x_r, const std::vector<double>& psi_soil){
 
     if (!std::isfinite(P_x_r) || !std::isfinite(area_leaf_)) {
       util::stop("E_from_Soil_to_Root_Collar invalid input; P_x_r=" + util::to_string(P_x_r) +
@@ -467,7 +820,7 @@ void Leaf::E_from_Soil_to_Root_Collar(double P_x_r, const std::vector<double>& p
     // general-branch integral comes from a monotone-increasing spline so it is
     // strictly > 0 (span>0), giving r_R>0 and finite E_i; and any stray NaN/Inf
     // still reaches the post-loop net.
-    for(size_t i = 0; i < max_soil_layer; i++){
+    for(int i = 0; i < max_soil_layer; i++){
 
     // Find the most negative soil potential out of the given soil layer and the root collar
     double P_src_min = std::min(psi_soil[i], P_x_r);
@@ -582,7 +935,7 @@ void Leaf::E_from_Soil_to_Root_Collar(double P_x_r, const std::vector<double>& p
 
 
 // This function is used to find root collar pressure which equilibrates the soil-root-stem water continuuum
-double Leaf::E_column(double x, const std::vector<double>& psi_soil, double psi_leaf) {
+inline double Leaf::E_column(double x, const std::vector<double>& psi_soil, double psi_leaf) {
 
   E_from_Soil_to_Root_Collar(x, psi_soil);
   root_collar_psi_ = -x;
@@ -591,7 +944,7 @@ double Leaf::E_column(double x, const std::vector<double>& psi_soil, double psi_
 }
 
 // This function is used to find root collar pressure where water form soil is equal to zero
-double Leaf::E_column_zero(double x, const std::vector<double>& psi_soil) {
+inline double Leaf::E_column_zero(double x, const std::vector<double>& psi_soil) {
 
   E_from_Soil_to_Root_Collar(x, psi_soil);
 
@@ -622,7 +975,7 @@ double Leaf::E_column_zero(double x, const std::vector<double>& psi_soil) {
 // it does not arise on the brackets this finder is actually handed. Like
 // psi_stem_to_ci (Phase 6) this is a same-tolerance method swap, NOT a tolerance
 // loosening: same root, fewer evals.
-double Leaf::find_root_psi(double wettest_soil_layer, const std::vector<double>& psi_soil, int find_root_crit) {
+inline double Leaf::find_root_psi(double wettest_soil_layer, const std::vector<double>& psi_soil, int find_root_crit) {
   // tol and iterations copied from control defaults (for now) - changed recently to 1e-6
   if (find_root_crit == 1) {
     auto target = [&](double x) -> double {
@@ -651,7 +1004,7 @@ double Leaf::find_root_psi(double wettest_soil_layer, const std::vector<double>&
 }
 
 // When root pressure is known, find E from soil, then use E from soil to find psi stem
-double Leaf::find_psi_stem_from_psi_root(double psi_root, const std::vector<double>& psi_soil){
+inline double Leaf::find_psi_stem_from_psi_root(double psi_root, const std::vector<double>& psi_soil){
   E_from_Soil_to_Root_Collar(psi_root, psi_soil);
 
   double psi_stem = transpiration_to_psi_stem(E_up_, psi_root);
@@ -696,7 +1049,7 @@ double Leaf::find_psi_stem_from_psi_root(double psi_root, const std::vector<doub
 // stem is held at psi_crit (transpiration not possible), so the plant pays only
 // respiration (R_d_) plus the hydraulic cost at psi_crit. Only the recorded
 // root-collar potential differs between the calling cases.
-void Leaf::set_shutdown_state(double root_collar) {
+inline void Leaf::set_shutdown_state(double root_collar) {
   root_collar_psi_ = root_collar;
   opt_psi_stem_ = psi_crit;
   profit_ = -R_d_ - hydraulic_cost_TF(psi_crit);
@@ -709,7 +1062,7 @@ void Leaf::set_shutdown_state(double root_collar) {
 // already determined here (shutdown / assim<0 / collapsed interval) and the
 // caller should stop; returns true with [bound_a, bound_b] set to the feasible
 // collar-potential interval (positive magnitudes) otherwise.
-bool Leaf::prepare_collar_solve(double& bound_a, double& bound_b){
+inline bool Leaf::prepare_collar_solve(double& bound_a, double& bound_b){
 
   // psi_soil_ arrives as positive magnitudes; flip once to the signed (negative)
   // potential convention used throughout the soil->collar transport (see the
@@ -720,7 +1073,7 @@ bool Leaf::prepare_collar_solve(double& bound_a, double& bound_b){
   // is the selected endpoint is exactly -psi_soil_inverted_[i].
   root_vuln_integral_soil_.resize(max_soil_layer);
   double wettest_soil_layer = -std::numeric_limits<double>::infinity();
-  for (size_t i = 0; i < max_soil_layer; ++i) {
+  for (int i = 0; i < max_soil_layer; ++i) {
     const double psi_inverted = -psi_soil_[i];
     psi_soil_inverted_[i] = psi_inverted;
     root_vuln_integral_soil_[i] =
@@ -824,7 +1177,7 @@ if(assim_max_ < 0){
     return true;
 }
 
-void Leaf::find_root_collar_psi(){
+inline void Leaf::find_root_collar_psi(){
     double bound_a, bound_b;
     if (!prepare_collar_solve(bound_a, bound_b)) {
       return;
@@ -868,7 +1221,7 @@ void Leaf::find_root_collar_psi(){
 // optimising it (see header). Clamps the target into the feasible interval so a
 // tracked state that has drifted outside it still yields a finite operating
 // point; the gradient computed by the caller then pulls it back inside.
-double Leaf::evaluate_root_collar_psi(double target_opt_root_psi){
+inline double Leaf::evaluate_root_collar_psi(double target_opt_root_psi){
     double bound_a, bound_b;
     if (!prepare_collar_solve(bound_a, bound_b)) {
       // Operating point fully determined by feasibility handling (shutdown /
@@ -886,7 +1239,7 @@ double Leaf::evaluate_root_collar_psi(double target_opt_root_psi){
 // [bound_a, bound_b] is identical to evaluate_root_collar_psi's, so near a
 // boundary a perturbed potential collapses onto the boundary -- which is exactly
 // how the FD path degrades gracefully to a one-sided difference.
-double Leaf::profit_at_collar_psi(double target_opt_root_psi,
+inline double Leaf::profit_at_collar_psi(double target_opt_root_psi,
                                   double bound_a, double bound_b){
     const double opt_root_psi =
         std::min(std::max(target_opt_root_psi, bound_a), bound_b);
@@ -916,7 +1269,7 @@ double Leaf::profit_at_collar_psi(double target_opt_root_psi,
 // with gc = const * transpiration(psi_stem,psi). A'/C' are obtained by forward
 // AD; the gc partials use the analytic spline derivative (transpiration_from_psi
 // .deriv); dpsi_stem/dpsi by a tight central difference on the smooth transport.
-double Leaf::dprofit_droot_collar_psi(double opt_root_psi) {
+inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi) {
   using AD = xad::fwd<double>::active_type;
   const double psi = opt_root_psi;
   const double gstar_Pa = gamma_ * umol_per_mol_to_Pa;
@@ -931,11 +1284,11 @@ double Leaf::dprofit_droot_collar_psi(double opt_root_psi) {
   // A'(ci) and C'(psi_stem) via forward-mode AD of the analytic algebra.
   AD ci_ad = ci;            xad::derivative(ci_ad) = 1.0;
   const double A_prime = xad::derivative(
-      assim_colimited_ad(ci_ad, vcmax_, electron_transport_, gstar_Pa, km_,
+      detail::assim_colimited_ad(ci_ad, vcmax_, electron_transport_, gstar_Pa, km_,
                          R_d_, curv_fact_colim));
   AD ps_ad = psi_stem;      xad::derivative(ps_ad) = 1.0;
   const double C_prime = xad::derivative(
-      hydraulic_cost_ad(ps_ad, b, c, g1_TF24, beta2));
+      detail::hydraulic_cost_ad(ps_ad, b, c, g1_TF24, beta2));
 
   // Stomatal-conductance supply coefficient gc and its partials. gc =
   // gc_const * transpiration(psi_stem, psi); transpiration is conductance_max *
@@ -995,7 +1348,7 @@ double Leaf::dprofit_droot_collar_psi(double opt_root_psi) {
 //   dinteg/dP  = sign_var * f_r(-P_x_r)  for P_x_r<0  (else sign_var, f_r==1),
 // and dE_i/dP follows by the quotient rule. Returns NaN on any branch kink so
 // the caller falls back to finite differences.
-double Leaf::dE_from_soil_dpsi_collar(double P_x_r, const std::vector<double>& psi_soil) {
+inline double Leaf::dE_from_soil_dpsi_collar(double P_x_r, const std::vector<double>& psi_soil) {
   const double inv_area_leaf = 1.0 / area_leaf_;
   const double kink_tol = 1e-8;
   double dEup_dr_mol = 0.0;
@@ -1054,16 +1407,16 @@ double Leaf::dE_from_soil_dpsi_collar(double P_x_r, const std::vector<double>& p
   return dEup_dr_mol * kg_per_mol_h2o;  // match E_up_'s kg units
 }
 
-double Leaf::arrh_curve(double Ea, double ref_value, double leaf_temp) const {
+inline double Leaf::arrh_curve(double Ea, double ref_value, double leaf_temp) const {
 
 
-  return ref_value*exp(Ea*((leaf_temp+C_to_K) - (25 + C_to_K))/((25 + C_to_K)*R*(leaf_temp+C_to_K)));
+  return ref_value*exp(Ea*((leaf_temp+C_to_K) - (25 + C_to_K))/((25 + C_to_K)*gas_constant*(leaf_temp+C_to_K)));
 }
 
-double Leaf::peak_arrh_curve(double Ea, double ref_value, double leaf_temp, double H_d, double d_S) const {
+inline double Leaf::peak_arrh_curve(double Ea, double ref_value, double leaf_temp, double H_d, double d_S) const {
   double arrh = arrh_curve(Ea, ref_value, leaf_temp);
-  double arg2 = 1 + exp((d_S*(25 + C_to_K) - H_d)/(R*(25 + C_to_K)));
-  double arg3 = 1 + exp((d_S*(leaf_temp + C_to_K) - H_d)/(R*(leaf_temp + C_to_K)));
+  double arg2 = 1 + exp((d_S*(25 + C_to_K) - H_d)/(gas_constant*(25 + C_to_K)));
+  double arg3 = 1 + exp((d_S*(leaf_temp + C_to_K) - H_d)/(gas_constant*(leaf_temp + C_to_K)));
 
   return arrh * arg2/arg3;
 }
@@ -1074,7 +1427,7 @@ double Leaf::peak_arrh_curve(double Ea, double ref_value, double leaf_temp, doub
 // lets the PM path recompute per operating-point Tleaf. electron_transport_ also
 // depends on the per-call PPFD_ and is (re)computed here from the just-updated
 // jmax_ -- on the non-PM cache-hit path set_physiology refreshes it separately.
-void Leaf::update_temperature_dependent_params(double leaf_temp) {
+inline void Leaf::update_temperature_dependent_params(double leaf_temp) {
   vcmax_ = peak_arrh_curve(vcmax_ha, vcmax_25, leaf_temp, vcmax_H_d, vcmax_d_S);
   jmax_ = peak_arrh_curve(jmax_ha, jmax_25, leaf_temp, jmax_H_d, jmax_d_S);
   gamma_ = arrh_curve(gamma_ha, gamma_25, leaf_temp);
@@ -1086,19 +1439,19 @@ void Leaf::update_temperature_dependent_params(double leaf_temp) {
 }
 
 // Saturation vapour pressure es(T) in kPa (Tetens), T in deg C.
-double Leaf::saturation_vapour_pressure(double temp) const {
+inline double Leaf::saturation_vapour_pressure(double temp) const {
   return 0.6108 * exp(17.27 * temp / (temp + 237.3));
 }
 
 // Slope of the saturation vapour pressure curve Delta(T) in kPa K^-1, T in deg C.
-double Leaf::saturation_vapour_pressure_slope(double temp) const {
+inline double Leaf::saturation_vapour_pressure_slope(double temp) const {
   return 4098.0 * saturation_vapour_pressure(temp) / ((temp + 237.3) * (temp + 237.3));
 }
 
 // Explicit leaf energy balance (#523): Tleaf = Tair + (Rn - lambda*E)*ra/(rho*cp).
 // E is the hydraulically-pinned transpiration (kg H2O m^-2 s^-1), so lambda*E is
 // the latent heat flux (W m^-2) and (Rn - lambda*E) the sensible heat flux H.
-double Leaf::leaf_temp_from_E(double E) const {
+inline double Leaf::leaf_temp_from_E(double E) const {
   const double Tleaf = Tair_ + (Rn_ - latent_heat_vap * E) * ra_ / vol_heat_cap_air;
   // Clamp to a physical range so an extreme (non-equilibrium) E cannot drive the
   // Arrhenius block non-finite; see leaf_temp_min/max in the header.
@@ -1109,7 +1462,7 @@ double Leaf::leaf_temp_from_E(double E) const {
 // transpiration supply functions
 
 // returns proportion of conductance taken from hydraulic vulnerability curve (unitless)
-double Leaf::proportion_of_conductivity(double psi) const {
+inline double Leaf::proportion_of_conductivity(double psi) const {
 
   return exp(-pow((psi / b), c));
 }
@@ -1125,7 +1478,7 @@ double Leaf::proportion_of_conductivity(double psi) const {
 //
 // Shared by setup_transpiration (xylem) and setup_root_vulnerability (roots);
 // each caller wires the resulting knots into its own interpolator(s).
-void Leaf::build_cumulative_vulnerability_integral(double b, double c,
+inline void Leaf::build_cumulative_vulnerability_integral(double b, double c,
                                                    double resolution,
                                                    std::vector<double>& x,
                                                    std::vector<double>& y_integral) {
@@ -1143,7 +1496,7 @@ void Leaf::build_cumulative_vulnerability_integral(double b, double c,
 // pre-compute root vulnerability curve f(psi) = exp(-(|psi|/b_root)^c_root) as a spline,
 // evaluated over the range [0, psi_max_root] where conductivity drops to 1%.
 // This avoids repeated exp(pow(...)) calls inside E_from_Soil_to_Root_Collar.
-void Leaf::setup_root_vulnerability(double resolution) {
+inline void Leaf::setup_root_vulnerability(double resolution) {
   std::vector<double> x_psi_root, y_integral;
   build_cumulative_vulnerability_integral(root_b, root_c, resolution,
                                           x_psi_root, y_integral);
@@ -1163,7 +1516,7 @@ void Leaf::setup_root_vulnerability(double resolution) {
 }
 
 // set spline for proportion of conductivity
-void Leaf::setup_transpiration(double resolution) {
+inline void Leaf::setup_transpiration(double resolution) {
   std::vector<double> x_psi_, y_cumulative_transpiration_;
   build_cumulative_vulnerability_integral(b, c, resolution, x_psi_,
                                           y_cumulative_transpiration_);
@@ -1176,20 +1529,23 @@ void Leaf::setup_transpiration(double resolution) {
   psi_from_transpiration.set_extrapolate(false);
 }
 
-// replace f with some other function, returns E kg m^-2 s^-1
-
-double Leaf::transpiration_full_integration(double psi_stem, double psi_upstream) {
-  std::function<double(double)> f;
-  f = [&](double psi) -> double { return proportion_of_conductivity(psi); };
-  
-  return leaf_specific_conductance_max_ * integrator.integrate(f, psi_upstream, psi_stem);
- }
+// Direct integration of the xylem vulnerability curve, as an independent check
+// on the pre-integrated spline that transpiration() uses on the hot path. Not
+// used in production. Uses leaf/quadrature.hpp rather than plant's compiled QAG,
+// so values are convergent-but-not-bit-identical to plant's; see that header.
+inline double Leaf::transpiration_full_integration(double psi_stem, double psi_upstream) {
+  const auto f = [&](double psi) -> double {
+    return proportion_of_conductivity(psi);
+  };
+  return leaf_specific_conductance_max_ *
+         quadrature::adaptive_simpson(f, psi_upstream, psi_stem);
+}
 
 //calculates supply-side transpiration from psi_stem and root_collar_psi_, returns kg h20 s^-1 m^-2 LA
 // SIGN: psi_stem and psi_upstream are POSITIVE magnitudes here (passed straight
 // to the spline). Contrast transpiration_to_psi_stem below. See the sign-
 // conventions block above E_from_Soil_to_Root_Collar.
-double Leaf::transpiration(double psi_stem, double psi_upstream) {
+inline double Leaf::transpiration(double psi_stem, double psi_upstream) {
 
   // 1-entry memo: identical (psi_stem, psi_upstream) is requested several times
   // per profit evaluation; return the cached value (bit-identical) to skip the
@@ -1216,7 +1572,7 @@ double Leaf::transpiration(double psi_stem, double psi_upstream) {
 // SIGN: unlike transpiration() above, psi_upstream here is a SIGNED (negative)
 // potential, so it is flipped with a leading `-` before the spline lookup. The
 // two functions are inverses called with opposite-sign psi_upstream.
-double Leaf::transpiration_to_psi_stem(double transpiration_, double psi_upstream) {
+inline double Leaf::transpiration_to_psi_stem(double transpiration_, double psi_upstream) {
   // integration of proportion_of_conductivity over [root_collar_psi_, psi_stem]
 
 
@@ -1227,7 +1583,7 @@ double Leaf::transpiration_to_psi_stem(double transpiration_, double psi_upstrea
   }
 
 // returns stomatal conductance to CO2, mol C m^-2 LA s^-1
-double Leaf:: stom_cond_CO2(double psi_stem, double psi_upstream) {
+inline double Leaf:: stom_cond_CO2(double psi_stem, double psi_upstream) {
   double transpiration_ = transpiration(psi_stem, psi_upstream);
   return atm_kpa_ * transpiration_ * kg_to_mol_h2o / atm_vpd_ / H2O_CO2_stom_diff_ratio;
 }
@@ -1236,7 +1592,7 @@ double Leaf:: stom_cond_CO2(double psi_stem, double psi_upstream) {
 // biochemical photosynthesis model equations
 //ensure that units of PPFD_ actually correspond to something real.
 // electron trnansport rate based on light availability and vcmax assuming co-limitation hypothesis
-double Leaf::electron_transport() {
+inline double Leaf::electron_transport() {
 
 
 
@@ -1248,14 +1604,14 @@ double Leaf::electron_transport() {
 }
 
 //calculate the rubisco-limited assimilation rate, returns umol m^-2 s^-1
-double Leaf::assim_rubisco_limited(double ci_) {
+inline double Leaf::assim_rubisco_limited(double ci_) {
 
   return (vcmax_ * (ci_ - gamma_ * umol_per_mol_to_Pa)) / (ci_ + km_);
 
 }
 
 //calculate the light-limited assimilation rate, returns umol m^-2 s^-1
-double Leaf::assim_electron_limited(double ci_) {
+inline double Leaf::assim_electron_limited(double ci_) {
   
 
   return electron_transport_ / 4 *
@@ -1263,7 +1619,7 @@ double Leaf::assim_electron_limited(double ci_) {
 }
 
 // returns co-limited assimilation umol m^-2 s^-1
-double Leaf::assim_colimited(double ci_) {
+inline double Leaf::assim_colimited(double ci_) {
   
   double assim_rubisco_limited_ = assim_rubisco_limited(ci_) ;
   double assim_electron_limited_ = assim_electron_limited(ci_);
@@ -1279,7 +1635,7 @@ double Leaf::assim_colimited(double ci_) {
 // A - gc curves
 
 // returns difference between co-limited assimilation and stom_cond_CO2, to be minimised (umol m^-2 s^-1)
-double Leaf::assim_minus_stom_cond_CO2(double x, double psi_stem, double psi_upstream) {
+inline double Leaf::assim_minus_stom_cond_CO2(double x, double psi_stem, double psi_upstream) {
 
   double assim_colimited_x_ = assim_colimited(x);
 
@@ -1289,7 +1645,7 @@ double Leaf::assim_minus_stom_cond_CO2(double x, double psi_stem, double psi_ups
 }
 
 // converts psi stem to ci, used to find ci which makes A(ci) = gc(ca - ci)
-double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
+inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
   const double stom_cond_CO2_fixed = stom_cond_CO2(psi_stem, psi_upstream);
 
   // Propagate non-finite inputs as NA rather than entering the solver. A
@@ -1299,7 +1655,7 @@ double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
   // ("a and b do not bracket the root"), so guard explicitly to preserve the
   // NA-in -> NA-out contract (see test-leaf.r "Basic functions").
   if (!std::isfinite(stom_cond_CO2_fixed)) {
-    return ci_ = NA_REAL;
+    return ci_ = util::na_value;
   }
 
   auto target = [&](double x) mutable -> double {
@@ -1341,7 +1697,7 @@ double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
 }
 
 // given psi_stem, find assimilation, transpiration and stomal conductance to c02
-void Leaf::set_leaf_states_rates_from_psi_stem(double psi_stem, double psi_upstream) {
+inline void Leaf::set_leaf_states_rates_from_psi_stem(double psi_stem, double psi_upstream) {
 
   if (psi_upstream >= psi_stem){
     ci_ = gamma_*umol_per_mol_to_Pa;
@@ -1378,7 +1734,7 @@ void Leaf::set_leaf_states_rates_from_psi_stem(double psi_stem, double psi_upstr
 
 // Sperry et al. 2017; Sabot et al. 2020 implementation
 
-double Leaf::hydraulic_cost_Sperry(double psi_stem, double psi_upstream) {
+inline double Leaf::hydraulic_cost_Sperry(double psi_stem, double psi_upstream) {
   // Cost is definitionally zero when the potentials are equal. Returning it
   // explicitly avoids a tiny non-zero residual from FMA contraction of the
   // k_l_soil_ - k_l_stem_ subtraction (arch-dependent; see arm64 build, #468).
@@ -1394,7 +1750,7 @@ double Leaf::hydraulic_cost_Sperry(double psi_stem, double psi_upstream) {
   return hydraulic_cost_;
 }
 
-double Leaf::hydraulic_cost_TF(double psi_stem) {
+inline double Leaf::hydraulic_cost_TF(double psi_stem) {
 
   hydraulic_cost_ = g1_TF24 * pow((1 - proportion_of_conductivity(psi_stem)), beta2);
 
@@ -1403,7 +1759,7 @@ return hydraulic_cost_;
 
 // Profit functions
 
-double Leaf::profit_psi_stem_Sperry(double psi_stem, double psi_upstream) {
+inline double Leaf::profit_psi_stem_Sperry(double psi_stem, double psi_upstream) {
 
 set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
 
@@ -1414,7 +1770,7 @@ set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
 }
 
 
-double Leaf::profit_psi_stem_TF(double psi_stem, double psi_upstream) {
+inline double Leaf::profit_psi_stem_TF(double psi_stem, double psi_upstream) {
 set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
 
 double benefit_ = assim_colimited_;
@@ -1428,7 +1784,7 @@ double benefit_ = assim_colimited_;
 
 
 // need docs on Golden Section Search.
-void Leaf::optimise_psi_stem_Sperry() {
+inline void Leaf::optimise_psi_stem_Sperry() {
 
     if (!(psi_soil_.size() == 1)) {
     util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
@@ -1456,7 +1812,7 @@ void Leaf::optimise_psi_stem_Sperry() {
   }
   
 
-void Leaf::optimise_psi_stem_TF() {
+inline void Leaf::optimise_psi_stem_TF() {
 
   if (!(psi_soil_.size() == 1)) {
     util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
@@ -1490,7 +1846,7 @@ void Leaf::optimise_psi_stem_TF() {
 // moisture stress factor in [0,1] from theta_/theta_w_/theta_fc_ (set in
 // set_physiology from the default soil-moisture values).
 // ===========================================================================
-double Leaf::medlyn_model_gs(double assim_colimited_){
+inline double Leaf::medlyn_model_gs(double assim_colimited_){
 
   double beta_ = (theta_ - theta_w_)/(theta_fc_ - theta_w_);
 
@@ -1510,7 +1866,7 @@ double Leaf::medlyn_model_gs(double assim_colimited_){
 // to that of the raw difference for x < ca_:
 //   gs_medlyn*(ca_-x) - gs_coupled*(ca_-x),  where
 //   gs_coupled*(ca_-x) = assim * (atm_kpa_*kPa_to_Pa) * 1.6 / 1e6.
-double Leaf::medlyn_stom_cond_minus_coupled_stom_cond(double x) {
+inline double Leaf::medlyn_stom_cond_minus_coupled_stom_cond(double x) {
   const double assim_colimited_x_ = assim_colimited(x);
   medlyn_model_gs_ = medlyn_model_gs(assim_colimited_x_);
   return medlyn_model_gs_ * (ca_ - x)
@@ -1530,7 +1886,7 @@ double Leaf::medlyn_stom_cond_minus_coupled_stom_cond(double x) {
 // therefore first locate the residual's maximum (Brent minimiser on -residual),
 // then root-find on [argmax, ca_], which isolates the physically meaningful
 // high-ci operating point in every case (including g0 == 0).
-void Leaf::solve_medlyn_ci_numerical(){
+inline void Leaf::solve_medlyn_ci_numerical(){
   auto target = [&](double x) -> double {
     return medlyn_stom_cond_minus_coupled_stom_cond(x);
   };
@@ -1561,7 +1917,7 @@ void Leaf::solve_medlyn_ci_numerical(){
   return;
 }
 
-void Leaf::solve_medlyn_ci_analytical(){
+inline void Leaf::solve_medlyn_ci_analytical(){
 
   ci_ = ca_ * (g1/(g1 + sqrt(atm_vpd_)));
   assim_colimited_ = assim_colimited(ci_);
@@ -1569,4 +1925,6 @@ void Leaf::solve_medlyn_ci_analytical(){
   return;
 }
 
-} // namespace plant
+} // namespace leaf
+
+#endif

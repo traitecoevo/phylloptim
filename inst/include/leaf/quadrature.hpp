@@ -1,0 +1,77 @@
+// -*-c++-*-
+#ifndef LEAF_QUADRATURE_HPP_
+#define LEAF_QUADRATURE_HPP_
+
+// Adaptive Simpson quadrature, used by Leaf::transpiration_full_integration.
+//
+// Why this exists: in plant, that one function integrated the xylem
+// vulnerability curve directly using plant's QAG (adaptive Gauss-Kronrod), which
+// is ~770 lines spread over four compiled translation units and was the leaf
+// model's ONLY remaining link-time dependency on plant. It is not on the hot
+// path -- the production `transpiration()` reads a pre-integrated spline
+// instead, and full integration exists purely as the independent check that the
+// spline is faithful (plant's tests/testthat/test-leaf.r asserts the two agree).
+// A dozen lines of adaptive Simpson discharges that job without dragging in a
+// compiled quadrature library, which is what makes this package header-only.
+//
+// Consequence to be aware of: results from transpiration_full_integration are
+// NOT bit-identical to plant's QAG version. Both converge on the same integral,
+// so the spline-fidelity test still passes at its stated tolerance, but do not
+// use this function as a bit-reproducibility baseline. Everything on the
+// production path (the spline) is unaffected.
+
+#include <cmath>
+#include <cstddef>
+
+namespace leaf {
+namespace quadrature {
+
+namespace internals {
+
+// One adaptive Simpson step over [a, b]. `fa`/`fm`/`fb` are f at the endpoints
+// and midpoint (passed in so they are never recomputed), `whole` the Simpson
+// estimate over the interval from those three. Recurses until the Richardson
+// error estimate on the two halves falls under `tol`, or the depth budget runs
+// out.
+template <typename Function>
+double simpson_step(Function f, double a, double b, double fa, double fm,
+                    double fb, double whole, double tol, int depth) {
+  const double m = 0.5 * (a + b);
+  const double lm = 0.5 * (a + m), rm = 0.5 * (m + b);
+  const double flm = f(lm), frm = f(rm);
+  const double h = (b - a) / 12.0;
+  const double left = h * (fa + 4.0 * flm + fm);
+  const double right = h * (fm + 4.0 * frm + fb);
+  const double both = left + right;
+  // Richardson: the Simpson error scales as h^4, so (both - whole)/15 estimates
+  // the error remaining in `both`.
+  if (depth <= 0 || std::abs(both - whole) <= 15.0 * tol) {
+    return both + (both - whole) / 15.0;
+  }
+  return simpson_step(f, a, m, fa, flm, fm, left, 0.5 * tol, depth - 1) +
+         simpson_step(f, m, b, fm, frm, fb, right, 0.5 * tol, depth - 1);
+}
+
+} // namespace internals
+
+// Integrate f over [a, b] to absolute tolerance `tol`. Reversed limits are
+// handled by the usual sign flip; a degenerate interval integrates to zero.
+template <typename Function>
+double adaptive_simpson(Function f, double a, double b, double tol = 1e-8,
+                        int max_depth = 30) {
+  if (a == b) {
+    return 0.0;
+  }
+  if (a > b) {
+    return -adaptive_simpson(f, b, a, tol, max_depth);
+  }
+  const double m = 0.5 * (a + b);
+  const double fa = f(a), fm = f(m), fb = f(b);
+  const double whole = (b - a) / 6.0 * (fa + 4.0 * fm + fb);
+  return internals::simpson_step(f, a, b, fa, fm, fb, whole, tol, max_depth);
+}
+
+} // namespace quadrature
+} // namespace leaf
+
+#endif

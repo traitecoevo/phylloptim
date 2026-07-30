@@ -1,6 +1,6 @@
 // -*-c++-*-
-#ifndef PLANT_PLANT_OPTIMIZE_H_
-#define PLANT_PLANT_OPTIMIZE_H_
+#ifndef LEAF_OPTIMIZE_HPP_
+#define LEAF_OPTIMIZE_HPP_
 
 // Robust 1-D function minimiser: Brent's method (golden-section search with
 // parabolic interpolation). This is the algorithm behind R's optimize() /
@@ -14,7 +14,7 @@
 #include <cfloat>  // DBL_EPSILON
 #include <cmath>
 
-namespace plant {
+namespace leaf {
 namespace util {
 
 // Minimise f over [ax, bx] (requires ax <= bx). Returns the argmin; on return

@@ -1,0 +1,20 @@
+# R
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+..Rcheck/
+*.Rcheck/
+*.tar.gz
+
+# C++ / test harness
+*.o
+*.so
+*.dylib
+tests/cpp/test_leaf
+tests/cpp/*.dSYM/
+
+# macOS
+.DS_Store
+._*
+.AppleDouble

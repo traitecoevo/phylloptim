@@ -1,0 +1,134 @@
+# leaf
+
+A header-only C++ leaf gas-exchange model in which **stomatal behaviour emerges
+from hydraulics** instead of an empirical conductance function.
+
+Farquhar-von Caemmerer-Berry photosynthesis is coupled to an explicit
+soil → root → stem → leaf water transport path — Weibull vulnerability curves
+for both xylem and roots, multi-layer soil, per-layer root resistance,
+gravitational head — and the operating point is chosen by Sperry-style gain-risk
+**profit maximisation** over the root-collar water potential. Forward-mode
+automatic differentiation (XAD) supplies exact derivatives of profit with respect
+to that potential, for models that need to track acclimation.
+
+A full solve costs about **4 µs**, which is what makes it usable inside a
+demographic model that calls it millions of times.
+
+This code was developed as the TF24 strategy inside
+[traitecoevo/plant](https://github.com/traitecoevo/plant) and is extracted here
+so it can be tested, profiled, extended and embedded on its own.
+
+## Status
+
+**v0.0.1 — early.** The model itself is mature and in production use inside
+plant. The *packaging* is new, and two things are not done yet:
+
+- The values this build produces have **not yet been cross-checked against
+  plant's compiled build**. That is job one; see [PLAN.md](PLAN.md).
+- There is **no R-level API**. This is a headers-only package, consumed from C++.
+
+It also carries one inherited defect worth knowing about before you use it: on
+the hydraulic-shutdown path, transpiration, assimilation and soil water uptake
+are left holding the previous solve's values. See "Fix the shutdown-state leak"
+in [PLAN.md](PLAN.md); the behaviour is pinned by a test so the fix will be
+deliberate and visible.
+
+## Use from C++
+
+There is nothing to link against — one include is the whole library.
+
+```cpp
+#include <leaf.hpp>
+
+leaf::Leaf l;                   // default Eucalyptus saligna traits
+l.setup_transpiration(100);     // build the xylem vulnerability splines
+l.setup_root_vulnerability(100);
+
+std::vector<double> psi_soil{2.0};      // positive suction, MPa
+std::vector<double> soil_depth{1.0};    // m
+std::vector<double> mass_root_prop{1.0};
+
+l.set_physiology(/*area_leaf*/ 0.05, mass_root_prop, /*rho*/ 608, /*a_bio*/ 0.0245,
+                 /*PPFD*/ 900, psi_soil, soil_depth,
+                 /*leaf_specific_conductance_max*/ 3.14e-5,
+                 /*atm_vpd*/ 2.0, /*ca*/ 40.0,
+                 /*sapwood_volume_per_leaf_area*/ 7.85e-4,
+                 /*leaf_temp*/ 25.0, /*atm_o2_kpa*/ 21.0, /*atm_kpa*/ 101.3);
+
+l.find_root_collar_psi();       // solve
+
+l.opt_psi_stem_;                // leaf water potential at the optimum, MPa
+l.root_collar_psi_;             // root-collar potential, MPa (signed)
+l.assim_colimited_;             // A, umol m-2 s-1
+l.transpiration_;               // E, kg H2O m-2 s-1
+l.stom_cond_CO2_;               // gc, mol CO2 m-2 s-1
+l.profit_;                      // A - hydraulic cost
+l.soil_consumption_;            // per-layer water uptake
+```
+
+Compile with C++20 and three include paths — this package, `odelia`, and Boost:
+
+```sh
+c++ -std=c++20 -O2 \
+  -I /path/to/leaf/inst/include \
+  -isystem /path/to/odelia/inst/include \
+  -isystem /path/to/boost \
+  my_program.cpp -o my_program
+```
+
+## Use from R
+
+As a headers-only dependency, the way `BH` is used. Add to your DESCRIPTION:
+
+```
+LinkingTo: BH, odelia, leaf
+```
+
+`LinkingTo` is **not** transitive in R, so you must name `BH` and `odelia`
+yourself even though it is `leaf` that includes them.
+
+There is no R-level interface to `leaf::Leaf` yet — see [PLAN.md](PLAN.md).
+
+## Dependencies
+
+Deliberately few, and all header-only:
+
+| | why | how |
+|---|---|---|
+| **odelia** | cubic-spline interpolator for the pre-integrated vulnerability curves, and the vendored **XAD** automatic-differentiation library | `LinkingTo` |
+| **BH** (Boost) | TOMS748 root finder, incomplete gamma for the closed-form vulnerability integral | `LinkingTo` |
+
+Nothing else. In particular the leaf model itself no longer touches **Rcpp** or
+the R C API: `leaf/util.hpp` replaced plant's `util::stop` with a plain
+`std::runtime_error` and `NA_REAL` with a quiet NaN. The one remaining R
+touchpoint is inside odelia's `ode_util.hpp`; the test suite substitutes a
+15-line shim for it, which both proves the point and documents exactly what
+would need to change upstream to remove it. See PLAN.md.
+
+Both dependencies are already required by plant, so plant pays nothing new for
+depending on this package.
+
+## Tests
+
+The test suite is plain C++ and needs neither R nor a test framework:
+
+```sh
+make -C tests/cpp
+```
+
+It discovers BH and odelia through `Rscript` if R is installed, and otherwise
+falls back to a sibling `odelia/` checkout and Homebrew Boost. Override with
+`make BH_INC=... ODELIA_INC=...`.
+
+## How this compares to other leaf models
+
+See [COMPARISON.md](COMPARISON.md) for a feature-by-feature comparison against
+`plantecophys`, `bigleaf` and `tealeaves`. The short version: those packages are
+stronger on empirical stomatal models, leaf energy balance and fitting to
+measured data; this one is the only one with an explicit hydraulic architecture
+and a profit-maximisation solve, and the only one written to be embedded in a
+larger model.
+
+## Licence
+
+AGPL (>= 3), inherited from plant.
