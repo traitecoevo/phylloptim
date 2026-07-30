@@ -287,6 +287,95 @@ void test_analytic_gradient_matches_finite_difference() {
   near(analytic, fd, 2e-3, "analytic gradient matches central difference");
 }
 
+// lambda = dA/dE is the first-order condition every model in this family shares,
+// so checking the analytic lambda against a finite-difference dA/dE is a check on
+// the whole optimisation, not just on one formula.
+void test_lambda_equals_dA_dE_single_layer() {
+  printf("marginal cost of water: analytic lambda vs dA/dE (stem free)\n");
+  Drivers d;
+  for (double psi_soil : {0.5, 1.0, 2.0, 3.0}) {
+    leaf::Leaf l = make_leaf(d, {psi_soil}, {1.0});
+    // optimise_psi_stem_TF holds the collar fixed at psi_soil_[0] and optimises
+    // the stem, so the single-layer lambda is the one that applies here.
+    l.optimise_psi_stem_TF();
+    const double psi = l.opt_psi_stem_;
+    const double eps = 1e-6;
+    l.set_leaf_states_rates_from_psi_stem(psi + eps, psi_soil);
+    const double A1 = l.assim_colimited_, E1 = l.transpiration_;
+    l.set_leaf_states_rates_from_psi_stem(psi - eps, psi_soil);
+    const double A0 = l.assim_colimited_, E0 = l.transpiration_;
+    const double fd = (A1 - A0) / (E1 - E0);
+    l.optimise_psi_stem_TF();
+    // Tolerance is set by the optimiser: GSS_tol_abs is 1e-3 on psi, so the
+    // first-order condition only holds to about that accuracy.
+    near(l.marginal_cost_water() / fd, 1.0, 1e-3,
+         "lambda/(dA/dE) at psi_soil=" + std::to_string(psi_soil));
+    ok(l.marginal_cost_water() > 0.0, "lambda is positive");
+  }
+}
+
+// The multi-layer identity from the companion manuscript:
+//   lambda_multi = lambda_single * [1 + kmax*f(psi_r)/S],   S = dE_up/dpsi_r
+// find_root_collar_psi optimises the COLLAR, so lambda_multi is what it
+// equalises. The single-layer lambda should be badly wrong here -- that is the
+// point of the correction, and this test pins the size of the error.
+void test_multilayer_lambda_identity() {
+  printf("multi-layer lambda: series-resistance correction vs dA/dE (collar free)\n");
+  Drivers d;
+  for (int layers : {1, 3, 5}) {
+    std::vector<double> ps(layers), depth(layers), root(layers);
+    for (int i = 0; i < layers; ++i) {
+      ps[i] = 1.0 + 0.25 * i;
+      depth[i] = 1.0 * (i + 1);
+      root[i] = 1.0 / layers;
+    }
+    leaf::Leaf l = make_leaf(d, ps, depth);
+    l.find_root_collar_psi();
+    const double single = l.marginal_cost_water();
+    const double multi = l.marginal_cost_water_multilayer();
+
+    const double target = -l.root_collar_psi_;
+    const double eps = 1e-6;
+    l.evaluate_root_collar_psi(target + eps);
+    const double A1 = l.assim_colimited_, E1 = l.transpiration_;
+    l.evaluate_root_collar_psi(target - eps);
+    const double A0 = l.assim_colimited_, E0 = l.transpiration_;
+    const double fd = (A1 - A0) / (E1 - E0);
+
+    const std::string tag = std::to_string(layers) + " layers";
+    ok(std::isfinite(multi), "lambda_multi is finite, " + tag);
+    near(multi / fd, 1.0, 1e-3, "lambda_multi/(dA/dE), " + tag);
+    // The correction bracket is >= 1, so the single-layer value must understate.
+    ok(multi > single, "lambda_multi exceeds lambda_single, " + tag);
+    ok(multi / single > 2.0 && multi / single < 12.0,
+       "the correction factor is in the reported 2-12 range, " + tag);
+    // And the single-layer value should be badly wrong when the collar is free,
+    // which is exactly why the correction matters.
+    ok(std::abs(single - fd) / fd > 0.5,
+       "lambda_single is >50% wrong when the collar is free, " + tag);
+  }
+}
+
+void test_g1_eff() {
+  printf("equivalent Medlyn slope\n");
+  Drivers d;
+  leaf::Leaf l = make_leaf(d, {2.0}, {1.0});
+  l.find_root_collar_psi();
+  const double g1 = l.g1_eff();
+  ok(std::isfinite(g1) && g1 > 0.0, "g1_eff is finite and positive");
+  // g1_eff is defined by inverting chi = g1/(g1 + sqrt(D)), so that must hold.
+  const double chi = l.ci_ / l.ca_;
+  near(g1 / (g1 + std::sqrt(l.atm_vpd_)), chi, 1e-12,
+       "g1_eff inverts the USO relation exactly");
+  // Drier soil closes stomata, lowering chi and therefore g1_eff.
+  leaf::Leaf dry = make_leaf(d, {4.0}, {1.0});
+  dry.find_root_collar_psi();
+  ok(dry.g1_eff() < g1, "g1_eff falls as the soil dries");
+  // And a higher marginal cost of water goes with a lower g1_eff.
+  ok(dry.marginal_cost_water() > l.marginal_cost_water(),
+     "lambda rises as the soil dries");
+}
+
 void test_energy_balance_path_runs() {
   printf("Penman-Monteith energy-balance path\n");
   Drivers d;
@@ -362,6 +451,9 @@ int main() {
   test_shutdown_when_soil_is_drier_than_psi_crit();
   test_shutdown_leaves_stale_state_known_defect();
   test_analytic_gradient_matches_finite_difference();
+  test_lambda_equals_dA_dE_single_layer();
+  test_multilayer_lambda_identity();
+  test_g1_eff();
   test_energy_balance_path_runs();
   test_bad_input_throws();
   benchmark();

@@ -363,6 +363,73 @@ public:
   void set_leaf_states_rates_from_psi_stem(double psi_stem, double psi_upstream);
 
 
+// --- Marginal cost of water ------------------------------------------------
+// lambda = dA/dE, the marginal carbon gain per unit water lost. This is the
+// quantity that unifies the stomatal optimality models: they all maximise a
+// profit, so they all satisfy dA/dE = lambda at the optimum and differ only in
+// lambda(state). Reporting it makes this model directly comparable to the
+// others, and to fitted Medlyn g1 values via g1_eff() below.
+//
+// Deliberately accessors rather than stored state: they are wanted once per
+// solve, not once per candidate potential, and computing them inside
+// set_leaf_states_rates_from_psi_stem would put a pow() on a path that runs
+// ~10^3 times per solve.
+//
+// NOTE the name clash to be careful of: the member `lambda_` is an *input* to
+// profit_psi_stem_Sperry (Sperry's prescribed marginal water cost, never set by
+// set_physiology). The lambda here is an *emergent output*. See PLAN.md 10a.
+
+  // lambda at an arbitrary stem water potential (positive magnitude, MPa), in
+  // umol CO2 (kg H2O)^-1. Analytic, from the TF24 cost function:
+  //
+  //   C(psi)     = g1_TF24 * (1 - f(psi))^beta2,    f(psi) = exp(-(psi/b)^c)
+  //   dC/dpsi    = g1_TF24 * beta2 * (1-f)^(beta2-1) * (c/b)(psi/b)^(c-1) * f
+  //   E(psi)     = kmax * integral of f,  so  dE/dpsi = kmax * f
+  //   lambda     = (dC/dpsi) / (dE/dpsi)
+  //
+  // The f cancels exactly; it is cancelled here rather than divided out, so the
+  // expression stays finite as psi -> psi_crit where f -> 0.
+  //
+  // Caveat: with beta2 < 1 the (1-f)^(beta2-1) factor diverges as psi -> 0
+  // (f -> 1), which is a property of the cost function, not of this code.
+  double lambda_TF24(double psi_stem) const;
+
+  // lambda at the current operating point. This is the single-layer value: it is
+  // the marginal cost seen by the stem, and equals dA/dE only when the collar
+  // potential is fixed (i.e. for the optimise_psi_stem_* solvers).
+  double marginal_cost_water() const;
+
+  // The same in molar units, mol CO2 (mol H2O)^-1, which is the convention the
+  // optimality literature states lambda in.
+  double marginal_cost_water_molar() const;
+
+  // lambda including the root-network series resistance, which is what
+  // find_root_collar_psi actually equalises because it optimises over the collar
+  // potential with the stem following from continuity:
+  //
+  //   lambda_multi = lambda_TF24 * [1 + kmax*f(psi_r)/S],    S = dE_up/dpsi_r
+  //
+  // S comes from dE_from_soil_dpsi_collar. The bracket is >= 1, so the
+  // single-layer lambda always UNDERSTATES the true marginal cost. Returns the
+  // NA sentinel where S is unavailable (the branch kinks that
+  // dE_from_soil_dpsi_collar reports as NaN) or zero.
+  //
+  // Requires that a collar solve has run, so that psi_soil_inverted_ is current.
+  double marginal_cost_water_multilayer();
+
+  // Equivalent Medlyn USO slope implied by the operating point, in kPa^0.5.
+  // Defined operationally from the solved chi = ci/ca, by inverting the USO
+  // relation chi = g1/(g1 + sqrt(D)):
+  //
+  //   g1_eff = chi * sqrt(D) / (1 - chi)
+  //
+  // Operational rather than predicted-from-lambda on purpose: this form is exact
+  // by construction and free of unit conventions, and it is directly comparable
+  // to g1 values fitted by plantecophys::fitBB or tabulated by Lin et al. (2015).
+  // Reconciling it against the theoretical sqrt(3*Gstar*P/(1.6*lambda)) is the
+  // companion manuscript's job, not this header's.
+  double g1_eff() const;
+
 // leaf economics functions
   double hydraulic_cost_Sperry(double psi_stem, double psi_upstream);
   double hydraulic_cost_TF(double psi_stem);
@@ -1765,6 +1832,48 @@ inline double Leaf::hydraulic_cost_Sperry(double psi_stem, double psi_upstream) 
   hydraulic_cost_ = k_l_soil_ - k_l_stem_;
   
   return hydraulic_cost_;
+}
+
+// --- Marginal cost of water -------------------------------------------------
+
+inline double Leaf::lambda_TF24(double psi_stem) const {
+  const double f = proportion_of_conductivity(psi_stem);
+  return g1_TF24 * beta2 * (c / b) * pow(psi_stem / b, c - 1.0) *
+         pow(1.0 - f, beta2 - 1.0) / leaf_specific_conductance_max_;
+}
+
+inline double Leaf::marginal_cost_water() const {
+  return lambda_TF24(opt_psi_stem_);
+}
+
+inline double Leaf::marginal_cost_water_molar() const {
+  // umol CO2 (kg H2O)^-1 -> mol CO2 (mol H2O)^-1
+  return marginal_cost_water() * umol_to_mol / kg_to_mol_h2o;
+}
+
+inline double Leaf::marginal_cost_water_multilayer() {
+  // SIGN: dE_from_soil_dpsi_collar differentiates with respect to the SIGNED
+  // collar potential, and uptake rises as the collar gets more negative, so it
+  // returns a negative number. S in the identity below is a conductance, i.e. the
+  // positive magnitude -- hence the negation. Getting this backwards makes
+  // lambda_multi come out negative, which is how it was caught.
+  const double S = -dE_from_soil_dpsi_collar(root_collar_psi_, psi_soil_inverted_);
+  if (!std::isfinite(S) || S <= 0.0) {
+    return util::na_value;
+  }
+  // f is the STEM vulnerability curve at the collar potential: kmax*f(psi_r) is
+  // dE_stem/dpsi_r, the stem-side conductance where the two paths meet.
+  const double f_r = proportion_of_conductivity(-root_collar_psi_);
+  return lambda_TF24(opt_psi_stem_) *
+         (1.0 + leaf_specific_conductance_max_ * f_r / S);
+}
+
+inline double Leaf::g1_eff() const {
+  const double chi = ci_ / ca_;
+  if (!std::isfinite(chi) || chi >= 1.0) {
+    return util::na_value;
+  }
+  return chi * std::sqrt(atm_vpd_) / (1.0 - chi);
 }
 
 inline double Leaf::hydraulic_cost_TF(double psi_stem) {
