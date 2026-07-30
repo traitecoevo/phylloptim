@@ -190,6 +190,15 @@ public:
   double atm_vpd_;
   double atm_o2_kpa_;
   double atm_kpa_;
+  // Conversion from a mixing ratio (umol mol^-1) to a partial pressure (Pa).
+  // DERIVED from atm_kpa_, not a constant: it is 1e-6 * P, so the old
+  // `umol_per_mol_to_Pa_ = 0.1013` was atmospheric pressure of 101.3 kPa in
+  // disguise. With atm_kpa_ a settable input, hard-coding it made the model
+  // internally inconsistent away from sea level -- the stomatal side responded to
+  // atm_kpa while Gamma*, Kc, Ko, Km and the ci root-find bounds all kept assuming
+  // 101.3 kPa. This is the trap plantecophys warns about in bold for its own
+  // `Patm`. Bit-identical to the old literal at 101.3 kPa (checked).
+  double umol_per_mol_to_Pa_;
   double ca_;
   double root_collar_psi_;
   double assim_max_;
@@ -612,6 +621,7 @@ inline void Leaf::setup_clean_leaf() {
   atm_vpd_= util::na_value; //kPa 
   atm_o2_kpa_= util::na_value; // kPa
   atm_kpa_= util::na_value; // kPa
+  umol_per_mol_to_Pa_ = util::na_value;
   ca_= util::na_value; //Pa
   opt_psi_stem_= util::na_value; //-MPa 
   opt_ci_= util::na_value; //Pa
@@ -674,6 +684,7 @@ inline void Leaf::set_physiology(double area_leaf, const std::vector<double>& ro
    atm_vpd_ = atm_vpd;
    leaf_temp_ = leaf_temp;
    atm_kpa_ = atm_kpa;
+   umol_per_mol_to_Pa_ = atm_kpa_ * kPa_to_Pa * umol_to_mol;
    atm_o2_kpa_ = atm_o2_kpa;
    PPFD_ = PPFD;
    switch (supply_kind_) {
@@ -933,7 +944,7 @@ inline void Leaf::set_shutdown_state(double root_collar) {
   transpiration_ = 0.0;
   stom_cond_CO2_ = 0.0;
   assim_colimited_ = -R_d_;
-  ci_ = gamma_ * umol_per_mol_to_Pa;
+  ci_ = gamma_ * umol_per_mol_to_Pa_;
   E_up_ = 0.0;
   std::fill(soil_consumption_.begin(), soil_consumption_.end(), 0.0);
   // Invalidate the transpiration memo: it is keyed on (psi_stem, psi_upstream) and
@@ -1147,7 +1158,7 @@ inline double Leaf::profit_at_collar_psi(double target_opt_root_psi,
 inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi) {
   using AD = xad::fwd<double>::active_type;
   const double psi = opt_root_psi;
-  const double gstar_Pa = gamma_ * umol_per_mol_to_Pa;
+  const double gstar_Pa = gamma_ * umol_per_mol_to_Pa_;
 
   // Operating point in double.
   const double psi_stem = find_psi_stem_from_psi_root(-psi, supply_psi_soil_inverted());
@@ -1239,7 +1250,7 @@ inline void Leaf::update_temperature_dependent_params(double leaf_temp) {
   ko_ = arrh_curve(ko_ha, ko_25, leaf_temp);
   kc_ = arrh_curve(kc_ha, kc_25, leaf_temp);
   R_d_ = vcmax_*0.015;
-  km_ = (kc_*umol_per_mol_to_Pa)*(1 + (atm_o2_kpa_*kPa_to_Pa)/(ko_*umol_per_mol_to_Pa));
+  km_ = (kc_*umol_per_mol_to_Pa_)*(1 + (atm_o2_kpa_*kPa_to_Pa)/(ko_*umol_per_mol_to_Pa_));
   electron_transport_ = electron_transport();
 }
 
@@ -1364,7 +1375,7 @@ inline double Leaf::electron_transport() {
 //calculate the rubisco-limited assimilation rate, returns umol m^-2 s^-1
 inline double Leaf::assim_rubisco_limited(double ci_) {
 
-  return (vcmax_ * (ci_ - gamma_ * umol_per_mol_to_Pa)) / (ci_ + km_);
+  return (vcmax_ * (ci_ - gamma_ * umol_per_mol_to_Pa_)) / (ci_ + km_);
 
 }
 
@@ -1373,7 +1384,7 @@ inline double Leaf::assim_electron_limited(double ci_) {
   
 
   return electron_transport_ / 4 *
-  ((ci_ - gamma_ * umol_per_mol_to_Pa) / (ci_ + 2 * gamma_ * umol_per_mol_to_Pa));
+  ((ci_ - gamma_ * umol_per_mol_to_Pa_) / (ci_ + 2 * gamma_ * umol_per_mol_to_Pa_));
 }
 
 // returns co-limited assimilation umol m^-2 s^-1
@@ -1432,7 +1443,7 @@ inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
   // hydraulic find_root_psi path keeps bisection (its target is not smooth -- see
   // the warning on util::uniroot_smooth).
   try {
-    return ci_ = util::uniroot_smooth(target, gamma_ * umol_per_mol_to_Pa, ca_, 1e-7, ci_niter);
+    return ci_ = util::uniroot_smooth(target, gamma_ * umol_per_mol_to_Pa_, ca_, 1e-7, ci_niter);
   } catch (const std::exception& e) {
     // Penman-Monteith path (#523): extreme energy-balance leaf heating raises the
     // CO2 compensation point (gamma*) so far that assimilation is negative across
@@ -1444,10 +1455,10 @@ inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
     // non-PM path keeps its original fail-fast contract (it never reaches here
     // under prescribed leaf_temp).
     if (use_energy_balance_) {
-      return ci_ = gamma_ * umol_per_mol_to_Pa;
+      return ci_ = gamma_ * umol_per_mol_to_Pa_;
     }
     util::stop("psi_stem_to_ci failed: " + std::string(e.what()) +
-               "; min=" + util::to_string(gamma_ * umol_per_mol_to_Pa) +
+               "; min=" + util::to_string(gamma_ * umol_per_mol_to_Pa_) +
                "; max=" + util::to_string(ca_) +
                "; psi_stem=" + util::to_string(psi_stem) +
                "; psi_upstream=" + util::to_string(psi_upstream));
@@ -1458,12 +1469,12 @@ inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
 inline void Leaf::set_leaf_states_rates_from_psi_stem(double psi_stem, double psi_upstream) {
 
   if (psi_upstream >= psi_stem){
-    ci_ = gamma_*umol_per_mol_to_Pa;
+    ci_ = gamma_*umol_per_mol_to_Pa_;
     transpiration_ = 0;
     stom_cond_CO2_ = 0;
     } else{
       if(assim_max_ < 0){
-        ci_ = gamma_*umol_per_mol_to_Pa;
+        ci_ = gamma_*umol_per_mol_to_Pa_;
         transpiration_ = 0;
         stom_cond_CO2_ = 0;
         } else{
@@ -1653,7 +1664,7 @@ inline double Leaf::medlyn_model_gs(double assim_colimited_){
   if(atm_vpd == 0){
      medlyn_model_gs_ = g0;
   } else{
-     medlyn_model_gs_ = g0 + 1.6*(1 + (g1*beta_)/sqrt(atm_vpd_))*(assim_colimited_/(ca_*(1/umol_per_mol_to_Pa)));
+     medlyn_model_gs_ = g0 + 1.6*(1 + (g1*beta_)/sqrt(atm_vpd_))*(assim_colimited_/(ca_*(1/umol_per_mol_to_Pa_)));
   }
   return medlyn_model_gs_;
 }
@@ -1690,7 +1701,7 @@ inline void Leaf::solve_medlyn_ci_numerical(){
   auto target = [&](double x) -> double {
     return medlyn_stom_cond_minus_coupled_stom_cond(x);
   };
-  const double lo = gamma_ * umol_per_mol_to_Pa;
+  const double lo = gamma_ * umol_per_mol_to_Pa_;
   const double hi = ca_;
 
   double neg_peak = 0.0;

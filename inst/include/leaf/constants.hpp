@@ -58,8 +58,12 @@ inline constexpr double ko_c = 20.30;
 // kJ mol ^-1
 inline constexpr double ko_ha = 36.38e3;
 
-// Pa umol ^ -1 mol ^ 1 
-inline constexpr double umol_per_mol_to_Pa = 0.1013;
+// NOTE: the conversion from a mixing ratio (umol mol^-1) to a partial pressure
+// (Pa) is deliberately NOT here. It is 1e-6 * P, so it is a function of
+// atmospheric pressure, not a constant -- see Leaf::umol_per_mol_to_Pa_, derived
+// from atm_kpa_ in set_physiology. The constant it replaces,
+// `umol_per_mol_to_Pa = 0.1013`, was 101.3 kPa hard-coded, which made the model
+// silently inconsistent at any other pressure.
 
 // mol H2o kg ^-1
 inline constexpr double kg_to_mol_h2o = 55.4939;

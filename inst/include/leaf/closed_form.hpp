@@ -71,7 +71,7 @@ namespace closed_form {
 // here while the g1 literature uses 1.6 -- see PLAN.md item 8 -- so a g1 compared
 // against fitted values carries that 2.2% offset.
 inline double uso_group(const Leaf &l) {
-  const double gstar_Pa = l.gamma_ * umol_per_mol_to_Pa;
+  const double gstar_Pa = l.gamma_ * l.umol_per_mol_to_Pa_;
   return 3.0 * gstar_Pa * kg_to_mol_h2o / (H2O_CO2_stom_diff_ratio * 1e-3);
 }
 
@@ -101,7 +101,7 @@ inline double dlambda_TF24(const Leaf &l, double psi) {
 // difference an earlier prototype used, saving two assimilation evaluations per
 // Newton step.
 inline double dassim_dci(const Leaf &l, double ci, double electron_transport) {
-  const double gstar = l.gamma_ * umol_per_mol_to_Pa;
+  const double gstar = l.gamma_ * l.umol_per_mol_to_Pa_;
   const double ar = l.vcmax_ * (ci - gstar) / (ci + l.km_);
   const double ae =
       electron_transport / 4.0 * (ci - gstar) / (ci + 2.0 * gstar);
