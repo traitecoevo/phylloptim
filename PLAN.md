@@ -5,7 +5,57 @@ this package can be trusted or used; everything after is improvement.
 
 ---
 
-## 1. Validate against plant — bit-identical or explain why not
+## 1. Validate against plant — DONE, and the answer is "1 ULP, explained"
+
+**Was blocking everything else. Now cleared for the leaf solve itself.**
+
+Run it with `Rscript tests/validate/compare_with_plant.R`, which drives plant's own
+compiled `Leaf` over exactly the grid in `tests/cpp/test_golden.cpp` and compares
+against the golden file. Result on `main`, 2026-07-31:
+
+- **585 of 2592 value comparisons differ, every one at 1-2 ULP** (worst relative
+  difference 2.2e-16; double eps is 2.2e-16).
+- **The source is arithmetically identical.** A normalised function-body diff over
+  all 44 shared functions found only three `size_t` -> `int` loop counters, which
+  cannot change floating-point arithmetic, plus `transpiration_full_integration`
+  (adaptive Simpson by design, and not on this path).
+- **The residual is build structure, not code.** plant compiles `leaf_model.cpp` as
+  its own translation unit; this package is header-only in a single TU, so the
+  optimiser contracts and reassociates across boundaries that used to be call
+  sites. Bit-identity across that difference is not achievable, so **"exact
+  equality", which this item used to demand, was the wrong bar.** The script now
+  passes at <= 1e-14 relative and explains itself.
+
+Two things that make the conclusion trustworthy rather than just hopeful:
+
+- Forcing `-ffp-contract=off` on one side alone moves the disagreement from 2e-16
+  to **3e-4**. These nested solvers amplify perturbations up to about
+  `GSS_tol_abs` (1e-3), so a genuine arithmetic difference is a 1e-4 phenomenon,
+  not a 1e-16 one. That is a four-order-of-magnitude gap between "reassociation"
+  and "bug", which is what makes the 1-ULP result meaningful.
+- The count is invariant across `-O0` to `-O3` and under `-fno-inline` (585-589),
+  so it is not an artefact of the optimisation level chosen here.
+
+**A methodological trap worth recording.** The first run compared against whatever
+plant happened to be installed, which turned out to be a **Jul 24 build of a
+different branch** carrying the ATLS thermal-damage layer, while this package was
+extracted from the Jul 31 PM branch. It gave identical numbers -- because ATLS is
+default-off and genuinely bit-identical when off -- but that was luck. Always build
+the reference from the commit the extraction came from; the recipe is in the script
+header.
+
+### Still outstanding under this item
+
+- Run plant's `tests/testthat/test-leaf.r` against a plant built on
+  `feature/consume-leaf-package` (item 3). The grid comparison exercises the solve;
+  the test suite exercises the R bindings and the shim.
+- Full SCM regression against a stored plant baseline. The 1-ULP leaf difference is
+  below `GSS_tol_abs`, but the SCM is a long integration and it is worth knowing
+  empirically whether it stays below the node-splitting thresholds.
+- Once both pass, replace the pinned values in `test_leaf.cpp` with values
+  generated from plant and say so in the comment.
+
+### Original text, kept for the record
 
 **Blocks everything else.** The conversion from plant was mechanical
 (`inline`-ify, hoist includes, swap `util::stop` for a throw, swap `NA_REAL` for
