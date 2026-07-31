@@ -62,7 +62,17 @@ reached the compile line.
 
 - The SCM regression above runs `max_patch_lifetime = 5`, which is plant's own test
   scenario and takes seconds. Worth one long run before anything ships.
-- Run plant's **full** test suite on the branch, not just `test-leaf.r`.
+- ~~Run plant's full test suite on the branch~~ DONE, with a control: **pass 1040,
+  fail 0, error 92, skip 7 -- identical on both builds.** The 92 errors are
+  pre-existing and are a harness artefact, not a regression: they are all
+  `could not find function "Species"`, and `Species` is unexported in *every* plant
+  build here including the one already installed on this machine (95 exports on both
+  temp builds; 102 on the installed ATLS branch, still without `Species`). plant's
+  suite expects devtools-style internal loading rather than an installed-package
+  attach. Running it as `test_dir()` against an installed plant is the wrong harness;
+  use `devtools::test()` if the remaining 92 matter. Note also that plant sets
+  `Config/testthat/parallel: true`, and the parallel workers cannot see a
+  non-default `R_LIBS`, so pass `TESTTHAT_PARALLEL=false`.
 - Optionally, track down the 1 ULP. Low value: it does not affect plant, and the
   remaining suspects are narrow.
 
