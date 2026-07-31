@@ -38,9 +38,13 @@ class SinglePotential {
 public:
   // Soil water potential as a POSITIVE magnitude, -MPa.
   double psi_soil_ = util::na_value;
-  // Series soil-to-collar resistance, [MPa * s * (mol H2O)^-1]. The whole path
-  // from soil to root collar collapses to this one number -- that is the point.
-  // Zero means a perfectly-conducting path (see uptake).
+  // Series soil-to-collar resistance PER UNIT LEAF AREA,
+  // [MPa * s * (mol H2O)^-1 * m^2 leaf]. The whole path from soil to root collar
+  // collapses to this one number -- that is the point. Per unit leaf area
+  // because the leaf is purely intensive: MultiLayerRoots gets the same
+  // normalisation for free, since its resistances come from root carbon that is
+  // itself per unit leaf area. Zero means a perfectly-conducting path (see
+  // uptake).
   double resistance_ = 0.0;
   // Gravitational head to lift water to the collar, MPa. Zero by default: the
   // bare-leaf user is not thinking about rooting depth.
@@ -76,7 +80,7 @@ public:
 
   // E_up at a collar potential. With a constant resistance this is Ohm's law:
   //
-  //   E = (psi_soil - P_collar - grav) / (r * area_leaf)
+  //   E = (psi_soil - P_collar - grav) / r
   //
   // A zero resistance means the collar equilibrates with the soil instantly, so
   // there is no potential drop to draw water across and the flux is whatever the
@@ -84,24 +88,22 @@ public:
   // "how much CAN the soil supply at this collar potential" -- so a zero
   // resistance is rejected at the point it would produce an infinity rather than
   // silently returning one.
-  void uptake(double P_x_r, double area_leaf,
-              std::vector<double>& soil_consumption, double& E_up) const {
-    uptake_from(P_x_r, psi_soil_inverted_, area_leaf, soil_consumption, E_up);
+  void uptake(double P_x_r, std::vector<double>& soil_consumption,
+              double& E_up) const {
+    uptake_from(P_x_r, psi_soil_inverted_, soil_consumption, E_up);
   }
 
-  void uptake_from(double P_x_r, double psi_soil_signed, double area_leaf,
+  void uptake_from(double P_x_r, double psi_soil_signed,
                    std::vector<double>& soil_consumption, double& E_up) const {
-    if (!std::isfinite(P_x_r) || !std::isfinite(area_leaf)) {
+    if (!std::isfinite(P_x_r)) {
       util::stop("SinglePotential::uptake invalid input; P_x_r=" +
-                 util::to_string(P_x_r) +
-                 "; area_leaf=" + util::to_string(area_leaf));
+                 util::to_string(P_x_r));
     }
     if (!(resistance_ > 0.0)) {
       util::stop("SinglePotential::uptake needs a positive resistance_; got " +
                  util::to_string(resistance_));
     }
-    const double E_i =
-        (psi_soil_signed - P_x_r - grav_head_) / (resistance_ * area_leaf);
+    const double E_i = (psi_soil_signed - P_x_r - grav_head_) / resistance_;
     if (!soil_consumption.empty()) {
       soil_consumption[0] = E_i;  // mol, as MultiLayerRoots leaves it
     }
@@ -117,28 +119,25 @@ public:
   // the R-facing Leaf::E_from_Soil_to_Root_Collar -- which may be handed any
   // vector at all -- means the same thing here as it does for MultiLayerRoots.
   void uptake_at(double P_x_r, const std::vector<double>& psi_soil,
-                 double area_leaf, std::vector<double>& soil_consumption,
-                 double& E_up) const {
+                 std::vector<double>& soil_consumption, double& E_up) const {
     if (psi_soil.empty()) {
       util::stop("SinglePotential::uptake_at needs at least one potential");
     }
-    uptake_from(P_x_r, psi_soil[0], area_leaf, soil_consumption, E_up);
+    uptake_from(P_x_r, psi_soil[0], soil_consumption, E_up);
   }
 
-  double duptake_dpsi(double P_x_r, const std::vector<double>& psi_soil,
-                      double area_leaf) const {
+  double duptake_dpsi(double P_x_r,
+                      const std::vector<double>& psi_soil) const {
     static_cast<void>(P_x_r);
     static_cast<void>(psi_soil);
-    return duptake_dpsi(area_leaf);
+    return duptake_dpsi();
   }
 
   // Constant, and exactly the analytic derivative of uptake above. Negative,
   // because uptake rises as the collar gets MORE negative -- the same sign
   // convention MultiLayerRoots::duptake_dpsi uses, and the one
   // marginal_cost_water_multilayer negates to recover a conductance.
-  double duptake_dpsi(double area_leaf) const {
-    return -kg_per_mol_h2o / (resistance_ * area_leaf);
-  }
+  double duptake_dpsi() const { return -kg_per_mol_h2o / resistance_; }
 };
 
 }  // namespace leaf

@@ -355,12 +355,12 @@ public:
 
   // Uptake at a collar potential, against the soil state begin_solve() cached.
   // This is the hot path: ~10^3 calls per collar solve.
-  void uptake(double P_x_r, double area_leaf,
-              std::vector<double>& soil_consumption, double& E_up) const {
+  void uptake(double P_x_r, std::vector<double>& soil_consumption,
+              double& E_up) const {
     uptake_impl(P_x_r, psi_soil_inverted_,
                 root_vuln_integral_soil_.size() ==
                     static_cast<size_t>(max_soil_layer),
-                area_leaf, soil_consumption, E_up);
+                soil_consumption, E_up);
   }
 
   // Uptake against an arbitrary vector of layer potentials, for callers that
@@ -373,13 +373,12 @@ public:
   // back psi_soil_inverted_ itself; the hot path above no longer depends on
   // address identity to be fast. PLAN 7b-ii trap 3.
   void uptake_at(double P_x_r, const std::vector<double>& psi_soil,
-                 double area_leaf, std::vector<double>& soil_consumption,
-                 double& E_up) const {
+                 std::vector<double>& soil_consumption, double& E_up) const {
     uptake_impl(P_x_r, psi_soil,
                 (&psi_soil == &psi_soil_inverted_) &&
                     root_vuln_integral_soil_.size() ==
                         static_cast<size_t>(max_soil_layer),
-                area_leaf, soil_consumption, E_up);
+                soil_consumption, E_up);
   }
 
   // Analytic d(E_up)/d(P_x_r): the signed-collar-potential derivative of the
@@ -387,7 +386,7 @@ public:
   // span = |psi_soil[i] - P_x_r| and integral = \int f_r over
   // [P_src_min, P_src_max] (root_vuln_integral_from_psi, whose integrand is
   // root_vuln_from_psi):
-  //   E_i        = (psi_soil[i] - P_x_r - grav) / area_leaf / r_R,
+  //   E_i        = (psi_soil[i] - P_x_r - grav) / r_R,
   //   r_R        = r_R_H_min[i] * span / integral + r_R_V_sum[i],
   //   dspan/dP   = sign_var   (+1 if P_x_r is the upper bound, else -1),
   //   dinteg/dP  = sign_var * f_r(-P_x_r)  for P_x_r<0  (else sign_var, f_r==1),
@@ -399,9 +398,8 @@ public:
   // those, and the caller falls back to a central difference. An implementation
   // that threw, or returned 0, would silently degrade TF24f's acclimation
   // gradient. Any alternative supply path must keep this contract.
-  double duptake_dpsi(double P_x_r, const std::vector<double>& psi_soil,
-                      double area_leaf) const {
-    const double inv_area_leaf = 1.0 / area_leaf;
+  double duptake_dpsi(double P_x_r,
+                      const std::vector<double>& psi_soil) const {
     const double kink_tol = 1e-8;
     double dEup_dr_mol = 0.0;
 
@@ -447,8 +445,8 @@ public:
           network_.r_R_H_min[i] * (sign_var * integral - span * dinteg_dr) / (integral * integral);
       const double dr_R_dr = dr_R_H_dr;
 
-      const double num = (psi_soil[i] - P_x_r - grav_head_z_[i]) * inv_area_leaf;
-      const double dnum_dr = -inv_area_leaf;
+      const double num = psi_soil[i] - P_x_r - grav_head_z_[i];
+      const double dnum_dr = -1.0;
       // E_i = num / r_R  ->  quotient rule.
       dEup_dr_mol += (dnum_dr * r_R - num * dr_R_dr) / (r_R * r_R);
     }
@@ -473,19 +471,14 @@ private:
   //     nested root-finders where bad brackets can produce NaNs; they fail fast
   //     with diagnostic context rather than propagating NaN.
   void uptake_impl(double P_x_r, const std::vector<double>& psi_soil,
-                   bool use_integral_cache, double area_leaf,
+                   bool use_integral_cache,
                    std::vector<double>& soil_consumption, double& E_up) const {
 
-    if (!std::isfinite(P_x_r) || !std::isfinite(area_leaf)) {
-      util::stop("E_from_Soil_to_Root_Collar invalid input; P_x_r=" + util::to_string(P_x_r) +
-                 "; area_leaf_=" + util::to_string(area_leaf));
+    if (!std::isfinite(P_x_r)) {
+      util::stop("E_from_Soil_to_Root_Collar invalid input; P_x_r=" + util::to_string(P_x_r));
     }
 
     E_up = 0;
-
-    // area_leaf is constant across the whole solve; fold its reciprocal into a
-    // per-layer multiply instead of a per-layer division (1 fdiv/call vs 15).
-    const double inv_area_leaf = 1.0 / area_leaf;
 
     // Cumulative-integral spline caching (bit-identical fast path). The only two
     // arguments ever passed to root_vuln_integral_from_psi in the loop below are
@@ -540,7 +533,7 @@ private:
       double r_R = r_R_H + network_.r_R_V_sum[i];
 
       // Transpiration is equivalent to gravitational water loss (i.e. layer gains water)
-      double E_i = -grav_head_z_[i] * inv_area_leaf / r_R ;
+      double E_i = -grav_head_z_[i] / r_R ;
 
       soil_consumption[i] = E_i;
       E_up += E_i;
@@ -604,7 +597,7 @@ private:
     double r_R = r_R_H + network_.r_R_V_sum[i]; // [MPa * s * (mol H2O)^-1]
 
     // Transpiration is equal to the potentail gradient between the root collar and the soil, accounting for gravitational potential
-    double E_i = (psi_soil[i] - P_x_r - grav_head_z_[i]) * inv_area_leaf / r_R; // [mol H2O / m^2 / s]
+    double E_i = (psi_soil[i] - P_x_r - grav_head_z_[i]) / r_R; // [mol H2O / m^2 / s]
 
     soil_consumption[i] = E_i;
     E_up += E_i;
@@ -619,8 +612,7 @@ private:
   E_up = E_up * kg_per_mol_h2o;
   if (!std::isfinite(E_up)) {
     util::stop("E_from_Soil_to_Root_Collar non-finite E_up_; P_x_r=" + util::to_string(P_x_r) +
-               "; max_soil_layer=" + std::to_string(max_soil_layer) +
-               "; area_leaf_=" + util::to_string(area_leaf));
+               "; max_soil_layer=" + std::to_string(max_soil_layer));
   }
   }
 };

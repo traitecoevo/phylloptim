@@ -61,10 +61,10 @@ Row solve(double psi_soil, double ppfd, double vpd, int layers) {
   for (int i = 0; i < layers; ++i) {
     ps[i] = psi_soil + 0.25 * i;
     depth[i] = 1.0 * (i + 1);
-    root[i] = 1.0 / layers;
+    root[i] = 1.0 / layers / kAreaLeaf;
   }
 
-  l.set_physiology(kAreaLeaf, root, ppfd, ps, depth, kKs * kTheta / kH, vpd, kCa,
+  l.set_physiology(root, ppfd, ps, depth, kKs * kTheta / kH, vpd, kCa,
                    kTleaf, kO2, kPatm);
   l.find_root_collar_psi();
 

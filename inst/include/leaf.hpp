@@ -16,9 +16,8 @@
 //   leaf::Leaf l;                       // default Eucalyptus saligna traits
 //   l.setup_transpiration(100);         // build the vulnerability splines
 //   l.setup_root_vulnerability(100);
-//   l.set_physiology(area_leaf, mass_root_prop, rho, a_bio, PPFD,
-//                    psi_soil, soil_depth, leaf_specific_conductance_max,
-//                    atm_vpd, ca, sapwood_volume_per_leaf_area,
+//   l.set_physiology(root_carbon_per_leaf_area, PPFD, psi_soil, soil_depth,
+//                    leaf_specific_conductance_max, atm_vpd, ca,
 //                    leaf_temp, atm_o2_kpa, atm_kpa);
 //   l.find_root_collar_psi();           // solve; results in l.opt_psi_stem_ etc.
 

@@ -169,7 +169,6 @@ public:
   double R_d_;
   double leaf_specific_conductance_max_;
   double k_s_;
-  double area_leaf_;
   double vcmax_;
   double jmax_;
   double lma_; //kg m^-2
@@ -304,7 +303,13 @@ public:
 
   
   // set-up functions
-  void set_physiology(double area_leaf, const std::vector<double>& root_carbon_per_layer, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double leaf_temp, double atm_o2_kpa, double atm_kpa);
+  // root_carbon_per_leaf_area: per-layer root carbon PER UNIT LEAF AREA. The leaf
+  // used to take absolute root carbon plus area_leaf and divide, but the two only
+  // ever appeared as that ratio -- r_R = beta/c_r is exactly linear in root carbon,
+  // so E_i is proportional to (root carbon / area_leaf) and nothing else. Passing
+  // the ratio makes the leaf PURELY INTENSIVE: no extensive quantity anywhere in
+  // it. beta_R_H and beta_R_V are unchanged; the scaling cancels exactly.
+  void set_physiology(const std::vector<double>& root_carbon_per_leaf_area, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double leaf_temp, double atm_o2_kpa, double atm_kpa);
   void setup_transpiration(double resolution);
   // Forwards to roots_.setup_vulnerability. Kept on Leaf because it is part of
   // the published construction sequence (see the umbrella header) and plant's
@@ -357,10 +362,10 @@ public:
   void E_from_Soil_to_Root_Collar(double P_x_r, const std::vector<double>& psi_soil) {
     switch (supply_kind_) {
       case SupplyKind::MultiLayer:
-        roots_.uptake_at(P_x_r, psi_soil, area_leaf_, soil_consumption_, E_up_);
+        roots_.uptake_at(P_x_r, psi_soil, soil_consumption_, E_up_);
         break;
       default:
-        single_.uptake_at(P_x_r, psi_soil, area_leaf_, soil_consumption_, E_up_);
+        single_.uptake_at(P_x_r, psi_soil, soil_consumption_, E_up_);
         break;
     }
   }
@@ -402,9 +407,9 @@ public:
   double dE_from_soil_dpsi_collar(double P_x_r, const std::vector<double>& psi_soil) {
     switch (supply_kind_) {
       case SupplyKind::MultiLayer:
-        return roots_.duptake_dpsi(P_x_r, psi_soil, area_leaf_);
+        return roots_.duptake_dpsi(P_x_r, psi_soil);
       default:
-        return single_.duptake_dpsi(P_x_r, psi_soil, area_leaf_);
+        return single_.duptake_dpsi(P_x_r, psi_soil);
     }
   }
   // Shut-down operating point used by the find_root_collar_psi early-exits: stem
@@ -652,7 +657,6 @@ inline void Leaf::setup_clean_leaf() {
   km_= util::na_value;
   R_d_= util::na_value;
   leaf_specific_conductance_max_= util::na_value; //kg m^-2 s^-1 MPa^-1 
-  area_leaf_ = util::na_value;
   vcmax_= util::na_value; //kg m^-3
   jmax_= util::na_value; //kg m^-3
   root_collar_psi_ = util::na_value; //-MPa
@@ -699,11 +703,11 @@ inline void Leaf::setup_clean_leaf() {
 // every call; see the optimisation notes / caching opportunity.
 //
 //sets various parameters which are constant for a given node at a given time
-inline void Leaf::set_physiology(double area_leaf, const std::vector<double>& root_carbon_per_layer, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double leaf_temp, double atm_o2_kpa, double atm_kpa) {
-    if (psi_soil.size() != soil_depth.size() || root_carbon_per_layer.size() != soil_depth.size()) {
-    util::stop("soil_depth, psi_soil and root_carbon_per_layer must have the same number of elements");
+inline void Leaf::set_physiology(const std::vector<double>& root_carbon_per_leaf_area, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double leaf_temp, double atm_o2_kpa, double atm_kpa) {
+    if (psi_soil.size() != soil_depth.size() || root_carbon_per_leaf_area.size() != soil_depth.size()) {
+    util::stop("soil_depth, psi_soil and root_carbon_per_leaf_area must have the same number of elements");
   }
-  if (!std::isfinite(area_leaf) || !std::isfinite(PPFD) || !std::isfinite(leaf_specific_conductance_max) ||
+  if (!std::isfinite(PPFD) || !std::isfinite(leaf_specific_conductance_max) ||
       !std::isfinite(atm_vpd) || !std::isfinite(ca) ||
       !std::isfinite(leaf_temp) ||
       !std::isfinite(atm_o2_kpa) || !std::isfinite(atm_kpa)) {
@@ -718,12 +722,11 @@ inline void Leaf::set_physiology(double area_leaf, const std::vector<double>& ro
       util::stop("set_physiology received non-finite soil_depth at layer=" + std::to_string(i) +
                  "; soil_depth=" + util::to_string(soil_depth[i]));
     }
-    if (!std::isfinite(root_carbon_per_layer[i])) {
-      util::stop("set_physiology received non-finite root_carbon_per_layer at layer=" + std::to_string(i) +
-                 "; root_carbon_per_layer=" + util::to_string(root_carbon_per_layer[i]));
+    if (!std::isfinite(root_carbon_per_leaf_area[i])) {
+      util::stop("set_physiology received non-finite root_carbon_per_leaf_area at layer=" + std::to_string(i) +
+                 "; root_carbon_per_leaf_area=" + util::to_string(root_carbon_per_leaf_area[i]));
     }
   }
-  area_leaf_ = area_leaf;
    atm_vpd_ = atm_vpd;
    leaf_temp_ = leaf_temp;
    atm_kpa_ = atm_kpa;
@@ -797,7 +800,7 @@ inline void Leaf::set_physiology(double area_leaf, const std::vector<double>& ro
   // root_network_from_carbon. This is the leaf-side half of that split -- moving
   // the call itself up to plant is an API change and belongs with item 10b.
   if (supply_kind_ == SupplyKind::MultiLayer) {
-    roots_.set_root_network_from_carbon(root_carbon_per_layer);
+    roots_.set_root_network_from_carbon(root_carbon_per_leaf_area);
   }
 
   // Set up vector of root water uptake from layer. Stays on Leaf: plant writes
