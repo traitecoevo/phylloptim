@@ -5,55 +5,66 @@ this package can be trusted or used; everything after is improvement.
 
 ---
 
-## 1. Validate against plant — DONE, and the answer is "1 ULP, explained"
+## 1. Validate against plant — DONE. The swap is bit-identical.
 
-**Was blocking everything else. Now cleared for the leaf solve itself.**
+**The decisive result.** Swapping plant's own leaf for this package changes
+**nothing**:
 
-Run it with `Rscript tests/validate/compare_with_plant.R`, which drives plant's own
-compiled `Leaf` over exactly the grid in `tests/cpp/test_golden.cpp` and compares
-against the golden file. Result on `main`, 2026-07-31:
+- plant builds clean on `feature/consume-leaf-package` against the installed
+  header-only package — zero warnings, no source changes beyond the shim.
+- plant's own `tests/testthat/test-leaf.r` passes **unchanged, 218 expectations**.
+  That exercises the RcppR6 bindings and the `plant::Leaf` alias, not just the maths.
+- A full **SCM regression is bit-identical across 78 of 78 recorded numeric
+  nodes**, for both a one-species and a two-species run, including the entire
+  collected trajectory — height, mortality, fecundity, storage,
+  `net_mass_production_dt`, `competition_effect`, `opt_psi_stem`, `root_mass` — and
+  the ODE step sequence. Reproduce with `tests/validate/scm_regression.R` twice and
+  `tests/validate/scm_compare.R`.
 
-- **585 of 2592 value comparisons differ, every one at 1-2 ULP** (worst relative
-  difference 2.2e-16; double eps is 2.2e-16).
-- **The source is arithmetically identical.** A normalised function-body diff over
-  all 44 shared functions found only three `size_t` -> `int` loop counters, which
-  cannot change floating-point arithmetic, plus `transpiration_full_integration`
-  (adaptive Simpson by design, and not on this path).
-- **The residual is build structure, not code.** plant compiles `leaf_model.cpp` as
-  its own translation unit; this package is header-only in a single TU, so the
-  optimiser contracts and reassociates across boundaries that used to be call
-  sites. Bit-identity across that difference is not achievable, so **"exact
-  equality", which this item used to demand, was the wrong bar.** The script now
-  passes at <= 1e-14 relative and explains itself.
+That last one is the check that mattered, because the SCM integrates the leaf solve
+through an adaptive stepper and a discrete node-splitting schedule: a perturbation
+far below tolerance could still flip a refinement decision, and that would be
+visible. It did not.
 
-Two things that make the conclusion trustworthy rather than just hopeful:
+**A separate, unresolved 1 ULP.** `tests/validate/compare_with_plant.R` compares a
+standalone C++ binary against plant's R-bound leaf over 288 operating points and
+finds 585 of 2592 values differing at 1-2 ULP (worst 2.2e-16). The source is
+arithmetically identical — a normalised body diff over all 44 shared functions
+found only three `size_t` -> `int` loop counters, which cannot change arithmetic,
+plus `transpiration_full_integration` (adaptive Simpson by design, off this path).
 
-- Forcing `-ffp-contract=off` on one side alone moves the disagreement from 2e-16
-  to **3e-4**. These nested solvers amplify perturbations up to about
-  `GSS_tol_abs` (1e-3), so a genuine arithmetic difference is a 1e-4 phenomenon,
-  not a 1e-16 one. That is a four-order-of-magnitude gap between "reassociation"
-  and "bug", which is what makes the 1-ULP result meaningful.
-- The count is invariant across `-O0` to `-O3` and under `-fno-inline` (585-589),
-  so it is not an artefact of the optimisation level chosen here.
+**The cause is not established, and I am not going to pretend otherwise.** Ruled
+out by experiment: the plant version/branch; compiler flags (`-std=c++20` vs
+`gnu++20`, `-g`, `-O0`..`-O3`, `-DNDEBUG`, `-fPIC`, `-ffp-contract` on/off);
+inlining (`-fno-inline`); and the odelia header version (local checkout vs
+installed — these do differ by 97 lines, but only in an adaptive `construct()`
+the leaf never calls). An earlier version of this item blamed translation-unit
+structure; **the SCM result contradicts that**, since that comparison does change TU
+structure and came out bit-identical. So: 1 ULP, cause unknown, confined to the
+standalone harness, and below every solver tolerance. Worth a note, not a blocker.
 
-**A methodological trap worth recording.** The first run compared against whatever
-plant happened to be installed, which turned out to be a **Jul 24 build of a
-different branch** carrying the ATLS thermal-damage layer, while this package was
-extracted from the Jul 31 PM branch. It gave identical numbers -- because ATLS is
-default-off and genuinely bit-identical when off -- but that was luck. Always build
-the reference from the commit the extraction came from; the recipe is in the script
-header.
+For scale on why 1 ULP is safe here: forcing `-ffp-contract=off` on one side alone
+moves the disagreement to **3e-4**, because these nested solvers amplify
+perturbations up to about `GSS_tol_abs` (1e-3). Four orders of magnitude separate
+"rounding" from "bug", which is what makes the result interpretable.
+
+**Two methodological traps, both hit and both worth recording.** First, the initial
+comparison used whatever plant was installed — a Jul 24 build of a *different
+branch*, carrying the ATLS thermal-damage layer, while this package came from the
+Jul 31 PM branch. It gave identical numbers, because ATLS is default-off and
+genuinely bit-identical when off, but that was luck. Build the reference from the
+extraction commit; the recipe is in the script header. Second, I read a
+"`-ffp-contract=off` on both sides" run as evidence about the source when
+`R_MAKEVARS_USER` had silently not applied the flag to plant's build. Check the flag
+reached the compile line.
 
 ### Still outstanding under this item
 
-- Run plant's `tests/testthat/test-leaf.r` against a plant built on
-  `feature/consume-leaf-package` (item 3). The grid comparison exercises the solve;
-  the test suite exercises the R bindings and the shim.
-- Full SCM regression against a stored plant baseline. The 1-ULP leaf difference is
-  below `GSS_tol_abs`, but the SCM is a long integration and it is worth knowing
-  empirically whether it stays below the node-splitting thresholds.
-- Once both pass, replace the pinned values in `test_leaf.cpp` with values
-  generated from plant and say so in the comment.
+- The SCM regression above runs `max_patch_lifetime = 5`, which is plant's own test
+  scenario and takes seconds. Worth one long run before anything ships.
+- Run plant's **full** test suite on the branch, not just `test-leaf.r`.
+- Optionally, track down the 1 ULP. Low value: it does not affect plant, and the
+  remaining suspects are narrow.
 
 ### Original text, kept for the record
 

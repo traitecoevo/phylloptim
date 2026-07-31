@@ -14,10 +14,22 @@
 #     all 44 shared functions found only three `size_t` -> `int` loop counters,
 #     which cannot change floating-point arithmetic. (Plus
 #     transpiration_full_integration, adaptive Simpson by design, not on this path.)
-#   * The residual is BUILD STRUCTURE. plant compiles leaf_model.cpp as its own
-#     translation unit; this package is header-only in a single TU, so the optimiser
-#     contracts and reassociates across boundaries that used to be call sites.
-#     Bit-identity across that difference is not achievable and is the wrong bar.
+#   * The CAUSE of the residual is NOT established. Ruled out by experiment: the
+#     plant version/branch, compiler flags (-std=c++20 vs gnu++20, -g, -O0..-O3,
+#     -DNDEBUG, -fPIC, -ffp-contract on/off), inlining (-fno-inline), and the odelia
+#     header version (local checkout vs installed). An earlier version of this
+#     comment blamed translation-unit structure; that is CONTRADICTED by
+#     scm_regression.R, which found plant-with-its-own-leaf and
+#     plant-with-this-package bit-identical -- and that comparison DOES change TU
+#     structure. So the honest statement is: 1 ULP, cause unknown, and it is
+#     confined to this standalone harness rather than to the package.
+#
+# WHAT IS ESTABLISHED, and it is the part that matters: swapping plant's own leaf
+# for this package changes NOTHING. plant's test-leaf.r passes unchanged (218
+# expectations) and a full SCM regression is bit-identical across 78 of 78 recorded
+# nodes, including the whole collected trajectory. See scm_regression.R /
+# scm_compare.R. The 1 ULP here is a property of comparing a standalone C++ binary
+# against plant's R-bound build, not of the extraction.
 #
 # So do NOT expect zero. Expect <= a few ULP, and investigate anything larger:
 # these nested solvers amplify perturbations up to about GSS_tol_abs (1e-3), so a
@@ -174,11 +186,11 @@ if (total_mismatch == 0L) {
 }
 if (worst_rel <= ulp_tol) {
   cat(sprintf(paste0("\nPASS: agreement to %.1e relative (%.0f ULP), within the %.0e bar.\n",
-                     "Not bit-identical, and not expected to be: the source is\n",
-                     "arithmetically identical, and the residual is floating-point\n",
-                     "reassociation between a single-TU header-only build and plant's\n",
-                     "separate-TU build. Anything above ~1e-12 would be a real\n",
-                     "difference and should be investigated.\n"),
+                     "The source is arithmetically identical (see the header); the\n",
+                     "cause of the 1-ULP residual is NOT established, but it is\n",
+                     "confined to this standalone harness -- swapping the package into\n",
+                     "plant is bit-identical (scm_compare.R). Anything above ~1e-12\n",
+                     "would be a real difference and should be investigated.\n"),
               worst_rel, worst_rel / .Machine$double.eps, ulp_tol))
   quit(status = 0)
 }
