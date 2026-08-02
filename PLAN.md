@@ -723,6 +723,27 @@ of doing it in stages.
      measured against the *old* structure. If it stacks, stage 2 lands around
      +4.3% total. That is still inside the band the closed-form path (6.3×/27×)
      dwarfs, but say the number rather than discovering it.
+
+   **Stage 4 was done alongside, not deferred**, for the reason above. plant's
+   `feature/consume-leaf-package` carries the eleven YAML lines and the two in
+   `tf24_strategy.cpp`. Run **with a control**, both from a clean `src/`:
+
+   | build | result |
+   |---|---|
+   | leaf `master` + plant unchanged | 2431 pass / 0 fail / 7 skip |
+   | this branch + plant's YAML change | 2431 pass / 0 fail / 7 skip |
+
+   Identical, including the skip list. Note this is **2431, not the 2364 recorded
+   under item 1** — the control shows that gap is environmental (`NOT_CRAN`
+   unset, so seven tests skip) and predates this work. The earlier figure should
+   not be read as a target to match.
+
+   The control was worth its cost for a second reason: `R CMD INSTALL` does not
+   clean, and a header-only `LinkingTo` dependency changing underneath a stale
+   `.o` moves no `.cpp` timestamp, so nothing rebuilds. That produced a load
+   failure naming a field accessor nobody had touched. Written up under "Build &
+   regeneration workflow" in plant's `agents.md`, with the `nm` check that
+   identifies it.
 2. **Introduce the concept.** `std::variant<MultiLayerRoots, SinglePotential>` and
    the four methods (`begin_solve`, `uptake`, `duptake_dpsi`, plus per-layer
    output access). Golden still bit-identical. Re-run `make bench` — the
