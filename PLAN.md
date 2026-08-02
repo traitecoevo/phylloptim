@@ -613,6 +613,94 @@ implementing it here, behind this interface, unblocks their work.
 
 Do 7b before 7a: the supply interface is the thing the λ functions plug into.
 
+### 7b-i. What actually moves — read this before starting
+
+Inventoried against the code so the refactor starts from a list rather than a
+guess.
+
+**State that moves into `MultiLayerRoots`** (line numbers as of `25b6599`):
+
+| group | members |
+|---|---|
+| root traits and curves | `root_b`, `root_c`, `root_psi_crit`, `root_vuln_from_psi`, `root_vuln_integral_from_psi` |
+| soil geometry | `soil_number_of_depths_`, `max_soil_layer`, `soil_depth_`, `z_soil_mid_`, `use_precomputed_z_soil_mid_`, `dz_`, `grav_head_z_` |
+| soil state | `psi_soil_`, `psi_soil_inverted_` |
+| resistance network | `r_R_H_min`, `r_R_V`, `r_R_V_sum` |
+| per-solve cache | `root_vuln_integral_soil_` |
+| outputs | `soil_consumption_`, and the `E_up_` it accumulates |
+
+**Functions that move:** `E_from_Soil_to_Root_Collar`, `dE_from_soil_dpsi_collar`,
+`setup_root_vulnerability`, the root-network block of `set_physiology`
+(`r_R_H_min` / `r_R_V` / `r_R_V_sum` and the `z_soil_mid_` fallback), and the
+soil-side cache build at the top of `prepare_collar_solve`.
+`build_cumulative_vulnerability_integral` is **shared with the stem** — leave it
+on `Leaf` or make it a free function; do not drag it across.
+
+**Functions that stay on `Leaf`,** because they span both sides: `E_column`,
+`E_column_zero`, `find_root_psi`, `find_psi_stem_from_psi_root`,
+`prepare_collar_solve`, `find_root_collar_psi`.
+
+### 7b-ii. Four things the proposed interface does not yet account for
+
+The `SupplyPath` sketch above is close but incomplete. Each of these will bite
+mid-refactor if it is not decided up front.
+
+1. **`uptake()` is not a pure function, and plant writes back into its output.**
+   It fills `soil_consumption_[i]` per layer, which feeds plant's patch water
+   balance. Checked on plant's side, and it is worse than read-only: after solving
+   at each height, `tf24_strategy.cpp:505-508` **assigns** the crown-integrated
+   value straight back into `leaf.soil_consumption_[a]` (and `leaf.E_up_`,
+   `leaf.profit_`, …), reading it at `:46` as `leaf.soil_consumption_[soil_layer]`.
+
+   So `soil_consumption_` is not simply an output the supply path owns — it is a
+   buffer plant reaches into by name and overwrites. **Recommendation: leave
+   `soil_consumption_` and `E_up_` as members of `Leaf`** and have the supply
+   path write into a buffer handed to it by reference. Moving them into
+   `MultiLayerRoots` breaks plant's access path for no benefit, and would also
+   entangle the crown write-back with the supply path's per-solve scratch state.
+
+   Note the deliberate unit split while touching this: `E_up_` is kg H₂O m⁻² s⁻¹,
+   `soil_consumption_[i]` is **mol**, converted downstream in plant.
+2. **`wettest_potential()` needs a per-solve entry point.** Today the soil-side
+   caches (`psi_soil_inverted_`, `root_vuln_integral_soil_`) and the wettest
+   layer are built in one pass at the top of `prepare_collar_solve`. Give the
+   concept a `begin_solve()` that does both and returns the wettest potential —
+   otherwise the cache is either lost or rebuilt per call, and it is a measured
+   hot-path optimisation (it collapses ~2 spline evals per layer to ~1).
+3. **The cache fast path is selected by pointer identity.**
+   `E_from_Soil_to_Root_Collar` tests `&psi_soil == &psi_soil_inverted_` to decide
+   whether the cache is valid. Once that vector lives in another object the test
+   still compiles and silently changes meaning. This is the single most likely
+   place to lose bit-identity — the golden file will catch it, but know where to
+   look.
+4. **`duptake_dpsi` returning NaN is a contract, not a failure.**
+   `dE_from_soil_dpsi_collar` deliberately returns NaN at the three branch kinks
+   (equal potentials, gravity balance, the ψ=0 split) so the caller falls back to
+   finite differences. Preserve that, and document it on the concept — a naive
+   implementation that throws or returns 0 would silently degrade TF24f's
+   acclimation gradient.
+
+### 7b-iii. Suggested staging
+
+Each stage is checkable bit-exactly against the golden file, which is the point
+of doing it in stages.
+
+1. **Pure move, no interface.** `MultiLayerRoots` as a plain member held by value,
+   `Leaf` forwarding to it. No variant, no virtual. This is where the cache and
+   pointer-identity risk lives, so it gets a commit to itself. Golden must be
+   bit-identical.
+2. **Introduce the concept.** `std::variant<MultiLayerRoots, SinglePotential>` and
+   the four methods (`begin_solve`, `uptake`, `duptake_dpsi`, plus per-layer
+   output access). Golden still bit-identical. Re-run `make bench` — the
+   measurement predicts +2.6%, so a larger regression means something else moved.
+3. **Add `SinglePotential`.** New behaviour and its own tests; golden unaffected
+   because it is not the default.
+4. **Check plant.** Build `feature/consume-leaf-package`, confirm the
+   `plant::Leaf` alias and the RcppR6 bindings still resolve and that
+   `soil_consumption_` is still reachable where `compute_rates` expects it.
+
+Stage 1 is the only one that should be able to break anything.
+
 ## 8. Report λ and g1_eff as first-class outputs
 
 **Small, and the analytical project asks for it first.** Its
