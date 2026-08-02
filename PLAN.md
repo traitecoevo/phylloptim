@@ -60,19 +60,35 @@ reached the compile line.
 
 ### Still outstanding under this item
 
-- The SCM regression above runs `max_patch_lifetime = 5`, which is plant's own test
-  scenario and takes seconds. Worth one long run before anything ships.
-- ~~Run plant's full test suite on the branch~~ DONE, with a control: **pass 1040,
-  fail 0, error 92, skip 7 -- identical on both builds.** The 92 errors are
-  pre-existing and are a harness artefact, not a regression: they are all
-  `could not find function "Species"`, and `Species` is unexported in *every* plant
-  build here including the one already installed on this machine (95 exports on both
-  temp builds; 102 on the installed ATLS branch, still without `Species`). plant's
-  suite expects devtools-style internal loading rather than an installed-package
-  attach. Running it as `test_dir()` against an installed plant is the wrong harness;
-  use `devtools::test()` if the remaining 92 matter. Note also that plant sets
-  `Config/testthat/parallel: true`, and the parallel workers cannot see a
-  non-default `R_LIBS`, so pass `TESTTHAT_PARALLEL=false`.
+- The SCM regression above runs `max_patch_lifetime = 5`, plant's own test scenario.
+  A longer run is **not** needed to guard against drift: the two builds are
+  bit-identical at every recorded value including the ODE step sequence, and the
+  computation is deterministic, so there is no perturbation to accumulate. What a
+  longer, drier run would add is **state-space coverage** — hydraulic shutdown, the
+  arid corner, tall trees — i.e. branches the 5-year scenario may never enter. That
+  matters little on `main`, where those branches are unchanged, and a lot on
+  `feature/api-cleanup`, which deliberately changes the shutdown path. So the long
+  run belongs to item 2's "quantify before merging", not to this item.
+- ~~Run plant's full test suite on the branch~~ **DONE, and it is clean:
+  2364 pass, 0 fail, 0 error, 7 skip — IDENTICAL on both builds.**
+
+  Use the right harness. `test_check("plant")` (what `R CMD check` runs via
+  `tests/testthat.R`) parents the test environment on the package *namespace*, so
+  RcppR6 internals are visible. `test_dir()` parents it on `globalenv()` and
+  produces **93 spurious "could not find function" errors** across 25 files, because
+  `Parameters`, `Species`, `Node`, `SCM`, `QAG` and friends are unexported. An
+  earlier version of this item recorded those 93 as "pre-existing"; they were an
+  artefact of my invocation, not a property of plant. Filed as plant #586.
+
+  Also: plant sets `Config/testthat/parallel: true`, and the workers do not inherit
+  a non-default `R_LIBS`, so pass `TESTTHAT_PARALLEL=false` when testing an
+  installed build in a temporary library. It otherwise fails with an opaque
+  `cli_abort` backtrace that says nothing about libraries.
+
+  And verify the library every  run: `/tmp` was cleaned mid-session and one run silently
+  fell back to the site-library plant (a different branch). `find.package("plant")`
+  at the top of every script is cheap insurance.
+
 - Optionally, track down the 1 ULP. Low value: it does not affect plant, and the
   remaining suspects are narrow.
 
