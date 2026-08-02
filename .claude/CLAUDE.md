@@ -36,6 +36,10 @@ tests/validate/                R scripts comparing against plant (needs R)
 make -C tests/cpp            # builds and runs both suites
 make -C tests/cpp golden     # regenerate the golden file -- see the warning below
 make -C tests/cpp bench      # time the collar solve (not part of `make all`)
+
+# compare the golden file with a tolerance instead of bit-exactly. Correct on a
+# platform other than macOS/arm64, wrong as a way to silence a real diff.
+make -C tests/cpp GOLDEN_ARGS="--rtol 1e-9"
 ```
 
 `bench` reports min-of-N over the golden grid. Use `reps=2000` (the default)
@@ -65,6 +69,18 @@ Guide to magnitudes, measured: **~1e-16 is reassociation, ~1e-4 is a real
 difference.** These nested solvers amplify perturbations up to about
 `GSS_tol_abs` (1e-3), so there is a four-order-of-magnitude gap between rounding
 and bug. Anything in between deserves investigation.
+
+**It is bit-exact only on the platform that generated it — macOS/arm64.** libm's
+`exp`/`pow` are not bit-reproducible between glibc on x86-64 and Apple's libm on
+arm64, and FMA contraction differs too, so cross-platform bit-equality was never
+achievable. Measured on the first CI run to reach Linux: **1761 of 2592 values
+differ, worst 1.7e-15 relative (13 ULP)** — reassociation, not regression. So CI
+compares bit-exactly on macOS and with `--rtol 1e-9` elsewhere, which still
+catches anything near the 1e-4 scale. `test_golden` prints the worst relative
+difference it saw either way, so the number is in the log.
+
+**Never regenerate the golden file to make another platform pass.** It just moves
+the failure to the platform the file came from.
 
 ## Branches
 

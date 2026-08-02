@@ -10,10 +10,13 @@
 // available version: it freezes what THIS implementation produces so that a
 // refactor which changes any of it fails loudly.
 //
-// Comparison is bit-exact. Values are written with %.17g, which round-trips an
-// IEEE double exactly, so a passing run means the refactor did not perturb a
-// single floating-point operation. If a change is *meant* to alter results,
-// regenerate deliberately and say so in the commit.
+// Comparison is bit-exact by default. Values are written with %.17g, which
+// round-trips an IEEE double exactly, so a passing run means the refactor did not
+// perturb a single floating-point operation. If a change is *meant* to alter
+// results, regenerate deliberately and say so in the commit.
+//
+// Bit-exactness holds on the platform that generated the file (macOS/arm64) and
+// cannot hold on any other -- `--rtol` is for those. See the comment above main().
 //
 // Note: a fresh Leaf is constructed for every grid point. That is not for tidiness
 // -- it is required, because the shutdown-state leak (PLAN.md item 2) makes a
@@ -23,7 +26,9 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -131,7 +136,29 @@ bool same(double a, double b) {
   return a == b;
 }
 
-int compare() {
+// Relative difference, used both to decide the tolerant comparison and to report
+// how far apart the two builds actually are. Returns 0 for the NaN/NaN and
+// exactly-equal cases, and infinity when one side is NaN and the other is not.
+double rel_diff(double a, double b) {
+  if (std::isnan(a) && std::isnan(b)) {
+    return 0.0;
+  }
+  if (std::isnan(a) != std::isnan(b)) {
+    return std::numeric_limits<double>::infinity();
+  }
+  if (a == b) {
+    return 0.0;
+  }
+  const double scale = std::max(std::abs(a), std::abs(b));
+  if (scale == 0.0) {
+    return 0.0;
+  }
+  return std::abs(a - b) / scale;
+}
+
+// rtol < 0 means bit-exact. See the comment above main() for why the tolerant
+// mode exists and where it is legitimate to use it.
+int compare(double rtol) {
   FILE *f = fopen(kGoldenPath, "r");
   if (f == nullptr) {
     fprintf(stderr,
@@ -148,6 +175,11 @@ int compare() {
 
   const std::vector<Row> rows = run_grid();
   int failures = 0;
+  int inexact = 0;
+  double worst_rel = 0.0;
+  double worst_got = 0.0, worst_want = 0.0;
+  const char *worst_desc = "";
+  Row worst_row{};
   size_t i = 0;
   for (; i < rows.size(); ++i) {
     if (fgets(line, sizeof line, f) == nullptr) {
@@ -182,12 +214,28 @@ int compare() {
                             {"e_up", r.e_up, g.e_up},
                             {"uptake", r.uptake, g.uptake}};
     for (const Field &fd : fields) {
+      const double rd = rel_diff(fd.got, fd.want);
+      // Track the worst deviation over the whole grid regardless of pass/fail,
+      // so the summary reports a magnitude rather than leaving the reader to
+      // infer one from a truncated list.
+      if (rd > worst_rel) {
+        worst_rel = rd;
+        worst_desc = fd.name;
+        worst_row = r;
+        worst_got = fd.got;
+        worst_want = fd.want;
+      }
       if (!same(fd.got, fd.want)) {
+        ++inexact;
+      }
+      const bool ok = rtol < 0.0 ? same(fd.got, fd.want) : (rd <= rtol);
+      if (!ok) {
         if (failures < 20) {
           fprintf(stderr,
                   "FAIL psi_soil=%g ppfd=%g vpd=%g layers=%d %s: got %.17g, "
-                  "want %.17g\n",
-                  r.psi_soil, r.ppfd, r.vpd, r.layers, fd.name, fd.got, fd.want);
+                  "want %.17g  (rel %.3g)\n",
+                  r.psi_soil, r.ppfd, r.vpd, r.layers, fd.name, fd.got, fd.want,
+                  rd);
         }
         ++failures;
       }
@@ -199,23 +247,86 @@ int compare() {
   }
   fclose(f);
 
+  // Always report the worst deviation. On a bit-exact pass it is 0 and says so;
+  // on a tolerant pass it is the number that matters, and watching it drift is
+  // the point of running the tolerant mode at all.
+  char worst[256] = "none (bit-identical)";
+  if (worst_rel > 0.0) {
+    snprintf(worst, sizeof worst,
+             "%.3g  at psi_soil=%g ppfd=%g vpd=%g layers=%d %s "
+             "(got %.17g, want %.17g)",
+             worst_rel, worst_row.psi_soil, worst_row.ppfd, worst_row.vpd,
+             worst_row.layers, worst_desc, worst_got, worst_want);
+  }
+
   if (failures == 0) {
-    printf("golden: %zu operating points, all bit-identical\n", rows.size());
+    if (rtol < 0.0) {
+      printf("golden: %zu operating points, all bit-identical\n", rows.size());
+    } else {
+      printf("golden: %zu operating points within rtol=%.1g\n"
+             "  %d of %zu values differ in the last bits; worst relative "
+             "difference %s\n",
+             rows.size(), rtol, inexact, rows.size() * 9, worst);
+    }
     return 0;
   }
   fprintf(stderr,
-          "\ngolden: %d mismatches over %zu operating points.\n"
-          "If this change was intended, regenerate with `make golden` and say so "
-          "in the commit message.\n",
-          failures, rows.size());
+          "\ngolden: %d mismatches over %zu operating points%s.\n"
+          "  worst relative difference %s\n",
+          failures, rows.size(),
+          rtol < 0.0 ? "" : " beyond tolerance", worst);
+  if (rtol < 0.0) {
+    fprintf(stderr,
+            "If this change was intended, regenerate with `make golden` and say "
+            "so in the commit message.\n"
+            "If you are on a different platform from the one that generated the "
+            "file, do NOT regenerate -- see --rtol.\n");
+  }
   return 1;
 }
 
 } // namespace
 
+// Usage:
+//   test_golden                 bit-exact compare (the default, and the one that
+//                               matters on the platform the file was generated on)
+//   test_golden --rtol 1e-9     tolerant compare, for a DIFFERENT platform
+//   test_golden --generate      overwrite the golden file (see the warning above)
+//
+// Why --rtol exists. The golden file is a *drift* detector: it pins what this
+// implementation produces so a refactor that perturbs it fails loudly. That job
+// requires bit-exactness, and gets it, on the platform that generated the file.
+//
+// It cannot be bit-exact across platforms, and it was never going to be. libm's
+// exp/pow are not bit-reproducible between glibc on x86-64 and Apple's libm on
+// arm64, x87/FMA contraction differs, and these nested solvers amplify the
+// resulting last-bit differences. Measured across that pair: ~1e-15 relative,
+// 13 ULP at worst. Regenerating the file on the second platform is NOT the fix --
+// it just moves the failure to the first one.
+//
+// So on other platforms, compare with a tolerance wide enough to absorb
+// reassociation and far narrower than a real difference. The calibration is in
+// PLAN.md item 1: ~1e-16 is reassociation, ~1e-4 is a real bug, and four orders
+// of magnitude separate them. rtol=1e-9 sits in that gap with room on both sides.
+// The tolerant mode still prints the worst relative difference it saw, so the
+// number is in the log and a drift in it is visible.
 int main(int argc, char **argv) {
   if (argc > 1 && std::strcmp(argv[1], "--generate") == 0) {
     return generate();
   }
-  return compare();
+  double rtol = -1.0; // negative = bit-exact
+  if (argc > 2 && std::strcmp(argv[1], "--rtol") == 0) {
+    rtol = std::atof(argv[2]);
+    if (!(rtol > 0.0)) {
+      fprintf(stderr, "--rtol needs a positive number, got '%s'\n", argv[2]);
+      return 2;
+    }
+  } else if (argc > 1 && std::strcmp(argv[1], "--rtol") == 0) {
+    fprintf(stderr, "--rtol needs a value, e.g. --rtol 1e-9\n");
+    return 2;
+  } else if (argc > 1) {
+    fprintf(stderr, "unknown argument '%s'\n", argv[1]);
+    return 2;
+  }
+  return compare(rtol);
 }

@@ -57,6 +57,22 @@ jobs:
             echo "inc=/usr/include" >> "$GITHUB_OUTPUT"
           fi
 
+      # The golden file is compared bit-exactly on the platform that generated it
+      # (macOS/arm64) and with a tolerance everywhere else. This is not a
+      # loosening: libm's exp/pow are not bit-reproducible between glibc on
+      # x86-64 and Apple's libm on arm64, so bit-exactness across platforms was
+      # never achievable. Measured difference is ~1e-15 relative (13 ULP) against
+      # ~1e-4 for a real change, so rtol=1e-9 sits in a four-order-of-magnitude
+      # gap. The tolerant run still prints the worst deviation it saw.
+      - name: Resolve golden comparison mode
+        id: golden
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            echo "args=" >> "$GITHUB_OUTPUT"
+          else
+            echo "args=--rtol 1e-9" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build and run
         env:
           CXX: ${{ matrix.cxx }}
@@ -64,7 +80,8 @@ jobs:
           make -C tests/cpp \
             CXX="$CXX" \
             ODELIA_INC="$GITHUB_WORKSPACE/odelia/inst/include" \
-            BH_INC="${{ steps.boost.outputs.inc }}"
+            BH_INC="${{ steps.boost.outputs.inc }}" \
+            GOLDEN_ARGS="${{ steps.golden.outputs.args }}"
 
       # Compile the benchmark but do not run it. It is a timing harness, so it
       # would be a flaky gate on a shared runner; building it keeps it from
@@ -78,12 +95,19 @@ jobs:
             ODELIA_INC="$GITHUB_WORKSPACE/odelia/inst/include" \
             BH_INC="${{ steps.boost.outputs.inc }}"
 
-      # The golden file records exact floating-point output, so a mismatch here is
-      # either a real regression or a genuine cross-platform numerical difference.
-      # Either way it is worth knowing about, which is why it is not tolerance-based.
       - name: Note on failure
         if: failure()
         run: |
-          echo "If only the golden test failed, check whether this is a real"
-          echo "regression or a platform floating-point difference before"
-          echo "regenerating. See tests/cpp/test_golden.cpp."
+          echo "If only the golden test failed, read the worst-relative-difference"
+          echo "line it printed before doing anything else."
+          echo
+          echo "  ~1e-15  reassociation / cross-platform libm. Not a regression."
+          echo "  ~1e-4   a real change in behaviour."
+          echo
+          echo "Linux already compares with --rtol 1e-9, so a failure here is"
+          echo "either genuinely large or an amplified solver decision (these"
+          echo "nested solvers amplify up to about GSS_tol_abs, 1e-3)."
+          echo
+          echo "Do NOT regenerate the golden file to make this pass. It is"
+          echo "generated on macOS/arm64; regenerating elsewhere just moves the"
+          echo "failure to the other platform. See tests/cpp/test_golden.cpp."

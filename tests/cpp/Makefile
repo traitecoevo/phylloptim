@@ -47,9 +47,15 @@ INCLUDES = -I$(LEAF_INC) -isystem $(SHIM_INC) $(SYS_INC)
 .PHONY: all build clean golden bench
 HEADERS = $(wildcard $(LEAF_INC)/leaf/*.hpp) $(LEAF_INC)/leaf.hpp
 
+# Extra arguments for the golden comparison. Empty means bit-exact, which is what
+# you want locally and on the platform that generated the file. CI passes
+# GOLDEN_ARGS="--rtol 1e-9" on platforms other than that one -- see the comment
+# above main() in test_golden.cpp for why that is correct and not a loosening.
+GOLDEN_ARGS ?=
+
 all: build
 	./test_leaf
-	./test_golden
+	./test_golden $(GOLDEN_ARGS)
 
 build: test_leaf test_golden
 
