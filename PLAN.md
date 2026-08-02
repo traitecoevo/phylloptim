@@ -1,7 +1,50 @@
 # Next steps
 
-Ordered by what blocks what. Items 1-3 are the ones that have to happen before
-this package can be trusted or used; everything after is improvement.
+## Status, 2026-08-03
+
+Tracked as issues in [traitecoevo/leaf_cpp](https://github.com/traitecoevo/leaf_cpp/issues);
+this file keeps the reasoning behind each one.
+
+**Done**
+
+| item | what |
+|---|---|
+| **1** | Validated against plant. The swap is bit-identical: plant's full suite 2364 pass / 0 fail / 0 error on both builds, `test-leaf.r` 218 expectations, SCM regression bit-identical across 78/78 nodes. Harnesses live in `tests/validate/`. |
+| **8** | λ and `g1_eff` reported as outputs, λ verified against finite-difference `dA/dE`, and the multi-layer λ identity implemented and verified. |
+| **9** | Closed-form fast path (`leaf/closed_form.hpp`): 6.3× with one Newton step, 27× for the explicit β₂=1/c form. Default off; accuracy characterised. |
+| **10a** | Renames done: `stem_b`/`stem_c`, `cost_scale_TF24`, `root_carbon_per_layer`. `R` and `n` gone from the public namespace. |
+| **10b** | Eight dead entities removed; `set_physiology` 14 → 10 arguments; the leaf is now purely intensive; 13 temperature-response parameters made settable. |
+| **10c** | The hidden hard-coded atmospheric pressure fixed (`umol_per_mol_to_Pa` derived from `atm_kpa_`). |
+| **15** | CI: gcc/clang × Linux/macOS, no R needed. Plus a golden-file regression baseline over 288 operating points, compared bit-exactly. |
+| **5** | **Decided: leave XAD as it is.** It arrives via odelia, both packages want the same version, and only forward mode is used so nothing needs linking. No action. |
+
+Changes that alter results or the API live on **`feature/api-cleanup`**, not on
+`master`, so `master` stays a drop-in for plant. That branch is 7 commits and is
+where 10a, 10b, 10c and the shutdown fix sit.
+
+**Not ours**
+
+| item | what |
+|---|---|
+| **2** | The shutdown-state leak is **being fixed in plant** (#578, with #577 as the `resize`/`assign` half). We port plant's fix rather than maintaining our own. ⚠️ `feature/api-cleanup` already carries an independent fix — it must be reconciled with plant's, preferring plant's, or the two will diverge. |
+
+**Remaining** — filed as issues; the item column points back into this document.
+
+| issue | item | what | note |
+|---|---|---|---|
+| [#2](https://github.com/traitecoevo/leaf_cpp/issues/2) | 7b | Extract the soil/root supply path behind an interface | **do first** — #3, the multi-layer λ, and `kmax(h)` all sit on top |
+| [#3](https://github.com/traitecoevo/leaf_cpp/issues/3) | 7a | Make λ(state) pluggable | needs #2 |
+| [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11 | Template `Leaf` on its scalar type | deletes the hand-maintained AD replicas |
+| [#5](https://github.com/traitecoevo/leaf_cpp/issues/5) | 6 | R interface (RcppR6) | absorbs the `Control` struct and the dropped-field cleanup |
+| [#6](https://github.com/traitecoevo/leaf_cpp/issues/6) | 12 | Calibration vignette, then inversion | needs #4 for trait gradients |
+| [#7](https://github.com/traitecoevo/leaf_cpp/issues/7) | 13 | Energy balance, full cut | leaf-to-air VPD is the cheap win; free convection is not worth it |
+| [#8](https://github.com/traitecoevo/leaf_cpp/issues/8) | 10a | Signed-vs-magnitude potentials in the type | design question, not a rename |
+| [#9](https://github.com/traitecoevo/leaf_cpp/issues/9) | 3 | Finish the plant-side integration | validated already; decisions + one unchecked consumer |
+| [#10](https://github.com/traitecoevo/leaf_cpp/issues/10) | 2 | Port plant's shutdown fix | ⚠️ reconcile with our branch fix |
+| [#11](https://github.com/traitecoevo/leaf_cpp/issues/11) | 4 | Drop the last R coupling | belongs upstream in odelia |
+| [#12](https://github.com/traitecoevo/leaf_cpp/issues/12) | 15 | `R CMD check` integration, C++ API docs | small |
+| [#13](https://github.com/traitecoevo/leaf_cpp/issues/13) | 1 | The unexplained 1 ULP | low value; does not affect plant |
+| [#1](https://github.com/traitecoevo/leaf_cpp/issues/1) | 14 | Decide the package name | publication framing is item 14 below |
 
 ---
 
@@ -132,9 +175,22 @@ Two known and deliberate exceptions to bit-identity:
 Once this is done, replace the pinned values in `test_leaf.cpp` with values
 generated from plant and say so in the comment.
 
-## 2. Fix the shutdown-state leak
+## 2. Shutdown-state leak — PLANT'S TO FIX; we port it
 
-**A real defect, inherited from plant unchanged, and it affects plant today.**
+**Being addressed in plant** (issues #578 and #577). We do not maintain a separate
+fix; when plant's lands we port it.
+
+⚠️ **Reconcile before merging `feature/api-cleanup`.** That branch already carries
+an independent fix, written before it was clear plant was taking this on. Two
+different fixes to the same defect is exactly how the stem-vs-root vulnerability
+mix-up happened elsewhere. Prefer plant's version and drop ours, or diff them
+deliberately — do not merge both. Our fix and its measured blast radius (240
+mismatches = 48 shutdown rows × 5 flux fields, `psi_stem`/`collar`/`profit`
+untouched) are in that branch's commit, which is useful as a cross-check on
+whatever plant does.
+
+The diagnosis below is kept because it is the evidence, and because the
+"`-R_d_`, not zero" point is easy to get wrong.
 
 `set_shutdown_state()` writes only `root_collar_psi_`, `opt_psi_stem_` and
 `profit_`. It does not reset `transpiration_`, `assim_colimited_`,
@@ -215,7 +271,14 @@ problem is. The upstream fix is for odelia to guard its Rcpp bits — e.g. an
 `ODELIA_NO_R` switch, or moving `stop`/`warning` to a throw the way
 `leaf/util.hpp` does. File against odelia.
 
-## 5. Settle where XAD comes from
+## 5. Where XAD comes from — DECIDED: leave it
+
+**Decision: no action.** XAD arrives via odelia, which vendors it; both packages
+live in this family and want the same version, and only *forward* mode is used
+(`xad::fwd<double>`), which needs no tape and therefore no linking — confirmed by
+`nm`: plant's `leaf_model.o` has zero `xad::Tape` symbols. The alternatives below
+are recorded in case that ever stops being true.
+
 
 XAD arrives via odelia, which vendors it. That is fine while both packages live
 in this family and want the same version, and it is why this package does not

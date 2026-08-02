@@ -29,6 +29,6 @@ Suggests:
     testthat
 Remotes:
     traitecoevo/odelia
-URL: https://github.com/traitecoevo/leaf
-BugReports: https://github.com/traitecoevo/leaf/issues
+URL: https://github.com/traitecoevo/leaf_cpp
+BugReports: https://github.com/traitecoevo/leaf_cpp/issues
 RoxygenNote: 7.3.3
