@@ -26,6 +26,7 @@ inst/include/leaf/
   uniroot.hpp, optimize.hpp    1-D root finders and optimisers
 tests/cpp/                     plain-C++ suite, no R, no framework
 tests/cpp/golden/              bit-exact regression baseline, 288 operating points
+tests/cpp/bench_solve.cpp      timing harness for the collar solve (hazard 5)
 tests/validate/                R scripts comparing against plant (needs R)
 ```
 
@@ -34,7 +35,16 @@ tests/validate/                R scripts comparing against plant (needs R)
 ```sh
 make -C tests/cpp            # builds and runs both suites
 make -C tests/cpp golden     # regenerate the golden file -- see the warning below
+make -C tests/cpp bench      # time the collar solve (not part of `make all`)
+
+# compare the golden file with a tolerance instead of bit-exactly. Correct on a
+# platform other than macOS/arm64, wrong as a way to silence a real diff.
+make -C tests/cpp GOLDEN_ARGS=--cross-platform
 ```
+
+`bench` reports min-of-N over the golden grid. Use `reps=2000` (the default)
+before believing a small difference: reproducibility is ±0.01 µs there but ±0.5 µs
+at `reps=40`, which is wide enough to invent or hide a few-percent effect.
 
 No R needed. Dependency headers are found via `Rscript` if R is installed, else a
 sibling `odelia/` checkout and Homebrew Boost. Override with
@@ -59,6 +69,54 @@ Guide to magnitudes, measured: **~1e-16 is reassociation, ~1e-4 is a real
 difference.** These nested solvers amplify perturbations up to about
 `GSS_tol_abs` (1e-3), so there is a four-order-of-magnitude gap between rounding
 and bug. Anything in between deserves investigation.
+
+**It is bit-exact only on the platform that generated it — macOS/arm64.** libm's
+`exp`/`pow` are not bit-reproducible between glibc on x86-64 and Apple's libm on
+arm64, and FMA contraction differs too, so cross-platform bit-equality was never
+achievable. CI compares bit-exactly on macOS and with `--cross-platform` elsewhere.
+
+**The size of the cross-platform disagreement is the interesting part, and it is
+not one number.** The nine reported fields split into two classes three orders of
+magnitude apart:
+
+| field | gcc | clang | why |
+|---|---|---|---|
+| `profit` | 1.85e-06 | 5.87e-07 | it is the maximum itself — well-conditioned |
+| the other eight | 5.53e-04 | 2.73e-04 | evaluated at the **argmax** — sqrt-amplified |
+
+The maximum is *flat*: curvature measured directly at the two worst points gives
+k ≈ 1.0 and 0.9 in `profit ≈ p* − k(psi_stem−x*)²`. For a flat maximum an error
+`dp` in the profit **value** displaces its **location** by `sqrt(dp/k)`, which is
+why the well-conditioned column sits three orders below the other. Checked
+pointwise — at those points the residuals imply k = 1.01 and 1.70 against the 1.0
+and 0.9 measured from the curvature. It is *not* a global identity: the two column
+maxima fall at different operating points, so `sqrt(worst profit)` is not meant to
+reproduce `worst argmax`.
+
+Two things follow that matter beyond this file:
+
+- **`profit` is the only reported field that is well-conditioned across platforms.**
+  If you need a portable check of the solve, check `profit`, not `opt_psi_stem_`.
+- **Eight of the nine fields are pinned to 17 digits but only *determined* to about
+  `GSS_tol_abs` (1e-3).** Bit-exactness on one platform is still a good drift
+  detector — any code change moves the arbitrary choice inside that window and it
+  shows — but that is reproducibility, not determinacy. Don't read a bit-identical
+  `opt_psi_stem_` as meaning the argmax is known to 17 digits.
+
+⚠️ **The numbers above were wrong twice, the same way both times.** First this note
+said the worst cross-platform difference was 1.7e-15 (13 ULP); then, after that was
+caught, 2.1e-07 and 4.5e-04. Both came from the 20 lines `test_golden` prints
+before it truncates — reading a truncated failure list as if it were the
+distribution. The truncated sample is biased toward whichever operating points
+happen to be listed first, which is not a random draw.
+
+The figures in the table are the full-grid maxima CI now prints on every run. The
+per-class reporting exists so the number never has to be inferred from the printed
+failures again — **if you need a magnitude, read the summary line, not the FAIL
+lines.**
+
+**Never regenerate the golden file to make another platform pass.** It just moves
+the failure to the platform the file came from.
 
 ## Branches
 
@@ -94,12 +152,27 @@ a coupled review.
    dimensionless/intensive driver. Nothing scales with plant size — whole-plant
    allometry (`kmax(h)`, root carbon totals) is computed on the plant side and passed
    in already reduced. Keep it that way; it is a one-sentence contract.
-5. **Hot-path discipline.** `find_root_collar_psi` runs ~10³ inner evaluations per
-   solve, and plant calls it millions of times. λ and `g1_eff` are *accessors*, not
-   stored state, for this reason. Do not add a `pow()` to
-   `set_leaf_states_rates_from_psi_stem`, and prefer compile-time dispatch to virtual
-   calls or `std::function` inside the solve — though **measure** rather than assume
-   the inlining matters (see issue #2).
+5. **Hot-path discipline — but measure it, because the intuition has been wrong.**
+   `find_root_collar_psi` runs ~10³ inner evaluations per solve, and plant calls it
+   millions of times. λ and `g1_eff` are *accessors*, not stored state, for this
+   reason, and don't add a `pow()` to `set_leaf_states_rates_from_psi_stem`.
+
+   What is *not* true is the blanket "prefer compile-time dispatch, a virtual call
+   in the solve would cost". Measured (`make -C tests/cpp bench`), the code splits
+   into two halves that answer oppositely:
+
+   - **The soil/supply path is already out-of-line.** `E_from_Soil_to_Root_Collar`
+     is inlined into none of its 18 call sites at `-O2`, nor at
+     `-inline-threshold=2000`; neither is the per-layer spline `eval`. So making it
+     virtual costs **+1.1%**, `std::function` +0.6%, `std::variant` +2.6% — noise.
+     Issue #2 needs no template. Forcing more inlining is *worse* (3.66 vs 3.52 µs).
+   - **The cost core is fully inlined.** `profit_psi_stem_TF`, `hydraulic_cost_TF`,
+     `assim_colimited` and `transpiration_to_psi_stem` have no out-of-line symbol at
+     all. Issue #3's pluggable λ lands here, so it is a genuinely different question
+     and needs its own measurement.
+
+   Before arguing from inlining, check: `nm -C test_golden | grep <fn>`. No symbol
+   means inlined; a symbol plus `bl` call sites in `objdump -d` means it is not.
 6. **No Rcpp in the leaf.** `util.hpp` throws `std::runtime_error` instead of
    `Rcpp::stop`, and uses a quiet NaN instead of `NA_REAL`. The only R touchpoint left
    in the include graph is odelia's `ode_util.hpp`; `tests/cpp/shim/RcppCommon.h` is a

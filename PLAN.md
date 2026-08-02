@@ -15,7 +15,7 @@ this file keeps the reasoning behind each one.
 | **10a** | Renames done: `stem_b`/`stem_c`, `cost_scale_TF24`, `root_carbon_per_layer`. `R` and `n` gone from the public namespace. |
 | **10b** | Eight dead entities removed; `set_physiology` 14 → 10 arguments; the leaf is now purely intensive; 13 temperature-response parameters made settable. |
 | **10c** | The hidden hard-coded atmospheric pressure fixed (`umol_per_mol_to_Pa` derived from `atm_kpa_`). |
-| **15** | CI: gcc/clang × Linux/macOS, no R needed. Plus a golden-file regression baseline over 288 operating points, compared bit-exactly. |
+| **15** | CI: gcc/clang × Linux/macOS, no R needed. Plus a golden-file regression baseline over 288 operating points, compared bit-exactly on macOS/arm64 and with `--cross-platform` elsewhere — see the note under item 1 on why bit-exact cannot be a cross-platform gate, and on the flat-optimum amplification that sets the tolerances. |
 | **5** | **Decided: leave XAD as it is.** It arrives via odelia, both packages want the same version, and only forward mode is used so nothing needs linking. No action. |
 
 Changes that alter results or the API live on **`feature/api-cleanup`**, not on
@@ -32,7 +32,7 @@ where 10a, 10b, 10c and the shutdown fix sit.
 
 | issue | item | what | note |
 |---|---|---|---|
-| [#2](https://github.com/traitecoevo/leaf_cpp/issues/2) | 7b | Extract the soil/root supply path behind an interface | **do first** — #3, the multi-layer λ, and `kmax(h)` all sit on top |
+| [#2](https://github.com/traitecoevo/leaf_cpp/issues/2) | 7b | Extract the soil/root supply path behind an interface | **do first** — #3, the multi-layer λ, and `kmax(h)` all sit on top. Design question settled: **no template needed**, use `std::variant`; measured, see 7b |
 | [#3](https://github.com/traitecoevo/leaf_cpp/issues/3) | 7a | Make λ(state) pluggable | needs #2 |
 | [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11 | Template `Leaf` on its scalar type | deletes the hand-maintained AD replicas |
 | [#5](https://github.com/traitecoevo/leaf_cpp/issues/5) | 6 | R interface (RcppR6) | absorbs the `Control` struct and the dropped-field cleanup |
@@ -90,6 +90,58 @@ For scale on why 1 ULP is safe here: forcing `-ffp-contract=off` on one side alo
 moves the disagreement to **3e-4**, because these nested solvers amplify
 perturbations up to about `GSS_tol_abs` (1e-3). Four orders of magnitude separate
 "rounding" from "bug", which is what makes the result interpretable.
+
+**A second, larger instance of the same effect: the golden file is not portable,
+and the amplification is what makes it interesting.** CI's first run to reach
+Linux (2026-08-03 — the workflow had been watching `branches: [main]` on a repo
+whose default branch is `master`, so it had never executed) found **1761 of 2592
+values differing under g++ and 1800 under clang++**. `exp`/`pow` are not
+bit-reproducible between glibc on x86-64 and Apple's libm on arm64, and FMA
+contraction differs, so a bit-exact cross-platform comparison was never
+achievable; the file's real job only ever needed bit-exactness on *one* platform.
+
+The magnitudes split cleanly into two classes:
+
+| field | gcc | clang |
+|---|---|---|
+| `profit` | 1.85e-06 | 5.87e-07 |
+| `psi_stem`, `collar`, `ci`, `assim`, `transpiration`, `gc`, `e_up`, `uptake` | 5.53e-04 | 2.73e-04 |
+
+**That split is the flat-optimum amplification, measured.** `find_root_collar_psi`
+maximises profit over the collar potential, and the maximum is flat — curvature
+measured directly at the two worst operating points gives k ≈ 1.0 and 0.9 in
+`profit ≈ p* − k(psi_stem − x*)²`. For a flat maximum an error `dp` in the profit
+*value* displaces the *argmax* by `sqrt(dp/k)`, which is why the well-conditioned
+row sits three orders below the other. Checked pointwise: at those points the
+residuals imply k = 1.01 and 1.70, against 1.0 and 0.9 from the curvature itself.
+Note it is not a global identity — the row maxima fall at different operating
+points, so `sqrt(worst profit)` is not meant to reproduce `worst argmax`.
+
+So `test_golden` takes `--cross-platform`, with per-class tolerances (profit 1e-5,
+argmax-derived 5e-3 — 5.4× and 9.0× headroom on the measured worst). The profit
+tolerance is deliberately not loosened further: 1e-4 is the scale at which a real
+change shows, so a profit gate approaching it would gate nothing. CI runs
+bit-exact on macOS/arm64 and `--cross-platform` elsewhere. Both modes print the
+worst value per class. **Regenerating the golden file to make a second platform
+pass is the wrong move** — it just relocates the failure.
+
+Two implications worth carrying:
+
+- **`profit` is the only reported field that is well-conditioned across platforms.**
+  For a portable check of the solve, compare `profit`, not `opt_psi_stem_`.
+- **Eight of the nine fields are pinned to 17 digits but determined only to about
+  `GSS_tol_abs` (1e-3).** Bit-exactness on one platform remains a sound drift
+  detector, but it is reproducibility of an arbitrary choice inside the solver's
+  tolerance window, not determinacy of the argmax.
+
+⚠️ **These numbers were wrong twice, the same way both times.** This paragraph
+first put the worst difference at 1.7e-15 (13 ULP) and called the whole thing
+reassociation; once that was caught it said 2.1e-07 and 4.5e-04. Both readings
+took the 20 lines `test_golden` prints before truncating as though they were the
+distribution. That sample is biased toward whichever points are listed first, and
+here those were the well-conditioned ones. The figures in the table are now the
+full-grid maxima that CI prints on every run — **for a magnitude, read the summary
+line, not the FAIL lines.**
 
 **Two methodological traps, both hit and both worth recording.** First, the initial
 comparison used whatever plant was installed — a Jul 24 build of a *different
@@ -377,11 +429,14 @@ code to support. The λ table is `main.tex` Table `tab:lambda`; hand-written
 
 Remaining design notes:
 
-- Prefer compile-time dispatch (a policy template parameter, or
-  `Leaf<MarginalCost>`) over a runtime `enum` and a `switch`. This is a
-  header-only library whose whole point is that the hot loop inlines; a virtual
-  call or a branch per profit evaluation would land inside a golden-section search
-  running ~10³ inner evaluations. Composes naturally with item 11.
+- Compile-time dispatch is *plausible* here in a way it was not for 7b, but it is
+  still unmeasured — **measure before committing to it.** The relevant difference
+  is that the cost core really does inline: `profit_psi_stem_TF`,
+  `hydraulic_cost_TF` and `assim_colimited` have no out-of-line symbol in
+  `test_golden` at all, so a virtual λ would be introducing an indirect call where
+  today there is no call. That is the opposite of the supply path, where the
+  measurement (7b) found the call already out-of-line and the dispatch free. Use
+  `tests/cpp/bench_solve.cpp`; the recipe is in 7b. Composes naturally with item 11.
 - **Prentice least-cost is the one that does not fit cleanly**, and it is not
   Medlyn. Its cost is a *ratio*, `(aE + bV)/A`, not an additive `λE`, so it is only
   a member of the family after a transformation; the project records that
@@ -455,9 +510,66 @@ struct SupplyPath {                              // concept, not a base class
 with (at least) two implementations: `MultiLayerRoots` — today's behaviour, with
 per-layer vulnerability, root resistance and gravitational head — and
 `SinglePotential`, which is one ψ_soil and either infinite or constant
-conductance. Template `Leaf` on it so the calls still inline; a `std::function`
-or a virtual base would put an indirect call inside a loop running ~10³ inner
-evaluations, which is the thing to avoid.
+conductance.
+
+#### Does it have to be a template? Measured: no.
+
+**This item previously asserted that `Leaf` had to be templated on the supply
+path so the calls would still inline, and that a virtual base or a
+`std::function` would put an indirect call inside a loop running ~10³ inner
+evaluations. That assertion was wrong, and it was wrong in the same way the
+`area_leaf` coupling claim was: by reasoning instead of measuring.**
+
+Two findings, the first of which settles it on its own.
+
+**1. The supply path is not inlined today, so there is no inlining to preserve.**
+`E_from_Soil_to_Root_Collar` has 18 out-of-line call sites in `test_golden` at
+`-O2` and clang inlines it into none of them — it is ~150 lines and carries
+string-building error paths. Nor is it a threshold accident: at
+`-mllvm -inline-threshold=2000` (roughly 10× the default) it is *still*
+out-of-line at 22 call sites. The spline `eval` it calls per layer is not
+inlined either (clang: `cost=405, threshold=225`). The hot path already pays a
+call per layer per evaluation.
+
+**2. So the dispatch is free.** `tests/cpp/bench_solve.cpp` times the 288-point
+golden grid; the body of `E_from_Soil_to_Root_Collar` was left byte-for-byte
+untouched and only the way it is *reached* was varied, with the bench checksum
+identical across all four builds to confirm no arithmetic moved:
+
+| dispatch | µs/solve | vs direct |
+|---|---|---|
+| direct call (today) | 3.52 | — |
+| `std::function` | 3.54 | +0.6% |
+| virtual base | 3.56 | +1.1% |
+| `std::variant` + `std::visit` | 3.61 | +2.6% |
+
+Reproducible to ±0.01 µs at `reps=2000` (±0.5 µs at `reps=40`, which is why an
+early 40-rep run looked like noise in both directions). Aggressive inlining is
+if anything *worse* — `-O2 -mllvm -inline-threshold=2000` gives 3.66 µs and
+`-O3` with the same 3.62 µs, i.e. code bloat costs more than the calls save.
+
+**So use a plain composed class. Do not template `Leaf`.** Templating would turn
+`Leaf` into `Leaf<Supply>`, which breaks plant's `plant::Leaf` alias and its
+~12,000 lines of generated RcppR6 code (item 3), for a measured benefit of zero.
+
+**Constraint on which runtime mechanism: `Leaf` must stay copyable.** plant's
+`make_strategy_ptr(TF24_Strategy s)` takes the strategy **by value**, and
+`TF24_Strategy` holds `Leaf leaf;` as a member (`tf24_strategy.h:375`), so a
+`std::unique_ptr<SupplyPath>` member would break plant's build. That leaves
+`std::variant` (+2.6%, value semantics, no heap — verified `Leaf` stays
+copy-constructible and copy-assignable) or a virtual base with a cloning copy
+constructor (+1.1%, but boilerplate and a heap allocation per `Leaf` copy).
+**Prefer `std::variant`** while there are only two implementations; 2.6% is a
+fair price for value semantics, and it is dwarfed by the 6.3×/27× the
+closed-form path already offers (item 9).
+
+⚠️ **This result does not transfer to item 7a.** It is specific to the supply
+path. The *cost* core is the opposite case: `profit_psi_stem_TF`,
+`hydraulic_cost_TF`, `assim_colimited` and `transpiration_to_psi_stem` have **no
+out-of-line symbol at all** — they are fully inlined into the golden-section
+loop. Making λ virtual could therefore cost real time where making the supply
+path virtual does not. Measure 7a separately with the same harness; do not cite
+this table for it.
 
 Four reasons this is worth doing rather than merely tidy:
 
