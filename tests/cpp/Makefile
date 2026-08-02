@@ -29,7 +29,20 @@ ifeq ($(strip $(ODELIA_INC)),)
   ODELIA_INC := ../../../odelia/inst/include
 endif
 
-INCLUDES = -I$(LEAF_INC) -isystem $(SHIM_INC) -isystem $(ODELIA_INC) -isystem $(BH_INC)
+# Dependency include dirs, as -isystem flags.
+#
+# /usr/include is filtered out deliberately. Passing `-isystem /usr/include`
+# moves it earlier in the system-header search order, and libstdc++'s <cmath>
+# then cannot resolve its `#include_next <math.h>` -- the build dies with
+#
+#   /usr/include/c++/13/cmath:47:15: fatal error: math.h: No such file or directory
+#
+# which reads like a broken toolchain and is not. It bites on Linux, where
+# apt's libboost-dev headers land in /usr/include and CI passes BH_INC=/usr/include.
+# The compiler already searches /usr/include, so dropping the flag costs nothing.
+DEP_INC  = $(ODELIA_INC) $(BH_INC)
+SYS_INC  = $(foreach d,$(filter-out /usr/include /usr/include/,$(strip $(DEP_INC))),-isystem $(d))
+INCLUDES = -I$(LEAF_INC) -isystem $(SHIM_INC) $(SYS_INC)
 
 .PHONY: all build clean golden bench
 HEADERS = $(wildcard $(LEAF_INC)/leaf/*.hpp) $(LEAF_INC)/leaf.hpp

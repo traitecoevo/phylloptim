@@ -7,7 +7,10 @@ name: C++ tests
 
 on:
   push:
-    branches: [main]
+    # This repo's default branch is master, not main. It was [main] until
+    # 2026-08-03, which meant no push ever triggered a run and the workflow sat
+    # unexercised from the day it was added until the first pull request.
+    branches: [master]
   pull_request:
   workflow_dispatch:
 
@@ -59,6 +62,18 @@ jobs:
           CXX: ${{ matrix.cxx }}
         run: |
           make -C tests/cpp \
+            CXX="$CXX" \
+            ODELIA_INC="$GITHUB_WORKSPACE/odelia/inst/include" \
+            BH_INC="${{ steps.boost.outputs.inc }}"
+
+      # Compile the benchmark but do not run it. It is a timing harness, so it
+      # would be a flaky gate on a shared runner; building it keeps it from
+      # rotting when the headers change.
+      - name: Build the benchmark (compile only)
+        env:
+          CXX: ${{ matrix.cxx }}
+        run: |
+          make -C tests/cpp bench_solve \
             CXX="$CXX" \
             ODELIA_INC="$GITHUB_WORKSPACE/odelia/inst/include" \
             BH_INC="${{ steps.boost.outputs.inc }}"
