@@ -76,7 +76,7 @@ void test_defaults_are_unset() {
   ok(!std::isfinite(l.ci_), "ci_ starts unset");
   ok(!std::isfinite(l.assim_colimited_), "assim_colimited_ starts unset");
   ok(!std::isfinite(l.opt_psi_stem_), "opt_psi_stem_ starts unset");
-  ok(l.psi_soil_.empty(), "psi_soil_ starts empty");
+  ok(l.roots_.psi_soil_.empty(), "psi_soil_ starts empty");
   ok(l.use_energy_balance_ == false, "energy balance defaults off");
 }
 

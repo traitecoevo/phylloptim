@@ -7,6 +7,8 @@
 #include <leaf/uniroot.hpp>
 #include <leaf/optimize.hpp>
 #include <leaf/quadrature.hpp>
+#include <leaf/roots.hpp>
+#include <leaf/vulnerability.hpp>
 
 #include <odelia/interpolator.hpp>
 
@@ -14,7 +16,6 @@
 #include <limits>
 #include <string>
 #include <vector>
-#include <boost/math/special_functions/gamma.hpp>
 #include <XAD/XAD.hpp>
 
 namespace leaf {
@@ -46,13 +47,16 @@ public:
         
   odelia::interpolator::Interpolator transpiration_from_psi;
   odelia::interpolator::Interpolator psi_from_transpiration;
-  // pre-computed root vulnerability curve (same role as transpiration_from_psi for xylem)
-  odelia::interpolator::Interpolator root_vuln_from_psi;
-  // cumulative integral of the root vulnerability curve, G(m) = int_0^m f_r(s) ds,
-  // indexed by magnitude m = -psi. Lets E_from_Soil_to_Root_Collar obtain the
-  // mean conductivity over a potential interval from 2 evals instead of (n+1)
-  // (same pre-integrated-curve trick as transpiration_from_psi for the xylem).
-  odelia::interpolator::Interpolator root_vuln_integral_from_psi;
+
+  // The soil -> root-collar water supply (issue #2). Everything the leaf needs
+  // from the soil enters through this object: `uptake` and its derivative. It is
+  // held by value -- Leaf must stay copyable, because plant's
+  // make_strategy_ptr(TF24_Strategy) takes the strategy by value and TF24_Strategy
+  // holds a Leaf member.
+  //
+  // Public because plant's RcppR6 bindings reach the moved fields by name; they
+  // now spell them `roots_.psi_soil_` etc. (see PLAN 7b-iii stage 4).
+  MultiLayerRoots roots_;
 
   // psi_from_E
 
@@ -60,9 +64,6 @@ public:
   double c;
   double b;
   double psi_crit;  // derived from b and c
-  double root_c;
-  double root_b;
-  double root_psi_crit;
   double beta2;
   double jmax_25;
   double a;
@@ -73,10 +74,6 @@ public:
   double ci_abs_tol;
   double ci_niter;
   double g1_TF24;
-  double beta_R_H;
-  double beta_R_V;
-  double soil_number_of_depths_;
-  int max_soil_layer;
 
   double ci_;
   double stom_cond_CO2_;
@@ -98,8 +95,6 @@ public:
   double leaf_specific_conductance_max_;
   double sapwood_volume_per_leaf_area_;
   double k_s_;
-  std::vector<double> c_r_V_;
-  std::vector<double> c_r_H_;
   double area_leaf_;
   double rho_;
   double vcmax_;
@@ -107,33 +102,6 @@ public:
   double lma_; //kg m^-2
   double a_bio_;
   
-  std::vector<double> psi_soil_;
-  std::vector<double> psi_soil_inverted_;
-  // Per-layer cache of root_vuln_integral_from_psi.eval(-psi_soil_inverted_[i]).
-  // psi_soil_inverted_ is fixed for the whole find_root_collar_psi solve, so the
-  // soil-side endpoint of the cumulative-integral lookup in
-  // E_from_Soil_to_Root_Collar is constant across every (re)evaluation of the
-  // nested root-finders. Precomputing it once per solve (alongside the
-  // P_x_r-side eval, hoisted out of the layer loop) collapses ~2 spline evals
-  // per layer to ~1 per call. Rebuilt in find_root_collar_psi.
-  std::vector<double> root_vuln_integral_soil_;
-  std::vector<double> soil_depth_;
-  std::vector<double> z_soil_mid_;
-  // Per-layer gravitational head gravity_head * z_soil_mid_[i], precomputed once
-  // per solve in set_physiology (z_soil_mid_ is fixed across find_root_collar_psi).
-  // Used three times per layer in E_from_Soil_to_Root_Collar's hot loop; caching
-  // it removes a redundant multiply per layer per (re)evaluation.
-  std::vector<double> grav_head_z_;
-  bool use_precomputed_z_soil_mid_;
-  double dz_;
-  std::vector<double> r_R_H_min;
-        // vertical root resistance
-    std::vector<double> r_R_V;
-
-            // cumulative vertical sum of root resistance
-    std::vector<double> r_R_V_sum;
-    
-
   double leaf_temp_;
   // Penman-Monteith leaf energy balance state (#523), only meaningful on the
   // use_energy_balance_ path. Set once per set_physiology; Tleaf itself is a
@@ -226,14 +194,21 @@ public:
   // set-up functions
   void set_physiology(double area_leaf, const std::vector<double>& mass_root_prop, double rho, double a_bio, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double sapwood_volume_per_leaf_area, double leaf_temp, double atm_o2_kpa, double atm_kpa);
   void setup_transpiration(double resolution);
-  void setup_root_vulnerability(double resolution);
-  // Shared builder for the knot grid {0, step, .., <= psi_max} and the
-  // cumulative vulnerability integral G(m) = int_0^m exp(-(s/b)^c) ds, seeded
-  // from its gamma closed form. Used by both setup_* functions (see #468).
+  // Forwards to roots_.setup_vulnerability. Kept on Leaf because it is part of
+  // the published construction sequence (see the umbrella header) and plant's
+  // bindings name it.
+  void setup_root_vulnerability(double resolution) {
+    roots_.setup_vulnerability(resolution);
+  }
+  // Forwards to leaf::cumulative_vulnerability_integral, which now lives in
+  // vulnerability.hpp because it is shared by the stem and the root curves and
+  // so belongs to neither.
   void build_cumulative_vulnerability_integral(double b, double c,
                                                double resolution,
                                                std::vector<double>& x,
-                                               std::vector<double>& y_integral);
+                                               std::vector<double>& y_integral) {
+    cumulative_vulnerability_integral(b, c, resolution, x, y_integral);
+  }
   void setup_clean_leaf();
 
   // Absolute tolerance for the direct quadrature in
@@ -260,7 +235,13 @@ public:
   void solve_medlyn_ci_analytical();
   // std::vector<double> root_collar_psi(std::vector<double> soil_moist_);
 
-  void E_from_Soil_to_Root_Collar(double P_x_r, const std::vector<double>& psi_soil);
+  // Uptake at a collar potential against an arbitrary vector of layer potentials.
+  // Thin forwarder to roots_.uptake_at; the E_up_ / soil_consumption_ buffers
+  // stay on Leaf and are handed over by reference, because plant writes back
+  // into them by name after crown integration (PLAN 7b-ii trap 1).
+  void E_from_Soil_to_Root_Collar(double P_x_r, const std::vector<double>& psi_soil) {
+    roots_.uptake_at(P_x_r, psi_soil, area_leaf_, soil_consumption_, E_up_);
+  }
   void find_root_collar_psi();
   // Shared setup for the root-collar solve: builds the soil-side caches, handles
   // every feasibility early-exit (shutdown / assim<0 / collapsed interval) by
@@ -290,20 +271,15 @@ public:
   // implicit-function theorem at the psi_stem_to_ci root-find, and analytic
   // spline derivatives (Interpolator::deriv) for the smooth transport. Replaces
   // the noisy finite-difference gradient. Assumes prepare_collar_solve setup has
-  // run (psi_soil_inverted_ etc.), as evaluate_root_collar_psi does.
+  // run (roots_.psi_soil_inverted_ etc.), as evaluate_root_collar_psi does.
   double dprofit_droot_collar_psi(double opt_root_psi);
-  // Analytic d(E_up_)/d(collar potential) for the soil->root-collar uptake
-  // (kg H2O m^-2 s^-1 per MPa of signed collar potential P_x_r), mirroring the
-  // general branch of E_from_Soil_to_Root_Collar layer by layer. The integral's
-  // derivative collapses to +/- root_vuln_integral_from_psi.deriv (the analytic
-  // slope of the same pre-integrated vulnerability curve used for the value, so
-  // it stays consistent even where that spline extrapolates), so no finite
-  // difference is needed.
-  // Returns NaN when any layer sits on a branch kink (P_x_r == psi_soil[i], the
-  // gravity-balance point, or P_x_r == 0); the caller (dprofit_droot_collar_psi)
-  // then falls back to a central difference. Used only on the TF24f acclimation
-  // gradient path, not the base TF24 value path.
-  double dE_from_soil_dpsi_collar(double P_x_r, const std::vector<double>& psi_soil);
+  // Analytic d(E_up_)/d(collar potential). Thin forwarder to
+  // roots_.duptake_dpsi; see there for the derivation and for the NaN-at-a-kink
+  // contract. Used only on the TF24f acclimation gradient path, not the base
+  // TF24 value path.
+  double dE_from_soil_dpsi_collar(double P_x_r, const std::vector<double>& psi_soil) {
+    return roots_.duptake_dpsi(P_x_r, psi_soil, area_leaf_);
+  }
   // Shut-down operating point used by the find_root_collar_psi early-exits: stem
   // held at psi_crit (no transpiration), paying only respiration + hydraulic
   // cost. Only root_collar_psi_ differs between the cases, so it is the argument.
@@ -414,7 +390,8 @@ public:
   // NA sentinel where S is unavailable (the branch kinks that
   // dE_from_soil_dpsi_collar reports as NaN) or zero.
   //
-  // Requires that a collar solve has run, so that psi_soil_inverted_ is current.
+  // Requires that a collar solve has run, so that roots_.psi_soil_inverted_ is
+  // current.
   double marginal_cost_water_multilayer();
 
   // Equivalent Medlyn USO slope implied by the operating point, in kPa^0.5.
@@ -466,10 +443,7 @@ inline Leaf::Leaf()
     vcmax_25(96), // umol m^-2 s^-1 
     c(2.680147), //unitless
     b(3.898245), //-MPa
-    psi_crit(5.870283), //-MPa 
-    root_c(2.680147), //unitless
-    root_b(3.898245), //-MPa
-    root_psi_crit(5.870283), //-MPa 
+    psi_crit(5.870283), //-MPa
     beta2(1.5), //exponent for effect of hydraulic risk (unitless)
     jmax_25(157.44), // maximum electron transport rate umol m^-2 s^-1
     a(0.30), //quantum yield of photosynthetic electron transport (mol mol^-1)
@@ -479,10 +453,12 @@ inline Leaf::Leaf()
     vulnerability_curve_ncontrol(100),
     ci_abs_tol(1e-3),
     ci_niter(1000),
-    g1_TF24(7.5), //cost parameter for TF24 profit model umol m^-2 s^-1
-    beta_R_H(3.4e2), //proportionality constant between minimum horizontal (intraleyer) root hydraulic resistance and C_r^-1 in [MPa * s * (mol C) / (mol H2O)]
-    beta_R_V(9.4e3) //proportionality constant between minimum vertical (interlayer) root hydraulic resistance and dz^2/C_r in [MPa * (mol C) * s / (mol H2O) / m^2]
+    g1_TF24(7.5) //cost parameter for TF24 profit model umol m^-2 s^-1
    {
+      // The root traits (root_c/root_b/root_psi_crit) and the two beta_R_*
+      // resistance constants keep their defaults in MultiLayerRoots, which owns
+      // them. Deliberately not restated here: a second copy of the root Weibull
+      // pair is the exact shape of hazard 1 in the developer guide.
       setup_transpiration(100); // arg: num control points for integration
       setup_root_vulnerability(100);
       setup_clean_leaf();
@@ -505,10 +481,7 @@ inline Leaf::Leaf(double vcmax_25, double c, double b,
     : vcmax_25(vcmax_25), // umol m^-2 s^-1 
     c(c), //unitless
     b(b), //-MPa
-    psi_crit(psi_crit), //-MPa 
-    root_c(root_c), //unitless
-    root_b(root_b), //-MPa
-    root_psi_crit(root_psi_crit), //-MPa 
+    psi_crit(psi_crit), //-MPa
     beta2(beta2), //exponent for effect of hydraulic risk (unitless)
     jmax_25(jmax_25), // maximum electron transport rate umol m^-2 s^-1
     a(a), //quantum yield of photosynthetic electron transport (mol mol^-1)
@@ -518,10 +491,16 @@ inline Leaf::Leaf(double vcmax_25, double c, double b,
     vulnerability_curve_ncontrol(vulnerability_curve_ncontrol),
     ci_abs_tol(ci_abs_tol),
     ci_niter(ci_niter),
-    g1_TF24(g1_TF24), //cost parameter for TF24 profit model umol m^-2 s^-1
-    beta_R_H(beta_R_H),
-    beta_R_V(beta_R_V)
+    g1_TF24(g1_TF24) //cost parameter for TF24 profit model umol m^-2 s^-1
    {
+      // The root traits and the two resistance constants belong to the supply
+      // path, so hand them over before its vulnerability curve is built.
+      roots_.root_c = root_c;          //unitless
+      roots_.root_b = root_b;          //-MPa
+      roots_.root_psi_crit = root_psi_crit; //-MPa
+      roots_.beta_R_H = beta_R_H; //proportionality constant between minimum horizontal (intraleyer) root hydraulic resistance and C_r^-1 in [MPa * s * (mol C) / (mol H2O)]
+      roots_.beta_R_V = beta_R_V; //proportionality constant between minimum vertical (interlayer) root hydraulic resistance and dz^2/C_r in [MPa * (mol C) * s / (mol H2O) / m^2]
+
       setup_transpiration(vulnerability_curve_ncontrol); // arg: num control points for integration
       setup_root_vulnerability(vulnerability_curve_ncontrol);
       setup_clean_leaf();
@@ -567,20 +546,8 @@ inline void Leaf::setup_clean_leaf() {
   theta_w_ = util::na_value;
   theta_fc_ = util::na_value;
   theta_ = util::na_value;
-  psi_soil_.clear();
-  soil_depth_.clear();
-  z_soil_mid_.clear();  // ADD THIS LINE
-  grav_head_z_.clear();
-  use_precomputed_z_soil_mid_ = false;
-  c_r_V_.clear(); // carbon per layer dedicated to vertical transport (kg m^-2);
-  c_r_H_.clear(); // carbon per layer dedicated to horizantal transport (kg m^-2);
-  r_R_H_min.clear(); //minimum horizontal portion of root resistance in each soil-layer in [MPa * s * (mol H2O)^-1 m^-2];
-  r_R_V.clear(); // vertical root resitance [MPa * s * (mol H2O)^-1 m^-2];
-  r_R_V_sum.clear(); // summed vertical root resistance as depth increase;
+  roots_.clear(); // soil state, geometry and the root resistance network
   soil_consumption_.clear(); // soil consumption mol  m^-2 s^-1;
-
-  soil_number_of_depths_ = util::na_value_int;
-  max_soil_layer = util::na_value_int; // number of soil layers with root mass greater than 0;
 
   transpiration_cached_ = false; // invalidate transpiration() memo
   photo_temp_cached_ = false;    // members above set to NA; force recompute
@@ -593,18 +560,12 @@ inline void Leaf::setup_clean_leaf() {
 //   1. Temperature-dependent photosynthetic parameters (vcmax_, jmax_,
 //      electron_transport_, gamma_, ko_, kc_, km_, R_d_) via Arrhenius/peaked
 //      Arrhenius functions, plus assim_max_ (assimilation at ci = ca).
-//   2. The root hydraulic-resistance network across soil layers. Each layer's
-//      root carbon (mass_root_prop[i], kg) is split 1/3 vertical : 2/3
-//      horizontal (c_r_V_, c_r_H_). From these:
-//        r_R_H_min[i] = beta_R_H / c_r_h      (min horizontal resistance,
-//                                              i.e. reciprocal of max conductance)
-//        r_R_V[i]     = beta_R_V * dz^2 / c_r_v (vertical resistance; dz^2 because
-//                                              vertical conductivity scales with
-//                                              root cross-sectional area)
-//        r_R_V_sum[i] = cumulative vertical resistance from surface to layer i.
-//      max_soil_layer is the deepest layer with non-zero root mass; all
-//      resistance vectors are sized to it so the hot E_from_Soil loop only
-//      iterates over layers that actually contain roots.
+//   2. The soil state and the root hydraulic-resistance network, both of which
+//      now belong to roots_ (MultiLayerRoots::set_soil_state and
+//      ::set_root_network). The two calls are left at their original positions
+//      in this function, straddling the temperature block, rather than merged:
+//      the blocks are numerically independent, but keeping the order means the
+//      only thing this refactor has to argue about is where the code lives.
 //
 // NOTE: the temperature-dependent block (group 1) depends only on leaf_temp_
 // (constant across the run in the current driver setup) yet is recomputed on
@@ -644,32 +605,7 @@ inline void Leaf::set_physiology(double area_leaf, const std::vector<double>& ma
    atm_kpa_ = atm_kpa;
    atm_o2_kpa_ = atm_o2_kpa;
    PPFD_ = PPFD;
-   psi_soil_ = psi_soil;
-   soil_depth_ = soil_depth;
-   soil_number_of_depths_ = soil_depth_.size();
-   
-   if (!(use_precomputed_z_soil_mid_ &&
-         z_soil_mid_.size() == static_cast<size_t>(soil_number_of_depths_))) {
-     // Fallback for paths that do not provide environment-precomputed midpoints.
-     z_soil_mid_.resize(soil_number_of_depths_);
-     for (size_t i = 0; i < soil_number_of_depths_; ++i) {
-       if (i == 0) {
-         z_soil_mid_[i] = (soil_depth_[i] / 2.0);
-       } else {
-         z_soil_mid_[i] = ((soil_depth_[i - 1] + soil_depth_[i]) / 2.0);
-       }
-     }
-   }
-
-   use_precomputed_z_soil_mid_ = false;
-
-   // Precompute the per-layer gravitational head gravity_head * z_soil_mid_[i];
-   // z_soil_mid_ is fixed for the whole solve, so E_from_Soil_to_Root_Collar can
-   // read it instead of recomputing the product on every (re)evaluation.
-   grav_head_z_.resize(soil_number_of_depths_);
-   for (size_t i = 0; i < soil_number_of_depths_; ++i) {
-     grav_head_z_[i] = gravity_head * z_soil_mid_[i];
-   }
+   roots_.set_soil_state(psi_soil, soil_depth);
 
    leaf_specific_conductance_max_ = leaf_specific_conductance_max;
    // conductance changed -> invalidate the transpiration() memo
@@ -722,51 +658,11 @@ inline void Leaf::set_physiology(double area_leaf, const std::vector<double>& ma
      photo_temp_cached_ = true;
    }
 
-   dz_ = soil_depth_.back()/soil_number_of_depths_;
+  roots_.set_root_network(mass_root_prop);
 
-
-  // find max soil layer as last iteration with mass_root_prop greater than 0
-  max_soil_layer = 0;
-  for (size_t i = 0; i < soil_number_of_depths_; ++i) {
-    if (mass_root_prop[i] != 0) {
-      max_soil_layer = i + 1;
-    }
-  }
-  c_r_V_.assign(max_soil_layer, 0.0);
-  c_r_H_.assign(max_soil_layer, 0.0);
-  r_R_H_min.resize(max_soil_layer);
-  r_R_V.resize(max_soil_layer);
-  r_R_V_sum.resize(max_soil_layer);
-
-  const double dz_sq = dz_ * dz_;
-  double vertical_resistance_sum = 0.0;
-  for (int i = 0; i < max_soil_layer; ++i) {
-    if(mass_root_prop[i] < 0){
-            util::stop("Root mass lower than 0");
-    }
-    const double root_mass = mass_root_prop[i];
-    if (root_mass == 0.0) {
-      r_R_H_min[i] = 0.0;
-      r_R_V[i] = 0.0;
-      r_R_V_sum[i] = vertical_resistance_sum;
-      continue;
-    }
-
-    const double c_r_v = root_mass / 3.0;
-    const double c_r_h = root_mass * 2.0 / 3.0;
-    c_r_V_[i] = c_r_v;
-    c_r_H_[i] = c_r_h;
-
-    // Set horizantal minimum resistance per soil layer (i.e. reciprocal of maximum conductance).
-    r_R_H_min[i] = beta_R_H / c_r_h;
-    // The vertical conductivity is likely linearly proportional to the root area projected onto the horizontal plane, hence dz^2.
-    r_R_V[i] = beta_R_V * dz_sq / c_r_v;
-    vertical_resistance_sum += r_R_V[i];
-    r_R_V_sum[i] = vertical_resistance_sum;
-  }
-
-  // Set up vector of root water uptake from layer
-  soil_consumption_.resize(soil_number_of_depths_, 0.0);
+  // Set up vector of root water uptake from layer. Stays on Leaf: plant writes
+  // the crown-integrated value back into leaf.soil_consumption_ by name.
+  soil_consumption_.resize(roots_.soil_number_of_depths_, 0.0);
 
   // Soil-moisture state for the Medlyn beta_ stress factor (develop #450). The
   // root-water compute path does not use these; they make the standalone,
@@ -788,12 +684,14 @@ inline void Leaf::set_physiology(double area_leaf, const std::vector<double>& ma
 //
 //   * SIGNED (negative) potentials -- the soil -> root-collar transport.
 //     psi_soil arrives as positive magnitudes and is flipped once into
-//     psi_soil_inverted_ (<= 0). From there P_x_r, the find_root_psi / E_column
+//     roots_.psi_soil_inverted_ (<= 0). From there P_x_r, the find_root_psi /
+//     E_column
 //     root variable `x`, find_psi_stem_from_psi_root's psi_root, and
 //     transpiration_to_psi_stem's psi_upstream are all SIGNED (<= 0). The
 //     physics here uses real signed gradients (psi_soil - P_x_r - gravity*z).
 //     The vulnerability splines take a magnitude, so these sites flip back with
-//     a leading `-` (e.g. root_vuln_from_psi.eval(-P_src_min)).
+//     a leading `-` (e.g. roots_.root_vuln_from_psi.eval(-P_src_min)). The
+//     supply side of this convention now lives in roots.hpp, which restates it.
 //
 //   * POSITIVE magnitudes -- the root-collar -> leaf supply. transpiration(),
 //     proportion_of_conductivity, hydraulic_cost_TF, psi_stem_to_ci,
@@ -813,210 +711,6 @@ inline void Leaf::set_physiology(double area_leaf, const std::vector<double>& ma
 //     -root_zero_E so the aux never flips sign by code path.
 // ===========================================================================
 //
-// ---------------------------------------------------------------------------
-// SOIL -> ROOT-COLLAR WATER TRANSPORT
-// ---------------------------------------------------------------------------
-// Scientific model (after Potkay et al. 2021; prototyped in
-// vignettes/models/root_water_uptake.Rmd as E_from_Soil_to_Root_Collar):
-//
-// The root system is represented as a set of parallel soil layers, each
-// connected to a single root collar (the point where roots join the stem).
-// Within each layer i, water flows from soil to collar driven by the water
-// potential gradient (psi_soil[i] - P_x_r), corrected for the gravitational
-// head needed to lift water to the layer midpoint (gravity_head * z_soil_mid).
-//
-// The hydraulic resistance of each layer is the sum of two terms:
-//   * r_R_H : horizontal (intra-layer, soil->root) resistance. Set during
-//             set_physiology as r_R_H_min[i] / f_r, where r_R_H_min scales
-//             with the carbon invested in horizontal roots and f_r is the
-//             fractional loss of conductivity from the root vulnerability
-//             curve at the operating potential.
-//   * r_R_V : vertical (inter-layer, along the root axis to the collar)
-//             resistance, accumulated from the surface down to layer i
-//             (r_R_V_sum). It scales with dz^2 / carbon-in-vertical-roots.
-//
-// Because the root vulnerability curve f_r is non-linear in psi, the
-// horizontal resistance is evaluated using the *average* fractional
-// conductivity over the potential interval spanned between the soil and the
-// collar (P_src_min..P_src_max). This mean is obtained as
-// (1/(b-a)) * integral_a^b f_r dpsi from a pre-integrated curve
-// (root_vuln_integral_from_psi) with two spline evals, the same technique used
-// for stem transpiration in setup_transpiration.
-//
-// Output: E_up_ = total water drawn from all layers to the collar
-//                 (converted to kg H2O m^-2 leaf s^-1), and soil_consumption_[i]
-//                 = per-layer uptake (mol H2O m^-2 leaf s^-1). Negative E_i in a
-//                 layer means that layer is *gaining* water (hydraulic redistribution).
-//
-// Implementation decisions:
-//   * f_r and its running integral are read from pre-computed splines
-//     (root_vuln_from_psi, root_vuln_integral_from_psi) instead of repeatedly
-//     evaluating exp(-(psi/b)^c); see setup_root_vulnerability.
-//   * Two special cases are handled exactly to avoid division/round-off issues:
-//     (a) collar potential equals layer potential, and (b) the gradient
-//     exactly balances gravity (E_i = 0).
-//   * Extensive isfinite() guards are present because this function is called
-//     from within nested root-finders where bad brackets can produce NaNs;
-//     they fail fast with diagnostic context rather than propagating NaN.
-//
-// This function calculates the total transpiration from the soil based on the
-// root collar pressure and the respective soil layer pressures
-inline void Leaf::E_from_Soil_to_Root_Collar(double P_x_r, const std::vector<double>& psi_soil){
-
-    if (!std::isfinite(P_x_r) || !std::isfinite(area_leaf_)) {
-      util::stop("E_from_Soil_to_Root_Collar invalid input; P_x_r=" + util::to_string(P_x_r) +
-                 "; area_leaf_=" + util::to_string(area_leaf_));
-    }
-
-    E_up_ = 0;
-
-    // area_leaf_ is constant across the whole solve; fold its reciprocal into a
-    // per-layer multiply instead of a per-layer division (1 fdiv/call vs 15).
-    const double inv_area_leaf = 1.0 / area_leaf_;
-
-    // Cumulative-integral spline caching (bit-identical fast path). The only two
-    // arguments ever passed to root_vuln_integral_from_psi in the loop below are
-    // -P_src_min and -hi_neg, each of which resolves to exactly one of
-    // {-psi_soil[i], -P_x_r, 0}. -P_x_r is constant across all layers (compute
-    // once), and -psi_soil[i] is constant across the whole solve (precomputed in
-    // find_root_collar_psi). We only take this path when psi_soil is the cached
-    // psi_soil_inverted_ vector; any other caller falls back to direct evals.
-    const bool use_integral_cache =
-        (&psi_soil == &psi_soil_inverted_) &&
-        root_vuln_integral_soil_.size() == static_cast<size_t>(max_soil_layer);
-    const double neg_P_x_r = -P_x_r;
-    const double G_at_P_x_r =
-        use_integral_cache ? root_vuln_integral_from_psi.eval(neg_P_x_r) : 0.0;
-
-    // GUARD POLICY (the per-layer isfinite/stop guards here were added while
-    // debugging the #485 drought-NaN, now fixed at source by the soil residual-
-    // moisture floor). Most were defensive and redundant, so they have been
-    // removed from this hot loop; the remaining two are load-bearing:
-    //   * the equal-potentials f_ri <= 0 check below: root_vuln_from_psi
-    //     LINEARLY extrapolates NEGATIVE beyond its domain, so a deep-drought
-    //     layer can produce negative conductivity -> negative-but-FINITE r_R ->
-    //     wrong-sign E_i that the post-loop isfinite(E_up_) net would NOT catch.
-    //   * the post-loop isfinite(E_up_) check: any non-finite produced anywhere
-    //     in the loop propagates into the sum and is caught there once per call.
-    // Everything else is provably safe to drop on the valid path: psi_soil is
-    // validated in set_physiology; P_src_min<=P_src_max by construction; the
-    // general-branch integral comes from a monotone-increasing spline so it is
-    // strictly > 0 (span>0), giving r_R>0 and finite E_i; and any stray NaN/Inf
-    // still reaches the post-loop net.
-    for(int i = 0; i < max_soil_layer; i++){
-
-    // Find the most negative soil potential out of the given soil layer and the root collar
-    double P_src_min = std::min(psi_soil[i], P_x_r);
-
-    // Find the least negative soil potential out of the given soil layer and the root collar
-    double P_src_max = std::max(psi_soil[i], P_x_r);
-
-     // If root collar soil water potential equals the soil water potential in a given layer
-    if(std::abs(P_x_r - psi_soil[i]) < 1e-8){
-
-      // Fraction of conductance in roots in a given layer at most negative soil water potential (but actually is equal to root collar)
-      // root_vuln_from_psi is a pre-built spline of exp(-(|psi|/b_root)^c_root)
-      double f_ri = root_vuln_from_psi.eval(-P_src_min);
-      if (!std::isfinite(f_ri) || f_ri <= 0.0) {
-        util::stop("E_from_Soil_to_Root_Collar invalid f_ri; layer=" + std::to_string(i) +
-                   "; f_ri=" + util::to_string(f_ri) +
-                   "; P_src_min=" + util::to_string(P_src_min) +
-                   "; P_x_r=" + util::to_string(P_x_r));
-      }
-
-      // Fraction of conductance in roots in a given layer at most negative soil water potential
-      double r_R_H = r_R_H_min[i] / f_ri; // [MPa * s * (mol H2O)^-1]
-
-      // Total root resistance (horizantal plus vertical)
-      double r_R = r_R_H + r_R_V_sum[i];
-
-      // Transpiration is equivalent to gravitational water loss (i.e. layer gains water)
-      double E_i = -grav_head_z_[i] * inv_area_leaf / r_R ;
-
-      soil_consumption_[i] = E_i;
-      E_up_ += E_i;
-
-    }
-    else if(std::abs((psi_soil[i] - P_x_r) - grav_head_z_[i]) < 1e-8){
-      // If pressure difference perfectly balances gravity transpiration is equal to zero
-      double E_i = 0.0; // [mol H2O / m^2 / s]
-      
-      soil_consumption_[i] = E_i;
-
-      E_up_ += E_i;
-
-    } else{
-
-      // Mean fractional root conductivity over the potential interval
-      // [P_src_min, P_src_max], i.e. (1/(b-a)) * integral_a^b f_r dpsi.
-      // Computed from the pre-integrated curve G(m) = integral_0^m f_r(s) ds
-      // (root_vuln_integral_from_psi, indexed by magnitude m = -psi) with 2
-      // evals instead of the old (n+1)-point sample mean. The interval is split
-      // at psi = 0: for psi > 0 (above-atmospheric) vulnerability is 1.
-      double hi_neg = std::min(P_src_max, 0.0); // boundary of the psi<=0 part
-      double lo_pos = std::max(P_src_min, 0.0); // boundary of the psi>0 part
-
-      // Memoised cumulative-integral lookup. Returns the exact same double the
-      // spline would (same input -> same output); the comparisons select the
-      // precomputed value because -P_src_min / -hi_neg are bit-for-bit equal to
-      // one of the cached arguments in the common (psi<=0) case.
-      const double neg_psi_soil_i = -psi_soil[i];
-      auto G_integral = [&](double arg) -> double {
-        if (use_integral_cache) {
-          if (arg == neg_P_x_r) return G_at_P_x_r;
-          if (arg == neg_psi_soil_i) return root_vuln_integral_soil_[i];
-        }
-        return root_vuln_integral_from_psi.eval(arg);
-      };
-
-      double integral = 0.0;
-      if (hi_neg > P_src_min) {
-        // psi<=0 part: magnitude m runs from -hi_neg up to -P_src_min
-        integral += G_integral(-P_src_min) - G_integral(-hi_neg);
-      }
-      if (P_src_max > lo_pos) {
-        // psi>0 part: f_r == 1 over its length
-        integral += (P_src_max - lo_pos);
-      }
-
-    // span = P_src_max - P_src_min > 0 here (the equal-potentials case is
-    // handled in the branch above). integral comes from the monotone-increasing
-    // cumulative-vulnerability spline so it is strictly > 0 over a span>0
-    // interval; forming r_R_H as r_R_H_min * span / integral is one division
-    // (vs the old f_r_average = integral/span then r_R_H_min/f_r_average two),
-    // and needs no per-layer finiteness guard (any stray NaN/Inf propagates to
-    // the post-loop isfinite(E_up_) net).
-    const double span = P_src_max - P_src_min;
-
-    // Find the horizantal resistance in a given layer by dividing the minimum resistance (i.e. maximum conductivity) by the fractional loss of conductivity
-    double r_R_H = r_R_H_min[i] * span / integral; // [MPa * s * (mol H2O)^-1]
-
-    // Find the total resistance in a given layer by adding the vertical resistance in that layer
-    double r_R = r_R_H + r_R_V_sum[i]; // [MPa * s * (mol H2O)^-1]
-
-    // Transpiration is equal to the potentail gradient between the root collar and the soil, accounting for gravitational potential
-    double E_i = (psi_soil[i] - P_x_r - grav_head_z_[i]) * inv_area_leaf / r_R; // [mol H2O / m^2 / s]
-
-    soil_consumption_[i] = E_i;
-    E_up_ += E_i;
-
-    }
-  }
-  // Convert the summed uptake to kg H2O m^-2 s^-1, consistent with the rest of
-  // the leaf model and environment. NOTE (review #10): only the aggregate E_up_
-  // is converted to kg here; the per-layer soil_consumption_[i] above is left in
-  // mol H2O m^-2 s^-1 and converted downstream in TF24_Strategy::compute_rates.
-  // The two siblings therefore carry different units by design.
-  E_up_ = E_up_ * kg_per_mol_h2o;
-  if (!std::isfinite(E_up_)) {
-    util::stop("E_from_Soil_to_Root_Collar non-finite E_up_; P_x_r=" + util::to_string(P_x_r) +
-               "; max_soil_layer=" + std::to_string(max_soil_layer) +
-               "; area_leaf_=" + util::to_string(area_leaf_));
-  }
-}
-
-
-
 // This function is used to find root collar pressure which equilibrates the soil-root-stem water continuuum
 inline double Leaf::E_column(double x, const std::vector<double>& psi_soil, double psi_leaf) {
 
@@ -1125,7 +819,7 @@ inline double Leaf::find_psi_stem_from_psi_root(double psi_root, const std::vect
 //   * maximum possible assimilation (at ci = ca) is negative.
 //
 // Implementation note: psi_soil arrives as positive magnitudes and is used
-// here as negative potentials, hence psi_soil_inverted_. The GSS reuses one
+// here as negative potentials, hence roots_.psi_soil_inverted_. The GSS reuses one
 // profit evaluation per iteration (golden ratio) to halve function calls, and
 // a collapsed-interval branch handles the degenerate single-feasible-point case.
 // Shut-down operating point shared by find_root_collar_psi's early-exits: the
@@ -1147,22 +841,11 @@ inline void Leaf::set_shutdown_state(double root_collar) {
 // collar-potential interval (positive magnitudes) otherwise.
 inline bool Leaf::prepare_collar_solve(double& bound_a, double& bound_b){
 
-  // psi_soil_ arrives as positive magnitudes; flip once to the signed (negative)
-  // potential convention used throughout the soil->collar transport (see the
-  // sign-conventions block above E_from_Soil_to_Root_Collar).
-  psi_soil_inverted_.resize(max_soil_layer);
-  // Precompute the soil-side cumulative-integral lookups once per solve; the
-  // argument fed to the spline in E_from_Soil_to_Root_Collar when the soil layer
-  // is the selected endpoint is exactly -psi_soil_inverted_[i].
-  root_vuln_integral_soil_.resize(max_soil_layer);
-  double wettest_soil_layer = -std::numeric_limits<double>::infinity();
-  for (int i = 0; i < max_soil_layer; ++i) {
-    const double psi_inverted = -psi_soil_[i];
-    psi_soil_inverted_[i] = psi_inverted;
-    root_vuln_integral_soil_[i] =
-        root_vuln_integral_from_psi.eval(-psi_inverted);
-    wettest_soil_layer = std::max(wettest_soil_layer, psi_inverted);
-  }
+  // Hand the supply path the start of a solve: it flips psi_soil_ from positive
+  // magnitudes into the signed (negative) convention used throughout the
+  // soil->collar transport, builds its per-solve caches, and reports back the
+  // wettest layer, which is the bracket endpoint everything below needs.
+  const double wettest_soil_layer = roots_.begin_solve();
 
   // Avoid loop if the wettest psi layer is drier than psi_crit in stem, transpiration not possible and so all variables set to
   // shut down
@@ -1172,16 +855,16 @@ inline bool Leaf::prepare_collar_solve(double& bound_a, double& bound_b){
     return false;
   }
 
-if(E_column(-psi_crit, psi_soil_inverted_, psi_crit) < 0){
+if(E_column(-psi_crit, roots_.psi_soil_inverted_, psi_crit) < 0){
       // root_collar_psi_ is reported as a signed (negative) potential, so store
       // -root_psi_crit rather than the positive magnitude root_psi_crit.
-      set_shutdown_state(-root_psi_crit);
+      set_shutdown_state(-roots_.root_psi_crit);
       return false;
 }
 
   // Avoid loop if the wettest psi layer is drier than psi_crit in stem, transpiration not possible and so all variables set to
   // shut down
-double root_crit = find_root_psi(wettest_soil_layer, psi_soil_inverted_, 1);
+double root_crit = find_root_psi(wettest_soil_layer, roots_.psi_soil_inverted_, 1);
 
 // If root crit would have to be larger than psi crit, also avoid loop as above
 
@@ -1191,7 +874,7 @@ double root_crit = find_root_psi(wettest_soil_layer, psi_soil_inverted_, 1);
   }
 
 // Find root collar where transpiration from soil is 0
-double root_zero_E = find_root_psi(wettest_soil_layer, psi_soil_inverted_, 0);
+double root_zero_E = find_root_psi(wettest_soil_layer, roots_.psi_soil_inverted_, 0);
 
 // If assimilation would be less than 0 even at Ca, also end loop
 if(assim_max_ < 0){
@@ -1202,7 +885,7 @@ if(assim_max_ < 0){
     // other branch of this solver.
     opt_psi_stem_ = -root_zero_E;
     root_collar_psi_ = root_zero_E;
-    E_from_Soil_to_Root_Collar(root_collar_psi_, psi_soil_inverted_);
+    E_from_Soil_to_Root_Collar(root_collar_psi_, roots_.psi_soil_inverted_);
 
     profit_ = - R_d_ - hydraulic_cost_TF(-root_collar_psi_);
 
@@ -1217,13 +900,13 @@ if(assim_max_ < 0){
 
   // optimise for stem water potential
     bound_a = -root_zero_E;
-    bound_b = std::max(-root_crit,-root_psi_crit);
+    bound_b = std::max(-root_crit,-roots_.root_psi_crit);
 
     // If no interval exists (single feasible root-collar value), use that
     // point directly as the alternative solution instead of running GSS.
     if (std::abs(bound_b - bound_a) <= GSS_tol_abs) {
       const double opt_root_psi = 0.5 * (bound_a + bound_b);
-      const double psi_stem_single = find_psi_stem_from_psi_root(-opt_root_psi, psi_soil_inverted_);
+      const double psi_stem_single = find_psi_stem_from_psi_root(-opt_root_psi, roots_.psi_soil_inverted_);
 
       if (!std::isfinite(psi_stem_single)) {
         util::stop("Error: non-finite psi_stem_single in collapsed-root interval; "
@@ -1277,12 +960,12 @@ inline void Leaf::find_root_collar_psi(){
     const double opt_root_psi = util::golden_section_max(
         [&](double bound) {
           const double psi_stem =
-              find_psi_stem_from_psi_root(-bound, psi_soil_inverted_);
+              find_psi_stem_from_psi_root(-bound, roots_.psi_soil_inverted_);
           return profit_psi_stem_TF(psi_stem, bound);
         },
         bound_a, bound_b, GSS_tol_abs);
 
-    opt_psi_stem_ = find_psi_stem_from_psi_root(-opt_root_psi, psi_soil_inverted_);
+    opt_psi_stem_ = find_psi_stem_from_psi_root(-opt_root_psi, roots_.psi_soil_inverted_);
 
     // store as the signed (negative) potential for a sign-consistent aux output;
     // profit_psi_stem_TF takes psi_upstream as a positive magnitude.
@@ -1327,7 +1010,7 @@ inline double Leaf::profit_at_collar_psi(double target_opt_root_psi,
     const double opt_root_psi =
         std::min(std::max(target_opt_root_psi, bound_a), bound_b);
 
-    opt_psi_stem_ = find_psi_stem_from_psi_root(-opt_root_psi, psi_soil_inverted_);
+    opt_psi_stem_ = find_psi_stem_from_psi_root(-opt_root_psi, roots_.psi_soil_inverted_);
     root_collar_psi_ = -opt_root_psi;
     profit_ = profit_psi_stem_TF(opt_psi_stem_, opt_root_psi);
 
@@ -1358,7 +1041,7 @@ inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi) {
   const double gstar_Pa = gamma_ * umol_per_mol_to_Pa;
 
   // Operating point in double.
-  const double psi_stem = find_psi_stem_from_psi_root(-psi, psi_soil_inverted_);
+  const double psi_stem = find_psi_stem_from_psi_root(-psi, roots_.psi_soil_inverted_);
   const double ci = psi_stem_to_ci(psi_stem, psi);
   if (!std::isfinite(psi_stem) || !std::isfinite(ci)) {
     return 0.0;  // shut-down / infeasible: no informative gradient
@@ -1400,10 +1083,10 @@ inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi) {
   // E_up_'(r) is analytic (dE_from_soil_dpsi_collar); near a branch kink it
   // returns NaN and we fall back to the central difference on the transport.
   const double r = -psi;
-  const double dEup_dr = dE_from_soil_dpsi_collar(r, psi_soil_inverted_);
+  const double dEup_dr = dE_from_soil_dpsi_collar(r, roots_.psi_soil_inverted_);
   double dpsistem_dpsi;
   if (std::isfinite(dEup_dr)) {
-    E_from_Soil_to_Root_Collar(r, psi_soil_inverted_);  // refresh E_up_ at r
+    E_from_Soil_to_Root_Collar(r, roots_.psi_soil_inverted_);  // refresh E_up_ at r
     const double E_psi_stem =
         E_up_ / leaf_specific_conductance_max_ + transpiration_from_psi.eval(psi);
     const double dEpsistem_dpsi =
@@ -1412,82 +1095,12 @@ inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi) {
   } else {
     const double h = 1e-6;
     dpsistem_dpsi =
-        (find_psi_stem_from_psi_root(-(psi + h), psi_soil_inverted_) -
-         find_psi_stem_from_psi_root(-(psi - h), psi_soil_inverted_)) / (2.0 * h);
+        (find_psi_stem_from_psi_root(-(psi + h), roots_.psi_soil_inverted_) -
+         find_psi_stem_from_psi_root(-(psi - h), roots_.psi_soil_inverted_)) / (2.0 * h);
   }
 
   const double dci_dpsi = dci_dpsistem * dpsistem_dpsi + dci_dpsi_expl;
   return A_prime * dci_dpsi - C_prime * dpsistem_dpsi;
-}
-
-// Analytic d(E_up_)/d(P_x_r): the signed-collar-potential derivative of the
-// soil->root-collar uptake, mirroring the general branch of
-// E_from_Soil_to_Root_Collar. Per layer, with span = |psi_soil[i] - P_x_r| and
-// integral = \int f_r over [P_src_min, P_src_max] (the cumulative-vulnerability
-// curve root_vuln_integral_from_psi, whose integrand is root_vuln_from_psi):
-//   E_i        = (psi_soil[i] - P_x_r - grav) / area_leaf / r_R,
-//   r_R        = r_R_H_min[i] * span / integral + r_R_V_sum[i],
-//   dspan/dP   = sign_var   (+1 if P_x_r is the upper bound, else -1),
-//   dinteg/dP  = sign_var * f_r(-P_x_r)  for P_x_r<0  (else sign_var, f_r==1),
-// and dE_i/dP follows by the quotient rule. Returns NaN on any branch kink so
-// the caller falls back to finite differences.
-inline double Leaf::dE_from_soil_dpsi_collar(double P_x_r, const std::vector<double>& psi_soil) {
-  const double inv_area_leaf = 1.0 / area_leaf_;
-  const double kink_tol = 1e-8;
-  double dEup_dr_mol = 0.0;
-
-  for (int i = 0; i < max_soil_layer; i++) {
-    // Branch kinks: equal potentials, gravity-balance, and the psi==0 split of
-    // the vulnerability integral. The analytic general-branch derivative is not
-    // valid across these, so signal a fallback.
-    if (std::abs(P_x_r - psi_soil[i]) < kink_tol ||
-        std::abs((psi_soil[i] - P_x_r) - grav_head_z_[i]) < kink_tol ||
-        std::abs(P_x_r) < kink_tol) {
-      return std::numeric_limits<double>::quiet_NaN();
-    }
-
-    const double P_src_min = std::min(psi_soil[i], P_x_r);
-    const double P_src_max = std::max(psi_soil[i], P_x_r);
-    const double span = P_src_max - P_src_min;
-    const double sign_var = (P_x_r > psi_soil[i]) ? 1.0 : -1.0;  // = dspan/dP_x_r
-
-    // integral, replicated bit-for-bit from E_from_Soil_to_Root_Collar.
-    const double hi_neg = std::min(P_src_max, 0.0);
-    const double lo_pos = std::max(P_src_min, 0.0);
-    double integral = 0.0;
-    if (hi_neg > P_src_min) {
-      integral += root_vuln_integral_from_psi.eval(-P_src_min) -
-                  root_vuln_integral_from_psi.eval(-hi_neg);
-    }
-    if (P_src_max > lo_pos) {
-      integral += (P_src_max - lo_pos);
-    }
-
-    // d(integral)/d(P_x_r): for P_x_r<0 the moving bound is in the vulnerable
-    // region. The integrand is the derivative of the *same* cumulative spline
-    // that produced `integral` (root_vuln_integral_from_psi.deriv), NOT the
-    // separate root_vuln_from_psi spline: the two agree on the knot domain but
-    // extrapolate independently (both clamp-to-last-value, #527), so beyond the
-    // domain only the integral spline's own derivative stays consistent with its
-    // value. For P_x_r>0 the moving bound is in the above-atmospheric part
-    // (f_r==1), contributed linearly, so the slope is 1.
-    const double fr_at =
-        (P_x_r < 0.0) ? root_vuln_integral_from_psi.deriv(-P_x_r) : 1.0;
-    const double dinteg_dr = sign_var * fr_at;
-
-    const double r_R_H = r_R_H_min[i] * span / integral;
-    const double r_R = r_R_H + r_R_V_sum[i];
-    const double dr_R_H_dr =
-        r_R_H_min[i] * (sign_var * integral - span * dinteg_dr) / (integral * integral);
-    const double dr_R_dr = dr_R_H_dr;
-
-    const double num = (psi_soil[i] - P_x_r - grav_head_z_[i]) * inv_area_leaf;
-    const double dnum_dr = -inv_area_leaf;
-    // E_i = num / r_R  ->  quotient rule.
-    dEup_dr_mol += (dnum_dr * r_R - num * dr_R_dr) / (r_R * r_R);
-  }
-
-  return dEup_dr_mol * kg_per_mol_h2o;  // match E_up_'s kg units
 }
 
 inline double Leaf::arrh_curve(double Ea, double ref_value, double leaf_temp) const {
@@ -1550,54 +1163,6 @@ inline double Leaf::proportion_of_conductivity(double psi) const {
   return exp(-pow((psi / b), c));
 }
 
-// Build the knot grid {0, step, 2*step, .., <= psi_max} (psi_max = the potential
-// magnitude at which conductivity drops to 1%, step = psi_max/resolution) and
-// the cumulative vulnerability integral
-//   G(m) = int_0^m exp(-(s/b)^c) ds = (b/c) * gamma_lower(1/c, (m/b)^c)
-// (lower incomplete gamma) seeded from this closed form. Seeding knots with the
-// closed form instead of a running trapezoid sum removes the dominant quadrature
-// bias at no hot-path cost -- same knots, same tk::spline, same O(1) eval. See
-// issue #468 and scripts/validate_gamma_transform.R.
-//
-// Shared by setup_transpiration (xylem) and setup_root_vulnerability (roots);
-// each caller wires the resulting knots into its own interpolator(s).
-inline void Leaf::build_cumulative_vulnerability_integral(double b, double c,
-                                                   double resolution,
-                                                   std::vector<double>& x,
-                                                   std::vector<double>& y_integral) {
-  x = std::vector<double>{0.0};
-  y_integral = std::vector<double>{0.0}; // G(0) = 0
-  double psi_max = b * pow(log(1.0 / 0.01), 1.0 / c);
-  double step = psi_max / resolution;
-  for (double psi = step; psi <= psi_max; psi += step) {
-    x.push_back(psi);
-    y_integral.push_back((b / c) *
-                         boost::math::tgamma_lower(1.0 / c, pow(psi / b, c)));
-  }
-}
-
-// pre-compute root vulnerability curve f(psi) = exp(-(|psi|/b_root)^c_root) as a spline,
-// evaluated over the range [0, psi_max_root] where conductivity drops to 1%.
-// This avoids repeated exp(pow(...)) calls inside E_from_Soil_to_Root_Collar.
-inline void Leaf::setup_root_vulnerability(double resolution) {
-  std::vector<double> x_psi_root, y_integral;
-  build_cumulative_vulnerability_integral(root_b, root_c, resolution,
-                                          x_psi_root, y_integral);
-
-  // f_r conductivity knots on the same grid. f_r(0) = exp(-pow(0,root_c)) = 1.
-  std::vector<double> y_f_r(x_psi_root.size());
-  for (size_t i = 0; i < x_psi_root.size(); ++i) {
-    y_f_r[i] = exp(-pow(x_psi_root[i] / root_b, root_c));
-  }
-  root_vuln_from_psi.init(x_psi_root, y_f_r);
-  root_vuln_from_psi.set_extrapolate(true); // clamp to last value beyond range
-
-  root_vuln_integral_from_psi.init(x_psi_root, y_integral);
-  // linear extrapolation beyond range: slope ~= f_r at the tail (~1%), so the
-  // integral keeps growing consistently with the clamped-conductivity tail.
-  root_vuln_integral_from_psi.set_extrapolate(true);
-}
-
 // set spline for proportion of conductivity
 inline void Leaf::setup_transpiration(double resolution) {
   std::vector<double> x_psi_, y_cumulative_transpiration_;
@@ -1628,7 +1193,7 @@ inline double Leaf::transpiration_full_integration(double psi_stem, double psi_u
 //calculates supply-side transpiration from psi_stem and root_collar_psi_, returns kg h20 s^-1 m^-2 LA
 // SIGN: psi_stem and psi_upstream are POSITIVE magnitudes here (passed straight
 // to the spline). Contrast transpiration_to_psi_stem below. See the sign-
-// conventions block above E_from_Soil_to_Root_Collar.
+// conventions block above.
 inline double Leaf::transpiration(double psi_stem, double psi_upstream) {
 
   // 1-entry memo: identical (psi_stem, psi_upstream) is requested several times
@@ -1857,7 +1422,7 @@ inline double Leaf::marginal_cost_water_multilayer() {
   // returns a negative number. S in the identity below is a conductance, i.e. the
   // positive magnitude -- hence the negation. Getting this backwards makes
   // lambda_multi come out negative, which is how it was caught.
-  const double S = -dE_from_soil_dpsi_collar(root_collar_psi_, psi_soil_inverted_);
+  const double S = -dE_from_soil_dpsi_collar(root_collar_psi_, roots_.psi_soil_inverted_);
   if (!std::isfinite(S) || S <= 0.0) {
     return util::na_value;
   }
@@ -1912,14 +1477,14 @@ double benefit_ = assim_colimited_;
 // need docs on Golden Section Search.
 inline void Leaf::optimise_psi_stem_Sperry() {
 
-    if (!(psi_soil_.size() == 1)) {
+    if (!(roots_.psi_soil_.size() == 1)) {
     util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
   }
 
-  opt_psi_stem_ = psi_soil_[0];
+  opt_psi_stem_ = roots_.psi_soil_[0];
 
 
-  if ((PPFD_ < 1.5e-8 )| (psi_soil_[0] > psi_crit)){
+  if ((PPFD_ < 1.5e-8 )| (roots_.psi_soil_[0] > psi_crit)){
     profit_ = 0;
     transpiration_ = 0;
     stom_cond_CO2_ = 0;
@@ -1931,8 +1496,8 @@ inline void Leaf::optimise_psi_stem_Sperry() {
   // objective; we minimise -profit and recover the maximum from neg_profit_opt.
     double neg_profit_opt = 0.0;
     opt_psi_stem_ = util::brent_fmin(
-        [&](double psi_stem) { return -profit_psi_stem_Sperry(psi_stem, psi_soil_[0]); },
-        psi_soil_[0], psi_crit, GSS_tol_abs, &neg_profit_opt);
+        [&](double psi_stem) { return -profit_psi_stem_Sperry(psi_stem, roots_.psi_soil_[0]); },
+        roots_.psi_soil_[0], psi_crit, GSS_tol_abs, &neg_profit_opt);
     profit_ = -neg_profit_opt;
 
   }
@@ -1940,14 +1505,14 @@ inline void Leaf::optimise_psi_stem_Sperry() {
 
 inline void Leaf::optimise_psi_stem_TF() {
 
-  if (!(psi_soil_.size() == 1)) {
+  if (!(roots_.psi_soil_.size() == 1)) {
     util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
   }
 
-  opt_psi_stem_ = psi_soil_[0];
+  opt_psi_stem_ = roots_.psi_soil_[0];
 
-  if (psi_soil_[0] > psi_crit){
-    profit_ = profit_psi_stem_TF(psi_soil_[0], psi_soil_[0]);
+  if (roots_.psi_soil_[0] > psi_crit){
+    profit_ = profit_psi_stem_TF(roots_.psi_soil_[0], roots_.psi_soil_[0]);
     return;
   }
 
@@ -1955,8 +1520,8 @@ inline void Leaf::optimise_psi_stem_TF() {
   // (minimise -profit), matching find_root_collar_psi's multi-layer solver.
     double neg_profit_opt = 0.0;
     opt_psi_stem_ = util::brent_fmin(
-        [&](double psi_stem) { return -profit_psi_stem_TF(psi_stem, psi_soil_[0]); },
-        psi_soil_[0], psi_crit, GSS_tol_abs, &neg_profit_opt);
+        [&](double psi_stem) { return -profit_psi_stem_TF(psi_stem, roots_.psi_soil_[0]); },
+        roots_.psi_soil_[0], psi_crit, GSS_tol_abs, &neg_profit_opt);
     profit_ = -neg_profit_opt;
 
     return;

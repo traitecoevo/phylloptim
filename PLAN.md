@@ -32,7 +32,7 @@ where 10a, 10b, 10c and the shutdown fix sit.
 
 | issue | item | what | note |
 |---|---|---|---|
-| [#2](https://github.com/traitecoevo/leaf_cpp/issues/2) | 7b | Extract the soil/root supply path behind an interface | **do first** — #3, the multi-layer λ, and `kmax(h)` all sit on top. Design question settled: **no template needed**, use `std::variant`; measured, see 7b |
+| [#2](https://github.com/traitecoevo/leaf_cpp/issues/2) | 7b | Extract the soil/root supply path behind an interface | **do first** — #3, the multi-layer λ, and `kmax(h)` all sit on top. Design settled: **no template needed**, use `std::variant`; measured, see 7b. **Stage 1 (the pure move) is done**: `leaf/roots.hpp`, golden bit-identical, 1.7% slower. Stages 2–4 remain, and stage 4 (plant's YAML) must land *with* the merge |
 | [#3](https://github.com/traitecoevo/leaf_cpp/issues/3) | 7a | Make λ(state) pluggable | needs #2 |
 | [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11 | Template `Leaf` on its scalar type | deletes the hand-maintained AD replicas |
 | [#5](https://github.com/traitecoevo/leaf_cpp/issues/5) | 6 | R interface (RcppR6) | absorbs the `Control` struct and the dropped-field cleanup |
@@ -685,10 +685,44 @@ mid-refactor if it is not decided up front.
 Each stage is checkable bit-exactly against the golden file, which is the point
 of doing it in stages.
 
-1. **Pure move, no interface.** `MultiLayerRoots` as a plain member held by value,
-   `Leaf` forwarding to it. No variant, no virtual. This is where the cache and
-   pointer-identity risk lives, so it gets a commit to itself. Golden must be
-   bit-identical.
+1. **Pure move, no interface — DONE.** `MultiLayerRoots` as a plain member held by
+   value, `Leaf` forwarding to it. No variant, no virtual. Golden bit-identical
+   over all 288 points, 105/105 unit checks. What the stage actually taught, in
+   descending order of how much it will matter later:
+
+   * **A fifth trap, and the expensive one: moving a public member breaks
+     plant's *generated* RcppR6 glue.** 7b-i's inventory was written against this
+     package only. plant binds eleven of the moved fields with `access: field`,
+     which emits `obj_->psi_soil_` as both getter and setter into
+     `src/RcppR6.cpp`. The fix is one YAML line each
+     (`name_cpp: "roots_.psi_soil_"` — the template pastes it verbatim after
+     `->`, and the R-side name comes from the YAML key so it does not move), plus
+     two lines in `tf24_strategy.cpp` for the `z_soil_mid_` write. Cheap, but it
+     means **stage 4 is not optional and not last**: plant tracks this package's
+     `master` via `Remotes:`, so the merge is what breaks it. Land them together.
+   * **Trap 3 (pointer identity) was survivable, and is now half-defused.**
+     `&psi_soil == &psi_soil_inverted_` keeps its exact meaning after the move,
+     because the member and the test moved together and callers still pass the
+     member by reference. The hot path now goes through `roots_.uptake()`, which
+     takes an explicit cache flag; the identity test survives only in
+     `uptake_at()`, the arbitrary-vector entry point, so that the R-facing
+     `Leaf::E_from_Soil_to_Root_Collar` cannot change behaviour. It disappears
+     for good in stage 2, when `E_column` / `find_root_psi` stop threading a
+     `psi_soil` vector through at all.
+   * **Trap 1 (`soil_consumption_` / `E_up_`) held.** They stayed on `Leaf` and
+     are handed to `uptake` by reference, as recommended. No friction.
+   * **It costs 1.7%** (3.53 vs 3.47 µs/solve, interleaved ×3 at reps=2000),
+     with no dispatch added yet. Not attributed: `uptake_impl` is still
+     out-of-line, as `E_from_Soil_to_Root_Collar` was, but its argument list went
+     from 2 (+`this`) to 6, and it is called ~10³ times per solve. That is the
+     leading candidate, not a measured cause. One hypothesis was tested and
+     **refuted**: accumulating `E_up` into a local to break the assumed aliasing
+     with the `soil_consumption` buffer changed nothing, so it was reverted
+     rather than kept on a story it did not earn.
+   * **Budget note for stage 2.** The +2.6% predicted for `std::variant` was
+     measured against the *old* structure. If it stacks, stage 2 lands around
+     +4.3% total. That is still inside the band the closed-form path (6.3×/27×)
+     dwarfs, but say the number rather than discovering it.
 2. **Introduce the concept.** `std::variant<MultiLayerRoots, SinglePotential>` and
    the four methods (`begin_solve`, `uptake`, `duptake_dpsi`, plus per-layer
    output access). Golden still bit-identical. Re-run `make bench` — the
