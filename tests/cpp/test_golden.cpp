@@ -164,8 +164,14 @@ struct Tolerance {
   double argmax;  // everything else: evaluated at the optimum's LOCATION
 };
 const Tolerance kExact{-1.0, -1.0};
-// profit differs by <= 2.1e-7 across platforms and psi_stem et al by <= 4.5e-4.
-// These leave ~50x and ~10x headroom respectively.
+// Measured over the full grid on Linux (gcc worst; clang is smaller): profit
+// 1.85e-6, argmax-derived 5.53e-4. That leaves 5.4x and 9.0x headroom.
+//
+// The profit tolerance is deliberately not loosened further despite the modest
+// headroom: 1e-4 is the scale at which a real behavioural change shows (PLAN.md
+// item 1), so a profit tolerance approaching it would gate nothing. If a future
+// toolchain pushes profit past 1e-5, that is worth looking at rather than
+// auto-passing.
 const Tolerance kCrossPlatform{1e-5, 5e-3};
 
 // `profit` is the only reported field that is the maximum itself; every other
@@ -340,21 +346,26 @@ int compare(Tolerance tol) {
 // platform is NOT the fix -- it just moves the failure to the first one.
 //
 // The interesting part is the SIZE of the disagreement, because it is not one
-// number. Measured on Linux against this file, the nine reported fields split
+// number. Measured over the full grid on Linux, the nine reported fields split
 // into two classes three orders of magnitude apart:
 //
-//     profit                       <= 2.1e-07
+//                                   gcc        clang
+//     profit                        1.85e-06   5.87e-07
 //     psi_stem, collar, ci, assim,
 //     transpiration, gc, e_up,
-//     uptake                       <= 4.5e-04
+//     uptake                        5.53e-04   2.73e-04
 //
 // That split is structural, not luck. `find_root_collar_psi` maximises profit
-// over the collar potential, and the maximum is FLAT: measured curvature k ~ 1.0
-// in profit ~ p* - k(psi_stem - x*)^2. For a flat maximum, an error dp in the
-// profit VALUE displaces the ARGMAX by sqrt(dp/k) -- so a well-conditioned 2e-7
-// difference in profit becomes an ill-conditioned 4.5e-4 difference in the
-// argmax and in everything evaluated there. sqrt(2.1e-7) = 4.6e-4, which is the
-// observed figure; no fitting required.
+// over the collar potential, and the maximum is FLAT: curvature k measured
+// directly at the two worst operating points gives k = 1.0 and 0.9 in
+// profit ~ p* - k(psi_stem - x*)^2. For a flat maximum, an error dp in the
+// profit VALUE displaces the ARGMAX by sqrt(dp/k), which is why a
+// well-conditioned profit sits three orders below an ill-conditioned argmax.
+//
+// The relation was checked pointwise, not as a global identity: at the two worst
+// points the residuals imply k = 1.01 and 1.70, against the 1.0 and 0.9 measured
+// from the curvature directly. Do NOT expect sqrt(worst profit) to equal the
+// worst argmax difference -- the two maxima occur at different operating points.
 //
 // Two consequences worth keeping in mind beyond this file:
 //

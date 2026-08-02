@@ -62,9 +62,9 @@ jobs:
       # loosening: libm's exp/pow are not bit-reproducible between glibc on
       # x86-64 and Apple's libm on arm64, so bit-exactness across platforms was
       # never achievable. Measured, the fields split into two classes -- profit
-      # (the maximum) at 2.1e-7, and everything derived from the argmax at 4.5e-4,
-      # because the profit maximum is flat and displacing it goes as sqrt. See the
-      # comment above main() in tests/cpp/test_golden.cpp.
+      # (the maximum) at 1.85e-6, and everything derived from the argmax at
+      # 5.53e-4, because the profit maximum is flat and displacing it goes as
+      # sqrt. See the comment above main() in tests/cpp/test_golden.cpp.
       - name: Resolve golden comparison mode
         id: golden
         run: |

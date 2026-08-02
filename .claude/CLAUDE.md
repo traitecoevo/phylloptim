@@ -79,15 +79,19 @@ achievable. CI compares bit-exactly on macOS and with `--cross-platform` elsewhe
 not one number.** The nine reported fields split into two classes three orders of
 magnitude apart:
 
-| field | worst cross-platform | why |
-|---|---|---|
-| `profit` | 2.1e-07 | it is the maximum itself — well-conditioned |
-| the other eight | 4.5e-04 | evaluated at the **argmax** — sqrt-amplified |
+| field | gcc | clang | why |
+|---|---|---|---|
+| `profit` | 1.85e-06 | 5.87e-07 | it is the maximum itself — well-conditioned |
+| the other eight | 5.53e-04 | 2.73e-04 | evaluated at the **argmax** — sqrt-amplified |
 
-The maximum is *flat*: measured curvature k ≈ 1.0 in `profit ≈ p* − k(psi_stem−x*)²`.
-For a flat maximum an error `dp` in the profit **value** displaces its **location**
-by `sqrt(dp/k)`, so a well-conditioned 2.1e-7 becomes 4.5e-4 — and indeed
-`sqrt(2.1e-7) = 4.6e-4`, matching the observed figure with no fitting.
+The maximum is *flat*: curvature measured directly at the two worst points gives
+k ≈ 1.0 and 0.9 in `profit ≈ p* − k(psi_stem−x*)²`. For a flat maximum an error
+`dp` in the profit **value** displaces its **location** by `sqrt(dp/k)`, which is
+why the well-conditioned column sits three orders below the other. Checked
+pointwise — at those points the residuals imply k = 1.01 and 1.70 against the 1.0
+and 0.9 measured from the curvature. It is *not* a global identity: the two column
+maxima fall at different operating points, so `sqrt(worst profit)` is not meant to
+reproduce `worst argmax`.
 
 Two things follow that matter beyond this file:
 
@@ -99,11 +103,17 @@ Two things follow that matter beyond this file:
   shows — but that is reproducibility, not determinacy. Don't read a bit-identical
   `opt_psi_stem_` as meaning the argmax is known to 17 digits.
 
-⚠️ An earlier version of this note said the worst cross-platform difference was
-1.7e-15 (13 ULP). **That was wrong.** It came from the 20 lines `test_golden`
-prints before truncating, which happened to be the well-conditioned ones — reading
-a truncated failure list as if it were the distribution. `test_golden` now always
-reports the worst value per class, precisely so that cannot recur.
+⚠️ **The numbers above were wrong twice, the same way both times.** First this note
+said the worst cross-platform difference was 1.7e-15 (13 ULP); then, after that was
+caught, 2.1e-07 and 4.5e-04. Both came from the 20 lines `test_golden` prints
+before it truncates — reading a truncated failure list as if it were the
+distribution. The truncated sample is biased toward whichever operating points
+happen to be listed first, which is not a random draw.
+
+The figures in the table are the full-grid maxima CI now prints on every run. The
+per-class reporting exists so the number never has to be inferred from the printed
+failures again — **if you need a magnitude, read the summary line, not the FAIL
+lines.**
 
 **Never regenerate the golden file to make another platform pass.** It just moves
 the failure to the platform the file came from.

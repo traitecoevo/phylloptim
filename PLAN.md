@@ -102,21 +102,25 @@ achievable; the file's real job only ever needed bit-exactness on *one* platform
 
 The magnitudes split cleanly into two classes:
 
-| field | worst cross-platform |
-|---|---|
-| `profit` | 2.1e-07 |
-| `psi_stem`, `collar`, `ci`, `assim`, `transpiration`, `gc`, `e_up`, `uptake` | 4.5e-04 |
+| field | gcc | clang |
+|---|---|---|
+| `profit` | 1.85e-06 | 5.87e-07 |
+| `psi_stem`, `collar`, `ci`, `assim`, `transpiration`, `gc`, `e_up`, `uptake` | 5.53e-04 | 2.73e-04 |
 
 **That split is the flat-optimum amplification, measured.** `find_root_collar_psi`
-maximises profit over the collar potential, and the maximum is flat — measured
-curvature k ≈ 1.0 in `profit ≈ p* − k(psi_stem − x*)²`. For a flat maximum an
-error `dp` in the profit *value* displaces the *argmax* by `sqrt(dp/k)`, so a
-well-conditioned 2.1e-7 in profit becomes an ill-conditioned 4.5e-4 in the argmax
-and everything evaluated there. `sqrt(2.1e-7) = 4.6e-4`, against an observed
-4.4e-4 — no fitting involved.
+maximises profit over the collar potential, and the maximum is flat — curvature
+measured directly at the two worst operating points gives k ≈ 1.0 and 0.9 in
+`profit ≈ p* − k(psi_stem − x*)²`. For a flat maximum an error `dp` in the profit
+*value* displaces the *argmax* by `sqrt(dp/k)`, which is why the well-conditioned
+row sits three orders below the other. Checked pointwise: at those points the
+residuals imply k = 1.01 and 1.70, against 1.0 and 0.9 from the curvature itself.
+Note it is not a global identity — the row maxima fall at different operating
+points, so `sqrt(worst profit)` is not meant to reproduce `worst argmax`.
 
 So `test_golden` takes `--cross-platform`, with per-class tolerances (profit 1e-5,
-argmax-derived 5e-3, roughly 50× and 10× headroom on the measured worst). CI runs
+argmax-derived 5e-3 — 5.4× and 9.0× headroom on the measured worst). The profit
+tolerance is deliberately not loosened further: 1e-4 is the scale at which a real
+change shows, so a profit gate approaching it would gate nothing. CI runs
 bit-exact on macOS/arm64 and `--cross-platform` elsewhere. Both modes print the
 worst value per class. **Regenerating the golden file to make a second platform
 pass is the wrong move** — it just relocates the failure.
@@ -130,11 +134,14 @@ Two implications worth carrying:
   detector, but it is reproducibility of an arbitrary choice inside the solver's
   tolerance window, not determinacy of the argmax.
 
-⚠️ An earlier version of this paragraph put the worst difference at 1.7e-15
-(13 ULP) and called the whole thing reassociation. **That was wrong** — it read
-the 20 lines `test_golden` prints before truncating as though they were the
-distribution, and those happened to be the well-conditioned ones. The reporting
-was changed so the same mistake is not available next time.
+⚠️ **These numbers were wrong twice, the same way both times.** This paragraph
+first put the worst difference at 1.7e-15 (13 ULP) and called the whole thing
+reassociation; once that was caught it said 2.1e-07 and 4.5e-04. Both readings
+took the 20 lines `test_golden` prints before truncating as though they were the
+distribution. That sample is biased toward whichever points are listed first, and
+here those were the well-conditioned ones. The figures in the table are now the
+full-grid maxima that CI prints on every run — **for a magnitude, read the summary
+line, not the FAIL lines.**
 
 **Two methodological traps, both hit and both worth recording.** First, the initial
 comparison used whatever plant was installed — a Jul 24 build of a *different
