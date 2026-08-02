@@ -49,7 +49,7 @@ HEADERS = $(wildcard $(LEAF_INC)/leaf/*.hpp) $(LEAF_INC)/leaf.hpp
 
 # Extra arguments for the golden comparison. Empty means bit-exact, which is what
 # you want locally and on the platform that generated the file. CI passes
-# GOLDEN_ARGS="--rtol 1e-9" on platforms other than that one -- see the comment
+# GOLDEN_ARGS=--cross-platform on platforms other than that one -- see the comment
 # above main() in test_golden.cpp for why that is correct and not a loosening.
 GOLDEN_ARGS ?=
 

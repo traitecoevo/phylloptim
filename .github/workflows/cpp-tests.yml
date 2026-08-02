@@ -58,19 +58,20 @@ jobs:
           fi
 
       # The golden file is compared bit-exactly on the platform that generated it
-      # (macOS/arm64) and with a tolerance everywhere else. This is not a
+      # (macOS/arm64) and with per-field tolerances everywhere else. This is not a
       # loosening: libm's exp/pow are not bit-reproducible between glibc on
       # x86-64 and Apple's libm on arm64, so bit-exactness across platforms was
-      # never achievable. Measured difference is ~1e-15 relative (13 ULP) against
-      # ~1e-4 for a real change, so rtol=1e-9 sits in a four-order-of-magnitude
-      # gap. The tolerant run still prints the worst deviation it saw.
+      # never achievable. Measured, the fields split into two classes -- profit
+      # (the maximum) at 2.1e-7, and everything derived from the argmax at 4.5e-4,
+      # because the profit maximum is flat and displacing it goes as sqrt. See the
+      # comment above main() in tests/cpp/test_golden.cpp.
       - name: Resolve golden comparison mode
         id: golden
         run: |
           if [ "$RUNNER_OS" = "macOS" ]; then
             echo "args=" >> "$GITHUB_OUTPUT"
           else
-            echo "args=--rtol 1e-9" >> "$GITHUB_OUTPUT"
+            echo "args=--cross-platform" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build and run
@@ -104,7 +105,7 @@ jobs:
           echo "  ~1e-15  reassociation / cross-platform libm. Not a regression."
           echo "  ~1e-4   a real change in behaviour."
           echo
-          echo "Linux already compares with --rtol 1e-9, so a failure here is"
+          echo "Linux already compares with --cross-platform, so a failure here is"
           echo "either genuinely large or an amplified solver decision (these"
           echo "nested solvers amplify up to about GSS_tol_abs, 1e-3)."
           echo

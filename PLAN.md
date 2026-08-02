@@ -15,7 +15,7 @@ this file keeps the reasoning behind each one.
 | **10a** | Renames done: `stem_b`/`stem_c`, `cost_scale_TF24`, `root_carbon_per_layer`. `R` and `n` gone from the public namespace. |
 | **10b** | Eight dead entities removed; `set_physiology` 14 → 10 arguments; the leaf is now purely intensive; 13 temperature-response parameters made settable. |
 | **10c** | The hidden hard-coded atmospheric pressure fixed (`umol_per_mol_to_Pa` derived from `atm_kpa_`). |
-| **15** | CI: gcc/clang × Linux/macOS, no R needed. Plus a golden-file regression baseline over 288 operating points, compared bit-exactly. |
+| **15** | CI: gcc/clang × Linux/macOS, no R needed. Plus a golden-file regression baseline over 288 operating points, compared bit-exactly on macOS/arm64 and with `--cross-platform` elsewhere — see the note under item 1 on why bit-exact cannot be a cross-platform gate, and on the flat-optimum amplification that sets the tolerances. |
 | **5** | **Decided: leave XAD as it is.** It arrives via odelia, both packages want the same version, and only forward mode is used so nothing needs linking. No action. |
 
 Changes that alter results or the API live on **`feature/api-cleanup`**, not on
@@ -90,6 +90,51 @@ For scale on why 1 ULP is safe here: forcing `-ffp-contract=off` on one side alo
 moves the disagreement to **3e-4**, because these nested solvers amplify
 perturbations up to about `GSS_tol_abs` (1e-3). Four orders of magnitude separate
 "rounding" from "bug", which is what makes the result interpretable.
+
+**A second, larger instance of the same effect: the golden file is not portable,
+and the amplification is what makes it interesting.** CI's first run to reach
+Linux (2026-08-03 — the workflow had been watching `branches: [main]` on a repo
+whose default branch is `master`, so it had never executed) found **1761 of 2592
+values differing under g++ and 1800 under clang++**. `exp`/`pow` are not
+bit-reproducible between glibc on x86-64 and Apple's libm on arm64, and FMA
+contraction differs, so a bit-exact cross-platform comparison was never
+achievable; the file's real job only ever needed bit-exactness on *one* platform.
+
+The magnitudes split cleanly into two classes:
+
+| field | worst cross-platform |
+|---|---|
+| `profit` | 2.1e-07 |
+| `psi_stem`, `collar`, `ci`, `assim`, `transpiration`, `gc`, `e_up`, `uptake` | 4.5e-04 |
+
+**That split is the flat-optimum amplification, measured.** `find_root_collar_psi`
+maximises profit over the collar potential, and the maximum is flat — measured
+curvature k ≈ 1.0 in `profit ≈ p* − k(psi_stem − x*)²`. For a flat maximum an
+error `dp` in the profit *value* displaces the *argmax* by `sqrt(dp/k)`, so a
+well-conditioned 2.1e-7 in profit becomes an ill-conditioned 4.5e-4 in the argmax
+and everything evaluated there. `sqrt(2.1e-7) = 4.6e-4`, against an observed
+4.4e-4 — no fitting involved.
+
+So `test_golden` takes `--cross-platform`, with per-class tolerances (profit 1e-5,
+argmax-derived 5e-3, roughly 50× and 10× headroom on the measured worst). CI runs
+bit-exact on macOS/arm64 and `--cross-platform` elsewhere. Both modes print the
+worst value per class. **Regenerating the golden file to make a second platform
+pass is the wrong move** — it just relocates the failure.
+
+Two implications worth carrying:
+
+- **`profit` is the only reported field that is well-conditioned across platforms.**
+  For a portable check of the solve, compare `profit`, not `opt_psi_stem_`.
+- **Eight of the nine fields are pinned to 17 digits but determined only to about
+  `GSS_tol_abs` (1e-3).** Bit-exactness on one platform remains a sound drift
+  detector, but it is reproducibility of an arbitrary choice inside the solver's
+  tolerance window, not determinacy of the argmax.
+
+⚠️ An earlier version of this paragraph put the worst difference at 1.7e-15
+(13 ULP) and called the whole thing reassociation. **That was wrong** — it read
+the 20 lines `test_golden` prints before truncating as though they were the
+distribution, and those happened to be the well-conditioned ones. The reporting
+was changed so the same mistake is not available next time.
 
 **Two methodological traps, both hit and both worth recording.** First, the initial
 comparison used whatever plant was installed — a Jul 24 build of a *different

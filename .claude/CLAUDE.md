@@ -39,7 +39,7 @@ make -C tests/cpp bench      # time the collar solve (not part of `make all`)
 
 # compare the golden file with a tolerance instead of bit-exactly. Correct on a
 # platform other than macOS/arm64, wrong as a way to silence a real diff.
-make -C tests/cpp GOLDEN_ARGS="--rtol 1e-9"
+make -C tests/cpp GOLDEN_ARGS=--cross-platform
 ```
 
 `bench` reports min-of-N over the golden grid. Use `reps=2000` (the default)
@@ -73,11 +73,37 @@ and bug. Anything in between deserves investigation.
 **It is bit-exact only on the platform that generated it — macOS/arm64.** libm's
 `exp`/`pow` are not bit-reproducible between glibc on x86-64 and Apple's libm on
 arm64, and FMA contraction differs too, so cross-platform bit-equality was never
-achievable. Measured on the first CI run to reach Linux: **1761 of 2592 values
-differ, worst 1.7e-15 relative (13 ULP)** — reassociation, not regression. So CI
-compares bit-exactly on macOS and with `--rtol 1e-9` elsewhere, which still
-catches anything near the 1e-4 scale. `test_golden` prints the worst relative
-difference it saw either way, so the number is in the log.
+achievable. CI compares bit-exactly on macOS and with `--cross-platform` elsewhere.
+
+**The size of the cross-platform disagreement is the interesting part, and it is
+not one number.** The nine reported fields split into two classes three orders of
+magnitude apart:
+
+| field | worst cross-platform | why |
+|---|---|---|
+| `profit` | 2.1e-07 | it is the maximum itself — well-conditioned |
+| the other eight | 4.5e-04 | evaluated at the **argmax** — sqrt-amplified |
+
+The maximum is *flat*: measured curvature k ≈ 1.0 in `profit ≈ p* − k(psi_stem−x*)²`.
+For a flat maximum an error `dp` in the profit **value** displaces its **location**
+by `sqrt(dp/k)`, so a well-conditioned 2.1e-7 becomes 4.5e-4 — and indeed
+`sqrt(2.1e-7) = 4.6e-4`, matching the observed figure with no fitting.
+
+Two things follow that matter beyond this file:
+
+- **`profit` is the only reported field that is well-conditioned across platforms.**
+  If you need a portable check of the solve, check `profit`, not `opt_psi_stem_`.
+- **Eight of the nine fields are pinned to 17 digits but only *determined* to about
+  `GSS_tol_abs` (1e-3).** Bit-exactness on one platform is still a good drift
+  detector — any code change moves the arbitrary choice inside that window and it
+  shows — but that is reproducibility, not determinacy. Don't read a bit-identical
+  `opt_psi_stem_` as meaning the argmax is known to 17 digits.
+
+⚠️ An earlier version of this note said the worst cross-platform difference was
+1.7e-15 (13 ULP). **That was wrong.** It came from the 20 lines `test_golden`
+prints before truncating, which happened to be the well-conditioned ones — reading
+a truncated failure list as if it were the distribution. `test_golden` now always
+reports the worst value per class, precisely so that cannot recur.
 
 **Never regenerate the golden file to make another platform pass.** It just moves
 the failure to the platform the file came from.
