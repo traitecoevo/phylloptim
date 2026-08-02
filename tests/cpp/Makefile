@@ -31,7 +31,7 @@ endif
 
 INCLUDES = -I$(LEAF_INC) -isystem $(SHIM_INC) -isystem $(ODELIA_INC) -isystem $(BH_INC)
 
-.PHONY: all build clean golden
+.PHONY: all build clean golden bench
 HEADERS = $(wildcard $(LEAF_INC)/leaf/*.hpp) $(LEAF_INC)/leaf.hpp
 
 all: build
@@ -40,10 +40,19 @@ all: build
 
 build: test_leaf test_golden
 
+# Not built or run by `make all` -- it takes a few seconds and measures the
+# machine as much as the code. Run it deliberately when a change might have
+# moved the cost of a solve.
+bench: bench_solve
+	./bench_solve
+
 test_leaf: test_leaf.cpp $(HEADERS)
 	$(CXX) $(CXXSTD) $(OPT) $(WARN) $(INCLUDES) $< -o $@
 
 test_golden: test_golden.cpp $(HEADERS)
+	$(CXX) $(CXXSTD) $(OPT) $(WARN) $(INCLUDES) $< -o $@
+
+bench_solve: bench_solve.cpp $(HEADERS)
 	$(CXX) $(CXXSTD) $(OPT) $(WARN) $(INCLUDES) $< -o $@
 
 # Regenerate the golden file. Only ever run this deliberately: it overwrites the
@@ -52,4 +61,4 @@ golden: test_golden
 	./test_golden --generate
 
 clean:
-	rm -f test_leaf test_golden
+	rm -f test_leaf test_golden bench_solve

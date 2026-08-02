@@ -32,7 +32,7 @@ where 10a, 10b, 10c and the shutdown fix sit.
 
 | issue | item | what | note |
 |---|---|---|---|
-| [#2](https://github.com/traitecoevo/leaf_cpp/issues/2) | 7b | Extract the soil/root supply path behind an interface | **do first** — #3, the multi-layer λ, and `kmax(h)` all sit on top |
+| [#2](https://github.com/traitecoevo/leaf_cpp/issues/2) | 7b | Extract the soil/root supply path behind an interface | **do first** — #3, the multi-layer λ, and `kmax(h)` all sit on top. Design question settled: **no template needed**, use `std::variant`; measured, see 7b |
 | [#3](https://github.com/traitecoevo/leaf_cpp/issues/3) | 7a | Make λ(state) pluggable | needs #2 |
 | [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11 | Template `Leaf` on its scalar type | deletes the hand-maintained AD replicas |
 | [#5](https://github.com/traitecoevo/leaf_cpp/issues/5) | 6 | R interface (RcppR6) | absorbs the `Control` struct and the dropped-field cleanup |
@@ -377,11 +377,14 @@ code to support. The λ table is `main.tex` Table `tab:lambda`; hand-written
 
 Remaining design notes:
 
-- Prefer compile-time dispatch (a policy template parameter, or
-  `Leaf<MarginalCost>`) over a runtime `enum` and a `switch`. This is a
-  header-only library whose whole point is that the hot loop inlines; a virtual
-  call or a branch per profit evaluation would land inside a golden-section search
-  running ~10³ inner evaluations. Composes naturally with item 11.
+- Compile-time dispatch is *plausible* here in a way it was not for 7b, but it is
+  still unmeasured — **measure before committing to it.** The relevant difference
+  is that the cost core really does inline: `profit_psi_stem_TF`,
+  `hydraulic_cost_TF` and `assim_colimited` have no out-of-line symbol in
+  `test_golden` at all, so a virtual λ would be introducing an indirect call where
+  today there is no call. That is the opposite of the supply path, where the
+  measurement (7b) found the call already out-of-line and the dispatch free. Use
+  `tests/cpp/bench_solve.cpp`; the recipe is in 7b. Composes naturally with item 11.
 - **Prentice least-cost is the one that does not fit cleanly**, and it is not
   Medlyn. Its cost is a *ratio*, `(aE + bV)/A`, not an additive `λE`, so it is only
   a member of the family after a transformation; the project records that
@@ -455,9 +458,66 @@ struct SupplyPath {                              // concept, not a base class
 with (at least) two implementations: `MultiLayerRoots` — today's behaviour, with
 per-layer vulnerability, root resistance and gravitational head — and
 `SinglePotential`, which is one ψ_soil and either infinite or constant
-conductance. Template `Leaf` on it so the calls still inline; a `std::function`
-or a virtual base would put an indirect call inside a loop running ~10³ inner
-evaluations, which is the thing to avoid.
+conductance.
+
+#### Does it have to be a template? Measured: no.
+
+**This item previously asserted that `Leaf` had to be templated on the supply
+path so the calls would still inline, and that a virtual base or a
+`std::function` would put an indirect call inside a loop running ~10³ inner
+evaluations. That assertion was wrong, and it was wrong in the same way the
+`area_leaf` coupling claim was: by reasoning instead of measuring.**
+
+Two findings, the first of which settles it on its own.
+
+**1. The supply path is not inlined today, so there is no inlining to preserve.**
+`E_from_Soil_to_Root_Collar` has 18 out-of-line call sites in `test_golden` at
+`-O2` and clang inlines it into none of them — it is ~150 lines and carries
+string-building error paths. Nor is it a threshold accident: at
+`-mllvm -inline-threshold=2000` (roughly 10× the default) it is *still*
+out-of-line at 22 call sites. The spline `eval` it calls per layer is not
+inlined either (clang: `cost=405, threshold=225`). The hot path already pays a
+call per layer per evaluation.
+
+**2. So the dispatch is free.** `tests/cpp/bench_solve.cpp` times the 288-point
+golden grid; the body of `E_from_Soil_to_Root_Collar` was left byte-for-byte
+untouched and only the way it is *reached* was varied, with the bench checksum
+identical across all four builds to confirm no arithmetic moved:
+
+| dispatch | µs/solve | vs direct |
+|---|---|---|
+| direct call (today) | 3.52 | — |
+| `std::function` | 3.54 | +0.6% |
+| virtual base | 3.56 | +1.1% |
+| `std::variant` + `std::visit` | 3.61 | +2.6% |
+
+Reproducible to ±0.01 µs at `reps=2000` (±0.5 µs at `reps=40`, which is why an
+early 40-rep run looked like noise in both directions). Aggressive inlining is
+if anything *worse* — `-O2 -mllvm -inline-threshold=2000` gives 3.66 µs and
+`-O3` with the same 3.62 µs, i.e. code bloat costs more than the calls save.
+
+**So use a plain composed class. Do not template `Leaf`.** Templating would turn
+`Leaf` into `Leaf<Supply>`, which breaks plant's `plant::Leaf` alias and its
+~12,000 lines of generated RcppR6 code (item 3), for a measured benefit of zero.
+
+**Constraint on which runtime mechanism: `Leaf` must stay copyable.** plant's
+`make_strategy_ptr(TF24_Strategy s)` takes the strategy **by value**, and
+`TF24_Strategy` holds `Leaf leaf;` as a member (`tf24_strategy.h:375`), so a
+`std::unique_ptr<SupplyPath>` member would break plant's build. That leaves
+`std::variant` (+2.6%, value semantics, no heap — verified `Leaf` stays
+copy-constructible and copy-assignable) or a virtual base with a cloning copy
+constructor (+1.1%, but boilerplate and a heap allocation per `Leaf` copy).
+**Prefer `std::variant`** while there are only two implementations; 2.6% is a
+fair price for value semantics, and it is dwarfed by the 6.3×/27× the
+closed-form path already offers (item 9).
+
+⚠️ **This result does not transfer to item 7a.** It is specific to the supply
+path. The *cost* core is the opposite case: `profit_psi_stem_TF`,
+`hydraulic_cost_TF`, `assim_colimited` and `transpiration_to_psi_stem` have **no
+out-of-line symbol at all** — they are fully inlined into the golden-section
+loop. Making λ virtual could therefore cost real time where making the supply
+path virtual does not. Measure 7a separately with the same harness; do not cite
+this table for it.
 
 Four reasons this is worth doing rather than merely tidy:
 

@@ -13,6 +13,7 @@
 *.dylib
 tests/cpp/test_leaf
 tests/cpp/test_golden
+tests/cpp/bench_solve
 tests/cpp/*.dSYM/
 
 # macOS

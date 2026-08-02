@@ -26,6 +26,7 @@ inst/include/leaf/
   uniroot.hpp, optimize.hpp    1-D root finders and optimisers
 tests/cpp/                     plain-C++ suite, no R, no framework
 tests/cpp/golden/              bit-exact regression baseline, 288 operating points
+tests/cpp/bench_solve.cpp      timing harness for the collar solve (hazard 5)
 tests/validate/                R scripts comparing against plant (needs R)
 ```
 
@@ -34,7 +35,12 @@ tests/validate/                R scripts comparing against plant (needs R)
 ```sh
 make -C tests/cpp            # builds and runs both suites
 make -C tests/cpp golden     # regenerate the golden file -- see the warning below
+make -C tests/cpp bench      # time the collar solve (not part of `make all`)
 ```
+
+`bench` reports min-of-N over the golden grid. Use `reps=2000` (the default)
+before believing a small difference: reproducibility is ±0.01 µs there but ±0.5 µs
+at `reps=40`, which is wide enough to invent or hide a few-percent effect.
 
 No R needed. Dependency headers are found via `Rscript` if R is installed, else a
 sibling `odelia/` checkout and Homebrew Boost. Override with
@@ -94,12 +100,27 @@ a coupled review.
    dimensionless/intensive driver. Nothing scales with plant size — whole-plant
    allometry (`kmax(h)`, root carbon totals) is computed on the plant side and passed
    in already reduced. Keep it that way; it is a one-sentence contract.
-5. **Hot-path discipline.** `find_root_collar_psi` runs ~10³ inner evaluations per
-   solve, and plant calls it millions of times. λ and `g1_eff` are *accessors*, not
-   stored state, for this reason. Do not add a `pow()` to
-   `set_leaf_states_rates_from_psi_stem`, and prefer compile-time dispatch to virtual
-   calls or `std::function` inside the solve — though **measure** rather than assume
-   the inlining matters (see issue #2).
+5. **Hot-path discipline — but measure it, because the intuition has been wrong.**
+   `find_root_collar_psi` runs ~10³ inner evaluations per solve, and plant calls it
+   millions of times. λ and `g1_eff` are *accessors*, not stored state, for this
+   reason, and don't add a `pow()` to `set_leaf_states_rates_from_psi_stem`.
+
+   What is *not* true is the blanket "prefer compile-time dispatch, a virtual call
+   in the solve would cost". Measured (`make -C tests/cpp bench`), the code splits
+   into two halves that answer oppositely:
+
+   - **The soil/supply path is already out-of-line.** `E_from_Soil_to_Root_Collar`
+     is inlined into none of its 18 call sites at `-O2`, nor at
+     `-inline-threshold=2000`; neither is the per-layer spline `eval`. So making it
+     virtual costs **+1.1%**, `std::function` +0.6%, `std::variant` +2.6% — noise.
+     Issue #2 needs no template. Forcing more inlining is *worse* (3.66 vs 3.52 µs).
+   - **The cost core is fully inlined.** `profit_psi_stem_TF`, `hydraulic_cost_TF`,
+     `assim_colimited` and `transpiration_to_psi_stem` have no out-of-line symbol at
+     all. Issue #3's pluggable λ lands here, so it is a genuinely different question
+     and needs its own measurement.
+
+   Before arguing from inlining, check: `nm -C test_golden | grep <fn>`. No symbol
+   means inlined; a symbol plus `bl` call sites in `objdump -d` means it is not.
 6. **No Rcpp in the leaf.** `util.hpp` throws `std::runtime_error` instead of
    `Rcpp::stop`, and uses a quiet NaN instead of `NA_REAL`. The only R touchpoint left
    in the include graph is odelia's `ode_util.hpp`; `tests/cpp/shim/RcppCommon.h` is a
