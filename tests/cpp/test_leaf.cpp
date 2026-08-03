@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -645,20 +646,36 @@ void test_g1_eff() {
      "lambda rises as the soil dries");
 }
 
+// Build a leaf with the energy-balance gate (and the wind model) configured BEFORE
+// set_physiology runs, which is what the PM path needs: `ra_`, `Rn_` and `Tair_` are
+// all derived there, and the non-finite-wind check is made there. make_leaf() calls
+// set_physiology itself, so setting the gate on its return value is too late for
+// anything set_physiology decides.
+leaf::Leaf make_pm_leaf(const Drivers &d, std::vector<double> psi_soil,
+                        std::vector<double> soil_depth, bool gate,
+                        double wind_speed = 2.0, double leaf_dim = 0.05) {
+  leaf::Leaf l;
+  l.setup_transpiration(100);
+  l.setup_root_vulnerability(100);
+  l.use_energy_balance_ = gate;
+  l.wind_speed_ = wind_speed;
+  l.d_ = leaf_dim;
+  std::vector<double> root(psi_soil.size(),
+                           1.0 / double(psi_soil.size()) / d.area_leaf);
+  l.set_physiology(root, d.PPFD, psi_soil, soil_depth,
+                   d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                   d.atm_o2_kpa, d.atm_kpa);
+  return l;
+}
+
 void test_energy_balance_path_runs() {
   printf("Penman-Monteith energy-balance path\n");
   Drivers d;
-  leaf::Leaf l = make_leaf(d, {2.0}, {1.0});
+  leaf::Leaf l = make_pm_leaf(d, {2.0}, {1.0}, false);
   l.find_root_collar_psi();
   const double A_prescribed = l.assim_colimited_;
 
-  leaf::Leaf eb = make_leaf(d, {2.0}, {1.0});
-  eb.use_energy_balance_ = true;
-  eb.wind_speed_ = 2.0;
-  eb.d_ = 0.05;
-  // ra and Rn are derived in set_physiology, so re-run it with the gate on.
-  eb = make_leaf(d, {2.0}, {1.0});
-  eb.use_energy_balance_ = true;
+  leaf::Leaf eb = make_pm_leaf(d, {2.0}, {1.0}, true);
   eb.find_root_collar_psi();
   ok(std::isfinite(eb.profit_), "energy-balance profit is finite");
   ok(std::isfinite(eb.assim_colimited_), "energy-balance assimilation is finite");
@@ -667,6 +684,106 @@ void test_energy_balance_path_runs() {
   const double Tleaf = eb.leaf_temp_from_E(eb.transpiration_);
   ok(Tleaf >= leaf::leaf_temp_min && Tleaf <= leaf::leaf_temp_max,
      "leaf temperature stays inside the physical clamp");
+
+  // The wind model really is what set ra_, rather than the fixed fallback. This
+  // used to be untested: the previous version of this test set wind_speed_/d_ and
+  // then immediately reassigned the leaf, discarding them, and its comment
+  // described re-running set_physiology with the gate on, which it did not do. It
+  // passed only because 2.0 / 0.05 are also the defaults.
+  ok(std::isfinite(eb.ra_) && eb.ra_ > 0.0, "ra is finite and positive");
+  near(eb.ra_, leaf::aerodynamic_resistance_coef * std::sqrt(0.05 / 2.0), 1e-12,
+       "ra comes from the wind model, not the fixed fallback");
+  ok(std::isfinite(eb.Rn_), "net radiation is finite");
+}
+
+// Isaac Towers' review of plant #567: the ra fallback accepted a non-finite wind
+// speed as well as a zero one. Zero wind is physically ra -> infinity and a
+// legitimate fallback; NA is a broken driver or an unset trait and should fail
+// rather than silently produce a plausible number. Fixed in plant `76df7169` and
+// carried into this package -- but the test lived only in plant, in a demo smoke
+// test, while the code now lives here. Ported so the package that owns the
+// contract also guards it.
+void test_pm_wind_speed_validation() {
+  printf("PM path fails fast on a non-finite wind speed (review: itowers1)\n");
+  Drivers d;
+  const double nan_v = std::numeric_limits<double>::quiet_NaN();
+
+  // 1. gate ON + non-finite wind: fail fast.
+  bool threw = false;
+  try {
+    make_pm_leaf(d, {2.0}, {1.0}, true, nan_v);
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(threw, "a non-finite wind speed throws on the energy-balance path");
+
+  // ... and the same for the leaf dimension, which enters the same formula.
+  threw = false;
+  try {
+    make_pm_leaf(d, {2.0}, {1.0}, true, 2.0, nan_v);
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(threw, "a non-finite leaf dimension throws on the energy-balance path");
+
+  // 2. gate OFF + non-finite wind: fine, the wind model is never read.
+  threw = false;
+  try {
+    leaf::Leaf off = make_pm_leaf(d, {2.0}, {1.0}, false, nan_v);
+    off.find_root_collar_psi();
+    ok(std::isfinite(off.profit_), "and still solves");
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(!threw, "a non-finite wind speed is ignored with the gate off");
+
+  // 3. gate ON + ZERO wind: legitimate (ra -> infinity), falls back to the fixed
+  // ra rather than erroring or producing an infinity.
+  threw = false;
+  try {
+    leaf::Leaf zero = make_pm_leaf(d, {2.0}, {1.0}, true, 0.0);
+    near(zero.ra_, leaf::aerodynamic_resistance_fixed, 1e-12,
+         "zero wind falls back to the fixed ra");
+    zero.find_root_collar_psi();
+    ok(std::isfinite(zero.profit_), "and still solves");
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(!threw, "zero wind is a legitimate case, not an error");
+}
+
+// The behavioural content of plant's PM demo smoke test, which asserted these
+// through the R shim over a Fick-vs-PM grid. The implementation is here now, so
+// the sign of the effect is asserted here too.
+void test_pm_leaf_temperature_response() {
+  printf("PM leaf temperature: Tleaf == Tair off, departs from it on\n");
+  for (double ppfd : {400.0, 2000.0}) {
+    for (double tair : {20.0, 40.0}) {
+      for (double vpd : {1.0, 3.0}) {
+        Drivers d;
+        d.PPFD = ppfd; d.leaf_temp = tair; d.atm_vpd = vpd;
+        const std::string at = " at PPFD=" + std::to_string(int(ppfd)) +
+                               " Tair=" + std::to_string(int(tair)) +
+                               " VPD=" + std::to_string(int(vpd));
+
+        leaf::Leaf fick = make_pm_leaf(d, {2.0}, {1.0}, false);
+        fick.find_root_collar_psi();
+        ok(std::isfinite(fick.profit_) && std::isfinite(fick.assim_colimited_),
+           "Fick outputs are finite" + at);
+
+        leaf::Leaf pm = make_pm_leaf(d, {2.0}, {1.0}, true);
+        pm.find_root_collar_psi();
+        ok(std::isfinite(pm.profit_) && std::isfinite(pm.assim_colimited_),
+           "PM outputs are finite" + at);
+
+        // Hot and bright is where PM matters: the leaf runs warmer than the air.
+        if (ppfd == 2000.0 && tair == 40.0) {
+          const double Tleaf = pm.leaf_temp_from_E(pm.transpiration_);
+          ok(Tleaf > pm.Tair_, "the leaf is warmer than the air when hot and bright");
+        }
+      }
+    }
+  }
 }
 
 // The closed-form fast path (leaf/closed_form.hpp). Two things matter: that it is
@@ -1059,6 +1176,8 @@ int main() {
   test_multilayer_lambda_identity();
   test_g1_eff();
   test_energy_balance_path_runs();
+  test_pm_wind_speed_validation();
+  test_pm_leaf_temperature_response();
   test_closed_form();
   test_single_potential();
   test_leaf_on_single_potential();
