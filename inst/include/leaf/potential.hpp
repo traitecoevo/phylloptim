@@ -43,15 +43,32 @@ namespace leaf {
 // it put both representations in one argument list and invited the reading that
 // psi_leaf is a different kind of quantity from psi_soil.
 //
-// LONGER TERM, THE SECOND TYPE SHOULD NOT EXIST. The reason it does is not psi vs
-// |psi| -- it is that this model stores psi negative and the Weibull scale b
-// POSITIVE, a mixed convention inside a single formula. Store b in the same
-// convention and the problem evaporates: (-2.0)/(-3.898) = +0.513, positive by
-// construction and exactly equal bitwise to the ratio of the magnitudes. Then there
-// is one type, no conversion, and plant #584 is unwriteable not because the mixed
-// comparison fails to compile but because there is no second representation to mix
-// in. What remains after that is the spline knot grids (built increasing over
-// magnitudes) and the R boundary. See PLAN 10a for the sequencing.
+// ⚠️ RETRACTED CLAIM, recorded because it was wrong in an instructive way. An
+// earlier version of this comment said the second type should not exist long term:
+// that the only reason it does is this package storing psi negative and the Weibull
+// scale b POSITIVE, so signing b would make (-2.0)/(-3.898) = +0.513 positive by
+// construction and delete the conversion. The arithmetic is right and the
+// conclusion is wrong, for two reasons found by grepping b's actual uses:
+//
+//   1. b IS NOT A WATER POTENTIAL. It is the scale parameter of a Weibull SURVIVAL
+//      FUNCTION over tension, f(x) = exp(-(x/b)^c) for x >= 0. The variable there
+//      is tension, |psi| -- a genuinely non-negative physical quantity, not a
+//      representation of psi. So the absolute value is intrinsic to the model, and
+//      no storage convention removes it.
+//   2. b IS USED AS A BARE SCALE, not only in the ratio psi/b, and those uses need
+//      it positive for reasons that are not conventional at all:
+//        closed_form.hpp:197   sqrt(Q * stem_b * kmax / ...)      -> sqrt of a negative
+//        closed_form.hpp:158   pow(... / (kmax * stem_b), 2/(n+2)) -> negative base
+//        closed_form.hpp:90,149  stem_c / (stem_b * kmax)          -> flips a coefficient
+//        leaf_model.hpp:1708     (stem_c / stem_b) in lambda_TF24  -> flips lambda's sign
+//        leaf_model.hpp:1471, roots.hpp:263  build a magnitude knot grid
+//      Signing b would need .abs() at about six sites and produce NaN at two, to
+//      remove it from about three. Net worse.
+//
+// So the design below is the END STATE, not a step toward one: Psi in all state and
+// all signatures, AbsPsi as a transient at the vulnerability boundary, where a real
+// non-negative quantity genuinely begins. What IS still open is psi_crit and
+// root_psi_crit, which ARE potentials and are stored positive; see PLAN 10a.
 //
 // The two differ by a minus sign, which is why mixing them is invisible: every
 // wrong answer has the right magnitude. Three incidents so far, all real:

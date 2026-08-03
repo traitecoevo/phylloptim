@@ -1250,6 +1250,30 @@ extraction.
   Closing it needs a conductance type on the supply contract's derivative method —
   worth doing with #3, which is where that contract is next opened.
 
+  **⚠️ One claim in this section was wrong and is retracted.** It said the second
+  type should not exist long term — that the only reason it does is this package
+  storing ψ negative while the Weibull scale `b` is positive, so signing `b` would
+  make `(-2.0)/(-3.898) = +0.513` positive by construction and delete the
+  conversion. The arithmetic is right; the conclusion is not. Grepping `b`'s actual
+  uses shows why:
+
+  - **`b` is not a water potential.** It is the scale parameter of a Weibull
+    *survival function over tension*, `f(x) = exp(-(x/b)^c)` for `x >= 0`. That
+    variable is tension, |ψ| — a genuinely non-negative physical quantity, not a
+    representation of ψ. The absolute value is intrinsic to the model.
+  - **`b` is used as a bare scale, not only as `ψ/b`,** and those uses need it
+    positive for non-conventional reasons: `sqrt(Q*stem_b*kmax/…)` in
+    `closed_form.hpp:197` would take the root of a negative, `pow(…/(kmax*stem_b),
+    2/(n+2))` at :158 would raise a negative base to a fractional power, and
+    `(stem_c/stem_b)` in `lambda_TF24` would flip λ's sign. Signing `b` needs
+    `.abs()` at ~6 sites and produces NaN at 2, to remove it from ~3. Net worse.
+
+  So the shipped design is the **end state**, not a way-station: `Psi` in all state
+  and all signatures, `AbsPsi` as a transient at the vulnerability boundary where a
+  real non-negative quantity begins. What remains genuinely open is `psi_crit` and
+  `root_psi_crit`, which *are* potentials and *are* stored positive — signing those
+  removes ~4 conversions and adds ~5, so it is a readability call, not a clear win.
+
   Templated on the scalar (`PsiT<T>`) so **#4 does not have to undo it**.
 - **`R` and `n` are already gone** from the public namespace (see item 1). Worth
   recording *why* it mattered: the analytical project's
