@@ -644,6 +644,72 @@ void test_potential_types() {
      "each is exactly one double wide");
 }
 
+// The types are templated on the scalar so #4 (template Leaf on its scalar type,
+// deleting the hand-maintained AD replicas) does not have to undo #8. That is a
+// claim about a type that does not exist yet in the model, so it is pinned here
+// rather than left to be discovered when #4 starts. Three things could break it
+// and none is obvious from reading the header:
+//
+//   * `T value{}` needs the AD type default-constructible.
+//   * The constructors are constexpr, and an AD type is not a literal type; this
+//     is legal only because they are templates, so the specialisation drops it.
+//   * XAD uses EXPRESSION TEMPLATES -- `AD - AD` is a BinaryExpr, not an AD -- and
+//     operator- declares T as its return type, so the expression must collapse.
+//
+// The check that matters is that a DERIVATIVE still survives the sign conversion,
+// since the conversion is a negation and getting it wrong is the whole subject of
+// issue #8.
+void test_potential_types_over_ad() {
+  printf("water potential: the types over an AD scalar (#4)\n");
+  using AD = xad::fwd<double>::active_type;
+  using PotentialAD = leaf::PotentialT<AD>;
+  using SuctionAD = leaf::SuctionT<AD>;
+
+  ok(xad::value(PotentialAD{}.value) == 0.0, "PotentialT<AD> default-constructs");
+
+  // The round trip is the identity, so d/ds must be exactly 1 -- one negation out
+  // and one back.
+  AD s = 3.5;
+  xad::derivative(s) = 1.0;
+  const SuctionAD round_tripped = SuctionAD{s}.signed_potential().magnitude();
+  near(xad::value(round_tripped.value), 3.5, 0.0, "AD round trip value");
+  near(xad::derivative(round_tripped.value), 1.0, 0.0, "AD round trip derivative is 1");
+
+  // A single conversion flips the derivative's sign, which is the property the
+  // supply path depends on.
+  AD s2 = 2.0;
+  xad::derivative(s2) = 1.0;
+  near(xad::derivative(SuctionAD{s2}.signed_potential().value), -1.0, 0.0,
+       "signed_potential() derivative is -1");
+
+  // Expression-template collapse, and the gradient uptake_impl actually forms:
+  // d(psi_soil - P_collar)/dP_collar = -1.
+  AD collar = -2.5;
+  xad::derivative(collar) = 1.0;
+  const AD gradient = PotentialAD{AD{-1.5}} - PotentialAD{collar};
+  near(xad::value(gradient), 1.0, 0.0, "Potential - Potential over AD");
+  near(xad::derivative(gradient), -1.0, 0.0,
+       "Potential - Potential derivative wrt collar is -1");
+
+  // Comparison and std::min/std::max, which P_src_min / P_src_max need.
+  ok(PotentialAD{AD{-1.0}} > PotentialAD{AD{-2.0}}, "AD potentials compare");
+  ok(xad::value(std::min(PotentialAD{AD{-1.0}}, PotentialAD{AD{-2.0}}).value) == -2.0,
+     "std::min over AD potentials");
+
+  // The realistic case: the root Weibull reached through the signed convention and
+  // back, differentiated, against the closed form
+  // df/dpsi = -f * (c/b) * (psi/b)^(c-1).
+  const double b = 3.898245, c = 2.680147, psi0 = 2.0;
+  AD psi = psi0;
+  xad::derivative(psi) = 1.0;
+  const SuctionAD via_signed = SuctionAD{psi}.signed_potential().magnitude();
+  const AD f = exp(-pow(via_signed.value / b, c));
+  const double analytic =
+      -std::exp(-std::pow(psi0 / b, c)) * (c / b) * std::pow(psi0 / b, c - 1.0);
+  near(xad::derivative(f), analytic, 1e-12,
+       "Weibull derivative through the typed layer matches the closed form");
+}
+
 void test_single_potential() {
   printf("single-potential supply path\n");
   leaf::SinglePotential sp;
@@ -849,6 +915,7 @@ int main() {
   test_energy_balance_path_runs();
   test_closed_form();
   test_potential_types();
+  test_potential_types_over_ad();
   test_single_potential();
   test_leaf_on_single_potential();
   test_root_network_from_carbon();
