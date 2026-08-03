@@ -6,35 +6,55 @@
 # not a reimplementation -- over exactly the grid in tests/cpp/test_golden.cpp,
 # and compares against the golden file this package generated.
 #
-# RESULT AS OF 2026-07-31: 585 of 2592 value comparisons differ, every one of them
-# at 1-2 ULP (worst relative difference 2.2e-16; double eps is 2.2e-16). The
-# extraction is faithful; see PLAN.md item 1 for the full argument, in short:
+# RESULT AS OF 2026-08-03: the finite values are BIT-IDENTICAL to plant, all 2352
+# of them. Zero difference, not a small one.
 #
-#   * The SOURCE is arithmetically identical. A normalised function-body diff over
-#     all 44 shared functions found only three `size_t` -> `int` loop counters,
-#     which cannot change floating-point arithmetic. (Plus
-#     transpiration_full_integration, adaptive Simpson by design, not on this path.)
-#   * The CAUSE of the residual is NOT established. Ruled out by experiment: the
-#     plant version/branch, compiler flags (-std=c++20 vs gnu++20, -g, -O0..-O3,
-#     -DNDEBUG, -fPIC, -ffp-contract on/off), inlining (-fno-inline), and the odelia
-#     header version (local checkout vs installed). An earlier version of this
-#     comment blamed translation-unit structure; that is CONTRADICTED by
-#     scm_regression.R, which found plant-with-its-own-leaf and
-#     plant-with-this-package bit-identical -- and that comparison DOES change TU
-#     structure. So the honest statement is: 1 ULP, cause unknown, and it is
-#     confined to this standalone harness rather than to the package.
+# This retracts the previous result rather than editing it, because the previous
+# result was an artifact of this script. It reported '585 of 2592 differ, every
+# one at 1-2 ULP, cause unknown'. That decomposes exactly:
 #
-# WHAT IS ESTABLISHED, and it is the part that matters: swapping plant's own leaf
-# for this package changes NOTHING. plant's test-leaf.r passes unchanged (218
-# expectations) and a full SCM regression is bit-identical across 78 of 78 recorded
-# nodes, including the whole collected trajectory. See scm_regression.R /
-# scm_compare.R. The 1 ULP here is a property of comparing a standalone C++ binary
-# against plant's R-bound build, not of the extraction.
+#     345   R's decimal parser reading the golden file
+#     240   the shutdown-state NA sentinel (48 rows x 5 flux fields)
+#     ---
+#     585
 #
-# So do NOT expect zero. Expect <= a few ULP, and investigate anything larger:
-# these nested solvers amplify perturbations up to about GSS_tol_abs (1e-3), so a
-# genuine arithmetic difference shows up at 1e-4, not 1e-16. Demonstrated -- forcing
-# -ffp-contract=off on one side only moves the disagreement to 3e-4.
+# THE 345. R's string-to-double conversion is not correctly rounded. as.numeric,
+# scan and read.delim all share it, and it returns a double one ULP off the
+# correctly rounded value for about 18% of inputs:
+#
+#     "26.550866314209998"   R gives 0x1.a8d0593240001p+4
+#                            correct  0x1.a8d059324p+4
+#
+# The golden file is written by C++ at full %.17g precision and read into R;
+# plant's values are computed in-process and never touch a string. So the parser
+# perturbed one side and not the other, and the script attributed the result to
+# the two implementations. It now reads through tests/validate/tsv_to_hex.c,
+# which parses with the C library's strtod and re-emits hex, which R reads
+# exactly. Verified: 4000 of 4000 hex values round-trip, against 3265 of 4000
+# for %.17g.
+#
+# This also explains why every previous hypothesis was ruled out and nothing
+# replaced them -- plant version, compiler flags, -ffp-contract, inlining, odelia
+# header version, translation-unit structure. None of them was ever involved. It
+# is also why scm_regression.R found the consume build bit-identical: that
+# comparison never round-trips through a text file parsed by R.
+#
+# THE 240 are not arithmetic at all: golden carries the NA sentinel on shutdown
+# rows where plant carries a number, because set_shutdown_state assigns
+# root_collar_psi_, opt_psi_stem_ and profit_ and leaves ci/assim/transpiration/
+# gc/e_up untouched. That is the shutdown-state leak (PLAN item 2, plant #578) --
+# a known behavioural difference, and the count matches the 48 x 5 recorded as
+# that fix's blast radius. They are now reported as their own column rather than
+# being counted as mismatches.
+#
+# Corroborated independently by compare_primitives.R, which calls the underlying
+# functions directly -- arrh_curve, the vulnerability curve, the assimilation
+# terms, transpiration, and the two that iterate -- and finds all 329 values
+# bit-identical.
+#
+# So: expect ZERO. Any finite difference now is real and should be investigated;
+# the nested solvers amplify perturbations up to about GSS_tol_abs (1e-3), so a
+# genuine arithmetic difference shows up around 1e-4.
 #
 # Run this against `main`, whose set_physiology signature still matches plant's.
 # The `feature/api-cleanup` branch deliberately diverges (different signature), so
@@ -135,7 +155,33 @@ plant_rows <- do.call(rbind, Map(solve_one, grid$psi_soil, grid$ppfd,
 
 # --- compare ------------------------------------------------------------------
 
-golden <- read.delim(golden_path)
+# Read the golden file through tsv_to_hex rather than with read.delim directly.
+# This is not fussiness, it is the difference between measuring the models and
+# measuring R: R's decimal parser is not correctly rounded, and on this file it
+# returns a double one ULP off the correctly rounded value for 345 of 3504 cells
+# (9.8%). Those perturbations land on the C++ side only -- plant's values are
+# computed in-process and never go near a string -- so they show up as a
+# disagreement between the two implementations, which is what they are not.
+# See tests/validate/tsv_to_hex.c, and issue #13.
+read_tsv_exactly <- function(path) {
+  src <- "tests/validate/tsv_to_hex.c"
+  bin <- file.path(tempdir(), "tsv_to_hex")
+  if (!file.exists(bin)) {
+    cc <- paste(system2(file.path(R.home("bin"), "R"), c("CMD", "config", "CC"),
+                        stdout = TRUE), collapse = " ")
+    if (system2(cc, c("-O2", "-o", shQuote(bin), shQuote(src))) != 0) {
+      stop("could not build ", src, ", which is needed to read ", path,
+           " without R's parser rounding it")
+    }
+  }
+  d <- read.delim(text = paste(system2(bin, stdin = path, stdout = TRUE),
+                               collapse = "\n"),
+                  colClasses = "character")
+  d[] <- lapply(d, as.numeric)   # hex; R parses this exactly
+  d
+}
+
+golden <- read_tsv_exactly(golden_path)
 stopifnot(nrow(golden) == nrow(plant_rows))
 
 # The inputs must line up before comparing outputs, or we would be comparing
@@ -159,20 +205,30 @@ total_mismatch <- 0L
 for (f in fields) {
   a <- plant_rows[[f]]
   b <- golden[[f]]
-  bad <- which(differs(a, b))
+  # Two entirely different things get counted separately, because conflating
+  # them is what made this look like a numerical mystery for so long:
+  #   shutdown  -- golden carries the NA sentinel where plant carries a number.
+  #                That is the shutdown-state leak (PLAN item 2, plant #578),
+  #                a known behavioural difference, not a rounding one.
+  #   numeric   -- both sides finite and unequal. THIS is the arithmetic.
+  shutdown <- is.nan(b) & !is.nan(a)
+  both_num <- !is.nan(a) & !is.nan(b)
+  bad <- which(both_num & a != b)
   total_mismatch <- total_mismatch + length(bad)
   rel <- if (length(bad)) {
-    max(abs(a[bad] - b[bad]) / pmax(abs(b[bad]), .Machine$double.xmin), na.rm = TRUE)
+    max(abs(a[bad] - b[bad]) / pmax(abs(b[bad]), .Machine$double.xmin))
   } else 0
-  summary_rows[[f]] <- data.frame(field = f, mismatches = length(bad),
+  summary_rows[[f]] <- data.frame(field = f, shutdown_NA = sum(shutdown),
+                                  numeric_differ = length(bad),
                                   max_rel_diff = rel)
 }
 summ <- do.call(rbind, summary_rows)
 
 cat("\n")
 print(summ, row.names = FALSE)
-cat(sprintf("\n%d of %d value comparisons differ.\n",
-            total_mismatch, nrow(golden) * length(fields)))
+cat(sprintf("\n%d of %d finite comparisons differ; %d cells are the shutdown\n  NA sentinel (a known behavioural difference, not arithmetic).\n",
+            total_mismatch, nrow(golden) * length(fields) - sum(summ$shutdown_NA),
+            sum(summ$shutdown_NA)))
 
 # The bar is a few ULP, not zero -- see the header. Bit-identity is unachievable
 # across a header-only single-TU build and plant's separate-TU build, and demanding
