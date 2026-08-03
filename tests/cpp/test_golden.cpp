@@ -41,7 +41,7 @@ struct Row {
   double psi_soil, ppfd, vpd;
   int layers;
   // outputs
-  double psi_stem, collar, ci, assim, transpiration, gc, profit, e_up, uptake;
+  double psi_stem, opt_root_psi, ci, assim, transpiration, gc, profit, e_up, uptake;
 };
 
 // Trait values and fixed drivers from plant's tests/testthat/test-leaf.r.
@@ -75,7 +75,7 @@ Row solve(double psi_soil, double ppfd, double vpd, int layers) {
     }
   }
   return Row{psi_soil,        ppfd,   vpd,        layers,     l.opt_psi_stem_,
-             l.root_collar_psi_, l.ci_, l.assim_colimited_, l.transpiration_,
+             l.opt_root_psi_, l.ci_, l.assim_colimited_, l.transpiration_,
              l.stom_cond_CO2_,   l.profit_, l.E_up_,        uptake};
 }
 
@@ -99,12 +99,12 @@ std::vector<Row> run_grid() {
 }
 
 const char *kHeader =
-    "psi_soil\tppfd\tvpd\tlayers\tpsi_stem\tcollar\tci\tassim\ttranspiration\t"
+    "psi_soil\tppfd\tvpd\tlayers\tpsi_stem\topt_root_psi\tci\tassim\ttranspiration\t"
     "gc\tprofit\te_up\tuptake\n";
 
 void write_row(FILE *f, const Row &r) {
   fprintf(f, "%.17g\t%.17g\t%.17g\t%d", r.psi_soil, r.ppfd, r.vpd, r.layers);
-  for (double v : {r.psi_stem, r.collar, r.ci, r.assim, r.transpiration, r.gc,
+  for (double v : {r.psi_stem, r.opt_root_psi, r.ci, r.assim, r.transpiration, r.gc,
                    r.profit, r.e_up, r.uptake}) {
     fprintf(f, "\t%.17g", v);
   }
@@ -215,7 +215,7 @@ int compare(Tolerance tol) {
     // 4 inputs then 9 outputs
     const int n = sscanf(
         line, "%lg\t%lg\t%lg\t%d\t%lg\t%lg\t%lg\t%lg\t%lg\t%lg\t%lg\t%lg\t%lg",
-        &g.psi_soil, &g.ppfd, &g.vpd, &g.layers, &g.psi_stem, &g.collar, &g.ci,
+        &g.psi_soil, &g.ppfd, &g.vpd, &g.layers, &g.psi_stem, &g.opt_root_psi, &g.ci,
         &g.assim, &g.transpiration, &g.gc, &g.profit, &g.e_up, &g.uptake);
     if (n != 13) {
       fprintf(stderr, "FAIL: row %zu is malformed (%d fields)\n", i, n);
@@ -228,7 +228,7 @@ int compare(Tolerance tol) {
       double got, want;
     };
     const Field fields[] = {{"psi_stem", r.psi_stem, g.psi_stem},
-                            {"collar", r.collar, g.collar},
+                            {"opt_root_psi", r.opt_root_psi, g.opt_root_psi},
                             {"ci", r.ci, g.ci},
                             {"assim", r.assim, g.assim},
                             {"transpiration", r.transpiration, g.transpiration},

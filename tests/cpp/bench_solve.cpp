@@ -96,7 +96,7 @@ double pass(std::vector<leaf::Leaf> &leaves, const std::vector<Point> &pts) {
     l.set_physiology(pt.root, pt.ppfd, pt.ps, pt.depth, kKs * kTheta / kH,
                      pt.vpd, kCa, kTleaf, kO2, kPatm);
     l.find_root_collar_psi();
-    for (double v : {l.opt_psi_stem_, l.root_collar_psi_, l.ci_,
+    for (double v : {l.opt_psi_stem_, l.opt_root_psi_, l.ci_,
                      l.assim_colimited_, l.transpiration_, l.stom_cond_CO2_,
                      l.profit_, l.E_up_}) {
       if (std::isfinite(v)) {

@@ -101,7 +101,7 @@ l.set_physiology(root_carbon_per_leaf_area, /*PPFD*/ 900,
 l.find_root_collar_psi();       // solve
 
 l.opt_psi_stem_;                // leaf water potential at the optimum, MPa
-l.root_collar_psi_;             // root-collar potential, MPa (signed)
+l.opt_root_psi_;                // root-collar potential, MPa (positive magnitude)
 l.assim_colimited_;             // A, umol m-2 s-1
 l.transpiration_;               // E, kg H2O m-2 s-1
 l.stom_cond_CO2_;               // gc, mol CO2 m-2 s-1

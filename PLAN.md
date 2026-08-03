@@ -78,7 +78,7 @@ code rather than of the merge:
 | [#5](https://github.com/traitecoevo/leaf_cpp/issues/5) | 6 | R interface (RcppR6) | absorbs the `Control` struct and the dropped-field cleanup |
 | [#6](https://github.com/traitecoevo/leaf_cpp/issues/6) | 12 | Calibration vignette, then inversion | needs #4 for trait gradients |
 | [#7](https://github.com/traitecoevo/leaf_cpp/issues/7) | 13 | Energy balance, full cut | leaf-to-air VPD is the cheap win; free convection is not worth it |
-| [#8](https://github.com/traitecoevo/leaf_cpp/issues/8) | 10a | Signed-vs-magnitude potentials in the type | design question, not a rename |
+| ~~[#8](https://github.com/traitecoevo/leaf_cpp/issues/8)~~ | 10a | Signed-vs-magnitude potentials in the type | **answered by [#25](https://github.com/traitecoevo/leaf_cpp/issues/25): remove one convention rather than type both.** #23 typed them (`Psi`/`AbsPsi`), worked, and was closed unmerged — halfway is halfway |
 | [#9](https://github.com/traitecoevo/leaf_cpp/issues/9) | 3 | Finish the plant-side integration | decisions + one unchecked consumer, and the catch-up: plant `develop` moved past the extraction point, so **its leaf fixes come to us** (plant #585, ported) before the swap can be validated. The validation itself needs redoing after #15 |
 | [#1](https://github.com/traitecoevo/leaf_cpp/issues/1) | 14 | Decide the package name | publication framing is item 14 below |
 
@@ -834,7 +834,7 @@ guess.
 |---|---|
 | root traits and curves | `root_b`, `root_c`, `root_psi_crit`, `root_vuln_from_psi`, `root_vuln_integral_from_psi` |
 | soil geometry | `soil_number_of_depths_`, `max_soil_layer`, `soil_depth_`, `z_soil_mid_`, `use_precomputed_z_soil_mid_`, `dz_`, `grav_head_z_` |
-| soil state | `psi_soil_`, `psi_soil_inverted_` |
+| soil state | `psi_soil_` (positive magnitudes; `psi_soil_inverted_` deleted in #25) |
 | resistance network | `r_R_H_min`, `r_R_V`, `r_R_V_sum` |
 | per-solve cache | `root_vuln_integral_soil_` |
 | outputs | `soil_consumption_`, and the `E_up_` it accumulates |
@@ -1240,13 +1240,17 @@ extraction.
 - **`mass_root_prop` → `root_carbon_per_layer`.** It is not a proportion of mass.
 - **`g1_TF24` → `cost_scale_TF24`.** It is not a g1 and invites confusion with
   Medlyn's g1 — doubly so once item 8 starts reporting an actual `g1_eff`.
-- **Signed-versus-magnitude water potentials belong in the type, not a comment.**
-  The convention is currently held together by a comment block above
-  `E_from_Soil_to_Root_Collar` and by suffix conventions
-  (`psi_soil_` positive, `psi_soil_inverted_` negative). A one-line strong type —
-  or at minimum a consistent naming rule enforced in review — removes a whole
-  class of sign error. This code already has form here: plant #584 is a dead
-  `std::max` clamp caused by a sign slip.
+- ~~**Signed-versus-magnitude water potentials belong in the type, not a comment.**~~
+  **Both halves of this were wrong, and the record is worth keeping.** The premise
+  ("the convention is held together by a comment block") was right; the prescribed
+  fix was not. #23 built the strong types, and they worked — bit-identical, and
+  they found a live bug. The review criticism that stuck was that they *describe* a
+  two-convention model instead of removing one, and that no type can cover
+  `dE_from_soil_dpsi_collar`, which is neither `Psi` nor `AbsPsi`. #25 deleted the
+  second convention instead: one representation, positive magnitudes, asserted at
+  the input boundary. `psi_soil_inverted_` is gone, so there is nothing left to
+  type. The lesson generalises: reach for a type to enforce an invariant you
+  actually need, not to police one you could remove.
 - **`R` and `n` are already gone** from the public namespace (see item 1). Worth
   recording *why* it mattered: the analytical project's
   `tf24_closed_form_bench.cpp` declares locals `const double n = l.c*l.beta2 - 1.0`

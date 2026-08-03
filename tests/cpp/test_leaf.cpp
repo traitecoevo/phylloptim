@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -355,7 +356,7 @@ void test_negative_assim_exit_writes_its_own_rates() {
        "net assimilation is -R_d, not the bright solve's");
   // The invariant the fix buys: profit_ == assim_colimited_ - hydraulic cost in
   // every branch. It held numerically to the last bit when measured.
-  near(l.assim_colimited_ - l.hydraulic_cost_TF(-l.root_collar_psi_), l.profit_,
+  near(l.assim_colimited_ - l.hydraulic_cost_TF(l.opt_root_psi_), l.profit_,
        1e-14, "profit is consistent with assimilation and the hydraulic cost");
 
   leaf::Leaf fresh;
@@ -376,7 +377,7 @@ void test_analytic_gradient_matches_finite_difference() {
   Drivers d;
   leaf::Leaf l = make_leaf(d, {2.0}, {1.0});
   l.find_root_collar_psi();
-  const double p0 = l.root_collar_psi_ < 0 ? -l.root_collar_psi_ : l.root_collar_psi_;
+  const double p0 = l.opt_root_psi_;
   const double target = std::max(2.2, std::min(p0, l.psi_crit - 0.5));
   const double eps = 1e-5;
   const double analytic = l.dprofit_droot_collar_psi(target);
@@ -421,11 +422,141 @@ void test_gradient_is_zero_in_reversed_gradient_state() {
   l.find_root_collar_psi();
   for (double target : {1.0, 3.0, 5.5, 5.9}) {
     const double psi_stem = l.find_psi_stem_from_psi_root(
-        -target, l.roots_.psi_soil_inverted_);
+        target, l.roots_.psi_soil_);
     ok(target >= psi_stem,
        "the target is in the reversed-gradient state at " + std::to_string(target));
     ok(l.dprofit_droot_collar_psi(target) == 0.0,
        "the gradient is exactly zero at " + std::to_string(target));
+  }
+}
+
+// #25's invariant, asserted rather than documented: every psi is a positive
+// magnitude, so the soil->collar derivative is a CONDUCTANCE. Under the old signed
+// convention this came back negative and had to be negated at the one call site
+// that wanted a conductance -- the omission of that negation is the bug that
+// motivated #8, and it is now unrepresentable.
+void test_soil_conductance_is_positive() {
+  printf("dE_up/d(collar suction) is a positive conductance\n");
+  Drivers d;
+  for (int layers : {1, 3, 5}) {
+    std::vector<double> ps(layers), depth(layers);
+    for (int i = 0; i < layers; ++i) { ps[i] = 1.0 + 0.25 * i; depth[i] = 1.0 * (i + 1); }
+    leaf::Leaf l = make_leaf(d, ps, depth);
+    l.find_root_collar_psi();
+    const double S = l.dE_from_soil_dpsi_collar(l.opt_root_psi_, l.roots_.psi_soil_);
+    ok(std::isfinite(S) && S > 0.0,
+       "conductance is finite and positive at " + std::to_string(layers) + " layers");
+    // It really is dE/dT: a central difference on the uptake must agree.
+    const double h = 1e-7;
+    double up = 0.0, dn = 0.0;
+    std::vector<double> buf(l.soil_consumption_.size(), 0.0);
+    l.roots_.uptake_at(l.opt_root_psi_ + h, l.roots_.psi_soil_, buf, up);
+    l.roots_.uptake_at(l.opt_root_psi_ - h, l.roots_.psi_soil_, buf, dn);
+    near(S, (up - dn) / (2.0 * h), 1e-5,
+         "conductance matches a central difference at " + std::to_string(layers) + " layers");
+  }
+}
+
+// The convention is now checkable, so check that it is checked: a caller still
+// holding the pre-#25 signed vector must fail loudly, not run.
+void test_signed_potentials_are_rejected() {
+  printf("signed potentials are rejected at the input boundary\n");
+  Drivers d;
+  leaf::Leaf l;
+  l.setup_transpiration(100);
+  l.setup_root_vulnerability(100);
+  bool threw = false;
+  try {
+    l.set_physiology({1.0 / d.area_leaf}, d.PPFD, {-2.0}, {1.0},
+                     d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                     d.atm_o2_kpa, d.atm_kpa);
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(threw, "set_physiology rejects a negative psi_soil");
+
+  leaf::Leaf ok_leaf = make_leaf(d, {2.0}, {1.0});
+  ok_leaf.find_root_collar_psi();
+  threw = false;
+  try {
+    ok_leaf.E_from_Soil_to_Root_Collar(2.5, {-2.0});
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(threw, "E_from_Soil_to_Root_Collar rejects a signed soil vector");
+
+  // The constructor's half of the invariant.
+  threw = false;
+  try {
+    leaf::Leaf bad(100, 2.04, -3.0, 5.0, 2.65, 1.29, 1.9, 1, 167 * 100, 0.3,
+                   0.7, 0.99, 1e-8, 100, 1e-6, 1000, 46.32995, 3.4e3, 9.4e4);
+    static_cast<void>(bad);
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(threw, "the constructor rejects a negative stem_b");
+}
+
+// #24 / plant #584: the dry end of the collar bracket is clamped to
+// root_psi_crit, the potential at which root conductivity is down to 5%. The clamp
+// was written as std::max against a *signed* root_psi_crit, so it could never bind
+// and the solver optimised over a collar drier than the root system can supply.
+//
+// The window is empty at this package's defaults, where psi_crit == root_psi_crit,
+// which is why the golden file does not move. It opens whenever the stem's psi_crit
+// is drier than the root's -- as it is in plant, by 1.2 MPa. Three regimes, all
+// pinned here, because the middle one is the only place a *transpiring* operating
+// point moves and the third is a behaviour the fix had to add rather than restore.
+void test_root_psi_crit_clamp_binds() {
+  printf("the collar bracket is clamped to root_psi_crit (#24)\n");
+  Drivers d;
+  const auto solve = [&](double psi_soil) {
+    leaf::Leaf l;
+    l.psi_crit = 5.91988;   // drier than root_psi_crit = 5.870283
+    l.setup_transpiration(100);
+    l.setup_root_vulnerability(100);
+    std::vector<double> ps{psi_soil}, depth{1.0}, root{1.0 / d.area_leaf};
+    l.set_physiology(root, d.PPFD, ps, depth, d.K_s * d.theta / d.h, d.atm_vpd,
+                     d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+    l.find_root_collar_psi();
+    return l;
+  };
+
+  // Regime 1 -- the clamp does not bind (root_crit is wetter than root_psi_crit),
+  // so nothing changes. Pinned so a future tightening cannot silently spread.
+  {
+    leaf::Leaf l = solve(5.80);
+    ok(l.opt_root_psi_ < l.roots_.root_psi_crit,
+       "below the window the collar stays inside the root limit anyway");
+    ok(l.transpiration_ > 0.0, "and the leaf still transpires");
+  }
+
+  // Regime 2 -- the interval is TIGHTENED but still has room. The optimum is
+  // genuinely interior here (measured 5.86989 against a bound of 5.870283, i.e.
+  // 3.9e-4 inside it -- within GSS_tol_abs), so the assertion is the invariant the
+  // clamp exists to enforce, not the boundary value: the collar no longer runs past
+  // the root limit, and the leaf goes on transpiring.
+  {
+    leaf::Leaf l = solve(5.86);
+    ok(l.opt_root_psi_ <= l.roots_.root_psi_crit,
+       "in the window the collar does not pass root_psi_crit");
+    ok(l.opt_root_psi_ > l.roots_.root_psi_crit - 1e-3,
+       "and it sits at the clamp, within the GSS tolerance");
+    ok(l.transpiration_ > 0.0, "and the leaf still transpires there");
+  }
+
+  // Regime 3 -- the clamp lands BELOW root_zero_E, the collar at which uptake is
+  // zero. Drawing any water would need a collar past the root limit, so there is no
+  // feasible transpiring operating point and the answer is shut-down. Nothing
+  // handled this before #24, because with the clamp dead it could not arise.
+  {
+    leaf::Leaf l = solve(5.90);
+    near(l.opt_root_psi_, l.roots_.root_psi_crit, 1e-12,
+         "past the window the collar sits at root_psi_crit");
+    near(l.transpiration_, 0.0, 1e-300, "and the leaf is shut down, not optimising");
+    near(l.opt_psi_stem_, l.psi_crit, 1e-12, "with the stem held at psi_crit");
+    ok(l.opt_root_psi_ <= l.roots_.root_psi_crit,
+       "the collar never passes root_psi_crit in any regime");
   }
 }
 
@@ -473,7 +604,7 @@ void test_multilayer_lambda_identity() {
     const double single = l.marginal_cost_water();
     const double multi = l.marginal_cost_water_multilayer();
 
-    const double target = -l.root_collar_psi_;
+    const double target = l.opt_root_psi_;
     const double eps = 1e-6;
     l.evaluate_root_collar_psi(target + eps);
     const double A1 = l.assim_colimited_, E1 = l.transpiration_;
@@ -515,20 +646,36 @@ void test_g1_eff() {
      "lambda rises as the soil dries");
 }
 
+// Build a leaf with the energy-balance gate (and the wind model) configured BEFORE
+// set_physiology runs, which is what the PM path needs: `ra_`, `Rn_` and `Tair_` are
+// all derived there, and the non-finite-wind check is made there. make_leaf() calls
+// set_physiology itself, so setting the gate on its return value is too late for
+// anything set_physiology decides.
+leaf::Leaf make_pm_leaf(const Drivers &d, std::vector<double> psi_soil,
+                        std::vector<double> soil_depth, bool gate,
+                        double wind_speed = 2.0, double leaf_dim = 0.05) {
+  leaf::Leaf l;
+  l.setup_transpiration(100);
+  l.setup_root_vulnerability(100);
+  l.use_energy_balance_ = gate;
+  l.wind_speed_ = wind_speed;
+  l.d_ = leaf_dim;
+  std::vector<double> root(psi_soil.size(),
+                           1.0 / double(psi_soil.size()) / d.area_leaf);
+  l.set_physiology(root, d.PPFD, psi_soil, soil_depth,
+                   d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                   d.atm_o2_kpa, d.atm_kpa);
+  return l;
+}
+
 void test_energy_balance_path_runs() {
   printf("Penman-Monteith energy-balance path\n");
   Drivers d;
-  leaf::Leaf l = make_leaf(d, {2.0}, {1.0});
+  leaf::Leaf l = make_pm_leaf(d, {2.0}, {1.0}, false);
   l.find_root_collar_psi();
   const double A_prescribed = l.assim_colimited_;
 
-  leaf::Leaf eb = make_leaf(d, {2.0}, {1.0});
-  eb.use_energy_balance_ = true;
-  eb.wind_speed_ = 2.0;
-  eb.d_ = 0.05;
-  // ra and Rn are derived in set_physiology, so re-run it with the gate on.
-  eb = make_leaf(d, {2.0}, {1.0});
-  eb.use_energy_balance_ = true;
+  leaf::Leaf eb = make_pm_leaf(d, {2.0}, {1.0}, true);
   eb.find_root_collar_psi();
   ok(std::isfinite(eb.profit_), "energy-balance profit is finite");
   ok(std::isfinite(eb.assim_colimited_), "energy-balance assimilation is finite");
@@ -537,6 +684,106 @@ void test_energy_balance_path_runs() {
   const double Tleaf = eb.leaf_temp_from_E(eb.transpiration_);
   ok(Tleaf >= leaf::leaf_temp_min && Tleaf <= leaf::leaf_temp_max,
      "leaf temperature stays inside the physical clamp");
+
+  // The wind model really is what set ra_, rather than the fixed fallback. This
+  // used to be untested: the previous version of this test set wind_speed_/d_ and
+  // then immediately reassigned the leaf, discarding them, and its comment
+  // described re-running set_physiology with the gate on, which it did not do. It
+  // passed only because 2.0 / 0.05 are also the defaults.
+  ok(std::isfinite(eb.ra_) && eb.ra_ > 0.0, "ra is finite and positive");
+  near(eb.ra_, leaf::aerodynamic_resistance_coef * std::sqrt(0.05 / 2.0), 1e-12,
+       "ra comes from the wind model, not the fixed fallback");
+  ok(std::isfinite(eb.Rn_), "net radiation is finite");
+}
+
+// Isaac Towers' review of plant #567: the ra fallback accepted a non-finite wind
+// speed as well as a zero one. Zero wind is physically ra -> infinity and a
+// legitimate fallback; NA is a broken driver or an unset trait and should fail
+// rather than silently produce a plausible number. Fixed in plant `76df7169` and
+// carried into this package -- but the test lived only in plant, in a demo smoke
+// test, while the code now lives here. Ported so the package that owns the
+// contract also guards it.
+void test_pm_wind_speed_validation() {
+  printf("PM path fails fast on a non-finite wind speed (review: itowers1)\n");
+  Drivers d;
+  const double nan_v = std::numeric_limits<double>::quiet_NaN();
+
+  // 1. gate ON + non-finite wind: fail fast.
+  bool threw = false;
+  try {
+    make_pm_leaf(d, {2.0}, {1.0}, true, nan_v);
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(threw, "a non-finite wind speed throws on the energy-balance path");
+
+  // ... and the same for the leaf dimension, which enters the same formula.
+  threw = false;
+  try {
+    make_pm_leaf(d, {2.0}, {1.0}, true, 2.0, nan_v);
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(threw, "a non-finite leaf dimension throws on the energy-balance path");
+
+  // 2. gate OFF + non-finite wind: fine, the wind model is never read.
+  threw = false;
+  try {
+    leaf::Leaf off = make_pm_leaf(d, {2.0}, {1.0}, false, nan_v);
+    off.find_root_collar_psi();
+    ok(std::isfinite(off.profit_), "and still solves");
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(!threw, "a non-finite wind speed is ignored with the gate off");
+
+  // 3. gate ON + ZERO wind: legitimate (ra -> infinity), falls back to the fixed
+  // ra rather than erroring or producing an infinity.
+  threw = false;
+  try {
+    leaf::Leaf zero = make_pm_leaf(d, {2.0}, {1.0}, true, 0.0);
+    near(zero.ra_, leaf::aerodynamic_resistance_fixed, 1e-12,
+         "zero wind falls back to the fixed ra");
+    zero.find_root_collar_psi();
+    ok(std::isfinite(zero.profit_), "and still solves");
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(!threw, "zero wind is a legitimate case, not an error");
+}
+
+// The behavioural content of plant's PM demo smoke test, which asserted these
+// through the R shim over a Fick-vs-PM grid. The implementation is here now, so
+// the sign of the effect is asserted here too.
+void test_pm_leaf_temperature_response() {
+  printf("PM leaf temperature: Tleaf == Tair off, departs from it on\n");
+  for (double ppfd : {400.0, 2000.0}) {
+    for (double tair : {20.0, 40.0}) {
+      for (double vpd : {1.0, 3.0}) {
+        Drivers d;
+        d.PPFD = ppfd; d.leaf_temp = tair; d.atm_vpd = vpd;
+        const std::string at = " at PPFD=" + std::to_string(int(ppfd)) +
+                               " Tair=" + std::to_string(int(tair)) +
+                               " VPD=" + std::to_string(int(vpd));
+
+        leaf::Leaf fick = make_pm_leaf(d, {2.0}, {1.0}, false);
+        fick.find_root_collar_psi();
+        ok(std::isfinite(fick.profit_) && std::isfinite(fick.assim_colimited_),
+           "Fick outputs are finite" + at);
+
+        leaf::Leaf pm = make_pm_leaf(d, {2.0}, {1.0}, true);
+        pm.find_root_collar_psi();
+        ok(std::isfinite(pm.profit_) && std::isfinite(pm.assim_colimited_),
+           "PM outputs are finite" + at);
+
+        // Hot and bright is where PM matters: the leaf runs warmer than the air.
+        if (ppfd == 2000.0 && tair == 40.0) {
+          const double Tleaf = pm.leaf_temp_from_E(pm.transpiration_);
+          ok(Tleaf > pm.Tair_, "the leaf is warmer than the air when hot and bright");
+        }
+      }
+    }
+  }
 }
 
 // The closed-form fast path (leaf/closed_form.hpp). Two things matter: that it is
@@ -678,13 +925,13 @@ void test_leaf_on_single_potential() {
   ok(std::isfinite(l.opt_psi_stem_), "and a finite stem potential");
   ok(l.opt_psi_stem_ > 0.0 && l.opt_psi_stem_ <= l.psi_crit,
      "stem potential is a positive magnitude within psi_crit");
-  ok(l.root_collar_psi_ <= 0.0, "collar potential is stored signed");
+  ok(l.opt_root_psi_ >= 0.0, "collar potential is stored as a positive magnitude");
   ok(l.assim_colimited_ > 0.0, "the leaf assimilates");
   ok(l.soil_consumption_.size() == 1u,
      "the consumption buffer is sized to one layer, not the caller's vector");
 
   // The collar must sit between the soil and the stem: water runs downhill.
-  const double collar_mag = -l.root_collar_psi_;
+  const double collar_mag = l.opt_root_psi_;
   ok(collar_mag >= psi_soil[0] - 1e-9 && collar_mag <= l.opt_psi_stem_ + 1e-9,
      "collar potential lies between soil and stem");
 
@@ -728,36 +975,36 @@ void test_single_potential() {
   // resistance_ is PER UNIT LEAF AREA, like every other input to the leaf.
   sp.resistance_ = 1.0e3;
 
-  // begin_solve flips to the signed convention and reports the only potential.
-  near(sp.begin_solve(), -1.5, 1e-14, "begin_solve returns the signed potential");
+  // begin_solve reports the only suction; there is nothing to flip (#25).
+  near(sp.begin_solve(), 1.5, 1e-14, "begin_solve returns the soil suction");
   ok(sp.n_layers() == 1, "single potential writes exactly one layer");
 
-  // Ohm's law, and the sign that matters: a collar drier than the soil draws
-  // water UP (positive uptake).
+  // Ohm's law, and the sign that matters: a collar drier than the soil -- a
+  // LARGER suction now -- draws water UP (positive uptake).
   std::vector<double> consumption(1, 0.0);
   double E_up = 0.0;
-  sp.uptake(-2.5, consumption, E_up);
+  sp.uptake(2.5, consumption, E_up);
   ok(E_up > 0.0, "a collar drier than the soil draws water up");
-  near(E_up, (-1.5 - -2.5) / sp.resistance_ * leaf::kg_per_mol_h2o,
+  near(E_up, (2.5 - 1.5) / sp.resistance_ * leaf::kg_per_mol_h2o,
        1e-14, "uptake is the Ohm's-law flux");
   ok(consumption[0] > 0.0, "per-layer consumption is filled");
 
   // A collar WETTER than the soil pushes water back into it. Losing this sign is
   // how hydraulic redistribution silently becomes extra uptake.
-  sp.uptake(-0.5, consumption, E_up);
+  sp.uptake(0.5, consumption, E_up);
   ok(E_up < 0.0, "a collar wetter than the soil loses water to it");
 
   // The analytic derivative must match a central difference on uptake, and stay
   // finite everywhere -- unlike MultiLayerRoots there are no branch kinks, so it
   // never asks the caller for a finite-difference fallback.
-  const double h = 1e-6, p0 = -2.5;
+  const double h = 1e-6, p0 = 2.5;
   double up = 0.0, dn = 0.0;
   sp.uptake(p0 + h, consumption, up);
   sp.uptake(p0 - h, consumption, dn);
   const double fd = (up - dn) / (2.0 * h);
   near(sp.duptake_dpsi(), fd, 1e-8, "analytic duptake_dpsi matches FD");
-  ok(sp.duptake_dpsi() < 0.0,
-     "duptake_dpsi is negative: uptake rises as the collar gets more negative");
+  ok(sp.duptake_dpsi() > 0.0,
+     "duptake_dpsi is a positive conductance: uptake rises as the collar pulls harder");
 
   // A zero resistance would be an infinite flux; it is rejected, not returned.
   leaf::SinglePotential bad;
@@ -765,7 +1012,7 @@ void test_single_potential() {
   bad.begin_solve();
   bool threw = false;
   try {
-    bad.uptake(-2.0, consumption, E_up);
+    bad.uptake(2.0, consumption, E_up);
   } catch (const std::exception &) {
     threw = true;
   }
@@ -922,10 +1169,15 @@ int main() {
   test_analytic_gradient_matches_finite_difference();
   test_gradient_needs_no_prior_solve();
   test_gradient_is_zero_in_reversed_gradient_state();
+  test_soil_conductance_is_positive();
+  test_root_psi_crit_clamp_binds();
+  test_signed_potentials_are_rejected();
   test_lambda_equals_dA_dE_single_layer();
   test_multilayer_lambda_identity();
   test_g1_eff();
   test_energy_balance_path_runs();
+  test_pm_wind_speed_validation();
+  test_pm_leaf_temperature_response();
   test_closed_form();
   test_single_potential();
   test_leaf_on_single_potential();
