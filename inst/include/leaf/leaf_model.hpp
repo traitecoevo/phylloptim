@@ -1060,6 +1060,20 @@ if(assim_max_ < 0){
     E_from_Soil_to_Root_Collar(root_collar_psi_, supply_psi_soil_inverted());
 
     profit_ = - R_d_ - hydraulic_cost_TF(-root_collar_psi_);
+    // As on the shut-down exits: transpiration is zero here, so gross
+    // assimilation is zero and the reported net rate is -R_d_. Set it
+    // explicitly -- this branch does not go through profit_psi_stem_TF, so
+    // assim_colimited_ would otherwise keep whatever the last probe wrote,
+    // and it is reported. Keeps profit_ == assim_colimited_ -
+    // hydraulic_cost_TF() in every branch.
+    assim_colimited_ = -R_d_;
+    // E_up_ and soil_consumption_ are already correct: the
+    // E_from_Soil_to_Root_Collar call above evaluates them at root_zero_E, the
+    // collar potential at which uptake is zero. The leaf-side pair is set
+    // nowhere on this path, though, so zero it here rather than leave the
+    // previous solve's values -- see set_shutdown_state for why that matters.
+    transpiration_ = 0.0;
+    stom_cond_CO2_ = 0.0;
 
         if(std::isnan(profit_)){
           util::stop("Error: profit nan");

@@ -322,6 +322,55 @@ void test_shallow_roots_do_not_inherit_deep_uptake() {
   }
 }
 
+// The other early exit that determines the operating point without going through
+// profit_psi_stem_TF: assimilation is negative even at ci = ca, so there is no
+// light level at which opening the stomata pays. It set profit_ but left the
+// leaf-side rates alone, so they held whatever the previous solve wrote -- and on
+// a fresh leaf, nothing at all. Ported from plant develop (#585).
+void test_negative_assim_exit_writes_its_own_rates() {
+  printf("the assim_max_ < 0 exit writes its own rates\n");
+  Drivers d;
+  leaf::Leaf l;
+  l.setup_transpiration(100);
+  l.setup_root_vulnerability(100);
+  const std::vector<double> psi_soil{1.0}, depth{1.0};
+  const std::vector<double> root{1.0 / d.area_leaf};
+  const auto solve = [&](double ppfd) {
+    l.set_physiology(root, ppfd, psi_soil, depth, d.K_s * d.theta / d.h,
+                     d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+    l.find_root_collar_psi();
+  };
+
+  solve(900.0); // bright: a normal optimising solve
+  ok(l.transpiration_ > 0.0, "the bright solve transpires");
+
+  // Dim enough that gross assimilation cannot cover R_d even with ci at ca. The
+  // soil is wet, so this is not the psi_crit shut-down path -- it is the
+  // assim_max_ < 0 exit, which parks the stem in equilibrium with the collar.
+  solve(10.0);
+  ok(l.assim_max_ < 0.0, "the dim solve takes the assim_max_ < 0 exit");
+  near(l.transpiration_, 0.0, 1e-300, "transpiration is zero, not stale");
+  near(l.stom_cond_CO2_, 0.0, 1e-300, "conductance is zero, not stale");
+  near(l.assim_colimited_, -l.R_d_, 1e-12,
+       "net assimilation is -R_d, not the bright solve's");
+  // The invariant the fix buys: profit_ == assim_colimited_ - hydraulic cost in
+  // every branch. It held numerically to the last bit when measured.
+  near(l.assim_colimited_ - l.hydraulic_cost_TF(-l.root_collar_psi_), l.profit_,
+       1e-14, "profit is consistent with assimilation and the hydraulic cost");
+
+  leaf::Leaf fresh;
+  fresh.setup_transpiration(100);
+  fresh.setup_root_vulnerability(100);
+  fresh.set_physiology(root, 10.0, psi_soil, depth, d.K_s * d.theta / d.h,
+                       d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  fresh.find_root_collar_psi();
+  ok(fresh.transpiration_ == l.transpiration_,
+     "a fresh leaf gives the same transpiration");
+  ok(fresh.assim_colimited_ == l.assim_colimited_,
+     "a fresh leaf gives the same assimilation");
+  ok(fresh.profit_ == l.profit_, "a fresh leaf gives the same profit");
+}
+
 void test_analytic_gradient_matches_finite_difference() {
   printf("analytic dprofit/dpsi_collar vs central difference\n");
   Drivers d;
@@ -830,6 +879,7 @@ int main() {
   test_shutdown_when_soil_is_drier_than_psi_crit();
   test_shutdown_writes_its_own_fluxes();
   test_shallow_roots_do_not_inherit_deep_uptake();
+  test_negative_assim_exit_writes_its_own_rates();
   test_analytic_gradient_matches_finite_difference();
   test_lambda_equals_dA_dE_single_layer();
   test_multilayer_lambda_identity();
