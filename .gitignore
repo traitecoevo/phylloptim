@@ -20,3 +20,6 @@ tests/cpp/*.dSYM/
 .DS_Store
 ._*
 .AppleDouble
+
+# Doxygen output (generated; see Doxyfile)
+docs/

@@ -1414,7 +1414,40 @@ expensive. In priority order:
   macOS. The suite needs no R, so this is fast and catches the portability
   problems (`long double`, FMA contraction) that have bitten plant before —
   see the arm64 note in `hydraulic_cost_Sperry`.
-- **Run the C++ suite under `R CMD check`** so `LinkingTo` consumers get told
-  when a header breaks.
-- **Doxygen or roxygen for the C++ API.** The header comments are unusually
-  good — they explain why, not what — and are worth rendering.
+- **Run the C++ suite under `R CMD check`** — DONE (#12). `tests/cpp.R` compiles
+  and runs `tests/cpp` using R's *configured* compiler (`R CMD config CXX20`)
+  against the *installed* headers, which is what a `LinkingTo` consumer actually
+  gets. `R CMD check` is clean: one NOTE, `'LinkingTo' field is unused: package
+  has no 'src' directory`, which is inherent to a header-only package and cannot
+  be fixed without adding compiled code we do not want.
+
+  It compiles the two sources **directly** rather than calling `make`, and that
+  is deliberate. `R CMD check` scans every Makefile in the tarball and warns
+  about GNU extensions, which `tests/cpp/Makefile` uses freely — `?=`,
+  `$(shell)`, `$(wildcard)`, `ifeq`. The sanctioned way to silence that is
+  `SystemRequirements: GNU make`, and it was declared briefly before being
+  reverted: it would be a **false statement about the package**. Installing leaf
+  needs no make whatsoever — there is no compiled code — and because
+  `SystemRequirements` is package-level metadata, every `LinkingTo: leaf`
+  consumer would inherit a declared dependency that is untrue for them. Only the
+  developer harness needs make. So the Makefile stays for developers and is kept
+  out of the tarball via `.Rbuildignore`, which costs two compiler invocations in
+  `tests/cpp.R` and no lies in the metadata.
+- **Doxygen for the C++ API** — DONE (#12). Not roxygen, and not a close call:
+  roxygen documents R objects and this package has none. When item 6 gives it an
+  R interface, roxygen becomes right for *that* surface and the two coexist.
+
+  The obstacle was that every comment here is a plain `//`, which Doxygen does
+  not read as documentation, and converting ten headers to `///` would be a
+  large diff through exactly the files `feature/api-cleanup` rewrites.
+  `tools/doxygen_filter.awk` does it at render time instead — comments only,
+  sources untouched. It also promotes each file's opening block to `\file`,
+  wraps indented tables and examples in `\verbatim` so Markdown cannot reflow
+  them into a paragraph, and escapes the characters Doxygen would otherwise read
+  as commands. CI renders with warnings promoted to errors, and asserts that
+  every non-comment line survives the filter byte-for-byte — because a filter
+  bug would otherwise show wrong signatures with nothing to indicate it.
+
+  Publishing is opt-in: set the repo variable `PUBLISH_DOCS=true` and Pages'
+  source to "GitHub Actions". Until then every run uploads the site as the
+  `api-docs` artifact.

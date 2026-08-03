@@ -163,6 +163,21 @@ It discovers BH and odelia through `Rscript` if R is installed, and otherwise
 falls back to a sibling `odelia/` checkout and Homebrew Boost. Override with
 `make BH_INC=... ODELIA_INC=...`.
 
+`R CMD check` runs the same suite, compiled with R's own configured compiler
+against the installed headers — so a package that `LinkingTo`s this one finds out
+from its own check when a header stops compiling.
+
+## API documentation
+
+```sh
+doxygen        # docs/html/index.html
+```
+
+Doxygen rather than roxygen because roxygen documents R objects and this package
+has none. The headers' comments are the substantive documentation here, and
+`tools/doxygen_filter.awk` presents them to Doxygen without modifying a single
+source file.
+
 ## How this compares to other leaf models
 
 See [COMPARISON.md](COMPARISON.md) for a feature-by-feature comparison against
