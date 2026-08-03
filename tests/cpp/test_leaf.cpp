@@ -510,6 +510,61 @@ void test_closed_form() {
 // reads r_R_H_min and r_R_V_sum. Testing it directly is the point of having
 // pulled it out of MultiLayerRoots -- and it is why the map stayed here rather
 // than moving to plant, where the golden file could not reach it.
+// The second supply path (issue #2 stage 3). Not wired into Leaf yet -- it exists
+// so the concept in stage 2 has two real alternatives to dispatch between, and so
+// the dispatch measurement was made against a genuine second type rather than a
+// stub the optimiser could see through.
+void test_single_potential() {
+  printf("single-potential supply path\n");
+  leaf::SinglePotential sp;
+  sp.set_soil_state(1.5);        // positive magnitude, -MPa
+  sp.resistance_ = 2.0e4;
+  const double area_leaf = 0.05;
+
+  // begin_solve flips to the signed convention and reports the only potential.
+  near(sp.begin_solve(), -1.5, 1e-14, "begin_solve returns the signed potential");
+  ok(sp.n_layers() == 1, "single potential writes exactly one layer");
+
+  // Ohm's law, and the sign that matters: a collar drier than the soil draws
+  // water UP (positive uptake).
+  std::vector<double> consumption(1, 0.0);
+  double E_up = 0.0;
+  sp.uptake(-2.5, area_leaf, consumption, E_up);
+  ok(E_up > 0.0, "a collar drier than the soil draws water up");
+  near(E_up, (-1.5 - -2.5) / (sp.resistance_ * area_leaf) * leaf::kg_per_mol_h2o,
+       1e-14, "uptake is the Ohm's-law flux");
+  ok(consumption[0] > 0.0, "per-layer consumption is filled");
+
+  // A collar WETTER than the soil pushes water back into it. Losing this sign is
+  // how hydraulic redistribution silently becomes extra uptake.
+  sp.uptake(-0.5, area_leaf, consumption, E_up);
+  ok(E_up < 0.0, "a collar wetter than the soil loses water to it");
+
+  // The analytic derivative must match a central difference on uptake, and stay
+  // finite everywhere -- unlike MultiLayerRoots there are no branch kinks, so it
+  // never asks the caller for a finite-difference fallback.
+  const double h = 1e-6, p0 = -2.5;
+  double up = 0.0, dn = 0.0;
+  sp.uptake(p0 + h, area_leaf, consumption, up);
+  sp.uptake(p0 - h, area_leaf, consumption, dn);
+  const double fd = (up - dn) / (2.0 * h);
+  near(sp.duptake_dpsi(area_leaf), fd, 1e-8, "analytic duptake_dpsi matches FD");
+  ok(sp.duptake_dpsi(area_leaf) < 0.0,
+     "duptake_dpsi is negative: uptake rises as the collar gets more negative");
+
+  // A zero resistance would be an infinite flux; it is rejected, not returned.
+  leaf::SinglePotential bad;
+  bad.set_soil_state(1.0);
+  bad.begin_solve();
+  bool threw = false;
+  try {
+    bad.uptake(-2.0, area_leaf, consumption, E_up);
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(threw, "zero resistance throws rather than returning an infinity");
+}
+
 void test_root_network_from_carbon() {
   printf("root architecture: carbon -> resistance\n");
   const double beta_H = 3.4e2, beta_V = 9.4e3, dz = 0.5;
@@ -609,6 +664,7 @@ int main() {
   test_g1_eff();
   test_energy_balance_path_runs();
   test_closed_form();
+  test_single_potential();
   test_root_network_from_carbon();
   test_bad_input_throws();
   benchmark();

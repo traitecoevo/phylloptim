@@ -32,7 +32,7 @@ where 10a, 10b, 10c and the shutdown fix sit.
 
 | issue | item | what | note |
 |---|---|---|---|
-| [#2](https://github.com/traitecoevo/leaf_cpp/issues/2) | 7b | Extract the soil/root supply path behind an interface | **do first** — #3, the multi-layer λ, and `kmax(h)` all sit on top. Design **partly** settled: **no template needed** (measured, see 7b). The runtime mechanism is reopened — `std::variant` was the *slowest* of the three measured and was chosen for copyability, not speed; the table is also stale post-stage-1. Re-measure, see 7b-iii stage 2. **Stage 1 MERGED** (#17, 2026-08-03, squashed as `10115e1`): `leaf/roots.hpp`, golden bit-identical, 1.7% slower, and the supply path now takes resistances rather than root carbon. plant's matching YAML sits on `feature/consume-leaf-package` (`3efe9c47`, `bbd47a36`) — that is the only plant branch consuming this package, so nothing is left broken. **Stages 2–3 remain** |
+| [#2](https://github.com/traitecoevo/leaf_cpp/issues/2) | 7b | Extract the soil/root supply path behind an interface | **do first** — #3, the multi-layer λ, and `kmax(h)` all sit on top. Design **partly** settled: **no template needed** (measured, see 7b). Runtime mechanism now **settled by measurement**: an **enum tag + `switch` is free** (−0.8%) where `std::variant` costs +1.0%; hold both alternatives as members. See 7b-iii stage 2. `SinglePotential` written and tested. **Stage 1 MERGED** (#17, 2026-08-03, squashed as `10115e1`): `leaf/roots.hpp`, golden bit-identical, 1.7% slower, and the supply path now takes resistances rather than root carbon. plant's matching YAML sits on `feature/consume-leaf-package` (`3efe9c47`, `bbd47a36`) — that is the only plant branch consuming this package, so nothing is left broken. **Stages 2–3 remain** |
 | [#3](https://github.com/traitecoevo/leaf_cpp/issues/3) | 7a | Make λ(state) pluggable | needs #2 |
 | [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11 | Template `Leaf` on its scalar type | deletes the hand-maintained AD replicas |
 | [#5](https://github.com/traitecoevo/leaf_cpp/issues/5) | 6 | R interface (RcppR6) | absorbs the `Control` struct and the dropped-field cleanup |
@@ -563,12 +563,14 @@ constructor (+1.1%, but boilerplate and a heap allocation per `Leaf` copy).
 fair price for value semantics, and it is dwarfed by the 6.3×/27× the
 closed-form path already offers (item 9).
 
-⚠️ **Read that preference with 7b-iii stage 2, which reopens it.** Two things
+⚠️ **This preference has since been overturned — see 7b-iii stage 2.** Two things
 this table does not say: `std::variant` is the *slowest* of the three options
-here, and the numbers were taken against the pre-stage-1 structure, which no
-longer exists. Two further options (enum tag + `switch`, and holding both) were
-never measured at all. The *conclusion* that survives is the constraint —
-`Leaf` must stay copyable — not the ranking.
+here, and the numbers were taken against the pre-stage-1 structure. Re-measured
+after stage 1, with a real second alternative, an **enum tag + `switch` is free**
+(−0.8%, i.e. at or below a direct call) while `std::variant` costs +1.0% — a
+third of the 2.6% below, but not nothing. The *conclusion* that survives from
+this section is the constraint — `Leaf` must stay copyable, and no template —
+not the ranking.
 
 ⚠️ **This result does not transfer to item 7a.** It is specific to the supply
 path. The *cost* core is the opposite case: `profit_psi_stem_TF`,
@@ -812,18 +814,48 @@ of doing it in stages.
    coupled reviews and a guaranteed conflict. When it lands it also takes
    `beta_R_H`/`beta_R_V` out of `Leaf`'s constructor and makes `soil_depth`
    droppable, since `dz` and `grav_head_z_` are its only remaining consumers.
-   **Which dispatch mechanism — and no, `std::variant` is not the fastest.** It
-   was the *slowest* of the three runtime options measured in #14. The full set,
-   with the constraint that decides it:
+   **Which dispatch mechanism — MEASURED against the current code, and the answer
+   is an enum tag.** `std::variant` was never the fastest; it was the *slowest* of
+   the three options in #14, chosen for copyability. Re-measured here against the
+   post-stage-1 structure, with `SinglePotential` as a genuine second alternative
+   and all three arms executing the same `MultiLayerRoots` code (identical bench
+   checksum, so only the *reach* varied), 10 interleaved rounds at reps=2000:
 
-   | option | measured | copyable? | why it is / is not the answer |
+   | option | measured | vs direct | verdict |
    |---|---|---|---|
-   | template `Leaf<Supply>` | fastest possible | yes | **rejected**: breaks the `plant::Leaf` alias and ~12,000 lines of generated RcppR6. Measured benefit is zero anyway — the supply path is not inlined |
-   | `std::function` | **+0.6%** | yes | fastest runtime option measured, but a poor structural fit: this is a *stateful, four-method* interface, not one callback. Three `std::function`s sharing state is worse than what it replaces |
-   | virtual base | +1.1% | only with a cloning copy ctor | clone boilerplate plus a heap allocation per `Leaf` copy |
-   | `std::variant` + `std::visit` | +2.6% | yes, natively | **current preference** — value semantics, no heap, no boilerplate |
-   | enum tag + `switch` | **not measured** | yes | hand-rolled variant. With only *two* alternatives a predictable branch may beat `std::visit`'s jump table. Worth measuring before defaulting to variant |
-   | hold both, select on a `bool` | **not measured** | yes | wasteful in space, near-free in time. Ugly, but the honest baseline for "how cheap could dispatch possibly be" |
+   | direct call (today) | 3.507 µs | — | baseline, not an option once there are two paths |
+   | **enum tag + `switch`** | **3.478 µs** | **−0.8%** | **free.** Consistently at or below the direct call across all 10 rounds |
+   | `std::variant` + `std::visit` | 3.542 µs | +1.0% | real, but a third of the +2.6% the old table claimed |
+   | template `Leaf<Supply>` | — | — | still rejected: breaks the `plant::Leaf` alias and ~12,000 lines of RcppR6, for a benefit the numbers above say is under 1% |
+   | `std::function` | — | — | measured +0.6% in #14, but a poor fit: this is a stateful *four-method* interface, not one callback |
+   | virtual base | — | — | +1.1% in #14, plus clone boilerplate and a heap allocation per `Leaf` copy |
+
+   **So: hold both alternatives as members and switch on a tag.** `SinglePotential`
+   is four doubles, so carrying it alongside `MultiLayerRoots` costs ~32 bytes per
+   `Leaf` and nothing at all in time. It is trivially copyable, needs no `visit`,
+   no clone, and no union.
+
+   *Why* it is free is worth knowing, because it is a durable property rather than
+   a lucky number: `uptake_impl` is out-of-line and stays that way (hazard 5), the
+   tag never changes within a solve so the branch predicts perfectly, and a
+   predictable conditional in front of an out-of-line call disappears into it.
+   `std::variant` cannot match that because `std::visit` emits **two out-of-line
+   `__dispatch` thunks** — an indirect jump, which predicts worse than a direct
+   branch. That is visible in the binary: `nm -C bench | grep __dispatch`.
+
+   ⚠️ **Reproducing this: the tag must be runtime-unknowable.** Set it from a
+   constant and the branch constant-folds, every arm measures zero, and it looks
+   like a free lunch that is not one. The measurement above set it from `argc`.
+   Verify before believing any arm: `nm -C bench | grep -c SinglePotential`
+   should be 0 for the direct arm and non-zero for the others — if the dispatch
+   folded, the unused path's symbol disappears entirely.
+
+   **The one argument for `std::variant` that survives** is not speed: a variant
+   makes the invalid state unrepresentable, whereas holding both members means
+   both objects always exist and only one is meaningful. That is worth 1.0% only
+   if the invalid state is a real risk. With one tag written in one place, it is
+   not — but revisit if a third and fourth supply path arrive, where holding all
+   of them stops being sensible.
 
    **The binding constraint is copyability, not speed.** plant's
    `make_strategy_ptr(TF24_Strategy s)` takes the strategy **by value** and
