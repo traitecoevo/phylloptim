@@ -19,8 +19,18 @@ this file keeps the reasoning behind each one.
 | **5** | **Decided: leave XAD as it is.** It arrives via odelia, both packages want the same version, and only forward mode is used so nothing needs linking. No action. |
 
 Changes that alter results or the API live on **`feature/api-cleanup`**, not on
-`master`, so `master` stays a drop-in for plant. That branch is 7 commits and is
-where 10a, 10b, 10c and the shutdown fix sit.
+`master`. That branch is 7 commits and is where 10a, 10b, 10c and the shutdown fix
+sit.
+
+⚠️ **That branch is now 5 commits behind `master` and conflicts** in
+`leaf_model.hpp` and `tests/cpp/test_leaf.cpp` (checked 2026-08-03 with a dry-run
+merge). Issue #2 rewrote `set_physiology`'s body and `Leaf`'s members three times
+— the supply-path move, the resistance interface, then the dispatch — and
+`api-cleanup` carries its own rewrite of the same function (14 → 10 args). **The
+cost only grows**: every further change to `master` in this area widens the same
+conflict, and `api-cleanup` also holds the *deferred half* of the resistance
+change (having plant pass resistances) which cannot land anywhere else. Rebase it
+before starting item 7a, or accept a harder merge later.
 
 **Not ours**
 
