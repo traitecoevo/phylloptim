@@ -1,8 +1,8 @@
-# Seed: give `leaf` an R interface, as a standalone package (#5)
+# Plan: give `leaf` an R interface, as a standalone package (#5)
 
-Handoff brief for starting the R-interface work in a fresh session. Everything
-below was established while rebasing and landing #15. Read this first so you don't
-re-derive it.
+Implementation plan plus handoff brief. The context was established while landing
+#15, and updated after #25/#26 and the plant-side catch-up. Read this first so you
+don't re-derive it; the staged plan is at the end.
 
 `PLAN.md` is the reasoning behind every open issue and is the authority; this file
 is only the *entry point* for this particular next step, plus the things that are
@@ -206,9 +206,78 @@ so despite the +2.4%, every scenario's success/failure classification is unchang
    inlined where the supply path was already out-of-line, so it needs its own
    measurement with `tests/cpp/bench_solve.cpp`.
 
-One more measurement worth carrying forward, because it will come up again the next
-time something is "supposed to be bit-identical": **boost's TOMS748 is not
-sign-symmetric.** #25 predicted the golden file would be bit-identical except for an
+## The staged plan for #5
+
+Five stages, each landing on its own. The ordering is chosen so that the two
+decisions that are hard to reverse — whether the package stops being header-only,
+and what the R-facing names are — come first and cheapest, and so that no stage
+leaves `master` unable to build plant.
+
+**Stage 0 — settle header-only, in a docs-only PR.** Nothing else can start until
+`DESCRIPTION`, `NAMESPACE` and `.github/workflows/cpp-tests.yml` agree on an answer
+(see "One decision to make" above). Write the answer down before writing YAML: the
+headers stay R-free and plant keeps `LinkingTo` them, with `src/` and an R job added
+alongside. Cheap to land, and it is the thing a reviewer will otherwise argue about
+in the middle of a 2000-line diff.
+
+**Stage 1 — the YAML and the generated glue, no design changes.** Copy `Leaf` out of
+plant's `inst/RcppR6_classes.yml` verbatim, minus the four fields #15 deleted, with
+`root_collar_psi_` → `opt_root_psi_`. Target: `Leaf()` constructs from R and
+`set_physiology` / `find_root_collar_psi` / the field getters work. Deliberately
+**not** friendlier than plant's version yet — this stage exists to prove the build,
+the CI job and `R CMD check` are sound with one moving part, not two.
+
+⚠️ **The C++ suite is the regression baseline for all of this, and it is blind to
+the R layer.** Add an R-side test that reproduces two or three golden operating
+points through the R API and compares to the recorded `%.17g` values. Without it, a
+YAML mistake that mistranslates an argument produces plausible numbers and no
+failure.
+
+**Stage 2 — a friendlier surface, as a thin R layer over stage 1.** This is where
+the design work goes, and keeping it *above* the generated glue means it can be
+rewritten without touching CI or the build:
+
+- **`set_physiology`'s ten positional arguments become a named, defaulted call.**
+  Ten is tolerable from a strategy that calls it once and painful from a console.
+- **Keep the `psi_soil >= 0` check.** #25 made every psi a positive magnitude and
+  asserted it at the input boundary; a friendly wrapper that quietly accepts a
+  signed vector would undo the one thing protecting an old script from a wrong
+  number. Surface the error, don't smooth it over.
+- **Absorb the `Control` struct** (PLAN 10b): `GSS_tol_abs`, `ci_abs_tol`,
+  `ci_niter`, `vulnerability_curve_ncontrol`, `integration_tol_`,
+  `leaf_temp_min`/`_max`. Deferred *to* this item because it means surgery on a
+  19-argument constructor that #5 redesigns anyway.
+- **A one-call convenience entry point** — drivers in, operating point out, as a
+  data.frame. This is the thing that makes the package legible to someone who would
+  otherwise reach for `plantecophys`, and `tests/cpp/test_golden.cpp`'s `solve()` is
+  already the shape of it.
+
+**Stage 3 — expose `SinglePotential`.** It is written, wired and tested, and
+unreachable from R because `supply_kind_` is a C++-only API. That is the bare-leaf,
+one-ψ_soil use case that was reason 2 in PLAN 7b for building it at all, and it is
+what makes the item 7a model comparison possible: Medlyn, Prentice least-cost and
+Cowan-Farquhar are all formulated against a *single* soil potential.
+
+⚠️ PLAN 7b-iii flags the footgun: **a naive `supply_kind_` setter silently
+invalidates a configured root network.** Design the transition, don't just expose
+the enum. The obvious shape is two constructors (or two `set_supply_*` calls) that
+each leave the object fully configured, with no state in which the tag and the
+network disagree.
+
+**Stage 4 — delete plant's copy, and collect the hazard-7 payoff.** Once the
+bindings live here, plant's `inst/RcppR6_classes.yml` stops naming `Leaf`'s fields
+and hazard 7 dissolves: no future member move needs a coupled commit in two repos.
+This is a coupled PR pair like the ones #25/#26 just did, and it is the last stage
+because it is the only one that can break plant.
+
+Sequencing note: stages 0–3 leave plant untouched, so they can land while plant's
+`feature/consume-leaf-package` is still in review. Stage 4 must wait for it to
+merge, or it will be rebasing against a moving target.
+
+## One measurement to carry forward
+
+It will come up again the next time something is "supposed to be bit-identical":
+**boost's TOMS748 is not sign-symmetric.** #25 predicted the golden file would be bit-identical except for an
 exactly-negated collar column. It came out 276/288 exactly negated, with 12 rows off
 by 1–3 ULP and 5–11 rows per other column moving at ≤5e-16. Hunted rather than
 tolerated, and localised: the flux rewrite *is* exactly antisymmetric (`root_zero_E`,
