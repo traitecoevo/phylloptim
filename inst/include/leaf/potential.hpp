@@ -4,9 +4,9 @@
 
 namespace leaf {
 
-// ---------------------------------------------------------------------------
-// WATER POTENTIAL: TWO CONVENTIONS, NOW IN THE TYPE  (issue #8)
-// ---------------------------------------------------------------------------
+// Water potential in two conventions, one type each, so the compiler keeps them
+// apart instead of a comment block (issue #8).
+//
 // This model carries water potential in two conventions, each natural to its
 // domain, and until now the only thing keeping them apart was a comment block
 // plus the `_inverted` suffix:
@@ -100,8 +100,8 @@ constexpr SuctionT<T> PotentialT<T>::magnitude() const {
 // --- comparison -------------------------------------------------------------
 // Same-convention only, which is the whole point: `Potential < Suction` does not
 // compile, and that is what makes the prepare_collar_solve clamp visible. Only
-// operator< is needed by std::min/std::max; the rest are here so call sites read
-// as they did before.
+// `operator<` is needed by `std::min` and `std::max`; the rest are here so call
+// sites read as they did before.
 #define LEAF_POTENTIAL_COMPARE(op)                                             \
   template <class T>                                                           \
   constexpr bool operator op(PotentialT<T> a, PotentialT<T> b) {                \
