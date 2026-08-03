@@ -22,6 +22,8 @@ inst/include/leaf/
   roots.hpp                    MultiLayerRoots (the soil → root-collar water supply)
                                plus root_network_from_carbon, the root architecture
                                model that feeds it resistances
+  single_potential.hpp         SinglePotential: the other supply path — one ψ_soil
+                               and a constant series resistance
   vulnerability.hpp            the Weibull cumulative-integral builder, shared by both
   constants.hpp                physical constants as inline constexpr
   closed_form.hpp              fast approximate solver, default off, not wired in
@@ -151,7 +153,7 @@ Keep them separate.
 this without a coupled review". That stopped being true when issue #2 stage 1
 merged (2026-08-03).** Moving the supply path into `MultiLayerRoots` relocated
 eleven fields that plant binds by name, so adopting `master` now requires a
-matching YAML change in plant — see hazard 6. The behaviour is still identical to
+matching YAML change in plant — see hazard 7. The behaviour is still identical to
 the byte; it is the *source* coupling that changed. The matching plant commits are
 `3efe9c47` and `bbd47a36` on `feature/consume-leaf-package`, which is the only
 plant branch that consumes this package.
@@ -203,7 +205,20 @@ they compute.** Results changes still belong on `feature/api-cleanup`. Anything 
 
    Before arguing from inlining, check: `nm -C test_golden | grep <fn>`. No symbol
    means inlined; a symbol plus `bl` call sites in `objdump -d` means it is not.
-6. **Moving a public member is a plant API break, because RcppR6 binds fields by
+6. **There are TWO supply paths, chosen by `Leaf::supply_kind_`.** `MultiLayerRoots`
+   (default) and `SinglePotential`. Both are held as members and selected by an
+   enum, which measured **free** where `std::variant` cost +1.0% — a predictable
+   branch in front of an already-out-of-line call disappears into it. Don't
+   "tidy" this into a variant without re-measuring; PLAN 7b-iii stage 2 has the
+   numbers and the reproduction recipe, including the trap that a
+   compile-time-known tag folds the branch away and reports a false zero.
+
+   When adding a third path, the contract is five methods — `begin_solve`,
+   `uptake`/`uptake_at`, `duptake_dpsi`, the collar-potential bound, and the layer
+   count — plus one rule: **`duptake_dpsi` returning NaN means "fall back to
+   finite differences", so returning 0 or throwing silently degrades TF24f's
+   acclimation gradient.** A path with no branch kinks simply never returns it.
+7. **Moving a public member is a plant API break, because RcppR6 binds fields by
    name.** plant's `inst/RcppR6_classes.yml` lists most of `Leaf`'s state as
    `access: field`, and the generator emits `obj_->psi_soil_` — a getter *and* a
    setter — straight into `src/RcppR6.cpp`. Relocating a member into a sub-object
@@ -224,7 +239,7 @@ they compute.** Results changes still belong on `feature/api-cleanup`. Anything 
    Check `git grep 'access: field' inst/RcppR6_classes.yml` in plant before
    moving anything public, and land the two changes together — plant tracks this
    package's **master** via `Remotes:`, so a merge here is what breaks it.
-7. **No Rcpp in the leaf.** `util.hpp` throws `std::runtime_error` instead of
+8. **No Rcpp in the leaf.** `util.hpp` throws `std::runtime_error` instead of
    `Rcpp::stop`, and uses a quiet NaN instead of `NA_REAL`. The only R touchpoint left
    in the include graph is odelia's `ode_util.hpp`; `tests/cpp/shim/RcppCommon.h` is a
    15-line stand-in that both keeps the tests R-free and specifies exactly what needs

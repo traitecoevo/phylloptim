@@ -48,10 +48,17 @@ public:
 
   // Signed (<= 0) form of psi_soil_, built by begin_solve.
   double psi_soil_inverted_ = util::na_value;
+  // The same value as a one-element vector. Leaf threads "the current soil state,
+  // signed" through E_column / find_root_psi / find_psi_stem_from_psi_root as a
+  // vector; carrying one here lets a single-potential Leaf reuse that machinery
+  // unchanged, which is what keeps stage 2 off the R-facing signatures. One
+  // double of duplication, and begin_solve is the only writer of either.
+  std::vector<double> psi_soil_inverted_vec_{0.0};
 
   void clear() {
     psi_soil_ = util::na_value;
     psi_soil_inverted_ = util::na_value;
+    psi_soil_inverted_vec_.assign(1, util::na_value);
   }
 
   // One layer, always: the consumption buffer gets exactly one entry.
@@ -63,6 +70,7 @@ public:
   // signed convention and report the wettest potential for bracketing.
   double begin_solve() {
     psi_soil_inverted_ = -psi_soil_;
+    psi_soil_inverted_vec_.assign(1, psi_soil_inverted_);
     return psi_soil_inverted_;
   }
 
@@ -78,6 +86,11 @@ public:
   // silently returning one.
   void uptake(double P_x_r, double area_leaf,
               std::vector<double>& soil_consumption, double& E_up) const {
+    uptake_from(P_x_r, psi_soil_inverted_, area_leaf, soil_consumption, E_up);
+  }
+
+  void uptake_from(double P_x_r, double psi_soil_signed, double area_leaf,
+                   std::vector<double>& soil_consumption, double& E_up) const {
     if (!std::isfinite(P_x_r) || !std::isfinite(area_leaf)) {
       util::stop("SinglePotential::uptake invalid input; P_x_r=" +
                  util::to_string(P_x_r) +
@@ -88,7 +101,7 @@ public:
                  util::to_string(resistance_));
     }
     const double E_i =
-        (psi_soil_inverted_ - P_x_r - grav_head_) / (resistance_ * area_leaf);
+        (psi_soil_signed - P_x_r - grav_head_) / (resistance_ * area_leaf);
     if (!soil_consumption.empty()) {
       soil_consumption[0] = E_i;  // mol, as MultiLayerRoots leaves it
     }
@@ -97,6 +110,26 @@ public:
       util::stop("SinglePotential::uptake non-finite E_up; P_x_r=" +
                  util::to_string(P_x_r));
     }
+  }
+
+  // Vector-taking forms, so Leaf can call both supply paths identically. The
+  // potential is read from element 0 rather than from psi_soil_inverted_, so that
+  // the R-facing Leaf::E_from_Soil_to_Root_Collar -- which may be handed any
+  // vector at all -- means the same thing here as it does for MultiLayerRoots.
+  void uptake_at(double P_x_r, const std::vector<double>& psi_soil,
+                 double area_leaf, std::vector<double>& soil_consumption,
+                 double& E_up) const {
+    if (psi_soil.empty()) {
+      util::stop("SinglePotential::uptake_at needs at least one potential");
+    }
+    uptake_from(P_x_r, psi_soil[0], area_leaf, soil_consumption, E_up);
+  }
+
+  double duptake_dpsi(double P_x_r, const std::vector<double>& psi_soil,
+                      double area_leaf) const {
+    static_cast<void>(P_x_r);
+    static_cast<void>(psi_soil);
+    return duptake_dpsi(area_leaf);
   }
 
   // Constant, and exactly the analytic derivative of uptake above. Negative,

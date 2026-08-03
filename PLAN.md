@@ -32,7 +32,7 @@ where 10a, 10b, 10c and the shutdown fix sit.
 
 | issue | item | what | note |
 |---|---|---|---|
-| [#2](https://github.com/traitecoevo/leaf_cpp/issues/2) | 7b | Extract the soil/root supply path behind an interface | **do first** — #3, the multi-layer λ, and `kmax(h)` all sit on top. Design **partly** settled: **no template needed** (measured, see 7b). Runtime mechanism now **settled by measurement**: an **enum tag + `switch` is free** (−0.8%) where `std::variant` costs +1.0%; hold both alternatives as members. See 7b-iii stage 2. `SinglePotential` written and tested. **Stage 1 MERGED** (#17, 2026-08-03, squashed as `10115e1`): `leaf/roots.hpp`, golden bit-identical, 1.7% slower, and the supply path now takes resistances rather than root carbon. plant's matching YAML sits on `feature/consume-leaf-package` (`3efe9c47`, `bbd47a36`) — that is the only plant branch consuming this package, so nothing is left broken. **Stages 2–3 remain** |
+| [#2](https://github.com/traitecoevo/leaf_cpp/issues/2) | 7b | Extract the soil/root supply path behind an interface | **do first** — #3, the multi-layer λ, and `kmax(h)` all sit on top. Design **partly** settled: **no template needed** (measured, see 7b). **Stages 2 and 3 DONE too** — `SinglePotential` written, wired, and dispatched by an enum tag, which measured **free** (`std::variant` would have cost +1.0%). All four stages of 7b-iii are now complete; #3 and the multi-layer λ are unblocked. **Stage 1 MERGED** (#17, 2026-08-03, squashed as `10115e1`): `leaf/roots.hpp`, golden bit-identical, 1.7% slower, and the supply path now takes resistances rather than root carbon. plant's matching YAML sits on `feature/consume-leaf-package` (`3efe9c47`, `bbd47a36`) — that is the only plant branch consuming this package, so nothing is left broken. **Stages 2–3 remain** |
 | [#3](https://github.com/traitecoevo/leaf_cpp/issues/3) | 7a | Make λ(state) pluggable | needs #2 |
 | [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11 | Template `Leaf` on its scalar type | deletes the hand-maintained AD replicas |
 | [#5](https://github.com/traitecoevo/leaf_cpp/issues/5) | 6 | R interface (RcppR6) | absorbs the `Control` struct and the dropped-field cleanup |
@@ -755,17 +755,42 @@ of doing it in stages.
    failure naming a field accessor nobody had touched. Written up under "Build &
    regeneration workflow" in plant's `agents.md`, with the `nm` check that
    identifies it.
-2. **Introduce the concept.** The four methods (`begin_solve`, `uptake`,
-   `duptake_dpsi`, plus per-layer output access) behind a swappable
-   implementation. Golden still bit-identical.
+2. **Introduce the concept — DONE**, together with stage 3. Golden bit-identical
+   over all 288 points; 134 checks; the dispatch measured **free** (3.537 vs 3.563
+   µs/solve against the pre-dispatch build, at or below it in every round).
 
-   ⚠️ **Do stage 3 first.** As written this stage names
-   `std::variant<MultiLayerRoots, SinglePotential>`, and stage 3 is what creates
-   `SinglePotential` — you cannot name a type that does not exist. Either build a
-   stub here or, better, swap the two: `SinglePotential` is small (one ψ_soil,
-   infinite or constant conductance) and a variant over two *real* alternatives is
-   the thing worth measuring. The numbering is left alone because commits and
-   `leaf_model.hpp` already cite "stage 4" by number.
+   `Leaf` holds **both** alternatives as members and selects with a
+   `SupplyKind` enum. Default `MultiLayer`, so every existing caller — plant
+   included — keeps today's behaviour without knowing this exists.
+
+   **The three R-facing signatures were saved, and cheaply.** The obstacle was
+   that `E_column`, `find_root_psi` and `find_psi_stem_from_psi_root` thread
+   "the current soil state, signed" as a `std::vector<double>`, and three of those
+   are RcppR6-exposed. Rather than removing the threading — an API change that
+   would have forced this onto `feature/api-cleanup` — `SinglePotential` simply
+   carries a one-element vector of its own, and `Leaf::supply_psi_soil_inverted()`
+   returns whichever is active. One duplicated double, and the entire solve stayed
+   supply-agnostic without a signature moving. **This also means stage 4 is a
+   no-op here**: no plant-visible name moved, so plant needs no YAML change.
+
+   Dispatch is needed at only five points, which is the measure of how well the
+   boundary was drawn: `begin_solve`, `uptake`, `duptake_dpsi`, the collar-potential
+   bound (`root_psi_crit` for roots, `psi_crit` for a constant-conductance path),
+   and the layer count that sizes `soil_consumption_`.
+
+   **Still open, deliberately.** Two things:
+
+   * The `psi_soil` threading survives, so the pointer-identity cache test in
+     `uptake_at` survives with it. Removing both is the API change described
+     above and belongs with 10b. Nothing forces it now that the concept works
+     without it.
+   * **`supply_kind_` is not reachable from R.** Switching supply paths is a C++
+     API only; plant's YAML exposes neither it nor `single_`. That is the right
+     default — plant always wants the multi-layer path, and exposing a setter
+     that silently invalidates a configured root network is a footgun — but it
+     means the bare-leaf, one-ψ_soil use case that motivated `SinglePotential`
+     (reason 2 in 7b) is still unreachable for an R user. Wire it up with item 6,
+     where the whole R interface gets designed, not before.
 
    **The supply path now takes resistances, not root carbon — done ahead of this
    stage, because the concept depends on it.** `MultiLayerRoots::set_root_network`
@@ -890,19 +915,31 @@ of doing it in stages.
      does. Decide deliberately which branch that belongs on rather than
      discovering it mid-refactor; see the branch rule in the developer guide.
 
-3. **Add `SinglePotential`.** New behaviour and its own tests; golden unaffected
-   because it is not the default. **In practice this comes before stage 2** — see
-   the ordering warning there.
-4. **Check plant.** Build `feature/consume-leaf-package`, confirm the
-   `plant::Leaf` alias and the RcppR6 bindings still resolve and that
-   `soil_consumption_` is still reachable where `compute_rates` expects it.
-   **Done for stage 1** (see the stage-4 note above); repeat it for each later
-   stage that moves a plant-visible name, since `master` is no longer a
-   source-level drop-in.
+3. **Add `SinglePotential` — DONE**, before stage 2 as the ordering warning
+   required. `leaf/single_potential.hpp`: one ψ_soil, a constant series
+   resistance, the same four-method contract. Golden unaffected because it is not
+   the default. Nineteen checks of its own, including that its analytic
+   `duptake_dpsi` matches a central difference, that a zero resistance throws
+   rather than returning an infinity, and — through a whole `Leaf` — that drier
+   soil and a higher series resistance both cost carbon, which is the contract
+   that makes the two paths comparable at all.
 
-Stage 1 was the only one that should have been able to break anything, and that
-turned out to be wrong twice over: it broke plant's *generated* glue (trap 5), and
-stage 2 will change three R-facing signatures if the `psi_soil` threading goes.
+   It has **no branch kinks**, so it never returns the NaN that `MultiLayerRoots`
+   uses to request a finite-difference fallback. That NaN is a *contract*
+   (7b-ii item 4), not an expectation: a path that never needs it is conforming,
+   not broken.
+4. **Check plant — DONE for every stage.** Stage 1 needed eleven YAML lines and
+   two in `tf24_strategy.cpp`; the resistance change re-pointed five paths; stages
+   2 and 3 needed **nothing at all**, because they only *added* members and moved
+   no plant-visible name. Repeat it for any later change that moves one, since
+   `master` is no longer a source-level drop-in.
+
+Stage 1 was the only one that should have been able to break anything. That was
+half wrong and half right: it *did* break plant's generated glue (trap 5), which
+nobody predicted — but stage 2, which looked like it would have to change three
+R-facing signatures, turned out not to need to. Letting `SinglePotential` carry
+its own one-element vector of signed potentials kept the whole solve
+supply-agnostic without touching a signature, and cost one duplicated double.
 
 ## 8. Report λ and g1_eff as first-class outputs
 
