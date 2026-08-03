@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -580,6 +581,69 @@ void test_leaf_on_single_potential() {
      "the supply path defaults to multi-layer");
 }
 
+// --- leaf/potential.hpp: the sign convention in the type (issue #8) ----------
+// Detection idiom, so the interesting half of this test -- what must NOT compile --
+// can be asserted rather than left to a comment. A false positive here means the
+// types have quietly gained a conversion and stopped guarding anything.
+template <class A, class B, class = void>
+struct comparable : std::false_type {};
+template <class A, class B>
+struct comparable<A, B,
+                  std::void_t<decltype(std::declval<A>() < std::declval<B>())>>
+    : std::true_type {};
+
+void test_potential_types() {
+  printf("water potential: the sign convention in the type\n");
+  using leaf::Potential;
+  using leaf::Suction;
+
+  // The round trip is the negation, and it is exact.
+  const Suction s{5.870283};
+  near(s.signed_potential().value, -5.870283, 0.0, "suction -> signed potential");
+  near(s.signed_potential().magnitude().value, s.value, 0.0,
+       "round trip is exact");
+  const Potential p{-2.5};
+  near(p.magnitude().value, 2.5, 0.0, "signed potential -> magnitude");
+
+  // A difference of two potentials is a plain scalar in MPa: it is a gradient, and
+  // has no convention to get wrong. This is what keeps uptake_impl's physics plain.
+  near(Potential{-1.5} - Potential{-2.5}, 1.0, 0.0,
+       "difference of two potentials is a bare scalar");
+  near(midpoint(Suction{1.0}, Suction{2.0}).value, 1.5, 0.0, "midpoint");
+
+  // Same-convention comparison works, so std::min/std::max do too.
+  ok(Potential{-1.0} > Potential{-2.0}, "wetter potential compares greater");
+  ok(std::min(Potential{-1.0}, Potential{-2.0}) == Potential{-2.0}, "std::min");
+  ok(std::max(Suction{1.0}, Suction{2.0}) == Suction{2.0}, "std::max");
+  static_assert(comparable<Potential, Potential>::value, "");
+  static_assert(comparable<Suction, Suction>::value, "");
+
+  // THE POINT. plant #584 is `std::max(-root_crit, -root_psi_crit)`, which compares
+  // a magnitude against a signed potential and so can never bind. In these types
+  // that comparison does not exist, and neither does an implicit double conversion
+  // that would smuggle it back in.
+  static_assert(!comparable<Potential, Suction>::value,
+                "mixing the two conventions must not compile -- that is plant #584");
+  static_assert(!comparable<Suction, Potential>::value, "");
+  static_assert(!comparable<Potential, double>::value,
+                "a bare double must not compare against a potential");
+  static_assert(!std::is_convertible_v<double, Potential>,
+                "construction must stay explicit");
+  static_assert(!std::is_convertible_v<Potential, double>,
+                "and must not decay back to a bare double");
+  static_assert(!std::is_convertible_v<Potential, Suction>,
+                "the two conventions must not interconvert implicitly");
+  ok(true, "the two conventions do not mix, and neither converts implicitly");
+
+  // Zero cost: one scalar, trivially copyable, so it is passed in a register on the
+  // ~10^3-evaluations-per-solve supply path exactly as the bare double was.
+  static_assert(sizeof(Potential) == sizeof(double), "");
+  static_assert(std::is_trivially_copyable_v<Potential>, "");
+  static_assert(std::is_trivially_copyable_v<Suction>, "");
+  ok(sizeof(Potential) == sizeof(double) && sizeof(Suction) == sizeof(double),
+     "each is exactly one double wide");
+}
+
 void test_single_potential() {
   printf("single-potential supply path\n");
   leaf::SinglePotential sp;
@@ -588,14 +652,16 @@ void test_single_potential() {
   sp.resistance_ = 1.0e3;
 
   // begin_solve flips to the signed convention and reports the only potential.
-  near(sp.begin_solve(), -1.5, 1e-14, "begin_solve returns the signed potential");
+  // Collar potentials are leaf::Potential since issue #8, so the test has to name
+  // the convention too -- `sp.uptake(-2.5, ...)` no longer compiles.
+  near(sp.begin_solve().value, -1.5, 1e-14, "begin_solve returns the signed potential");
   ok(sp.n_layers() == 1, "single potential writes exactly one layer");
 
   // Ohm's law, and the sign that matters: a collar drier than the soil draws
   // water UP (positive uptake).
   std::vector<double> consumption(1, 0.0);
   double E_up = 0.0;
-  sp.uptake(-2.5, consumption, E_up);
+  sp.uptake(leaf::Potential{-2.5}, consumption, E_up);
   ok(E_up > 0.0, "a collar drier than the soil draws water up");
   near(E_up, (-1.5 - -2.5) / sp.resistance_ * leaf::kg_per_mol_h2o,
        1e-14, "uptake is the Ohm's-law flux");
@@ -603,7 +669,7 @@ void test_single_potential() {
 
   // A collar WETTER than the soil pushes water back into it. Losing this sign is
   // how hydraulic redistribution silently becomes extra uptake.
-  sp.uptake(-0.5, consumption, E_up);
+  sp.uptake(leaf::Potential{-0.5}, consumption, E_up);
   ok(E_up < 0.0, "a collar wetter than the soil loses water to it");
 
   // The analytic derivative must match a central difference on uptake, and stay
@@ -611,8 +677,8 @@ void test_single_potential() {
   // never asks the caller for a finite-difference fallback.
   const double h = 1e-6, p0 = -2.5;
   double up = 0.0, dn = 0.0;
-  sp.uptake(p0 + h, consumption, up);
-  sp.uptake(p0 - h, consumption, dn);
+  sp.uptake(leaf::Potential{p0 + h}, consumption, up);
+  sp.uptake(leaf::Potential{p0 - h}, consumption, dn);
   const double fd = (up - dn) / (2.0 * h);
   near(sp.duptake_dpsi(), fd, 1e-8, "analytic duptake_dpsi matches FD");
   ok(sp.duptake_dpsi() < 0.0,
@@ -624,7 +690,7 @@ void test_single_potential() {
   bad.begin_solve();
   bool threw = false;
   try {
-    bad.uptake(-2.0, consumption, E_up);
+    bad.uptake(leaf::Potential{-2.0}, consumption, E_up);
   } catch (const std::exception &) {
     threw = true;
   }
@@ -782,6 +848,7 @@ int main() {
   test_g1_eff();
   test_energy_balance_path_runs();
   test_closed_form();
+  test_potential_types();
   test_single_potential();
   test_leaf_on_single_potential();
   test_root_network_from_carbon();

@@ -3,6 +3,7 @@
 #define LEAF_SINGLE_POTENTIAL_HPP_
 
 #include <leaf/constants.hpp>
+#include <leaf/potential.hpp>
 #include <leaf/util.hpp>
 
 #include <cmath>
@@ -27,9 +28,9 @@ namespace leaf {
 //   duptake_dpsi(.) -> dE_up/dP_collar
 //   n_layers()      -> how many entries of the consumption buffer it writes
 //
-// SIGN CONVENTION matches MultiLayerRoots: psi_soil_ is supplied as a positive
-// magnitude and flipped once, in begin_solve(), to the signed potential the
-// transport works in.
+// SIGN CONVENTION matches MultiLayerRoots, and is now in the type (issue #8):
+// psi_soil_ is supplied as a positive magnitude -- a Suction -- and flipped once,
+// in begin_solve(), to the Potential the transport works in.
 //
 // NO KINKS, so duptake_dpsi never returns the NaN that MultiLayerRoots uses to
 // request a finite-difference fallback. The contract is "NaN means fall back",
@@ -50,19 +51,19 @@ public:
   // bare-leaf user is not thinking about rooting depth.
   double grav_head_ = 0.0;
 
-  // Signed (<= 0) form of psi_soil_, built by begin_solve.
-  double psi_soil_inverted_ = util::na_value;
+  // Signed form of psi_soil_, built by begin_solve.
+  Potential psi_soil_inverted_{util::na_value};
   // The same value as a one-element vector. Leaf threads "the current soil state,
   // signed" through E_column / find_root_psi / find_psi_stem_from_psi_root as a
   // vector; carrying one here lets a single-potential Leaf reuse that machinery
   // unchanged, which is what keeps stage 2 off the R-facing signatures. One
   // double of duplication, and begin_solve is the only writer of either.
-  std::vector<double> psi_soil_inverted_vec_{0.0};
+  std::vector<Potential> psi_soil_inverted_vec_{Potential{0.0}};
 
   void clear() {
     psi_soil_ = util::na_value;
-    psi_soil_inverted_ = util::na_value;
-    psi_soil_inverted_vec_.assign(1, util::na_value);
+    psi_soil_inverted_ = Potential{util::na_value};
+    psi_soil_inverted_vec_.assign(1, Potential{util::na_value});
   }
 
   // One layer, always: the consumption buffer gets exactly one entry.
@@ -72,8 +73,8 @@ public:
 
   // Per-solve entry point. Mirrors MultiLayerRoots::begin_solve: flip to the
   // signed convention and report the wettest potential for bracketing.
-  double begin_solve() {
-    psi_soil_inverted_ = -psi_soil_;
+  Potential begin_solve() {
+    psi_soil_inverted_ = Suction{psi_soil_}.signed_potential();
     psi_soil_inverted_vec_.assign(1, psi_soil_inverted_);
     return psi_soil_inverted_;
   }
@@ -88,29 +89,29 @@ public:
   // "how much CAN the soil supply at this collar potential" -- so a zero
   // resistance is rejected at the point it would produce an infinity rather than
   // silently returning one.
-  void uptake(double P_x_r, std::vector<double>& soil_consumption,
+  void uptake(Potential P_x_r, std::vector<double>& soil_consumption,
               double& E_up) const {
     uptake_from(P_x_r, psi_soil_inverted_, soil_consumption, E_up);
   }
 
-  void uptake_from(double P_x_r, double psi_soil_signed,
+  void uptake_from(Potential P_x_r, Potential psi_soil_signed,
                    std::vector<double>& soil_consumption, double& E_up) const {
-    if (!std::isfinite(P_x_r)) {
+    if (!std::isfinite(P_x_r.value)) {
       util::stop("SinglePotential::uptake invalid input; P_x_r=" +
-                 util::to_string(P_x_r));
+                 util::to_string(P_x_r.value));
     }
     if (!(resistance_ > 0.0)) {
       util::stop("SinglePotential::uptake needs a positive resistance_; got " +
                  util::to_string(resistance_));
     }
-    const double E_i = (psi_soil_signed - P_x_r - grav_head_) / resistance_;
+    const double E_i = ((psi_soil_signed - P_x_r) - grav_head_) / resistance_;
     if (!soil_consumption.empty()) {
       soil_consumption[0] = E_i;  // mol, as MultiLayerRoots leaves it
     }
     E_up = E_i * kg_per_mol_h2o;
     if (!std::isfinite(E_up)) {
       util::stop("SinglePotential::uptake non-finite E_up; P_x_r=" +
-                 util::to_string(P_x_r));
+                 util::to_string(P_x_r.value));
     }
   }
 
@@ -118,7 +119,7 @@ public:
   // potential is read from element 0 rather than from psi_soil_inverted_, so that
   // the R-facing Leaf::E_from_Soil_to_Root_Collar -- which may be handed any
   // vector at all -- means the same thing here as it does for MultiLayerRoots.
-  void uptake_at(double P_x_r, const std::vector<double>& psi_soil,
+  void uptake_at(Potential P_x_r, const std::vector<Potential>& psi_soil,
                  std::vector<double>& soil_consumption, double& E_up) const {
     if (psi_soil.empty()) {
       util::stop("SinglePotential::uptake_at needs at least one potential");
@@ -126,8 +127,8 @@ public:
     uptake_from(P_x_r, psi_soil[0], soil_consumption, E_up);
   }
 
-  double duptake_dpsi(double P_x_r,
-                      const std::vector<double>& psi_soil) const {
+  double duptake_dpsi(Potential P_x_r,
+                      const std::vector<Potential>& psi_soil) const {
     static_cast<void>(P_x_r);
     static_cast<void>(psi_soil);
     return duptake_dpsi();
