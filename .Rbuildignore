@@ -1,0 +1,36 @@
+# NB: R has no comment syntax for this file -- every line is a Perl regex, and a
+# line like this one is simply a pattern that never matches anything. Keep the
+# prose free of regex metacharacters: an unbalanced bracket here aborts
+# R CMD build with "invalid regular expression", which is how this note came to
+# be written.
+
+^\.github$
+^\.claude$
+^\.vscode$
+^.*\.Rproj$
+^\.Rproj\.user$
+^PLAN\.md$
+^COMPARISON\.md$
+^agents\.md$
+^Doxyfile$
+^docs$
+^leaf_.+\.tar\.gz$
+^.*\.Rcheck$
+
+# The developer harness, deliberately not shipped. R CMD check scans every
+# Makefile in the tarball and warns about GNU extensions, and the sanctioned way
+# to silence that -- SystemRequirements: GNU make -- would be a false statement
+# about this package: installing it needs no make at all. tests/cpp.R compiles
+# the two sources directly instead. See the long note at the top of that file.
+^tests/cpp/Makefile$
+
+# Built by make -C tests/cpp. The sources and the golden file must ship -- the
+# check in tests/cpp.R compiles them -- but the binaries must not.
+^tests/cpp/test_leaf$
+^tests/cpp/test_golden$
+^tests/cpp/bench_solve$
+^tests/cpp/.*\.dSYM$
+
+# Validation scripts, not tests: they need an installed plant and take minutes.
+# See the header comment in each.
+^tests/validate$
