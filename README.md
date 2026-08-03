@@ -72,9 +72,9 @@ plant. The *packaging* is new, and two things are not done yet:
 
 It also carries one inherited defect worth knowing about before you use it: on
 the hydraulic-shutdown path, transpiration, assimilation and soil water uptake
-are left holding the previous solve's values. See "Fix the shutdown-state leak"
-in [PLAN.md](PLAN.md); the behaviour is pinned by a test so the fix will be
-deliberate and visible.
+are left holding the previous solve's values (plant #578). `main` reproduces
+plant's behaviour exactly, including this; the fix is on the `feature/api-cleanup`
+branch alongside the other changes that alter results or the API.
 
 ## Use from C++
 
@@ -87,15 +87,15 @@ leaf::Leaf l;                   // default Eucalyptus saligna traits
 l.setup_transpiration(100);     // build the xylem vulnerability splines
 l.setup_root_vulnerability(100);
 
-std::vector<double> psi_soil{2.0};      // positive suction, MPa
-std::vector<double> soil_depth{1.0};    // m
-std::vector<double> mass_root_prop{1.0};
+std::vector<double> psi_soil{2.0};             // positive suction, MPa
+std::vector<double> soil_depth{1.0};           // m
+// kg C per m2 LEAF, not absolute carbon: the leaf is purely intensive.
+std::vector<double> root_carbon_per_leaf_area{20.0};
 
-l.set_physiology(/*area_leaf*/ 0.05, mass_root_prop, /*rho*/ 608, /*a_bio*/ 0.0245,
-                 /*PPFD*/ 900, psi_soil, soil_depth,
+l.set_physiology(root_carbon_per_leaf_area, /*PPFD*/ 900,
+                 psi_soil, soil_depth,
                  /*leaf_specific_conductance_max*/ 3.14e-5,
                  /*atm_vpd*/ 2.0, /*ca*/ 40.0,
-                 /*sapwood_volume_per_leaf_area*/ 7.85e-4,
                  /*leaf_temp*/ 25.0, /*atm_o2_kpa*/ 21.0, /*atm_kpa*/ 101.3);
 
 l.find_root_collar_psi();       // solve

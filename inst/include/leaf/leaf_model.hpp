@@ -13,6 +13,7 @@
 
 #include <odelia/interpolator.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <string>
@@ -27,8 +28,8 @@ public:
   Leaf();
   
   Leaf(double vcmax_25, 
-       double c, 
-       double b, 
+       double stem_c, 
+       double stem_b, 
        double psi_crit,
        double root_c,
        double root_b,
@@ -42,7 +43,7 @@ public:
        double vulnerability_curve_ncontrol,
        double ci_abs_tol,
        double ci_niter,
-      double g1_TF24,
+      double cost_scale_TF24,
     double beta_R_H,
     double beta_R_V); 
         
@@ -128,8 +129,15 @@ public:
   // psi_from_E
 
   double vcmax_25;
-  double c;
-  double b;
+  // NAMED stem_* deliberately. There are TWO Weibull vulnerability curves in this
+  // model -- stem (stem_b, stem_c), which drives hydraulic_cost_TF, and root
+  // (root_b, root_c), which drives uptake -- and these used to be the unmarked
+  // default `b` and `c`. That is not a style question: the companion analysis used
+  // the root parameters for the stem cost and carried lambda ~ psi^3.02 into a
+  // manuscript draft where it should have been psi^0.64. Never leave an unmarked
+  // default for a parameter that exists in two versions.
+  double stem_c;
+  double stem_b;
   double psi_crit;  // derived from b and c
   double beta2;
   double jmax_25;
@@ -140,7 +148,7 @@ public:
   double vulnerability_curve_ncontrol;
   double ci_abs_tol;
   double ci_niter;
-  double g1_TF24;
+  double cost_scale_TF24;
 
   double ci_;
   double stom_cond_CO2_;
@@ -160,14 +168,10 @@ public:
   double km_;
   double R_d_;
   double leaf_specific_conductance_max_;
-  double sapwood_volume_per_leaf_area_;
   double k_s_;
-  double area_leaf_;
-  double rho_;
   double vcmax_;
   double jmax_;
   double lma_; //kg m^-2
-  double a_bio_;
   
   double leaf_temp_;
   // Penman-Monteith leaf energy balance state (#523), only meaningful on the
@@ -191,7 +195,47 @@ public:
   double PPFD_;
   double atm_vpd_;
   double atm_o2_kpa_;
+
+  // --- Temperature-response parameters ---------------------------------------
+  // Settable, NOT constexpr, and that is a deliberate correction. These are
+  // exactly plantecophys's EaV / EdVC / delsC / EaJ / EdVJ / delsJ, which are
+  // *user parameters* there -- and whose defaults that package revised at v1.4
+  // after a literature review. They are also precisely what thermal acclimation
+  // modifies (Kattge & Knorr), so TF24t needs them mutable. `constexpr` asserted
+  // that they were not modelling choices, which was wrong.
+  //
+  // Defaults are the constants in leaf/constants.hpp, so there is still one source
+  // of truth for the published values.
+  double vcmax_ha_ = leaf::vcmax_ha;    // activation energy, J mol^-1
+  double vcmax_H_d_ = leaf::vcmax_H_d;  // deactivation energy, J mol^-1
+  double vcmax_d_S_ = leaf::vcmax_d_S;  // entropy term, J mol^-1 K^-1
+  double jmax_ha_ = leaf::jmax_ha;
+  double jmax_H_d_ = leaf::jmax_H_d;
+  double jmax_d_S_ = leaf::jmax_d_S;
+  // Bernacchi kinetics: reference value at 25 C and activation energy. Weaker case
+  // for being settable than the six above -- enzyme kinetics vary less among
+  // species -- but they are literature values that get revised, and bigleaf
+  // exposes them.
+  double gamma_25_ = leaf::gamma_25;    // CO2 compensation point, umol mol^-1
+  double gamma_ha_ = leaf::gamma_ha;
+  double kc_25_ = leaf::kc_25;          // Rubisco Km for CO2, umol mol^-1
+  double kc_ha_ = leaf::kc_ha;
+  double ko_25_ = leaf::ko_25;          // Rubisco Km for O2, umol mol^-1
+  double ko_ha_ = leaf::ko_ha;
+  // Dark respiration as a fraction of vcmax. Was the bare literal 0.015 inline in
+  // update_temperature_dependent_params -- a named, species-variable parameter
+  // (Collatz/Farquhar) hiding as a magic number.
+  double rd_to_vcmax_ratio_ = 0.015;
   double atm_kpa_;
+  // Conversion from a mixing ratio (umol mol^-1) to a partial pressure (Pa).
+  // DERIVED from atm_kpa_, not a constant: it is 1e-6 * P, so the old
+  // `umol_per_mol_to_Pa_ = 0.1013` was atmospheric pressure of 101.3 kPa in
+  // disguise. With atm_kpa_ a settable input, hard-coding it made the model
+  // internally inconsistent away from sea level -- the stomatal side responded to
+  // atm_kpa while Gamma*, Kc, Ko, Km and the ci root-find bounds all kept assuming
+  // 101.3 kPa. This is the trap plantecophys warns about in bold for its own
+  // `Patm`. Bit-identical to the old literal at 101.3 kPa (checked).
+  double umol_per_mol_to_Pa_;
   double ca_;
   double root_collar_psi_;
   double assim_max_;
@@ -259,7 +303,13 @@ public:
 
   
   // set-up functions
-  void set_physiology(double area_leaf, const std::vector<double>& mass_root_prop, double rho, double a_bio, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double sapwood_volume_per_leaf_area, double leaf_temp, double atm_o2_kpa, double atm_kpa);
+  // root_carbon_per_leaf_area: per-layer root carbon PER UNIT LEAF AREA. The leaf
+  // used to take absolute root carbon plus area_leaf and divide, but the two only
+  // ever appeared as that ratio -- r_R = beta/c_r is exactly linear in root carbon,
+  // so E_i is proportional to (root carbon / area_leaf) and nothing else. Passing
+  // the ratio makes the leaf PURELY INTENSIVE: no extensive quantity anywhere in
+  // it. beta_R_H and beta_R_V are unchanged; the scaling cancels exactly.
+  void set_physiology(const std::vector<double>& root_carbon_per_leaf_area, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double leaf_temp, double atm_o2_kpa, double atm_kpa);
   void setup_transpiration(double resolution);
   // Forwards to roots_.setup_vulnerability. Kept on Leaf because it is part of
   // the published construction sequence (see the umbrella header) and plant's
@@ -269,12 +319,15 @@ public:
   }
   // Forwards to leaf::cumulative_vulnerability_integral, which now lives in
   // vulnerability.hpp because it is shared by the stem and the root curves and
-  // so belongs to neither.
-  void build_cumulative_vulnerability_integral(double b, double c,
+  // so belongs to neither. The parameters are deliberately neutral names, not
+  // stem_*: this is called with (stem_b, stem_c) from setup_transpiration and
+  // with (root_b, root_c) from setup_root_vulnerability.
+  void build_cumulative_vulnerability_integral(double weibull_b, double weibull_c,
                                                double resolution,
                                                std::vector<double>& x,
                                                std::vector<double>& y_integral) {
-    cumulative_vulnerability_integral(b, c, resolution, x, y_integral);
+    cumulative_vulnerability_integral(weibull_b, weibull_c, resolution, x,
+                                      y_integral);
   }
   void setup_clean_leaf();
 
@@ -309,10 +362,10 @@ public:
   void E_from_Soil_to_Root_Collar(double P_x_r, const std::vector<double>& psi_soil) {
     switch (supply_kind_) {
       case SupplyKind::MultiLayer:
-        roots_.uptake_at(P_x_r, psi_soil, area_leaf_, soil_consumption_, E_up_);
+        roots_.uptake_at(P_x_r, psi_soil, soil_consumption_, E_up_);
         break;
       default:
-        single_.uptake_at(P_x_r, psi_soil, area_leaf_, soil_consumption_, E_up_);
+        single_.uptake_at(P_x_r, psi_soil, soil_consumption_, E_up_);
         break;
     }
   }
@@ -354,9 +407,9 @@ public:
   double dE_from_soil_dpsi_collar(double P_x_r, const std::vector<double>& psi_soil) {
     switch (supply_kind_) {
       case SupplyKind::MultiLayer:
-        return roots_.duptake_dpsi(P_x_r, psi_soil, area_leaf_);
+        return roots_.duptake_dpsi(P_x_r, psi_soil);
       default:
-        return single_.duptake_dpsi(P_x_r, psi_soil, area_leaf_);
+        return single_.duptake_dpsi(P_x_r, psi_soil);
     }
   }
   // Shut-down operating point used by the find_root_collar_psi early-exits: stem
@@ -437,8 +490,9 @@ public:
   // lambda at an arbitrary stem water potential (positive magnitude, MPa), in
   // umol CO2 (kg H2O)^-1. Analytic, from the TF24 cost function:
   //
-  //   C(psi)     = g1_TF24 * (1 - f(psi))^beta2,    f(psi) = exp(-(psi/b)^c)
-  //   dC/dpsi    = g1_TF24 * beta2 * (1-f)^(beta2-1) * (c/b)(psi/b)^(c-1) * f
+  //   C(psi)   = cost_scale_TF24 * (1 - f)^beta2,   f(psi) = exp(-(psi/stem_b)^stem_c)
+  //   dC/dpsi  = cost_scale_TF24 * beta2 * (1-f)^(beta2-1) *
+  //              (stem_c/stem_b)(psi/stem_b)^(stem_c-1) * f
   //   E(psi)     = kmax * integral of f,  so  dE/dpsi = kmax * f
   //   lambda     = (dC/dpsi) / (dE/dpsi)
   //
@@ -513,15 +567,16 @@ T assim_colimited_ad(T ci, double vcmax, double et, double gstar_Pa, double km,
   return (s - sqrt(s * s - 4.0 * curv * ar * ae)) / (2.0 * curv) - R_d;
 }
 template <typename T>
-T hydraulic_cost_ad(T psi_stem, double b, double c, double g1, double beta2) {
-  return g1 * pow(1.0 - exp(-pow(psi_stem / b, c)), beta2);
+T hydraulic_cost_ad(T psi_stem, double stem_b, double stem_c, double cost_scale,
+                    double beta2) {
+  return cost_scale * pow(1.0 - exp(-pow(psi_stem / stem_b, stem_c)), beta2);
 }
 }  // namespace detail
 inline Leaf::Leaf()
     :
     vcmax_25(96), // umol m^-2 s^-1 
-    c(2.680147), //unitless
-    b(3.898245), //-MPa
+    stem_c(2.680147), //unitless
+    stem_b(3.898245), //-MPa
     psi_crit(5.870283), //-MPa
     beta2(1.5), //exponent for effect of hydraulic risk (unitless)
     jmax_25(157.44), // maximum electron transport rate umol m^-2 s^-1
@@ -532,7 +587,7 @@ inline Leaf::Leaf()
     vulnerability_curve_ncontrol(100),
     ci_abs_tol(1e-3),
     ci_niter(1000),
-    g1_TF24(7.5) //cost parameter for TF24 profit model umol m^-2 s^-1
+    cost_scale_TF24(7.5) //cost parameter for TF24 profit model umol m^-2 s^-1
    {
       // The root traits (root_c/root_b/root_psi_crit) and the two beta_R_*
       // resistance constants keep their defaults in MultiLayerRoots, which owns
@@ -543,7 +598,7 @@ inline Leaf::Leaf()
       setup_clean_leaf();
 }
 
-inline Leaf::Leaf(double vcmax_25, double c, double b,
+inline Leaf::Leaf(double vcmax_25, double stem_c, double stem_b,
            double psi_crit, // derived from b and c,
            double root_c,
            double root_b,
@@ -554,12 +609,12 @@ inline Leaf::Leaf(double vcmax_25, double c, double b,
            double vulnerability_curve_ncontrol,
            double ci_abs_tol,
            double ci_niter,
-           double g1_TF24,
+           double cost_scale_TF24,
            double beta_R_H,
            double beta_R_V)
     : vcmax_25(vcmax_25), // umol m^-2 s^-1 
-    c(c), //unitless
-    b(b), //-MPa
+    stem_c(stem_c), //unitless
+    stem_b(stem_b), //-MPa
     psi_crit(psi_crit), //-MPa
     beta2(beta2), //exponent for effect of hydraulic risk (unitless)
     jmax_25(jmax_25), // maximum electron transport rate umol m^-2 s^-1
@@ -570,7 +625,7 @@ inline Leaf::Leaf(double vcmax_25, double c, double b,
     vulnerability_curve_ncontrol(vulnerability_curve_ncontrol),
     ci_abs_tol(ci_abs_tol),
     ci_niter(ci_niter),
-    g1_TF24(g1_TF24) //cost parameter for TF24 profit model umol m^-2 s^-1
+    cost_scale_TF24(cost_scale_TF24) //cost parameter for TF24 profit model umol m^-2 s^-1
    {
       // The root traits and the two resistance constants belong to the supply
       // path, so hand them over before its vulnerability curve is built.
@@ -602,12 +657,8 @@ inline void Leaf::setup_clean_leaf() {
   km_= util::na_value;
   R_d_= util::na_value;
   leaf_specific_conductance_max_= util::na_value; //kg m^-2 s^-1 MPa^-1 
-  sapwood_volume_per_leaf_area_ = util::na_value; //m^3 SA m^-2 LA
-  area_leaf_ = util::na_value;
-  rho_= util::na_value; //kg m^-3
   vcmax_= util::na_value; //kg m^-3
   jmax_= util::na_value; //kg m^-3
-  a_bio_= util::na_value; //kg mol^-1
   root_collar_psi_ = util::na_value; //-MPa
   leaf_temp_= util::na_value; // deg C
   Tair_= util::na_value; // deg C
@@ -617,6 +668,7 @@ inline void Leaf::setup_clean_leaf() {
   atm_vpd_= util::na_value; //kPa 
   atm_o2_kpa_= util::na_value; // kPa
   atm_kpa_= util::na_value; // kPa
+  umol_per_mol_to_Pa_ = util::na_value;
   ca_= util::na_value; //Pa
   opt_psi_stem_= util::na_value; //-MPa 
   opt_ci_= util::na_value; //Pa
@@ -651,14 +703,13 @@ inline void Leaf::setup_clean_leaf() {
 // every call; see the optimisation notes / caching opportunity.
 //
 //sets various parameters which are constant for a given node at a given time
-inline void Leaf::set_physiology(double area_leaf, const std::vector<double>& mass_root_prop, double rho, double a_bio, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double sapwood_volume_per_leaf_area, double leaf_temp, double atm_o2_kpa, double atm_kpa) {
-    if (psi_soil.size() != soil_depth.size() || mass_root_prop.size() != soil_depth.size()) {
-    util::stop("soil_depth, psi_soil and mass_root_prop must have the same number of elements");
+inline void Leaf::set_physiology(const std::vector<double>& root_carbon_per_leaf_area, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double leaf_temp, double atm_o2_kpa, double atm_kpa) {
+    if (psi_soil.size() != soil_depth.size() || root_carbon_per_leaf_area.size() != soil_depth.size()) {
+    util::stop("soil_depth, psi_soil and root_carbon_per_leaf_area must have the same number of elements");
   }
-  if (!std::isfinite(area_leaf) || !std::isfinite(rho) || !std::isfinite(a_bio) ||
-      !std::isfinite(PPFD) || !std::isfinite(leaf_specific_conductance_max) ||
+  if (!std::isfinite(PPFD) || !std::isfinite(leaf_specific_conductance_max) ||
       !std::isfinite(atm_vpd) || !std::isfinite(ca) ||
-      !std::isfinite(sapwood_volume_per_leaf_area) || !std::isfinite(leaf_temp) ||
+      !std::isfinite(leaf_temp) ||
       !std::isfinite(atm_o2_kpa) || !std::isfinite(atm_kpa)) {
     util::stop("set_physiology received non-finite scalar input");
   }
@@ -671,17 +722,15 @@ inline void Leaf::set_physiology(double area_leaf, const std::vector<double>& ma
       util::stop("set_physiology received non-finite soil_depth at layer=" + std::to_string(i) +
                  "; soil_depth=" + util::to_string(soil_depth[i]));
     }
-    if (!std::isfinite(mass_root_prop[i])) {
-      util::stop("set_physiology received non-finite mass_root_prop at layer=" + std::to_string(i) +
-                 "; mass_root_prop=" + util::to_string(mass_root_prop[i]));
+    if (!std::isfinite(root_carbon_per_leaf_area[i])) {
+      util::stop("set_physiology received non-finite root_carbon_per_leaf_area at layer=" + std::to_string(i) +
+                 "; root_carbon_per_leaf_area=" + util::to_string(root_carbon_per_leaf_area[i]));
     }
   }
-  area_leaf_ = area_leaf;
-  rho_ = rho;
-   a_bio_ = a_bio;
    atm_vpd_ = atm_vpd;
    leaf_temp_ = leaf_temp;
    atm_kpa_ = atm_kpa;
+   umol_per_mol_to_Pa_ = atm_kpa_ * kPa_to_Pa * umol_to_mol;
    atm_o2_kpa_ = atm_o2_kpa;
    PPFD_ = PPFD;
    switch (supply_kind_) {
@@ -699,7 +748,6 @@ inline void Leaf::set_physiology(double area_leaf, const std::vector<double>& ma
    leaf_specific_conductance_max_ = leaf_specific_conductance_max;
    // conductance changed -> invalidate the transpiration() memo
    transpiration_cached_ = false;
-   sapwood_volume_per_leaf_area_ = sapwood_volume_per_leaf_area;
    ca_ = ca;
    // Penman-Monteith leaf energy-balance inputs (#523). Reinterpret the incoming
    // leaf_temp driver as air temperature; derive net radiation from the absorbed
@@ -752,7 +800,7 @@ inline void Leaf::set_physiology(double area_leaf, const std::vector<double>& ma
   // root_network_from_carbon. This is the leaf-side half of that split -- moving
   // the call itself up to plant is an API change and belongs with item 10b.
   if (supply_kind_ == SupplyKind::MultiLayer) {
-    roots_.set_root_network_from_carbon(mass_root_prop);
+    roots_.set_root_network_from_carbon(root_carbon_per_leaf_area);
   }
 
   // Set up vector of root water uptake from layer. Stays on Leaf: plant writes
@@ -925,6 +973,29 @@ inline void Leaf::set_shutdown_state(double root_collar) {
   root_collar_psi_ = root_collar;
   opt_psi_stem_ = psi_crit;
   profit_ = -R_d_ - hydraulic_cost_TF(psi_crit);
+
+  // Write the flux outputs too. Before this they were left holding whatever the
+  // PREVIOUS solve on this object put there, and set_physiology did not reset them
+  // either (setup_clean_leaf runs from the constructors only) -- so a reused Leaf
+  // reported the previous plant's water and carbon use after a shutdown. plant
+  // holds one persistent Leaf per TF24_Strategy and drives every node, height and
+  // timestep through it, and soil_consumption_ feeds the patch water balance, so
+  // this was a live water-balance error on the dry margin. plant #578, #577.
+  //
+  // The values are the ones consistent with the profit already set above: the leaf
+  // is holding at psi_crit, so it moves no water at all, but it IS respiring --
+  // profit_ is -R_d_ - hydraulic_cost, so assimilation is -R_d_, not zero. ci sits
+  // at the CO2 compensation point, matching the two zero-transpiration branches in
+  // set_leaf_states_rates_from_psi_stem.
+  transpiration_ = 0.0;
+  stom_cond_CO2_ = 0.0;
+  assim_colimited_ = -R_d_;
+  ci_ = gamma_ * umol_per_mol_to_Pa_;
+  E_up_ = 0.0;
+  std::fill(soil_consumption_.begin(), soil_consumption_.end(), 0.0);
+  // Invalidate the transpiration memo: it is keyed on (psi_stem, psi_upstream) and
+  // we have just written transpiration_ without going through transpiration().
+  transpiration_cached_ = false;
 }
 
 // Shared setup + feasibility handling for the root-collar solve. Extracted
@@ -1133,7 +1204,7 @@ inline double Leaf::profit_at_collar_psi(double target_opt_root_psi,
 inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi) {
   using AD = xad::fwd<double>::active_type;
   const double psi = opt_root_psi;
-  const double gstar_Pa = gamma_ * umol_per_mol_to_Pa;
+  const double gstar_Pa = gamma_ * umol_per_mol_to_Pa_;
 
   // Operating point in double.
   const double psi_stem = find_psi_stem_from_psi_root(-psi, supply_psi_soil_inverted());
@@ -1149,7 +1220,7 @@ inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi) {
                          R_d_, curv_fact_colim));
   AD ps_ad = psi_stem;      xad::derivative(ps_ad) = 1.0;
   const double C_prime = xad::derivative(
-      detail::hydraulic_cost_ad(ps_ad, b, c, g1_TF24, beta2));
+      detail::hydraulic_cost_ad(ps_ad, stem_b, stem_c, cost_scale_TF24, beta2));
 
   // Stomatal-conductance supply coefficient gc and its partials. gc =
   // gc_const * transpiration(psi_stem, psi); transpiration is conductance_max *
@@ -1219,13 +1290,14 @@ inline double Leaf::peak_arrh_curve(double Ea, double ref_value, double leaf_tem
 // depends on the per-call PPFD_ and is (re)computed here from the just-updated
 // jmax_ -- on the non-PM cache-hit path set_physiology refreshes it separately.
 inline void Leaf::update_temperature_dependent_params(double leaf_temp) {
-  vcmax_ = peak_arrh_curve(vcmax_ha, vcmax_25, leaf_temp, vcmax_H_d, vcmax_d_S);
-  jmax_ = peak_arrh_curve(jmax_ha, jmax_25, leaf_temp, jmax_H_d, jmax_d_S);
-  gamma_ = arrh_curve(gamma_ha, gamma_25, leaf_temp);
-  ko_ = arrh_curve(ko_ha, ko_25, leaf_temp);
-  kc_ = arrh_curve(kc_ha, kc_25, leaf_temp);
-  R_d_ = vcmax_*0.015;
-  km_ = (kc_*umol_per_mol_to_Pa)*(1 + (atm_o2_kpa_*kPa_to_Pa)/(ko_*umol_per_mol_to_Pa));
+  vcmax_ =
+      peak_arrh_curve(vcmax_ha_, vcmax_25, leaf_temp, vcmax_H_d_, vcmax_d_S_);
+  jmax_ = peak_arrh_curve(jmax_ha_, jmax_25, leaf_temp, jmax_H_d_, jmax_d_S_);
+  gamma_ = arrh_curve(gamma_ha_, gamma_25_, leaf_temp);
+  ko_ = arrh_curve(ko_ha_, ko_25_, leaf_temp);
+  kc_ = arrh_curve(kc_ha_, kc_25_, leaf_temp);
+  R_d_ = vcmax_ * rd_to_vcmax_ratio_;
+  km_ = (kc_*umol_per_mol_to_Pa_)*(1 + (atm_o2_kpa_*kPa_to_Pa)/(ko_*umol_per_mol_to_Pa_));
   electron_transport_ = electron_transport();
 }
 
@@ -1255,13 +1327,13 @@ inline double Leaf::leaf_temp_from_E(double E) const {
 // returns proportion of conductance taken from hydraulic vulnerability curve (unitless)
 inline double Leaf::proportion_of_conductivity(double psi) const {
 
-  return exp(-pow((psi / b), c));
+  return exp(-pow((psi / stem_b), stem_c));
 }
 
 // set spline for proportion of conductivity
 inline void Leaf::setup_transpiration(double resolution) {
   std::vector<double> x_psi_, y_cumulative_transpiration_;
-  build_cumulative_vulnerability_integral(b, c, resolution, x_psi_,
+  build_cumulative_vulnerability_integral(stem_b, stem_c, resolution, x_psi_,
                                           y_cumulative_transpiration_);
 
   // setup interpolator
@@ -1350,7 +1422,7 @@ inline double Leaf::electron_transport() {
 //calculate the rubisco-limited assimilation rate, returns umol m^-2 s^-1
 inline double Leaf::assim_rubisco_limited(double ci_) {
 
-  return (vcmax_ * (ci_ - gamma_ * umol_per_mol_to_Pa)) / (ci_ + km_);
+  return (vcmax_ * (ci_ - gamma_ * umol_per_mol_to_Pa_)) / (ci_ + km_);
 
 }
 
@@ -1359,7 +1431,7 @@ inline double Leaf::assim_electron_limited(double ci_) {
   
 
   return electron_transport_ / 4 *
-  ((ci_ - gamma_ * umol_per_mol_to_Pa) / (ci_ + 2 * gamma_ * umol_per_mol_to_Pa));
+  ((ci_ - gamma_ * umol_per_mol_to_Pa_) / (ci_ + 2 * gamma_ * umol_per_mol_to_Pa_));
 }
 
 // returns co-limited assimilation umol m^-2 s^-1
@@ -1418,7 +1490,7 @@ inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
   // hydraulic find_root_psi path keeps bisection (its target is not smooth -- see
   // the warning on util::uniroot_smooth).
   try {
-    return ci_ = util::uniroot_smooth(target, gamma_ * umol_per_mol_to_Pa, ca_, 1e-7, ci_niter);
+    return ci_ = util::uniroot_smooth(target, gamma_ * umol_per_mol_to_Pa_, ca_, 1e-7, ci_niter);
   } catch (const std::exception& e) {
     // Penman-Monteith path (#523): extreme energy-balance leaf heating raises the
     // CO2 compensation point (gamma*) so far that assimilation is negative across
@@ -1430,10 +1502,10 @@ inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
     // non-PM path keeps its original fail-fast contract (it never reaches here
     // under prescribed leaf_temp).
     if (use_energy_balance_) {
-      return ci_ = gamma_ * umol_per_mol_to_Pa;
+      return ci_ = gamma_ * umol_per_mol_to_Pa_;
     }
     util::stop("psi_stem_to_ci failed: " + std::string(e.what()) +
-               "; min=" + util::to_string(gamma_ * umol_per_mol_to_Pa) +
+               "; min=" + util::to_string(gamma_ * umol_per_mol_to_Pa_) +
                "; max=" + util::to_string(ca_) +
                "; psi_stem=" + util::to_string(psi_stem) +
                "; psi_upstream=" + util::to_string(psi_upstream));
@@ -1444,12 +1516,12 @@ inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
 inline void Leaf::set_leaf_states_rates_from_psi_stem(double psi_stem, double psi_upstream) {
 
   if (psi_upstream >= psi_stem){
-    ci_ = gamma_*umol_per_mol_to_Pa;
+    ci_ = gamma_*umol_per_mol_to_Pa_;
     transpiration_ = 0;
     stom_cond_CO2_ = 0;
     } else{
       if(assim_max_ < 0){
-        ci_ = gamma_*umol_per_mol_to_Pa;
+        ci_ = gamma_*umol_per_mol_to_Pa_;
         transpiration_ = 0;
         stom_cond_CO2_ = 0;
         } else{
@@ -1498,7 +1570,7 @@ inline double Leaf::hydraulic_cost_Sperry(double psi_stem, double psi_upstream) 
 
 inline double Leaf::lambda_TF24(double psi_stem) const {
   const double f = proportion_of_conductivity(psi_stem);
-  return g1_TF24 * beta2 * (c / b) * pow(psi_stem / b, c - 1.0) *
+  return cost_scale_TF24 * beta2 * (stem_c / stem_b) * pow(psi_stem / stem_b, stem_c - 1.0) *
          pow(1.0 - f, beta2 - 1.0) / leaf_specific_conductance_max_;
 }
 
@@ -1538,7 +1610,7 @@ inline double Leaf::g1_eff() const {
 
 inline double Leaf::hydraulic_cost_TF(double psi_stem) {
 
-  hydraulic_cost_ = g1_TF24 * pow((1 - proportion_of_conductivity(psi_stem)), beta2);
+  hydraulic_cost_ = cost_scale_TF24 * pow((1 - proportion_of_conductivity(psi_stem)), beta2);
 
 return hydraulic_cost_;
 }
@@ -1639,7 +1711,7 @@ inline double Leaf::medlyn_model_gs(double assim_colimited_){
   if(atm_vpd == 0){
      medlyn_model_gs_ = g0;
   } else{
-     medlyn_model_gs_ = g0 + 1.6*(1 + (g1*beta_)/sqrt(atm_vpd_))*(assim_colimited_/(ca_*(1/umol_per_mol_to_Pa)));
+     medlyn_model_gs_ = g0 + 1.6*(1 + (g1*beta_)/sqrt(atm_vpd_))*(assim_colimited_/(ca_*(1/umol_per_mol_to_Pa_)));
   }
   return medlyn_model_gs_;
 }
@@ -1676,7 +1748,7 @@ inline void Leaf::solve_medlyn_ci_numerical(){
   auto target = [&](double x) -> double {
     return medlyn_stom_cond_minus_coupled_stom_cond(x);
   };
-  const double lo = gamma_ * umol_per_mol_to_Pa;
+  const double lo = gamma_ * umol_per_mol_to_Pa_;
   const double hi = ca_;
 
   double neg_peak = 0.0;

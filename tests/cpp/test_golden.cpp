@@ -46,7 +46,7 @@ struct Row {
 
 // Trait values and fixed drivers from plant's tests/testthat/test-leaf.r.
 const double kTheta = 0.000157, kKs = 1.0, kH = 5.0;
-const double kAreaLeaf = 0.05, kRho = 608.0, kABio = 0.0245;
+const double kAreaLeaf = 0.05;
 const double kCa = 40.0, kO2 = 21.0, kTleaf = 25.0, kPatm = 101.3;
 
 Row solve(double psi_soil, double ppfd, double vpd, int layers) {
@@ -61,11 +61,11 @@ Row solve(double psi_soil, double ppfd, double vpd, int layers) {
   for (int i = 0; i < layers; ++i) {
     ps[i] = psi_soil + 0.25 * i;
     depth[i] = 1.0 * (i + 1);
-    root[i] = 1.0 / layers;
+    root[i] = 1.0 / layers / kAreaLeaf;
   }
 
-  l.set_physiology(kAreaLeaf, root, kRho, kABio, ppfd, ps, depth,
-                   kKs * kTheta / kH, vpd, kCa, kTheta * kH, kTleaf, kO2, kPatm);
+  l.set_physiology(root, ppfd, ps, depth, kKs * kTheta / kH, vpd, kCa,
+                   kTleaf, kO2, kPatm);
   l.find_root_collar_psi();
 
   double uptake = 0.0;
@@ -129,11 +129,11 @@ int generate() {
 
 // Exact equality, with NaN treated as equal to NaN -- some grid points shut down
 // and legitimately produce the NA sentinel (see PLAN.md item 2).
-bool same(double a, double b) {
-  if (std::isnan(a) && std::isnan(b)) {
+bool same(double got, double want) {
+  if (std::isnan(got) && std::isnan(want)) {
     return true;
   }
-  return a == b;
+  return got == want;
 }
 
 // Relative difference, used both to decide the tolerant comparison and to report

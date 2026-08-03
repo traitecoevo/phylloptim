@@ -39,27 +39,22 @@ inline constexpr double jmax_d_S = 650;
 
 // umol ^ -1 mol ^ 1
 inline constexpr double gamma_25 = 42.75;
-// dimensionless
-inline constexpr double gamma_c = 19.02;
 // kJ mol ^-1
 inline constexpr double gamma_ha = 37.83e3;
 
 // umol mol ^-1
 inline constexpr double kc_25 = 404.9 ;
-// dimensionless
-inline constexpr double kc_c = 38.05;
 // kJ mol ^-1
 inline constexpr double kc_ha = 79.43e3;
 
 // umol mol ^-1
 inline constexpr double ko_25 = 278400 ;
-// dimensionless
-inline constexpr double ko_c = 20.30;
 // kJ mol ^-1
 inline constexpr double ko_ha = 36.38e3;
 
-// Pa umol ^ -1 mol ^ 1 
-inline constexpr double umol_per_mol_to_Pa = 0.1013;
+// umol mol^-1 -> Pa is deliberately NOT a constant here: it is 1e-6 * P. See
+// Leaf::umol_per_mol_to_Pa_, derived from atm_kpa_. The old `0.1013` was 101.3
+// kPa hard-coded; don't reinstate it.
 
 // mol H2o kg ^-1
 inline constexpr double kg_to_mol_h2o = 55.4939;

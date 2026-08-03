@@ -40,7 +40,7 @@ namespace {
 // Trait values and fixed drivers from plant's tests/testthat/test-leaf.r, the
 // same ones test_golden.cpp uses.
 const double kTheta = 0.000157, kKs = 1.0, kH = 5.0;
-const double kAreaLeaf = 0.05, kRho = 608.0, kABio = 0.0245;
+const double kAreaLeaf = 0.05;
 const double kCa = 40.0, kO2 = 21.0, kTleaf = 25.0, kPatm = 101.3;
 
 struct Point {
@@ -67,7 +67,9 @@ std::vector<Point> grid() {
           for (int i = 0; i < n; ++i) {
             pt.ps[i] = p + 0.25 * i;
             pt.depth[i] = 1.0 * (i + 1);
-            pt.root[i] = 1.0 / n;
+            // root carbon PER UNIT LEAF AREA -- set_physiology no longer takes
+            // area_leaf, so the ratio is the input. Matches test_golden.cpp.
+            pt.root[i] = 1.0 / n / kAreaLeaf;
           }
           pts.push_back(pt);
         }
@@ -91,9 +93,8 @@ double pass(std::vector<leaf::Leaf> &leaves, const std::vector<Point> &pts) {
   for (size_t i = 0; i < pts.size(); ++i) {
     const Point &pt = pts[i];
     leaf::Leaf &l = leaves[i];
-    l.set_physiology(kAreaLeaf, pt.root, kRho, kABio, pt.ppfd, pt.ps, pt.depth,
-                     kKs * kTheta / kH, pt.vpd, kCa, kTheta * kH, kTleaf, kO2,
-                     kPatm);
+    l.set_physiology(pt.root, pt.ppfd, pt.ps, pt.depth, kKs * kTheta / kH,
+                     pt.vpd, kCa, kTleaf, kO2, kPatm);
     l.find_root_collar_psi();
     for (double v : {l.opt_psi_stem_, l.root_collar_psi_, l.ci_,
                      l.assim_colimited_, l.transpiration_, l.stom_cond_CO2_,

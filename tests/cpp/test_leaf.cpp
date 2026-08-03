@@ -51,8 +51,6 @@ struct Drivers {
   double leaf_temp = 25.0;
   double atm_kpa = 101.3;
   double area_leaf = 0.05;
-  double rho = 608.0;
-  double a_bio = 0.0245;
 };
 
 leaf::Leaf make_leaf(const Drivers &d, std::vector<double> psi_soil,
@@ -60,11 +58,12 @@ leaf::Leaf make_leaf(const Drivers &d, std::vector<double> psi_soil,
   leaf::Leaf l;
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
+  // root carbon per unit leaf area: the old absolute carbon divided by area_leaf
   std::vector<double> mass_root_prop(psi_soil.size(),
-                                     1.0 / double(psi_soil.size()));
-  l.set_physiology(d.area_leaf, mass_root_prop, d.rho, d.a_bio, d.PPFD, psi_soil,
-                   soil_depth, d.K_s * d.theta / d.h, d.atm_vpd, d.ca,
-                   d.theta * d.h, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+                                     1.0 / double(psi_soil.size()) / d.area_leaf);
+  l.set_physiology(mass_root_prop, d.PPFD, psi_soil, soil_depth,
+                   d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                   d.atm_o2_kpa, d.atm_kpa);
   return l;
 }
 
@@ -90,7 +89,7 @@ void test_vulnerability_curve() {
   // is a different and larger potential.) Asserting the closed form rather than a
   // round number so this stays honest if the defaults change.
   near(l.proportion_of_conductivity(l.psi_crit),
-       std::exp(-std::pow(l.psi_crit / l.b, l.c)), 1e-12,
+       std::exp(-std::pow(l.psi_crit / l.stem_b, l.stem_c)), 1e-12,
        "conductivity at psi_crit matches the Weibull closed form");
   ok(l.proportion_of_conductivity(l.psi_crit) < 0.06,
      "conductivity at psi_crit is a few percent");
@@ -188,12 +187,13 @@ void test_light_response() {
   Drivers dim = Drivers(), bright = Drivers();
   dim.PPFD = 200;
   bright.PPFD = 1800;
-  leaf::Leaf a = make_leaf(dim, {2.0}, {1.0});
-  leaf::Leaf b = make_leaf(bright, {2.0}, {1.0});
-  a.find_root_collar_psi();
-  b.find_root_collar_psi();
-  ok(b.assim_colimited_ > a.assim_colimited_, "brighter light assimilates more");
-  ok(b.transpiration_ > a.transpiration_, "brighter light transpires more");
+  leaf::Leaf shaded = make_leaf(dim, {2.0}, {1.0});
+  leaf::Leaf sunlit = make_leaf(bright, {2.0}, {1.0});
+  shaded.find_root_collar_psi();
+  sunlit.find_root_collar_psi();
+  ok(sunlit.assim_colimited_ > shaded.assim_colimited_,
+     "brighter light assimilates more");
+  ok(sunlit.transpiration_ > shaded.transpiration_, "brighter light transpires more");
 }
 
 void test_multi_layer_soil() {
@@ -221,54 +221,52 @@ void test_shutdown_when_soil_is_drier_than_psi_crit() {
   near(l.opt_psi_stem_, l.psi_crit, 1e-12, "stem is held at psi_crit");
 }
 
-// KNOWN DEFECT, inherited from plant unchanged -- see PLAN.md, "Fix the
-// shutdown-state leak". set_shutdown_state() writes only root_collar_psi_,
-// opt_psi_stem_ and profit_. It does NOT reset transpiration_,
-// assim_colimited_, stom_cond_CO2_, ci_, E_up_ or soil_consumption_, and
-// set_physiology() does not either (setup_clean_leaf() runs from the
-// constructors only). So a Leaf object reused across solves -- which is exactly
-// how plant uses it, one persistent Leaf per TF24_Strategy driving every node
-// and timestep -- reports the PREVIOUS solve's water and carbon fluxes after a
-// shutdown.
-//
-// This test pins the broken behaviour deliberately, so that the fix is a
-// visible, deliberate change rather than a silent one. When the leak is fixed,
-// these assertions flip to expecting zeros.
-void test_shutdown_leaves_stale_state_known_defect() {
-  printf("shutdown state leak (known defect, pinned)\n");
+// The shutdown path used to leak the previous solve's fluxes (plant #578/#577).
+// set_shutdown_state now writes them, so this asserts the fixed behaviour: a
+// shut-down leaf moves no water, respires at R_d, and sits at the CO2
+// compensation point -- and, critically, none of that depends on what ran before.
+void test_shutdown_writes_its_own_fluxes() {
+  printf("shutdown writes its own fluxes (plant #578 fixed)\n");
   Drivers d;
   leaf::Leaf l;
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
-  std::vector<double> mrp{1.0}, depth{1.0};
+  std::vector<double> mrp{1.0 / d.area_leaf}, depth{1.0};
   const auto solve = [&](double psi) {
     std::vector<double> ps{psi};
-    l.set_physiology(d.area_leaf, mrp, d.rho, d.a_bio, d.PPFD, ps, depth,
-                     d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.theta * d.h,
-                     d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+    l.set_physiology(mrp, d.PPFD, ps, depth,
+                     d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                     d.atm_o2_kpa, d.atm_kpa);
     l.find_root_collar_psi();
   };
+
   solve(4.0); // wet enough to transpire
-  const double E_wet = l.transpiration_;
-  const double A_wet = l.assim_colimited_;
-  const double S_wet = l.soil_consumption_[0];
-  ok(E_wet > 0.0, "the wet solve transpires");
+  ok(l.transpiration_ > 0.0, "the wet solve transpires");
 
   solve(20.0); // far drier than psi_crit: the leaf shuts down
   ok(l.profit_ < 0.0, "the dry solve is a shutdown (profit < 0)");
-  ok(l.transpiration_ == E_wet,
-     "DEFECT: transpiration_ still holds the wet value");
-  ok(l.assim_colimited_ == A_wet,
-     "DEFECT: assim_colimited_ still holds the wet value");
-  ok(l.soil_consumption_[0] == S_wet,
-     "DEFECT: soil_consumption_ still holds the wet value");
+  near(l.transpiration_, 0.0, 1e-300, "transpiration is zero, not stale");
+  near(l.stom_cond_CO2_, 0.0, 1e-300, "conductance is zero, not stale");
+  near(l.E_up_, 0.0, 1e-300, "soil uptake is zero, not stale");
+  for (double s : l.soil_consumption_) {
+    near(s, 0.0, 1e-300, "per-layer consumption is zero, not stale");
+  }
+  // Respiring, not simply idle: profit_ is -R_d_ - hydraulic_cost, so the
+  // consistent assimilation is -R_d_. Zero would be inconsistent with profit_.
+  ok(l.assim_colimited_ < 0.0, "assimilation is negative (respiring)");
+  near(l.assim_colimited_, l.profit_ + l.hydraulic_cost_TF(l.psi_crit), 1e-12,
+       "assimilation is consistent with profit and the hydraulic cost");
+  ok(std::isfinite(l.ci_), "ci is set to the compensation point, not left stale");
 
-  // A freshly constructed leaf shows the same hole from the other side: the
-  // fluxes are never written at all, so they stay at the NA sentinel.
+  // Order independence is the property that was actually broken: a fresh leaf
+  // taken straight to dry must report exactly the same thing.
   leaf::Leaf fresh = make_leaf(d, {20.0}, {1.0});
   fresh.find_root_collar_psi();
-  ok(!std::isfinite(fresh.transpiration_),
-     "DEFECT: a never-transpired shutdown leaves transpiration_ unset");
+  ok(fresh.transpiration_ == l.transpiration_,
+     "a fresh leaf gives the same transpiration");
+  ok(fresh.assim_colimited_ == l.assim_colimited_,
+     "a fresh leaf gives the same assimilation");
+  ok(fresh.profit_ == l.profit_, "a fresh leaf gives the same profit");
 }
 
 void test_analytic_gradient_matches_finite_difference() {
@@ -327,7 +325,7 @@ void test_multilayer_lambda_identity() {
     for (int i = 0; i < layers; ++i) {
       ps[i] = 1.0 + 0.25 * i;
       depth[i] = 1.0 * (i + 1);
-      root[i] = 1.0 / layers;
+      root[i] = 1.0 / layers / d.area_leaf;
     }
     leaf::Leaf l = make_leaf(d, ps, depth);
     l.find_root_collar_psi();
@@ -411,9 +409,8 @@ void test_closed_form() {
   const double theta = 1.0 / 4669.0;
   const auto setp = [&](leaf::Leaf &l, double h, double vpd) {
     std::vector<double> ps{0.0}, dp{1.0}, rt{1.0};
-    l.set_physiology(1.0, rt, 608.0, 0.0245, 900.0, ps, dp,
-                     1.0 * theta / (h * eta_c), vpd, 40.0, theta * h, 25.0, 21.0,
-                     101.3);
+    l.set_physiology(rt, 900.0, ps, dp, 1.0 * theta / (h * eta_c), vpd, 40.0,
+                     25.0, 21.0, 101.3);
   };
   leaf::Leaf l;
 
@@ -462,7 +459,7 @@ void test_closed_form() {
                         5.870283, 1.0 / 2.680147, 157.44, 0.30, 0.7, 0.99, 1e-3,
                         100, 1e-3, 1000, 7.5, 3.4e2, 9.4e3);
   ok(leaf::closed_form::beta2_is_exact(exact_leaf),
-     "beta2_is_exact recognises beta2 = 1/c");
+     "beta2_is_exact recognises beta2 = 1/stem_c");
   ok(!leaf::closed_form::beta2_is_exact(l), "and rejects the default beta2 = 1.5");
   setp(exact_leaf, 5.0, 1.5);
   exact_leaf.optimise_psi_stem_TF();
@@ -525,14 +522,15 @@ void test_leaf_on_single_potential() {
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
   l.supply_kind_ = leaf::Leaf::SupplyKind::SinglePotential;
-  l.single_.resistance_ = 2.0e4;
+  // resistance_ is per unit leaf area now, so this is the old 2.0e4 * 0.05.
+  l.single_.resistance_ = 1.0e3;
 
   // set_physiology keeps its signature; on this path only psi_soil[0] is read,
   // so the depth and root-mass vectors are ignored rather than forbidden.
   std::vector<double> psi_soil{1.0}, depth{1.0}, root{1.0};
-  l.set_physiology(d.area_leaf, root, d.rho, d.a_bio, d.PPFD, psi_soil, depth,
-                   d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.theta * d.h,
-                   d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  l.set_physiology(root, d.PPFD, psi_soil, depth,
+                   d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                   d.atm_o2_kpa, d.atm_kpa);
   l.find_root_collar_psi();
 
   ok(std::isfinite(l.profit_), "single-potential solve gives a finite profit");
@@ -555,11 +553,11 @@ void test_leaf_on_single_potential() {
   dry.setup_transpiration(100);
   dry.setup_root_vulnerability(100);
   dry.supply_kind_ = leaf::Leaf::SupplyKind::SinglePotential;
-  dry.single_.resistance_ = 2.0e4;
+  dry.single_.resistance_ = 1.0e3;
   std::vector<double> psi_dry{3.0};
-  dry.set_physiology(d.area_leaf, root, d.rho, d.a_bio, d.PPFD, psi_dry, depth,
-                     d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.theta * d.h,
-                     d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  dry.set_physiology(root, d.PPFD, psi_dry, depth,
+                     d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                     d.atm_o2_kpa, d.atm_kpa);
   dry.find_root_collar_psi();
   ok(dry.profit_ < l.profit_, "drier soil yields less profit");
 
@@ -569,10 +567,10 @@ void test_leaf_on_single_potential() {
   tight.setup_transpiration(100);
   tight.setup_root_vulnerability(100);
   tight.supply_kind_ = leaf::Leaf::SupplyKind::SinglePotential;
-  tight.single_.resistance_ = 2.0e5;
-  tight.set_physiology(d.area_leaf, root, d.rho, d.a_bio, d.PPFD, psi_soil, depth,
-                       d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.theta * d.h,
-                       d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  tight.single_.resistance_ = 1.0e4;
+  tight.set_physiology(root, d.PPFD, psi_soil, depth,
+                       d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                       d.atm_o2_kpa, d.atm_kpa);
   tight.find_root_collar_psi();
   ok(tight.profit_ <= l.profit_, "a higher series resistance does not help");
 
@@ -586,8 +584,8 @@ void test_single_potential() {
   printf("single-potential supply path\n");
   leaf::SinglePotential sp;
   sp.set_soil_state(1.5);        // positive magnitude, -MPa
-  sp.resistance_ = 2.0e4;
-  const double area_leaf = 0.05;
+  // resistance_ is PER UNIT LEAF AREA, like every other input to the leaf.
+  sp.resistance_ = 1.0e3;
 
   // begin_solve flips to the signed convention and reports the only potential.
   near(sp.begin_solve(), -1.5, 1e-14, "begin_solve returns the signed potential");
@@ -597,15 +595,15 @@ void test_single_potential() {
   // water UP (positive uptake).
   std::vector<double> consumption(1, 0.0);
   double E_up = 0.0;
-  sp.uptake(-2.5, area_leaf, consumption, E_up);
+  sp.uptake(-2.5, consumption, E_up);
   ok(E_up > 0.0, "a collar drier than the soil draws water up");
-  near(E_up, (-1.5 - -2.5) / (sp.resistance_ * area_leaf) * leaf::kg_per_mol_h2o,
+  near(E_up, (-1.5 - -2.5) / sp.resistance_ * leaf::kg_per_mol_h2o,
        1e-14, "uptake is the Ohm's-law flux");
   ok(consumption[0] > 0.0, "per-layer consumption is filled");
 
   // A collar WETTER than the soil pushes water back into it. Losing this sign is
   // how hydraulic redistribution silently becomes extra uptake.
-  sp.uptake(-0.5, area_leaf, consumption, E_up);
+  sp.uptake(-0.5, consumption, E_up);
   ok(E_up < 0.0, "a collar wetter than the soil loses water to it");
 
   // The analytic derivative must match a central difference on uptake, and stay
@@ -613,11 +611,11 @@ void test_single_potential() {
   // never asks the caller for a finite-difference fallback.
   const double h = 1e-6, p0 = -2.5;
   double up = 0.0, dn = 0.0;
-  sp.uptake(p0 + h, area_leaf, consumption, up);
-  sp.uptake(p0 - h, area_leaf, consumption, dn);
+  sp.uptake(p0 + h, consumption, up);
+  sp.uptake(p0 - h, consumption, dn);
   const double fd = (up - dn) / (2.0 * h);
-  near(sp.duptake_dpsi(area_leaf), fd, 1e-8, "analytic duptake_dpsi matches FD");
-  ok(sp.duptake_dpsi(area_leaf) < 0.0,
+  near(sp.duptake_dpsi(), fd, 1e-8, "analytic duptake_dpsi matches FD");
+  ok(sp.duptake_dpsi() < 0.0,
      "duptake_dpsi is negative: uptake rises as the collar gets more negative");
 
   // A zero resistance would be an infinite flux; it is rejected, not returned.
@@ -626,7 +624,7 @@ void test_single_potential() {
   bad.begin_solve();
   bool threw = false;
   try {
-    bad.uptake(-2.0, area_leaf, consumption, E_up);
+    bad.uptake(-2.0, consumption, E_up);
   } catch (const std::exception &) {
     threw = true;
   }
@@ -676,6 +674,58 @@ void test_root_network_from_carbon() {
   ok(threw, "negative root carbon throws");
 }
 
+// The temperature-response parameters were constexpr constants; they are now
+// settable members. This checks the point of that change -- that setting them
+// actually moves the model -- rather than just that they compile.
+void test_temperature_parameters_are_settable() {
+  printf("temperature-response parameters are settable\n");
+  Drivers d;
+  leaf::Leaf base = make_leaf(d, {2.0}, {1.0});
+  base.find_root_collar_psi();
+  const double A_base = base.assim_colimited_;
+
+  // Defaults must equal the published constants, so this is a no-op refactor for
+  // anyone who does not touch them.
+  ok(base.vcmax_ha_ == leaf::vcmax_ha, "vcmax_ha_ defaults to the constant");
+  ok(base.jmax_d_S_ == leaf::jmax_d_S, "jmax_d_S_ defaults to the constant");
+  ok(base.gamma_25_ == leaf::gamma_25, "gamma_25_ defaults to the constant");
+  near(base.rd_to_vcmax_ratio_, 0.015, 1e-12, "rd_to_vcmax_ratio_ default");
+
+  // Raising the Vcmax activation energy raises Vcmax above the 25 C reference,
+  // so a 25 C leaf should be unaffected but a warm one should assimilate more.
+  {
+    leaf::Leaf warm = make_leaf(d, {2.0}, {1.0});
+    leaf::Leaf warm_hi = make_leaf(d, {2.0}, {1.0});
+    warm_hi.vcmax_ha_ = leaf::vcmax_ha * 1.5;
+    // set_physiology already ran, so push the change through the T-response block.
+    warm.update_temperature_dependent_params(35.0);
+    warm_hi.update_temperature_dependent_params(35.0);
+    ok(warm_hi.vcmax_ > warm.vcmax_,
+       "a larger activation energy gives a larger vcmax at 35 C");
+  }
+
+  // Respiration fraction: doubling it must lower assimilation.
+  {
+    leaf::Leaf r2 = make_leaf(d, {2.0}, {1.0});
+    r2.rd_to_vcmax_ratio_ = 0.030;
+    r2.update_temperature_dependent_params(d.leaf_temp);
+    r2.find_root_collar_psi();
+    ok(r2.assim_colimited_ < A_base,
+       "doubling the respiration fraction lowers assimilation");
+    ok(r2.R_d_ > base.R_d_, "and raises R_d");
+  }
+
+  // The CO2 compensation point feeds photorespiration, so raising it lowers A.
+  {
+    leaf::Leaf g2 = make_leaf(d, {2.0}, {1.0});
+    g2.gamma_25_ = leaf::gamma_25 * 1.5;
+    g2.update_temperature_dependent_params(d.leaf_temp);
+    g2.find_root_collar_psi();
+    ok(g2.assim_colimited_ < A_base,
+       "raising the compensation point lowers assimilation");
+  }
+}
+
 void test_bad_input_throws() {
   printf("input validation\n");
   Drivers d;
@@ -684,10 +734,10 @@ void test_bad_input_throws() {
   l.setup_root_vulnerability(100);
   bool threw = false;
   try {
-    std::vector<double> psi_soil{2.0}, depth{1.0, 2.0}, mrp{1.0};
-    l.set_physiology(d.area_leaf, mrp, d.rho, d.a_bio, d.PPFD, psi_soil, depth,
-                     d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.theta * d.h,
-                     d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+    std::vector<double> psi_soil{2.0}, depth{1.0, 2.0}, mrp{1.0 / d.area_leaf};
+    l.set_physiology(mrp, d.PPFD, psi_soil, depth,
+                     d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                     d.atm_o2_kpa, d.atm_kpa);
   } catch (const std::runtime_error &) {
     threw = true;
   }
@@ -725,7 +775,7 @@ int main() {
   test_light_response();
   test_multi_layer_soil();
   test_shutdown_when_soil_is_drier_than_psi_crit();
-  test_shutdown_leaves_stale_state_known_defect();
+  test_shutdown_writes_its_own_fluxes();
   test_analytic_gradient_matches_finite_difference();
   test_lambda_equals_dA_dE_single_layer();
   test_multilayer_lambda_identity();
@@ -735,6 +785,7 @@ int main() {
   test_single_potential();
   test_leaf_on_single_potential();
   test_root_network_from_carbon();
+  test_temperature_parameters_are_settable();
   test_bad_input_throws();
   benchmark();
 

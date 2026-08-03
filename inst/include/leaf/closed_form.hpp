@@ -11,9 +11,9 @@
 //
 //     exact optimise_psi_stem_TF          2.611 us      1x
 //     power law + 1 Newton step           0.241 us     10.8x
-//     explicit form at beta2 = 1/c        0.056 us     47x
+//     explicit form at beta2 = 1/stem_c   0.056 us     47x
 //
-// At beta2 = 1/c, 0.051 of the 0.056 us is set_physiology -- the leaf solve itself
+// At beta2 = 1/stem_c, 0.051 of the 0.056 us is set_physiology -- the leaf solve itself
 // has essentially vanished. For scale: making this library header-only, and
 // enabling LTO, each measured at *zero*. This is where the speed is.
 //
@@ -25,7 +25,7 @@
 // with Q below. Because lambda_TF24 is a power law in psi to leading order, that
 // can be inverted explicitly for a starting psi, and one Newton step on the
 // unapproximated supply-minus-demand residual finishes the job. When
-// beta2 = 1/c the power cancels and there is nothing left to solve at all.
+// beta2 = 1/stem_c the power cancels and there is nothing left to solve at all.
 //
 // STATUS: this is NOT wired into Leaf, and nothing calls it by default. It is a
 // selectable alternative whose accuracy has to be established per use (see
@@ -71,7 +71,7 @@ namespace closed_form {
 // here while the g1 literature uses 1.6 -- see PLAN.md item 8 -- so a g1 compared
 // against fitted values carries that 2.2% offset.
 inline double uso_group(const Leaf &l) {
-  const double gstar_Pa = l.gamma_ * umol_per_mol_to_Pa;
+  const double gstar_Pa = l.gamma_ * l.umol_per_mol_to_Pa_;
   return 3.0 * gstar_Pa * kg_to_mol_h2o / (H2O_CO2_stom_diff_ratio * 1e-3);
 }
 
@@ -84,24 +84,24 @@ inline double transpiration_from_assim(const Leaf &l, double assim, double ci) {
 }
 
 // d(lambda)/d(psi), analytic. Differentiates Leaf::lambda_TF24, whose form is
-//     lambda = K * (1-f)^(beta2-1) * p^(c-1),   p = psi/b,  f = exp(-p^c)
+//     lambda = K * (1-f)^(beta2-1) * p^(stem_c-1),  p = psi/stem_b,  f = exp(-p^stem_c)
 inline double dlambda_TF24(const Leaf &l, double psi) {
   const double K =
-      l.g1_TF24 * l.beta2 * l.c / (l.b * l.leaf_specific_conductance_max_);
-  const double p = psi / l.b;
-  const double f = std::exp(-std::pow(p, l.c));
-  return K * std::pow(p, l.c - 2.0) *
-         ((l.beta2 - 1.0) * std::pow(1.0 - f, l.beta2 - 2.0) * f * l.c *
-              std::pow(p, l.c) +
-          std::pow(1.0 - f, l.beta2 - 1.0) * (l.c - 1.0)) /
-         l.b;
+      l.cost_scale_TF24 * l.beta2 * l.stem_c / (l.stem_b * l.leaf_specific_conductance_max_);
+  const double p = psi / l.stem_b;
+  const double f = std::exp(-std::pow(p, l.stem_c));
+  return K * std::pow(p, l.stem_c - 2.0) *
+         ((l.beta2 - 1.0) * std::pow(1.0 - f, l.beta2 - 2.0) * f * l.stem_c *
+              std::pow(p, l.stem_c) +
+          std::pow(1.0 - f, l.beta2 - 1.0) * (l.stem_c - 1.0)) /
+         l.stem_b;
 }
 
 // dA/dci for the colimitation quadratic, analytic. Replaces the central
 // difference an earlier prototype used, saving two assimilation evaluations per
 // Newton step.
 inline double dassim_dci(const Leaf &l, double ci, double electron_transport) {
-  const double gstar = l.gamma_ * umol_per_mol_to_Pa;
+  const double gstar = l.gamma_ * l.umol_per_mol_to_Pa_;
   const double ar = l.vcmax_ * (ci - gstar) / (ci + l.km_);
   const double ae =
       electron_transport / 4.0 * (ci - gstar) / (ci + 2.0 * gstar);
@@ -146,19 +146,19 @@ inline Solution solve(Leaf &l, int newton_steps = 1) {
   const double kmax = l.leaf_specific_conductance_max_;
   const double sqrt_D = std::sqrt(l.atm_vpd_);
   const double Q = uso_group(l);
-  const double K_lambda = l.g1_TF24 * l.beta2 * l.c / (l.b * kmax);
+  const double K_lambda = l.cost_scale_TF24 * l.beta2 * l.stem_c / (l.stem_b * kmax);
   const double Xi = std::sqrt(Q / K_lambda);
-  const double n = l.c * l.beta2 - 1.0;
+  const double n = l.stem_c * l.beta2 - 1.0;
   const double electron_transport = l.electron_transport();
 
   // Leading order, taking kappa from the wet-end limit A(ci -> ca).
   const double assim_wet = l.assim_colimited(l.ca_ * (1.0 - 1e-9));
   const double kappa = H2O_CO2_stom_diff_ratio * 1e-3 * assim_wet /
                        (l.ca_ * kg_to_mol_h2o);
-  double p = std::pow(kappa * sqrt_D * Xi / (kmax * l.b), 2.0 / (n + 2.0));
+  double p = std::pow(kappa * sqrt_D * Xi / (kmax * l.stem_b), 2.0 / (n + 2.0));
 
   for (int k = 0; k < newton_steps; ++k) {
-    const double psi = p * l.b;
+    const double psi = p * l.stem_b;
     if (!(psi > 0.0) || psi >= l.psi_crit) {
       break;
     }
@@ -176,26 +176,26 @@ inline Solution solve(Leaf &l, int newton_steps = 1) {
     // Residual: hydraulic supply minus stomatal demand, both kg H2O m-2 s-1.
     const double R = l.transpiration(psi, 0.0) - E;
     const double dR =
-        kmax * std::exp(-std::pow(p, l.c)) - dE_dci * dci_dxi * dxi_dpsi;
+        kmax * std::exp(-std::pow(p, l.stem_c)) - dE_dci * dci_dxi * dxi_dpsi;
     if (dR == 0.0 || !std::isfinite(R) || !std::isfinite(dR)) {
       break;
     }
     double psi_next = psi - R / dR;
     psi_next = std::max(1e-6, std::min(psi_next, l.psi_crit * (1.0 - 1e-9)));
-    p = psi_next / l.b;
+    p = psi_next / l.stem_b;
   }
 
-  return evaluate_at(l, p * l.b, Q, sqrt_D);
+  return evaluate_at(l, p * l.stem_b, Q, sqrt_D);
 }
 
-// beta2 == 1/c. The psi dependence cancels out of lambda entirely, so xi is
+// beta2 == 1/stem_c. The psi dependence cancels out of lambda entirely, so xi is
 // constant and there is nothing to solve -- no power law, no Newton step. This is
-// the 47x case. Only correct when beta2 == 1/c; check with beta2_is_exact below.
+// the 47x case. Only correct when beta2 == 1/stem_c; check beta2_is_exact below.
 inline Solution solve_exact_beta2(Leaf &l) {
   const double sqrt_D = std::sqrt(l.atm_vpd_);
   const double Q = uso_group(l);
-  const double xi = std::sqrt(Q * l.b * l.leaf_specific_conductance_max_ /
-                              (l.g1_TF24 * l.beta2 * l.c));
+  const double xi = std::sqrt(Q * l.stem_b * l.leaf_specific_conductance_max_ /
+                              (l.cost_scale_TF24 * l.beta2 * l.stem_c));
   const double ci = l.ca_ * xi / (xi + sqrt_D);
   const double assim = l.assim_colimited(ci);
   const double E = transpiration_from_assim(l, assim, ci);
@@ -206,7 +206,7 @@ inline Solution solve_exact_beta2(Leaf &l) {
 }
 
 inline bool beta2_is_exact(const Leaf &l, double tol = 1e-12) {
-  return std::abs(l.beta2 - 1.0 / l.c) <= tol * std::max(1.0, 1.0 / l.c);
+  return std::abs(l.beta2 - 1.0 / l.stem_c) <= tol * std::max(1.0, 1.0 / l.stem_c);
 }
 
 // The validity guard. The closed form degrades where the leaf is far from the
