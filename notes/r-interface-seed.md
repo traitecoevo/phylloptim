@@ -252,6 +252,51 @@ rewritten without touching CI or the build:
   otherwise reach for `plantecophys`, and `tests/cpp/test_golden.cpp`'s `solve()` is
   already the shape of it.
 
+**Stage 2b — take resistances, not root carbon.** Coupled with plant, so it wants its
+own PR pair, but it belongs here because it is the same surgery on the same argument
+list.
+
+`set_physiology` currently takes `root_carbon_per_leaf_area` and calls
+`roots_.set_root_network_from_carbon(...)` internally. **The solve never touches root
+carbon.** `uptake_impl` and `duptake_dpsi` read exactly two vectors —
+`network_.r_R_H_min` and `network_.r_R_V_sum` — plus `grav_head_z_` and
+`max_soil_layer`. Everything else the carbon path produces (`c_r_V`, `c_r_H`, `r_R_V`)
+is carried only because plant exposes it through RcppR6.
+
+So taking carbon makes the leaf own four things that are not gas exchange:
+`beta_R_H`, `beta_R_V`, `dz_`, and the 1/3 : 2/3 horizontal/vertical split. Two of
+them are constructor arguments — 2 of the 19 that stage 2 is redesigning anyway.
+Taking resistances instead deletes all four from the leaf's surface, and it is exactly
+the move `leaf_specific_conductance_max` already makes: plant computes
+`kmax = K_s*theta/(h*eta_c)` and hands over a scalar, because which
+conductance-versus-height model is in force is not this package's business. Which
+root-architecture model is in force is not either. `MultiLayerRoots::set_root_network`
+already exists and takes a `RootNetwork` directly; `roots.hpp`'s own comment argues
+for this at length, and `set_physiology`'s says the remaining step — hoisting the call
+up to plant — "is an API change and belongs with item 10b". It was deferred, not
+rejected.
+
+Two objections, both answerable:
+
+- **"It leaves the tested surface."** `roots.hpp` says `root_network_from_carbon`
+  stays in the package "so that it remains covered by the golden file — the moment
+  this arithmetic crosses the package boundary it leaves the tested surface." Keep the
+  function here, as a documented public helper (it already has a value-returning
+  overload "for tests and one-off callers", and `test_root_network_from_carbon`
+  already exercises it). What moves out is the *call*, not the model. The golden grid
+  then calls helper-then-`set_physiology` and covers both.
+- **"It costs an allocation per solve."** Only if the caller rebuilds the vectors.
+  Building five fresh ones each call measured **+0.074 µs (0.061 → 0.135), about +2%
+  of a whole solve**, which is why the in-place `RootNetwork& out` overload exists.
+  plant already holds the carbon buffer as a `TF24_Strategy` member and refills it; it
+  would hold a `RootNetwork` the same way. Neutral if done that way — and worth
+  re-measuring interleaved, per hazard 5, rather than assumed.
+
+The gain for an R user is the real argument: a bare-leaf caller does not have a root
+carbon profile, a layer thickness, or an opinion about `beta_R_V`. They have a
+resistance, or they have `SinglePotential` (stage 3). Asking them for carbon forces
+them through a plant-shaped model to get at a leaf.
+
 **Stage 3 — expose `SinglePotential`.** It is written, wired and tested, and
 unreachable from R because `supply_kind_` is a C++-only API. That is the bare-leaf,
 one-ψ_soil use case that was reason 2 in PLAN 7b for building it at all, and it is
@@ -270,9 +315,10 @@ and hazard 7 dissolves: no future member move needs a coupled commit in two repo
 This is a coupled PR pair like the ones #25/#26 just did, and it is the last stage
 because it is the only one that can break plant.
 
-Sequencing note: stages 0–3 leave plant untouched, so they can land while plant's
-`feature/consume-leaf-package` is still in review. Stage 4 must wait for it to
-merge, or it will be rebasing against a moving target.
+Sequencing note: stages 0, 1, 2 and 3 leave plant untouched, so they can land while
+plant's `feature/consume-leaf-package` is still in review. **Stages 2b and 4 are
+coupled** and must wait for it to merge, or they will be rebasing against a moving
+target. 2b before 4 if both are done, since 4 deletes the bindings that 2b changes.
 
 ## One measurement to carry forward
 
