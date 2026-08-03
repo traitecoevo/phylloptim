@@ -805,7 +805,13 @@ inline void Leaf::set_physiology(const std::vector<double>& root_carbon_per_leaf
 
   // Set up vector of root water uptake from layer. Stays on Leaf: plant writes
   // the crown-integrated value back into leaf.soil_consumption_ by name.
-  soil_consumption_.resize(supply_n_layers(), 0.0);
+  //
+  // .assign, not .resize: the uptake loop writes only up to the deepest *rooted*
+  // layer, and resize's fill reaches only newly added elements, so a solve with
+  // fewer rooted layers than the last one on this Leaf would leave the tail
+  // holding the previous plant's values -- which plant then bills to the patch
+  // water balance.
+  soil_consumption_.assign(supply_n_layers(), 0.0);
 
   // Soil-moisture state for the Medlyn beta_ stress factor (develop #450). The
   // root-water compute path does not use these; they make the standalone,

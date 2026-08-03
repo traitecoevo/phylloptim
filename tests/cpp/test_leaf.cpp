@@ -269,6 +269,59 @@ void test_shutdown_writes_its_own_fluxes() {
   ok(fresh.profit_ == l.profit_, "a fresh leaf gives the same profit");
 }
 
+// soil_consumption_ used to be cleared with .resize, whose fill reaches only
+// newly-added elements, while the uptake loop writes only up to max_soil_layer --
+// the deepest layer holding root carbon. So a shallow-rooted plant solving on a
+// Leaf that a deep-rooted one used before it inherited the deep layers' uptake
+// (plant #577, fixed in plant by #585). The soil layer count is the same in both
+// solves here; only the rooted depth shrinks, which is why resizing never noticed.
+void test_shallow_roots_do_not_inherit_deep_uptake() {
+  printf("shallow roots do not inherit the previous plant's deep uptake\n");
+  Drivers d;
+  leaf::Leaf l;
+  l.setup_transpiration(100);
+  l.setup_root_vulnerability(100);
+
+  const std::vector<double> psi_soil{1.0, 1.5, 2.0};
+  const std::vector<double> depth{1.0, 2.0, 3.0};
+  const auto solve = [&](std::vector<double> root_carbon) {
+    l.set_physiology(root_carbon, d.PPFD, psi_soil, depth,
+                     d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                     d.atm_o2_kpa, d.atm_kpa);
+    l.find_root_collar_psi();
+  };
+
+  // A tree rooted through all three layers, then a seedling rooted in the top
+  // layer only -- trailing zeros in the carbon vector is how plant expresses
+  // "not rooted that deep".
+  const double c = 1.0 / 3.0 / d.area_leaf;
+  solve({c, c, c});
+  ok(l.soil_consumption_[1] != 0.0 && l.soil_consumption_[2] != 0.0,
+     "the deep-rooted solve draws from layers 2 and 3");
+
+  solve({1.0 / d.area_leaf, 0.0, 0.0});
+  ok(l.soil_consumption_.size() == 3u,
+     "the consumption vector still spans every soil layer");
+  near(l.soil_consumption_[1], 0.0, 1e-300,
+       "layer 2 is zero, not the tree's uptake");
+  near(l.soil_consumption_[2], 0.0, 1e-300,
+       "layer 3 is zero, not the tree's uptake");
+
+  // Order independence is the property that matters: plant reuses one Leaf for
+  // every individual in a patch, so the seedling must not depend on its neighbour.
+  leaf::Leaf fresh;
+  fresh.setup_transpiration(100);
+  fresh.setup_root_vulnerability(100);
+  fresh.set_physiology({1.0 / d.area_leaf, 0.0, 0.0}, d.PPFD, psi_soil, depth,
+                       d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                       d.atm_o2_kpa, d.atm_kpa);
+  fresh.find_root_collar_psi();
+  for (size_t i = 0; i < 3; ++i) {
+    ok(fresh.soil_consumption_[i] == l.soil_consumption_[i],
+       "a fresh leaf gives the same per-layer consumption");
+  }
+}
+
 void test_analytic_gradient_matches_finite_difference() {
   printf("analytic dprofit/dpsi_collar vs central difference\n");
   Drivers d;
@@ -776,6 +829,7 @@ int main() {
   test_multi_layer_soil();
   test_shutdown_when_soil_is_drier_than_psi_crit();
   test_shutdown_writes_its_own_fluxes();
+  test_shallow_roots_do_not_inherit_deep_uptake();
   test_analytic_gradient_matches_finite_difference();
   test_lambda_equals_dA_dE_single_layer();
   test_multilayer_lambda_identity();
