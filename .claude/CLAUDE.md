@@ -50,6 +50,16 @@ make -C tests/cpp bench      # time the collar solve (not part of `make all`)
 make -C tests/cpp GOLDEN_ARGS=--cross-platform
 ```
 
+⚠️ **`bench` is NOT part of `make all`, and CI builds it.** So `make -C tests/cpp`
+passing locally does not mean CI will: a rename that misses `bench_solve.cpp` gives a
+green local run and three red CI jobs. That is exactly how #25 first failed CI, with
+`191 checks, 0 failures` and a bit-identical golden file sitting above the error.
+**Before pushing, build everything CI builds:**
+
+```sh
+make -C tests/cpp && make -C tests/cpp bench
+```
+
 `bench` reports min-of-N over the golden grid. Use `reps=2000` (the default)
 before believing a small difference: reproducibility is ±0.01 µs there but ±0.5 µs
 at `reps=40`, which is wide enough to invent or hide a few-percent effect.

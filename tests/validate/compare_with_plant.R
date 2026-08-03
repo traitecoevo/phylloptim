@@ -41,7 +41,8 @@
 #
 # THE 240 are not arithmetic at all: golden carries the NA sentinel on shutdown
 # rows where plant carries a number, because set_shutdown_state assigns
-# root_collar_psi_, opt_psi_stem_ and profit_ and leaves ci/assim/transpiration/
+# opt_root_psi_ (root_collar_psi_ before #25), opt_psi_stem_ and profit_ and leaves
+# ci/assim/transpiration/
 # gc/e_up untouched. That is the shutdown-state leak (PLAN item 2, plant #578) --
 # a known behavioural difference, and the count matches the 48 x 5 recorded as
 # that fix's blast radius. They are now reported as their own column rather than
@@ -134,7 +135,7 @@ solve_one <- function(psi_soil, ppfd, vpd, layers) {
   cons <- l$soil_consumption_
   data.frame(
     psi_soil = psi_soil, ppfd = ppfd, vpd = vpd, layers = layers,
-    psi_stem = l$opt_psi_stem_, collar = l$root_collar_psi_,
+    psi_stem = l$opt_psi_stem_, opt_root_psi = l$opt_root_psi_,
     ci = l$ci_, assim = l$assim_colimited_,
     transpiration = l$transpiration_, gc = l$stom_cond_CO2_,
     profit = l$profit_, e_up = l$E_up_,
@@ -193,7 +194,7 @@ for (key in c("psi_soil", "ppfd", "vpd", "layers")) {
   }
 }
 
-fields <- c("psi_stem", "collar", "ci", "assim", "transpiration", "gc",
+fields <- c("psi_stem", "opt_root_psi", "ci", "assim", "transpiration", "gc",
             "profit", "e_up", "uptake")
 
 # NaN == NaN for our purposes: shut-down points legitimately carry the NA
