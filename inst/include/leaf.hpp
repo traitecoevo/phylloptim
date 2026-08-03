@@ -28,6 +28,7 @@
 #include <leaf/optimize.hpp>
 #include <leaf/quadrature.hpp>
 #include <leaf/roots.hpp>
+#include <leaf/single_potential.hpp>
 #include <leaf/uniroot.hpp>
 #include <leaf/util.hpp>
 #include <leaf/vulnerability.hpp>

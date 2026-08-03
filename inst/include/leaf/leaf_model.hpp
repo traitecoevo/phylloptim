@@ -8,6 +8,7 @@
 #include <leaf/optimize.hpp>
 #include <leaf/quadrature.hpp>
 #include <leaf/roots.hpp>
+#include <leaf/single_potential.hpp>
 #include <leaf/vulnerability.hpp>
 
 #include <odelia/interpolator.hpp>
@@ -57,6 +58,72 @@ public:
   // Public because plant's RcppR6 bindings reach the moved fields by name; they
   // now spell them `roots_.psi_soil_` etc. (see PLAN 7b-iii stage 4).
   MultiLayerRoots roots_;
+
+  // The alternative supply path (issue #2 stage 2/3). Both alternatives are held
+  // as members and selected by `supply_kind_` -- measured free, where
+  // std::variant costs +1.0%; see PLAN 7b-iii stage 2 for the numbers and for why
+  // a predictable branch in front of an already-out-of-line call disappears into
+  // it. SinglePotential is four doubles plus a one-element vector, so carrying it
+  // unused costs tens of bytes per Leaf.
+  SinglePotential single_;
+  enum class SupplyKind { MultiLayer, SinglePotential };
+  // Default MultiLayer: every existing caller, plant included, keeps today's
+  // behaviour bit-for-bit without knowing this exists.
+  SupplyKind supply_kind_ = SupplyKind::MultiLayer;
+
+  // --- supply dispatch -------------------------------------------------------
+  // The four points where the two paths differ. Everything else in the solve is
+  // supply-agnostic and goes through the vector of signed potentials below,
+  // which both paths provide -- that is what keeps this stage off the three
+  // R-facing signatures that thread it (find_root_psi, find_psi_stem_from_psi_root,
+  // E_from_Soil_to_Root_Collar).
+  double supply_begin_solve() {
+    switch (supply_kind_) {
+      case SupplyKind::MultiLayer: return roots_.begin_solve();
+      default:                     return single_.begin_solve();
+    }
+  }
+  // The current soil state in the signed convention. Threaded through E_column,
+  // find_root_psi and find_psi_stem_from_psi_root exactly as before.
+  const std::vector<double>& supply_psi_soil_inverted() const {
+    switch (supply_kind_) {
+      case SupplyKind::MultiLayer: return roots_.psi_soil_inverted_;
+      default:                     return single_.psi_soil_inverted_vec_;
+    }
+  }
+  // Driest collar potential the supply path can be asked about, positive
+  // magnitude. For roots it is the root vulnerability limit; a constant-
+  // conductance path has no such limit, so the stem's psi_crit binds instead.
+  double supply_psi_crit() const {
+    switch (supply_kind_) {
+      case SupplyKind::MultiLayer: return roots_.root_psi_crit;
+      default:                     return psi_crit;
+    }
+  }
+  // The single soil potential the psi_soil_[0]-style solvers (optimise_psi_stem_*)
+  // work against, positive magnitude. Those solvers already require exactly one
+  // layer, so this is the same value either way -- it just stops them reaching
+  // into MultiLayerRoots for it.
+  double supply_psi_soil_scalar() const {
+    switch (supply_kind_) {
+      case SupplyKind::MultiLayer: return roots_.psi_soil_[0];
+      default:                     return single_.psi_soil_;
+    }
+  }
+  bool supply_is_single_layer() const {
+    switch (supply_kind_) {
+      case SupplyKind::MultiLayer: return roots_.psi_soil_.size() == 1;
+      default:                     return true;
+    }
+  }
+  int supply_n_layers() const {
+    switch (supply_kind_) {
+      case SupplyKind::MultiLayer:
+        return static_cast<int>(roots_.soil_number_of_depths_);
+      default:
+        return single_.n_layers();
+    }
+  }
 
   // psi_from_E
 
@@ -240,7 +307,14 @@ public:
   // stay on Leaf and are handed over by reference, because plant writes back
   // into them by name after crown integration (PLAN 7b-ii trap 1).
   void E_from_Soil_to_Root_Collar(double P_x_r, const std::vector<double>& psi_soil) {
-    roots_.uptake_at(P_x_r, psi_soil, area_leaf_, soil_consumption_, E_up_);
+    switch (supply_kind_) {
+      case SupplyKind::MultiLayer:
+        roots_.uptake_at(P_x_r, psi_soil, area_leaf_, soil_consumption_, E_up_);
+        break;
+      default:
+        single_.uptake_at(P_x_r, psi_soil, area_leaf_, soil_consumption_, E_up_);
+        break;
+    }
   }
   void find_root_collar_psi();
   // Shared setup for the root-collar solve: builds the soil-side caches, handles
@@ -278,7 +352,12 @@ public:
   // contract. Used only on the TF24f acclimation gradient path, not the base
   // TF24 value path.
   double dE_from_soil_dpsi_collar(double P_x_r, const std::vector<double>& psi_soil) {
-    return roots_.duptake_dpsi(P_x_r, psi_soil, area_leaf_);
+    switch (supply_kind_) {
+      case SupplyKind::MultiLayer:
+        return roots_.duptake_dpsi(P_x_r, psi_soil, area_leaf_);
+      default:
+        return single_.duptake_dpsi(P_x_r, psi_soil, area_leaf_);
+    }
   }
   // Shut-down operating point used by the find_root_collar_psi early-exits: stem
   // held at psi_crit (no transpiration), paying only respiration + hydraulic
@@ -605,7 +684,17 @@ inline void Leaf::set_physiology(double area_leaf, const std::vector<double>& ma
    atm_kpa_ = atm_kpa;
    atm_o2_kpa_ = atm_o2_kpa;
    PPFD_ = PPFD;
-   roots_.set_soil_state(psi_soil, soil_depth);
+   switch (supply_kind_) {
+     case SupplyKind::MultiLayer:
+       roots_.set_soil_state(psi_soil, soil_depth);
+       break;
+     default:
+       // One potential; the depth profile and the root-mass profile are not
+       // this path's business, and the caller's vectors are simply not read
+       // beyond element 0.
+       single_.set_soil_state(psi_soil[0]);
+       break;
+   }
 
    leaf_specific_conductance_max_ = leaf_specific_conductance_max;
    // conductance changed -> invalidate the transpiration() memo
@@ -662,11 +751,13 @@ inline void Leaf::set_physiology(double area_leaf, const std::vector<double>& ma
   // resistances; roots_ itself no longer knows about root carbon. See
   // root_network_from_carbon. This is the leaf-side half of that split -- moving
   // the call itself up to plant is an API change and belongs with item 10b.
-  roots_.set_root_network_from_carbon(mass_root_prop);
+  if (supply_kind_ == SupplyKind::MultiLayer) {
+    roots_.set_root_network_from_carbon(mass_root_prop);
+  }
 
   // Set up vector of root water uptake from layer. Stays on Leaf: plant writes
   // the crown-integrated value back into leaf.soil_consumption_ by name.
-  soil_consumption_.resize(roots_.soil_number_of_depths_, 0.0);
+  soil_consumption_.resize(supply_n_layers(), 0.0);
 
   // Soil-moisture state for the Medlyn beta_ stress factor (develop #450). The
   // root-water compute path does not use these; they make the standalone,
@@ -849,7 +940,7 @@ inline bool Leaf::prepare_collar_solve(double& bound_a, double& bound_b){
   // magnitudes into the signed (negative) convention used throughout the
   // soil->collar transport, builds its per-solve caches, and reports back the
   // wettest layer, which is the bracket endpoint everything below needs.
-  const double wettest_soil_layer = roots_.begin_solve();
+  const double wettest_soil_layer = supply_begin_solve();
 
   // Avoid loop if the wettest psi layer is drier than psi_crit in stem, transpiration not possible and so all variables set to
   // shut down
@@ -859,16 +950,16 @@ inline bool Leaf::prepare_collar_solve(double& bound_a, double& bound_b){
     return false;
   }
 
-if(E_column(-psi_crit, roots_.psi_soil_inverted_, psi_crit) < 0){
+if(E_column(-psi_crit, supply_psi_soil_inverted(), psi_crit) < 0){
       // root_collar_psi_ is reported as a signed (negative) potential, so store
       // -root_psi_crit rather than the positive magnitude root_psi_crit.
-      set_shutdown_state(-roots_.root_psi_crit);
+      set_shutdown_state(-supply_psi_crit());
       return false;
 }
 
   // Avoid loop if the wettest psi layer is drier than psi_crit in stem, transpiration not possible and so all variables set to
   // shut down
-double root_crit = find_root_psi(wettest_soil_layer, roots_.psi_soil_inverted_, 1);
+double root_crit = find_root_psi(wettest_soil_layer, supply_psi_soil_inverted(), 1);
 
 // If root crit would have to be larger than psi crit, also avoid loop as above
 
@@ -878,7 +969,7 @@ double root_crit = find_root_psi(wettest_soil_layer, roots_.psi_soil_inverted_, 
   }
 
 // Find root collar where transpiration from soil is 0
-double root_zero_E = find_root_psi(wettest_soil_layer, roots_.psi_soil_inverted_, 0);
+double root_zero_E = find_root_psi(wettest_soil_layer, supply_psi_soil_inverted(), 0);
 
 // If assimilation would be less than 0 even at Ca, also end loop
 if(assim_max_ < 0){
@@ -889,7 +980,7 @@ if(assim_max_ < 0){
     // other branch of this solver.
     opt_psi_stem_ = -root_zero_E;
     root_collar_psi_ = root_zero_E;
-    E_from_Soil_to_Root_Collar(root_collar_psi_, roots_.psi_soil_inverted_);
+    E_from_Soil_to_Root_Collar(root_collar_psi_, supply_psi_soil_inverted());
 
     profit_ = - R_d_ - hydraulic_cost_TF(-root_collar_psi_);
 
@@ -904,13 +995,13 @@ if(assim_max_ < 0){
 
   // optimise for stem water potential
     bound_a = -root_zero_E;
-    bound_b = std::max(-root_crit,-roots_.root_psi_crit);
+    bound_b = std::max(-root_crit,-supply_psi_crit());
 
     // If no interval exists (single feasible root-collar value), use that
     // point directly as the alternative solution instead of running GSS.
     if (std::abs(bound_b - bound_a) <= GSS_tol_abs) {
       const double opt_root_psi = 0.5 * (bound_a + bound_b);
-      const double psi_stem_single = find_psi_stem_from_psi_root(-opt_root_psi, roots_.psi_soil_inverted_);
+      const double psi_stem_single = find_psi_stem_from_psi_root(-opt_root_psi, supply_psi_soil_inverted());
 
       if (!std::isfinite(psi_stem_single)) {
         util::stop("Error: non-finite psi_stem_single in collapsed-root interval; "
@@ -964,12 +1055,12 @@ inline void Leaf::find_root_collar_psi(){
     const double opt_root_psi = util::golden_section_max(
         [&](double bound) {
           const double psi_stem =
-              find_psi_stem_from_psi_root(-bound, roots_.psi_soil_inverted_);
+              find_psi_stem_from_psi_root(-bound, supply_psi_soil_inverted());
           return profit_psi_stem_TF(psi_stem, bound);
         },
         bound_a, bound_b, GSS_tol_abs);
 
-    opt_psi_stem_ = find_psi_stem_from_psi_root(-opt_root_psi, roots_.psi_soil_inverted_);
+    opt_psi_stem_ = find_psi_stem_from_psi_root(-opt_root_psi, supply_psi_soil_inverted());
 
     // store as the signed (negative) potential for a sign-consistent aux output;
     // profit_psi_stem_TF takes psi_upstream as a positive magnitude.
@@ -1014,7 +1105,7 @@ inline double Leaf::profit_at_collar_psi(double target_opt_root_psi,
     const double opt_root_psi =
         std::min(std::max(target_opt_root_psi, bound_a), bound_b);
 
-    opt_psi_stem_ = find_psi_stem_from_psi_root(-opt_root_psi, roots_.psi_soil_inverted_);
+    opt_psi_stem_ = find_psi_stem_from_psi_root(-opt_root_psi, supply_psi_soil_inverted());
     root_collar_psi_ = -opt_root_psi;
     profit_ = profit_psi_stem_TF(opt_psi_stem_, opt_root_psi);
 
@@ -1045,7 +1136,7 @@ inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi) {
   const double gstar_Pa = gamma_ * umol_per_mol_to_Pa;
 
   // Operating point in double.
-  const double psi_stem = find_psi_stem_from_psi_root(-psi, roots_.psi_soil_inverted_);
+  const double psi_stem = find_psi_stem_from_psi_root(-psi, supply_psi_soil_inverted());
   const double ci = psi_stem_to_ci(psi_stem, psi);
   if (!std::isfinite(psi_stem) || !std::isfinite(ci)) {
     return 0.0;  // shut-down / infeasible: no informative gradient
@@ -1087,10 +1178,10 @@ inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi) {
   // E_up_'(r) is analytic (dE_from_soil_dpsi_collar); near a branch kink it
   // returns NaN and we fall back to the central difference on the transport.
   const double r = -psi;
-  const double dEup_dr = dE_from_soil_dpsi_collar(r, roots_.psi_soil_inverted_);
+  const double dEup_dr = dE_from_soil_dpsi_collar(r, supply_psi_soil_inverted());
   double dpsistem_dpsi;
   if (std::isfinite(dEup_dr)) {
-    E_from_Soil_to_Root_Collar(r, roots_.psi_soil_inverted_);  // refresh E_up_ at r
+    E_from_Soil_to_Root_Collar(r, supply_psi_soil_inverted());  // refresh E_up_ at r
     const double E_psi_stem =
         E_up_ / leaf_specific_conductance_max_ + transpiration_from_psi.eval(psi);
     const double dEpsistem_dpsi =
@@ -1099,8 +1190,8 @@ inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi) {
   } else {
     const double h = 1e-6;
     dpsistem_dpsi =
-        (find_psi_stem_from_psi_root(-(psi + h), roots_.psi_soil_inverted_) -
-         find_psi_stem_from_psi_root(-(psi - h), roots_.psi_soil_inverted_)) / (2.0 * h);
+        (find_psi_stem_from_psi_root(-(psi + h), supply_psi_soil_inverted()) -
+         find_psi_stem_from_psi_root(-(psi - h), supply_psi_soil_inverted())) / (2.0 * h);
   }
 
   const double dci_dpsi = dci_dpsistem * dpsistem_dpsi + dci_dpsi_expl;
@@ -1426,7 +1517,7 @@ inline double Leaf::marginal_cost_water_multilayer() {
   // returns a negative number. S in the identity below is a conductance, i.e. the
   // positive magnitude -- hence the negation. Getting this backwards makes
   // lambda_multi come out negative, which is how it was caught.
-  const double S = -dE_from_soil_dpsi_collar(root_collar_psi_, roots_.psi_soil_inverted_);
+  const double S = -dE_from_soil_dpsi_collar(root_collar_psi_, supply_psi_soil_inverted());
   if (!std::isfinite(S) || S <= 0.0) {
     return util::na_value;
   }
@@ -1481,14 +1572,14 @@ double benefit_ = assim_colimited_;
 // need docs on Golden Section Search.
 inline void Leaf::optimise_psi_stem_Sperry() {
 
-    if (!(roots_.psi_soil_.size() == 1)) {
+    if (!supply_is_single_layer()) {
     util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
   }
 
-  opt_psi_stem_ = roots_.psi_soil_[0];
+  opt_psi_stem_ = supply_psi_soil_scalar();
 
 
-  if ((PPFD_ < 1.5e-8 )| (roots_.psi_soil_[0] > psi_crit)){
+  if ((PPFD_ < 1.5e-8 )| (supply_psi_soil_scalar() > psi_crit)){
     profit_ = 0;
     transpiration_ = 0;
     stom_cond_CO2_ = 0;
@@ -1500,8 +1591,8 @@ inline void Leaf::optimise_psi_stem_Sperry() {
   // objective; we minimise -profit and recover the maximum from neg_profit_opt.
     double neg_profit_opt = 0.0;
     opt_psi_stem_ = util::brent_fmin(
-        [&](double psi_stem) { return -profit_psi_stem_Sperry(psi_stem, roots_.psi_soil_[0]); },
-        roots_.psi_soil_[0], psi_crit, GSS_tol_abs, &neg_profit_opt);
+        [&](double psi_stem) { return -profit_psi_stem_Sperry(psi_stem, supply_psi_soil_scalar()); },
+        supply_psi_soil_scalar(), psi_crit, GSS_tol_abs, &neg_profit_opt);
     profit_ = -neg_profit_opt;
 
   }
@@ -1509,14 +1600,14 @@ inline void Leaf::optimise_psi_stem_Sperry() {
 
 inline void Leaf::optimise_psi_stem_TF() {
 
-  if (!(roots_.psi_soil_.size() == 1)) {
+  if (!supply_is_single_layer()) {
     util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
   }
 
-  opt_psi_stem_ = roots_.psi_soil_[0];
+  opt_psi_stem_ = supply_psi_soil_scalar();
 
-  if (roots_.psi_soil_[0] > psi_crit){
-    profit_ = profit_psi_stem_TF(roots_.psi_soil_[0], roots_.psi_soil_[0]);
+  if (supply_psi_soil_scalar() > psi_crit){
+    profit_ = profit_psi_stem_TF(supply_psi_soil_scalar(), supply_psi_soil_scalar());
     return;
   }
 
@@ -1524,8 +1615,8 @@ inline void Leaf::optimise_psi_stem_TF() {
   // (minimise -profit), matching find_root_collar_psi's multi-layer solver.
     double neg_profit_opt = 0.0;
     opt_psi_stem_ = util::brent_fmin(
-        [&](double psi_stem) { return -profit_psi_stem_TF(psi_stem, roots_.psi_soil_[0]); },
-        roots_.psi_soil_[0], psi_crit, GSS_tol_abs, &neg_profit_opt);
+        [&](double psi_stem) { return -profit_psi_stem_TF(psi_stem, supply_psi_soil_scalar()); },
+        supply_psi_soil_scalar(), psi_crit, GSS_tol_abs, &neg_profit_opt);
     profit_ = -neg_profit_opt;
 
     return;

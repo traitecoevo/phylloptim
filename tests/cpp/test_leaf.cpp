@@ -510,6 +510,129 @@ void test_closed_form() {
 // reads r_R_H_min and r_R_V_sum. Testing it directly is the point of having
 // pulled it out of MultiLayerRoots -- and it is why the map stayed here rather
 // than moving to plant, where the golden file could not reach it.
+// The second supply path (issue #2 stage 3). Not wired into Leaf yet -- it exists
+// so the concept in stage 2 has two real alternatives to dispatch between, and so
+// the dispatch measurement was made against a genuine second type rather than a
+// stub the optimiser could see through.
+// A whole Leaf solving through SinglePotential (issue #2 stage 2). This is the
+// point of the whole item: the gas-exchange core is supply-agnostic, so swapping
+// the supply path should change the operating point and nothing else.
+void test_leaf_on_single_potential() {
+  printf("Leaf solving on the single-potential supply path\n");
+  Drivers d;
+
+  leaf::Leaf l;
+  l.setup_transpiration(100);
+  l.setup_root_vulnerability(100);
+  l.supply_kind_ = leaf::Leaf::SupplyKind::SinglePotential;
+  l.single_.resistance_ = 2.0e4;
+
+  // set_physiology keeps its signature; on this path only psi_soil[0] is read,
+  // so the depth and root-mass vectors are ignored rather than forbidden.
+  std::vector<double> psi_soil{1.0}, depth{1.0}, root{1.0};
+  l.set_physiology(d.area_leaf, root, d.rho, d.a_bio, d.PPFD, psi_soil, depth,
+                   d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.theta * d.h,
+                   d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  l.find_root_collar_psi();
+
+  ok(std::isfinite(l.profit_), "single-potential solve gives a finite profit");
+  ok(std::isfinite(l.opt_psi_stem_), "and a finite stem potential");
+  ok(l.opt_psi_stem_ > 0.0 && l.opt_psi_stem_ <= l.psi_crit,
+     "stem potential is a positive magnitude within psi_crit");
+  ok(l.root_collar_psi_ <= 0.0, "collar potential is stored signed");
+  ok(l.assim_colimited_ > 0.0, "the leaf assimilates");
+  ok(l.soil_consumption_.size() == 1u,
+     "the consumption buffer is sized to one layer, not the caller's vector");
+
+  // The collar must sit between the soil and the stem: water runs downhill.
+  const double collar_mag = -l.root_collar_psi_;
+  ok(collar_mag >= psi_soil[0] - 1e-9 && collar_mag <= l.opt_psi_stem_ + 1e-9,
+     "collar potential lies between soil and stem");
+
+  // Drier soil must cost carbon here too -- the same contract the multi-layer
+  // path is held to, which is what makes the two comparable at all.
+  leaf::Leaf dry;
+  dry.setup_transpiration(100);
+  dry.setup_root_vulnerability(100);
+  dry.supply_kind_ = leaf::Leaf::SupplyKind::SinglePotential;
+  dry.single_.resistance_ = 2.0e4;
+  std::vector<double> psi_dry{3.0};
+  dry.set_physiology(d.area_leaf, root, d.rho, d.a_bio, d.PPFD, psi_dry, depth,
+                     d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.theta * d.h,
+                     d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  dry.find_root_collar_psi();
+  ok(dry.profit_ < l.profit_, "drier soil yields less profit");
+
+  // A larger series resistance is a worse-supplied plant, so it must not do
+  // better. This is the knob the multi-layer path spends root carbon to lower.
+  leaf::Leaf tight;
+  tight.setup_transpiration(100);
+  tight.setup_root_vulnerability(100);
+  tight.supply_kind_ = leaf::Leaf::SupplyKind::SinglePotential;
+  tight.single_.resistance_ = 2.0e5;
+  tight.set_physiology(d.area_leaf, root, d.rho, d.a_bio, d.PPFD, psi_soil, depth,
+                       d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.theta * d.h,
+                       d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  tight.find_root_collar_psi();
+  ok(tight.profit_ <= l.profit_, "a higher series resistance does not help");
+
+  // And the default is unchanged: a Leaf nobody configures is multi-layer.
+  leaf::Leaf plain;
+  ok(plain.supply_kind_ == leaf::Leaf::SupplyKind::MultiLayer,
+     "the supply path defaults to multi-layer");
+}
+
+void test_single_potential() {
+  printf("single-potential supply path\n");
+  leaf::SinglePotential sp;
+  sp.set_soil_state(1.5);        // positive magnitude, -MPa
+  sp.resistance_ = 2.0e4;
+  const double area_leaf = 0.05;
+
+  // begin_solve flips to the signed convention and reports the only potential.
+  near(sp.begin_solve(), -1.5, 1e-14, "begin_solve returns the signed potential");
+  ok(sp.n_layers() == 1, "single potential writes exactly one layer");
+
+  // Ohm's law, and the sign that matters: a collar drier than the soil draws
+  // water UP (positive uptake).
+  std::vector<double> consumption(1, 0.0);
+  double E_up = 0.0;
+  sp.uptake(-2.5, area_leaf, consumption, E_up);
+  ok(E_up > 0.0, "a collar drier than the soil draws water up");
+  near(E_up, (-1.5 - -2.5) / (sp.resistance_ * area_leaf) * leaf::kg_per_mol_h2o,
+       1e-14, "uptake is the Ohm's-law flux");
+  ok(consumption[0] > 0.0, "per-layer consumption is filled");
+
+  // A collar WETTER than the soil pushes water back into it. Losing this sign is
+  // how hydraulic redistribution silently becomes extra uptake.
+  sp.uptake(-0.5, area_leaf, consumption, E_up);
+  ok(E_up < 0.0, "a collar wetter than the soil loses water to it");
+
+  // The analytic derivative must match a central difference on uptake, and stay
+  // finite everywhere -- unlike MultiLayerRoots there are no branch kinks, so it
+  // never asks the caller for a finite-difference fallback.
+  const double h = 1e-6, p0 = -2.5;
+  double up = 0.0, dn = 0.0;
+  sp.uptake(p0 + h, area_leaf, consumption, up);
+  sp.uptake(p0 - h, area_leaf, consumption, dn);
+  const double fd = (up - dn) / (2.0 * h);
+  near(sp.duptake_dpsi(area_leaf), fd, 1e-8, "analytic duptake_dpsi matches FD");
+  ok(sp.duptake_dpsi(area_leaf) < 0.0,
+     "duptake_dpsi is negative: uptake rises as the collar gets more negative");
+
+  // A zero resistance would be an infinite flux; it is rejected, not returned.
+  leaf::SinglePotential bad;
+  bad.set_soil_state(1.0);
+  bad.begin_solve();
+  bool threw = false;
+  try {
+    bad.uptake(-2.0, area_leaf, consumption, E_up);
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(threw, "zero resistance throws rather than returning an infinity");
+}
+
 void test_root_network_from_carbon() {
   printf("root architecture: carbon -> resistance\n");
   const double beta_H = 3.4e2, beta_V = 9.4e3, dz = 0.5;
@@ -609,6 +732,8 @@ int main() {
   test_g1_eff();
   test_energy_balance_path_runs();
   test_closed_form();
+  test_single_potential();
+  test_leaf_on_single_potential();
   test_root_network_from_carbon();
   test_bad_input_throws();
   benchmark();
