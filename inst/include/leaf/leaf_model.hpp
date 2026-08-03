@@ -493,7 +493,11 @@ public:
   double find_psi_stem_from_psi_root(double psi_root, const std::vector<double>& psi_soil) {
     return find_psi_stem_from_psi_root(Potential{psi_root}, as_potentials(psi_soil));
   }
-  double E_column(Potential x, const std::vector<Potential>& psi_soil, double psi_leaf);
+  // psi_leaf is a MAGNITUDE (it is handed to transpiration's psi_stem), so it is a
+  // Suction while the collar potential beside it is a Potential. Both are typed:
+  // this is a bridge function, the two conventions genuinely meet in its argument
+  // list, and a bare double here would still accept a signed value silently.
+  double E_column(Potential x, const std::vector<Potential>& psi_soil, Suction psi_leaf);
   double E_column_zero(Potential x, const std::vector<Potential>& psi_soil);
   
   double arrh_curve(double Ea, double ref_value, double leaf_temp) const;
@@ -941,13 +945,13 @@ inline void Leaf::set_physiology(const std::vector<double>& root_carbon_per_leaf
 // ===========================================================================
 //
 // This function is used to find root collar pressure which equilibrates the soil-root-stem water continuuum
-inline double Leaf::E_column(Potential x, const std::vector<Potential>& psi_soil, double psi_leaf) {
+inline double Leaf::E_column(Potential x, const std::vector<Potential>& psi_soil, Suction psi_leaf) {
 
   E_from_Soil_to_Root_Collar(x, psi_soil);
   // Scratch use of a signed-convention member to hold a magnitude; see the ⚠️ in
   // the sign map above. transpiration() takes psi_upstream as a magnitude.
   root_collar_psi_ = x.magnitude().value;
-  double E_root_to_leaf = transpiration(psi_leaf, root_collar_psi_);
+  double E_root_to_leaf = transpiration(psi_leaf.value, root_collar_psi_);
   return E_up_ - E_root_to_leaf;
 }
 
@@ -992,7 +996,7 @@ inline Potential Leaf::find_root_psi(Potential wettest_soil_layer, const std::ve
   // tol and iterations copied from control defaults (for now) - changed recently to 1e-6
   if (find_root_crit == 1) {
     auto target = [&](double x) -> double {
-      return E_column(Potential{x}, psi_soil, psi_crit);
+      return E_column(Potential{x}, psi_soil, Suction{psi_crit});
     };
     try {
       return Potential{util::uniroot_smooth(target, dry_end.value,
@@ -1119,7 +1123,7 @@ inline bool Leaf::prepare_collar_solve(Suction& bound_a, Suction& bound_b){
     return false;
   }
 
-if(E_column(Suction{psi_crit}.signed_potential(), supply_psi_soil_inverted(), psi_crit) < 0){
+if(E_column(Suction{psi_crit}.signed_potential(), supply_psi_soil_inverted(), Suction{psi_crit}) < 0){
       // root_collar_psi_ is reported as a signed potential, so store the signed
       // form of root_psi_crit rather than the magnitude.
       set_shutdown_state(supply_psi_crit().signed_potential());
