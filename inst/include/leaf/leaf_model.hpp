@@ -1165,7 +1165,7 @@ if(assim_max_ < 0){
   // optimise for stem water potential
     bound_a = root_zero_E.magnitude();
 
-    // ⚠️ PRESERVED DEFECT -- this is plant #584, and it is LIVE here. The clamp to
+    // ⚠️ PRESERVED DEFECT -- issue #24, = plant #584, and it is LIVE here. The clamp to
     // the root critical potential can never bind: root_crit is a signed potential,
     // so root_crit.magnitude() is a magnitude, while -supply_psi_crit() is
     // negative, and std::max between them always returns the first. Reproduced at
@@ -1180,7 +1180,7 @@ if(assim_max_ < 0){
     // reaching past them into `.value`. It is left as-is HERE ON PURPOSE: fixing it
     // moves results, and this commit's whole warrant is that the golden file does
     // not move. Filed separately; do not "tidy" this line without the blast-radius
-    // measurement the guide asks for.
+    // measurement the guide asks for. Issue #24 carries the reproduction.
     bound_b = Suction{std::max(root_crit.magnitude().value,
                                -supply_psi_crit().value)};
 

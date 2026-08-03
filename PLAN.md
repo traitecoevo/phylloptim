@@ -78,6 +78,7 @@ code rather than of the merge:
 | [#5](https://github.com/traitecoevo/leaf_cpp/issues/5) | 6 | R interface (RcppR6) | absorbs the `Control` struct and the dropped-field cleanup |
 | [#6](https://github.com/traitecoevo/leaf_cpp/issues/6) | 12 | Calibration vignette, then inversion | needs #4 for trait gradients |
 | [#7](https://github.com/traitecoevo/leaf_cpp/issues/7) | 13 | Energy balance, full cut | leaf-to-air VPD is the cheap win; free convection is not worth it |
+| [#24](https://github.com/traitecoevo/leaf_cpp/issues/24) | 10a | The collar bracket's clamp to `root_psi_crit` is dead | = plant #584, **live here**; found by #8's types and preserved there because fixing it moves results. Needs the blast radius measured and plant fixed in step |
 | [#9](https://github.com/traitecoevo/leaf_cpp/issues/9) | 3 | Finish the plant-side integration | validated already; decisions + one unchecked consumer. Now also carries **landing the shutdown fix in plant** (plant #578/#577), which is still open there with no fix written |
 | [#1](https://github.com/traitecoevo/leaf_cpp/issues/1) | 14 | Decide the package name | publication framing is item 14 below |
 
@@ -1232,7 +1233,7 @@ extraction.
   The defect is **preserved, not fixed**: fixing it moves results and this change's
   warrant was that the golden file does not. It is annotated in place with the
   intended line quoted, and only compiles by reaching past the types into
-  `.value`. Filed as its own issue with the reproduction.
+  `.value`. Filed as [#24](https://github.com/traitecoevo/leaf_cpp/issues/24) with the reproduction.
 
   **Three boundaries, each deliberate.** The demand side (`transpiration`,
   `psi_stem_to_ci`, `hydraulic_cost_TF`, `opt_psi_stem_`, `psi_crit`) stays plain

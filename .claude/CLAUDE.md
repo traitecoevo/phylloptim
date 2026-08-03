@@ -233,7 +233,7 @@ refuse.
    magnitude against a signed potential, so it can never bind. Reproduced at
    `psi_soil = 5.90` with `psi_crit = 5.91988`: the bracket runs to 5.906974,
    past `root_psi_crit = 5.870283`. Fixing it moves results, so it is annotated
-   in place with the intended line quoted, and filed as its own issue. It now
+   in place with the intended line quoted, and filed as **issue #24**. It now
    only compiles by reaching past the types into `.value`, which is the point.
    Don't tidy that line without the blast-radius measurement.
 
