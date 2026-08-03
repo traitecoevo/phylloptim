@@ -98,9 +98,31 @@ Doxygen, not roxygen — roxygen documents R objects and this package has none.
 Because every comment here is a plain `//`, which Doxygen ignores,
 `tools/doxygen_filter.awk` converts them at render time; **the sources are never
 touched**, and CI asserts that every non-comment line survives the filter
-byte-for-byte. If you add a header, you need do nothing. If you want a literal
-Doxygen command, write a `///` comment and the filter will leave it alone.
-Publishing is off until someone sets the repo variable `PUBLISH_DOCS=true`.
+byte-for-byte. If you want a literal Doxygen command, write a `///` comment and
+the filter will leave it alone. Publishing is off until someone sets the repo
+variable `PUBLISH_DOCS=true`.
+
+**"If you add a header, you need do nothing" was too optimistic — `potential.hpp`
+tripped two comment-shape rules, and the docs job runs with `WARN_AS_ERROR`, so
+either one fails the build.** Both are worth knowing before you write the header,
+not after:
+
+- **Don't open a file with a dashed `// ----` banner.** The filter turns the
+  file's first comment block into a `\file` block, and a following line of `---`
+  makes Markdown read the `\file` line itself as a setext heading — *"'\file'
+  command is not allowed in section title"*. Open with a prose summary, as every
+  other header does; banners are fine anywhere later in the file.
+- **Two qualified names joined by a slash reads as an explicit link request.**
+  `std::min/std::max` fails with *"explicit link request to 'max' could not be
+  resolved"*; bare `std::variant` and `std::vector<double>` are fine and already
+  ship. Write them separately, and backtick them — a code span suppresses
+  autolinking.
+
+⚠️ **Both are CI-only.** Doxygen 1.17 (Homebrew) accepts the second happily;
+ubuntu's 1.9 does not — the same version skew the filter already documents for a
+leading `::`. Reproduce locally with the CI command,
+`{ cat Doxyfile; echo "WARN_AS_ERROR = FAIL_ON_WARNINGS"; } | doxygen -`, but
+don't read a local pass as CI passing.
 
 ## The golden file is the safety net — treat it that way
 
