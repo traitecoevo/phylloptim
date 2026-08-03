@@ -145,7 +145,7 @@ the failure to the platform the file came from.
   against a remembered number.)
 - **`feature/api-cleanup`** — everything that changes results or the API: the renames,
   the shrunken input set, the pressure fix, and the shutdown fix. **Rebased onto
-  `master` on 2026-08-03** (six commits, onto `cfd5dcf`). Its golden file came
+  `master` on 2026-08-03** (seven commits, onto `91c2500`). Its golden file came
   through the rebase byte-identical, which is the check that master's supply-path
   refactor did not perturb the branch's arithmetic.
 

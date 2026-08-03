@@ -24,9 +24,11 @@ Changes that alter results or the API live on **`feature/api-cleanup`**, not on
 `master`. That branch is 10a, 10b, 10c and the shutdown fix.
 
 ✅ **Rebased onto `master` on 2026-08-03**, so the conflict warning that used to
-sit here is discharged. Six commits, replayed onto `cfd5dcf`; the two merge
-commits it used to carry are gone, and one commit ("stop tracking the
-`test_golden` binary") was dropped because `master` had since done the same thing.
+sit here is discharged. Seven commits replayed onto `91c2500`: the branch's six
+real ones, plus one that had been a *merge* commit and is now just the
+bench-harness update it was actually carrying. One further commit ("stop tracking
+the `test_golden` binary") was dropped outright, because `master` had since done
+the same thing.
 
 Three things are worth carrying out of that rebase:
 
