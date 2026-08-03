@@ -89,9 +89,10 @@ l.setup_root_vulnerability(100);
 
 std::vector<double> psi_soil{2.0};             // positive suction, MPa
 std::vector<double> soil_depth{1.0};           // m
-std::vector<double> root_carbon_per_layer{1.0};
+// kg C per m2 LEAF, not absolute carbon: the leaf is purely intensive.
+std::vector<double> root_carbon_per_leaf_area{20.0};
 
-l.set_physiology(/*area_leaf*/ 0.05, root_carbon_per_layer, /*PPFD*/ 900,
+l.set_physiology(root_carbon_per_leaf_area, /*PPFD*/ 900,
                  psi_soil, soil_depth,
                  /*leaf_specific_conductance_max*/ 3.14e-5,
                  /*atm_vpd*/ 2.0, /*ca*/ 40.0,
