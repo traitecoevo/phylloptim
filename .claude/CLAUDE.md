@@ -238,6 +238,23 @@ refuse.
    there is no osmotic term and gravity is carried separately as `gravity_head`, so
    ψ here is a pure pressure potential. Add solutes and "tension" is wrong while
    "magnitude of ψ" stays right.
+
+   **The dead clamp (#24 / plant #584) is fixed, and fixing it needed a third
+   branch.** `prepare_collar_solve`'s dry bound is now
+   `std::min(root_crit, supply_psi_crit())`. Two things worth carrying:
+
+   - **The golden file cannot see it**, because at this package's defaults
+     `psi_crit == root_psi_crit` so the window is empty. It opens whenever the
+     stem's `psi_crit` is drier than the root's — in plant, by **1.2 MPa**
+     (7.0855 vs 5.8703). A bit-identical golden run said nothing here either.
+   - **A correct clamp can invert the bracket**, which nothing handled because with
+     the clamp dead it could not happen. When `root_psi_crit` lands below
+     `root_zero_E` — the collar at which uptake is exactly zero — no operating point
+     both moves water and stays inside the root limit, so the answer is shut-down.
+     Without that exit, `golden_section_max` gets `bound_a > bound_b` and returns a
+     point between them, i.e. past the limit the clamp exists to enforce: the fix
+     reintroducing its own bug. Three regimes (no bind / tightened-but-transpiring /
+     shut-down) are pinned in `test_root_psi_crit_clamp_binds`.
 3. **Argmax smoothness is a hard constraint, not a preference.** plant chose
    golden-section over Brent because its argmax varies *smoothly* with inputs, and
    the demographic growth-rate gradient depends on that. Any change to the solver

@@ -496,6 +496,69 @@ void test_signed_potentials_are_rejected() {
   ok(threw, "the constructor rejects a negative stem_b");
 }
 
+// #24 / plant #584: the dry end of the collar bracket is clamped to
+// root_psi_crit, the potential at which root conductivity is down to 5%. The clamp
+// was written as std::max against a *signed* root_psi_crit, so it could never bind
+// and the solver optimised over a collar drier than the root system can supply.
+//
+// The window is empty at this package's defaults, where psi_crit == root_psi_crit,
+// which is why the golden file does not move. It opens whenever the stem's psi_crit
+// is drier than the root's -- as it is in plant, by 1.2 MPa. Three regimes, all
+// pinned here, because the middle one is the only place a *transpiring* operating
+// point moves and the third is a behaviour the fix had to add rather than restore.
+void test_root_psi_crit_clamp_binds() {
+  printf("the collar bracket is clamped to root_psi_crit (#24)\n");
+  Drivers d;
+  const auto solve = [&](double psi_soil) {
+    leaf::Leaf l;
+    l.psi_crit = 5.91988;   // drier than root_psi_crit = 5.870283
+    l.setup_transpiration(100);
+    l.setup_root_vulnerability(100);
+    std::vector<double> ps{psi_soil}, depth{1.0}, root{1.0 / d.area_leaf};
+    l.set_physiology(root, d.PPFD, ps, depth, d.K_s * d.theta / d.h, d.atm_vpd,
+                     d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+    l.find_root_collar_psi();
+    return l;
+  };
+
+  // Regime 1 -- the clamp does not bind (root_crit is wetter than root_psi_crit),
+  // so nothing changes. Pinned so a future tightening cannot silently spread.
+  {
+    leaf::Leaf l = solve(5.80);
+    ok(l.opt_root_psi_ < l.roots_.root_psi_crit,
+       "below the window the collar stays inside the root limit anyway");
+    ok(l.transpiration_ > 0.0, "and the leaf still transpires");
+  }
+
+  // Regime 2 -- the interval is TIGHTENED but still has room. The optimum is
+  // genuinely interior here (measured 5.86989 against a bound of 5.870283, i.e.
+  // 3.9e-4 inside it -- within GSS_tol_abs), so the assertion is the invariant the
+  // clamp exists to enforce, not the boundary value: the collar no longer runs past
+  // the root limit, and the leaf goes on transpiring.
+  {
+    leaf::Leaf l = solve(5.86);
+    ok(l.opt_root_psi_ <= l.roots_.root_psi_crit,
+       "in the window the collar does not pass root_psi_crit");
+    ok(l.opt_root_psi_ > l.roots_.root_psi_crit - 1e-3,
+       "and it sits at the clamp, within the GSS tolerance");
+    ok(l.transpiration_ > 0.0, "and the leaf still transpires there");
+  }
+
+  // Regime 3 -- the clamp lands BELOW root_zero_E, the collar at which uptake is
+  // zero. Drawing any water would need a collar past the root limit, so there is no
+  // feasible transpiring operating point and the answer is shut-down. Nothing
+  // handled this before #24, because with the clamp dead it could not arise.
+  {
+    leaf::Leaf l = solve(5.90);
+    near(l.opt_root_psi_, l.roots_.root_psi_crit, 1e-12,
+         "past the window the collar sits at root_psi_crit");
+    near(l.transpiration_, 0.0, 1e-300, "and the leaf is shut down, not optimising");
+    near(l.opt_psi_stem_, l.psi_crit, 1e-12, "with the stem held at psi_crit");
+    ok(l.opt_root_psi_ <= l.roots_.root_psi_crit,
+       "the collar never passes root_psi_crit in any regime");
+  }
+}
+
 void test_lambda_equals_dA_dE_single_layer() {
   printf("marginal cost of water: analytic lambda vs dA/dE (stem free)\n");
   Drivers d;
@@ -990,6 +1053,7 @@ int main() {
   test_gradient_needs_no_prior_solve();
   test_gradient_is_zero_in_reversed_gradient_state();
   test_soil_conductance_is_positive();
+  test_root_psi_crit_clamp_binds();
   test_signed_potentials_are_rejected();
   test_lambda_equals_dA_dE_single_layer();
   test_multilayer_lambda_identity();

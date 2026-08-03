@@ -1170,16 +1170,42 @@ if(assim_max_ < 0){
 
   // optimise for stem water potential
     bound_a = root_zero_E;
-    // ⚠️ #24 IS STILL LIVE HERE, DELIBERATELY. The clamp wants the *drier* of the
-    // two limits, which in magnitudes is std::min(root_crit, supply_psi_crit()).
-    // What is written is the faithful translation of the pre-#25 line,
-    // std::max(-root_crit, -root_psi_crit), which compared a magnitude against a
-    // signed potential and so could never bind: -supply_psi_crit() is negative and
-    // root_crit is positive, so the max is always root_crit. Fixing it moves
-    // results, so it is left in place with its own blast-radius measurement --
-    // issue #24, the very next commit. Do not tidy this line here; that would
-    // merge two measurements into one.
-    bound_b = std::max(root_crit, -supply_psi_crit());
+    // The dry end of the feasible interval is whichever limit binds FIRST: the
+    // continuity root, or the potential at which root conductivity is down to 5%.
+    // Both are positive magnitudes, so that is a min (#24, plant #584).
+    //
+    // This line used to read std::max(-root_crit, -root_psi_crit) -- a magnitude
+    // compared against a signed potential, so the second term was always negative
+    // and the clamp could never bind. The master solver's comment has claimed the
+    // bracket is "clamped to root_psi_crit" throughout; it now is. In magnitudes
+    // the correct form is the obvious one and the trap is gone, which is the
+    // clearest argument for #25 there is: the bug was a property of having two
+    // representations, not of this line.
+    bound_b = std::min(root_crit, supply_psi_crit());
+
+    // ⚠️ The clamp can INVERT the interval, and nothing handled that before,
+    // because with the clamp dead it could not happen. bound_a is root_zero_E, the
+    // collar suction at which uptake is exactly zero: to draw any water at all the
+    // collar must pull harder than that. So when root_psi_crit lands *below*
+    // root_zero_E there is no operating point that both moves water and stays
+    // inside the root vulnerability limit, and the answer is shut-down rather than
+    // an optimisation over an empty interval.
+    //
+    // Measured at psi_crit = 5.91988 (plant's TF24 value, drier than
+    // root_psi_crit = 5.870283), single layer:
+    //
+    //   psi_soil   root_zero_E   root_crit   bound_b     inverted
+    //     5.850      5.854900     5.863944   5.863944    no
+    //     5.880      5.884900     5.889736   5.870283    YES
+    //     5.910      5.914900     5.915587   5.870283    YES
+    //
+    // Without this exit, golden_section_max is handed bound_a > bound_b and returns
+    // a point between them -- past the limit the clamp exists to enforce, which is
+    // the very failure #24 is about, reintroduced by its own fix.
+    if (bound_b < bound_a) {
+      set_shutdown_state(supply_psi_crit());
+      return false;
+    }
 
     // If no interval exists (single feasible root-collar value), use that
     // point directly as the alternative solution instead of running GSS.
