@@ -1419,10 +1419,20 @@ expensive. In priority order:
   against the *installed* headers, which is what a `LinkingTo` consumer actually
   gets. `R CMD check` is clean: one NOTE, `'LinkingTo' field is unused: package
   has no 'src' directory`, which is inherent to a header-only package and cannot
-  be fixed without adding compiled code we do not want. `SystemRequirements: GNU
-  make` is now declared, which is both true — the harness Makefile uses `?=`,
-  `$(shell)`, `$(wildcard)` and `ifeq` — and the sanctioned way to silence R's
-  portable-Makefile warning.
+  be fixed without adding compiled code we do not want.
+
+  It compiles the two sources **directly** rather than calling `make`, and that
+  is deliberate. `R CMD check` scans every Makefile in the tarball and warns
+  about GNU extensions, which `tests/cpp/Makefile` uses freely — `?=`,
+  `$(shell)`, `$(wildcard)`, `ifeq`. The sanctioned way to silence that is
+  `SystemRequirements: GNU make`, and it was declared briefly before being
+  reverted: it would be a **false statement about the package**. Installing leaf
+  needs no make whatsoever — there is no compiled code — and because
+  `SystemRequirements` is package-level metadata, every `LinkingTo: leaf`
+  consumer would inherit a declared dependency that is untrue for them. Only the
+  developer harness needs make. So the Makefile stays for developers and is kept
+  out of the tarball via `.Rbuildignore`, which costs two compiler invocations in
+  `tests/cpp.R` and no lies in the metadata.
 - **Doxygen for the C++ API** — DONE (#12). Not roxygen, and not a close call:
   roxygen documents R objects and this package has none. When item 6 gives it an
   R interface, roxygen becomes right for *that* surface and the two coexist.

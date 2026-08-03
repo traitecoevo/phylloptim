@@ -82,9 +82,13 @@ which is what a `LinkingTo: leaf` consumer gets — so a consumer running their 
 `R CMD check` is told when one of our headers stops compiling. Expect exactly one
 NOTE, `'LinkingTo' field is unused: package has no 'src' directory`: it is
 inherent to a header-only package and is not worth adding compiled code to
-silence. `SystemRequirements: GNU make` is declared because the harness Makefile
-genuinely needs GNU make, and declaring it is also how R's portable-Makefile
-warning is meant to be answered.
+silence.
+
+It compiles the two sources directly rather than calling `make`, and
+`tests/cpp/Makefile` is `.Rbuildignore`d, because `R CMD check` warns about the
+GNU extensions the harness uses. The sanctioned fix, `SystemRequirements: GNU
+make`, was tried and reverted — installing this package needs no make, and
+`LinkingTo: leaf` consumers would inherit a declaration that is false for them.
 
 Doxygen, not roxygen — roxygen documents R objects and this package has none.
 Because every comment here is a plain `//`, which Doxygen ignores,
