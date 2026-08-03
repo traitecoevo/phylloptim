@@ -124,11 +124,12 @@ c++ -std=c++20 -O2 \
 As a headers-only dependency, the way `BH` is used. Add to your DESCRIPTION:
 
 ```
-LinkingTo: BH, odelia, leaf
+LinkingTo: BH, odelia (>= 0.2.0), leaf
 ```
 
 `LinkingTo` is **not** transitive in R, so you must name `BH` and `odelia`
-yourself even though it is `leaf` that includes them.
+yourself even though it is `leaf` that includes them — including the odelia
+version, for the same reason.
 
 There is no R-level interface to `leaf::Leaf` yet — see [PLAN.md](PLAN.md).
 
@@ -138,7 +139,7 @@ Deliberately few, and all header-only:
 
 | | why | how |
 |---|---|---|
-| **odelia** | cubic-spline interpolator for the pre-integrated vulnerability curves, and the vendored **XAD** automatic-differentiation library | `LinkingTo` |
+| **odelia** (>= 0.2.0) | cubic-spline interpolator for the pre-integrated vulnerability curves, and the vendored **XAD** automatic-differentiation library | `LinkingTo` |
 | **BH** (Boost) | TOMS748 root finder, incomplete gamma for the closed-form vulnerability integral | `LinkingTo` |
 
 Nothing else, and **neither dependency needs R**. The leaf model itself does not
@@ -146,7 +147,10 @@ touch **Rcpp** or the R C API: `leaf/util.hpp` replaced plant's `util::stop`
 with a plain `std::runtime_error` and `NA_REAL` with a quiet NaN. odelia's
 solver core was the last R touchpoint in the include graph, via `ode_util.hpp`;
 that was removed upstream in traitecoevo/odelia#44, so the test suite now builds
-against the real headers with nothing standing in for R at all.
+against the real headers with nothing standing in for R at all. **odelia 0.2.0 is
+the first release with that fix**, hence the version requirement: an older odelia
+would otherwise fail deep in the build with `RcppCommon.h: No such file or
+directory`, which does not point at the cause.
 
 Both dependencies are already required by plant, so plant pays nothing new for
 depending on this package.
