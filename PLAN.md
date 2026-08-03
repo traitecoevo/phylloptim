@@ -391,19 +391,25 @@ which merely shadowed `plant::n` and `plant::R`, so dropping those two names is
 safe and in fact removes the shadowing. Build that file against the branch as part
 of verifying it.
 
-## 4. Drop the last R coupling
+## 4. Drop the last R coupling — DONE
 
-The leaf model is R-free. odelia is not: `odelia/ode_util.hpp` includes
-`RcppCommon.h` for `Rcpp::stop`/`Rcpp::warning` and for `Rcpp::as`/`wrap`
-declarations on `odelia::util::index`, and `odelia/interpolator.hpp` includes it
-for `util::stop`. That is the only reason this package cannot claim to be plain
-C++ outright.
+**Fixed upstream and here.** odelia's `ode_util.hpp` included `RcppCommon.h` for
+`Rcpp::stop`/`Rcpp::warning` and for `Rcpp::as`/`wrap` declarations on
+`odelia::util::index`, which made it the one thing standing between this package
+and plain C++. Filed as traitecoevo/odelia#43, fixed in traitecoevo/odelia#44.
 
-`tests/cpp/shim/RcppCommon.h` is a 15-line stand-in that satisfies all of it,
-which both keeps the test suite R-free and specifies exactly how small the
-problem is. The upstream fix is for odelia to guard its Rcpp bits — e.g. an
-`ODELIA_NO_R` switch, or moving `stop`/`warning` to a throw the way
-`leaf/util.hpp` does. File against odelia.
+odelia took the "move `stop`/`warning` to a throw" route rather than an
+`ODELIA_NO_R` guard: a guard would have left R as the default, so plain-C++
+consumers would still have needed to know to define the macro. `util::stop` now
+throws `std::runtime_error` exactly the way `leaf/util.hpp` does, `util::warning`
+writes to stderr, and the `util::index` / `as` / `wrap` block turned out to be
+dead code — declared, never defined, no callers — and was deleted.
+
+`tests/cpp/shim/RcppCommon.h` is gone. The suite builds against odelia's real
+headers with nothing standing in for R, and reproduces all 288 golden points
+bit-identically, so this was a clean removal rather than a swap. Note that
+odelia now runs a `tests/standalone/` check in CI on a runner with no R, which
+is what keeps this from silently regressing on us.
 
 ## 5. Where XAD comes from — DECIDED: leave it
 

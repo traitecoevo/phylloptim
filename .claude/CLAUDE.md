@@ -252,11 +252,13 @@ they compute.** Results changes still belong on `feature/api-cleanup`. Anything 
    seedling bit-identical layers 1–2. **The shutdown fix does not cover this** —
    that one runs only on the shutdown path, this leaks on every path. One-word fix
    (`assign`), but it changes results; see PLAN item 2.
-9. **No Rcpp in the leaf.** `util.hpp` throws `std::runtime_error` instead of
-   `Rcpp::stop`, and uses a quiet NaN instead of `NA_REAL`. The only R touchpoint left
-   in the include graph is odelia's `ode_util.hpp`; `tests/cpp/shim/RcppCommon.h` is a
-   15-line stand-in that both keeps the tests R-free and specifies exactly what needs
-   fixing upstream (issue #11). Don't reintroduce Rcpp.
+9. **No Rcpp in the leaf, and none in the include graph either.** `util.hpp` throws
+   `std::runtime_error` instead of `Rcpp::stop`, and uses a quiet NaN instead of
+   `NA_REAL`. odelia's `ode_util.hpp` was the last R touchpoint; it was fixed upstream
+   (traitecoevo/odelia#44), so `tests/cpp/shim/` is gone and the suite compiles against
+   the real headers with no R anywhere (issue #11, closed). Don't reintroduce Rcpp —
+   and note the tests will no longer tell you if you do it indirectly by leaning on a
+   header that pulls R in, because there is no longer a shim to notice.
 
 ## Validating against plant
 
