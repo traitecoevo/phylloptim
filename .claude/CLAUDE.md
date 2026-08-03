@@ -69,6 +69,31 @@ sibling `odelia/` checkout and Homebrew Boost. Override with
 
 CI runs gcc and clang on Linux and clang on macOS.
 
+### The two R-side entry points
+
+```sh
+R CMD check .                # runs the C++ suite too, via tests/cpp.R
+doxygen                      # renders the C++ API to docs/html/index.html
+```
+
+`tests/cpp.R` is not a duplicate of the CI workflow. It compiles with R's
+*configured* compiler (`R CMD config CXX20`) against the *installed* headers,
+which is what a `LinkingTo: leaf` consumer gets — so a consumer running their own
+`R CMD check` is told when one of our headers stops compiling. Expect exactly one
+NOTE, `'LinkingTo' field is unused: package has no 'src' directory`: it is
+inherent to a header-only package and is not worth adding compiled code to
+silence. `SystemRequirements: GNU make` is declared because the harness Makefile
+genuinely needs GNU make, and declaring it is also how R's portable-Makefile
+warning is meant to be answered.
+
+Doxygen, not roxygen — roxygen documents R objects and this package has none.
+Because every comment here is a plain `//`, which Doxygen ignores,
+`tools/doxygen_filter.awk` converts them at render time; **the sources are never
+touched**, and CI asserts that every non-comment line survives the filter
+byte-for-byte. If you add a header, you need do nothing. If you want a literal
+Doxygen command, write a `///` comment and the filter will leave it alone.
+Publishing is off until someone sets the repo variable `PUBLISH_DOCS=true`.
+
 ## The golden file is the safety net — treat it that way
 
 `tests/cpp/golden/operating_points.tsv` records 288 operating points and is

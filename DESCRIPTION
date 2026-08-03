@@ -25,6 +25,7 @@ Description: A C++ header-only implementation of leaf-level gas exchange in
 Encoding: UTF-8
 License: AGPL (>= 3)
 LinkingTo: BH, odelia
+SystemRequirements: GNU make
 Suggests:
     testthat
 Remotes:

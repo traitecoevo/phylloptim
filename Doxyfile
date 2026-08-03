@@ -1,0 +1,67 @@
+# Doxygen configuration for the leaf C++ API (issue #12, PLAN item 15).
+#
+#   doxygen            # writes docs/html/index.html
+#
+# Only the settings that differ from Doxygen's defaults are listed; everything
+# else is left alone deliberately, so this file stays readable and a Doxygen
+# upgrade does not arrive as a 3000-line diff.
+#
+# Roxygen is not an option here and this is not a close call: roxygen documents
+# R objects, and this package has none -- no R/ directory, no compiled code,
+# nothing exported from NAMESPACE. When PLAN item 6 gives the package an R
+# interface, roxygen becomes the right tool for *that* surface, and the two sit
+# side by side. Doxygen is the only one of the pair that can read a C++ header.
+
+PROJECT_NAME           = "leaf"
+PROJECT_BRIEF          = "Header-only leaf gas exchange with explicit plant hydraulics"
+PROJECT_NUMBER         = 0.0.1
+
+INPUT                  = inst/include
+FILE_PATTERNS          = *.hpp
+RECURSIVE              = YES
+OUTPUT_DIRECTORY       = docs
+STRIP_FROM_PATH        = inst/include
+
+# The package's comments are plain `//`, which Doxygen does not read as
+# documentation. This translates them at render time rather than rewriting ten
+# headers -- see the long explanation at the top of the filter.
+INPUT_FILTER           = "awk -f tools/doxygen_filter.awk"
+
+# Show everything. This is a small, single-header-per-concept library whose
+# private members carry load-bearing warnings (the `stem_b`/`stem_c`
+# two-vulnerability-curves hazard is on a private declaration), so hiding them
+# would drop exactly the notes worth rendering.
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+
+# The comments are written as prose with tables and indented numeric blocks.
+MARKDOWN_SUPPORT       = YES
+AUTOLINK_SUPPORT       = YES
+
+# Let a reader jump from a rendered comment to the code it describes. For this
+# package that matters more than usual: several comments are arguments about
+# specific lines.
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+REFERENCED_BY_RELATION = YES
+
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+HTML_OUTPUT            = html
+GENERATE_TREEVIEW      = YES
+DISABLE_INDEX          = NO
+FULL_SIDEBAR           = NO
+
+# Call/collaboration graphs need graphviz. Harmless when absent -- Doxygen
+# falls back to text -- but the class relationships here are worth seeing.
+HAVE_DOT               = YES
+CALL_GRAPH             = NO
+CALLER_GRAPH           = NO
+
+# Everything is undocumented by Doxygen's definition (no `\param` tags anywhere),
+# so warning about it would produce thousands of lines of noise and hide the
+# warnings that matter.
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_AS_ERROR          = NO

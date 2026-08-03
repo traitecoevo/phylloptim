@@ -1,0 +1,87 @@
+name: API docs
+
+# Renders the C++ API with Doxygen (issue #12, PLAN item 15).
+#
+# Building the docs is a check in its own right, not just a publishing step: the
+# render runs with warnings promoted to errors, so a malformed reference or a
+# comment that confuses the parser fails here rather than quietly producing a
+# worse page.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Doxygen and graphviz
+        run: sudo apt-get update && sudo apt-get install -y doxygen graphviz
+
+      # The renderer reads the headers through tools/doxygen_filter.awk, which
+      # rewrites comments so Doxygen can see them. A bug there could silently
+      # alter what Doxygen believes the CODE says, and the rendered signatures
+      # would be wrong with nothing to indicate it. So: assert that every line
+      # which is not a whole-line comment survives the filter byte-for-byte.
+      - name: Check the filter alters only comments
+        run: |
+          set -eu
+          status=0
+          for f in $(find inst/include -name '*.hpp' | sort); do
+            awk '!/^[ \t]*\/\//' "$f" > /tmp/orig.txt
+            awk -f tools/doxygen_filter.awk "$f" \
+              | awk '/^[ \t]*\/\*! \\file/ {inf=1; next}
+                     inf                   {if ($0 ~ /^[ \t]*\*\/[ \t]*$/) inf=0; next}
+                     /^[ \t]*\/\//         {next}
+                     {print}' > /tmp/filtered.txt
+            if ! diff -u /tmp/orig.txt /tmp/filtered.txt > /tmp/delta.txt; then
+              echo "::error file=$f::doxygen_filter.awk changed non-comment lines"
+              head -40 /tmp/delta.txt
+              status=1
+            fi
+          done
+          exit $status
+
+      # Overriding on stdin is Doxygen's documented way to change one setting
+      # without a second Doxyfile. Warnings stay non-fatal for a local `doxygen`
+      # run, where they are informative rather than blocking.
+      - name: Render
+        run: |
+          { cat Doxyfile; echo "WARN_AS_ERROR = FAIL_ON_WARNINGS"; } | doxygen -
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: api-docs
+          path: docs/html
+          if-no-files-found: error
+
+      - name: Package for Pages
+        if: github.event_name == 'push' && vars.PUBLISH_DOCS == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/html
+
+  # Publishing is opt-in and off by default. To turn it on: set the repository
+  # variable PUBLISH_DOCS to "true", and set Settings -> Pages -> Source to
+  # "GitHub Actions". Until then the rendered site is still available from every
+  # run as the `api-docs` artifact, and nothing here goes near the public web.
+  deploy:
+    needs: build
+    if: github.event_name == 'push' && vars.PUBLISH_DOCS == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

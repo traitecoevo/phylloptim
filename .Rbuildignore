@@ -1,0 +1,23 @@
+^\.github$
+^\.claude$
+^\.vscode$
+^.*\.Rproj$
+^\.Rproj\.user$
+^PLAN\.md$
+^COMPARISON\.md$
+^agents\.md$
+^Doxyfile$
+^docs$
+^leaf_.+\.tar\.gz$
+^.*\.Rcheck$
+
+# Built by `make -C tests/cpp`. The sources and the golden file must ship -- the
+# check in tests/cpp.R compiles them -- but the binaries must not.
+^tests/cpp/test_leaf$
+^tests/cpp/test_golden$
+^tests/cpp/bench_solve$
+^tests/cpp/.*\.dSYM$
+
+# Validation scripts, not tests: they need an installed `plant` and take minutes.
+# See tests/validate/README or the header comment in each.
+^tests/validate$
