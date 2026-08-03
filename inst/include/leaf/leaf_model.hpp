@@ -805,7 +805,13 @@ inline void Leaf::set_physiology(const std::vector<double>& root_carbon_per_leaf
 
   // Set up vector of root water uptake from layer. Stays on Leaf: plant writes
   // the crown-integrated value back into leaf.soil_consumption_ by name.
-  soil_consumption_.resize(supply_n_layers(), 0.0);
+  //
+  // .assign, not .resize: the uptake loop writes only up to the deepest *rooted*
+  // layer, and resize's fill reaches only newly added elements, so a solve with
+  // fewer rooted layers than the last one on this Leaf would leave the tail
+  // holding the previous plant's values -- which plant then bills to the patch
+  // water balance.
+  soil_consumption_.assign(supply_n_layers(), 0.0);
 
   // Soil-moisture state for the Medlyn beta_ stress factor (develop #450). The
   // root-water compute path does not use these; they make the standalone,
@@ -1054,6 +1060,20 @@ if(assim_max_ < 0){
     E_from_Soil_to_Root_Collar(root_collar_psi_, supply_psi_soil_inverted());
 
     profit_ = - R_d_ - hydraulic_cost_TF(-root_collar_psi_);
+    // As on the shut-down exits: transpiration is zero here, so gross
+    // assimilation is zero and the reported net rate is -R_d_. Set it
+    // explicitly -- this branch does not go through profit_psi_stem_TF, so
+    // assim_colimited_ would otherwise keep whatever the last probe wrote,
+    // and it is reported. Keeps profit_ == assim_colimited_ -
+    // hydraulic_cost_TF() in every branch.
+    assim_colimited_ = -R_d_;
+    // E_up_ and soil_consumption_ are already correct: the
+    // E_from_Soil_to_Root_Collar call above evaluates them at root_zero_E, the
+    // collar potential at which uptake is zero. The leaf-side pair is set
+    // nowhere on this path, though, so zero it here rather than leave the
+    // previous solve's values -- see set_shutdown_state for why that matters.
+    transpiration_ = 0.0;
+    stom_cond_CO2_ = 0.0;
 
         if(std::isnan(profit_)){
           util::stop("Error: profit nan");
@@ -1206,11 +1226,30 @@ inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi) {
   const double psi = opt_root_psi;
   const double gstar_Pa = gamma_ * umol_per_mol_to_Pa_;
 
+  // Every transport evaluation below reads the supply path's signed soil
+  // potentials, so seat them on the current psi_soil_ here rather than depending
+  // on whatever the caller's last solve left cached.
+  supply_begin_solve();
+
   // Operating point in double.
   const double psi_stem = find_psi_stem_from_psi_root(-psi, supply_psi_soil_inverted());
-  const double ci = psi_stem_to_ci(psi_stem, psi);
-  if (!std::isfinite(psi_stem) || !std::isfinite(ci)) {
+  // Shut down before the ci solve, not after. psi and psi_stem are both positive
+  // magnitudes here, so psi >= psi_stem is the no-flow / reversed-gradient case --
+  // the same condition set_leaf_states_rates_from_psi_stem treats as zero
+  // transpiration. It has to be caught *here* because psi_stem_to_ci does not
+  // return non-finite in that state, it throws: gc = const * transpiration goes
+  // negative, which flips the sign of the supply term so the residual no longer
+  // crosses zero over (gamma*, ca] and the bracketing root-find reports that its
+  // endpoints do not bracket a root. The isfinite check below was written to cover
+  // shut-down but cannot see a thrown exception, so a dry patch killed a whole
+  // plant run: reproduced on TF24f at 5 layers, theta = 0.005-0.03 with 1 m/yr
+  // rainfall, at psi_stem = 1.23 against psi_upstream = 5.92 MPa.
+  if (!std::isfinite(psi_stem) || psi >= psi_stem) {
     return 0.0;  // shut-down / infeasible: no informative gradient
+  }
+  const double ci = psi_stem_to_ci(psi_stem, psi);
+  if (!std::isfinite(ci)) {
+    return 0.0;
   }
 
   // A'(ci) and C'(psi_stem) via forward-mode AD of the analytic algebra.
@@ -1434,13 +1473,14 @@ inline double Leaf::assim_electron_limited(double ci_) {
   ((ci_ - gamma_ * umol_per_mol_to_Pa_) / (ci_ + 2 * gamma_ * umol_per_mol_to_Pa_));
 }
 
-// returns co-limited assimilation umol m^-2 s^-1
+// returns co-limited assimilation umol m^-2 s^-1, NET of dark respiration (the
+// trailing `- R_d_`), so gross assimilation is this value + R_d_. The comment
+// that used to sit on the return statement said the opposite.
 inline double Leaf::assim_colimited(double ci_) {
-  
+
   double assim_rubisco_limited_ = assim_rubisco_limited(ci_) ;
   double assim_electron_limited_ = assim_electron_limited(ci_);
 
-  // no dark respiration included at the moment
   return (assim_rubisco_limited_ + assim_electron_limited_ - sqrt(pow(assim_rubisco_limited_ + assim_electron_limited_, 2) - 4 * curv_fact_colim * assim_rubisco_limited_ * assim_electron_limited_)) /
              (2 * curv_fact_colim)- R_d_;
 

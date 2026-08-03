@@ -18,7 +18,7 @@ this file keeps the reasoning behind each one.
 | **15** | CI: gcc/clang × Linux/macOS, no R needed, plus `R CMD check` and rendered C++ API docs (#20). And a golden-file regression baseline over 288 operating points, compared bit-exactly on macOS/arm64 and with `--cross-platform` elsewhere — see the note under item 1 on why bit-exact cannot be a cross-platform gate, and on the flat-optimum amplification that sets the tolerances. |
 | **5** | **Decided: leave XAD as it is.** It arrives via odelia, both packages want the same version, and only forward mode is used so nothing needs linking. No action. |
 | **7b** | The supply path is swappable. All four stages of 7b-iii merged (#17 → `10115e1`, #18 → `cfd5dcf`): `MultiLayerRoots`, the resistance interface, `SinglePotential`, and an enum-tag dispatch that measured **free**. Issue #2 closed; #3 and the multi-layer λ are unblocked. |
-| **2** | The shutdown-state leak, **fixed and merged** (#15). The reconciliation with plant went the *opposite* way to what this document expected — plant had no fix to port. See item 2. ⚠️ plant **#577 is a separate bug, still unfixed here**. |
+| **2** | The shutdown-state leak, **fixed and merged** (#15) — and plant **#577 too**, together with two more stale-state exits ported from plant `develop` (#585). See item 2; the reconciliation with plant reversed direction twice. |
 | **4** | **The include graph is R-free.** The `RcppCommon` shim is deleted (#19) and odelia is pinned at `>= 0.2.0`, its first release with an R-free core (#22). The package is now plain C++ outright. |
 
 **Everything above is on `master`.** `feature/api-cleanup` merged as
@@ -79,7 +79,7 @@ code rather than of the merge:
 | [#6](https://github.com/traitecoevo/leaf_cpp/issues/6) | 12 | Calibration vignette, then inversion | needs #4 for trait gradients |
 | [#7](https://github.com/traitecoevo/leaf_cpp/issues/7) | 13 | Energy balance, full cut | leaf-to-air VPD is the cheap win; free convection is not worth it |
 | [#8](https://github.com/traitecoevo/leaf_cpp/issues/8) | 10a | Signed-vs-magnitude potentials in the type | design question, not a rename |
-| [#9](https://github.com/traitecoevo/leaf_cpp/issues/9) | 3 | Finish the plant-side integration | validated already; decisions + one unchecked consumer. Now also carries **landing the shutdown fix in plant** (plant #578/#577), which is still open there with no fix written |
+| [#9](https://github.com/traitecoevo/leaf_cpp/issues/9) | 3 | Finish the plant-side integration | decisions + one unchecked consumer, and the catch-up: plant `develop` moved past the extraction point, so **its leaf fixes come to us** (plant #585, ported) before the swap can be validated. The validation itself needs redoing after #15 |
 | [#1](https://github.com/traitecoevo/leaf_cpp/issues/1) | 14 | Decide the package name | publication framing is item 14 below |
 
 ---
@@ -286,19 +286,32 @@ Two known and deliberate exceptions to bit-identity:
 Once this is done, replace the pinned values in `test_leaf.cpp` with values
 generated from plant and say so in the comment.
 
-## 2. Shutdown-state leak — FIXED HERE. plant has no fix to port.
+## 2. Stale state between solves — all four exits now fixed here
 
-**Reconciled 2026-08-03, and the answer is the opposite of what this section used
-to say.** It said plant owned the fix and we would port plant's when it landed.
-Checked: **plant #578 and #577 are both still open, and no fix has been written
-against either** — no commit on any plant branch touches `set_shutdown_state`, and
-`soil_consumption_.resize` is still `resize`. There is nothing to port and there
-never was; the earlier reading mistook *"Andrew has filed it"* for *"Andrew is
-fixing it"*.
+**This section has been wrong twice, in opposite directions, and the history is
+worth keeping because the mistake is repeatable.**
 
-So the reconciliation went the other way: **our fix stands and plant is downstream
-of it.** Merged as #15 (`26ab841`). Two things make that safe rather than a
-land-grab:
+1. It first said plant owned the fix and we would port plant's when it landed.
+2. Reconciled 2026-08-03: **checked, and plant #578/#577 were both still open with
+   no fix written** — no commit on any plant branch touched `set_shutdown_state`,
+   and `soil_consumption_.resize` was still `resize`. The earlier reading had
+   mistaken *"Andrew has filed it"* for *"Andrew is fixing it"*. So our fix stood
+   and plant was downstream of it (#15).
+3. **Retracted 2026-08-04: statement 2 has expired.** plant merged
+   [#585](https://github.com/traitecoevo/plant/pull/585) into `develop`, which
+   fixes #577 (`.assign`) *and* two further stale-state exits, and bumps TF24's
+   `scientific_version` to 4 for the shutdown half. So plant did acquire fixes to
+   port, five days after we concluded it never would. All of them are now in this
+   package (branch `fix/port-plant-develop-leaf-fixes`), each as its own commit
+   with its own measurement.
+
+**The lesson, since this is the second time the direction flipped: a "checked, and
+there is nothing upstream" conclusion has a shelf life of days on an actively
+developed sibling.** Re-check before acting on it, not just before writing it
+down. `git log <base>...origin/develop -- <the files we forked>` is the check.
+
+The shutdown half of the fix was merged here as #15 (`26ab841`), before plant had
+one. Two things made that safe rather than a land-grab:
 
 - **The semantics were already agreed on plant #578, in writing.** The one comment
   on that issue is Daniel's, and it specifies exactly what our fix implements:
@@ -314,9 +327,18 @@ land-grab:
   Fixing inside `set_shutdown_state` therefore cannot touch it. That is the check
   worth repeating if the fix is ever moved.
 
-⚠️ **The other half, plant #577, is NOT fixed and is still live in this package —
-reproduced here, not merely inferred.** `leaf_model.hpp:808` has
-`soil_consumption_.resize(supply_n_layers(), 0.0)` where it wants `.assign`.
+  ⚠️ **The second bullet's premise — that #578 says the `assim_max_ < 0` exit "is
+  already correct" — turned out to be wrong**, and plant #585 fixed it. It sets
+  `profit_` but leaves `transpiration_`, `stom_cond_CO2_` and `assim_colimited_`
+  holding the previous solve's values, which made `profit_ == assim_colimited_ -
+  hydraulic_cost_TF()` false in that one branch (measured: 7.79 against a reported
+  -1.47). Now ported. The *scoping* argument still holds — fixing inside
+  `set_shutdown_state` genuinely cannot reach that exit — but "cannot reach it" was
+  read as "does not need to".
+
+### plant #577 — the `resize`/`assign` half. **Now fixed here** (ported from plant #585)
+
+Was `soil_consumption_.resize(supply_n_layers(), 0.0)` where it wants `.assign`.
 `supply_n_layers()` returns `soil_number_of_depths_` (every layer), while the
 uptake loop runs to `max_soil_layer` (the deepest *rooted* layer), and `resize`'s
 fill argument applies only to *newly added* elements — so layers a plant has no
@@ -332,16 +354,24 @@ seedling (roots in 1 layer) : 0.000633884 0.00026097 0.000172362
 Andrew measured **33.78%** of cohort-time records on a production run carrying at
 least one stale layer, and 25.73% carrying three of five.
 
-**Our shutdown fix does not cover this**, and it is worth being clear why, because
+**Our shutdown fix did not cover this**, and it is worth being clear why, because
 the two look like one bug: `std::fill` in `set_shutdown_state` runs only on the
-shutdown path, whereas #577 leaks on *every* path, shutdown or not. It is a
-one-word change (`resize` → `assign`), but it changes results wherever a rooted
-layer count shrinks between solves, so it wants its own commit, its own golden
-regeneration and its own measured blast radius — the same treatment the shutdown
-fix got. **Not done here; decide it deliberately.**
+shutdown path, whereas #577 leaks on *every* path, shutdown or not.
 
-**Still to do, and it is plant-side:** land this in plant as its own reviewed
-change and close #578/#577 there. Tracked under issue #9.
+**How it was measured, and the trap in measuring it.** The golden file is
+**bit-identical** after the fix, all 288 points, and that says nothing either way:
+`test_golden` constructs a fresh `Leaf` per grid point on purpose, so
+`soil_consumption_` is always empty when `set_physiology` runs and `resize` fills
+all of it. The bug needs a *reused* `Leaf`. The measurement is a new test that
+solves a three-layer-rooted tree and then a top-layer-only seedling on one `Leaf`
+with the same three soil layers — only the rooted depth shrinks, which is why
+resizing never noticed. Reverting the one word makes it report 1.31e-04 and
+4.75e-05 kg H2O m^-2 s^-1 of phantom uptake in layers 2 and 3. That is the ~1e-4
+"real difference" scale, four orders above reassociation.
+
+**Still to do, and it is plant-side:** close #578/#577 on plant once
+`feature/consume-leaf-package` merges — #585 already fixed both in plant's own leaf,
+so the issues are stale rather than open. Tracked under issue #9.
 
 The diagnosis below is kept because it is the evidence, and because the
 "`-R_d_`, not zero" point is easy to get wrong.
