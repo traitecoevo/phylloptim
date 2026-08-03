@@ -11,10 +11,112 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <utility>
 #include <string>
 #include <vector>
 
 namespace leaf {
+
+// The per-layer root hydraulic resistances the supply solve actually consumes.
+// Two of the five fields are load-bearing; see set_root_network on why the other
+// three are here at all.
+struct RootNetwork {
+  // Minimum (fully-hydrated) horizontal, intra-layer soil->root resistance.
+  // Divided by the vulnerability-weighted mean conductivity at the operating
+  // potential to get the actual horizontal resistance.
+  std::vector<double> r_R_H_min;
+  // Cumulative vertical, inter-layer resistance from the surface down to layer i.
+  std::vector<double> r_R_V_sum;
+  // Diagnostics only -- read by nothing in the model.
+  std::vector<double> c_r_V, c_r_H, r_R_V;
+};
+
+// The root-architecture model: how carbon invested in roots becomes hydraulic
+// resistance. Each layer's root carbon is split 1/3 vertical : 2/3 horizontal,
+// and
+//   network_.r_R_H_min[i] = beta_R_H / c_r_h        (min horizontal resistance, i.e. the
+//                                           reciprocal of max conductance)
+//   r_R_V[i]     = beta_R_V * dz^2 / c_r_v (vertical; dz^2 because vertical
+//                                           conductivity scales with root
+//                                           cross-sectional area)
+//   network_.r_R_V_sum[i] = cumulative vertical resistance from the surface to layer i.
+//
+// The returned vectors are sized to the deepest layer with non-zero root carbon,
+// so the hot loop only iterates over layers that actually contain roots.
+//
+// This is deliberately a free function rather than a member: it is the one part
+// of the supply path that is a *model of the plant*, not of water transport, and
+// keeping it out of MultiLayerRoots is what lets an alternative supply path
+// exist without inventing a root system. It stays in this package rather than
+// moving to plant so that it remains covered by the golden file -- the moment
+// this arithmetic crosses the package boundary it leaves the tested surface.
+//
+// NOTE on zero-carbon layers: a layer with no roots currently gets
+// r_R_H_min = 0, i.e. *zero* horizontal resistance, which is infinite
+// soil-to-root conductance in a layer with no roots -- backwards. It appears
+// unreachable from plant today (max_soil_layer truncates at the last non-zero
+// layer, and plant's Q() root distribution does not produce an exact interior
+// zero), so this preserves the behaviour rather than changing it silently.
+//
+// Fills `out` in place so its buffers are reused: this runs once per
+// set_physiology, which plant calls once per solve, and building five fresh
+// vectors each time measured +0.074 us/call (0.061 -> 0.135), about +2% of a
+// whole solve. The value-returning overload below is for tests and one-off
+// callers, where that does not matter.
+inline void root_network_from_carbon(
+    const std::vector<double>& root_carbon_per_layer, double dz,
+    double beta_R_H, double beta_R_V, RootNetwork& out) {
+  const size_t n_layers = root_carbon_per_layer.size();
+
+  // deepest layer with non-zero root carbon
+  int max_soil_layer = 0;
+  for (size_t i = 0; i < n_layers; ++i) {
+    if (root_carbon_per_layer[i] != 0) {
+      max_soil_layer = i + 1;
+    }
+  }
+  out.c_r_V.assign(max_soil_layer, 0.0);
+  out.c_r_H.assign(max_soil_layer, 0.0);
+  out.r_R_H_min.resize(max_soil_layer);
+  out.r_R_V.resize(max_soil_layer);
+  out.r_R_V_sum.resize(max_soil_layer);
+
+  const double dz_sq = dz * dz;
+  double vertical_resistance_sum = 0.0;
+  for (int i = 0; i < max_soil_layer; ++i) {
+    if(root_carbon_per_layer[i] < 0){
+            util::stop("Root mass lower than 0");
+    }
+    const double root_mass = root_carbon_per_layer[i];
+    if (root_mass == 0.0) {
+      out.r_R_H_min[i] = 0.0;
+      out.r_R_V[i] = 0.0;
+      out.r_R_V_sum[i] = vertical_resistance_sum;
+      continue;
+    }
+
+    const double c_r_v = root_mass / 3.0;
+    const double c_r_h = root_mass * 2.0 / 3.0;
+    out.c_r_V[i] = c_r_v;
+    out.c_r_H[i] = c_r_h;
+
+    // Set horizantal minimum resistance per soil layer (i.e. reciprocal of maximum conductance).
+    out.r_R_H_min[i] = beta_R_H / c_r_h;
+    // The vertical conductivity is likely linearly proportional to the root area projected onto the horizontal plane, hence dz^2.
+    out.r_R_V[i] = beta_R_V * dz_sq / c_r_v;
+    vertical_resistance_sum += out.r_R_V[i];
+    out.r_R_V_sum[i] = vertical_resistance_sum;
+  }
+}
+
+// Same, returning a fresh network. Convenience for tests and standalone callers.
+inline RootNetwork root_network_from_carbon(
+    const std::vector<double>& root_carbon_per_layer, double dz,
+    double beta_R_H, double beta_R_V) {
+  RootNetwork out;
+  root_network_from_carbon(root_carbon_per_layer, dz, beta_R_H, beta_R_V, out);
+  return out;
+}
 
 // ---------------------------------------------------------------------------
 // SOIL -> ROOT-COLLAR WATER SUPPLY
@@ -39,7 +141,7 @@ namespace leaf {
 //
 // The hydraulic resistance of each layer is the sum of two terms:
 //   * r_R_H : horizontal (intra-layer, soil->root) resistance. Set during
-//             set_root_network as r_R_H_min[i] / f_r, where r_R_H_min scales
+//             set_root_network as network_.r_R_H_min[i] / f_r, where r_R_H_min scales
 //             with the carbon invested in horizontal roots and f_r is the
 //             fractional loss of conductivity from the root vulnerability
 //             curve at the operating potential.
@@ -117,11 +219,10 @@ public:
   std::vector<double> root_vuln_integral_soil_;
 
   // --- root resistance network --------------------------------------------
-  std::vector<double> c_r_V_;  // carbon per layer in vertical transport (kg m^-2)
-  std::vector<double> c_r_H_;  // carbon per layer in horizontal transport (kg m^-2)
-  std::vector<double> r_R_H_min;  // min horizontal resistance per layer
-  std::vector<double> r_R_V;      // vertical resistance per layer
-  std::vector<double> r_R_V_sum;  // cumulative vertical resistance with depth
+  // Held as one object rather than five loose vectors so the carbon -> resistance
+  // map can fill it in place and reuse its buffers. The solve reads exactly two
+  // of its fields.
+  RootNetwork network_;
 
   // -------------------------------------------------------------------------
 
@@ -132,11 +233,11 @@ public:
     z_soil_mid_.clear();
     grav_head_z_.clear();
     use_precomputed_z_soil_mid_ = false;
-    c_r_V_.clear();
-    c_r_H_.clear();
-    r_R_H_min.clear();
-    r_R_V.clear();
-    r_R_V_sum.clear();
+    network_.c_r_V.clear();
+    network_.c_r_H.clear();
+    network_.r_R_H_min.clear();
+    network_.r_R_V.clear();
+    network_.r_R_V_sum.clear();
     soil_number_of_depths_ = util::na_value_int;
     max_soil_layer = util::na_value_int;
   }
@@ -190,65 +291,44 @@ public:
     for (size_t i = 0; i < soil_number_of_depths_; ++i) {
       grav_head_z_[i] = gravity_head * z_soil_mid_[i];
     }
+
+    // Layer thickness is soil geometry, not root architecture, so it is set here
+    // rather than alongside the resistance network that consumes it.
+    dz_ = soil_depth_.back()/soil_number_of_depths_;
   }
 
-  // Per-timestep root resistance network. Each layer's root carbon
-  // (mass_root_prop[i], kg) is split 1/3 vertical : 2/3 horizontal (c_r_V_,
-  // c_r_H_). From these:
-  //   r_R_H_min[i] = beta_R_H / c_r_h        (min horizontal resistance, i.e.
-  //                                           reciprocal of max conductance)
-  //   r_R_V[i]     = beta_R_V * dz^2 / c_r_v (vertical; dz^2 because vertical
-  //                                           conductivity scales with root
-  //                                           cross-sectional area)
-  //   r_R_V_sum[i] = cumulative vertical resistance from surface to layer i.
-  // max_soil_layer is the deepest layer with non-zero root mass; the resistance
-  // vectors are sized to it so uptake()'s hot loop only iterates over layers
-  // that actually contain roots.
+  // Per-timestep root resistance network. Takes the resistances themselves, not
+  // the root carbon they are derived from.
   //
-  // Requires set_soil_state to have run this step (reads soil_depth_ and
-  // soil_number_of_depths_).
-  void set_root_network(const std::vector<double>& mass_root_prop) {
-    dz_ = soil_depth_.back()/soil_number_of_depths_;
+  // WHY THIS TAKES RESISTANCES. The solve reads exactly two of these vectors --
+  // r_R_H_min and r_R_V_sum -- plus grav_head_z_ and max_soil_layer. Nothing in
+  // uptake() or duptake_dpsi() touches root carbon, the 1/3 : 2/3 split, dz, or
+  // either beta_R_* constant; those are inputs to a *root architecture* model
+  // that happens to run just before. Splitting them out is the same move
+  // leaf_specific_conductance_max already makes: plant computes
+  // kmax = K_s*theta/(h*eta_c) and hands over a scalar, so which
+  // conductance-versus-height model is in force is not this package's business.
+  // The carbon -> resistance map lives in root_network_from_carbon below, so an
+  // alternative supply path can supply resistances any way it likes.
+  //
+  // c_r_V_, c_r_H_ and r_R_V ride along as diagnostics: nothing in the model
+  // reads them, but plant exposes them through RcppR6, so they are carried
+  // rather than dropped. They are removal candidates with item 6.
+  // Takes by value and moves: the caller always passes a freshly-built
+  // RootNetwork, so this hands over its buffers rather than copying five vectors
+  // on every set_physiology.
+  void set_root_network(RootNetwork network) {
+    network_ = std::move(network);
+    max_soil_layer = static_cast<int>(network_.r_R_H_min.size());
+  }
 
-    // find max soil layer as last iteration with mass_root_prop greater than 0
-    max_soil_layer = 0;
-    for (size_t i = 0; i < soil_number_of_depths_; ++i) {
-      if (mass_root_prop[i] != 0) {
-        max_soil_layer = i + 1;
-      }
-    }
-    c_r_V_.assign(max_soil_layer, 0.0);
-    c_r_H_.assign(max_soil_layer, 0.0);
-    r_R_H_min.resize(max_soil_layer);
-    r_R_V.resize(max_soil_layer);
-    r_R_V_sum.resize(max_soil_layer);
-
-    const double dz_sq = dz_ * dz_;
-    double vertical_resistance_sum = 0.0;
-    for (int i = 0; i < max_soil_layer; ++i) {
-      if(mass_root_prop[i] < 0){
-              util::stop("Root mass lower than 0");
-      }
-      const double root_mass = mass_root_prop[i];
-      if (root_mass == 0.0) {
-        r_R_H_min[i] = 0.0;
-        r_R_V[i] = 0.0;
-        r_R_V_sum[i] = vertical_resistance_sum;
-        continue;
-      }
-
-      const double c_r_v = root_mass / 3.0;
-      const double c_r_h = root_mass * 2.0 / 3.0;
-      c_r_V_[i] = c_r_v;
-      c_r_H_[i] = c_r_h;
-
-      // Set horizantal minimum resistance per soil layer (i.e. reciprocal of maximum conductance).
-      r_R_H_min[i] = beta_R_H / c_r_h;
-      // The vertical conductivity is likely linearly proportional to the root area projected onto the horizontal plane, hence dz^2.
-      r_R_V[i] = beta_R_V * dz_sq / c_r_v;
-      vertical_resistance_sum += r_R_V[i];
-      r_R_V_sum[i] = vertical_resistance_sum;
-    }
+  // The carbon-based caller. Kept as an entry point (rather than making everyone
+  // go through root_network_from_carbon) so the fill happens straight into
+  // network_ and its buffers are reused across calls.
+  void set_root_network_from_carbon(const std::vector<double>& root_carbon_per_layer) {
+    root_network_from_carbon(root_carbon_per_layer, dz_, beta_R_H, beta_R_V,
+                             network_);
+    max_soil_layer = static_cast<int>(network_.r_R_H_min.size());
   }
 
   // Per-solve entry point. Flips psi_soil_ into the signed convention, builds
@@ -361,10 +441,10 @@ public:
           (P_x_r < 0.0) ? root_vuln_integral_from_psi.deriv(-P_x_r) : 1.0;
       const double dinteg_dr = sign_var * fr_at;
 
-      const double r_R_H = r_R_H_min[i] * span / integral;
-      const double r_R = r_R_H + r_R_V_sum[i];
+      const double r_R_H = network_.r_R_H_min[i] * span / integral;
+      const double r_R = r_R_H + network_.r_R_V_sum[i];
       const double dr_R_H_dr =
-          r_R_H_min[i] * (sign_var * integral - span * dinteg_dr) / (integral * integral);
+          network_.r_R_H_min[i] * (sign_var * integral - span * dinteg_dr) / (integral * integral);
       const double dr_R_dr = dr_R_H_dr;
 
       const double num = (psi_soil[i] - P_x_r - grav_head_z_[i]) * inv_area_leaf;
@@ -454,10 +534,10 @@ private:
       }
 
       // Fraction of conductance in roots in a given layer at most negative soil water potential
-      double r_R_H = r_R_H_min[i] / f_ri; // [MPa * s * (mol H2O)^-1]
+      double r_R_H = network_.r_R_H_min[i] / f_ri; // [MPa * s * (mol H2O)^-1]
 
       // Total root resistance (horizantal plus vertical)
-      double r_R = r_R_H + r_R_V_sum[i];
+      double r_R = r_R_H + network_.r_R_V_sum[i];
 
       // Transpiration is equivalent to gravitational water loss (i.e. layer gains water)
       double E_i = -grav_head_z_[i] * inv_area_leaf / r_R ;
@@ -518,10 +598,10 @@ private:
     const double span = P_src_max - P_src_min;
 
     // Find the horizantal resistance in a given layer by dividing the minimum resistance (i.e. maximum conductivity) by the fractional loss of conductivity
-    double r_R_H = r_R_H_min[i] * span / integral; // [MPa * s * (mol H2O)^-1]
+    double r_R_H = network_.r_R_H_min[i] * span / integral; // [MPa * s * (mol H2O)^-1]
 
     // Find the total resistance in a given layer by adding the vertical resistance in that layer
-    double r_R = r_R_H + r_R_V_sum[i]; // [MPa * s * (mol H2O)^-1]
+    double r_R = r_R_H + network_.r_R_V_sum[i]; // [MPa * s * (mol H2O)^-1]
 
     // Transpiration is equal to the potentail gradient between the root collar and the soil, accounting for gravitational potential
     double E_i = (psi_soil[i] - P_x_r - grav_head_z_[i]) * inv_area_leaf / r_R; // [mol H2O / m^2 / s]

@@ -748,6 +748,54 @@ of doing it in stages.
    the four methods (`begin_solve`, `uptake`, `duptake_dpsi`, plus per-layer
    output access). Golden still bit-identical. Re-run `make bench` — the
    measurement predicts +2.6%, so a larger regression means something else moved.
+
+   **The supply path now takes resistances, not root carbon — done ahead of this
+   stage, because the concept depends on it.** `MultiLayerRoots::set_root_network`
+   takes a `RootNetwork` (`r_R_H_min`, `r_R_V_sum`, plus three diagnostics), and
+   the carbon → resistance map is the free function `root_network_from_carbon`.
+
+   The reason is that the solve reads **exactly two** of those vectors, plus
+   `grav_head_z_` and `max_soil_layer`. Nothing in `uptake` or `duptake_dpsi`
+   touches root carbon, the 1/3 : 2/3 split, `dz`, or either `beta_R_*` — those
+   are inputs to a *root architecture* model that happens to run just before.
+   This resolves a contradiction that had been sitting in this document: **10b
+   lists "the whole root architecture" under "move to the plant side", while 7b
+   above says "do not push it up into plant".** Both are right, and they meet at
+   the resistance interface — the architecture is plant's, the transport solve is
+   ours. It is the same split `leaf_specific_conductance_max` already makes, which
+   10b names as "the model to copy".
+
+   Three things learned doing it:
+
+   * **The map stays in this package, as a free function.** Moving the arithmetic
+     into `tf24_strategy.cpp` would land it beside `root_mass_carbon_scale` and
+     `rooting_depth_max` — already TODO-flagged as magic numbers — and, worse,
+     take it outside the golden file's reach. It is now covered *twice*: through
+     `set_physiology` as before, and by a direct unit test, which is the payoff
+     for it being a free function at all.
+   * **Building a fresh `RootNetwork` per call cost +0.074 µs on
+     `set_physiology`** (0.061 → 0.135 µs, ~+2% of a whole solve): five vector
+     allocations replacing in-place resizes that had been reusing capacity.
+     `std::move` did not help — the allocation, not the copy, was the cost. Fixed
+     by having `MultiLayerRoots` hold the `RootNetwork` and the map fill it in
+     place; the value-returning overload remains for tests and one-off callers.
+     Measured back to 0.056–0.061 µs, and the solve itself unchanged.
+   * **A zero-carbon layer gets `r_R_H_min = 0`** — *zero* horizontal resistance,
+     i.e. infinite soil-to-root conductance where there are no roots. Backwards.
+     Preserved rather than silently changed: it looks unreachable from plant
+     today (`max_soil_layer` truncates at the last non-zero layer, and plant's
+     `Q()` distribution will not give an exact interior zero). Passing resistances
+     from plant forces the question to be answered explicitly, which is a reason
+     to finish the job.
+
+   **The other half is deferred on purpose.** Having *plant* call
+   `root_network_from_carbon` and pass resistances through `set_physiology`
+   changes that signature, and signature changes belong with 10b on
+   `feature/api-cleanup` — which has already reworked `set_physiology` (14 → 10
+   args, `root_carbon_per_leaf_area`). Doing it here as well would give plant two
+   coupled reviews and a guaranteed conflict. When it lands it also takes
+   `beta_R_H`/`beta_R_V` out of `Leaf`'s constructor and makes `soil_depth`
+   droppable, since `dz` and `grav_head_z_` are its only remaining consumers.
 3. **Add `SinglePotential`.** New behaviour and its own tests; golden unaffected
    because it is not the default.
 4. **Check plant.** Build `feature/consume-leaf-package`, confirm the

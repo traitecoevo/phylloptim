@@ -658,7 +658,11 @@ inline void Leaf::set_physiology(double area_leaf, const std::vector<double>& ma
      photo_temp_cached_ = true;
    }
 
-  roots_.set_root_network(mass_root_prop);
+  // Root architecture (carbon -> resistance) is computed here and handed over as
+  // resistances; roots_ itself no longer knows about root carbon. See
+  // root_network_from_carbon. This is the leaf-side half of that split -- moving
+  // the call itself up to plant is an API change and belongs with item 10b.
+  roots_.set_root_network_from_carbon(mass_root_prop);
 
   // Set up vector of root water uptake from layer. Stays on Leaf: plant writes
   // the crown-integrated value back into leaf.soil_consumption_ by name.

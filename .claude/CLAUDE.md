@@ -19,7 +19,9 @@ Family context lives in [`plant-meta`](https://github.com/traitecoevo/plant-meta
 inst/include/leaf.hpp          umbrella header — one include is the whole library
 inst/include/leaf/
   leaf_model.hpp               the Leaf class: the gas-exchange core, everything inline
-  roots.hpp                    MultiLayerRoots: the soil → root-collar water supply
+  roots.hpp                    MultiLayerRoots (the soil → root-collar water supply)
+                               plus root_network_from_carbon, the root architecture
+                               model that feeds it resistances
   vulnerability.hpp            the Weibull cumulative-integral builder, shared by both
   constants.hpp                physical constants as inline constexpr
   closed_form.hpp              fast approximate solver, default off, not wired in
@@ -134,8 +136,10 @@ the failure to the platform the file came from.
 ## Branches
 
 - **`master`** — stays a drop-in replacement for plant's own leaf. Validated: plant's
-  full suite is 2364 pass / 0 fail / 0 error, and an SCM regression is bit-identical
-  across 78/78 nodes.
+  full suite is 0 fail / 0 error, and an SCM regression is bit-identical across
+  78/78 nodes. (The pass *count* is environment-dependent — 2364 when first
+  recorded, 2431 on a 2026-08-03 rerun with `NOT_CRAN` unset, on both arms of a
+  control. Compare against a control run, never against a remembered number.)
 - **`feature/api-cleanup`** — everything that changes results or the API: the renames,
   the shrunken input set, the pressure fix, and an independent shutdown fix that
   **must be reconciled with plant's** (issue #10).
@@ -197,8 +201,12 @@ a coupled review.
    R-side name (taken from the YAML key, not `name_cpp`) does not move:
 
    ```yaml
-   psi_soil_: {type: "std::vector<double>", access: field, name_cpp: "roots_.psi_soil_"}
+   psi_soil_:  {type: "std::vector<double>", access: field, name_cpp: "roots_.psi_soil_"}
+   r_R_H_min:  {type: "std::vector<double>", access: field, name_cpp: "roots_.network_.r_R_H_min"}
    ```
+
+   The path can be nested arbitrarily, as the second line shows — so a member can
+   be moved as deep as the design wants without the R API noticing.
 
    Check `git grep 'access: field' inst/RcppR6_classes.yml` in plant before
    moving anything public, and land the two changes together — plant tracks this
