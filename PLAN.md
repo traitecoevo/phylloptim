@@ -82,7 +82,7 @@ means anything.
 | [#9](https://github.com/traitecoevo/leaf_cpp/issues/9) | 3 | Finish the plant-side integration | validated already; decisions + one unchecked consumer. Now also carries **landing the shutdown fix in plant** (plant #578/#577), which is still open there with no fix written |
 | [#11](https://github.com/traitecoevo/leaf_cpp/issues/11) | 4 | Drop the last R coupling | belongs upstream in odelia |
 | [#12](https://github.com/traitecoevo/leaf_cpp/issues/12) | 15 | `R CMD check` integration, C++ API docs | small |
-| [#13](https://github.com/traitecoevo/leaf_cpp/issues/13) | 1 | The unexplained 1 ULP | low value; does not affect plant |
+| [#13](https://github.com/traitecoevo/leaf_cpp/issues/13) | 1 | The unexplained 1 ULP | **RESOLVED**: R's decimal parser, not the model |
 | [#1](https://github.com/traitecoevo/leaf_cpp/issues/1) | 14 | Decide the package name | publication framing is item 14 below |
 
 ---
@@ -108,27 +108,47 @@ through an adaptive stepper and a discrete node-splitting schedule: a perturbati
 far below tolerance could still flip a refinement decision, and that would be
 visible. It did not.
 
-**A separate, unresolved 1 ULP.** `tests/validate/compare_with_plant.R` compares a
-standalone C++ binary against plant's R-bound leaf over 288 operating points and
-finds 585 of 2592 values differing at 1-2 ULP (worst 2.2e-16). The source is
-arithmetically identical — a normalised body diff over all 44 shared functions
-found only three `size_t` -> `int` loop counters, which cannot change arithmetic,
-plus `transpiration_full_integration` (adaptive Simpson by design, off this path).
+**The 1 ULP is RESOLVED, and it was never in the model — issue #13.**
+`tests/validate/compare_with_plant.R` reported 585 of 2592 values differing at
+1-2 ULP with "cause unknown". The 585 decomposes exactly:
 
-**The cause is not established, and I am not going to pretend otherwise.** Ruled
-out by experiment: the plant version/branch; compiler flags (`-std=c++20` vs
-`gnu++20`, `-g`, `-O0`..`-O3`, `-DNDEBUG`, `-fPIC`, `-ffp-contract` on/off);
-inlining (`-fno-inline`); and the odelia header version (local checkout vs
-installed — these do differ by 97 lines, but only in an adaptive `construct()`
-the leaf never calls). An earlier version of this item blamed translation-unit
-structure; **the SCM result contradicts that**, since that comparison does change TU
-structure and came out bit-identical. So: 1 ULP, cause unknown, confined to the
-standalone harness, and below every solver tolerance. Worth a note, not a blocker.
+| count | cause |
+|---|---|
+| 345 | R's decimal parser reading the golden file |
+| 240 | the shutdown-state NA sentinel (48 rows × 5 flux fields) |
+| **585** | |
 
-For scale on why 1 ULP is safe here: forcing `-ffp-contract=off` on one side alone
-moves the disagreement to **3e-4**, because these nested solvers amplify
-perturbations up to about `GSS_tol_abs` (1e-3). Four orders of magnitude separate
-"rounding" from "bug", which is what makes the result interpretable.
+**R's string-to-double conversion is not correctly rounded.** `as.numeric`,
+`scan` and `read.delim` all share it, and it returns a double one ULP off the
+correctly rounded value for about 18% of inputs — `"26.550866314209998"` parses
+to `0x1.a8d0593240001p+4` where the correct nearest double is `0x1.a8d059324p+4`.
+The golden file is written by C++ at full `%.17g` and read into R; plant's values
+are computed in-process and never touch a string. So the parser perturbed one
+side only, and the script blamed the two implementations for it.
+
+Reading through `tests/validate/tsv_to_hex.c` — parse with the C library's
+`strtod`, re-emit as hex, which R reads exactly — the comparison is now
+**bit-identical across all 2352 finite values, worst relative difference 0.0**.
+`tests/validate/compare_primitives.R` confirms it independently by calling the
+underlying functions directly: 329 values, all bit-identical, from `arrh_curve`
+up through the spline-backed `transpiration` and the two that iterate.
+
+This also explains why every hypothesis was ruled out with nothing left standing:
+plant version, compiler flags, `-ffp-contract`, inlining, odelia header version,
+translation-unit structure — none was ever involved. And it is why the SCM
+regression was bit-identical: that comparison never round-trips through a text
+file parsed by R.
+
+The other 240 are not arithmetic. `set_shutdown_state` assigns
+`root_collar_psi_`, `opt_psi_stem_` and `profit_` and leaves
+ci/assim/transpiration/gc/e_up untouched, so golden carries the NA sentinel where
+plant carries a number. That is the shutdown-state leak (item 2, plant #578), and
+48 × 5 is exactly the blast radius recorded for that fix. They are now reported
+in their own column instead of being counted as mismatches.
+
+**Expect zero from now on.** A finite difference is real: the nested solvers
+amplify perturbations up to about `GSS_tol_abs` (1e-3), so genuine arithmetic
+differences arrive around 1e-4, four orders of magnitude above rounding.
 
 **A second, larger instance of the same effect: the golden file is not portable,
 and the amplification is what makes it interesting.** CI's first run to reach
@@ -223,8 +243,9 @@ reached the compile line.
   fell back to the site-library plant (a different branch). `find.package("plant")`
   at the top of every script is cheap insurance.
 
-- Optionally, track down the 1 ULP. Low value: it does not affect plant, and the
-  remaining suspects are narrow.
+- ~~Optionally, track down the 1 ULP~~ **DONE (#13), and the answer was that there
+  was nothing to track down in the model: it was R's decimal parser reading the
+  golden file. See the resolution above.**
 
 ### Original text, kept for the record
 
