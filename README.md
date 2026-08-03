@@ -141,12 +141,12 @@ Deliberately few, and all header-only:
 | **odelia** | cubic-spline interpolator for the pre-integrated vulnerability curves, and the vendored **XAD** automatic-differentiation library | `LinkingTo` |
 | **BH** (Boost) | TOMS748 root finder, incomplete gamma for the closed-form vulnerability integral | `LinkingTo` |
 
-Nothing else. In particular the leaf model itself no longer touches **Rcpp** or
-the R C API: `leaf/util.hpp` replaced plant's `util::stop` with a plain
-`std::runtime_error` and `NA_REAL` with a quiet NaN. The one remaining R
-touchpoint is inside odelia's `ode_util.hpp`; the test suite substitutes a
-15-line shim for it, which both proves the point and documents exactly what
-would need to change upstream to remove it. See PLAN.md.
+Nothing else, and **neither dependency needs R**. The leaf model itself does not
+touch **Rcpp** or the R C API: `leaf/util.hpp` replaced plant's `util::stop`
+with a plain `std::runtime_error` and `NA_REAL` with a quiet NaN. odelia's
+solver core was the last R touchpoint in the include graph, via `ode_util.hpp`;
+that was removed upstream in traitecoevo/odelia#44, so the test suite now builds
+against the real headers with nothing standing in for R at all.
 
 Both dependencies are already required by plant, so plant pays nothing new for
 depending on this package.

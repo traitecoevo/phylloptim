@@ -1,4 +1,5 @@
-# Build and run the leaf test suite as plain C++ -- no R, no linking.
+# Build and run the leaf test suite as plain C++ -- no R, no linking, and since
+# odelia #44 nothing standing in for R either.
 #
 #   make          build and run
 #   make build    build only
@@ -18,7 +19,6 @@ OPT      ?= -O2
 WARN     ?= -Wall -Wextra -Wno-unused-parameter
 
 LEAF_INC   ?= ../../inst/include
-SHIM_INC   ?= shim
 BH_INC     ?= $(shell Rscript -e 'cat(system.file("include", package="BH"))' 2>/dev/null)
 ODELIA_INC ?= $(shell Rscript -e 'cat(system.file("include", package="odelia"))' 2>/dev/null)
 
@@ -42,7 +42,7 @@ endif
 # The compiler already searches /usr/include, so dropping the flag costs nothing.
 DEP_INC  = $(ODELIA_INC) $(BH_INC)
 SYS_INC  = $(foreach d,$(filter-out /usr/include /usr/include/,$(strip $(DEP_INC))),-isystem $(d))
-INCLUDES = -I$(LEAF_INC) -isystem $(SHIM_INC) $(SYS_INC)
+INCLUDES = -I$(LEAF_INC) $(SYS_INC)
 
 .PHONY: all build clean golden bench
 HEADERS = $(wildcard $(LEAF_INC)/leaf/*.hpp) $(LEAF_INC)/leaf.hpp
