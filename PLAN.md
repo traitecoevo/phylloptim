@@ -32,7 +32,7 @@ where 10a, 10b, 10c and the shutdown fix sit.
 
 | issue | item | what | note |
 |---|---|---|---|
-| [#2](https://github.com/traitecoevo/leaf_cpp/issues/2) | 7b | Extract the soil/root supply path behind an interface | **do first** — #3, the multi-layer λ, and `kmax(h)` all sit on top. Design settled: **no template needed**, use `std::variant`; measured, see 7b. **Stage 1 MERGED** (#17, 2026-08-03, squashed as `10115e1`): `leaf/roots.hpp`, golden bit-identical, 1.7% slower, and the supply path now takes resistances rather than root carbon. plant's matching YAML sits on `feature/consume-leaf-package` (`3efe9c47`, `bbd47a36`) — that is the only plant branch consuming this package, so nothing is left broken. **Stages 2–3 remain** |
+| [#2](https://github.com/traitecoevo/leaf_cpp/issues/2) | 7b | Extract the soil/root supply path behind an interface | **do first** — #3, the multi-layer λ, and `kmax(h)` all sit on top. Design **partly** settled: **no template needed** (measured, see 7b). The runtime mechanism is reopened — `std::variant` was the *slowest* of the three measured and was chosen for copyability, not speed; the table is also stale post-stage-1. Re-measure, see 7b-iii stage 2. **Stage 1 MERGED** (#17, 2026-08-03, squashed as `10115e1`): `leaf/roots.hpp`, golden bit-identical, 1.7% slower, and the supply path now takes resistances rather than root carbon. plant's matching YAML sits on `feature/consume-leaf-package` (`3efe9c47`, `bbd47a36`) — that is the only plant branch consuming this package, so nothing is left broken. **Stages 2–3 remain** |
 | [#3](https://github.com/traitecoevo/leaf_cpp/issues/3) | 7a | Make λ(state) pluggable | needs #2 |
 | [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11 | Template `Leaf` on its scalar type | deletes the hand-maintained AD replicas |
 | [#5](https://github.com/traitecoevo/leaf_cpp/issues/5) | 6 | R interface (RcppR6) | absorbs the `Control` struct and the dropped-field cleanup |
@@ -563,6 +563,13 @@ constructor (+1.1%, but boilerplate and a heap allocation per `Leaf` copy).
 fair price for value semantics, and it is dwarfed by the 6.3×/27× the
 closed-form path already offers (item 9).
 
+⚠️ **Read that preference with 7b-iii stage 2, which reopens it.** Two things
+this table does not say: `std::variant` is the *slowest* of the three options
+here, and the numbers were taken against the pre-stage-1 structure, which no
+longer exists. Two further options (enum tag + `switch`, and holding both) were
+never measured at all. The *conclusion* that survives is the constraint —
+`Leaf` must stay copyable — not the ranking.
+
 ⚠️ **This result does not transfer to item 7a.** It is specific to the supply
 path. The *cost* core is the opposite case: `profit_psi_stem_TF`,
 `hydraulic_cost_TF`, `assim_colimited` and `transpiration_to_psi_stem` have **no
@@ -746,10 +753,17 @@ of doing it in stages.
    failure naming a field accessor nobody had touched. Written up under "Build &
    regeneration workflow" in plant's `agents.md`, with the `nm` check that
    identifies it.
-2. **Introduce the concept.** `std::variant<MultiLayerRoots, SinglePotential>` and
-   the four methods (`begin_solve`, `uptake`, `duptake_dpsi`, plus per-layer
-   output access). Golden still bit-identical. Re-run `make bench` — the
-   measurement predicts +2.6%, so a larger regression means something else moved.
+2. **Introduce the concept.** The four methods (`begin_solve`, `uptake`,
+   `duptake_dpsi`, plus per-layer output access) behind a swappable
+   implementation. Golden still bit-identical.
+
+   ⚠️ **Do stage 3 first.** As written this stage names
+   `std::variant<MultiLayerRoots, SinglePotential>`, and stage 3 is what creates
+   `SinglePotential` — you cannot name a type that does not exist. Either build a
+   stub here or, better, swap the two: `SinglePotential` is small (one ψ_soil,
+   infinite or constant conductance) and a variant over two *real* alternatives is
+   the thing worth measuring. The numbering is left alone because commits and
+   `leaf_model.hpp` already cite "stage 4" by number.
 
    **The supply path now takes resistances, not root carbon — done ahead of this
    stage, because the concept depends on it.** `MultiLayerRoots::set_root_network`
@@ -798,13 +812,65 @@ of doing it in stages.
    coupled reviews and a guaranteed conflict. When it lands it also takes
    `beta_R_H`/`beta_R_V` out of `Leaf`'s constructor and makes `soil_depth`
    droppable, since `dz` and `grav_head_z_` are its only remaining consumers.
+   **Which dispatch mechanism — and no, `std::variant` is not the fastest.** It
+   was the *slowest* of the three runtime options measured in #14. The full set,
+   with the constraint that decides it:
+
+   | option | measured | copyable? | why it is / is not the answer |
+   |---|---|---|---|
+   | template `Leaf<Supply>` | fastest possible | yes | **rejected**: breaks the `plant::Leaf` alias and ~12,000 lines of generated RcppR6. Measured benefit is zero anyway — the supply path is not inlined |
+   | `std::function` | **+0.6%** | yes | fastest runtime option measured, but a poor structural fit: this is a *stateful, four-method* interface, not one callback. Three `std::function`s sharing state is worse than what it replaces |
+   | virtual base | +1.1% | only with a cloning copy ctor | clone boilerplate plus a heap allocation per `Leaf` copy |
+   | `std::variant` + `std::visit` | +2.6% | yes, natively | **current preference** — value semantics, no heap, no boilerplate |
+   | enum tag + `switch` | **not measured** | yes | hand-rolled variant. With only *two* alternatives a predictable branch may beat `std::visit`'s jump table. Worth measuring before defaulting to variant |
+   | hold both, select on a `bool` | **not measured** | yes | wasteful in space, near-free in time. Ugly, but the honest baseline for "how cheap could dispatch possibly be" |
+
+   **The binding constraint is copyability, not speed.** plant's
+   `make_strategy_ptr(TF24_Strategy s)` takes the strategy **by value** and
+   `TF24_Strategy` holds a `Leaf` member, so a `std::unique_ptr<SupplyPath>`
+   member breaks plant's build outright. Everything above except the virtual base
+   satisfies that for free.
+
+   **And the whole table is stale.** It was measured against the *pre-stage-1*
+   structure, where the supply call was a direct member call taking two arguments.
+   It now goes through `roots_.` into a six-argument out-of-line `uptake_impl`.
+   Whether +2.6% stacks on stage 1's +1.7% or partly absorbs into it is an open
+   question — **re-measure the shortlist against the current code before
+   choosing**, using the interleaved method (hazard note under "Build and test";
+   a sequential A/B got the sign wrong once already).
+
+   **Two interface details this stage has to settle.**
+
+   * **"Per-layer output access" is doing real work in that sentence.**
+     `MultiLayerRoots` writes `soil_consumption_[i]` for every rooted layer;
+     `SinglePotential` has one layer or none. plant reads that buffer *by index*
+     and integrates it into the patch water balance, so the concept must express
+     how many entries an implementation writes — it is not a detail that can be
+     left to each implementation.
+   * **Retiring the pointer-identity test is an API change.** Four `Leaf`
+     functions still thread a `psi_soil` vector down to `uptake_at`: `E_column`,
+     `E_column_zero`, `find_root_psi`, `find_psi_stem_from_psi_root`. Stopping
+     that — so the supply object owns the current soil state and callers just say
+     `uptake()` — is what finally kills the address-identity cache test. But
+     `find_root_psi`, `find_psi_stem_from_psi_root` and
+     `E_from_Soil_to_Root_Collar` are all RcppR6-exposed *with* that argument, so
+     it changes three R-facing signatures. Results do not move, but the R API
+     does. Decide deliberately which branch that belongs on rather than
+     discovering it mid-refactor; see the branch rule in the developer guide.
+
 3. **Add `SinglePotential`.** New behaviour and its own tests; golden unaffected
-   because it is not the default.
+   because it is not the default. **In practice this comes before stage 2** — see
+   the ordering warning there.
 4. **Check plant.** Build `feature/consume-leaf-package`, confirm the
    `plant::Leaf` alias and the RcppR6 bindings still resolve and that
    `soil_consumption_` is still reachable where `compute_rates` expects it.
+   **Done for stage 1** (see the stage-4 note above); repeat it for each later
+   stage that moves a plant-visible name, since `master` is no longer a
+   source-level drop-in.
 
-Stage 1 is the only one that should be able to break anything.
+Stage 1 was the only one that should have been able to break anything, and that
+turned out to be wrong twice over: it broke plant's *generated* glue (trap 5), and
+stage 2 will change three R-facing signatures if the `psi_soil` threading goes.
 
 ## 8. Report λ and g1_eff as first-class outputs
 
