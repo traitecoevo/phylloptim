@@ -390,6 +390,45 @@ void test_analytic_gradient_matches_finite_difference() {
 // lambda = dA/dE is the first-order condition every model in this family shares,
 // so checking the analytic lambda against a finite-difference dA/dE is a check on
 // the whole optimisation, not just on one formula.
+// dprofit_droot_collar_psi reads the supply path's signed soil potentials, which
+// used to be seated only by a solve -- so calling it on a leaf that had had
+// set_physiology but not find_root_collar_psi read an empty vector. It now seats
+// them itself. Ported from plant develop (#585).
+void test_gradient_needs_no_prior_solve() {
+  printf("dprofit/dpsi_collar does not require a prior solve\n");
+  Drivers d;
+  leaf::Leaf solved = make_leaf(d, {2.0}, {1.0});
+  solved.find_root_collar_psi();
+  leaf::Leaf unsolved = make_leaf(d, {2.0}, {1.0});
+  // Bit-identical, not merely close: seating the potentials from psi_soil_ is
+  // exactly what a solve does, so this is idempotent and moves no arithmetic.
+  ok(unsolved.dprofit_droot_collar_psi(2.5) == solved.dprofit_droot_collar_psi(2.5),
+     "the gradient is the same with and without a prior solve");
+}
+
+// The reversed-gradient state: the collar is asked about a potential drier than
+// the stem it would have to supply, so there is no flow and no informative
+// gradient. psi_stem_to_ci does not return non-finite there -- it either throws
+// (gc goes negative, the residual stops crossing zero, and the bracketing solver
+// gives up) or returns a number built on a negative conductance. Both were
+// reachable from TF24f's acclimation gradient on a dry patch.
+void test_gradient_is_zero_in_reversed_gradient_state() {
+  printf("dprofit/dpsi_collar returns zero when the gradient reverses\n");
+  Drivers d;
+  // Drier than psi_crit at every layer, so the leaf is shut down and every collar
+  // potential below the wettest layer implies psi_stem < psi_upstream.
+  leaf::Leaf l = make_leaf(d, {5.9, 6.15, 6.4, 6.65, 6.9}, {1.0, 2.0, 3.0, 4.0, 5.0});
+  l.find_root_collar_psi();
+  for (double target : {1.0, 3.0, 5.5, 5.9}) {
+    const double psi_stem = l.find_psi_stem_from_psi_root(
+        -target, l.roots_.psi_soil_inverted_);
+    ok(target >= psi_stem,
+       "the target is in the reversed-gradient state at " + std::to_string(target));
+    ok(l.dprofit_droot_collar_psi(target) == 0.0,
+       "the gradient is exactly zero at " + std::to_string(target));
+  }
+}
+
 void test_lambda_equals_dA_dE_single_layer() {
   printf("marginal cost of water: analytic lambda vs dA/dE (stem free)\n");
   Drivers d;
@@ -881,6 +920,8 @@ int main() {
   test_shallow_roots_do_not_inherit_deep_uptake();
   test_negative_assim_exit_writes_its_own_rates();
   test_analytic_gradient_matches_finite_difference();
+  test_gradient_needs_no_prior_solve();
+  test_gradient_is_zero_in_reversed_gradient_state();
   test_lambda_equals_dA_dE_single_layer();
   test_multilayer_lambda_identity();
   test_g1_eff();
