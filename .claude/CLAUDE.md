@@ -8,6 +8,8 @@ Read alongside:
 
 - **[README.md](../README.md)** — what it is and how to use it
 - **[PLAN.md](../PLAN.md)** — status table, then the reasoning behind every open issue
+- **[notes/r-interface-seed.md](../notes/r-interface-seed.md)** — handoff brief for the
+  next step (#5, the R interface): where the repo is, what is decided, what bites
 - **[COMPARISON.md](../COMPARISON.md)** — how this differs from `plantecophys`, `tealeaves`, `bigleaf`
 - **[issues](https://github.com/traitecoevo/leaf_cpp/issues)** — the work queue; PLAN.md is the *why* behind each
 
@@ -166,32 +168,26 @@ the failure to the platform the file came from.
 
 ## Branches
 
-- **`master`** — **behaviourally** a drop-in for plant's own leaf, but no longer a
-  *source-level* one. Validated: plant's full suite is 0 fail / 0 error, and an SCM
-  regression is bit-identical across 78/78 nodes. (The pass *count* is
-  environment-dependent — 2364 when first recorded, 2431 on a 2026-08-03 rerun with
-  `NOT_CRAN` unset, on both arms of a control. Compare against a control run, never
-  against a remembered number.)
-- **`feature/api-cleanup`** — everything that changes results or the API: the renames,
-  the shrunken input set, the pressure fix, and the shutdown fix. **Rebased onto
-  `master` on 2026-08-03** (seven commits, onto `91c2500`). Its golden file came
-  through the rebase byte-identical, which is the check that master's supply-path
-  refactor did not perturb the branch's arithmetic.
+**Single-branch now.** `feature/api-cleanup` merged as #15 on 2026-08-03, and with
+it the two-branch rule this section used to state ("results changes live on the
+branch, `master` stays a drop-in"). Both halves of that rule are spent: `master` is
+no longer a source-level drop-in for plant's leaf, and there is no longer a branch
+to quarantine results changes onto.
 
-Keep them separate.
+- **`master`** — everything. **Behaviourally** still validated against plant's own
+  leaf as of the pre-#15 state: full suite 0 fail / 0 error, SCM regression
+  bit-identical across 78/78 nodes. (The pass *count* is environment-dependent —
+  2364 when first recorded, 2431 on a rerun with `NOT_CRAN` unset, on both arms of a
+  control. Compare against a control run, never against a remembered number.)
+  ⚠️ **#15 deliberately changed results**, so that validation now needs redoing
+  against plant — see hazard 7 and PLAN item 9.
 
-⚠️ **This section used to say "`master` being a drop-in is what lets plant adopt
-this without a coupled review". That stopped being true when issue #2 stage 1
-merged (2026-08-03).** Moving the supply path into `MultiLayerRoots` relocated
-eleven fields that plant binds by name, so adopting `master` now requires a
-matching YAML change in plant — see hazard 7. The behaviour is still identical to
-the byte; it is the *source* coupling that changed. The matching plant commits are
-`3efe9c47` and `bbd47a36` on `feature/consume-leaf-package`, which is the only
-plant branch that consumes this package.
-
-The rule that replaces it: **`master` may change where things live, but not what
-they compute.** Results changes still belong on `feature/api-cleanup`. Anything on
-`master` that moves a plant-visible name lands together with plant's YAML.
+What replaces the old rule: **a change that moves results lands on `master` through
+a PR that states its measured blast radius against the golden file.** #15 is the
+worked example — 240 cells from the shutdown fix, 355 at ≤1.2e-13 from
+reassociation, split by cause because the two classes are four orders apart. A PR
+that regenerates the golden file without saying what moved and why is the thing to
+refuse.
 
 ## Hazards, each of which has cost someone real numbers
 
