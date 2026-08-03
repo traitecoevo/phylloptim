@@ -92,6 +92,22 @@ function escape(s) {
   return s
 }
 
+# A `::` that STARTS a line is a wrapped qualified name -- `MultiLayerRoots` at
+# the end of one line and `::set_root_network` at the start of the next -- and
+# Doxygen reads it as an explicit link request to a global entity, which cannot
+# resolve. Escape only that case: `Leaf::optimise_psi_stem_TF` written inline
+# still auto-links, which is worth keeping. Doxygen 1.9 on ubuntu errors on this
+# where 1.17 does not, so it only ever showed up in CI.
+#
+# Written out longhand rather than with a backreference: `\1` in sub() is a GNU
+# awk extension and CI runs mawk.
+function escape_leading_scope(s,   i) {
+  i = 1
+  while (i <= length(s) && (substr(s, i, 1) == " " || substr(s, i, 1) == "\t")) i++
+  if (substr(s, i, 2) == "::") return substr(s, 1, i - 1) "\\::" substr(s, i + 2)
+  return s
+}
+
 function put(text) {
   if (length(text)) print prefix " " text
   else print prefix
@@ -137,7 +153,7 @@ function emit(text) {
   }
   close_verbatim()
   emit_blanks()
-  put(escape(text))
+  put(escape_leading_scope(escape(text)))
   emitted_any = 1
 }
 
