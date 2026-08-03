@@ -1211,8 +1211,7 @@ extraction.
 - **`g1_TF24` → `cost_scale_TF24`.** It is not a g1 and invites confusion with
   Medlyn's g1 — doubly so once item 8 starts reporting an actual `g1_eff`.
 - **Signed-versus-magnitude water potentials are now in the type — DONE (#8).**
-  `leaf/potential.hpp` defines `Potential` (signed, ≤ 0) and `Suction` (positive
-  magnitude), and the soil → root-collar supply path is threaded with them.
+  `leaf/potential.hpp` defines `Psi` and `AbsPsi`, and the soil → root-collar supply path is threaded with them.
   Bit-identical: 288/288 golden points, 158 checks, and the `bench_solve` binaries
   built before and after the change are **byte-identical**, so the types cost
   literally nothing.
@@ -1251,7 +1250,7 @@ extraction.
   Closing it needs a conductance type on the supply contract's derivative method —
   worth doing with #3, which is where that contract is next opened.
 
-  Templated on the scalar (`PotentialT<T>`) so **#4 does not have to undo it**.
+  Templated on the scalar (`PsiT<T>`) so **#4 does not have to undo it**.
 - **`R` and `n` are already gone** from the public namespace (see item 1). Worth
   recording *why* it mattered: the analytical project's
   `tf24_closed_form_bench.cpp` declares locals `const double n = l.c*l.beta2 - 1.0`

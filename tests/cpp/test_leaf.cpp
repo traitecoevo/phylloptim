@@ -594,53 +594,53 @@ struct comparable<A, B,
 
 void test_potential_types() {
   printf("water potential: the sign convention in the type\n");
-  using leaf::Potential;
-  using leaf::Suction;
+  using leaf::Psi;
+  using leaf::AbsPsi;
 
   // The round trip is the negation, and it is exact.
-  const Suction s{5.870283};
-  near(s.signed_potential().value, -5.870283, 0.0, "suction -> signed potential");
-  near(s.signed_potential().magnitude().value, s.value, 0.0,
+  const AbsPsi s{5.870283};
+  near(s.as_psi().value, -5.870283, 0.0, "suction -> signed potential");
+  near(s.as_psi().abs().value, s.value, 0.0,
        "round trip is exact");
-  const Potential p{-2.5};
-  near(p.magnitude().value, 2.5, 0.0, "signed potential -> magnitude");
+  const Psi p{-2.5};
+  near(p.abs().value, 2.5, 0.0, "signed potential -> magnitude");
 
   // A difference of two potentials is a plain scalar in MPa: it is a gradient, and
   // has no convention to get wrong. This is what keeps uptake_impl's physics plain.
-  near(Potential{-1.5} - Potential{-2.5}, 1.0, 0.0,
+  near(Psi{-1.5} - Psi{-2.5}, 1.0, 0.0,
        "difference of two potentials is a bare scalar");
-  near(midpoint(Suction{1.0}, Suction{2.0}).value, 1.5, 0.0, "midpoint");
+  near(midpoint(AbsPsi{1.0}, AbsPsi{2.0}).value, 1.5, 0.0, "midpoint");
 
   // Same-convention comparison works, so std::min/std::max do too.
-  ok(Potential{-1.0} > Potential{-2.0}, "wetter potential compares greater");
-  ok(std::min(Potential{-1.0}, Potential{-2.0}) == Potential{-2.0}, "std::min");
-  ok(std::max(Suction{1.0}, Suction{2.0}) == Suction{2.0}, "std::max");
-  static_assert(comparable<Potential, Potential>::value, "");
-  static_assert(comparable<Suction, Suction>::value, "");
+  ok(Psi{-1.0} > Psi{-2.0}, "wetter potential compares greater");
+  ok(std::min(Psi{-1.0}, Psi{-2.0}) == Psi{-2.0}, "std::min");
+  ok(std::max(AbsPsi{1.0}, AbsPsi{2.0}) == AbsPsi{2.0}, "std::max");
+  static_assert(comparable<Psi, Psi>::value, "");
+  static_assert(comparable<AbsPsi, AbsPsi>::value, "");
 
   // THE POINT. plant #584 is `std::max(-root_crit, -root_psi_crit)`, which compares
   // a magnitude against a signed potential and so can never bind. In these types
   // that comparison does not exist, and neither does an implicit double conversion
   // that would smuggle it back in.
-  static_assert(!comparable<Potential, Suction>::value,
+  static_assert(!comparable<Psi, AbsPsi>::value,
                 "mixing the two conventions must not compile -- that is plant #584");
-  static_assert(!comparable<Suction, Potential>::value, "");
-  static_assert(!comparable<Potential, double>::value,
+  static_assert(!comparable<AbsPsi, Psi>::value, "");
+  static_assert(!comparable<Psi, double>::value,
                 "a bare double must not compare against a potential");
-  static_assert(!std::is_convertible_v<double, Potential>,
+  static_assert(!std::is_convertible_v<double, Psi>,
                 "construction must stay explicit");
-  static_assert(!std::is_convertible_v<Potential, double>,
+  static_assert(!std::is_convertible_v<Psi, double>,
                 "and must not decay back to a bare double");
-  static_assert(!std::is_convertible_v<Potential, Suction>,
+  static_assert(!std::is_convertible_v<Psi, AbsPsi>,
                 "the two conventions must not interconvert implicitly");
   ok(true, "the two conventions do not mix, and neither converts implicitly");
 
   // Zero cost: one scalar, trivially copyable, so it is passed in a register on the
   // ~10^3-evaluations-per-solve supply path exactly as the bare double was.
-  static_assert(sizeof(Potential) == sizeof(double), "");
-  static_assert(std::is_trivially_copyable_v<Potential>, "");
-  static_assert(std::is_trivially_copyable_v<Suction>, "");
-  ok(sizeof(Potential) == sizeof(double) && sizeof(Suction) == sizeof(double),
+  static_assert(sizeof(Psi) == sizeof(double), "");
+  static_assert(std::is_trivially_copyable_v<Psi>, "");
+  static_assert(std::is_trivially_copyable_v<AbsPsi>, "");
+  ok(sizeof(Psi) == sizeof(double) && sizeof(AbsPsi) == sizeof(double),
      "each is exactly one double wide");
 }
 
@@ -662,16 +662,16 @@ void test_potential_types() {
 void test_potential_types_over_ad() {
   printf("water potential: the types over an AD scalar (#4)\n");
   using AD = xad::fwd<double>::active_type;
-  using PotentialAD = leaf::PotentialT<AD>;
-  using SuctionAD = leaf::SuctionT<AD>;
+  using PsiAD = leaf::PsiT<AD>;
+  using AbsPsiAD = leaf::AbsPsiT<AD>;
 
-  ok(xad::value(PotentialAD{}.value) == 0.0, "PotentialT<AD> default-constructs");
+  ok(xad::value(PsiAD{}.value) == 0.0, "PsiT<AD> default-constructs");
 
   // The round trip is the identity, so d/ds must be exactly 1 -- one negation out
   // and one back.
   AD s = 3.5;
   xad::derivative(s) = 1.0;
-  const SuctionAD round_tripped = SuctionAD{s}.signed_potential().magnitude();
+  const AbsPsiAD round_tripped = AbsPsiAD{s}.as_psi().abs();
   near(xad::value(round_tripped.value), 3.5, 0.0, "AD round trip value");
   near(xad::derivative(round_tripped.value), 1.0, 0.0, "AD round trip derivative is 1");
 
@@ -679,21 +679,21 @@ void test_potential_types_over_ad() {
   // supply path depends on.
   AD s2 = 2.0;
   xad::derivative(s2) = 1.0;
-  near(xad::derivative(SuctionAD{s2}.signed_potential().value), -1.0, 0.0,
+  near(xad::derivative(AbsPsiAD{s2}.as_psi().value), -1.0, 0.0,
        "signed_potential() derivative is -1");
 
   // Expression-template collapse, and the gradient uptake_impl actually forms:
   // d(psi_soil - P_collar)/dP_collar = -1.
   AD collar = -2.5;
   xad::derivative(collar) = 1.0;
-  const AD gradient = PotentialAD{AD{-1.5}} - PotentialAD{collar};
-  near(xad::value(gradient), 1.0, 0.0, "Potential - Potential over AD");
+  const AD gradient = PsiAD{AD{-1.5}} - PsiAD{collar};
+  near(xad::value(gradient), 1.0, 0.0, "Psi - Psi over AD");
   near(xad::derivative(gradient), -1.0, 0.0,
-       "Potential - Potential derivative wrt collar is -1");
+       "Psi - Psi derivative wrt collar is -1");
 
   // Comparison and std::min/std::max, which P_src_min / P_src_max need.
-  ok(PotentialAD{AD{-1.0}} > PotentialAD{AD{-2.0}}, "AD potentials compare");
-  ok(xad::value(std::min(PotentialAD{AD{-1.0}}, PotentialAD{AD{-2.0}}).value) == -2.0,
+  ok(PsiAD{AD{-1.0}} > PsiAD{AD{-2.0}}, "AD potentials compare");
+  ok(xad::value(std::min(PsiAD{AD{-1.0}}, PsiAD{AD{-2.0}}).value) == -2.0,
      "std::min over AD potentials");
 
   // The realistic case: the root Weibull reached through the signed convention and
@@ -702,7 +702,7 @@ void test_potential_types_over_ad() {
   const double b = 3.898245, c = 2.680147, psi0 = 2.0;
   AD psi = psi0;
   xad::derivative(psi) = 1.0;
-  const SuctionAD via_signed = SuctionAD{psi}.signed_potential().magnitude();
+  const AbsPsiAD via_signed = AbsPsiAD{psi}.as_psi().abs();
   const AD f = exp(-pow(via_signed.value / b, c));
   const double analytic =
       -std::exp(-std::pow(psi0 / b, c)) * (c / b) * std::pow(psi0 / b, c - 1.0);
@@ -718,7 +718,7 @@ void test_single_potential() {
   sp.resistance_ = 1.0e3;
 
   // begin_solve flips to the signed convention and reports the only potential.
-  // Collar potentials are leaf::Potential since issue #8, so the test has to name
+  // Collar potentials are leaf::Psi since issue #8, so the test has to name
   // the convention too -- `sp.uptake(-2.5, ...)` no longer compiles.
   near(sp.begin_solve().value, -1.5, 1e-14, "begin_solve returns the signed potential");
   ok(sp.n_layers() == 1, "single potential writes exactly one layer");
@@ -727,7 +727,7 @@ void test_single_potential() {
   // water UP (positive uptake).
   std::vector<double> consumption(1, 0.0);
   double E_up = 0.0;
-  sp.uptake(leaf::Potential{-2.5}, consumption, E_up);
+  sp.uptake(leaf::Psi{-2.5}, consumption, E_up);
   ok(E_up > 0.0, "a collar drier than the soil draws water up");
   near(E_up, (-1.5 - -2.5) / sp.resistance_ * leaf::kg_per_mol_h2o,
        1e-14, "uptake is the Ohm's-law flux");
@@ -735,7 +735,7 @@ void test_single_potential() {
 
   // A collar WETTER than the soil pushes water back into it. Losing this sign is
   // how hydraulic redistribution silently becomes extra uptake.
-  sp.uptake(leaf::Potential{-0.5}, consumption, E_up);
+  sp.uptake(leaf::Psi{-0.5}, consumption, E_up);
   ok(E_up < 0.0, "a collar wetter than the soil loses water to it");
 
   // The analytic derivative must match a central difference on uptake, and stay
@@ -743,8 +743,8 @@ void test_single_potential() {
   // never asks the caller for a finite-difference fallback.
   const double h = 1e-6, p0 = -2.5;
   double up = 0.0, dn = 0.0;
-  sp.uptake(leaf::Potential{p0 + h}, consumption, up);
-  sp.uptake(leaf::Potential{p0 - h}, consumption, dn);
+  sp.uptake(leaf::Psi{p0 + h}, consumption, up);
+  sp.uptake(leaf::Psi{p0 - h}, consumption, dn);
   const double fd = (up - dn) / (2.0 * h);
   near(sp.duptake_dpsi(), fd, 1e-8, "analytic duptake_dpsi matches FD");
   ok(sp.duptake_dpsi() < 0.0,
@@ -756,7 +756,7 @@ void test_single_potential() {
   bad.begin_solve();
   bool threw = false;
   try {
-    bad.uptake(leaf::Potential{-2.0}, consumption, E_up);
+    bad.uptake(leaf::Psi{-2.0}, consumption, E_up);
   } catch (const std::exception &) {
     threw = true;
   }

@@ -4,22 +4,57 @@
 
 namespace leaf {
 
-// Water potential in two conventions, one type each, so the compiler keeps them
-// apart instead of a comment block (issue #8).
+// Water potential in two representations, one type each, so the compiler keeps
+// them apart instead of a comment block (issue #8).
 //
-// This model carries water potential in two conventions, each natural to its
-// domain, and until now the only thing keeping them apart was a comment block
-// plus the `_inverted` suffix:
+// WHY THERE ARE TWO OF THESE AT ALL. There is ONE physical quantity, psi, negative
+// in a transpiring plant. But this model evaluates two functions of it whose
+// domains are incompatible:
 //
-//   Potential -- SIGNED, <= 0, MPa. The soil -> root-collar transport works in
-//                real signed gradients (psi_soil - P_collar - gravity*z), so
-//                this is the convention the supply physics wants.
-//   Suction   -- a POSITIVE MAGNITUDE, -MPa. The stem/leaf demand side, the
-//                vulnerability splines and every published trait value
-//                (psi_crit, root_psi_crit) are quoted this way.
+//   TRANSPORT is linear in psi and needs the sign.
+//       E_i = (psi_soil_i - P_collar - rho*g*z_i) / r_i
+//     The sign is physical: E_i < 0 means layer i GAINS water (hydraulic
+//     redistribution). Rewritten in magnitudes you would have to remember to
+//     reverse the subtraction while the gravity term does not reverse.
 //
-// The two differ by a minus sign, which is exactly why mixing them is invisible:
-// every wrong answer is the right magnitude. Three incidents so far, all real:
+//   VULNERABILITY is a power law and CANNOT take the sign.
+//       f(psi) = exp(-(psi/b)^c),   b = 3.898245, c = 2.680147
+//     c is not an integer, and x^c for real non-integer c is undefined for x < 0.
+//     At psi = -2.0:  exp(-(2.0/b)^c) = 0.846046, exp(-(-0.513)^c) = nan.
+//
+// The solve computes the COMPOSITION of the two -- transport supplies the potential
+// at which vulnerability is evaluated -- so a conversion is mathematically forced.
+// No naming and no refactor removes it. These types only make each crossing
+// explicit, and stop the two being confused.
+//
+// HENCE THE NAMES, and why they are deliberately asymmetric. These are not two
+// conventions of equal standing: `Psi` is the quantity, `AbsPsi` is |psi|. The
+// second is derived from the first by nothing more interesting than an absolute
+// value, and the name should say so. An earlier draft called them `Potential` and
+// `Suction` -- both real terms, but the pairing let one member claim the physics,
+// and it misled its own author into writing "psi_leaf is not a potential", which is
+// false. If you rename these, keep the property that the second name reads as a
+// function of the first.
+//
+// NEVER STORE AN AbsPsi, AND NEVER PUT ONE IN A SIGNATURE. It is a transient at the
+// point of a `pow` or a spline lookup, nothing more. Everything the model holds or
+// passes is a `Psi`. E_column used to take its psi_leaf as a magnitude, because
+// that is the form transpiration() wants; that was accurate and wrong-headed, since
+// it put both representations in one argument list and invited the reading that
+// psi_leaf is a different kind of quantity from psi_soil.
+//
+// LONGER TERM, THE SECOND TYPE SHOULD NOT EXIST. The reason it does is not psi vs
+// |psi| -- it is that this model stores psi negative and the Weibull scale b
+// POSITIVE, a mixed convention inside a single formula. Store b in the same
+// convention and the problem evaporates: (-2.0)/(-3.898) = +0.513, positive by
+// construction and exactly equal bitwise to the ratio of the magnitudes. Then there
+// is one type, no conversion, and plant #584 is unwriteable not because the mixed
+// comparison fails to compile but because there is no second representation to mix
+// in. What remains after that is the spline knot grids (built increasing over
+// magnitudes) and the R boundary. See PLAN 10a for the sequencing.
+//
+// The two differ by a minus sign, which is why mixing them is invisible: every
+// wrong answer has the right magnitude. Three incidents so far, all real:
 //
 //   * plant #584 (and it is LIVE in this package, see prepare_collar_solve):
 //     `std::max(-root_crit, -root_psi_crit)` compares a magnitude against a
@@ -28,22 +63,28 @@ namespace leaf {
 //     bracket runs to 5.906974, past root_psi_crit = 5.870283.
 //   * the multi-layer lambda came out NEGATIVE while PLAN 8 was being written,
 //     because dE_from_soil_dpsi_collar differentiates with respect to the signed
-//     potential and the identity wanted a positive conductance.
-//   * psi_soil_ / psi_soil_inverted_ have to be kept straight by suffix alone.
+//     form and the identity wanted a positive conductance.
+//   * psi_soil_ / psi_soil_inverted_ had to be kept straight by suffix alone.
 //
 // WHAT THESE TYPES DO AND DO NOT COVER
 //
-// They cover the *supply* side: soil -> root collar, where both conventions meet
-// and every flip lives. They deliberately stop at the demand side (transpiration,
-// psi_stem_to_ci, hydraulic_cost_TF, proportion_of_conductivity, profit_*), which
-// has exactly one convention -- positive magnitudes -- and no recorded incident.
-// Typing it too would put `.value` on the whole photosynthesis core to guard
-// against a confusion that cannot arise there.
+// They cover the *supply* side: soil -> root collar, where both representations
+// meet and every flip lives. They deliberately stop at the demand side
+// (transpiration, psi_stem_to_ci, hydraulic_cost_TF, proportion_of_conductivity,
+// profit_*), which uses one representation throughout and has no recorded
+// incident. Typing it too would cost about twelve more `double` forwarders -- that
+// many are plant-bound -- plus ten `.value` unwraps where a psi meets pow, exp or
+// a spline, and it would need the templated form through the AD replicas and
+// closed_form.hpp, so it collides with issue #4 rather than helping it.
+//
+// The rule for a signature that spans both, since supply-versus-demand does not
+// decide it: type a parameter whenever both representations are in play at that
+// point. E_column holds one of each, so both are typed.
 //
 // They also do NOT cover the lambda incident above, and it is worth being clear
 // about that: the wrong-signed quantity there was a *derivative*, dE_up/dpsi,
-// which is neither a Potential nor a Suction. Catching that needs a conductance
-// type on the supply contract's derivative method; it is not in this pair.
+// which is neither of these. Catching that needs a conductance type on the supply
+// contract's derivative method; it is not in this pair. See issue #3.
 //
 // THE R BOUNDARY STAYS `double`. plant's RcppR6 bindings list psi_soil_,
 // root_collar_psi_, opt_psi_stem_ and psi_stem as `access: field` with type
@@ -57,58 +98,60 @@ namespace leaf {
 // ZERO COST BY CONSTRUCTION. Each is one scalar in a trivially-copyable struct,
 // so it is passed in a register exactly as the bare scalar was, and every
 // conversion is a negation the compiler already emitted. Asserted below, and
-// measured: see the PR for the interleaved bench.
+// measured: the bench_solve binaries built with and without this header are
+// byte-identical.
 //
 // TEMPLATED ON THE SCALAR so issue #4 (template Leaf on its scalar type, to
-// delete the hand-maintained AD replicas) does not have to undo this. The
-// aliases at the bottom are what the model actually spells.
-// ---------------------------------------------------------------------------
+// delete the hand-maintained AD replicas) does not have to undo this. Tested over
+// XAD's forward-mode active type, derivatives included. The aliases at the bottom
+// are what the model actually spells.
 
-template <class T> struct SuctionT;
+template <class T> struct AbsPsiT;
 
-// Signed water potential, <= 0, MPa.
+// A water potential in its SIGNED form: <= 0, MPa.
 template <class T>
-struct PotentialT {
+struct PsiT {
   T value{};
 
-  PotentialT() = default;
-  constexpr explicit PotentialT(T v) : value(v) {}
+  PsiT() = default;
+  constexpr explicit PsiT(T v) : value(v) {}
 
   // The ONE sanctioned way to reach the other convention. Every minus sign that
   // used to be an unmarked leading `-` is now one of these.
-  constexpr SuctionT<T> magnitude() const;
+  constexpr AbsPsiT<T> abs() const;
 };
 
-// Water potential as a positive magnitude, -MPa.
+// The same quantity as a MAGNITUDE: >= 0, -MPa.
 template <class T>
-struct SuctionT {
+struct AbsPsiT {
   T value{};
 
-  SuctionT() = default;
-  constexpr explicit SuctionT(T v) : value(v) {}
+  AbsPsiT() = default;
+  constexpr explicit AbsPsiT(T v) : value(v) {}
 
-  constexpr PotentialT<T> signed_potential() const {
-    return PotentialT<T>(-value);
+  constexpr PsiT<T> as_psi() const {
+    return PsiT<T>(-value);
   }
 };
 
 template <class T>
-constexpr SuctionT<T> PotentialT<T>::magnitude() const {
-  return SuctionT<T>(-value);
+constexpr AbsPsiT<T> PsiT<T>::abs() const {
+  return AbsPsiT<T>(-value);
 }
 
 // --- comparison -------------------------------------------------------------
-// Same-convention only, which is the whole point: `Potential < Suction` does not
-// compile, and that is what makes the prepare_collar_solve clamp visible. Only
+// Same representation only, which is the whole point: `Psi < AbsPsi`
+// does not compile, and that is what makes the prepare_collar_solve clamp
+// visible. Only
 // `operator<` is needed by `std::min` and `std::max`; the rest are here so call
 // sites read as they did before.
 #define LEAF_POTENTIAL_COMPARE(op)                                             \
   template <class T>                                                           \
-  constexpr bool operator op(PotentialT<T> a, PotentialT<T> b) {                \
+  constexpr bool operator op(PsiT<T> a, PsiT<T> b) {                \
     return a.value op b.value;                                                  \
   }                                                                             \
   template <class T>                                                           \
-  constexpr bool operator op(SuctionT<T> a, SuctionT<T> b) {                     \
+  constexpr bool operator op(AbsPsiT<T> a, AbsPsiT<T> b) {                     \
     return a.value op b.value;                                                  \
   }
 LEAF_POTENTIAL_COMPARE(<)
@@ -120,35 +163,35 @@ LEAF_POTENTIAL_COMPARE(!=)
 #undef LEAF_POTENTIAL_COMPARE
 
 // --- differences ------------------------------------------------------------
-// A difference of two potentials is a plain scalar in MPa, and deliberately so:
-// it is a gradient or an interval width, and unlike a potential it carries no
-// sign convention to get wrong. Returning a bare scalar is what lets the physics
+// A difference of two psi values in the SAME representation is a plain scalar in
+// MPa, and deliberately so: it is a gradient or an interval width, and unlike a
+// potential it carries no sign convention to get wrong. Returning a bare scalar is what lets the physics
 // in uptake_impl stay the plain arithmetic it already was.
 template <class T>
-constexpr T operator-(PotentialT<T> a, PotentialT<T> b) {
+constexpr T operator-(PsiT<T> a, PsiT<T> b) {
   return a.value - b.value;
 }
 template <class T>
-constexpr T operator-(SuctionT<T> a, SuctionT<T> b) {
+constexpr T operator-(AbsPsiT<T> a, AbsPsiT<T> b) {
   return a.value - b.value;
 }
 
-// Midpoint of two suctions. Spelled out as a named function rather than allowing
-// `a + b`, because the sum of two potentials is not a potential and nothing
-// should be able to write one by accident.
+// Midpoint of two magnitudes. A named function rather than allowing `a + b`,
+// because the sum of two potentials is not a potential and nothing should be able
+// to write one by accident.
 template <class T>
-constexpr SuctionT<T> midpoint(SuctionT<T> a, SuctionT<T> b) {
-  return SuctionT<T>(0.5 * (a.value + b.value));
+constexpr AbsPsiT<T> midpoint(AbsPsiT<T> a, AbsPsiT<T> b) {
+  return AbsPsiT<T>(0.5 * (a.value + b.value));
 }
 
 // --- what the model spells --------------------------------------------------
-using Potential = PotentialT<double>;
-using Suction = SuctionT<double>;
+using Psi = PsiT<double>;
+using AbsPsi = AbsPsiT<double>;
 
-static_assert(sizeof(Potential) == sizeof(double),
-              "Potential must be exactly a double: it is passed in registers on "
+static_assert(sizeof(Psi) == sizeof(double),
+              "Psi must be exactly a double: it is passed in registers on "
               "the ~10^3-evaluations-per-solve supply path.");
-static_assert(sizeof(Suction) == sizeof(double), "likewise Suction");
+static_assert(sizeof(AbsPsi) == sizeof(double), "likewise AbsPsi");
 
 }  // namespace leaf
 

@@ -27,8 +27,8 @@ inst/include/leaf/
   single_potential.hpp         SinglePotential: the other supply path — one ψ_soil
                                and a constant series resistance
   vulnerability.hpp            the Weibull cumulative-integral builder, shared by both
-  potential.hpp                Potential (signed) / Suction (magnitude) — the water
-                               potential sign convention in the type (hazard 2)
+  potential.hpp                Psi / AbsPsi — the water potential sign
+                               convention in the type (hazard 2)
   constants.hpp                physical constants as inline constexpr
   closed_form.hpp              fast approximate solver, default off, not wired in
   quadrature.hpp               adaptive Simpson (replaced plant's compiled QAG)
@@ -222,10 +222,9 @@ refuse.
    it should have been ψ^0.64. Never leave an unmarked default for a parameter that
    exists in two versions.
 2. **Signed versus magnitude water potentials — now in the type, on the supply
-   side only.** `leaf/potential.hpp` defines `Potential` (signed, ≤ 0) and
-   `Suction` (positive magnitude), and the soil → root-collar path is threaded
-   with them: `psi_soil_inverted_` is a `std::vector<Potential>`, and
-   `begin_solve` / `uptake` / `uptake_at` / `duptake_dpsi` take `Potential`.
+   side only.** `leaf/potential.hpp` defines `Psi` and `AbsPsi`, and the soil → root-collar path is threaded
+   with them: `psi_soil_inverted_` is a `std::vector<Psi>`, and
+   `begin_solve` / `uptake` / `uptake_at` / `duptake_dpsi` take `Psi`.
    Mixing the two does not compile, and the tests assert that with the detection
    idiom rather than a comment.
 
@@ -246,7 +245,7 @@ refuse.
    - **`dE_from_soil_dpsi_collar` is NOT covered.** It differentiates with
      respect to the *signed* potential, so it returns a negative number where a
      conductance is wanted — that produced a negative λ before it was caught.
-     A derivative is neither a `Potential` nor a `Suction`, so
+     A derivative is neither a `Psi` nor an `AbsPsi`, so
      `marginal_cost_water_multilayer` still carries the negation and the comment.
      Closing it needs a conductance type on the supply contract.
 
