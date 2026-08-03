@@ -144,8 +144,10 @@ the failure to the platform the file came from.
   `NOT_CRAN` unset, on both arms of a control. Compare against a control run, never
   against a remembered number.)
 - **`feature/api-cleanup`** — everything that changes results or the API: the renames,
-  the shrunken input set, the pressure fix, and an independent shutdown fix that
-  **must be reconciled with plant's** (issue #10).
+  the shrunken input set, the pressure fix, and the shutdown fix. **Rebased onto
+  `master` on 2026-08-03** (six commits, onto `cfd5dcf`). Its golden file came
+  through the rebase byte-identical, which is the check that master's supply-path
+  refactor did not perturb the branch's arithmetic.
 
 Keep them separate.
 
@@ -239,7 +241,18 @@ they compute.** Results changes still belong on `feature/api-cleanup`. Anything 
    Check `git grep 'access: field' inst/RcppR6_classes.yml` in plant before
    moving anything public, and land the two changes together — plant tracks this
    package's **master** via `Remotes:`, so a merge here is what breaks it.
-8. **No Rcpp in the leaf.** `util.hpp` throws `std::runtime_error` instead of
+8. **`soil_consumption_` is not cleared between solves (plant #577), and it is
+   still live here.** `set_physiology` calls
+   `soil_consumption_.resize(supply_n_layers(), 0.0)`, but `resize`'s fill applies
+   only to newly added elements, and the uptake loop writes only up to
+   `max_soil_layer` — the deepest *rooted* layer, not the deepest layer. So a solve
+   with fewer rooted layers than the last one leaves the tail holding the previous
+   plant's values, and plant bills them to the patch water balance. Reproduced
+   here: a 3-layer tree then a 1-layer seedling on the same `Leaf` gives the
+   seedling bit-identical layers 1–2. **The shutdown fix does not cover this** —
+   that one runs only on the shutdown path, this leaks on every path. One-word fix
+   (`assign`), but it changes results; see PLAN item 2.
+9. **No Rcpp in the leaf.** `util.hpp` throws `std::runtime_error` instead of
    `Rcpp::stop`, and uses a quiet NaN instead of `NA_REAL`. The only R touchpoint left
    in the include graph is odelia's `ode_util.hpp`; `tests/cpp/shim/RcppCommon.h` is a
    15-line stand-in that both keeps the tests R-free and specifies exactly what needs

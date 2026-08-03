@@ -17,40 +17,67 @@ this file keeps the reasoning behind each one.
 | **10c** | The hidden hard-coded atmospheric pressure fixed (`umol_per_mol_to_Pa` derived from `atm_kpa_`). |
 | **15** | CI: gcc/clang × Linux/macOS, no R needed. Plus a golden-file regression baseline over 288 operating points, compared bit-exactly on macOS/arm64 and with `--cross-platform` elsewhere — see the note under item 1 on why bit-exact cannot be a cross-platform gate, and on the flat-optimum amplification that sets the tolerances. |
 | **5** | **Decided: leave XAD as it is.** It arrives via odelia, both packages want the same version, and only forward mode is used so nothing needs linking. No action. |
+| **7b** | The supply path is swappable. All four stages of 7b-iii merged (#17 → `10115e1`, #18 → `cfd5dcf`): `MultiLayerRoots`, the resistance interface, `SinglePotential`, and an enum-tag dispatch that measured **free**. Issue #2 closed; #3 and the multi-layer λ are unblocked. |
+| **2** | The shutdown-state leak, **fixed on `feature/api-cleanup`** — and the reconciliation with plant went the *opposite* way to what this document expected. See below. |
 
 Changes that alter results or the API live on **`feature/api-cleanup`**, not on
-`master`. That branch is 7 commits and is where 10a, 10b, 10c and the shutdown fix
-sit.
+`master`. That branch is 10a, 10b, 10c and the shutdown fix.
 
-⚠️ **That branch is now 5 commits behind `master` and conflicts** in
-`leaf_model.hpp` and `tests/cpp/test_leaf.cpp` (checked 2026-08-03 with a dry-run
-merge). Issue #2 rewrote `set_physiology`'s body and `Leaf`'s members three times
-— the supply-path move, the resistance interface, then the dispatch — and
-`api-cleanup` carries its own rewrite of the same function (14 → 10 args). **The
-cost only grows**: every further change to `master` in this area widens the same
-conflict, and `api-cleanup` also holds the *deferred half* of the resistance
-change (having plant pass resistances) which cannot land anywhere else. Rebase it
-before starting item 7a, or accept a harder merge later.
+✅ **Rebased onto `master` on 2026-08-03**, so the conflict warning that used to
+sit here is discharged. Six commits, replayed onto `cfd5dcf`; the two merge
+commits it used to carry are gone, and one commit ("stop tracking the
+`test_golden` binary") was dropped because `master` had since done the same thing.
 
-**Not ours**
+Three things are worth carrying out of that rebase:
 
-| item | what |
-|---|---|
-| **2** | The shutdown-state leak is **being fixed in plant** (#578, with #577 as the `resize`/`assign` half). We port plant's fix rather than maintaining our own. ⚠️ `feature/api-cleanup` already carries an independent fix — it must be reconciled with plant's, preferring plant's, or the two will diverge. |
+- **The branch's numerics survived master's refactor exactly.** The golden file on
+  the rebased branch is **byte-identical** to the golden file on the pre-rebase
+  branch, and the rebased code reproduces it bit-exactly. Since `master` had in the
+  meantime moved the entire supply path into `roots.hpp` and put a dispatch in
+  front of it, that is the check that the replay preserved arithmetic and not just
+  intent.
+- **`area_leaf` came out of the supply-path contract, not just out of
+  `set_physiology`.** This was the one conflict that needed a decision rather than a
+  resolution: `master`'s five-method supply contract threads `area_leaf` through
+  `uptake` / `uptake_at` / `duptake_dpsi`, while the branch's whole point is that
+  root carbon arrives already divided by it. Dropping the parameter from all three
+  methods is the reconciliation, and it is the direction hazard 4 already asked for
+  — the contract now has no extensive quantity in it either. `SinglePotential::resistance_`
+  is consequently **per unit leaf area**, which is documented at the member.
+- **It costs nothing.** 3.53 µs/solve on both arms, interleaved ×4 (`bench_solve`,
+  reps=2000).
+
+**Blast radius of landing this branch on `master`**, measured cell-by-cell against
+`master`'s golden file and split by cause, because the two classes are four orders
+of magnitude apart and should never be quoted as one number:
+
+| cause | cells | rows | worst relative change |
+|---|---|---|---|
+| the shutdown fix (`nan` → a real value) | 240 | 48 | n/a — was unset |
+| ppm-to-Pa + the `area_leaf` reassociation | 355 | 124 | **1.2e-13** (`profit`) |
+
+The 240 is exactly 48 shutdown rows × 5 flux fields (`ci`, `assim`,
+`transpiration`, `gc`, `e_up`), which is the number the shutdown commit predicted.
+Note the *sign* of what `master` records there: on a fresh `Leaf` — which is how
+`test_golden` drives each point — the shutdown path never writes the fluxes at all,
+so they sit at the NA sentinel. The stale-value form of the same defect only shows
+on a reused object, which is how plant uses it. Both are the one bug.
+
+The second row is rounding by the guide's own scale (~1e-16 is reassociation, ~1e-4
+is a real difference), so it is four orders below the threshold at which a change
+means anything.
 
 **Remaining** — filed as issues; the item column points back into this document.
 
 | issue | item | what | note |
 |---|---|---|---|
-| [#2](https://github.com/traitecoevo/leaf_cpp/issues/2) | 7b | Extract the soil/root supply path behind an interface | **do first** — #3, the multi-layer λ, and `kmax(h)` all sit on top. Design **partly** settled: **no template needed** (measured, see 7b). **Stages 2 and 3 MERGED too** (#18 → `cfd5dcf`) — `SinglePotential` written, wired, and dispatched by an enum tag, which measured **free** (`std::variant` would have cost +1.0%). They needed **no plant change**, unlike stage 1. **All four stages of 7b-iii are complete; issue #2 is done.** #3 and the multi-layer λ are unblocked. **Stage 1 MERGED** (#17, 2026-08-03, squashed as `10115e1`): `leaf/roots.hpp`, golden bit-identical, 1.7% slower, and the supply path now takes resistances rather than root carbon. plant's matching YAML sits on `feature/consume-leaf-package` (`3efe9c47`, `bbd47a36`) — that is the only plant branch consuming this package, so nothing is left broken. **Stages 2–3 remain** |
-| [#3](https://github.com/traitecoevo/leaf_cpp/issues/3) | 7a | Make λ(state) pluggable | needs #2 |
+| [#3](https://github.com/traitecoevo/leaf_cpp/issues/3) | 7a | Make λ(state) pluggable | **unblocked** — #2 is done. Measure the dispatch separately: the cost core is fully inlined where the supply path was not, so 7b's "dispatch is free" result does **not** transfer |
 | [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11 | Template `Leaf` on its scalar type | deletes the hand-maintained AD replicas |
 | [#5](https://github.com/traitecoevo/leaf_cpp/issues/5) | 6 | R interface (RcppR6) | absorbs the `Control` struct and the dropped-field cleanup |
 | [#6](https://github.com/traitecoevo/leaf_cpp/issues/6) | 12 | Calibration vignette, then inversion | needs #4 for trait gradients |
 | [#7](https://github.com/traitecoevo/leaf_cpp/issues/7) | 13 | Energy balance, full cut | leaf-to-air VPD is the cheap win; free convection is not worth it |
 | [#8](https://github.com/traitecoevo/leaf_cpp/issues/8) | 10a | Signed-vs-magnitude potentials in the type | design question, not a rename |
-| [#9](https://github.com/traitecoevo/leaf_cpp/issues/9) | 3 | Finish the plant-side integration | validated already; decisions + one unchecked consumer |
-| [#10](https://github.com/traitecoevo/leaf_cpp/issues/10) | 2 | Port plant's shutdown fix | ⚠️ reconcile with our branch fix |
+| [#9](https://github.com/traitecoevo/leaf_cpp/issues/9) | 3 | Finish the plant-side integration | validated already; decisions + one unchecked consumer. Now also carries **landing the shutdown fix in plant** (plant #578/#577), which is still open there with no fix written |
 | [#11](https://github.com/traitecoevo/leaf_cpp/issues/11) | 4 | Drop the last R coupling | belongs upstream in odelia |
 | [#12](https://github.com/traitecoevo/leaf_cpp/issues/12) | 15 | `R CMD check` integration, C++ API docs | small |
 | [#13](https://github.com/traitecoevo/leaf_cpp/issues/13) | 1 | The unexplained 1 ULP | low value; does not affect plant |
@@ -237,19 +264,62 @@ Two known and deliberate exceptions to bit-identity:
 Once this is done, replace the pinned values in `test_leaf.cpp` with values
 generated from plant and say so in the comment.
 
-## 2. Shutdown-state leak — PLANT'S TO FIX; we port it
+## 2. Shutdown-state leak — FIXED HERE. plant has no fix to port.
 
-**Being addressed in plant** (issues #578 and #577). We do not maintain a separate
-fix; when plant's lands we port it.
+**Reconciled 2026-08-03, and the answer is the opposite of what this section used
+to say.** It said plant owned the fix and we would port plant's when it landed.
+Checked: **plant #578 and #577 are both still open, and no fix has been written
+against either** — no commit on any plant branch touches `set_shutdown_state`, and
+`soil_consumption_.resize` is still `resize`. There is nothing to port and there
+never was; the earlier reading mistook *"Andrew has filed it"* for *"Andrew is
+fixing it"*.
 
-⚠️ **Reconcile before merging `feature/api-cleanup`.** That branch already carries
-an independent fix, written before it was clear plant was taking this on. Two
-different fixes to the same defect is exactly how the stem-vs-root vulnerability
-mix-up happened elsewhere. Prefer plant's version and drop ours, or diff them
-deliberately — do not merge both. Our fix and its measured blast radius (240
-mismatches = 48 shutdown rows × 5 flux fields, `psi_stem`/`collar`/`profit`
-untouched) are in that branch's commit, which is useful as a cross-check on
-whatever plant does.
+So the reconciliation went the other way: **our fix on `feature/api-cleanup`
+stands, and plant is downstream of it.** Two things make that safe rather than a
+land-grab:
+
+- **The semantics were already agreed on plant #578, in writing.** The one comment
+  on that issue is Daniel's, and it specifies exactly what our fix implements:
+  zero for `transpiration_` / `stom_cond_CO2_` / `soil_consumption_`, the
+  compensation point `gamma_ * umol_per_mol_to_Pa` for `ci_`, and **`-R_d_`, not
+  zero,** for `assim_colimited_`. So there is no divergence to resolve — the fix
+  *is* the position recorded on the issue.
+- **It lands on precisely the three exits the issue names, and no others.**
+  `set_shutdown_state` is called from exactly three places in
+  `prepare_collar_solve`, which are #578's three rows. The fourth early exit
+  (`assim_max_ < 0`) does **not** call it — it sets its own operating point and
+  calls `E_from_Soil_to_Root_Collar` — and #578 says that one is already correct.
+  Fixing inside `set_shutdown_state` therefore cannot touch it. That is the check
+  worth repeating if the fix is ever moved.
+
+⚠️ **The other half, plant #577, is NOT fixed and is still live in this package —
+reproduced here, not merely inferred.** `leaf_model.hpp:808` has
+`soil_consumption_.resize(supply_n_layers(), 0.0)` where it wants `.assign`.
+`supply_n_layers()` returns `soil_number_of_depths_` (every layer), while the
+uptake loop runs to `max_soil_layer` (the deepest *rooted* layer), and `resize`'s
+fill argument applies only to *newly added* elements — so layers a plant has no
+roots in are never written and never cleared, and plant bills all of them to the
+patch water balance. Andrew's protocol, run against this package:
+
+```
+tree     (roots in 3 layers): 0.000522694 0.00026097 0.000172362
+seedling (roots in 1 layer) : 0.000633884 0.00026097 0.000172362
+                                          ^^^^^^^^^^ ^^^^^^^^^^ bit-identical
+```
+
+Andrew measured **33.78%** of cohort-time records on a production run carrying at
+least one stale layer, and 25.73% carrying three of five.
+
+**Our shutdown fix does not cover this**, and it is worth being clear why, because
+the two look like one bug: `std::fill` in `set_shutdown_state` runs only on the
+shutdown path, whereas #577 leaks on *every* path, shutdown or not. It is a
+one-word change (`resize` → `assign`), but it changes results wherever a rooted
+layer count shrinks between solves, so it wants its own commit, its own golden
+regeneration and its own measured blast radius — the same treatment the shutdown
+fix got. **Not done here; decide it deliberately.**
+
+**Still to do, and it is plant-side:** land this in plant as its own reviewed
+change and close #578/#577 there. Tracked under issue #9.
 
 The diagnosis below is kept because it is the evidence, and because the
 "`-R_d_`, not zero" point is easy to get wrong.
@@ -1067,6 +1137,42 @@ Do this before item 6 builds an R interface, so the R names are right the first
 time, and coordinate with plant, since renames cross the shim.
 
 ### 10b. Shrink the input set
+
+Done: the five dead items (`root_mass_`, `vcmax_25_to_jmax_25`, plus `rho`,
+`a_bio`, `sapwood_volume_per_leaf_area`, taking `set_physiology` from 14 arguments
+to 11), three further dead constants found later (`gamma_c`, `kc_c`, `ko_c`), and
+the constants-that-are-parameters: thirteen temperature-response parameters are now
+settable members, including `rd_to_vcmax_ratio_`, which had been the bare literal
+`0.015` inline.
+
+Still open, and each for a stated reason:
+
+- ~~**`area_leaf`**~~ -- DONE. And my earlier claim that it was coupled to 7b was
+  wrong: `r_R = beta/c_r` is exactly linear in root carbon, so `E_i` depends on
+  `root_carbon / area_leaf` and nothing else, and passing the ratio is a four-line
+  change that needs no interface. beta_R_H and beta_R_V are unchanged -- the scaling
+  cancels. The leaf is now purely intensive: no extensive quantity anywhere in it.
+
+  **The rebase onto 7b's supply interface extended this, and improved it.** 7b had
+  meanwhile threaded `area_leaf` through the supply contract itself --
+  `uptake`, `uptake_at`, `duptake_dpsi` all took it. Since the carbon arriving is
+  already divided by it, the parameter is now gone from all three, and
+  `inv_area_leaf` is gone from `uptake_impl`. So "purely intensive" is now true of
+  the *supply contract* too, not just of `set_physiology`, and a third supply path
+  cannot reintroduce an extensive quantity without changing the interface. One
+  consequence to know: `SinglePotential::resistance_` is **per unit leaf area**,
+  documented at the member.
+- **The root architecture** -- that is item 7b itself.
+- **A `Control` struct** for `GSS_tol_abs`, `ci_abs_tol`, `ci_niter`,
+  `vulnerability_curve_ncontrol`, `integration_tol_`, `leaf_temp_min`/`_max`.
+  Deferred deliberately: it means surgery on a 19-argument constructor, and item 6
+  is going to redesign that argument list anyway when it builds the R interface.
+  Doing it twice would be wasteful and doing it now would make item 6 harder.
+- **The PM energy-balance constants** (`longwave_net_offset`, `sw_abs_per_par`,
+  `latent_heat_vap`, `vol_heat_cap_air`, `aerodynamic_resistance_*`) -- these
+  belong with item 13, which is going to revisit that whole block; making them
+  settable before deciding what the block *is* would fix the wrong interface.
+
 
 Audited `set_physiology`'s fourteen arguments, the constructor's nineteen, and the
 constants header. Findings, in order of how free they are.
