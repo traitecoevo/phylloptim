@@ -144,7 +144,7 @@ void test_solve_single_layer() {
   ok(std::isfinite(l.opt_psi_stem_), "psi_stem is finite");
   ok(std::isfinite(l.profit_), "profit is finite");
   ok(l.opt_psi_stem_ > 2.0, "stem is drier than the soil");
-  ok(l.opt_psi_stem_ <= l.psi_crit, "stem stays within psi_crit");
+  ok(l.opt_psi_stem_ <= l.psi_crit.value, "stem stays within psi_crit");
   ok(l.transpiration_ > 0.0, "transpiration is positive");
   ok(l.assim_colimited_ > 0.0, "assimilation is positive");
   // Regression guards -- see the note at the top of this file.
@@ -219,7 +219,7 @@ void test_shutdown_when_soil_is_drier_than_psi_crit() {
   l.find_root_collar_psi();
   ok(std::isfinite(l.profit_), "profit stays finite past psi_crit");
   ok(l.profit_ <= 0.0, "profit is non-positive when shut down");
-  near(l.opt_psi_stem_, l.psi_crit, 1e-12, "stem is held at psi_crit");
+  near(l.opt_psi_stem_, l.psi_crit.value, 1e-12, "stem is held at psi_crit");
 }
 
 // The shutdown path used to leak the previous solve's fluxes (plant #578/#577).
@@ -276,7 +276,7 @@ void test_analytic_gradient_matches_finite_difference() {
   leaf::Leaf l = make_leaf(d, {2.0}, {1.0});
   l.find_root_collar_psi();
   const double p0 = l.root_collar_psi_ < 0 ? -l.root_collar_psi_ : l.root_collar_psi_;
-  const double target = std::max(2.2, std::min(p0, l.psi_crit - 0.5));
+  const double target = std::max(2.2, std::min(p0, l.psi_crit.value - 0.5));
   const double eps = 1e-5;
   const double analytic = l.dprofit_droot_collar_psi(target);
   const double up = l.evaluate_root_collar_psi(target + eps);
@@ -536,7 +536,7 @@ void test_leaf_on_single_potential() {
 
   ok(std::isfinite(l.profit_), "single-potential solve gives a finite profit");
   ok(std::isfinite(l.opt_psi_stem_), "and a finite stem potential");
-  ok(l.opt_psi_stem_ > 0.0 && l.opt_psi_stem_ <= l.psi_crit,
+  ok(l.opt_psi_stem_ > 0.0 && l.opt_psi_stem_ <= l.psi_crit.value,
      "stem potential is a positive magnitude within psi_crit");
   ok(l.root_collar_psi_ <= 0.0, "collar potential is stored signed");
   ok(l.assim_colimited_ > 0.0, "the leaf assimilates");

@@ -50,11 +50,13 @@ namespace leaf {
 // construction and delete the conversion. The arithmetic is right and the
 // conclusion is wrong, for two reasons found by grepping b's actual uses:
 //
-//   1. b IS NOT A WATER POTENTIAL. It is the scale parameter of a Weibull SURVIVAL
-//      FUNCTION over tension, f(x) = exp(-(x/b)^c) for x >= 0. The variable there
-//      is tension, |psi| -- a genuinely non-negative physical quantity, not a
-//      representation of psi. So the absolute value is intrinsic to the model, and
-//      no storage convention removes it.
+//   1. WHAT IS REFUTED IS SIGNING b, NOT TYPING IT. b IS a potential: it is the
+//      value on the psi axis at which conductivity falls to 1/e, with dimensions of
+//      MPa, directly analogous to the P50 that gets quoted. An earlier draft of this
+//      note claimed b "is not a water potential, it is a scale parameter", which is a
+//      false dichotomy -- being the scale parameter of a distribution over TENSION
+//      means it lives on the tension axis, so it is one. It is therefore typed
+//      AbsPsi, and `psi / stem_b` is a ratio of two tensions.
 //   2. b IS USED AS A BARE SCALE, not only in the ratio psi/b, and those uses need
 //      it positive for reasons that are not conventional at all:
 //        closed_form.hpp:197   sqrt(Q * stem_b * kmax / ...)      -> sqrt of a negative
@@ -191,6 +193,17 @@ constexpr T operator-(PsiT<T> a, PsiT<T> b) {
 template <class T>
 constexpr T operator-(AbsPsiT<T> a, AbsPsiT<T> b) {
   return a.value - b.value;
+}
+
+// Ratio of two tensions: dimensionless, and the argument the Weibull actually
+// takes. f(psi) = exp(-((psi/b))^c) is a function of psi/b, a tension divided by the
+// characteristic tension b -- so this operator lets that formula be written as the
+// maths writes it, with no unwrapping at all. It is deliberately only defined for
+// AbsPsi/AbsPsi: a ratio of two SIGNED potentials is the same number, but writing it
+// would mean dividing by a negative b, which is the thing that cannot happen.
+template <class T>
+constexpr T operator/(AbsPsiT<T> a, AbsPsiT<T> b) {
+  return a.value / b.value;
 }
 
 // Midpoint of two magnitudes. A named function rather than allowing `a + b`,

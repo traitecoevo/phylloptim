@@ -105,7 +105,7 @@ public:
   AbsPsi supply_psi_crit() const {
     switch (supply_kind_) {
       case SupplyKind::MultiLayer: return roots_.root_psi_crit;
-      default:                     return AbsPsi{psi_crit};
+      default:                     return psi_crit;
     }
   }
   // The single soil potential the psi_soil_[0]-style solvers (optimise_psi_stem_*)
@@ -143,9 +143,13 @@ public:
   // the root parameters for the stem cost and carried lambda ~ psi^3.02 into a
   // manuscript draft where it should have been psi^0.64. Never leave an unmarked
   // default for a parameter that exists in two versions.
-  double stem_c;
-  double stem_b;
-  double psi_crit;  // derived from b and c
+  double stem_c;   // unitless Weibull shape
+  // The characteristic TENSION at which conductivity falls to 1/e -- a point on the
+  // psi axis, so a potential, and quoted positive like every published P50.
+  AbsPsi stem_b;
+  // The critical stem TENSION, derived from stem_b and stem_c. A point on the psi
+  // axis quoted positive, like stem_b and every published vulnerability threshold.
+  AbsPsi psi_crit;
   double beta2;
   double jmax_25;
   double a;
@@ -526,20 +530,54 @@ public:
 
   // transpiration functions
 
-  // proportion of conductivity in xylem at a given water potential (return: unitless)
-  double proportion_of_conductivity(double psi) const;
+  // --- THE DEMAND SIDE IS MADE OF TENSIONS -------------------------------------
+  // Everything from here to the profit functions is a function of TENSION, |psi|,
+  // which is `AbsPsi` -- not a representation of a potential but the non-negative
+  // physical quantity the vulnerability curve and its splines are distributions
+  // over. See the retraction in leaf/potential.hpp for why that is a statement
+  // about the model and not about storage.
+  //
+  // Each of these has a `double` twin, because plant's RcppR6 binds every one of
+  // them (`args: [psi_stem: double, psi_upstream: double]`). The twin is the R
+  // signature and takes a tension, exactly as it always did.
 
-  // supply-side transpiration for a given water potential gradient between leaves and soil, 
-  // references setup_transpiraiton for values (return: kg h20 s^-1 m^-2 LA)
-  // should be renamed to reflect supply-side
-  double transpiration(double psi_stem, double psi_upstream);
-  // supply-side transpiration for a given water potential gradient between leaves and soil, integrated internally (return: kg h20 s^-1 m^-2 LA)
-  // should be renamed to reflect supply-side
-  double transpiration_full_integration(double psi_stem, double psi_upstream);                    
+  // proportion of conductivity in xylem at a given tension (return: unitless)
+  double proportion_of_conductivity(AbsPsi psi) const;
+  double proportion_of_conductivity(double psi) const {
+    return proportion_of_conductivity(AbsPsi{psi});
+  }
+
+  // supply-side transpiration for a given tension difference between leaf and
+  // upstream, references setup_transpiration for values (return: kg h20 s^-1 m^-2 LA)
+  double transpiration(AbsPsi psi_stem, AbsPsi psi_upstream);
+  double transpiration(double psi_stem, double psi_upstream) {
+    return transpiration(AbsPsi{psi_stem}, AbsPsi{psi_upstream});
+  }
+  // as above, integrated internally rather than read from the spline
+  double transpiration_full_integration(AbsPsi psi_stem, AbsPsi psi_upstream);
+  double transpiration_full_integration(double psi_stem, double psi_upstream) {
+    return transpiration_full_integration(AbsPsi{psi_stem}, AbsPsi{psi_upstream});
+  }
   // stomatal conductance rate of c02 (return: mol CO2 m^-2 s^-1)
-  double stom_cond_CO2(double psi_stem, double psi_upstream); // define as a constant
-  // converts transpiration in kg h20 s^-1 m^-2 LA to psi_stem (return: -MPa)
-  double transpiration_to_psi_stem(double transpiration_, double psi_upstream);
+  double stom_cond_CO2(AbsPsi psi_stem, AbsPsi psi_upstream);
+  double stom_cond_CO2(double psi_stem, double psi_upstream) {
+    return stom_cond_CO2(AbsPsi{psi_stem}, AbsPsi{psi_upstream});
+  }
+  // Converts transpiration in kg h20 s^-1 m^-2 LA to a stem tension.
+  //
+  // ⚠️ THIS IS THE ONE THAT DISAGREED WITH ITS OWN INVERSE. Its psi_upstream used
+  // to arrive as a SIGNED potential while transpiration()'s arrived as a tension --
+  // same parameter name, opposite meaning, held together by a comment saying "NOT a
+  // bug". Both now take a tension, so the pair finally agrees, and the one caller
+  // that holds a signed collar potential (find_psi_stem_from_psi_root) spells the
+  // conversion. The `double` twin keeps the OLD signed meaning, because plant's R
+  // callers pass a signed value today and silently redefining that would be an API
+  // change dressed as a refactor.
+  AbsPsi transpiration_to_psi_stem(double transpiration_, AbsPsi psi_upstream);
+  double transpiration_to_psi_stem(double transpiration_, double psi_upstream_signed) {
+    return transpiration_to_psi_stem(transpiration_,
+                                     Psi{psi_upstream_signed}.abs()).value;
+  }
   
   // assimilation functions
 
@@ -548,9 +586,18 @@ public:
   double electron_transport();
   double assim_electron_limited(double ci_);
   double assim_colimited(double ci_);
-  double assim_minus_stom_cond_CO2(double x, double psi_stem, double psi_upstream);
-  double psi_stem_to_ci(double psi_stem, double psi_upstream);
-  void set_leaf_states_rates_from_psi_stem(double psi_stem, double psi_upstream);
+  double assim_minus_stom_cond_CO2(double x, AbsPsi psi_stem, AbsPsi psi_upstream);
+  double assim_minus_stom_cond_CO2(double x, double psi_stem, double psi_upstream) {
+    return assim_minus_stom_cond_CO2(x, AbsPsi{psi_stem}, AbsPsi{psi_upstream});
+  }
+  double psi_stem_to_ci(AbsPsi psi_stem, AbsPsi psi_upstream);
+  double psi_stem_to_ci(double psi_stem, double psi_upstream) {
+    return psi_stem_to_ci(AbsPsi{psi_stem}, AbsPsi{psi_upstream});
+  }
+  void set_leaf_states_rates_from_psi_stem(AbsPsi psi_stem, AbsPsi psi_upstream);
+  void set_leaf_states_rates_from_psi_stem(double psi_stem, double psi_upstream) {
+    set_leaf_states_rates_from_psi_stem(AbsPsi{psi_stem}, AbsPsi{psi_upstream});
+  }
 
 
 // --- Marginal cost of water ------------------------------------------------
@@ -583,7 +630,8 @@ public:
   //
   // Caveat: with beta2 < 1 the (1-f)^(beta2-1) factor diverges as psi -> 0
   // (f -> 1), which is a property of the cost function, not of this code.
-  double lambda_TF24(double psi_stem) const;
+  double lambda_TF24(AbsPsi psi_stem) const;
+  double lambda_TF24(double psi_stem) const { return lambda_TF24(AbsPsi{psi_stem}); }
 
   // lambda at the current operating point. This is the single-layer value: it is
   // the marginal cost seen by the stem, and equals dA/dE only when the collar
@@ -623,11 +671,21 @@ public:
   double g1_eff() const;
 
 // leaf economics functions
-  double hydraulic_cost_Sperry(double psi_stem, double psi_upstream);
-  double hydraulic_cost_TF(double psi_stem);
+  double hydraulic_cost_Sperry(AbsPsi psi_stem, AbsPsi psi_upstream);
+  double hydraulic_cost_Sperry(double psi_stem, double psi_upstream) {
+    return hydraulic_cost_Sperry(AbsPsi{psi_stem}, AbsPsi{psi_upstream});
+  }
+  double hydraulic_cost_TF(AbsPsi psi_stem);
+  double hydraulic_cost_TF(double psi_stem) { return hydraulic_cost_TF(AbsPsi{psi_stem}); }
 
-  double profit_psi_stem_Sperry(double psi_stem, double psi_upstream);
-  double profit_psi_stem_TF(double psi_stem, double psi_upstream);
+  double profit_psi_stem_Sperry(AbsPsi psi_stem, AbsPsi psi_upstream);
+  double profit_psi_stem_Sperry(double psi_stem, double psi_upstream) {
+    return profit_psi_stem_Sperry(AbsPsi{psi_stem}, AbsPsi{psi_upstream});
+  }
+  double profit_psi_stem_TF(AbsPsi psi_stem, AbsPsi psi_upstream);
+  double profit_psi_stem_TF(double psi_stem, double psi_upstream) {
+    return profit_psi_stem_TF(AbsPsi{psi_stem}, AbsPsi{psi_upstream});
+  }
 
 // optimiser functions
   void optimise_psi_stem_Sperry();
@@ -658,8 +716,8 @@ inline Leaf::Leaf()
     :
     vcmax_25(96), // umol m^-2 s^-1 
     stem_c(2.680147), //unitless
-    stem_b(3.898245), //-MPa
-    psi_crit(5.870283), //-MPa
+    stem_b(AbsPsi{3.898245}), //-MPa
+    psi_crit(AbsPsi{5.870283}), //-MPa
     beta2(1.5), //exponent for effect of hydraulic risk (unitless)
     jmax_25(157.44), // maximum electron transport rate umol m^-2 s^-1
     a(0.30), //quantum yield of photosynthetic electron transport (mol mol^-1)
@@ -696,8 +754,8 @@ inline Leaf::Leaf(double vcmax_25, double stem_c, double stem_b,
            double beta_R_V)
     : vcmax_25(vcmax_25), // umol m^-2 s^-1 
     stem_c(stem_c), //unitless
-    stem_b(stem_b), //-MPa
-    psi_crit(psi_crit), //-MPa
+    stem_b(AbsPsi{stem_b}), //-MPa
+    psi_crit(AbsPsi{psi_crit}), //-MPa
     beta2(beta2), //exponent for effect of hydraulic risk (unitless)
     jmax_25(jmax_25), // maximum electron transport rate umol m^-2 s^-1
     a(a), //quantum yield of photosynthetic electron transport (mol mol^-1)
@@ -712,7 +770,7 @@ inline Leaf::Leaf(double vcmax_25, double stem_c, double stem_b,
       // The root traits and the two resistance constants belong to the supply
       // path, so hand them over before its vulnerability curve is built.
       roots_.root_c = root_c;          //unitless
-      roots_.root_b = root_b;          //-MPa
+      roots_.root_b = AbsPsi{root_b};  //-MPa
       // The constructor arg is a plain double (plant's RcppR6 passes it that way);
       // it is quoted as a magnitude, so say so here.
       roots_.root_psi_crit = AbsPsi{root_psi_crit}; //-MPa
@@ -997,7 +1055,7 @@ inline double Leaf::E_column_zero(Psi x, const std::vector<Psi>& psi_soil) {
 // at the one boundary between the model and the solver -- which is where it belongs.
 inline Psi Leaf::find_root_psi(Psi wettest_soil_layer, const std::vector<Psi>& psi_soil, int find_root_crit) {
   // psi_crit is a demand-side magnitude; the bracket needs it signed.
-  const Psi dry_end = AbsPsi{psi_crit}.as_psi();
+  const Psi dry_end = psi_crit.as_psi();
   // tol and iterations copied from control defaults (for now) - changed recently to 1e-6
   if (find_root_crit == 1) {
     auto target = [&](double x) -> double {
@@ -1078,7 +1136,7 @@ inline double Leaf::find_psi_stem_from_psi_root(Psi psi_root, const std::vector<
 // root-collar potential differs between the calling cases.
 inline void Leaf::set_shutdown_state(Psi root_collar) {
   root_collar_psi_ = root_collar.value;
-  opt_psi_stem_ = psi_crit;
+  opt_psi_stem_ = psi_crit.value;
   profit_ = -R_d_ - hydraulic_cost_TF(psi_crit);
 
   // Write the flux outputs too. Before this they were left holding whatever the
@@ -1123,12 +1181,12 @@ inline bool Leaf::prepare_collar_solve(AbsPsi& bound_a, AbsPsi& bound_b){
   // Avoid loop if the wettest psi layer is drier than psi_crit in stem, transpiration not possible and so all variables set to
   // shut down
 
-  if (wettest_soil_layer.abs().value >= psi_crit){
-    set_shutdown_state(AbsPsi{psi_crit}.as_psi());
+  if (wettest_soil_layer.abs() >= psi_crit){
+    set_shutdown_state(psi_crit.as_psi());
     return false;
   }
 
-const Psi stem_crit = AbsPsi{psi_crit}.as_psi();
+const Psi stem_crit = psi_crit.as_psi();
 if(E_column(stem_crit, supply_psi_soil_inverted(), stem_crit) < 0){
       // root_collar_psi_ is reported as a signed potential, so store the signed
       // form of root_psi_crit rather than the magnitude.
@@ -1142,7 +1200,7 @@ Psi root_crit = find_root_psi(wettest_soil_layer, supply_psi_soil_inverted(), 1)
 
 // If root crit would have to be larger than psi crit, also avoid loop as above
 
-    if (root_crit.abs().value >= psi_crit){
+    if (root_crit.abs() >= psi_crit){
     set_shutdown_state(root_crit);
     return false;
   }
@@ -1355,7 +1413,7 @@ inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi) {
                          R_d_, curv_fact_colim));
   AD ps_ad = psi_stem;      xad::derivative(ps_ad) = 1.0;
   const double C_prime = xad::derivative(
-      detail::hydraulic_cost_ad(ps_ad, stem_b, stem_c, cost_scale_TF24, beta2));
+      detail::hydraulic_cost_ad(ps_ad, stem_b.value, stem_c, cost_scale_TF24, beta2));
 
   // Stomatal-conductance supply coefficient gc and its partials. gc =
   // gc_const * transpiration(psi_stem, psi); transpiration is conductance_max *
@@ -1460,15 +1518,18 @@ inline double Leaf::leaf_temp_from_E(double E) const {
 // transpiration supply functions
 
 // returns proportion of conductance taken from hydraulic vulnerability curve (unitless)
-inline double Leaf::proportion_of_conductivity(double psi) const {
-
+inline double Leaf::proportion_of_conductivity(AbsPsi psi) const {
+  // stem_b is the tension at which conductivity falls to 1/e, so this ratio is a
+  // dimensionless tension. No abs() appears because the argument is already the
+  // non-negative quantity the Weibull is a distribution over -- which is the whole
+  // point of the type.
   return exp(-pow((psi / stem_b), stem_c));
 }
 
 // set spline for proportion of conductivity
 inline void Leaf::setup_transpiration(double resolution) {
   std::vector<double> x_psi_, y_cumulative_transpiration_;
-  build_cumulative_vulnerability_integral(stem_b, stem_c, resolution, x_psi_,
+  build_cumulative_vulnerability_integral(stem_b.value, stem_c, resolution, x_psi_,
                                           y_cumulative_transpiration_);
 
   // setup interpolator
@@ -1483,37 +1544,36 @@ inline void Leaf::setup_transpiration(double resolution) {
 // on the pre-integrated spline that transpiration() uses on the hot path. Not
 // used in production. Uses leaf/quadrature.hpp rather than plant's compiled QAG,
 // so values are convergent-but-not-bit-identical to plant's; see that header.
-inline double Leaf::transpiration_full_integration(double psi_stem, double psi_upstream) {
+inline double Leaf::transpiration_full_integration(AbsPsi psi_stem, AbsPsi psi_upstream) {
   const auto f = [&](double psi) -> double {
-    return proportion_of_conductivity(psi);
+    return proportion_of_conductivity(AbsPsi{psi});
   };
   return leaf_specific_conductance_max_ *
-         quadrature::adaptive_simpson(f, psi_upstream, psi_stem,
+         quadrature::adaptive_simpson(f, psi_upstream.value, psi_stem.value,
                                       integration_tol_);
 }
 
 //calculates supply-side transpiration from psi_stem and root_collar_psi_, returns kg h20 s^-1 m^-2 LA
-// SIGN: psi_stem and psi_upstream are POSITIVE magnitudes here (passed straight
-// to the spline). Contrast transpiration_to_psi_stem below. See the sign-
-// conventions block above.
-inline double Leaf::transpiration(double psi_stem, double psi_upstream) {
+// Both arguments are TENSIONS, which is what the spline is indexed by, so both go
+// straight in. transpiration_to_psi_stem below now agrees; it used to not.
+inline double Leaf::transpiration(AbsPsi psi_stem, AbsPsi psi_upstream) {
 
   // 1-entry memo: identical (psi_stem, psi_upstream) is requested several times
   // per profit evaluation; return the cached value (bit-identical) to skip the
   // redundant spline lookups. Cache invalidated in set_physiology.
   if (transpiration_cached_ &&
-      psi_stem == transpiration_cache_psi_stem_ &&
-      psi_upstream == transpiration_cache_psi_upstream_) {
+      psi_stem.value == transpiration_cache_psi_stem_ &&
+      psi_upstream.value == transpiration_cache_psi_upstream_) {
     return transpiration_cache_value_;
   }
 
-  // integration of proportion_of_conductivity over [root_collar_psi_, psi_stem]
+  // integration of proportion_of_conductivity over [psi_upstream, psi_stem]
   const double E = leaf_specific_conductance_max_ *
-    (transpiration_from_psi.eval(psi_stem) - transpiration_from_psi.eval(psi_upstream));
+    (transpiration_from_psi.eval(psi_stem.value) - transpiration_from_psi.eval(psi_upstream.value));
   // return (transpiration_full_integration(psi_stem));
 
-  transpiration_cache_psi_stem_ = psi_stem;
-  transpiration_cache_psi_upstream_ = psi_upstream;
+  transpiration_cache_psi_stem_ = psi_stem.value;
+  transpiration_cache_psi_upstream_ = psi_upstream.value;
   transpiration_cache_value_ = E;
   transpiration_cached_ = true;
   return E;
@@ -1523,18 +1583,19 @@ inline double Leaf::transpiration(double psi_stem, double psi_upstream) {
 // SIGN: unlike transpiration() above, psi_upstream here is a SIGNED (negative)
 // potential, so it is flipped with a leading `-` before the spline lookup. The
 // two functions are inverses called with opposite-sign psi_upstream.
-inline double Leaf::transpiration_to_psi_stem(double transpiration_, double psi_upstream) {
-  // integration of proportion_of_conductivity over [root_collar_psi_, psi_stem]
+// The inverse of transpiration(). It now takes its psi_upstream in the SAME
+// representation, so `eval(psi_upstream.value)` replaces the old `eval(-psi_upstream)`
+// -- the negation has moved out to the one caller that holds a signed potential.
+// Bit-identical: that caller passed a signed value and this negated it, which is
+// exactly what .abs() now does at the call site.
+inline AbsPsi Leaf::transpiration_to_psi_stem(double transpiration_, AbsPsi psi_upstream) {
+  double E_psi_stem = transpiration_/leaf_specific_conductance_max_ +  transpiration_from_psi.eval(psi_upstream.value);
 
-
-  double E_psi_stem = transpiration_/leaf_specific_conductance_max_ +  transpiration_from_psi.eval(-psi_upstream);
-
-
-  return psi_from_transpiration.eval(E_psi_stem);
+  return AbsPsi{psi_from_transpiration.eval(E_psi_stem)};
   }
 
 // returns stomatal conductance to CO2, mol C m^-2 LA s^-1
-inline double Leaf:: stom_cond_CO2(double psi_stem, double psi_upstream) {
+inline double Leaf:: stom_cond_CO2(AbsPsi psi_stem, AbsPsi psi_upstream) {
   double transpiration_ = transpiration(psi_stem, psi_upstream);
   return atm_kpa_ * transpiration_ * kg_to_mol_h2o / atm_vpd_ / H2O_CO2_stom_diff_ratio;
 }
@@ -1586,7 +1647,7 @@ inline double Leaf::assim_colimited(double ci_) {
 // A - gc curves
 
 // returns difference between co-limited assimilation and stom_cond_CO2, to be minimised (umol m^-2 s^-1)
-inline double Leaf::assim_minus_stom_cond_CO2(double x, double psi_stem, double psi_upstream) {
+inline double Leaf::assim_minus_stom_cond_CO2(double x, AbsPsi psi_stem, AbsPsi psi_upstream) {
 
   double assim_colimited_x_ = assim_colimited(x);
 
@@ -1596,7 +1657,7 @@ inline double Leaf::assim_minus_stom_cond_CO2(double x, double psi_stem, double 
 }
 
 // converts psi stem to ci, used to find ci which makes A(ci) = gc(ca - ci)
-inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
+inline double Leaf::psi_stem_to_ci(AbsPsi psi_stem, AbsPsi psi_upstream) {
   const double stom_cond_CO2_fixed = stom_cond_CO2(psi_stem, psi_upstream);
 
   // Propagate non-finite inputs as NA rather than entering the solver. A
@@ -1642,13 +1703,13 @@ inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
     util::stop("psi_stem_to_ci failed: " + std::string(e.what()) +
                "; min=" + util::to_string(gamma_ * umol_per_mol_to_Pa_) +
                "; max=" + util::to_string(ca_) +
-               "; psi_stem=" + util::to_string(psi_stem) +
-               "; psi_upstream=" + util::to_string(psi_upstream));
+               "; psi_stem=" + util::to_string(psi_stem.value) +
+               "; psi_upstream=" + util::to_string(psi_upstream.value));
   }
 }
 
 // given psi_stem, find assimilation, transpiration and stomal conductance to c02
-inline void Leaf::set_leaf_states_rates_from_psi_stem(double psi_stem, double psi_upstream) {
+inline void Leaf::set_leaf_states_rates_from_psi_stem(AbsPsi psi_stem, AbsPsi psi_upstream) {
 
   if (psi_upstream >= psi_stem){
     ci_ = gamma_*umol_per_mol_to_Pa_;
@@ -1685,7 +1746,7 @@ inline void Leaf::set_leaf_states_rates_from_psi_stem(double psi_stem, double ps
 
 // Sperry et al. 2017; Sabot et al. 2020 implementation
 
-inline double Leaf::hydraulic_cost_Sperry(double psi_stem, double psi_upstream) {
+inline double Leaf::hydraulic_cost_Sperry(AbsPsi psi_stem, AbsPsi psi_upstream) {
   // Cost is definitionally zero when the potentials are equal. Returning it
   // explicitly avoids a tiny non-zero residual from FMA contraction of the
   // k_l_soil_ - k_l_stem_ subtraction (arch-dependent; see arm64 build, #468).
@@ -1703,9 +1764,9 @@ inline double Leaf::hydraulic_cost_Sperry(double psi_stem, double psi_upstream) 
 
 // --- Marginal cost of water -------------------------------------------------
 
-inline double Leaf::lambda_TF24(double psi_stem) const {
+inline double Leaf::lambda_TF24(AbsPsi psi_stem) const {
   const double f = proportion_of_conductivity(psi_stem);
-  return cost_scale_TF24 * beta2 * (stem_c / stem_b) * pow(psi_stem / stem_b, stem_c - 1.0) *
+  return cost_scale_TF24 * beta2 * (stem_c / stem_b.value) * pow(psi_stem / stem_b, stem_c - 1.0) *
          pow(1.0 - f, beta2 - 1.0) / leaf_specific_conductance_max_;
 }
 
@@ -1749,7 +1810,7 @@ inline double Leaf::g1_eff() const {
   return chi * std::sqrt(atm_vpd_) / (1.0 - chi);
 }
 
-inline double Leaf::hydraulic_cost_TF(double psi_stem) {
+inline double Leaf::hydraulic_cost_TF(AbsPsi psi_stem) {
 
   hydraulic_cost_ = cost_scale_TF24 * pow((1 - proportion_of_conductivity(psi_stem)), beta2);
 
@@ -1758,7 +1819,7 @@ return hydraulic_cost_;
 
 // Profit functions
 
-inline double Leaf::profit_psi_stem_Sperry(double psi_stem, double psi_upstream) {
+inline double Leaf::profit_psi_stem_Sperry(AbsPsi psi_stem, AbsPsi psi_upstream) {
 
 set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
 
@@ -1769,7 +1830,7 @@ set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
 }
 
 
-inline double Leaf::profit_psi_stem_TF(double psi_stem, double psi_upstream) {
+inline double Leaf::profit_psi_stem_TF(AbsPsi psi_stem, AbsPsi psi_upstream) {
 set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
 
 double benefit_ = assim_colimited_;
@@ -1792,7 +1853,7 @@ inline void Leaf::optimise_psi_stem_Sperry() {
   opt_psi_stem_ = supply_psi_soil_scalar();
 
 
-  if ((PPFD_ < 1.5e-8 )| (supply_psi_soil_scalar() > psi_crit)){
+  if ((PPFD_ < 1.5e-8 )| (supply_psi_soil_scalar() > psi_crit.value)){
     profit_ = 0;
     transpiration_ = 0;
     stom_cond_CO2_ = 0;
@@ -1805,7 +1866,7 @@ inline void Leaf::optimise_psi_stem_Sperry() {
     double neg_profit_opt = 0.0;
     opt_psi_stem_ = util::brent_fmin(
         [&](double psi_stem) { return -profit_psi_stem_Sperry(psi_stem, supply_psi_soil_scalar()); },
-        supply_psi_soil_scalar(), psi_crit, GSS_tol_abs, &neg_profit_opt);
+        supply_psi_soil_scalar(), psi_crit.value, GSS_tol_abs, &neg_profit_opt);
     profit_ = -neg_profit_opt;
 
   }
@@ -1819,7 +1880,7 @@ inline void Leaf::optimise_psi_stem_TF() {
 
   opt_psi_stem_ = supply_psi_soil_scalar();
 
-  if (supply_psi_soil_scalar() > psi_crit){
+  if (supply_psi_soil_scalar() > psi_crit.value){
     profit_ = profit_psi_stem_TF(supply_psi_soil_scalar(), supply_psi_soil_scalar());
     return;
   }
@@ -1829,7 +1890,7 @@ inline void Leaf::optimise_psi_stem_TF() {
     double neg_profit_opt = 0.0;
     opt_psi_stem_ = util::brent_fmin(
         [&](double psi_stem) { return -profit_psi_stem_TF(psi_stem, supply_psi_soil_scalar()); },
-        supply_psi_soil_scalar(), psi_crit, GSS_tol_abs, &neg_profit_opt);
+        supply_psi_soil_scalar(), psi_crit.value, GSS_tol_abs, &neg_profit_opt);
     profit_ = -neg_profit_opt;
 
     return;

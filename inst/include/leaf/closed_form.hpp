@@ -83,18 +83,25 @@ inline double transpiration_from_assim(const Leaf &l, double assim, double ci) {
          ((l.ca_ - ci) * kg_to_mol_h2o);
 }
 
+// NOTE ON stem_b.value BELOW. This solver uses b as a bare SCALE -- inside a sqrt,
+// inside a pow's base, and as a divisor -- not only as the tension ratio psi/b. Those
+// uses need b's numeric value and need it positive, which is why b is typed AbsPsi (a
+// tension) and NOT as a signed potential: signing it would put a negative under a
+// square root at :197 and under a fractional power at :158. See the retraction in
+// leaf/potential.hpp.
+//
 // d(lambda)/d(psi), analytic. Differentiates Leaf::lambda_TF24, whose form is
 //     lambda = K * (1-f)^(beta2-1) * p^(stem_c-1),  p = psi/stem_b,  f = exp(-p^stem_c)
 inline double dlambda_TF24(const Leaf &l, double psi) {
   const double K =
-      l.cost_scale_TF24 * l.beta2 * l.stem_c / (l.stem_b * l.leaf_specific_conductance_max_);
-  const double p = psi / l.stem_b;
+      l.cost_scale_TF24 * l.beta2 * l.stem_c / (l.stem_b.value * l.leaf_specific_conductance_max_);
+  const double p = AbsPsi{psi} / l.stem_b;
   const double f = std::exp(-std::pow(p, l.stem_c));
   return K * std::pow(p, l.stem_c - 2.0) *
          ((l.beta2 - 1.0) * std::pow(1.0 - f, l.beta2 - 2.0) * f * l.stem_c *
               std::pow(p, l.stem_c) +
           std::pow(1.0 - f, l.beta2 - 1.0) * (l.stem_c - 1.0)) /
-         l.stem_b;
+         l.stem_b.value;
 }
 
 // dA/dci for the colimitation quadratic, analytic. Replaces the central
@@ -146,7 +153,7 @@ inline Solution solve(Leaf &l, int newton_steps = 1) {
   const double kmax = l.leaf_specific_conductance_max_;
   const double sqrt_D = std::sqrt(l.atm_vpd_);
   const double Q = uso_group(l);
-  const double K_lambda = l.cost_scale_TF24 * l.beta2 * l.stem_c / (l.stem_b * kmax);
+  const double K_lambda = l.cost_scale_TF24 * l.beta2 * l.stem_c / (l.stem_b.value * kmax);
   const double Xi = std::sqrt(Q / K_lambda);
   const double n = l.stem_c * l.beta2 - 1.0;
   const double electron_transport = l.electron_transport();
@@ -155,11 +162,11 @@ inline Solution solve(Leaf &l, int newton_steps = 1) {
   const double assim_wet = l.assim_colimited(l.ca_ * (1.0 - 1e-9));
   const double kappa = H2O_CO2_stom_diff_ratio * 1e-3 * assim_wet /
                        (l.ca_ * kg_to_mol_h2o);
-  double p = std::pow(kappa * sqrt_D * Xi / (kmax * l.stem_b), 2.0 / (n + 2.0));
+  double p = std::pow(kappa * sqrt_D * Xi / (kmax * l.stem_b.value), 2.0 / (n + 2.0));
 
   for (int k = 0; k < newton_steps; ++k) {
-    const double psi = p * l.stem_b;
-    if (!(psi > 0.0) || psi >= l.psi_crit) {
+    const double psi = p * l.stem_b.value;
+    if (!(psi > 0.0) || psi >= l.psi_crit.value) {
       break;
     }
     const double lambda = l.lambda_TF24(psi);
@@ -181,11 +188,11 @@ inline Solution solve(Leaf &l, int newton_steps = 1) {
       break;
     }
     double psi_next = psi - R / dR;
-    psi_next = std::max(1e-6, std::min(psi_next, l.psi_crit * (1.0 - 1e-9)));
-    p = psi_next / l.stem_b;
+    psi_next = std::max(1e-6, std::min(psi_next, l.psi_crit.value * (1.0 - 1e-9)));
+    p = AbsPsi{psi_next} / l.stem_b;
   }
 
-  return evaluate_at(l, p * l.stem_b, Q, sqrt_D);
+  return evaluate_at(l, p * l.stem_b.value, Q, sqrt_D);
 }
 
 // beta2 == 1/stem_c. The psi dependence cancels out of lambda entirely, so xi is
@@ -194,7 +201,7 @@ inline Solution solve(Leaf &l, int newton_steps = 1) {
 inline Solution solve_exact_beta2(Leaf &l) {
   const double sqrt_D = std::sqrt(l.atm_vpd_);
   const double Q = uso_group(l);
-  const double xi = std::sqrt(Q * l.stem_b * l.leaf_specific_conductance_max_ /
+  const double xi = std::sqrt(Q * l.stem_b.value * l.leaf_specific_conductance_max_ /
                               (l.cost_scale_TF24 * l.beta2 * l.stem_c));
   const double ci = l.ca_ * xi / (xi + sqrt_D);
   const double assim = l.assim_colimited(ci);

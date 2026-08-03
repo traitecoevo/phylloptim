@@ -177,7 +177,8 @@ class MultiLayerRoots {
 public:
   // --- root vulnerability trait pair (hazard 1: NOT the stem's b/c) ---------
   double root_c = 2.680147;       // unitless
-  double root_b = 3.898245;       // -MPa
+  // The characteristic TENSION for the ROOT curve (hazard 1: not the stem's).
+  AbsPsi root_b{3.898245};        // -MPa
   // The driest collar potential this supply path can be asked about. A published
   // trait, quoted as a magnitude, so it is a AbsPsi -- which is what stops it
   // being compared against a signed potential (plant #584; see potential.hpp).
@@ -260,13 +261,13 @@ public:
   // exp(pow(...)) inside uptake().
   void setup_vulnerability(double resolution) {
     std::vector<double> x_psi_root, y_integral;
-    cumulative_vulnerability_integral(root_b, root_c, resolution, x_psi_root,
+    cumulative_vulnerability_integral(root_b.value, root_c, resolution, x_psi_root,
                                       y_integral);
 
     // f_r conductivity knots on the same grid. f_r(0) = exp(-pow(0,root_c)) = 1.
     std::vector<double> y_f_r(x_psi_root.size());
     for (size_t i = 0; i < x_psi_root.size(); ++i) {
-      y_f_r[i] = exp(-pow(x_psi_root[i] / root_b, root_c));
+      y_f_r[i] = exp(-pow(AbsPsi{x_psi_root[i]} / root_b, root_c));
     }
     root_vuln_from_psi.init(x_psi_root, y_f_r);
     root_vuln_from_psi.set_extrapolate(true); // clamp to last value beyond range
