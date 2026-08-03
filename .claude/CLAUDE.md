@@ -27,6 +27,8 @@ inst/include/leaf/
   single_potential.hpp         SinglePotential: the other supply path — one ψ_soil
                                and a constant series resistance
   vulnerability.hpp            the Weibull cumulative-integral builder, shared by both
+  potential.hpp                Potential (signed) / Suction (magnitude) — the water
+                               potential sign convention in the type (hazard 2)
   constants.hpp                physical constants as inline constexpr
   closed_form.hpp              fast approximate solver, default off, not wired in
   quadrature.hpp               adaptive Simpson (replaced plant's compiled QAG)
@@ -197,12 +199,47 @@ refuse.
    parameters for the stem cost and carried λ ∝ ψ^3.02 into a manuscript draft where
    it should have been ψ^0.64. Never leave an unmarked default for a parameter that
    exists in two versions.
-2. **Signed versus magnitude water potentials.** `psi_soil_` holds positive
-   magnitudes; `psi_soil_inverted_` holds signed (negative) potentials. The
-   convention is held together by comments, not types (issue #8). `dE_from_soil_dpsi_collar`
-   differentiates with respect to the *signed* potential, so it returns a negative
-   number where a conductance is wanted — that one produced a negative λ before it
-   was caught. plant #584 is a dead clamp from the same class of slip.
+2. **Signed versus magnitude water potentials — now in the type, on the supply
+   side only.** `leaf/potential.hpp` defines `Potential` (signed, ≤ 0) and
+   `Suction` (positive magnitude), and the soil → root-collar path is threaded
+   with them: `psi_soil_inverted_` is a `std::vector<Potential>`, and
+   `begin_solve` / `uptake` / `uptake_at` / `duptake_dpsi` take `Potential`.
+   Mixing the two does not compile, and the tests assert that with the detection
+   idiom rather than a comment.
+
+   **Three boundaries to know, because the type stops at each of them:**
+
+   - **The demand side is plain `double` magnitudes on purpose.**
+     `transpiration`, `psi_stem_to_ci`, `hydraulic_cost_TF`,
+     `proportion_of_conductivity`, `profit_*`, `opt_psi_stem_` and `psi_crit`
+     have one convention and no recorded incident. Don't "finish the job" here
+     without a reason; it buys `.value` across the whole photosynthesis core.
+   - **The R boundary is `double`.** plant binds `psi_soil_`,
+     `root_collar_psi_`, `opt_psi_stem_`, `psi_stem` as `access: field, type:
+     double` (hazard 7), so those members cannot be retyped, and teaching Rcpp
+     these types would reintroduce hazard 9. Every plant-bound field and method
+     keeps its signature behind a thin adapter — including `prepare_collar_solve`
+     and `profit_at_collar_psi`, which plant calls from C++ rather than R. So
+     nothing here needs a coupled plant change.
+   - **`dE_from_soil_dpsi_collar` is NOT covered.** It differentiates with
+     respect to the *signed* potential, so it returns a negative number where a
+     conductance is wanted — that produced a negative λ before it was caught.
+     A derivative is neither a `Potential` nor a `Suction`, so
+     `marginal_cost_water_multilayer` still carries the negation and the comment.
+     Closing it needs a conductance type on the supply contract.
+
+   ⚠️ **plant #584 is LIVE here and deliberately left that way.** The clamp in
+   `prepare_collar_solve` — `std::max(-root_crit, -root_psi_crit)` — compares a
+   magnitude against a signed potential, so it can never bind. Reproduced at
+   `psi_soil = 5.90` with `psi_crit = 5.91988`: the bracket runs to 5.906974,
+   past `root_psi_crit = 5.870283`. Fixing it moves results, so it is annotated
+   in place with the intended line quoted, and filed as its own issue. It now
+   only compiles by reaching past the types into `.value`, which is the point.
+   Don't tidy that line without the blast-radius measurement.
+
+   One more thing the conversion surfaced and did not change: `E_column` parks a
+   *magnitude* in `root_collar_psi_` mid-solve as scratch, in a member documented
+   as signed in every branch. Nothing reads it before the next write.
 3. **Argmax smoothness is a hard constraint, not a preference.** plant chose
    golden-section over Brent because its argmax varies *smoothly* with inputs, and
    the demographic growth-rate gradient depends on that. Any change to the solver

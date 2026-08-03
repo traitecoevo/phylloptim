@@ -12,7 +12,7 @@ this file keeps the reasoning behind each one.
 | **1** | Validated against plant. The swap is bit-identical: plant's full suite 0 fail / 0 error on both builds, `test-leaf.r` 218 expectations, SCM regression bit-identical across 78/78 nodes. Harnesses live in `tests/validate/`. **And the 1 ULP is resolved** (#21): there was no offending function — all 2352 finite values are bit-identical to plant. The 585 decomposed exactly into 345 from R's decimal parser (not correctly rounded, ~18% of inputs off by 1 ULP) and 240 from the shutdown NA sentinel, which #15 has now fixed. The disagreement was in the measuring instrument. |
 | **8** | λ and `g1_eff` reported as outputs, λ verified against finite-difference `dA/dE`, and the multi-layer λ identity implemented and verified. |
 | **9** | Closed-form fast path (`leaf/closed_form.hpp`): 6.3× with one Newton step, 27× for the explicit β₂=1/c form. Default off; accuracy characterised. |
-| **10a** | Renames done: `stem_b`/`stem_c`, `cost_scale_TF24`, `root_carbon_per_leaf_area`. `R` and `n` gone from the public namespace. |
+| **10a** | Renames done: `stem_b`/`stem_c`, `cost_scale_TF24`, `root_carbon_per_leaf_area`. `R` and `n` gone from the public namespace. **And the tail is done** (#8): the signed-vs-magnitude convention is in the type (`leaf/potential.hpp`), bit-identical, and it immediately found plant #584 live in this package — see 10a. |
 | **10b** | Eight dead entities removed; `set_physiology` 14 → 10 arguments; the leaf is now purely intensive; 13 temperature-response parameters made settable. |
 | **10c** | The hidden hard-coded atmospheric pressure fixed (`umol_per_mol_to_Pa` derived from `atm_kpa_`). |
 | **15** | CI: gcc/clang × Linux/macOS, no R needed, plus `R CMD check` and rendered C++ API docs (#20). And a golden-file regression baseline over 288 operating points, compared bit-exactly on macOS/arm64 and with `--cross-platform` elsewhere — see the note under item 1 on why bit-exact cannot be a cross-platform gate, and on the flat-optimum amplification that sets the tolerances. |
@@ -78,7 +78,6 @@ code rather than of the merge:
 | [#5](https://github.com/traitecoevo/leaf_cpp/issues/5) | 6 | R interface (RcppR6) | absorbs the `Control` struct and the dropped-field cleanup |
 | [#6](https://github.com/traitecoevo/leaf_cpp/issues/6) | 12 | Calibration vignette, then inversion | needs #4 for trait gradients |
 | [#7](https://github.com/traitecoevo/leaf_cpp/issues/7) | 13 | Energy balance, full cut | leaf-to-air VPD is the cheap win; free convection is not worth it |
-| [#8](https://github.com/traitecoevo/leaf_cpp/issues/8) | 10a | Signed-vs-magnitude potentials in the type | design question, not a rename |
 | [#9](https://github.com/traitecoevo/leaf_cpp/issues/9) | 3 | Finish the plant-side integration | validated already; decisions + one unchecked consumer. Now also carries **landing the shutdown fix in plant** (plant #578/#577), which is still open there with no fix written |
 | [#1](https://github.com/traitecoevo/leaf_cpp/issues/1) | 14 | Decide the package name | publication framing is item 14 below |
 
@@ -1210,13 +1209,48 @@ extraction.
 - **`mass_root_prop` → `root_carbon_per_layer`.** It is not a proportion of mass.
 - **`g1_TF24` → `cost_scale_TF24`.** It is not a g1 and invites confusion with
   Medlyn's g1 — doubly so once item 8 starts reporting an actual `g1_eff`.
-- **Signed-versus-magnitude water potentials belong in the type, not a comment.**
-  The convention is currently held together by a comment block above
-  `E_from_Soil_to_Root_Collar` and by suffix conventions
-  (`psi_soil_` positive, `psi_soil_inverted_` negative). A one-line strong type —
-  or at minimum a consistent naming rule enforced in review — removes a whole
-  class of sign error. This code already has form here: plant #584 is a dead
-  `std::max` clamp caused by a sign slip.
+- **Signed-versus-magnitude water potentials are now in the type — DONE (#8).**
+  `leaf/potential.hpp` defines `Potential` (signed, ≤ 0) and `Suction` (positive
+  magnitude), and the soil → root-collar supply path is threaded with them.
+  Bit-identical: 288/288 golden points, 158 checks, and the `bench_solve` binaries
+  built before and after the change are **byte-identical**, so the types cost
+  literally nothing.
+
+  **What decided it, because the issue framed this as a design question worth
+  weighing rather than an obvious win.** The argument against was that this defect
+  class "has so far been caught each time". That premise turned out to be false:
+  **plant #584 is live in this package.** The clamp in `prepare_collar_solve`,
+  `std::max(-root_crit, -root_psi_crit)`, compares a magnitude against a signed
+  potential and so can never bind. Reproduced at `psi_soil = 5.90` with
+  `psi_crit = 5.91988`: the bracket runs to 5.906974, past
+  `root_psi_crit = 5.870283`, handing the golden-section search a dry endpoint at
+  which root conductivity is below the 5% that parameter exists to exclude. A
+  comment convention had already failed to stop it once, in a file whose comments
+  are unusually careful — which is about as direct an answer to "is the type worth
+  it" as this repo is going to get.
+
+  The defect is **preserved, not fixed**: fixing it moves results and this change's
+  warrant was that the golden file does not. It is annotated in place with the
+  intended line quoted, and only compiles by reaching past the types into
+  `.value`. Filed as its own issue with the reproduction.
+
+  **Three boundaries, each deliberate.** The demand side (`transpiration`,
+  `psi_stem_to_ci`, `hydraulic_cost_TF`, `opt_psi_stem_`, `psi_crit`) stays plain
+  `double` magnitudes — one convention, no incidents, and typing it would put
+  `.value` across the whole photosynthesis core. The R boundary stays `double`,
+  because plant binds four of these members as `access: field, type: double` and
+  teaching Rcpp the types would undo hazard 9; adapters cover it, including the two
+  entry points plant calls from C++ rather than R, so **this needed no coupled plant
+  change**. And the generic solvers (`uniroot_smooth`, `golden_section_max`) stay
+  convention-agnostic, with the wrap/unwrap at the model's edge.
+
+  **What it does not cover, since the issue cited it as motivation:** the negative
+  multi-layer λ. That wrong sign was on a *derivative*, `dE_up/dpsi`, which is
+  neither type, so `marginal_cost_water_multilayer` still relies on a comment.
+  Closing it needs a conductance type on the supply contract's derivative method —
+  worth doing with #3, which is where that contract is next opened.
+
+  Templated on the scalar (`PotentialT<T>`) so **#4 does not have to undo it**.
 - **`R` and `n` are already gone** from the public namespace (see item 1). Worth
   recording *why* it mattered: the analytical project's
   `tf24_closed_form_bench.cpp` declares locals `const double n = l.c*l.beta2 - 1.0`

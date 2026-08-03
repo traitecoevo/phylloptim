@@ -25,6 +25,7 @@
 #include <leaf/constants.hpp>
 #include <leaf/leaf_model.hpp>
 #include <leaf/optimize.hpp>
+#include <leaf/potential.hpp>
 #include <leaf/quadrature.hpp>
 #include <leaf/roots.hpp>
 #include <leaf/single_potential.hpp>
