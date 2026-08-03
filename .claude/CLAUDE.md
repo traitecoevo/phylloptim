@@ -266,17 +266,35 @@ refuse.
    Check `git grep 'access: field' inst/RcppR6_classes.yml` in plant before
    moving anything public, and land the two changes together — plant tracks this
    package's **master** via `Remotes:`, so a merge here is what breaks it.
-8. **`soil_consumption_` is not cleared between solves (plant #577), and it is
-   still live here.** `set_physiology` calls
-   `soil_consumption_.resize(supply_n_layers(), 0.0)`, but `resize`'s fill applies
-   only to newly added elements, and the uptake loop writes only up to
-   `max_soil_layer` — the deepest *rooted* layer, not the deepest layer. So a solve
-   with fewer rooted layers than the last one leaves the tail holding the previous
-   plant's values, and plant bills them to the patch water balance. Reproduced
-   here: a 3-layer tree then a 1-layer seedling on the same `Leaf` gives the
-   seedling bit-identical layers 1–2. **The shutdown fix does not cover this** —
-   that one runs only on the shutdown path, this leaks on every path. One-word fix
-   (`assign`), but it changes results; see PLAN item 2.
+8. **Every path out of the solve must write its own rates — three did not, and all
+   three are now fixed.** `Leaf` is a value member that plant reuses for every
+   individual in a patch, so any output a branch declines to write silently becomes
+   the *previous plant's* value. The three that had this defect were fixed
+   separately, each with its own measurement:
+
+   - `set_physiology` cleared `soil_consumption_` with `.resize`, whose fill reaches
+     only newly-added elements, while the uptake loop writes only up to
+     `max_soil_layer` — the deepest *rooted* layer, not the deepest soil layer. A
+     shallow-rooted plant therefore inherited the deep layers' uptake, and plant
+     bills that to the patch water balance. Now `.assign` (plant #577, fixed in
+     plant by #585).
+   - the `assim_max_ < 0` exit set `profit_` but left `transpiration_`,
+     `stom_cond_CO2_` and `assim_colimited_` alone, which made `profit_ ==
+     assim_colimited_ - hydraulic_cost_TF()` false in that one branch (7.79 vs
+     -1.47 when measured).
+   - `dprofit_droot_collar_psi` read soil potentials a solve had to have seated, so
+     calling it without one **segfaults**; and it missed the reversed-gradient case
+     (`psi >= psi_stem`), where `psi_stem_to_ci` either throws or returns a gradient
+     built on a negative conductance.
+
+   ⚠️ **The golden file cannot see any of this, and that is by design.**
+   `test_golden` constructs a fresh `Leaf` per grid point (see its header), so
+   `soil_consumption_` is always empty when `set_physiology` runs; the grid's
+   minimum `assim_max_` is 3.71 so it never reaches that exit; and no golden column
+   comes from the gradient. All three fixes are golden-bit-identical. **A
+   bit-identical golden run is not evidence about a stale-state bug** — reach for a
+   test that reuses one `Leaf`, and check whether the grid reaches the branch at all
+   before reading its silence as a result.
 9. **No Rcpp in the leaf, and none in the include graph either.** `util.hpp` throws
    `std::runtime_error` instead of `Rcpp::stop`, and uses a quiet NaN instead of
    `NA_REAL`. odelia's `ode_util.hpp` was the last R touchpoint; it was fixed upstream

@@ -1473,13 +1473,14 @@ inline double Leaf::assim_electron_limited(double ci_) {
   ((ci_ - gamma_ * umol_per_mol_to_Pa_) / (ci_ + 2 * gamma_ * umol_per_mol_to_Pa_));
 }
 
-// returns co-limited assimilation umol m^-2 s^-1
+// returns co-limited assimilation umol m^-2 s^-1, NET of dark respiration (the
+// trailing `- R_d_`), so gross assimilation is this value + R_d_. The comment
+// that used to sit on the return statement said the opposite.
 inline double Leaf::assim_colimited(double ci_) {
-  
+
   double assim_rubisco_limited_ = assim_rubisco_limited(ci_) ;
   double assim_electron_limited_ = assim_electron_limited(ci_);
 
-  // no dark respiration included at the moment
   return (assim_rubisco_limited_ + assim_electron_limited_ - sqrt(pow(assim_rubisco_limited_ + assim_electron_limited_, 2) - 4 * curv_fact_colim * assim_rubisco_limited_ * assim_electron_limited_)) /
              (2 * curv_fact_colim)- R_d_;
 
