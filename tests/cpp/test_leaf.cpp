@@ -355,7 +355,7 @@ void test_negative_assim_exit_writes_its_own_rates() {
        "net assimilation is -R_d, not the bright solve's");
   // The invariant the fix buys: profit_ == assim_colimited_ - hydraulic cost in
   // every branch. It held numerically to the last bit when measured.
-  near(l.assim_colimited_ - l.hydraulic_cost_TF(-l.root_collar_psi_), l.profit_,
+  near(l.assim_colimited_ - l.hydraulic_cost_TF(l.opt_root_psi_), l.profit_,
        1e-14, "profit is consistent with assimilation and the hydraulic cost");
 
   leaf::Leaf fresh;
@@ -376,7 +376,7 @@ void test_analytic_gradient_matches_finite_difference() {
   Drivers d;
   leaf::Leaf l = make_leaf(d, {2.0}, {1.0});
   l.find_root_collar_psi();
-  const double p0 = l.root_collar_psi_ < 0 ? -l.root_collar_psi_ : l.root_collar_psi_;
+  const double p0 = l.opt_root_psi_;
   const double target = std::max(2.2, std::min(p0, l.psi_crit - 0.5));
   const double eps = 1e-5;
   const double analytic = l.dprofit_droot_collar_psi(target);
@@ -421,12 +421,79 @@ void test_gradient_is_zero_in_reversed_gradient_state() {
   l.find_root_collar_psi();
   for (double target : {1.0, 3.0, 5.5, 5.9}) {
     const double psi_stem = l.find_psi_stem_from_psi_root(
-        -target, l.roots_.psi_soil_inverted_);
+        target, l.roots_.psi_soil_);
     ok(target >= psi_stem,
        "the target is in the reversed-gradient state at " + std::to_string(target));
     ok(l.dprofit_droot_collar_psi(target) == 0.0,
        "the gradient is exactly zero at " + std::to_string(target));
   }
+}
+
+// #25's invariant, asserted rather than documented: every psi is a positive
+// magnitude, so the soil->collar derivative is a CONDUCTANCE. Under the old signed
+// convention this came back negative and had to be negated at the one call site
+// that wanted a conductance -- the omission of that negation is the bug that
+// motivated #8, and it is now unrepresentable.
+void test_soil_conductance_is_positive() {
+  printf("dE_up/d(collar suction) is a positive conductance\n");
+  Drivers d;
+  for (int layers : {1, 3, 5}) {
+    std::vector<double> ps(layers), depth(layers);
+    for (int i = 0; i < layers; ++i) { ps[i] = 1.0 + 0.25 * i; depth[i] = 1.0 * (i + 1); }
+    leaf::Leaf l = make_leaf(d, ps, depth);
+    l.find_root_collar_psi();
+    const double S = l.dE_from_soil_dpsi_collar(l.opt_root_psi_, l.roots_.psi_soil_);
+    ok(std::isfinite(S) && S > 0.0,
+       "conductance is finite and positive at " + std::to_string(layers) + " layers");
+    // It really is dE/dT: a central difference on the uptake must agree.
+    const double h = 1e-7;
+    double up = 0.0, dn = 0.0;
+    std::vector<double> buf(l.soil_consumption_.size(), 0.0);
+    l.roots_.uptake_at(l.opt_root_psi_ + h, l.roots_.psi_soil_, buf, up);
+    l.roots_.uptake_at(l.opt_root_psi_ - h, l.roots_.psi_soil_, buf, dn);
+    near(S, (up - dn) / (2.0 * h), 1e-5,
+         "conductance matches a central difference at " + std::to_string(layers) + " layers");
+  }
+}
+
+// The convention is now checkable, so check that it is checked: a caller still
+// holding the pre-#25 signed vector must fail loudly, not run.
+void test_signed_potentials_are_rejected() {
+  printf("signed potentials are rejected at the input boundary\n");
+  Drivers d;
+  leaf::Leaf l;
+  l.setup_transpiration(100);
+  l.setup_root_vulnerability(100);
+  bool threw = false;
+  try {
+    l.set_physiology({1.0 / d.area_leaf}, d.PPFD, {-2.0}, {1.0},
+                     d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                     d.atm_o2_kpa, d.atm_kpa);
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(threw, "set_physiology rejects a negative psi_soil");
+
+  leaf::Leaf ok_leaf = make_leaf(d, {2.0}, {1.0});
+  ok_leaf.find_root_collar_psi();
+  threw = false;
+  try {
+    ok_leaf.E_from_Soil_to_Root_Collar(2.5, {-2.0});
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(threw, "E_from_Soil_to_Root_Collar rejects a signed soil vector");
+
+  // The constructor's half of the invariant.
+  threw = false;
+  try {
+    leaf::Leaf bad(100, 2.04, -3.0, 5.0, 2.65, 1.29, 1.9, 1, 167 * 100, 0.3,
+                   0.7, 0.99, 1e-8, 100, 1e-6, 1000, 46.32995, 3.4e3, 9.4e4);
+    static_cast<void>(bad);
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(threw, "the constructor rejects a negative stem_b");
 }
 
 void test_lambda_equals_dA_dE_single_layer() {
@@ -473,7 +540,7 @@ void test_multilayer_lambda_identity() {
     const double single = l.marginal_cost_water();
     const double multi = l.marginal_cost_water_multilayer();
 
-    const double target = -l.root_collar_psi_;
+    const double target = l.opt_root_psi_;
     const double eps = 1e-6;
     l.evaluate_root_collar_psi(target + eps);
     const double A1 = l.assim_colimited_, E1 = l.transpiration_;
@@ -678,13 +745,13 @@ void test_leaf_on_single_potential() {
   ok(std::isfinite(l.opt_psi_stem_), "and a finite stem potential");
   ok(l.opt_psi_stem_ > 0.0 && l.opt_psi_stem_ <= l.psi_crit,
      "stem potential is a positive magnitude within psi_crit");
-  ok(l.root_collar_psi_ <= 0.0, "collar potential is stored signed");
+  ok(l.opt_root_psi_ >= 0.0, "collar potential is stored as a positive magnitude");
   ok(l.assim_colimited_ > 0.0, "the leaf assimilates");
   ok(l.soil_consumption_.size() == 1u,
      "the consumption buffer is sized to one layer, not the caller's vector");
 
   // The collar must sit between the soil and the stem: water runs downhill.
-  const double collar_mag = -l.root_collar_psi_;
+  const double collar_mag = l.opt_root_psi_;
   ok(collar_mag >= psi_soil[0] - 1e-9 && collar_mag <= l.opt_psi_stem_ + 1e-9,
      "collar potential lies between soil and stem");
 
@@ -728,36 +795,36 @@ void test_single_potential() {
   // resistance_ is PER UNIT LEAF AREA, like every other input to the leaf.
   sp.resistance_ = 1.0e3;
 
-  // begin_solve flips to the signed convention and reports the only potential.
-  near(sp.begin_solve(), -1.5, 1e-14, "begin_solve returns the signed potential");
+  // begin_solve reports the only suction; there is nothing to flip (#25).
+  near(sp.begin_solve(), 1.5, 1e-14, "begin_solve returns the soil suction");
   ok(sp.n_layers() == 1, "single potential writes exactly one layer");
 
-  // Ohm's law, and the sign that matters: a collar drier than the soil draws
-  // water UP (positive uptake).
+  // Ohm's law, and the sign that matters: a collar drier than the soil -- a
+  // LARGER suction now -- draws water UP (positive uptake).
   std::vector<double> consumption(1, 0.0);
   double E_up = 0.0;
-  sp.uptake(-2.5, consumption, E_up);
+  sp.uptake(2.5, consumption, E_up);
   ok(E_up > 0.0, "a collar drier than the soil draws water up");
-  near(E_up, (-1.5 - -2.5) / sp.resistance_ * leaf::kg_per_mol_h2o,
+  near(E_up, (2.5 - 1.5) / sp.resistance_ * leaf::kg_per_mol_h2o,
        1e-14, "uptake is the Ohm's-law flux");
   ok(consumption[0] > 0.0, "per-layer consumption is filled");
 
   // A collar WETTER than the soil pushes water back into it. Losing this sign is
   // how hydraulic redistribution silently becomes extra uptake.
-  sp.uptake(-0.5, consumption, E_up);
+  sp.uptake(0.5, consumption, E_up);
   ok(E_up < 0.0, "a collar wetter than the soil loses water to it");
 
   // The analytic derivative must match a central difference on uptake, and stay
   // finite everywhere -- unlike MultiLayerRoots there are no branch kinks, so it
   // never asks the caller for a finite-difference fallback.
-  const double h = 1e-6, p0 = -2.5;
+  const double h = 1e-6, p0 = 2.5;
   double up = 0.0, dn = 0.0;
   sp.uptake(p0 + h, consumption, up);
   sp.uptake(p0 - h, consumption, dn);
   const double fd = (up - dn) / (2.0 * h);
   near(sp.duptake_dpsi(), fd, 1e-8, "analytic duptake_dpsi matches FD");
-  ok(sp.duptake_dpsi() < 0.0,
-     "duptake_dpsi is negative: uptake rises as the collar gets more negative");
+  ok(sp.duptake_dpsi() > 0.0,
+     "duptake_dpsi is a positive conductance: uptake rises as the collar pulls harder");
 
   // A zero resistance would be an infinite flux; it is rejected, not returned.
   leaf::SinglePotential bad;
@@ -765,7 +832,7 @@ void test_single_potential() {
   bad.begin_solve();
   bool threw = false;
   try {
-    bad.uptake(-2.0, consumption, E_up);
+    bad.uptake(2.0, consumption, E_up);
   } catch (const std::exception &) {
     threw = true;
   }
@@ -922,6 +989,8 @@ int main() {
   test_analytic_gradient_matches_finite_difference();
   test_gradient_needs_no_prior_solve();
   test_gradient_is_zero_in_reversed_gradient_state();
+  test_soil_conductance_is_positive();
+  test_signed_potentials_are_rejected();
   test_lambda_equals_dA_dE_single_layer();
   test_multilayer_lambda_identity();
   test_g1_eff();

@@ -197,12 +197,47 @@ refuse.
    parameters for the stem cost and carried λ ∝ ψ^3.02 into a manuscript draft where
    it should have been ψ^0.64. Never leave an unmarked default for a parameter that
    exists in two versions.
-2. **Signed versus magnitude water potentials.** `psi_soil_` holds positive
-   magnitudes; `psi_soil_inverted_` holds signed (negative) potentials. The
-   convention is held together by comments, not types (issue #8). `dE_from_soil_dpsi_collar`
-   differentiates with respect to the *signed* potential, so it returns a negative
-   number where a conductance is wanted — that one produced a negative λ before it
-   was caught. plant #584 is a dead clamp from the same class of slip.
+2. **~~Signed versus magnitude water potentials.~~ RESOLVED — there is now ONE
+   representation: every ψ is a positive magnitude in MPa (#25).** The hazard this
+   entry used to describe is gone rather than managed, and the two attempts to
+   manage it are both instructive:
+
+   - The original state was two conventions held together by comments. It cost a
+     negative λ (`dE_from_soil_dpsi_collar` differentiated w.r.t. the *signed*
+     potential and returned a negative where a conductance was wanted) and a dead
+     clamp (plant #584, filed here as #24).
+   - #23 put the two conventions in the type system (`Psi` / `AbsPsi`). It worked
+     and was bit-identical, but it *described* the two-convention model instead of
+     removing one, and it could not cover the derivative — which is neither type.
+     Closed unmerged.
+
+   What replaced them: `psi_soil_`, `psi_crit`, `root_psi_crit`, `stem_b`,
+   `root_b`, `opt_psi_stem_`, `opt_root_psi_`, the collar variable inside the
+   solve, the root-finding brackets and all four spline domains are the same kind
+   of number. Where an equation needs one potential to oppose another the minus
+   sign is **in the equation**: `E_i = (T_collar - T_soil_i - gravity_head*z_i)/r_R`.
+   `psi_soil_inverted_` is deleted.
+
+   Three things follow that are worth knowing:
+
+   - **The invariant is asserted, not documented.** `set_physiology` rejects a
+     negative `psi_soil`, the constructor rejects a non-positive `psi_crit` /
+     `stem_b` / `root_b` / `root_psi_crit`, and the three entry points that take
+     the soil state *as an argument* reject a signed vector. Before #25 there was
+     no global statement to assert, because the answer depended on the variable.
+   - **`dE_from_soil_dpsi_collar` is a positive conductance by construction**, so
+     the negation `marginal_cost_water_multilayer` used to carry is deleted and the
+     negative-λ class of bug is unrepresentable.
+   - **The member is `opt_root_psi_`, not `root_collar_psi_`.** Renamed on purpose:
+     a flipped sign under the old name would let an old analysis silently read the
+     wrong value, where a rename gives a binding error. plant's compensating
+     negations at `tf24f_strategy.cpp:64` and `:117` are deleted, and its
+     `opt_root_psi` aux and state finally agree in sign.
+
+   ⚠️ **Do not call the convention "tension" in code.** It is exact only because
+   there is no osmotic term and gravity is carried separately as `gravity_head`, so
+   ψ here is a pure pressure potential. Add solutes and "tension" is wrong while
+   "magnitude of ψ" stays right.
 3. **Argmax smoothness is a hard constraint, not a preference.** plant chose
    golden-section over Brent because its argmax varies *smoothly* with inputs, and
    the demographic growth-rate gradient depends on that. Any change to the solver
