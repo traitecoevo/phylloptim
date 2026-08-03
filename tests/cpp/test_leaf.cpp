@@ -76,7 +76,7 @@ void test_defaults_are_unset() {
   ok(!std::isfinite(l.ci_), "ci_ starts unset");
   ok(!std::isfinite(l.assim_colimited_), "assim_colimited_ starts unset");
   ok(!std::isfinite(l.opt_psi_stem_), "opt_psi_stem_ starts unset");
-  ok(l.psi_soil_.empty(), "psi_soil_ starts empty");
+  ok(l.roots_.psi_soil_.empty(), "psi_soil_ starts empty");
   ok(l.use_energy_balance_ == false, "energy balance defaults off");
 }
 
@@ -505,6 +505,54 @@ void test_closed_form() {
   ok(sink != 0.0, "timing loop was not optimised away");
 }
 
+// The carbon -> resistance map (root_network_from_carbon) is the one piece of
+// root *architecture* left in this package; the supply solve itself only ever
+// reads r_R_H_min and r_R_V_sum. Testing it directly is the point of having
+// pulled it out of MultiLayerRoots -- and it is why the map stayed here rather
+// than moving to plant, where the golden file could not reach it.
+void test_root_network_from_carbon() {
+  printf("root architecture: carbon -> resistance\n");
+  const double beta_H = 3.4e2, beta_V = 9.4e3, dz = 0.5;
+
+  // Closed form, straight from the documented model: carbon splits 1/3 vertical
+  // : 2/3 horizontal, r_R_H_min = beta_H/c_r_h, r_R_V = beta_V*dz^2/c_r_v.
+  const std::vector<double> carbon{3.0, 6.0, 1.5};
+  const auto n = leaf::root_network_from_carbon(carbon, dz, beta_H, beta_V);
+
+  ok(n.r_R_H_min.size() == 3u, "one resistance per rooted layer");
+  near(n.r_R_H_min[0], beta_H / (3.0 * 2.0 / 3.0), 1e-14, "r_R_H_min layer 0");
+  near(n.r_R_H_min[1], beta_H / (6.0 * 2.0 / 3.0), 1e-14, "r_R_H_min layer 1");
+  near(n.r_R_V[2], beta_V * dz * dz / (1.5 / 3.0), 1e-14, "r_R_V layer 2");
+
+  // r_R_V_sum is a running total down the profile, so it is monotone and its
+  // last entry is the whole column's vertical resistance.
+  ok(n.r_R_V_sum[0] < n.r_R_V_sum[1] && n.r_R_V_sum[1] < n.r_R_V_sum[2],
+     "cumulative vertical resistance increases with depth");
+  near(n.r_R_V_sum[2], n.r_R_V[0] + n.r_R_V[1] + n.r_R_V[2], 1e-14,
+       "r_R_V_sum is the running sum of r_R_V");
+
+  // More carbon is less resistance, in both directions. This is the sign that
+  // matters: getting it backwards would make investment in roots harmful.
+  const auto rich = leaf::root_network_from_carbon({12.0}, dz, beta_H, beta_V);
+  const auto poor = leaf::root_network_from_carbon({3.0}, dz, beta_H, beta_V);
+  ok(rich.r_R_H_min[0] < poor.r_R_H_min[0], "more root carbon -> less horizontal resistance");
+  ok(rich.r_R_V_sum[0] < poor.r_R_V_sum[0], "more root carbon -> less vertical resistance");
+
+  // Trailing zero-carbon layers are dropped, so the hot loop never visits them.
+  const auto trailing = leaf::root_network_from_carbon({3.0, 6.0, 0.0, 0.0}, dz,
+                                                      beta_H, beta_V);
+  ok(trailing.r_R_H_min.size() == 2u, "trailing rootless layers are dropped");
+
+  // Negative carbon is rejected rather than producing a negative resistance.
+  bool threw = false;
+  try {
+    leaf::root_network_from_carbon({3.0, -1.0}, dz, beta_H, beta_V);
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(threw, "negative root carbon throws");
+}
+
 void test_bad_input_throws() {
   printf("input validation\n");
   Drivers d;
@@ -561,6 +609,7 @@ int main() {
   test_g1_eff();
   test_energy_balance_path_runs();
   test_closed_form();
+  test_root_network_from_carbon();
   test_bad_input_throws();
   benchmark();
 

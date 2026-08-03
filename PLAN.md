@@ -32,7 +32,7 @@ where 10a, 10b, 10c and the shutdown fix sit.
 
 | issue | item | what | note |
 |---|---|---|---|
-| [#2](https://github.com/traitecoevo/leaf_cpp/issues/2) | 7b | Extract the soil/root supply path behind an interface | **do first** — #3, the multi-layer λ, and `kmax(h)` all sit on top. Design question settled: **no template needed**, use `std::variant`; measured, see 7b |
+| [#2](https://github.com/traitecoevo/leaf_cpp/issues/2) | 7b | Extract the soil/root supply path behind an interface | **do first** — #3, the multi-layer λ, and `kmax(h)` all sit on top. Design settled: **no template needed**, use `std::variant`; measured, see 7b. **Stage 1 (the pure move) is done**: `leaf/roots.hpp`, golden bit-identical, 1.7% slower. Stages 2–4 remain, and stage 4 (plant's YAML) must land *with* the merge |
 | [#3](https://github.com/traitecoevo/leaf_cpp/issues/3) | 7a | Make λ(state) pluggable | needs #2 |
 | [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11 | Template `Leaf` on its scalar type | deletes the hand-maintained AD replicas |
 | [#5](https://github.com/traitecoevo/leaf_cpp/issues/5) | 6 | R interface (RcppR6) | absorbs the `Control` struct and the dropped-field cleanup |
@@ -685,14 +685,117 @@ mid-refactor if it is not decided up front.
 Each stage is checkable bit-exactly against the golden file, which is the point
 of doing it in stages.
 
-1. **Pure move, no interface.** `MultiLayerRoots` as a plain member held by value,
-   `Leaf` forwarding to it. No variant, no virtual. This is where the cache and
-   pointer-identity risk lives, so it gets a commit to itself. Golden must be
-   bit-identical.
+1. **Pure move, no interface — DONE.** `MultiLayerRoots` as a plain member held by
+   value, `Leaf` forwarding to it. No variant, no virtual. Golden bit-identical
+   over all 288 points, 105/105 unit checks. What the stage actually taught, in
+   descending order of how much it will matter later:
+
+   * **A fifth trap, and the expensive one: moving a public member breaks
+     plant's *generated* RcppR6 glue.** 7b-i's inventory was written against this
+     package only. plant binds eleven of the moved fields with `access: field`,
+     which emits `obj_->psi_soil_` as both getter and setter into
+     `src/RcppR6.cpp`. The fix is one YAML line each
+     (`name_cpp: "roots_.psi_soil_"` — the template pastes it verbatim after
+     `->`, and the R-side name comes from the YAML key so it does not move), plus
+     two lines in `tf24_strategy.cpp` for the `z_soil_mid_` write. Cheap, but it
+     means **stage 4 is not optional and not last**: plant tracks this package's
+     `master` via `Remotes:`, so the merge is what breaks it. Land them together.
+   * **Trap 3 (pointer identity) was survivable, and is now half-defused.**
+     `&psi_soil == &psi_soil_inverted_` keeps its exact meaning after the move,
+     because the member and the test moved together and callers still pass the
+     member by reference. The hot path now goes through `roots_.uptake()`, which
+     takes an explicit cache flag; the identity test survives only in
+     `uptake_at()`, the arbitrary-vector entry point, so that the R-facing
+     `Leaf::E_from_Soil_to_Root_Collar` cannot change behaviour. It disappears
+     for good in stage 2, when `E_column` / `find_root_psi` stop threading a
+     `psi_soil` vector through at all.
+   * **Trap 1 (`soil_consumption_` / `E_up_`) held.** They stayed on `Leaf` and
+     are handed to `uptake` by reference, as recommended. No friction.
+   * **It costs 1.7%** (3.53 vs 3.47 µs/solve, interleaved ×3 at reps=2000),
+     with no dispatch added yet. Not attributed: `uptake_impl` is still
+     out-of-line, as `E_from_Soil_to_Root_Collar` was, but its argument list went
+     from 2 (+`this`) to 6, and it is called ~10³ times per solve. That is the
+     leading candidate, not a measured cause. One hypothesis was tested and
+     **refuted**: accumulating `E_up` into a local to break the assumed aliasing
+     with the `soil_consumption` buffer changed nothing, so it was reverted
+     rather than kept on a story it did not earn.
+   * **Budget note for stage 2.** The +2.6% predicted for `std::variant` was
+     measured against the *old* structure. If it stacks, stage 2 lands around
+     +4.3% total. That is still inside the band the closed-form path (6.3×/27×)
+     dwarfs, but say the number rather than discovering it.
+
+   **Stage 4 was done alongside, not deferred**, for the reason above. plant's
+   `feature/consume-leaf-package` carries the eleven YAML lines and the two in
+   `tf24_strategy.cpp`. Run **with a control**, both from a clean `src/`:
+
+   | build | result |
+   |---|---|
+   | leaf `master` + plant unchanged | 2431 pass / 0 fail / 7 skip |
+   | this branch + plant's YAML change | 2431 pass / 0 fail / 7 skip |
+
+   Identical, including the skip list. Note this is **2431, not the 2364 recorded
+   under item 1** — the control shows that gap is environmental (`NOT_CRAN`
+   unset, so seven tests skip) and predates this work. The earlier figure should
+   not be read as a target to match.
+
+   The control was worth its cost for a second reason: `R CMD INSTALL` does not
+   clean, and a header-only `LinkingTo` dependency changing underneath a stale
+   `.o` moves no `.cpp` timestamp, so nothing rebuilds. That produced a load
+   failure naming a field accessor nobody had touched. Written up under "Build &
+   regeneration workflow" in plant's `agents.md`, with the `nm` check that
+   identifies it.
 2. **Introduce the concept.** `std::variant<MultiLayerRoots, SinglePotential>` and
    the four methods (`begin_solve`, `uptake`, `duptake_dpsi`, plus per-layer
    output access). Golden still bit-identical. Re-run `make bench` — the
    measurement predicts +2.6%, so a larger regression means something else moved.
+
+   **The supply path now takes resistances, not root carbon — done ahead of this
+   stage, because the concept depends on it.** `MultiLayerRoots::set_root_network`
+   takes a `RootNetwork` (`r_R_H_min`, `r_R_V_sum`, plus three diagnostics), and
+   the carbon → resistance map is the free function `root_network_from_carbon`.
+
+   The reason is that the solve reads **exactly two** of those vectors, plus
+   `grav_head_z_` and `max_soil_layer`. Nothing in `uptake` or `duptake_dpsi`
+   touches root carbon, the 1/3 : 2/3 split, `dz`, or either `beta_R_*` — those
+   are inputs to a *root architecture* model that happens to run just before.
+   This resolves a contradiction that had been sitting in this document: **10b
+   lists "the whole root architecture" under "move to the plant side", while 7b
+   above says "do not push it up into plant".** Both are right, and they meet at
+   the resistance interface — the architecture is plant's, the transport solve is
+   ours. It is the same split `leaf_specific_conductance_max` already makes, which
+   10b names as "the model to copy".
+
+   Three things learned doing it:
+
+   * **The map stays in this package, as a free function.** Moving the arithmetic
+     into `tf24_strategy.cpp` would land it beside `root_mass_carbon_scale` and
+     `rooting_depth_max` — already TODO-flagged as magic numbers — and, worse,
+     take it outside the golden file's reach. It is now covered *twice*: through
+     `set_physiology` as before, and by a direct unit test, which is the payoff
+     for it being a free function at all.
+   * **Building a fresh `RootNetwork` per call cost +0.074 µs on
+     `set_physiology`** (0.061 → 0.135 µs, ~+2% of a whole solve): five vector
+     allocations replacing in-place resizes that had been reusing capacity.
+     `std::move` did not help — the allocation, not the copy, was the cost. Fixed
+     by having `MultiLayerRoots` hold the `RootNetwork` and the map fill it in
+     place; the value-returning overload remains for tests and one-off callers.
+     Measured back to 0.056–0.061 µs, and the solve itself unchanged.
+   * **A zero-carbon layer gets `r_R_H_min = 0`** — *zero* horizontal resistance,
+     i.e. infinite soil-to-root conductance where there are no roots. Backwards.
+     Preserved rather than silently changed: it looks unreachable from plant
+     today (`max_soil_layer` truncates at the last non-zero layer, and plant's
+     `Q()` distribution will not give an exact interior zero). Passing resistances
+     from plant forces the question to be answered explicitly, which is a reason
+     to finish the job.
+
+   **The other half is deferred on purpose.** Having *plant* call
+   `root_network_from_carbon` and pass resistances through `set_physiology`
+   changes that signature, and signature changes belong with 10b on
+   `feature/api-cleanup` — which has already reworked `set_physiology` (14 → 10
+   args, `root_carbon_per_leaf_area`). Doing it here as well would give plant two
+   coupled reviews and a guaranteed conflict. When it lands it also takes
+   `beta_R_H`/`beta_R_V` out of `Leaf`'s constructor and makes `soil_depth`
+   droppable, since `dz` and `grav_head_z_` are its only remaining consumers.
 3. **Add `SinglePotential`.** New behaviour and its own tests; golden unaffected
    because it is not the default.
 4. **Check plant.** Build `feature/consume-leaf-package`, confirm the

@@ -18,7 +18,11 @@ Family context lives in [`plant-meta`](https://github.com/traitecoevo/plant-meta
 ```
 inst/include/leaf.hpp          umbrella header — one include is the whole library
 inst/include/leaf/
-  leaf_model.hpp               the Leaf class: ~2000 lines, everything inline
+  leaf_model.hpp               the Leaf class: the gas-exchange core, everything inline
+  roots.hpp                    MultiLayerRoots (the soil → root-collar water supply)
+                               plus root_network_from_carbon, the root architecture
+                               model that feeds it resistances
+  vulnerability.hpp            the Weibull cumulative-integral builder, shared by both
   constants.hpp                physical constants as inline constexpr
   closed_form.hpp              fast approximate solver, default off, not wired in
   quadrature.hpp               adaptive Simpson (replaced plant's compiled QAG)
@@ -45,6 +49,17 @@ make -C tests/cpp GOLDEN_ARGS=--cross-platform
 `bench` reports min-of-N over the golden grid. Use `reps=2000` (the default)
 before believing a small difference: reproducibility is ±0.01 µs there but ±0.5 µs
 at `reps=40`, which is wide enough to invent or hide a few-percent effect.
+
+⚠️ **The ±0.01 µs is *within* one process. Between processes it is ~±0.1 µs, so
+A/B by running one build and then the other is not good enough.** Measured while
+sizing issue #2 stage 1: one sequential pair said the refactor was 4% *faster*;
+interleaving the two binaries three times each said it was 1.7% slower, which is
+what held up. Build both, keep both, and alternate:
+
+```sh
+cp bench_solve bench_before      # ...switch branches, rebuild...
+for i in 1 2 3; do ./bench_solve | tail -1; ./bench_before | tail -1; done
+```
 
 No R needed. Dependency headers are found via `Rscript` if R is installed, else a
 sibling `odelia/` checkout and Homebrew Boost. Override with
@@ -121,8 +136,10 @@ the failure to the platform the file came from.
 ## Branches
 
 - **`master`** — stays a drop-in replacement for plant's own leaf. Validated: plant's
-  full suite is 2364 pass / 0 fail / 0 error, and an SCM regression is bit-identical
-  across 78/78 nodes.
+  full suite is 0 fail / 0 error, and an SCM regression is bit-identical across
+  78/78 nodes. (The pass *count* is environment-dependent — 2364 when first
+  recorded, 2431 on a 2026-08-03 rerun with `NOT_CRAN` unset, on both arms of a
+  control. Compare against a control run, never against a remembered number.)
 - **`feature/api-cleanup`** — everything that changes results or the API: the renames,
   the shrunken input set, the pressure fix, and an independent shutdown fix that
   **must be reconciled with plant's** (issue #10).
@@ -173,7 +190,28 @@ a coupled review.
 
    Before arguing from inlining, check: `nm -C test_golden | grep <fn>`. No symbol
    means inlined; a symbol plus `bl` call sites in `objdump -d` means it is not.
-6. **No Rcpp in the leaf.** `util.hpp` throws `std::runtime_error` instead of
+6. **Moving a public member is a plant API break, because RcppR6 binds fields by
+   name.** plant's `inst/RcppR6_classes.yml` lists most of `Leaf`'s state as
+   `access: field`, and the generator emits `obj_->psi_soil_` — a getter *and* a
+   setter — straight into `src/RcppR6.cpp`. Relocating a member into a sub-object
+   therefore breaks plant's generated glue, not just its own sources.
+
+   It is cheap to fix, which is the part worth knowing: for `access: field` the
+   template pastes `name_cpp` verbatim after `->`, so a dotted path works and the
+   R-side name (taken from the YAML key, not `name_cpp`) does not move:
+
+   ```yaml
+   psi_soil_:  {type: "std::vector<double>", access: field, name_cpp: "roots_.psi_soil_"}
+   r_R_H_min:  {type: "std::vector<double>", access: field, name_cpp: "roots_.network_.r_R_H_min"}
+   ```
+
+   The path can be nested arbitrarily, as the second line shows — so a member can
+   be moved as deep as the design wants without the R API noticing.
+
+   Check `git grep 'access: field' inst/RcppR6_classes.yml` in plant before
+   moving anything public, and land the two changes together — plant tracks this
+   package's **master** via `Remotes:`, so a merge here is what breaks it.
+7. **No Rcpp in the leaf.** `util.hpp` throws `std::runtime_error` instead of
    `Rcpp::stop`, and uses a quiet NaN instead of `NA_REAL`. The only R touchpoint left
    in the include graph is odelia's `ode_util.hpp`; `tests/cpp/shim/RcppCommon.h` is a
    15-line stand-in that both keeps the tests R-free and specifies exactly what needs
