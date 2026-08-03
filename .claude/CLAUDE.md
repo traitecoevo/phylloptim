@@ -135,17 +135,30 @@ the failure to the platform the file came from.
 
 ## Branches
 
-- **`master`** — stays a drop-in replacement for plant's own leaf. Validated: plant's
-  full suite is 0 fail / 0 error, and an SCM regression is bit-identical across
-  78/78 nodes. (The pass *count* is environment-dependent — 2364 when first
-  recorded, 2431 on a 2026-08-03 rerun with `NOT_CRAN` unset, on both arms of a
-  control. Compare against a control run, never against a remembered number.)
+- **`master`** — **behaviourally** a drop-in for plant's own leaf, but no longer a
+  *source-level* one. Validated: plant's full suite is 0 fail / 0 error, and an SCM
+  regression is bit-identical across 78/78 nodes. (The pass *count* is
+  environment-dependent — 2364 when first recorded, 2431 on a 2026-08-03 rerun with
+  `NOT_CRAN` unset, on both arms of a control. Compare against a control run, never
+  against a remembered number.)
 - **`feature/api-cleanup`** — everything that changes results or the API: the renames,
   the shrunken input set, the pressure fix, and an independent shutdown fix that
   **must be reconciled with plant's** (issue #10).
 
-Keep them separate. `master` being a drop-in is what lets plant adopt this without
-a coupled review.
+Keep them separate.
+
+⚠️ **This section used to say "`master` being a drop-in is what lets plant adopt
+this without a coupled review". That stopped being true when issue #2 stage 1
+merged (2026-08-03).** Moving the supply path into `MultiLayerRoots` relocated
+eleven fields that plant binds by name, so adopting `master` now requires a
+matching YAML change in plant — see hazard 6. The behaviour is still identical to
+the byte; it is the *source* coupling that changed. The matching plant commits are
+`3efe9c47` and `bbd47a36` on `feature/consume-leaf-package`, which is the only
+plant branch that consumes this package.
+
+The rule that replaces it: **`master` may change where things live, but not what
+they compute.** Results changes still belong on `feature/api-cleanup`. Anything on
+`master` that moves a plant-visible name lands together with plant's YAML.
 
 ## Hazards, each of which has cost someone real numbers
 

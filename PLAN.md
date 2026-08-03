@@ -32,7 +32,7 @@ where 10a, 10b, 10c and the shutdown fix sit.
 
 | issue | item | what | note |
 |---|---|---|---|
-| [#2](https://github.com/traitecoevo/leaf_cpp/issues/2) | 7b | Extract the soil/root supply path behind an interface | **do first** — #3, the multi-layer λ, and `kmax(h)` all sit on top. Design settled: **no template needed**, use `std::variant`; measured, see 7b. **Stage 1 (the pure move) is done**: `leaf/roots.hpp`, golden bit-identical, 1.7% slower. Stages 2–4 remain, and stage 4 (plant's YAML) must land *with* the merge |
+| [#2](https://github.com/traitecoevo/leaf_cpp/issues/2) | 7b | Extract the soil/root supply path behind an interface | **do first** — #3, the multi-layer λ, and `kmax(h)` all sit on top. Design settled: **no template needed**, use `std::variant`; measured, see 7b. **Stage 1 MERGED** (#17, 2026-08-03, squashed as `10115e1`): `leaf/roots.hpp`, golden bit-identical, 1.7% slower, and the supply path now takes resistances rather than root carbon. plant's matching YAML sits on `feature/consume-leaf-package` (`3efe9c47`, `bbd47a36`) — that is the only plant branch consuming this package, so nothing is left broken. **Stages 2–3 remain** |
 | [#3](https://github.com/traitecoevo/leaf_cpp/issues/3) | 7a | Make λ(state) pluggable | needs #2 |
 | [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11 | Template `Leaf` on its scalar type | deletes the hand-maintained AD replicas |
 | [#5](https://github.com/traitecoevo/leaf_cpp/issues/5) | 6 | R interface (RcppR6) | absorbs the `Control` struct and the dropped-field cleanup |
@@ -726,7 +726,9 @@ of doing it in stages.
 
    **Stage 4 was done alongside, not deferred**, for the reason above. plant's
    `feature/consume-leaf-package` carries the eleven YAML lines and the two in
-   `tf24_strategy.cpp`. Run **with a control**, both from a clean `src/`:
+   `tf24_strategy.cpp` (`3efe9c47`), plus five re-pointed paths once the supply
+   path started taking resistances (`bbd47a36`). Run **with a control**, both from
+   a clean `src/`:
 
    | build | result |
    |---|---|
