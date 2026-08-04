@@ -306,6 +306,20 @@ test_that("leaf_gradient() leaves the traits it was given", {
   expect_identical(first$value, second$value)
 })
 
+test_that("the documented examples classify the way their comments claim", {
+  # Written after the first version of ?leaf_gradient offered
+  # `psi_soil = c(4, 4.25, 4.5), atm_vpd = 2` as "a pinned optimum" and it came
+  # back interior. An example whose comment contradicts its output is worse than
+  # no example, and nothing else here would have caught it: examples are run by
+  # R CMD check but their *classifications* are not asserted anywhere. So assert
+  # them, using exactly the calls in the roxygen block.
+  expect_identical(leaf_gradient(psi_soil = 2.0, PPFD = 900)$method, "ift")
+
+  dry <- leaf_gradient(psi_soil = 4.5, PPFD = 900, atm_vpd = 3.0)
+  expect_identical(dry$method, "fd")
+  expect_identical(dry$status, "pinned")
+})
+
 test_that("leaf_gradient() rejects bad arguments", {
   expect_error(grid_gradient(2.0, pars = "not_a_trait"),
                "not traits")

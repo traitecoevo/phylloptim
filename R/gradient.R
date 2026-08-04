@@ -184,8 +184,12 @@ set_traits <- function(x, traits) {
 ##' g$method
 ##' g$gradient[c("vcmax_25", "stem_b"), ]
 ##'
-##' # a pinned optimum: the composite's premise fails, so the fallback is used
-##' leaf_gradient(psi_soil = c(4, 4.25, 4.5), PPFD = 900, atm_vpd = 2.0)$method
+##' # In dry soil at high VPD the optimum pins against the edge of the feasible
+##' # range, the composite's premise fails, and the fallback is used instead.
+##' dry <- leaf_gradient(psi_soil = 4.5, PPFD = 900, atm_vpd = 3.0)
+##' dry$method       # "fd"
+##' dry$status       # "pinned"
+##' dry$stationarity # how far from stationary the optimum is, in MPa
 ##' @export
 leaf_gradient <- function(psi_soil,
                           PPFD = 900,
