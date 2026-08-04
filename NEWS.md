@@ -27,11 +27,39 @@ Two things worth knowing if you are working on this package:
   3.47e-15 at `-O0`, which does not contract `a*b + c` into an FMA. A debug build
   failing `test_golden` by ~1e-15 has found nothing.
 
-The R-facing argument list is still the C++ one — nineteen positional traits in
-the constructor, ten in `set_physiology`. That is deliberate for this stage: the
-bindings were kept a faithful translation so a failure could only be a
-translation error, checked against the same golden points the C++ suite uses. A
-named, defaulted surface is next.
+## A surface you can type at a console (#5, stage 2)
+
+The bindings above are a faithful translation of the C++, which is what let them
+be checked against the golden file — and it means nineteen positional arguments.
+On top of them:
+
+- **`leaf_solve()`** — drivers in, operating point out as a data.frame,
+  vectorised, so a response curve is one call. This is the entry point for
+  someone who would otherwise reach for `plantecophys::Photosyn()`.
+- **`leaf_traits()` and `leaf_control()`** — the split the issue asked for. Four
+  of the constructor's nineteen arguments are tolerances sitting among the
+  physiology, and a trait-calibration loop should not have to know which. A test
+  asserts the two functions partition the constructor exactly.
+- **`leaf_model()`** — named and defaulted, and the recommended constructor.
+  `Leaf()` remains exported as the raw one.
+- **`set_drivers()`** and **`operating_point()`** for the stateful path.
+- **`vignette("leaf")`** — a solve, a drought response, the light/VPD surface,
+  and the profit function being maximised.
+
+Two decisions worth knowing:
+
+- **The `psi_soil >= 0` rejection is surfaced, not smoothed over.** A friendly
+  wrapper is exactly where someone would be tempted to `abs()` it, and that check
+  is the only thing between a script written against the old signed convention
+  and a plausible wrong number.
+- **The leaf-temperature clamp is NOT in `leaf_control()`**, though the issue
+  listed it. It is a guard keeping the Arrhenius block finite on the
+  energy-balance path, not a tolerance anyone tunes; making it settable would let
+  a caller get NaNs back with no indication why.
+
+**`root_carbon_per_leaf_area` still has no good default** — a bare-leaf user does
+not have a root carbon profile, and the value the R layer supplies is a stand-in.
+Removing the need for it is what the single-potential supply path is for.
 
 # leaf 0.1.0
 

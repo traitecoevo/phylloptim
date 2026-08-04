@@ -17,11 +17,13 @@
 ^leaf_.+\.tar\.gz$
 ^.*\.Rcheck$
 
-# The developer harness, deliberately not shipped. R CMD check scans every
+# The developer harnesses, deliberately not shipped. R CMD check scans every
 # Makefile in the tarball and warns about GNU extensions, and the sanctioned way
 # to silence that -- SystemRequirements: GNU make -- would be a false statement
 # about this package: installing it needs no make at all. tests/cpp.R compiles
 # the two sources directly instead. See the long note at the top of that file.
+# The top-level Makefile is developer entry points only, for the same reason.
+^Makefile$
 ^tests/cpp/Makefile$
 
 # Built by make -C tests/cpp. The sources and the golden file must ship -- the

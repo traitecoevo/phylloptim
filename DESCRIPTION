@@ -36,9 +36,12 @@ Imports:
     Rcpp
 LinkingTo: Rcpp, BH, odelia (>= 0.2.0)
 Suggests:
+    dplyr,
+    ggplot2,
     knitr,
     rmarkdown,
-    testthat (>= 3.0.0)
+    testthat (>= 3.0.0),
+    tidyr
 VignetteBuilder: knitr
 Remotes:
     traitecoevo/odelia

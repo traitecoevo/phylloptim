@@ -8,8 +8,6 @@ Read alongside:
 
 - **[README.md](../README.md)** — what it is and how to use it
 - **[PLAN.md](../PLAN.md)** — status table, then the reasoning behind every open issue
-- **[notes/r-interface-seed.md](../notes/r-interface-seed.md)** — handoff brief for the
-  next step (#5, the R interface): where the repo is, what is decided, what bites
 - **[COMPARISON.md](../COMPARISON.md)** — how this differs from `plantecophys`, `tealeaves`, `bigleaf`
 - **[issues](https://github.com/traitecoevo/leaf_cpp/issues)** — the work queue; PLAN.md is the *why* behind each
 
@@ -225,6 +223,23 @@ lines.**
 
 **Never regenerate the golden file to make another platform pass.** It just moves
 the failure to the platform the file came from.
+
+### One measurement to carry forward: TOMS748 is not sign-symmetric
+
+It comes up whenever something is "supposed to be bit-identical". #25 predicted
+the golden file would be bit-identical bar an exactly-negated collar column. It
+came out **276/288 exactly negated, with 12 rows off by 1–3 ULP** and 5–11 rows
+per other column moving at ≤5e-16.
+
+Hunted rather than tolerated, and localised: the flux rewrite *is* exactly
+antisymmetric — `root_zero_E`, which depends only on `E_up`, is exactly negated —
+while `root_crit`, from the same solver on a **reversed bracket**, is not.
+Reproduced independently on a synthetic family of smooth monotone targets: 44 of
+192 bracket midpoints are not the exact negation.
+
+**Reversing a bracket's orientation costs the last two bits, and no amount of
+care in the model code buys them back.** Budget for it when planning a change
+that flips a sign.
 
 ## Branches
 

@@ -212,37 +212,65 @@ arrive as an array without a copy.
 
 ## Use from R
 
+Drivers in, operating point out. `leaf_solve()` is vectorised, so a response
+curve is one call:
+
 ```r
 library(leaf)
 
-l <- Leaf(vcmax_25 = 96, stem_c = 2.680147, stem_b = 3.898245,
-          psi_crit = 5.870283, root_c = 2.680147, root_b = 3.898245,
-          root_psi_crit = 5.870283, beta2 = 1.5, jmax_25 = 157.44, a = 0.30,
-          curv_fact_elec_trans = 0.7, curv_fact_colim = 0.99,
-          GSS_tol_abs = 1e-3, vulnerability_curve_ncontrol = 100,
-          ci_abs_tol = 1e-3, ci_niter = 1000, cost_scale_TF24 = 7.5,
-          beta_R_H = 3.4e2, beta_R_V = 9.4e3)
+leaf_solve(psi_soil = 2.0, PPFD = 900)
+#>   psi_soil layers PPFD atm_vpd ca leaf_temp atm_kpa psi_stem  collar    ci
+#> 1        2      1  900       2 40        25   101.3 3.595247 2.92039 10.49
+#>          A         E         gc   profit ... lambda    g1_eff
+#> 1 5.599511 1.142e-05 0.01921993 2.515843 ... 159884.6 0.5025448
 
-l$set_physiology(root_carbon_per_leaf_area = 20, PPFD = 900,
-                 psi_soil = 2.0, soil_depth = 1.0,
-                 leaf_specific_conductance_max = 3.14e-5,
-                 atm_vpd = 2.0, ca = 40.0, leaf_temp = 25,
-                 atm_o2_kpa = 21, atm_kpa = 101.3)
-l$find_root_collar_psi()
-
-l$opt_psi_stem_   # leaf water potential at the optimum, MPa
-l$profit_         # A - hydraulic cost
-l$lambda          # marginal cost of water, dA/dE
-l$g1_eff          # the effective g1 the solve implies
+# a drought response
+leaf_solve(psi_soil = seq(0.5, 5, length.out = 20), PPFD = 900)
 ```
 
-Nineteen positional trait arguments is what the C++ constructor takes, and it is
-not a reasonable thing to type at a console. A named, defaulted interface is the
-next step; see [PLAN.md](PLAN.md) item 6.
+`gc` is not from a fitted conductance model — it is what falls out of maximising
+profit over the hydraulic path. `lambda` is the marginal cost of water, dA/dE, at
+the operating point, and `g1_eff` re-expresses the solved conductance as a Medlyn
+`g1`, which is a convenient common scale for comparison.
+
+Traits and numerical settings are separate, so a calibration loop varying traits
+never has to know which of the C++ constructor's nineteen arguments are
+tolerances:
+
+```r
+leaf_solve(psi_soil = 3.0, PPFD = 900,
+           traits  = leaf_traits(vcmax_25 = 120, stem_b = 2.5),
+           control = leaf_control(GSS_tol_abs = 1e-5))
+```
+
+For the stateful interface — which is what plant uses, and what you want if you
+care about intermediate state:
+
+```r
+l <- leaf_model()                          # or leaf_model(traits, control)
+set_drivers(l, psi_soil = 2.0, PPFD = 900)
+l$find_root_collar_psi()
+
+operating_point(l)   # the same one-row data.frame
+l$profit_            # or reach into the object directly
+l$lambda             # marginal cost of water, dA/dE
+```
+
+`Leaf()` is also exported: it is the raw C++ constructor, nineteen positional
+arguments and no defaults. `leaf_model()` is that with the arguments named,
+defaulted and split into traits versus tolerances, and is what you should use.
 
 **All water potentials are positive magnitudes in MPa.** One representation
 throughout, and it is asserted rather than documented — a negative `psi_soil` is
 an error, not a sign convention the model quietly accepts.
+
+⚠️ **`root_carbon_per_leaf_area` is the one argument with no good default.** A
+bare-leaf user does not have a root carbon profile, and the value the R layer
+supplies is a stand-in rather than a recommendation. The single-soil-potential
+supply path that removes the need for it exists in the C++ and is being brought
+to the R side.
+
+See `vignette("leaf")` for the whole tour.
 
 ### As a dependency of another R package
 

@@ -9,82 +9,159 @@ vignette: >
 
 ```{r, include = FALSE}
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7,
-                      fig.height = 4.2, dpi = 120)
+                      fig.height = 4, dpi = 120, fig.align = "center")
 ```
 
-```{r setup}
+```{r setup, message = FALSE}
 library(leaf)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+theme_set(theme_bw(base_size = 11) +
+            theme(panel.grid.minor = element_blank(),
+                  strip.background = element_rect(fill = "grey95",
+                                                  colour = NA)))
 ```
 
 ## What this model does differently
 
 Most leaf gas-exchange models get stomatal conductance from an empirical
 function of assimilation, VPD and CO₂ — Ball-Berry, Medlyn, and their
-descendants. This one does not have such a function. It builds an explicit
-hydraulic path from the soil, through the roots and the root collar, up the
-stem to the leaf, and then asks: **which stem water potential maximises profit?**
-Profit is assimilation minus a hydraulic cost that rises as the xylem loses
-conductivity. Conductance is whatever falls out of the answer.
+descendants. This one has no such function. It builds an explicit hydraulic path
+from the soil, through the roots and the root collar, up the stem to the leaf,
+and then asks: **which stem water potential maximises profit?** Profit is
+assimilation minus a hydraulic cost that rises as the xylem loses conductivity.
+Conductance is whatever falls out of the answer.
 
-The consequence worth caring about is that stomatal closure under drought is not
-fitted, it is *derived* — from two Weibull vulnerability curves, the soil
-potential, and the plant's own conductance.
+So stomatal closure under drought here is not fitted. It is derived, from two
+Weibull vulnerability curves, the soil potential, and the plant's own
+conductance.
 
 ## One solve
 
-The object is stateful, which is unusual for R but is what makes it fast enough
-to sit inside a demographic model that calls it millions of times: you set the
-drivers, solve, and read the operating point off the object.
+```{r}
+leaf_solve(psi_soil = 2.0, PPFD = 900) |>
+  as_tibble() |>
+  glimpse()
+```
 
-⚠️ **Nineteen positional trait arguments is not a reasonable thing to type at a
-console**, and it is not the intended long-term interface — it is the C++
-constructor, exposed as-is so that the R layer could be proved correct against
-the C++ regression baseline before being redesigned. A named, defaulted
-interface is the next piece of work.
+Drivers in, operating point out. `psi_soil` is a **positive magnitude in MPa** —
+more on that below.
+
+Most of those columns are the usual gas-exchange quantities. Two are less usual:
+
+- **`lambda`** is the marginal cost of water, dA/dE, at the operating point —
+  how much carbon the leaf gives up per unit of water it declines to transpire.
+  It is the quantity the optimisation equalises.
+- **`g1_eff`** re-expresses the solved conductance as the `g1` of the Medlyn
+  model, which is a convenient common scale if that is the model you are used
+  to. It is computed from the solve rather than supplied, so it varies with
+  conditions.
+
+## A drought response
+
+`leaf_solve()` is vectorised over its drivers, so a response curve is one call.
 
 ```{r}
-saligna <- function() {
-  Leaf(vcmax_25 = 96, stem_c = 2.680147, stem_b = 3.898245,
-       psi_crit = 5.870283, root_c = 2.680147, root_b = 3.898245,
-       root_psi_crit = 5.870283, beta2 = 1.5, jmax_25 = 157.44, a = 0.30,
-       curv_fact_elec_trans = 0.7, curv_fact_colim = 0.99,
-       GSS_tol_abs = 1e-3, vulnerability_curve_ncontrol = 100,
-       ci_abs_tol = 1e-3, ci_niter = 1000, cost_scale_TF24 = 7.5,
-       beta_R_H = 3.4e2, beta_R_V = 9.4e3)
-}
+drought <- leaf_solve(psi_soil = seq(0.2, 5.5, length.out = 40), PPFD = 900) |>
+  as_tibble()
 
-l <- saligna()
-l$set_physiology(
-  root_carbon_per_leaf_area = 20,   # kg C per m2 LEAF, not absolute carbon
-  PPFD = 900,                       # umol m-2 s-1
-  psi_soil = 2.0,                   # MPa, POSITIVE magnitude -- see below
-  soil_depth = 1.0,                 # m
-  leaf_specific_conductance_max = 3.14e-5,
-  atm_vpd = 2.0, ca = 40.0, leaf_temp = 25,
-  atm_o2_kpa = 21, atm_kpa = 101.3
+drought |>
+  select(psi_soil, A, gc) |>
+  pivot_longer(c(A, gc), names_to = "variable") |>
+  mutate(variable = recode(variable,
+                           A = "assimilation~(mu*mol~m^-2~s^-1)",
+                           gc = "stomatal~conductance~(mol~m^-2~s^-1)")) |>
+  ggplot(aes(psi_soil, value)) +
+  geom_line(linewidth = 0.8, colour = "steelblue4") +
+  facet_wrap(~variable, scales = "free_y", labeller = label_parsed) +
+  labs(x = "soil water potential (MPa)", y = NULL)
+```
+
+Note where both hit exactly zero. That is not a floor imposed by a
+minimum-conductance parameter — it is the solve reporting that no operating
+point both moves water and stays inside the root's hydraulic limit, so the
+answer is shut-down.
+
+## The same sweep on a familiar scale
+
+`g1_eff` across the same drought, over the range where the stomata are open:
+
+```{r, fig.height = 3.4}
+drought |>
+  filter(gc > 0, is.finite(g1_eff)) |>
+  ggplot(aes(psi_soil, g1_eff)) +
+  geom_line(linewidth = 0.8, colour = "firebrick") +
+  labs(x = "soil water potential (MPa)",
+       y = expression(effective~g[1]~(kPa^0.5)))
+```
+
+It declines as the soil dries, because it is computed from the solve rather than
+being a parameter of it.
+
+## Light and VPD together
+
+Because `leaf_solve()` recycles its drivers elementwise, a factorial design is an
+`expand_grid()` and a single call — no loop, and nothing to join back afterwards,
+since the drivers come back as columns of the answer.
+
+```{r}
+expand_grid(PPFD = seq(50, 1800, length.out = 30),
+            atm_vpd = c(0.5, 1, 2, 4)) |>
+  with(leaf_solve(psi_soil = 1.0, PPFD = PPFD, atm_vpd = atm_vpd)) |>
+  ggplot(aes(PPFD, A, colour = factor(atm_vpd))) +
+  geom_line(linewidth = 0.8) +
+  scale_colour_viridis_d(end = 0.9, direction = -1) +
+  labs(x = expression(PPFD~(mu*mol~m^-2~s^-1)),
+       y = expression(A~(mu*mol~m^-2~s^-1)),
+       colour = "VPD (kPa)")
+```
+
+The curves saturate at different heights because the hydraulic cost of the
+transpiration needed to support a given assimilation rises with VPD.
+
+## Traits and numerical settings are separate
+
+The C++ constructor takes nineteen positional arguments, four of which are
+tolerances sitting among the physiology. `leaf_traits()` and `leaf_control()`
+split them, so a calibration loop varying traits never has to know which of the
+nineteen are not traits.
+
+```{r}
+vulnerable <- leaf_traits(stem_b = 2.5, psi_crit = 4.0,
+                          root_b = 2.5, root_psi_crit = 4.0)
+
+bind_rows(
+  default = leaf_solve(psi_soil = 3.0, PPFD = 900),
+  vulnerable = leaf_solve(psi_soil = 3.0, PPFD = 900, traits = vulnerable),
+  .id = "traits"
+) |>
+  select(traits, psi_stem, A, gc, g1_eff)
+```
+
+`stem_b`/`stem_c` and `root_b`/`root_c` are **two different vulnerability
+curves** — the stem pair drives the hydraulic cost, the root pair drives uptake.
+They are named rather than left as an unmarked `b`/`c` because using one where
+the other belongs is a mistake that has been made here and reached a manuscript
+draft.
+
+Tolerances go the other way, through `leaf_control()`:
+
+```{r}
+tibble(
+  setting = c("default", "tight"),
+  psi_stem = c(
+    leaf_solve(psi_soil = 2.0, PPFD = 900)$psi_stem,
+    leaf_solve(psi_soil = 2.0, PPFD = 900,
+               control = leaf_control(GSS_tol_abs = 1e-5))$psi_stem
+  )
 )
-l$find_root_collar_psi()
-
-c(psi_stem = l$opt_psi_stem_,   # leaf water potential at the optimum, MPa
-  collar   = l$opt_root_psi_,   # root-collar potential, MPa
-  A        = l$assim_colimited_,
-  E        = l$transpiration_,
-  gc       = l$stom_cond_CO2_,
-  profit   = l$profit_)
 ```
 
-Two derived quantities that are the reason for comparing this model against
-others. `lambda` is the marginal cost of water, dA/dE, at the operating point;
-`g1_eff` is the Medlyn `g1` that an empirical model would have to be given to
-reproduce this leaf's behaviour here.
-
-```{r}
-c(lambda = l$lambda, g1_eff = l$g1_eff)
-```
-
-The point of `g1_eff` is that it is not a constant. An empirical model treats
-`g1` as a trait; here it is an *output*, and watching it move with soil moisture
-is watching the empirical model's central assumption fail.
+Those differ in the fourth decimal, which is the honest scale of how well the
+optimum's *location* is determined — the nested solvers amplify up to about
+`GSS_tol_abs`.
 
 ## Water potentials are positive magnitudes
 
@@ -92,114 +169,88 @@ There is one representation throughout: every ψ is a positive number of MPa,
 including `psi_soil`, `psi_crit` and the collar potential. Where an equation
 needs one potential to oppose another, the minus sign is in the equation.
 
-This is asserted rather than documented, which matters if you are porting an
-older script that passed signed potentials:
+This is asserted rather than documented, which matters if you are porting a
+script that passed signed potentials:
 
 ```{r, error = TRUE}
-l$set_physiology(
-  root_carbon_per_leaf_area = 20, PPFD = 900,
-  psi_soil = -2.0, soil_depth = 1.0,
-  leaf_specific_conductance_max = 3.14e-5,
-  atm_vpd = 2.0, ca = 40.0, leaf_temp = 25,
-  atm_o2_kpa = 21, atm_kpa = 101.3
-)
+leaf_solve(psi_soil = -2.0, PPFD = 900)
 ```
 
 An error, not a quiet `abs()`. A model that accepted both conventions would let
 that script return a plausible wrong number instead.
 
-## A drought response, derived rather than fitted
+## Multiple soil layers
 
-Sweep soil potential from wet to very dry and watch the leaf shut down. Nothing
-in the code below tells it when to close.
-
-```{r}
-solve_at <- function(psi_soil, vpd = 2.0, ppfd = 900) {
-  l <- saligna()
-  l$set_physiology(root_carbon_per_leaf_area = 20, PPFD = ppfd,
-                   psi_soil = psi_soil, soil_depth = 1.0,
-                   leaf_specific_conductance_max = 3.14e-5,
-                   atm_vpd = vpd, ca = 40.0, leaf_temp = 25,
-                   atm_o2_kpa = 21, atm_kpa = 101.3)
-  l$find_root_collar_psi()
-  data.frame(psi_soil = psi_soil, vpd = vpd,
-             A = l$assim_colimited_, E = l$transpiration_,
-             gc = l$stom_cond_CO2_, psi_stem = l$opt_psi_stem_,
-             g1_eff = l$g1_eff)
-}
-
-drought <- do.call(rbind, lapply(seq(0.2, 5.5, length.out = 40), solve_at))
-
-op <- par(mfrow = c(1, 2), mar = c(4.2, 4.2, 2, 1))
-plot(A ~ psi_soil, drought, type = "l", lwd = 2,
-     xlab = "soil water potential (MPa)",
-     ylab = expression(A~(mu*mol~m^-2~s^-1)),
-     main = "assimilation")
-plot(gc ~ psi_soil, drought, type = "l", lwd = 2, col = "steelblue",
-     xlab = "soil water potential (MPa)",
-     ylab = expression(g[c]~(mol~m^-2~s^-1)),
-     main = "stomatal conductance")
-par(op)
-```
-
-Note the point where both hit exactly zero. That is not a floor imposed by a
-minimum-conductance parameter — it is the solve reporting that no operating
-point both moves water and stays inside the root's hydraulic limit, so the
-answer is shut-down.
-
-## `g1_eff` is not a constant
-
-The same sweep, read as the empirical parameter it would take to mimic this
-leaf:
+Pass a vector for a layered profile, or a list of vectors for several profiles.
+Layers default to 1 m thick with the root carbon split evenly.
 
 ```{r}
-plot(g1_eff ~ psi_soil, drought[is.finite(drought$g1_eff) & drought$gc > 0, ],
-     type = "l", lwd = 2, col = "darkred",
-     xlab = "soil water potential (MPa)",
-     ylab = expression(g[1]~effective~(kPa^0.5)),
-     main = "the Medlyn g1 this leaf implies")
+leaf_solve(psi_soil = list(c(1.0, 1.5, 2.0), c(3.0, 3.5, 4.0)), PPFD = 900) |>
+  as_tibble() |>
+  select(psi_soil, layers, A, gc, uptake)
 ```
 
-A Medlyn model fitted at one soil moisture and applied at another is using the
-wrong `g1`, by a factor this curve measures. That is the argument for a
-hydraulically explicit model, and it is the reason `g1_eff` is reported at all.
+`psi_soil` in the result is the wettest layer, with `layers` alongside, so the
+column stays numeric and the frame stays rectangular.
 
-## Light and VPD together
+## The stateful interface
+
+`leaf_solve()` is a wrapper over an R6 object you can drive yourself. This is
+what plant does, and it is what you want when you care about the intermediate
+state rather than only the operating point.
 
 ```{r}
-ppfds <- seq(50, 1800, length.out = 30)
-grid <- do.call(rbind, lapply(c(0.5, 1, 2, 4), function(v) {
-  d <- do.call(rbind, lapply(ppfds, function(q) {
-    solve_at(psi_soil = 1.0, vpd = v, ppfd = q)
-  }))
-  d$ppfd <- ppfds
-  d
-}))
+l <- leaf_model()
+set_drivers(l, psi_soil = 2.0, PPFD = 900)
+l$find_root_collar_psi()
 
-vpds <- sort(unique(grid$vpd))
-cols <- hcl.colors(length(vpds), "Zissou 1")
-plot(NA, xlim = range(grid$ppfd), ylim = range(grid$A),
-     xlab = expression(PPFD~(mu*mol~m^-2~s^-1)),
-     ylab = expression(A~(mu*mol~m^-2~s^-1)),
-     main = "light response at four vapour pressure deficits")
-for (i in seq_along(vpds)) {
-  d <- grid[grid$vpd == vpds[i], ]
-  lines(d$ppfd, d$A, lwd = 2, col = cols[i])
-}
-legend("bottomright", legend = paste0("VPD ", vpds, " kPa"),
-       col = cols, lwd = 2, bty = "n")
+tibble(profit = l$profit_, cost = l$hydraulic_cost_, A = l$assim_colimited_)
 ```
 
-The curves saturate at different heights because the hydraulic cost of the
-transpiration needed to support a given assimilation rises with VPD — again,
-derived, not fitted.
+The object exposes the whole model, not just the operating point. The stem
+vulnerability curve is defined for any potential:
+
+```{r, fig.height = 3.4}
+tibble(psi = seq(0, 6, length.out = 200)) |>
+  mutate(k = vapply(psi, l$proportion_of_conductivity, numeric(1))) |>
+  ggplot(aes(psi, k)) +
+  geom_line(linewidth = 0.8, colour = "darkgreen") +
+  labs(x = expression(psi~(MPa)), y = "proportion of conductivity",
+       title = "stem vulnerability")
+```
+
+The profit function is not. Water flows from the soil to the leaf, so
+`psi_stem` must be **at least** the upstream potential; below it the leaf would
+be wetter than the soil, and `transpiration()` and `stom_cond_CO2()` duly return
+negative values. Evaluate profit there and you get a number, but it is built on a
+negative conductance and means nothing. Plot the domain the solve actually
+searches:
+
+```{r, fig.height = 3.4}
+psi_upstream <- 2.0
+
+tibble(psi = seq(psi_upstream, 6, length.out = 200)) |>
+  mutate(profit = vapply(psi, l$profit_psi_stem_TF, numeric(1),
+                         psi_upstream = psi_upstream)) |>
+  ggplot(aes(psi, profit)) +
+  geom_line(linewidth = 0.8, colour = "darkgreen") +
+  geom_vline(xintercept = l$opt_psi_stem_, linetype = 2, colour = "grey40") +
+  labs(x = expression(psi[stem]~(MPa)), y = "profit",
+       title = "the function being maximised")
+```
+
+The dashed line is where the solve landed, and the maximum it sits on is
+**flat**. That is worth knowing rather than glossing: the profit *value* is far
+better determined than its *location*, which is why `profit` is the only
+reported field well conditioned across platforms, and why the `GSS_tol_abs`
+comparison above moved `psi_stem` in the fourth decimal.
 
 ## Where to go next
 
-- `vignette` aside, the C++ API is documented with Doxygen; the model is a set
-  of self-contained headers that need no R at all, so the same solve is
-  available from a C++ program or a Python extension. See the README.
+- The model is a set of self-contained C++ headers that need no R at all, so the
+  same solve is available from a C++ program or a Python extension. See the
+  README.
 - `COMPARISON.md` sets this against `plantecophys`, `tealeaves` and `bigleaf`.
-- The multi-layer soil path takes vectors for `psi_soil`, `soil_depth` and
-  `root_carbon_per_leaf_area`; everything above used a single layer for
-  brevity.
+- The root carbon profile is still a required input with an arbitrary default,
+  which is the wrong thing to ask a bare-leaf user for. A single-soil-potential
+  supply path exists in the C++ and is being brought to the R side.

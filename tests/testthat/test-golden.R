@@ -112,21 +112,20 @@ test_that("R's hex parser is exact, which is what the expected values rely on", 
   expect_identical(as.numeric("0x1.91eb851eb851fp+1"), 3.14)
 })
 
-test_that("the R constructor's defaults are the C++ default constructor's", {
-  # tests/cpp/test_golden.cpp solves with a default-constructed leaf::Leaf.
-  # RcppR6 binds only the 19-argument constructor, so helper-golden.R restates
-  # those values, and the golden comparisons below are only meaningful while the
-  # restatement is right. Rather than trusting the list, check a value that the
-  # traits actually reach: the stem vulnerability curve is built from stem_b and
-  # stem_c at construction, so proportion_of_conductivity is a fingerprint of
-  # them, and psi_crit shows up in where the profit optimum can sit.
-  l <- default_leaf()
+test_that("leaf_model()'s defaults are the C++ default constructor's", {
+  # tests/cpp/test_golden.cpp solves with a default-constructed leaf::Leaf, and
+  # every comparison below goes through leaf_model(). So the golden rows are
+  # already the strong form of this check. This is the cheap, legible form that
+  # says which thing broke when they fail: the stem vulnerability curve is built
+  # from stem_b and stem_c at construction, so proportion_of_conductivity is a
+  # fingerprint of that pair.
+  l <- leaf_model()
   # exp(-(2/3.898245)^2.680147), the Weibull survival at psi = 2 MPa.
   expect_equal(l$proportion_of_conductivity(2.0),
                exp(-(2.0 / 3.898245)^2.680147))
   # A trait the constructor validates rather than merely stores.
   expect_error(
-    do.call(Leaf, modifyList(leaf_cpp_defaults, list(psi_crit = -5.870283))),
+    leaf_model(leaf_traits(psi_crit = -5.870283)),
     "psi_crit must be a positive magnitude"
   )
 })
