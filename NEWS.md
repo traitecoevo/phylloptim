@@ -1,5 +1,81 @@
 # leaf (development version)
 
+## The AD replicas are gone, and the model's precision floor moved (#4, PLAN 11b)
+
+Two small results-moving changes, landed in this order because the order matters:
+
+**`psi_stem_to_ci`'s tolerance is 1e-10, was 1e-7** — moves results by
+**1.82e-07**, lands **335× closer to a converged solve**, costs **+3.4%**. This
+tolerance was invisible while the collar solve's own `GSS_tol_abs` (1e-3) dominated;
+once PLAN 11a removed that, it became the model's dominant amplifier and therefore
+the floor of what every reported output *means*. The working magnitudes for reading
+a diff are now **~1e-16 reassociation, ~1e-9 solver floor, ~1e-4 a real
+difference**. Not the same knob as the settable `ci_abs_tol` (default 1e-3), which
+reaches only the off-path `optimise_psi_stem_*` solvers.
+
+**`namespace detail`'s hand-maintained AD replicas are deleted** — moves results by
+**3.51e-10**. `assim_colimited`, its two components, `hydraulic_cost_TF` and
+`proportion_of_conductivity` are now `T = double` instantiations of scalar-generic
+member templates, and `dprofit_droot_collar_psi` differentiates the *same code*. So
+the forward model and its derivative can no longer be derivatives of different
+functions — which they were: the deleted replica associated the electron-limited
+term differently, making the AD derivative exact for a function the model did not
+evaluate.
+
+**The `double` path is bit-identical**, checked directly across all five entry
+points. The whole 3.51e-10 is the derivative changing.
+
+Doing the tolerance first is what makes the unification a 3.51e-10 change rather
+than a 4.98e-07 one — a factor of 1400 for free, purely from ordering.
+
+To be clear about what this second change is *not*: it does **not** make the solved
+operating point more accurate. Both the old and new builds locate their respective
+roots to ~1e-14, and the two derivatives differ so little that their roots differ by
+~1e-15 MPa. It is a maintainability and correctness-of-construction fix.
+
+## ⚠️ The collar solve changed, and results moved (#4, PLAN 11a)
+
+**`find_root_collar_psi` no longer maximises profit by golden-section search. It
+solves the first-order condition, `dprofit/dpsi == 0`, by a safeguarded
+root-find.** Every solved operating point moves by roughly the argmax correction —
+worst change over the 288-point golden grid **1.5e-03** relative, 240 rows, with
+`profit` itself moving at most 1.4e-03 because it is the maximum and therefore
+flat. Shut-down rows are unchanged. **If you have recorded numbers from this
+package, they will differ.**
+
+This is a correctness fix, and the evidence is the residual rather than the
+values: `|dprofit|` at the returned collar improved on **240 of 240** feasible
+grid rows with none worse, from a median of 7.8e-04 to **5.6e-15** on the 198 rows
+with an interior optimum. The remaining 42 have a *constrained* optimum pinned to
+a bracket bound, where the gradient is genuinely non-zero.
+
+Why it was worth moving results:
+
+- **Trait derivatives were unusable, and worse than noisy.** Golden section
+  resolved the argmax only to `GSS_tol_abs`, so a finite difference in a
+  photosynthetic trait returned exactly **zero** below a relative step of 1e-4 —
+  silently dropping a whole term of `dA/dtheta`. For traits in the hydraulic path
+  it was worse: the argmax came back smooth, plausible and **sign-inverted**
+  (`root_b` gave −2.6e-03 where the truth is +2.6e-04). A gradient-based
+  calibration would have walked those traits the wrong way with nothing to show
+  it. Finite differences now agree to ~4 digits at any relative step from 1e-8 to
+  1e-2, which unblocks #6.
+- **It is faster: 24.5%**, 2.65 against 3.51 µs/solve, interleaved at reps=2000.
+- **The argmax got smoother, not rougher** — ~1000× smaller second differences in
+  a trait. That is the opposite of what the guide's hazard 3 would lead you to
+  expect, and it is measured. ⚠️ In a *trait*; smoothness in plant state, which is
+  what hazard 3 is actually about, needs re-measuring on the plant side once
+  plant #591 clears.
+
+`GSS_tol_abs` is still a control and still has two jobs — the "interval too narrow
+to solve over" threshold and the off-path single-layer optimisers — but it no
+longer sets how well the reported operating point is determined.
+
+Also in this change: `dprofit_droot_collar_psi` gained an optional `bool*
+feasible` out-parameter, so a caller searching for a zero can tell a real
+stationary point from the `0.0` it returns on its shut-down exits. The default
+leaves every existing caller, including plant's TF24f, untouched.
+
 ## The package is callable from R (#5, stage 1)
 
 `leaf::Leaf` now has an R interface, so this is no longer a `LinkingTo`-only

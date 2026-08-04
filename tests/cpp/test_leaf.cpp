@@ -147,9 +147,13 @@ void test_solve_single_layer() {
   ok(l.opt_psi_stem_ <= l.psi_crit, "stem stays within psi_crit");
   ok(l.transpiration_ > 0.0, "transpiration is positive");
   ok(l.assim_colimited_ > 0.0, "assimilation is positive");
-  // Regression guards -- see the note at the top of this file.
-  near(l.opt_psi_stem_, 3.595247, 1e-5, "opt_psi_stem_");
-  near(l.assim_colimited_, 5.599511, 1e-5, "assim_colimited_");
+  // Regression guards -- see the note at the top of this file. Moved by PLAN 11a
+  // (the collar root-find): opt_psi_stem_ 3.595247 -> 3.595088 and
+  // assim_colimited_ 5.599511 -> 5.599153, both ~1e-4 relative, which is the
+  // argmax correction and not rounding. profit_ and transpiration_ did not move at
+  // this tolerance -- profit_ because it is the maximum and therefore flat.
+  near(l.opt_psi_stem_, 3.595088, 1e-5, "opt_psi_stem_");
+  near(l.assim_colimited_, 5.599153, 1e-5, "assim_colimited_");
   near(l.transpiration_, 1.141941e-05, 1e-5, "transpiration_");
   near(l.profit_, 2.515843, 1e-5, "profit_");
 }
@@ -428,6 +432,263 @@ void test_gradient_is_zero_in_reversed_gradient_state() {
     ok(l.dprofit_droot_collar_psi(target) == 0.0,
        "the gradient is exactly zero at " + std::to_string(target));
   }
+}
+
+// The 0.0 the two exits above return is a SENTINEL, and PLAN 11a is what makes
+// telling it apart from a genuine stationary point load bearing: it proposes
+// root-finding on dprofit == 0, and the sentinel fires at the WET END of the very
+// bracket such a solve would search. At bound_a = root_zero_E uptake is zero by
+// construction, so psi >= psi_stem and the reversed-gradient exit is taken -- and
+// a bracketing solver evaluates that endpoint FIRST, to check its bracket
+// brackets. So it would read the sentinel as the answer and return the
+// zero-transpiration point as the optimum.
+//
+// This test pins the distinction rather than the eventual solver, so it is
+// independent of how 11a is implemented. Note what it can and cannot see: the
+// golden file cannot see any of this (no golden column comes from the gradient),
+// and neither can a test that only samples interior points -- the sentinel region
+// measured at most 3.46e-07 MPa wide over the golden grid, which is exactly why
+// it would survive casual testing.
+void test_gradient_reports_feasibility() {
+  printf("dprofit/dpsi_collar distinguishes its 0.0 sentinel from a stationary point\n");
+  Drivers d;
+  leaf::Leaf l = make_leaf(d, {2.0}, {1.0});
+
+  // The bracket a root-find would search, built exactly as prepare_collar_solve
+  // does: the wet end is where uptake is zero, the dry end whichever limit binds.
+  const double wettest = 2.0;
+  const double root_zero_E = l.find_root_psi(wettest, l.roots_.psi_soil_, 0);
+  const double root_crit = l.find_root_psi(wettest, l.roots_.psi_soil_, 1);
+  const double bound_b = std::min(root_crit, l.roots_.root_psi_crit);
+  ok(root_zero_E < bound_b, "the bracket is non-empty");
+
+  // The wet endpoint: 0.0, and NOT a stationary point.
+  bool feasible = true;
+  const double at_a = l.dprofit_droot_collar_psi(root_zero_E, &feasible);
+  ok(at_a == 0.0, "the gradient is 0.0 at the wet bracket endpoint");
+  ok(!feasible, "and the endpoint is reported infeasible, so the 0.0 is a sentinel");
+
+  // Why accepting it would be wrong, stated as a number rather than an assertion
+  // about intent: the endpoint is a far worse operating point than the optimum.
+  l.find_root_collar_psi();
+  const double best = l.profit_;
+  const double at_endpoint = l.evaluate_root_collar_psi(root_zero_E);
+  ok(at_endpoint < best - 1.0,
+     "and profit at the endpoint is much worse than at the optimum");
+
+  // An interior point: a real derivative, so a zero there WOULD be stationary.
+  feasible = false;
+  const double mid = 0.5 * (root_zero_E + bound_b);
+  const double at_mid = l.dprofit_droot_collar_psi(mid, &feasible);
+  ok(feasible, "an interior point is reported feasible");
+  ok(std::isfinite(at_mid) && at_mid != 0.0,
+     "and its gradient is a finite non-zero number");
+
+  // The reversed-gradient state is infeasible too, and there the 0.0 is the whole
+  // answer -- this is the case test_gradient_is_zero_in_reversed_gradient_state
+  // already pins, checked here for the flag rather than the value.
+  leaf::Leaf dry = make_leaf(d, {5.9, 6.15, 6.4, 6.65, 6.9},
+                             {1.0, 2.0, 3.0, 4.0, 5.0});
+  dry.find_root_collar_psi();
+  feasible = true;
+  ok(dry.dprofit_droot_collar_psi(3.0, &feasible) == 0.0 && !feasible,
+     "the reversed-gradient state is reported infeasible");
+
+  // The out-parameter changes nothing about the value, so TF24f's contract (the
+  // return value alone, consumed as an ODE rate) is untouched. Bit-identical, not
+  // merely close: the flag is a write to a caller's bool, not arithmetic.
+  ok(l.dprofit_droot_collar_psi(mid) == at_mid,
+     "passing no flag returns exactly the same value");
+  ok(l.dprofit_droot_collar_psi(root_zero_E) == 0.0,
+     "and the sentinel is still 0.0 for a caller that does not ask");
+}
+
+// PLAN 11b: the AD derivative and the forward model are now instantiations of ONE
+// body, so they cannot be derivatives of different functions. That was not true
+// before: `detail::assim_colimited_ad` associated the electron-limited term
+// left-to-right where `assim_electron_limited` divides the bracket first, and used
+// `s*s` where `assim_colimited` uses `pow(s, 2)`.
+//
+// The check that bites is the DERIVATIVE against a central difference of the
+// `double` function, because that is precisely the identity the drift broke. Note a
+// weaker test would have passed throughout: the drifted replica was still a
+// perfectly good derivative of *itself*, and agreed with the real function to
+// ~1e-16 in VALUE. It is the derivative-of-the-same-function property that failed.
+void test_ad_kernels_are_the_model_not_a_mirror() {
+  printf("AD differentiates the model's own algebra, not a mirror of it\n");
+  Drivers d;
+  leaf::Leaf l = make_leaf(d, {2.0}, {1.0});
+  l.find_root_collar_psi();
+  using AD = xad::fwd<double>::active_type;
+
+  // 1. The kernels and the double entry points are the same code, so they must
+  // agree BIT-EXACTLY, not merely closely. This is what "one body" means.
+  for (double ci : {5.0, 12.0, 20.0, 29.26, 35.0, 39.0}) {
+    ok(l.assim_colimited_kernel(ci) == l.assim_colimited(ci),
+       "assim_colimited_kernel<double> is assim_colimited at ci=" +
+           std::to_string(ci));
+    ok(l.assim_rubisco_limited_kernel(ci) == l.assim_rubisco_limited(ci),
+       "rubisco kernel matches bit-exactly at ci=" + std::to_string(ci));
+    ok(l.assim_electron_limited_kernel(ci) == l.assim_electron_limited(ci),
+       "electron kernel matches bit-exactly at ci=" + std::to_string(ci));
+  }
+  for (double p : {0.5, 2.0, 3.5949, 5.0}) {
+    ok(l.hydraulic_cost_TF_kernel(p) == l.hydraulic_cost_TF(p),
+       "hydraulic_cost_TF_kernel<double> is hydraulic_cost_TF at psi=" +
+           std::to_string(p));
+  }
+
+  // 2. The AD derivative of the kernel against a central difference of the DOUBLE
+  // function. Richardson-extrapolated, so the FD reference is good to ~1e-10 and
+  // the tolerance is testing the derivative rather than the difference quotient.
+  const auto richardson = [](auto f, double x, double h) {
+    const double d1 = (f(x + h) - f(x - h)) / (2 * h);
+    const double d2 = (f(x + h / 2) - f(x - h / 2)) / h;
+    return (4 * d2 - d1) / 3;
+  };
+  for (double ci : {12.0, 20.0, 29.26, 35.0}) {
+    AD a = ci; xad::derivative(a) = 1.0;
+    const double ad = xad::derivative(l.assim_colimited_kernel(a));
+    const double fd =
+        richardson([&](double x) { return l.assim_colimited(x); }, ci, 1e-4);
+    near(ad, fd, 1e-8, "dA/dci: AD vs Richardson FD at ci=" + std::to_string(ci));
+  }
+  for (double p : {0.5, 2.0, 3.5949, 5.0}) {
+    AD a = p; xad::derivative(a) = 1.0;
+    const double ad = xad::derivative(l.hydraulic_cost_TF_kernel(a));
+    const double fd =
+        richardson([&](double x) { return l.hydraulic_cost_TF_kernel(x); }, p, 1e-4);
+    near(ad, fd, 1e-8, "dcost/dpsi: AD vs Richardson FD at psi=" +
+                           std::to_string(p));
+  }
+
+  // 3. The cost kernel must be PURE -- an AD probe must not scribble the cached
+  // hydraulic_cost_, or a gradient evaluation would corrupt reported model state.
+  const double cached = l.hydraulic_cost_TF(3.0);
+  AD probe = 4.5; xad::derivative(probe) = 1.0;
+  (void)l.hydraulic_cost_TF_kernel(probe);
+  ok(l.hydraulic_cost_ == cached,
+     "an AD probe of the cost kernel leaves hydraulic_cost_ untouched");
+}
+
+// PLAN 11a: the collar solve now solves its own first-order condition, so the
+// check that bites is the RESIDUAL at the returned point, not the returned value.
+// Measured over the golden grid: 240 of 240 feasible rows improved their residual
+// and none got worse, interior rows landing at a median |dprofit| of 5.6e-15
+// against golden section's 7.8e-4.
+//
+// Deliberately NOT checked against profit. Profit is the wrong instrument here for
+// a reason worth recording: it is the maximum, so it is flat, and its own
+// numerical floor is set by the nested ci root-find's 1e-7 tolerance. Over the
+// grid two rows come out ~6e-7 LOWER in profit than golden section while their
+// residual improves by ten orders of magnitude -- that is the floor, not a
+// regression, and a test asserting "profit never decreases" would encode the noise.
+void test_collar_solve_satisfies_its_own_first_order_condition() {
+  printf("the collar solve lands where dprofit == 0 (PLAN 11a)\n");
+  Drivers d;
+  // An interior optimum: the gradient at the answer should be at solver precision.
+  leaf::Leaf l = make_leaf(d, {2.0}, {1.0});
+  l.find_root_collar_psi();
+  const double residual = l.dprofit_droot_collar_psi(l.opt_root_psi_);
+  ok(std::abs(residual) < 1e-9,
+     "the interior optimum satisfies dprofit == 0 to solver precision");
+  // The bar this clears, stated as the thing it replaced: golden section left
+  // -6.22e-4 here, which is what made the argmax a staircase in the traits.
+  ok(std::abs(residual) < 1e-6 * 6.22e-4,
+     "and it is orders below the residual golden section left behind");
+
+  // The answer stays strictly inside the feasible interval. This is the guard on
+  // the #31 regression that returning bound_a caused: below psi_upstream the
+  // profit algebra runs on a negative conductance and profit is DISCONTINUOUS, so
+  // an endpoint is not merely a poor answer, it is a different function. Returning
+  // bound_a moved 22 golden rows' profit DOWN by 1.44 before this was caught.
+  const double root_zero_E = l.find_root_psi(2.0, l.roots_.psi_soil_, 0);
+  const double bound_b =
+      std::min(l.find_root_psi(2.0, l.roots_.psi_soil_, 1), l.roots_.root_psi_crit);
+  ok(l.opt_root_psi_ > root_zero_E,
+     "the collar is strictly drier than the zero-uptake bound (#31)");
+  ok(l.opt_root_psi_ <= bound_b, "and no drier than the binding dry limit");
+}
+
+// A CONSTRAINED optimum, which 42 of the 240 feasible golden-grid rows are: profit
+// is still climbing at one end of the feasible interval, so dprofit never crosses
+// zero inside it. The residual is then NOT small, and that is correct rather than a
+// convergence failure -- so this pins the property that actually holds there.
+void test_collar_solve_handles_a_pinned_optimum() {
+  printf("a collar optimum pinned to its constraint (PLAN 11a)\n");
+  Drivers d;
+  // psi_soil 4.0 over 5 layers at vpd 2.0 -- one of the measured pinned rows.
+  leaf::Leaf l = make_leaf(d, {4.0, 4.25, 4.5, 4.75, 5.0},
+                           {1.0, 2.0, 3.0, 4.0, 5.0});
+  l.find_root_collar_psi();
+  const double root_zero_E = l.find_root_psi(4.0, l.roots_.psi_soil_, 0);
+  const double bound_b =
+      std::min(l.find_root_psi(4.0, l.roots_.psi_soil_, 1), l.roots_.root_psi_crit);
+  ok(std::isfinite(l.profit_), "the pinned row still yields a finite profit");
+  ok(l.opt_root_psi_ > root_zero_E,
+     "and a collar strictly inside the zero-uptake bound, not on it (#31)");
+  ok(l.opt_root_psi_ <= bound_b, "and inside the dry bound");
+  // It is pinned NEAR the wet end, but not AT it: the true argmax sits essentially
+  // on the feasibility boundary, and the step-in resolves it to ~1e-6 of the
+  // bracket width. Measured 3.29e-4 wetter than golden section's answer, with a
+  // profit 1.27e-3 HIGHER -- so being pinned is not being wrong.
+  ok(l.opt_root_psi_ - root_zero_E < 1e-4 * (bound_b - root_zero_E),
+     "the pinned answer sits at the wet end of the interval");
+  // The gradient there is genuinely non-zero, which is what "constrained" means.
+  ok(l.dprofit_droot_collar_psi(l.opt_root_psi_) < 0.0,
+     "profit is decreasing at the pinned answer, so the bound is what binds");
+}
+
+// Hazard 3, re-measured rather than argued. The guide's constraint is that the
+// argmax must vary SMOOTHLY with inputs. Golden section resolved it only to
+// GSS_tol_abs, making it piecewise constant at fine scales -- so a sharper solve
+// makes it smoother, which is the opposite of what the hazard reads like.
+//
+// ⚠️ This measures smoothness in a TRAIT. Hazard 3's actual concern is smoothness
+// in plant state feeding the demographic growth-rate gradient, which cannot be
+// measured from here while plant #591 blocks end-to-end validation. Same
+// mechanism, so the same direction is expected -- but it is not the same test, and
+// this one passing does not discharge the hazard.
+void test_collar_argmax_is_smooth_in_a_trait() {
+  printf("the collar argmax varies smoothly with a trait (hazard 3)\n");
+  Drivers d;
+  const int n = 11;
+  const double base = 96.0, step = base * 1e-3;  // 0.1% steps in vcmax_25
+  double collar[n];
+  int distinct = 0;
+  for (int i = 0; i < n; ++i) {
+    leaf::Leaf l;
+    l.vcmax_25 = base + i * step;
+    l.setup_transpiration(100);
+    l.setup_root_vulnerability(100);
+    std::vector<double> ps{2.0}, depth{1.0}, root{1.0 / d.area_leaf};
+    l.set_physiology(root, d.PPFD, ps, depth, d.K_s * d.theta / d.h, d.atm_vpd,
+                     d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+    l.find_root_collar_psi();
+    collar[i] = l.opt_root_psi_;
+    bool seen = false;
+    for (int j = 0; j < i; ++j) {
+      if (collar[j] == collar[i]) seen = true;
+    }
+    if (!seen) ++distinct;
+  }
+  // Golden section gave 6 distinct values out of 11 -- the staircase, tread width
+  // ~GSS_tol_abs. Every step must now move the answer.
+  ok(distinct == n, "every trait step moves the argmax (no staircase)");
+
+  // Smoothness, as second differences against the step size. Golden section
+  // measured 3.9e-4, i.e. the same size as the steps themselves: pure noise. The
+  // root-find measured 3.4e-7, ~1000x smaller than its own steps.
+  double worst_d2 = 0.0, mean_step = 0.0;
+  for (int i = 1; i < n; ++i) {
+    mean_step += std::abs(collar[i] - collar[i - 1]) / (n - 1);
+  }
+  for (int i = 2; i < n; ++i) {
+    worst_d2 = std::max(worst_d2,
+                        std::abs(collar[i] - 2 * collar[i - 1] + collar[i - 2]));
+  }
+  ok(worst_d2 < 0.02 * mean_step,
+     "second differences are small against the step size, not comparable to it");
 }
 
 // #25's invariant, asserted rather than documented: every psi is a positive
@@ -1169,6 +1430,11 @@ int main() {
   test_analytic_gradient_matches_finite_difference();
   test_gradient_needs_no_prior_solve();
   test_gradient_is_zero_in_reversed_gradient_state();
+  test_gradient_reports_feasibility();
+  test_ad_kernels_are_the_model_not_a_mirror();
+  test_collar_solve_satisfies_its_own_first_order_condition();
+  test_collar_solve_handles_a_pinned_optimum();
+  test_collar_argmax_is_smooth_in_a_trait();
   test_soil_conductance_is_positive();
   test_root_psi_crit_clamp_binds();
   test_signed_potentials_are_rejected();

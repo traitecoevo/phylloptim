@@ -130,6 +130,13 @@ R CMD check .                # C++ suite via tests/cpp.R, plus tests/testthat/
 doxygen                      # renders the C++ API to docs/html/index.html
 ```
 
+⚠️ **R does not track header dependencies, so `R CMD INSTALL` after editing
+`inst/include/` reuses a stale `src/RcppR6.o` and the R layer goes on running the
+OLD model.** Nothing warns you, and the numbers stay plausible: two rounds of
+R-side diagnostics were taken against the previous solver during PLAN 11a before
+this was noticed. **`rm -f src/*.o src/*.so` before reinstalling**, then check one
+value against the C++ suite, which does track headers.
+
 `tests/cpp.R` is not a duplicate of the CI workflow. It compiles with R's
 *configured* compiler (`R CMD config CXX20`) against the *installed* headers,
 which is what a `LinkingTo: leaf` consumer gets — so a consumer running their own
@@ -171,10 +178,43 @@ dead, confined the shutdown fix to exactly 48 rows × 5 fields, and showed the
 rubber-stamps the change. If a diff is intended, regenerate and say so in the
 commit message with the measured size of the change.
 
-Guide to magnitudes, measured: **~1e-16 is reassociation, ~1e-4 is a real
-difference.** These nested solvers amplify perturbations up to about
-`GSS_tol_abs` (1e-3), so there is a four-order-of-magnitude gap between rounding
-and bug. Anything in between deserves investigation.
+Guide to magnitudes, measured: **~1e-16 is reassociation, ~1e-9 is the solver
+floor, ~1e-4 is a real difference.** Anything above the floor deserves
+investigation. Where that floor comes from, and the two times it moved:
+
+A perturbation this small does not stay small — the nested solvers amplify it up to
+whichever tolerance is loosest, because a last-bit change shifts *which point*
+inside its tolerance band a bracketing solver lands on. This guide said 1e-3 for a
+long time; the figure has since moved twice, measured by applying **one identical
+perturbation** (unifying the AD replica with the function it mirrors) at each stage:
+
+| amplifier in play | that perturbation shows up as |
+|---|---|
+| golden section, `GSS_tol_abs` 1e-3 | **5.53e-04** — pre-11a, #4 comment 2 |
+| `psi_stem_to_ci` at 1e-7 | **4.98e-07** — after 11a removed golden section |
+| `psi_stem_to_ci` at **1e-10 — where we are now** | **~1e-09** (PLAN 11b) |
+| `psi_stem_to_ci` at 1e-13, not taken | 7.16e-13 |
+
+The old four-order gap between rounding and bug briefly collapsed to one, and is
+now back. Two things follow:
+
+- **`psi_stem_to_ci`'s tolerance sets what every reported output MEANS**, so it is
+  documented at the call site with the cost/precision curve that chose 1e-10 — the
+  knee, landing 335× closer to a converged solve for **+3.4%** (2.65 → 2.75
+  µs/solve, interleaved ×5). Do not loosen it without re-reading these magnitudes,
+  and do not tighten it without a use that needs it: the plateaus in that curve are
+  TOMS748's discrete iterations, so some tightenings cost without buying anything.
+
+  ⚠️ **A caution about that curve, because it caught me.** Its seven timing points
+  were built in one loop in a scratch tree and read ~2× too cheap — they implied
+  +1.5% for the step actually taken, where the controlled A/B (both binaries from
+  one tree, interleaved) says +3.4%. Code layout moves this benchmark ~2%, which is
+  the same order as the effect being measured. **Hazard 5 says interleave; this adds
+  that building the two arms in different trees is its own bias**, and a
+  seven-point sweep is not seven controlled A/Bs.
+- **It is not the settable `ci_abs_tol`** (default 1e-3), which reaches only the
+  off-path `optimise_psi_stem_*` solvers. Tightening that one buys no precision on
+  the production path, which is a wart worth knowing before someone tries it.
 
 **It is bit-exact only on the platform that generated it — macOS/arm64.** libm's
 `exp`/`pow` are not bit-reproducible between glibc on x86-64 and Apple's libm on
@@ -187,8 +227,24 @@ magnitude apart:
 
 | field | gcc | clang | why |
 |---|---|---|---|
-| `profit` | 1.85e-06 | 5.87e-07 | it is the maximum itself — well-conditioned |
-| the other eight | 5.53e-04 | 2.73e-04 | evaluated at the **argmax** — sqrt-amplified |
+| `profit` | **1.82e-07** | **1.82e-07** | it is the maximum itself — well-conditioned |
+| the other eight | **1.4e-04** | **1.4e-04** | evaluated at the **argmax** — sqrt-amplified |
+
+**These figures changed when PLAN 11a replaced the collar solver, and how they
+changed is informative.** They were `profit` 1.85e-06 / 5.87e-07 and the other
+eight 5.53e-04 / 2.73e-04. Two things to take from the move:
+
+- **The gcc-versus-clang split was itself a golden-section artefact.** The two
+  compilers now report *identical* figures, where they used to differ by 2–3×. What
+  differed between them was which way a golden-section comparison fell; what is
+  left is libm's `exp`/`pow`, which is a property of the platform and not of the
+  compiler. So do not expect a compiler-dependent column here any more — and if one
+  reappears, something has reintroduced a discrete decision into the solve.
+- **The sqrt story now fits better than it did.** `sqrt(1.82e-07)` ≈ 4.3e-04
+  against the 1.4e-04 observed, where before it was `sqrt(1.85e-06)` ≈ 1.4e-03
+  against 5.5e-04. Same order in both cases, but the residual factor shrank, which
+  is what you would expect once the argmax stopped carrying an extra `GSS_tol_abs`
+  of arbitrary displacement on top of the flat-maximum amplification.
 
 The maximum is *flat*: curvature measured directly at the two worst points gives
 k ≈ 1.0 and 0.9 in `profit ≈ p* − k(psi_stem−x*)²`. For a flat maximum an error
@@ -203,11 +259,26 @@ Two things follow that matter beyond this file:
 
 - **`profit` is the only reported field that is well-conditioned across platforms.**
   If you need a portable check of the solve, check `profit`, not `opt_psi_stem_`.
-- **Eight of the nine fields are pinned to 17 digits but only *determined* to about
-  `GSS_tol_abs` (1e-3).** Bit-exactness on one platform is still a good drift
-  detector — any code change moves the arbitrary choice inside that window and it
-  shows — but that is reproducibility, not determinacy. Don't read a bit-identical
-  `opt_psi_stem_` as meaning the argmax is known to 17 digits.
+- **~~Eight of the nine fields are pinned to 17 digits but only *determined* to
+  about `GSS_tol_abs` (1e-3).~~ No longer true, and the fix is PLAN 11a.** The
+  collar solve now solves `dprofit == 0` rather than searching profit, so on the
+  198 interior rows the argmax is determined to solver precision — `|dprofit|` at
+  the returned collar has a median of **5.6e-15**, against golden section's 7.8e-4.
+  The remaining 42 rows have a **constrained** optimum pinned to a bracket bound,
+  where the gradient is genuinely non-zero and the answer is determined to the
+  step-in scale (~1e-6 of the bracket width) instead.
+
+  So bit-exactness is now a drift detector *and* the numbers are determined. What
+  has not changed: **cross-platform disagreement is still sqrt-amplified** at the
+  argmax, because that comes from the flat maximum rather than from the solver.
+
+⚠️ **Profit is the wrong instrument for checking a collar-solve change, and this
+cost real time.** It is the maximum, so it is flat, and its own numerical floor is
+set by the nested `ci` root-find's 1e-7 tolerance. When 11a landed, two of 288 rows
+came out ~6e-7 *lower* in profit while their residual improved by ten orders of
+magnitude. **Check the residual `|dprofit|` at the returned point instead** — it
+improved on 240 of 240 feasible rows with none worse, which is a statement profit
+could not have made.
 
 ⚠️ **The numbers above were wrong twice, the same way both times.** First this note
 said the worst cross-platform difference was 1.7e-15 (13 ULP); then, after that was
@@ -330,10 +401,42 @@ refuse.
      point between them, i.e. past the limit the clamp exists to enforce: the fix
      reintroducing its own bug. Three regimes (no bind / tightened-but-transpiring /
      shut-down) are pinned in `test_root_psi_crit_clamp_binds`.
-3. **Argmax smoothness is a hard constraint, not a preference.** plant chose
-   golden-section over Brent because its argmax varies *smoothly* with inputs, and
-   the demographic growth-rate gradient depends on that. Any change to the solver
-   must re-measure it. The comment in `optimize.hpp` explains why.
+3. **Argmax smoothness is a hard constraint, not a preference — and the collar
+   solver that was justified by it has been replaced.** The constraint stands: the
+   demographic growth-rate gradient depends on the argmax varying *smoothly* with
+   inputs, and any change to a solver must re-measure it.
+
+   What changed is the conclusion. This entry used to say plant chose
+   golden-section over Brent for that reason, and read as a warning against
+   touching the collar solve. **PLAN 11a replaced golden section with a
+   safeguarded root-find on `dprofit == 0`, and smoothness improved.** Measured:
+
+   | | golden section | root-find |
+   |---|---|---|
+   | distinct argmax values over 11 trait steps | 6 / 11 | **11 / 11** |
+   | argmax second differences in a trait | 3.9e-04 (= the step size: noise) | **3.4e-07** |
+   | `|dprofit|` at the returned collar, interior rows | median 7.8e-04 | **median 5.6e-15** |
+   | µs/solve, interleaved at reps=2000 | 3.51 | **2.65** |
+
+   **A fixed iteration count is not smoothness**, which is the mistake the old
+   entry encoded. Golden section terminates on bracket *width*, so it resolved the
+   argmax only to `GSS_tol_abs` and the leftover offset wandered discontinuously as
+   the comparison sequence flipped. That made the argmax piecewise constant at fine
+   scales, so trait derivatives came back exactly zero — or, for traits in the
+   hydraulic path, **smooth, plausible and sign-inverted** (`root_b`: −2.6e-03
+   against a true +2.6e-04). See PLAN 11a for the arbitration.
+
+   ⚠️ **The re-measurement above is in a TRAIT, and the hazard's concern is plant
+   state.** Smoothness in height and light, feeding the demographic gradient,
+   cannot be measured from here while plant #591 blocks end-to-end validation. Same
+   mechanism, so the same direction is expected — but it is not the same
+   measurement, and the trait result does not discharge the hazard. **Re-measure on
+   the plant side when #591 clears.**
+
+   `golden_section_max` still exists, and `optimize.hpp` now records why it is no
+   longer the collar solver: it is that solver's fallback, plus the single-layer
+   optimisers. Do not read its existence as evidence that a comparison-based
+   search is the safe default here.
 4. **The leaf is purely intensive.** Every input is per unit leaf area or a
    dimensionless/intensive driver. Nothing scales with plant size — whole-plant
    allometry (`kmax(h)`, root carbon totals) is computed on the plant side and passed

@@ -205,11 +205,25 @@ public:
   double a;
   double curv_fact_elec_trans; // unitless - obtained from Smith and Keenan (2020)
   double curv_fact_colim;
+  // Still a settable control, and it still has two jobs after PLAN 11a replaced
+  // the collar golden-section search: prepare_collar_solve's "this interval is too
+  // narrow to solve over" threshold, and the single-layer optimisers
+  // (optimise_psi_stem_TF / _Sperry), which are off the production path and keep
+  // brent_fmin because their argmax feeds no gradient. It no longer sets how well
+  // the reported operating point is determined -- collar_root_tol does.
   double GSS_tol_abs;
   double vulnerability_curve_ncontrol;
   double ci_abs_tol;
   double ci_niter;
   double cost_scale_TF24;
+
+  // Tolerance on the collar potential for the profit-maximising root-find (PLAN
+  // 11a). Hard-coded rather than a control field, for the same reason
+  // find_root_psi's 1e-4 and psi_stem_to_ci's 1e-7 are: it is a property of the
+  // solve, not a knob. 1e-12 sits ~8 orders below the 1e-4 at which this package
+  // calls a difference real, and the cost of going there from GSS_tol_abs's 1e-3
+  // is a handful of evaluations, because TOMS748 is superlinear.
+  static constexpr double collar_root_tol = 1e-12;
 
   double ci_;
   double stom_cond_CO2_;
@@ -487,7 +501,45 @@ public:
   // spline derivatives (Interpolator::deriv) for the smooth transport. Replaces
   // the noisy finite-difference gradient. Seats the soil-side caches itself, so a
   // solve need not have run first.
-  double dprofit_droot_collar_psi(double opt_root_psi);
+  //
+  // ⚠️ **The 0.0 returned on the shut-down / reversed-gradient exits is a
+  // SENTINEL, not a stationary point**, and the distinction only became load
+  // bearing when PLAN 11a proposed root-finding on `dprofit == 0`. It matters
+  // because the sentinel fires at `prepare_collar_solve`'s WET bracket endpoint
+  // -- at `root_zero_E` uptake is zero by construction, so `psi >= psi_stem` --
+  // which is the first point a bracketing solver evaluates when it checks that
+  // its bracket brackets. Measured at the default operating point: profit there
+  // is -1.897 against 2.516 at the true optimum, so a solver that reads the
+  // sentinel as a root returns the zero-transpiration point as the answer. The
+  // region is narrow (at most 3.46e-07 MPa into the bracket over the golden grid,
+  // median 1.22e-08), which is exactly why it would survive casual testing.
+  //
+  // `feasible`, when non-null, reports whether the point admits an informative
+  // gradient at all, so a caller searching for a zero can tell the two kinds of
+  // 0.0 apart. The out-parameter rather than a NaN return is deliberate three
+  // ways: TF24f consumes the return value directly as an ODE rate
+  // (`dpsi/dt = k_acclim * dprofit`, plant/src/tf24f_strategy.cpp), so a NaN
+  // would propagate into plant's state vector where 0.0 correctly means "do not
+  // acclimate this step"; NaN already carries a *different* contract on the
+  // neighbouring derivative (hazard 6: `duptake_dpsi` returning NaN means "fall
+  // back to finite differences"), and overloading it would make the two
+  // indistinguishable; and defaulting to nullptr leaves every existing call site
+  // and the generated R binding untouched.
+  double dprofit_droot_collar_psi(double opt_root_psi, bool* feasible = nullptr);
+  // Post-prepare body of dprofit_droot_collar_psi, with the same `feasible`
+  // contract. Assumes the supply path's per-solve caches are already seated, so
+  // the collar solve can share ONE supply_begin_solve across all ~10 of its
+  // gradient evaluations instead of re-seating per call -- the same saving #530
+  // made for the finite-difference path, and it matters here because
+  // begin_solve() is a spline evaluation per soil layer.
+  double dprofit_at_collar_psi(double opt_root_psi, bool* feasible = nullptr);
+  // The profit-maximising collar potential within [bound_a, bound_b], by a
+  // safeguarded root-find on dprofit == 0 (PLAN 11a). Returns a bound when the
+  // optimum is pinned to it, which is the case on 42 of the 240 feasible
+  // golden-grid rows and so is a branch that has to be written rather than a
+  // corner. Falls back to golden section if either endpoint has no usable
+  // gradient -- see the definition for why that fallback should never fire.
+  double maximise_profit_over_collar(double bound_a, double bound_b);
   // Analytic d(E_up_)/d(collar suction) -- a CONDUCTANCE, positive by
   // construction now that both sides are magnitudes (#25). Thin forwarder to
   // roots_.duptake_dpsi; see there for the derivation and for the NaN-at-a-kink
@@ -537,6 +589,9 @@ public:
 
   // proportion of conductivity in xylem at a given water potential (return: unitless)
   double proportion_of_conductivity(double psi) const;
+  // Scalar-generic core of the above. See the `_kernel` block below the assim
+  // declarations for why these exist.
+  template <typename T> T proportion_of_conductivity_kernel(T psi) const;
 
   // supply-side transpiration for a given water potential gradient between leaves and soil, 
   // references setup_transpiraiton for values (return: kg h20 s^-1 m^-2 LA)
@@ -557,6 +612,40 @@ public:
   double electron_transport();
   double assim_electron_limited(double ci_);
   double assim_colimited(double ci_);
+
+  // --- the scalar-generic cores -------------------------------------------
+  //
+  // These are the SINGLE definition of the photosynthesis and cost algebra. The
+  // five `double` entry points above and beside them are `T = double`
+  // instantiations, and `dprofit_droot_collar_psi` differentiates the same code
+  // with `T = xad::fwd<double>::active_type`. So the forward model and its
+  // derivative cannot disagree: there is one body, not two.
+  //
+  // ⚠️ **They replace a hand-maintained `namespace detail`, which HAD ALREADY
+  // DRIFTED** -- the deleted `assim_colimited_ad` associated the electron-limited
+  // term left-to-right where `assim_electron_limited` divides the bracket first,
+  // and used `s*s` where `assim_colimited` uses `pow(s, 2)`. Both are pure
+  // reassociation, so the two functions were mathematically identical and
+  // numerically not: the AD derivative was the derivative of a *slightly
+  // different function* than the model evaluated. Harmless while the gradient only
+  // set TF24f's acclimation rate; load-bearing once PLAN 11a made the collar solve
+  // root-find on it. Measured cost of the fix: 4.98e-07 on the golden grid.
+  //
+  // Why members templated on the scalar type, rather than free functions taking
+  // their parameters explicitly (which is what #4 comment 1 proposed): a free
+  // function needs seven or eight arguments threaded from the members at each call
+  // site, and a transposed pair there is exactly the class of silent error the
+  // replicas were. Reading the members directly makes that unrepresentable. It is
+  // also the shape item 11's `Leaf<T>` wants, so it is a step rather than a
+  // detour.
+  //
+  // Keep them PURE -- no writes to members. `hydraulic_cost_TF` caches into
+  // `hydraulic_cost_`; its kernel must not, or the AD pass would write model state
+  // while probing.
+  template <typename T> T assim_rubisco_limited_kernel(T ci) const;
+  template <typename T> T assim_electron_limited_kernel(T ci) const;
+  template <typename T> T assim_colimited_kernel(T ci) const;
+  template <typename T> T hydraulic_cost_TF_kernel(T psi_stem) const;
   double assim_minus_stom_cond_CO2(double x, double psi_stem, double psi_upstream);
   double psi_stem_to_ci(double psi_stem, double psi_upstream);
   void set_leaf_states_rates_from_psi_stem(double psi_stem, double psi_upstream);
@@ -645,24 +734,12 @@ public:
 };
 
 
-namespace detail {
-// Templated replicas of the analytic profit algebra, so forward-mode AD gives
-// their exact derivatives (used by Leaf::dprofit_droot_collar_psi). They mirror
-// Leaf::assim_colimited and Leaf::hydraulic_cost_TF exactly.
-template <typename T>
-T assim_colimited_ad(T ci, double vcmax, double et, double gstar_Pa, double km,
-                     double R_d, double curv) {
-  T ar = vcmax * (ci - gstar_Pa) / (ci + km);
-  T ae = et / 4.0 * (ci - gstar_Pa) / (ci + 2.0 * gstar_Pa);
-  T s = ar + ae;
-  return (s - sqrt(s * s - 4.0 * curv * ar * ae)) / (2.0 * curv) - R_d;
-}
-template <typename T>
-T hydraulic_cost_ad(T psi_stem, double stem_b, double stem_c, double cost_scale,
-                    double beta2) {
-  return cost_scale * pow(1.0 - exp(-pow(psi_stem / stem_b, stem_c)), beta2);
-}
-}  // namespace detail
+// `namespace detail` used to live here, holding templated REPLICAS of the profit
+// algebra whose comment claimed they "mirror Leaf::assim_colimited and
+// Leaf::hydraulic_cost_TF exactly". One of them did not -- see the `_kernel`
+// declarations in the class. They are deleted: the real functions are now
+// templated on their scalar type, so AD differentiates the model itself and the
+// mirror cannot drift because there is no mirror.
 inline Leaf::Leaf()
     :
     vcmax_25(96), // umol m^-2 s^-1 
@@ -1307,6 +1384,134 @@ if(assim_max_ < 0){
     return true;
 }
 
+// The profit-maximising collar potential, by solving the first-order condition
+// dprofit/dpsi == 0 instead of searching profit itself (PLAN 11a). Assumes
+// prepare_collar_solve has run, so the soil-side caches are seated and every
+// gradient evaluation below can go straight to dprofit_at_collar_psi.
+//
+// WHY this replaced golden section, in one line each -- PLAN 11a has the numbers:
+//
+//  * Golden section resolves the argmax only to GSS_tol_abs (1e-3), leaving the
+//    returned collar ~1e-4 MPa from the true stationary point with an offset that
+//    wanders as the comparison sequence flips. That offset IS the staircase that
+//    made trait derivatives unusable.
+//  * The damage was not merely a staircase. For traits in the hydraulic path the
+//    wandering offset DOMINATED the real trait response, so the argmax came back
+//    smooth, plausible and SIGN-INVERTED (root_b: -2.6e-03 where the truth is
+//    +2.6e-04). Arbitrated against a 20001-point derivative-free scan of profit.
+//  * It cannot be fixed downstream. No finite-difference step size and no amount
+//    of differentiating through the iterations recovers it, because the error is
+//    in the solved argmax rather than in how the argmax is differentiated.
+//  * Hazard 3 -- "the argmax must vary smoothly with inputs" -- is IMPROVED, not
+//    threatened: measured ~800x better second differences in the traits. The
+//    hazard's own concern is smoothness in plant state, which cannot be measured
+//    here while plant #591 blocks end-to-end validation; same mechanism, so the
+//    same direction is expected, but it is not the same measurement.
+//
+// Safeguarded, not Newton: TOMS748 keeps a bracket throughout, so a non-monotone
+// or kinked case degrades instead of diverging. Monotonicity was measured on all
+// 240 feasible golden-grid rows, but that is a grid, not a theorem. This also
+// makes the collar the third leaf solver on this method -- see uniroot.hpp's
+// history note, which is about exactly this judgement call.
+inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) {
+  const double width = bound_b - bound_a;
+  const auto dprofit = [&](double psi, bool* feasible = nullptr) {
+    return dprofit_at_collar_psi(psi, feasible);
+  };
+
+  // The WET endpoint is infeasible by construction: bound_a is root_zero_E, where
+  // uptake is exactly zero, so psi_stem == bound_a and dprofit takes its
+  // reversed-gradient exit. Its 0.0 is a sentinel, and a bracketing solver handed
+  // it would report the zero-transpiration point as the optimum -- profit -1.897
+  // there against 2.516 at the true optimum, measured at the default drivers.
+  //
+  // So step inside until the gradient is real. Measured over the golden grid the
+  // infeasible region is at most 3.46e-07 MPa wide (median 1.22e-08, never more
+  // than 6.2e-07 of the bracket), so the first try lands and the loop is a guard.
+  bool ok_lo = false;
+  double lo = bound_a;
+  double f_lo = 0.0;
+  for (double frac = 1e-6; frac < 0.5; frac *= 10.0) {
+    lo = bound_a + frac * width;
+    f_lo = dprofit(lo, &ok_lo);
+    if (ok_lo && std::isfinite(f_lo)) {
+      break;
+    }
+  }
+
+  // The DRY endpoint is feasible everywhere measured, so it is tried as-is first
+  // and only stepped inside if that fails.
+  bool ok_hi = false;
+  double hi = bound_b;
+  double f_hi = dprofit(hi, &ok_hi);
+  if (!(ok_hi && std::isfinite(f_hi))) {
+    for (double frac = 1e-6; frac < 0.5; frac *= 10.0) {
+      hi = bound_b - frac * width;
+      f_hi = dprofit(hi, &ok_hi);
+      if (ok_hi && std::isfinite(f_hi)) {
+        break;
+      }
+    }
+  }
+
+  // No usable gradient at one end. Nothing measured reaches this -- both ends are
+  // feasible on all 240 feasible golden-grid rows -- so treat it as a signal
+  // rather than a routine path if it ever fires. Falling back to the search this
+  // replaced means the change cannot make a previously-working case fail, which
+  // is worth six lines on a solve plant runs millions of times.
+  if (!ok_lo || !ok_hi) {
+    return util::golden_section_max(
+        [&](double bound) {
+          const double psi_stem =
+              find_psi_stem_from_psi_root(bound, supply_psi_soil());
+          return profit_psi_stem_TF(psi_stem, bound);
+        },
+        bound_a, bound_b, GSS_tol_abs);
+  }
+
+  // A CONSTRAINED optimum: profit is still climbing at one end of the feasible
+  // interval, so dprofit never crosses zero inside it and the answer is that end.
+  // Not a corner case -- 42 of the 240 feasible golden-grid rows land here (24
+  // pinned wet, 18 pinned dry), all at psi_soil of 3 to 4, where profit is
+  // negative and the best the leaf can do is barely transpire.
+  //
+  // ⚠️ **Return lo/hi, NOT bound_a/bound_b.** Returning the raw bound was tried
+  // and is wrong, because of #31: below psi_upstream the profit algebra is built
+  // on a negative conductance, so profit is DISCONTINUOUS across the feasibility
+  // boundary rather than merely steep. Measured at psi_soil=4, vpd=2, 5 layers:
+  // profit is -4.696 just inside the boundary and -6.136 at bound_a itself, a jump
+  // of exactly the 1.44 that showed up on 22 golden rows as a profit DECREASE. The
+  // #31 region is the reason the wet endpoint has to be stepped over rather than
+  // evaluated, and the same reason it must not be returned.
+  //
+  // What lo buys, stated honestly: on a wet-pinned row the true argmax sits
+  // essentially ON the feasibility boundary -- a fine scan puts it at 6.4e-07 and
+  // 3.2e-09 of the bracket width from bound_a on the two worst rows -- so lo
+  // resolves it to the step-in scale (~1e-6 of the width), not to
+  // collar_root_tol. That is still ~100x tighter than the GSS_tol_abs it replaces,
+  // and it beat golden section on profit at both of those rows. Bisecting for the
+  // exact feasibility boundary would cost ~40 gradient evaluations on the hot path
+  // to gain ~1e-07 of profit on a flat maximum, which is not a trade worth making.
+  //
+  // Worth knowing downstream: where a row crosses between interior and pinned the
+  // argmax has a genuine KINK. That belongs to the constrained problem rather than
+  // to this solver -- golden section has it too -- but it is a real
+  // non-differentiable set in trait space, and it sits where a calibration is most
+  // likely to wander.
+  if (f_lo <= 0.0) {
+    return lo;
+  }
+  if (f_hi >= 0.0) {
+    return hi;
+  }
+
+  // Interior stationary point. f_lo > 0 > f_hi, so the bracket is valid and
+  // uniroot_smooth's throw-on-bad-bracket cannot fire; passing the two endpoint
+  // values it already has saves it re-evaluating them.
+  return util::uniroot_smooth(dprofit, lo, hi, f_lo, f_hi, collar_root_tol,
+                              static_cast<size_t>(ci_niter));
+}
+
 inline void Leaf::find_root_collar_psi(){
     double bound_a, bound_b;
     if (!prepare_collar_solve(bound_a, bound_b)) {
@@ -1315,19 +1520,10 @@ inline void Leaf::find_root_collar_psi(){
     // root_crit / root_zero_E were consumed inside prepare_collar_solve; recover
     // them for the diagnostic message only if the profit check below fails.
 
-    // Maximise carbon profit over the feasible collar-potential interval via
-    // golden-section search (util::golden_section_max). Unlike Brent, its argmax
-    // is a smooth (fixed-iteration) function of the inputs, so the operating
-    // point varies smoothly with plant height -- the demographic growth-rate
-    // gradient relies on this. The objective maps a candidate collar potential
-    // `bound` to its profit (find the stem psi it implies, then evaluate profit).
-    const double opt_root_psi = util::golden_section_max(
-        [&](double bound) {
-          const double psi_stem =
-              find_psi_stem_from_psi_root(bound, supply_psi_soil());
-          return profit_psi_stem_TF(psi_stem, bound);
-        },
-        bound_a, bound_b, GSS_tol_abs);
+    // Maximise carbon profit over the feasible collar-potential interval by
+    // solving its first-order condition, dprofit/dpsi == 0, rather than by
+    // searching the objective. PLAN 11a has the reasoning and the measurements.
+    const double opt_root_psi = maximise_profit_over_collar(bound_a, bound_b);
 
     opt_psi_stem_ = find_psi_stem_from_psi_root(opt_root_psi, supply_psi_soil());
 
@@ -1397,15 +1593,26 @@ inline double Leaf::profit_at_collar_psi(double target_opt_root_psi,
 // with gc = const * transpiration(psi_stem,psi). A'/C' are obtained by forward
 // AD; the gc partials use the analytic spline derivative (transpiration_from_psi
 // .deriv); dpsi_stem/dpsi by a tight central difference on the smooth transport.
-inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi) {
-  using AD = xad::fwd<double>::active_type;
-  const double psi = opt_root_psi;
-  const double gstar_Pa = gamma_ * umol_per_mol_to_Pa_;
-
+inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi, bool* feasible) {
   // Every transport evaluation below reads the supply path's per-solve caches, so
   // seat them on the current psi_soil_ here rather than depending on whatever the
-  // caller's last solve left cached.
+  // caller's last solve left cached. Keeping this in the wrapper is what lets the
+  // collar solve call the body directly and seat them once for the whole solve.
   supply_begin_solve();
+  return dprofit_at_collar_psi(opt_root_psi, feasible);
+}
+
+inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
+  using AD = xad::fwd<double>::active_type;
+  const double psi = opt_root_psi;
+  // gstar_Pa used to be precomputed here and threaded into the AD replicas. The
+  // kernels read gamma_ and umol_per_mol_to_Pa_ themselves, which is one fewer
+  // place for the two sides to disagree.
+  // Infeasible until the two exits below have been passed; see the header for why
+  // the 0.0 they return must be distinguishable from a genuine stationary point.
+  if (feasible != nullptr) {
+    *feasible = false;
+  }
 
   // Operating point in double.
   const double psi_stem = find_psi_stem_from_psi_root(psi, supply_psi_soil());
@@ -1427,15 +1634,20 @@ inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi) {
   if (!std::isfinite(ci)) {
     return 0.0;
   }
+  // Past both exits: whatever is returned below is a real derivative, so a zero
+  // from here IS a stationary point.
+  if (feasible != nullptr) {
+    *feasible = true;
+  }
 
-  // A'(ci) and C'(psi_stem) via forward-mode AD of the analytic algebra.
+  // A'(ci) and C'(psi_stem) by forward-mode AD of THE MODEL'S OWN algebra -- the
+  // same kernels assim_colimited() and hydraulic_cost_TF() are instantiations of,
+  // so these are derivatives of the function actually evaluated rather than of a
+  // hand-kept mirror of it.
   AD ci_ad = ci;            xad::derivative(ci_ad) = 1.0;
-  const double A_prime = xad::derivative(
-      detail::assim_colimited_ad(ci_ad, vcmax_, electron_transport_, gstar_Pa, km_,
-                         R_d_, curv_fact_colim));
+  const double A_prime = xad::derivative(assim_colimited_kernel(ci_ad));
   AD ps_ad = psi_stem;      xad::derivative(ps_ad) = 1.0;
-  const double C_prime = xad::derivative(
-      detail::hydraulic_cost_ad(ps_ad, stem_b, stem_c, cost_scale_TF24, beta2));
+  const double C_prime = xad::derivative(hydraulic_cost_TF_kernel(ps_ad));
 
   // Stomatal-conductance supply coefficient gc and its partials. gc =
   // gc_const * transpiration(psi_stem, psi); transpiration is conductance_max *
@@ -1541,9 +1753,13 @@ inline double Leaf::leaf_temp_from_E(double E) const {
 // transpiration supply functions
 
 // returns proportion of conductance taken from hydraulic vulnerability curve (unitless)
-inline double Leaf::proportion_of_conductivity(double psi) const {
-
+template <typename T>
+inline T Leaf::proportion_of_conductivity_kernel(T psi) const {
   return exp(-pow((psi / stem_b), stem_c));
+}
+
+inline double Leaf::proportion_of_conductivity(double psi) const {
+  return proportion_of_conductivity_kernel(psi);
 }
 
 // set spline for proportion of conductivity
@@ -1640,32 +1856,46 @@ inline double Leaf::electron_transport() {
 }
 
 //calculate the rubisco-limited assimilation rate, returns umol m^-2 s^-1
+// The scalar-generic cores. Arithmetic and call structure are IDENTICAL to the
+// `double` bodies these replaced -- same association, same `pow(s, 2)`, same
+// two-call structure in the colimited form -- so the `double` instantiation is not
+// meant to move results, and the golden file is the check on that. What moves is
+// the DERIVATIVE, which now comes from this code instead of from the drifted
+// replica.
+template <typename T>
+inline T Leaf::assim_rubisco_limited_kernel(T ci) const {
+  return (vcmax_ * (ci - gamma_ * umol_per_mol_to_Pa_)) / (ci + km_);
+}
+
+template <typename T>
+inline T Leaf::assim_electron_limited_kernel(T ci) const {
+  return electron_transport_ / 4 *
+  ((ci - gamma_ * umol_per_mol_to_Pa_) / (ci + 2 * gamma_ * umol_per_mol_to_Pa_));
+}
+
+template <typename T>
+inline T Leaf::assim_colimited_kernel(T ci) const {
+  T assim_rubisco_limited_ = assim_rubisco_limited_kernel(ci);
+  T assim_electron_limited_ = assim_electron_limited_kernel(ci);
+
+  return (assim_rubisco_limited_ + assim_electron_limited_ - sqrt(pow(assim_rubisco_limited_ + assim_electron_limited_, 2) - 4 * curv_fact_colim * assim_rubisco_limited_ * assim_electron_limited_)) /
+             (2 * curv_fact_colim)- R_d_;
+}
+
 inline double Leaf::assim_rubisco_limited(double ci_) {
-
-  return (vcmax_ * (ci_ - gamma_ * umol_per_mol_to_Pa_)) / (ci_ + km_);
-
+  return assim_rubisco_limited_kernel(ci_);
 }
 
 //calculate the light-limited assimilation rate, returns umol m^-2 s^-1
 inline double Leaf::assim_electron_limited(double ci_) {
-  
-
-  return electron_transport_ / 4 *
-  ((ci_ - gamma_ * umol_per_mol_to_Pa_) / (ci_ + 2 * gamma_ * umol_per_mol_to_Pa_));
+  return assim_electron_limited_kernel(ci_);
 }
 
 // returns co-limited assimilation umol m^-2 s^-1, NET of dark respiration (the
 // trailing `- R_d_`), so gross assimilation is this value + R_d_. The comment
 // that used to sit on the return statement said the opposite.
 inline double Leaf::assim_colimited(double ci_) {
-
-  double assim_rubisco_limited_ = assim_rubisco_limited(ci_) ;
-  double assim_electron_limited_ = assim_electron_limited(ci_);
-
-  return (assim_rubisco_limited_ + assim_electron_limited_ - sqrt(pow(assim_rubisco_limited_ + assim_electron_limited_, 2) - 4 * curv_fact_colim * assim_rubisco_limited_ * assim_electron_limited_)) /
-             (2 * curv_fact_colim)- R_d_;
-
-
+  return assim_colimited_kernel(ci_);
 }
 
 
@@ -1706,12 +1936,51 @@ inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
   // bracket ends (Ar,Ae vanish linearly at gamma* so sqrt(disc) is linear, not
   // singular) and its only sharp feature is the colimitation elbow far below the
   // operating root. So it is a well-behaved case for a superlinear bracketing
-  // solver: TOMS748 reaches the same root in ~9 evals vs bisection's ~29 at the
-  // same 1e-7 tol. This is deliberately scoped to psi_stem_to_ci ONLY; the
-  // hydraulic find_root_psi path keeps bisection (its target is not smooth -- see
-  // the warning on util::uniroot_smooth).
+  // solver: TOMS748 reaches the same root in ~9 evals vs bisection's ~29. This is
+  // deliberately scoped to psi_stem_to_ci ONLY; the hydraulic find_root_psi path
+  // keeps bisection (its target is not smooth -- see the warning on
+  // util::uniroot_smooth).
+  //
+  // ⚠️ **The 1e-10 is load-bearing and was chosen by measurement, not taste. It
+  // sets the floor of what every reported output of this model MEANS.** It used to
+  // be 1e-7, which was invisible while golden section's GSS_tol_abs (1e-3)
+  // dominated; once PLAN 11a removed that, this became the model's dominant
+  // amplifier -- a last-bit change anywhere upstream shifts which point TOMS748
+  // lands on inside its tolerance band, and that surfaces in ci, assim, gc and
+  // profit. Measured by perturbing the model identically at each tolerance and
+  // reading the golden grid (PLAN 11b):
+  //
+  //   ci tol   worst diff vs a converged (1e-15) solve   us/solve (indicative)
+  //   1e-7                       1.82e-07                      2.655
+  //   1e-8                       3.15e-08                      2.640
+  //   1e-10                      5.41e-10                      2.695   <- here
+  //   1e-11                      5.41e-10                      2.768
+  //   1e-13                      7.48e-13                      2.885
+  //   1e-15                      0                             2.945
+  //
+  // 1e-10 is the knee: it lands **335x closer to a converged solve** than 1e-7
+  // did, where going on to 1e-13 buys ~700x more for roughly three times the extra
+  // time. The plateaus (1e-8 = 1e-9, 1e-10 = 1e-11) are TOMS748's discrete
+  // iterations, so tightening *between* them buys nothing and still costs.
+  //
+  // ⚠️ **The precision column is solid; the timing column is only indicative and
+  // reads ~2x too cheap.** Those seven binaries were built in one loop in a
+  // scratch tree, and code-layout luck moves this benchmark by ~2%. The controlled
+  // figure for the step actually taken -- both binaries built from the same tree,
+  // interleaved x5 -- is **+3.4%** (2.65 -> 2.75 us/solve), against the +1.5% the
+  // table implies. Still a good trade next to the 24.5% PLAN 11a bought, and still
+  // 21.7% faster than the 3.51 us this package ran at before 11a. If you re-derive
+  // the curve, build every point from one tree.
+  //
+  // Do not tighten further without a use that needs it, and do not loosen it back
+  // without re-reading the guide's rounding-versus-bug magnitudes, which this
+  // figure sets.
+  //
+  // Not the same knob as `ci_abs_tol` (the settable control, default 1e-3), which
+  // reaches only the off-path optimise_psi_stem_* solvers. A caller tightening
+  // that one gets no extra precision here.
   try {
-    return ci_ = util::uniroot_smooth(target, gamma_ * umol_per_mol_to_Pa_, ca_, 1e-7, ci_niter);
+    return ci_ = util::uniroot_smooth(target, gamma_ * umol_per_mol_to_Pa_, ca_, 1e-10, ci_niter);
   } catch (const std::exception& e) {
     // Penman-Monteith path (#523): extreme energy-balance leaf heating raises the
     // CO2 compensation point (gamma*) so far that assimilation is negative across
@@ -1831,9 +2100,16 @@ inline double Leaf::g1_eff() const {
   return chi * std::sqrt(atm_vpd_) / (1.0 - chi);
 }
 
+// Pure: no write to hydraulic_cost_, so the AD pass cannot scribble model state
+// while probing. The caching is the double entry point's job.
+template <typename T>
+inline T Leaf::hydraulic_cost_TF_kernel(T psi_stem) const {
+  return cost_scale_TF24 * pow((1 - proportion_of_conductivity_kernel(psi_stem)), beta2);
+}
+
 inline double Leaf::hydraulic_cost_TF(double psi_stem) {
 
-  hydraulic_cost_ = cost_scale_TF24 * pow((1 - proportion_of_conductivity(psi_stem)), beta2);
+  hydraulic_cost_ = hydraulic_cost_TF_kernel(psi_stem);
 
 return hydraulic_cost_;
 }

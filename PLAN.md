@@ -78,10 +78,10 @@ code rather than of the merge:
 | issue | item | what | note |
 |---|---|---|---|
 | [#3](https://github.com/traitecoevo/leaf_cpp/issues/3) | 7a | Make λ(state) pluggable | **unblocked** — #2 is done. Measure the dispatch separately: the cost core is fully inlined where the supply path was not, so 7b's "dispatch is free" result does **not** transfer |
-| [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11 | Template `Leaf` on its scalar type | deletes the hand-maintained AD replicas |
+| [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11, **11a** | Template `Leaf` on its scalar type | **reordered, and 11a is DONE** (#35 + #36, 2026-08-04). Golden section missed `dprofit = 0` by 6.2e-04, which for hydraulic traits made the trait response **smooth, plausible and sign-inverted** (`root_b`: −2.6e-03 against a true +2.6e-04, arbitrated derivative-free). Replaced by a root-find: residual improved on 240/240 rows, **24.5% faster**, hazard 3 ~1000× smoother. **Still open:** the replica drift (5.53e-4) and `Leaf<T>` for the trait partials, both smaller than originally scoped |
 | [#33](https://github.com/traitecoevo/leaf_cpp/issues/33) | 6d | Take resistances, not root carbon | #5 stage 2b, **blocked on plant #591**. Before #34 |
 | [#34](https://github.com/traitecoevo/leaf_cpp/issues/34) | 6d | Delete plant's `Leaf` bindings | #5 stage 4, **blocked on plant #591**. The hazard-7 payoff, and the only stage that can break plant |
-| [#6](https://github.com/traitecoevo/leaf_cpp/issues/6) | 12 | Calibration vignette, then inversion | needs #4 for trait gradients |
+| [#6](https://github.com/traitecoevo/leaf_cpp/issues/6) | 12 | Calibration vignette, then inversion | **UNBLOCKED** — the gate was 11a, not all of #4, and 11a landed (#35 + #36). A plain central difference now gives ~4 correct digits at any relative step from 1e-8 to 1e-2, so a fit can start. AD is still the vignette's headline result (AD *against* FD), so #4's remainder still improves this rather than gating it |
 | [#7](https://github.com/traitecoevo/leaf_cpp/issues/7) | 13 | Energy balance, full cut | leaf-to-air VPD is the cheap win; free convection is not worth it |
 | [#28](https://github.com/traitecoevo/leaf_cpp/issues/28) | 13 | Temperature-dependent outgoing longwave in the Penman-Monteith Rn | from plant #581 / #567 review |
 | [#31](https://github.com/traitecoevo/leaf_cpp/issues/31) | 6 | `profit_psi_stem_TF` returns a plausible number below `psi_upstream` | found writing the stage 2 vignette. Negative conductance, and profit is **discontinuous** at the boundary. Unreachable from plant's solve, which is why it survived — the first thing an R user does is plot the profit function |
@@ -1731,6 +1731,453 @@ Expect the `double` instantiation to be unchanged and verify it.
 
 There is a second, larger payoff, which is item 12: templating on the scalar type
 is what turns "we have AD" into "we can calibrate". See below.
+
+### 11a. Sharpen the outer solve FIRST — DONE, and it reordered the item
+
+**Both PRs landed 2026-08-04: #35 (the sentinel) and the collar root-find.** The
+decision below was written first and survived implementation; three things came out
+of building it that the write-up did not predict, and they are recorded at the end
+of this sub-item under "What implementation changed". Headline results:
+
+| | golden section | root-find |
+|---|---|---|
+| `|dprofit|` at the returned collar, 198 interior rows | median 7.8e-04 | **median 5.6e-15** |
+| rows with an improved residual | — | **240 / 240**, none worse |
+| distinct argmax values over 11 trait steps | 6 / 11 | **11 / 11** |
+| argmax second differences in a trait | 3.9e-04 (= the step: noise) | **3.4e-07** |
+| µs/solve, interleaved at reps=2000 | 3.51 | **2.65 (24.5% faster)** |
+| worst golden-file change | — | **1.5e-03** (2160 of 2592 cells, 240 rows) |
+
+
+
+**Decision: replace the golden-section maximisation in `find_root_collar_psi` with
+a safeguarded root-find on `dprofit_droot_collar_psi == 0`, as its own PR, before
+any `Leaf<T>` work.** Everything below is measured through the #30 R interface at
+this package's defaults, and the prototype was built in R (`uniroot` on the bound
+derivative) so the conclusion did not have to be taken on trust.
+
+Settled in writing before code, the way 6a settled header-only. Issue #4's four
+comments sized the work; this sub-item records what survived checking. **Two of
+its claims are corrected below and one is strengthened** — see the last two
+paragraphs of the first section.
+
+#### What was verified
+
+The two load-bearing measurements from #4 comment 4 reproduce exactly. At
+`psi_soil = 2.0`, `PPFD = 900`, `atm_vpd = 2.0`, one layer: `dprofit` at the
+golden-section answer is **−6.219675e-04** against a local slope of **−8.9566
+MPa⁻¹**, so the returned collar sits **6.94e-05 MPa** from the true stationary
+point. Both figures are #4's to every digit quoted there.
+
+Extended to the whole 288-point golden grid, which #4 asked for and did not have:
+
+| | |
+|---|---|
+| feasible rows (GSS actually runs) | **240** of 288; the 48 at `psi_soil = 6` shut down |
+| `dprofit` monotone decreasing across the bracket | **240 / 240** |
+| `∂²profit/∂ψ²` at the answer — the IFT denominator | **−1.56 to −61.4**, never near zero |
+| offset from the stationary point, interior rows | median **1.01e-04 MPa**, max **2.70e-04** |
+
+So monotonicity is a property of the grid, not of one operating point, and the
+IFT denominator is well conditioned everywhere — #4 comment 3's point 2 asked for
+exactly this re-measurement and it holds.
+
+**Correction 1 — the argmax is at a BOUNDARY on 42 of the 240 feasible rows**
+(24 pinned at the wet end `root_zero_E`, 18 at the dry end
+`min(root_crit, supply_psi_crit())`), all at `psi_soil` of 3 or 4. #4 assumed an
+interior stationary point throughout. `dprofit` does not cross zero on those
+rows, so **the root-find must be a constrained solve**: check the sign at both
+endpoints and return the endpoint when there is no interior crossing. That is
+what any safeguarded bracketing method does when handed a non-bracketing
+interval, so it is a branch rather than a difficulty — but it must be written,
+and it must be written *deliberately*, because the failure mode is returning a
+point strictly inside a bracket whose maximum is on the edge. The remaining 198
+interior rows all bracket correctly (`dprofit > 0` above the wet end, `< 0` at
+the dry end).
+
+**Correction 2 — the `0.0` sentinel fires at the WET BRACKET ENDPOINT, which
+makes fixing it a hard prerequisite rather than defence in depth.** #4 flagged
+the sentinel as a trap; it is worse placed than that suggests. At exactly
+`bound_a = root_zero_E` uptake is zero by construction, so `psi >= psi_stem` and
+`dprofit_droot_collar_psi` returns its `0.0`. A bracketing solver evaluates that
+endpoint *first*, to check the bracket brackets, and reads `0.0` as "the root is
+here" — returning the zero-transpiration point as the optimum. At the default
+point profit there is **−1.897** against **2.516** at the true optimum. The
+saving grace is that the region is narrow: bisecting on it, the sentinel extends
+at most **3.46e-07 MPa** into the bracket (max over the grid; median 1.22e-08),
+never more than 6.2e-07 of the bracket width. So the fix is cheap — move the
+sentinel out of the searched range, to NaN or a separate feasibility flag — and
+**it must land before or with the solver change, not after.**
+
+**Strengthened — the staircase is not the worst of it. For hydraulic traits the
+current solver returns a smooth, plausible, SIGN-INVERTED trait response.** This
+is the finding that most changes the item, and it is why #4's instruction to
+check a hydraulic trait was the right one.
+
+#4 comment 3 measured `vcmax_25` and found the argmax piecewise constant, so a
+finite difference is exactly zero below `h ≈ 0.1` and the composite `dA/dθ`
+silently drops its second term. That reproduces: 6 distinct `psi_stem` values
+across 11 samples, treads ~9e-4 ≈ `GSS_tol_abs`, FD exactly `0.000000e+00` for
+relative `h ≤ 1e-4`, and `dA/dvcmax_25` by FD at `h = 1e-3` is **8.21e-03**
+against a true **1.72e-02** — #4's number, and it is 52% low rather than merely
+"biased".
+
+But traits in the hydraulic path move the collar *bracket*, so the finite
+difference does cross treads, and what it lands on is not the derivative:
+
+| trait | naive FD (rel h 1e-6) | resolved truth | |
+|---|---|---|---|
+| `vcmax_25` | 0.000000e+00 | +4.008e-03 | term dropped entirely |
+| `cost_scale_TF24` | 0.000000e+00 | −1.765e-01 | term dropped entirely |
+| `stem_b` | +4.996e-01 | +9.257e-01 | 46% low |
+| `root_b` | **−2.324e-03** | **+4.749e-03** | **wrong sign** |
+| `beta_R_H` | **+1.443e-05** | **−3.510e-05** | **wrong sign** |
+
+`d psi_stem/d θ`, central difference, default operating point. "Resolved truth"
+is a least-squares slope over ±5% at n = 41, and it is corroborated below.
+
+For `root_b` the golden-section collar decreases smoothly with the trait
+(slope **−2.639e-03**, second differences 4.7e-08 — it looks *clean*) while the
+truth increases (**+2.587e-04**). Wrong sign, and an order of magnitude too
+large. Arbitrated three ways, which matters because a wrong gradient is
+plausible: a 20001-point scan of `profit` with a parabolic refinement and **no
+derivative anywhere in it** agrees with the root-find to **3–7e-10 MPa** and
+gives slope **+2.5868e-04** against the root-find's **+2.5868e-04**; `profit` at
+the root-find collar is `>=` the golden-section value at every sample; and
+`|dprofit|` at the root-find answer is **~1e-14** against **6.2e-04** at the
+golden-section answer.
+
+That is a materially worse failure than a staircase, and it is the strongest
+argument in this whole item. A staircase announces itself — a zero gradient, or
+visible treads. A smooth wrong sign does not: a gradient-based calibration handed
+`root_b` walks it the wrong way and either diverges or parks confidently on the
+wrong value, with nothing in the trace to say so. It also cannot be repaired by
+any amount of finite-difference step tuning or by differentiating through the
+iterations, **because the error is in the solved argmax itself rather than in how
+it is differentiated.** Only sharpening the solve fixes it. plant #406 predicted
+this class of problem in the abstract — "a noisy finite-difference gradient can
+push `x` the *wrong* way, not just slow it"; this is a measured instance, and it
+is not noisy.
+
+#### The prototype: it works, and it settles hazard 3 favourably
+
+`uniroot` on `dprofit == 0` to `tol = 1e-14`, wet endpoint nudged past the
+sentinel, substituted for the golden section. Compared against the current solver
+at the same operating point:
+
+| | golden section | root-find |
+|---|---|---|
+| distinct collar values over 11 samples at rel step 1e-3 (`vcmax_25`) | **6 / 11** | **11 / 11** |
+| collar second differences, `vcmax_25` | 3.94e-04 (≈ the step: noise) | **3.44e-07** |
+| collar second differences, `cost_scale_TF24` | 5.45e-04 (≈ the step: noise) | **6.75e-07** |
+| FD of `d psi_stem/d vcmax_25`, rel h from **1e-8 to 1e-2** | 0 until 1e-3, then drifting | **stable to 7 digits** |
+| FD of `d A/d root_b`, same range | 8.62e-03 (64% low) | **stable to 7 digits** |
+
+The staircase is gone at source. Finite differences work across eight decades of
+step size — which is also the statement that differentiating *through* the
+iterations would now work, since both fail for the same structural reason and it
+has been removed.
+
+**Hazard 3 is improved, not threatened, and this is now measured rather than
+argued.** The guide says plant chose golden section over Brent because the argmax
+must vary *smoothly* with inputs, and that any solver change must re-measure it.
+Re-measured: smoothness of the argmax in the traits improves by **~800–1000×**
+(second differences 3.9e-04 → 3.4e-07). #4 predicted the direction and was right.
+The honest caveat is that hazard 3's actual concern is smoothness in **plant
+state** — height, light — feeding the demographic growth-rate gradient, and that
+is a plant-side measurement this package cannot make while plant #591 blocks
+end-to-end validation. The mechanism is the same one, so the same direction is
+expected; it is not the same measurement, and the PR should say so rather than
+claim the hazard discharged.
+
+One new non-smoothness does appear and should be recorded rather than discovered
+later: where a row transitions from an interior optimum to a pinned one, the
+argmax has a genuine **kink** — a constrained optimum coming off its constraint.
+That is a property of the constrained problem, not of the solver, and the
+golden-section solver has it too. It is not a regression, but it is a real
+non-differentiable set in trait space that a calibration can walk onto, and the
+42 pinned rows are all at `psi_soil` of 3 to 4, i.e. the dry end where a fit is
+most likely to wander.
+
+#### Cost: unmeasured, and not to be claimed until it is
+
+Indicative evaluation counts over the 111 interior rows sampled: a root-find to
+~1e-14 takes a median of **12** `dprofit` evaluations (min 10, max 37) against
+**18** profit evaluations for golden section to `GSS_tol_abs` — ratio 0.67. But a
+`dprofit` evaluation costs strictly more than a profit evaluation (the same
+`find_psi_stem_from_psi_root` and `ci` root-find, plus two AD sweeps, two spline
+derivatives, and a possible finite-difference fallback), so **an eval-count ratio
+of 0.67 is not a speedup and must not be quoted as one.** #4 comment 4's "it is
+probably faster" is plausible and unverified.
+
+The real number needs `make bench` at `reps=2000`, **interleaved**, per hazard 5
+— and per the guide's own warning that a sequential A/B got the sign wrong once
+while sizing #2. Two builds kept side by side, alternated three times. Do it
+after the C++ lands and before the PR claims anything about speed.
+
+#### What this means for `Leaf<T>`, and for the three AD questions
+
+Templating is still wanted, but the reason narrows and the ordering changes.
+
+- **The outer solve no longer needs the implicit function theorem.** At a root of
+  `dprofit`, `∂profit/∂ψ = 0` holds to ~1e-14 rather than to 6e-04, so the
+  envelope theorem applies cleanly and `dψ*/dθ` is one well-conditioned division
+  (denominator −1.56 to −61.4 across the grid). #4 comment 3 designed the IFT
+  composition as the *only* correct option; it becomes the cheap and obvious one.
+- **The replica drift is a live defect and is independent of all of this.**
+  `detail::assim_colimited_ad` no longer mirrors `Leaf::assim_colimited` (5.53e-4
+  on the golden grid, per #4 comment 2), so the AD derivative and the forward
+  model are not currently derivatives of the same function. Fix it regardless of
+  what happens to the solver.
+- **Item 12 may not be blocked as hard as PLAN says.** After the solver change a
+  plain central difference gives ~4 correct digits at any relative step from 1e-8
+  to 1e-2, which a gradient-based fit can use. That does not retire the AD
+  argument — the vignette's headline result is AD *against* FD, and AD is exact —
+  but "item 12 cannot start until #4 lands" should be re-read as "cannot start
+  until 11a lands", which is a much smaller gate.
+
+On the three questions raised when this was handed over:
+
+- **Derivatives across many parameters.** Forward mode costs one sweep per
+  parameter, which for the 10–15 traits a calibration fits is 10–15× a solve.
+  Vendored XAD already supports **vector forward mode** — `xad::fwd<T, N>` seeds
+  N directions and reads N sensitivities from one sweep, N fixed at compile time
+  (`XAD/Interface.hpp:59`, `XAD/Literals.hpp:49`). **Nothing in leaf, plant or
+  odelia uses N > 1 today**, and there is a trap: `ExprTraits<FReal<Scalar,N>>::
+  vector_size` is hard-coded to 1 while the `FRealDirect` variant reports N, so
+  `xad::fwdd` is the safer carrier if `fwd` misbehaves at N > 1. Prefer this over
+  reverse mode here: PLAN item 5's settled decision is that only forward mode is
+  used so **nothing needs linking**, and a tape in leaf would spend that. Reverse
+  mode is the right tool at plant scale, where `ff16_production_kernel.h` already
+  demonstrates trait gradients through a templated kernel in one adjoint sweep.
+- **Not carrying nested solvers through the tape.** This is plant #537's rule,
+  and it names `dprofit_droot_collar_psi` a deliberate **cut-point** — hard-coded
+  to `xad::fwd<double>`, taking and returning plain `double`, therefore opaque to
+  an outer AD pass and uncompilable against a future `Leaf<T>`. Its design rule:
+  prefer derivative code templated on the scalar type, and where a hand
+  derivative is kept for speed, register it as a custom adjoint / IFT checkpoint
+  the outer tape can traverse, with a templated reference path alongside. That
+  rule, not the replica deletion, is the real content of "template `Leaf`" — and
+  the solver change **reduces** the number of cut-points needed, because the
+  outer optimisation stops being one. odelia already relies on the composition
+  property that makes this safe: forward tangents need no tape, so they never
+  contend with an outer adjoint (`odelia/ode_jacobian.hpp:11`).
+- **TF24f as a way to avoid nested solvers — and the thing nobody has written
+  down.** TF24f makes the collar potential a sixth ODE state with
+  `dψ/dt = k_acclim · ∂profit/∂ψ` (`plant/src/tf24f_strategy.cpp:26-38`), chosen
+  as gradient ascent precisely because the relaxation form `dx/dt = (x*−x)/τ`
+  would need the argmax explicitly — the search being deleted (plant #525). So
+  **TF24f's fixed point is exactly `dprofit == 0`, which is exactly what 11a
+  proposes to solve.** They are one equation approached from two directions:
+  TF24f relaxes onto it over demographic time, the root-find lands on it at once.
+
+  The consequence is a correctness argument for 11a that is not in #4 at all.
+  plant #529 notes that TF24f's `k → ∞` limit is the quasi-steady state
+  `∂profit/∂ψ = 0`, i.e. "solving the optimisation that TF24 already does each
+  step". That is not currently true: TF24's golden-section answer misses
+  `dprofit = 0` by 6.2e-04, so TF24 and TF24f's fixed point are **different
+  points**, ~7e-05 MPa apart, and no choice of `k` makes them agree. After 11a
+  they are the same point. TF24f does *not*, however, help item 12 — calibrating
+  against steady-state gas exchange needs the fixed point, which is the
+  root-find. TF24f buys the demographic path, not the leaf-level fit.
+
+  Worth noting for whoever picks up plant: TF24f keeps the two bracket root-finds
+  (`root_crit`, `root_zero_E`) and the `ci` root-find on every step, and it calls
+  `find_root_collar_psi` once per individual at birth to seed the state
+  (`plant/src/tf24f_strategy.cpp:51`). So it deletes the golden-section layer, not
+  the nesting.
+
+#### Sequencing
+
+1. **The sentinel fix**, on its own — `dprofit_droot_collar_psi`'s `0.0` out of
+   the searched range. Separable, small, and golden-bit-identical (no golden
+   column comes from the gradient; hazard 8 says the same of the last three
+   fixes). Land it first.
+2. **The solver change**, as a deliberate results-moving PR with its blast radius
+   measured against the golden file and split by cause, the way #15 was done. It
+   moves every output by roughly the argmax correction, ~1e-04 MPa on the collar,
+   which is at this guide's "real difference" threshold — and it is a
+   **correctness improvement**, checkable by the residual: `|dprofit|` at the
+   returned point goes from 6.2e-04 to ~1e-14, and `profit` does not decrease at
+   any sampled point. Include the constrained-optimum branch, the interleaved
+   bench, and the honest note that plant-side smoothness is unmeasured.
+3. **Then reassess `Leaf<T>`** against what is left: the replica drift fix, the
+   trait partials, and #537's cut-point rule. The scope should be smaller than
+   #4 comment 3 assumed.
+
+⚠️ **The golden file says nothing about whether any of the derivative work is
+right** — no golden column comes from a gradient. Do not read a bit-identical
+golden run as evidence here. The checks that do bite are the three arbiters used
+above: a derivative-free scan of the maximum, `profit` not decreasing, and
+`|dprofit|` at the returned point.
+
+#### What implementation changed — three things the write-up above got wrong
+
+Recorded because each cost a debugging cycle and two of them contradict what is
+written above.
+
+1. **Returning the raw bound on a pinned row is WRONG, because of #31.** The plan
+   said "return the endpoint when there is no interior crossing", which is what any
+   safeguarded method does. It moved 22 golden rows' profit **down by 1.44**. The
+   cause is #31: below `psi_upstream` the profit algebra runs on a negative
+   conductance, so profit is **discontinuous** across the feasibility boundary
+   rather than merely steep — at `psi_soil = 4`, `vpd = 2`, 5 layers it is −4.696
+   just inside and −6.136 at `bound_a`. So #4's warning to "keep the search inside
+   the bracket" applies to the *answer* as well as to the search. The fix is to
+   return the stepped-inside point, which also beat golden section on profit at both
+   worst rows. Consequence worth carrying: a wet-pinned answer is determined to the
+   step-in scale (~1e-6 of the bracket width), not to `collar_root_tol`.
+2. **`profit` is the wrong instrument for checking this change**, and the write-up
+   above proposes it. It is the maximum, so it is flat, and its own floor is the
+   nested `ci` root-find's 1e-7 tolerance: two of 288 rows end ~6e-7 *lower* in
+   profit while their residual improves by ten orders of magnitude. **Check
+   `|dprofit|` at the returned point** — 240/240 improved, none worse. A test
+   asserting "profit never decreases" would have encoded the noise floor.
+3. **The speedup is real and larger than "probably faster" — 24.5%**, 2.65 against
+   3.51 µs/solve, identical across four interleaved pairs at reps=2000. The
+   eval-count estimate above (12 vs 18, "not a speedup") was too pessimistic
+   because it priced a `dprofit` evaluation without noticing the other half of the
+   change: the gradient was split into a wrapper plus `dprofit_at_collar_psi`, so
+   the solve seats the supply caches **once** rather than per evaluation — the same
+   saving #530 made for the finite-difference path.
+
+⚠️ **And one process note.** R does not track header dependencies, so
+`R CMD INSTALL` after editing `inst/include/` silently reuses a stale
+`src/RcppR6.o` and the R layer keeps running the OLD model. Two rounds of R-side
+diagnostics were measured against the previous solver before this was spotted, and
+the numbers looked plausible throughout. **`rm -f src/*.o src/*.so` before
+reinstalling**, and sanity-check one value against the C++ suite.
+
+### 11b. The replica unification and the ci tolerance — DONE
+
+**Both landed 2026-08-04.** The `namespace detail` replicas are deleted and
+`psi_stem_to_ci` is at 1e-10. Item 11's original framing is now complete except for
+`Leaf<T>`, which needs re-deciding rather than doing (see the end of this
+sub-item).
+
+**⚠️ The order mattered, and it was not the order originally planned.** The
+unification was measured, committed, and then *un*committed and redone after the
+tolerance change, because measuring it revealed the reason to swap them:
+
+| | as planned (unify first) | as landed (tolerance first) |
+|---|---|---|
+| tolerance change moves | — | **1.82e-07** |
+| unification then moves | **4.98e-07** | **3.51e-10** |
+
+Doing the tolerance first makes the unification a **1400× smaller** change — a
+3.5e-10 diff that is at the solver floor and trivially reviewable, instead of a
+5e-7 one needing its own justification. The measurement that forced the swap is
+below.
+
+Measured in a scratch copy first, repo untouched. **11a changed the cost of the
+remaining work, and #4 comment 2's planning number is superseded.**
+
+#### The replica unification is now cheap — 4.98e-07, not 5.53e-04
+
+Comment 2 measured that unifying `detail::assim_colimited_ad` with
+`Leaf::assim_colimited` moves results by **5.53e-04**, concluded "there is no
+bit-identical stepping stone", and said to plan a deliberate results-moving PR.
+Re-measured on the post-11a solver, the same unification moves the golden grid by
+**4.98e-07** — about **1100× smaller**, and *below* the cross-platform noise for
+`profit` this package already tolerates (1.82e-07 now, 1.85e-06 before). It is a
+small PR whose diff sits inside existing noise, not a blast-radius exercise.
+
+The reason is the amplifier, not the algebra. Both differences are pure
+reassociation — `et/4*((ci−g)/(ci+2g))` versus left-to-right, and `pow(s,2)`
+versus `s*s`. What turned last-bit reassociation into 5.53e-04 was a flipped
+golden-section comparison moving the argmax by `GSS_tol_abs`. That mechanism is
+gone.
+
+#### The new amplifier is `psi_stem_to_ci`'s 1e-7, and this is the actionable part
+
+Isolated by tightening that one hard-coded tolerance and re-running the same
+unification against a tight-`ci` baseline:
+
+| amplifier in play | the same perturbation shows up as |
+|---|---|
+| golden section, `GSS_tol_abs` 1e-3 | 5.53e-04 |
+| `psi_stem_to_ci` 1e-7 — where we are now | **4.98e-07** |
+| `psi_stem_to_ci` 1e-13 | **7.16e-13** |
+
+So **~1e-6 is the floor of what this model's reported outputs mean.** Three things
+follow, and the third is the one that matters for item 12:
+
+- It explains the two rows whose profit came out ~6e-7 *lower* under 11a while
+  their residual improved ten orders of magnitude. Same number, same cause.
+- The guide's "~1e-16 is reassociation, ~1e-4 is a real difference" gap has
+  narrowed from four orders to about one. A 1e-6 diff is no longer obviously
+  rounding.
+- **It caps the precision of any calibration target at ~1e-6.** If a fit in item 12
+  needs better, the lever is the `ci` tolerance, **not** more AD. Cost measured:
+  **+6.2%** (2.73 → 2.90 µs/solve, interleaved ×4), still 17% faster than the 3.51
+  µs before 11a. Not taken now — nothing needs it — but recorded as a decision.
+
+#### What was done, and three things learned doing it
+
+1. **`psi_stem_to_ci` 1e-7 → 1e-10** (`b76fa5e`). Moves 1.82e-07; lands **335×
+   closer to a converged (1e-15) solve**; costs **+3.4%** by controlled interleaved
+   A/B. The knee of the curve above. Not the settable `ci_abs_tol`, which reaches
+   only the off-path `optimise_psi_stem_*` solvers — a wart worth knowing before
+   someone tries it.
+2. **`namespace detail` deleted.** The five entry points and the AD path are now
+   instantiations of **one** set of scalar-generic member templates
+   (`assim_*_kernel`, `hydraulic_cost_TF_kernel`,
+   `proportion_of_conductivity_kernel`). Moves 3.51e-10.
+
+   Implemented as **members templated on the scalar type, reading the members
+   directly** — not as free functions taking their parameters explicitly, which is
+   what comment 1 proposed. A free function needs seven or eight arguments threaded
+   from members at each call site, and a transposed pair there is exactly the class
+   of silent error the replicas were. It is also the shape `Leaf<T>` wants, so it is
+   a step rather than a detour.
+
+   **⚠️ Comment 2's "no bit-identical stepping stone" does not hold, and the reason
+   is reusable.** It measured a residual 1.19e-06 from FMA contraction and concluded
+   "no amount of care in the algebra removes it, because the algebra is already
+   identical". The `double` path here is **bit-identical** — checked directly across
+   all five entry points at eleven operating points, before and after. What differs
+   is that this keeps the **call structure**: three kernels mirroring the three
+   original functions, so the compiler sees the same inlining boundaries. Comment 2
+   collapsed rubisco + electron into one body, which is what changed contraction.
+   **Contraction follows the call graph, so preserving the call graph preserves it.**
+
+   Consequence: the entire 3.51e-10 is the *derivative* changing. The forward model
+   did not move at all.
+
+3. **A correctness claim that turned out to be false, recorded because it was
+   tempting.** It is natural to say the unification makes the solver root-find on
+   the *true* derivative of the profit it reports, so the returned collar must be
+   closer to the true argmax. Measured on the 82 rows whose collar moved: the true
+   residual improves on **40 of 82**, median improvement factor **0.999** — i.e. not
+   at all. Both builds converge to ~1e-14 on their respective derivatives, and the
+   two derivatives differ so little that their roots differ by ~1e-15 MPa. The
+   golden diff is the `ci` band amplifying that, not a better argmax. **The
+   unification is a maintainability and correctness-of-construction fix, not an
+   accuracy fix**, and the PR says so.
+
+#### What is left: `Leaf<T>`, and it needs deciding rather than doing
+
+The justification has narrowed to plant **#537's cut-point rule** — composing with
+an outer AD pass — rather than "trait gradients do not work otherwise", because
+after 11a a central difference gives ~4 correct digits at any relative step from
+1e-8 to 1e-2. And the kernels above already deliver most of what item 11 was
+originally *for*: the duplication is gone, and they are templated, so `∂A/∂θ` is
+reachable by seeding a trait through them without templating the class.
+
+So the open question is narrower than item 11 states: **does anything need an
+`xad::adj` pass to traverse the whole `Leaf`, or is seeding the kernels enough?**
+That depends on what item 12's fit actually wants, which argues for doing #6 first
+and letting it say. A reversal of the original ordering, and worth a deliberate
+decision rather than drift.
+
+#### Still unmeasured
+
+- **FMA contraction.** Comment 2's 1.19e-06 residual (verified by rebuilding both
+  sides with `-ffp-contract=off` and getting bit-identical) was also measured under
+  golden section, so it is probably much smaller now. Not re-measured.
+- **Hazard 3 on the plant side**, blocked on plant #591.
+- **Whether the inner root-finds need IFT of their own** (comment 3's ⚠️). Less
+  pressing now that differentiating through the outer solve works.
 
 ## 12. Demonstrate calibration — and then consider inversion
 
