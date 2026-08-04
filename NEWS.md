@@ -1,5 +1,51 @@
 # leaf (development version)
 
+## Trait gradients: `leaf_gradient()` and `set_traits()` (#4, PLAN 11e)
+
+**No results move. The golden file is bit-identical** — this adds two entry points
+rather than changing one.
+
+**`leaf_gradient()`** returns the derivatives of the solved outputs with respect to
+the traits: `dA/dθ`, `dgc/dθ`, `dψ_stem/dθ` and `dψ*/dθ`, for any subset of the
+fifteen traits at one operating point. These are not finite differences of the
+solve. The outputs are read at the profit-maximising collar potential, so a trait
+moves them both directly and by moving that optimum, and differentiating the
+optimality condition captures both terms — which matters because for
+`cost_scale_TF24`, `beta2`, `stem_b` and `stem_c` the second one is **100%** of the
+answer.
+
+⚠️ **That derivation assumes the optimum is interior, and in dry soil it often is
+not.** With the optimum pinned to the edge of the feasible collar range the formula
+is wrong by up to seven orders of magnitude and does not fail loudly, so the
+assumption is **tested at every point** — and `leaf_gradient()` differences the
+solve instead where it fails. `$method` and `$status` report which route ran and
+why. Across the package's 288-point grid the two populations are five orders of
+magnitude apart, so the threshold is measured rather than chosen.
+
+**`set_traits()`** replaces the traits on an existing `Leaf`, which is far cheaper
+than building a new one and is the only correct way to do it: a bare trait
+assignment would leave the two pre-integrated vulnerability splines, the solved
+operating point, and — least visibly — `vcmax_`/`jmax_`/`R_d_` all describing the
+old value. The last of those is derived behind a cache keyed on leaf temperature
+and O2 alone, so "change the trait, then set the drivers again" silently does not
+recompute it. Call `set_drivers()` after `set_traits()`; the object is returned to
+its just-constructed state deliberately.
+
+⚠️ **On speed, and the answer depends on which side of the R boundary you are.**
+From R this was planned as a 10× speedup and is not one: per parameter the composite
+is **6% slower** than differencing the solve, because an R call costs ~1.8 µs against
+the 0.26 µs of C++ work it wraps. What *is* worth 4× from R is `set_traits()` —
+reusing the object rather than rebuilding it — and that accrues to either method. So
+**from R, use `leaf_gradient()` for exactness and the active-set classification, not
+for speed.**
+
+In C++ the picture is different, and it is the one a `LinkingTo` consumer gets:
+there the composite wins **4.4×** on the eleven traits that do not touch a
+vulnerability spline, and only **1.15×** on `stem_b`, `stem_c`, `root_b` and
+`root_c`, where rebuilding the spline (21.8 µs) costs more than three solves.
+`make -C tests/cpp bench_gradient` reproduces both arms. PLAN 11e has the numbers
+and the retraction they corrected.
+
 ## The AD replicas are gone, and the model's precision floor moved (#4, PLAN 11b)
 
 Two small results-moving changes, landed in this order because the order matters:

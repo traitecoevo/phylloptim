@@ -1375,6 +1375,145 @@ void test_temperature_parameters_are_settable() {
   }
 }
 
+// set_traits exists so a gradient loop can perturb a trait without rebuilding the
+// object. That is only worth having if re-traiting is INDISTINGUISHABLE from
+// constructing afresh, so that is what is asserted -- bit-exactly, which is a
+// statement neither a tolerance nor an eyeball could make.
+//
+// Bit-exactness is the whole point here rather than strictness for its own sake:
+// the two ways to reach the same traits share no code, so any piece of derived
+// state that set_traits fails to refresh shows up as a difference. Three pieces
+// were candidates, and each is a real trap rather than a hypothetical one:
+//
+//   * the two pre-integrated vulnerability splines (stem_b/stem_c, root_b/root_c);
+//   * vcmax_/jmax_/R_d_, behind set_physiology's (leaf_temp, atm_o2_kpa) cache --
+//     the nastiest of the three, because the natural repair of "set the drivers
+//     again" is exactly what takes the cache hit;
+//   * the solved operating point itself (hazard 8).
+//
+// A `l.vcmax_25 = x` written by hand passes none of this, which is why the traits
+// are not bound as settable fields.
+void test_set_traits_matches_a_fresh_leaf() {
+  printf("set_traits is indistinguishable from constructing afresh\n");
+  Drivers d;
+
+  // One perturbed trait from each group that has its own derived state: a
+  // photosynthetic trait (the temperature cache), the stem curve, the root curve,
+  // and a cost parameter that is read directly and so should need no rebuild.
+  struct Case { const char *name; int which; double value; };
+  const Case cases[] = {{"vcmax_25", 0, 96.0 * 1.05},
+                        {"stem_b", 2, 3.898245 * 1.05},
+                        {"root_b", 5, 3.898245 * 1.05},
+                        {"cost_scale_TF24", 12, 7.5 * 1.05},
+                        {"stem_c", 1, 2.680147 * 1.05},
+                        {"root_c", 4, 2.680147 * 1.05}};
+
+  for (const Case &c : cases) {
+    // The default trait vector, in set_traits' own argument order.
+    double t[15] = {96.0,     2.680147, 3.898245, 5.870283, 2.680147,
+                    3.898245, 5.870283, 1.5,      157.44,   0.30,
+                    0.7,      0.99,     7.5,      3.4e2,    9.4e3};
+    t[c.which] = c.value;
+
+    // Fresh: the traits go through the constructor.
+    leaf::Leaf fresh(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9],
+                     t[10], t[11], 1e-3, 100, 1e-3, 1000, t[12], t[13], t[14]);
+    std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
+    fresh.set_physiology(mrp, d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
+                         d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+    fresh.find_root_collar_psi();
+
+    // Reused: solved once at the DEFAULTS first, so every cache is warm and
+    // pointing at the old traits before set_traits runs. Solving first is what
+    // makes this a test rather than a coincidence -- on a cold object the
+    // temperature cache would miss anyway and the trap would not fire.
+    leaf::Leaf reused = make_leaf(d, {2.0}, {1.0});
+    reused.find_root_collar_psi();
+    reused.set_traits(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9],
+                      t[10], t[11], t[12], t[13], t[14]);
+    reused.set_physiology(mrp, d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
+                          d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+    reused.find_root_collar_psi();
+
+    const std::string what = std::string(" after set_traits(") + c.name + ")";
+    ok(reused.vcmax_ == fresh.vcmax_, "vcmax_ is bit-identical" + what);
+    ok(reused.jmax_ == fresh.jmax_, "jmax_ is bit-identical" + what);
+    ok(reused.R_d_ == fresh.R_d_, "R_d_ is bit-identical" + what);
+    ok(reused.opt_root_psi_ == fresh.opt_root_psi_,
+       "the collar is bit-identical" + what);
+    ok(reused.opt_psi_stem_ == fresh.opt_psi_stem_,
+       "psi_stem is bit-identical" + what);
+    ok(reused.assim_colimited_ == fresh.assim_colimited_,
+       "assimilation is bit-identical" + what);
+    ok(reused.profit_ == fresh.profit_, "profit is bit-identical" + what);
+    ok(reused.transpiration_ == fresh.transpiration_,
+       "transpiration is bit-identical" + what);
+  }
+
+  // The specific trap, isolated, because the bit-exact comparisons above would
+  // also pass if set_traits rebuilt everything unconditionally and the reason it
+  // works were lost. vcmax_ is derived inside set_physiology's temperature cache,
+  // which is keyed on (leaf_temp, atm_o2_kpa) and NOT on the traits -- so this is
+  // the assertion that "change the trait, then set the drivers again" is a
+  // sufficient recipe, which it is only because set_traits invalidates the cache.
+  {
+    leaf::Leaf l = make_leaf(d, {2.0}, {1.0});
+    const double vcmax_before = l.vcmax_;
+    l.set_traits(96.0 * 2.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
+                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, 3.4e2, 9.4e3);
+    std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
+    // The SAME leaf_temp and atm_o2_kpa, which is what arms the cache.
+    l.set_physiology(mrp, d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
+                     d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+    near(l.vcmax_ / vcmax_before, 2.0, 1e-12,
+         "doubling vcmax_25 doubles vcmax_ at an unchanged temperature");
+  }
+
+  // The splines really are rebuilt, and only when their own pair moves. Read
+  // through proportion_of_conductivity (the closed form) against transpiration()
+  // (the spline): the two describe the same curve, so they move together or the
+  // object is inconsistent.
+  {
+    leaf::Leaf l = make_leaf(d, {2.0}, {1.0});
+    const double E_before = l.transpiration(3.0, 1.0);
+    l.set_traits(96.0, 2.680147, 3.898245 * 1.5, 5.870283, 2.680147, 3.898245,
+                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, 3.4e2, 9.4e3);
+    std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
+    l.set_physiology(mrp, d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
+                     d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+    // A less vulnerable stem (larger stem_b) holds more conductivity, so the
+    // integral of the vulnerability curve over the same span is larger.
+    ok(l.transpiration(3.0, 1.0) > E_before,
+       "raising stem_b rebuilds the transpiration spline");
+  }
+
+  // The #25 boundary is enforced here too. A bare field write would bypass it,
+  // which is the fourth reason these are not settable fields.
+  {
+    leaf::Leaf l = make_leaf(d, {2.0}, {1.0});
+    const double good[15] = {96.0,     2.680147, 3.898245, 5.870283, 2.680147,
+                             3.898245, 5.870283, 1.5,      157.44,   0.30,
+                             0.7,      0.99,     7.5,      3.4e2,    9.4e3};
+    const int signed_positions[] = {3, 2, 5, 6};  // psi_crit, stem_b, root_b, root_psi_crit
+    const char *labels[] = {"psi_crit", "stem_b", "root_b", "root_psi_crit"};
+    for (int k = 0; k < 4; ++k) {
+      double t[15];
+      for (int i = 0; i < 15; ++i) {
+        t[i] = good[i];
+      }
+      t[signed_positions[k]] = -t[signed_positions[k]];  // the pre-#25 sign
+      bool threw = false;
+      try {
+        l.set_traits(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9],
+                     t[10], t[11], t[12], t[13], t[14]);
+      } catch (const std::runtime_error &) {
+        threw = true;
+      }
+      ok(threw, std::string("set_traits rejects a negative ") + labels[k]);
+    }
+  }
+}
+
 void test_bad_input_throws() {
   printf("input validation\n");
   Drivers d;
@@ -1449,6 +1588,7 @@ int main() {
   test_leaf_on_single_potential();
   test_root_network_from_carbon();
   test_temperature_parameters_are_settable();
+  test_set_traits_matches_a_fresh_leaf();
   test_bad_input_throws();
   benchmark();
 

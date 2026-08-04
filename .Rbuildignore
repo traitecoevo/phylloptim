@@ -12,6 +12,11 @@
 ^PLAN\.md$
 ^COMPARISON\.md$
 ^agents\.md$
+
+# Working notes for whoever picks up an item next -- the same class of thing as
+# PLAN.md above, and flagged as a non-standard top-level directory if shipped.
+# Added after notes/trait-gradients-seed.md arrived and put a NOTE in the check.
+^notes$
 ^Doxyfile$
 ^docs$
 ^leaf_.+\.tar\.gz$
@@ -37,6 +42,7 @@
 ^tests/cpp/test_leaf$
 ^tests/cpp/test_golden$
 ^tests/cpp/bench_solve$
+^tests/cpp/bench_gradient$
 ^tests/cpp/.*\.dSYM$
 
 # Validation scripts, not tests: they need an installed plant and take minutes.

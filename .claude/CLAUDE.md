@@ -43,9 +43,18 @@ inst/RcppR6_classes.yml        the R bindings' source of truth. Edit this, then
                                `Rscript -e 'RcppR6::RcppR6()'`, never the output
 src/, R/                       the R layer. Depends downward on inst/include/;
                                nothing there depends back on it
+R/leaf-model.R                 the friendly surface: leaf_traits/leaf_control,
+                               leaf_model/set_drivers, leaf_solve
+R/gradient.R                   set_traits() and leaf_gradient() -- trait
+                               gradients by the implicit function theorem, with
+                               the active-set guard. Read its header before
+                               believing anything about its speed
 tests/cpp/                     plain-C++ suite, no R, no framework
 tests/cpp/golden/              bit-exact regression baseline, 288 operating points
 tests/cpp/bench_solve.cpp      timing harness for the collar solve (hazard 5)
+tests/cpp/bench_gradient.cpp   timing harness for a TRAIT GRADIENT: the IFT
+                               composite against differencing the solve, with
+                               no R in the way. PLAN 11e
 tests/testthat/                the R layer's tie-back to the golden points
 tests/validate/                R scripts comparing against plant (needs R)
 CMakeLists.txt                 the no-R build: C++ and Python consumers, and the
@@ -57,7 +66,7 @@ CMakeLists.txt                 the no-R build: C++ and Python consumers, and the
 ```sh
 make -C tests/cpp            # builds and runs both suites
 make -C tests/cpp golden     # regenerate the golden file -- see the warning below
-make -C tests/cpp bench      # time the collar solve (not part of `make all`)
+make -C tests/cpp bench      # time the solve AND a trait gradient (not in `make all`)
 
 # compare the golden file with a tolerance instead of bit-exactly. Correct on a
 # platform other than macOS/arm64, wrong as a way to silence a real diff.
@@ -65,7 +74,7 @@ make -C tests/cpp GOLDEN_ARGS=--cross-platform
 ```
 
 ⚠️ **`bench` is NOT part of `make all`, and CI builds it.** So `make -C tests/cpp`
-passing locally does not mean CI will: a rename that misses `bench_solve.cpp` gives a
+passing locally does not mean CI will: a rename that misses a bench source gives a
 green local run and three red CI jobs. That is exactly how #25 first failed CI, with
 `191 checks, 0 failures` and a bit-identical golden file sitting above the error.
 **Before pushing, build everything CI builds:**
@@ -548,6 +557,50 @@ refuse.
    install rules encode the same split from the other end — they ship `*.hpp` and
    exclude `leaf.h` and `RcppR6_*.hpp`, so a C++ or Python consumer is never
    handed a header they cannot compile.
+10. **Changing a trait is not one assignment, and the reason is invisible.** The
+   traits are public plain doubles, so `l.vcmax_25 = x` compiles — and leaves three
+   pieces of derived state describing the old value. Use `set_traits()`, which
+   exists for exactly this and is the only route bound to R.
+
+   The two you would guess are the pre-integrated **vulnerability splines**
+   (`stem_b`/`stem_c` build the transpiration pair, `root_b`/`root_c` the root
+   curve) and the **solved operating point** (hazard 8). The third is the one that
+   cost the time:
+
+   ⚠️ **`vcmax_`, `jmax_` and `R_d_` are derived inside `set_physiology`'s
+   temperature cache, which is keyed on `(leaf_temp_, atm_o2_kpa_)` and on nothing
+   else.** So the obvious repair — change the trait, then call `set_physiology`
+   again — takes a cache *hit* and never recomputes them. Only
+   `electron_transport_` gets refreshed. A trait sweep written that way runs the
+   whole sweep at the first vcmax it ever saw, and every number it reports is
+   plausible.
+
+   `set_traits` ends with `setup_clean_leaf()`, which is what resets the cache; the
+   cost is that `set_physiology` must genuinely be called again afterwards.
+   `test_set_traits_matches_a_fresh_leaf` asserts a re-traited leaf is
+   **bit-identical** to a freshly constructed one, which is the assertion that
+   catches all three at once — the two routes share no code, so anything not
+   refreshed shows up as a difference. It solves at the defaults *first*, on
+   purpose: on a cold object the cache would miss anyway and the trap would not
+   fire.
+
+   **And measure before optimising a trait loop, in the layer you actually care
+   about.** Two costs dominate, and which one bites depends on where you are:
+
+   - **From R**, constructing a `Leaf` costs **204 µs** — 33 solves — of which only
+     ~32 µs is the two splines; the rest is R-side object construction over ~60
+     active bindings. That, not the choice of gradient formula, is what dominates a
+     finite-difference gradient in R. `set_traits` exists to avoid it.
+   - **In C++**, `set_traits` costs **0.02 µs** normally and **21.8 µs** when it
+     rebuilds a vulnerability curve — **3.5× a whole solve**. So a gradient loop
+     over `stem_b`, `stem_c`, `root_b` or `root_c` is dominated by spline
+     reconstruction, and no amount of cleverness in the derivative touches it.
+
+   `make -C tests/cpp bench_gradient` measures both arms. ⚠️ **Do not carry the R
+   conclusion into C++**: PLAN 11e retracted a projected speedup on an R
+   measurement and then had to un-retract half of it, because with the boundary
+   removed the same composite wins 4.4× on the eleven traits that touch no spline.
+
 
 ## Validating against plant
 

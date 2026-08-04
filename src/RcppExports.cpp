@@ -72,6 +72,31 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// Leaf__set_traits
+void Leaf__set_traits(leaf::RcppR6::RcppR6<leaf::Leaf> obj_, double vcmax_25, double stem_c, double stem_b, double psi_crit, double root_c, double root_b, double root_psi_crit, double beta2, double jmax_25, double a, double curv_fact_elec_trans, double curv_fact_colim, double cost_scale_TF24, double beta_R_H, double beta_R_V);
+RcppExport SEXP _leaf_Leaf__set_traits(SEXP obj_SEXP, SEXP vcmax_25SEXP, SEXP stem_cSEXP, SEXP stem_bSEXP, SEXP psi_critSEXP, SEXP root_cSEXP, SEXP root_bSEXP, SEXP root_psi_critSEXP, SEXP beta2SEXP, SEXP jmax_25SEXP, SEXP aSEXP, SEXP curv_fact_elec_transSEXP, SEXP curv_fact_colimSEXP, SEXP cost_scale_TF24SEXP, SEXP beta_R_HSEXP, SEXP beta_R_VSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< leaf::RcppR6::RcppR6<leaf::Leaf> >::type obj_(obj_SEXP);
+    Rcpp::traits::input_parameter< double >::type vcmax_25(vcmax_25SEXP);
+    Rcpp::traits::input_parameter< double >::type stem_c(stem_cSEXP);
+    Rcpp::traits::input_parameter< double >::type stem_b(stem_bSEXP);
+    Rcpp::traits::input_parameter< double >::type psi_crit(psi_critSEXP);
+    Rcpp::traits::input_parameter< double >::type root_c(root_cSEXP);
+    Rcpp::traits::input_parameter< double >::type root_b(root_bSEXP);
+    Rcpp::traits::input_parameter< double >::type root_psi_crit(root_psi_critSEXP);
+    Rcpp::traits::input_parameter< double >::type beta2(beta2SEXP);
+    Rcpp::traits::input_parameter< double >::type jmax_25(jmax_25SEXP);
+    Rcpp::traits::input_parameter< double >::type a(aSEXP);
+    Rcpp::traits::input_parameter< double >::type curv_fact_elec_trans(curv_fact_elec_transSEXP);
+    Rcpp::traits::input_parameter< double >::type curv_fact_colim(curv_fact_colimSEXP);
+    Rcpp::traits::input_parameter< double >::type cost_scale_TF24(cost_scale_TF24SEXP);
+    Rcpp::traits::input_parameter< double >::type beta_R_H(beta_R_HSEXP);
+    Rcpp::traits::input_parameter< double >::type beta_R_V(beta_R_VSEXP);
+    Leaf__set_traits(obj_, vcmax_25, stem_c, stem_b, psi_crit, root_c, root_b, root_psi_crit, beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, cost_scale_TF24, beta_R_H, beta_R_V);
+    return R_NilValue;
+END_RCPP
+}
 // Leaf__proportion_of_conductivity
 double Leaf__proportion_of_conductivity(leaf::RcppR6::RcppR6<leaf::Leaf> obj_, double psi);
 RcppExport SEXP _leaf_Leaf__proportion_of_conductivity(SEXP obj_SEXP, SEXP psiSEXP) {
@@ -1787,6 +1812,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_leaf_Leaf__ctor", (DL_FUNC) &_leaf_Leaf__ctor, 19},
     {"_leaf_Leaf__initialize_integrator", (DL_FUNC) &_leaf_Leaf__initialize_integrator, 3},
     {"_leaf_Leaf__set_physiology", (DL_FUNC) &_leaf_Leaf__set_physiology, 11},
+    {"_leaf_Leaf__set_traits", (DL_FUNC) &_leaf_Leaf__set_traits, 16},
     {"_leaf_Leaf__proportion_of_conductivity", (DL_FUNC) &_leaf_Leaf__proportion_of_conductivity, 2},
     {"_leaf_Leaf__arrh_curve", (DL_FUNC) &_leaf_Leaf__arrh_curve, 4},
     {"_leaf_Leaf__peak_arrh_curve", (DL_FUNC) &_leaf_Leaf__peak_arrh_curve, 6},
