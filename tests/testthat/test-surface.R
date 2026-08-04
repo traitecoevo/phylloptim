@@ -129,6 +129,134 @@ test_that("leaf_solve() reproduces the stateful path exactly", {
                    operating_point(stateful))
 })
 
+# Read the twelve outputs the slow way -- one active binding at a time, which is
+# what operating_point() did before #39 -- so the one-call C++ reader can be
+# checked against it.
+outputs_one_at_a_time <- function(l) {
+  consumption <- l$soil_consumption_
+  c(psi_stem = l$opt_psi_stem_,
+    collar = l$opt_root_psi_,
+    ci = l$ci_,
+    A = l$assim_colimited_,
+    E = l$transpiration_,
+    gc = l$stom_cond_CO2_,
+    profit = l$profit_,
+    hydraulic_cost = l$hydraulic_cost_,
+    E_up = l$E_up_,
+    uptake = sum(consumption[is.finite(consumption)]),
+    lambda = l$lambda,
+    g1_eff = l$g1_eff)
+}
+
+test_that("operating_point_values() returns the twelve fields, in that order", {
+  # ⚠️ THE ORDER IS AN INTERFACE AND NOTHING IN THE TYPES ENFORCES IT. The C++
+  # method returns a flat vector because that is what crosses the R boundary for
+  # free (#39: twelve active bindings cost ~15 us against a ~3 us solve, one call
+  # ~1.5 us), and R names its positions in .operating_point_names. A field
+  # inserted on one side and not the other would shift a column and keep
+  # returning plausible numbers, so it is checked rather than commented.
+  l <- leaf_model()
+
+  # Unsolved FIRST, because that is the case a test written after a solve would
+  # miss: every output is the NA sentinel and soil_consumption_ is empty, so the
+  # uptake sum has nothing to sum. R summed the finite layers only and the C++
+  # does the same; sum(numeric(0)) is 0 on both sides.
+  expect_identical(l$operating_point_values(),
+                   unname(outputs_one_at_a_time(l)))
+  expect_identical(names(outputs_one_at_a_time(l)),
+                   leaf:::.operating_point_names)
+
+  # Then solved, and then in shut-down, where the layer uptakes are written but
+  # the flux outputs are zero -- the branch where "every path writes its own
+  # outputs" (hazard 8) is load-bearing.
+  for (drivers in list(list(psi_soil = 2.0, PPFD = 900),
+                       list(psi_soil = 6.0, PPFD = 100, atm_vpd = 4.0))) {
+    do.call(set_drivers, c(list(l), drivers))
+    l$find_root_collar_psi()
+    expect_identical(l$operating_point_values(),
+                     unname(outputs_one_at_a_time(l)))
+  }
+  # ...and the second of those really was the shut-down branch.
+  expect_identical(l$transpiration_, 0)
+
+  # Multi-layer, so the uptake sum has more than one term to get wrong.
+  ml <- leaf_model()
+  set_drivers(ml, psi_soil = c(1.0, 2.0, 3.0), PPFD = 900,
+              soil_depth = c(0.3, 0.6, 1.0),
+              root_carbon_per_leaf_area = c(0.1, 0.05, 0.02))
+  ml$find_root_collar_psi()
+  expect_identical(ml$operating_point_values(),
+                   unname(outputs_one_at_a_time(ml)))
+  expect_length(ml$soil_consumption_, 3L)
+})
+
+test_that("operating_point() is the data.frame it replaced", {
+  # #39 replaced a twelve-argument data.frame() call -- 158 us, on a function
+  # called once per 3 us solve -- with a direct list-to-data.frame construction
+  # at 2 us. That is only safe if the result is indistinguishable, so this
+  # rebuilds the old call verbatim and demands identical(). row.names is the part
+  # that would break silently: it has to be the integer 1L, not 1.0.
+  l <- leaf_model()
+  set_drivers(l, psi_soil = 2.0, PPFD = 900)
+  l$find_root_collar_psi()
+
+  consumption <- l$soil_consumption_
+  as_written_before <- data.frame(
+    psi_stem = l$opt_psi_stem_,
+    collar = l$opt_root_psi_,
+    ci = l$ci_,
+    A = l$assim_colimited_,
+    E = l$transpiration_,
+    gc = l$stom_cond_CO2_,
+    profit = l$profit_,
+    hydraulic_cost = l$hydraulic_cost_,
+    E_up = l$E_up_,
+    uptake = sum(consumption[is.finite(consumption)]),
+    lambda = l$lambda,
+    g1_eff = l$g1_eff
+  )
+  expect_identical(operating_point(l), as_written_before)
+
+  # And on an unsolved leaf, where every value is a sentinel.
+  expect_identical(operating_point(leaf_model()),
+                   operating_point(leaf_model()))
+  expect_true(all(is.na(unlist(operating_point(leaf_model())[
+    c("psi_stem", "A", "gc")]))))
+})
+
+test_that("leaf_solve()'s rows are assembled in the right order", {
+  # The columnwise rewrite (#39) fills a preallocated matrix by index instead of
+  # rbinding one-row frames, which trades an obvious cost for a
+  # non-obvious failure mode: a misaligned row would pair driver i with the
+  # answer to driver j and look entirely reasonable. So every row of a vectorised
+  # call is checked against its own single-row call.
+  #
+  # The drivers deliberately vary in a way that makes each row distinguishable
+  # and non-monotonic, and they cross into shut-down, which is where a
+  # last-written-value bug would show up as a duplicated row.
+  drivers <- list(psi_soil = c(1.0, 6.0, 0.5, 3.0, 2.0),
+                  PPFD = c(900, 100, 1500, 600, 1200),
+                  atm_vpd = c(2.0, 4.0, 0.5, 3.0, 1.0))
+  many <- do.call(leaf_solve, drivers)
+
+  for (i in seq_along(drivers$psi_soil)) {
+    one <- leaf_solve(psi_soil = drivers$psi_soil[[i]],
+                      PPFD = drivers$PPFD[[i]],
+                      atm_vpd = drivers$atm_vpd[[i]])
+    row <- many[i, ]
+    # The extracted row carries its position as its row name; the single-row
+    # call is row 1. That is the only licensed difference, so it is removed here
+    # rather than by comparing loosely.
+    attr(row, "row.names") <- 1L
+    expect_identical(row, one, info = paste("row", i))
+  }
+
+  # Not vacuous: the rows have to actually differ, and one of them has to be the
+  # shut-down branch.
+  expect_identical(anyDuplicated(many$A), 0L)
+  expect_true(any(many$E == 0))
+})
+
 test_that("leaf_solve() vectorises and recycles", {
   d <- leaf_solve(psi_soil = c(0.5, 1, 2), PPFD = 900)
   expect_s3_class(d, "data.frame")

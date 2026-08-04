@@ -455,6 +455,11 @@ set_drivers <- function(x,
 ##' `$find_root_collar_psi()`; before that the values are the missing-value
 ##' sentinels the object was constructed with.
 ##'
+##' Costs about 4 µs, so it is usable in a loop. It was 180 µs until it stopped
+##' reading the twelve outputs through twelve separate calls into C++ and stopped
+##' building its one row with `data.frame()` (#39) -- 45× more than the ~3 µs
+##' solve it was reporting on.
+##'
 ##' @param x a solved `Leaf`
 ##' @return A one-row data.frame.
 ##' @seealso [leaf_solve()], which does the whole thing in one call.
@@ -468,22 +473,48 @@ operating_point <- function(x) {
   if (!inherits(x, "Leaf")) {
     stop("`x` must be a Leaf, from leaf_model()", call. = FALSE)
   }
-  consumption <- x$soil_consumption_
-  data.frame(
-    psi_stem = x$opt_psi_stem_,        # MPa, positive magnitude
-    collar = x$opt_root_psi_,          # MPa, positive magnitude
-    ci = x$ci_,                        # Pa
-    A = x$assim_colimited_,            # umol C m^-2 s^-1
-    E = x$transpiration_,              # kg H2O m^-2 s^-1
-    gc = x$stom_cond_CO2_,             # mol CO2 m^-2 s^-1
-    profit = x$profit_,                # umol C m^-2 s^-1
-    hydraulic_cost = x$hydraulic_cost_,
-    E_up = x$E_up_,
-    uptake = sum(consumption[is.finite(consumption)]),
-    lambda = x$lambda,                 # dA/dE
-    g1_eff = x$g1_eff                  # the Medlyn g1 this leaf implies
-  )
+  # One row, from the same C++ reader leaf_solve()'s loop uses, rather than a
+  # data.frame() call listing the columns a second time: the names are written
+  # down once, in .operating_point_names.
+  #
+  # ⚠️ Built directly rather than through data.frame(), which costs 158 us
+  # against 2 us for this -- on a function called once per solved point, to
+  # report a 3 us solve. What data.frame() spends it on is checking and recycling
+  # twelve arguments that are already twelve length-1 doubles by construction.
+  # The result is `identical()` to what data.frame() returned, which
+  # test-surface.R asserts rather than assumes; note row.names has to be the
+  # integer 1L and not 1.0, or it would not be.
+  v <- as.list(x$operating_point_values())
+  names(v) <- .operating_point_names
+  structure(v, class = "data.frame", row.names = 1L)
 }
+
+# What an operating point IS: the names of the twelve values
+# `Leaf::operating_point_values()` returns, in its order. `operating_point()`
+# wraps them in a one-row data.frame and `leaf_solve()` fills a matrix row with
+# them, so the two cannot disagree about which outputs there are.
+#
+# ⚠️ THE ORDER IS AN INTERFACE, and it is one nothing in the types enforces --
+# the C++ side returns a flat vector, because a flat vector is what crosses the
+# boundary for free. test-surface.R asserts these names line up with the
+# twelve individual bindings by reading each one and comparing, so a field
+# inserted on either side without the other fails there instead of silently
+# shifting a column. test-golden.R then compares leaf_solve()'s output
+# bit-exactly against a file generated in C++.
+.operating_point_names <- c(
+  "psi_stem",       # MPa, positive magnitude
+  "collar",         # MPa, positive magnitude
+  "ci",             # Pa
+  "A",              # umol C m^-2 s^-1
+  "E",              # kg H2O m^-2 s^-1
+  "gc",             # mol CO2 m^-2 s^-1
+  "profit",         # umol C m^-2 s^-1
+  "hydraulic_cost",
+  "E_up",
+  "uptake",
+  "lambda",         # dA/dE
+  "g1_eff"          # the Medlyn g1 this leaf implies
+)
 
 ##' Solve a leaf, in one call
 ##'
@@ -495,6 +526,29 @@ operating_point <- function(x) {
 ##' the package: `gc` here is not from a fitted conductance model, it is what
 ##' falls out of maximising profit over an explicit hydraulic path, and `g1_eff`
 ##' reports the Medlyn `g1` that would have been needed to reproduce it.
+##'
+##' @section Performance, and what the lever actually is:
+##' About **20 µs per row**, of which the model is **2.8 µs**. The rest is the R
+##' boundary: each call into C++ costs ~1.1 µs and a solved row needs several.
+##'
+##' Two consequences, both the opposite of what you might expect:
+##'
+##' * **This is the fast path, not the convenient-but-slow one.** It is within 6%
+##'   of building a `Leaf` yourself and looping `set_drivers()` +
+##'   `$find_root_collar_psi()` + [operating_point()]. Reaching into the object
+##'   saves about 1 µs a row and is worth doing for access to intermediate state,
+##'   not for speed. (This was not true before: building the result row by row and
+##'   `rbind`ing cost 344 µs a row, 26× the stateful loop.)
+##' * **The lever is fewer R calls per row, not a different R function.** Pass all
+##'   your drivers to one vectorised call rather than looping in R. If you need
+##'   more than that -- a fit's inner loop, say -- what has to go is the boundary
+##'   itself, which means C++.
+##'
+##' `reuse = TRUE` is the default because constructing a `Leaf` from R costs
+##' ~204 µs, some 70 solves, and only ~32 µs of that is the two vulnerability
+##' splines; the rest is R-side object construction. See [set_traits()] for
+##' varying traits without reconstructing, and note it costs 21.8 µs rather than
+##' 0.02 µs when the trait you change owns a vulnerability spline.
 ##'
 ##' @section Recycling:
 ##' `PPFD`, `atm_vpd`, `ca`, `leaf_temp`, `atm_o2_kpa`, `atm_kpa` and
@@ -574,7 +628,25 @@ leaf_solve <- function(psi_soil,
 
   shared <- if (reuse) leaf_model(traits, control, supply) else NULL
 
-  rows <- lapply(seq_len(n), function(i) {
+  # ⚠️ COLUMNWISE, AND THAT IS MOST OF THE PERFORMANCE STORY OF THIS FUNCTION.
+  # It used to build a one-row data.frame of drivers per row, cbind an
+  # `operating_point()` data.frame to it, and rbind the lot at the end. Measured
+  # over 32 rows on the single-potential path, that cost **344 us per row**
+  # against ~5 us of solving, and 310 us of it was the two data.frame() calls,
+  # the cbind and the rbind -- none of which is the model (#39). Filling
+  # preallocated storage and assembling once takes it to 34 us; the one-call
+  # reader below takes it to **20.5 us**, which is 1.2x the cost of driving the
+  # object by hand rather than the 22x it was. Same result to the bit.
+  #
+  # So: nothing that allocates per row. The driver columns are already length-n
+  # vectors from the recycling above, the outputs go into one matrix, and there
+  # is exactly one data.frame() call, at the end. Its ~105 us is a per-CALL cost
+  # rather than a per-row one, which is why it is still data.frame(): at n = 1 it
+  # is invisible beside the 204 us of constructing the Leaf.
+  outputs <- matrix(NA_real_, nrow = n, ncol = length(.operating_point_names),
+                    dimnames = list(NULL, .operating_point_names))
+
+  for (i in seq_len(n)) {
     l <- if (reuse) shared else leaf_model(traits, control, supply)
     set_drivers(l,
                 psi_soil = layered[[i]],
@@ -590,25 +662,20 @@ leaf_solve <- function(psi_soil,
                 atm_o2_kpa = scalars$atm_o2_kpa[[i]],
                 atm_kpa = scalars$atm_kpa[[i]])
     l$find_root_collar_psi()
+    outputs[i, ] <- l$operating_point_values()
+  }
 
-    # One row of drivers, then one row of outputs. psi_soil is reported as the
-    # wettest layer when there are several, with the layer count alongside, so
-    # the column stays numeric and the frame stays rectangular.
-    cbind(
-      data.frame(psi_soil = min(layered[[i]]),
-                 layers = length(layered[[i]]),
-                 PPFD = scalars$PPFD[[i]],
-                 atm_vpd = scalars$atm_vpd[[i]],
-                 ca = scalars$ca[[i]],
-                 leaf_temp = scalars$leaf_temp[[i]],
-                 atm_kpa = scalars$atm_kpa[[i]]),
-      operating_point(l)
-    )
-  })
-
-  out <- do.call(rbind, rows)
-  rownames(out) <- NULL
-  out
+  # The drivers, then the outputs. psi_soil is reported as the wettest layer
+  # when there are several, with the layer count alongside, so the column stays
+  # numeric and the frame stays rectangular.
+  data.frame(psi_soil = vapply(layered, min, numeric(1)),
+             layers = lengths(layered),
+             PPFD = scalars$PPFD,
+             atm_vpd = scalars$atm_vpd,
+             ca = scalars$ca,
+             leaf_temp = scalars$leaf_temp,
+             atm_kpa = scalars$atm_kpa,
+             outputs)
 }
 
 # --- internals ---------------------------------------------------------------

@@ -17,6 +17,12 @@ Reads the outputs off a leaf that has been solved. Call after
 `$find_root_collar_psi()`; before that the values are the missing-value
 sentinels the object was constructed with.
 }
+\details{
+Costs about 4 µs, so it is usable in a loop. It was 180 µs until it stopped
+reading the twelve outputs through twelve separate calls into C++ and stopped
+building its one row with `data.frame()` (#39) -- 45× more than the ~3 µs
+solve it was reporting on.
+}
 \examples{
 l <- leaf_model()
 set_drivers(l, psi_soil = 2.0, PPFD = 900)

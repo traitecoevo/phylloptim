@@ -5,6 +5,10 @@ Leaf__ctor <- function(vcmax_25, stem_c, stem_b, psi_crit, root_c, root_b, root_
     .Call('_leaf_Leaf__ctor', PACKAGE = 'leaf', vcmax_25, stem_c, stem_b, psi_crit, root_c, root_b, root_psi_crit, beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, GSS_tol_abs, vulnerability_curve_ncontrol, ci_abs_tol, ci_niter, cost_scale_TF24, beta_R_H, beta_R_V)
 }
 
+Leaf__operating_point_values <- function(obj_) {
+    .Call('_leaf_Leaf__operating_point_values', PACKAGE = 'leaf', obj_)
+}
+
 Leaf__initialize_integrator <- function(obj_, integration_rule, integration_tol) {
     invisible(.Call('_leaf_Leaf__initialize_integrator', PACKAGE = 'leaf', obj_, integration_rule, integration_tol))
 }
