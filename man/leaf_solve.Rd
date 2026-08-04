@@ -81,6 +81,31 @@ the package: `gc` here is not from a fitted conductance model, it is what
 falls out of maximising profit over an explicit hydraulic path, and `g1_eff`
 reports the Medlyn `g1` that would have been needed to reproduce it.
 }
+\section{Performance, and what the lever actually is}{
+
+About **20 µs per row**, of which the model is **2.8 µs**. The rest is the R
+boundary: each call into C++ costs ~1.1 µs and a solved row needs several.
+
+Two consequences, both the opposite of what you might expect:
+
+* **This is the fast path, not the convenient-but-slow one.** It is within 6%
+  of building a `Leaf` yourself and looping `set_drivers()` +
+  `$find_root_collar_psi()` + [operating_point()]. Reaching into the object
+  saves about 1 µs a row and is worth doing for access to intermediate state,
+  not for speed. (This was not true before: building the result row by row and
+  `rbind`ing cost 344 µs a row, 26× the stateful loop.)
+* **The lever is fewer R calls per row, not a different R function.** Pass all
+  your drivers to one vectorised call rather than looping in R. If you need
+  more than that -- a fit's inner loop, say -- what has to go is the boundary
+  itself, which means C++.
+
+`reuse = TRUE` is the default because constructing a `Leaf` from R costs
+~204 µs, some 70 solves, and only ~32 µs of that is the two vulnerability
+splines; the rest is R-side object construction. See [set_traits()] for
+varying traits without reconstructing, and note it costs 21.8 µs rather than
+0.02 µs when the trait you change owns a vulnerability spline.
+}
+
 \section{Recycling}{
 
 `PPFD`, `atm_vpd`, `ca`, `leaf_temp`, `atm_o2_kpa`, `atm_kpa` and

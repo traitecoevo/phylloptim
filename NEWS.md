@@ -1,5 +1,36 @@
 # leaf (development version)
 
+## `leaf_solve()` is 16× faster, and the fast path is now the documented one (#39)
+
+**No results move; every value is bit-identical, including the error messages.**
+This is assembly, not arithmetic.
+
+`leaf_solve()` built a one-row `data.frame` of drivers per row, `cbind`ed an
+`operating_point()` frame to it, and `rbind`ed the lot at the end. Measured over 32
+rows, that cost **344 µs per row** against **2.8 µs** of solving — 96% overhead, on
+the function the README and the vignette point people at. It now fills preallocated
+storage and assembles once: **21.5 µs per row**.
+
+Two smaller changes make up the rest of it:
+
+* **`operating_point()`: 180 → 4 µs.** It read the twelve outputs through twelve
+  separate calls into C++ (~1.1 µs each) and built its one row with
+  `data.frame()` (158 µs). `Leaf$operating_point_values()` is new and returns all
+  twelve in one call; the row is now built directly, and a test asserts the result
+  is `identical()` to what `data.frame()` returned.
+* **`Leaf$operating_point_values()`** is public, so C++ and Python consumers get it
+  too, though there it is a convenience rather than a speedup — the cost it removes
+  is the R boundary's.
+
+⚠️ **The advice that follows from this is the opposite of what it was.**
+`leaf_solve()` is now within **6%** of building a `Leaf` and driving it yourself, so
+the stateful interface is for access to intermediate state and not for speed. What
+is left to optimise is the *number of R calls per row* — about 18 of the 21.5 µs —
+which means one vectorised call rather than a loop, and C++ rather than better R if
+that is not enough. The README has a "Performance from R" section and `?leaf_solve`
+a "Performance" one; both are new, and both replace claims that only ever held on
+the C++ side.
+
 ## Trait gradients: `leaf_gradient()` and `set_traits()` (#4, PLAN 11e)
 
 **No results move. The golden file is bit-identical** — this adds two entry points

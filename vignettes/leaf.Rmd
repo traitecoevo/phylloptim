@@ -255,6 +255,14 @@ column stays numeric and the frame stays rectangular.
 what plant does, and it is what you want when you care about the intermediate
 state rather than only the operating point.
 
+It is **not** the faster route, which is worth saying because it looks like it
+ought to be. Measured over 32 rows, `leaf_solve()` costs 21.5 µs a row and this
+loop costs 20.3 — within 6%, because both are dominated by the same thing: each
+call across the R boundary costs about 1.1 µs, against 2.8 µs for the whole C++
+solve. If you need an inner loop faster than that, what has to go is the number of
+R calls per row, not which R function makes them. `?leaf_solve` has the numbers
+and the README a section on it.
+
 ```{r}
 l <- leaf_model()
 set_drivers(l, psi_soil = 2.0, PPFD = 900)

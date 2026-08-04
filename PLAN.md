@@ -25,7 +25,8 @@ this file keeps the reasoning behind each one.
 | **6d stage 3** | **`SinglePotential` is reachable from R — issue #32.** `leaf_supply_single()` / `leaf_supply_multilayer()`. The 7b-iii footgun is designed out: no settable tag at any level, both entry points reconfigure completely, and the fields are bound read-only. |
 | **6** | **The R interface — issue #5.** `leaf::Leaf` is callable from R: generated RcppR6 bindings tied back to the golden file bit-exactly, then a hand-written surface over them — `leaf_solve()` (drivers in, operating point out, vectorised), `leaf_traits()` / `leaf_control()` splitting the constructor's 19 arguments, `leaf_model()` / `set_drivers()` / `operating_point()`, and `vignette("leaf")`. λ and `g1_eff` are exposed for the first time. The model stays R-free and gained a CMake package, so it is still linkable from C++ or Python. **#32** landed on top of it. **#33** and **#34** are split out and coupled with plant #591. Reasoning in item 6; #31 was found on the way. |
 | **11** | **`Leaf<T>` — CLOSED, SUPERSEDED, not going to be built.** Both payoffs the item opened with are spent: the `namespace detail` AD replicas were already deleted by **11b**, using scalar-generic *member* templates rather than a class template, and "templating is what turns AD into calibration" is falsified by **11e** plus a calibrating #6. Its last live use was plant #537's cut-point rule, which is about an **outer** AD pass over plant and about *state* rather than traits — and even that now looks avoidable, because the composite works for a driver as well as a trait (`leaf_specific_conductance_max`, which is how height reaches the leaf: ratios 0.99994–0.99996). ⚠️ **Do not reopen this to get exact trait derivatives; that is done.** If it returns it should return from the plant side under a title describing an outer pass. |
-| **11c, 11d, 11e** | **Trait gradients, stage 1 — issue #4.** `leaf_gradient()` returns `dA/dθ`, `dgc/dθ`, `dψ_stem/dθ` and `dψ*/dθ` by the implicit function theorem where the optimum is interior, and by differencing the solve where it is pinned. Matches 11c's arbitrated references to 4 digits; the active-set guard classifies the golden grid **198 interior / 42 pinned / 48 no-gradient** with the two populations **five orders of magnitude apart**, so the threshold is measured rather than chosen. `set_traits()` came with it — a method, not settable fields, because a bare trait write leaves `vcmax_` stale behind `set_physiology`'s temperature cache. ⚠️ **The speed argument is retracted FOR THE R LAYER only: the composite measured 6% slower than the finite difference there**, and the 4× that is real comes from object reuse. **In C++ it wins 4.4× — but only 1.15× on `stem_b`/`stem_c`/`root_b`/`root_c`, because `set_traits` rebuilds a vulnerability spline at 21.8 µs against 6.2 µs for a whole solve, and those are the four traits whose gradient is 100% argmax-mediated.** That promotes stage 3 rather than shelving it. See 11e; quote the split, never the 1.50× total. |
+| **11c, 11d, 11e** | **Trait gradients, stage 1 — issue #4.** `leaf_gradient()` returns `dA/dθ`, `dgc/dθ`, `dψ_stem/dθ` and `dψ*/dθ` by the implicit function theorem where the optimum is interior, and by differencing the solve where it is pinned. Matches 11c's arbitrated references to 4 digits; the active-set guard classifies the golden grid **198 interior / 42 pinned / 48 no-gradient** with the two populations **five orders of magnitude apart**, so the threshold is measured rather than chosen. `set_traits()` came with it — a method, not settable fields, because a bare trait write leaves `vcmax_` stale behind `set_physiology`'s temperature cache. ⚠️ **The speed argument is retracted FOR THE R LAYER only: the composite measured 6% slower than the finite difference there**, and the 4× that is real comes from object reuse. **In C++ it wins 4.4× — but only 1.15× on `stem_b`/`stem_c`/`root_b`/`root_c`, because `set_traits` rebuilds a vulnerability spline at 21.8 µs against 6.2 µs for a whole solve, and those are the four traits whose gradient is 100% argmax-mediated.** That argued for stage 3 — ⚠️ but see the 11e tail row: the calibration it was argued *for* holds those four fixed, so stage 3 has the case without the customer. See 11e; quote the split, never the 1.50× total. |
+| **11e tail** | **`leaf_solve()` is 16× faster and the R-layer advice is inverted — issue #39.** It built a one-row `data.frame` per row and `rbind`ed them: **344 µs/row against 2.8 µs of solving**, on the path the README and vignette advertise. Columnwise assembly plus one C++ call for the twelve outputs (`Leaf::operating_point_values()`) gives **21.5 µs/row**, bit-identical including the error messages. `operating_point()` went 180 → 4 µs. ⚠️ **So "drive the object, don't use the wrapper" is spent** — `leaf_solve()` is now within **6%** of a hand-written loop, and the remaining lever is the *number of R calls per row*, not which function makes them. ⚠️ Measuring it also **retracted 11e's promotion of stage 3**: the calibration it was promoted for holds `stem_b`/`stem_c` fixed at measured values and fits two non-traits (`K_total`, `f_plant`) that `leaf_gradient()` cannot take at all. |
 | **11a, 11b** | **The collar solve now solves its own first-order condition** (PR #36, `d22907a`). Golden section is gone: `dprofit == 0` by safeguarded TOMS748, so the argmax is resolved to solver precision instead of `GSS_tol_abs` — residual `\|dprofit\|` improved on **240/240** feasible rows, median 7.8e-04 → **5.6e-15**. With it: `psi_stem_to_ci` tightened 1e-7 → 1e-10 (**335×** closer to a converged solve, +3.4%), the `namespace detail` AD replicas **deleted** in favour of scalar-generic member templates the model and its derivative both instantiate, and `dprofit_droot_collar_psi` given a `bool* feasible` out-parameter. **21.7% faster** overall (2.75 vs 3.51 µs/solve). Deliberately moved results — worst 1.5e-03, split by cause under 11a/11b. Hazard 3 **improved** ~1000×. ⚠️ Note the kernels are templated on their **argument**, so this delivered exact derivatives w.r.t. **state**, not w.r.t. traits — trait gradients are still open under #4. |
 
 **Everything above is on `master`.** `feature/api-cleanup` merged as
@@ -102,7 +103,7 @@ code rather than of the merge:
 | issue | item | what | note |
 |---|---|---|---|
 | [#3](https://github.com/traitecoevo/leaf_cpp/issues/3) | 7a | Make λ(state) pluggable | **unblocked** — #2 is done. Measure the dispatch separately: the cost core is fully inlined where the supply path was not, so 7b's "dispatch is free" result does **not** transfer |
-| [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11, **11d** | Trait gradients (was: template `Leaf`) | **11a and 11b landed** (#36); **11d DECIDES the rest.** #6's fit spends **97.6%** of 10,045 evaluations on FD gradients, so it is worth building. The win is **architectural, not modal**: the cost is re-solving the model 2N times per gradient, so IFT gets **12×** with no new AD, and parameter-explicit kernels **72×**. **Reverse mode is not needed and `Leaf<T>` is not on this path** — item 5's no-linking decision was revisited and stands. ⚠️ Must carry 11c's **active-set branch** (42 pinned rows; bare composite wrong by 3.5e+07) |
+| [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11, **11e** | Trait gradients (was: template `Leaf`) | **Stage 1 landed** (#42): exact where the optimum is interior, differenced where it is pinned, active set tested rather than assumed. ⚠️ **Read 11e before quoting a speedup.** 11d's 12× and 72× were computed against the solve and no caller spends its time there: in R the composite is 6% *slower*, in C++ it is **4.4×** on the eleven traits that rebuild no spline and **1.15×** on the four that do. **Reverse mode is not needed and `Leaf<T>` is not on this path**, and that is now closed rather than pending. What is left: the two **non-trait** parameters the calibration actually fits, then stage 2; stage 3 has a case but no customer |
 | [#33](https://github.com/traitecoevo/leaf_cpp/issues/33) | 6d | Take resistances, not root carbon | #5 stage 2b, **blocked on plant #591**. Before #34 |
 | [#34](https://github.com/traitecoevo/leaf_cpp/issues/34) | 6d | Delete plant's `Leaf` bindings | #5 stage 4, **blocked on plant #591**. The hazard-7 payoff, and the only stage that can break plant |
 | [#6](https://github.com/traitecoevo/leaf_cpp/issues/6) | 12 | Calibration vignette, then inversion | **UNBLOCKED, and it is now the thing that should go next.** 11c measured trait gradients: FD gives ~4 digits at interior points and is correct at pinned ones, so the fit can be written today. Item 12's old "FD-only calibration is throwaway" rule assumed FD *does not work*, which 11a fixed — so write the fit against FD and let it say whether exactness is worth having. **Doing this is what specifies #4's remainder.** ⚠️ Achievable precision of a target is **~1e-9**, set by `psi_stem_to_ci` |
@@ -2684,13 +2685,87 @@ Two things follow, and the second reverses what the first draft of this item sai
   four traits — which also makes it a much smaller job than "parameter-explicit
   kernels" sounds.
 
+#### The wider loop is done — #39 — and it removes the premise of half of this item
+
+This item ended by saying #6's next win is #39 rather than a better gradient, and
+that #4's stage 2 and #39 are the same fix applied to two loops. **#39 is now
+done, and it went further than sizing it against stage 2 suggested.**
+
+`leaf_solve()` built a one-row `data.frame` of drivers per row, `cbind`ed an
+`operating_point()` frame to it, and `rbind`ed the lot. Measured over 32 rows,
+per row:
+
+| | µs/row | |
+|---|---:|---|
+| `leaf_solve()`, before | **344** | 96% of it allocation, on the documented path |
+| columnwise assembly | 34 | one `data.frame()` call, at the end |
+| **+ one C++ call for the twelve outputs** | **21.5** | `Leaf::operating_point_values()` |
+| driving the object by hand, for comparison | 20.3 | i.e. `leaf_solve()` is within **6%** |
+| the C++ solve inside all of them | **2.8** | |
+
+Bit-identical throughout — every value, every column type, and the error messages
+too, which is what the identity harness compared. Two things follow that matter
+beyond that function:
+
+- **The "drive the object, don't use the wrapper" advice is spent.** It was 26×
+  and is now 1.06×, so the stateful interface is for intermediate state rather
+  than for speed. The README, the vignette and `?leaf_solve` all said or implied
+  otherwise and now carry the measurement instead. This is exactly the doc-rot
+  pattern this project keeps finding: the claim was true when written.
+- **`operating_point()` was 180 µs to report a 2.8 µs solve**, and 158 of that
+  was `data.frame()` checking twelve arguments that are twelve length-1 doubles
+  by construction. It is 4 µs now. **⚠️ Reading twelve fields through twelve
+  active bindings cost ~15 µs — five times the model.** That is the number to
+  reach for when someone proposes exposing more state to R one field at a time.
+
+#### ⚠️ And a correction to what promoted stage 3: #6 does not fit those traits
+
+Stage 3 was promoted above on the grounds that "a hydraulic calibration — which
+is what #6 is — spends most of its gradient budget" on `stem_b`, `stem_c`,
+`root_b` and `root_c`, the four whose perturbation rebuilds a 21.8 µs spline.
+**Measured against the fit itself rather than reasoned about, that is false.**
+`leaf-calibration`'s free parameters are `K_total`, `f_plant`, `cost_scale_TF24`
+and `beta2`:
+
+- `stem_b` and `stem_c` are **data**, derived analytically from each species'
+  measured P50 and P88, with `psi_crit` derived from them in turn. They are held
+  fixed for the whole fit. The root pair is never touched.
+- So of the four free parameters, **two are traits** — `cost_scale_TF24` and
+  `beta2` — and both are in the eleven that rebuild nothing, where the composite
+  already wins **4.4×** in C++ today.
+- The other two are **not traits at all.** `K_total` and `f_plant` reach the leaf
+  as `leaf_specific_conductance_max` (a driver) and the single-potential
+  `resistance` (a supply parameter), and `leaf_gradient()`'s `pars` accepts
+  neither. So the fit's exact gradient is not two-thirds available, it is
+  **half** available — and the missing half is not blocked on stage 3.
+
+⚠️ **This does not un-promote stage 3, it de-customers it.** The 21.8 µs rebuild
+is real and stage 3 is still the only thing that removes it; what is no longer
+true is that the calibration is waiting on it. A fit that frees the vulnerability
+curve — which is a reasonable thing to want, and would make P50 an estimated
+quantity rather than an input — would need it. Nothing today does.
+
+The general lesson is the one that keeps recurring in this item: **every time a
+cost model here has been checked against the code that would pay it, it has been
+wrong.** 11d's 12× was computed against the solve and the fit does not spend its
+time there; the R measurement was denominated in the wrong currency; and now the
+trait split was applied to a customer whose traits are fixed. Size against the
+caller, not against the model.
+
 #### What is left of #4
 
-- **Stage 2 (composition in C++, one R call per operating point)** carries the R
-  layer's remaining speed case, and should be sized against #39 — they are the same
-  fix applied to two loops.
-- **Stage 3, for the four hydraulic traits only.** See above; it is the spline
-  rebuild that justifies it, not the differentiation cost.
+- **The two non-trait parameters the calibration actually fits** —
+  `leaf_specific_conductance_max` and the single-potential `resistance`. Nothing
+  in the derivation cares that θ is a trait (the driver case is measured above at
+  ratios 0.99994–0.99996), so this is plumbing rather than mathematics, and it is
+  now the item with a customer waiting. Filed as its own issue.
+- **Stage 2 (composition in C++, one R call per operating point)** still carries
+  the R layer's speed case, and #39 has re-sized it: with the wrapper fixed, a
+  gradient's ~10 R calls per parameter are the remaining boundary cost, and
+  `operating_point_values()` is the pattern to copy — one call returning a flat
+  vector.
+- **Stage 3, for the four hydraulic traits only,** and now without a caller. See
+  the correction above before starting it.
 - **`Leaf<T>` is still not needed for any of this.** And there is now a measured
   argument that plant #537 A1 may not need it either: the composite works for a
   *driver* as well as a trait — differentiating w.r.t.

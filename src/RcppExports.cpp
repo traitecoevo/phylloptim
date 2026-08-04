@@ -40,6 +40,17 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// Leaf__operating_point_values
+std::vector<double> Leaf__operating_point_values(leaf::RcppR6::RcppR6<leaf::Leaf> obj_);
+RcppExport SEXP _leaf_Leaf__operating_point_values(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< leaf::RcppR6::RcppR6<leaf::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__operating_point_values(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
 // Leaf__initialize_integrator
 void Leaf__initialize_integrator(leaf::RcppR6::RcppR6<leaf::Leaf> obj_, int integration_rule, double integration_tol);
 RcppExport SEXP _leaf_Leaf__initialize_integrator(SEXP obj_SEXP, SEXP integration_ruleSEXP, SEXP integration_tolSEXP) {
@@ -1810,6 +1821,7 @@ END_RCPP
 
 static const R_CallMethodDef CallEntries[] = {
     {"_leaf_Leaf__ctor", (DL_FUNC) &_leaf_Leaf__ctor, 19},
+    {"_leaf_Leaf__operating_point_values", (DL_FUNC) &_leaf_Leaf__operating_point_values, 1},
     {"_leaf_Leaf__initialize_integrator", (DL_FUNC) &_leaf_Leaf__initialize_integrator, 3},
     {"_leaf_Leaf__set_physiology", (DL_FUNC) &_leaf_Leaf__set_physiology, 11},
     {"_leaf_Leaf__set_traits", (DL_FUNC) &_leaf_Leaf__set_traits, 16},

@@ -11,8 +11,10 @@ gravitational head — and the operating point is chosen by Sperry-style gain-ri
 automatic differentiation (XAD) supplies exact derivatives of profit with respect
 to that potential, for models that need to track acclimation.
 
-A full solve costs about **4 µs**, which is what makes it usable inside a
-demographic model that calls it millions of times.
+A full solve costs about **3 µs**, which is what makes it usable inside a
+demographic model that calls it millions of times. That is the C++ figure; from R
+a solved row costs ~20 µs, nearly all of it the R boundary rather than the model —
+see [Performance from R](#performance-from-r) before optimising anything.
 
 This code was developed as the TF24 strategy inside
 [traitecoevo/plant](https://github.com/traitecoevo/plant) and is extracted here
@@ -51,15 +53,21 @@ one ψ_soil, so you have to be able to hold the supply side fixed. [PLAN.md](PLA
 item 7b.
 
 **Fast and differentiable, so it is built for calibration.** A full hydraulic
-solve costs ~4 µs, and forward-mode AD (XAD) gives exact derivatives rather than
-finite differences. That combination is what calibration wants: gradient-based
-optimisers and Hamiltonian samplers need many evaluations *and* clean gradients,
-and finite-differencing a nested root-find through a golden-section search is
-exactly the case where numerical gradients are noisiest. Two honest caveats: the
-AD currently differentiates with respect to the collar potential only, not with
-respect to traits, and getting trait gradients needs the templated `Leaf<T>` of
-[PLAN.md](PLAN.md) item 11; and there is no worked example yet — a calibration
-vignette is item 12 and is the demonstration this claim needs.
+solve costs ~3 µs, and derivatives are analytic rather than finite differences:
+forward-mode AD (XAD) for the collar potential, and `leaf_gradient()` for the
+traits, by differentiating the optimality condition. That combination is what
+calibration wants — gradient-based optimisers and Hamiltonian samplers need many
+evaluations *and* clean gradients, and finite-differencing a nested root-find is
+exactly the case where numerical gradients are noisiest.
+
+One honest caveat, and one correction this paragraph used to get wrong. The caveat
+is that there is still no calibration vignette in the package ([PLAN.md](PLAN.md)
+item 12), though the fit that drove the gradient work exists outside it. The
+correction: trait gradients are **done**, and they did not need the templated
+`Leaf<T>` this paragraph pointed at — that item is closed unbuilt. What they
+needed was the implicit function theorem, which is cheaper and gives the
+active-set classification a drought calibration actually has to have. See
+[Trait gradients](#trait-gradients) below and [PLAN.md](PLAN.md) item 11e.
 
 ## Status
 
@@ -316,6 +324,49 @@ l$find_root_collar_psi()
 ```
 
 See `vignette("leaf")` for the whole tour.
+
+### Performance from R
+
+The **~3 µs** quoted at the top of this file is the C++ solve. From R the same
+solved row costs about **20 µs**, and the difference is not the model — it is that
+each call across the R boundary costs ~1.1 µs, and a solved row needs a handful of
+them. Measured on 32 rows, one driver combination per row, default multi-layer
+supply:
+
+| | µs per row |
+|---|---:|
+| `leaf_solve()`, vectorised | **21.5** |
+| `leaf_model()` once, then `set_drivers()` + `$find_root_collar_psi()` + `operating_point()` per row | 20.3 |
+| the same, reading one field instead of `operating_point()` | 17.1 |
+| the C++ solve inside all three | **2.8** |
+
+Three things follow, and the first two are corrections to advice this file used to
+imply:
+
+- **Use `leaf_solve()`.** It is within 6% of driving the object by hand. It was
+  **26× slower** until it stopped building a one-row `data.frame` per row and
+  rbinding them (#39) — 344 → 21.5 µs — so if you are reading advice anywhere that
+  says to avoid it for inner loops, that advice has expired.
+- **Reaching into the object is not the lever either.** The stateful interface is
+  for when you want intermediate state, not for speed; it saves ~1 µs a row.
+- **The lever is making fewer R calls per row.** ~18 of the 20 µs is R call
+  overhead and R-side assembly. A loop that solves the same leaf at many drivers
+  should pass them all to one vectorised `leaf_solve()` call rather than looping in
+  R, and if you need a fit's inner loop faster than this, the thing to remove is
+  the boundary — which means C++, not better R.
+
+Two costs worth knowing because they surprise people:
+
+- **Constructing a `Leaf` from R costs ~204 µs** — 70 solves — and only ~32 µs of
+  that is the two vulnerability splines; the rest is R-side object construction
+  over ~60 active bindings. So construct once and reuse. `leaf_solve(reuse = TRUE)`
+  is the default for this reason, and [`set_traits()`](#trait-gradients) exists so
+  that a trait sweep need not reconstruct either.
+- **`set_traits()` is ~0.02 µs unless you change `stem_b`, `stem_c`, `root_b` or
+  `root_c`, and 21.8 µs if you do**, because those four own the pre-integrated
+  vulnerability splines and it rebuilds one. That is 8× a solve, in C++, where
+  batching cannot help — worth knowing before writing a sweep over a vulnerability
+  curve.
 
 ### As a dependency of another R package
 

@@ -6,6 +6,10 @@ leaf::Leaf Leaf__ctor(double vcmax_25, double stem_c, double stem_b, double psi_
   return leaf::Leaf(vcmax_25, stem_c, stem_b, psi_crit, root_c, root_b, root_psi_crit, beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, GSS_tol_abs, vulnerability_curve_ncontrol, ci_abs_tol, ci_niter, cost_scale_TF24, beta_R_H, beta_R_V);
 }
 // [[Rcpp::export]]
+std::vector<double> Leaf__operating_point_values(leaf::RcppR6::RcppR6<leaf::Leaf> obj_) {
+  return obj_->operating_point_values();
+}
+// [[Rcpp::export]]
 void Leaf__initialize_integrator(leaf::RcppR6::RcppR6<leaf::Leaf> obj_, int integration_rule, double integration_tol) {
   obj_->initialize_integrator(integration_rule, integration_tol);
 }

@@ -765,6 +765,46 @@ public:
   // companion manuscript's job, not this header's.
   double g1_eff() const;
 
+  // Every reported output of a solved point, in one call.
+  //
+  // ⚠️ THIS EXISTS FOR THE R BOUNDARY AND FOR NOTHING ELSE. A C++ caller should
+  // read the members; they are public and free. From R each read is a separate
+  // call through an RcppR6 active binding at ~1.1 us, so the twelve of them cost
+  // ~15 us against a ~3 us solve -- five times the model, to report it (#39).
+  // One call is ~1.5 us. That is the whole justification, and it is why this is
+  // a flat vector rather than a struct: it crosses the boundary as a numeric
+  // vector with no glue.
+  //
+  // The ORDER is the interface. R's .operating_point_names names these positions
+  // and test-surface.R checks the two agree by reading all twelve fields
+  // individually and comparing -- so a field inserted here without a
+  // corresponding R change fails rather than silently shifting a column.
+  //
+  // Index 9 is the total soil uptake, summed over FINITE layers only: before a
+  // solve the layers hold the NA sentinel, and R's own reader did the same
+  // filtering. Everything else is read as-is, sentinels included, because
+  // "unsolved" is a state the caller is entitled to see.
+  std::vector<double> operating_point_values() const {
+    double uptake = 0.0;
+    for (double c : soil_consumption_) {
+      if (std::isfinite(c)) {
+        uptake += c;
+      }
+    }
+    return {opt_psi_stem_,   // MPa, positive magnitude
+            opt_root_psi_,   // MPa, positive magnitude
+            ci_,             // Pa
+            assim_colimited_,// umol C m^-2 s^-1
+            transpiration_,  // kg H2O m^-2 s^-1
+            stom_cond_CO2_,  // mol CO2 m^-2 s^-1
+            profit_,         // umol C m^-2 s^-1
+            hydraulic_cost_,
+            E_up_,
+            uptake,
+            marginal_cost_water(),
+            g1_eff()};
+  }
+
 // leaf economics functions
   double hydraulic_cost_Sperry(double psi_stem, double psi_upstream);
   double hydraulic_cost_TF(double psi_stem);
