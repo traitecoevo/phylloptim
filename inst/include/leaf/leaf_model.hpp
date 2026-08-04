@@ -391,14 +391,16 @@ public:
   //
   // ONE ENTRY POINT, NOT FIFTEEN SETTABLE FIELDS, and this is the set_supply_*
   // judgement again (issue #32) rather than a stylistic preference. The traits are
-  // public plain doubles, so assigning one *compiles* -- and two separate pieces of
-  // derived state go stale when it does:
+  // public plain doubles, so assigning one *compiles* -- and three separate pieces
+  // of derived state go stale when it does:
   //
   //   * the two vulnerability SPLINES. stem_b/stem_c build transpiration_from_psi
   //     and psi_from_transpiration; root_b/root_c build the root curve. Both are
   //     pre-integrated at construction, so a bare `l.stem_b = x` leaves the hot
   //     path reading the previous curve's integral while proportion_of_conductivity
   //     reports the new one -- two answers to the same question.
+  //   * the solved OPERATING POINT, which is hazard 8: an output that no code path
+  //     rewrites goes on reading as though it belonged to the new traits.
   //   * vcmax_, jmax_ and R_d_, which are derived from vcmax_25/jmax_25 inside
   //     set_physiology's TEMPERATURE CACHE. That cache is keyed on (leaf_temp_,
   //     atm_o2_kpa_) and on nothing else, so calling set_physiology again after a
@@ -407,8 +409,11 @@ public:
   //     drivers again" -- therefore does not work, which is what makes a settable
   //     field actively dangerous here rather than merely untidy.
   //
-  // So: the invariant checks run (a bare write bypasses them entirely, #25), the
-  // splines are rebuilt only when the curve that owns them actually moved, and
+  // A fourth, which is not derived state but is the same argument: a bare write
+  // bypasses the #25 positive-magnitude checks below entirely.
+  //
+  // So: the invariant checks run, the splines
+  // are rebuilt only when the curve that owns them actually moved, and
   // setup_clean_leaf() puts the object back in its just-constructed state -- which
   // resets both caches and requires set_physiology() before the next solve, exactly
   // as a fresh Leaf would. That last part is not conservatism: the derived
