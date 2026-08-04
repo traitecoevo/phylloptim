@@ -569,6 +569,72 @@ While doing it, take the chance to give the R side a saner surface than the
 C++ one: `set_physiology()` takes fourteen positional arguments, which is
 tolerable from a strategy that calls it once and painful from a console.
 
+The staged plan — five stages, ordered so the hard-to-reverse decisions come
+first — is in [`notes/r-interface-seed.md`](notes/r-interface-seed.md). What
+follows is stage 0: the decision it says to settle before writing any YAML.
+
+### 6a. "Header-only" — DECIDED: two layers, and the headers keep the guarantee
+
+Three documents asserted that this package ships no compiled code
+(`DESCRIPTION`'s Description field, `NAMESPACE`'s comment, and by omission
+`.github/workflows/cpp-tests.yml`, which builds with no R present). RcppR6 adds
+`src/`, `R/` and a shared library, so one of those two facts has to give.
+
+**The decision: the package gains a compiled R layer, and `inst/include/` keeps
+every guarantee it has today.** Two layers with a one-way dependency:
+
+| layer | contents | who consumes it | rule |
+|---|---|---|---|
+| `inst/include/` | the model | `LinkingTo: leaf` (plant), and anyone embedding it in C++ | plain C++. No Rcpp, no `R.h`, no R at all. Never includes anything from `src/` |
+| `src/`, `R/` | RcppR6-generated glue plus a hand-written R layer | R users, via `library(leaf)` | may use Rcpp freely. Includes *downward* into `inst/include/` and never the reverse |
+
+This is what makes the change compatible with item 4 (#11), which only just got
+the include graph R-free. **#11's guarantee is about the include graph reachable
+from `leaf.hpp`, not about the tarball containing no `src/`** — those were the
+same statement while there was no R layer, and they stop being the same
+statement here. The one that matters to a consumer is the first: plant compiles
+`leaf.hpp` into its own translation units, and what it must not inherit is
+Rcpp, not the existence of a `.so` it never links against.
+
+**The invariant that replaces "header-only", and how it stays true.**
+`cpp-tests.yml` builds and runs the whole C++ suite with **no R installed on the
+runner** — that is the assertion, and it is already written and already green.
+It keeps working unchanged, because it compiles `tests/cpp/*.cpp` against
+`inst/include/` and never looks at `src/`. So the day someone reaches for
+`Rcpp::stop` inside a header, three CI jobs go red before review. Adding the R
+job *alongside* it rather than replacing it is the whole point; a single
+`R CMD check` job would compile the headers with R present and could not tell
+the difference.
+
+**What this costs, stated rather than discovered later:**
+
+- The `R CMD check` NOTE `'LinkingTo' field is unused: package has no 'src'
+  directory` disappears. `.claude/CLAUDE.md` says to expect exactly that NOTE;
+  that sentence becomes wrong and must move with the code.
+- `DESCRIPTION` gains `Imports: R6, Rcpp`, `LinkingTo: Rcpp`, and loses the
+  sentence "The package ships headers only: there is no compiled code and
+  nothing to link against." `NAMESPACE` gains `useDynLib` and stops being a
+  comment block.
+- Installing the package now needs a compiler. It always effectively did — a
+  `LinkingTo: leaf` consumer compiles these headers, and BH/odelia/Rcpp all
+  require a toolchain — but "needs a compiler" moves from the consumer's build
+  to ours, and a binary-only R installation can no longer install it from
+  source. `tests/cpp.R` already handles the no-toolchain case by skipping; the
+  install itself cannot.
+- `tests/cpp/` and its Makefile stay exactly as they are. The C++ suite remains
+  the regression baseline, and stage 1 adds an R-side test *in addition to* it
+  rather than porting it.
+
+**The alternative that was rejected: a separate `leafr` package** holding the R
+layer, leaving this one pure. It preserves the current framing exactly and it is
+the wrong trade. Two repos to keep in step for one model, and the family has
+just finished paying for that failure mode in the other direction — see the
+pinning discipline under item 3, where a sibling's version not moving across
+four merges made `>= 0.0.1` meaningless. It also puts a choice in front of
+precisely the audience item 6 exists for: someone who wants what `plantecophys`
+gives them should type `install.packages` once, not first work out which of two
+packages is the one with the functions in it.
+
 ## 7. Make the components swappable
 
 **This is the argument for the package being a package rather than a file**, and

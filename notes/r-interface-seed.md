@@ -87,22 +87,24 @@ for the YAML:
   stop on a negative entry. **If you give the R side a friendlier wrapper, keep that
   check** — it is the only thing standing between an old script and a wrong number.
 
-## One decision to make before writing any YAML
+## The decision that had to come first — SETTLED (stage 0)
 
-**leaf is currently header-only by design, and #5 changes that.** Three documents
-assert the old answer and will need revising together, not retrofitting:
+**leaf gains a compiled R layer; `inst/include/` keeps every guarantee it has
+today.** Written up in full as PLAN item 6a; the short version is two layers with a
+one-way dependency — `src/` and `R/` include *downward* into `inst/include/`, never
+the reverse, and the headers stay plain C++ with no Rcpp anywhere.
 
-- `DESCRIPTION`: "The package ships headers only: there is no compiled code and
-  nothing to link against."
-- `NAMESPACE`: "no R-level API and no compiled code, so nothing is exported and no
-  shared library is loaded."
-- `.github/workflows/cpp-tests.yml`: pure C++, no R.
+The part worth carrying into every later stage: **#11's guarantee is about the
+include graph reachable from `leaf.hpp`, not about the tarball containing no
+`src/`.** Those were the same statement while there was no R layer and stop being
+the same statement now. `.github/workflows/cpp-tests.yml` is what keeps the real
+one true — it builds the C++ suite with **no R on the runner**, so `Rcpp::stop` in a
+header turns three jobs red. The R job is added *alongside* it, never in place of
+it; one `R CMD check` job would compile the headers with R present and could not
+tell the difference.
 
-RcppR6 adds `src/`, a shared library, `R/`, and needs an R job in CI. This is
-reconcilable with #11 — the *headers* stay R-free and plant keeps `LinkingTo` them,
-with the R layer sitting on top — but settle the framing first. Note #11 only just
-made the include graph R-free; don't undo that by letting Rcpp back into
-`inst/include/`.
+`DESCRIPTION`, `NAMESPACE` and the "expect exactly one NOTE" line in
+`.claude/CLAUDE.md` all state the old answer and move with the code in stage 1.
 
 ## What to build against
 
@@ -213,12 +215,11 @@ decisions that are hard to reverse — whether the package stops being header-on
 and what the R-facing names are — come first and cheapest, and so that no stage
 leaves `master` unable to build plant.
 
-**Stage 0 — settle header-only, in a docs-only PR.** Nothing else can start until
-`DESCRIPTION`, `NAMESPACE` and `.github/workflows/cpp-tests.yml` agree on an answer
-(see "One decision to make" above). Write the answer down before writing YAML: the
-headers stay R-free and plant keeps `LinkingTo` them, with `src/` and an R job added
-alongside. Cheap to land, and it is the thing a reviewer will otherwise argue about
-in the middle of a 2000-line diff.
+**Stage 0 — settle header-only. DONE**, as PLAN item 6a. The answer is written down
+before any YAML, which is the point: it is the thing a reviewer would otherwise
+argue about in the middle of a 2000-line diff. The `DESCRIPTION` / `NAMESPACE` /
+`CLAUDE.md` edits it implies are deliberately *not* here — they assert things that
+only become true when stage 1's code lands, so they travel with it.
 
 **Stage 1 — the YAML and the generated glue, no design changes.** Copy `Leaf` out of
 plant's `inst/RcppR6_classes.yml` verbatim, minus the four fields #15 deleted, with
