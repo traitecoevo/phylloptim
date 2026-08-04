@@ -100,10 +100,10 @@ code rather than of the merge:
 | issue | item | what | note |
 |---|---|---|---|
 | [#3](https://github.com/traitecoevo/leaf_cpp/issues/3) | 7a | Make λ(state) pluggable | **unblocked** — #2 is done. Measure the dispatch separately: the cost core is fully inlined where the supply path was not, so 7b's "dispatch is free" result does **not** transfer |
-| [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11 | Template `Leaf` on its scalar type | **11a and 11b landed** (#36): the solver, the tolerance and the replica drift are dealt with. **Trait gradients are NOT — 11b's kernels are templated on their argument, so `T` is the state variable and every trait is still a `double` member that cannot carry a tangent.** (This row previously claimed otherwise; retracted under 11b.) So the real work remains, and the choice is `Leaf<T>` against parameter-explicit kernel overloads plus IFT — the second looks much cheaper and 11a is what made it viable. Settle it in writing first |
+| [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11, **11c** | Template `Leaf` on its scalar type | **11a and 11b landed** (#36); **11c measured what is left and the answer is "not urgent"**. Trait gradients already work to ~4 digits by finite difference — at interior points *and*, unlike any IFT composite, correctly at the 42 pinned ones. So `Leaf<T>` buys **exactness and speed, not capability**. ⚠️ The crux for any IFT design is the **active set**, not the mixed partial: at a pinned optimum the bare composite is wrong by up to **3.5e+07**, silently and by O(1). **Let #6 choose** — write the fit against FD, and let it say which gradient, if any, is the problem |
 | [#33](https://github.com/traitecoevo/leaf_cpp/issues/33) | 6d | Take resistances, not root carbon | #5 stage 2b, **blocked on plant #591**. Before #34 |
 | [#34](https://github.com/traitecoevo/leaf_cpp/issues/34) | 6d | Delete plant's `Leaf` bindings | #5 stage 4, **blocked on plant #591**. The hazard-7 payoff, and the only stage that can break plant |
-| [#6](https://github.com/traitecoevo/leaf_cpp/issues/6) | 12 | Calibration vignette, then inversion | **Can start, cannot finish.** #36 made FD usable — ~4 correct digits at any relative step from 1e-8 to 1e-2, where it used to return zero or the wrong sign — so the fitting machinery and the data work are unblocked. But **trait AD still does not exist** (see #4), and item 12's own rule is that an FD-only calibration is throwaway because the headline result *is* the AD-versus-FD comparison. So #4 still gates the deliverable. Achievable precision of a target is **~1e-9**, set by `psi_stem_to_ci` |
+| [#6](https://github.com/traitecoevo/leaf_cpp/issues/6) | 12 | Calibration vignette, then inversion | **UNBLOCKED, and it is now the thing that should go next.** 11c measured trait gradients: FD gives ~4 digits at interior points and is correct at pinned ones, so the fit can be written today. Item 12's old "FD-only calibration is throwaway" rule assumed FD *does not work*, which 11a fixed — so write the fit against FD and let it say whether exactness is worth having. **Doing this is what specifies #4's remainder.** ⚠️ Achievable precision of a target is **~1e-9**, set by `psi_stem_to_ci` |
 | [#7](https://github.com/traitecoevo/leaf_cpp/issues/7) | 13 | Energy balance, full cut | leaf-to-air VPD is the cheap win; free convection is not worth it |
 | [#28](https://github.com/traitecoevo/leaf_cpp/issues/28) | 13 | Temperature-dependent outgoing longwave in the Penman-Monteith Rn | from plant #581 / #567 review |
 | [#31](https://github.com/traitecoevo/leaf_cpp/issues/31) | 6 | `profit_psi_stem_TF` returns a plausible number below `psi_upstream` | found writing the stage 2 vignette. Negative conductance, and profit is **discontinuous** at the boundary. Unreachable from plant's solve, which is why it survived — the first thing an R user does is plot the profit function |
@@ -2253,6 +2253,104 @@ The second looks much cheaper and is not obviously worse. **Settle it in writing
 first, the way 6a and 11a were settled**, and note that the composite needs a mixed
 second partial `∂²profit/∂ψ∂θ`, which is the piece most likely to decide the design.
 
+### 11c. Trait gradients: measured before deciding, and the answer reframes the item
+
+Measured 2026-08-04 through the R interface, repo untouched. **I expected the mixed
+partial `∂²profit/∂ψ∂θ` to be the hard part. It is not — it is easy. The hard part
+is the active set, which I had not considered.**
+
+#### Trait gradients already work, and no templating was needed for that
+
+`dprofit_droot_collar_psi` is exact in ψ and **smooth in the traits**, because ψ is
+an argument held fixed — no argmax is involved. So differencing it in θ is a
+first-order difference of an exact quantity, and it is well conditioned: `M =
+∂²profit/∂ψ∂θ` is **stable to 7 significant figures across five decades** of θ step
+(relative 1e-7 to 1e-3). Compose with the IFT,
+
+    dψ*/dθ = −M / H,      H = ∂²profit/∂ψ²   (measured −1.56 to −61.4 over the grid)
+    dA/dθ  = ∂A/∂θ|_ψ + (∂A/∂ψ)(dψ*/dθ)
+
+and against a resolved reference this lands at **ratio 0.9979–1.0000 for all eight
+traits tried** (`vcmax_25`, `jmax_25`, `cost_scale_TF24`, `beta2`, `stem_b`,
+`stem_c`, `root_b`, `beta_R_H`) and across five soil-moisture levels.
+
+**How much of the answer is the term the pre-11a finite difference silently dropped:**
+
+| trait | indirect (argmax-mediated) share of `dA/dθ` |
+|---|---|
+| `cost_scale_TF24`, `beta2`, `stem_b`, `stem_c` | **100%** |
+| `jmax_25` | 61% |
+| `vcmax_25` | 52% |
+| `root_b` | 6% |
+| `beta_R_H` | −15% |
+
+So for four of eight traits the *entire* gradient came through the argmax. That is
+the quantitative version of "a whole term silently multiplied by zero".
+
+⚠️ **And the naive finite difference on the solved output now works too** — ratio
+0.9979–1.0000 at every interior point tried, matching the composite. That is a
+direct consequence of 11a and it is the honest headline: **#4's remaining work buys
+exactness and speed, not capability.** A gradient-based fit can be written today.
+
+#### The crux is the ACTIVE SET, and it is where the IFT composite fails hard
+
+At a **pinned** optimum the constraint is active: ψ* is a *bound*, so `dψ*/dθ` is
+that bound's derivative and not `−M/H` — and `H` is not the right denominator either,
+because `dprofit ≠ 0` at the answer. Measured on rows that 11a classified as pinned:
+
+| operating point | class | trait | composite / truth |
+|---|---|---|---|
+| ψ=4, vpd=2, 5 layers | pinned wet | `stem_b` | **3.5e+07** |
+| ψ=3, vpd=4, 3 layers | pinned wet | `stem_b` | **5.3e+06** |
+| ψ=4, vpd=2, 5 layers | pinned wet | `vcmax_25` | **−8.5e+03** |
+| ψ=4, vpd=0.5, 3 layers | pinned dry | `vcmax_25` | 1.65 |
+| ψ=4, vpd=0.5, 3 layers | pinned dry | `stem_b` | 0.93 |
+| ψ=2, vpd=2, 1 layer | interior | either | **1.0000** |
+
+The pinned-wet cases are the dangerous ones: the true gradient there is ~1e-08
+(the leaf is stuck at the wettest feasible collar and barely responds), and the
+composite returns **O(1)**. Not noisy — confidently, silently wrong, and by the
+largest margin anywhere in this whole item.
+
+**The naive finite difference does not have this failure**, because it differences
+the actual solved output and so respects the constraint by construction: 0.9999 at
+the pinned-dry rows, and approximately zero — i.e. approximately right — at the
+pinned-wet ones.
+
+That inverts the lean recorded above. **Any IFT-based design must carry an
+active-set branch**: detect a pinned optimum and switch to the constraint's own
+derivative. 42 of 240 feasible golden rows exercise it, all at `psi_soil` 3–4, which
+is the dry end where a calibration is most likely to wander. Getting it wrong is not
+a tolerance issue.
+
+#### So the decision
+
+**Neither route is urgent, and that is the finding.** Ordered by what each buys:
+
+1. **Do nothing yet.** Trait gradients work to ~4 digits by finite difference, at
+   every interior operating point and — unlike any IFT composite — correctly at
+   pinned ones too. This is enough to write #6's fit.
+2. **If exactness is wanted**, the cheapest correct thing is *not* the bare IFT
+   composite: it is the composite **plus an active-set branch**, with the branch
+   tested against the 42 pinned rows. Parameter-explicit kernel overloads supply the
+   partials; the branch is the work.
+3. **`Leaf<T>` handles the active set for free**, for the same reason the naive
+   difference does — the clamp's `min`/`max` is differentiable almost everywhere and
+   the comparison picks the branch. That is a real argument for it that this item did
+   not previously have. It still costs the supply path, the root-finders and both
+   packages' R bindings, and each inner root-find still needs IFT of its own.
+
+**Recommendation: let #6 choose.** Write the fit against finite differences first —
+which item 12 forbade on the grounds that FD-based calibration is throwaway, an
+objection that assumed FD *does not work*, and it now does. If the fit converges
+acceptably, exactness is a performance optimisation and can be scoped as one. If it
+does not, #6 will say precisely which gradient is the problem, and that is a far
+better specification for this item than a guess.
+
+⚠️ **One thing to carry into #6 either way:** the achievable precision of a
+calibration target is **~1e-9**, set by `psi_stem_to_ci` (11b). Do not ask a fit to
+resolve anything finer.
+
 #### Still unmeasured
 
 - **FMA contraction.** Comment 2's 1.19e-06 residual (verified by rebuilding both
@@ -2311,13 +2409,36 @@ fully true:
   too, and better found in a vignette than in a paper.
 - Report the wall time for the whole fit. If it is seconds, that is the headline.
 
-**Do this after item 11 — confirmed as a decision, 2026-08-04, not just a
-preference.** Attempting it before produces a vignette that finite-differences
-trait gradients, which is precisely the thing being argued against. There is no
-partial version worth doing either: a calibration built on FD gradients would
-have to be thrown away rather than upgraded, because the headline result is the
-comparison between the two. **Item 11 (#4) is therefore the gate on this item,
-and nothing here should start until AD trait gradients exist.**
+⚠️ **~~Do this after item 11 — confirmed as a decision, 2026-08-04.~~ REVERSED the
+same day, by 11a and then 11c. Do this NEXT, and before the rest of item 11.**
+
+The original reasoning was that an FD-based calibration is throwaway work, because
+the headline result *is* the AD-versus-FD comparison, so a vignette that
+finite-differences trait gradients argues against itself. **That rested on FD not
+working** — and it genuinely did not: before 11a a difference quotient returned
+exactly zero for a photosynthetic trait and the *wrong sign* for a hydraulic one.
+
+11a removed the cause, and 11c measured the result: FD trait gradients now agree
+with a resolved reference to **~4 digits** at every interior operating point, and —
+unlike the IFT composite — remain correct at the 42 pinned rows. So the premise is
+gone and the conclusion goes with it.
+
+Two consequences for how to write this:
+
+- **Write the fit against finite differences.** It is not throwaway: if exact
+  gradients arrive later they slot into the same optimiser, and the FD arm is the
+  comparison the vignette needs anyway.
+- **This item now specifies item 11 rather than waiting on it.** If the fit
+  converges acceptably on FD, exactness is a performance optimisation and should be
+  scoped as one. If it does not, this item will say precisely which gradient is the
+  problem — a far better specification than a guess. 11c has the routes and the
+  active-set trap.
+
+⚠️ **And be honest about what the comparison can now claim.** The vignette was
+going to argue AD-works-against-FD-does-not. It cannot: the argument is now
+AD-is-exact-and-cheaper against FD-is-workable-but-needs-2N-solves-and-a-step-size.
+That is a weaker and more interesting result, and per the instruction below, if AD
+does not win convincingly, say so.
 
 **Then the bigger question: inversion.** The clearest capability gap against
 `plantecophys` is that `fitaci` inverts A-Ci curves for Vcmax/Jmax/Rd and this
