@@ -158,6 +158,19 @@ takes `std::max(root_crit, -supply_psi_crit())` where it wants
 annotated deliberately, because fixing it moves results and deserves its own
 measurement rather than riding along with a representation change.
 
+## The plant-side work is DONE — moved to PLAN item 3
+
+The three ways its survey was wrong — the odelia compile break, the `atm_kpa`
+100.5 driver making the pressure fix a **+2.4%** change rather than an inert one,
+and the `area_leaf` cancellation being a trap for plant's *tests* — are now
+recorded in **PLAN item 3**, along with the control-run discipline that licenses
+attributing a failure to the swap. They were here first because this file was
+written while the work was in flight; they are permanent findings and this file
+is not, so they moved. Nothing was dropped.
+
+<details>
+<summary>Original text, kept until this note is deleted</summary>
+
 ## The plant-side work is DONE, and its survey was wrong in three ways
 
 PLAN item 3's survey of what #15 costs plant (8 hand edits plus a regeneration, one
@@ -197,6 +210,8 @@ swap rather than to the environment. And the dry scenario gateway
 (`PLANT_RUN_SCENARIOS=1`) passes on the branch against develop's blessed baseline —
 so despite the +2.4%, every scenario's success/failure classification is unchanged.
 
+</details>
+
 ## Recommended order from here
 
 1. ~~**#9's plant-side edits**~~ — **done**, see the section above. plant's
@@ -221,18 +236,32 @@ argue about in the middle of a 2000-line diff. The `DESCRIPTION` / `NAMESPACE` /
 `CLAUDE.md` edits it implies are deliberately *not* here — they assert things that
 only become true when stage 1's code lands, so they travel with it.
 
-**Stage 1 — the YAML and the generated glue, no design changes.** Copy `Leaf` out of
-plant's `inst/RcppR6_classes.yml` verbatim, minus the four fields #15 deleted, with
-`root_collar_psi_` → `opt_root_psi_`. Target: `Leaf()` constructs from R and
-`set_physiology` / `find_root_collar_psi` / the field getters work. Deliberately
-**not** friendlier than plant's version yet — this stage exists to prove the build,
-the CI job and `R CMD check` are sound with one moving part, not two.
+**Stage 1 — the YAML and the generated glue, no design changes. DONE.** `Leaf` came
+out of plant's `inst/RcppR6_classes.yml` minus the four fields #15 deleted, with
+`root_collar_psi_` → `opt_root_psi_` and the constructor's R-side names corrected
+to `stem_c` / `stem_b` / `cost_scale_TF24`. λ and `g1_eff` were added, since #5
+asks for them and they were pure additions of existing C++ accessors. `R CMD
+check` is **Status OK with zero NOTEs** — the `'LinkingTo' field is unused` NOTE
+this guide used to tell you to expect is gone, because there is a `src/` now.
 
-⚠️ **The C++ suite is the regression baseline for all of this, and it is blind to
-the R layer.** Add an R-side test that reproduces two or three golden operating
-points through the R API and compares to the recorded `%.17g` values. Without it, a
-YAML mistake that mistranslates an argument produces plausible numbers and no
-failure.
+Four things learned doing it, none of which were in the plan:
+
+1. **RcppR6 forces the `.h` / `.hpp` split.** It hardwires `#include <leaf.h>` in
+   the code it generates and `<leaf/RcppR6_pre.hpp>` in the umbrella it expects to
+   find, so the R-facing umbrella *must* be `leaf.h` and the model's had to stay
+   `leaf.hpp`. A file extension now carries the whole one-way-dependency rule,
+   which is more weight than an extension should bear — hence the banner at the
+   top of `leaf.h`.
+2. **The generated `RcppR6_*.hpp` land in `inst/include/leaf/` and do include
+   Rcpp.** So "no Rcpp under `inst/include/`" is no longer the invariant; the
+   invariant is directional. Hazard 9 in the developer guide was rewritten for it.
+3. **The expected values in the R test have to be hex floats.** Pasting the golden
+   file's `%.17g` strings would fail against a model that is exactly right, for
+   ~18% of them — issue #13's parser problem, arriving from a new direction.
+4. **The golden file's bit-exactness is conditional on the optimisation level**,
+   not only on the platform: bit-identical at `-O1`/`-O2`/`-O3`, off by 3.47e-15
+   at `-O0`, which does not contract `a*b + c` into an FMA. Found because CMake's
+   default build type is flagless. The Makefile defaults to `-O2` and never met it.
 
 **Stage 2 — a friendlier surface, as a thin R layer over stage 1.** This is where
 the design work goes, and keeping it *above* the generated glue means it can be

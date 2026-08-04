@@ -419,6 +419,60 @@ File this against plant as well as here.
 
 ## 3. Have plant consume this package
 
+**The branch is built and passing (plant #591, open), and its survey — the "8
+hand edits plus a regeneration" below — was accurate about the *work* and wrong
+about the *risk* in three ways. Each cost real time, and none was predicted:**
+
+1. **A third compile break, in a dependency, presenting as eight errors inside
+   somebody else's headers.** plant needed odelia at `master`, not the
+   `>= 0.2.0` its DESCRIPTION asked for: plant #585 made `Patch::ode_rates`
+   non-const while odelia 0.2.0's `r_ode_rates` took the system by `const&`.
+   plant's `develop` did not compile against released odelia either, so the swap
+   did not cause it — but nothing in plant named which odelia it wanted, so it
+   arrived as template instantiation errors pointing nowhere near the cause.
+   Filed traitecoevo/odelia#48; **resolved** by odelia 0.2.1 (#49) and leaf 0.1.0
+   (#29), and plant now pins both ways — a `LinkingTo (>= x)` floor, which R
+   checks at install, plus `Remotes: ...@sha`, which fixes what gets fetched.
+   Neither subsumes the other, and the version has to be bumped *first* or the
+   floor means nothing: leaf sat at 0.0.1 across #15, #24, #25 and #26, so
+   `>= 0.0.1` was satisfied by a version plant cannot compile against.
+2. **The pressure fix is NOT inert for plant, and it dominates everything else.**
+   The survey said 10c "should be inert at 101.3 kPa, and plant's tests all use
+   that". The *tests* do; `TF24_Environment` sets the **`atm_kpa` driver to
+   100.5**, which nothing had checked. Measured on the one-species SCM scenario,
+   deriving the ppm→Pa conversion from `atm_kpa` moves offspring production
+   **+2.4%**, against **+0.10%** for the entire rest of the swap combined. TF24's
+   `scientific_version` went 4 → 5 for it. **This package's golden grid evaluates
+   at 101.3 and is blind to it by construction** — a standing reminder that the
+   golden file bounds *this* package's behaviour, not plant's.
+3. **"The `area_leaf` division cancels — do not compute it" is right for plant's
+   C++ and a trap for its tests.** In plant the cancellation is exact
+   (`mass_root()` is `pars.a_r1 * area_leaf`, so per-leaf-area carbon is just
+   `root_mass_carbon_scale * pars.a_r1`). But `test-leaf.r` passed absolute
+   carbon and `area_leaf` as separate arguments, and dropping the argument
+   without dividing leaves a root system 20× too weak at `area_leaf = 0.05`. It
+   compiles, runs, and moved the critical-demand collar potential from −0.685 to
+   −2.57 MPa **while leaving the zero-uptake collar untouched** — that one is
+   scale-invariant, so of two regression guards sitting side by side only one
+   fired.
+
+Two things from that work worth reusing:
+
+- **The verification that licenses attributing failures to the swap.**
+  `origin/develop`, built and tested in a worktree against the *same* installed
+  dependencies, passes its own suite with zero failures. Without that control,
+  every failure on the branch is ambiguous between the swap and the environment.
+  The dry scenario gateway (`PLANT_RUN_SCENARIOS=1`) also passes against
+  develop's blessed baseline, so despite the +2.4% every scenario's
+  success/failure classification is unchanged.
+- **"Checked — there is nothing upstream to port" has a shelf life of days on an
+  actively developed sibling.** Both this document and the handoff notes were
+  caught by it within 24 hours: plant merged #585 into `develop`, which fixed
+  #577 *and* two further stale-state exits, and #26 ported all of it here. The
+  check is `git log <base>...origin/develop -- <the files we forked>`, and it has
+  to be re-run before *acting* on the conclusion, not just before writing it
+  down.
+
 Branch `feature/consume-leaf-package` in plant does this: delete
 `inst/include/plant/leaf_model.h` and `src/leaf_model.cpp`, add
 `LinkingTo: leaf`, and provide a compatibility shim so that `plant::Leaf` and the
@@ -624,6 +678,43 @@ the difference.
 - `tests/cpp/` and its Makefile stay exactly as they are. The C++ suite remains
   the regression baseline, and stage 1 adds an R-side test *in addition to* it
   rather than porting it.
+
+### 6c. RcppR6 versus odelia's hand-written bindings — DECIDED: both, in layers
+
+odelia solves the same problem differently, and it is worth saying why this
+package does not simply copy it. odelia is **also** Rcpp + R6 — the difference is
+that its glue is hand-written: `// [[Rcpp::export]]` free functions taking an
+`Rcpp::XPtr`, wrapped in an R6 class that holds the pointer. No generator.
+
+The two are not actually in competition here, because **stage 2 writes a
+hand-written R layer either way.** Named arguments, defaults, a `Control` object
+and a one-call entry point are design work, and no generator produces them. So
+the only thing in question is the ~90 low-level accessors underneath: 60 field
+getters and setters and 30 method forwards.
+
+**Generate those.** They contain no design content, and hand-writing them is
+90 opportunities to transpose an argument — which is precisely the error class
+that produces plausible numbers and a green C++ suite, and precisely why the
+R-side golden test had to be written. Generation also keeps stage 4 a *move*
+rather than a rewrite: plant is an RcppR6 package, plant's `Leaf` block is the
+same YAML dialect, and plant's `test-leaf.r` asserts the R-side names that
+`access: field` preserves. And the dotted `name_cpp` trick — `roots_.psi_soil_`
+reaching a moved member without the R name changing — is what makes hazard 7
+cheap; it has no hand-written equivalent that is not just as much code.
+
+**The real cost is that RcppR6 is not on CRAN**, and that is worth defusing
+rather than living with. It is defused by **not declaring it at all**: the
+generated files are committed, so nobody installing or checking this package
+needs RcppR6 — only a developer regenerating does. It is therefore absent from
+`Suggests` and from `Remotes`, and installed explicitly by the one CI job that
+regenerates and diffs the output. That job exists because a committed generated
+file can go stale silently, which is the one genuine downside of generating.
+
+**If this package ever does need to drop RcppR6** — CRAN submission is the
+plausible trigger — odelia's approach is the migration target, and the migration
+is cheap *because* of the layering above: the public R API lives in the
+hand-written layer, so the generator underneath can be replaced without the
+surface moving. That is a reason to build the layer even while RcppR6 stays.
 
 **The alternative that was rejected: a separate `leafr` package** holding the R
 layer, leaving this one pure. It preserves the current framing exactly and it is

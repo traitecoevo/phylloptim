@@ -1,7 +1,7 @@
 # leaf
 
-A header-only C++ leaf gas-exchange model in which **stomatal behaviour emerges
-from hydraulics** instead of an empirical conductance function.
+A C++ leaf gas-exchange model, callable from R, in which **stomatal behaviour
+emerges from hydraulics** instead of an empirical conductance function.
 
 Farquhar-von Caemmerer-Berry photosynthesis is coupled to an explicit
 soil → root → stem → leaf water transport path — Weibull vulnerability curves
@@ -63,18 +63,33 @@ vignette is item 12 and is the demonstration this claim needs.
 
 ## Status
 
-**v0.0.1 — early.** The model itself is mature and in production use inside
-plant. The *packaging* is new, and two things are not done yet:
+**v0.1.0 — early, but validated.** The model itself is mature and in production
+use inside plant. The *packaging* is what is new.
 
-- The values this build produces have **not yet been cross-checked against
-  plant's compiled build**. That is job one; see [PLAN.md](PLAN.md).
-- There is **no R-level API**. This is a headers-only package, consumed from C++.
+- **Cross-checked against plant's compiled build**, and the swap was bit-identical
+  at the point it was made: plant's full suite 0 fail / 0 error on both builds,
+  and the SCM regression identical across 78/78 nodes. The 1-ULP disagreement
+  that held this up turned out to be R's decimal parser rather than either model.
+- **The shutdown defect is fixed.** On the hydraulic-shutdown path, transpiration,
+  assimilation and uptake used to be left holding the previous solve's values
+  (plant #578). That, and three further stale-state exits ported from plant #585,
+  are all fixed here.
+- **Results now differ from plant's own leaf, deliberately** — see
+  [NEWS.md](NEWS.md). The most consequential single change is deriving the
+  ppm→Pa conversion from the actual atmospheric pressure instead of a hard-coded
+  101.3 kPa, which moves TF24 offspring production by 2.4% in plant, because
+  plant's driver default is 100.5.
 
-It also carries one inherited defect worth knowing about before you use it: on
-the hydraulic-shutdown path, transpiration, assimilation and soil water uptake
-are left holding the previous solve's values (plant #578). `main` reproduces
-plant's behaviour exactly, including this; the fix is on the `feature/api-cleanup`
-branch alongside the other changes that alter results or the API.
+## Two ways in, and the model does not need R
+
+The model is a set of self-contained C++ headers under `inst/include`. They use
+no R and no Rcpp, depend only on Boost and the header-only parts of odelia, and
+compile and run with no R installed — so the same model is available to a C++
+program, to a Python extension, and to R, with none of those paying for the
+others. The R layer (`src/`, `R/`) sits on top of those headers and is never
+included by them; the dependency runs one way only. See [PLAN.md](PLAN.md) item
+6a for the decision, and `.github/workflows/cpp-tests.yml` for what enforces it —
+it builds the whole C++ suite on a runner with no R on it.
 
 ## Use from C++
 
@@ -119,30 +134,142 @@ c++ -std=c++20 -O2 \
   my_program.cpp -o my_program
 ```
 
+Or use the CMake package, which handles those three paths for you. `odelia` is
+distributed as an R package but the headers used here are plain C++, so a git
+checkout of it is enough — nothing needs installing or building:
+
+```sh
+git clone https://github.com/traitecoevo/odelia
+cmake -B build -DLEAF_ODELIA_INCLUDE_DIR=$PWD/odelia/inst/include
+cmake --build build
+ctest --test-dir build          # runs the C++ suite, including the golden file
+cmake --install build --prefix /usr/local
+```
+
+```cmake
+find_package(leaf REQUIRED)
+target_link_libraries(my_program PRIVATE leaf::leaf)
+```
+
+`leaf::leaf` is an INTERFACE target — headers, an include path and `cxx_std_20`,
+with nothing to link. `add_subdirectory(leaf)` works the same way if you would
+rather vendor it.
+
+⚠️ **Build with optimisation on if you intend to compare against the golden
+file.** Measured on macOS/arm64: `-O1`, `-O2` and `-O3` all reproduce
+`tests/cpp/golden/operating_points.tsv` bit-for-bit and `-O0` does not, missing
+by about 13 ULP because it declines to contract `a*b + c` into an FMA. A debug
+build that fails `test_golden` by ~1e-15 has found nothing. The CMake build
+therefore defaults to `Release` rather than to CMake's flagless default.
+
+## Use from Python
+
+The same headers, through [pybind11](https://pybind11.readthedocs.io/) — no R
+anywhere in the picture. A minimal extension module:
+
+```cpp
+// pyleaf.cpp
+#include <leaf.hpp>
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+namespace py = pybind11;
+
+PYBIND11_MODULE(pyleaf, m) {
+  py::class_<leaf::Leaf>(m, "Leaf")
+      .def(py::init<>())
+      .def("set_physiology", &leaf::Leaf::set_physiology)
+      .def("find_root_collar_psi", &leaf::Leaf::find_root_collar_psi)
+      .def_readonly("profit", &leaf::Leaf::profit_)
+      .def_readonly("opt_psi_stem", &leaf::Leaf::opt_psi_stem_)
+      .def_property_readonly("g1_eff", &leaf::Leaf::g1_eff);
+}
+```
+
+```cmake
+find_package(leaf REQUIRED)
+find_package(pybind11 REQUIRED)
+pybind11_add_module(pyleaf pyleaf.cpp)
+target_link_libraries(pyleaf PRIVATE leaf::leaf)
+```
+
+```python
+>>> import pyleaf
+>>> l = pyleaf.Leaf()
+>>> l.set_physiology([20.0], 900, [2.0], [1.0], 3.14e-5, 2.0, 40.0, 25.0, 21.0, 101.3)
+>>> l.find_root_collar_psi()
+>>> l.profit
+2.5158434693939866
+```
+
+That value is the golden file's `profit` at this operating point, to the last
+bit — which is the point of the example. `util::stop` throws
+`std::runtime_error`, so pybind11 turns the model's input validation into a
+`RuntimeError` with no extra work.
+
+`std::vector<double>` needs `pybind11/stl.h`, as above; swap it for
+`pybind11/numpy.h` and an `Eigen`-style binding if you want the soil profile to
+arrive as an array without a copy.
+
 ## Use from R
 
-As a headers-only dependency, the way `BH` is used. Add to your DESCRIPTION:
+```r
+library(leaf)
+
+l <- Leaf(vcmax_25 = 96, stem_c = 2.680147, stem_b = 3.898245,
+          psi_crit = 5.870283, root_c = 2.680147, root_b = 3.898245,
+          root_psi_crit = 5.870283, beta2 = 1.5, jmax_25 = 157.44, a = 0.30,
+          curv_fact_elec_trans = 0.7, curv_fact_colim = 0.99,
+          GSS_tol_abs = 1e-3, vulnerability_curve_ncontrol = 100,
+          ci_abs_tol = 1e-3, ci_niter = 1000, cost_scale_TF24 = 7.5,
+          beta_R_H = 3.4e2, beta_R_V = 9.4e3)
+
+l$set_physiology(root_carbon_per_leaf_area = 20, PPFD = 900,
+                 psi_soil = 2.0, soil_depth = 1.0,
+                 leaf_specific_conductance_max = 3.14e-5,
+                 atm_vpd = 2.0, ca = 40.0, leaf_temp = 25,
+                 atm_o2_kpa = 21, atm_kpa = 101.3)
+l$find_root_collar_psi()
+
+l$opt_psi_stem_   # leaf water potential at the optimum, MPa
+l$profit_         # A - hydraulic cost
+l$lambda          # marginal cost of water, dA/dE
+l$g1_eff          # the effective g1 the solve implies
+```
+
+Nineteen positional trait arguments is what the C++ constructor takes, and it is
+not a reasonable thing to type at a console. A named, defaulted interface is the
+next step; see [PLAN.md](PLAN.md) item 6.
+
+**All water potentials are positive magnitudes in MPa.** One representation
+throughout, and it is asserted rather than documented — a negative `psi_soil` is
+an error, not a sign convention the model quietly accepts.
+
+### As a dependency of another R package
+
+Name it in `LinkingTo` to compile against the headers, the way `BH` is used:
 
 ```
-LinkingTo: BH, odelia (>= 0.2.0), leaf
+LinkingTo: BH, odelia (>= 0.2.0), leaf (>= 0.1.0)
 ```
 
 `LinkingTo` is **not** transitive in R, so you must name `BH` and `odelia`
 yourself even though it is `leaf` that includes them — including the odelia
-version, for the same reason.
-
-There is no R-level interface to `leaf::Leaf` yet — see [PLAN.md](PLAN.md).
+version, for the same reason. A `LinkingTo` consumer gets `<leaf.hpp>`, which is
+R-free; `<leaf.h>` is the R binding layer's own umbrella and is not for you.
 
 ## Dependencies
 
-Deliberately few, and all header-only:
+Deliberately few. The two the *model* needs are header-only:
 
 | | why | how |
 |---|---|---|
 | **odelia** (>= 0.2.0) | cubic-spline interpolator for the pre-integrated vulnerability curves, and the vendored **XAD** automatic-differentiation library | `LinkingTo` |
 | **BH** (Boost) | TOMS748 root finder, incomplete gamma for the closed-form vulnerability integral | `LinkingTo` |
 
-Nothing else, and **neither dependency needs R**. The leaf model itself does not
+**Rcpp** and **R6** are needed by the R layer only. They are not in the model's
+include graph and a C++ or Python consumer never sees them.
+
+Nothing else, and **neither model dependency needs R**. The leaf model itself does not
 touch **Rcpp** or the R C API: `leaf/util.hpp` replaced plant's `util::stop`
 with a plain `std::runtime_error` and `NA_REAL` with a quiet NaN. odelia's
 solver core was the last R touchpoint in the include graph, via `ode_util.hpp`;
@@ -157,19 +284,37 @@ depending on this package.
 
 ## Tests
 
-The test suite is plain C++ and needs neither R nor a test framework:
+Two suites, and the C++ one is the regression baseline.
 
 ```sh
-make -C tests/cpp
+make -C tests/cpp        # plain C++: no R, no test framework
 ```
 
 It discovers BH and odelia through `Rscript` if R is installed, and otherwise
 falls back to a sibling `odelia/` checkout and Homebrew Boost. Override with
-`make BH_INC=... ODELIA_INC=...`.
+`make BH_INC=... ODELIA_INC=...`. `ctest --test-dir build` runs the same two
+programs through CMake.
 
-`R CMD check` runs the same suite, compiled with R's own configured compiler
+At its centre is `tests/cpp/golden/operating_points.tsv`: 288 operating points
+recorded at full precision and compared **bit-exactly**, which is what makes a
+large refactor of this code checkable rather than hopeful. It is bit-exact on the
+platform that generated it (macOS/arm64) and compared with per-field tolerances
+elsewhere, because libm's `exp`/`pow` are not bit-reproducible across platforms.
+
+```sh
+R CMD check .            # the C++ suite, plus the R layer's own tests
+```
+
+`R CMD check` runs the C++ suite compiled with R's own configured compiler
 against the installed headers — so a package that `LinkingTo`s this one finds out
-from its own check when a header stops compiling.
+from its own check when a header stops compiling. It also runs
+`tests/testthat/`, which ties the R layer back to the same golden points. That
+tie-back matters more than it looks: the C++ suite never loads the R layer, so a
+mistranslation in the bindings would otherwise produce a green suite and
+plausible R numbers. Those expected values are written as **C99 hex floats**, on
+purpose — R's decimal parser is not correctly rounded and returns a value one ULP
+off for roughly 18% of full-precision inputs, so decimals there would fail
+against a model that is exactly right.
 
 ## API documentation
 
@@ -177,10 +322,9 @@ from its own check when a header stops compiling.
 doxygen        # docs/html/index.html
 ```
 
-Doxygen rather than roxygen because roxygen documents R objects and this package
-has none. The headers' comments are the substantive documentation here, and
-`tools/doxygen_filter.awk` presents them to Doxygen without modifying a single
-source file.
+Doxygen for the C++ API and roxygen for the R one. The headers' comments are the
+substantive documentation here, and `tools/doxygen_filter.awk` presents them to
+Doxygen without modifying a single source file.
 
 ## How this compares to other leaf models
 

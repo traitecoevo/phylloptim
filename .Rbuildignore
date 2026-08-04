@@ -34,3 +34,14 @@
 # Validation scripts, not tests: they need an installed plant and take minutes.
 # See the header comment in each.
 ^tests/validate$
+
+# The CMake build, which exists so that "the model does not need R" is runnable
+# rather than merely claimed (see README, "Use from C++"). It is for consumers
+# who are not installing this as an R package, so it has no business in the
+# tarball -- and R CMD check would flag the top-level CMakeLists.txt as a
+# non-standard file if it were there.
+^CMakeLists\.txt$
+^cmake$
+^build.*$
+^_deps$
+

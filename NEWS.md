@@ -1,3 +1,38 @@
+# leaf (development version)
+
+## The package is callable from R (#5, stage 1)
+
+`leaf::Leaf` now has an R interface, so this is no longer a `LinkingTo`-only
+package. `library(leaf)` gives you an R6 `Leaf` with the drivers, the solve and
+the whole operating point; `vignette("leaf")` walks through a solve, a drought
+response and a light response. **λ and `g1_eff` are exposed for the first time**
+— they existed in C++ and were unreachable from R.
+
+**The C++ headers are unchanged, and still need no R.** The model stays a set of
+self-contained headers under `inst/include` that use no R and no Rcpp; the R
+layer sits on top of them and is never included by them. So a `LinkingTo: leaf`
+consumer sees nothing new, and the model remains linkable straight into a C++
+program or a Python extension. There is now a **CMake package** (`leaf::leaf`)
+for exactly that, and CI builds and installs it on runners with no R, so the
+claim is tested rather than asserted. See PLAN item 6a.
+
+Two things worth knowing if you are working on this package:
+
+- **RcppR6 is not a declared dependency.** The generated glue is committed, so
+  only a developer regenerating it needs the generator. CI regenerates and diffs
+  to catch a stale commit. PLAN item 6c has the reasoning, including what would
+  make it worth swapping for odelia's hand-written style.
+- **The golden file's bit-exactness turns out to depend on the optimisation
+  level, not only on the platform**: identical at `-O1`/`-O2`/`-O3`, off by
+  3.47e-15 at `-O0`, which does not contract `a*b + c` into an FMA. A debug build
+  failing `test_golden` by ~1e-15 has found nothing.
+
+The R-facing argument list is still the C++ one — nineteen positional traits in
+the constructor, ten in `set_physiology`. That is deliberate for this stage: the
+bindings were kept a faithful translation so a failure could only be a
+translation error, checked against the same golden points the C++ suite uses. A
+named, defaulted surface is next.
+
 # leaf 0.1.0
 
 **The first version bump since the package was created, and it exists so downstream can

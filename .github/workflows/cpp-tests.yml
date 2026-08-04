@@ -4,6 +4,13 @@ name: C++ tests
 # catches the portability problems that have bitten this code before -- long double
 # width and FMA contraction differing between compilers and architectures (see the
 # arm64 note in Leaf::hydraulic_cost_Sperry), which a single-platform build misses.
+#
+# ⚠️ THIS WORKFLOW IS ALSO THE ENFORCEMENT MECHANISM FOR PLAN ITEM 6a, and must
+# not gain an R step. The package has an R layer now, and what keeps
+# inst/include/ usable from C++ and Python is that these jobs build the whole
+# model on runners with no R installed. An `R CMD check` job compiles the same
+# headers with R present and cannot tell the difference, so it is a complement,
+# never a replacement. Put R work in a separate workflow.
 
 on:
   push:
@@ -95,6 +102,72 @@ jobs:
             CXX="$CXX" \
             ODELIA_INC="$GITHUB_WORKSPACE/odelia/inst/include" \
             BH_INC="${{ steps.boost.outputs.inc }}"
+
+      # The same headers through CMake, which is the route a C++ or Python
+      # consumer takes (README: "Use from C++", "Use from Python"). Cheap, and it
+      # covers three things the Makefile cannot: that the install rules ship the
+      # right headers and exclude the Rcpp-dependent ones, that find_package
+      # produces a usable target, and that the whole thing works on a runner
+      # where R has never been installed.
+      - name: Build, test and install through CMake (no R)
+        env:
+          CXX: ${{ matrix.cxx }}
+        run: |
+          cmake -B build-cmake \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DLEAF_ODELIA_INCLUDE_DIR="$GITHUB_WORKSPACE/odelia/inst/include" \
+            -DLEAF_BOOST_INCLUDE_DIR="${{ steps.boost.outputs.inc }}"
+          cmake --build build-cmake -j 3
+          ctest --test-dir build-cmake --output-on-failure
+          cmake --install build-cmake --prefix "$GITHUB_WORKSPACE/cmake-prefix"
+
+      # An installed leaf must be consumable by find_package, and must NOT have
+      # shipped leaf.h or the RcppR6_*.hpp headers -- those need Rcpp, and handing
+      # them to a non-R consumer would turn PLAN item 6a's one-way dependency into
+      # a broken build a long way from its cause.
+      - name: Consume the installed package (no R)
+        env:
+          CXX: ${{ matrix.cxx }}
+        run: |
+          for f in leaf.h leaf/RcppR6_pre.hpp leaf/RcppR6_post.hpp leaf/RcppR6_support.hpp; do
+            if [ -e "$GITHUB_WORKSPACE/cmake-prefix/include/$f" ]; then
+              echo "$f was installed; it needs Rcpp and must be excluded" >&2
+              exit 1
+            fi
+          done
+          mkdir -p consumer && cd consumer
+          cat > CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.16)
+          project(consumer LANGUAGES CXX)
+          find_package(leaf REQUIRED)
+          add_executable(consumer main.cpp)
+          target_link_libraries(consumer PRIVATE leaf::leaf)
+          EOF
+          cat > main.cpp <<'EOF'
+          #include <leaf.hpp>
+          #include <cmath>
+          #include <cstdio>
+          int main() {
+            leaf::Leaf l;
+            l.set_physiology({1.0 / 0.05}, 900, {2.0}, {1.0}, 1.0 * 0.000157 / 5.0,
+                             2.0, 40.0, 25.0, 21.0, 101.3);
+            l.find_root_collar_psi();
+            std::printf("profit = %.17g\n", l.profit_);
+            // The golden file's profit at this operating point. Compared loosely
+            // on purpose: the point here is that an installed package computes
+            // the model, not that this runner reproduces macOS/arm64 bit-for-bit
+            // -- test_golden above already makes the exact claim, with the right
+            // per-platform tolerances.
+            return std::fabs(l.profit_ - 2.5158434693939866) < 1e-6 ? 0 : 1;
+          }
+          EOF
+          cmake -B build \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/cmake-prefix" \
+            -DLEAF_ODELIA_INCLUDE_DIR="$GITHUB_WORKSPACE/odelia/inst/include" \
+            -DLEAF_BOOST_INCLUDE_DIR="${{ steps.boost.outputs.inc }}"
+          cmake --build build
+          ./build/consumer
 
       - name: Note on failure
         if: failure()
