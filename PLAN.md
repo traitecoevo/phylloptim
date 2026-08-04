@@ -2048,6 +2048,74 @@ diagnostics were measured against the previous solver before this was spotted, a
 the numbers looked plausible throughout. **`rm -f src/*.o src/*.so` before
 reinstalling**, and sanity-check one value against the C++ suite.
 
+### 11b. What is left of item 11 after 11a — re-measured, and it is smaller
+
+Measured 2026-08-04 in a scratch copy, repo untouched. **11a changed the cost of
+the remaining work, and #4 comment 2's planning number is superseded.**
+
+#### The replica unification is now cheap — 4.98e-07, not 5.53e-04
+
+Comment 2 measured that unifying `detail::assim_colimited_ad` with
+`Leaf::assim_colimited` moves results by **5.53e-04**, concluded "there is no
+bit-identical stepping stone", and said to plan a deliberate results-moving PR.
+Re-measured on the post-11a solver, the same unification moves the golden grid by
+**4.98e-07** — about **1100× smaller**, and *below* the cross-platform noise for
+`profit` this package already tolerates (1.82e-07 now, 1.85e-06 before). It is a
+small PR whose diff sits inside existing noise, not a blast-radius exercise.
+
+The reason is the amplifier, not the algebra. Both differences are pure
+reassociation — `et/4*((ci−g)/(ci+2g))` versus left-to-right, and `pow(s,2)`
+versus `s*s`. What turned last-bit reassociation into 5.53e-04 was a flipped
+golden-section comparison moving the argmax by `GSS_tol_abs`. That mechanism is
+gone.
+
+#### The new amplifier is `psi_stem_to_ci`'s 1e-7, and this is the actionable part
+
+Isolated by tightening that one hard-coded tolerance and re-running the same
+unification against a tight-`ci` baseline:
+
+| amplifier in play | the same perturbation shows up as |
+|---|---|
+| golden section, `GSS_tol_abs` 1e-3 | 5.53e-04 |
+| `psi_stem_to_ci` 1e-7 — where we are now | **4.98e-07** |
+| `psi_stem_to_ci` 1e-13 | **7.16e-13** |
+
+So **~1e-6 is the floor of what this model's reported outputs mean.** Three things
+follow, and the third is the one that matters for item 12:
+
+- It explains the two rows whose profit came out ~6e-7 *lower* under 11a while
+  their residual improved ten orders of magnitude. Same number, same cause.
+- The guide's "~1e-16 is reassociation, ~1e-4 is a real difference" gap has
+  narrowed from four orders to about one. A 1e-6 diff is no longer obviously
+  rounding.
+- **It caps the precision of any calibration target at ~1e-6.** If a fit in item 12
+  needs better, the lever is the `ci` tolerance, **not** more AD. Cost measured:
+  **+6.2%** (2.73 → 2.90 µs/solve, interleaved ×4), still 17% faster than the 3.51
+  µs before 11a. Not taken now — nothing needs it — but recorded as a decision.
+
+#### So the remaining scope, in order
+
+1. **Unify the replicas** (comment 1's "cheap half"): make the two real functions
+   templated statics taking their parameters explicitly, and delete
+   `namespace detail`. This is *both* the drift fix and what supplies `∂A/∂θ`, so
+   the two jobs comment 1 separated have merged. ~4.98e-07, one small PR.
+2. **Decide the `ci` tolerance** — a one-line change with a measured price and a
+   measured payoff. Cheap to settle, and item 12 wants the answer.
+3. **`Leaf<T>` if still wanted.** The justification has narrowed to plant #537's
+   cut-point rule — composing with an outer AD pass — rather than "trait gradients
+   do not work otherwise", because after 11a a central difference gives ~4 correct
+   digits at any relative step from 1e-8 to 1e-2. Worth re-deciding on those
+   grounds rather than inheriting the original scope.
+
+#### Still unmeasured
+
+- **FMA contraction.** Comment 2's 1.19e-06 residual (verified by rebuilding both
+  sides with `-ffp-contract=off` and getting bit-identical) was also measured under
+  golden section, so it is probably much smaller now. Not re-measured.
+- **Hazard 3 on the plant side**, blocked on plant #591.
+- **Whether the inner root-finds need IFT of their own** (comment 3's ⚠️). Less
+  pressing now that differentiating through the outer solve works.
+
 ## 12. Demonstrate calibration — and then consider inversion
 
 **The claim.** ~4 µs per solve *and* exact derivatives rather than finite

@@ -183,6 +183,27 @@ difference.** These nested solvers amplify perturbations up to about
 `GSS_tol_abs` (1e-3), so there is a four-order-of-magnitude gap between rounding
 and bug. Anything in between deserves investigation.
 
+⚠️ **That 1e-3 amplification figure is out of date, and the replacement is worth
+knowing before you size any change.** PLAN 11a removed golden section, which was
+the dominant amplifier — a last-bit perturbation no longer flips a comparison and
+moves the argmax by `GSS_tol_abs`. **The amplifier is now `psi_stem_to_ci`'s
+hard-coded 1e-7 tolerance**, and the chain was measured by isolation on the same
+perturbation (unifying the AD replica with the function it mirrors):
+
+| amplifier in play | that perturbation shows up as |
+|---|---|
+| golden section, `GSS_tol_abs` 1e-3 | **5.53e-04** (measured pre-11a, #4 comment 2) |
+| `psi_stem_to_ci`, 1e-7 — where we are now | **4.98e-07** |
+| `psi_stem_to_ci` tightened to 1e-13 | **7.16e-13** |
+
+So **~1e-6 is now the floor of what this model's reported outputs mean**, and the
+rounding-versus-bug gap has narrowed from four orders to about one. Two
+consequences: a diff of 1e-6 is no longer obviously rounding, and if you need
+better than 1e-6 out of this model the lever is the `ci` tolerance, not the collar
+solve. Tightening it to 1e-13 measured **+6.2%** (2.73 → 2.90 µs/solve, interleaved
+×4) — still 17% faster than the 3.51 µs before 11a. Not taken, because nothing
+needs it yet; taken as a decision rather than left as an omission.
+
 **It is bit-exact only on the platform that generated it — macOS/arm64.** libm's
 `exp`/`pow` are not bit-reproducible between glibc on x86-64 and Apple's libm on
 arm64, and FMA contraction differs too, so cross-platform bit-equality was never
@@ -194,8 +215,24 @@ magnitude apart:
 
 | field | gcc | clang | why |
 |---|---|---|---|
-| `profit` | 1.85e-06 | 5.87e-07 | it is the maximum itself — well-conditioned |
-| the other eight | 5.53e-04 | 2.73e-04 | evaluated at the **argmax** — sqrt-amplified |
+| `profit` | **1.82e-07** | **1.82e-07** | it is the maximum itself — well-conditioned |
+| the other eight | **1.4e-04** | **1.4e-04** | evaluated at the **argmax** — sqrt-amplified |
+
+**These figures changed when PLAN 11a replaced the collar solver, and how they
+changed is informative.** They were `profit` 1.85e-06 / 5.87e-07 and the other
+eight 5.53e-04 / 2.73e-04. Two things to take from the move:
+
+- **The gcc-versus-clang split was itself a golden-section artefact.** The two
+  compilers now report *identical* figures, where they used to differ by 2–3×. What
+  differed between them was which way a golden-section comparison fell; what is
+  left is libm's `exp`/`pow`, which is a property of the platform and not of the
+  compiler. So do not expect a compiler-dependent column here any more — and if one
+  reappears, something has reintroduced a discrete decision into the solve.
+- **The sqrt story now fits better than it did.** `sqrt(1.82e-07)` ≈ 4.3e-04
+  against the 1.4e-04 observed, where before it was `sqrt(1.85e-06)` ≈ 1.4e-03
+  against 5.5e-04. Same order in both cases, but the residual factor shrank, which
+  is what you would expect once the argmax stopped carrying an extra `GSS_tol_abs`
+  of arbitrary displacement on top of the flat-maximum amplification.
 
 The maximum is *flat*: curvature measured directly at the two worst points gives
 k ≈ 1.0 and 0.9 in `profit ≈ p* − k(psi_stem−x*)²`. For a flat maximum an error
