@@ -376,7 +376,9 @@ Two costs worth knowing because they surprise people:
   `root_c`, and 21.8 µs if you do**, because those four own the pre-integrated
   vulnerability splines and it rebuilds one. That is 8× a solve, in C++, where
   batching cannot help — worth knowing before writing a sweep over a vulnerability
-  curve.
+  curve. Most of it is the incomplete gamma function seeding 101 knots, not the
+  spline machinery. `leaf_gradient()` sidesteps it for `stem_b`, which is
+  homogeneous: see `fast_stem_curve` in `?leaf_gradient`.
 
 ### As a dependency of another R package
 

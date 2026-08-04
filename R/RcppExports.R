@@ -17,6 +17,10 @@ Leaf__set_physiology <- function(obj_, root_carbon_per_leaf_area, PPFD, psi_soil
     invisible(.Call('_phylloptim_Leaf__set_physiology', PACKAGE = 'phylloptim', obj_, root_carbon_per_leaf_area, PPFD, psi_soil, soil_depth, leaf_specific_conductance_max, atm_vpd, ca, leaf_temp, atm_o2_kpa, atm_kpa))
 }
 
+Leaf__perturb_stem_b <- function(obj_, stem_b) {
+    invisible(.Call('_phylloptim_Leaf__perturb_stem_b', PACKAGE = 'phylloptim', obj_, stem_b))
+}
+
 Leaf__set_traits <- function(obj_, vcmax_25, stem_c, stem_b, psi_crit, root_c, root_b, root_psi_crit, beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, cost_scale_TF24, beta_R_H, beta_R_V) {
     invisible(.Call('_phylloptim_Leaf__set_traits', PACKAGE = 'phylloptim', obj_, vcmax_25, stem_c, stem_b, psi_crit, root_c, root_b, root_psi_crit, beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, cost_scale_TF24, beta_R_H, beta_R_V))
 }

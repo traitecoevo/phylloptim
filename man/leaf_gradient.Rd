@@ -21,7 +21,8 @@ leaf_gradient(
   pars = NULL,
   step = 1e-06,
   stationarity_tol = 1e-08,
-  method = c("auto", "ift", "fd")
+  method = c("auto", "ift", "fd"),
+  fast_stem_curve = TRUE
 )
 }
 \arguments{
@@ -83,6 +84,14 @@ difference where it does not. `"ift"` and `"fd"` force one route, for
 checking one against the other. Forcing `"ift"` at a pinned optimum returns
 a confidently wrong number -- that is the whole reason `"auto"` exists --
 and `status` still reports the truth about the point.}
+
+\item{fast_stem_curve}{perturb `stem_b` without rebuilding the stem
+vulnerability spline (`TRUE`, the default). The curve is homogeneous of
+degree 1 in `stem_b`, so the spline for a perturbed `stem_b` is the existing
+one with its argument rescaled — which makes the rebuild, otherwise most of
+the cost of that gradient, unnecessary. `FALSE` rebuilds, and exists so the
+equivalence is checkable rather than assumed; the package's tests require
+the two routes to agree. `stem_c` has no such identity and always rebuilds.}
 }
 \value{
 A list with

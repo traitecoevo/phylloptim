@@ -50,6 +50,37 @@ public:
   odelia::interpolator::Interpolator transpiration_from_psi;
   odelia::interpolator::Interpolator psi_from_transpiration;
 
+  // The `stem_b` the two splines above were built at, which is normally just
+  // `stem_b` -- and is not, while a gradient is perturbing it.
+  //
+  // ⚠️ THIS IS A HOMOGENEITY RESULT, AND IT IS WHAT MAKES A GRADIENT IN stem_b
+  // FREE. The cumulative integral obeys
+  //
+  //     G(psi; s*b, c) = s * G(psi/s; b, c)
+  //
+  // because G(psi; b, c) = b * g(psi/b; c) for g(u; c) = integral of
+  // exp(-u^c) -- b enters only as a scale on both axes. The knot grid scales
+  // with it too (psi_max = b*log(100)^(1/c)), so the identity holds for the
+  // SPLINE and not merely for the integral it approximates: measured, the
+  // rescaled spline reproduces a rebuilt one to 0-3e-16.
+  //
+  // So moving stem_b needs no rebuild at all -- just the existing spline
+  // evaluated at a rescaled argument. That matters because a rebuild is 11.9 us
+  // of incomplete gammas plus 3.1 us per interpolator, which is the entire cost
+  // of a gradient in stem_b (PLAN 11f).
+  //
+  // ⚠️ There is NO SUCH IDENTITY FOR stem_c, and the obvious substitute -- read
+  // G from its closed form instead of the spline -- was built, measured and
+  // rejected: it differentiates a slightly different model and disagrees with the
+  // spline's own derivative by 3e-4. See PLAN 11f. stem_c rebuilds.
+  //
+  // Two rules keep this from becoming a stale-state bug of the kind hazard 8
+  // records: ONLY the four stem_curve_* accessors may read the splines, so one
+  // scale factor is sufficient; and `setup_transpiration()` resets it, with
+  // `set_traits()` forcing a rebuild while it is displaced, so no route out of
+  // the perturbed state leaves it set.
+  double stem_b_spline_ = 0.0;
+
   // The soil -> root-collar water supply (issue #2). Everything the leaf needs
   // from the soil enters through this object: `uptake` and its derivative. It is
   // held by value -- Leaf must stay copyable, because plant's
@@ -224,6 +255,7 @@ public:
   // calls a difference real, and the cost of going there from GSS_tol_abs's 1e-3
   // is a handful of evaluations, because TOMS748 is superlinear.
   static constexpr double collar_root_tol = 1e-12;
+
 
   double ci_;
   double stom_cond_CO2_;
@@ -431,6 +463,40 @@ public:
                                    double root_psi_crit);
 
   void setup_transpiration(double resolution);
+
+  // The stem cumulative-vulnerability integral G and its inverse, as the FOUR
+  // operations the model actually performs on them. Every read of
+  // transpiration_from_psi / psi_from_transpiration goes through these, which is
+  // what lets `stem_curve_closed_form_` be a single flag rather than a condition
+  // repeated at eight call sites.
+  //
+  // At stem_b == stem_b_spline_ they are the splines, and bit-identically so --
+  // the scale is exactly 1.0, and dividing by it is the identity. Otherwise they
+  // apply the homogeneity identity documented at stem_b_spline_, with
+  // s = stem_b / stem_b_spline_:
+  //
+  //   G(psi)     = s * G_spline(psi/s)
+  //   G'(psi)    =     G'_spline(psi/s)
+  //   G^-1(w)    = s * G^-1_spline(w/s)
+  //   (G^-1)'(w) =     (G^-1)'_spline(w/s)
+  //
+  // The two derivative lines have no leading `s` on purpose: differentiating
+  // s*G(psi/s) with respect to psi cancels it.
+  double stem_curve_integral(double psi) const;
+  double stem_curve_integral_deriv(double psi) const;
+  double stem_curve_integral_inverse(double w) const;
+  double stem_curve_integral_inverse_deriv(double w) const;
+
+  // Move stem_b WITHOUT rebuilding the stem vulnerability spline, by the
+  // homogeneity identity above. stem_c is not accepted: it has no such identity.
+  //
+  // ⚠️ FOR DERIVATIVE WORK ONLY. It leaves the splines describing a different
+  // stem_b, which is sound only because every read goes through the four
+  // accessors, and it deliberately does NOT clear the solved operating point --
+  // re-seating the physiology is exactly the cost being avoided -- so whatever
+  // reads the outputs afterwards must write them first. `set_traits()` is the
+  // way back, and forces a rebuild.
+  void perturb_stem_b(double stem_b_new);
   // Forwards to roots_.setup_vulnerability. Kept on Leaf because it is part of
   // the published construction sequence (see the umbrella header) and plant's
   // bindings name it.
@@ -936,7 +1002,13 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
   // rebuilding it is pure cost. A trait perturbed by a relative 1e-08 -- what a
   // gradient loop does -- compares unequal and rebuilds, which is the case that
   // must not be missed.
-  const bool stem_curve_moved = (stem_b_ != stem_b) || (stem_c_ != stem_c);
+  // ⚠️ The third clause is what makes set_traits the way back from
+  // perturb_stem_b. While the splines are built at a different stem_b, "the
+  // parameters did not move" is not a reason to keep them -- it is exactly the
+  // case where the equality test would conclude there is nothing to do and leave
+  // the object rescaling forever.
+  const bool stem_curve_moved = (stem_b_ != stem_b) || (stem_c_ != stem_c) ||
+                                (stem_b != stem_b_spline_);
   const bool root_curve_moved =
       (root_b_ != roots_.root_b) || (root_c_ != roots_.root_c);
 
@@ -1802,9 +1874,9 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
       atm_kpa_ * kg_to_mol_h2o / atm_vpd_ / H2O_CO2_stom_diff_ratio;
   const double gc = gc_const * transpiration(psi_stem, psi);
   const double dgc_dpsistem =
-      gc_const * leaf_specific_conductance_max_ * transpiration_from_psi.deriv(psi_stem);
+      gc_const * leaf_specific_conductance_max_ * stem_curve_integral_deriv(psi_stem);
   const double dgc_dpsi =
-      gc_const * leaf_specific_conductance_max_ * (-transpiration_from_psi.deriv(psi));
+      gc_const * leaf_specific_conductance_max_ * (-stem_curve_integral_deriv(psi));
 
   // IFT on g(ci; psi_stem, psi): dci/dp = -(dg/dp)/(dg/dci).
   const double inv_atm = 1.0 / (atm_kpa_ * kPa_to_Pa);
@@ -1827,10 +1899,10 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
   if (std::isfinite(dEup_dpsi)) {
     E_from_Soil_to_Root_Collar(psi, supply_psi_soil());  // refresh E_up_ at psi
     const double E_psi_stem =
-        E_up_ / leaf_specific_conductance_max_ + transpiration_from_psi.eval(psi);
+        E_up_ / leaf_specific_conductance_max_ + stem_curve_integral(psi);
     const double dEpsistem_dpsi =
-        dEup_dpsi / leaf_specific_conductance_max_ + transpiration_from_psi.deriv(psi);
-    dpsistem_dpsi = psi_from_transpiration.deriv(E_psi_stem) * dEpsistem_dpsi;
+        dEup_dpsi / leaf_specific_conductance_max_ + stem_curve_integral_deriv(psi);
+    dpsistem_dpsi = stem_curve_integral_inverse_deriv(E_psi_stem) * dEpsistem_dpsi;
   } else {
     const double h = 1e-6;
     dpsistem_dpsi =
@@ -1919,6 +1991,57 @@ inline void Leaf::setup_transpiration(double resolution) {
 
   psi_from_transpiration.init(y_cumulative_transpiration_, x_psi_);
   psi_from_transpiration.set_extrapolate(false);
+
+  // The splines now describe the current stem_b, so the rescaling is over.
+  // Recording it HERE rather than at each caller is what makes it impossible to
+  // rebuild and forget.
+  stem_b_spline_ = stem_b;
+}
+
+// --- the stem curve, as the four operations performed on it ------------------
+//
+// See the declarations for the identity these implement. Each returns the spline
+// unchanged when nothing is rescaled, which is the production path.
+
+inline double Leaf::stem_curve_integral(double psi) const {
+  if (stem_b == stem_b_spline_) {
+    return transpiration_from_psi.eval(psi);
+  }
+  const double s = stem_b / stem_b_spline_;
+  return s * transpiration_from_psi.eval(psi / s);
+}
+
+inline double Leaf::stem_curve_integral_deriv(double psi) const {
+  if (stem_b == stem_b_spline_) {
+    return transpiration_from_psi.deriv(psi);
+  }
+  return transpiration_from_psi.deriv(psi / (stem_b / stem_b_spline_));
+}
+
+inline double Leaf::stem_curve_integral_inverse(double w) const {
+  if (stem_b == stem_b_spline_) {
+    return psi_from_transpiration.eval(w);
+  }
+  const double s = stem_b / stem_b_spline_;
+  return s * psi_from_transpiration.eval(w / s);
+}
+
+inline double Leaf::stem_curve_integral_inverse_deriv(double w) const {
+  if (stem_b == stem_b_spline_) {
+    return psi_from_transpiration.deriv(w);
+  }
+  return psi_from_transpiration.deriv(w / (stem_b / stem_b_spline_));
+}
+
+inline void Leaf::perturb_stem_b(double stem_b_new) {
+  check_psi_magnitudes(psi_crit, stem_b_new, roots_.root_b, roots_.root_psi_crit);
+  stem_b = stem_b_new;
+  // ⚠️ The transpiration memo is keyed on (psi_stem, psi_upstream) and NOT on the
+  // curve, so a perturbation that leaves the potentials alone -- which is every
+  // perturbation a gradient makes -- would hit an entry computed from the old
+  // stem_b and return it. That is the bug this line prevents, and it is invisible:
+  // the returned value is a plausible transpiration.
+  transpiration_cached_ = false;
 }
 
 // Direct integration of the xylem vulnerability curve, as an independent check
@@ -1951,7 +2074,7 @@ inline double Leaf::transpiration(double psi_stem, double psi_upstream) {
 
   // integration of proportion_of_conductivity over [opt_root_psi_, psi_stem]
   const double E = leaf_specific_conductance_max_ *
-    (transpiration_from_psi.eval(psi_stem) - transpiration_from_psi.eval(psi_upstream));
+    (stem_curve_integral(psi_stem) - stem_curve_integral(psi_upstream));
   // return (transpiration_full_integration(psi_stem));
 
   transpiration_cache_psi_stem_ = psi_stem;
@@ -1973,10 +2096,10 @@ inline double Leaf::transpiration_to_psi_stem(double transpiration_, double psi_
   // with opposite-sign arguments. Under one representation they are not, and the
   // negation is deleted (#25).
 
-  double E_psi_stem = transpiration_/leaf_specific_conductance_max_ +  transpiration_from_psi.eval(psi_upstream);
+  double E_psi_stem = transpiration_/leaf_specific_conductance_max_ +  stem_curve_integral(psi_upstream);
 
 
-  return psi_from_transpiration.eval(E_psi_stem);
+  return stem_curve_integral_inverse(E_psi_stem);
   }
 
 // returns stomatal conductance to CO2, mol C m^-2 LA s^-1

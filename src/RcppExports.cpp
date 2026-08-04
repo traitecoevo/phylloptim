@@ -83,6 +83,17 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// Leaf__perturb_stem_b
+void Leaf__perturb_stem_b(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double stem_b);
+RcppExport SEXP _phylloptim_Leaf__perturb_stem_b(SEXP obj_SEXP, SEXP stem_bSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    Rcpp::traits::input_parameter< double >::type stem_b(stem_bSEXP);
+    Leaf__perturb_stem_b(obj_, stem_b);
+    return R_NilValue;
+END_RCPP
+}
 // Leaf__set_traits
 void Leaf__set_traits(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double vcmax_25, double stem_c, double stem_b, double psi_crit, double root_c, double root_b, double root_psi_crit, double beta2, double jmax_25, double a, double curv_fact_elec_trans, double curv_fact_colim, double cost_scale_TF24, double beta_R_H, double beta_R_V);
 RcppExport SEXP _phylloptim_Leaf__set_traits(SEXP obj_SEXP, SEXP vcmax_25SEXP, SEXP stem_cSEXP, SEXP stem_bSEXP, SEXP psi_critSEXP, SEXP root_cSEXP, SEXP root_bSEXP, SEXP root_psi_critSEXP, SEXP beta2SEXP, SEXP jmax_25SEXP, SEXP aSEXP, SEXP curv_fact_elec_transSEXP, SEXP curv_fact_colimSEXP, SEXP cost_scale_TF24SEXP, SEXP beta_R_HSEXP, SEXP beta_R_VSEXP) {
@@ -1824,6 +1835,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__operating_point_values", (DL_FUNC) &_phylloptim_Leaf__operating_point_values, 1},
     {"_phylloptim_Leaf__initialize_integrator", (DL_FUNC) &_phylloptim_Leaf__initialize_integrator, 3},
     {"_phylloptim_Leaf__set_physiology", (DL_FUNC) &_phylloptim_Leaf__set_physiology, 11},
+    {"_phylloptim_Leaf__perturb_stem_b", (DL_FUNC) &_phylloptim_Leaf__perturb_stem_b, 2},
     {"_phylloptim_Leaf__set_traits", (DL_FUNC) &_phylloptim_Leaf__set_traits, 16},
     {"_phylloptim_Leaf__proportion_of_conductivity", (DL_FUNC) &_phylloptim_Leaf__proportion_of_conductivity, 2},
     {"_phylloptim_Leaf__arrh_curve", (DL_FUNC) &_phylloptim_Leaf__arrh_curve, 4},
