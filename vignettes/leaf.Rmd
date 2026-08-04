@@ -179,6 +179,54 @@ leaf_solve(psi_soil = -2.0, PPFD = 900)
 An error, not a quiet `abs()`. A model that accepted both conventions would let
 that script return a plausible wrong number instead.
 
+## A bare leaf: one soil potential, one resistance
+
+Everything above went through the multi-layer root network, which is what plant
+uses — and which asks you for a root carbon profile you probably do not have.
+The other supply path collapses the whole soil-to-collar journey into a single
+resistance:
+
+```{r}
+leaf_solve(psi_soil = 1.5, PPFD = 900,
+           supply = leaf_supply_single(resistance = 1e3)) |>
+  as_tibble() |>
+  select(psi_soil, psi_stem, collar, A, gc, g1_eff)
+```
+
+No depth profile, no root carbon, no `beta_R_V`. The resistance is **per unit
+leaf area**, because nothing in this model is allowed to scale with plant size.
+Raising it makes water harder to get and the leaf closes down:
+
+```{r, fig.height = 3.4}
+tibble(resistance = 10^seq(2.5, 4.5, length.out = 25)) |>
+  rowwise() |>
+  mutate(A = leaf_solve(psi_soil = 1.5, PPFD = 900,
+                        supply = leaf_supply_single(resistance))$A) |>
+  ungroup() |>
+  ggplot(aes(resistance, A)) +
+  geom_line(linewidth = 0.8, colour = "steelblue4") +
+  scale_x_log10() +
+  labs(x = expression(soil-to-collar~resistance~(MPa~s~mol^-1~m^2)),
+       y = expression(A~(mu*mol~m^-2~s^-1)))
+```
+
+This path is also what makes comparison against other optimality models
+meaningful: Medlyn, Prentice least-cost and Cowan-Farquhar are all formulated
+against a *single* soil potential, so comparing them against a multi-layer root
+network would compare two things at once.
+
+The choice is made when the leaf is built, not afterwards. There is no
+`leaf$supply_kind <- "single"`:
+
+```{r, error = TRUE}
+l <- leaf_model()
+l$supply_kind <- "single"
+```
+
+Flipping the tag alone would leave the other path's state configured and silently
+ignored — so instead both `leaf_supply_*()` reconfigure the object completely,
+and the object can never be in a state where the tag and the supply disagree.
+
 ## Multiple soil layers
 
 Pass a vector for a layered profile, or a list of vectors for several profiles.
@@ -251,6 +299,6 @@ comparison above moved `psi_stem` in the fourth decimal.
   same solve is available from a C++ program or a Python extension. See the
   README.
 - `COMPARISON.md` sets this against `plantecophys`, `tealeaves` and `bigleaf`.
-- The root carbon profile is still a required input with an arbitrary default,
-  which is the wrong thing to ask a bare-leaf user for. A single-soil-potential
-  supply path exists in the C++ and is being brought to the R side.
+- On the multi-layer path the root carbon profile is still a required input with
+  an arbitrary default. `leaf_supply_single()` avoids it entirely; taking
+  resistances on the multi-layer path too is the remaining piece.

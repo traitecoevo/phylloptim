@@ -22,7 +22,8 @@ this file keeps the reasoning behind each one.
 | **4** | **The include graph is R-free.** The `RcppCommon` shim is deleted (#19) and odelia is pinned at `>= 0.2.0`, its first release with an R-free core (#22). ⚠️ Restated by item 6a once the R layer landed: the guarantee is *directional* — nothing reachable from `<leaf.hpp>` includes Rcpp — not "no Rcpp under `inst/include/`", which the generated `RcppR6_*.hpp` now break. What enforces it is `cpp-tests.yml` building on runners with no R. |
 | **10a tail** | **Signed-vs-magnitude potentials — issue #8, closed.** Answered by **#25**: remove one convention rather than type both. #23 typed them (`Psi`/`AbsPsi`), worked, was bit-identical, and was **closed unmerged** — it described the two-convention model instead of removing one, and no type covers `dE_from_soil_dpsi_collar`, which is a derivative and therefore neither. Do not reintroduce the types. |
 | **3** | **The plant-side integration — issue #9, closed.** plant's `feature/consume-leaf-package` (plant #591) compiles and passes against this package's `master`. Its survey was accurate about the work and wrong about the risk in three ways, all recorded under item 3. |
-| **6** | **The R interface — issue #5.** `leaf::Leaf` is callable from R: generated RcppR6 bindings tied back to the golden file bit-exactly, then a hand-written surface over them — `leaf_solve()` (drivers in, operating point out, vectorised), `leaf_traits()` / `leaf_control()` splitting the constructor's 19 arguments, `leaf_model()` / `set_drivers()` / `operating_point()`, and `vignette("leaf")`. λ and `g1_eff` are exposed for the first time. The model stays R-free and gained a CMake package, so it is still linkable from C++ or Python. Three stages were split out rather than dropped: **#32** (`SinglePotential` from R, unblocked), **#33** and **#34** (coupled with plant #591). Reasoning in item 6; #31 was found on the way. |
+| **6d stage 3** | **`SinglePotential` is reachable from R — issue #32.** `leaf_supply_single()` / `leaf_supply_multilayer()`. The 7b-iii footgun is designed out: no settable tag at any level, both entry points reconfigure completely, and the fields are bound read-only. |
+| **6** | **The R interface — issue #5.** `leaf::Leaf` is callable from R: generated RcppR6 bindings tied back to the golden file bit-exactly, then a hand-written surface over them — `leaf_solve()` (drivers in, operating point out, vectorised), `leaf_traits()` / `leaf_control()` splitting the constructor's 19 arguments, `leaf_model()` / `set_drivers()` / `operating_point()`, and `vignette("leaf")`. λ and `g1_eff` are exposed for the first time. The model stays R-free and gained a CMake package, so it is still linkable from C++ or Python. **#32** landed on top of it. **#33** and **#34** are split out and coupled with plant #591. Reasoning in item 6; #31 was found on the way. |
 
 **Everything above is on `master`.** `feature/api-cleanup` merged as
 [#15](https://github.com/traitecoevo/leaf_cpp/pull/15) (`26ab841`) on 2026-08-03,
@@ -78,7 +79,6 @@ code rather than of the merge:
 |---|---|---|---|
 | [#3](https://github.com/traitecoevo/leaf_cpp/issues/3) | 7a | Make λ(state) pluggable | **unblocked** — #2 is done. Measure the dispatch separately: the cost core is fully inlined where the supply path was not, so 7b's "dispatch is free" result does **not** transfer |
 | [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11 | Template `Leaf` on its scalar type | deletes the hand-maintained AD replicas |
-| [#32](https://github.com/traitecoevo/leaf_cpp/issues/32) | 6d | Expose `SinglePotential` from R | #5 stage 3, **unblocked**. Design the transition — a naive `supply_kind_` setter silently invalidates a configured root network |
 | [#33](https://github.com/traitecoevo/leaf_cpp/issues/33) | 6d | Take resistances, not root carbon | #5 stage 2b, **blocked on plant #591**. Before #34 |
 | [#34](https://github.com/traitecoevo/leaf_cpp/issues/34) | 6d | Delete plant's `Leaf` bindings | #5 stage 4, **blocked on plant #591**. The hazard-7 payoff, and the only stage that can break plant |
 | [#6](https://github.com/traitecoevo/leaf_cpp/issues/6) | 12 | Calibration vignette, then inversion | needs #4 for trait gradients |
@@ -855,17 +855,29 @@ caller has no root carbon profile, no layer thickness and no opinion about
 its own documentation. That is the smell. They have a resistance, or they have
 `SinglePotential`.
 
-**Stage 3 — expose `SinglePotential`. NEXT, and unblocked.** It is written, wired
-and tested, and unreachable from R because `supply_kind_` is a C++-only API. That
-is the bare-leaf, one-ψ_soil use case that was reason 2 in 7b for building it, and
-it is what makes the 7a model comparison possible: Medlyn, Prentice least-cost and
-Cowan-Farquhar are all formulated against a *single* soil potential.
+**Stage 3 — expose `SinglePotential`. DONE (#32).** `leaf_supply_single(resistance,
+gravity_head)` and `leaf_supply_multilayer()`, chosen through `leaf_model(supply =)`
+and `leaf_solve(supply =)`. That is the bare-leaf, one-ψ_soil use case that was
+reason 2 in 7b for building it, and it is what makes the 7a model comparison
+possible: Medlyn, Prentice least-cost and Cowan-Farquhar are all formulated
+against a *single* soil potential.
 
-⚠️ 7b-iii flags the footgun: **a naive `supply_kind_` setter silently invalidates
-a configured root network.** Design the transition, don't just expose the enum.
-The obvious shape is two constructors (or two `set_supply_*` calls) that each
-leave the object fully configured, with no state in which the tag and the network
-disagree.
+7b-iii's footgun — **a naive `supply_kind_` setter silently invalidates a
+configured root network** — is designed out rather than documented. There is no
+settable tag at any level: C++ gained `set_supply_multilayer()` /
+`set_supply_single()`, each of which reconfigures the object completely and
+clears the solved state, and `supply_kind` / `single_resistance_` /
+`single_gravity_head_` are bound **read-only**. There is no intermediate state in
+which the tag and the supply disagree, and a test asserts the assignments fail.
+
+Two smaller things it forced, both worth keeping:
+
+- `setup_clean_leaf()` now clears **both** supply paths' soil state, not just the
+  active one. A Leaf switched between paths is precisely the case where the
+  inactive path's stale state could come back — hazard 8, from a new direction.
+- `set_drivers()` **refuses** `soil_depth` / `root_carbon_per_leaf_area` on the
+  single path rather than ignoring them. Silently ignoring a profile someone took
+  the trouble to pass is how a plausible wrong number gets made.
 
 **Stage 4 — delete plant's copy, and collect the hazard-7 payoff. BLOCKED on
 plant #591.** Once the bindings live here, plant's `inst/RcppR6_classes.yml` stops

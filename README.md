@@ -264,11 +264,20 @@ defaulted and split into traits versus tolerances, and is what you should use.
 throughout, and it is asserted rather than documented — a negative `psi_soil` is
 an error, not a sign convention the model quietly accepts.
 
-⚠️ **`root_carbon_per_leaf_area` is the one argument with no good default.** A
-bare-leaf user does not have a root carbon profile, and the value the R layer
-supplies is a stand-in rather than a recommendation. The single-soil-potential
-supply path that removes the need for it exists in the C++ and is being brought
-to the R side.
+A bare leaf needs no root carbon profile at all — collapse the whole
+soil-to-collar path to one resistance:
+
+```r
+leaf_solve(psi_soil = 1.5, PPFD = 900,
+           supply = leaf_supply_single(resistance = 1e3))
+```
+
+The path is chosen when the leaf is built and cannot be flipped afterwards: a
+settable tag would leave the other path's state configured and silently ignored.
+
+⚠️ On the **multi-layer** path `root_carbon_per_leaf_area` still has no good
+default, and the value the R layer supplies is a stand-in rather than a
+recommendation.
 
 See `vignette("leaf")` for the whole tour.
 

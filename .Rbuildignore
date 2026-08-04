@@ -17,6 +17,12 @@
 ^leaf_.+\.tar\.gz$
 ^.*\.Rcheck$
 
+# The full AGPL text. R CMD check --as-cran flags it as a non-standard top-level
+# file, because a LICENSE file is only expected when DESCRIPTION says
+# "License: ... + file LICENSE"; ours names AGPL (>= 3) outright, so R already
+# knows the terms and the copy here is for GitHub's benefit, not R's.
+^LICENSE\.md$
+
 # The developer harnesses, deliberately not shipped. R CMD check scans every
 # Makefile in the tarball and warns about GNU extensions, and the sanctioned way
 # to silence that -- SystemRequirements: GNU make -- would be a false statement

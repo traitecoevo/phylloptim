@@ -133,6 +133,14 @@ Leaf__solve_medlyn_ci_analytical <- function(obj_) {
     invisible(.Call('_leaf_Leaf__solve_medlyn_ci_analytical', PACKAGE = 'leaf', obj_))
 }
 
+Leaf__set_supply_multilayer <- function(obj_) {
+    invisible(.Call('_leaf_Leaf__set_supply_multilayer', PACKAGE = 'leaf', obj_))
+}
+
+Leaf__set_supply_single <- function(obj_, resistance, gravity_head) {
+    invisible(.Call('_leaf_Leaf__set_supply_single', PACKAGE = 'leaf', obj_, resistance, gravity_head))
+}
+
 Leaf__setup_transpiration <- function(obj_, resolution) {
     invisible(.Call('_leaf_Leaf__setup_transpiration', PACKAGE = 'leaf', obj_, resolution))
 }
@@ -579,6 +587,22 @@ Leaf__theta___get <- function(obj_) {
 
 Leaf__theta___set <- function(obj_, value) {
     invisible(.Call('_leaf_Leaf__theta___set', PACKAGE = 'leaf', obj_, value))
+}
+
+Leaf__supply_kind__get <- function(obj_) {
+    .Call('_leaf_Leaf__supply_kind__get', PACKAGE = 'leaf', obj_)
+}
+
+Leaf__single_resistance___get <- function(obj_) {
+    .Call('_leaf_Leaf__single_resistance___get', PACKAGE = 'leaf', obj_)
+}
+
+Leaf__single_gravity_head___get <- function(obj_) {
+    .Call('_leaf_Leaf__single_gravity_head___get', PACKAGE = 'leaf', obj_)
+}
+
+Leaf__single_psi_soil___get <- function(obj_) {
+    .Call('_leaf_Leaf__single_psi_soil___get', PACKAGE = 'leaf', obj_)
 }
 
 Leaf__lambda__get <- function(obj_) {

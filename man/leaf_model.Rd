@@ -4,12 +4,19 @@
 \alias{leaf_model}
 \title{Build a leaf}
 \usage{
-leaf_model(traits = leaf_traits(), control = leaf_control())
+leaf_model(
+  traits = leaf_traits(),
+  control = leaf_control(),
+  supply = leaf_supply_multilayer()
+)
 }
 \arguments{
 \item{traits}{a [leaf_traits()] object}
 
 \item{control}{a [leaf_control()] object}
+
+\item{supply}{how water reaches the root collar: [leaf_supply_multilayer()]
+(the default) or [leaf_supply_single()]}
 }
 \value{
 A `Leaf` R6 object.
@@ -32,5 +39,6 @@ l$find_root_collar_psi()
 operating_point(l)
 }
 \seealso{
-[leaf_traits()], [leaf_control()], [set_drivers()], [leaf_solve()]
+[leaf_traits()], [leaf_control()], [leaf_supply_single()],
+  [set_drivers()], [leaf_solve()]
 }

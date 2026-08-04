@@ -72,6 +72,61 @@ public:
   // behaviour bit-for-bit without knowing this exists.
   SupplyKind supply_kind_ = SupplyKind::MultiLayer;
 
+  // --- choosing the supply path (issue #32) ----------------------------------
+  //
+  // TWO ENTRY POINTS, NOT A SETTABLE TAG, and the difference matters. Assigning
+  // supply_kind_ on its own leaves the other path's state configured and
+  // silently ignored; assign it back and that state is now stale rather than
+  // absent. PLAN 7b-iii flagged this as the footgun to design around before
+  // exposing any of it to R, where a settable field is the obvious thing to
+  // reach for. Each of these leaves the object in a state where the tag and the
+  // supply agree, and there is no intermediate state in which they do not.
+  //
+  // Both CLEAR the solved state, so set_physiology() must be called again
+  // afterwards. That is not an inconvenience being papered over -- the two paths
+  // read different inputs, so any state carried across would be answering a
+  // question about the other model.
+  void set_supply_multilayer() {
+    supply_kind_ = SupplyKind::MultiLayer;
+    single_.clear();
+    setup_clean_leaf();
+  }
+
+  // `resistance` is the whole soil-to-collar path collapsed to one number, PER
+  // UNIT LEAF AREA [MPa s (mol H2O)^-1 m^2 leaf] -- the leaf is purely intensive
+  // (hazard 4) and this is the one input that would otherwise smuggle plant size
+  // back in. `gravity_head` is the head to lift water to the collar in MPa, zero
+  // for a bare leaf that is not thinking about rooting depth.
+  //
+  // Rejected here rather than at first use: a non-positive resistance is an
+  // infinite flux, and uptake() already stops on it -- but by then the caller is
+  // several frames away from the mistake, and on this path the error would
+  // surface from inside a root-find.
+  void set_supply_single(double resistance, double gravity_head = 0.0) {
+    if (!(resistance > 0.0) || !std::isfinite(resistance)) {
+      util::stop("set_supply_single needs a positive, finite resistance per unit "
+                 "leaf area; got " + util::to_string(resistance));
+    }
+    if (!std::isfinite(gravity_head) || gravity_head < 0.0) {
+      util::stop("set_supply_single needs a finite, non-negative gravity_head in "
+                 "MPa; got " + util::to_string(gravity_head));
+    }
+    supply_kind_ = SupplyKind::SinglePotential;
+    setup_clean_leaf();
+    // AFTER setup_clean_leaf, which clears both supply paths' soil state. These
+    // two are configuration rather than state -- clear() deliberately leaves
+    // them -- but ordering them last means this stays correct if that ever
+    // changes.
+    single_.resistance_ = resistance;
+    single_.grav_head_ = gravity_head;
+  }
+
+  // Which path is in force, as a string, because the enum has no R
+  // representation and a bare integer would be a worse one.
+  std::string supply_kind_name() const {
+    return supply_kind_ == SupplyKind::MultiLayer ? "multilayer" : "single";
+  }
+
   // --- supply dispatch -------------------------------------------------------
   // The four points where the two paths differ. Everything else in the solve is
   // supply-agnostic and goes through the vector of signed potentials below,
@@ -736,6 +791,13 @@ inline void Leaf::setup_clean_leaf() {
   theta_fc_ = util::na_value;
   theta_ = util::na_value;
   roots_.clear(); // soil state, geometry and the root resistance network
+  // BOTH supply paths, not just the active one. Hazard 8 is that an output a
+  // code path declines to write becomes the previous solve's value, and a Leaf
+  // that has been switched between paths (set_supply_single / _multilayer) is
+  // exactly the case where the inactive one's stale soil state could come back.
+  // clear() leaves resistance_/grav_head_ alone: those are configuration, and
+  // wiping them here would make set_supply_single order-dependent.
+  single_.clear();
   soil_consumption_.clear(); // soil consumption mol  m^-2 s^-1;
 
   transpiration_cached_ = false; // invalidate transpiration() memo

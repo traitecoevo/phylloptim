@@ -440,6 +440,28 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// Leaf__set_supply_multilayer
+void Leaf__set_supply_multilayer(leaf::RcppR6::RcppR6<leaf::Leaf> obj_);
+RcppExport SEXP _leaf_Leaf__set_supply_multilayer(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< leaf::RcppR6::RcppR6<leaf::Leaf> >::type obj_(obj_SEXP);
+    Leaf__set_supply_multilayer(obj_);
+    return R_NilValue;
+END_RCPP
+}
+// Leaf__set_supply_single
+void Leaf__set_supply_single(leaf::RcppR6::RcppR6<leaf::Leaf> obj_, double resistance, double gravity_head);
+RcppExport SEXP _leaf_Leaf__set_supply_single(SEXP obj_SEXP, SEXP resistanceSEXP, SEXP gravity_headSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< leaf::RcppR6::RcppR6<leaf::Leaf> >::type obj_(obj_SEXP);
+    Rcpp::traits::input_parameter< double >::type resistance(resistanceSEXP);
+    Rcpp::traits::input_parameter< double >::type gravity_head(gravity_headSEXP);
+    Leaf__set_supply_single(obj_, resistance, gravity_head);
+    return R_NilValue;
+END_RCPP
+}
 // Leaf__setup_transpiration
 void Leaf__setup_transpiration(leaf::RcppR6::RcppR6<leaf::Leaf> obj_, double resolution);
 RcppExport SEXP _leaf_Leaf__setup_transpiration(SEXP obj_SEXP, SEXP resolutionSEXP) {
@@ -1672,6 +1694,50 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// Leaf__supply_kind__get
+std::string Leaf__supply_kind__get(leaf::RcppR6::RcppR6<leaf::Leaf> obj_);
+RcppExport SEXP _leaf_Leaf__supply_kind__get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< leaf::RcppR6::RcppR6<leaf::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__supply_kind__get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__single_resistance___get
+double Leaf__single_resistance___get(leaf::RcppR6::RcppR6<leaf::Leaf> obj_);
+RcppExport SEXP _leaf_Leaf__single_resistance___get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< leaf::RcppR6::RcppR6<leaf::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__single_resistance___get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__single_gravity_head___get
+double Leaf__single_gravity_head___get(leaf::RcppR6::RcppR6<leaf::Leaf> obj_);
+RcppExport SEXP _leaf_Leaf__single_gravity_head___get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< leaf::RcppR6::RcppR6<leaf::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__single_gravity_head___get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__single_psi_soil___get
+double Leaf__single_psi_soil___get(leaf::RcppR6::RcppR6<leaf::Leaf> obj_);
+RcppExport SEXP _leaf_Leaf__single_psi_soil___get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< leaf::RcppR6::RcppR6<leaf::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__single_psi_soil___get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
 // Leaf__lambda__get
 double Leaf__lambda__get(leaf::RcppR6::RcppR6<leaf::Leaf> obj_);
 RcppExport SEXP _leaf_Leaf__lambda__get(SEXP obj_SEXP) {
@@ -1751,6 +1817,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_leaf_Leaf__medlyn_model_gs", (DL_FUNC) &_leaf_Leaf__medlyn_model_gs, 2},
     {"_leaf_Leaf__solve_medlyn_ci_numerical", (DL_FUNC) &_leaf_Leaf__solve_medlyn_ci_numerical, 1},
     {"_leaf_Leaf__solve_medlyn_ci_analytical", (DL_FUNC) &_leaf_Leaf__solve_medlyn_ci_analytical, 1},
+    {"_leaf_Leaf__set_supply_multilayer", (DL_FUNC) &_leaf_Leaf__set_supply_multilayer, 1},
+    {"_leaf_Leaf__set_supply_single", (DL_FUNC) &_leaf_Leaf__set_supply_single, 3},
     {"_leaf_Leaf__setup_transpiration", (DL_FUNC) &_leaf_Leaf__setup_transpiration, 2},
     {"_leaf_Leaf__setup_root_vulnerability", (DL_FUNC) &_leaf_Leaf__setup_root_vulnerability, 2},
     {"_leaf_Leaf__ci___get", (DL_FUNC) &_leaf_Leaf__ci___get, 1},
@@ -1863,6 +1931,10 @@ static const R_CallMethodDef CallEntries[] = {
     {"_leaf_Leaf__theta_fc___set", (DL_FUNC) &_leaf_Leaf__theta_fc___set, 2},
     {"_leaf_Leaf__theta___get", (DL_FUNC) &_leaf_Leaf__theta___get, 1},
     {"_leaf_Leaf__theta___set", (DL_FUNC) &_leaf_Leaf__theta___set, 2},
+    {"_leaf_Leaf__supply_kind__get", (DL_FUNC) &_leaf_Leaf__supply_kind__get, 1},
+    {"_leaf_Leaf__single_resistance___get", (DL_FUNC) &_leaf_Leaf__single_resistance___get, 1},
+    {"_leaf_Leaf__single_gravity_head___get", (DL_FUNC) &_leaf_Leaf__single_gravity_head___get, 1},
+    {"_leaf_Leaf__single_psi_soil___get", (DL_FUNC) &_leaf_Leaf__single_psi_soil___get, 1},
     {"_leaf_Leaf__lambda__get", (DL_FUNC) &_leaf_Leaf__lambda__get, 1},
     {"_leaf_Leaf__lambda_molar__get", (DL_FUNC) &_leaf_Leaf__lambda_molar__get, 1},
     {"_leaf_Leaf__lambda_multilayer__get", (DL_FUNC) &_leaf_Leaf__lambda_multilayer__get, 1},

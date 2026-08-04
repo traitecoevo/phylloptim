@@ -176,6 +176,68 @@ leaf_control <- function(GSS_tol_abs = 1e-3,
   structure(out, class = c("leaf_control", "list"))
 }
 
+##' Choose how water reaches the root collar
+##'
+##' Two supply paths, and the choice belongs with the model rather than with the
+##' drivers, so it is made once in [leaf_model()].
+##'
+##' `leaf_supply_multilayer()` is the default and is what plant uses: a soil
+##' profile of one or more layers, each with its own water potential, feeding a
+##' root network whose resistances are derived from a root carbon profile.
+##'
+##' `leaf_supply_single()` collapses the whole soil-to-collar path to **one
+##' resistance**. This is what a leaf physiologist arriving from `plantecophys`
+##' or `tealeaves` actually has: a soil water potential and no root-mass profile.
+##' It is also what makes comparison against other optimality models meaningful,
+##' since Medlyn, Prentice least-cost and Cowan-Farquhar are all formulated
+##' against a single soil potential — comparing them against a multi-layer root
+##' network compares two things at once.
+##'
+##' @section Why this is not a settable field:
+##' The obvious R interface would be `leaf$supply_kind <- "single"`. It is not
+##' offered, because flipping the tag on its own leaves the other path's state
+##' configured and silently ignored, and flipping back makes it stale rather than
+##' absent. Both entry points here reconfigure the object completely, so the tag
+##' and the supply state can never disagree. The cost is that switching clears
+##' the solved state and the drivers must be set again — which is honest, since
+##' the two paths read different inputs.
+##'
+##' @param resistance the whole soil-to-collar path as one series resistance,
+##'   **per unit leaf area**, MPa s (mol H2O)^-1 m^2 leaf. Must be positive: a
+##'   zero resistance is an infinite flux. Per unit leaf area because the leaf is
+##'   purely intensive — nothing here may scale with plant size.
+##' @param gravity_head head required to lift water to the collar, MPa. Zero by
+##'   default, which is right for a bare leaf that is not thinking about rooting
+##'   depth.
+##'
+##' @return A `leaf_supply` object, for the `supply` argument of [leaf_model()]
+##'   and [leaf_solve()].
+##' @examples
+##' # a bare leaf: one soil potential, one resistance, no root profile
+##' leaf_solve(psi_soil = 1.5, PPFD = 900,
+##'            supply = leaf_supply_single(resistance = 1e3))
+##' @export
+leaf_supply_single <- function(resistance, gravity_head = 0) {
+  out <- list(kind = "single", resistance = resistance,
+              gravity_head = gravity_head)
+  .check_scalars(out[c("resistance", "gravity_head")], "leaf_supply_single")
+  if (resistance <= 0) {
+    stop("leaf_supply_single(): `resistance` must be positive; a zero ",
+         "resistance is an infinite flux", call. = FALSE)
+  }
+  if (gravity_head < 0) {
+    stop("leaf_supply_single(): `gravity_head` must be non-negative (MPa)",
+         call. = FALSE)
+  }
+  structure(out, class = c("leaf_supply", "list"))
+}
+
+##' @rdname leaf_supply_single
+##' @export
+leaf_supply_multilayer <- function() {
+  structure(list(kind = "multilayer"), class = c("leaf_supply", "list"))
+}
+
 ##' Build a leaf
 ##'
 ##' The recommended way to construct a leaf. [Leaf()] is the raw C++ constructor,
@@ -189,21 +251,29 @@ leaf_control <- function(GSS_tol_abs = 1e-3,
 ##'
 ##' @param traits a [leaf_traits()] object
 ##' @param control a [leaf_control()] object
+##' @param supply how water reaches the root collar: [leaf_supply_multilayer()]
+##'   (the default) or [leaf_supply_single()]
 ##'
 ##' @return A `Leaf` R6 object.
-##' @seealso [leaf_traits()], [leaf_control()], [set_drivers()], [leaf_solve()]
+##' @seealso [leaf_traits()], [leaf_control()], [leaf_supply_single()],
+##'   [set_drivers()], [leaf_solve()]
 ##' @examples
 ##' l <- leaf_model()
 ##' set_drivers(l, psi_soil = 2.0, PPFD = 900)
 ##' l$find_root_collar_psi()
 ##' operating_point(l)
 ##' @export
-leaf_model <- function(traits = leaf_traits(), control = leaf_control()) {
+leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
+                       supply = leaf_supply_multilayer()) {
   if (!inherits(traits, "leaf_traits")) {
     stop("`traits` must come from leaf_traits()", call. = FALSE)
   }
   if (!inherits(control, "leaf_control")) {
     stop("`control` must come from leaf_control()", call. = FALSE)
+  }
+  if (!inherits(supply, "leaf_supply")) {
+    stop("`supply` must come from leaf_supply_multilayer() or ",
+         "leaf_supply_single()", call. = FALSE)
   }
 
   # Positional, because that is what the generated constructor takes. The whole
@@ -231,6 +301,12 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control()) {
     beta_R_V = traits$beta_R_V
   )
   l$initialize_integrator(control$integration_rule, control$integration_tol)
+  # After the integrator, because set_supply_single clears the solved state --
+  # not the integrator tolerance, but relying on that ordering would be a
+  # dependency on an implementation detail of setup_clean_leaf.
+  if (identical(supply$kind, "single")) {
+    l$set_supply_single(supply$resistance, supply$gravity_head)
+  }
   l
 }
 
@@ -311,18 +387,46 @@ set_drivers <- function(x,
          "rather than negating the result.", call. = FALSE)
   }
 
-  soil_depth <- if (is.null(soil_depth)) seq_len(n) * 1.0 else as.numeric(soil_depth)
-  root_carbon_per_leaf_area <- if (is.null(root_carbon_per_leaf_area)) {
-    rep(20 / n, n)
-  } else {
-    as.numeric(root_carbon_per_leaf_area)
-  }
+  single <- identical(x$supply_kind, "single")
 
-  if (length(soil_depth) != n || length(root_carbon_per_leaf_area) != n) {
-    stop("`psi_soil` (", n, "), `soil_depth` (", length(soil_depth),
-         ") and `root_carbon_per_leaf_area` (",
-         length(root_carbon_per_leaf_area),
-         ") must all have one entry per soil layer", call. = FALSE)
+  if (single) {
+    # The single-potential path reads psi_soil[1] and nothing else: no depth
+    # profile, no root carbon. Rather than quietly ignoring extra layers -- which
+    # would let someone pass a profile and believe it was used -- say so.
+    if (n != 1L) {
+      stop("`psi_soil` must be a single value on the single-potential supply ",
+           "path; got ", n, " layers. Build the leaf with ",
+           "leaf_supply_multilayer() for a layered profile.", call. = FALSE)
+    }
+    if (!is.null(soil_depth) || !is.null(root_carbon_per_leaf_area)) {
+      stop("`soil_depth` and `root_carbon_per_leaf_area` are not used on the ",
+           "single-potential supply path -- the whole soil-to-collar path is ",
+           "the `resistance` given to leaf_supply_single(). Drop them, or ",
+           "build the leaf with leaf_supply_multilayer().", call. = FALSE)
+    }
+    # set_physiology keeps one signature for both paths and requires the three
+    # vectors to match in length; on this path it reads only psi_soil[1], so
+    # these two are placeholders rather than inputs.
+    soil_depth <- 1.0
+    root_carbon_per_leaf_area <- 0.0
+  } else {
+    soil_depth <- if (is.null(soil_depth)) {
+      seq_len(n) * 1.0
+    } else {
+      as.numeric(soil_depth)
+    }
+    root_carbon_per_leaf_area <- if (is.null(root_carbon_per_leaf_area)) {
+      rep(20 / n, n)
+    } else {
+      as.numeric(root_carbon_per_leaf_area)
+    }
+
+    if (length(soil_depth) != n || length(root_carbon_per_leaf_area) != n) {
+      stop("`psi_soil` (", n, "), `soil_depth` (", length(soil_depth),
+           ") and `root_carbon_per_leaf_area` (",
+           length(root_carbon_per_leaf_area),
+           ") must all have one entry per soil layer", call. = FALSE)
+    }
   }
 
   x$set_physiology(
@@ -398,6 +502,10 @@ operating_point <- function(x) {
 ##' @inheritParams set_drivers
 ##' @param traits a [leaf_traits()] object
 ##' @param control a [leaf_control()] object
+##' @param supply how water reaches the root collar: [leaf_supply_multilayer()]
+##'   (the default) or [leaf_supply_single()]. On the single-potential path
+##'   `soil_depth` and `root_carbon_per_leaf_area` must be omitted, and each
+##'   `psi_soil` is one value rather than a profile.
 ##' @param reuse solve every row with one `Leaf` object (`TRUE`) or construct a
 ##'   fresh one per row (`FALSE`, the default). Reuse is faster because the two
 ##'   vulnerability splines are built once, and it is safe -- every exit from the
@@ -433,6 +541,7 @@ leaf_solve <- function(psi_soil,
                        atm_kpa = 101.3,
                        traits = leaf_traits(),
                        control = leaf_control(),
+                       supply = leaf_supply_multilayer(),
                        reuse = TRUE) {
   layered <- .as_layer_list(psi_soil, "psi_soil")
   scalars <- list(PPFD = PPFD, atm_vpd = atm_vpd, ca = ca,
@@ -458,10 +567,10 @@ leaf_solve <- function(psi_soil,
                                "root_carbon_per_leaf_area"),
                 n, "root_carbon_per_leaf_area")
 
-  shared <- if (reuse) leaf_model(traits, control) else NULL
+  shared <- if (reuse) leaf_model(traits, control, supply) else NULL
 
   rows <- lapply(seq_len(n), function(i) {
-    l <- if (reuse) shared else leaf_model(traits, control)
+    l <- if (reuse) shared else leaf_model(traits, control, supply)
     set_drivers(l,
                 psi_soil = layered[[i]],
                 PPFD = scalars$PPFD[[i]],

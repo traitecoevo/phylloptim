@@ -134,6 +134,14 @@ void Leaf__solve_medlyn_ci_analytical(leaf::RcppR6::RcppR6<leaf::Leaf> obj_) {
   obj_->solve_medlyn_ci_analytical();
 }
 // [[Rcpp::export]]
+void Leaf__set_supply_multilayer(leaf::RcppR6::RcppR6<leaf::Leaf> obj_) {
+  obj_->set_supply_multilayer();
+}
+// [[Rcpp::export]]
+void Leaf__set_supply_single(leaf::RcppR6::RcppR6<leaf::Leaf> obj_, double resistance, double gravity_head) {
+  obj_->set_supply_single(resistance, gravity_head);
+}
+// [[Rcpp::export]]
 void Leaf__setup_transpiration(leaf::RcppR6::RcppR6<leaf::Leaf> obj_, double resolution) {
   obj_->setup_transpiration(resolution);
 }
@@ -634,6 +642,26 @@ double Leaf__theta___get(leaf::RcppR6::RcppR6<leaf::Leaf> obj_) {
 // [[Rcpp::export]]
 void Leaf__theta___set(leaf::RcppR6::RcppR6<leaf::Leaf> obj_, double value) {
   obj_->theta_ = value;
+}
+
+// [[Rcpp::export]]
+std::string Leaf__supply_kind__get(leaf::RcppR6::RcppR6<leaf::Leaf> obj_) {
+  return obj_->supply_kind_name();
+}
+
+// [[Rcpp::export]]
+double Leaf__single_resistance___get(leaf::RcppR6::RcppR6<leaf::Leaf> obj_) {
+  return obj_->single_.resistance_;
+}
+
+// [[Rcpp::export]]
+double Leaf__single_gravity_head___get(leaf::RcppR6::RcppR6<leaf::Leaf> obj_) {
+  return obj_->single_.grav_head_;
+}
+
+// [[Rcpp::export]]
+double Leaf__single_psi_soil___get(leaf::RcppR6::RcppR6<leaf::Leaf> obj_) {
+  return obj_->single_.psi_soil_;
 }
 
 // [[Rcpp::export]]

@@ -17,6 +17,7 @@ leaf_solve(
   atm_kpa = 101.3,
   traits = leaf_traits(),
   control = leaf_control(),
+  supply = leaf_supply_multilayer(),
   reuse = TRUE
 )
 }
@@ -53,6 +54,11 @@ assimilation by percent, not by rounding.}
 \item{traits}{a [leaf_traits()] object}
 
 \item{control}{a [leaf_control()] object}
+
+\item{supply}{how water reaches the root collar: [leaf_supply_multilayer()]
+(the default) or [leaf_supply_single()]. On the single-potential path
+`soil_depth` and `root_carbon_per_leaf_area` must be omitted, and each
+`psi_soil` is one value rather than a profile.}
 
 \item{reuse}{solve every row with one `Leaf` object (`TRUE`) or construct a
 fresh one per row (`FALSE`, the default). Reuse is faster because the two

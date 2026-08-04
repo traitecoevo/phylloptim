@@ -9,6 +9,49 @@
 # model than the one the golden file was generated from.
 default_leaf <- function() leaf_model()
 
+# --- how exactly to compare -------------------------------------------------
+#
+# The golden file is bit-exact ONLY on the platform that generated it,
+# macOS/arm64, and this is not a shortcut being taken -- libm's exp/pow are not
+# bit-reproducible between glibc on x86-64 and Apple's libm on arm64, and FMA
+# contraction differs too, so cross-platform bit-equality was never achievable.
+# tests/cpp/test_golden.cpp has had a `--cross-platform` mode for this since it
+# was written; the R side needs the same policy, and got it the hard way -- the
+# first version of this file asserted bit-exactness everywhere, passed on macOS,
+# and failed on Linux CI at the 16th significant figure.
+#
+# Tolerances are the C++ suite's, measured over the full grid rather than
+# guessed, and they are per-CLASS because the fields split into two groups three
+# orders of magnitude apart:
+#
+#   profit          the maximum itself, and so well conditioned
+#   everything else evaluated at the ARGMAX of a flat maximum, so an error dp in
+#                   the profit value displaces its location by sqrt(dp/k)
+#
+# If you need a magnitude, read those numbers, not a failure list.
+golden_bit_exact_platform <- function() {
+  si <- Sys.info()
+  identical(unname(si[["sysname"]]), "Darwin") &&
+    grepl("arm64|aarch64", unname(si[["machine"]]))
+}
+
+golden_tolerance <- function(field) {
+  if (identical(field, "profit")) 1.0e-5 else 1.0e-3
+}
+
+# expect_identical where it can hold, expect_equal with the measured per-field
+# tolerance where it cannot. Wrapped in one place so no individual test has to
+# decide, and so the reason lives next to the policy rather than at every call.
+expect_golden <- function(actual, expected_hex, field, label) {
+  expected <- as.numeric(expected_hex)
+  if (golden_bit_exact_platform()) {
+    expect_identical(actual, expected, label = paste(label, field))
+  } else {
+    expect_equal(actual, expected, tolerance = golden_tolerance(field),
+                 label = paste(label, field))
+  }
+}
+
 # The fixed drivers from tests/cpp/test_golden.cpp, which took them in turn from
 # plant's tests/testthat/test-leaf.r.
 golden_theta <- 0.000157

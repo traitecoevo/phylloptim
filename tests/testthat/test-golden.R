@@ -140,12 +140,10 @@ for (row in golden_rows) {
     test_that(paste("the R API reproduces the golden point", label), {
       got <- do.call(golden_solve, inputs)
       for (field in names(expected)) {
-        # expect_identical, not expect_equal: the whole value of the golden file
-        # is that it is compared bit-exactly, and expect_equal's default
-        # tolerance (1.5e-8) is four orders looser than the "~1e-4 is a real
-        # difference" threshold this model's nested solvers set.
-        expect_identical(got[[field]], as.numeric(expected[[field]]),
-                         label = paste(label, field))
+        # Bit-exact on macOS/arm64, per-field measured tolerance elsewhere --
+        # the same policy tests/cpp/test_golden.cpp applies, and for the same
+        # reason. See expect_golden() in helper-golden.R.
+        expect_golden(got[[field]], expected[[field]], field, label)
       }
     })
   })

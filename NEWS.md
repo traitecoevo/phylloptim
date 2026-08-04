@@ -57,9 +57,31 @@ Two decisions worth knowing:
   energy-balance path, not a tolerance anyone tunes; making it settable would let
   a caller get NaNs back with no indication why.
 
-**`root_carbon_per_leaf_area` still has no good default** — a bare-leaf user does
-not have a root carbon profile, and the value the R layer supplies is a stand-in.
-Removing the need for it is what the single-potential supply path is for.
+## A bare leaf needs no root carbon profile (#5 stage 3, #32)
+
+`leaf_supply_single()` collapses the whole soil-to-collar path to one series
+resistance, so a leaf physiologist with a soil water potential and no root-mass
+profile can use the model without going through a plant-shaped one to get at a
+leaf. It is also what makes the optimality-model comparison meaningful, since
+Medlyn, Prentice least-cost and Cowan-Farquhar are all written against a single
+soil potential.
+
+```r
+leaf_solve(psi_soil = 1.5, PPFD = 900,
+           supply = leaf_supply_single(resistance = 1e3))
+```
+
+The path is chosen when the leaf is built, and **there is no
+`leaf$supply_kind <- "single"`.** Flipping a tag would leave the other path's
+state configured and silently ignored — and flipping back would make it stale
+rather than absent. `leaf_supply_multilayer()` and `leaf_supply_single()`
+reconfigure the object completely instead, so it can never be in a state where
+the tag and the supply disagree. `supply_kind`, `single_resistance_` and
+`single_gravity_head_` are readable but not settable, for the same reason.
+
+On the multi-layer path `root_carbon_per_leaf_area` still has no good default and
+the R layer supplies a stand-in. Taking resistances there too is #33, which is
+coupled with plant.
 
 # leaf 0.1.0
 

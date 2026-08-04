@@ -191,6 +191,84 @@ test_that("operating_point() reports lambda and g1_eff from the solved state", {
   expect_gt(diff(range(live$g1_eff)) / mean(live$g1_eff), 0.1)
 })
 
+test_that("the supply path can be chosen, and reports which is in force", {
+  expect_identical(leaf_model()$supply_kind, "multilayer")
+
+  single <- leaf_model(supply = leaf_supply_single(resistance = 1e3,
+                                                   gravity_head = 0.05))
+  expect_identical(single$supply_kind, "single")
+  expect_identical(single$single_resistance_, 1e3)
+  expect_identical(single$single_gravity_head_, 0.05)
+})
+
+test_that("there is no state in which the tag and the supply disagree", {
+  # The footgun PLAN 7b-iii flagged, and the reason this is two entry points
+  # rather than a settable field: assigning the tag alone would leave the other
+  # path's state configured and silently ignored. So the tag must not be
+  # assignable at all, and the resistance must not be settable behind the tag's
+  # back either.
+  l <- leaf_model()
+  expect_error(l$supply_kind <- "single", "read-only")
+  expect_error(l$single_resistance_ <- 1e3, "read-only")
+
+  # Switching after the drivers are set must not leave the previous path's
+  # solved state lying around to be read as if it belonged to the new one.
+  set_drivers(l, psi_soil = 2.0, PPFD = 900)
+  l$find_root_collar_psi()
+  expect_true(is.finite(l$profit_))
+
+  l$set_supply_single(1e3, 0)
+  expect_identical(l$supply_kind, "single")
+  expect_false(is.finite(l$profit_))
+  expect_length(l$psi_soil_, 0L)
+})
+
+test_that("the single-potential path solves, and responds to its resistance", {
+  solve_at <- function(r) {
+    leaf_solve(psi_soil = 1.5, PPFD = 900,
+               supply = leaf_supply_single(resistance = r))
+  }
+  easy <- solve_at(1e3)
+  hard <- solve_at(1e4)
+
+  expect_true(all(is.finite(c(easy$A, easy$gc, easy$psi_stem))))
+  expect_gt(easy$A, 0)
+  # A tenfold harder path to the collar must cost the leaf something. This is
+  # the check that the resistance actually reaches the model rather than being
+  # stored and ignored -- the failure mode a read-only field invites.
+  expect_lt(hard$A, easy$A)
+  expect_lt(hard$gc, easy$gc)
+
+  # Water runs downhill: soil <= collar <= stem, all positive magnitudes.
+  expect_gte(easy$collar, 1.5 - 1e-9)
+  expect_lte(easy$collar, easy$psi_stem + 1e-9)
+})
+
+test_that("the single path refuses inputs it would otherwise ignore", {
+  # Silently ignoring a soil profile someone took the trouble to pass is the
+  # kind of thing that produces a plausible wrong number, so it errors.
+  l <- leaf_model(supply = leaf_supply_single(1e3))
+  expect_error(set_drivers(l, psi_soil = c(1, 2)), "single value")
+  expect_error(set_drivers(l, psi_soil = 1, soil_depth = 1), "are not used")
+  expect_error(
+    set_drivers(l, psi_soil = 1, root_carbon_per_leaf_area = 20),
+    "are not used")
+
+  expect_error(leaf_supply_single(0), "must be positive")
+  expect_error(leaf_supply_single(-1), "must be positive")
+  expect_error(leaf_supply_single(1e3, gravity_head = -1), "non-negative")
+  expect_error(leaf_model(supply = list(kind = "single")),
+               "must come from leaf_supply")
+})
+
+test_that("gravity_head costs the leaf water, on the single path", {
+  flat <- leaf_solve(psi_soil = 1.5, PPFD = 900,
+                     supply = leaf_supply_single(1e3))
+  uphill <- leaf_solve(psi_soil = 1.5, PPFD = 900,
+                       supply = leaf_supply_single(1e3, gravity_head = 0.5))
+  expect_lt(uphill$A, flat$A)
+})
+
 test_that("atm_kpa is not decorative", {
   # 10c: the ppm-to-Pa conversion is derived from atm_kpa. This was hard-coded at
   # 101.3 until #15, and plant's own driver default is 100.5 -- which turned out
