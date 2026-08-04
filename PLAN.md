@@ -1,6 +1,6 @@
 # Next steps
 
-## Status, 2026-08-03
+## Status, 2026-08-04
 
 Tracked as issues in [traitecoevo/leaf_cpp](https://github.com/traitecoevo/leaf_cpp/issues);
 this file keeps the reasoning behind each one.
@@ -24,6 +24,7 @@ this file keeps the reasoning behind each one.
 | **3** | **The plant-side integration — issue #9, closed.** plant's `feature/consume-leaf-package` (plant #591) compiles and passes against this package's `master`. Its survey was accurate about the work and wrong about the risk in three ways, all recorded under item 3. |
 | **6d stage 3** | **`SinglePotential` is reachable from R — issue #32.** `leaf_supply_single()` / `leaf_supply_multilayer()`. The 7b-iii footgun is designed out: no settable tag at any level, both entry points reconfigure completely, and the fields are bound read-only. |
 | **6** | **The R interface — issue #5.** `leaf::Leaf` is callable from R: generated RcppR6 bindings tied back to the golden file bit-exactly, then a hand-written surface over them — `leaf_solve()` (drivers in, operating point out, vectorised), `leaf_traits()` / `leaf_control()` splitting the constructor's 19 arguments, `leaf_model()` / `set_drivers()` / `operating_point()`, and `vignette("leaf")`. λ and `g1_eff` are exposed for the first time. The model stays R-free and gained a CMake package, so it is still linkable from C++ or Python. **#32** landed on top of it. **#33** and **#34** are split out and coupled with plant #591. Reasoning in item 6; #31 was found on the way. |
+| **11a, 11b** | **The collar solve now solves its own first-order condition** (PR #36, `d22907a`). Golden section is gone: `dprofit == 0` by safeguarded TOMS748, so the argmax is resolved to solver precision instead of `GSS_tol_abs` — residual `\|dprofit\|` improved on **240/240** feasible rows, median 7.8e-04 → **5.6e-15**. With it: `psi_stem_to_ci` tightened 1e-7 → 1e-10 (**335×** closer to a converged solve, +3.4%), the `namespace detail` AD replicas **deleted** in favour of scalar-generic member templates the model and its derivative both instantiate, and `dprofit_droot_collar_psi` given a `bool* feasible` out-parameter. **21.7% faster** overall (2.75 vs 3.51 µs/solve). Deliberately moved results — worst 1.5e-03, split by cause under 11a/11b. Hazard 3 **improved** ~1000×. What remains of item 11 is `Leaf<T>`, and it needs deciding rather than doing. |
 
 **Everything above is on `master`.** `feature/api-cleanup` merged as
 [#15](https://github.com/traitecoevo/leaf_cpp/pull/15) (`26ab841`) on 2026-08-03,
@@ -31,6 +32,27 @@ which retires the two-branch split this section used to describe. There is no
 longer a branch where "changes that alter results" live, and no rule to keep them
 apart: results changes now land on `master` through a PR with their blast radius
 measured, which is what the golden file is for.
+
+**Two such changes have landed since, and #15 is no longer the reference point for
+what the numbers are.** [#36](https://github.com/traitecoevo/leaf_cpp/pull/36)
+(`d22907a`, 2026-08-04) moved every solved operating point by up to **1.5e-03** —
+far larger than anything below — because it relocated the argmax rather than
+perturbing it. Its blast radius is split by cause under 11a and 11b. Two
+consequences reach beyond that item:
+
+- **The magnitudes in the guide changed.** The old "~1e-16 is reassociation, ~1e-3
+  is the solver floor" is now **~1e-16 reassociation, ~1e-9 solver floor, ~1e-4 a
+  real difference**, because the two amplifiers that set the floor were removed in
+  sequence — golden section, then `psi_stem_to_ci`'s 1e-7. Size a diff against the
+  new figures.
+- **The cross-platform table changed too, and the gcc-versus-clang split in it was
+  itself a golden-section artefact.** The two compilers now report identical
+  figures. If a compiler-dependent column reappears there, something has put a
+  discrete decision back into the solve.
+
+⚠️ **So `master`'s validation against plant needs redoing for a second reason.**
+Hazard 7 and item 9 already said #15 required it; #36 is a much larger move and is
+the one that matters now. Blocked on plant #591.
 
 **What #15 moved**, measured cell-by-cell over the 288-point golden grid and split
 by cause, because the two classes are four orders of magnitude apart and should
@@ -78,10 +100,10 @@ code rather than of the merge:
 | issue | item | what | note |
 |---|---|---|---|
 | [#3](https://github.com/traitecoevo/leaf_cpp/issues/3) | 7a | Make λ(state) pluggable | **unblocked** — #2 is done. Measure the dispatch separately: the cost core is fully inlined where the supply path was not, so 7b's "dispatch is free" result does **not** transfer |
-| [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11, **11a** | Template `Leaf` on its scalar type | **reordered, and 11a is DONE** (#35 + #36, 2026-08-04). Golden section missed `dprofit = 0` by 6.2e-04, which for hydraulic traits made the trait response **smooth, plausible and sign-inverted** (`root_b`: −2.6e-03 against a true +2.6e-04, arbitrated derivative-free). Replaced by a root-find: residual improved on 240/240 rows, **24.5% faster**, hazard 3 ~1000× smoother. **Still open:** the replica drift (5.53e-4) and `Leaf<T>` for the trait partials, both smaller than originally scoped |
+| [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11 | Template `Leaf` on its scalar type | **mostly done — 11a and 11b landed** (#36). The solver, the tolerance and the replicas are all dealt with; see the Done table. **What is left is `Leaf<T>` alone, and it needs a decision, not an implementation:** the kernels 11b added already supply `∂A/∂θ` by seeding a trait, so the only remaining justification is plant #537's cut-point rule (letting an outer `xad::adj` pass traverse the class). Whether that is needed depends on what #6's fit wants — so **do #6 first**, which reverses the original ordering |
 | [#33](https://github.com/traitecoevo/leaf_cpp/issues/33) | 6d | Take resistances, not root carbon | #5 stage 2b, **blocked on plant #591**. Before #34 |
 | [#34](https://github.com/traitecoevo/leaf_cpp/issues/34) | 6d | Delete plant's `Leaf` bindings | #5 stage 4, **blocked on plant #591**. The hazard-7 payoff, and the only stage that can break plant |
-| [#6](https://github.com/traitecoevo/leaf_cpp/issues/6) | 12 | Calibration vignette, then inversion | **UNBLOCKED** — the gate was 11a, not all of #4, and 11a landed (#35 + #36). A plain central difference now gives ~4 correct digits at any relative step from 1e-8 to 1e-2, so a fit can start. AD is still the vignette's headline result (AD *against* FD), so #4's remainder still improves this rather than gating it |
+| [#6](https://github.com/traitecoevo/leaf_cpp/issues/6) | 12 | Calibration vignette, then inversion | **UNBLOCKED, and now the next thing to do.** The gate was 11a rather than all of #4, and #36 landed it: a central difference gives ~4 correct digits at any relative step from 1e-8 to 1e-2, and the 11b kernels give exact trait partials by seeding. AD remains the vignette's headline (AD *against* FD), so #4's remainder improves this rather than gating it — and doing this first is what tells #4 whether `Leaf<T>` is needed at all. Note the achievable precision of a calibration target is **~1e-9**, set by `psi_stem_to_ci` |
 | [#7](https://github.com/traitecoevo/leaf_cpp/issues/7) | 13 | Energy balance, full cut | leaf-to-air VPD is the cheap win; free convection is not worth it |
 | [#28](https://github.com/traitecoevo/leaf_cpp/issues/28) | 13 | Temperature-dependent outgoing longwave in the Penman-Monteith Rn | from plant #581 / #567 review |
 | [#31](https://github.com/traitecoevo/leaf_cpp/issues/31) | 6 | `profit_psi_stem_TF` returns a plausible number below `psi_upstream` | found writing the stage 2 vignette. Negative conductance, and profit is **discontinuous** at the boundary. Unreachable from plant's solve, which is why it survived — the first thing an R user does is plot the profit function |
@@ -149,8 +171,11 @@ plant carries a number. That is the shutdown-state leak (item 2, plant #578), an
 in their own column instead of being counted as mismatches.
 
 **Expect zero from now on.** A finite difference is real: the nested solvers
-amplify perturbations up to about `GSS_tol_abs` (1e-3), so genuine arithmetic
-differences arrive around 1e-4, four orders of magnitude above rounding.
+amplify perturbations up to whichever tolerance is loosest, so genuine arithmetic
+differences arrive well above rounding. ⚠️ **That amplifier was `GSS_tol_abs`
+(1e-3) when this was written and is now `psi_stem_to_ci`'s 1e-10 (see 11b), so the
+floor is ~1e-9 rather than ~1e-4.** The four-order gap between rounding and bug
+still holds; the band in between has moved.
 
 **A second, larger instance of the same effect: the golden file is not portable,
 and the amplification is what makes it interesting.** CI's first run to reach
@@ -190,10 +215,13 @@ Two implications worth carrying:
 
 - **`profit` is the only reported field that is well-conditioned across platforms.**
   For a portable check of the solve, compare `profit`, not `opt_psi_stem_`.
-- **Eight of the nine fields are pinned to 17 digits but determined only to about
-  `GSS_tol_abs` (1e-3).** Bit-exactness on one platform remains a sound drift
-  detector, but it is reproducibility of an arbitrary choice inside the solver's
-  tolerance window, not determinacy of the argmax.
+- **~~Eight of the nine fields are pinned to 17 digits but determined only to about
+  `GSS_tol_abs` (1e-3).~~ Fixed by 11a.** The collar solve now solves its own
+  first-order condition, so on the 198 interior grid rows the argmax is determined
+  to solver precision (`|dprofit|` median 5.6e-15) rather than being an arbitrary
+  choice inside a tolerance window. The 42 rows with a *constrained* optimum are
+  determined to the step-in scale (~1e-6 of the bracket width) instead. Bit-exactness
+  on one platform is now a drift detector *and* the numbers mean something.
 
 ⚠️ **These numbers were wrong twice, the same way both times.** This paragraph
 first put the worst difference at 1.7e-15 (13 ULP) and called the whole thing
@@ -977,7 +1005,7 @@ Why this matters beyond tidiness: every R package in this space commits to one
 *hydraulically explicit* scheme, or to none (see
 [COMPARISON.md](COMPARISON.md)), so none of them can compare the formulations
 where the live argument actually is. A package that runs four against identical
-drivers, at 4 µs a solve, is a different and more interesting contribution than a
+drivers, at ~3 µs a solve, is a different and more interesting contribution than a
 fourth implementation of one of them.
 
 ### 7b. The soil-and-root water supply path
@@ -1014,9 +1042,11 @@ So the soil enters the optimisation *only* as a supply function
 
 **So: isolate it, but keep it here — do not push it up into plant.** The reason
 not to move it to plant is that the coupling point is not at plant's level. The
-golden-section search evaluates the supply function at every candidate collar
-potential, inside the inner loop. plant would have to inject a callback into the
-leaf optimiser's hot path, which is a worse boundary than the one that exists now.
+collar solve evaluates the supply function at every candidate collar potential,
+inside the inner loop — a golden-section search when this was written, a root-find
+on `dprofit == 0` since 11a, and the argument is unaffected either way. plant would
+have to inject a callback into the leaf solver's hot path, which is a worse boundary
+than the one that exists now.
 
 Extract it instead as a swappable component *within* the package:
 
@@ -1096,10 +1126,15 @@ not the ranking.
 ⚠️ **This result does not transfer to item 7a.** It is specific to the supply
 path. The *cost* core is the opposite case: `profit_psi_stem_TF`,
 `hydraulic_cost_TF`, `assim_colimited` and `transpiration_to_psi_stem` have **no
-out-of-line symbol at all** — they are fully inlined into the golden-section
-loop. Making λ virtual could therefore cost real time where making the supply
-path virtual does not. Measure 7a separately with the same harness; do not cite
-this table for it.
+out-of-line symbol at all** — they are fully inlined into the solve loop. Making λ
+virtual could therefore cost real time where making the supply path virtual does
+not. Measure 7a separately with the same harness; do not cite this table for it.
+
+Since 11a that loop is the `dprofit == 0` root-find rather than a golden-section
+search, and 11b made the cost core a set of scalar-generic templates, so **re-check
+the inlining before relying on the paragraph above** — `nm -C test_golden | grep
+<fn>`, per hazard 5. The direction is unlikely to have changed (templates inline at
+least as readily), but it has not been re-measured.
 
 Four reasons this is worth doing rather than merely tidy:
 
@@ -1517,11 +1552,14 @@ Four things not to get wrong:
 - **Report the realised speedup, not the best case.** With a fallback fraction φ
   the realised gain is `1/[φ + (1−φ)/10.8]` — 3.6× at φ = 0.2, not 10.8×.
   Measuring φ on a real water-limited scenario is an open item over there.
-- **Smoothness of the argmax is a hard constraint.** plant chose golden-section
-  over Brent specifically because its argmax varies smoothly with inputs, which
-  the demographic growth-rate gradient depends on (the comment survives in
-  `leaf/optimize.hpp`). Any replacement solver must preserve that; the project
-  measures it as roughness in dA/dh — 0.0015 closed form against 0.0011 exact.
+- **Smoothness of the argmax is a hard constraint.** The demographic growth-rate
+  gradient depends on the argmax varying smoothly with inputs, and any replacement
+  solver must preserve that; the project measures it as roughness in dA/dh — 0.0015
+  closed form against 0.0011 exact. ⚠️ **The reason this used to give — that plant
+  chose golden-section over Brent for it — is superseded by 11a**, which replaced
+  golden section with a root-find on the first-order condition and measured
+  smoothness ~1000× *better*. The constraint stands; golden section is not the way
+  to meet it.
 
 The larger prize is that the closed form is **analytically differentiable**, so
 the demographic gradient could become exact rather than finite-differenced. That
@@ -2181,17 +2219,27 @@ decision rather than drift.
 
 ## 12. Demonstrate calibration — and then consider inversion
 
-**The claim.** ~4 µs per solve *and* exact derivatives rather than finite
+**The claim.** ~3 µs per solve *and* exact derivatives rather than finite
 differences makes this an unusually good target for calibration. Gradient-based
 optimisers and Hamiltonian samplers want both: many evaluations, and gradients
-that are not numerical noise. And this model is close to the worst case for
-finite differencing — a golden-section search wrapped around two nested
-root-finds, so the objective is only piecewise smooth in its inputs and a
-difference quotient picks up the solver tolerances as much as the physics. plant
-already hit exactly this: the analytic `dprofit_droot_collar_psi` exists precisely
-because the finite-difference gradient was too noisy for TF24f's acclimation
-tracking, and #576 turned out to be an AD-versus-finite-difference branch
-asymmetry.
+that are not numerical noise. plant already hit the finite-difference problem
+directly: the analytic `dprofit_droot_collar_psi` exists precisely because the FD
+gradient was too noisy for TF24f's acclimation tracking, and #576 turned out to be
+an AD-versus-finite-difference branch asymmetry.
+
+⚠️ **The "worst case for finite differencing" part of this claim is now out of
+date, and that changes what the vignette can argue.** This paragraph used to say
+the model is a golden-section search wrapped around two nested root-finds, so the
+objective is only piecewise smooth and a difference quotient picks up solver
+tolerances as much as physics. 11a deleted the golden section: a central difference
+now agrees to ~4 digits at any relative step from 1e-8 to 1e-2, where before it
+returned **exactly zero** below 1e-4 for a photosynthetic trait and the *wrong
+sign* for a hydraulic one.
+
+So FD is no longer a straw man, and the vignette has to be honest about that: the
+comparison is now AD-is-exact-and-cheaper against FD-is-workable, not
+AD-works against FD-doesn't. If AD does not win convincingly, say so — the
+instruction below still holds, and it is more likely to bite than it was.
 
 **The honest state of it.** The claim is not yet demonstrated, and it is not yet
 fully true:
@@ -2252,9 +2300,9 @@ expensive. In priority order:
 3. **Free convection.** A Grashof-number term, as in plantecophys and
    tealeaves. **This is the expensive one, and probably not worth it here.** It
    makes the boundary-layer conductance depend on `|Tleaf - Tair|`, which makes
-   the balance implicit and forces an inner iteration *inside* a golden-section
-   search that already runs ~10³ inner evaluations per solve. At 4 µs per solve
-   in a model that calls it millions of times, that is a poor trade. If leaf
+   the balance implicit and forces an inner iteration *inside* the collar solve,
+   which already runs many inner evaluations per solve. At ~3 µs per solve in a
+   model that calls it millions of times, that is a poor trade. If leaf
    temperature accuracy under low wind ever becomes the priority, prefer a
    one-step correction over a converged inner solve.
 
