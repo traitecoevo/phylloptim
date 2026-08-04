@@ -24,6 +24,7 @@ this file keeps the reasoning behind each one.
 | **3** | **The plant-side integration — issue #9, closed.** plant's `feature/consume-leaf-package` (plant #591) compiles and passes against this package's `master`. Its survey was accurate about the work and wrong about the risk in three ways, all recorded under item 3. |
 | **6d stage 3** | **`SinglePotential` is reachable from R — issue #32.** `leaf_supply_single()` / `leaf_supply_multilayer()`. The 7b-iii footgun is designed out: no settable tag at any level, both entry points reconfigure completely, and the fields are bound read-only. |
 | **6** | **The R interface — issue #5.** `leaf::Leaf` is callable from R: generated RcppR6 bindings tied back to the golden file bit-exactly, then a hand-written surface over them — `leaf_solve()` (drivers in, operating point out, vectorised), `leaf_traits()` / `leaf_control()` splitting the constructor's 19 arguments, `leaf_model()` / `set_drivers()` / `operating_point()`, and `vignette("leaf")`. λ and `g1_eff` are exposed for the first time. The model stays R-free and gained a CMake package, so it is still linkable from C++ or Python. **#32** landed on top of it. **#33** and **#34** are split out and coupled with plant #591. Reasoning in item 6; #31 was found on the way. |
+| **11** | **`Leaf<T>` — CLOSED, SUPERSEDED, not going to be built.** Both payoffs the item opened with are spent: the `namespace detail` AD replicas were already deleted by **11b**, using scalar-generic *member* templates rather than a class template, and "templating is what turns AD into calibration" is falsified by **11e** plus a calibrating #6. Its last live use was plant #537's cut-point rule, which is about an **outer** AD pass over plant and about *state* rather than traits — and even that now looks avoidable, because the composite works for a driver as well as a trait (`leaf_specific_conductance_max`, which is how height reaches the leaf: ratios 0.99994–0.99996). ⚠️ **Do not reopen this to get exact trait derivatives; that is done.** If it returns it should return from the plant side under a title describing an outer pass. |
 | **11c, 11d, 11e** | **Trait gradients, stage 1 — issue #4.** `leaf_gradient()` returns `dA/dθ`, `dgc/dθ`, `dψ_stem/dθ` and `dψ*/dθ` by the implicit function theorem where the optimum is interior, and by differencing the solve where it is pinned. Matches 11c's arbitrated references to 4 digits; the active-set guard classifies the golden grid **198 interior / 42 pinned / 48 no-gradient** with the two populations **five orders of magnitude apart**, so the threshold is measured rather than chosen. `set_traits()` came with it — a method, not settable fields, because a bare trait write leaves `vcmax_` stale behind `set_physiology`'s temperature cache. ⚠️ **The speed argument is retracted FOR THE R LAYER only: the composite measured 6% slower than the finite difference there**, and the 4× that is real comes from object reuse. **In C++ it wins 4.4× — but only 1.15× on `stem_b`/`stem_c`/`root_b`/`root_c`, because `set_traits` rebuilds a vulnerability spline at 21.8 µs against 6.2 µs for a whole solve, and those are the four traits whose gradient is 100% argmax-mediated.** That promotes stage 3 rather than shelving it. See 11e; quote the split, never the 1.50× total. |
 | **11a, 11b** | **The collar solve now solves its own first-order condition** (PR #36, `d22907a`). Golden section is gone: `dprofit == 0` by safeguarded TOMS748, so the argmax is resolved to solver precision instead of `GSS_tol_abs` — residual `\|dprofit\|` improved on **240/240** feasible rows, median 7.8e-04 → **5.6e-15**. With it: `psi_stem_to_ci` tightened 1e-7 → 1e-10 (**335×** closer to a converged solve, +3.4%), the `namespace detail` AD replicas **deleted** in favour of scalar-generic member templates the model and its derivative both instantiate, and `dprofit_droot_collar_psi` given a `bool* feasible` out-parameter. **21.7% faster** overall (2.75 vs 3.51 µs/solve). Deliberately moved results — worst 1.5e-03, split by cause under 11a/11b. Hazard 3 **improved** ~1000×. ⚠️ Note the kernels are templated on their **argument**, so this delivered exact derivatives w.r.t. **state**, not w.r.t. traits — trait gradients are still open under #4. |
 
@@ -1766,10 +1767,49 @@ comment already admits this is deliberate, "kept at the historical 0.018015 to
 preserve results". Worth unifying once there is a bit-identity baseline (item 1) so
 the change can be shown to be 0.028% and nothing else.
 
-## 11. Template `Leaf` on its scalar type
+## 11. ~~Template `Leaf` on its scalar type~~ — CLOSED, SUPERSEDED
 
-This is the strongest technical argument for the package being header-only, and
-the reason to have done the split at all.
+**Decided 2026-08-04, after 11e. `Leaf<T>` is not going to be built, and the
+sub-items delivered everything this heading was for by other means.** The original
+text is kept below because two of its arguments were good ones that were answered
+rather than abandoned.
+
+Both payoffs the item opens with are spent:
+
+| the argument | what happened |
+|---|---|
+| "it deletes the hand-maintained AD replicas in `namespace detail`" | **Already done, by 11b, without templating the class.** The replicas are gone, replaced by scalar-generic *member* templates that the model and its derivative both instantiate. Templating the class was one route there; it is not the one taken. |
+| "templating on the scalar type is what turns 'we have AD' into 'we can calibrate'" (item 12) | **Falsified.** 11e ships trait gradients for all fifteen traits and three responses, and #6 is calibrating. |
+
+11c added a third — that `Leaf<T>` would handle the active set for free, since the
+clamp's `min`/`max` is differentiable almost everywhere. That is now an elegance
+argument rather than a capability one: 11e's stationarity test detects pinning and
+is asserted against all 42 pinned rows.
+
+**What was left was plant #537's cut-point rule** — `dprofit_droot_collar_psi` is
+`double` in and `double` out, so it is opaque to an *outer* AD pass over plant, and
+#537 A1 (`Node::growth_rate_gradient`, the family's most pervasive finite
+difference) wants a tangent seeded on **height** flowing through `compute_rates`.
+That is a requirement about *state*, not traits, and it belongs to plant.
+
+⚠️ **And there is now a measured reason to think even that does not need it.** The
+composite works for a **driver** exactly as it does for a trait, because nothing in
+the derivation cares which: differentiating w.r.t. `leaf_specific_conductance_max`
+— which is how height reaches the leaf — gives ratios of **0.99994–0.99996** against
+a resolved least-squares slope, with the mixed partial stable to **7 significant
+figures across five decades** of step. The indirect term is 100% of `dA/dk`.
+
+Caveats, because that measurement is narrower than the claim it bears on: one
+interior operating point, the **leaf's share only** (height enters plant's allometry
+in more places than `kmax`), and **the active-set hazard transfers** — which matters
+more in height than in a trait, because the SCM transports along height. It sizes
+the idea; it does not settle it. **The decision is plant #537's to make.**
+
+⚠️ **Do not reintroduce this item to get exact derivatives w.r.t. traits. That is
+done.** If it comes back it should come back from the plant side, with #537's own
+measurements, and under a title that describes an outer AD pass rather than this one.
+
+### Original text, kept for the record
 
 `leaf_model.hpp` currently carries hand-maintained templated *replicas* of
 `assim_colimited` and `hydraulic_cost_TF` in `namespace detail`, existing only so
