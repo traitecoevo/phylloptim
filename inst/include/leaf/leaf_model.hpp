@@ -589,6 +589,9 @@ public:
 
   // proportion of conductivity in xylem at a given water potential (return: unitless)
   double proportion_of_conductivity(double psi) const;
+  // Scalar-generic core of the above. See the `_kernel` block below the assim
+  // declarations for why these exist.
+  template <typename T> T proportion_of_conductivity_kernel(T psi) const;
 
   // supply-side transpiration for a given water potential gradient between leaves and soil, 
   // references setup_transpiraiton for values (return: kg h20 s^-1 m^-2 LA)
@@ -609,6 +612,40 @@ public:
   double electron_transport();
   double assim_electron_limited(double ci_);
   double assim_colimited(double ci_);
+
+  // --- the scalar-generic cores -------------------------------------------
+  //
+  // These are the SINGLE definition of the photosynthesis and cost algebra. The
+  // five `double` entry points above and beside them are `T = double`
+  // instantiations, and `dprofit_droot_collar_psi` differentiates the same code
+  // with `T = xad::fwd<double>::active_type`. So the forward model and its
+  // derivative cannot disagree: there is one body, not two.
+  //
+  // ⚠️ **They replace a hand-maintained `namespace detail`, which HAD ALREADY
+  // DRIFTED** -- the deleted `assim_colimited_ad` associated the electron-limited
+  // term left-to-right where `assim_electron_limited` divides the bracket first,
+  // and used `s*s` where `assim_colimited` uses `pow(s, 2)`. Both are pure
+  // reassociation, so the two functions were mathematically identical and
+  // numerically not: the AD derivative was the derivative of a *slightly
+  // different function* than the model evaluated. Harmless while the gradient only
+  // set TF24f's acclimation rate; load-bearing once PLAN 11a made the collar solve
+  // root-find on it. Measured cost of the fix: 4.98e-07 on the golden grid.
+  //
+  // Why members templated on the scalar type, rather than free functions taking
+  // their parameters explicitly (which is what #4 comment 1 proposed): a free
+  // function needs seven or eight arguments threaded from the members at each call
+  // site, and a transposed pair there is exactly the class of silent error the
+  // replicas were. Reading the members directly makes that unrepresentable. It is
+  // also the shape item 11's `Leaf<T>` wants, so it is a step rather than a
+  // detour.
+  //
+  // Keep them PURE -- no writes to members. `hydraulic_cost_TF` caches into
+  // `hydraulic_cost_`; its kernel must not, or the AD pass would write model state
+  // while probing.
+  template <typename T> T assim_rubisco_limited_kernel(T ci) const;
+  template <typename T> T assim_electron_limited_kernel(T ci) const;
+  template <typename T> T assim_colimited_kernel(T ci) const;
+  template <typename T> T hydraulic_cost_TF_kernel(T psi_stem) const;
   double assim_minus_stom_cond_CO2(double x, double psi_stem, double psi_upstream);
   double psi_stem_to_ci(double psi_stem, double psi_upstream);
   void set_leaf_states_rates_from_psi_stem(double psi_stem, double psi_upstream);
@@ -697,24 +734,12 @@ public:
 };
 
 
-namespace detail {
-// Templated replicas of the analytic profit algebra, so forward-mode AD gives
-// their exact derivatives (used by Leaf::dprofit_droot_collar_psi). They mirror
-// Leaf::assim_colimited and Leaf::hydraulic_cost_TF exactly.
-template <typename T>
-T assim_colimited_ad(T ci, double vcmax, double et, double gstar_Pa, double km,
-                     double R_d, double curv) {
-  T ar = vcmax * (ci - gstar_Pa) / (ci + km);
-  T ae = et / 4.0 * (ci - gstar_Pa) / (ci + 2.0 * gstar_Pa);
-  T s = ar + ae;
-  return (s - sqrt(s * s - 4.0 * curv * ar * ae)) / (2.0 * curv) - R_d;
-}
-template <typename T>
-T hydraulic_cost_ad(T psi_stem, double stem_b, double stem_c, double cost_scale,
-                    double beta2) {
-  return cost_scale * pow(1.0 - exp(-pow(psi_stem / stem_b, stem_c)), beta2);
-}
-}  // namespace detail
+// `namespace detail` used to live here, holding templated REPLICAS of the profit
+// algebra whose comment claimed they "mirror Leaf::assim_colimited and
+// Leaf::hydraulic_cost_TF exactly". One of them did not -- see the `_kernel`
+// declarations in the class. They are deleted: the real functions are now
+// templated on their scalar type, so AD differentiates the model itself and the
+// mirror cannot drift because there is no mirror.
 inline Leaf::Leaf()
     :
     vcmax_25(96), // umol m^-2 s^-1 
@@ -1580,7 +1605,9 @@ inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi, bool* feasible
 inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
   using AD = xad::fwd<double>::active_type;
   const double psi = opt_root_psi;
-  const double gstar_Pa = gamma_ * umol_per_mol_to_Pa_;
+  // gstar_Pa used to be precomputed here and threaded into the AD replicas. The
+  // kernels read gamma_ and umol_per_mol_to_Pa_ themselves, which is one fewer
+  // place for the two sides to disagree.
   // Infeasible until the two exits below have been passed; see the header for why
   // the 0.0 they return must be distinguishable from a genuine stationary point.
   if (feasible != nullptr) {
@@ -1613,14 +1640,14 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
     *feasible = true;
   }
 
-  // A'(ci) and C'(psi_stem) via forward-mode AD of the analytic algebra.
+  // A'(ci) and C'(psi_stem) by forward-mode AD of THE MODEL'S OWN algebra -- the
+  // same kernels assim_colimited() and hydraulic_cost_TF() are instantiations of,
+  // so these are derivatives of the function actually evaluated rather than of a
+  // hand-kept mirror of it.
   AD ci_ad = ci;            xad::derivative(ci_ad) = 1.0;
-  const double A_prime = xad::derivative(
-      detail::assim_colimited_ad(ci_ad, vcmax_, electron_transport_, gstar_Pa, km_,
-                         R_d_, curv_fact_colim));
+  const double A_prime = xad::derivative(assim_colimited_kernel(ci_ad));
   AD ps_ad = psi_stem;      xad::derivative(ps_ad) = 1.0;
-  const double C_prime = xad::derivative(
-      detail::hydraulic_cost_ad(ps_ad, stem_b, stem_c, cost_scale_TF24, beta2));
+  const double C_prime = xad::derivative(hydraulic_cost_TF_kernel(ps_ad));
 
   // Stomatal-conductance supply coefficient gc and its partials. gc =
   // gc_const * transpiration(psi_stem, psi); transpiration is conductance_max *
@@ -1726,9 +1753,13 @@ inline double Leaf::leaf_temp_from_E(double E) const {
 // transpiration supply functions
 
 // returns proportion of conductance taken from hydraulic vulnerability curve (unitless)
-inline double Leaf::proportion_of_conductivity(double psi) const {
-
+template <typename T>
+inline T Leaf::proportion_of_conductivity_kernel(T psi) const {
   return exp(-pow((psi / stem_b), stem_c));
+}
+
+inline double Leaf::proportion_of_conductivity(double psi) const {
+  return proportion_of_conductivity_kernel(psi);
 }
 
 // set spline for proportion of conductivity
@@ -1825,32 +1856,46 @@ inline double Leaf::electron_transport() {
 }
 
 //calculate the rubisco-limited assimilation rate, returns umol m^-2 s^-1
+// The scalar-generic cores. Arithmetic and call structure are IDENTICAL to the
+// `double` bodies these replaced -- same association, same `pow(s, 2)`, same
+// two-call structure in the colimited form -- so the `double` instantiation is not
+// meant to move results, and the golden file is the check on that. What moves is
+// the DERIVATIVE, which now comes from this code instead of from the drifted
+// replica.
+template <typename T>
+inline T Leaf::assim_rubisco_limited_kernel(T ci) const {
+  return (vcmax_ * (ci - gamma_ * umol_per_mol_to_Pa_)) / (ci + km_);
+}
+
+template <typename T>
+inline T Leaf::assim_electron_limited_kernel(T ci) const {
+  return electron_transport_ / 4 *
+  ((ci - gamma_ * umol_per_mol_to_Pa_) / (ci + 2 * gamma_ * umol_per_mol_to_Pa_));
+}
+
+template <typename T>
+inline T Leaf::assim_colimited_kernel(T ci) const {
+  T assim_rubisco_limited_ = assim_rubisco_limited_kernel(ci);
+  T assim_electron_limited_ = assim_electron_limited_kernel(ci);
+
+  return (assim_rubisco_limited_ + assim_electron_limited_ - sqrt(pow(assim_rubisco_limited_ + assim_electron_limited_, 2) - 4 * curv_fact_colim * assim_rubisco_limited_ * assim_electron_limited_)) /
+             (2 * curv_fact_colim)- R_d_;
+}
+
 inline double Leaf::assim_rubisco_limited(double ci_) {
-
-  return (vcmax_ * (ci_ - gamma_ * umol_per_mol_to_Pa_)) / (ci_ + km_);
-
+  return assim_rubisco_limited_kernel(ci_);
 }
 
 //calculate the light-limited assimilation rate, returns umol m^-2 s^-1
 inline double Leaf::assim_electron_limited(double ci_) {
-  
-
-  return electron_transport_ / 4 *
-  ((ci_ - gamma_ * umol_per_mol_to_Pa_) / (ci_ + 2 * gamma_ * umol_per_mol_to_Pa_));
+  return assim_electron_limited_kernel(ci_);
 }
 
 // returns co-limited assimilation umol m^-2 s^-1, NET of dark respiration (the
 // trailing `- R_d_`), so gross assimilation is this value + R_d_. The comment
 // that used to sit on the return statement said the opposite.
 inline double Leaf::assim_colimited(double ci_) {
-
-  double assim_rubisco_limited_ = assim_rubisco_limited(ci_) ;
-  double assim_electron_limited_ = assim_electron_limited(ci_);
-
-  return (assim_rubisco_limited_ + assim_electron_limited_ - sqrt(pow(assim_rubisco_limited_ + assim_electron_limited_, 2) - 4 * curv_fact_colim * assim_rubisco_limited_ * assim_electron_limited_)) /
-             (2 * curv_fact_colim)- R_d_;
-
-
+  return assim_colimited_kernel(ci_);
 }
 
 
@@ -2055,9 +2100,16 @@ inline double Leaf::g1_eff() const {
   return chi * std::sqrt(atm_vpd_) / (1.0 - chi);
 }
 
+// Pure: no write to hydraulic_cost_, so the AD pass cannot scribble model state
+// while probing. The caching is the double entry point's job.
+template <typename T>
+inline T Leaf::hydraulic_cost_TF_kernel(T psi_stem) const {
+  return cost_scale_TF24 * pow((1 - proportion_of_conductivity_kernel(psi_stem)), beta2);
+}
+
 inline double Leaf::hydraulic_cost_TF(double psi_stem) {
 
-  hydraulic_cost_ = cost_scale_TF24 * pow((1 - proportion_of_conductivity(psi_stem)), beta2);
+  hydraulic_cost_ = hydraulic_cost_TF_kernel(psi_stem);
 
 return hydraulic_cost_;
 }

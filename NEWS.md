@@ -1,5 +1,38 @@
 # leaf (development version)
 
+## The AD replicas are gone, and the model's precision floor moved (#4, PLAN 11b)
+
+Two small results-moving changes, landed in this order because the order matters:
+
+**`psi_stem_to_ci`'s tolerance is 1e-10, was 1e-7** — moves results by
+**1.82e-07**, lands **335× closer to a converged solve**, costs **+3.4%**. This
+tolerance was invisible while the collar solve's own `GSS_tol_abs` (1e-3) dominated;
+once PLAN 11a removed that, it became the model's dominant amplifier and therefore
+the floor of what every reported output *means*. The working magnitudes for reading
+a diff are now **~1e-16 reassociation, ~1e-9 solver floor, ~1e-4 a real
+difference**. Not the same knob as the settable `ci_abs_tol` (default 1e-3), which
+reaches only the off-path `optimise_psi_stem_*` solvers.
+
+**`namespace detail`'s hand-maintained AD replicas are deleted** — moves results by
+**3.51e-10**. `assim_colimited`, its two components, `hydraulic_cost_TF` and
+`proportion_of_conductivity` are now `T = double` instantiations of scalar-generic
+member templates, and `dprofit_droot_collar_psi` differentiates the *same code*. So
+the forward model and its derivative can no longer be derivatives of different
+functions — which they were: the deleted replica associated the electron-limited
+term differently, making the AD derivative exact for a function the model did not
+evaluate.
+
+**The `double` path is bit-identical**, checked directly across all five entry
+points. The whole 3.51e-10 is the derivative changing.
+
+Doing the tolerance first is what makes the unification a 3.51e-10 change rather
+than a 4.98e-07 one — a factor of 1400 for free, purely from ordering.
+
+To be clear about what this second change is *not*: it does **not** make the solved
+operating point more accurate. Both the old and new builds locate their respective
+roots to ~1e-14, and the two derivatives differ so little that their roots differ by
+~1e-15 MPa. It is a maintainability and correctness-of-construction fix.
+
 ## ⚠️ The collar solve changed, and results moved (#4, PLAN 11a)
 
 **`find_root_collar_psi` no longer maximises profit by golden-section search. It

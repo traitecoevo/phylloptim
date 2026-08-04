@@ -2048,10 +2048,29 @@ diagnostics were measured against the previous solver before this was spotted, a
 the numbers looked plausible throughout. **`rm -f src/*.o src/*.so` before
 reinstalling**, and sanity-check one value against the C++ suite.
 
-### 11b. What is left of item 11 after 11a — re-measured, and it is smaller
+### 11b. The replica unification and the ci tolerance — DONE
 
-Measured 2026-08-04 in a scratch copy, repo untouched. **11a changed the cost of
-the remaining work, and #4 comment 2's planning number is superseded.**
+**Both landed 2026-08-04.** The `namespace detail` replicas are deleted and
+`psi_stem_to_ci` is at 1e-10. Item 11's original framing is now complete except for
+`Leaf<T>`, which needs re-deciding rather than doing (see the end of this
+sub-item).
+
+**⚠️ The order mattered, and it was not the order originally planned.** The
+unification was measured, committed, and then *un*committed and redone after the
+tolerance change, because measuring it revealed the reason to swap them:
+
+| | as planned (unify first) | as landed (tolerance first) |
+|---|---|---|
+| tolerance change moves | — | **1.82e-07** |
+| unification then moves | **4.98e-07** | **3.51e-10** |
+
+Doing the tolerance first makes the unification a **1400× smaller** change — a
+3.5e-10 diff that is at the solver floor and trivially reviewable, instead of a
+5e-7 one needing its own justification. The measurement that forced the swap is
+below.
+
+Measured in a scratch copy first, repo untouched. **11a changed the cost of the
+remaining work, and #4 comment 2's planning number is superseded.**
 
 #### The replica unification is now cheap — 4.98e-07, not 5.53e-04
 
@@ -2093,19 +2112,63 @@ follow, and the third is the one that matters for item 12:
   **+6.2%** (2.73 → 2.90 µs/solve, interleaved ×4), still 17% faster than the 3.51
   µs before 11a. Not taken now — nothing needs it — but recorded as a decision.
 
-#### So the remaining scope, in order
+#### What was done, and three things learned doing it
 
-1. **Unify the replicas** (comment 1's "cheap half"): make the two real functions
-   templated statics taking their parameters explicitly, and delete
-   `namespace detail`. This is *both* the drift fix and what supplies `∂A/∂θ`, so
-   the two jobs comment 1 separated have merged. ~4.98e-07, one small PR.
-2. **Decide the `ci` tolerance** — a one-line change with a measured price and a
-   measured payoff. Cheap to settle, and item 12 wants the answer.
-3. **`Leaf<T>` if still wanted.** The justification has narrowed to plant #537's
-   cut-point rule — composing with an outer AD pass — rather than "trait gradients
-   do not work otherwise", because after 11a a central difference gives ~4 correct
-   digits at any relative step from 1e-8 to 1e-2. Worth re-deciding on those
-   grounds rather than inheriting the original scope.
+1. **`psi_stem_to_ci` 1e-7 → 1e-10** (`b76fa5e`). Moves 1.82e-07; lands **335×
+   closer to a converged (1e-15) solve**; costs **+3.4%** by controlled interleaved
+   A/B. The knee of the curve above. Not the settable `ci_abs_tol`, which reaches
+   only the off-path `optimise_psi_stem_*` solvers — a wart worth knowing before
+   someone tries it.
+2. **`namespace detail` deleted.** The five entry points and the AD path are now
+   instantiations of **one** set of scalar-generic member templates
+   (`assim_*_kernel`, `hydraulic_cost_TF_kernel`,
+   `proportion_of_conductivity_kernel`). Moves 3.51e-10.
+
+   Implemented as **members templated on the scalar type, reading the members
+   directly** — not as free functions taking their parameters explicitly, which is
+   what comment 1 proposed. A free function needs seven or eight arguments threaded
+   from members at each call site, and a transposed pair there is exactly the class
+   of silent error the replicas were. It is also the shape `Leaf<T>` wants, so it is
+   a step rather than a detour.
+
+   **⚠️ Comment 2's "no bit-identical stepping stone" does not hold, and the reason
+   is reusable.** It measured a residual 1.19e-06 from FMA contraction and concluded
+   "no amount of care in the algebra removes it, because the algebra is already
+   identical". The `double` path here is **bit-identical** — checked directly across
+   all five entry points at eleven operating points, before and after. What differs
+   is that this keeps the **call structure**: three kernels mirroring the three
+   original functions, so the compiler sees the same inlining boundaries. Comment 2
+   collapsed rubisco + electron into one body, which is what changed contraction.
+   **Contraction follows the call graph, so preserving the call graph preserves it.**
+
+   Consequence: the entire 3.51e-10 is the *derivative* changing. The forward model
+   did not move at all.
+
+3. **A correctness claim that turned out to be false, recorded because it was
+   tempting.** It is natural to say the unification makes the solver root-find on
+   the *true* derivative of the profit it reports, so the returned collar must be
+   closer to the true argmax. Measured on the 82 rows whose collar moved: the true
+   residual improves on **40 of 82**, median improvement factor **0.999** — i.e. not
+   at all. Both builds converge to ~1e-14 on their respective derivatives, and the
+   two derivatives differ so little that their roots differ by ~1e-15 MPa. The
+   golden diff is the `ci` band amplifying that, not a better argmax. **The
+   unification is a maintainability and correctness-of-construction fix, not an
+   accuracy fix**, and the PR says so.
+
+#### What is left: `Leaf<T>`, and it needs deciding rather than doing
+
+The justification has narrowed to plant **#537's cut-point rule** — composing with
+an outer AD pass — rather than "trait gradients do not work otherwise", because
+after 11a a central difference gives ~4 correct digits at any relative step from
+1e-8 to 1e-2. And the kernels above already deliver most of what item 11 was
+originally *for*: the duplication is gone, and they are templated, so `∂A/∂θ` is
+reachable by seeding a trait through them without templating the class.
+
+So the open question is narrower than item 11 states: **does anything need an
+`xad::adj` pass to traverse the whole `Leaf`, or is seeding the kernels enough?**
+That depends on what item 12's fit actually wants, which argues for doing #6 first
+and letting it say. A reversal of the original ordering, and worth a deliberate
+decision rather than drift.
 
 #### Still unmeasured
 
