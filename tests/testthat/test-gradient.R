@@ -306,6 +306,24 @@ test_that("leaf_gradient() leaves the traits it was given", {
   expect_identical(first$value, second$value)
 })
 
+test_that("GSS_tol_abs does not reach the production path", {
+  # Not a gradient test, but it belongs with the ones above: it is the claim that
+  # makes them possible. Since PLAN 11a the collar solve solves dprofit == 0 at
+  # 1e-12 instead of searching profit to GSS_tol_abs, so this control has no
+  # effect on the answer -- and an argmax determined only to 1e-3 could not be
+  # differentiated at all.
+  #
+  # Asserted because it was documented WRONG in two places until this branch: the
+  # vignette demonstrated 1e-3 against 1e-5 and said they "differ in the fourth
+  # decimal", and leaf_control()'s roxygen said this sets how well the operating
+  # point is determined. Both were true before 11a. Bit-exact, because "no
+  # effect" is exactly what is being claimed.
+  loose <- leaf_solve(psi_soil = 2.0, PPFD = 900)
+  tight <- leaf_solve(psi_soil = 2.0, PPFD = 900,
+                      control = leaf_control(GSS_tol_abs = 1e-5))
+  expect_identical(loose, tight)
+})
+
 test_that("the documented examples classify the way their comments claim", {
   # Written after the first version of ?leaf_gradient offered
   # `psi_soil = c(4, 4.25, 4.5), atm_vpd = 2` as "a pinned optimum" and it came

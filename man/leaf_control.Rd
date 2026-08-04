@@ -15,9 +15,14 @@ leaf_control(
 }
 \arguments{
 \item{GSS_tol_abs}{absolute tolerance for the golden-section search over
-stem water potential. The nested solvers amplify perturbations up to about
-this size, so it also sets how well determined the reported operating
-point is.}
+stem water potential. ⚠️ **This no longer sets how well the operating point
+is determined**, and this text used to say that it did. The collar solve now
+solves its own first-order condition to about `1e-12` instead of searching
+profit to `GSS_tol_abs`, so changing this leaves the answer bit-identical on
+the production path. What it still does: it is the width below which the
+feasible collar interval is treated as a single point, and it is the
+tolerance of the two single-layer `optimise_psi_stem_*` optimisers, which
+are off that path.}
 
 \item{vulnerability_curve_ncontrol}{number of control points used to
 pre-integrate the two Weibull vulnerability curves into splines. Higher is

@@ -297,9 +297,11 @@ tibble(psi = seq(psi_upstream, 6, length.out = 200)) |>
 
 The dashed line is where the solve landed, and the maximum it sits on is
 **flat**. That is worth knowing rather than glossing: the profit *value* is far
-better determined than its *location*, which is why `profit` is the only
-reported field well conditioned across platforms, and why the `GSS_tol_abs`
-comparison above moved `psi_stem` in the fourth decimal.
+better determined than its *location*, which is why `profit` is the only reported
+field well conditioned across platforms. It is also why the solve does not search
+this curve — an error `dp` in a flat maximum's *value* displaces its *location* by
+`sqrt(dp/k)`, so locating the peak by comparing heights costs precision that
+solving `dprofit = 0` keeps.
 
 ## Trait gradients, and where they stop working
 
