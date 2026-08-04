@@ -18,7 +18,7 @@ Family context lives in [`plant-meta`](https://github.com/traitecoevo/plant-meta
 ```
 inst/include/leaf.hpp          umbrella header — one include is the whole model.
                                R-FREE, and that is a guarantee, not an accident
-inst/include/leaf.h            the R layer's umbrella: <leaf.hpp> plus the RcppR6
+inst/include/leaf.h            the R layer's umbrella: <phylloptim.hpp> plus the RcppR6
                                support headers, so it pulls in Rcpp. ONLY
                                src/RcppR6.cpp includes it. The .h/.hpp split is
                                forced by RcppR6, which hardwires both names
@@ -122,7 +122,7 @@ cmake --build build && ctest --test-dir build
 Same two programs as `tests/cpp/Makefile`, through the route a C++ or Python
 consumer takes. It also covers what the Makefile cannot: that the install rules
 ship `*.hpp` and **exclude** `leaf.h` and `RcppR6_*.hpp`, and that
-`find_package(leaf)` yields a usable `leaf::leaf`.
+`find_package(phylloptim)` yields a usable `phylloptim::phylloptim`.
 
 ⚠️ **The golden file's bit-exactness depends on the optimisation level too, not
 only on the platform.** Measured on macOS/arm64: bit-identical at `-O1`, `-O2`
@@ -148,7 +148,7 @@ value against the C++ suite, which does track headers.
 
 `tests/cpp.R` is not a duplicate of the CI workflow. It compiles with R's
 *configured* compiler (`R CMD config CXX20`) against the *installed* headers,
-which is what a `LinkingTo: leaf` consumer gets — so a consumer running their own
+which is what a `LinkingTo: phylloptim` consumer gets — so a consumer running their own
 `R CMD check` is told when one of our headers stops compiling.
 
 This guide used to say to expect exactly one NOTE here — `'LinkingTo' field is
@@ -160,7 +160,7 @@ It compiles the two sources directly rather than calling `make`, and
 `tests/cpp/Makefile` is `.Rbuildignore`d, because `R CMD check` warns about the
 GNU extensions the harness uses. The sanctioned fix, `SystemRequirements: GNU
 make`, was tried and reverted — installing this package needs no make, and
-`LinkingTo: leaf` consumers would inherit a declaration that is false for them.
+`LinkingTo: phylloptim` consumers would inherit a declaration that is false for them.
 
 Doxygen for the C++ API, roxygen for the R one — they document different things
 and both now have something to document. The roxygen blocks live in
@@ -546,8 +546,8 @@ refuse.
    is worth stating exactly.** There is now Rcpp inside `inst/include/` — in
    `leaf.h` and the three generated `RcppR6_*.hpp` files — so "no Rcpp under
    `inst/include/`" is no longer the invariant. The invariant is **directional**:
-   nothing reachable from `<leaf.hpp>` may include any of those four, and only
-   `src/RcppR6.cpp` includes `<leaf.h>`.
+   nothing reachable from `<phylloptim.hpp>` may include any of those four, and only
+   `src/RcppR6.cpp` includes `<phylloptim.h>`.
 
    What enforces it is that `cpp-tests.yml` builds the suite on runners with **no
    R installed**, so the moment a model header reaches for Rcpp, three jobs go red

@@ -1,15 +1,15 @@
 // -*-c++-*-
-#ifndef LEAF_SINGLE_POTENTIAL_HPP_
-#define LEAF_SINGLE_POTENTIAL_HPP_
+#ifndef PHYLLOPTIM_SINGLE_POTENTIAL_HPP_
+#define PHYLLOPTIM_SINGLE_POTENTIAL_HPP_
 
-#include <leaf/constants.hpp>
-#include <leaf/util.hpp>
+#include <phylloptim/constants.hpp>
+#include <phylloptim/util.hpp>
 
 #include <cmath>
 #include <string>
 #include <vector>
 
-namespace leaf {
+namespace phylloptim {
 
 // The other supply path: one soil water potential and a constant series
 // resistance to the root collar (issue #2, stage 3).
@@ -136,6 +136,6 @@ public:
   double duptake_dpsi() const { return kg_per_mol_h2o / resistance_; }
 };
 
-}  // namespace leaf
+}  // namespace phylloptim
 
 #endif

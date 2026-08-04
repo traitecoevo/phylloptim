@@ -1,6 +1,6 @@
 // -*-c++-*-
-#ifndef LEAF_UTIL_HPP_
-#define LEAF_UTIL_HPP_
+#ifndef PHYLLOPTIM_UTIL_HPP_
+#define PHYLLOPTIM_UTIL_HPP_
 
 // Minimal, R-free utilities for the leaf model.
 //
@@ -18,7 +18,7 @@
 #include <limits>
 #include <stdexcept>
 
-namespace leaf {
+namespace phylloptim {
 namespace util {
 
 // Throws; never returns. The attribute lets the compiler see that callers whose
@@ -51,6 +51,6 @@ inline constexpr double na_value = std::numeric_limits<double>::quiet_NaN();
 inline constexpr int na_value_int = -2147483648;
 
 } // namespace util
-} // namespace leaf
+} // namespace phylloptim
 
 #endif

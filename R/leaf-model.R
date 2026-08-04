@@ -18,7 +18,7 @@
 # The C++ default constructor's values, in one place. These are Eucalyptus
 # saligna, and they are the defaults for every function below.
 #
-# ⚠️ These must equal leaf::Leaf's default constructor, and it is not enough to
+# ⚠️ These must equal phylloptim::Leaf's default constructor, and it is not enough to
 # believe so: tests/testthat/test-golden.R solves through THESE defaults and
 # compares bit-exactly against a golden file generated from a default-constructed
 # C++ Leaf. If the two ever drift apart, that file fails.
@@ -61,7 +61,7 @@
 ##' [leaf_control()]; the C++ constructor mixes the two and this is the split.
 ##'
 ##' Defaults are *Eucalyptus saligna*, and are the same values
-##' `leaf::Leaf`'s default constructor uses.
+##' `phylloptim::Leaf`'s default constructor uses.
 ##'
 ##' @section Two vulnerability curves, not one:
 ##' `stem_b`/`stem_c` describe the STEM Weibull curve, which drives the

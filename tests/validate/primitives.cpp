@@ -24,7 +24,7 @@
 //
 // It writes TSV on stdout: function, arg1, arg2, value.
 
-#include <leaf.hpp>
+#include <phylloptim.hpp>
 
 #include <cstdio>
 #include <vector>
@@ -56,7 +56,7 @@ void row(const char *fn, double a1, double a2, double v) {
 } // namespace
 
 int main() {
-  leaf::Leaf l;
+  phylloptim::Leaf l;
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
 

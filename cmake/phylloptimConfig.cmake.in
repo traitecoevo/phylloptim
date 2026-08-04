@@ -1,0 +1,22 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(Boost CONFIG)
+
+# odelia ships as an R package and has no CMake package of its own, so the
+# include directory cannot be found automatically. Ask for it here rather than
+# letting the failure surface later as a missing <odelia/interpolator.hpp> from
+# inside phylloptim's own headers, which points nowhere near the cause.
+if(NOT DEFINED PHYLLOPTIM_ODELIA_INCLUDE_DIR OR NOT EXISTS "${PHYLLOPTIM_ODELIA_INCLUDE_DIR}/odelia/interpolator.hpp")
+  set(phylloptim_FOUND FALSE)
+  set(phylloptim_NOT_FOUND_MESSAGE
+      "phylloptim needs odelia's headers. Clone https://github.com/traitecoevo/odelia "
+      "and configure with -DLEAF_ODELIA_INCLUDE_DIR=/path/to/odelia/inst/include")
+  return()
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/phylloptimTargets.cmake")
+
+target_include_directories(phylloptim::phylloptim SYSTEM INTERFACE "${PHYLLOPTIM_ODELIA_INCLUDE_DIR}")
+
+check_required_components(phylloptim)

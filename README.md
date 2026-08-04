@@ -104,9 +104,9 @@ it builds the whole C++ suite on a runner with no R on it.
 There is nothing to link against — one include is the whole library.
 
 ```cpp
-#include <leaf.hpp>
+#include <phylloptim.hpp>
 
-leaf::Leaf l;                   // default Eucalyptus saligna traits
+phylloptim::Leaf l;                   // default Eucalyptus saligna traits
 l.setup_transpiration(100);     // build the xylem vulnerability splines
 l.setup_root_vulnerability(100);
 
@@ -155,11 +155,11 @@ cmake --install build --prefix /usr/local
 ```
 
 ```cmake
-find_package(leaf REQUIRED)
-target_link_libraries(my_program PRIVATE leaf::leaf)
+find_package(phylloptim REQUIRED)
+target_link_libraries(my_program PRIVATE phylloptim::phylloptim)
 ```
 
-`leaf::leaf` is an INTERFACE target — headers, an include path and `cxx_std_20`,
+`phylloptim::phylloptim` is an INTERFACE target — headers, an include path and `cxx_std_20`,
 with nothing to link. `add_subdirectory(leaf)` works the same way if you would
 rather vendor it.
 
@@ -177,27 +177,27 @@ anywhere in the picture. A minimal extension module:
 
 ```cpp
 // pyleaf.cpp
-#include <leaf.hpp>
+#include <phylloptim.hpp>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 namespace py = pybind11;
 
 PYBIND11_MODULE(pyleaf, m) {
-  py::class_<leaf::Leaf>(m, "Leaf")
+  py::class_<phylloptim::Leaf>(m, "Leaf")
       .def(py::init<>())
-      .def("set_physiology", &leaf::Leaf::set_physiology)
-      .def("find_root_collar_psi", &leaf::Leaf::find_root_collar_psi)
-      .def_readonly("profit", &leaf::Leaf::profit_)
-      .def_readonly("opt_psi_stem", &leaf::Leaf::opt_psi_stem_)
-      .def_property_readonly("g1_eff", &leaf::Leaf::g1_eff);
+      .def("set_physiology", &phylloptim::Leaf::set_physiology)
+      .def("find_root_collar_psi", &phylloptim::Leaf::find_root_collar_psi)
+      .def_readonly("profit", &phylloptim::Leaf::profit_)
+      .def_readonly("opt_psi_stem", &phylloptim::Leaf::opt_psi_stem_)
+      .def_property_readonly("g1_eff", &phylloptim::Leaf::g1_eff);
 }
 ```
 
 ```cmake
-find_package(leaf REQUIRED)
+find_package(phylloptim REQUIRED)
 find_package(pybind11 REQUIRED)
 pybind11_add_module(pyleaf pyleaf.cpp)
-target_link_libraries(pyleaf PRIVATE leaf::leaf)
+target_link_libraries(pyleaf PRIVATE phylloptim::phylloptim)
 ```
 
 ```python
@@ -224,7 +224,7 @@ Drivers in, operating point out. `leaf_solve()` is vectorised, so a response
 curve is one call:
 
 ```r
-library(leaf)
+library(phylloptim)
 
 leaf_solve(psi_soil = 2.0, PPFD = 900)
 #>   psi_soil layers PPFD atm_vpd ca leaf_temp atm_kpa psi_stem  collar    ci
@@ -323,7 +323,7 @@ set_drivers(l, psi_soil = 2.0, PPFD = 900)   # required: the drivers must be re-
 l$find_root_collar_psi()
 ```
 
-See `vignette("leaf")` for the whole tour.
+See `vignette("phylloptim")` for the whole tour.
 
 ### Performance from R
 
@@ -373,13 +373,13 @@ Two costs worth knowing because they surprise people:
 Name it in `LinkingTo` to compile against the headers, the way `BH` is used:
 
 ```
-LinkingTo: BH, odelia (>= 0.2.0), leaf (>= 0.1.0)
+LinkingTo: BH, odelia (>= 0.2.0), phylloptim (>= 0.1.0)
 ```
 
 `LinkingTo` is **not** transitive in R, so you must name `BH` and `odelia`
 yourself even though it is `leaf` that includes them — including the odelia
-version, for the same reason. A `LinkingTo` consumer gets `<leaf.hpp>`, which is
-R-free; `<leaf.h>` is the R binding layer's own umbrella and is not for you.
+version, for the same reason. A `LinkingTo` consumer gets `<phylloptim.hpp>`, which is
+R-free; `<phylloptim.h>` is the R binding layer's own umbrella and is not for you.
 
 ## Dependencies
 

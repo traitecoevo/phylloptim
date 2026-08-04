@@ -67,7 +67,7 @@ The traits, and only the traits. Numerical settings live in
 }
 \details{
 Defaults are *Eucalyptus saligna*, and are the same values
-`leaf::Leaf`'s default constructor uses.
+`phylloptim::Leaf`'s default constructor uses.
 }
 \section{Two vulnerability curves, not one}{
 

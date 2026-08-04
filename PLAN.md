@@ -19,11 +19,11 @@ this file keeps the reasoning behind each one.
 | **5** | **Decided: leave XAD as it is.** It arrives via odelia, both packages want the same version, and only forward mode is used so nothing needs linking. No action. |
 | **7b** | The supply path is swappable. All four stages of 7b-iii merged (#17 → `10115e1`, #18 → `cfd5dcf`): `MultiLayerRoots`, the resistance interface, `SinglePotential`, and an enum-tag dispatch that measured **free**. Issue #2 closed; #3 and the multi-layer λ are unblocked. |
 | **2** | The shutdown-state leak, **fixed and merged** (#15) — and plant **#577 too**, together with two more stale-state exits ported from plant `develop` (#585). See item 2; the reconciliation with plant reversed direction twice. |
-| **4** | **The include graph is R-free.** The `RcppCommon` shim is deleted (#19) and odelia is pinned at `>= 0.2.0`, its first release with an R-free core (#22). ⚠️ Restated by item 6a once the R layer landed: the guarantee is *directional* — nothing reachable from `<leaf.hpp>` includes Rcpp — not "no Rcpp under `inst/include/`", which the generated `RcppR6_*.hpp` now break. What enforces it is `cpp-tests.yml` building on runners with no R. |
+| **4** | **The include graph is R-free.** The `RcppCommon` shim is deleted (#19) and odelia is pinned at `>= 0.2.0`, its first release with an R-free core (#22). ⚠️ Restated by item 6a once the R layer landed: the guarantee is *directional* — nothing reachable from `<phylloptim.hpp>` includes Rcpp — not "no Rcpp under `inst/include/`", which the generated `RcppR6_*.hpp` now break. What enforces it is `cpp-tests.yml` building on runners with no R. |
 | **10a tail** | **Signed-vs-magnitude potentials — issue #8, closed.** Answered by **#25**: remove one convention rather than type both. #23 typed them (`Psi`/`AbsPsi`), worked, was bit-identical, and was **closed unmerged** — it described the two-convention model instead of removing one, and no type covers `dE_from_soil_dpsi_collar`, which is a derivative and therefore neither. Do not reintroduce the types. |
 | **3** | **The plant-side integration — issue #9, closed.** plant's `feature/consume-leaf-package` (plant #591) compiles and passes against this package's `master`. Its survey was accurate about the work and wrong about the risk in three ways, all recorded under item 3. |
 | **6d stage 3** | **`SinglePotential` is reachable from R — issue #32.** `leaf_supply_single()` / `leaf_supply_multilayer()`. The 7b-iii footgun is designed out: no settable tag at any level, both entry points reconfigure completely, and the fields are bound read-only. |
-| **6** | **The R interface — issue #5.** `leaf::Leaf` is callable from R: generated RcppR6 bindings tied back to the golden file bit-exactly, then a hand-written surface over them — `leaf_solve()` (drivers in, operating point out, vectorised), `leaf_traits()` / `leaf_control()` splitting the constructor's 19 arguments, `leaf_model()` / `set_drivers()` / `operating_point()`, and `vignette("leaf")`. λ and `g1_eff` are exposed for the first time. The model stays R-free and gained a CMake package, so it is still linkable from C++ or Python. **#32** landed on top of it. **#33** and **#34** are split out and coupled with plant #591. Reasoning in item 6; #31 was found on the way. |
+| **6** | **The R interface — issue #5.** `phylloptim::Leaf` is callable from R: generated RcppR6 bindings tied back to the golden file bit-exactly, then a hand-written surface over them — `leaf_solve()` (drivers in, operating point out, vectorised), `leaf_traits()` / `leaf_control()` splitting the constructor's 19 arguments, `leaf_model()` / `set_drivers()` / `operating_point()`, and `vignette("phylloptim")`. λ and `g1_eff` are exposed for the first time. The model stays R-free and gained a CMake package, so it is still linkable from C++ or Python. **#32** landed on top of it. **#33** and **#34** are split out and coupled with plant #591. Reasoning in item 6; #31 was found on the way. |
 | **11** | **`Leaf<T>` — CLOSED, SUPERSEDED, not going to be built.** Both payoffs the item opened with are spent: the `namespace detail` AD replicas were already deleted by **11b**, using scalar-generic *member* templates rather than a class template, and "templating is what turns AD into calibration" is falsified by **11e** plus a calibrating #6. Its last live use was plant #537's cut-point rule, which is about an **outer** AD pass over plant and about *state* rather than traits — and even that now looks avoidable, because the composite works for a driver as well as a trait (`leaf_specific_conductance_max`, which is how height reaches the leaf: ratios 0.99994–0.99996). ⚠️ **Do not reopen this to get exact trait derivatives; that is done.** If it returns it should return from the plant side under a title describing an outer pass. |
 | **11c, 11d, 11e** | **Trait gradients, stage 1 — issue #4.** `leaf_gradient()` returns `dA/dθ`, `dgc/dθ`, `dψ_stem/dθ` and `dψ*/dθ` by the implicit function theorem where the optimum is interior, and by differencing the solve where it is pinned. Matches 11c's arbitrated references to 4 digits; the active-set guard classifies the golden grid **198 interior / 42 pinned / 48 no-gradient** with the two populations **five orders of magnitude apart**, so the threshold is measured rather than chosen. `set_traits()` came with it — a method, not settable fields, because a bare trait write leaves `vcmax_` stale behind `set_physiology`'s temperature cache. ⚠️ **The speed argument is retracted FOR THE R LAYER only: the composite measured 6% slower than the finite difference there**, and the 4× that is real comes from object reuse. **In C++ it wins 4.4× — but only 1.15× on `stem_b`/`stem_c`/`root_b`/`root_c`, because `set_traits` rebuilds a vulnerability spline at 21.8 µs against 6.2 µs for a whole solve, and those are the four traits whose gradient is 100% argmax-mediated.** That argued for stage 3 — ⚠️ but see the 11e tail row: the calibration it was argued *for* holds those four fixed, so stage 3 has the case without the customer. See 11e; quote the split, never the 1.50× total. |
 | **11e tail** | **`leaf_solve()` is 16× faster and the R-layer advice is inverted — issue #39.** It built a one-row `data.frame` per row and `rbind`ed them: **344 µs/row against 2.8 µs of solving**, on the path the README and vignette advertise. Columnwise assembly plus one C++ call for the twelve outputs (`Leaf::operating_point_values()`) gives **21.5 µs/row**, bit-identical including the error messages. `operating_point()` went 180 → 4 µs. ⚠️ **So "drive the object, don't use the wrapper" is spent** — `leaf_solve()` is now within **6%** of a hand-written loop, and the remaining lever is the *number of R calls per row*, not which function makes them. ⚠️ Measuring it also **retracted 11e's promotion of stage 3**: the calibration it was promoted for holds `stem_b`/`stem_c` fixed at measured values and fits two non-traits (`K_total`, `f_plant`) that `leaf_gradient()` cannot take at all. |
@@ -511,13 +511,13 @@ Two things from that work worth reusing:
 
 Branch `feature/consume-leaf-package` in plant does this: delete
 `inst/include/plant/leaf_model.h` and `src/leaf_model.cpp`, add
-`LinkingTo: leaf`, and provide a compatibility shim so that `plant::Leaf` and the
+`LinkingTo: phylloptim`, and provide a compatibility shim so that `plant::Leaf` and the
 handful of leaf constants plant reads (`kg_per_mol_h2o`) keep resolving. Nothing
 in plant's own sources should need to change beyond that shim.
 
 Remaining work on that branch: build it, run the test suite, and decide whether
 to keep the `plant::Leaf` alias permanently or migrate plant's ~12,000 lines of
-generated RcppR6/RcppExports code to `leaf::Leaf`. The alias is much cheaper and
+generated RcppR6/RcppExports code to `phylloptim::Leaf`. The alias is much cheaper and
 costs nothing at runtime.
 
 ### What #15 costs plant — surveyed, and smaller than expected
@@ -668,7 +668,7 @@ stalls.
 
 Right now this is a `LinkingTo`-only package, like `BH`. To be useful to leaf
 physiologists — the audience that would otherwise reach for `plantecophys` — it
-needs `leaf::Leaf` callable from R.
+needs `phylloptim::Leaf` callable from R.
 
 plant already has the bindings: `inst/RcppR6_classes.yml` describes the `Leaf`
 class and RcppR6 generates the glue. Move that definition here and generate
@@ -695,8 +695,8 @@ every guarantee it has today.** Two layers with a one-way dependency:
 
 | layer | contents | who consumes it | rule |
 |---|---|---|---|
-| `inst/include/` | the model | `LinkingTo: leaf` (plant), and anyone embedding it in C++ | plain C++. No Rcpp, no `R.h`, no R at all. Never includes anything from `src/` |
-| `src/`, `R/` | RcppR6-generated glue plus a hand-written R layer | R users, via `library(leaf)` | may use Rcpp freely. Includes *downward* into `inst/include/` and never the reverse |
+| `inst/include/` | the model | `LinkingTo: phylloptim` (plant), and anyone embedding it in C++ | plain C++. No Rcpp, no `R.h`, no R at all. Never includes anything from `src/` |
+| `src/`, `R/` | RcppR6-generated glue plus a hand-written R layer | R users, via `library(phylloptim)` | may use Rcpp freely. Includes *downward* into `inst/include/` and never the reverse |
 
 This is what makes the change compatible with item 4 (#11), which only just got
 the include graph R-free. **#11's guarantee is about the include graph reachable
@@ -726,7 +726,7 @@ the difference.
   nothing to link against." `NAMESPACE` gains `useDynLib` and stops being a
   comment block.
 - Installing the package now needs a compiler. It always effectively did — a
-  `LinkingTo: leaf` consumer compiles these headers, and BH/odelia/Rcpp all
+  `LinkingTo: phylloptim` consumer compiles these headers, and BH/odelia/Rcpp all
   require a toolchain — but "needs a compiler" moves from the consumer's build
   to ours, and a binary-only R installation can no longer install it from
   source. `tests/cpp.R` already handles the no-toolchain case by skipping; the
@@ -825,7 +825,7 @@ mistranslated argument gives a green suite and plausible R numbers.
 `tests/testthat/test-golden.R` ties four golden operating points back through the
 R API, compared bit-exactly. Four things that were not in the plan:
 
-1. **RcppR6 forces the `.h` / `.hpp` split.** It hardwires `#include <leaf.h>` in
+1. **RcppR6 forces the `.h` / `.hpp` split.** It hardwires `#include <phylloptim.h>` in
    what it generates and `<leaf/RcppR6_pre.hpp>` in the umbrella it expects, so
    the R-facing umbrella *must* be `leaf.h` and the model's had to stay
    `leaf.hpp`. A file extension now carries the one-way-dependency rule, which is
@@ -849,7 +849,7 @@ build — which is also what makes 6c's generator replaceable.
   which are tolerances. A test asserts the two partition it exactly.
 - `leaf_model()`, `set_drivers()`, `operating_point()` — named and defaulted.
 - `leaf_solve()` — drivers in, operating point out as a data.frame, vectorised.
-- `vignette("leaf")`.
+- `vignette("phylloptim")`.
 
 Two decisions worth keeping: **the `psi_soil >= 0` rejection is surfaced, not
 smoothed over** — a friendly wrapper is exactly where someone would `abs()` it,
@@ -2952,7 +2952,7 @@ expensive. In priority order:
   `SystemRequirements: GNU make`, and it was declared briefly before being
   reverted: it would be a **false statement about the package**. Installing leaf
   needs no make whatsoever — there is no compiled code — and because
-  `SystemRequirements` is package-level metadata, every `LinkingTo: leaf`
+  `SystemRequirements` is package-level metadata, every `LinkingTo: phylloptim`
   consumer would inherit a declared dependency that is untrue for them. Only the
   developer harness needs make. So the Makefile stays for developers and is kept
   out of the tarball via `.Rbuildignore`, which costs two compiler invocations in

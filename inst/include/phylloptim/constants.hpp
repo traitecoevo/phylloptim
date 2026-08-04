@@ -1,6 +1,6 @@
 // -*-c++-*-
-#ifndef LEAF_CONSTANTS_HPP_
-#define LEAF_CONSTANTS_HPP_
+#ifndef PHYLLOPTIM_CONSTANTS_HPP_
+#define PHYLLOPTIM_CONSTANTS_HPP_
 
 // Physical and physiological constants for the leaf model.
 //
@@ -20,7 +20,7 @@
 
 #include <cmath>
 
-namespace leaf {
+namespace phylloptim {
 
 // double check best namespace for constants (private vs global)
 // kJ mol ^-1
@@ -108,6 +108,6 @@ inline constexpr double leaf_temp_min = -40.0;
 inline constexpr double leaf_temp_max = 70.0;
 
 
-} // namespace leaf
+} // namespace phylloptim
 
 #endif

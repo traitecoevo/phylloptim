@@ -1,10 +1,10 @@
 // -*-c++-*-
-#ifndef LEAF_ROOTS_HPP_
-#define LEAF_ROOTS_HPP_
+#ifndef PHYLLOPTIM_ROOTS_HPP_
+#define PHYLLOPTIM_ROOTS_HPP_
 
-#include <leaf/constants.hpp>
-#include <leaf/util.hpp>
-#include <leaf/vulnerability.hpp>
+#include <phylloptim/constants.hpp>
+#include <phylloptim/util.hpp>
+#include <phylloptim/vulnerability.hpp>
 
 #include <odelia/interpolator.hpp>
 
@@ -15,7 +15,7 @@
 #include <string>
 #include <vector>
 
-namespace leaf {
+namespace phylloptim {
 
 // The per-layer root hydraulic resistances the supply solve actually consumes.
 // Two of the five fields are load-bearing; see set_root_network on why the other
@@ -621,6 +621,6 @@ private:
   }
 };
 
-}  // namespace leaf
+}  // namespace phylloptim
 
 #endif

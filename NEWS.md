@@ -155,17 +155,17 @@ leaves every existing caller, including plant's TF24f, untouched.
 
 ## The package is callable from R (#5, stage 1)
 
-`leaf::Leaf` now has an R interface, so this is no longer a `LinkingTo`-only
-package. `library(leaf)` gives you an R6 `Leaf` with the drivers, the solve and
-the whole operating point; `vignette("leaf")` walks through a solve, a drought
+`phylloptim::Leaf` now has an R interface, so this is no longer a `LinkingTo`-only
+package. `library(phylloptim)` gives you an R6 `Leaf` with the drivers, the solve and
+the whole operating point; `vignette("phylloptim")` walks through a solve, a drought
 response and a light response. **λ and `g1_eff` are exposed for the first time**
 — they existed in C++ and were unreachable from R.
 
 **The C++ headers are unchanged, and still need no R.** The model stays a set of
 self-contained headers under `inst/include` that use no R and no Rcpp; the R
-layer sits on top of them and is never included by them. So a `LinkingTo: leaf`
+layer sits on top of them and is never included by them. So a `LinkingTo: phylloptim`
 consumer sees nothing new, and the model remains linkable straight into a C++
-program or a Python extension. There is now a **CMake package** (`leaf::leaf`)
+program or a Python extension. There is now a **CMake package** (`phylloptim::phylloptim`)
 for exactly that, and CI builds and installs it on runners with no R, so the
 claim is tested rather than asserted. See PLAN item 6a.
 
@@ -196,7 +196,7 @@ On top of them:
 - **`leaf_model()`** — named and defaulted, and the recommended constructor.
   `Leaf()` remains exported as the raw one.
 - **`set_drivers()`** and **`operating_point()`** for the stateful path.
-- **`vignette("leaf")`** — a solve, a drought response, the light/VPD surface,
+- **`vignette("phylloptim")`** — a solve, a drought response, the light/VPD surface,
   and the profit function being maximised.
 
 Two decisions worth knowing:

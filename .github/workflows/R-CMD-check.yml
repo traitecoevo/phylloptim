@@ -56,7 +56,7 @@ jobs:
       - name: Check the generated bindings are current
         run: |
           Rscript -e 'library(methods); RcppR6::RcppR6()'
-          if ! git diff --exit-code -- R/ src/ inst/include/leaf/RcppR6_*.hpp; then
+          if ! git diff --exit-code -- R/ src/ inst/include/phylloptim/RcppR6_*.hpp; then
             echo "::error::Generated RcppR6 files are out of date." \
                  "Run Rscript -e 'RcppR6::RcppR6()' and commit the result."
             exit 1

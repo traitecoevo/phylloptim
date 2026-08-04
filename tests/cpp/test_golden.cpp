@@ -22,7 +22,7 @@
 // -- it is required, because the shutdown-state leak (PLAN.md item 2) makes a
 // reused Leaf order-dependent, which would make this file ill-defined.
 
-#include <leaf.hpp>
+#include <phylloptim.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -50,7 +50,7 @@ const double kAreaLeaf = 0.05;
 const double kCa = 40.0, kO2 = 21.0, kTleaf = 25.0, kPatm = 101.3;
 
 Row solve(double psi_soil, double ppfd, double vpd, int layers) {
-  leaf::Leaf l;
+  phylloptim::Leaf l;
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
 
