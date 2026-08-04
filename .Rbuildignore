@@ -42,6 +42,7 @@
 ^tests/cpp/test_leaf$
 ^tests/cpp/test_golden$
 ^tests/cpp/bench_solve$
+^tests/cpp/bench_gradient$
 ^tests/cpp/.*\.dSYM$
 
 # Validation scripts, not tests: they need an installed plant and take minutes.
