@@ -8,7 +8,7 @@
 # run. An R package's build system cannot demonstrate that, because R is present
 # the whole time. This can, and CI runs it on a runner with no R.
 #
-#   cmake -B build -DLEAF_ODELIA_INCLUDE_DIR=/path/to/odelia/inst/include
+#   cmake -B build -DPHYLLOPTIM_ODELIA_INCLUDE_DIR=/path/to/odelia/inst/include
 #   cmake --build build
 #   ctest --test-dir build
 #
@@ -87,7 +87,7 @@ if(NOT Boost_FOUND)
       "PHYLLOPTIM_BOOST_INCLUDE_DIR (${PHYLLOPTIM_BOOST_INCLUDE_DIR}) does not contain "
       "boost/math/tools/toms748_solve.hpp.\n"
       "Install Boost's headers and either let CMake find them or pass "
-      "-DLEAF_BOOST_INCLUDE_DIR=/path/to/boost/headers")
+      "-DPHYLLOPTIM_BOOST_INCLUDE_DIR=/path/to/boost/headers")
   endif()
 endif()
 
@@ -100,7 +100,7 @@ if(NOT EXISTS "${PHYLLOPTIM_ODELIA_INCLUDE_DIR}/odelia/interpolator.hpp")
     "(${PHYLLOPTIM_ODELIA_INCLUDE_DIR}).\n"
     "Clone https://github.com/traitecoevo/odelia and point at its "
     "inst/include, e.g.\n"
-    "  cmake -B build -DLEAF_ODELIA_INCLUDE_DIR=/path/to/odelia/inst/include")
+    "  cmake -B build -DPHYLLOPTIM_ODELIA_INCLUDE_DIR=/path/to/odelia/inst/include")
 endif()
 
 # --- the target ---------------------------------------------------------------

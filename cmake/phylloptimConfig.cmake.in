@@ -11,7 +11,7 @@ if(NOT DEFINED PHYLLOPTIM_ODELIA_INCLUDE_DIR OR NOT EXISTS "${PHYLLOPTIM_ODELIA_
   set(phylloptim_FOUND FALSE)
   set(phylloptim_NOT_FOUND_MESSAGE
       "phylloptim needs odelia's headers. Clone https://github.com/traitecoevo/odelia "
-      "and configure with -DLEAF_ODELIA_INCLUDE_DIR=/path/to/odelia/inst/include")
+      "and configure with -DPHYLLOPTIM_ODELIA_INCLUDE_DIR=/path/to/odelia/inst/include")
   return()
 endif()
 

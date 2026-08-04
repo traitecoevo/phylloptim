@@ -148,7 +148,7 @@ checkout of it is enough — nothing needs installing or building:
 
 ```sh
 git clone https://github.com/traitecoevo/odelia
-cmake -B build -DLEAF_ODELIA_INCLUDE_DIR=$PWD/odelia/inst/include
+cmake -B build -DPHYLLOPTIM_ODELIA_INCLUDE_DIR=$PWD/odelia/inst/include
 cmake --build build
 ctest --test-dir build          # runs the C++ suite, including the golden file
 cmake --install build --prefix /usr/local

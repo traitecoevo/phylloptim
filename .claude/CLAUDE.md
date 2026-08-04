@@ -115,7 +115,7 @@ installed**. Do not add an R step to that workflow; R work goes in
 the difference. PLAN item 6a has the decision.
 
 ```sh
-cmake -B build -DLEAF_ODELIA_INCLUDE_DIR=../odelia/inst/include
+cmake -B build -DPHYLLOPTIM_ODELIA_INCLUDE_DIR=../odelia/inst/include
 cmake --build build && ctest --test-dir build
 ```
 

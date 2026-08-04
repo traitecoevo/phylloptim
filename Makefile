@@ -70,7 +70,7 @@ test-cpp:
 ODELIA_INC ?= $(CURDIR)/../odelia/inst/include
 
 test-cmake:
-	cmake -B build-cmake -DLEAF_ODELIA_INCLUDE_DIR="$(ODELIA_INC)"
+	cmake -B build-cmake -DPHYLLOPTIM_ODELIA_INCLUDE_DIR="$(ODELIA_INC)"
 	cmake --build build-cmake
 	ctest --test-dir build-cmake --output-on-failure
 

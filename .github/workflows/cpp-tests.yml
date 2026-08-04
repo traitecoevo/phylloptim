@@ -120,8 +120,8 @@ jobs:
         run: |
           cmake -B build-cmake \
             -DCMAKE_CXX_COMPILER="$CXX" \
-            -DLEAF_ODELIA_INCLUDE_DIR="$GITHUB_WORKSPACE/odelia/inst/include" \
-            -DLEAF_BOOST_INCLUDE_DIR="${{ steps.boost.outputs.inc }}"
+            -DPHYLLOPTIM_ODELIA_INCLUDE_DIR="$GITHUB_WORKSPACE/odelia/inst/include" \
+            -DPHYLLOPTIM_BOOST_INCLUDE_DIR="${{ steps.boost.outputs.inc }}"
           cmake --build build-cmake -j 3
           ctest --test-dir build-cmake --output-on-failure
           cmake --install build-cmake --prefix "$GITHUB_WORKSPACE/cmake-prefix"
@@ -169,8 +169,8 @@ jobs:
           cmake -B build \
             -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/cmake-prefix" \
-            -DLEAF_ODELIA_INCLUDE_DIR="$GITHUB_WORKSPACE/odelia/inst/include" \
-            -DLEAF_BOOST_INCLUDE_DIR="${{ steps.boost.outputs.inc }}"
+            -DPHYLLOPTIM_ODELIA_INCLUDE_DIR="$GITHUB_WORKSPACE/odelia/inst/include" \
+            -DPHYLLOPTIM_BOOST_INCLUDE_DIR="${{ steps.boost.outputs.inc }}"
           cmake --build build
           ./build/consumer
 
