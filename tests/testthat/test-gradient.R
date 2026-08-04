@@ -182,6 +182,35 @@ test_that("a pinned optimum takes the fallback, and the composite would be wrong
   expect_equal(dry$gradient["stem_b", "A"], 4.6991, tolerance = 1e-3)
 })
 
+test_that("at a pinned optimum the BOUND's own trait carries the gradient", {
+  # The sharpest statement of why the fallback is not merely a fallback, and it
+  # is a stronger claim than "the composite is inaccurate there".
+  #
+  # `psi_crit` does not appear in the profit function at all -- it only sets the
+  # dry end of the feasible collar interval. So at an INTERIOR optimum it has no
+  # effect and its gradient is exactly zero, which is right. At a DRY-PINNED
+  # optimum it IS the binding constraint, so moving it moves the answer directly.
+  #
+  # ⚠️ The composite cannot see that, and not by a small margin: psi* enters
+  # `dprofit` nowhere, so M = 0, dpsi*/dtheta = 0, the direct term is 0, and the
+  # composite returns EXACTLY ZERO where the truth is 1.26. A silent zero is
+  # arguably a worse failure than the wet-pinned 3.5e+07 -- it tells an optimiser
+  # the parameter does nothing, and nothing about it looks wrong.
+  interior <- grid_gradient(2.0, pars = c("psi_crit", "root_psi_crit"))
+  expect_identical(interior$status, "interior")
+  expect_equal(interior$gradient["psi_crit", "A"], 0)
+  expect_equal(interior$gradient["root_psi_crit", "A"], 0)
+
+  pinned <- grid_gradient(4, vpd = 0.5, layers = 3L, pars = "psi_crit")
+  expect_identical(pinned$status, "pinned")
+  expect_identical(pinned$method, "fd")
+  # Arbitrated against a least-squares slope of the solved A over +-2% of
+  # psi_crit at n = 41, which gives 1.2605 (R^2 = 0.998; the fit is imperfect
+  # because the response has a kink in it, which is the whole point).
+  expect_equal(pinned$gradient["psi_crit", "A"], 1.2605, tolerance = 5e-3)
+  expect_gt(pinned$gradient["psi_crit", "collar"], 0)
+})
+
 test_that("a shut-down operating point reports no gradient and still differences", {
   # psi_soil = 6 is drier than psi_crit, so there is no optimisation to
   # differentiate: dprofit returns a sentinel zero rather than a derivative, and

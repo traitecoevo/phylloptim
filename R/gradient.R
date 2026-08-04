@@ -118,6 +118,15 @@ set_traits <- function(x, traits) {
 ##' differences the constrained answer. That is the one thing the crude method does
 ##' better, and `method` in the result says which was used.
 ##'
+##' It is better in a second way, which is sharper than accuracy. `psi_crit` does
+##' not appear in the profit function at all -- it only sets the dry end of the
+##' feasible collar interval -- so the composite necessarily returns **exactly
+##' zero** for it. At an interior optimum that is correct. At a dry-pinned optimum
+##' `psi_crit` *is* the binding constraint, the true `dA/dθ` is about `1.26`, and a
+##' zero is arguably a worse answer than a wildly wrong one: it tells an optimiser
+##' the parameter does nothing, and nothing about it looks suspicious. The
+##' difference of the solve gets it for free.
+##'
 ##' There is a second guard behind that one, found by measurement rather than
 ##' designed: a pinned optimum sits so close to its bound that the difference in
 ##' `psi` cannot be centred there without being clamped, and that is detected too.
@@ -334,8 +343,12 @@ leaf_gradient <- function(psi_soil,
   .gradient_outputs(l)
 }
 
-# The trait step. Relative, with an absolute floor so a trait sitting at zero
-# still gets differentiated rather than not perturbed at all.
+# The trait step: relative to the trait for values above 1, and plain `step` below
+# it. Not a relative step with an epsilon floor -- the floor is at 1, which is
+# deliberate. Traits here span `a` = 0.3 to `beta_R_V` = 9.4e3, and a strictly
+# relative step would perturb the small ones so little that the difference is
+# dominated by the solve's ~1e-09 noise. It also means a trait sitting at zero is
+# still perturbed rather than not differentiated at all.
 .gradient_step <- function(value, step) {
   max(abs(value), 1) * step
 }

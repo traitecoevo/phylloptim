@@ -147,6 +147,15 @@ of the whole solve, which respects the constraint by construction because it
 differences the constrained answer. That is the one thing the crude method does
 better, and `method` in the result says which was used.
 
+It is better in a second way, which is sharper than accuracy. `psi_crit` does
+not appear in the profit function at all -- it only sets the dry end of the
+feasible collar interval -- so the composite necessarily returns **exactly
+zero** for it. At an interior optimum that is correct. At a dry-pinned optimum
+`psi_crit` *is* the binding constraint, the true `dA/dθ` is about `1.26`, and a
+zero is arguably a worse answer than a wildly wrong one: it tells an optimiser
+the parameter does nothing, and nothing about it looks suspicious. The
+difference of the solve gets it for free.
+
 There is a second guard behind that one, found by measurement rather than
 designed: a pinned optimum sits so close to its bound that the difference in
 `psi` cannot be centred there without being clamped, and that is detected too.
