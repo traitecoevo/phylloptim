@@ -31,13 +31,20 @@ and O2 alone, so "change the trait, then set the drivers again" silently does no
 recompute it. Call `set_drivers()` after `set_traits()`; the object is returned to
 its just-constructed state deliberately.
 
-⚠️ **On speed, against expectations.** This was planned as a 10× speedup and is not
-one: measured per parameter, the gradient composite is **6% slower** than
-differencing the solve, because in the R layer a call costs ~1.8 µs against the
-0.26 µs of C++ work it wraps. What *is* worth 4× at a single operating point is
-`set_traits()` — reusing the object instead of rebuilding it — and that accrues to
-either method. PLAN 11e has the full retraction. **The reason to use
-`leaf_gradient()` is exactness and the active-set classification, not speed.**
+⚠️ **On speed, and the answer depends on which side of the R boundary you are.**
+From R this was planned as a 10× speedup and is not one: per parameter the composite
+is **6% slower** than differencing the solve, because an R call costs ~1.8 µs against
+the 0.26 µs of C++ work it wraps. What *is* worth 4× from R is `set_traits()` —
+reusing the object rather than rebuilding it — and that accrues to either method. So
+**from R, use `leaf_gradient()` for exactness and the active-set classification, not
+for speed.**
+
+In C++ the picture is different, and it is the one a `LinkingTo` consumer gets:
+there the composite wins **4.4×** on the eleven traits that do not touch a
+vulnerability spline, and only **1.15×** on `stem_b`, `stem_c`, `root_b` and
+`root_c`, where rebuilding the spline (21.8 µs) costs more than three solves.
+`make -C tests/cpp bench_gradient` reproduces both arms. PLAN 11e has the numbers
+and the retraction they corrected.
 
 ## The AD replicas are gone, and the model's precision floor moved (#4, PLAN 11b)
 
