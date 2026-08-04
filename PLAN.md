@@ -24,7 +24,7 @@ this file keeps the reasoning behind each one.
 | **3** | **The plant-side integration — issue #9, closed.** plant's `feature/consume-leaf-package` (plant #591) compiles and passes against this package's `master`. Its survey was accurate about the work and wrong about the risk in three ways, all recorded under item 3. |
 | **6d stage 3** | **`SinglePotential` is reachable from R — issue #32.** `leaf_supply_single()` / `leaf_supply_multilayer()`. The 7b-iii footgun is designed out: no settable tag at any level, both entry points reconfigure completely, and the fields are bound read-only. |
 | **6** | **The R interface — issue #5.** `leaf::Leaf` is callable from R: generated RcppR6 bindings tied back to the golden file bit-exactly, then a hand-written surface over them — `leaf_solve()` (drivers in, operating point out, vectorised), `leaf_traits()` / `leaf_control()` splitting the constructor's 19 arguments, `leaf_model()` / `set_drivers()` / `operating_point()`, and `vignette("leaf")`. λ and `g1_eff` are exposed for the first time. The model stays R-free and gained a CMake package, so it is still linkable from C++ or Python. **#32** landed on top of it. **#33** and **#34** are split out and coupled with plant #591. Reasoning in item 6; #31 was found on the way. |
-| **11a, 11b** | **The collar solve now solves its own first-order condition** (PR #36, `d22907a`). Golden section is gone: `dprofit == 0` by safeguarded TOMS748, so the argmax is resolved to solver precision instead of `GSS_tol_abs` — residual `\|dprofit\|` improved on **240/240** feasible rows, median 7.8e-04 → **5.6e-15**. With it: `psi_stem_to_ci` tightened 1e-7 → 1e-10 (**335×** closer to a converged solve, +3.4%), the `namespace detail` AD replicas **deleted** in favour of scalar-generic member templates the model and its derivative both instantiate, and `dprofit_droot_collar_psi` given a `bool* feasible` out-parameter. **21.7% faster** overall (2.75 vs 3.51 µs/solve). Deliberately moved results — worst 1.5e-03, split by cause under 11a/11b. Hazard 3 **improved** ~1000×. What remains of item 11 is `Leaf<T>`, and it needs deciding rather than doing. |
+| **11a, 11b** | **The collar solve now solves its own first-order condition** (PR #36, `d22907a`). Golden section is gone: `dprofit == 0` by safeguarded TOMS748, so the argmax is resolved to solver precision instead of `GSS_tol_abs` — residual `\|dprofit\|` improved on **240/240** feasible rows, median 7.8e-04 → **5.6e-15**. With it: `psi_stem_to_ci` tightened 1e-7 → 1e-10 (**335×** closer to a converged solve, +3.4%), the `namespace detail` AD replicas **deleted** in favour of scalar-generic member templates the model and its derivative both instantiate, and `dprofit_droot_collar_psi` given a `bool* feasible` out-parameter. **21.7% faster** overall (2.75 vs 3.51 µs/solve). Deliberately moved results — worst 1.5e-03, split by cause under 11a/11b. Hazard 3 **improved** ~1000×. ⚠️ Note the kernels are templated on their **argument**, so this delivered exact derivatives w.r.t. **state**, not w.r.t. traits — trait gradients are still open under #4. |
 
 **Everything above is on `master`.** `feature/api-cleanup` merged as
 [#15](https://github.com/traitecoevo/leaf_cpp/pull/15) (`26ab841`) on 2026-08-03,
@@ -100,10 +100,10 @@ code rather than of the merge:
 | issue | item | what | note |
 |---|---|---|---|
 | [#3](https://github.com/traitecoevo/leaf_cpp/issues/3) | 7a | Make λ(state) pluggable | **unblocked** — #2 is done. Measure the dispatch separately: the cost core is fully inlined where the supply path was not, so 7b's "dispatch is free" result does **not** transfer |
-| [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11 | Template `Leaf` on its scalar type | **mostly done — 11a and 11b landed** (#36). The solver, the tolerance and the replicas are all dealt with; see the Done table. **What is left is `Leaf<T>` alone, and it needs a decision, not an implementation:** the kernels 11b added already supply `∂A/∂θ` by seeding a trait, so the only remaining justification is plant #537's cut-point rule (letting an outer `xad::adj` pass traverse the class). Whether that is needed depends on what #6's fit wants — so **do #6 first**, which reverses the original ordering |
+| [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11 | Template `Leaf` on its scalar type | **11a and 11b landed** (#36): the solver, the tolerance and the replica drift are dealt with. **Trait gradients are NOT — 11b's kernels are templated on their argument, so `T` is the state variable and every trait is still a `double` member that cannot carry a tangent.** (This row previously claimed otherwise; retracted under 11b.) So the real work remains, and the choice is `Leaf<T>` against parameter-explicit kernel overloads plus IFT — the second looks much cheaper and 11a is what made it viable. Settle it in writing first |
 | [#33](https://github.com/traitecoevo/leaf_cpp/issues/33) | 6d | Take resistances, not root carbon | #5 stage 2b, **blocked on plant #591**. Before #34 |
 | [#34](https://github.com/traitecoevo/leaf_cpp/issues/34) | 6d | Delete plant's `Leaf` bindings | #5 stage 4, **blocked on plant #591**. The hazard-7 payoff, and the only stage that can break plant |
-| [#6](https://github.com/traitecoevo/leaf_cpp/issues/6) | 12 | Calibration vignette, then inversion | **UNBLOCKED, and now the next thing to do.** The gate was 11a rather than all of #4, and #36 landed it: a central difference gives ~4 correct digits at any relative step from 1e-8 to 1e-2, and the 11b kernels give exact trait partials by seeding. AD remains the vignette's headline (AD *against* FD), so #4's remainder improves this rather than gating it — and doing this first is what tells #4 whether `Leaf<T>` is needed at all. Note the achievable precision of a calibration target is **~1e-9**, set by `psi_stem_to_ci` |
+| [#6](https://github.com/traitecoevo/leaf_cpp/issues/6) | 12 | Calibration vignette, then inversion | **Can start, cannot finish.** #36 made FD usable — ~4 correct digits at any relative step from 1e-8 to 1e-2, where it used to return zero or the wrong sign — so the fitting machinery and the data work are unblocked. But **trait AD still does not exist** (see #4), and item 12's own rule is that an FD-only calibration is throwaway because the headline result *is* the AD-versus-FD comparison. So #4 still gates the deliverable. Achievable precision of a target is **~1e-9**, set by `psi_stem_to_ci` |
 | [#7](https://github.com/traitecoevo/leaf_cpp/issues/7) | 13 | Energy balance, full cut | leaf-to-air VPD is the cheap win; free convection is not worth it |
 | [#28](https://github.com/traitecoevo/leaf_cpp/issues/28) | 13 | Temperature-dependent outgoing longwave in the Penman-Monteith Rn | from plant #581 / #567 review |
 | [#31](https://github.com/traitecoevo/leaf_cpp/issues/31) | 6 | `profit_psi_stem_TF` returns a plausible number below `psi_upstream` | found writing the stage 2 vignette. Negative conductance, and profit is **discontinuous** at the boundary. Unreachable from plant's solve, which is why it survived — the first thing an R user does is plot the profit function |
@@ -2193,20 +2193,65 @@ follow, and the third is the one that matters for item 12:
    unification is a maintainability and correctness-of-construction fix, not an
    accuracy fix**, and the PR says so.
 
-#### What is left: `Leaf<T>`, and it needs deciding rather than doing
+#### What is left — and ⚠️ a RETRACTION, because this sub-item first got it wrong
 
-The justification has narrowed to plant **#537's cut-point rule** — composing with
-an outer AD pass — rather than "trait gradients do not work otherwise", because
-after 11a a central difference gives ~4 correct digits at any relative step from
-1e-8 to 1e-2. And the kernels above already deliver most of what item 11 was
-originally *for*: the duplication is gone, and they are templated, so `∂A/∂θ` is
-reachable by seeding a trait through them without templating the class.
+**This section previously claimed the kernels "already deliver `∂A/∂θ` … by seeding
+a trait through them without templating the class", and concluded that what remained
+was a decision rather than an implementation. That is false.** Checked at the
+source: the kernels are templated on their **argument** only, so `T` is the type of
+the *state variable* (`ci`, `psi_stem`) and never of a trait. Every trait and every
+derived parameter — `vcmax_25`, `vcmax_`, `stem_b`, `beta2`,
+`electron_transport_`, `km_`, `gamma_` — is stored as a plain `double` member. A
+`double` cannot carry a tangent, so **no trait can be seeded through these kernels
+at all.** There is no templated member storage anywhere in the class.
 
-So the open question is narrower than item 11 states: **does anything need an
-`xad::adj` pass to traverse the whole `Leaf`, or is seeding the kernels enough?**
-That depends on what item 12's fit actually wants, which argues for doing #6 first
-and letting it say. A reversal of the original ordering, and worth a deliberate
-decision rather than drift.
+What 11b actually delivered, stated precisely so the next person does not have to
+re-derive it:
+
+- **One body for the model and its derivative**, so they cannot drift apart. Real,
+  and verified bit-exactly.
+- **Trustworthy exact derivatives with respect to STATE** — `∂A/∂ci`,
+  `∂cost/∂ψ_stem`, and `dprofit/dψ_collar` composed from them. These already
+  existed; what changed is that they are now derivatives of the function the model
+  evaluates.
+- **A structural prerequisite for `Leaf<T>`**: the algebra is now scalar-generic, so
+  templating the class no longer requires touching the algebra. That is a real step,
+  but it is a step and not the thing.
+
+What it did **not** deliver: **trait partials.** Those need θ to be an active type.
+
+#### So the ordering question reopens, and item 12's original answer stands
+
+The "do #6 first" recommendation this section used to make was built on the false
+premise above. Correcting the premise restores what item 12 always said: **a
+calibration built on finite-difference trait gradients is throwaway work, because
+the vignette's headline result *is* the AD-versus-FD comparison.** #6 can start —
+FD gives ~4 digits now, which it did not before 11a — but it cannot *finish* without
+trait AD. So this item still gates #6's deliverable, just not its beginning.
+
+#### The actual design question, which is smaller than `Leaf<T>`
+
+Two routes, and they should be measured rather than argued:
+
+- **`Leaf<T>`** — template the whole class. Reaches everything, and satisfies plant
+  #537's cut-point rule outright. But it pulls in the supply path
+  (`MultiLayerRoots`, `SinglePotential`), the root-finders, and the R bindings
+  (`using Leaf = Leaf_<double>;` here *and* in plant), and it means differentiating
+  *through* the inner root-finds — which #4 comment 3 warns against.
+- **Parameter-explicit kernel overloads plus IFT** — give the kernels an overload
+  taking the traits as `T` rather than reading them as `double` members, then
+  compose with the implicit function theorem at the converged points. **This is
+  close to what #4 comment 1 proposed and I rejected**, on the grounds that
+  threading seven or eight parameters invites a transposed pair. That objection was
+  right for the *deduplication* job and is the wrong trade for *this* job, because a
+  trait has to be an independent variable to be differentiated w.r.t. at all. And
+  11a is what makes it viable: with the argmax resolved to solver precision, the
+  outer sensitivity comes from IFT on a first-order condition that genuinely holds,
+  rather than from a staircase.
+
+The second looks much cheaper and is not obviously worse. **Settle it in writing
+first, the way 6a and 11a were settled**, and note that the composite needs a mixed
+second partial `∂²profit/∂ψ∂θ`, which is the piece most likely to decide the design.
 
 #### Still unmeasured
 
@@ -2244,11 +2289,12 @@ instruction below still holds, and it is more likely to bite than it was.
 **The honest state of it.** The claim is not yet demonstrated, and it is not yet
 fully true:
 
-- AD currently differentiates with respect to the **collar potential only**.
-  Calibration needs derivatives with respect to **traits** — `vcmax_25`, `b`, `c`,
-  `g1_TF24`, `beta2`, the root parameters. Those do not exist. Item 8 is the
-  enabler: a `Leaf<T>` seeded on a trait rather than on `psi_stem` gives them
-  directly.
+- AD currently differentiates with respect to **state only** — the collar
+  potential, `ci`, `psi_stem`. Calibration needs derivatives with respect to
+  **traits** — `vcmax_25`, `stem_b`, `stem_c`, `beta2`, the root parameters. Those
+  **still do not exist**, and this remains true after 11b: its kernels are templated
+  on their *argument*, so a trait cannot be seeded through them (retraction under
+  11b). **Item 11 is the enabler**, and the two candidate routes are set out there.
 - There is no worked example. Until there is, this is a plausible claim about an
   architecture rather than a capability anyone can check.
 
