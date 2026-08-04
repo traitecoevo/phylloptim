@@ -91,14 +91,19 @@ jobs:
             BH_INC="${{ steps.boost.outputs.inc }}" \
             GOLDEN_ARGS="${{ steps.golden.outputs.args }}"
 
-      # Compile the benchmark but do not run it. It is a timing harness, so it
-      # would be a flaky gate on a shared runner; building it keeps it from
-      # rotting when the headers change.
-      - name: Build the benchmark (compile only)
+      # Compile the benchmarks but do not run them. They are timing harnesses, so
+      # they would be flaky gates on a shared runner; building them keeps them
+      # from rotting when the headers change.
+      #
+      # ⚠️ Name every harness here. This step used to say `bench_solve`, which is
+      # a target and not the `bench` group -- so adding bench_gradient.cpp without
+      # touching this file would have left it uncompiled by CI, which is how #25
+      # first went red with a green local run.
+      - name: Build the benchmarks (compile only)
         env:
           CXX: ${{ matrix.cxx }}
         run: |
-          make -C tests/cpp bench_solve \
+          make -C tests/cpp bench_solve bench_gradient \
             CXX="$CXX" \
             ODELIA_INC="$GITHUB_WORKSPACE/odelia/inst/include" \
             BH_INC="${{ steps.boost.outputs.inc }}"

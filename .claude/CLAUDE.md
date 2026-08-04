@@ -52,6 +52,9 @@ R/gradient.R                   set_traits() and leaf_gradient() -- trait
 tests/cpp/                     plain-C++ suite, no R, no framework
 tests/cpp/golden/              bit-exact regression baseline, 288 operating points
 tests/cpp/bench_solve.cpp      timing harness for the collar solve (hazard 5)
+tests/cpp/bench_gradient.cpp   timing harness for a TRAIT GRADIENT: the IFT
+                               composite against differencing the solve, with
+                               no R in the way. PLAN 11e
 tests/testthat/                the R layer's tie-back to the golden points
 tests/validate/                R scripts comparing against plant (needs R)
 CMakeLists.txt                 the no-R build: C++ and Python consumers, and the
@@ -63,7 +66,7 @@ CMakeLists.txt                 the no-R build: C++ and Python consumers, and the
 ```sh
 make -C tests/cpp            # builds and runs both suites
 make -C tests/cpp golden     # regenerate the golden file -- see the warning below
-make -C tests/cpp bench      # time the collar solve (not part of `make all`)
+make -C tests/cpp bench      # time the solve AND a trait gradient (not in `make all`)
 
 # compare the golden file with a tolerance instead of bit-exactly. Correct on a
 # platform other than macOS/arm64, wrong as a way to silence a real diff.
@@ -71,7 +74,7 @@ make -C tests/cpp GOLDEN_ARGS=--cross-platform
 ```
 
 ⚠️ **`bench` is NOT part of `make all`, and CI builds it.** So `make -C tests/cpp`
-passing locally does not mean CI will: a rename that misses `bench_solve.cpp` gives a
+passing locally does not mean CI will: a rename that misses a bench source gives a
 green local run and three red CI jobs. That is exactly how #25 first failed CI, with
 `191 checks, 0 failures` and a bit-identical golden file sitting above the error.
 **Before pushing, build everything CI builds:**
@@ -581,11 +584,22 @@ refuse.
    purpose: on a cold object the cache would miss anyway and the trap would not
    fire.
 
-   **And measure before optimising a trait loop.** Constructing a `Leaf` from R
-   costs **204 µs** — 73 solves — of which only ~32 µs is the two splines and the
-   rest is R-side object construction over ~60 active bindings. That ratio, not the
-   choice of gradient formula, is what dominates a finite-difference gradient in R;
-   PLAN 11e has the retraction it caused.
+   **And measure before optimising a trait loop, in the layer you actually care
+   about.** Two costs dominate, and which one bites depends on where you are:
+
+   - **From R**, constructing a `Leaf` costs **204 µs** — 33 solves — of which only
+     ~32 µs is the two splines; the rest is R-side object construction over ~60
+     active bindings. That, not the choice of gradient formula, is what dominates a
+     finite-difference gradient in R. `set_traits` exists to avoid it.
+   - **In C++**, `set_traits` costs **0.02 µs** normally and **21.8 µs** when it
+     rebuilds a vulnerability curve — **3.5× a whole solve**. So a gradient loop
+     over `stem_b`, `stem_c`, `root_b` or `root_c` is dominated by spline
+     reconstruction, and no amount of cleverness in the derivative touches it.
+
+   `make -C tests/cpp bench_gradient` measures both arms. ⚠️ **Do not carry the R
+   conclusion into C++**: PLAN 11e retracted a projected speedup on an R
+   measurement and then had to un-retract half of it, because with the boundary
+   removed the same composite wins 4.4× on the eleven traits that touch no spline.
 
 
 ## Validating against plant
