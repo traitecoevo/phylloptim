@@ -503,6 +503,74 @@ void test_gradient_reports_feasibility() {
      "and the sentinel is still 0.0 for a caller that does not ask");
 }
 
+// PLAN 11b: the AD derivative and the forward model are now instantiations of ONE
+// body, so they cannot be derivatives of different functions. That was not true
+// before: `detail::assim_colimited_ad` associated the electron-limited term
+// left-to-right where `assim_electron_limited` divides the bracket first, and used
+// `s*s` where `assim_colimited` uses `pow(s, 2)`.
+//
+// The check that bites is the DERIVATIVE against a central difference of the
+// `double` function, because that is precisely the identity the drift broke. Note a
+// weaker test would have passed throughout: the drifted replica was still a
+// perfectly good derivative of *itself*, and agreed with the real function to
+// ~1e-16 in VALUE. It is the derivative-of-the-same-function property that failed.
+void test_ad_kernels_are_the_model_not_a_mirror() {
+  printf("AD differentiates the model's own algebra, not a mirror of it\n");
+  Drivers d;
+  leaf::Leaf l = make_leaf(d, {2.0}, {1.0});
+  l.find_root_collar_psi();
+  using AD = xad::fwd<double>::active_type;
+
+  // 1. The kernels and the double entry points are the same code, so they must
+  // agree BIT-EXACTLY, not merely closely. This is what "one body" means.
+  for (double ci : {5.0, 12.0, 20.0, 29.26, 35.0, 39.0}) {
+    ok(l.assim_colimited_kernel(ci) == l.assim_colimited(ci),
+       "assim_colimited_kernel<double> is assim_colimited at ci=" +
+           std::to_string(ci));
+    ok(l.assim_rubisco_limited_kernel(ci) == l.assim_rubisco_limited(ci),
+       "rubisco kernel matches bit-exactly at ci=" + std::to_string(ci));
+    ok(l.assim_electron_limited_kernel(ci) == l.assim_electron_limited(ci),
+       "electron kernel matches bit-exactly at ci=" + std::to_string(ci));
+  }
+  for (double p : {0.5, 2.0, 3.5949, 5.0}) {
+    ok(l.hydraulic_cost_TF_kernel(p) == l.hydraulic_cost_TF(p),
+       "hydraulic_cost_TF_kernel<double> is hydraulic_cost_TF at psi=" +
+           std::to_string(p));
+  }
+
+  // 2. The AD derivative of the kernel against a central difference of the DOUBLE
+  // function. Richardson-extrapolated, so the FD reference is good to ~1e-10 and
+  // the tolerance is testing the derivative rather than the difference quotient.
+  const auto richardson = [](auto f, double x, double h) {
+    const double d1 = (f(x + h) - f(x - h)) / (2 * h);
+    const double d2 = (f(x + h / 2) - f(x - h / 2)) / h;
+    return (4 * d2 - d1) / 3;
+  };
+  for (double ci : {12.0, 20.0, 29.26, 35.0}) {
+    AD a = ci; xad::derivative(a) = 1.0;
+    const double ad = xad::derivative(l.assim_colimited_kernel(a));
+    const double fd =
+        richardson([&](double x) { return l.assim_colimited(x); }, ci, 1e-4);
+    near(ad, fd, 1e-8, "dA/dci: AD vs Richardson FD at ci=" + std::to_string(ci));
+  }
+  for (double p : {0.5, 2.0, 3.5949, 5.0}) {
+    AD a = p; xad::derivative(a) = 1.0;
+    const double ad = xad::derivative(l.hydraulic_cost_TF_kernel(a));
+    const double fd =
+        richardson([&](double x) { return l.hydraulic_cost_TF_kernel(x); }, p, 1e-4);
+    near(ad, fd, 1e-8, "dcost/dpsi: AD vs Richardson FD at psi=" +
+                           std::to_string(p));
+  }
+
+  // 3. The cost kernel must be PURE -- an AD probe must not scribble the cached
+  // hydraulic_cost_, or a gradient evaluation would corrupt reported model state.
+  const double cached = l.hydraulic_cost_TF(3.0);
+  AD probe = 4.5; xad::derivative(probe) = 1.0;
+  (void)l.hydraulic_cost_TF_kernel(probe);
+  ok(l.hydraulic_cost_ == cached,
+     "an AD probe of the cost kernel leaves hydraulic_cost_ untouched");
+}
+
 // PLAN 11a: the collar solve now solves its own first-order condition, so the
 // check that bites is the RESIDUAL at the returned point, not the returned value.
 // Measured over the golden grid: 240 of 240 feasible rows improved their residual
@@ -1363,6 +1431,7 @@ int main() {
   test_gradient_needs_no_prior_solve();
   test_gradient_is_zero_in_reversed_gradient_state();
   test_gradient_reports_feasibility();
+  test_ad_kernels_are_the_model_not_a_mirror();
   test_collar_solve_satisfies_its_own_first_order_condition();
   test_collar_solve_handles_a_pinned_optimum();
   test_collar_argmax_is_smooth_in_a_trait();
