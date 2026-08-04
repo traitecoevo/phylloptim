@@ -17,11 +17,19 @@
 ^leaf_.+\.tar\.gz$
 ^.*\.Rcheck$
 
-# The developer harness, deliberately not shipped. R CMD check scans every
+# The full AGPL text. R CMD check --as-cran flags it as a non-standard top-level
+# file, because a LICENSE file is only expected when DESCRIPTION says
+# "License: ... + file LICENSE"; ours names AGPL (>= 3) outright, so R already
+# knows the terms and the copy here is for GitHub's benefit, not R's.
+^LICENSE\.md$
+
+# The developer harnesses, deliberately not shipped. R CMD check scans every
 # Makefile in the tarball and warns about GNU extensions, and the sanctioned way
 # to silence that -- SystemRequirements: GNU make -- would be a false statement
 # about this package: installing it needs no make at all. tests/cpp.R compiles
 # the two sources directly instead. See the long note at the top of that file.
+# The top-level Makefile is developer entry points only, for the same reason.
+^Makefile$
 ^tests/cpp/Makefile$
 
 # Built by make -C tests/cpp. The sources and the golden file must ship -- the
@@ -34,3 +42,14 @@
 # Validation scripts, not tests: they need an installed plant and take minutes.
 # See the header comment in each.
 ^tests/validate$
+
+# The CMake build, which exists so that "the model does not need R" is runnable
+# rather than merely claimed (see README, "Use from C++"). It is for consumers
+# who are not installing this as an R package, so it has no business in the
+# tarball -- and R CMD check would flag the top-level CMakeLists.txt as a
+# non-standard file if it were there.
+^CMakeLists\.txt$
+^cmake$
+^build.*$
+^_deps$
+

@@ -1,0 +1,72 @@
+name: R-CMD-check
+
+# The R layer's job. It is deliberately SEPARATE from cpp-tests.yml rather than a
+# step inside it, and that separation is load-bearing: cpp-tests.yml runs on
+# machines with no R, which is the only thing that can demonstrate that
+# inst/include/ is usable without R (PLAN item 6a). This job installs R, so it
+# could never notice an Rcpp include creeping into a model header. Two workflows,
+# two different claims.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  R-CMD-check:
+    runs-on: ${{ matrix.config.os }}
+    name: ${{ matrix.config.os }} (${{ matrix.config.r }})
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - { os: macos-latest, r: release }
+          - { os: ubuntu-latest, r: release }
+
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      R_KEEP_PKG_SOURCE: yes
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: ${{ matrix.config.r }}
+          use-public-rspm: true
+
+      # RcppR6 is deliberately NOT a declared dependency -- it is a developer
+      # tool whose output is committed, so nobody installing this package needs
+      # it (PLAN item 6c). It is installed here, and only here, for the
+      # regeneration check below.
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: |
+            any::rcmdcheck
+            github::richfitz/RcppR6
+          needs: check
+
+      # The generated glue is committed, so a check runs without RcppR6. But a
+      # stale commit of it is invisible to every other check here -- the build
+      # would happily compile bindings that no longer match the YAML. Regenerating
+      # and diffing is the only thing that catches an edit to
+      # inst/RcppR6_classes.yml that was never run through the generator.
+      - name: Check the generated bindings are current
+        run: |
+          Rscript -e 'library(methods); RcppR6::RcppR6()'
+          if ! git diff --exit-code -- R/ src/ inst/include/leaf/RcppR6_*.hpp; then
+            echo "::error::Generated RcppR6 files are out of date." \
+                 "Run Rscript -e 'RcppR6::RcppR6()' and commit the result."
+            exit 1
+          fi
+
+      - uses: r-lib/actions/check-r-package@v2
+        with:
+          upload-snapshots: true
+          # The C++ suite runs inside R CMD check too, via tests/cpp.R, compiled
+          # with R's own configured compiler against the INSTALLED headers -- which
+          # is what a LinkingTo consumer gets, and is a different thing from what
+          # cpp-tests.yml builds.
+          args: 'c("--no-manual", "--as-cran")'

@@ -19,7 +19,11 @@ this file keeps the reasoning behind each one.
 | **5** | **Decided: leave XAD as it is.** It arrives via odelia, both packages want the same version, and only forward mode is used so nothing needs linking. No action. |
 | **7b** | The supply path is swappable. All four stages of 7b-iii merged (#17 → `10115e1`, #18 → `cfd5dcf`): `MultiLayerRoots`, the resistance interface, `SinglePotential`, and an enum-tag dispatch that measured **free**. Issue #2 closed; #3 and the multi-layer λ are unblocked. |
 | **2** | The shutdown-state leak, **fixed and merged** (#15) — and plant **#577 too**, together with two more stale-state exits ported from plant `develop` (#585). See item 2; the reconciliation with plant reversed direction twice. |
-| **4** | **The include graph is R-free.** The `RcppCommon` shim is deleted (#19) and odelia is pinned at `>= 0.2.0`, its first release with an R-free core (#22). The package is now plain C++ outright. |
+| **4** | **The include graph is R-free.** The `RcppCommon` shim is deleted (#19) and odelia is pinned at `>= 0.2.0`, its first release with an R-free core (#22). ⚠️ Restated by item 6a once the R layer landed: the guarantee is *directional* — nothing reachable from `<leaf.hpp>` includes Rcpp — not "no Rcpp under `inst/include/`", which the generated `RcppR6_*.hpp` now break. What enforces it is `cpp-tests.yml` building on runners with no R. |
+| **10a tail** | **Signed-vs-magnitude potentials — issue #8, closed.** Answered by **#25**: remove one convention rather than type both. #23 typed them (`Psi`/`AbsPsi`), worked, was bit-identical, and was **closed unmerged** — it described the two-convention model instead of removing one, and no type covers `dE_from_soil_dpsi_collar`, which is a derivative and therefore neither. Do not reintroduce the types. |
+| **3** | **The plant-side integration — issue #9, closed.** plant's `feature/consume-leaf-package` (plant #591) compiles and passes against this package's `master`. Its survey was accurate about the work and wrong about the risk in three ways, all recorded under item 3. |
+| **6d stage 3** | **`SinglePotential` is reachable from R — issue #32.** `leaf_supply_single()` / `leaf_supply_multilayer()`. The 7b-iii footgun is designed out: no settable tag at any level, both entry points reconfigure completely, and the fields are bound read-only. |
+| **6** | **The R interface — issue #5.** `leaf::Leaf` is callable from R: generated RcppR6 bindings tied back to the golden file bit-exactly, then a hand-written surface over them — `leaf_solve()` (drivers in, operating point out, vectorised), `leaf_traits()` / `leaf_control()` splitting the constructor's 19 arguments, `leaf_model()` / `set_drivers()` / `operating_point()`, and `vignette("leaf")`. λ and `g1_eff` are exposed for the first time. The model stays R-free and gained a CMake package, so it is still linkable from C++ or Python. **#32** landed on top of it. **#33** and **#34** are split out and coupled with plant #591. Reasoning in item 6; #31 was found on the way. |
 
 **Everything above is on `master`.** `feature/api-cleanup` merged as
 [#15](https://github.com/traitecoevo/leaf_cpp/pull/15) (`26ab841`) on 2026-08-03,
@@ -75,11 +79,12 @@ code rather than of the merge:
 |---|---|---|---|
 | [#3](https://github.com/traitecoevo/leaf_cpp/issues/3) | 7a | Make λ(state) pluggable | **unblocked** — #2 is done. Measure the dispatch separately: the cost core is fully inlined where the supply path was not, so 7b's "dispatch is free" result does **not** transfer |
 | [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11 | Template `Leaf` on its scalar type | deletes the hand-maintained AD replicas |
-| [#5](https://github.com/traitecoevo/leaf_cpp/issues/5) | 6 | R interface (RcppR6) | absorbs the `Control` struct and the dropped-field cleanup |
+| [#33](https://github.com/traitecoevo/leaf_cpp/issues/33) | 6d | Take resistances, not root carbon | #5 stage 2b, **blocked on plant #591**. Before #34 |
+| [#34](https://github.com/traitecoevo/leaf_cpp/issues/34) | 6d | Delete plant's `Leaf` bindings | #5 stage 4, **blocked on plant #591**. The hazard-7 payoff, and the only stage that can break plant |
 | [#6](https://github.com/traitecoevo/leaf_cpp/issues/6) | 12 | Calibration vignette, then inversion | needs #4 for trait gradients |
 | [#7](https://github.com/traitecoevo/leaf_cpp/issues/7) | 13 | Energy balance, full cut | leaf-to-air VPD is the cheap win; free convection is not worth it |
-| ~~[#8](https://github.com/traitecoevo/leaf_cpp/issues/8)~~ | 10a | Signed-vs-magnitude potentials in the type | **answered by [#25](https://github.com/traitecoevo/leaf_cpp/issues/25): remove one convention rather than type both.** #23 typed them (`Psi`/`AbsPsi`), worked, and was closed unmerged — halfway is halfway |
-| [#9](https://github.com/traitecoevo/leaf_cpp/issues/9) | 3 | Finish the plant-side integration | decisions + one unchecked consumer, and the catch-up: plant `develop` moved past the extraction point, so **its leaf fixes come to us** (plant #585, ported) before the swap can be validated. The validation itself needs redoing after #15 |
+| [#28](https://github.com/traitecoevo/leaf_cpp/issues/28) | 13 | Temperature-dependent outgoing longwave in the Penman-Monteith Rn | from plant #581 / #567 review |
+| [#31](https://github.com/traitecoevo/leaf_cpp/issues/31) | 6 | `profit_psi_stem_TF` returns a plausible number below `psi_upstream` | found writing the stage 2 vignette. Negative conductance, and profit is **discontinuous** at the boundary. Unreachable from plant's solve, which is why it survived — the first thing an R user does is plot the profit function |
 | [#1](https://github.com/traitecoevo/leaf_cpp/issues/1) | 14 | Decide the package name | publication framing is item 14 below |
 
 ---
@@ -419,6 +424,60 @@ File this against plant as well as here.
 
 ## 3. Have plant consume this package
 
+**The branch is built and passing (plant #591, open), and its survey — the "8
+hand edits plus a regeneration" below — was accurate about the *work* and wrong
+about the *risk* in three ways. Each cost real time, and none was predicted:**
+
+1. **A third compile break, in a dependency, presenting as eight errors inside
+   somebody else's headers.** plant needed odelia at `master`, not the
+   `>= 0.2.0` its DESCRIPTION asked for: plant #585 made `Patch::ode_rates`
+   non-const while odelia 0.2.0's `r_ode_rates` took the system by `const&`.
+   plant's `develop` did not compile against released odelia either, so the swap
+   did not cause it — but nothing in plant named which odelia it wanted, so it
+   arrived as template instantiation errors pointing nowhere near the cause.
+   Filed traitecoevo/odelia#48; **resolved** by odelia 0.2.1 (#49) and leaf 0.1.0
+   (#29), and plant now pins both ways — a `LinkingTo (>= x)` floor, which R
+   checks at install, plus `Remotes: ...@sha`, which fixes what gets fetched.
+   Neither subsumes the other, and the version has to be bumped *first* or the
+   floor means nothing: leaf sat at 0.0.1 across #15, #24, #25 and #26, so
+   `>= 0.0.1` was satisfied by a version plant cannot compile against.
+2. **The pressure fix is NOT inert for plant, and it dominates everything else.**
+   The survey said 10c "should be inert at 101.3 kPa, and plant's tests all use
+   that". The *tests* do; `TF24_Environment` sets the **`atm_kpa` driver to
+   100.5**, which nothing had checked. Measured on the one-species SCM scenario,
+   deriving the ppm→Pa conversion from `atm_kpa` moves offspring production
+   **+2.4%**, against **+0.10%** for the entire rest of the swap combined. TF24's
+   `scientific_version` went 4 → 5 for it. **This package's golden grid evaluates
+   at 101.3 and is blind to it by construction** — a standing reminder that the
+   golden file bounds *this* package's behaviour, not plant's.
+3. **"The `area_leaf` division cancels — do not compute it" is right for plant's
+   C++ and a trap for its tests.** In plant the cancellation is exact
+   (`mass_root()` is `pars.a_r1 * area_leaf`, so per-leaf-area carbon is just
+   `root_mass_carbon_scale * pars.a_r1`). But `test-leaf.r` passed absolute
+   carbon and `area_leaf` as separate arguments, and dropping the argument
+   without dividing leaves a root system 20× too weak at `area_leaf = 0.05`. It
+   compiles, runs, and moved the critical-demand collar potential from −0.685 to
+   −2.57 MPa **while leaving the zero-uptake collar untouched** — that one is
+   scale-invariant, so of two regression guards sitting side by side only one
+   fired.
+
+Two things from that work worth reusing:
+
+- **The verification that licenses attributing failures to the swap.**
+  `origin/develop`, built and tested in a worktree against the *same* installed
+  dependencies, passes its own suite with zero failures. Without that control,
+  every failure on the branch is ambiguous between the swap and the environment.
+  The dry scenario gateway (`PLANT_RUN_SCENARIOS=1`) also passes against
+  develop's blessed baseline, so despite the +2.4% every scenario's
+  success/failure classification is unchanged.
+- **"Checked — there is nothing upstream to port" has a shelf life of days on an
+  actively developed sibling.** Both this document and the handoff notes were
+  caught by it within 24 hours: plant merged #585 into `develop`, which fixed
+  #577 *and* two further stale-state exits, and #26 ported all of it here. The
+  check is `git log <base>...origin/develop -- <the files we forked>`, and it has
+  to be re-run before *acting* on the conclusion, not just before writing it
+  down.
+
 Branch `feature/consume-leaf-package` in plant does this: delete
 `inst/include/plant/leaf_model.h` and `src/leaf_model.cpp`, add
 `LinkingTo: leaf`, and provide a compatibility shim so that `plant::Leaf` and the
@@ -569,9 +628,10 @@ While doing it, take the chance to give the R side a saner surface than the
 C++ one: `set_physiology()` takes fourteen positional arguments, which is
 tolerable from a strategy that calls it once and painful from a console.
 
-The staged plan — five stages, ordered so the hard-to-reverse decisions come
-first — is in [`notes/r-interface-seed.md`](notes/r-interface-seed.md). What
-follows is stage 0: the decision it says to settle before writing any YAML.
+Three decisions and a staged plan follow: 6a settles whether the package stops
+being header-only, 6b what to build the bindings against, 6c whether to use a
+generator at all, and 6d is the five stages themselves and where they have got
+to.
 
 ### 6a. "Header-only" — DECIDED: two layers, and the headers keep the guarantee
 
@@ -634,6 +694,200 @@ four merges made `>= 0.0.1` meaningless. It also puts a choice in front of
 precisely the audience item 6 exists for: someone who wants what `plantecophys`
 gives them should type `install.packages` once, not first work out which of two
 packages is the one with the functions in it.
+
+### 6b. What to build the bindings against — plant's, moved rather than rewritten
+
+plant already has them, and they are the reference implementation: `Leaf` moves
+out of plant's `inst/RcppR6_classes.yml` and is generated against this package.
+That is deliberate rather than lazy. plant's version is the surface its
+`test-leaf.r` has been exercising for years, so translating it means a failure in
+that stage is a translation error and nothing else — the redesign happens in a
+separate, later stage where it cannot be confused with one. plant's copy then
+goes, which is the hazard-7 payoff (stage 4).
+
+Two design notes carried from item 7b-iii:
+
+- **Wire up `supply_kind_` / `single_`** so `SinglePotential` is reachable. 7b-iii
+  flags the footgun: a naive setter silently invalidates a configured root
+  network. Design it, don't just expose it. (Stage 3.)
+- **Absorb the `Control` struct** (item 10b): `GSS_tol_abs`, `ci_abs_tol`,
+  `ci_niter`, `vulnerability_curve_ncontrol`, `integration_tol_`,
+  `leaf_temp_min`/`_max`. Deferred *to* this item because it means surgery on a
+  19-argument constructor that item 6 redesigns anyway. (Stage 2.)
+
+### 6c. RcppR6 versus odelia's hand-written bindings — DECIDED: both, in layers
+
+odelia solves the same problem differently, and it is worth saying why this
+package does not simply copy it. odelia is **also** Rcpp + R6 — the difference is
+that its glue is hand-written: `// [[Rcpp::export]]` free functions taking an
+`Rcpp::XPtr`, wrapped in an R6 class that holds the pointer. No generator.
+
+The two are not actually in competition here, because **stage 2 writes a
+hand-written R layer either way.** Named arguments, defaults, a `Control` object
+and a one-call entry point are design work, and no generator produces them. So
+the only thing in question is the ~90 low-level accessors underneath: 60 field
+getters and setters and 30 method forwards.
+
+**Generate those.** They contain no design content, and hand-writing them is
+90 opportunities to transpose an argument — which is precisely the error class
+that produces plausible numbers and a green C++ suite, and precisely why the
+R-side golden test had to be written. Generation also keeps stage 4 a *move*
+rather than a rewrite: plant is an RcppR6 package, plant's `Leaf` block is the
+same YAML dialect, and plant's `test-leaf.r` asserts the R-side names that
+`access: field` preserves. And the dotted `name_cpp` trick — `roots_.psi_soil_`
+reaching a moved member without the R name changing — is what makes hazard 7
+cheap; it has no hand-written equivalent that is not just as much code.
+
+**The real cost is that RcppR6 is not on CRAN**, and that is worth defusing
+rather than living with. It is defused by **not declaring it at all**: the
+generated files are committed, so nobody installing or checking this package
+needs RcppR6 — only a developer regenerating does. It is therefore absent from
+`Suggests` and from `Remotes`, and installed explicitly by the one CI job that
+regenerates and diffs the output. That job exists because a committed generated
+file can go stale silently, which is the one genuine downside of generating.
+
+**If this package ever does need to drop RcppR6** — CRAN submission is the
+plausible trigger — odelia's approach is the migration target, and the migration
+is cheap *because* of the layering above: the public R API lives in the
+hand-written layer, so the generator underneath can be replaced without the
+surface moving. That is a reason to build the layer even while RcppR6 stays.
+
+### 6d. The staged plan — 0, 1 and 2 are done; 3 is next; 2b and 4 are blocked
+
+Five stages, each landing on its own, ordered so that the two hard-to-reverse
+decisions — whether the package stops being header-only, and what the R-facing
+names are — come first and cheapest, and so that no stage leaves `master` unable
+to build plant.
+
+**Stage 0 — settle header-only. DONE**, as 6a above. Written down before any
+YAML, which is the point: it is what a reviewer would otherwise argue about in
+the middle of a 2000-line diff.
+
+**Stage 1 — the YAML and the generated glue, no design changes. DONE.** `Leaf`
+came out of plant's YAML minus the four fields #15 deleted, with
+`root_collar_psi_` → `opt_root_psi_` and the constructor's R-side names corrected
+to `stem_c` / `stem_b` / `cost_scale_TF24`. λ and `g1_eff` were added, since they
+are what #5 asks for and were pure additions of existing C++ accessors.
+`R CMD check` is Status OK with zero NOTEs.
+
+⚠️ **The C++ suite is the regression baseline and is blind to the R layer**, so a
+mistranslated argument gives a green suite and plausible R numbers.
+`tests/testthat/test-golden.R` ties four golden operating points back through the
+R API, compared bit-exactly. Four things that were not in the plan:
+
+1. **RcppR6 forces the `.h` / `.hpp` split.** It hardwires `#include <leaf.h>` in
+   what it generates and `<leaf/RcppR6_pre.hpp>` in the umbrella it expects, so
+   the R-facing umbrella *must* be `leaf.h` and the model's had to stay
+   `leaf.hpp`. A file extension now carries the one-way-dependency rule, which is
+   more weight than an extension should bear — hence the banner in `leaf.h`.
+2. **The generated `RcppR6_*.hpp` live in `inst/include/leaf/` and do include
+   Rcpp**, so "no Rcpp under `inst/include/`" is no longer the invariant. The
+   invariant is *directional*; hazard 9 in the developer guide was rewritten.
+3. **The R test's expected values must be C99 hex floats.** Decimal `%.17g`
+   strings would fail for ~18% of them against a model that is exactly right —
+   issue #13's parser problem, arriving from a new direction.
+4. **The golden file's bit-exactness is conditional on the optimisation level**,
+   not only the platform: identical at `-O1`/`-O2`/`-O3`, off by 3.47e-15 at
+   `-O0`, which does not contract `a*b + c` into an FMA. Found because CMake's
+   default build type is flagless.
+
+**Stage 2 — a friendlier surface, as a hand-written R layer over stage 1. DONE.**
+Kept *above* the generated glue so it can be rewritten without touching CI or the
+build — which is also what makes 6c's generator replaceable.
+
+- `leaf_traits()` / `leaf_control()` split the constructor's 19 arguments, four of
+  which are tolerances. A test asserts the two partition it exactly.
+- `leaf_model()`, `set_drivers()`, `operating_point()` — named and defaulted.
+- `leaf_solve()` — drivers in, operating point out as a data.frame, vectorised.
+- `vignette("leaf")`.
+
+Two decisions worth keeping: **the `psi_soil >= 0` rejection is surfaced, not
+smoothed over** — a friendly wrapper is exactly where someone would `abs()` it,
+and that check is all that stands between a pre-#25 script and a plausible wrong
+number. And **the leaf-temperature clamp is NOT in `leaf_control()`** though 10b
+listed it: it is a guard keeping the Arrhenius block finite on the energy-balance
+path, not a tolerance anyone tunes, and making it settable would let a caller get
+NaNs back with no indication why.
+
+Writing the vignette also found **#31**: `profit_psi_stem_TF` returns a plausible
+number for `psi_stem < psi_upstream`, built on a negative conductance, with a
+discontinuity of 1.58 units at the boundary. Unreachable from plant's solve,
+which is why it survived; the first thing an R user does is plot the profit
+function.
+
+**Stage 2b — take resistances, not root carbon. BLOCKED on plant #591**, since it
+is coupled. It belongs here because it is the same surgery on the same argument
+list.
+
+`set_physiology` takes `root_carbon_per_leaf_area` and calls
+`roots_.set_root_network_from_carbon(...)` internally. **The solve never touches
+root carbon.** `uptake_impl` and `duptake_dpsi` read exactly two vectors —
+`network_.r_R_H_min` and `network_.r_R_V_sum` — plus `grav_head_z_` and
+`max_soil_layer`. Everything else the carbon path produces (`c_r_V`, `c_r_H`,
+`r_R_V`) is carried only because plant exposes it through RcppR6.
+
+So taking carbon makes the leaf own four things that are not gas exchange:
+`beta_R_H`, `beta_R_V`, `dz_`, and the 1/3 : 2/3 horizontal/vertical split. Taking
+resistances instead deletes all four from the leaf's surface, and it is exactly
+the move `leaf_specific_conductance_max` already makes: plant computes
+`kmax = K_s*theta/(h*eta_c)` and hands over a scalar, because which
+conductance-versus-height model is in force is not this package's business. Which
+root-architecture model is in force is not either. `MultiLayerRoots::set_root_network`
+already exists and takes a `RootNetwork` directly.
+
+Two objections, both answerable:
+
+- **"It leaves the tested surface."** `roots.hpp` keeps `root_network_from_carbon`
+  here "so that it remains covered by the golden file — the moment this arithmetic
+  crosses the package boundary it leaves the tested surface." Keep the function, as
+  a documented public helper; what moves out is the *call*, not the model. The
+  golden grid then calls helper-then-`set_physiology` and covers both.
+- **"It costs an allocation per solve."** Only if the caller rebuilds the vectors.
+  Building five fresh ones each call measured **+0.074 µs (0.061 → 0.135), about
+  +2% of a whole solve**, which is why the in-place `RootNetwork& out` overload
+  exists. plant already holds the carbon buffer as a `TF24_Strategy` member and
+  refills it; it would hold a `RootNetwork` the same way. Neutral done that way —
+  and worth re-measuring interleaved, per hazard 5, rather than assumed.
+
+The gain for an R user is the real argument, and stage 2 sharpened it: a bare-leaf
+caller has no root carbon profile, no layer thickness and no opinion about
+`beta_R_V`, so `set_drivers()` currently invents a default for them and says so in
+its own documentation. That is the smell. They have a resistance, or they have
+`SinglePotential`.
+
+**Stage 3 — expose `SinglePotential`. DONE (#32).** `leaf_supply_single(resistance,
+gravity_head)` and `leaf_supply_multilayer()`, chosen through `leaf_model(supply =)`
+and `leaf_solve(supply =)`. That is the bare-leaf, one-ψ_soil use case that was
+reason 2 in 7b for building it, and it is what makes the 7a model comparison
+possible: Medlyn, Prentice least-cost and Cowan-Farquhar are all formulated
+against a *single* soil potential.
+
+7b-iii's footgun — **a naive `supply_kind_` setter silently invalidates a
+configured root network** — is designed out rather than documented. There is no
+settable tag at any level: C++ gained `set_supply_multilayer()` /
+`set_supply_single()`, each of which reconfigures the object completely and
+clears the solved state, and `supply_kind` / `single_resistance_` /
+`single_gravity_head_` are bound **read-only**. There is no intermediate state in
+which the tag and the supply disagree, and a test asserts the assignments fail.
+
+Two smaller things it forced, both worth keeping:
+
+- `setup_clean_leaf()` now clears **both** supply paths' soil state, not just the
+  active one. A Leaf switched between paths is precisely the case where the
+  inactive path's stale state could come back — hazard 8, from a new direction.
+- `set_drivers()` **refuses** `soil_depth` / `root_carbon_per_leaf_area` on the
+  single path rather than ignoring them. Silently ignoring a profile someone took
+  the trouble to pass is how a plausible wrong number gets made.
+
+**Stage 4 — delete plant's copy, and collect the hazard-7 payoff. BLOCKED on
+plant #591.** Once the bindings live here, plant's `inst/RcppR6_classes.yml` stops
+naming `Leaf`'s fields and hazard 7 dissolves: no future member move needs a
+coupled commit in two repos. A coupled PR pair, and last because it is the only
+stage that can break plant.
+
+**Sequencing.** Stages 0–3 leave plant untouched and can land while plant #591 is
+in review. 2b and 4 are coupled and must wait for it to merge or they rebase
+against a moving target. **2b before 4**, since 4 deletes the bindings 2b changes.
 
 ## 7. Make the components swappable
 

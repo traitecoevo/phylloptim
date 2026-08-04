@@ -21,5 +21,10 @@ tests/cpp/*.dSYM/
 ._*
 .AppleDouble
 
+# CMake, for the no-R build (see CMakeLists.txt)
+build*/
+CMakeCache.txt
+CMakeFiles/
+
 # Doxygen output (generated; see Doxyfile)
 docs/

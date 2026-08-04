@@ -1,0 +1,9 @@
+## XAD, which arrives via odelia and supplies the forward-mode derivatives,
+## needs C++20. So does the model.
+CXX_STD = CXX20
+
+## The model headers, which are shipped in inst/include and are not on the
+## include path during the package's own build. -isystem rather than -I so that
+## a warning in the model does not fail a consumer's build with -Werror; the
+## headers get their own -Wall -Wextra treatment in tests/cpp.
+PKG_CPPFLAGS = -isystem../inst/include/

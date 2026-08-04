@@ -1,3 +1,88 @@
+# leaf (development version)
+
+## The package is callable from R (#5, stage 1)
+
+`leaf::Leaf` now has an R interface, so this is no longer a `LinkingTo`-only
+package. `library(leaf)` gives you an R6 `Leaf` with the drivers, the solve and
+the whole operating point; `vignette("leaf")` walks through a solve, a drought
+response and a light response. **λ and `g1_eff` are exposed for the first time**
+— they existed in C++ and were unreachable from R.
+
+**The C++ headers are unchanged, and still need no R.** The model stays a set of
+self-contained headers under `inst/include` that use no R and no Rcpp; the R
+layer sits on top of them and is never included by them. So a `LinkingTo: leaf`
+consumer sees nothing new, and the model remains linkable straight into a C++
+program or a Python extension. There is now a **CMake package** (`leaf::leaf`)
+for exactly that, and CI builds and installs it on runners with no R, so the
+claim is tested rather than asserted. See PLAN item 6a.
+
+Two things worth knowing if you are working on this package:
+
+- **RcppR6 is not a declared dependency.** The generated glue is committed, so
+  only a developer regenerating it needs the generator. CI regenerates and diffs
+  to catch a stale commit. PLAN item 6c has the reasoning, including what would
+  make it worth swapping for odelia's hand-written style.
+- **The golden file's bit-exactness turns out to depend on the optimisation
+  level, not only on the platform**: identical at `-O1`/`-O2`/`-O3`, off by
+  3.47e-15 at `-O0`, which does not contract `a*b + c` into an FMA. A debug build
+  failing `test_golden` by ~1e-15 has found nothing.
+
+## A surface you can type at a console (#5, stage 2)
+
+The bindings above are a faithful translation of the C++, which is what let them
+be checked against the golden file — and it means nineteen positional arguments.
+On top of them:
+
+- **`leaf_solve()`** — drivers in, operating point out as a data.frame,
+  vectorised, so a response curve is one call. This is the entry point for
+  someone who would otherwise reach for `plantecophys::Photosyn()`.
+- **`leaf_traits()` and `leaf_control()`** — the split the issue asked for. Four
+  of the constructor's nineteen arguments are tolerances sitting among the
+  physiology, and a trait-calibration loop should not have to know which. A test
+  asserts the two functions partition the constructor exactly.
+- **`leaf_model()`** — named and defaulted, and the recommended constructor.
+  `Leaf()` remains exported as the raw one.
+- **`set_drivers()`** and **`operating_point()`** for the stateful path.
+- **`vignette("leaf")`** — a solve, a drought response, the light/VPD surface,
+  and the profit function being maximised.
+
+Two decisions worth knowing:
+
+- **The `psi_soil >= 0` rejection is surfaced, not smoothed over.** A friendly
+  wrapper is exactly where someone would be tempted to `abs()` it, and that check
+  is the only thing between a script written against the old signed convention
+  and a plausible wrong number.
+- **The leaf-temperature clamp is NOT in `leaf_control()`**, though the issue
+  listed it. It is a guard keeping the Arrhenius block finite on the
+  energy-balance path, not a tolerance anyone tunes; making it settable would let
+  a caller get NaNs back with no indication why.
+
+## A bare leaf needs no root carbon profile (#5 stage 3, #32)
+
+`leaf_supply_single()` collapses the whole soil-to-collar path to one series
+resistance, so a leaf physiologist with a soil water potential and no root-mass
+profile can use the model without going through a plant-shaped one to get at a
+leaf. It is also what makes the optimality-model comparison meaningful, since
+Medlyn, Prentice least-cost and Cowan-Farquhar are all written against a single
+soil potential.
+
+```r
+leaf_solve(psi_soil = 1.5, PPFD = 900,
+           supply = leaf_supply_single(resistance = 1e3))
+```
+
+The path is chosen when the leaf is built, and **there is no
+`leaf$supply_kind <- "single"`.** Flipping a tag would leave the other path's
+state configured and silently ignored — and flipping back would make it stale
+rather than absent. `leaf_supply_multilayer()` and `leaf_supply_single()`
+reconfigure the object completely instead, so it can never be in a state where
+the tag and the supply disagree. `supply_kind`, `single_resistance_` and
+`single_gravity_head_` are readable but not settable, for the same reason.
+
+On the multi-layer path `root_carbon_per_leaf_area` still has no good default and
+the R layer supplies a stand-in. Taking resistances there too is #33, which is
+coupled with plant.
+
 # leaf 0.1.0
 
 **The first version bump since the package was created, and it exists so downstream can

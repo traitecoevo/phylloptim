@@ -1,0 +1,340 @@
+# RcppR6 bindings for leaf::Leaf (issue #5, stage 1).
+#
+# PROVENANCE. This is plant's `inst/RcppR6_classes.yml` Leaf block, moved here
+# and adjusted, not written fresh -- that is deliberate. plant's version is the
+# reference implementation: it is the surface that plant's `test-leaf.r` has been
+# exercising for years, so translating it rather than redesigning it means a
+# failure in this stage is a translation error and nothing else. The redesign is
+# stage 2, in a thin R layer above this file, where it can be rewritten without
+# touching the build.
+#
+# Four differences from plant's copy, all forced:
+#
+#   * `name_cpp: leaf::Leaf`, not `plant::Leaf`.
+#   * The constructor's R-side argument names are the real C++ ones. plant still
+#     says `c`, `b` and `g1_TF24` positionally; #15 renamed those to `stem_c`,
+#     `stem_b` and `cost_scale_TF24`, and the whole reason 10a had to land before
+#     this item is that an R name is much harder to change than a C++ one. `c` is
+#     also the name of a base R function, which is its own small argument.
+#   * The four fields #15 deleted are gone: `rho_`, `a_bio_`, `area_leaf_` and
+#     `sapwood_volume_per_leaf_area_`.
+#   * `root_collar_psi_` is `opt_root_psi_`, positive (#25). A flipped sign under
+#     the old name would let an old script silently read the wrong number; a
+#     rename gives an error, which is the point of having renamed it.
+#
+# HAZARD, carried from plant's guide: for `access: field` the generator pastes
+# `name_cpp` verbatim after `->`, so a dotted path reaches a member that has been
+# moved into a sub-object without the R-side name moving. That is how the
+# `roots_.` entries below work, and it is what makes a future member move cheap.
+
+Leaf:
+  name_cpp: "leaf::Leaf"
+  constructor:
+    roxygen: |
+      Leaf-level gas exchange with explicit hydraulics.
+
+      Stomatal behaviour emerges from a gain-risk profit maximisation over the
+      root-collar water potential rather than from an empirical conductance
+      model, coupled to Farquhar-von Caemmerer-Berry photosynthesis and an
+      explicit soil-root-stem-leaf water transport path. See the package README
+      for the model and for how it differs from `plantecophys`, `tealeaves` and
+      `bigleaf`.
+
+      Set the drivers with `$set_physiology()`, solve with
+      `$find_root_collar_psi()`, then read the operating point off the object:
+      `$opt_psi_stem_`, `$profit_`, `$assim_colimited_`, `$transpiration_`,
+      `$lambda`, `$g1_eff`.
+
+      All water potentials are **positive magnitudes in MPa**. There is one
+      representation throughout and it is asserted, not documented: a negative
+      `psi_crit`, `stem_b`, `root_b` or `root_psi_crit` is an error here, and a
+      negative `psi_soil` is an error in `set_physiology`.
+
+      @param vcmax_25 maximum carboxylation rate at 25 C (umol m^-2 s^-1)
+      @param stem_c shape parameter of the STEM hydraulic vulnerability curve (unitless)
+      @param stem_b sensitivity parameter of the STEM hydraulic vulnerability curve (MPa)
+      @param psi_crit critical stem water potential (MPa, positive magnitude)
+      @param root_c shape parameter of the ROOT hydraulic vulnerability curve (unitless)
+      @param root_b sensitivity parameter of the ROOT hydraulic vulnerability curve (MPa)
+      @param root_psi_crit critical root water potential (MPa, positive magnitude)
+      @param beta2 exponent for the effect of hydraulic risk (unitless)
+      @param jmax_25 maximum rate of electron transport at 25 C (umol m^-2 s^-1)
+      @param a quantum yield of photosynthetic electron transport (mol mol^-1)
+      @param curv_fact_elec_trans curvature factor for the light response curve (unitless)
+      @param curv_fact_colim curvature factor for the colimited photosynthesis equation
+      @param GSS_tol_abs absolute tolerance for the golden-section search
+      @param vulnerability_curve_ncontrol number of control points for the pre-computed vulnerability curves
+      @param ci_abs_tol absolute tolerance for root-solving ci
+      @param ci_niter maximum number of iterations for root-solving ci
+      @param cost_scale_TF24 cost parameter for the TF24 profit model (umol m^-2 s^-1)
+      @param beta_R_H proportionality constant between minimum horizontal (intralayer) root hydraulic resistance and C_r^-1 (MPa s mol C / mol H2O)
+      @param beta_R_V proportionality constant between minimum vertical (interlayer) root hydraulic resistance and dz^2/C_r (MPa mol C s / mol H2O / m^2)
+
+      @export
+    args:
+      - vcmax_25: double
+      - stem_c: double
+      - stem_b: double
+      - psi_crit: double
+      - root_c: double
+      - root_b: double
+      - root_psi_crit: double
+      - beta2: double
+      - jmax_25: double
+      - a: double
+      - curv_fact_elec_trans: double
+      - curv_fact_colim: double
+      - GSS_tol_abs: double
+      - vulnerability_curve_ncontrol: double
+      - ci_abs_tol: double
+      - ci_niter: double
+      - cost_scale_TF24: double
+      - beta_R_H: double
+      - beta_R_V: double
+
+  active:
+    # --- solved operating point ----------------------------------------------
+    ci_: {type: double, access: field}
+    stom_cond_CO2_: {type: double, access: field}
+    assim_colimited_: {type: double, access: field}
+    transpiration_: {type: double, access: field}
+    soil_consumption_: {type: "std::vector<double>", access: field}
+    profit_: {type: double, access: field}
+    psi_stem: {type: double, access: field}
+    lambda_: {type: double, access: field}
+    lambda_analytical_: {type: double, access: field}
+    hydraulic_cost_: {type: double, access: field}
+    opt_psi_stem_: {type: double, access: field}
+    opt_root_psi_: {type: double, access: field}
+    opt_ci_: {type: double, access: field}
+    E_up_: {type: double, access: field}
+    assim_max_: {type: double, access: field}
+    count: {type: double, access: field}
+
+    # --- temperature-dependent photosynthetic parameters ---------------------
+    electron_transport_: {type: double, access: field}
+    gamma_: {type: double, access: field}
+    ko_: {type: double, access: field}
+    kc_: {type: double, access: field}
+    km_: {type: double, access: field}
+    R_d_: {type: double, access: field}
+    vcmax_: {type: double, access: field}
+    jmax_: {type: double, access: field}
+
+    # --- drivers, as last set by set_physiology ------------------------------
+    PPFD_: {type: double, access: field}
+    atm_vpd_: {type: double, access: field}
+    ca_: {type: double, access: field}
+    leaf_temp_: {type: double, access: field}
+    atm_o2_kpa_: {type: double, access: field}
+    atm_kpa_: {type: double, access: field}
+    leaf_specific_conductance_max_: {type: double, access: field}
+
+    # --- soil geometry and state, which live in roots_ (hazard 7) ------------
+    soil_depth_: {type: "std::vector<double>", access: field, name_cpp: "roots_.soil_depth_"}
+    z_soil_mid_: {type: "std::vector<double>", access: field, name_cpp: "roots_.z_soil_mid_"}
+    dz_: {type: double, access: field, name_cpp: "roots_.dz_"}
+    soil_number_of_depths_: {type: int, access: field, name_cpp: "roots_.soil_number_of_depths_"}
+    max_soil_layer: {type: int, access: field, name_cpp: "roots_.max_soil_layer"}
+    psi_soil_: {type: "std::vector<double>", access: field, name_cpp: "roots_.psi_soil_"}
+
+    # --- the root resistance network -----------------------------------------
+    c_r_V_: {type: "std::vector<double>", access: field, name_cpp: "roots_.network_.c_r_V"}
+    c_r_H_: {type: "std::vector<double>", access: field, name_cpp: "roots_.network_.c_r_H"}
+    r_R_H_min: {type: "std::vector<double>", access: field, name_cpp: "roots_.network_.r_R_H_min"}
+    r_R_V: {type: "std::vector<double>", access: field, name_cpp: "roots_.network_.r_R_V"}
+    r_R_V_sum: {type: "std::vector<double>", access: field, name_cpp: "roots_.network_.r_R_V_sum"}
+    f_r: {type: "std::vector<double>", access: field}
+
+    # --- energy balance (#523) ------------------------------------------------
+    use_energy_balance_: {type: bool, access: field}
+    d_: {type: double, access: field}
+    wind_speed_: {type: double, access: field}
+    Tair_: {type: double, access: field}
+    Rn_: {type: double, access: field}
+    ra_: {type: double, access: field}
+
+    # --- Medlyn stomatal-conductance model (plant develop #450) --------------
+    medlyn_model_gs_: {type: double, access: field}
+    g0: {type: double, access: field}
+    g1: {type: double, access: field}
+    theta_w_: {type: double, access: field}
+    theta_fc_: {type: double, access: field}
+    theta_: {type: double, access: field}
+
+    # --- lambda and g1_eff (issue #5; PLAN item 8) ---------------------------
+    #
+    # New here: these exist in C++ and were unreachable from R, which is the
+    # first thing the companion project's list asks for. They are ACCESSORS, not
+    # stored state (hazard 5: find_root_collar_psi runs ~10^3 inner evaluations
+    # per solve, so nothing that is only ever read afterwards gets a member), so
+    # they are `access: member` and read-only -- RcppR6 makes an active read-only
+    # exactly when no `name_cpp_set` is given.
+    #
+    # They read the solved state, so they are meaningful only after
+    # find_root_collar_psi(). Reading one before that gets whatever the
+    # NA-sentinel arithmetic produces, in keeping with every other output here.
+    # --- which soil -> root-collar supply path is in force (issue #32) -------
+    #
+    # READ-ONLY, all three, and that is the design rather than caution. The
+    # footgun PLAN 7b-iii flagged is that assigning the tag leaves the other
+    # path's state configured and silently ignored, so there is no settable
+    # `supply_kind` here at all -- the only way to change it is
+    # set_supply_multilayer() / set_supply_single(), which leave the tag and the
+    # supply agreeing. `resistance` and `gravity_head` are read-only for a
+    # weaker reason: setting them while the multi-layer path is active would do
+    # nothing, which is a confusing thing to allow.
+    supply_kind: {type: "std::string", access: member, name_cpp: supply_kind_name}
+    single_resistance_: {type: double, access: field, name_cpp: "single_.resistance_", readonly: true}
+    single_gravity_head_: {type: double, access: field, name_cpp: "single_.grav_head_", readonly: true}
+    single_psi_soil_: {type: double, access: field, name_cpp: "single_.psi_soil_", readonly: true}
+
+    lambda: {type: double, access: member, name_cpp: marginal_cost_water}
+    lambda_molar: {type: double, access: member, name_cpp: marginal_cost_water_molar}
+    lambda_multilayer: {type: double, access: member, name_cpp: marginal_cost_water_multilayer}
+    g1_eff: {type: double, access: member, name_cpp: g1_eff}
+
+  methods:
+    initialize_integrator:
+      return_type: void
+      args: [integration_rule: int, integration_tol: double]
+    set_physiology:
+      return_type: void
+      args: [root_carbon_per_leaf_area: "const std::vector<double>&", PPFD: double, psi_soil: "const std::vector<double>&", soil_depth: "const std::vector<double>&", leaf_specific_conductance_max: double, atm_vpd: double, ca: double, leaf_temp: double, atm_o2_kpa: double, atm_kpa: double]
+
+    # --- transpiration and conductance ---------------------------------------
+    proportion_of_conductivity:
+      return_type: double
+      args: [psi: double]
+    arrh_curve:
+      return_type: double
+      args: [Ea: double, ref_value: double, leaf_temp: double]
+    peak_arrh_curve:
+      return_type: double
+      args: [Ea: double, ref_value: double, leaf_temp: double, H_d: double, d_S: double]
+    transpiration:
+      return_type: double
+      args: [psi_stem: double, psi_upstream: double]
+    transpiration_full_integration:
+      return_type: double
+      args: [psi_stem: double, psi_upstream: double]
+    stom_cond_CO2:
+      return_type: double
+      args: [psi_stem: double, psi_upstream: double]
+    transpiration_to_psi_stem:
+      return_type: double
+      args: [transpiration_: double, psi_upstream: double]
+
+    # --- assimilation ---------------------------------------------------------
+    assim_rubisco_limited:
+      return_type: double
+      args: [ci_: double]
+    assim_electron_limited:
+      return_type: double
+      args: [ci_: double]
+    assim_colimited:
+      return_type: double
+      args: [ci_: double]
+    assim_minus_stom_cond_CO2:
+      return_type: double
+      args: [x: double, psi_stem: double, psi_upstream: double]
+    electron_transport:
+      return_type: double
+      args: []
+    set_leaf_states_rates_from_psi_stem:
+      return_type: void
+      args: [psi_stem: double, psi_upstream: double]
+
+    # --- the soil -> root-collar supply path ----------------------------------
+    #
+    # These four take the soil state as an ARGUMENT, and #25 changed what that
+    # argument means -- positive suction magnitudes, not signed potentials --
+    # without changing any signature. Each validates the vector and stops on a
+    # negative entry. That check is the only thing standing between a pre-#25
+    # script and a plausible wrong number, so a friendlier wrapper in stage 2
+    # must keep it rather than smooth it over.
+    E_from_Soil_to_Root_Collar:
+      return_type: void
+      args: [P_x_r: double, psi_soil: "std::vector<double>"]
+    find_root_collar_psi:
+      return_type: void
+      args: []
+    find_root_psi:
+      return_type: double
+      args: [wettest_soil_layer: double, psi_soil: "std::vector<double>", find_root_crit: int]
+    find_psi_stem_from_psi_root:
+      return_type: double
+      args: [psi_root: double, psi_soil: "std::vector<double>"]
+    evaluate_root_collar_psi:
+      return_type: double
+      args: [target_opt_root_psi: double]
+    dprofit_droot_collar_psi:
+      return_type: double
+      args: [opt_root_psi: double]
+    psi_stem_to_ci:
+      return_type: double
+      args: [psi_stem: double, psi_upstream: double]
+
+    # --- leaf economics -------------------------------------------------------
+    hydraulic_cost_Sperry:
+      return_type: double
+      args: [psi_stem: double, psi_upstream: double]
+    hydraulic_cost_TF:
+      return_type: double
+      args: [psi_stem: double]
+    profit_psi_stem_Sperry:
+      return_type: double
+      args: [psi_stem: double, psi_upstream: double]
+    profit_psi_stem_TF:
+      return_type: double
+      args: [psi_stem: double, psi_upstream: double]
+    lambda_TF24:
+      return_type: double
+      args: [psi_stem: double]
+
+    # --- optimisers -----------------------------------------------------------
+    optimise_psi_stem_Sperry:
+      return_type: void
+      args: []
+    optimise_psi_stem_TF:
+      return_type: void
+      args: []
+
+    # --- Medlyn stomatal-conductance model (plant develop #450) --------------
+    medlyn_model_gs:
+      return_type: double
+      args: [assim_colimited_: double]
+    solve_medlyn_ci_numerical:
+      return_type: void
+      args: []
+    solve_medlyn_ci_analytical:
+      return_type: void
+      args: []
+
+    # --- setup ---------------------------------------------------------------
+    # Exposed because the default constructor builds both vulnerability splines
+    # at 100 control points and a caller who changes vulnerability_curve_ncontrol
+    # through the constructor gets them rebuilt there -- but a caller reaching in
+    # to change stem_b/root_b afterwards does not, and would otherwise be stuck
+    # with splines for the old curve. See the note in setup_transpiration.
+    # --- choosing the supply path (issue #32) --------------------------------
+    #
+    # Two entry points rather than a settable tag. Each leaves the object in a
+    # state where the tag and the supply state agree; there is no intermediate
+    # state in which they disagree, which is what a bindable `supply_kind_`
+    # would have created. Both clear the solved state, so set_physiology() has
+    # to be called again -- the two paths read different inputs, so anything
+    # carried across would be answering a question about the other model.
+    set_supply_multilayer:
+      return_type: void
+      args: []
+    set_supply_single:
+      return_type: void
+      args: [resistance: double, gravity_head: double]
+
+    setup_transpiration:
+      return_type: void
+      args: [resolution: double]
+    setup_root_vulnerability:
+      return_type: void
+      args: [resolution: double]

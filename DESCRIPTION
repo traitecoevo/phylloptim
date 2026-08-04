@@ -1,5 +1,5 @@
 Package: leaf
-Title: Header-Only Leaf Gas Exchange with Explicit Plant Hydraulics
+Title: Leaf Gas Exchange with Explicit Plant Hydraulics
 Version: 0.1.0
 Authors@R: c(
     person("Isaac", "Towers", , "", "aut",
@@ -10,27 +10,42 @@ Authors@R: c(
             comment = "Root-finding utilities (uniroot.hpp)")
     )
 Maintainer: Daniel Falster <daniel.falster@unsw.edu.au>
-Description: A C++ header-only implementation of leaf-level gas exchange in
-    which stomatal behaviour emerges from hydraulics rather than an empirical
-    conductance model. Farquhar-von Caemmerer-Berry photosynthesis is coupled to
-    an explicit soil-root-stem-leaf water transport path, with Weibull
-    vulnerability curves for both xylem and roots, multi-layer soil and
-    gravitational head, and the operating point is chosen by Sperry-style
-    gain-risk profit maximisation over the root-collar water potential. Forward
-    -mode automatic differentiation supplies exact derivatives of profit with
-    respect to the collar potential. Extracted from the TF24 strategy in the
-    'plant' package so that it can be tested, profiled, extended and embedded
-    independently. The package ships headers only: there is no compiled code and
-    nothing to link against.
+Description: An implementation of leaf-level gas exchange in which stomatal
+    behaviour emerges from hydraulics rather than an empirical conductance
+    model. Farquhar-von Caemmerer-Berry photosynthesis is coupled to an explicit
+    soil-root-stem-leaf water transport path, with Weibull vulnerability curves
+    for both xylem and roots, multi-layer soil and gravitational head, and the
+    operating point is chosen by Sperry-style gain-risk profit maximisation over
+    the root-collar water potential. Forward-mode automatic differentiation
+    supplies exact derivatives of profit with respect to the collar potential.
+    Extracted from the TF24 strategy in the 'plant' package so that it can be
+    tested, profiled, extended and embedded independently. The model itself is a
+    set of self-contained C++ headers, under inst/include, that use no R and no
+    'Rcpp' and depend only on Boost and the header-only parts of 'odelia': they
+    compile and run with no R present at all, so the model can be linked
+    directly into a C++ program or bound to another language such as Python
+    without going through this package. R users get the same model through an
+    'RcppR6' layer that sits on top of those headers and is never included by
+    them, and R packages get it by naming 'leaf' in their LinkingTo field.
 Encoding: UTF-8
 License: AGPL (>= 3)
 Depends:
     R (>= 4.2.0)
-LinkingTo: BH, odelia (>= 0.2.0)
+Imports:
+    R6,
+    Rcpp
+LinkingTo: Rcpp, BH, odelia (>= 0.2.0)
 Suggests:
-    testthat
+    dplyr,
+    ggplot2,
+    knitr,
+    rmarkdown,
+    testthat (>= 3.0.0),
+    tidyr
+VignetteBuilder: knitr
 Remotes:
     traitecoevo/odelia
+Config/testthat/edition: 3
 URL: https://github.com/traitecoevo/leaf_cpp
 BugReports: https://github.com/traitecoevo/leaf_cpp/issues
-RoxygenNote: 7.3.3
+Config/roxygen2/version: 8.0.0
