@@ -1891,12 +1891,51 @@ inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
   // bracket ends (Ar,Ae vanish linearly at gamma* so sqrt(disc) is linear, not
   // singular) and its only sharp feature is the colimitation elbow far below the
   // operating root. So it is a well-behaved case for a superlinear bracketing
-  // solver: TOMS748 reaches the same root in ~9 evals vs bisection's ~29 at the
-  // same 1e-7 tol. This is deliberately scoped to psi_stem_to_ci ONLY; the
-  // hydraulic find_root_psi path keeps bisection (its target is not smooth -- see
-  // the warning on util::uniroot_smooth).
+  // solver: TOMS748 reaches the same root in ~9 evals vs bisection's ~29. This is
+  // deliberately scoped to psi_stem_to_ci ONLY; the hydraulic find_root_psi path
+  // keeps bisection (its target is not smooth -- see the warning on
+  // util::uniroot_smooth).
+  //
+  // ⚠️ **The 1e-10 is load-bearing and was chosen by measurement, not taste. It
+  // sets the floor of what every reported output of this model MEANS.** It used to
+  // be 1e-7, which was invisible while golden section's GSS_tol_abs (1e-3)
+  // dominated; once PLAN 11a removed that, this became the model's dominant
+  // amplifier -- a last-bit change anywhere upstream shifts which point TOMS748
+  // lands on inside its tolerance band, and that surfaces in ci, assim, gc and
+  // profit. Measured by perturbing the model identically at each tolerance and
+  // reading the golden grid (PLAN 11b):
+  //
+  //   ci tol   worst diff vs a converged (1e-15) solve   us/solve (indicative)
+  //   1e-7                       1.82e-07                      2.655
+  //   1e-8                       3.15e-08                      2.640
+  //   1e-10                      5.41e-10                      2.695   <- here
+  //   1e-11                      5.41e-10                      2.768
+  //   1e-13                      7.48e-13                      2.885
+  //   1e-15                      0                             2.945
+  //
+  // 1e-10 is the knee: it lands **335x closer to a converged solve** than 1e-7
+  // did, where going on to 1e-13 buys ~700x more for roughly three times the extra
+  // time. The plateaus (1e-8 = 1e-9, 1e-10 = 1e-11) are TOMS748's discrete
+  // iterations, so tightening *between* them buys nothing and still costs.
+  //
+  // ⚠️ **The precision column is solid; the timing column is only indicative and
+  // reads ~2x too cheap.** Those seven binaries were built in one loop in a
+  // scratch tree, and code-layout luck moves this benchmark by ~2%. The controlled
+  // figure for the step actually taken -- both binaries built from the same tree,
+  // interleaved x5 -- is **+3.4%** (2.65 -> 2.75 us/solve), against the +1.5% the
+  // table implies. Still a good trade next to the 24.5% PLAN 11a bought, and still
+  // 21.7% faster than the 3.51 us this package ran at before 11a. If you re-derive
+  // the curve, build every point from one tree.
+  //
+  // Do not tighten further without a use that needs it, and do not loosen it back
+  // without re-reading the guide's rounding-versus-bug magnitudes, which this
+  // figure sets.
+  //
+  // Not the same knob as `ci_abs_tol` (the settable control, default 1e-3), which
+  // reaches only the off-path optimise_psi_stem_* solvers. A caller tightening
+  // that one gets no extra precision here.
   try {
-    return ci_ = util::uniroot_smooth(target, gamma_ * umol_per_mol_to_Pa_, ca_, 1e-7, ci_niter);
+    return ci_ = util::uniroot_smooth(target, gamma_ * umol_per_mol_to_Pa_, ca_, 1e-10, ci_niter);
   } catch (const std::exception& e) {
     // Penman-Monteith path (#523): extreme energy-balance leaf heating raises the
     // CO2 compensation point (gamma*) so far that assimilation is negative across

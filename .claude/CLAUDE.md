@@ -178,31 +178,43 @@ dead, confined the shutdown fix to exactly 48 rows × 5 fields, and showed the
 rubber-stamps the change. If a diff is intended, regenerate and say so in the
 commit message with the measured size of the change.
 
-Guide to magnitudes, measured: **~1e-16 is reassociation, ~1e-4 is a real
-difference.** These nested solvers amplify perturbations up to about
-`GSS_tol_abs` (1e-3), so there is a four-order-of-magnitude gap between rounding
-and bug. Anything in between deserves investigation.
+Guide to magnitudes, measured: **~1e-16 is reassociation, ~1e-9 is the solver
+floor, ~1e-4 is a real difference.** Anything above the floor deserves
+investigation. Where that floor comes from, and the two times it moved:
 
-⚠️ **That 1e-3 amplification figure is out of date, and the replacement is worth
-knowing before you size any change.** PLAN 11a removed golden section, which was
-the dominant amplifier — a last-bit perturbation no longer flips a comparison and
-moves the argmax by `GSS_tol_abs`. **The amplifier is now `psi_stem_to_ci`'s
-hard-coded 1e-7 tolerance**, and the chain was measured by isolation on the same
-perturbation (unifying the AD replica with the function it mirrors):
+A perturbation this small does not stay small — the nested solvers amplify it up to
+whichever tolerance is loosest, because a last-bit change shifts *which point*
+inside its tolerance band a bracketing solver lands on. This guide said 1e-3 for a
+long time; the figure has since moved twice, measured by applying **one identical
+perturbation** (unifying the AD replica with the function it mirrors) at each stage:
 
 | amplifier in play | that perturbation shows up as |
 |---|---|
-| golden section, `GSS_tol_abs` 1e-3 | **5.53e-04** (measured pre-11a, #4 comment 2) |
-| `psi_stem_to_ci`, 1e-7 — where we are now | **4.98e-07** |
-| `psi_stem_to_ci` tightened to 1e-13 | **7.16e-13** |
+| golden section, `GSS_tol_abs` 1e-3 | **5.53e-04** — pre-11a, #4 comment 2 |
+| `psi_stem_to_ci` at 1e-7 | **4.98e-07** — after 11a removed golden section |
+| `psi_stem_to_ci` at **1e-10 — where we are now** | **~1e-09** (PLAN 11b) |
+| `psi_stem_to_ci` at 1e-13, not taken | 7.16e-13 |
 
-So **~1e-6 is now the floor of what this model's reported outputs mean**, and the
-rounding-versus-bug gap has narrowed from four orders to about one. Two
-consequences: a diff of 1e-6 is no longer obviously rounding, and if you need
-better than 1e-6 out of this model the lever is the `ci` tolerance, not the collar
-solve. Tightening it to 1e-13 measured **+6.2%** (2.73 → 2.90 µs/solve, interleaved
-×4) — still 17% faster than the 3.51 µs before 11a. Not taken, because nothing
-needs it yet; taken as a decision rather than left as an omission.
+The old four-order gap between rounding and bug briefly collapsed to one, and is
+now back. Two things follow:
+
+- **`psi_stem_to_ci`'s tolerance sets what every reported output MEANS**, so it is
+  documented at the call site with the cost/precision curve that chose 1e-10 — the
+  knee, landing 335× closer to a converged solve for **+3.4%** (2.65 → 2.75
+  µs/solve, interleaved ×5). Do not loosen it without re-reading these magnitudes,
+  and do not tighten it without a use that needs it: the plateaus in that curve are
+  TOMS748's discrete iterations, so some tightenings cost without buying anything.
+
+  ⚠️ **A caution about that curve, because it caught me.** Its seven timing points
+  were built in one loop in a scratch tree and read ~2× too cheap — they implied
+  +1.5% for the step actually taken, where the controlled A/B (both binaries from
+  one tree, interleaved) says +3.4%. Code layout moves this benchmark ~2%, which is
+  the same order as the effect being measured. **Hazard 5 says interleave; this adds
+  that building the two arms in different trees is its own bias**, and a
+  seven-point sweep is not seven controlled A/Bs.
+- **It is not the settable `ci_abs_tol`** (default 1e-3), which reaches only the
+  off-path `optimise_psi_stem_*` solvers. Tightening that one buys no precision on
+  the production path, which is a wart worth knowing before someone tries it.
 
 **It is bit-exact only on the platform that generated it — macOS/arm64.** libm's
 `exp`/`pow` are not bit-reproducible between glibc on x86-64 and Apple's libm on
