@@ -1778,57 +1778,6 @@ have to be thrown away rather than upgraded, because the headline result is the
 comparison between the two. **Item 11 (#4) is therefore the gate on this item,
 and nothing here should start until AD trait gradients exist.**
 
-### What data to calibrate against — surveyed 2026-08-04
-
-The survey exists because "take measured or synthetic A, gs and psi_leaf" above
-is easy to write and turns out to be the hard part: **gas exchange is abundant,
-leaf water potential exists separately, and almost nothing joins them on the same
-row.** Checked exhaustively across `plantecophys`, `bigleaf`, `tealeaves`,
-`photosynthesis`, `racir`, `LeafGasExchange`, `fitplc`, `medfate`,
-`sapfluxnetr` and others: **no R package ships A + gs + psi_leaf together.**
-
-**First choice: Sabot et al. 2022 (JAMES, 10.1029/2021MS002761).** The only
-candidate found that puts A, gs, Ci, E *and* `Pleaf` on the same rows, with
-`Ps` (soil water potential) as a driver and P50/P88/kmax/Vcmax25 per species.
-1,362 observations, 16 species, 8 sites, psi_soil spanning −0.05 to −5.6 MPa —
-a real drought gradient, not a proxy. ~314 kB of plain CSV.
-[github.com/ManonSabot/One_gs_model_to_rule_them_all](https://github.com/ManonSabot/One_gs_model_to_rule_them_all),
-Zenodo 10.5281/zenodo.5932661, **MIT** (verified by reading the `License` file;
-note Zenodo's metadata says only `other-open`). Two data caveats:
-`Corrigin_Eucalyptus_capillosa` has no `Pleaf` column, and the two Panama files
-use `-9999` as a missing sentinel.
-
-⚠️ **And it is more than a dataset — it is the closest existing version of item
-7a.** `src/TractLSM/CH2OCoupler/` implements Medlyn, Tuzet, WUE_LWP, CGain, CMax,
-LeastCost, CAP, MES, SOX, ProfitMax and ProfitMax2 — essentially the six models
-issue #3 is built around, in one place, as a reference implementation to check
-against.
-
-**But simulate first, and not as a fallback.** For the deliverable above — that
-AD trait gradients beat finite differences — synthetic data is the *better*
-instrument, for three reasons: known-true parameters let the vignette report
-**recovery error** rather than merely convergence; an AD-versus-FD comparison is
-a claim about gradient accuracy, and real data adds an error term exactly where
-the numerical effect is being measured; and it carries no licence surface at all.
-What simulation cannot show is that the model is *adequate* — that it fits
-Sevilleta pinyon-juniper at psi_soil = −5.6 MPa. That is a second vignette, and
-Sabot is what it should use.
-
-**Rejected, with reasons worth not re-deriving:**
-
-| candidate | why not |
-|---|---|
-| Flo et al. 2024 (PCE, 10.1111/pce.14891) | Scientifically the best fit — six optimality schemes, 38 species, a hydraulic-traits table. **The repo has no licence file at all**, so default GitHub terms apply and it cannot be redistributed. The article being CC BY does not extend to a repo the publisher never hosted. One email to Victor Flo would settle it |
-| Joshi et al. 2022 (Nature Plants, 10.1038/s41477-022-01244-5) | **Cleanest licence of the lot** (CC BY 4.0, verified). But the main table pairs A and gs with *predawn* LWP only; midday psi_leaf is in a separate 78-row table for 9 species, and there are no P50/kmax. It is the ancestor of the Flo compilation — all three DOIs are one lineage |
-| Lin et al. 2015 | The CC BY 4.0 figshare version (15,162 obs, 314 species) **has no leaf water potential**. The expanded Bitbucket version does, but only on 1,087 rows / 2 species / 1 site — and it carries **no licence statement of any kind** |
-| Choat et al. 2012, and the Xylem Functional Traits database | Not open access / no stated terms. Both are P50 sources, not gas exchange |
-
-⚠️ **One thread left open: the TF24 paper's own calibration data.** Towers et al.
-2024 is the model this package *is*, and Isaac is an author here, so it is the
-most natural candidate and the only one that would let a fit be checked against
-the parameters TF24 was published with. It was not reached in the survey and is
-not anywhere in the plant-family tree. Ask before settling on anything else.
-
 **Then the bigger question: inversion.** The clearest capability gap against
 `plantecophys` is that `fitaci` inverts A-Ci curves for Vcmax/Jmax/Rd and this
 package cannot invert anything. Calibrating *hydraulic* traits — P50-type
