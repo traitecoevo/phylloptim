@@ -130,6 +130,13 @@ R CMD check .                # C++ suite via tests/cpp.R, plus tests/testthat/
 doxygen                      # renders the C++ API to docs/html/index.html
 ```
 
+⚠️ **R does not track header dependencies, so `R CMD INSTALL` after editing
+`inst/include/` reuses a stale `src/RcppR6.o` and the R layer goes on running the
+OLD model.** Nothing warns you, and the numbers stay plausible: two rounds of
+R-side diagnostics were taken against the previous solver during PLAN 11a before
+this was noticed. **`rm -f src/*.o src/*.so` before reinstalling**, then check one
+value against the C++ suite, which does track headers.
+
 `tests/cpp.R` is not a duplicate of the CI workflow. It compiles with R's
 *configured* compiler (`R CMD config CXX20`) against the *installed* headers,
 which is what a `LinkingTo: leaf` consumer gets — so a consumer running their own
@@ -203,11 +210,26 @@ Two things follow that matter beyond this file:
 
 - **`profit` is the only reported field that is well-conditioned across platforms.**
   If you need a portable check of the solve, check `profit`, not `opt_psi_stem_`.
-- **Eight of the nine fields are pinned to 17 digits but only *determined* to about
-  `GSS_tol_abs` (1e-3).** Bit-exactness on one platform is still a good drift
-  detector — any code change moves the arbitrary choice inside that window and it
-  shows — but that is reproducibility, not determinacy. Don't read a bit-identical
-  `opt_psi_stem_` as meaning the argmax is known to 17 digits.
+- **~~Eight of the nine fields are pinned to 17 digits but only *determined* to
+  about `GSS_tol_abs` (1e-3).~~ No longer true, and the fix is PLAN 11a.** The
+  collar solve now solves `dprofit == 0` rather than searching profit, so on the
+  198 interior rows the argmax is determined to solver precision — `|dprofit|` at
+  the returned collar has a median of **5.6e-15**, against golden section's 7.8e-4.
+  The remaining 42 rows have a **constrained** optimum pinned to a bracket bound,
+  where the gradient is genuinely non-zero and the answer is determined to the
+  step-in scale (~1e-6 of the bracket width) instead.
+
+  So bit-exactness is now a drift detector *and* the numbers are determined. What
+  has not changed: **cross-platform disagreement is still sqrt-amplified** at the
+  argmax, because that comes from the flat maximum rather than from the solver.
+
+⚠️ **Profit is the wrong instrument for checking a collar-solve change, and this
+cost real time.** It is the maximum, so it is flat, and its own numerical floor is
+set by the nested `ci` root-find's 1e-7 tolerance. When 11a landed, two of 288 rows
+came out ~6e-7 *lower* in profit while their residual improved by ten orders of
+magnitude. **Check the residual `|dprofit|` at the returned point instead** — it
+improved on 240 of 240 feasible rows with none worse, which is a statement profit
+could not have made.
 
 ⚠️ **The numbers above were wrong twice, the same way both times.** First this note
 said the worst cross-platform difference was 1.7e-15 (13 ULP); then, after that was
@@ -330,10 +352,42 @@ refuse.
      point between them, i.e. past the limit the clamp exists to enforce: the fix
      reintroducing its own bug. Three regimes (no bind / tightened-but-transpiring /
      shut-down) are pinned in `test_root_psi_crit_clamp_binds`.
-3. **Argmax smoothness is a hard constraint, not a preference.** plant chose
-   golden-section over Brent because its argmax varies *smoothly* with inputs, and
-   the demographic growth-rate gradient depends on that. Any change to the solver
-   must re-measure it. The comment in `optimize.hpp` explains why.
+3. **Argmax smoothness is a hard constraint, not a preference — and the collar
+   solver that was justified by it has been replaced.** The constraint stands: the
+   demographic growth-rate gradient depends on the argmax varying *smoothly* with
+   inputs, and any change to a solver must re-measure it.
+
+   What changed is the conclusion. This entry used to say plant chose
+   golden-section over Brent for that reason, and read as a warning against
+   touching the collar solve. **PLAN 11a replaced golden section with a
+   safeguarded root-find on `dprofit == 0`, and smoothness improved.** Measured:
+
+   | | golden section | root-find |
+   |---|---|---|
+   | distinct argmax values over 11 trait steps | 6 / 11 | **11 / 11** |
+   | argmax second differences in a trait | 3.9e-04 (= the step size: noise) | **3.4e-07** |
+   | `|dprofit|` at the returned collar, interior rows | median 7.8e-04 | **median 5.6e-15** |
+   | µs/solve, interleaved at reps=2000 | 3.51 | **2.65** |
+
+   **A fixed iteration count is not smoothness**, which is the mistake the old
+   entry encoded. Golden section terminates on bracket *width*, so it resolved the
+   argmax only to `GSS_tol_abs` and the leftover offset wandered discontinuously as
+   the comparison sequence flipped. That made the argmax piecewise constant at fine
+   scales, so trait derivatives came back exactly zero — or, for traits in the
+   hydraulic path, **smooth, plausible and sign-inverted** (`root_b`: −2.6e-03
+   against a true +2.6e-04). See PLAN 11a for the arbitration.
+
+   ⚠️ **The re-measurement above is in a TRAIT, and the hazard's concern is plant
+   state.** Smoothness in height and light, feeding the demographic gradient,
+   cannot be measured from here while plant #591 blocks end-to-end validation. Same
+   mechanism, so the same direction is expected — but it is not the same
+   measurement, and the trait result does not discharge the hazard. **Re-measure on
+   the plant side when #591 clears.**
+
+   `golden_section_max` still exists, and `optimize.hpp` now records why it is no
+   longer the collar solver: it is that solver's fallback, plus the single-layer
+   optimisers. Do not read its existence as evidence that a comparison-based
+   search is the safe default here.
 4. **The leaf is purely intensive.** Every input is per unit leaf area or a
    dimensionless/intensive driver. Nothing scales with plant size — whole-plant
    allometry (`kmax(h)`, root carbon totals) is computed on the plant side and passed

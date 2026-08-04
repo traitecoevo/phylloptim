@@ -1,5 +1,48 @@
 # leaf (development version)
 
+## ⚠️ The collar solve changed, and results moved (#4, PLAN 11a)
+
+**`find_root_collar_psi` no longer maximises profit by golden-section search. It
+solves the first-order condition, `dprofit/dpsi == 0`, by a safeguarded
+root-find.** Every solved operating point moves by roughly the argmax correction —
+worst change over the 288-point golden grid **1.5e-03** relative, 240 rows, with
+`profit` itself moving at most 1.4e-03 because it is the maximum and therefore
+flat. Shut-down rows are unchanged. **If you have recorded numbers from this
+package, they will differ.**
+
+This is a correctness fix, and the evidence is the residual rather than the
+values: `|dprofit|` at the returned collar improved on **240 of 240** feasible
+grid rows with none worse, from a median of 7.8e-04 to **5.6e-15** on the 198 rows
+with an interior optimum. The remaining 42 have a *constrained* optimum pinned to
+a bracket bound, where the gradient is genuinely non-zero.
+
+Why it was worth moving results:
+
+- **Trait derivatives were unusable, and worse than noisy.** Golden section
+  resolved the argmax only to `GSS_tol_abs`, so a finite difference in a
+  photosynthetic trait returned exactly **zero** below a relative step of 1e-4 —
+  silently dropping a whole term of `dA/dtheta`. For traits in the hydraulic path
+  it was worse: the argmax came back smooth, plausible and **sign-inverted**
+  (`root_b` gave −2.6e-03 where the truth is +2.6e-04). A gradient-based
+  calibration would have walked those traits the wrong way with nothing to show
+  it. Finite differences now agree to ~4 digits at any relative step from 1e-8 to
+  1e-2, which unblocks #6.
+- **It is faster: 24.5%**, 2.65 against 3.51 µs/solve, interleaved at reps=2000.
+- **The argmax got smoother, not rougher** — ~1000× smaller second differences in
+  a trait. That is the opposite of what the guide's hazard 3 would lead you to
+  expect, and it is measured. ⚠️ In a *trait*; smoothness in plant state, which is
+  what hazard 3 is actually about, needs re-measuring on the plant side once
+  plant #591 clears.
+
+`GSS_tol_abs` is still a control and still has two jobs — the "interval too narrow
+to solve over" threshold and the off-path single-layer optimisers — but it no
+longer sets how well the reported operating point is determined.
+
+Also in this change: `dprofit_droot_collar_psi` gained an optional `bool*
+feasible` out-parameter, so a caller searching for a zero can tell a real
+stationary point from the `0.0` it returns on its shut-down exits. The default
+leaves every existing caller, including plant's TF24f, untouched.
+
 ## The package is callable from R (#5, stage 1)
 
 `leaf::Leaf` now has an R interface, so this is no longer a `LinkingTo`-only

@@ -1732,7 +1732,23 @@ Expect the `double` instantiation to be unchanged and verify it.
 There is a second, larger payoff, which is item 12: templating on the scalar type
 is what turns "we have AD" into "we can calibrate". See below.
 
-### 11a. Sharpen the outer solve FIRST — decided 2026-08-04, and it reorders the item
+### 11a. Sharpen the outer solve FIRST — DONE, and it reordered the item
+
+**Both PRs landed 2026-08-04: #35 (the sentinel) and the collar root-find.** The
+decision below was written first and survived implementation; three things came out
+of building it that the write-up did not predict, and they are recorded at the end
+of this sub-item under "What implementation changed". Headline results:
+
+| | golden section | root-find |
+|---|---|---|
+| `|dprofit|` at the returned collar, 198 interior rows | median 7.8e-04 | **median 5.6e-15** |
+| rows with an improved residual | — | **240 / 240**, none worse |
+| distinct argmax values over 11 trait steps | 6 / 11 | **11 / 11** |
+| argmax second differences in a trait | 3.9e-04 (= the step: noise) | **3.4e-07** |
+| µs/solve, interleaved at reps=2000 | 3.51 | **2.65 (24.5% faster)** |
+| worst golden-file change | — | **1.5e-03** (2160 of 2592 cells, 240 rows) |
+
+
 
 **Decision: replace the golden-section maximisation in `find_root_collar_psi` with
 a safeguarded root-find on `dprofit_droot_collar_psi == 0`, as its own PR, before
@@ -1994,6 +2010,43 @@ right** — no golden column comes from a gradient. Do not read a bit-identical
 golden run as evidence here. The checks that do bite are the three arbiters used
 above: a derivative-free scan of the maximum, `profit` not decreasing, and
 `|dprofit|` at the returned point.
+
+#### What implementation changed — three things the write-up above got wrong
+
+Recorded because each cost a debugging cycle and two of them contradict what is
+written above.
+
+1. **Returning the raw bound on a pinned row is WRONG, because of #31.** The plan
+   said "return the endpoint when there is no interior crossing", which is what any
+   safeguarded method does. It moved 22 golden rows' profit **down by 1.44**. The
+   cause is #31: below `psi_upstream` the profit algebra runs on a negative
+   conductance, so profit is **discontinuous** across the feasibility boundary
+   rather than merely steep — at `psi_soil = 4`, `vpd = 2`, 5 layers it is −4.696
+   just inside and −6.136 at `bound_a`. So #4's warning to "keep the search inside
+   the bracket" applies to the *answer* as well as to the search. The fix is to
+   return the stepped-inside point, which also beat golden section on profit at both
+   worst rows. Consequence worth carrying: a wet-pinned answer is determined to the
+   step-in scale (~1e-6 of the bracket width), not to `collar_root_tol`.
+2. **`profit` is the wrong instrument for checking this change**, and the write-up
+   above proposes it. It is the maximum, so it is flat, and its own floor is the
+   nested `ci` root-find's 1e-7 tolerance: two of 288 rows end ~6e-7 *lower* in
+   profit while their residual improves by ten orders of magnitude. **Check
+   `|dprofit|` at the returned point** — 240/240 improved, none worse. A test
+   asserting "profit never decreases" would have encoded the noise floor.
+3. **The speedup is real and larger than "probably faster" — 24.5%**, 2.65 against
+   3.51 µs/solve, identical across four interleaved pairs at reps=2000. The
+   eval-count estimate above (12 vs 18, "not a speedup") was too pessimistic
+   because it priced a `dprofit` evaluation without noticing the other half of the
+   change: the gradient was split into a wrapper plus `dprofit_at_collar_psi`, so
+   the solve seats the supply caches **once** rather than per evaluation — the same
+   saving #530 made for the finite-difference path.
+
+⚠️ **And one process note.** R does not track header dependencies, so
+`R CMD INSTALL` after editing `inst/include/` silently reuses a stale
+`src/RcppR6.o` and the R layer keeps running the OLD model. Two rounds of R-side
+diagnostics were measured against the previous solver before this was spotted, and
+the numbers looked plausible throughout. **`rm -f src/*.o src/*.so` before
+reinstalling**, and sanity-check one value against the C++ suite.
 
 ## 12. Demonstrate calibration — and then consider inversion
 

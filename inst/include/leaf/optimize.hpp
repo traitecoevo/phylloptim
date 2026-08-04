@@ -113,12 +113,32 @@ double brent_fmin(Function f, double ax, double bx, double tol,
 // single new f() evaluation per step after the initial two.
 //
 // Why this exists alongside brent_fmin: brent_fmin converges faster but its
-// parabolic step makes the argmax a *non-smooth* function of the inputs. The
-// production collar solver (Leaf::find_root_collar_psi) feeds its argmax into the
-// demographic growth-rate gradient, which needs that argmax to vary smoothly
-// with plant state -- so it uses this fixed-iteration golden-section search.
-// Where the argmax does not feed a gradient (the single-layer leaf optimisers),
-// prefer brent_fmin, which was measured ~2.3-2.6x faster there.
+// parabolic step makes the argmax a *non-smooth* function of the inputs. Where
+// the argmax does not feed a gradient (the single-layer leaf optimisers), prefer
+// brent_fmin, which was measured ~2.3-2.6x faster there.
+//
+// ⚠️ **The production collar solver no longer uses this** -- PLAN 11a replaced it
+// with a safeguarded root-find on the first-order condition
+// (Leaf::maximise_profit_over_collar), and this is now only that solver's fallback
+// for the case where neither bracket endpoint has a usable gradient. The reasoning
+// this comment used to give -- that the collar argmax feeds the demographic
+// growth-rate gradient and so must vary smoothly with plant state -- was right
+// about the requirement and wrong about which solver meets it best:
+//
+//   * A fixed iteration COUNT is not smoothness. Golden section terminates on
+//     bracket WIDTH, so it resolves the argmax only to `tol` and the residual
+//     offset wanders discontinuously as the comparison sequence flips. Measured:
+//     6 distinct answers across 11 trait steps, tread width ~GSS_tol_abs.
+//   * That made the argmax piecewise constant at fine scales, so trait
+//     derivatives came back exactly zero -- or, for traits in the hydraulic path,
+//     smooth, plausible and SIGN-INVERTED.
+//   * Solving dprofit == 0 instead resolves the argmax to solver precision and
+//     measured ~1000x smoother second differences in a trait, and 24.5% faster
+//     (2.65 vs 3.51 us/solve, interleaved at reps=2000).
+//
+// So the constraint stands and the conclusion inverted. Keep the constraint in
+// mind before changing the collar solver again; do not read this function's
+// existence as evidence that a comparison-based search is the safe choice.
 template <typename Function>
 double golden_section_max(Function f, double ax, double bx, double tol) {
   const double gr = (std::sqrt(5.0) + 1.0) / 2.0;  // ~1.6180339...

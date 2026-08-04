@@ -79,6 +79,28 @@ double uniroot_smooth(Function f, double min, double max, double tol,
   return (root.first + root.second) / 2.0;
 }
 
+// Same solver, for a caller that has ALREADY evaluated both endpoints.
+//
+// This exists for the collar solve (Leaf::maximise_profit_over_collar), which has
+// to evaluate f at both ends anyway -- it must know the signs there to tell an
+// interior optimum from one pinned to a constraint, and it must step the wet end
+// past dprofit's infeasibility sentinel. Handing those two values back saves 2 of
+// ~12 evaluations per solve, and a collar gradient evaluation is not cheap: each
+// one carries a nested ci root-find. Worth the overload on a path plant runs
+// millions of times.
+template <typename Function>
+double uniroot_smooth(Function f, double min, double max, double f_min,
+                      double f_max, double tol, size_t max_iterations) {
+  using boost::math::tools::toms748_solve;
+  boost::uintmax_t it = max_iterations;
+  std::pair<double, double> root = toms748_solve(
+      f, min, max, f_min, f_max, internals::uniroot_tol(tol, tol), it);
+  if (it >= static_cast<boost::uintmax_t>(max_iterations)) {
+    util::stop("Exceeded max_iterations");
+  }
+  return (root.first + root.second) / 2.0;
+}
+
 }
 }
 

@@ -28,6 +28,10 @@
 #
 # and paste the row. The C tool parses with the C library's strtod, which is
 # correctly rounded, and prints %a.
+#
+# Last regenerated for PLAN 11a (the collar root-find), which moved 27 of these
+# 36 values. The nine that did not move are the shut-down row: it never reaches
+# the collar solve, which is the point of having it here.
 
 # Four points, chosen to exercise different parts of the model rather than to
 # sample the grid evenly:
@@ -48,43 +52,43 @@ golden_rows <- list(
   list(
     inputs = list(psi_soil = 0.5, ppfd = 1500, vpd = 0.5, layers = 1L),
     expected = list(
-      psi_stem      = "0x1.70a79229baf62p+1",
-      opt_root_psi  = "0x1.067534d71138ap+1",
-      ci            = "0x1.9f471d46f21aep+4",
-      assim         = "0x1.215939832df68p+4",
-      transpiration = "0x1.450a2a0c39e62p-16",
-      gc            = "0x1.0b20062338333p-3",
-      profit        = "0x1.0790ff36ff824p+4",
-      e_up          = "0x1.450a2ac2a908ap-16",
-      uptake        = "0x1.19eae7c50af87p-10"
+      psi_stem      = "0x1.70a14c7893a66p+1",
+      opt_root_psi  = "0x1.0671f2de624bcp+1",
+      ci            = "0x1.9f448245054c4p+4",
+      assim         = "0x1.2157d30459d36p+4",
+      transpiration = "0x1.4504d2a133514p-16",
+      gc            = "0x1.0b1ba25cac3bep-3",
+      profit        = "0x1.0790ff442a381p+4",
+      e_up          = "0x1.4504d35b65acbp-16",
+      uptake        = "0x1.19e645c6a3926p-10"
     )
   ),
   list(
     inputs = list(psi_soil = 2.0, ppfd = 900, vpd = 2.0, layers = 3L),
     expected = list(
-      psi_stem      = "0x1.b1bb73796d571p+1",
-      opt_root_psi  = "0x1.82165fbecbafbp+1",
-      ci            = "0x1.0ddfaafaee8f8p+3",
-      assim         = "0x1.b2bd19a830ef3p+1",
-      transpiration = "0x1.b2957fb96c8p-18",
-      gc            = "0x1.6526ae31f8f4dp-7",
-      profit        = "0x1.8a0d7a4132bfcp-1",
-      e_up          = "0x1.b29582e19c3cfp-18",
-      uptake        = "0x1.78edd1274b422p-12"
+      psi_stem      = "0x1.b1b38a3125b6dp+1",
+      opt_root_psi  = "0x1.8211ae5c473c6p+1",
+      ci            = "0x1.0ddbcc40f557dp+3",
+      assim         = "0x1.b2abf3fc8af43p+1",
+      transpiration = "0x1.b282b1733fce8p-18",
+      gc            = "0x1.651739b6d3d15p-7",
+      profit        = "0x1.8a0d7bc5257p-1",
+      e_up          = "0x1.b282b4820ffc1p-18",
+      uptake        = "0x1.78dd817d6233ep-12"
     )
   ),
   list(
     inputs = list(psi_soil = 4.0, ppfd = 500, vpd = 1.0, layers = 5L),
     expected = list(
-      psi_stem      = "0x1.778e7b5cb2aedp+2",
-      opt_root_psi  = "0x1.37e2caa12f2e6p+2",
-      ci            = "0x1.0bc250999ed1p+3",
-      assim         = "0x1.9d4f247b8c6b5p+1",
-      transpiration = "0x1.9c4c8ca3cb5dp-19",
-      gc            = "0x1.52d638cde37efp-7",
-      profit        = "-0x1.db62d1e76e657p+1",
-      e_up          = "0x1.9c4c9102b1e34p-19",
-      uptake        = "0x1.6599bb3b768c8p-13"
+      psi_stem      = "0x1.77b2b5b3436bp+2",
+      opt_root_psi  = "0x1.37e82d8840ff2p+2",
+      ci            = "0x1.0bcf9df500a4p+3",
+      assim         = "0x1.9d87d2667966dp+1",
+      transpiration = "0x1.9c8a7e60e4353p-19",
+      gc            = "0x1.5309210eddb78p-7",
+      profit        = "-0x1.db6089328069fp+1",
+      e_up          = "0x1.9c8a84340ca09p-19",
+      uptake        = "0x1.65cf766e15e4ep-13"
     )
   ),
   list(

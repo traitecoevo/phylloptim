@@ -205,11 +205,25 @@ public:
   double a;
   double curv_fact_elec_trans; // unitless - obtained from Smith and Keenan (2020)
   double curv_fact_colim;
+  // Still a settable control, and it still has two jobs after PLAN 11a replaced
+  // the collar golden-section search: prepare_collar_solve's "this interval is too
+  // narrow to solve over" threshold, and the single-layer optimisers
+  // (optimise_psi_stem_TF / _Sperry), which are off the production path and keep
+  // brent_fmin because their argmax feeds no gradient. It no longer sets how well
+  // the reported operating point is determined -- collar_root_tol does.
   double GSS_tol_abs;
   double vulnerability_curve_ncontrol;
   double ci_abs_tol;
   double ci_niter;
   double cost_scale_TF24;
+
+  // Tolerance on the collar potential for the profit-maximising root-find (PLAN
+  // 11a). Hard-coded rather than a control field, for the same reason
+  // find_root_psi's 1e-4 and psi_stem_to_ci's 1e-7 are: it is a property of the
+  // solve, not a knob. 1e-12 sits ~8 orders below the 1e-4 at which this package
+  // calls a difference real, and the cost of going there from GSS_tol_abs's 1e-3
+  // is a handful of evaluations, because TOMS748 is superlinear.
+  static constexpr double collar_root_tol = 1e-12;
 
   double ci_;
   double stom_cond_CO2_;
@@ -512,6 +526,20 @@ public:
   // indistinguishable; and defaulting to nullptr leaves every existing call site
   // and the generated R binding untouched.
   double dprofit_droot_collar_psi(double opt_root_psi, bool* feasible = nullptr);
+  // Post-prepare body of dprofit_droot_collar_psi, with the same `feasible`
+  // contract. Assumes the supply path's per-solve caches are already seated, so
+  // the collar solve can share ONE supply_begin_solve across all ~10 of its
+  // gradient evaluations instead of re-seating per call -- the same saving #530
+  // made for the finite-difference path, and it matters here because
+  // begin_solve() is a spline evaluation per soil layer.
+  double dprofit_at_collar_psi(double opt_root_psi, bool* feasible = nullptr);
+  // The profit-maximising collar potential within [bound_a, bound_b], by a
+  // safeguarded root-find on dprofit == 0 (PLAN 11a). Returns a bound when the
+  // optimum is pinned to it, which is the case on 42 of the 240 feasible
+  // golden-grid rows and so is a branch that has to be written rather than a
+  // corner. Falls back to golden section if either endpoint has no usable
+  // gradient -- see the definition for why that fallback should never fire.
+  double maximise_profit_over_collar(double bound_a, double bound_b);
   // Analytic d(E_up_)/d(collar suction) -- a CONDUCTANCE, positive by
   // construction now that both sides are magnitudes (#25). Thin forwarder to
   // roots_.duptake_dpsi; see there for the derivation and for the NaN-at-a-kink
@@ -1331,6 +1359,134 @@ if(assim_max_ < 0){
     return true;
 }
 
+// The profit-maximising collar potential, by solving the first-order condition
+// dprofit/dpsi == 0 instead of searching profit itself (PLAN 11a). Assumes
+// prepare_collar_solve has run, so the soil-side caches are seated and every
+// gradient evaluation below can go straight to dprofit_at_collar_psi.
+//
+// WHY this replaced golden section, in one line each -- PLAN 11a has the numbers:
+//
+//  * Golden section resolves the argmax only to GSS_tol_abs (1e-3), leaving the
+//    returned collar ~1e-4 MPa from the true stationary point with an offset that
+//    wanders as the comparison sequence flips. That offset IS the staircase that
+//    made trait derivatives unusable.
+//  * The damage was not merely a staircase. For traits in the hydraulic path the
+//    wandering offset DOMINATED the real trait response, so the argmax came back
+//    smooth, plausible and SIGN-INVERTED (root_b: -2.6e-03 where the truth is
+//    +2.6e-04). Arbitrated against a 20001-point derivative-free scan of profit.
+//  * It cannot be fixed downstream. No finite-difference step size and no amount
+//    of differentiating through the iterations recovers it, because the error is
+//    in the solved argmax rather than in how the argmax is differentiated.
+//  * Hazard 3 -- "the argmax must vary smoothly with inputs" -- is IMPROVED, not
+//    threatened: measured ~800x better second differences in the traits. The
+//    hazard's own concern is smoothness in plant state, which cannot be measured
+//    here while plant #591 blocks end-to-end validation; same mechanism, so the
+//    same direction is expected, but it is not the same measurement.
+//
+// Safeguarded, not Newton: TOMS748 keeps a bracket throughout, so a non-monotone
+// or kinked case degrades instead of diverging. Monotonicity was measured on all
+// 240 feasible golden-grid rows, but that is a grid, not a theorem. This also
+// makes the collar the third leaf solver on this method -- see uniroot.hpp's
+// history note, which is about exactly this judgement call.
+inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) {
+  const double width = bound_b - bound_a;
+  const auto dprofit = [&](double psi, bool* feasible = nullptr) {
+    return dprofit_at_collar_psi(psi, feasible);
+  };
+
+  // The WET endpoint is infeasible by construction: bound_a is root_zero_E, where
+  // uptake is exactly zero, so psi_stem == bound_a and dprofit takes its
+  // reversed-gradient exit. Its 0.0 is a sentinel, and a bracketing solver handed
+  // it would report the zero-transpiration point as the optimum -- profit -1.897
+  // there against 2.516 at the true optimum, measured at the default drivers.
+  //
+  // So step inside until the gradient is real. Measured over the golden grid the
+  // infeasible region is at most 3.46e-07 MPa wide (median 1.22e-08, never more
+  // than 6.2e-07 of the bracket), so the first try lands and the loop is a guard.
+  bool ok_lo = false;
+  double lo = bound_a;
+  double f_lo = 0.0;
+  for (double frac = 1e-6; frac < 0.5; frac *= 10.0) {
+    lo = bound_a + frac * width;
+    f_lo = dprofit(lo, &ok_lo);
+    if (ok_lo && std::isfinite(f_lo)) {
+      break;
+    }
+  }
+
+  // The DRY endpoint is feasible everywhere measured, so it is tried as-is first
+  // and only stepped inside if that fails.
+  bool ok_hi = false;
+  double hi = bound_b;
+  double f_hi = dprofit(hi, &ok_hi);
+  if (!(ok_hi && std::isfinite(f_hi))) {
+    for (double frac = 1e-6; frac < 0.5; frac *= 10.0) {
+      hi = bound_b - frac * width;
+      f_hi = dprofit(hi, &ok_hi);
+      if (ok_hi && std::isfinite(f_hi)) {
+        break;
+      }
+    }
+  }
+
+  // No usable gradient at one end. Nothing measured reaches this -- both ends are
+  // feasible on all 240 feasible golden-grid rows -- so treat it as a signal
+  // rather than a routine path if it ever fires. Falling back to the search this
+  // replaced means the change cannot make a previously-working case fail, which
+  // is worth six lines on a solve plant runs millions of times.
+  if (!ok_lo || !ok_hi) {
+    return util::golden_section_max(
+        [&](double bound) {
+          const double psi_stem =
+              find_psi_stem_from_psi_root(bound, supply_psi_soil());
+          return profit_psi_stem_TF(psi_stem, bound);
+        },
+        bound_a, bound_b, GSS_tol_abs);
+  }
+
+  // A CONSTRAINED optimum: profit is still climbing at one end of the feasible
+  // interval, so dprofit never crosses zero inside it and the answer is that end.
+  // Not a corner case -- 42 of the 240 feasible golden-grid rows land here (24
+  // pinned wet, 18 pinned dry), all at psi_soil of 3 to 4, where profit is
+  // negative and the best the leaf can do is barely transpire.
+  //
+  // ⚠️ **Return lo/hi, NOT bound_a/bound_b.** Returning the raw bound was tried
+  // and is wrong, because of #31: below psi_upstream the profit algebra is built
+  // on a negative conductance, so profit is DISCONTINUOUS across the feasibility
+  // boundary rather than merely steep. Measured at psi_soil=4, vpd=2, 5 layers:
+  // profit is -4.696 just inside the boundary and -6.136 at bound_a itself, a jump
+  // of exactly the 1.44 that showed up on 22 golden rows as a profit DECREASE. The
+  // #31 region is the reason the wet endpoint has to be stepped over rather than
+  // evaluated, and the same reason it must not be returned.
+  //
+  // What lo buys, stated honestly: on a wet-pinned row the true argmax sits
+  // essentially ON the feasibility boundary -- a fine scan puts it at 6.4e-07 and
+  // 3.2e-09 of the bracket width from bound_a on the two worst rows -- so lo
+  // resolves it to the step-in scale (~1e-6 of the width), not to
+  // collar_root_tol. That is still ~100x tighter than the GSS_tol_abs it replaces,
+  // and it beat golden section on profit at both of those rows. Bisecting for the
+  // exact feasibility boundary would cost ~40 gradient evaluations on the hot path
+  // to gain ~1e-07 of profit on a flat maximum, which is not a trade worth making.
+  //
+  // Worth knowing downstream: where a row crosses between interior and pinned the
+  // argmax has a genuine KINK. That belongs to the constrained problem rather than
+  // to this solver -- golden section has it too -- but it is a real
+  // non-differentiable set in trait space, and it sits where a calibration is most
+  // likely to wander.
+  if (f_lo <= 0.0) {
+    return lo;
+  }
+  if (f_hi >= 0.0) {
+    return hi;
+  }
+
+  // Interior stationary point. f_lo > 0 > f_hi, so the bracket is valid and
+  // uniroot_smooth's throw-on-bad-bracket cannot fire; passing the two endpoint
+  // values it already has saves it re-evaluating them.
+  return util::uniroot_smooth(dprofit, lo, hi, f_lo, f_hi, collar_root_tol,
+                              static_cast<size_t>(ci_niter));
+}
+
 inline void Leaf::find_root_collar_psi(){
     double bound_a, bound_b;
     if (!prepare_collar_solve(bound_a, bound_b)) {
@@ -1339,19 +1495,10 @@ inline void Leaf::find_root_collar_psi(){
     // root_crit / root_zero_E were consumed inside prepare_collar_solve; recover
     // them for the diagnostic message only if the profit check below fails.
 
-    // Maximise carbon profit over the feasible collar-potential interval via
-    // golden-section search (util::golden_section_max). Unlike Brent, its argmax
-    // is a smooth (fixed-iteration) function of the inputs, so the operating
-    // point varies smoothly with plant height -- the demographic growth-rate
-    // gradient relies on this. The objective maps a candidate collar potential
-    // `bound` to its profit (find the stem psi it implies, then evaluate profit).
-    const double opt_root_psi = util::golden_section_max(
-        [&](double bound) {
-          const double psi_stem =
-              find_psi_stem_from_psi_root(bound, supply_psi_soil());
-          return profit_psi_stem_TF(psi_stem, bound);
-        },
-        bound_a, bound_b, GSS_tol_abs);
+    // Maximise carbon profit over the feasible collar-potential interval by
+    // solving its first-order condition, dprofit/dpsi == 0, rather than by
+    // searching the objective. PLAN 11a has the reasoning and the measurements.
+    const double opt_root_psi = maximise_profit_over_collar(bound_a, bound_b);
 
     opt_psi_stem_ = find_psi_stem_from_psi_root(opt_root_psi, supply_psi_soil());
 
@@ -1422,6 +1569,15 @@ inline double Leaf::profit_at_collar_psi(double target_opt_root_psi,
 // AD; the gc partials use the analytic spline derivative (transpiration_from_psi
 // .deriv); dpsi_stem/dpsi by a tight central difference on the smooth transport.
 inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi, bool* feasible) {
+  // Every transport evaluation below reads the supply path's per-solve caches, so
+  // seat them on the current psi_soil_ here rather than depending on whatever the
+  // caller's last solve left cached. Keeping this in the wrapper is what lets the
+  // collar solve call the body directly and seat them once for the whole solve.
+  supply_begin_solve();
+  return dprofit_at_collar_psi(opt_root_psi, feasible);
+}
+
+inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
   using AD = xad::fwd<double>::active_type;
   const double psi = opt_root_psi;
   const double gstar_Pa = gamma_ * umol_per_mol_to_Pa_;
@@ -1430,11 +1586,6 @@ inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi, bool* feasible
   if (feasible != nullptr) {
     *feasible = false;
   }
-
-  // Every transport evaluation below reads the supply path's per-solve caches, so
-  // seat them on the current psi_soil_ here rather than depending on whatever the
-  // caller's last solve left cached.
-  supply_begin_solve();
 
   // Operating point in double.
   const double psi_stem = find_psi_stem_from_psi_root(psi, supply_psi_soil());
