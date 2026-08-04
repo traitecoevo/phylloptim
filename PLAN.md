@@ -2438,7 +2438,11 @@ written:
 #### The decision
 
 **Route 2 now; route 3 when the fit asks for it.** Both keep leaf header-only with
-no tape and no linking.
+no tape and no linking. **The staged plan and the verification references are in
+[`notes/trait-gradients-seed.md`](notes/trait-gradients-seed.md)**, which is the
+entry point for a fresh session — including the measurement that stage 1 can live
+in the R layer and still get 10x, because R's per-call overhead on `dprofit` is only
+1.7 us.
 
 1. **Wire up the IFT composition** — `dψ*/dθ` from `H` and `M`, both from the
    existing exact `dprofit`, then compose `dA/dθ`. 12× for a small amount of code
