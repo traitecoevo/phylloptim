@@ -487,7 +487,31 @@ public:
   // spline derivatives (Interpolator::deriv) for the smooth transport. Replaces
   // the noisy finite-difference gradient. Seats the soil-side caches itself, so a
   // solve need not have run first.
-  double dprofit_droot_collar_psi(double opt_root_psi);
+  //
+  // ⚠️ **The 0.0 returned on the shut-down / reversed-gradient exits is a
+  // SENTINEL, not a stationary point**, and the distinction only became load
+  // bearing when PLAN 11a proposed root-finding on `dprofit == 0`. It matters
+  // because the sentinel fires at `prepare_collar_solve`'s WET bracket endpoint
+  // -- at `root_zero_E` uptake is zero by construction, so `psi >= psi_stem` --
+  // which is the first point a bracketing solver evaluates when it checks that
+  // its bracket brackets. Measured at the default operating point: profit there
+  // is -1.897 against 2.516 at the true optimum, so a solver that reads the
+  // sentinel as a root returns the zero-transpiration point as the answer. The
+  // region is narrow (at most 3.46e-07 MPa into the bracket over the golden grid,
+  // median 1.22e-08), which is exactly why it would survive casual testing.
+  //
+  // `feasible`, when non-null, reports whether the point admits an informative
+  // gradient at all, so a caller searching for a zero can tell the two kinds of
+  // 0.0 apart. The out-parameter rather than a NaN return is deliberate three
+  // ways: TF24f consumes the return value directly as an ODE rate
+  // (`dpsi/dt = k_acclim * dprofit`, plant/src/tf24f_strategy.cpp), so a NaN
+  // would propagate into plant's state vector where 0.0 correctly means "do not
+  // acclimate this step"; NaN already carries a *different* contract on the
+  // neighbouring derivative (hazard 6: `duptake_dpsi` returning NaN means "fall
+  // back to finite differences"), and overloading it would make the two
+  // indistinguishable; and defaulting to nullptr leaves every existing call site
+  // and the generated R binding untouched.
+  double dprofit_droot_collar_psi(double opt_root_psi, bool* feasible = nullptr);
   // Analytic d(E_up_)/d(collar suction) -- a CONDUCTANCE, positive by
   // construction now that both sides are magnitudes (#25). Thin forwarder to
   // roots_.duptake_dpsi; see there for the derivation and for the NaN-at-a-kink
@@ -1397,10 +1421,15 @@ inline double Leaf::profit_at_collar_psi(double target_opt_root_psi,
 // with gc = const * transpiration(psi_stem,psi). A'/C' are obtained by forward
 // AD; the gc partials use the analytic spline derivative (transpiration_from_psi
 // .deriv); dpsi_stem/dpsi by a tight central difference on the smooth transport.
-inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi) {
+inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi, bool* feasible) {
   using AD = xad::fwd<double>::active_type;
   const double psi = opt_root_psi;
   const double gstar_Pa = gamma_ * umol_per_mol_to_Pa_;
+  // Infeasible until the two exits below have been passed; see the header for why
+  // the 0.0 they return must be distinguishable from a genuine stationary point.
+  if (feasible != nullptr) {
+    *feasible = false;
+  }
 
   // Every transport evaluation below reads the supply path's per-solve caches, so
   // seat them on the current psi_soil_ here rather than depending on whatever the
@@ -1426,6 +1455,11 @@ inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi) {
   const double ci = psi_stem_to_ci(psi_stem, psi);
   if (!std::isfinite(ci)) {
     return 0.0;
+  }
+  // Past both exits: whatever is returned below is a real derivative, so a zero
+  // from here IS a stationary point.
+  if (feasible != nullptr) {
+    *feasible = true;
   }
 
   // A'(ci) and C'(psi_stem) via forward-mode AD of the analytic algebra.

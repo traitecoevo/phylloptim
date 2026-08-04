@@ -430,6 +430,75 @@ void test_gradient_is_zero_in_reversed_gradient_state() {
   }
 }
 
+// The 0.0 the two exits above return is a SENTINEL, and PLAN 11a is what makes
+// telling it apart from a genuine stationary point load bearing: it proposes
+// root-finding on dprofit == 0, and the sentinel fires at the WET END of the very
+// bracket such a solve would search. At bound_a = root_zero_E uptake is zero by
+// construction, so psi >= psi_stem and the reversed-gradient exit is taken -- and
+// a bracketing solver evaluates that endpoint FIRST, to check its bracket
+// brackets. So it would read the sentinel as the answer and return the
+// zero-transpiration point as the optimum.
+//
+// This test pins the distinction rather than the eventual solver, so it is
+// independent of how 11a is implemented. Note what it can and cannot see: the
+// golden file cannot see any of this (no golden column comes from the gradient),
+// and neither can a test that only samples interior points -- the sentinel region
+// measured at most 3.46e-07 MPa wide over the golden grid, which is exactly why
+// it would survive casual testing.
+void test_gradient_reports_feasibility() {
+  printf("dprofit/dpsi_collar distinguishes its 0.0 sentinel from a stationary point\n");
+  Drivers d;
+  leaf::Leaf l = make_leaf(d, {2.0}, {1.0});
+
+  // The bracket a root-find would search, built exactly as prepare_collar_solve
+  // does: the wet end is where uptake is zero, the dry end whichever limit binds.
+  const double wettest = 2.0;
+  const double root_zero_E = l.find_root_psi(wettest, l.roots_.psi_soil_, 0);
+  const double root_crit = l.find_root_psi(wettest, l.roots_.psi_soil_, 1);
+  const double bound_b = std::min(root_crit, l.roots_.root_psi_crit);
+  ok(root_zero_E < bound_b, "the bracket is non-empty");
+
+  // The wet endpoint: 0.0, and NOT a stationary point.
+  bool feasible = true;
+  const double at_a = l.dprofit_droot_collar_psi(root_zero_E, &feasible);
+  ok(at_a == 0.0, "the gradient is 0.0 at the wet bracket endpoint");
+  ok(!feasible, "and the endpoint is reported infeasible, so the 0.0 is a sentinel");
+
+  // Why accepting it would be wrong, stated as a number rather than an assertion
+  // about intent: the endpoint is a far worse operating point than the optimum.
+  l.find_root_collar_psi();
+  const double best = l.profit_;
+  const double at_endpoint = l.evaluate_root_collar_psi(root_zero_E);
+  ok(at_endpoint < best - 1.0,
+     "and profit at the endpoint is much worse than at the optimum");
+
+  // An interior point: a real derivative, so a zero there WOULD be stationary.
+  feasible = false;
+  const double mid = 0.5 * (root_zero_E + bound_b);
+  const double at_mid = l.dprofit_droot_collar_psi(mid, &feasible);
+  ok(feasible, "an interior point is reported feasible");
+  ok(std::isfinite(at_mid) && at_mid != 0.0,
+     "and its gradient is a finite non-zero number");
+
+  // The reversed-gradient state is infeasible too, and there the 0.0 is the whole
+  // answer -- this is the case test_gradient_is_zero_in_reversed_gradient_state
+  // already pins, checked here for the flag rather than the value.
+  leaf::Leaf dry = make_leaf(d, {5.9, 6.15, 6.4, 6.65, 6.9},
+                             {1.0, 2.0, 3.0, 4.0, 5.0});
+  dry.find_root_collar_psi();
+  feasible = true;
+  ok(dry.dprofit_droot_collar_psi(3.0, &feasible) == 0.0 && !feasible,
+     "the reversed-gradient state is reported infeasible");
+
+  // The out-parameter changes nothing about the value, so TF24f's contract (the
+  // return value alone, consumed as an ODE rate) is untouched. Bit-identical, not
+  // merely close: the flag is a write to a caller's bool, not arithmetic.
+  ok(l.dprofit_droot_collar_psi(mid) == at_mid,
+     "passing no flag returns exactly the same value");
+  ok(l.dprofit_droot_collar_psi(root_zero_E) == 0.0,
+     "and the sentinel is still 0.0 for a caller that does not ask");
+}
+
 // #25's invariant, asserted rather than documented: every psi is a positive
 // magnitude, so the soil->collar derivative is a CONDUCTANCE. Under the old signed
 // convention this came back negative and had to be negated at the one call site
@@ -1169,6 +1238,7 @@ int main() {
   test_analytic_gradient_matches_finite_difference();
   test_gradient_needs_no_prior_solve();
   test_gradient_is_zero_in_reversed_gradient_state();
+  test_gradient_reports_feasibility();
   test_soil_conductance_is_positive();
   test_root_psi_crit_clamp_binds();
   test_signed_potentials_are_rejected();
