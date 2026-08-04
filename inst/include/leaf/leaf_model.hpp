@@ -385,6 +385,46 @@ public:
   // the ratio makes the leaf PURELY INTENSIVE: no extensive quantity anywhere in
   // it. beta_R_H and beta_R_V are unchanged; the scaling cancels exactly.
   void set_physiology(const std::vector<double>& root_carbon_per_leaf_area, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double leaf_temp, double atm_o2_kpa, double atm_kpa);
+
+  // Replace the fifteen traits on an existing Leaf, leaving the four numerical
+  // controls alone. Same arguments, same order, as the constructor's trait subset.
+  //
+  // ONE ENTRY POINT, NOT FIFTEEN SETTABLE FIELDS, and this is the set_supply_*
+  // judgement again (issue #32) rather than a stylistic preference. The traits are
+  // public plain doubles, so assigning one *compiles* -- and two separate pieces of
+  // derived state go stale when it does:
+  //
+  //   * the two vulnerability SPLINES. stem_b/stem_c build transpiration_from_psi
+  //     and psi_from_transpiration; root_b/root_c build the root curve. Both are
+  //     pre-integrated at construction, so a bare `l.stem_b = x` leaves the hot
+  //     path reading the previous curve's integral while proportion_of_conductivity
+  //     reports the new one -- two answers to the same question.
+  //   * vcmax_, jmax_ and R_d_, which are derived from vcmax_25/jmax_25 inside
+  //     set_physiology's TEMPERATURE CACHE. That cache is keyed on (leaf_temp_,
+  //     atm_o2_kpa_) and on nothing else, so calling set_physiology again after a
+  //     bare trait write at the SAME temperature takes the cache hit and never
+  //     recomputes them. The obvious repair -- "change the trait, then set the
+  //     drivers again" -- therefore does not work, which is what makes a settable
+  //     field actively dangerous here rather than merely untidy.
+  //
+  // So: the invariant checks run (a bare write bypasses them entirely, #25), the
+  // splines are rebuilt only when the curve that owns them actually moved, and
+  // setup_clean_leaf() puts the object back in its just-constructed state -- which
+  // resets both caches and requires set_physiology() before the next solve, exactly
+  // as a fresh Leaf would. That last part is not conservatism: the derived
+  // photosynthetic parameters really are unknown until the drivers are re-supplied.
+  void set_traits(double vcmax_25, double stem_c, double stem_b, double psi_crit,
+                  double root_c, double root_b, double root_psi_crit,
+                  double beta2, double jmax_25, double a,
+                  double curv_fact_elec_trans, double curv_fact_colim,
+                  double cost_scale_TF24, double beta_R_H, double beta_R_V);
+
+  // The #25 boundary: the four potentials that must be positive magnitudes. One
+  // copy, called from both the constructor and set_traits -- the alternative is
+  // two copies that agree until one of them is edited.
+  static void check_psi_magnitudes(double psi_crit, double stem_b, double root_b,
+                                   double root_psi_crit);
+
   void setup_transpiration(double resolution);
   // Forwards to roots_.setup_vulnerability. Kept on Leaf because it is part of
   // the published construction sequence (see the umbrella header) and plant's
@@ -799,23 +839,8 @@ inline Leaf::Leaf(double vcmax_25, double stem_c, double stem_b,
       // there was no global statement about psi's sign to assert -- psi_soil_ was
       // >= 0, psi_soil_inverted_ was <= 0, psi_crit was >= 0 and the collar was
       // <= 0 -- which is precisely why the convention had to live in comments.
-      // Now it is checkable, so it is checked.
-      if (!(psi_crit > 0.0)) {
-        util::stop("psi_crit must be a positive magnitude in MPa (#25); got " +
-                   util::to_string(psi_crit));
-      }
-      if (!(stem_b > 0.0)) {
-        util::stop("stem_b must be a positive magnitude in MPa (#25); got " +
-                   util::to_string(stem_b));
-      }
-      if (!(root_b > 0.0)) {
-        util::stop("root_b must be a positive magnitude in MPa (#25); got " +
-                   util::to_string(root_b));
-      }
-      if (!(root_psi_crit > 0.0)) {
-        util::stop("root_psi_crit must be a positive magnitude in MPa (#25); got " +
-                   util::to_string(root_psi_crit));
-      }
+      // Now it is checkable, so it is checked. set_traits shares this check.
+      check_psi_magnitudes(psi_crit, stem_b, root_b, root_psi_crit);
 
       // The root traits and the two resistance constants belong to the supply
       // path, so hand them over before its vulnerability curve is built.
@@ -828,6 +853,81 @@ inline Leaf::Leaf(double vcmax_25, double stem_c, double stem_b,
       setup_transpiration(vulnerability_curve_ncontrol); // arg: num control points for integration
       setup_root_vulnerability(vulnerability_curve_ncontrol);
       setup_clean_leaf();
+}
+
+inline void Leaf::check_psi_magnitudes(double psi_crit, double stem_b,
+                                      double root_b, double root_psi_crit) {
+  if (!(psi_crit > 0.0)) {
+    util::stop("psi_crit must be a positive magnitude in MPa (#25); got " +
+               util::to_string(psi_crit));
+  }
+  if (!(stem_b > 0.0)) {
+    util::stop("stem_b must be a positive magnitude in MPa (#25); got " +
+               util::to_string(stem_b));
+  }
+  if (!(root_b > 0.0)) {
+    util::stop("root_b must be a positive magnitude in MPa (#25); got " +
+               util::to_string(root_b));
+  }
+  if (!(root_psi_crit > 0.0)) {
+    util::stop("root_psi_crit must be a positive magnitude in MPa (#25); got " +
+               util::to_string(root_psi_crit));
+  }
+}
+
+// See the header for why this exists rather than fifteen settable fields.
+inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
+                             double psi_crit_, double root_c_, double root_b_,
+                             double root_psi_crit_, double beta2_,
+                             double jmax_25_, double a_,
+                             double curv_fact_elec_trans_,
+                             double curv_fact_colim_, double cost_scale_TF24_,
+                             double beta_R_H_, double beta_R_V_) {
+  check_psi_magnitudes(psi_crit_, stem_b_, root_b_, root_psi_crit_);
+
+  // Which splines have to be rebuilt, decided BEFORE the assignment. Exact
+  // equality is the right test and not a sloppy one: the spline is a pure
+  // function of the pair, so an unchanged pair gives a bit-identical spline and
+  // rebuilding it is pure cost. A trait perturbed by a relative 1e-08 -- what a
+  // gradient loop does -- compares unequal and rebuilds, which is the case that
+  // must not be missed.
+  const bool stem_curve_moved = (stem_b_ != stem_b) || (stem_c_ != stem_c);
+  const bool root_curve_moved =
+      (root_b_ != roots_.root_b) || (root_c_ != roots_.root_c);
+
+  vcmax_25 = vcmax_25_;
+  stem_c = stem_c_;
+  stem_b = stem_b_;
+  psi_crit = psi_crit_;
+  beta2 = beta2_;
+  jmax_25 = jmax_25_;
+  a = a_;
+  curv_fact_elec_trans = curv_fact_elec_trans_;
+  curv_fact_colim = curv_fact_colim_;
+  cost_scale_TF24 = cost_scale_TF24_;
+
+  roots_.root_c = root_c_;
+  roots_.root_b = root_b_;
+  roots_.root_psi_crit = root_psi_crit_;
+  roots_.beta_R_H = beta_R_H_;
+  roots_.beta_R_V = beta_R_V_;
+
+  // beta_R_H / beta_R_V need no rebuild here: they turn root carbon into
+  // resistances, and that happens in set_physiology, which this call requires
+  // anyway. Same reasoning as psi_crit, which is read directly.
+  if (stem_curve_moved) {
+    setup_transpiration(vulnerability_curve_ncontrol);
+  }
+  if (root_curve_moved) {
+    setup_root_vulnerability(vulnerability_curve_ncontrol);
+  }
+
+  // Last, and it is the whole safety argument: back to the just-constructed
+  // state. Clears the solved operating point to the NA sentinels (hazard 8: an
+  // output left unwritten becomes the previous solve's value), and resets both
+  // the transpiration memo and the photosynthesis temperature cache -- the one
+  // that would otherwise hand back the old vcmax_.
+  setup_clean_leaf();
 }
 
 // set various states and physiology parameters obtained from TF24 to NA to clean leaf object

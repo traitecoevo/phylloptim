@@ -279,6 +279,42 @@ settable tag would leave the other path's state configured and silently ignored.
 default, and the value the R layer supplies is a stand-in rather than a
 recommendation.
 
+### Trait gradients
+
+`leaf_gradient()` gives the derivatives of the solved outputs with respect to the
+traits, which is what a gradient-based optimiser or a Hamiltonian sampler wants:
+
+```r
+g <- leaf_gradient(psi_soil = 2.0, PPFD = 900,
+                   pars = c("vcmax_25", "stem_b", "cost_scale_TF24"))
+g$gradient   # rows: traits.  columns: A, gc, psi_stem, collar
+g$method     # "ift" or "fd" -- see below
+```
+
+These are not finite differences of the solve. The outputs are evaluated at the
+profit-maximising collar potential, so a trait moves them both directly and by
+moving that optimum — and for `cost_scale_TF24`, `beta2`, `stem_b` and `stem_c`
+the second route is **100%** of the answer. Differentiating the optimality
+condition rather than the solved output gets both terms exactly.
+
+That derivation assumes the optimum is interior, and at the dry end it often is
+not: with the optimum pinned to the edge of the feasible range the formula returns
+a confidently wrong number, off by up to seven orders of magnitude. So the
+assumption is **tested** at every point and the function falls back to
+differencing the solve where it fails. `g$method` reports which route ran and
+`g$status` reports why.
+
+To vary traits yourself, `set_traits()` replaces them on an existing leaf — much
+cheaper than rebuilding one, and the only correct way to do it, since a trait
+change invalidates derived state that is not obvious from the outside:
+
+```r
+l <- leaf_model()
+set_traits(l, leaf_traits(vcmax_25 = 120))
+set_drivers(l, psi_soil = 2.0, PPFD = 900)   # required: the drivers must be re-set
+l$find_root_collar_psi()
+```
+
 See `vignette("leaf")` for the whole tour.
 
 ### As a dependency of another R package
