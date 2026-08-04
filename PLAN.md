@@ -100,7 +100,7 @@ code rather than of the merge:
 | issue | item | what | note |
 |---|---|---|---|
 | [#3](https://github.com/traitecoevo/leaf_cpp/issues/3) | 7a | Make λ(state) pluggable | **unblocked** — #2 is done. Measure the dispatch separately: the cost core is fully inlined where the supply path was not, so 7b's "dispatch is free" result does **not** transfer |
-| [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11, **11c** | Template `Leaf` on its scalar type | **11a and 11b landed** (#36); **11c measured what is left and the answer is "not urgent"**. Trait gradients already work to ~4 digits by finite difference — at interior points *and*, unlike any IFT composite, correctly at the 42 pinned ones. So `Leaf<T>` buys **exactness and speed, not capability**. ⚠️ The crux for any IFT design is the **active set**, not the mixed partial: at a pinned optimum the bare composite is wrong by up to **3.5e+07**, silently and by O(1). **Let #6 choose** — write the fit against FD, and let it say which gradient, if any, is the problem |
+| [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11, **11d** | Trait gradients (was: template `Leaf`) | **11a and 11b landed** (#36); **11d DECIDES the rest.** #6's fit spends **97.6%** of 10,045 evaluations on FD gradients, so it is worth building. The win is **architectural, not modal**: the cost is re-solving the model 2N times per gradient, so IFT gets **12×** with no new AD, and parameter-explicit kernels **72×**. **Reverse mode is not needed and `Leaf<T>` is not on this path** — item 5's no-linking decision was revisited and stands. ⚠️ Must carry 11c's **active-set branch** (42 pinned rows; bare composite wrong by 3.5e+07) |
 | [#33](https://github.com/traitecoevo/leaf_cpp/issues/33) | 6d | Take resistances, not root carbon | #5 stage 2b, **blocked on plant #591**. Before #34 |
 | [#34](https://github.com/traitecoevo/leaf_cpp/issues/34) | 6d | Delete plant's `Leaf` bindings | #5 stage 4, **blocked on plant #591**. The hazard-7 payoff, and the only stage that can break plant |
 | [#6](https://github.com/traitecoevo/leaf_cpp/issues/6) | 12 | Calibration vignette, then inversion | **UNBLOCKED, and it is now the thing that should go next.** 11c measured trait gradients: FD gives ~4 digits at interior points and is correct at pinned ones, so the fit can be written today. Item 12's old "FD-only calibration is throwaway" rule assumed FD *does not work*, which 11a fixed — so write the fit against FD and let it say whether exactness is worth having. **Doing this is what specifies #4's remainder.** ⚠️ Achievable precision of a target is **~1e-9**, set by `psi_stem_to_ci` |
@@ -618,6 +618,25 @@ live in this family and want the same version, and only *forward* mode is used
 (`xad::fwd<double>`), which needs no tape and therefore no linking — confirmed by
 `nm`: plant's `leaf_model.o` has zero `xad::Tape` symbols. The alternatives below
 are recorded in case that ever stops being true.
+
+**Revisited 2026-08-04 and it stands**, which is worth recording because it was the
+obvious thing to reopen. Trait gradients (item 11) looked like they might want
+*reverse* mode, since reverse is the only mode that is O(1) rather than O(N) in the
+parameter count and the motivating fit has 40 parameters. Two measurements closed it
+(11d):
+
+- **Reverse mode genuinely does not link header-only.** `xad::adj<double>` leaves
+  `xad::Tape<double,1>::active_tape_` and its members undefined. The definitions are
+  in `odelia/src/Tape.cpp`, which says in a comment that it is the *only* compiled
+  copy of the tape runtime in the process and that `LinkingTo: odelia` consumers
+  resolve against it. plant reaches it from tests via `PKG_LIBS=<odelia.so>`, and
+  skips when it is absent. leaf's CMake and Python consumers could not do that at
+  all, so taking reverse mode would cost the no-R build.
+- **It is not needed.** The gradient cost is dominated by *re-solving the model*,
+  not by differentiation: `dprofit` is 7.1% of a solve. Once the implicit function
+  theorem removes the N re-solves, forward AD on the kernels is noise — so the O(N)
+  versus O(1) distinction never bites. Only N = 1 tapes are instantiated anyway, so
+  `adj<double,N>` would not link even with the library.
 
 
 XAD arrives via odelia, which vendors it. That is fine while both packages live
@@ -2323,9 +2342,15 @@ derivative. 42 of 240 feasible golden rows exercise it, all at `psi_soil` 3–4,
 is the dry end where a calibration is most likely to wander. Getting it wrong is not
 a tolerance issue.
 
-#### So the decision
+#### So the decision — ⚠️ superseded by 11d
 
-**Neither route is urgent, and that is the finding.** Ordered by what each buys:
+**11c concluded "neither route is urgent" and left the choice to #6. #6 answered:
+97.6% of its hierarchical fit's 10,045 evaluations were finite-difference
+gradients, so it is worth building, and 11d settles how.** The framing below is
+still the right one — it is the *urgency* judgement that was wrong, because 11c had
+no cost figure to weigh. Read 11d for the decision.
+
+Ordered by what each buys:
 
 1. **Do nothing yet.** Trait gradients work to ~4 digits by finite difference, at
    every interior operating point and — unlike any IFT composite — correctly at
@@ -2350,6 +2375,90 @@ better specification for this item than a guess.
 ⚠️ **One thing to carry into #6 either way:** the achievable precision of a
 calibration target is **~1e-9**, set by `psi_stem_to_ci` (11b). Do not ask a fit to
 resolve anything finer.
+
+### 11d. DECIDED: implicit function theorem, forward AD, no tape
+
+**11c said "let #6 choose". #6 has chosen**, and it supplies the number 11c was
+missing. The `leaf-calibration` hierarchical fit (40 parameters, 16 species, Sabot
+et al. 2022) ran **10.1 minutes over 10,045 model evaluations, of which 97.6% —
+245 gradients × 40 parameters — were finite-difference gradient evaluations.**
+Trait gradients are therefore worth building, and 11c's "not urgent" is retired.
+
+#### What the 97.6% is actually spent on, which decides the design
+
+It is spent **re-solving the whole model 2N times per gradient**, not on
+differentiation overhead. Measured in C++ at the default operating point:
+
+| | µs |
+|---|---|
+| full solve (`set_physiology` + `find_root_collar_psi`) | **3.607** |
+| `dprofit_at_collar_psi` (caches already seated) | **0.256** — 7.1% of a solve |
+
+So the cost per trait gradient at N = 40:
+
+| route | work | µs | vs the fit today |
+|---|---|---|---|
+| **1. FD on the solve** — what the fit does | 2N solves | **288.6** | — |
+| **2. IFT, FD on `dprofit`** | 1 solve + 2N `dprofit` | **24.1** | **12×** |
+| **3. IFT, AD on parameter-explicit kernels** | 1 solve + ~1 sweep | **4.0** | **72×** |
+
+**The win is architectural, not modal.** Route 2 gets 12× with **no new AD
+machinery at all** — the composition is `dψ*/dθ = −M/H` with `M` from a difference
+of the *exact* `dprofit` in θ, which 11c measured stable to **7 significant
+figures** across five decades of step. Route 3 adds parameter-explicit kernel
+overloads and gets the rest.
+
+#### Reverse mode is NOT needed, so item 5's decision stands
+
+This was worth checking rather than assuming, and the check reverses what I had
+written:
+
+- **Forward AD is O(N) in the parameter count, exactly like a finite difference** —
+  so a *vector* forward sweep is not asymptotically better than scalar forward, and
+  measured on the assim kernel the two are within noise at N = 40 (0.164 vs 0.163
+  µs). At N ≥ 12 both are *slower* than central FD on the same kernel. My earlier
+  claim that vector forward is what "gets the speedup" was wrong.
+- **It does not matter**, because the kernel is 7% of a solve. Once IFT removes the
+  N re-solves, differentiating the kernel any way at all is noise: route 3's 4.0 µs
+  is 3.6 of solve plus 0.4 of everything else.
+- **Only reverse mode would be O(1) in N**, and it is the one option that costs
+  something real. Confirmed by building it: `xad::adj<double>` **does not link
+  header-only** — `xad::Tape<double,1>::active_tape_` and friends are undefined. The
+  implementations live in `odelia/src/Tape.cpp`, which carries an explicit note that
+  it is the *only* compiled copy of the tape runtime in the process and that
+  `LinkingTo: odelia` consumers resolve against it. plant reaches it from tests via
+  `PKG_LIBS=<odelia.so>` and skips when absent.
+
+  For leaf that would mean linking a specific `.so`, which the CMake and Python
+  consumers — the whole point of the no-R build — cannot do. **So PLAN item 5's
+  "forward only, therefore no linking" stands. It was offered up for revisiting and
+  does not need it.** Note also that only N = 1 tapes are instantiated, so
+  `adj<double, N>` would not link even with the library.
+
+#### The decision
+
+**Route 2 now; route 3 when the fit asks for it.** Both keep leaf header-only with
+no tape and no linking.
+
+1. **Wire up the IFT composition** — `dψ*/dθ` from `H` and `M`, both from the
+   existing exact `dprofit`, then compose `dA/dθ`. 12× for a small amount of code
+   and no new machinery. ⚠️ **It must carry the active-set branch from 11c**: at a
+   pinned optimum the bare composite is wrong by up to 3.5e+07, and 42 of 240
+   golden rows are pinned. Test against those rows specifically.
+2. **Then parameter-explicit kernel overloads** for the remaining 6× if the fit
+   still wants it. Forward mode, scalar or vector — measure, do not assume, and
+   expect it not to matter much.
+3. **`Leaf<T>` is not on this path at all.** Its remaining justification is plant
+   #537's cut-point rule, which is about an *outer* AD pass over plant, not about
+   trait gradients here. Decouple the two: this item can close without it.
+
+⚠️ **Three measurements in this item were wrong before they were right, all from
+the same cause — the work not actually running.** A stale `src/RcppR6.o` (R does not
+track header dependencies), a stale `bench_solve` after a `sed`, and dead-code
+elimination hoisting a benchmark's inner loop out of the timing region. In the last
+case FD and scalar forward both timed at exactly 0.000 µs, which is the tell. **Vary
+the input per iteration and consume the output**, and treat a suspiciously round
+zero as a bug in the harness rather than a result.
 
 #### Still unmeasured
 
