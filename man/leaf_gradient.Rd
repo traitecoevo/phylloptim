@@ -198,6 +198,37 @@ trait perturbation can. That is the case the clamp detector below exists for,
 and it fails loudly rather than quietly.
 }
 
+\section{What it costs, and when that beats differencing}{
+
+Both routes are linear in a parameter count, and it is a **different** count
+for each. With `N` observations:
+
+\deqn{T_{FD} = 2\,P_{fit}\,T_{objective}}
+\deqn{T_{exact} = N\,(t_{construct} + t_{solve}) + 2\,P_{model}\,N\,t_{eval}}
+
+An optimiser differences the `P_fit` parameters it is moving. This function is
+asked for the `P_model` parameters the leaf has — the length of `pars`. Those
+are equal only when the fit varies traits directly; a parameterisation in
+between (pooling, a hierarchy, any shared or derived parameter) makes
+`P_fit > P_model`, and then this route's cost does not follow the optimiser's
+dimension.
+
+⚠️ **So "is the exact gradient faster" has no answer independent of your
+parameterisation, and both regimes are measured.** `vignette("fitting")` fits
+72 observations with `P_fit == P_model` and this loses at every count up to 13.
+The companion study `leaf-calibration` has `N = 1327`, `P_fit = 40`,
+`P_model = 4`, wins 3.4x, and reaches the same optimum — with its
+57-parameter variant costing the same as its 40-parameter one, because
+`P_model` is 4 in both.
+
+⚠️ **Always pass `pars`.** It is `P_model`, so the default — all sixteen —
+is the most expensive thing you can ask for, and a fit that reads four of them
+pays for twelve it discards.
+
+The intercept is a fresh `Leaf` per call, which there is currently no way to
+avoid (see phylloptim#52); it is 29% of the exact gradient in the study above.
+}
+
 \section{Precision}{
 
 Do not ask for more than about `1e-09` from any of this. That is the

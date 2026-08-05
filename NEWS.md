@@ -1,4 +1,42 @@
-# leaf (development version)
+# phylloptim (development version)
+
+## Documented when the exact gradient beats differencing, and it is not "at more parameters"
+
+Docs only; no code change. `vignette("fitting")` measured the exact gradient as
+*slower* than differencing the objective, from a three-parameter fit, and that
+result was over-generalised into "the value of `leaf_gradient()` is exactness, not
+speed" — including in this package's own sources.
+
+Both routes are linear in a parameter count, and it is a **different** count for
+each:
+
+    T_fd    = 2 * P_fit   * T_objective
+    T_exact = N * (t_construct + t_solve)  +  2 * P_model * N * t_eval
+
+An optimiser differences the `P_fit` parameters it is moving; `leaf_gradient()` is
+asked for the `P_model` parameters the leaf has, i.e. `length(pars)`. Those are
+equal **only when the fit varies traits directly.** Any parameterisation in between
+— pooling, a hierarchy, a shared or derived parameter — makes `P_fit > P_model`, and
+then the composite's cost does not follow the optimiser's dimension.
+
+⚠️ **Growing the parameter count does not on its own reverse the verdict.** In the
+vignette's design the composite's *slope* is the larger of the two, so it loses at
+every count up to 13; each extra parameter costs it two more R calls per
+observation. What reverses it is `P_fit` exceeding `P_model`.
+
+Both regimes are now measured. The vignette gains a scaling sweep that fits the two
+coefficients, and those coefficients — taken from 72 simulated observations —
+**predict** the companion study `leaf-calibration` (1,327 observations, 16 species,
+`P_fit = 40`, `P_model = 4`) to within about 5%: 646 ms predicted against 679
+measured, break-even 12.4 fitted parameters against 13.1. There the composite wins
+**3.4×** and reaches the same optimum as the numerical gradient, and its
+57-parameter variant costs the same as its 40-parameter one.
+
+`?leaf_gradient` gains a "What it costs" section, and a warning that was missing:
+**always pass `pars`**, since it *is* `P_model` and the default of all sixteen is
+the most expensive request available.
+
+Also: this file's heading said `leaf`, three renames ago.
 
 ## A gradient in `stem_b` no longer rebuilds the vulnerability spline (#4, PLAN 11f)
 
