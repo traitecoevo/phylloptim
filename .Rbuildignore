@@ -19,7 +19,7 @@
 ^notes$
 ^Doxyfile$
 ^docs$
-^leaf_.+\.tar\.gz$
+^phylloptim_.+\.tar\.gz$
 ^.*\.Rcheck$
 
 # The full AGPL text. R CMD check --as-cran flags it as a non-standard top-level

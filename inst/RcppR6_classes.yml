@@ -1,4 +1,4 @@
-# RcppR6 bindings for leaf::Leaf (issue #5, stage 1).
+# RcppR6 bindings for phylloptim::Leaf (issue #5, stage 1).
 #
 # PROVENANCE. This is plant's `inst/RcppR6_classes.yml` Leaf block, moved here
 # and adjusted, not written fresh -- that is deliberate. plant's version is the
@@ -10,7 +10,7 @@
 #
 # Four differences from plant's copy, all forced:
 #
-#   * `name_cpp: leaf::Leaf`, not `plant::Leaf`.
+#   * `name_cpp: phylloptim::Leaf`, not `plant::Leaf`.
 #   * The constructor's R-side argument names are the real C++ ones. plant still
 #     says `c`, `b` and `g1_TF24` positionally; #15 renamed those to `stem_c`,
 #     `stem_b` and `cost_scale_TF24`, and the whole reason 10a had to land before
@@ -28,7 +28,7 @@
 # `roots_.` entries below work, and it is what makes a future member move cheap.
 
 Leaf:
-  name_cpp: "leaf::Leaf"
+  name_cpp: "phylloptim::Leaf"
   constructor:
     roxygen: |
       Leaf-level gas exchange with explicit hydraulics.

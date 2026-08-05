@@ -20,7 +20,7 @@ all: RcppR6 compile
 #
 # inst/RcppR6_classes.yml is the source of truth for the R bindings. Edit that,
 # then run this -- never edit R/RcppR6.R, src/RcppR6.cpp or
-# inst/include/leaf/RcppR6_*.hpp, which all carry a "do not edit by hand" banner.
+# inst/include/phylloptim/RcppR6_*.hpp, which all carry a "do not edit by hand" banner.
 # The generated files are committed, so a consumer never needs RcppR6; CI
 # regenerates and diffs to catch a commit that forgot to.
 RcppR6:
@@ -70,7 +70,7 @@ test-cpp:
 ODELIA_INC ?= $(CURDIR)/../odelia/inst/include
 
 test-cmake:
-	cmake -B build-cmake -DLEAF_ODELIA_INCLUDE_DIR="$(ODELIA_INC)"
+	cmake -B build-cmake -DPHYLLOPTIM_ODELIA_INCLUDE_DIR="$(ODELIA_INC)"
 	cmake --build build-cmake
 	ctest --test-dir build-cmake --output-on-failure
 

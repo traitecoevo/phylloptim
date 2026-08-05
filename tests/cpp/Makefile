@@ -18,7 +18,7 @@ CXXSTD   ?= -std=c++20
 OPT      ?= -O2
 WARN     ?= -Wall -Wextra -Wno-unused-parameter
 
-LEAF_INC   ?= ../../inst/include
+PHYLLOPTIM_INC   ?= ../../inst/include
 BH_INC     ?= $(shell Rscript -e 'cat(system.file("include", package="BH"))' 2>/dev/null)
 ODELIA_INC ?= $(shell Rscript -e 'cat(system.file("include", package="odelia"))' 2>/dev/null)
 
@@ -42,10 +42,10 @@ endif
 # The compiler already searches /usr/include, so dropping the flag costs nothing.
 DEP_INC  = $(ODELIA_INC) $(BH_INC)
 SYS_INC  = $(foreach d,$(filter-out /usr/include /usr/include/,$(strip $(DEP_INC))),-isystem $(d))
-INCLUDES = -I$(LEAF_INC) $(SYS_INC)
+INCLUDES = -I$(PHYLLOPTIM_INC) $(SYS_INC)
 
 .PHONY: all build clean golden bench
-HEADERS = $(wildcard $(LEAF_INC)/leaf/*.hpp) $(LEAF_INC)/leaf.hpp
+HEADERS = $(wildcard $(PHYLLOPTIM_INC)/phylloptim/*.hpp) $(PHYLLOPTIM_INC)/phylloptim.hpp
 
 # Extra arguments for the golden comparison. Empty means bit-exact, which is what
 # you want locally and on the platform that generated the file. CI passes

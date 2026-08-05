@@ -8,24 +8,24 @@
 # run. An R package's build system cannot demonstrate that, because R is present
 # the whole time. This can, and CI runs it on a runner with no R.
 #
-#   cmake -B build -DLEAF_ODELIA_INCLUDE_DIR=/path/to/odelia/inst/include
+#   cmake -B build -DPHYLLOPTIM_ODELIA_INCLUDE_DIR=/path/to/odelia/inst/include
 #   cmake --build build
 #   ctest --test-dir build
 #
 # In another project:
 #
-#   add_subdirectory(leaf)            # or find_package(leaf)
-#   target_link_libraries(mine PRIVATE leaf::leaf)
+#   add_subdirectory(phylloptim)            # or find_package(phylloptim)
+#   target_link_libraries(mine PRIVATE phylloptim::phylloptim)
 #
 # The target is INTERFACE -- the model is header-only and there is nothing to
 # link against. `src/` is the R binding layer and is deliberately not built here;
 # it is the one part of this repository that does need R.
 #
-# See README.md, "Using leaf without R", for the Python route, which is this
+# See README.md, "Using phylloptim without R", for the Python route, which is this
 # target plus pybind11.
 
 cmake_minimum_required(VERSION 3.16)
-project(leaf VERSION 0.1.0 LANGUAGES CXX
+project(phylloptim VERSION 0.1.0 LANGUAGES CXX
         DESCRIPTION "Leaf gas exchange with explicit plant hydraulics")
 
 include(GNUInstallDirs)
@@ -33,9 +33,9 @@ include(CMakePackageConfigHelpers)
 
 # PROJECT_IS_TOP_LEVEL is CMake 3.21; this file claims 3.16, so derive it.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  set(LEAF_IS_TOP_LEVEL ON)
+  set(PHYLLOPTIM_IS_TOP_LEVEL ON)
 else()
-  set(LEAF_IS_TOP_LEVEL OFF)
+  set(PHYLLOPTIM_IS_TOP_LEVEL OFF)
 endif()
 
 # --- default build type, which the golden file cares about --------------------
@@ -52,7 +52,7 @@ endif()
 # file's bit-exactness is conditional on the OPTIMISATION LEVEL as well as on the
 # platform. tests/cpp/Makefile defaults to -O2 and so never met this. A debug
 # build that fails test_golden by ~1e-15 has found nothing.
-if(LEAF_IS_TOP_LEVEL AND NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+if(PHYLLOPTIM_IS_TOP_LEVEL AND NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
 endif()
 
@@ -77,54 +77,54 @@ endif()
 # this uses: one root finder, header-only, nothing to link.
 find_package(Boost QUIET CONFIG)
 
-set(LEAF_BOOST_INCLUDE_DIR "" CACHE PATH
+set(PHYLLOPTIM_BOOST_INCLUDE_DIR "" CACHE PATH
     "Path to Boost's headers; only needed if find_package(Boost CONFIG) fails")
 
 if(NOT Boost_FOUND)
-  if(NOT EXISTS "${LEAF_BOOST_INCLUDE_DIR}/boost/math/tools/toms748_solve.hpp")
+  if(NOT EXISTS "${PHYLLOPTIM_BOOST_INCLUDE_DIR}/boost/math/tools/toms748_solve.hpp")
     message(FATAL_ERROR
       "Boost not found by find_package(Boost CONFIG), and "
-      "LEAF_BOOST_INCLUDE_DIR (${LEAF_BOOST_INCLUDE_DIR}) does not contain "
+      "PHYLLOPTIM_BOOST_INCLUDE_DIR (${PHYLLOPTIM_BOOST_INCLUDE_DIR}) does not contain "
       "boost/math/tools/toms748_solve.hpp.\n"
       "Install Boost's headers and either let CMake find them or pass "
-      "-DLEAF_BOOST_INCLUDE_DIR=/path/to/boost/headers")
+      "-DPHYLLOPTIM_BOOST_INCLUDE_DIR=/path/to/boost/headers")
   endif()
 endif()
 
-set(LEAF_ODELIA_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../odelia/inst/include"
+set(PHYLLOPTIM_ODELIA_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../odelia/inst/include"
     CACHE PATH "Path to odelia's inst/include")
 
-if(NOT EXISTS "${LEAF_ODELIA_INCLUDE_DIR}/odelia/interpolator.hpp")
+if(NOT EXISTS "${PHYLLOPTIM_ODELIA_INCLUDE_DIR}/odelia/interpolator.hpp")
   message(FATAL_ERROR
-    "odelia headers not found under LEAF_ODELIA_INCLUDE_DIR "
-    "(${LEAF_ODELIA_INCLUDE_DIR}).\n"
+    "odelia headers not found under PHYLLOPTIM_ODELIA_INCLUDE_DIR "
+    "(${PHYLLOPTIM_ODELIA_INCLUDE_DIR}).\n"
     "Clone https://github.com/traitecoevo/odelia and point at its "
     "inst/include, e.g.\n"
-    "  cmake -B build -DLEAF_ODELIA_INCLUDE_DIR=/path/to/odelia/inst/include")
+    "  cmake -B build -DPHYLLOPTIM_ODELIA_INCLUDE_DIR=/path/to/odelia/inst/include")
 endif()
 
 # --- the target ---------------------------------------------------------------
 
-add_library(leaf INTERFACE)
-add_library(leaf::leaf ALIAS leaf)
+add_library(phylloptim INTERFACE)
+add_library(phylloptim::phylloptim ALIAS phylloptim)
 
 # C++20 is XAD's floor, not a preference.
-target_compile_features(leaf INTERFACE cxx_std_20)
+target_compile_features(phylloptim INTERFACE cxx_std_20)
 
-target_include_directories(leaf INTERFACE
+target_include_directories(phylloptim INTERFACE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/inst/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
 # SYSTEM so that a consumer building with -Werror is not held responsible for
 # warnings in Boost, XAD or the interpolator.
-target_include_directories(leaf SYSTEM INTERFACE
-  $<BUILD_INTERFACE:${LEAF_ODELIA_INCLUDE_DIR}>)
+target_include_directories(phylloptim SYSTEM INTERFACE
+  $<BUILD_INTERFACE:${PHYLLOPTIM_ODELIA_INCLUDE_DIR}>)
 
 if(Boost_FOUND)
-  target_link_libraries(leaf INTERFACE Boost::headers)
-elseif(NOT LEAF_BOOST_INCLUDE_DIR MATCHES "^/usr/include/?$")
-  target_include_directories(leaf SYSTEM INTERFACE
-    $<BUILD_INTERFACE:${LEAF_BOOST_INCLUDE_DIR}>)
+  target_link_libraries(phylloptim INTERFACE Boost::headers)
+elseif(NOT PHYLLOPTIM_BOOST_INCLUDE_DIR MATCHES "^/usr/include/?$")
+  target_include_directories(phylloptim SYSTEM INTERFACE
+    $<BUILD_INTERFACE:${PHYLLOPTIM_BOOST_INCLUDE_DIR}>)
 endif()
 # /usr/include is deliberately not added as a SYSTEM include, and dropping it
 # costs nothing because the compiler searches it anyway. Passing
@@ -146,14 +146,14 @@ endif()
 # (macOS/arm64), so pass --cross-platform anywhere else. See the comment above
 # main() in tests/cpp/test_golden.cpp for why that is not a loosening.
 
-option(LEAF_BUILD_TESTS "Build the C++ test suite" ${LEAF_IS_TOP_LEVEL})
+option(PHYLLOPTIM_BUILD_TESTS "Build the C++ test suite" ${PHYLLOPTIM_IS_TOP_LEVEL})
 
-if(LEAF_BUILD_TESTS)
+if(PHYLLOPTIM_BUILD_TESTS)
   enable_testing()
 
   foreach(prog test_leaf test_golden bench_solve)
     add_executable(${prog} tests/cpp/${prog}.cpp)
-    target_link_libraries(${prog} PRIVATE leaf::leaf)
+    target_link_libraries(${prog} PRIVATE phylloptim::phylloptim)
     target_compile_options(${prog} PRIVATE -Wall -Wextra -Wno-unused-parameter)
   endforeach()
 
@@ -161,12 +161,12 @@ if(LEAF_BUILD_TESTS)
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/cpp)
 
   if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
-    set(LEAF_GOLDEN_ARGS "")
+    set(PHYLLOPTIM_GOLDEN_ARGS "")
   else()
-    set(LEAF_GOLDEN_ARGS "--cross-platform")
+    set(PHYLLOPTIM_GOLDEN_ARGS "--cross-platform")
   endif()
 
-  add_test(NAME leaf_golden COMMAND test_golden ${LEAF_GOLDEN_ARGS}
+  add_test(NAME leaf_golden COMMAND test_golden ${PHYLLOPTIM_GOLDEN_ARGS}
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests/cpp)
 
   # bench_solve is built but not registered as a test: it is a timing harness,
@@ -176,11 +176,11 @@ endif()
 
 # --- install ------------------------------------------------------------------
 #
-# Headers only. RcppR6_pre/post/support.hpp are generated into inst/include/leaf/
+# Headers only. RcppR6_pre/post/support.hpp are generated into inst/include/phylloptim/
 # by RcppR6 and DO include Rcpp -- they are excluded here, along with leaf.h, the
 # R-facing umbrella that includes them. Installing them would hand a non-R
 # consumer headers they cannot compile, and would blur the one-way dependency
-# that PLAN item 6a rests on. <leaf.hpp> is the entry point; <leaf.h> is not.
+# that PLAN item 6a rests on. <phylloptim.hpp> is the entry point; <phylloptim.h> is not.
 
 install(DIRECTORY inst/include/
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
@@ -188,27 +188,27 @@ install(DIRECTORY inst/include/
           PATTERN "*.hpp"
           PATTERN "RcppR6_*.hpp" EXCLUDE)
 
-install(TARGETS leaf EXPORT leafTargets)
-install(EXPORT leafTargets
-        FILE leafTargets.cmake
-        NAMESPACE leaf::
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/leaf)
+install(TARGETS phylloptim EXPORT phylloptimTargets)
+install(EXPORT phylloptimTargets
+        FILE phylloptimTargets.cmake
+        NAMESPACE phylloptim::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/phylloptim)
 
-# The exported target carries leaf's own headers but NOT odelia's: odelia has no
+# The exported target carries phylloptim's own headers but NOT odelia's: odelia has no
 # CMake package to depend on, so the path is a BUILD_INTERFACE only and an
-# installed consumer has to supply it. leafConfig.cmake asks for it by the same
+# installed consumer has to supply it. phylloptimConfig.cmake asks for it by the same
 # variable name and fails with the same message rather than letting the error
 # surface as a missing <odelia/interpolator.hpp> from inside our headers.
 configure_package_config_file(
-  cmake/leafConfig.cmake.in
-  "${CMAKE_CURRENT_BINARY_DIR}/leafConfig.cmake"
-  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/leaf)
+  cmake/phylloptimConfig.cmake.in
+  "${CMAKE_CURRENT_BINARY_DIR}/phylloptimConfig.cmake"
+  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/phylloptim)
 
 write_basic_package_version_file(
-  "${CMAKE_CURRENT_BINARY_DIR}/leafConfigVersion.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/phylloptimConfigVersion.cmake"
   COMPATIBILITY SameMajorVersion
   ARCH_INDEPENDENT)
 
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/leafConfig.cmake"
-              "${CMAKE_CURRENT_BINARY_DIR}/leafConfigVersion.cmake"
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/leaf)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/phylloptimConfig.cmake"
+              "${CMAKE_CURRENT_BINARY_DIR}/phylloptimConfigVersion.cmake"
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/phylloptim)

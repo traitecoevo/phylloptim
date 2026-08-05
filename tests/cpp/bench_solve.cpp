@@ -22,7 +22,7 @@
 // change which perturbed the arithmetic is caught here rather than being
 // mistaken for a speed difference.
 
-#include <leaf.hpp>
+#include <phylloptim.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -31,8 +31,8 @@
 #include <cstdlib>
 #include <vector>
 
-#ifndef LEAF_BENCH_LABEL
-#define LEAF_BENCH_LABEL "solve"
+#ifndef PHYLLOPTIM_BENCH_LABEL
+#define PHYLLOPTIM_BENCH_LABEL "solve"
 #endif
 
 namespace {
@@ -88,11 +88,11 @@ std::vector<Point> grid() {
 // timing them would dilute the signal. set_physiology is left in, because plant
 // does call it once per solve and it invalidates the caches -- which is what
 // keeps each timed solve a genuine cold solve rather than a memo hit.
-double pass(std::vector<leaf::Leaf> &leaves, const std::vector<Point> &pts) {
+double pass(std::vector<phylloptim::Leaf> &leaves, const std::vector<Point> &pts) {
   double checksum = 0.0;
   for (size_t i = 0; i < pts.size(); ++i) {
     const Point &pt = pts[i];
-    leaf::Leaf &l = leaves[i];
+    phylloptim::Leaf &l = leaves[i];
     l.set_physiology(pt.root, pt.ppfd, pt.ps, pt.depth, kKs * kTheta / kH,
                      pt.vpd, kCa, kTleaf, kO2, kPatm);
     l.find_root_collar_psi();
@@ -113,8 +113,8 @@ int main(int argc, char **argv) {
   const int reps = argc > 1 ? std::atoi(argv[1]) : 2000;
   const std::vector<Point> pts = grid();
 
-  std::vector<leaf::Leaf> leaves(pts.size());
-  for (leaf::Leaf &l : leaves) {
+  std::vector<phylloptim::Leaf> leaves(pts.size());
+  for (phylloptim::Leaf &l : leaves) {
     l.setup_transpiration(100);
     l.setup_root_vulnerability(100);
   }
@@ -129,6 +129,6 @@ int main(int argc, char **argv) {
   }
 
   printf("%-14s  %8.2f us/solve   (%zu points, best of %d)   checksum %.17g\n",
-         LEAF_BENCH_LABEL, best / pts.size() * 1e6, pts.size(), reps, checksum);
+         PHYLLOPTIM_BENCH_LABEL, best / pts.size() * 1e6, pts.size(), reps, checksum);
   return 0;
 }

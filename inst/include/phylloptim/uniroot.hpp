@@ -1,14 +1,14 @@
 // -*-c++-*-
-#ifndef LEAF_UNIROOT_HPP_
-#define LEAF_UNIROOT_HPP_
+#ifndef PHYLLOPTIM_UNIROOT_HPP_
+#define PHYLLOPTIM_UNIROOT_HPP_
 
 // Really simple wrapper around Boost's 1d root finding with bisection
 // method.
 
 #include <boost/math/tools/roots.hpp>
-#include <leaf/util.hpp>
+#include <phylloptim/util.hpp>
 
-namespace leaf {
+namespace phylloptim {
 namespace util {
 
 namespace internals {

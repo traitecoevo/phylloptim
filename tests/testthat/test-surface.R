@@ -164,7 +164,7 @@ test_that("operating_point_values() returns the twelve fields, in that order", {
   expect_identical(l$operating_point_values(),
                    unname(outputs_one_at_a_time(l)))
   expect_identical(names(outputs_one_at_a_time(l)),
-                   leaf:::.operating_point_names)
+                   phylloptim:::.operating_point_names)
 
   # Then solved, and then in shut-down, where the layer uptakes are written but
   # the flux outputs are zero -- the branch where "every path writes its own

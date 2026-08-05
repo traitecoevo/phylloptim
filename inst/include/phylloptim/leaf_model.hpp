@@ -1,15 +1,15 @@
 // -*-c++-*-
-#ifndef LEAF_LEAF_MODEL_HPP_
-#define LEAF_LEAF_MODEL_HPP_
+#ifndef PHYLLOPTIM_LEAF_MODEL_HPP_
+#define PHYLLOPTIM_LEAF_MODEL_HPP_
 
-#include <leaf/constants.hpp>
-#include <leaf/util.hpp>
-#include <leaf/uniroot.hpp>
-#include <leaf/optimize.hpp>
-#include <leaf/quadrature.hpp>
-#include <leaf/roots.hpp>
-#include <leaf/single_potential.hpp>
-#include <leaf/vulnerability.hpp>
+#include <phylloptim/constants.hpp>
+#include <phylloptim/util.hpp>
+#include <phylloptim/uniroot.hpp>
+#include <phylloptim/optimize.hpp>
+#include <phylloptim/quadrature.hpp>
+#include <phylloptim/roots.hpp>
+#include <phylloptim/single_potential.hpp>
+#include <phylloptim/vulnerability.hpp>
 
 #include <odelia/interpolator.hpp>
 
@@ -20,7 +20,7 @@
 #include <vector>
 #include <XAD/XAD.hpp>
 
-namespace leaf {
+namespace phylloptim {
 
 class Leaf {
 public:
@@ -281,22 +281,22 @@ public:
   //
   // Defaults are the constants in leaf/constants.hpp, so there is still one source
   // of truth for the published values.
-  double vcmax_ha_ = leaf::vcmax_ha;    // activation energy, J mol^-1
-  double vcmax_H_d_ = leaf::vcmax_H_d;  // deactivation energy, J mol^-1
-  double vcmax_d_S_ = leaf::vcmax_d_S;  // entropy term, J mol^-1 K^-1
-  double jmax_ha_ = leaf::jmax_ha;
-  double jmax_H_d_ = leaf::jmax_H_d;
-  double jmax_d_S_ = leaf::jmax_d_S;
+  double vcmax_ha_ = phylloptim::vcmax_ha;    // activation energy, J mol^-1
+  double vcmax_H_d_ = phylloptim::vcmax_H_d;  // deactivation energy, J mol^-1
+  double vcmax_d_S_ = phylloptim::vcmax_d_S;  // entropy term, J mol^-1 K^-1
+  double jmax_ha_ = phylloptim::jmax_ha;
+  double jmax_H_d_ = phylloptim::jmax_H_d;
+  double jmax_d_S_ = phylloptim::jmax_d_S;
   // Bernacchi kinetics: reference value at 25 C and activation energy. Weaker case
   // for being settable than the six above -- enzyme kinetics vary less among
   // species -- but they are literature values that get revised, and bigleaf
   // exposes them.
-  double gamma_25_ = leaf::gamma_25;    // CO2 compensation point, umol mol^-1
-  double gamma_ha_ = leaf::gamma_ha;
-  double kc_25_ = leaf::kc_25;          // Rubisco Km for CO2, umol mol^-1
-  double kc_ha_ = leaf::kc_ha;
-  double ko_25_ = leaf::ko_25;          // Rubisco Km for O2, umol mol^-1
-  double ko_ha_ = leaf::ko_ha;
+  double gamma_25_ = phylloptim::gamma_25;    // CO2 compensation point, umol mol^-1
+  double gamma_ha_ = phylloptim::gamma_ha;
+  double kc_25_ = phylloptim::kc_25;          // Rubisco Km for CO2, umol mol^-1
+  double kc_ha_ = phylloptim::kc_ha;
+  double ko_25_ = phylloptim::ko_25;          // Rubisco Km for O2, umol mol^-1
+  double ko_ha_ = phylloptim::ko_ha;
   // Dark respiration as a fraction of vcmax. Was the bare literal 0.015 inline in
   // update_temperature_dependent_params -- a named, species-variable parameter
   // (Collatz/Farquhar) hiding as a magic number.
@@ -437,7 +437,7 @@ public:
   void setup_root_vulnerability(double resolution) {
     roots_.setup_vulnerability(resolution);
   }
-  // Forwards to leaf::cumulative_vulnerability_integral, which now lives in
+  // Forwards to phylloptim::cumulative_vulnerability_integral, which now lives in
   // vulnerability.hpp because it is shared by the stem and the root curves and
   // so belongs to neither. The parameters are deliberately neutral names, not
   // stem_*: this is called with (stem_b, stem_c) from setup_transpiration and
@@ -2427,6 +2427,6 @@ inline void Leaf::solve_medlyn_ci_analytical(){
   return;
 }
 
-} // namespace leaf
+} // namespace phylloptim
 
 #endif

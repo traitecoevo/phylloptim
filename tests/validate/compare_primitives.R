@@ -45,7 +45,7 @@ if (!nzchar(leaf_model_h)) {
 }
 if (any(grepl("leaf.hpp", readLines(leaf_model_h, warn = FALSE), fixed = TRUE))) {
   stop("The plant on this library path is the consume-leaf-package build: its\n",
-       "  leaf_model.h includes <leaf.hpp>, so it IS this package and comparing\n",
+       "  leaf_model.h includes <phylloptim.hpp>, so it IS this package and comparing\n",
        "  against it would be vacuous. Build the reference described above and\n",
        "  re-run with R_LIBS pointed at it.")
 }

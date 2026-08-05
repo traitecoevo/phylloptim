@@ -42,7 +42,7 @@
 // checksum folds in every value both arms compute, so a change that perturbed
 // the arithmetic is caught here rather than read as a speed difference.
 
-#include <leaf.hpp>
+#include <phylloptim.hpp>
 
 #include <chrono>
 #include <cstdio>
@@ -72,7 +72,7 @@ bool rebuilds_a_spline(int i) {
   return i == 1 || i == 2 || i == 4 || i == 5;
 }
 
-void apply_traits(leaf::Leaf &l, const Traits &t) {
+void apply_traits(phylloptim::Leaf &l, const Traits &t) {
   l.set_traits(t.v[0], t.v[1], t.v[2], t.v[3], t.v[4], t.v[5], t.v[6], t.v[7],
                t.v[8], t.v[9], t.v[10], t.v[11], t.v[12], t.v[13], t.v[14]);
 }
@@ -81,7 +81,7 @@ void apply_traits(leaf::Leaf &l, const Traits &t) {
 // as everywhere else in this suite.
 const double kTheta = 0.000157, kKs = 1.0, kH = 5.0, kAreaLeaf = 0.05;
 
-void set_drivers(leaf::Leaf &l) {
+void set_drivers(phylloptim::Leaf &l) {
   std::vector<double> root{1.0 / kAreaLeaf}, psi_soil{2.0}, depth{1.0};
   l.set_physiology(root, 900.0, psi_soil, depth, kKs * kTheta / kH, 2.0, 40.0,
                    25.0, 21.0, 101.3);
@@ -101,7 +101,7 @@ double perturbed(const Traits &t, int idx, int sign, long r) {
   return t.v[idx] * (1.0 + double(sign) * 1e-6 * (1.0 + double(r) * 1e-9));
 }
 
-double fd_arm(leaf::Leaf &l, int idx, long reps, double &sink) {
+double fd_arm(phylloptim::Leaf &l, int idx, long reps, double &sink) {
   const auto t0 = clock_type::now();
   for (long r = 0; r < reps; ++r) {
     for (int sign = -1; sign <= 1; sign += 2) {
@@ -116,7 +116,7 @@ double fd_arm(leaf::Leaf &l, int idx, long reps, double &sink) {
   return us_per(t0, clock_type::now(), reps);
 }
 
-double ift_arm(leaf::Leaf &l, int idx, double psi_star, long reps,
+double ift_arm(phylloptim::Leaf &l, int idx, double psi_star, long reps,
                double &sink) {
   const auto t0 = clock_type::now();
   for (long r = 0; r < reps; ++r) {
@@ -140,7 +140,7 @@ int main(int argc, char **argv) {
   const long reps = argc > 1 ? std::atol(argv[1]) : 3000;
   const long per_round = reps / 3 > 0 ? reps / 3 : 1;
 
-  leaf::Leaf l;
+  phylloptim::Leaf l;
   apply_traits(l, kBase);
   set_drivers(l);
   l.find_root_collar_psi();

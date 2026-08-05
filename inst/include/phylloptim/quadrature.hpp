@@ -1,6 +1,6 @@
 // -*-c++-*-
-#ifndef LEAF_QUADRATURE_HPP_
-#define LEAF_QUADRATURE_HPP_
+#ifndef PHYLLOPTIM_QUADRATURE_HPP_
+#define PHYLLOPTIM_QUADRATURE_HPP_
 
 // Adaptive Simpson quadrature, used by Leaf::transpiration_full_integration.
 //
@@ -23,7 +23,7 @@
 #include <cmath>
 #include <cstddef>
 
-namespace leaf {
+namespace phylloptim {
 namespace quadrature {
 
 namespace internals {
@@ -72,6 +72,6 @@ double adaptive_simpson(Function f, double a, double b, double tol = 1e-8,
 }
 
 } // namespace quadrature
-} // namespace leaf
+} // namespace phylloptim
 
 #endif

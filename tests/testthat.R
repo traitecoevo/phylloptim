@@ -1,4 +1,4 @@
 library(testthat)
-library(leaf)
+library(phylloptim)
 
-test_check("leaf")
+test_check("phylloptim")

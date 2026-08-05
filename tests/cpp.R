@@ -2,7 +2,7 @@
 #
 # This package ships headers and nothing else -- no R code, no compiled code --
 # so without this file `R CMD check` validates essentially nothing. The point is
-# not to duplicate the GitHub Actions workflow: it is that a `LinkingTo: leaf`
+# not to duplicate the GitHub Actions workflow: it is that a `LinkingTo: phylloptim`
 # consumer's own `R CMD check`, on their machine and their toolchain, tells them
 # when a header stops compiling. That is the failure mode that matters for a
 # header-only package, and it is invisible to every other check R runs here.
@@ -22,7 +22,7 @@
 # `ifeq`), and `R CMD check` scans every Makefile in the tarball and warns about
 # them. The sanctioned way to silence that is `SystemRequirements: GNU make` --
 # but that would be a false statement about this package. Installing it requires
-# no make whatsoever; only its own test harness does, and a `LinkingTo: leaf`
+# no make whatsoever; only its own test harness does, and a `LinkingTo: phylloptim`
 # consumer would inherit a declared dependency they do not have. So the Makefile
 # stays for developers and is left out of the tarball (see .Rbuildignore), and
 # the two translation units are compiled directly here. It is two compiler calls.
@@ -60,7 +60,7 @@ if (!nzchar(trimws(cxx))) {
 #
 # BH and odelia are LinkingTo, so they are installed whenever this is checked.
 
-deps <- vapply(c("leaf", "BH", "odelia"),
+deps <- vapply(c("phylloptim", "BH", "odelia"),
                function(p) system.file("include", package = p),
                character(1))
 missing <- names(deps)[!nzchar(deps)]
@@ -90,7 +90,7 @@ golden_args <- if (on_generating_platform) character() else "--cross-platform"
 
 message("Building the C++ suite with:")
 message("  CXX     ", cxx, " ", cxxstd)
-message("  leaf    ", deps[["leaf"]])
+message("  leaf    ", deps[["phylloptim"]])
 message("  BH      ", deps[["BH"]])
 message("  odelia  ", deps[["odelia"]])
 message("  golden  ", if (length(golden_args)) golden_args else "bit-exact")
@@ -98,7 +98,7 @@ message("  golden  ", if (length(golden_args)) golden_args else "bit-exact")
 owd <- setwd(cpp_dir)   # test_golden reads golden/operating_points.tsv relatively
 on.exit(setwd(owd), add = TRUE)
 
-includes <- c("-I", shQuote(deps[["leaf"]]),
+includes <- c("-I", shQuote(deps[["phylloptim"]]),
               "-isystem", shQuote(deps[["odelia"]]),
               "-isystem", shQuote(deps[["BH"]]))
 

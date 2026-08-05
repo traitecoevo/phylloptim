@@ -4,7 +4,7 @@
 # 1 bound only the 19-argument constructor and the R side had to name them all.
 # It no longer does, and that is the improvement: `leaf_model()` carries the
 # package's own defaults now, so solving through it here is what CHECKS those
-# defaults still equal `leaf::Leaf`'s. If the two ever drift apart the bit-exact
+# defaults still equal `phylloptim::Leaf`'s. If the two ever drift apart the bit-exact
 # comparisons in test-golden.R fail, rather than quietly measuring a different
 # model than the one the golden file was generated from.
 default_leaf <- function() leaf_model()

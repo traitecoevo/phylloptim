@@ -1,6 +1,6 @@
 // -*-c++-*-
-#ifndef LEAF_CLOSED_FORM_HPP_
-#define LEAF_CLOSED_FORM_HPP_
+#ifndef PHYLLOPTIM_CLOSED_FORM_HPP_
+#define PHYLLOPTIM_CLOSED_FORM_HPP_
 
 // A fast approximate solver for the TF24 leaf optimum, as an alternative to the
 // exact golden-section search in Leaf::optimise_psi_stem_TF.
@@ -53,12 +53,12 @@
 // three-level nest, so the prize there is larger -- but the closed form for it does
 // not exist yet. See PLAN.md item 7b.
 
-#include <leaf/constants.hpp>
-#include <leaf/leaf_model.hpp>
+#include <phylloptim/constants.hpp>
+#include <phylloptim/leaf_model.hpp>
 
 #include <cmath>
 
-namespace leaf {
+namespace phylloptim {
 namespace closed_form {
 
 // The group that converts a marginal cost of water into the USO slope xi:
@@ -218,6 +218,6 @@ inline bool within_guard(const Leaf &l, const Solution &s) {
 }
 
 } // namespace closed_form
-} // namespace leaf
+} // namespace phylloptim
 
 #endif

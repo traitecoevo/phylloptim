@@ -117,7 +117,7 @@ test_that("R's hex parser is exact, which is what the expected values rely on", 
 })
 
 test_that("leaf_model()'s defaults are the C++ default constructor's", {
-  # tests/cpp/test_golden.cpp solves with a default-constructed leaf::Leaf, and
+  # tests/cpp/test_golden.cpp solves with a default-constructed phylloptim::Leaf, and
   # every comparison below goes through leaf_model(). So the golden rows are
   # already the strong form of this check. This is the cheap, legible form that
   # says which thing broke when they fail: the stem vulnerability curve is built

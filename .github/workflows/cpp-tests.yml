@@ -120,21 +120,21 @@ jobs:
         run: |
           cmake -B build-cmake \
             -DCMAKE_CXX_COMPILER="$CXX" \
-            -DLEAF_ODELIA_INCLUDE_DIR="$GITHUB_WORKSPACE/odelia/inst/include" \
-            -DLEAF_BOOST_INCLUDE_DIR="${{ steps.boost.outputs.inc }}"
+            -DPHYLLOPTIM_ODELIA_INCLUDE_DIR="$GITHUB_WORKSPACE/odelia/inst/include" \
+            -DPHYLLOPTIM_BOOST_INCLUDE_DIR="${{ steps.boost.outputs.inc }}"
           cmake --build build-cmake -j 3
           ctest --test-dir build-cmake --output-on-failure
           cmake --install build-cmake --prefix "$GITHUB_WORKSPACE/cmake-prefix"
 
-      # An installed leaf must be consumable by find_package, and must NOT have
-      # shipped leaf.h or the RcppR6_*.hpp headers -- those need Rcpp, and handing
+      # An installed phylloptim must be consumable by find_package, and must NOT have
+      # shipped phylloptim.h or the RcppR6_*.hpp headers -- those need Rcpp, and handing
       # them to a non-R consumer would turn PLAN item 6a's one-way dependency into
       # a broken build a long way from its cause.
       - name: Consume the installed package (no R)
         env:
           CXX: ${{ matrix.cxx }}
         run: |
-          for f in leaf.h leaf/RcppR6_pre.hpp leaf/RcppR6_post.hpp leaf/RcppR6_support.hpp; do
+          for f in phylloptim.h phylloptim/RcppR6_pre.hpp phylloptim/RcppR6_post.hpp phylloptim/RcppR6_support.hpp; do
             if [ -e "$GITHUB_WORKSPACE/cmake-prefix/include/$f" ]; then
               echo "$f was installed; it needs Rcpp and must be excluded" >&2
               exit 1
@@ -144,16 +144,16 @@ jobs:
           cat > CMakeLists.txt <<'EOF'
           cmake_minimum_required(VERSION 3.16)
           project(consumer LANGUAGES CXX)
-          find_package(leaf REQUIRED)
+          find_package(phylloptim REQUIRED)
           add_executable(consumer main.cpp)
-          target_link_libraries(consumer PRIVATE leaf::leaf)
+          target_link_libraries(consumer PRIVATE phylloptim::phylloptim)
           EOF
           cat > main.cpp <<'EOF'
-          #include <leaf.hpp>
+          #include <phylloptim.hpp>
           #include <cmath>
           #include <cstdio>
           int main() {
-            leaf::Leaf l;
+            phylloptim::Leaf l;
             l.set_physiology({1.0 / 0.05}, 900, {2.0}, {1.0}, 1.0 * 0.000157 / 5.0,
                              2.0, 40.0, 25.0, 21.0, 101.3);
             l.find_root_collar_psi();
@@ -169,8 +169,8 @@ jobs:
           cmake -B build \
             -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/cmake-prefix" \
-            -DLEAF_ODELIA_INCLUDE_DIR="$GITHUB_WORKSPACE/odelia/inst/include" \
-            -DLEAF_BOOST_INCLUDE_DIR="${{ steps.boost.outputs.inc }}"
+            -DPHYLLOPTIM_ODELIA_INCLUDE_DIR="$GITHUB_WORKSPACE/odelia/inst/include" \
+            -DPHYLLOPTIM_BOOST_INCLUDE_DIR="${{ steps.boost.outputs.inc }}"
           cmake --build build
           ./build/consumer
 

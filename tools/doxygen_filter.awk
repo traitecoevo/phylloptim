@@ -46,7 +46,7 @@
 #
 # ESCAPING. Text outside a verbatim run is escaped, because none of it was
 # written with Doxygen in mind: `\`, `@`, `#`, `%`, `&`, `<` and `>` all mean
-# something to Doxygen and here they never do. Without it, `#include <leaf.hpp>`
+# something to Doxygen and here they never do. Without it, `#include <phylloptim.hpp>`
 # becomes a broken link to an entity called "include" followed by a swallowed
 # HTML tag, and the `\int` in the roots.hpp head-loss note becomes an unknown
 # command; both were observed before this was added. Verbatim runs are NOT

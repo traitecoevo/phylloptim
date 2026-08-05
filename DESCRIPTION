@@ -1,4 +1,4 @@
-Package: leaf
+Package: phylloptim
 Title: Leaf Gas Exchange with Explicit Plant Hydraulics
 Version: 0.1.0
 Authors@R: c(
@@ -26,7 +26,7 @@ Description: An implementation of leaf-level gas exchange in which stomatal
     directly into a C++ program or bound to another language such as Python
     without going through this package. R users get the same model through an
     'RcppR6' layer that sits on top of those headers and is never included by
-    them, and R packages get it by naming 'leaf' in their LinkingTo field.
+    them, and R packages get it by naming 'phylloptim' in their LinkingTo field.
 Encoding: UTF-8
 License: AGPL (>= 3)
 Depends:
@@ -46,6 +46,6 @@ VignetteBuilder: knitr
 Remotes:
     traitecoevo/odelia
 Config/testthat/edition: 3
-URL: https://github.com/traitecoevo/leaf_cpp
-BugReports: https://github.com/traitecoevo/leaf_cpp/issues
+URL: https://github.com/traitecoevo/phylloptim
+BugReports: https://github.com/traitecoevo/phylloptim/issues
 Config/roxygen2/version: 8.0.0
