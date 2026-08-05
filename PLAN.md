@@ -26,7 +26,8 @@ the user-visible history.
 |---|---|---|---|
 | [#3](https://github.com/traitecoevo/phylloptim/issues/3) | 7a | Make λ(state) pluggable | **unblocked** — #2 is done. ⚠️ Measure the dispatch separately: the cost core is fully inlined where the supply path was not, so 7b's "dispatch is free" does **not** transfer |
 | [#4](https://github.com/traitecoevo/phylloptim/issues/4) | 11e, 11f | Trait gradients — stage 2, and `stem_c`'s rebuild | Stages 1 and 3 landed ([#42](https://github.com/traitecoevo/phylloptim/pull/42), [#46](https://github.com/traitecoevo/phylloptim/pull/46)). ⚠️ Read 11e before quoting any speedup |
-| [#6](https://github.com/traitecoevo/phylloptim/issues/6) | 12 | Calibration vignette, then inversion | **The one with the most downstream** — it specifies what is left of #4, and doing it found #38, #40 and #41 |
+| [#6](https://github.com/traitecoevo/phylloptim/issues/6) | 12 | Real-data calibration, then inversion | **The one with the most downstream** — it specifies what is left of #4, and doing it found #38, #40, #41 and #52. ⚠️ The *synthetic* vignette is done ([#53](https://github.com/traitecoevo/phylloptim/pull/53)) and **AD lost**: read 12a before repeating the comparison |
+| [#52](https://github.com/traitecoevo/phylloptim/issues/52) | 12 | `leaf_gradient()` rebuilds a `Leaf` per call, with no way to pass one in | From #53. A third of a per-observation gradient's cost, and why item 12's "reuse one object" advice cannot be followed as written |
 | [#7](https://github.com/traitecoevo/phylloptim/issues/7) | 13 | Energy balance, in priority order | Leaf-to-air VPD is the cheap win and is **not wired in**; free convection is not worth it |
 | [#28](https://github.com/traitecoevo/phylloptim/issues/28) | 13 | Temperature-dependent outgoing longwave in the Penman-Monteith Rn | from plant #581 / #567 review |
 | [#31](https://github.com/traitecoevo/phylloptim/issues/31) | 31 | `profit_psi_stem_TF` returns a plausible number below `psi_upstream` | Found writing the vignette. Profit is **discontinuous by 1.58** at the boundary |
@@ -191,6 +192,57 @@ observations — that is what `set_traits()` exists for — and report what the 
 pays per call that the FD arm does not. The solve-count half needs no such care:
 central differences cost 2N solves per gradient, so the ratio is bounded below by the
 parameter count.
+
+### 12a. The synthetic vignette — DONE, and AD lost
+
+`vignettes/fitting.Rmd` ([#53](https://github.com/traitecoevo/phylloptim/pull/53))
+fits `vcmax_25`, `jmax_25` and `cost_scale_TF24` to `A`, `gc` and `psi_stem` over 72
+operating points (12 ψ_soil × 3 PPFD × 2 VPD) of noisy simulated data, recovering
+them to −3.5% / +7.5% / −1.2%. Same optimiser, same start, same optimum (201.13):
+
+| | objective evals | honest total | per gradient |
+|---|---:|---:|---:|
+| Nelder-Mead | 106 | 106 | — |
+| L-BFGS-B, numerical | 18 fn + 18 gr | **126** | 6.9 ms |
+| L-BFGS-B, **exact** | 19 fn + 19 gr | **19** | **33.5 ms** |
+
+`honest total` adds back the `2 × npar` central differences `optim` does not count.
+**The exact gradient cuts the solve count ~5× and is 4.9× slower in wall clock**, and
+per the instruction above that is what the vignette says.
+
+⚠️ **This supersedes the construction warning above.** That confound is real and is
+only a **third** of the gap, so it changes the conclusion rather than explaining it
+away: warmed and interleaved, 32.8 ms for the exact arm of which 11.0 ms is the 72
+constructions. The other two thirds is the **R call boundary** — the composite trades
+one solve for several much cheaper evaluations, each an R call costing more than the
+C++ work it wraps. Fixing construction alone would not make the exact arm faster;
+only stage 2 (composition in C++) reaches the rest.
+
+⚠️ **And "reuse one object across observations" cannot be done today**, which is why
+that advice did not save the measurement: `leaf_gradient()` constructs internally and
+takes no model argument. That is **#52**.
+
+Two things the vignette records because both cost time here:
+
+- **Plain `method = "BFGS"` overflows on its first step.** The objective is scaled by
+  `1/sigma²` with `sigma_gc = 0.0015`, so the gradient is ~2e4 in log units; from an
+  identity Hessian the first trial point is `theta − g` and `exp()` of that is `Inf`,
+  so the objective throws before the line search can shrink it. Bound the parameters.
+- **A third of an ordinary drought design is pinned** — 48 interior / 24 pinned of 72
+  — and the fit still recovers the traits, because the active-set guard differences
+  the solve there. The fallback is a normal path, not an exotic one.
+
+⚠️ **Warm up before timing anything in this layer.** An unwarmed `leaf_model()` reads
+~3× its steady-state cost. #52 first claimed 89% off exactly that error, and the
+wrong number pointed at the wrong fix.
+
+**Two companion vignettes landed with it.** `cpp-interface.Rmd` documents the
+linkable half and states that trait gradients are **R-only** — a C++ consumer gets
+`set_traits`, `perturb_stem_b`, `dprofit_droot_collar_psi(psi, &feasible)` and
+`evaluate_root_collar_psi`, but must compose the theorem and reimplement the
+active-set guard itself. `phylloptim.Rmd` gains "Choosing which gradients to
+compute": `pars` selects, omitting it computes all sixteen, and all-16 costs ~4.6×
+one. ⚠️ The four *outputs* are not selectable — `pars` chooses rows, never columns.
 
 **Then the bigger question: inversion.** `plantecophys::fitaci` inverts A-Ci curves
 for Vcmax, Jmax and Rd; this package inverts nothing. Inverting *hydraulic* traits —
