@@ -62,8 +62,9 @@ differentiate at}
 \item{supply}{how water reaches the root collar: [leaf_supply_multilayer()]
 (the default) or [leaf_supply_single()]}
 
-\item{pars}{names of the traits to differentiate with respect to. Defaults to
-all of them.}
+\item{pars}{what to differentiate with respect to. Any of the fifteen
+[leaf_traits()] names, plus `"leaf_specific_conductance_max"` and — on the
+single-potential path only — `"resistance"`. Defaults to all of them.}
 
 \item{step}{relative step for the trait difference. The default `1e-06` is
 near the middle of the five decades over which the mixed partial was
@@ -164,6 +165,28 @@ Over this package's grid it catches every pinned point on its own, so forcing
 Do not read that as making the stationarity test redundant -- it fires only
 when the feasible interval is narrow, which is true of these points but not of
 pinned optima in general.
+}
+
+\section{Two of these are not traits}{
+
+`pars` also accepts `leaf_specific_conductance_max` and, on the
+single-potential path, `resistance`. They are here because a calibration fits
+them: of `leaf-calibration`'s four free parameters two are traits and two are
+these, so restricting `pars` to [leaf_traits()] left half of that fit without
+an exact gradient.
+
+Nothing in the derivation cares that the parameter is a trait — the implicit
+function theorem is applied to `dprofit/dpsi = 0`, and any parameter the profit
+function depends on goes through it identically. What differs is only which
+setter applies the perturbation. `leaf_specific_conductance_max` is also how
+plant's height reaches the leaf, so the same route gives a gradient with
+respect to plant state and not only with respect to traits.
+
+⚠️ **Both move the feasible collar interval, not just the profit function** —
+`resistance` directly and `leaf_specific_conductance_max` through the supply
+curve — so a perturbation can push a bound past `psi*` more readily than a
+trait perturbation can. That is the case the clamp detector below exists for,
+and it fails loudly rather than quietly.
 }
 
 \section{Precision}{

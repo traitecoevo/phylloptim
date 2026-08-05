@@ -338,9 +338,94 @@ test_that("the documented examples classify the way their comments claim", {
   expect_identical(dry$status, "pinned")
 })
 
+test_that("the two non-trait parameters agree with a resolved reference", {
+  # #44. Half of leaf-calibration's free parameters are not traits: `K_total` and
+  # `f_plant` reach the leaf as leaf_specific_conductance_max (a driver) and the
+  # single-potential resistance. Nothing in the derivation cares -- the implicit
+  # function theorem is applied to dprofit/dpsi = 0, and any parameter profit
+  # depends on goes through it identically -- so the thing to check is that the
+  # plumbing applies the perturbation through the right setter.
+  #
+  # Arbitrated the way 11c arbitrated the traits: against a central difference of
+  # the WHOLE SOLVE, read where the step sweep plateaus rather than at one step.
+  d <- list(psi_soil = 1.5, PPFD = 900, atm_vpd = 2.0,
+            supply = leaf_supply_single(resistance = 1e4))
+
+  solve_at <- function(par, value) {
+    a <- d
+    if (identical(par, "resistance")) {
+      a$supply <- leaf_supply_single(resistance = value)
+    } else {
+      a[[par]] <- value
+    }
+    x <- do.call(leaf_solve, a)
+    c(A = x$A, gc = x$gc, psi_stem = x$psi_stem, collar = x$collar)
+  }
+
+  g <- do.call(leaf_gradient,
+               c(d, list(pars = c("leaf_specific_conductance_max",
+                                  "resistance"), method = "ift")))
+  expect_identical(g$status, "interior")
+
+  for (p in c("leaf_specific_conductance_max", "resistance")) {
+    v <- if (identical(p, "resistance")) 1e4 else 3.14e-5
+    h <- v * 1e-5
+    ref <- (solve_at(p, v + h) - solve_at(p, v - h)) / (2 * h)
+    # Six digits, which is well inside the reference's own precision. Measured
+    # agreement is 8 digits for the driver and 9 for the resistance.
+    expect_equal(g$gradient[p, ], ref, tolerance = 1e-6)
+    # And not accidentally zero, which is how this would fail if the setter did
+    # nothing at all -- the failure mode psi_crit genuinely has (see above).
+    expect_gt(abs(g$gradient[p, "A"]), 1e-8)
+  }
+})
+
+test_that("the non-trait gradients are stable across decades of step", {
+  # The mixed partial is a difference of an exact quantity, so it should be
+  # step-insensitive over a wide band; a parameter whose step rule was wrong
+  # would show up here as drift rather than as a wrong answer.
+  #
+  # ⚠️ This is the test that would have caught the step-rule trap:
+  # leaf_specific_conductance_max defaults to 3.14e-05, so the traits' rule of
+  # flooring the step at 1 would perturb it by 3% and measure a secant.
+  d <- list(psi_soil = 1.5, PPFD = 900, atm_vpd = 2.0,
+            supply = leaf_supply_single(resistance = 1e4))
+  for (p in c("leaf_specific_conductance_max", "resistance")) {
+    vals <- vapply(10^-(4:7), function(st) {
+      do.call(leaf_gradient, c(d, list(pars = p, step = st,
+                                       method = "ift")))$gradient[p, "A"]
+    }, numeric(1))
+    expect_lt(diff(range(vals)) / abs(mean(vals)), 1e-6)
+  }
+})
+
+test_that("the active-set guard covers the non-trait parameters too", {
+  # Both move the FEASIBLE COLLAR INTERVAL and not only the profit function --
+  # resistance directly, the conductance through the supply curve -- so a
+  # perturbation can push a bound past psi* more readily than a trait
+  # perturbation can. The guard must not be trait-specific.
+  dry <- list(psi_soil = 5.5, PPFD = 900, atm_vpd = 3.0,
+              supply = leaf_supply_single(resistance = 1e4))
+  auto <- do.call(leaf_gradient,
+                  c(dry, list(pars = c("leaf_specific_conductance_max",
+                                       "resistance"))))
+  expect_true(auto$status %in% c("pinned", "no-gradient"))
+  expect_identical(auto$method, "fd")
+  expect_true(all(is.finite(auto$gradient)))
+
+  # ...and forcing the composite there fails loudly rather than returning a
+  # confident number, which is the whole reason `auto` exists.
+  expect_error(do.call(leaf_gradient,
+                       c(dry, list(pars = "resistance", method = "ift"))))
+})
+
 test_that("leaf_gradient() rejects bad arguments", {
   expect_error(grid_gradient(2.0, pars = "not_a_trait"),
-               "not traits")
+               "cannot differentiate")
+  # `resistance` is a real parameter -- on the other supply path -- so the
+  # message says which path it belongs to rather than calling it unknown.
+  expect_error(grid_gradient(2.0, pars = "resistance"),
+               "single-potential path only")
   expect_error(grid_gradient(2.0, step = -1), "positive number")
   expect_error(grid_gradient(2.0, traits = list(vcmax_25 = 96)),
                "leaf_traits")

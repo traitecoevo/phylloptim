@@ -2754,11 +2754,18 @@ caller, not against the model.
 
 #### What is left of #4
 
-- **The two non-trait parameters the calibration actually fits** —
-  `leaf_specific_conductance_max` and the single-potential `resistance`. Nothing
-  in the derivation cares that θ is a trait (the driver case is measured above at
-  ratios 0.99994–0.99996), so this is plumbing rather than mathematics, and it is
-  now the item with a customer waiting. Filed as its own issue.
+- ~~**The two non-trait parameters the calibration actually fits**~~ — **DONE,
+  issue #44.** `pars` takes `leaf_specific_conductance_max` and, on the
+  single-potential path, `resistance`. It was plumbing rather than mathematics,
+  exactly as predicted: `.gradient_theta` / `.gradient_setter` replaced the
+  traits-only closure and the theorem was untouched. Arbitrated against a
+  resolved central difference of the solve: **8 significant figures** for the
+  conductance, **9** for the resistance, and stable across four decades of
+  `step`. ⚠️ **One trap found in the doing, and it is the kind that returns a
+  plausible number:** the traits' step rule floors at 1, which for
+  `leaf_specific_conductance_max` (3.14e-05) is a **3% perturbation** — a secant,
+  not a derivative. Those two parameters take a relative step, and a test pins the
+  step-independence rather than the value alone.
 - **Stage 2 (composition in C++, one R call per operating point)** still carries
   the R layer's speed case, and #39 has re-sized it: with the wrapper fixed, a
   gradient's ~10 R calls per parameter are the remaining boundary cost, and

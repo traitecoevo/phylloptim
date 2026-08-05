@@ -295,8 +295,18 @@ traits, which is what a gradient-based optimiser or a Hamiltonian sampler wants:
 ```r
 g <- leaf_gradient(psi_soil = 2.0, PPFD = 900,
                    pars = c("vcmax_25", "stem_b", "cost_scale_TF24"))
-g$gradient   # rows: traits.  columns: A, gc, psi_stem, collar
+g$gradient   # rows: parameters.  columns: A, gc, psi_stem, collar
 g$method     # "ift" or "fd" -- see below
+```
+
+`pars` is not restricted to traits: `leaf_specific_conductance_max` and, on the
+single-potential path, `resistance` are differentiable too, because a calibration
+fits them and nothing in the derivation cares whether a parameter is a trait.
+
+```r
+leaf_gradient(psi_soil = 1.5, PPFD = 900,
+              supply = leaf_supply_single(resistance = 1e4),
+              pars = c("leaf_specific_conductance_max", "resistance"))
 ```
 
 These are not finite differences of the solve. The outputs are evaluated at the

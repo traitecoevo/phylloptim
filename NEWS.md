@@ -1,5 +1,38 @@
 # leaf (development version)
 
+## `leaf_gradient()` covers the two parameters that are not traits (#44)
+
+`pars` now accepts **`leaf_specific_conductance_max`** and — on the
+single-potential path — **`resistance`**, alongside the fifteen traits.
+
+They are here because a calibration fits them. Of `leaf-calibration`'s four free
+parameters, two are traits (`cost_scale_TF24`, `beta2`) and two are these
+(`K_total` and `f_plant` reach the leaf as a conductance and a resistance), so
+restricting `pars` to `leaf_traits()` left half of that fit with no exact
+gradient at all.
+
+Nothing in the derivation had to change: the implicit function theorem is applied
+to `dprofit/dpsi = 0`, and any parameter the profit function depends on goes
+through it identically. What differs per parameter is only which setter applies
+the perturbation. Both new parameters agree with a resolved central difference of
+the whole solve to **8 and 9 significant figures**, and neither rebuilds a
+vulnerability spline, so both sit in the fast class.
+
+`leaf_specific_conductance_max` is also how plant's height reaches the leaf, so
+this is a gradient with respect to plant *state* and not only with respect to
+traits.
+
+⚠️ **Two consequences worth knowing:**
+
+* **The default `pars` is wider**, so `leaf_gradient()` with no `pars` now
+  returns 16 rows on the multi-layer path and 17 on the single-potential one,
+  rather than 15.
+* **The step rule is per-parameter now.** The traits' rule floors the step at 1,
+  which is right for parameters spanning 0.3 to 9.4e3 but catastrophic for
+  `leaf_specific_conductance_max`, whose default is 3.14e-05 — flooring there
+  would perturb it by 3% and measure a secant rather than a derivative. Those
+  two get a plain relative step.
+
 ## `leaf_solve()` is 16× faster, and the fast path is now the documented one (#39)
 
 **No results move; every value is bit-identical, including the error messages.**

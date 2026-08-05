@@ -136,6 +136,26 @@ set_traits <- function(x, traits) {
 ##' when the feasible interval is narrow, which is true of these points but not of
 ##' pinned optima in general.
 ##'
+##' @section Two of these are not traits:
+##' `pars` also accepts `leaf_specific_conductance_max` and, on the
+##' single-potential path, `resistance`. They are here because a calibration fits
+##' them: of `leaf-calibration`'s four free parameters two are traits and two are
+##' these, so restricting `pars` to [leaf_traits()] left half of that fit without
+##' an exact gradient.
+##'
+##' Nothing in the derivation cares that the parameter is a trait — the implicit
+##' function theorem is applied to `dprofit/dpsi = 0`, and any parameter the profit
+##' function depends on goes through it identically. What differs is only which
+##' setter applies the perturbation. `leaf_specific_conductance_max` is also how
+##' plant's height reaches the leaf, so the same route gives a gradient with
+##' respect to plant state and not only with respect to traits.
+##'
+##' ⚠️ **Both move the feasible collar interval, not just the profit function** —
+##' `resistance` directly and `leaf_specific_conductance_max` through the supply
+##' curve — so a perturbation can push a bound past `psi*` more readily than a
+##' trait perturbation can. That is the case the clamp detector below exists for,
+##' and it fails loudly rather than quietly.
+##'
 ##' @section Precision:
 ##' Do not ask for more than about `1e-09` from any of this. That is the
 ##' achievable precision of the solved outputs themselves, set by the tolerance of
@@ -147,8 +167,9 @@ set_traits <- function(x, traits) {
 ##' @param control a [leaf_control()] object
 ##' @param supply how water reaches the root collar: [leaf_supply_multilayer()]
 ##'   (the default) or [leaf_supply_single()]
-##' @param pars names of the traits to differentiate with respect to. Defaults to
-##'   all of them.
+##' @param pars what to differentiate with respect to. Any of the fifteen
+##'   [leaf_traits()] names, plus `"leaf_specific_conductance_max"` and — on the
+##'   single-potential path only — `"resistance"`. Defaults to all of them.
 ##' @param step relative step for the trait difference. The default `1e-06` is
 ##'   near the middle of the five decades over which the mixed partial was
 ##'   measured stable; it is also used, relative to the collar potential, for the
@@ -212,14 +233,6 @@ leaf_gradient <- function(psi_soil,
   if (!inherits(traits, "leaf_traits")) {
     stop("`traits` must come from leaf_traits()", call. = FALSE)
   }
-  if (is.null(pars)) {
-    pars <- names(traits)
-  }
-  unknown <- setdiff(pars, names(traits))
-  if (length(unknown)) {
-    stop("`pars` names things that are not traits: ",
-         paste(unknown, collapse = ", "), call. = FALSE)
-  }
   if (!(is.numeric(step) && length(step) == 1L && step > 0)) {
     stop("`step` must be a single positive number", call. = FALSE)
   }
@@ -230,16 +243,39 @@ leaf_gradient <- function(psi_soil,
                   atm_vpd = atm_vpd, ca = ca, leaf_temp = leaf_temp,
                   atm_o2_kpa = atm_o2_kpa, atm_kpa = atm_kpa)
 
+  # The differentiable parameters: the fifteen traits, plus the two that are not
+  # traits and that a calibration nonetheless fits (#44). See .gradient_theta.
+  theta <- .gradient_theta(traits, leaf_specific_conductance_max, supply)
+  if (is.null(pars)) {
+    pars <- names(theta)
+  }
+  unknown <- setdiff(pars, names(theta))
+  if (length(unknown)) {
+    # Name the multi-layer case specially: `resistance` is a real parameter on
+    # the other supply path, so "not differentiable" would be misleading rather
+    # than merely unhelpful.
+    why <- if (identical(supply$kind, "multilayer") &&
+               "resistance" %in% unknown) {
+      paste(" `resistance` is a parameter of the single-potential path only;",
+            "on the multi-layer path the soil-to-collar resistances are derived",
+            "from root carbon.")
+    } else {
+      ""
+    }
+    stop("`pars` names things this cannot differentiate: ",
+         paste(unknown, collapse = ", "),
+         ". Available: the traits from leaf_traits(), plus ",
+         "`leaf_specific_conductance_max`",
+         if (identical(supply$kind, "single")) " and `resistance`" else "",
+         ".", why, call. = FALSE)
+  }
+
   # ONE leaf for the whole gradient, re-traited rather than reconstructed. This is
   # the measurement that reordered PLAN 11d: a fresh Leaf costs ~204 us against
   # ~4 us to re-trait and re-drive this one, so reconstructing per perturbation
   # would swamp any difference between the two gradient routes below.
   l <- leaf_model(traits, control, supply)
-  reset <- function(tr) {
-    set_traits(l, tr)
-    do.call(set_drivers, c(list(l), drivers))
-    invisible(l)
-  }
+  reset <- .gradient_setter(l, traits, drivers, supply)
   do.call(set_drivers, c(list(l), drivers))
   l$find_root_collar_psi()
 
@@ -309,9 +345,9 @@ leaf_gradient <- function(psi_soil,
   }
 
   grad <- if (use_ift) {
-    .gradient_ift(l, reset, traits, pars, psi_star, H, dY_dpsi, step)
+    .gradient_ift(l, reset, theta, pars, psi_star, H, dY_dpsi, step)
   } else {
-    .gradient_fd(l, reset, traits, pars, step)
+    .gradient_fd(l, reset, theta, pars, step)
   }
 
   list(gradient = grad,
@@ -347,26 +383,86 @@ leaf_gradient <- function(psi_soil,
   .gradient_outputs(l)
 }
 
-# The trait step: relative to the trait for values above 1, and plain `step` below
+# Everything this can differentiate, and its current value, as one named vector.
+#
+# The fifteen traits, plus the two quantities a calibration fits that are NOT
+# traits (#44) and that `pars` therefore used to reject:
+#
+#   * `leaf_specific_conductance_max` -- a DRIVER, set through set_drivers(). It
+#     is also how plant's height reaches the leaf, so the same code path answers
+#     plant #537's question about differentiating w.r.t. state.
+#   * `resistance` -- the single-potential path's whole soil-to-collar
+#     resistance, set through $set_supply_single(). Only present on that path: on
+#     the multi-layer path the resistances are derived from root carbon and there
+#     is no such parameter, which is why it appears here conditionally rather
+#     than being rejected later with a worse message.
+#
+# Nothing in the derivation cares that theta is a trait -- `dpsi*/dtheta = -M/H`
+# and `dY/dtheta = dY/dtheta|_psi + (dY/dpsi)(dpsi*/dtheta)` hold for any
+# parameter profit depends on. What differs per parameter is only which setter
+# applies it, which is .gradient_setter's job.
+.gradient_theta <- function(traits, kmax, supply) {
+  theta <- c(unlist(traits), leaf_specific_conductance_max = kmax)
+  if (identical(supply$kind, "single")) {
+    theta <- c(theta, resistance = supply$resistance)
+  }
+  theta
+}
+
+# Push a parameter vector back onto the leaf, in the one order that is correct.
+#
+# ⚠️ ORDER IS LOAD-BEARING and the reason this is a function rather than three
+# lines at each call site. `set_traits()` and `$set_supply_single()` both return
+# the leaf to its just-constructed state, so the drivers have to be re-supplied
+# AFTER them -- and `set_drivers()` is what re-derives vcmax_/jmax_/R_d_ behind
+# the temperature cache that `set_traits()` has just cleared.
+.gradient_setter <- function(l, traits, drivers, supply) {
+  trait_names <- names(traits)
+  trait_class <- class(traits)
+  single <- identical(supply$kind, "single")
+  function(theta) {
+    set_traits(l, structure(as.list(theta[trait_names]), class = trait_class))
+    if (single) {
+      l$set_supply_single(theta[["resistance"]], supply$gravity_head)
+    }
+    drivers$leaf_specific_conductance_max <-
+      theta[["leaf_specific_conductance_max"]]
+    do.call(set_drivers, c(list(l), drivers))
+    invisible(l)
+  }
+}
+
+# Parameters whose step is RELATIVE rather than floored at 1. See .gradient_step.
+.gradient_relative_pars <- c("leaf_specific_conductance_max", "resistance")
+
+# The step: relative to the parameter for values above 1, and plain `step` below
 # it. Not a relative step with an epsilon floor -- the floor is at 1, which is
 # deliberate. Traits here span `a` = 0.3 to `beta_R_V` = 9.4e3, and a strictly
 # relative step would perturb the small ones so little that the difference is
 # dominated by the solve's ~1e-09 noise. It also means a trait sitting at zero is
 # still perturbed rather than not differentiated at all.
-.gradient_step <- function(value, step) {
-  max(abs(value), 1) * step
+#
+# ⚠️ That floor is WRONG for a parameter whose natural magnitude is far below 1,
+# and `leaf_specific_conductance_max` is: it defaults to 3.14e-05, so flooring at
+# 1 would perturb it by **3%** and measure a secant across a range over which the
+# model is visibly nonlinear, not a derivative. Those parameters get a plain
+# relative step. For `resistance` (~1e3 and up) the two rules coincide; it is
+# listed for the reason rather than for the arithmetic.
+.gradient_step <- function(par, value, step) {
+  floor <- if (par %in% .gradient_relative_pars) 0 else 1
+  max(abs(value), floor) * step
 }
 
-# The implicit-function composite. Two perturbed evaluations per trait, neither of
-# which re-solves the model: `dprofit` at the UNPERTURBED psi* gives the mixed
-# partial, and the outputs at that same psi* give the direct term.
-.gradient_ift <- function(l, reset, traits, pars, psi_star, H, dY_dpsi, step) {
+# The implicit-function composite. Two perturbed evaluations per parameter,
+# neither of which re-solves the model: `dprofit` at the UNPERTURBED psi* gives
+# the mixed partial, and the outputs at that same psi* give the direct term.
+.gradient_ift <- function(l, reset, theta, pars, psi_star, H, dY_dpsi, step) {
   out <- t(vapply(pars, function(p) {
-    h <- .gradient_step(traits[[p]], step)
+    h <- .gradient_step(p, theta[[p]], step)
     side <- function(sign) {
-      tr <- traits
-      tr[[p]] <- tr[[p]] + sign * h
-      reset(structure(tr, class = class(traits)))
+      th <- theta
+      th[[p]] <- th[[p]] + sign * h
+      reset(th)
       y <- .gradient_outputs_at(l, psi_star)
       if (is.null(y)) {
         stop("leaf_gradient(): perturbing `", p, "` moved the feasible collar ",
@@ -390,25 +486,25 @@ leaf_gradient <- function(psi_soil,
     g[["collar"]] <- dpsi_dtheta
     g[.gradient_output_names]
   }, numeric(length(.gradient_output_names))))
-  reset(traits)
+  reset(theta)
   out
 }
 
 # The fallback: a central difference of the whole solve. Correct at a pinned
 # optimum because it differences the constrained answer, which is exactly what the
 # composite cannot do.
-.gradient_fd <- function(l, reset, traits, pars, step) {
+.gradient_fd <- function(l, reset, theta, pars, step) {
   out <- t(vapply(pars, function(p) {
-    h <- .gradient_step(traits[[p]], step)
+    h <- .gradient_step(p, theta[[p]], step)
     side <- function(sign) {
-      tr <- traits
-      tr[[p]] <- tr[[p]] + sign * h
-      reset(structure(tr, class = class(traits)))
+      th <- theta
+      th[[p]] <- th[[p]] + sign * h
+      reset(th)
       l$find_root_collar_psi()
       .gradient_outputs(l)
     }
     ((side(1) - side(-1)) / (2 * h))[.gradient_output_names]
   }, numeric(length(.gradient_output_names))))
-  reset(traits)
+  reset(theta)
   out
 }
