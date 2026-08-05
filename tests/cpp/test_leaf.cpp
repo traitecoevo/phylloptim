@@ -14,6 +14,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <functional>
 #include <cstdio>
 #include <limits>
 #include <string>
@@ -1661,6 +1662,88 @@ void test_bad_input_throws() {
   ok(threw, "mismatched soil vector lengths throw std::runtime_error");
 }
 
+// What an out-of-domain transport lookup says. The stem curve is the only
+// interpolator here with extrapolation disabled, so it is the only one a lookup
+// can throw on -- and there are two of them, they are inverses, and they carry
+// different units, so odelia's message (which names the point and the domain but
+// not the spline) is ambiguous in the way that matters. Localising plant#576 came
+// down to which of the four call sites was asking; these assertions are what make
+// that a read rather than a bisect.
+std::string message_of(const std::function<void()>& f) {
+  try {
+    f();
+  } catch (const std::exception& e) {
+    return std::string(e.what());
+  }
+  return std::string();
+}
+
+bool mentions(const std::string& haystack, const char* needle) {
+  return haystack.find(needle) != std::string::npos;
+}
+
+void test_out_of_domain_names_the_spline() {
+  printf("out-of-domain reporting\n");
+  Drivers d;
+  phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
+
+  // Forward direction, past the far end of the vulnerability curve.
+  const std::string fwd = message_of([&] { l.transpiration(50.0, 0.0); });
+  ok(mentions(fwd, "transpiration_from_psi"), "forward lookup names its spline");
+  ok(mentions(fwd, "psi = 50"), "forward lookup reports the point");
+  ok(mentions(fwd, "beyond the upper end"), "forward lookup reports which end");
+  ok(mentions(fwd, "Leaf::transpiration"), "forward lookup names the caller");
+
+  // Inverse direction, below the lower end -- the plant#576 signature. A
+  // sufficiently negative flux puts E/K_max below the domain, which is the
+  // statement "the collar cannot supply this, so no stem potential carries it".
+  const std::string inv =
+      message_of([&] { l.transpiration_to_psi_stem(-1e3, 0.0); });
+  ok(mentions(inv, "psi_from_transpiration"), "inverse lookup names its spline");
+  ok(mentions(inv, "beyond the lower end"), "inverse lookup reports which end");
+  ok(mentions(inv, "E/K_max"), "inverse lookup names its argument's units");
+  ok(mentions(inv, "Leaf::transpiration_to_psi_stem"),
+     "inverse lookup names the caller");
+
+  // The two are distinguishable, which is the entire point.
+  ok(fwd != inv && !fwd.empty() && !inv.empty(),
+     "the two splines give different messages");
+
+  // A non-finite point must NOT become a domain complaint: the guard uses the
+  // same comparison odelia does rather than negating an in-range test, so NaN
+  // falls through to the spline and comes back non-finite. plant documents a
+  // profit_psi_stem_TF(NA, .) -> NA contract built on this.
+  const std::string nan_msg =
+      message_of([&] { l.transpiration(std::nan(""), 0.0); });
+  ok(nan_msg.empty(), "a non-finite psi_stem does not throw a domain error");
+  ok(!std::isfinite(l.transpiration(std::nan(""), 0.0)),
+     "a non-finite psi_stem returns non-finite");
+
+  // In-domain reads are untouched.
+  ok(std::isfinite(l.transpiration(2.5, 0.0)),
+     "an in-domain lookup still returns a finite value");
+}
+
+// The rescaled path reports the domain in the CALLER's units, not the spline's.
+// Under perturb_stem_b the value handed to the spline is psi/s, so quoting the
+// spline's own endpoints would send the reader after a discrepancy that is not
+// there.
+void test_out_of_domain_under_rescale() {
+  Drivers d;
+  phylloptim::Leaf wide = make_leaf(d, {2.0}, {1.0});
+  const std::string before = message_of([&] { wide.transpiration(50.0, 0.0); });
+
+  phylloptim::Leaf rescaled = make_leaf(d, {2.0}, {1.0});
+  rescaled.perturb_stem_b(rescaled.stem_b * 2.0);
+  const std::string after =
+      message_of([&] { rescaled.transpiration(50.0, 0.0); });
+
+  ok(!before.empty() && !after.empty(), "both report a domain failure");
+  ok(before != after, "the rescaled domain is reported, not the spline's own");
+  ok(mentions(after, "rescaled by"),
+     "the rescale is named so the two domains are not confused");
+}
+
 void benchmark() {
   printf("\ntiming\n");
   Drivers d;
@@ -1720,6 +1803,8 @@ int main() {
   test_set_traits_matches_a_fresh_leaf();
   test_perturb_stem_b_matches_a_rebuild();
   test_bad_input_throws();
+  test_out_of_domain_names_the_spline();
+  test_out_of_domain_under_rescale();
   benchmark();
 
   printf("\n%d checks, %d failures\n", checks, failures);
