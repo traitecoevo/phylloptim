@@ -43,10 +43,11 @@
 # rows where plant carries a number, because set_shutdown_state assigns
 # opt_root_psi_ (root_collar_psi_ before #25), opt_psi_stem_ and profit_ and leaves
 # ci/assim/transpiration/
-# gc/e_up untouched. That is the shutdown-state leak (PLAN item 2, plant #578) --
-# a known behavioural difference, and the count matches the 48 x 5 recorded as
-# that fix's blast radius. They are now reported as their own column rather than
-# being counted as mismatches.
+# gc/e_up untouched. That WAS the shutdown-state leak (PLAN item 2, plant #578),
+# and the count matches the 48 x 5 recorded as that fix's blast radius. The leak is
+# fixed both here and in plant, so this column should now be empty against a
+# current plant -- it is retained because a non-empty one means the two have
+# drifted apart again, which is more useful than the check disappearing.
 #
 # Corroborated independently by compare_primitives.R, which calls the underlying
 # functions directly -- arrh_curve, the vulnerability curve, the assimilation
