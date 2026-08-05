@@ -602,3 +602,14 @@ test_that("leaf_gradient() refuses the combinations that would disagree", {
   expect_error(leaf_gradient(psi_soil = 2, x = l, traits = tr, pars = "resistance"),
                "single-potential path only")
 })
+
+test_that("the setter's positional trait call cannot drift in arity", {
+  # `.gradient_setter()` applies traits POSITIONALLY, straight onto the object, to
+  # skip rebuilding a leaf_traits per perturbation. That is a hard-coded thirteen. If
+  # a trait is added to leaf_traits() and to the C++ setter, nothing about that call
+  # fails to compile -- it would silently pass the wrong value for every argument
+  # after the new one. So the arity is asserted here rather than trusted.
+  expect_length(leaf_traits(), 13L)
+  expect_length(formals(leaf_model()$set_traits), 13L)
+  expect_identical(names(leaf_traits()), names(formals(leaf_model()$set_traits)))
+})

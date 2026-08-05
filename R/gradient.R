@@ -535,9 +535,34 @@ leaf_gradient <- function(psi_soil,
 # quantity by different means, and a test can compare them.
 .gradient_output_names <- c("A", "gc", "psi_stem", "collar")
 
+# ⚠️ ONE call, not four field reads. Every `l$field` is an R6 ACTIVE BINDING -- a
+# closure call wrapping a `.Call` -- and this function runs once per perturbation, so
+# eleven times per four-parameter gradient. Four reads cost 4.65 us against 0.93 us
+# for the one C++ reader that returns all twelve outputs, and `$` was 12.7% of a
+# gradient's self time before this. Same numbers: the reader is the same accessor the
+# bindings wrap, and test-gradient.R requires bit-identical gradients.
+#
+# `.operating_point_names` is the order that reader emits; the four wanted are
+# selected by position, matched once and cached.
+#
+# ⚠️ Cached at FIRST CALL, not at build time. R collates `R/` alphabetically, so this
+# file is sourced before `leaf-model.R` and `.operating_point_names` does not exist
+# yet -- a build-time `match()` here fails the package load with a message that names
+# neither file. Deferring costs one `is.null` per call.
+.gradient_outputs_idx <- local({
+  idx <- NULL
+  function() {
+    if (is.null(idx)) {
+      idx <<- match(.gradient_output_names, .operating_point_names)
+    }
+    idx
+  }
+})
+
 .gradient_outputs <- function(l) {
-  c(A = l$assim_colimited_, gc = l$stom_cond_CO2_, psi_stem = l$opt_psi_stem_,
-    collar = l$opt_root_psi_)
+  v <- l$operating_point_values()[.gradient_outputs_idx()]
+  names(v) <- .gradient_output_names
+  v
 }
 
 # Outputs with the collar held at `psi` rather than optimised. NULL when the
@@ -594,11 +619,32 @@ leaf_gradient <- function(psi_soil,
 # It used to be TWO such setters: `$set_supply_single()` reset the object as well,
 # because the single path's resistance was a property of the supply object rather
 # than a driver. Now it is a driver on both paths and only `set_traits()` resets.
+# The arguments `.resolve_drivers()` takes, in its order, so the drivers list can be
+# handed over without naming them at the call site.
+.resolve_names <- c("psi_soil", "PPFD", "soil_depth", "root_network",
+                    "leaf_specific_conductance_max", "atm_vpd", "ca",
+                    "leaf_temp", "atm_o2_kpa", "atm_kpa")
+
 .gradient_setter <- function(l, traits, drivers, supply,
                              fast_stem_curve = TRUE) {
   trait_names <- names(traits)
-  trait_class <- class(traits)
   single <- identical(supply$kind, "single")
+  # ⚠️ RESOLVE THE DRIVERS ONCE. This closure runs once per perturbation -- eleven
+  # times for a four-parameter gradient -- and `set_drivers()` re-validates and
+  # re-defaults the same values every time. `.resolve_drivers()` is the definition
+  # of those rules and is called here exactly once; the loop then applies the result
+  # positionally, varying only the two entries a perturbation can move. That is
+  # ~12% of a gradient, and it is why the rules are not reimplemented here: a second
+  # copy of the 1 m-layer default or the single-path placeholder depth would be free
+  # to drift from set_drivers() with nothing to notice.
+  base <- do.call(.resolve_drivers, c(list(l), drivers[.resolve_names]))
+
+  # Method closures pulled out of the object once. `$` on an R6 object is a lookup
+  # per use and was 12.7% of a gradient's self time; these three run per
+  # perturbation.
+  apply_traits <- l$set_traits
+  apply_drivers <- l$set_physiology
+
   function(theta, only = NULL) {
     # THE FAST PATH FOR stem_b, and it is the whole of PLAN 11f.
     #
@@ -624,17 +670,36 @@ leaf_gradient <- function(psi_soil,
       l$perturb_stem_b(theta[["stem_b"]])
       return(invisible(l))
     }
-    set_traits(l, structure(as.list(theta[trait_names]), class = trait_class))
-    # `resistance` is a driver now, so it goes in with the others rather than
-    # through $set_supply_single(). That removes the second object-resetting call
-    # this function used to make -- and with it the reason the ordering note above
-    # had to mention two setters instead of one.
-    if (single) {
-      drivers$root_network <- series_resistance(theta[["resistance"]])
+    # Positional, straight onto the object, rather than through `set_traits()` and
+    # `set_drivers()`. Those two rebuild a `leaf_traits` object with
+    # `structure(as.list(...))`, re-extract thirteen fields by name, and re-run the
+    # driver validation -- 3.0% + 3.3% + 4.9% of a gradient's self time between them,
+    # for work whose answer cannot change across perturbations.
+    #
+    # ⚠️ THIS BYPASSES set_traits()'s INVARIANT CHECKS, and that is sound here for
+    # one reason only: `theta` came from `.gradient_theta()`, whose values came from a
+    # `leaf_traits()` object the caller already handed in, and the C++ setter asserts
+    # the #25 positive-magnitude invariants itself. Do not copy this pattern anywhere
+    # the values are not already known-good.
+    # ⚠️ POSITIONAL, so the count is load-bearing. `set_traits()`'s C++ signature and
+    # `leaf_traits()` must agree on thirteen; if a trait is ever added, this call is
+    # the one place that will not fail to compile. test-gradient.R asserts the arity.
+    tv <- theta[trait_names]
+    apply_traits(tv[[1L]], tv[[2L]], tv[[3L]], tv[[4L]], tv[[5L]], tv[[6L]],
+                 tv[[7L]], tv[[8L]], tv[[9L]], tv[[10L]], tv[[11L]], tv[[12L]],
+                 tv[[13L]])
+    # `resistance` is a driver, so it goes in with the others rather than through
+    # $set_supply_single(). That removes the second object-resetting call this
+    # function used to make -- and with it the reason the ordering note above had to
+    # mention two setters instead of one.
+    net <- if (single) {
+      series_resistance(theta[["resistance"]])
+    } else {
+      base$root_network
     }
-    drivers$leaf_specific_conductance_max <-
-      theta[["leaf_specific_conductance_max"]]
-    do.call(set_drivers, c(list(l), drivers))
+    apply_drivers(net, base$PPFD, base$psi_soil, base$soil_depth,
+                  theta[["leaf_specific_conductance_max"]], base$atm_vpd,
+                  base$ca, base$leaf_temp, base$atm_o2_kpa, base$atm_kpa)
     invisible(l)
   }
 }

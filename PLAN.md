@@ -422,6 +422,26 @@ The saving shrinks as `pars` grows — construction is a fixed cost against a te
 linear in `P_model`, so it is 38% at one parameter and 26% at three. A fit asking for
 many parameters gains less.
 
+### And the R glue was a third of what remained
+
+Profiling the reused path found the **C++ model at 1.5% of a gradient** — 6 µs of
+solving against 119 µs of dispatch (112 boundary crossings) and ~285 µs of interpreter.
+`.gradient_setter()` was 60% of the call on its own. Reducing it needed no C++:
+resolve the drivers once rather than per perturbation (`.resolve_drivers()`, split out
+of `set_drivers()` so there is still one definition of the defaults), apply traits
+positionally rather than rebuilding a `leaf_traits` each time, and read the four
+outputs in one call rather than four R6 active bindings. **400 → 231 µs per observation
+at four fitted parameters (−42%)** on the reused path, 504 → 366 (−27%) on the fresh
+one; gradients bit-identical. With #52 together, 504 → 231 µs, −54%.
+
+⚠️ **What this says about "move it to C++".** Moving a small R helper across the
+boundary makes it *slower*: each move adds a ~1.1 µs crossing to a function that costs
+less than that. The lever is crossings-per-unit-of-work, not language. Which is also
+why the remaining prize is large and wholesale: `bench_gradient.cpp` already times this
+same composite in C++ at **1.8 µs per trait**, so a four-parameter gradient is ~7 µs
+there against ~350 µs here. That is item 11 stage 2, and it is a 30–50× ceiling rather
+than a tuning exercise.
+
 ## 6d. The R interface: what is left — #34
 
 Stages 0 through 3 are done, and **stage 2b is now done too** (#33). Only stage 4
