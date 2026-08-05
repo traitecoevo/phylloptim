@@ -121,32 +121,33 @@ public:
     setup_clean_leaf();
   }
 
-  // `resistance` is the whole soil-to-collar path collapsed to one number, PER
-  // UNIT LEAF AREA [MPa s (mol H2O)^-1 m^2 leaf] -- the leaf is purely intensive
-  // (hazard 4) and this is the one input that would otherwise smuggle plant size
-  // back in. `gravity_head` is the head to lift water to the collar in MPa, zero
-  // for a bare leaf that is not thinking about rooting depth.
+  // ⚠️ THIS TAKES NO RESISTANCE, and that is the point of the change that
+  // introduced this comment. The soil-to-collar resistance is a per-call DRIVER on
+  // both supply paths now: it arrives through `set_physiology`, out of the same
+  // `RootNetwork` the multi-layer path is given (see
+  // SinglePotential::set_supply_resistances). Before, the multi-layer path took its
+  // resistances per call and this one took its resistance at construction, so the
+  // same quantity arrived at two different times depending on which path was in
+  // force -- and `resistance` was the only differentiable parameter whose setter
+  // reset the whole object, because it had to come back through here.
   //
-  // Rejected here rather than at first use: a non-positive resistance is an
-  // infinite flux, and uptake() already stops on it -- but by then the caller is
-  // several frames away from the mistake, and on this path the error would
-  // surface from inside a root-find.
-  void set_supply_single(double resistance, double gravity_head = 0.0) {
-    if (!(resistance > 0.0) || !std::isfinite(resistance)) {
-      util::stop("set_supply_single needs a positive, finite resistance per unit "
-                 "leaf area; got " + util::to_string(resistance));
-    }
+  // `gravity_head` is the head to lift water to the collar in MPa, and IS still
+  // configuration. That is the one asymmetry left, and it is not laziness: the
+  // multi-layer path derives a per-layer head from the depth profile it is handed
+  // (gravity_head * z_soil_mid), and this path has no depth profile to derive one
+  // from. A bare leaf also wants zero rather than a geometric default, which the
+  // multi-layer rule cannot express. A caller who does want the multi-layer rule
+  // for one layer of thickness d passes `gravity_head = <gravity head> * d / 2`.
+  void set_supply_single(double gravity_head = 0.0) {
     if (!std::isfinite(gravity_head) || gravity_head < 0.0) {
       util::stop("set_supply_single needs a finite, non-negative gravity_head in "
                  "MPa; got " + util::to_string(gravity_head));
     }
     supply_kind_ = SupplyKind::SinglePotential;
     setup_clean_leaf();
-    // AFTER setup_clean_leaf, which clears both supply paths' soil state. These
-    // two are configuration rather than state -- clear() deliberately leaves
-    // them -- but ordering them last means this stays correct if that ever
-    // changes.
-    single_.resistance_ = resistance;
+    // grav_head_ is configuration and clear() spares it, so this must come after
+    // setup_clean_leaf. resistance_ used to need the same treatment and no longer
+    // does -- it is a driver, clear() resets it, and set_physiology re-supplies it.
     single_.grav_head_ = gravity_head;
   }
 
@@ -1102,8 +1103,9 @@ inline void Leaf::setup_clean_leaf() {
   // code path declines to write becomes the previous solve's value, and a Leaf
   // that has been switched between paths (set_supply_single / _multilayer) is
   // exactly the case where the inactive one's stale soil state could come back.
-  // clear() leaves resistance_/grav_head_ alone: those are configuration, and
-  // wiping them here would make set_supply_single order-dependent.
+  // clear() leaves grav_head_ alone -- it is the single path's one remaining piece
+  // of configuration, and wiping it here would make set_supply_single
+  // order-dependent. resistance_ IS cleared, because it is a driver now.
   single_.clear();
   soil_consumption_.clear(); // soil consumption mol  m^-2 s^-1;
 
@@ -1231,12 +1233,22 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
      photo_temp_cached_ = true;
    }
 
-  // The root resistances, handed over as given. #33 moved the carbon ->
-  // resistance step out to the caller, so this is now a validated copy rather
-  // than a model evaluation. It stays HERE, after set_soil_state, because the
-  // length check it performs needs the soil profile to be seated first.
-  if (supply_kind_ == SupplyKind::MultiLayer) {
-    roots_.set_root_network(root_network);
+  // The supply resistances, handed over as given. #33 moved the carbon ->
+  // resistance step out to the caller, so this is a validated copy rather than a
+  // model evaluation. BOTH paths are served from the one argument: the
+  // single-potential path reads `r_R_V_sum[0]` as its series resistance, which is
+  // that field's own meaning with one layer and no horizontal term. That is what
+  // makes the calling convention independent of which path is in force.
+  //
+  // It stays HERE, after set_soil_state, because the multi-layer length check
+  // needs the soil profile seated first.
+  switch (supply_kind_) {
+    case SupplyKind::MultiLayer:
+      roots_.set_root_network(root_network);
+      break;
+    default:
+      single_.set_supply_resistances(root_network);
+      break;
   }
 
   // Set up vector of root water uptake from layer. Stays on Leaf: plant writes

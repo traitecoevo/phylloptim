@@ -1,5 +1,61 @@
 # phylloptim 0.2.0
 
+## The two supply paths are configured and driven the same way
+
+Follows the entry below, and finishes what it started. `set_physiology()` now takes
+the soil-to-collar resistances on **both** supply paths, out of the same
+`root_network` argument. Before, the multi-layer path took its resistances per call
+and the single-potential path took its resistance at construction — so the same
+quantity arrived at a different *time* depending on which path was in force.
+
+* **`leaf_supply_single()` no longer takes `resistance`.** Migration:
+  `leaf_supply_single(resistance = r)` ->
+  `leaf_supply_single()` plus `root_network = series_resistance(r)` on
+  `set_drivers()` / `leaf_solve()` / `leaf_gradient()`. The C++
+  `$set_supply_single(resistance, gravity_head)` becomes
+  `$set_supply_single(gravity_head)`.
+* **`series_resistance(r)` is new**: the single-potential path's counterpart to
+  `root_network_from_carbon()`, packaging one series resistance into the
+  `RootNetwork` that `set_drivers()` takes. It goes in `r_R_V_sum`, which is exact
+  rather than a convention — that field already means "series resistance to the
+  collar, with no vulnerability weighting". A network carrying a non-zero
+  `r_R_H_min` is **refused** on this path rather than silently reinterpreted.
+* **`set_drivers()` accepts `root_network` on the single-potential path** where it
+  used to reject it, and defaults it to a nominal 1e3 written out in the body — the
+  same treatment the multi-layer default gets. `soil_depth` is still refused there,
+  because nothing on that path reads a depth profile.
+* **`single_resistance_` is unset until `set_physiology()` runs**, like `psi_soil_`.
+  It used to be seated by the constructor.
+
+**What this buys, beyond symmetry.** `resistance` was the only differentiable
+parameter whose setter reset the whole object: perturbing it meant calling
+`$set_supply_single()`, which calls `setup_clean_leaf()`, wiping the temperature
+cache and the solved state. It is a plain driver now, handled exactly like
+`leaf_specific_conductance_max`, and `.gradient_setter()` makes one
+object-resetting call instead of two.
+
+⚠️ **One asymmetry is left, deliberately: `gravity_head`.** The multi-layer path
+derives a per-layer head from the depth profile it is handed
+(`gravity_head * z_soil_mid`); the single-potential path has no depth profile to
+derive one from, and a bare leaf wants **zero** rather than a geometric default —
+which is the caller that path exists for. Making it a driver would mean inventing a
+depth for a leaf that has none, or adding a second supply-shaped argument only one
+path reads. For the multi-layer rule at one layer of thickness `d`, pass
+`gravity_head = 0.00981 * d / 2`.
+
+**Results are unchanged on both paths**, verified bit-identical over 18 operating
+points: 3 soil profiles x 2 VPDs on the multi-layer path, and 3 resistances x 2
+gravity heads x 2 VPDs on the single-potential one. The 288-point golden file is
+bit-identical too.
+
+⚠️ **A caution about how that was verified, because it cost time.** The first
+comparison said one row differed by 1.22e-10 and that the *same build* was
+nondeterministic run to run. Both were artefacts of a stale `src/*.o`: the two arms
+had been installed either side of a `git stash` round-trip, and `R CMD INSTALL`
+silently relinks rather than recompiling. Clean-building both arms gave
+bit-identical, reproducible results. **Check that an install actually compiled
+(`grep -c '^clang++.*-c ' <log>`) before believing a sub-solver-floor difference.**
+
 ## `set_physiology()` takes root resistances, not root carbon
 
 **Breaking, in both the C++ and R interfaces**, and coupled with a plant PR.

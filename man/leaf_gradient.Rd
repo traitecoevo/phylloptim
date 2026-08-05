@@ -34,11 +34,13 @@ sets the number of soil layers.}
 \item{soil_depth}{cumulative depth to the bottom of each layer, m. Defaults
 to 1 m layers.}
 
-\item{root_network}{the per-layer root hydraulic resistances, a
-[RootNetwork()]. Defaults to a nominal 20 kg C m^-2 leaf split evenly over
-the layers and put through [root_network_from_carbon()] — a stand-in, not a
-recommendation, which is why it is written out where you can see and replace
-it. Ignored, and an error if supplied, on the single-potential path.}
+\item{root_network}{the soil-to-collar hydraulic resistances, a
+[RootNetwork()]. **The same argument on both supply paths**: per rooted layer
+from [root_network_from_carbon()] on the multi-layer path, or one series
+resistance from [series_resistance()] on the single-potential path. Defaults
+to a nominal value on either — 20 kg C m^-2 leaf split evenly, or 1e3 —
+written out in the body where you can see and replace it. Stand-ins, not
+recommendations.}
 
 \item{leaf_specific_conductance_max}{maximum leaf-specific hydraulic
 conductance, kg m^-2 s^-1 MPa^-1}

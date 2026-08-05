@@ -36,6 +36,17 @@ root_network(const std::vector<double>& root_carbon_per_leaf_area,
       beta_R_H, beta_R_V);
 }
 
+// The single-potential path's driver: one series resistance, and no
+// vulnerability-weighted horizontal term. The SAME RootNetwork the multi-layer
+// path takes -- `r_R_V_sum` already means "series resistance to the collar", so
+// this is that field with one layer, which is why one set_physiology argument
+// serves both paths.
+inline phylloptim::RootNetwork series_resistance(double r) {
+  phylloptim::RootNetwork out;
+  out.r_R_V_sum.assign(1, r);
+  return out;
+}
+
 }  // namespace fixture
 
 #endif

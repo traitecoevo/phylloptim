@@ -153,8 +153,8 @@ Leaf__set_supply_multilayer <- function(obj_) {
     invisible(.Call('_phylloptim_Leaf__set_supply_multilayer', PACKAGE = 'phylloptim', obj_))
 }
 
-Leaf__set_supply_single <- function(obj_, resistance, gravity_head) {
-    invisible(.Call('_phylloptim_Leaf__set_supply_single', PACKAGE = 'phylloptim', obj_, resistance, gravity_head))
+Leaf__set_supply_single <- function(obj_, gravity_head) {
+    invisible(.Call('_phylloptim_Leaf__set_supply_single', PACKAGE = 'phylloptim', obj_, gravity_head))
 }
 
 Leaf__setup_transpiration <- function(obj_, resolution) {

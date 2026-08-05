@@ -504,14 +504,13 @@ BEGIN_RCPP
 END_RCPP
 }
 // Leaf__set_supply_single
-void Leaf__set_supply_single(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double resistance, double gravity_head);
-RcppExport SEXP _phylloptim_Leaf__set_supply_single(SEXP obj_SEXP, SEXP resistanceSEXP, SEXP gravity_headSEXP) {
+void Leaf__set_supply_single(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double gravity_head);
+RcppExport SEXP _phylloptim_Leaf__set_supply_single(SEXP obj_SEXP, SEXP gravity_headSEXP) {
 BEGIN_RCPP
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
-    Rcpp::traits::input_parameter< double >::type resistance(resistanceSEXP);
     Rcpp::traits::input_parameter< double >::type gravity_head(gravity_headSEXP);
-    Leaf__set_supply_single(obj_, resistance, gravity_head);
+    Leaf__set_supply_single(obj_, gravity_head);
     return R_NilValue;
 END_RCPP
 }
@@ -1889,7 +1888,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__solve_medlyn_ci_numerical", (DL_FUNC) &_phylloptim_Leaf__solve_medlyn_ci_numerical, 1},
     {"_phylloptim_Leaf__solve_medlyn_ci_analytical", (DL_FUNC) &_phylloptim_Leaf__solve_medlyn_ci_analytical, 1},
     {"_phylloptim_Leaf__set_supply_multilayer", (DL_FUNC) &_phylloptim_Leaf__set_supply_multilayer, 1},
-    {"_phylloptim_Leaf__set_supply_single", (DL_FUNC) &_phylloptim_Leaf__set_supply_single, 3},
+    {"_phylloptim_Leaf__set_supply_single", (DL_FUNC) &_phylloptim_Leaf__set_supply_single, 2},
     {"_phylloptim_Leaf__setup_transpiration", (DL_FUNC) &_phylloptim_Leaf__setup_transpiration, 2},
     {"_phylloptim_Leaf__setup_root_vulnerability", (DL_FUNC) &_phylloptim_Leaf__setup_root_vulnerability, 2},
     {"_phylloptim_Leaf__ci___get", (DL_FUNC) &_phylloptim_Leaf__ci___get, 1},

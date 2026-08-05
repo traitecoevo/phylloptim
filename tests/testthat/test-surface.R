@@ -333,11 +333,14 @@ test_that("operating_point() reports lambda and g1_eff from the solved state", {
 test_that("the supply path can be chosen, and reports which is in force", {
   expect_identical(leaf_model()$supply_kind, "multilayer")
 
-  single <- leaf_model(supply = leaf_supply_single(resistance = 1e3,
-                                                   gravity_head = 0.05))
+  single <- leaf_model(supply = leaf_supply_single(gravity_head = 0.05))
   expect_identical(single$supply_kind, "single")
-  expect_identical(single$single_resistance_, 1e3)
   expect_identical(single$single_gravity_head_, 0.05)
+  # The resistance is a DRIVER now, so it is unset until set_drivers() runs -- the
+  # same way psi_soil is, and the change this test exists to pin.
+  expect_true(is.na(single$single_resistance_))
+  set_drivers(single, psi_soil = 1.5, root_network = series_resistance(1e3))
+  expect_identical(single$single_resistance_, 1e3)
 })
 
 test_that("there is no state in which the tag and the supply disagree", {
@@ -356,7 +359,7 @@ test_that("there is no state in which the tag and the supply disagree", {
   l$find_root_collar_psi()
   expect_true(is.finite(l$profit_))
 
-  l$set_supply_single(1e3, 0)
+  l$set_supply_single(0)
   expect_identical(l$supply_kind, "single")
   expect_false(is.finite(l$profit_))
   expect_length(l$psi_soil_, 0L)
@@ -365,7 +368,8 @@ test_that("there is no state in which the tag and the supply disagree", {
 test_that("the single-potential path solves, and responds to its resistance", {
   solve_at <- function(r) {
     leaf_solve(psi_soil = 1.5, PPFD = 900,
-               supply = leaf_supply_single(resistance = r))
+               supply = leaf_supply_single(),
+               root_network = series_resistance(r))
   }
   easy <- solve_at(1e3)
   hard <- solve_at(1e4)
@@ -386,26 +390,42 @@ test_that("the single-potential path solves, and responds to its resistance", {
 test_that("the single path refuses inputs it would otherwise ignore", {
   # Silently ignoring a soil profile someone took the trouble to pass is the
   # kind of thing that produces a plausible wrong number, so it errors.
-  l <- leaf_model(supply = leaf_supply_single(1e3))
+  l <- leaf_model(supply = leaf_supply_single())
   expect_error(set_drivers(l, psi_soil = c(1, 2)), "single value")
-  expect_error(set_drivers(l, psi_soil = 1, soil_depth = 1), "are not used")
+  # `soil_depth` is the one argument that stays multi-layer-only: this path has no
+  # depth profile for anything to read.
+  expect_error(set_drivers(l, psi_soil = 1, soil_depth = 1),
+               "no depth profile to read")
+
+  # But `root_network` is now USED here rather than refused, which is the
+  # consistency change: it is the same argument on both paths. What is refused is a
+  # network built for the OTHER path -- a vulnerability-weighted horizontal term
+  # this path cannot apply, which would otherwise be silently dropped.
   expect_error(
     set_drivers(l, psi_soil = 1,
                 root_network = root_network_from_carbon(20, soil_depth = 1)),
-    "are not used")
+    "r_R_H_min must be empty or zero")
+  expect_error(
+    set_drivers(l, psi_soil = 1,
+                root_network = RootNetwork(r_R_V_sum = c(1e3, 2e3))),
+    "exactly one series resistance")
+  expect_error(set_drivers(l, psi_soil = 1, root_network = list(a = 1)),
+               "must be a RootNetwork")
 
-  expect_error(leaf_supply_single(0), "must be positive")
-  expect_error(leaf_supply_single(-1), "must be positive")
-  expect_error(leaf_supply_single(1e3, gravity_head = -1), "non-negative")
+  expect_error(series_resistance(0), "must be positive")
+  expect_error(series_resistance(-1), "must be positive")
+  expect_error(leaf_supply_single(gravity_head = -1), "non-negative")
   expect_error(leaf_model(supply = list(kind = "single")),
                "must come from leaf_supply")
 })
 
 test_that("gravity_head costs the leaf water, on the single path", {
   flat <- leaf_solve(psi_soil = 1.5, PPFD = 900,
-                     supply = leaf_supply_single(1e3))
+                     supply = leaf_supply_single(),
+                     root_network = series_resistance(1e3))
   uphill <- leaf_solve(psi_soil = 1.5, PPFD = 900,
-                       supply = leaf_supply_single(1e3, gravity_head = 0.5))
+                       supply = leaf_supply_single(gravity_head = 0.5),
+                       root_network = series_resistance(1e3))
   expect_lt(uphill$A, flat$A)
 })
 

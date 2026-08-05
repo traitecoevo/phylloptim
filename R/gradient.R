@@ -306,6 +306,16 @@ leaf_gradient <- function(psi_soil,
     stop("`step` must be a single positive number", call. = FALSE)
   }
 
+  # Resolve the single path's default resistance HERE rather than letting
+  # set_drivers() do it, because `resistance` is one of the parameters being
+  # differentiated: theta has to hold the value the solve will actually use, and a
+  # NULL would leave it unknown. `.default_series_resistance()` is the same
+  # function set_drivers() would have called, so there is no second default to
+  # drift.
+  if (identical(supply$kind, "single") && is.null(root_network)) {
+    root_network <- .default_series_resistance()
+  }
+
   drivers <- list(psi_soil = psi_soil, PPFD = PPFD, soil_depth = soil_depth,
                   root_network = root_network,
                   leaf_specific_conductance_max = leaf_specific_conductance_max,
@@ -314,7 +324,8 @@ leaf_gradient <- function(psi_soil,
 
   # The differentiable parameters: the thirteen traits, plus the two that are not
   # traits and that a calibration nonetheless fits (#44). See .gradient_theta.
-  theta <- .gradient_theta(traits, leaf_specific_conductance_max, supply)
+  theta <- .gradient_theta(traits, leaf_specific_conductance_max, supply,
+                           root_network)
   if (is.null(pars)) {
     pars <- names(theta)
   }
@@ -461,20 +472,24 @@ leaf_gradient <- function(psi_soil,
 #     is also how plant's height reaches the leaf, so the same code path answers
 #     plant #537's question about differentiating w.r.t. state.
 #   * `resistance` -- the single-potential path's whole soil-to-collar
-#     resistance, set through $set_supply_single(). Only present on that path: on
-#     the multi-layer path the resistances are per-layer vectors handed to
-#     set_physiology (#33) rather than one scalar, so there is no such parameter --
-#     which is why it appears here conditionally rather than being rejected later
-#     with a worse message.
+#     resistance. A DRIVER, like leaf_specific_conductance_max above: it reaches
+#     the leaf as the `root_network` argument to set_drivers(), and is read back out
+#     of `r_R_V_sum[1]`. It used to be a property of the supply object set through
+#     $set_supply_single(), which made it the one differentiable parameter whose
+#     setter called setup_clean_leaf() and reset the whole object. Only present on
+#     that path: on the multi-layer path the resistances are per-layer vectors
+#     rather than one scalar, so there is no such parameter -- which is why it
+#     appears here conditionally rather than being rejected later with a worse
+#     message.
 #
 # Nothing in the derivation cares that theta is a trait -- `dpsi*/dtheta = -M/H`
 # and `dY/dtheta = dY/dtheta|_psi + (dY/dpsi)(dpsi*/dtheta)` hold for any
 # parameter profit depends on. What differs per parameter is only which setter
 # applies it, which is .gradient_setter's job.
-.gradient_theta <- function(traits, kmax, supply) {
+.gradient_theta <- function(traits, kmax, supply, root_network) {
   theta <- c(unlist(traits), leaf_specific_conductance_max = kmax)
   if (identical(supply$kind, "single")) {
-    theta <- c(theta, resistance = supply$resistance)
+    theta <- c(theta, resistance = root_network$r_R_V_sum[[1]])
   }
   theta
 }
@@ -482,10 +497,14 @@ leaf_gradient <- function(psi_soil,
 # Push a parameter vector back onto the leaf, in the one order that is correct.
 #
 # ⚠️ ORDER IS LOAD-BEARING and the reason this is a function rather than three
-# lines at each call site. `set_traits()` and `$set_supply_single()` both return
-# the leaf to its just-constructed state, so the drivers have to be re-supplied
-# AFTER them -- and `set_drivers()` is what re-derives vcmax_/jmax_/R_d_ behind
-# the temperature cache that `set_traits()` has just cleared.
+# lines at each call site. `set_traits()` returns the leaf to its just-constructed
+# state, so the drivers have to be re-supplied AFTER it -- and `set_drivers()` is
+# what re-derives vcmax_/jmax_/R_d_ behind the temperature cache `set_traits()`
+# has just cleared.
+#
+# It used to be TWO such setters: `$set_supply_single()` reset the object as well,
+# because the single path's resistance was a property of the supply object rather
+# than a driver. Now it is a driver on both paths and only `set_traits()` resets.
 .gradient_setter <- function(l, traits, drivers, supply,
                              fast_stem_curve = TRUE) {
   trait_names <- names(traits)
@@ -517,8 +536,12 @@ leaf_gradient <- function(psi_soil,
       return(invisible(l))
     }
     set_traits(l, structure(as.list(theta[trait_names]), class = trait_class))
+    # `resistance` is a driver now, so it goes in with the others rather than
+    # through $set_supply_single(). That removes the second object-resetting call
+    # this function used to make -- and with it the reason the ordering note above
+    # had to mention two setters instead of one.
     if (single) {
-      l$set_supply_single(theta[["resistance"]], supply$gravity_head)
+      drivers$root_network <- series_resistance(theta[["resistance"]])
     }
     drivers$leaf_specific_conductance_max <-
       theta[["leaf_specific_conductance_max"]]

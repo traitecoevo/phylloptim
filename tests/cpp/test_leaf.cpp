@@ -1180,14 +1180,14 @@ void test_leaf_on_single_potential() {
   phylloptim::Leaf l;
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
-  l.supply_kind_ = phylloptim::Leaf::SupplyKind::SinglePotential;
-  // resistance_ is per unit leaf area now, so this is the old 2.0e4 * 0.05.
-  l.single_.resistance_ = 1.0e3;
+  l.set_supply_single();
 
-  // set_physiology keeps its signature; on this path only psi_soil[0] is read,
-  // so the depth and root-mass vectors are ignored rather than forbidden.
-  std::vector<double> psi_soil{1.0}, depth{1.0}, root{1.0};
-  l.set_physiology(fixture::root_network(root, depth), d.PPFD, psi_soil, depth,
+  // ⚠️ THE SAME CALL AS THE MULTI-LAYER PATH, which is the point. The resistance
+  // is a per-call driver on both paths now, carried by the RootNetwork argument;
+  // it used to be a set_supply_single() constructor-style argument. 1.0e3 is per
+  // unit leaf area, i.e. the old 2.0e4 * 0.05.
+  std::vector<double> psi_soil{1.0}, depth{1.0};
+  l.set_physiology(fixture::series_resistance(1.0e3), d.PPFD, psi_soil, depth,
                    d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
                    d.atm_o2_kpa, d.atm_kpa);
   l.find_root_collar_psi();
@@ -1211,10 +1211,9 @@ void test_leaf_on_single_potential() {
   phylloptim::Leaf dry;
   dry.setup_transpiration(100);
   dry.setup_root_vulnerability(100);
-  dry.supply_kind_ = phylloptim::Leaf::SupplyKind::SinglePotential;
-  dry.single_.resistance_ = 1.0e3;
+  dry.set_supply_single();
   std::vector<double> psi_dry{3.0};
-  dry.set_physiology(fixture::root_network(root, depth), d.PPFD, psi_dry, depth,
+  dry.set_physiology(fixture::series_resistance(1.0e3), d.PPFD, psi_dry, depth,
                      d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
                      d.atm_o2_kpa, d.atm_kpa);
   dry.find_root_collar_psi();
@@ -1225,9 +1224,8 @@ void test_leaf_on_single_potential() {
   phylloptim::Leaf tight;
   tight.setup_transpiration(100);
   tight.setup_root_vulnerability(100);
-  tight.supply_kind_ = phylloptim::Leaf::SupplyKind::SinglePotential;
-  tight.single_.resistance_ = 1.0e4;
-  tight.set_physiology(fixture::root_network(root, depth), d.PPFD, psi_soil, depth,
+  tight.set_supply_single();
+  tight.set_physiology(fixture::series_resistance(1.0e4), d.PPFD, psi_soil, depth,
                        d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
                        d.atm_o2_kpa, d.atm_kpa);
   tight.find_root_collar_psi();
@@ -1277,7 +1275,10 @@ void test_single_potential() {
   ok(sp.duptake_dpsi() > 0.0,
      "duptake_dpsi is a positive conductance: uptake rises as the collar pulls harder");
 
-  // A zero resistance would be an infinite flux; it is rejected, not returned.
+  // An UNSET resistance would be an infinite or NaN flux; it is rejected, not
+  // returned. The default is now the NA sentinel rather than zero, because the
+  // resistance became a per-call driver -- an unset one means set_physiology was
+  // never called, which is the same class of mistake as an unset psi_soil.
   phylloptim::SinglePotential bad;
   bad.set_soil_state(1.0);
   bad.begin_solve();
@@ -1287,7 +1288,49 @@ void test_single_potential() {
   } catch (const std::exception &) {
     threw = true;
   }
-  ok(threw, "zero resistance throws rather than returning an infinity");
+  ok(threw, "an unset resistance throws rather than returning an infinity");
+
+  // --- the driver entry point, and its two guards ---------------------------
+  // set_supply_resistances is what makes the two supply paths take the same
+  // set_physiology argument, so what it accepts and refuses is the contract.
+  phylloptim::SinglePotential drv;
+  drv.set_supply_resistances(fixture::series_resistance(2.5e3));
+  near(drv.resistance_, 2.5e3, 1e-14,
+       "the series resistance is read from r_R_V_sum[0]");
+
+  // A network for the OTHER path carries a vulnerability-weighted horizontal
+  // term this path cannot apply. Ignoring it would silently drop a resistance the
+  // caller meant to use, so it is refused.
+  threw = false;
+  try {
+    drv.set_supply_resistances(fixture::root_network({20.0}, {1.0}));
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(threw, "a multi-layer network is refused, not silently reinterpreted");
+  near(drv.resistance_, 2.5e3, 1e-14,
+       "and the refusal leaves the previous resistance intact");
+
+  // More than one layer is the other path's shape too.
+  threw = false;
+  try {
+    phylloptim::RootNetwork two;
+    two.r_R_V_sum.assign(2, 1.0e3);
+    drv.set_supply_resistances(two);
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(threw, "two layers are refused on a one-potential path");
+
+  // And a non-positive resistance is caught at the boundary rather than inside a
+  // root-find, which is why this entry point validates at all.
+  threw = false;
+  try {
+    drv.set_supply_resistances(fixture::series_resistance(0.0));
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(threw, "a zero series resistance is refused at the boundary");
 }
 
 void test_root_network_from_carbon() {

@@ -293,11 +293,13 @@ test_that("the active-set classification splits the golden grid as measured", {
 
 test_that("leaf_gradient() works on the single-potential supply path", {
   g <- leaf_gradient(psi_soil = 1.5, PPFD = 900,
-                     supply = leaf_supply_single(resistance = 1e3),
+                     supply = leaf_supply_single(),
+                     root_network = series_resistance(1e3),
                      pars = c("vcmax_25", "stem_b"))
   expect_identical(g$status, "interior")
   fd <- leaf_gradient(psi_soil = 1.5, PPFD = 900,
-                      supply = leaf_supply_single(resistance = 1e3),
+                      supply = leaf_supply_single(),
+                      root_network = series_resistance(1e3),
                       pars = c("vcmax_25", "stem_b"), method = "fd")
   expect_equal(g$gradient, fd$gradient, tolerance = 1e-3)
 })
@@ -355,12 +357,16 @@ test_that("the two non-trait parameters agree with a resolved reference", {
   # Arbitrated the way 11c arbitrated the traits: against a central difference of
   # the WHOLE SOLVE, read where the step sweep plateaus rather than at one step.
   d <- list(psi_soil = 1.5, PPFD = 900, atm_vpd = 2.0,
-            supply = leaf_supply_single(resistance = 1e4))
+            supply = leaf_supply_single(),
+            root_network = series_resistance(1e4))
 
   solve_at <- function(par, value) {
     a <- d
+    # `resistance` is a driver now, so perturbing it means rebuilding the
+    # root_network driver rather than rebuilding the supply object -- which is the
+    # whole of the consistency change, seen from the caller's side.
     if (identical(par, "resistance")) {
-      a$supply <- leaf_supply_single(resistance = value)
+      a$root_network <- series_resistance(value)
     } else {
       a[[par]] <- value
     }
@@ -395,7 +401,8 @@ test_that("the non-trait gradients are stable across decades of step", {
   # leaf_specific_conductance_max defaults to 3.14e-05, so the traits' rule of
   # flooring the step at 1 would perturb it by 3% and measure a secant.
   d <- list(psi_soil = 1.5, PPFD = 900, atm_vpd = 2.0,
-            supply = leaf_supply_single(resistance = 1e4))
+            supply = leaf_supply_single(),
+            root_network = series_resistance(1e4))
   for (p in c("leaf_specific_conductance_max", "resistance")) {
     vals <- vapply(10^-(4:7), function(st) {
       do.call(leaf_gradient, c(d, list(pars = p, step = st,
@@ -411,7 +418,8 @@ test_that("the active-set guard covers the non-trait parameters too", {
   # perturbation can push a bound past psi* more readily than a trait
   # perturbation can. The guard must not be trait-specific.
   dry <- list(psi_soil = 5.5, PPFD = 900, atm_vpd = 3.0,
-              supply = leaf_supply_single(resistance = 1e4))
+              supply = leaf_supply_single(),
+              root_network = series_resistance(1e4))
   auto <- do.call(leaf_gradient,
                   c(dry, list(pars = c("leaf_specific_conductance_max",
                                        "resistance"))))
