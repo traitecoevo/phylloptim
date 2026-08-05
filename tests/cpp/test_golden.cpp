@@ -6,8 +6,9 @@
 // Why this exists. The refactors in PLAN.md items 7-11 are meant to be
 // behaviour-preserving, and the only way to know is to pin the behaviour first.
 // PLAN.md item 1 -- cross-checking against plant's compiled build -- is the real
-// validation and is still outstanding; this file is the weaker but immediately
-// available version: it freezes what THIS implementation produces so that a
+// validation, and it is DONE: the swap was bit-identical, including 78 of 78 SCM
+// nodes. This file is the cheaper, always-available version: it freezes what THIS
+// implementation produces so that a
 // refactor which changes any of it fails loudly.
 //
 // Comparison is bit-exact by default. Values are written with %.17g, which
@@ -19,8 +20,11 @@
 // cannot hold on any other -- `--rtol` is for those. See the comment above main().
 //
 // Note: a fresh Leaf is constructed for every grid point. That is not for tidiness
-// -- it is required, because the shutdown-state leak (PLAN.md item 2) makes a
-// reused Leaf order-dependent, which would make this file ill-defined.
+// -- it WAS required, because the shutdown-state leak (PLAN.md item 2) made a
+// reused Leaf order-dependent, which would have made this file ill-defined. That
+// leak is fixed, so the construction is now belt-and-braces rather than load
+// bearing -- and it is kept, because a fresh Leaf per point is also what makes
+// this file blind to stale state by construction (hazard 8).
 
 #include <phylloptim.hpp>
 

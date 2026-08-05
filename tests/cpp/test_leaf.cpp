@@ -3,9 +3,10 @@
 //
 // The trait values and drivers below are lifted from plant's
 // tests/testthat/test-leaf.r so the two suites exercise the same operating
-// point. See PLAN.md step 1: the expected values here were produced BY this
-// implementation and are regression guards only -- they have not yet been
-// cross-checked against plant's compiled build, which is the first job.
+// point. The expected values here were produced BY this implementation and are
+// regression guards rather than independent references -- but PLAN.md item 1 has
+// since cross-checked the implementation against plant's compiled build and found
+// it bit-identical, so they are guarding a verified model.
 
 #include <phylloptim.hpp>
 

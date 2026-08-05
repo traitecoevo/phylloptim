@@ -9,7 +9,7 @@ Read alongside:
 - **[README.md](../README.md)** — what it is and how to use it
 - **[PLAN.md](../PLAN.md)** — status table, then the reasoning behind every open issue
 - **[COMPARISON.md](../COMPARISON.md)** — how this differs from `plantecophys`, `tealeaves`, `bigleaf`
-- **[issues](https://github.com/traitecoevo/leaf_cpp/issues)** — the work queue; PLAN.md is the *why* behind each
+- **[issues](https://github.com/traitecoevo/phylloptim/issues)** — the work queue; PLAN.md is the *why* behind each
 
 Family context lives in [`plant-meta`](https://github.com/traitecoevo/plant-meta).
 
