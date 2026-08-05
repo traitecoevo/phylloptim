@@ -13,6 +13,13 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Supersede in-flight runs on the same ref -- see the note in cpp-tests.yml. This
+# workflow was the worst per-run offender of the three while the repo was private:
+# 936 billable minutes from only 66 jobs, because its macOS leg bills at 10x.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   R-CMD-check:
     runs-on: ${{ matrix.config.os }}

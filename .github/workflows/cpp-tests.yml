@@ -21,6 +21,17 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Supersede in-flight runs on the same ref. Without this, every intermediate push
+# to a PR branch ran its whole matrix to completion alongside its successor --
+# 202 jobs fired on 2026-08-04 alone, which is how this repo consumed the org's
+# entire 2000-minute monthly Actions allowance in three days while it was still
+# private. It is public now, so those minutes are free, but the redundant runs
+# still queue behind each other (free-tier accounts cap concurrent macOS jobs at
+# 5) and delay the result that matters.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ${{ matrix.os }}
