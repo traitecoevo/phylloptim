@@ -1,5 +1,67 @@
 # phylloptim 0.2.0
 
+## Trait gradients over a batch of observations, composed in C++ -- 22x
+
+`leaf_batch()` and `leaf_gradient_batch()`. The same gradient `leaf_gradient()`
+computes, by the same two routes with the same active-set test, but composed in
+`inst/include/phylloptim/gradient.hpp` and looped over observations there -- so a
+calibration crosses the R boundary **once per likelihood evaluation** instead of 112
+times per observation.
+
+```r
+b <- leaf_batch(psi_soil = obs$psi_soil, PPFD = obs$PPFD)   # once per fit
+g <- leaf_gradient_batch(b, traits, pars = FIT)             # once per draw
+```
+
+Measured per observation over 24 gradients at four fitted parameters, both arms in one
+process:
+
+| | us/observation | x a trivial `.Call` |
+|---|---:|---:|
+| `leaf_gradient()` in a loop | 363.3 | 340 |
+| `leaf_gradient(x = )`, reusing one leaf | 235.2 | 220 |
+| **`leaf_gradient_batch()`** | **10.59** | **9.9** |
+
+`leaf_batch()` costs 335 us once, for all 24. For a 1,327-observation fit at 30,000
+draws that is minutes rather than hours.
+
+⚠️ **Nothing about the gradient got faster.** The C++ model was already 1.5% of a
+gradient's cost; this removes the boundary from under it. So the figure needs a batch
+to be realised -- calling it with one observation pays the whole per-call overhead for
+one row's work.
+
+**Not a likelihood, and not the parameterisation Jacobian.** Both stay in R: the
+likelihood is your model, and the chain rule belongs where the win is -- C++ returns
+`dY/dtheta` for the four parameters a leaf has, and R applies your `P_fit x P_model`
+Jacobian vectorised over observations.
+
+**Per-row status, not an error.** A proposal will reach operating points the solve
+cannot handle, and that costs those rows rather than the dataset: every row reports
+`status`, a failure is `"error"` with a `message`, and a failed row's gradient is all
+`NA` rather than partially filled.
+
+⚠️ **`leaf_batch()` holds C++ pointers, so it does not survive `saveRDS()` or a new
+session.** Rebuild it; it says so rather than crashing.
+
+⚠️ **`psi_soil` recycles the way `leaf_solve()`'s does.** A plain numeric vector is N
+single-layer observations; a list of numeric vectors is one multi-layer observation
+each. This is the easiest mistake to make with `leaf_batch()`, and it fails loudly
+rather than silently.
+
+The C++ composite reproduces `leaf_gradient()` **bit-for-bit** -- 0 mismatches over 25
+operating points x three methods, including every pinned and shut-down row -- and the
+values are also pinned to `tests/testthat/gradient_golden.tsv`, because an equality
+test between two implementations cannot see a change applied to both. PLAN item 11g
+has the three things that made bit-for-bit possible, including that
+`a + b * c` written as one expression compiles to a fused multiply-add and disagrees
+with R's two roundings on 28% of random triples.
+
+**Found on the way: #72.** `leaf_gradient()`'s `stem_b` gradient is contaminated by
+whichever parameter precedes it in `pars`, by up to 3.4e-5 -- the fast path rescales
+the spline without restoring the other parameters, which are still one step away from
+base. It affects both routes and predates this change; the C++ port reproduces it
+exactly on purpose, so that the equality test above keeps its meaning. Not fixed here.
+
 ## The gradient's R glue is a third cheaper
 
 Profiling `leaf_gradient()` found that the **C++ model is 1.5% of its cost**: 6 us of

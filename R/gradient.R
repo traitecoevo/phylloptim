@@ -394,26 +394,9 @@ leaf_gradient <- function(psi_soil,
   if (is.null(pars)) {
     pars <- names(theta)
   }
-  unknown <- setdiff(pars, names(theta))
-  if (length(unknown)) {
-    # Name the multi-layer case specially: `resistance` is a real parameter on
-    # the other supply path, so "not differentiable" would be misleading rather
-    # than merely unhelpful.
-    why <- if (identical(supply$kind, "multilayer") &&
-               "resistance" %in% unknown) {
-      paste(" `resistance` is a parameter of the single-potential path only;",
-            "on the multi-layer path the soil-to-collar resistances are derived",
-            "from root carbon.")
-    } else {
-      ""
-    }
-    stop("`pars` names things this cannot differentiate: ",
-         paste(unknown, collapse = ", "),
-         ". Available: the traits from leaf_traits(), plus ",
-         "`leaf_specific_conductance_max`",
-         if (identical(supply$kind, "single")) " and `resistance`" else "",
-         ".", why, call. = FALSE)
-  }
+  # Shared with leaf_gradient_batch(), so the two entry points cannot disagree
+  # about which parameters exist or explain a rejection differently.
+  .gradient_check_pars(pars, identical(supply$kind, "single"))
 
   # ONE leaf for the whole gradient, re-traited rather than reconstructed. This is
   # the measurement that reordered PLAN 11d: a fresh Leaf costs ~155 us against
@@ -575,6 +558,59 @@ leaf_gradient <- function(psi_soil,
     return(NULL)
   }
   .gradient_outputs(l)
+}
+
+# The differentiable parameters, in the order C++ indexes them (#4 stage 2).
+#
+# Derived from leaf_traits() rather than written out, so it cannot drift from the
+# trait vector. The C++ side has its own copy, in `phylloptim::gradient::par_names`,
+# because it has no way to read this one; `test-gradient-batch.R` compares them
+# rather than trusting them, since R passes integer POSITIONS into that
+# enumeration -- appending to it is safe and reordering it would silently
+# differentiate the wrong parameter.
+#
+# ⚠️ Computed at FIRST CALL, not at build time, for the reason
+# `.gradient_outputs_idx` records: R collates `R/` alphabetically, so this file is
+# sourced before `leaf-model.R` and `.leaf_trait_defaults` does not exist yet.
+.gradient_par_names <- local({
+  nms <- NULL
+  function() {
+    if (is.null(nms)) {
+      nms <<- c(names(.leaf_trait_defaults), "leaf_specific_conductance_max",
+                "resistance")
+    }
+    nms
+  }
+})
+
+# What `pars` may name, and the message when it names something else. One
+# definition, used by `leaf_gradient()` and by `leaf_gradient_batch()`: the
+# multi-layer case has to be named specially, because `resistance` is a real
+# parameter on the OTHER supply path and "not differentiable" would be misleading
+# rather than merely unhelpful.
+.gradient_available_pars <- function(single) {
+  nms <- .gradient_par_names()
+  if (single) nms else setdiff(nms, "resistance")
+}
+
+.gradient_check_pars <- function(pars, single) {
+  unknown <- setdiff(pars, .gradient_available_pars(single))
+  if (length(unknown)) {
+    why <- if (!single && "resistance" %in% unknown) {
+      paste(" `resistance` is a parameter of the single-potential path only;",
+            "on the multi-layer path the soil-to-collar resistances are derived",
+            "from root carbon.")
+    } else {
+      ""
+    }
+    stop("`pars` names things this cannot differentiate: ",
+         paste(unknown, collapse = ", "),
+         ". Available: the traits from leaf_traits(), plus ",
+         "`leaf_specific_conductance_max`",
+         if (single) " and `resistance`" else "",
+         ".", why, call. = FALSE)
+  }
+  invisible(pars)
 }
 
 # Everything this can differentiate, and its current value, as one named vector.

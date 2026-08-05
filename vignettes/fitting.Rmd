@@ -362,16 +362,30 @@ Four things follow:
 - **`P_fit` = `P_model` is the worst case for the composite**, and it is the case a
   vignette naturally demonstrates because fitting traits directly is the simplest
   thing to show. Real fits are usually not that case.
-- **Model reuse is most of the intercept**, and is tracked as
-  [phylloptim#52](https://github.com/traitecoevo/phylloptim/issues/52): let
-  `leaf_gradient()` accept an existing model the way `set_traits()` does. In
-  `leaf-calibration` it is 29% of the exact gradient, and closing it would move that
-  study's break-even from ~13 fitted parameters to ~9. It would not make the
-  composite the faster arm *here*, because here the problem is the slope.
-- **From C++ neither overhead exists**, so neither does the slope.
-  `vignette("cpp-interface")` has the same comparison with no R in the way, where the
-  composite wins 4.4× on the eleven traits that touch no spline. Moving the
-  composition into C++ is stage 2 of PLAN item 11.
+- **Model reuse was most of the intercept, and it is fixed**
+  ([phylloptim#52](https://github.com/traitecoevo/phylloptim/issues/52)):
+  `leaf_gradient(x = )` takes a model you already have. In `leaf-calibration` that
+  was 29% of the exact gradient. It did not make the composite the faster arm
+  *here*, because here the problem is the slope.
+- **And the slope is gone too, which supersedes this whole comparison.**
+  `leaf_gradient_batch()` composes the theorem in C++ and loops over observations
+  there, so the boundary is crossed once per call instead of 112 times per
+  observation: **363 → 10.6 µs per observation** at four fitted parameters, 22×.
+
+⚠️ **So do not read the table above as the state of the art — read it as what the R
+boundary costs.** It is kept because the cost *model* is still the thing to reason
+with, and because `P_fit` versus `P_model` still decides which arm wins. What has
+changed is only the constant in front of the exact arm. The same fit through
+`leaf_batch()` + `leaf_gradient_batch()`:
+
+```r
+b <- leaf_batch(psi_soil = obs$psi_soil, PPFD = obs$PPFD)   # once, not per draw
+g <- leaf_gradient_batch(b, traits, pars = FIT)
+```
+
+with the likelihood and your parameterisation Jacobian still in R, vectorised over
+observations — which is where they belong, and is why the `P_fit > P_model`
+structure is what the exact route exploits.
 
 ## ⚠️ Where a gradient-based fit goes wrong
 
