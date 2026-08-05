@@ -282,7 +282,21 @@ series_resistance <- function(resistance) {
     stop("series_resistance(): `resistance` must be positive; a zero ",
          "resistance is an infinite flux", call. = FALSE)
   }
-  RootNetwork(r_R_V_sum = resistance)
+  # ⚠️ NOT `RootNetwork(r_R_V_sum = resistance)`, WHICH COSTS ~58 us. That call
+  # reaches C++ for a default-constructed network and pays `Rcpp::wrap` building the
+  # five-element named list -- measured at 58 us against 1.1 us for a trivial
+  # `.Call`. This function is reached per likelihood evaluation by a calibration
+  # whose fitted resistance changes every proposal, so it cannot be hoisted out of
+  # the caller's loop the way a fixed network can.
+  #
+  # Instead: take ONE default-constructed network per session and overwrite the one
+  # field. R's copy-on-write means the assignment copies rather than mutating the
+  # cached prototype, so callers cannot corrupt each other -- asserted in
+  # test-surface.R. The field list still comes from the real constructor, so it
+  # cannot drift from the C++ struct the way a hand-written `structure()` would.
+  out <- .root_network_prototype()
+  out$r_R_V_sum <- resistance
+  out
 }
 
 ##' @rdname leaf_supply_single
@@ -419,6 +433,15 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
 # multi-layer default it is a stand-in rather than a recommendation -- but it means
 # `leaf_solve(psi_soil = 2, supply = leaf_supply_single())` means something, exactly
 # as it does on the other path. Neither path forces a caller to own a supply model.
+# One default-constructed RootNetwork per session, as a prototype to copy. See
+# series_resistance() for why, and .network_memo above for the measurement.
+.root_network_prototype <- function() {
+  if (is.null(.network_memo$proto)) {
+    .network_memo$proto <- RootNetwork()
+  }
+  .network_memo$proto
+}
+
 .default_series_resistance <- function() {
   if (is.null(.network_memo$series)) {
     .network_memo$series <- series_resistance(1e3)
@@ -517,6 +540,29 @@ set_drivers <- function(x,
                         leaf_temp = 25.0,
                         atm_o2_kpa = 21.0,
                         atm_kpa = 101.3) {
+  a <- .resolve_drivers(x, psi_soil, PPFD, soil_depth, root_network,
+                        leaf_specific_conductance_max, atm_vpd, ca, leaf_temp,
+                        atm_o2_kpa, atm_kpa)
+  x$set_physiology(a$root_network, a$PPFD, a$psi_soil, a$soil_depth,
+                   a$leaf_specific_conductance_max, a$atm_vpd, a$ca,
+                   a$leaf_temp, a$atm_o2_kpa, a$atm_kpa)
+  invisible(x)
+}
+
+# Validate and default the drivers, without applying them.
+#
+# WHY THIS IS SPLIT OUT. `leaf_gradient()` re-drives the leaf once per
+# perturbation -- eleven times for a four-parameter gradient -- and all of this
+# validation and defaulting produces the same answer every time bar the one
+# parameter being moved. Resolving once and applying many times is worth ~12% of a
+# gradient (see PLAN), but only if there is ONE definition of the rules: the
+# defaults here are load-bearing (1 m layers, the nominal networks, the
+# single-path placeholder depth) and a second copy in the gradient code would be
+# free to drift from this one silently. So the gradient calls this, not a
+# reimplementation of it.
+.resolve_drivers <- function(x, psi_soil, PPFD, soil_depth, root_network,
+                             leaf_specific_conductance_max, atm_vpd, ca,
+                             leaf_temp, atm_o2_kpa, atm_kpa) {
   if (!inherits(x, "Leaf")) {
     stop("`x` must be a Leaf, from leaf_model()", call. = FALSE)
   }
@@ -587,19 +633,18 @@ set_drivers <- function(x,
     }
   }
 
-  x$set_physiology(
-    root_network = root_network,
-    PPFD = PPFD,
-    psi_soil = psi_soil,
-    soil_depth = soil_depth,
-    leaf_specific_conductance_max = leaf_specific_conductance_max,
-    atm_vpd = atm_vpd,
-    ca = ca,
-    leaf_temp = leaf_temp,
-    atm_o2_kpa = atm_o2_kpa,
-    atm_kpa = atm_kpa
-  )
-  invisible(x)
+  # In `set_physiology`'s own argument order, so a caller can splat it positionally
+  # without naming ten arguments at a call site that runs in a loop.
+  list(root_network = root_network,
+       PPFD = PPFD,
+       psi_soil = psi_soil,
+       soil_depth = soil_depth,
+       leaf_specific_conductance_max = leaf_specific_conductance_max,
+       atm_vpd = atm_vpd,
+       ca = ca,
+       leaf_temp = leaf_temp,
+       atm_o2_kpa = atm_o2_kpa,
+       atm_kpa = atm_kpa)
 }
 
 ##' The solved operating point, as one row

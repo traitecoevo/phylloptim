@@ -31,6 +31,13 @@ inst/include/phylloptim/
                                layer_thickness() is the dz definition both sides share
   single_potential.hpp         SinglePotential: the other supply path — one ψ_soil
                                and a constant series resistance
+  gradient.hpp                 the trait gradient, composed here and batched over
+                               observations (#4 stage 2). A SECOND implementation
+                               of R/gradient.R, required to agree with it
+                               BIT-FOR-BIT -- so no reassociation, no fused
+                               multiply-add (see `rounded()`), and every
+                               difference names its halves first because C++ does
+                               not sequence `f(a) - f(b)` and R does
   vulnerability.hpp            the Weibull cumulative-integral builder, shared by both
   constants.hpp                physical constants as inline constexpr
   closed_form.hpp              fast approximate solver, default off, not wired in
@@ -50,7 +57,13 @@ R/leaf-model.R                 the friendly surface: leaf_traits/leaf_control,
 R/gradient.R                   set_traits() and leaf_gradient() -- trait
                                gradients by the implicit function theorem, with
                                the active-set guard. Read its header before
-                               believing anything about its speed
+                               believing anything about its speed. ⚠️ THE
+                               REFERENCE IMPLEMENTATION: gradient.hpp is required
+                               to reproduce it bit-for-bit, so its arithmetic
+                               order is load-bearing
+R/gradient-batch.R             leaf_batch() and leaf_gradient_batch() -- the same
+                               gradient over N observations in ONE crossing.
+                               22x/observation; PLAN 11g
 tests/cpp/                     plain-C++ suite, no R, no framework
 tests/cpp/root_network.hpp     the suite's root-architecture fixture: the two
                                ex-Leaf-default beta_R_* constants, in ONE place
@@ -61,6 +74,16 @@ tests/cpp/bench_gradient.cpp   timing harness for a TRAIT GRADIENT: the IFT
                                composite against differencing the solve, with
                                no R in the way. PLAN 11e
 tests/testthat/                the R layer's tie-back to the golden points
+tests/testthat/gradient_golden.tsv
+                               recorded trait gradients, five rows, hex floats.
+                               The guard the C++-versus-R equality test cannot
+                               be: a change applied to BOTH passes that one.
+                               Regenerate with tools/gradient_golden.R, on
+                               macOS/arm64, and only deliberately. ⚠️ Bit-exact
+                               on that platform only, like tests/cpp/golden/ --
+                               these are derivatives of argmax-evaluated outputs,
+                               so they inherit its sqrt-amplified class and
+                               disagree cross-platform by up to 1.3e-4
 tests/validate/                R scripts comparing against plant (needs R)
 CMakeLists.txt                 the no-R build: C++ and Python consumers, and the
                                thing that makes "does not need R" runnable
@@ -204,6 +227,48 @@ touched**, and CI asserts that every non-comment line survives the filter
 byte-for-byte. If you add a header, you need do nothing. If you want a literal
 Doxygen command, write a `///` comment and the filter will leave it alone.
 Publishing is off until someone sets the repo variable `PUBLISH_DOCS=true`.
+
+## Cost: the one thing the golden file cannot see
+
+`tests/cpp/bench_solve.cpp` and `bench_gradient.cpp` cover the C++ side.
+**`tools/bench_user_cost.R` covers the R side** — one solve, N solves, and a
+gradient — and `tools/bench_history.sh` runs all of them against a list of commits.
+`tests/testthat/test-cost.R` is the guard, and `tools/cost-baseline.tsv` the recorded
+table. PLAN has the numbers.
+
+Three rules, each of which was learned by getting it wrong:
+
+1. **Never pin an absolute microsecond figure.** A bare `.Call` on this machine moved
+   0.69 → 1.10 µs between two runs an hour apart on the same build. Record cost ÷ a
+   trivial `.Call` in the SAME process; that ratio travels between machines and runs.
+2. **Guard by COUNTING, not by timing, wherever you can.** The regression that
+   motivated all this was a `.Call` appearing in a per-row path, and a count of
+   `.Call`s has no variance. `test-cost.R` swaps a namespace binding for a counting
+   one. The timing assertions there are a backstop for what counting cannot foresee,
+   are bounded at ~2× the measurement, and are `skip_on_ci()` because shared runners
+   are too noisy for even that.
+   ⚠️ **The two supply paths reach C++ through different symbols** — the multi-layer
+   default through `root_network_from_carbon()`, the single one through
+   `RootNetwork__ctor`. Counting the wrong one returns 0 forever and the test passes
+   while measuring nothing. That mistake is in this file's history.
+3. ⚠️ **A count beats a time whenever one is available, and for the batch gradient
+   one always is.** `leaf_gradient_batch()`'s whole claim is that it crosses the
+   boundary ONCE per call rather than 112 times per observation, and that is
+   countable: `test-cost.R` asserts one `gradient_batch_run` for any N, and **zero**
+   calls to any of the nine per-perturbation primitives the R route reaches through.
+   A timing assertion would not say this — it drifts with the machine, and it would
+   still pass if the count went back to being per-row on a fast day.
+4. ⚠️ **Measure the entry point the USER calls.** #66 nearly doubled
+   `leaf_gradient()` (286× → 539× a `.Call`) while `set_drivers()` and `leaf_solve()`
+   were flat. Both of those were measured and pronounced "at parity"; the gradient
+   path was not in any harness, and a calibration uses the gradient path.
+
+⚠️ **`tools/bench_history.sh` refuses commits before #47**, and the reason is worth
+knowing before you write any harness that installs an old commit: they declare
+`Package: leaf`, install cleanly as `leaf`, and then `library(phylloptim)` silently
+falls back to the SITE build — so the row that comes out describes the current tree
+while looking like history. Two rows were produced that way before it was noticed.
+`bench_user_cost.R` now takes `--expect-version` and hard-fails on a mismatch.
 
 ## The golden file is the safety net — treat it that way
 

@@ -25,7 +25,8 @@ the user-visible history.
 | issue | item | what | note |
 |---|---|---|---|
 | [#3](https://github.com/traitecoevo/phylloptim/issues/3) | 7a | Make λ(state) pluggable | **unblocked** — #2 is done. ⚠️ Measure the dispatch separately: the cost core is fully inlined where the supply path was not, so 7b's "dispatch is free" does **not** transfer |
-| [#4](https://github.com/traitecoevo/phylloptim/issues/4) | 11e, 11f | Trait gradients — stage 2, and `stem_c`'s rebuild | Stages 1 and 3 landed ([#42](https://github.com/traitecoevo/phylloptim/pull/42), [#46](https://github.com/traitecoevo/phylloptim/pull/46)). ⚠️ Read 11e before quoting any speedup |
+| [#4](https://github.com/traitecoevo/phylloptim/issues/4) | 11f | Trait gradients — `stem_c`'s rebuild | Stages 1, 2 and 3 landed ([#42](https://github.com/traitecoevo/phylloptim/pull/42), #73, [#46](https://github.com/traitecoevo/phylloptim/pull/46)). ⚠️ Read 11e before quoting any speedup, and 11g for which side of the boundary a figure belongs to. `stem_c` is **unmotivated** until something frees a vulnerability curve |
+| [#74](https://github.com/traitecoevo/phylloptim/issues/74) | 11f, 11g | The `stem_b` shortcut is undone by a rebuild once per observation | 11f's 24.5× is **2.4×** through `leaf_gradient_batch()`. Unmotivated until something frees a vulnerability curve; filed so the wrong figure is not quoted meanwhile |
 | [#6](https://github.com/traitecoevo/phylloptim/issues/6) | 12 | Real-data calibration, then inversion | **The one with the most downstream** — it specifies what is left of #4, and doing it found #38, #40, #41 and #52. ⚠️ The *synthetic* vignette is done ([#53](https://github.com/traitecoevo/phylloptim/pull/53)) and **AD lost**: read 12a before repeating the comparison |
 | [#52](https://github.com/traitecoevo/phylloptim/issues/52) | 12 | `leaf_gradient()` rebuilds a `Leaf` per call, with no way to pass one in | From #53. A third of a per-observation gradient's cost, and why item 12's "reuse one object" advice cannot be followed as written |
 | [#7](https://github.com/traitecoevo/phylloptim/issues/7) | 13 | Energy balance, in priority order | Leaf-to-air VPD is the cheap win and is **not wired in**; free convection is not worth it |
@@ -135,21 +136,10 @@ Medlyn path, and it makes "apples-to-apples by construction" testable.
 
 ## #4 — trait gradients: what is left
 
-Stage 1 landed in [#42](https://github.com/traitecoevo/phylloptim/pull/42) and stage
-3 in [#46](https://github.com/traitecoevo/phylloptim/pull/46); the measurements are
-under 11c–11f. Two things remain.
-
-**Stage 2 — compose the gradient in C++, one R call per operating point.** This
-carries the R layer's remaining speed case, and #39 re-sized it: with `leaf_solve()`
-fixed, a gradient's ~10 R calls per parameter are what is left of the boundary cost.
-`Leaf::operating_point_values()` is the pattern to copy — one call returning a flat
-vector.
-
-⚠️ **Stage 2 is also what an HMC user needs, which makes it more than a speed fix.**
-Stan cannot evaluate a likelihood that calls compiled C++ inside this package, so the
-calibration study reached for a derivative-free sampler instead. A gradient composed
-in C++ and reachable without the R boundary is the enabler for that, and nothing
-else on this list is.
+Stage 1 landed in [#42](https://github.com/traitecoevo/phylloptim/pull/42), stage 2
+in #73 and stage 3 in [#46](https://github.com/traitecoevo/phylloptim/pull/46); the
+measurements are under 11c–11g. One thing remains, and it is the least motivated of
+the three.
 
 **`stem_c`'s rebuild.** 11f removed the vulnerability-spline rebuild for `stem_b` by
 homogeneity; `stem_c` has no such identity, because it changes the curve's shape
@@ -358,6 +348,89 @@ expensive. In priority order:
    millions of times that is a poor trade. If leaf-temperature accuracy under low
    wind ever becomes the priority, prefer a one-step correction to a converged inner
    solve.
+
+## What a user pays, and whether it has regressed
+
+`tools/bench_user_cost.R` measures the R side (one solve, N solves, a gradient);
+`tools/bench_history.sh` runs it plus the two C++ benches against a list of commits.
+`tests/testthat/test-cost.R` is the guard.
+
+⚠️ **Compare the RATIO columns.** A bare `.Call` on one machine moved 0.69 → 1.10 µs
+between two runs an hour apart on the same build, so absolute µs are comparable only
+within a single invocation. Cost ÷ a trivial `.Call` in the same process is what
+travels. Measured macOS/arm64, 2026-08-05, one run:
+
+| | R: 1 solve | R: 32 solves /row | R: gradient, 1 par | C++ solve | C++ IFT /trait |
+|---|---|---|---|---|---|
+| #46 pre-resistance | 13.4× | 19.0× | 291× | 2.72 µs | 1.640 µs |
+| #62 pre-resistance | 13.9× | 20.1× | 306× | 2.72 µs | 1.660 µs |
+| #63 resistances | 13.7× | 19.5× | 286× | 2.76 µs | 1.844 µs |
+| #66 both paths | 13.9× | 19.8× | **539×** | 2.76 µs | 1.813 µs |
+| #67 master | 13.7× | 20.1× | 313× | 2.75 µs | 1.819 µs |
+
+**Three results, and one of them is a regression I shipped and did not measure.**
+
+- **The solve paths never moved.** One solve and 32 solves are flat across all five
+  commits, inside a ~5% band. The whole resistance change is invisible to a user
+  driving solves.
+- ⚠️ **#66 nearly doubled the GRADIENT path — 286× → 539× — and #67 fixed it.**
+  `.gradient_setter` rebuilds `drivers$root_network` on **every** setter call, whatever
+  parameter is being perturbed, so the 86 µs `RootNetwork` constructor landed on every
+  perturbation. I measured `set_drivers` and `leaf_solve` at the time and concluded the
+  R layer was "at parity"; the gradient path was 1.9× worse and I never looked at it.
+  **A calibration uses the gradient path.** The lesson is not "measure more" but
+  "measure the entry point the user calls" — `leaf_gradient()` was not in any harness
+  until now, which is why `tools/bench_user_cost.R` covers all three.
+- **The C++ per-trait IFT gradient is ~10% slower since #63** (1.65 → 1.82 µs) while a
+  whole solve is +1.5%. Same cause, different denominator: `set_physiology`'s
+  copy-assign of five vectors is a fixed cost, and the IFT arm calls it twice against a
+  ~1.8 µs total rather than a ~2.8 µs solve. Known and accepted; it is the price of the
+  boundary move (#33), not a defect.
+
+**#52 IS DONE, and it was the biggest lever on this surface.** `leaf_model()`
+construction is ~150 µs of fixed cost per call, and `leaf_gradient(x =)` removes it.
+Measured over 24 gradients, per observation:
+
+| fitted pars | fresh leaf | one reused | saved |
+|---|---|---|---|
+| 1 | 316 µs | 200 µs | **−37%** |
+| 4 | 511 µs | 409 µs | **−20%** |
+
+⚠️ **Quote the four-parameter row for a calibration.** Construction is fixed per call
+while the differentiated work is linear in `pars`, so the saving shrinks as the fit
+grows — 37% at one parameter is the most flattering case, not the representative one.
+Everything the resistance work touched is 4% of the same call, which is why no amount
+of tuning in `set_drivers()` could have competed.
+
+⚠️ **It does not reverse the arm comparison, and the issue said so first.** The exact
+gradient is ~4.8× differencing the objective in wall clock while using ~5× fewer
+solves; a third off leaves it ~3×. The remainder is the R call boundary, and only
+composition in C++ (item 11 stage 2) reaches it. Recording this because the numbers
+invite the opposite reading.
+
+The saving shrinks as `pars` grows — construction is a fixed cost against a term
+linear in `P_model`, so it is 38% at one parameter and 26% at three. A fit asking for
+many parameters gains less.
+
+### And the R glue was a third of what remained
+
+Profiling the reused path found the **C++ model at 1.5% of a gradient** — 6 µs of
+solving against 119 µs of dispatch (112 boundary crossings) and ~285 µs of interpreter.
+`.gradient_setter()` was 60% of the call on its own. Reducing it needed no C++:
+resolve the drivers once rather than per perturbation (`.resolve_drivers()`, split out
+of `set_drivers()` so there is still one definition of the defaults), apply traits
+positionally rather than rebuilding a `leaf_traits` each time, and read the four
+outputs in one call rather than four R6 active bindings. **400 → 231 µs per observation
+at four fitted parameters (−42%)** on the reused path, 504 → 366 (−27%) on the fresh
+one; gradients bit-identical. With #52 together, 504 → 231 µs, −54%.
+
+⚠️ **What this says about "move it to C++".** Moving a small R helper across the
+boundary makes it *slower*: each move adds a ~1.1 µs crossing to a function that costs
+less than that. The lever is crossings-per-unit-of-work, not language. Which is also
+why the remaining prize is large and wholesale: `bench_gradient.cpp` already times this
+same composite in C++ at **1.8 µs per trait**, so a four-parameter gradient is ~7 µs
+there against ~350 µs here. That is item 11 stage 2, and it is a 30–50× ceiling rather
+than a tuning exercise.
 
 ## 6d. The R interface: what is left — #34
 
@@ -1128,6 +1201,130 @@ equivalence test's tolerance is loose, and it should not be tightened.
 
 ⚠️ **From R it is 1.23×**, not 24.5×, because `leaf_gradient()` pays 204 µs per call
 to construct a `Leaf`.
+
+## 11g. Stage 2 — the boundary, removed rather than tuned
+
+**22×, measured, and the projection was right for once.** Same 24 observations, same
+four fitted parameters, both arms in one process, cost quoted against a trivial
+`.Call` in that process:
+
+| per observation, 4 fitted parameters | µs | × `.Call` |
+|---|---:|---:|
+| `leaf_gradient()` in a loop, fresh `Leaf` | 363.3 | 340 |
+| `leaf_gradient(x = )`, reusing one (#52) | 235.2 | 220 |
+| **`leaf_gradient_batch()`** | **10.59** | **9.9** |
+
+`leaf_batch()` costs 335 µs once, for all 24 — it resolves the drivers and converts
+them to C++, and a fit pays it once against 30,000-odd draws. At one fitted parameter
+the ratio is 19×; the four-parameter row is the one to quote, for 11e's reason.
+
+**Nothing about the gradient got faster.** 11e measured the C++ model at 1.5% of a
+gradient — 6 µs of solving against 112 boundary crossings and the interpreter around
+them — so this is the same composite with the boundary taken out from under it, which
+is what 11e said the remaining prize was. `test-cost.R` guards it as a **count**: one
+crossing per call, constant in N, and zero calls to any of the nine per-perturbation
+primitives the R route reaches through.
+
+### The shape, and what stayed in R
+
+```
+leaf_batch(drivers)                  -> prepared once, holds a Leaf and the drivers
+leaf_gradient_batch(batch, pars)     -> value[N,4], gradient[N,npars,4], status[N]
+```
+
+**Not a likelihood.** That is the caller's model — σ, robustness, a hierarchy — and
+baking one in would commit this package to it. The parameterisation Jacobian stays in
+R too, which is where the win comes from: `leaf-calibration` maps 40 fitted parameters
+onto 4 model ones, so C++ returns `dY/dθ_model` and R applies a 40×4 chain rule
+vectorised over observations. That is exactly the `P_fit > P_model` structure 11e's
+cost law identified as where the exact gradient wins at all.
+
+⚠️ **The prepared-drivers object is not premature.** A `RootNetwork` costs 60–100 µs
+to cross the boundary, some 60× a trivial `.Call`, because it is an RcppR6 `list:`
+class and every crossing rebuilds a five-element named list. Converting 1,327 of them
+per likelihood evaluation would cost ~80 ms and swamp the ~14 ms of gradient it was
+carrying. Driver resolution still goes through `.resolve_drivers()`, once per
+observation per fit, so the defaults have one definition.
+
+### The three rules that make bit-for-bit possible, and the one that was not obvious
+
+The acceptance test is that the C++ composite reproduces `leaf_gradient()` **exactly**
+— 0 mismatches over 15 multi-layer and 10 single-potential operating points × three
+methods, including every pinned and shut-down row and the rows where forcing `ift`
+raises an error in R. A tolerance would have let a transcription slip hide inside the
+solver's own ~1e-09 floor. Three things had to be deliberate:
+
+1. **R's arithmetic order, kept literally**, including where a division could be
+   folded into a neighbouring one.
+2. **No fused multiply-add.** ⚠️ This is the one that would have been missed.
+   `direct + dY_dpsi * dpsi_dtheta` as one expression compiles to a single `fmadd` on
+   arm64 — clang contracts within an expression by default, gcc across statements —
+   and the fused result differs from R's two roundings. Measured over 2,000,000 random
+   triples, **565,762 disagree: 28%**. A named intermediate suffices under clang and
+   not under gcc's `-ffp-contract=fast`, so the barrier is a `volatile` store, which
+   the standard guarantees rounds.
+3. **Explicit call sequencing.** `f(a) - f(b)` has *unspecified* operand order in C++
+   and left-to-right order in R, and these `f`s mutate the leaf. Every difference
+   names its two halves first.
+
+⚠️ **And the equality test cannot see a change applied to BOTH.** Move the step rule,
+the stationarity threshold or a solver tolerance and the two implementations move
+together, the test passes, and nothing says the gradients changed — the #70 trap,
+across a language boundary. So `tests/testthat/gradient_golden.tsv` records five rows
+as **hex floats** (R's decimal parser is not correctly rounded; #13). Its values agree
+with 11c's independently arbitrated references, which is the check that the
+transcription is *right* and not merely self-consistent.
+
+### What the order test found — #72, now fixed
+
+Asserting that `pars` order does not matter failed, and the cause was in R and
+predated the port. The `stem_b` shortcut calls `perturb_stem_b()`, which rescales the
+spline and touches nothing else, while the loops only restore base **after the whole
+parameter loop** — so a `stem_b` that was not first was differentiated at a point
+displaced by one step in whichever parameter preceded it. Up to **3.4e-5 relative**,
+four orders above the ~1e-9 the function documents as achievable, worst after the
+traits whose step hits the absolute `1e-6` floor (`a`, `curv_fact_colim`) and after
+`stem_c`, whose perturbation rebuilds the curve the rescale is then applied to. Both
+routes had it; `fast_stem_curve = FALSE` did not, which localised it exactly.
+
+⚠️ **It was deliberately NOT fixed in the same change as the port.** Fixing both
+implementations in the change whose acceptance test is their equality would have left
+that test passing while no longer able to tell a faithful transcription from the same
+mistake made twice. So the port reproduced it, and the fix landed separately.
+
+**The fix restores an invariant rather than special-casing a name: every parameter's
+gradient is taken from the base point.** Before a parameter whose setter takes a
+shortcut, base is reseated. Written as "this parameter takes a shortcut" rather than
+"this parameter is `stem_b`", because `root_b` obeys the same homogeneity identity and
+would get the same treatment.
+
+**Cost: +0.15 µs per observation, 0.7%**, because `set_traits()` decides its two
+rebuilds by comparing the pairs it is handed — so after a parameter that owns no
+vulnerability curve, nothing is rebuilt and the reseat is one trait write plus one
+driver write. After `stem_c`/`root_b`/`root_c` it does rebuild, and those are the
+parameters already paying a rebuild per side.
+
+**Blast radius: 9 of 60 `gradient_golden.tsv` cells, worst 3.8e-7.** ⚠️ That is far
+smaller than the 3.4e-5 the defect was worth, and the reason is worth recording: every
+golden case put `vcmax_25` immediately before `stem_b`, which is a *benign*
+predecessor (5.9e-10). **A recorded baseline only measures the configurations it
+records.** `test-gradient.R`'s arbitrated references were unaffected, since they were
+established with `stem_b` first.
+
+⚠️ **And the golden file could not have been the regression guard anyway.** It is
+compared with a 1e-3 tolerance off macOS/arm64 and the defect was 3.4e-5, so a
+recurrence would pass on Linux. The guard is a test that compares two orderings **in
+the same process**, which is exact everywhere and needs no tolerance — all thirteen
+traits as predecessors, four permutations, both routes, both `fast_stem_curve`
+settings.
+
+### And what it unblocks
+
+11e's note that stage 2 "is also what an HMC user needs" holds: a gradient composed in
+C++ and reachable in one call is what a Stan-style sampler needs from this package, and
+the calibration study reached for a derivative-free sampler for want of it. This does
+not finish that — Stan still cannot call in — but the R-side cost is no longer the
+reason.
 
 ## 15. Housekeeping
 

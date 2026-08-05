@@ -214,7 +214,34 @@ set_traits <- function(x, traits) {
 ##' achievable precision of the solved outputs themselves, set by the tolerance of
 ##' the intercellular-CO2 root-find.
 ##'
+##' @section Reusing a leaf across gradients:
+##' Constructing a `Leaf` costs ~155 µs and this function does it once per call, which
+##' is **about 40% of a one-parameter gradient** — the largest single term on this
+##' surface, and paid once per observation by a fit that differentiates per
+##' observation. Pass `x` to reuse one:
+##'
+##' ```r
+##' l <- leaf_model(traits, control, supply)
+##' for (i in seq_len(n)) leaf_gradient(psi_soil = ps[i], x = l, traits = traits, pars = FIT)
+##' ```
+##'
+##' `x` is a **vessel, not the point**: `traits` still says where the gradient is
+##' taken and is applied to `x`, rather than read from it (a `Leaf` does not expose
+##' its traits). That is why `traits` is required with `x` — defaulting it would
+##' differentiate at the package defaults on somebody else's leaf and return a
+##' plausible answer for a point nobody asked about.
+##'
+##' `control` and `supply` are fixed when `x` is built, so passing them alongside it
+##' is an error rather than silently resolved.
+##'
+##' **`x` is left solved at the base point**, not at the last perturbation — the
+##' state this function seats it in, restored on the way out including on an error.
+##' The restore costs one re-trait and one solve, ~20 µs against the ~155 saved.
+##'
 ##' @inheritParams set_drivers
+##' @param x an existing `Leaf` from [leaf_model()] to reuse instead of building
+##'   one, for a loop that takes many gradients. `traits` is required with it, and
+##'   `control`/`supply` must be omitted. See the section above.
 ##' @param traits a [leaf_traits()] object: the point in trait space to
 ##'   differentiate at
 ##' @param control a [leaf_control()] object
@@ -290,6 +317,7 @@ leaf_gradient <- function(psi_soil,
                           leaf_temp = 25.0,
                           atm_o2_kpa = 21.0,
                           atm_kpa = 101.3,
+                          x = NULL,
                           traits = leaf_traits(),
                           control = leaf_control(),
                           supply = leaf_supply_multilayer(),
@@ -304,6 +332,43 @@ leaf_gradient <- function(psi_soil,
   }
   if (!(is.numeric(step) && length(step) == 1L && step > 0)) {
     stop("`step` must be a single positive number", call. = FALSE)
+  }
+
+  # --- reusing a Leaf (#52) -------------------------------------------------
+  # `x` is a VESSEL, not the point being differentiated: `traits` still says where
+  # the gradient is taken, and the setter applies it. That is why `traits` becomes
+  # REQUIRED here rather than optional -- with `x` supplied and `traits` left at its
+  # default, this would differentiate at the package defaults on somebody else's
+  # leaf and return a plausible answer for a point nobody asked about.
+  #
+  # `control` and `supply` are baked into `x`, so accepting them alongside it would
+  # invite a silent disagreement (a `supply` naming one path, an `x` built on the
+  # other). Rejected rather than resolved. `supply` is still needed internally --
+  # only its `kind` is ever read -- so it is derived from the object.
+  if (!is.null(x)) {
+    if (!inherits(x, "Leaf")) {
+      stop("`x` must be a Leaf, from leaf_model(); got ", class(x)[[1]],
+           call. = FALSE)
+    }
+    if (missing(traits)) {
+      stop("`traits` must be given with `x`: it is the point the gradient is ",
+           "taken at, and it is applied to `x` rather than read from it. Pass ",
+           "the same leaf_traits() the leaf was built with.", call. = FALSE)
+    }
+    if (!missing(control)) {
+      stop("`control` comes from `x` and cannot be given alongside it -- the ",
+           "tolerances and the integrator were fixed when `x` was built.",
+           call. = FALSE)
+    }
+    if (!missing(supply)) {
+      stop("`supply` comes from `x` and cannot be given alongside it. `x` is on ",
+           "the ", x$supply_kind, " path.", call. = FALSE)
+    }
+    supply <- if (identical(x$supply_kind, "single")) {
+      leaf_supply_single()
+    } else {
+      leaf_supply_multilayer()
+    }
   }
 
   # Resolve the single path's default resistance HERE rather than letting
@@ -329,34 +394,41 @@ leaf_gradient <- function(psi_soil,
   if (is.null(pars)) {
     pars <- names(theta)
   }
-  unknown <- setdiff(pars, names(theta))
-  if (length(unknown)) {
-    # Name the multi-layer case specially: `resistance` is a real parameter on
-    # the other supply path, so "not differentiable" would be misleading rather
-    # than merely unhelpful.
-    why <- if (identical(supply$kind, "multilayer") &&
-               "resistance" %in% unknown) {
-      paste(" `resistance` is a parameter of the single-potential path only;",
-            "on the multi-layer path the soil-to-collar resistances are derived",
-            "from root carbon.")
-    } else {
-      ""
-    }
-    stop("`pars` names things this cannot differentiate: ",
-         paste(unknown, collapse = ", "),
-         ". Available: the traits from leaf_traits(), plus ",
-         "`leaf_specific_conductance_max`",
-         if (identical(supply$kind, "single")) " and `resistance`" else "",
-         ".", why, call. = FALSE)
-  }
+  # Shared with leaf_gradient_batch(), so the two entry points cannot disagree
+  # about which parameters exist or explain a rejection differently.
+  .gradient_check_pars(pars, identical(supply$kind, "single"))
 
   # ONE leaf for the whole gradient, re-traited rather than reconstructed. This is
-  # the measurement that reordered PLAN 11d: a fresh Leaf costs ~204 us against
-  # ~4 us to re-trait and re-drive this one, so reconstructing per perturbation
+  # the measurement that reordered PLAN 11d: a fresh Leaf costs ~155 us against
+  # ~14 us to re-trait and re-drive this one, so reconstructing per perturbation
   # would swamp any difference between the two gradient routes below.
-  l <- leaf_model(traits, control, supply)
+  #
+  # And with `x`, one leaf across gradients too -- which is #52, and worth ~40% of
+  # a call in a per-observation fit. Construction is the single largest term on
+  # this surface.
+  l <- if (is.null(x)) leaf_model(traits, control, supply) else x
   reset <- .gradient_setter(l, traits, drivers, supply, fast_stem_curve)
-  do.call(set_drivers, c(list(l), drivers))
+
+  if (is.null(x)) {
+    do.call(set_drivers, c(list(l), drivers))
+  } else {
+    # ⚠️ A REUSED LEAF MUST BE SEATED WITH reset(), NOT set_drivers() ALONE. It
+    # arrives carrying whatever traits its last user left on it, and everything
+    # below -- `value`, `psi_star`, `H`, and the whole composite -- is supposed to
+    # describe `traits`. set_drivers() re-derives the drivers and never touches
+    # traits, so a leaf built at other traits would be differentiated at the wrong
+    # point: plausibly, and with no symptom. reset() applies both.
+    reset(theta)
+    # Hand the caller's object back as this function found it -- solved at the base
+    # point -- rather than at whichever perturbation happened to run last, which is
+    # hazard 8 territory. `on.exit` because several paths below stop().
+    on.exit({
+      try({
+        reset(theta)
+        l$find_root_collar_psi()
+      }, silent = TRUE)
+    }, add = TRUE)
+  }
   l$find_root_collar_psi()
 
   psi_star <- l$opt_root_psi_
@@ -425,9 +497,10 @@ leaf_gradient <- function(psi_soil,
   }
 
   grad <- if (use_ift) {
-    .gradient_ift(l, reset, theta, pars, psi_star, H, dY_dpsi, step)
+    .gradient_ift(l, reset, theta, pars, psi_star, H, dY_dpsi, step,
+                  fast_stem_curve)
   } else {
-    .gradient_fd(l, reset, theta, pars, step)
+    .gradient_fd(l, reset, theta, pars, step, fast_stem_curve)
   }
 
   list(gradient = grad,
@@ -446,9 +519,34 @@ leaf_gradient <- function(psi_soil,
 # quantity by different means, and a test can compare them.
 .gradient_output_names <- c("A", "gc", "psi_stem", "collar")
 
+# ⚠️ ONE call, not four field reads. Every `l$field` is an R6 ACTIVE BINDING -- a
+# closure call wrapping a `.Call` -- and this function runs once per perturbation, so
+# eleven times per four-parameter gradient. Four reads cost 4.65 us against 0.93 us
+# for the one C++ reader that returns all twelve outputs, and `$` was 12.7% of a
+# gradient's self time before this. Same numbers: the reader is the same accessor the
+# bindings wrap, and test-gradient.R requires bit-identical gradients.
+#
+# `.operating_point_names` is the order that reader emits; the four wanted are
+# selected by position, matched once and cached.
+#
+# ⚠️ Cached at FIRST CALL, not at build time. R collates `R/` alphabetically, so this
+# file is sourced before `leaf-model.R` and `.operating_point_names` does not exist
+# yet -- a build-time `match()` here fails the package load with a message that names
+# neither file. Deferring costs one `is.null` per call.
+.gradient_outputs_idx <- local({
+  idx <- NULL
+  function() {
+    if (is.null(idx)) {
+      idx <<- match(.gradient_output_names, .operating_point_names)
+    }
+    idx
+  }
+})
+
 .gradient_outputs <- function(l) {
-  c(A = l$assim_colimited_, gc = l$stom_cond_CO2_, psi_stem = l$opt_psi_stem_,
-    collar = l$opt_root_psi_)
+  v <- l$operating_point_values()[.gradient_outputs_idx()]
+  names(v) <- .gradient_output_names
+  v
 }
 
 # Outputs with the collar held at `psi` rather than optimised. NULL when the
@@ -461,6 +559,59 @@ leaf_gradient <- function(psi_soil,
     return(NULL)
   }
   .gradient_outputs(l)
+}
+
+# The differentiable parameters, in the order C++ indexes them (#4 stage 2).
+#
+# Derived from leaf_traits() rather than written out, so it cannot drift from the
+# trait vector. The C++ side has its own copy, in `phylloptim::gradient::par_names`,
+# because it has no way to read this one; `test-gradient-batch.R` compares them
+# rather than trusting them, since R passes integer POSITIONS into that
+# enumeration -- appending to it is safe and reordering it would silently
+# differentiate the wrong parameter.
+#
+# ⚠️ Computed at FIRST CALL, not at build time, for the reason
+# `.gradient_outputs_idx` records: R collates `R/` alphabetically, so this file is
+# sourced before `leaf-model.R` and `.leaf_trait_defaults` does not exist yet.
+.gradient_par_names <- local({
+  nms <- NULL
+  function() {
+    if (is.null(nms)) {
+      nms <<- c(names(.leaf_trait_defaults), "leaf_specific_conductance_max",
+                "resistance")
+    }
+    nms
+  }
+})
+
+# What `pars` may name, and the message when it names something else. One
+# definition, used by `leaf_gradient()` and by `leaf_gradient_batch()`: the
+# multi-layer case has to be named specially, because `resistance` is a real
+# parameter on the OTHER supply path and "not differentiable" would be misleading
+# rather than merely unhelpful.
+.gradient_available_pars <- function(single) {
+  nms <- .gradient_par_names()
+  if (single) nms else setdiff(nms, "resistance")
+}
+
+.gradient_check_pars <- function(pars, single) {
+  unknown <- setdiff(pars, .gradient_available_pars(single))
+  if (length(unknown)) {
+    why <- if (!single && "resistance" %in% unknown) {
+      paste(" `resistance` is a parameter of the single-potential path only;",
+            "on the multi-layer path the soil-to-collar resistances are derived",
+            "from root carbon.")
+    } else {
+      ""
+    }
+    stop("`pars` names things this cannot differentiate: ",
+         paste(unknown, collapse = ", "),
+         ". Available: the traits from leaf_traits(), plus ",
+         "`leaf_specific_conductance_max`",
+         if (single) " and `resistance`" else "",
+         ".", why, call. = FALSE)
+  }
+  invisible(pars)
 }
 
 # Everything this can differentiate, and its current value, as one named vector.
@@ -505,11 +656,32 @@ leaf_gradient <- function(psi_soil,
 # It used to be TWO such setters: `$set_supply_single()` reset the object as well,
 # because the single path's resistance was a property of the supply object rather
 # than a driver. Now it is a driver on both paths and only `set_traits()` resets.
+# The arguments `.resolve_drivers()` takes, in its order, so the drivers list can be
+# handed over without naming them at the call site.
+.resolve_names <- c("psi_soil", "PPFD", "soil_depth", "root_network",
+                    "leaf_specific_conductance_max", "atm_vpd", "ca",
+                    "leaf_temp", "atm_o2_kpa", "atm_kpa")
+
 .gradient_setter <- function(l, traits, drivers, supply,
                              fast_stem_curve = TRUE) {
   trait_names <- names(traits)
-  trait_class <- class(traits)
   single <- identical(supply$kind, "single")
+  # ⚠️ RESOLVE THE DRIVERS ONCE. This closure runs once per perturbation -- eleven
+  # times for a four-parameter gradient -- and `set_drivers()` re-validates and
+  # re-defaults the same values every time. `.resolve_drivers()` is the definition
+  # of those rules and is called here exactly once; the loop then applies the result
+  # positionally, varying only the two entries a perturbation can move. That is
+  # ~12% of a gradient, and it is why the rules are not reimplemented here: a second
+  # copy of the 1 m-layer default or the single-path placeholder depth would be free
+  # to drift from set_drivers() with nothing to notice.
+  base <- do.call(.resolve_drivers, c(list(l), drivers[.resolve_names]))
+
+  # Method closures pulled out of the object once. `$` on an R6 object is a lookup
+  # per use and was 12.7% of a gradient's self time; these three run per
+  # perturbation.
+  apply_traits <- l$set_traits
+  apply_drivers <- l$set_physiology
+
   function(theta, only = NULL) {
     # THE FAST PATH FOR stem_b, and it is the whole of PLAN 11f.
     #
@@ -535,17 +707,36 @@ leaf_gradient <- function(psi_soil,
       l$perturb_stem_b(theta[["stem_b"]])
       return(invisible(l))
     }
-    set_traits(l, structure(as.list(theta[trait_names]), class = trait_class))
-    # `resistance` is a driver now, so it goes in with the others rather than
-    # through $set_supply_single(). That removes the second object-resetting call
-    # this function used to make -- and with it the reason the ordering note above
-    # had to mention two setters instead of one.
-    if (single) {
-      drivers$root_network <- series_resistance(theta[["resistance"]])
+    # Positional, straight onto the object, rather than through `set_traits()` and
+    # `set_drivers()`. Those two rebuild a `leaf_traits` object with
+    # `structure(as.list(...))`, re-extract thirteen fields by name, and re-run the
+    # driver validation -- 3.0% + 3.3% + 4.9% of a gradient's self time between them,
+    # for work whose answer cannot change across perturbations.
+    #
+    # ⚠️ THIS BYPASSES set_traits()'s INVARIANT CHECKS, and that is sound here for
+    # one reason only: `theta` came from `.gradient_theta()`, whose values came from a
+    # `leaf_traits()` object the caller already handed in, and the C++ setter asserts
+    # the #25 positive-magnitude invariants itself. Do not copy this pattern anywhere
+    # the values are not already known-good.
+    # ⚠️ POSITIONAL, so the count is load-bearing. `set_traits()`'s C++ signature and
+    # `leaf_traits()` must agree on thirteen; if a trait is ever added, this call is
+    # the one place that will not fail to compile. test-gradient.R asserts the arity.
+    tv <- theta[trait_names]
+    apply_traits(tv[[1L]], tv[[2L]], tv[[3L]], tv[[4L]], tv[[5L]], tv[[6L]],
+                 tv[[7L]], tv[[8L]], tv[[9L]], tv[[10L]], tv[[11L]], tv[[12L]],
+                 tv[[13L]])
+    # `resistance` is a driver, so it goes in with the others rather than through
+    # $set_supply_single(). That removes the second object-resetting call this
+    # function used to make -- and with it the reason the ordering note above had to
+    # mention two setters instead of one.
+    net <- if (single) {
+      series_resistance(theta[["resistance"]])
+    } else {
+      base$root_network
     }
-    drivers$leaf_specific_conductance_max <-
-      theta[["leaf_specific_conductance_max"]]
-    do.call(set_drivers, c(list(l), drivers))
+    apply_drivers(net, base$PPFD, base$psi_soil, base$soil_depth,
+                  theta[["leaf_specific_conductance_max"]], base$atm_vpd,
+                  base$ca, base$leaf_temp, base$atm_o2_kpa, base$atm_kpa)
     invisible(l)
   }
 }
@@ -571,11 +762,57 @@ leaf_gradient <- function(psi_soil,
   max(abs(value), floor) * step
 }
 
+# Parameters whose setter takes a SHORTCUT that leaves the rest of the object
+# alone, and which therefore require the object to be at the base point before
+# they run. See `.gradient_reseat_base()`.
+.gradient_shortcut_pars <- function(fast_stem_curve) {
+  if (fast_stem_curve) "stem_b" else character(0)
+}
+
+# ⚠️ THE FIX FOR #72, AND THE INVARIANT IT RESTORES: every parameter's gradient
+# is taken from the BASE point.
+#
+# `perturb_stem_b()` rescales the stem vulnerability spline and touches nothing
+# else, which is sound only if everything else on the object is already at base.
+# The loops below restore base once at the END, not between parameters, because
+# every other parameter's setter goes through the full `set_traits()` +
+# `set_physiology()` path and restores it on the way. `stem_b` on the fast path
+# is the one that does not -- so a `stem_b` that is not the first entry of `pars`
+# was differentiated at a point displaced by one step in whichever parameter
+# preceded it. Measured up to **3.4e-5 relative**, four orders above the ~1e-9
+# this function documents as achievable, and on BOTH routes.
+#
+# Restoring base before the shortcut is the whole fix. It is cheap in the case
+# that matters, because `set_traits()` decides the two spline rebuilds by
+# comparing the pairs it was given: after a parameter that owns no vulnerability
+# curve nothing is rebuilt, so this costs one trait write and one driver write.
+# After `stem_c`/`root_b`/`root_c` it does rebuild -- but those are the
+# parameters whose own gradients cost a rebuild per side anyway.
+#
+# ⚠️ Not `stem_b`-specific by name at the call site, deliberately. `root_b` obeys
+# the same homogeneity identity and would get the same fast path, at which point
+# the condition has to be "this parameter takes a shortcut" rather than a name.
+.gradient_reseat_base <- function(reset, theta, pars, fast_stem_curve) {
+  shortcut <- pars %in% .gradient_shortcut_pars(fast_stem_curve)
+  at_base <- TRUE
+  function(k) {
+    if (shortcut[[k]] && !at_base) {
+      reset(theta)
+    }
+    at_base <<- FALSE
+    invisible(NULL)
+  }
+}
+
 # The implicit-function composite. Two perturbed evaluations per parameter,
 # neither of which re-solves the model: `dprofit` at the UNPERTURBED psi* gives
 # the mixed partial, and the outputs at that same psi* give the direct term.
-.gradient_ift <- function(l, reset, theta, pars, psi_star, H, dY_dpsi, step) {
-  out <- t(vapply(pars, function(p) {
+.gradient_ift <- function(l, reset, theta, pars, psi_star, H, dY_dpsi, step,
+                          fast_stem_curve = TRUE) {
+  seat <- .gradient_reseat_base(reset, theta, pars, fast_stem_curve)
+  out <- t(vapply(seq_along(pars), function(k) {
+    p <- pars[[k]]
+    seat(k)
     h <- .gradient_step(p, theta[[p]], step)
     side <- function(sign) {
       th <- theta
@@ -605,14 +842,18 @@ leaf_gradient <- function(psi_soil,
     g[.gradient_output_names]
   }, numeric(length(.gradient_output_names))))
   reset(theta)
+  rownames(out) <- pars
   out
 }
 
 # The fallback: a central difference of the whole solve. Correct at a pinned
 # optimum because it differences the constrained answer, which is exactly what the
 # composite cannot do.
-.gradient_fd <- function(l, reset, theta, pars, step) {
-  out <- t(vapply(pars, function(p) {
+.gradient_fd <- function(l, reset, theta, pars, step, fast_stem_curve = TRUE) {
+  seat <- .gradient_reseat_base(reset, theta, pars, fast_stem_curve)
+  out <- t(vapply(seq_along(pars), function(k) {
+    p <- pars[[k]]
+    seat(k)
     h <- .gradient_step(p, theta[[p]], step)
     side <- function(sign) {
       th <- theta
@@ -623,6 +864,7 @@ leaf_gradient <- function(psi_soil,
     }
     ((side(1) - side(-1)) / (2 * h))[.gradient_output_names]
   }, numeric(length(.gradient_output_names))))
+  rownames(out) <- pars
   reset(theta)
   out
 }

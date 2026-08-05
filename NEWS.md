@@ -37,6 +37,189 @@ through to the spline and returns non-finite rather than throwing — the guard 
 
 # phylloptim 0.2.0
 
+## Trait gradients over a batch of observations, composed in C++ -- 22x
+
+`leaf_batch()` and `leaf_gradient_batch()`. The same gradient `leaf_gradient()`
+computes, by the same two routes with the same active-set test, but composed in
+`inst/include/phylloptim/gradient.hpp` and looped over observations there -- so a
+calibration crosses the R boundary **once per likelihood evaluation** instead of 112
+times per observation.
+
+```r
+b <- leaf_batch(psi_soil = obs$psi_soil, PPFD = obs$PPFD)   # once per fit
+g <- leaf_gradient_batch(b, traits, pars = FIT)             # once per draw
+```
+
+Measured per observation over 24 gradients at four fitted parameters, both arms in one
+process:
+
+| | us/observation | x a trivial `.Call` |
+|---|---:|---:|
+| `leaf_gradient()` in a loop | 363.3 | 340 |
+| `leaf_gradient(x = )`, reusing one leaf | 235.2 | 220 |
+| **`leaf_gradient_batch()`** | **10.59** | **9.9** |
+
+`leaf_batch()` costs 335 us once, for all 24. For a 1,327-observation fit at 30,000
+draws that is minutes rather than hours.
+
+⚠️ **Nothing about the gradient got faster.** The C++ model was already 1.5% of a
+gradient's cost; this removes the boundary from under it. So the figure needs a batch
+to be realised -- calling it with one observation pays the whole per-call overhead for
+one row's work.
+
+**Not a likelihood, and not the parameterisation Jacobian.** Both stay in R: the
+likelihood is your model, and the chain rule belongs where the win is -- C++ returns
+`dY/dtheta` for the four parameters a leaf has, and R applies your `P_fit x P_model`
+Jacobian vectorised over observations.
+
+**Per-row status, not an error.** A proposal will reach operating points the solve
+cannot handle, and that costs those rows rather than the dataset: every row reports
+`status`, a failure is `"error"` with a `message`, and a failed row's gradient is all
+`NA` rather than partially filled.
+
+⚠️ **`leaf_batch()` holds C++ pointers, so it does not survive `saveRDS()` or a new
+session.** Rebuild it; it says so rather than crashing.
+
+⚠️ **`psi_soil` recycles the way `leaf_solve()`'s does.** A plain numeric vector is N
+single-layer observations; a list of numeric vectors is one multi-layer observation
+each. This is the easiest mistake to make with `leaf_batch()`, and it fails loudly
+rather than silently.
+
+The C++ composite reproduces `leaf_gradient()` **bit-for-bit** -- 0 mismatches over 25
+operating points x three methods, including every pinned and shut-down row -- and the
+values are also pinned to `tests/testthat/gradient_golden.tsv`, because an equality
+test between two implementations cannot see a change applied to both. PLAN item 11g
+has the three things that made bit-for-bit possible, including that
+`a + b * c` written as one expression compiles to a fused multiply-add and disagrees
+with R's two roundings on 28% of random triples.
+
+## `pars` order no longer changes the `stem_b` gradient (#72)
+
+`leaf_gradient()`'s `stem_b` gradient was contaminated by whichever parameter preceded
+it in `pars`, by up to **3.4e-5 relative** -- four orders above the ~1e-9 the function
+documents as achievable, and on both routes. `perturb_stem_b()` rescales the
+vulnerability spline and touches nothing else, while the loops only restored the base
+point *after* the whole parameter loop, so a `stem_b` that was not first was
+differentiated one step away from base in the preceding parameter.
+
+Fixed by restoring the invariant rather than special-casing the name: **every
+parameter's gradient is taken from the base point**. Costs +0.15 us per observation
+(0.7%), because `set_traits()` decides its spline rebuilds by comparing the trait pairs
+it is given -- so after a parameter that owns no vulnerability curve nothing is
+rebuilt.
+
+⚠️ **Gradients move.** 9 of 60 recorded cells in `gradient_golden.tsv`, worst 3.8e-7 --
+much smaller than the defect was worth, because every recorded case put `vcmax_25`
+immediately before `stem_b` and that is a benign predecessor. `test-gradient.R`'s
+arbitrated references are unchanged, having been established with `stem_b` first. If
+you have fitted results that differentiated `stem_b` alongside `a`,
+`curv_fact_colim`, `root_b` or `stem_c`, they carried the larger error.
+
+The regression guard is a test comparing two `pars` orderings **in the same process**,
+not the golden file: the golden file is compared with a 1e-3 tolerance off macOS/arm64,
+so it could not have caught a 3.4e-5 recurrence on Linux.
+
+**Also found, and not fixed: [#74](https://github.com/traitecoevo/phylloptim/issues/74).**
+The `stem_b` shortcut is undone by a spline rebuild once per observation, so PLAN 11f's
+24.5x is **2.4x** through `leaf_gradient_batch()`. Say which figure you mean.
+
+## The gradient's R glue is a third cheaper
+
+Profiling `leaf_gradient()` found that the **C++ model is 1.5% of its cost**: 6 us of
+solving against 119 us of `.Call` dispatch over 112 boundary crossings and ~285 us of
+R interpreter. `.gradient_setter()` alone was 60% of a gradient. Three changes, no C++:
+
+* **The drivers are resolved once per gradient, not once per perturbation.**
+  `set_drivers()` is split into `.resolve_drivers()` (validate and default) and the
+  application, and the setter calls the former once and applies the result
+  positionally. There is still ONE definition of the defaulting rules -- a second copy
+  in the gradient code would have been free to drift from `set_drivers()`.
+* **Traits go on positionally**, rather than rebuilding a `leaf_traits` object with
+  `structure(as.list(...))` and re-extracting thirteen fields by name per
+  perturbation.
+* **`.gradient_outputs()` reads all four outputs in one call** instead of four R6
+  active bindings: 4.65 -> 0.93 us, eleven times per four-parameter gradient. `$` was
+  12.7% of a gradient's self time.
+
+Measured per observation over 24 gradients, interleaved three times against the
+commit this lands on:
+
+| 4 fitted parameters | before | after |
+|---|---|---|
+| fresh leaf | 504 us | 366 us (-27%) |
+| reused leaf | 400 us | **231 us (-42%)** |
+
+Together with the entry below, a four-parameter calibration goes from 504 to 231 us per
+observation, **-54%**.
+
+**Gradients are bit-identical** across both supply paths, both methods and eight
+parameters -- asserted rather than assumed, since a change applied to both routes
+would otherwise pass every existing test.
+
+⚠️ Two things to know before copying the pattern. The positional trait call **bypasses
+`set_traits()`'s invariant checks**, which is sound only because the values came from a
+`leaf_traits()` the caller already supplied and the C++ setter asserts #25 itself. And
+it is a hard-coded thirteen arguments that would not fail to compile if a trait were
+added, so `test-gradient.R` asserts the arity.
+
+## `leaf_gradient()` can reuse a leaf, which is 38% of a call
+
+Closes #52. `leaf_gradient()` built its own `Leaf` every call and offered no way to
+pass one in, and construction is **~150 us, half of a one-parameter gradient** -- the
+largest single term on the R surface, paid once per observation by a fit that
+differentiates per observation. `leaf_gradient(x = l, traits = tr, ...)` reuses one. Measured over 24 gradients,
+per observation: **511 -> 409 us at four fitted parameters (-20%)** and
+316 -> 200 us at one (-37%).
+
+⚠️ **The four-parameter figure is the one a calibration gets, and it is the smaller
+one.** Construction is a fixed cost per call while the differentiated work is linear
+in `pars`, so the saving falls as `pars` grows. Quoting the one-parameter number
+overstates what a fit sees.
+
+⚠️ **This does not make the exact gradient the faster arm**, and the issue was right
+to say so before the work started. `vignette("fitting")` measures it at ~4.8x the wall
+clock of differencing the objective while using ~5x fewer solves; recovering a third
+leaves it ~3x. The rest is the R call boundary, which only composition in C++ reaches
+(PLAN item 11 stage 2).
+
+Three things about the argument:
+
+* **`x` is a vessel, not the point.** `traits` still says where the gradient is taken
+  and is applied to `x` rather than read from it -- a `Leaf` does not expose its
+  traits. So `traits` is **required** with `x`: defaulting it would differentiate at
+  the package defaults on somebody else's leaf and return a plausible answer for a
+  point nobody asked about.
+* **`control` and `supply` are refused alongside `x`**, since both were fixed when it
+  was built and accepting them invites a silent disagreement. The supply path is read
+  off the object, so `resistance` is differentiable exactly when `x` is on the
+  single-potential path.
+* **`x` comes back solved at the base point**, not at the last perturbation, restored
+  on the way out including on an error -- hazard 8. That costs one re-trait and one
+  solve, ~18 us against the ~150 saved.
+
+`tests/testthat/test-cost.R` asserts the reuse path constructs **zero** leaves and the
+default path exactly one per call, so the argument cannot quietly become decorative.
+
+## `series_resistance()` no longer pays the 58 us R-boundary cost
+
+Bug fix on the entry above. `series_resistance()` built its `RootNetwork` through the
+generated constructor, which reaches C++ for a default-constructed struct and pays
+`Rcpp::wrap` assembling the five-element named list — **58 us**, against 1.1 us for a
+trivial `.Call`. It now overwrites one field of a session-cached prototype instead:
+**58 -> 3.1 us**.
+
+This matters because, unlike a fixed root network, a fitted series resistance cannot
+be hoisted out of a caller's loop — it changes every proposal. Measured in the
+companion calibration study, whose likelihood is 24 rows: the migration to the new
+API had made `leaf_predict()` **17% slower** (0.517 -> 0.606 ms) where it was
+predicted to get slightly *faster*, because removing one object-resetting
+`$set_supply_single()` call saved less than the per-evaluation network build cost.
+
+The prototype is shared, and safe only because R copies on write; `test-surface.R`
+pins that a returned network cannot corrupt it and that the field list still comes
+from the real constructor rather than a hand-written `structure()` that could drift
+from the C++ struct.
+
 ## The two supply paths are configured and driven the same way
 
 Follows the entry below, and finishes what it started. `set_physiology()` now takes
