@@ -322,6 +322,16 @@ assumption is **tested** at every point and the function falls back to
 differencing the solve where it fails. `g$method` reports which route ran and
 `g$status` reports why.
 
+Whether this is *faster* than letting your optimiser difference the objective
+depends on your parameterisation, and the two counts that decide it are easy to
+conflate. Differencing costs `2 ×` the number of parameters **the optimiser is
+moving**; this costs one pass plus a term in the number of parameters **the leaf
+has** — `length(pars)`. They are equal only if you fit traits directly. Pooling, a
+hierarchy, or any derived parameter makes the first much larger than the second,
+which is where this route wins; `vignette("fitting")` measures both regimes and
+`?leaf_gradient` has the cost model. ⚠️ **Always pass `pars`** — the default is all
+sixteen, which is the most expensive request there is.
+
 To vary traits yourself, `set_traits()` replaces them on an existing leaf — much
 cheaper than rebuilding one, and the only correct way to do it, since a trait
 change invalidates derived state that is not obvious from the outside:

@@ -174,10 +174,150 @@ evaluations — the `honest total` column above adds them back. Comparing a
 derivative-free method's reported count against a gradient method's reported count
 without that correction flatters the gradient method by a factor of `2 × npar`.
 
-## ⚠️ The exact gradient is currently *slower* than differencing it
+## ⚠️ Faster or slower depends on the parameter count — and on *which* parameter count
 
-Evaluation counts are not wall clock, and here the two disagree. Measure both arms
-in one process, interleaved:
+Evaluation counts are not wall clock, and here the two disagree: at three
+parameters the exact gradient **loses**. That is a real result, and it is also the
+most misread one in this package, because it does not generalise the way it looks
+like it should. Both arms scale with the number of parameters, and they scale with
+**different** parameter counts.
+
+Measure both arms in one process, interleaved, over a growing request:
+
+```{r}
+#| label: scaling
+tm <- function(f) {
+  t0 <- Sys.time(); f(); 1000 * as.numeric(difftime(Sys.time(), t0, units = "secs"))
+}
+
+CAND <- c("vcmax_25", "jmax_25", "cost_scale_TF24", "beta2", "a",
+          "curv_fact_elec_trans", "curv_fact_colim", "beta_R_H", "beta_R_V",
+          "stem_b", "stem_c", "root_b", "root_c")
+
+exact_n <- function(pars) {
+  vapply(seq_len(nrow(obs)), function(i) {
+    leaf_gradient(psi_soil = obs$psi_soil[i], PPFD = obs$PPFD[i],
+                  atm_vpd = obs$atm_vpd[i], traits = truth,
+                  pars = pars)$gradient[pars, "A"]
+  }, numeric(length(pars)))
+}
+ssq_at <- function(theta, l, nm) {
+  tr <- truth; tr[nm] <- as.list(exp(theta))
+  set_traits(l, do.call(leaf_traits, tr))
+  out <- vapply(seq_len(nrow(obs)), function(i) {
+    set_drivers(l, psi_soil = obs$psi_soil[i], PPFD = obs$PPFD[i],
+                atm_vpd = obs$atm_vpd[i])
+    l$find_root_collar_psi()
+    c(l$assim_colimited_, l$stom_cond_CO2_, l$opt_psi_stem_)
+  }, numeric(3))
+  sum(((obs$A_obs - out[1, ]) / sigma[["A"]])^2) +
+    sum(((obs$gc_obs - out[2, ]) / sigma[["gc"]])^2) +
+    sum(((obs$psi_obs - out[3, ]) / sigma[["psi_stem"]])^2)
+}
+fd_n <- function(pars, l) {
+  th <- log(unlist(truth[pars]))
+  for (j in seq_along(pars)) {
+    a <- th; b <- th; a[j] <- a[j] + 1e-5; b[j] <- b[j] - 1e-5
+    ssq_at(a, l, pars); ssq_at(b, l, pars)
+  }
+}
+
+for (k in 1:3) { invisible(exact_n(CAND[1:2])); fd_n(CAND[1:2], l) }  # warm both
+
+scaling <- do.call(rbind, lapply(c(1, 3, 5, 8, 13), function(n) {
+  p <- CAND[seq_len(n)]
+  r <- replicate(3, c(tm(function() exact_n(p)), tm(function() fd_n(p, l))))
+  data.frame(n_par = n, exact_ms = round(min(r[1, ]), 1),
+             fd_ms = round(min(r[2, ]), 1))
+}))
+scaling$ratio <- round(scaling$fd_ms / scaling$exact_ms, 2)
+scaling
+```
+
+```{r}
+#| label: scaling-slopes
+rbind(
+  exact = round(coef(lm(exact_ms ~ n_par, scaling)), 2),
+  fd = round(coef(lm(fd_ms ~ n_par, scaling)), 2)
+)
+```
+
+Both are linear, and the two coefficients are the whole story:
+
+- **the finite difference is pure slope** — its intercept is ~0 and its slope is
+  `2 ×` one objective evaluation, because that is literally what it does;
+- **the exact gradient has a large intercept and a slope too.** The intercept is
+  the per-observation `Leaf` construction and solve, paid once whatever you ask
+  for. The slope is `2` evaluations per parameter per observation.
+
+Here the exact route's *slope* is the larger of the two, so **growing the parameter
+count in this design never makes it win** — the ratio improves but does not reach 1.
+Each extra parameter costs it two more R calls per observation, and from R a call
+costs more than the C++ work it wraps.
+
+### ⚠️ So what reverses it is not more parameters, but more *fitted* parameters per *model* parameter
+
+The two counts are the same thing only because this vignette fits traits directly.
+They come apart as soon as a parameterisation sits between the fit and the model:
+
+$$T_\text{FD} = 2\,P_\text{fit}\,T_\text{obj}
+\qquad
+T_\text{exact} = N\,(t_\text{construct} + t_\text{solve}) + 2\,P_\text{model}\,N\,t_\text{eval}$$
+
+**`leaf_gradient()` is asked for `P_model` parameters; `optim` differences
+`P_fit` of them.** A hierarchical model is the standard case where those differ: a
+non-centred population mean, SD and per-species deviation are three fitted
+parameters that reach the leaf as *one*.
+
+The companion study
+[`leaf-calibration`](https://github.com/traitecoevo/leaf_calibration_test) is that
+case, and it is worth quoting because it comes out the other way round. 1,327
+observations, 16 species, **40 fitted parameters that map onto 4 model
+parameters**:
+
+| | |
+|---|---|
+| exact gradient, 40 fitted parameters | **0.68 s** |
+| exact gradient, 57 fitted parameters | **0.67 s** — unchanged, because `P_model` is still 4 |
+| central differences, 40 fitted parameters | **2.12 s** |
+| the resulting fit | same optimum, **3.4× less wall clock** |
+
+⚠️ **The cost model is not fitted to that study — it PREDICTS it.** Take the two
+coefficients measured above, divide by this vignette's 72 observations to get
+per-observation costs, and substitute that study's design:
+
+```{r}
+#| label: predict-other-study
+co <- coef(lm(exact_ms ~ n_par, scaling)) / nrow(obs)   # ms per observation
+LC <- list(N = 1327, P_model = 4, T_obj_ms = 26,        # measured there
+           exact_ms = 679, break_even = 13.1)
+
+predicted <- LC$N * (co[[1]] + co[[2]] * LC$P_model)
+data.frame(
+  quantity = c("exact gradient (ms)", "break-even fitted parameters"),
+  predicted = round(c(predicted, predicted / (2 * LC$T_obj_ms)), 1),
+  measured_there = c(LC$exact_ms, LC$break_even)
+)
+```
+
+Two designs differing 18-fold in size, one set of coefficients, agreeing to a few
+percent. That is the evidence that the scaling law is the mechanism and not a
+coincidence of either design.
+
+**So the rule to take away is not "AD is slower here".** It is:
+
+> Count how many *distinct model parameters* your gradient needs, not how many
+> parameters your optimiser is moving. Differencing costs the latter; the composite
+> costs the former.
+
+If those numbers are equal, difference the objective. If your parameterisation
+makes the first much smaller than the second — pooling, hierarchy, any shared or
+derived parameter — use the gradient.
+
+### Where the intercept goes
+
+The remaining measurement, since the intercept is the exact route's whole
+disadvantage in this design:
 
 ```{r}
 fd_gradient <- function() {
@@ -193,9 +333,6 @@ construct_only <- function() for (i in seq_len(nrow(obs))) leaf_model(truth)
 # "nine tenths" and point the conclusion at the wrong fix.
 for (k in 1:3) { ssq_grad(start, l); fd_gradient(); construct_only() }
 
-tm <- function(f) {
-  t0 <- Sys.time(); f(); 1000 * as.numeric(difftime(Sys.time(), t0, units = "secs"))
-}
 reps <- replicate(5, c(tm(function() ssq_grad(start, l)),
                        tm(fd_gradient),
                        tm(construct_only)))
@@ -207,28 +344,34 @@ data.frame(
 )
 ```
 
-The exact gradient loses on wall clock while winning on evaluation count, and the
-third row is **about a third** of the reason. `leaf_gradient()` constructs a fresh
-model on every call — there is no argument for handing it one you already have — so
-a gradient over `n` observations pays `n` constructions.
+The third row is most of the intercept. `leaf_gradient()` constructs a fresh model
+on every call — there is no argument for handing it one you already have — so a
+gradient over `n` observations pays `n` constructions.
 
-The other two thirds is the R call boundary itself. The composite replaces one
-solve with a handful of much cheaper evaluations, but each of those is an R call
-into C++, and an R call costs more than the C++ work it wraps. The theorem does
-less arithmetic and more crossing.
+The rest is the R call boundary itself. The composite replaces one solve with a
+handful of much cheaper evaluations, but each of those is an R call into C++, and an
+R call costs more than the C++ work it wraps. The theorem does less arithmetic and
+more crossing — which is also why the exact route has a *slope* in `P_model` at all,
+rather than the near-free one the C++ benchmarks show.
 
-Three things follow:
+Four things follow:
 
-- **Do not choose between these on the counts alone.** Time them on your own design.
-  Where the objective is expensive relative to a model construction — many more
-  observations, or a supply path with more soil layers — the ranking flips back.
-- **Model reuse is worth a third of it**, and is tracked as
+- **Do not choose between these on the evaluation counts alone**, and do not choose
+  on this vignette's verdict either. Put your own `N`, `P_fit` and `P_model` into the
+  cost model above, or time it on your own design.
+- **`P_fit` = `P_model` is the worst case for the composite**, and it is the case a
+  vignette naturally demonstrates because fitting traits directly is the simplest
+  thing to show. Real fits are usually not that case.
+- **Model reuse is most of the intercept**, and is tracked as
   [phylloptim#52](https://github.com/traitecoevo/phylloptim/issues/52): let
-  `leaf_gradient()` accept an existing model the way `set_traits()` does. On its own
-  it would not make the exact gradient the faster arm here.
-- **From C++ neither overhead exists.** `vignette("cpp-interface")` has the same
-  comparison with no R in the way. Moving the composition into C++ is stage 2 of
-  PLAN item 11, and it is what would actually reverse this result.
+  `leaf_gradient()` accept an existing model the way `set_traits()` does. In
+  `leaf-calibration` it is 29% of the exact gradient, and closing it would move that
+  study's break-even from ~13 fitted parameters to ~9. It would not make the
+  composite the faster arm *here*, because here the problem is the slope.
+- **From C++ neither overhead exists**, so neither does the slope.
+  `vignette("cpp-interface")` has the same comparison with no R in the way, where the
+  composite wins 4.4× on the eleven traits that touch no spline. Moving the
+  composition into C++ is stage 2 of PLAN item 11.
 
 ## ⚠️ Where a gradient-based fit goes wrong
 
