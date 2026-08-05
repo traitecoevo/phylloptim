@@ -201,6 +201,25 @@ leaf_control <- function(GSS_tol_abs = 1e-3,
 ##' against a single soil potential — comparing them against a multi-layer root
 ##' network compares two things at once.
 ##'
+##' @section Both paths are configured the same way, and take the same drivers:
+##' Neither function takes a resistance. The soil-to-collar resistance is a
+##' per-call **driver** on both paths, supplied to [set_drivers()] as
+##' `root_network` — [root_network_from_carbon()] on the multi-layer path,
+##' [series_resistance()] on this one. It used to be an argument here, so the same
+##' quantity arrived at construction on one path and per call on the other, and
+##' `resistance` was the only differentiable parameter whose setter reset the whole
+##' object.
+##'
+##' ⚠️ **`gravity_head` is the one asymmetry left, and it is deliberate.** The
+##' multi-layer path derives a per-layer head from the depth profile it is handed
+##' (`gravity_head * z_soil_mid`); this path has no depth profile to derive one
+##' from, and a bare leaf wants **zero** rather than a geometric default — which is
+##' precisely the caller `leaf_supply_single()` exists for. Making it a driver here
+##' would mean either inventing a depth for a leaf that has none, or adding a
+##' second supply-shaped argument to [set_drivers()] that only one path reads. If
+##' you do want the multi-layer rule for a single layer of thickness `d`, pass
+##' `gravity_head = 0.00981 * d / 2`.
+##'
 ##' @section Why this is not a settable field:
 ##' The obvious R interface would be `leaf$supply_kind <- "single"`. It is not
 ##' offered, because flipping the tag on its own leaves the other path's state
@@ -210,34 +229,60 @@ leaf_control <- function(GSS_tol_abs = 1e-3,
 ##' the solved state and the drivers must be set again — which is honest, since
 ##' the two paths read different inputs.
 ##'
-##' @param resistance the whole soil-to-collar path as one series resistance,
-##'   **per unit leaf area**, MPa s (mol H2O)^-1 m^2 leaf. Must be positive: a
-##'   zero resistance is an infinite flux. Per unit leaf area because the leaf is
-##'   purely intensive — nothing here may scale with plant size.
 ##' @param gravity_head head required to lift water to the collar, MPa. Zero by
 ##'   default, which is right for a bare leaf that is not thinking about rooting
-##'   depth.
+##'   depth. See the section above for why this, alone, is not a driver.
 ##'
 ##' @return A `leaf_supply` object, for the `supply` argument of [leaf_model()]
 ##'   and [leaf_solve()].
+##' @seealso [series_resistance()] for the resistance itself, which is a driver.
 ##' @examples
 ##' # a bare leaf: one soil potential, one resistance, no root profile
-##' leaf_solve(psi_soil = 1.5, PPFD = 900,
-##'            supply = leaf_supply_single(resistance = 1e3))
+##' leaf_solve(psi_soil = 1.5, PPFD = 900, supply = leaf_supply_single(),
+##'            root_network = series_resistance(1e3))
 ##' @export
-leaf_supply_single <- function(resistance, gravity_head = 0) {
-  out <- list(kind = "single", resistance = resistance,
-              gravity_head = gravity_head)
-  .check_scalars(out[c("resistance", "gravity_head")], "leaf_supply_single")
-  if (resistance <= 0) {
-    stop("leaf_supply_single(): `resistance` must be positive; a zero ",
-         "resistance is an infinite flux", call. = FALSE)
-  }
+leaf_supply_single <- function(gravity_head = 0) {
+  out <- list(kind = "single", gravity_head = gravity_head)
+  .check_scalars(out["gravity_head"], "leaf_supply_single")
   if (gravity_head < 0) {
     stop("leaf_supply_single(): `gravity_head` must be non-negative (MPa)",
          call. = FALSE)
   }
   structure(out, class = c("leaf_supply", "list"))
+}
+
+##' A single soil-to-collar series resistance, as a supply driver
+##'
+##' The single-potential path's counterpart to [root_network_from_carbon()]: it
+##' packages one series resistance into the [RootNetwork()] that [set_drivers()]
+##' takes, so the two supply paths are driven through the same argument.
+##'
+##' It goes in `r_R_V_sum` rather than `r_R_H_min`, and that is exact rather than a
+##' convention: `r_R_V_sum` already means "series resistance from the surface down
+##' to this layer, with no vulnerability weighting", and this is that quantity with
+##' one layer. `r_R_H_min` is the vulnerability-weighted horizontal term, which
+##' this path does not have — supplying a non-zero one is an error rather than
+##' ignored, since it would otherwise silently drop a resistance you meant to use.
+##'
+##' @param resistance the whole soil-to-collar path as one series resistance,
+##'   **per unit leaf area**, MPa s (mol H2O)^-1 m^2 leaf. Must be positive: a
+##'   zero resistance is an infinite flux. Per unit leaf area because the leaf is
+##'   purely intensive — nothing here may scale with plant size.
+##'
+##' @return A [RootNetwork()] with one entry in `r_R_V_sum`.
+##' @seealso [leaf_supply_single()], [root_network_from_carbon()], [set_drivers()]
+##' @examples
+##' series_resistance(1500)
+##' leaf_solve(psi_soil = 1.5, supply = leaf_supply_single(),
+##'            root_network = series_resistance(1500))
+##' @export
+series_resistance <- function(resistance) {
+  .check_scalars(list(resistance = resistance), "series_resistance")
+  if (resistance <= 0) {
+    stop("series_resistance(): `resistance` must be positive; a zero ",
+         "resistance is an infinite flux", call. = FALSE)
+  }
+  RootNetwork(r_R_V_sum = resistance)
 }
 
 ##' @rdname leaf_supply_single
@@ -311,7 +356,7 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
   # not the integrator tolerance, but relying on that ordering would be a
   # dependency on an implementation detail of setup_clean_leaf.
   if (identical(supply$kind, "single")) {
-    l$set_supply_single(supply$resistance, supply$gravity_head)
+    l$set_supply_single(supply$gravity_head)
   }
   l
 }
@@ -368,14 +413,17 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
   net
 }
 
-# The single-potential path reads `psi_soil[1]` and nothing else, so it needs a
-# network only because `set_physiology` has one signature for both paths. One empty
-# one per session.
-.empty_root_network <- function() {
-  if (is.null(.network_memo$empty)) {
-    .network_memo$empty <- RootNetwork()
+# The single-potential path's default: one nominal series resistance, in the same
+# memo and for the same reason. 1e3 MPa s (mol H2O)^-1 m^2 leaf is the value the
+# package's own vignettes and the companion calibration study use, and like the
+# multi-layer default it is a stand-in rather than a recommendation -- but it means
+# `leaf_solve(psi_soil = 2, supply = leaf_supply_single())` means something, exactly
+# as it does on the other path. Neither path forces a caller to own a supply model.
+.default_series_resistance <- function() {
+  if (is.null(.network_memo$series)) {
+    .network_memo$series <- series_resistance(1e3)
   }
-  .network_memo$empty
+  .network_memo$series
 }
 
 ##' Set the drivers for a leaf
@@ -396,25 +444,36 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
 ##' Pass vectors for `psi_soil`, and optionally for `soil_depth`. Both must end up
 ##' the same length; by default `soil_depth` becomes 1 m layers.
 ##'
-##' @section The root network, and why it is not a carbon profile:
-##' Since #33 the leaf takes the per-layer root hydraulic RESISTANCES, not the root
-##' carbon they may have been derived from. The solve reads two vectors,
+##' @section The supply resistances, on either path:
+##' The leaf takes the soil-to-collar hydraulic RESISTANCES, not the root carbon
+##' they may have been derived from (#33). The solve reads two vectors of them,
 ##' `r_R_H_min` and `r_R_V_sum`, and nothing in it knows about root carbon, layer
 ##' thickness, the 1/3 : 2/3 vertical/horizontal split or either `beta_R_*`
-##' constant. That matters here rather than only in C++: this function used to ask
-##' for a root carbon profile, which a leaf physiologist does not have, and it
-##' invented a default of 20 kg C m^-2 leaf and then apologised for it in this
-##' paragraph.
+##' constant. This function used to ask for a root carbon profile, which a leaf
+##' physiologist does not have, and invented a default of 20 kg C m^-2 leaf.
 ##'
-##' It still has a default, because the multi-layer path is the default path and
-##' `leaf_solve(psi_soil = 2)` has to mean something. What changed is that the
-##' default is now *visible*: it is a nominal carbon profile put through
-##' [root_network_from_carbon()], written out below, rather than a number buried in
-##' a signature. Supply `root_network` to replace it — with measured resistances,
-##' with fitted ones, or with the same helper at your own constants.
+##' **`root_network` is the same argument on both supply paths**, which is the
+##' point. On the multi-layer path it carries one `r_R_H_min` and one `r_R_V_sum`
+##' per rooted layer; on the single-potential path it carries one series resistance
+##' in `r_R_V_sum` and nothing else, which is that field's own meaning with one
+##' layer and no vulnerability-weighted term. [root_network_from_carbon()] builds
+##' the first, [series_resistance()] the second. Before this change the
+##' single-potential resistance was an argument to [leaf_supply_single()] instead —
+##' so the same quantity arrived at a different *time* depending on which path was
+##' in force, and it was the only fitted parameter whose setter reset the object.
 ##'
-##' The numbers are unchanged from the old default, so this is not a results
-##' change for anyone who was accepting it.
+##' Both paths default it, because neither should force a caller to own a supply
+##' model they do not have, and both defaults are written out in this function's
+##' body rather than buried in a signature: a nominal 20 kg C m^-2 leaf through
+##' [root_network_from_carbon()] on the multi-layer path, and a nominal 1e3
+##' MPa s (mol H2O)^-1 m^2 leaf series resistance on the single-potential one.
+##' Both are stand-ins, not recommendations.
+##'
+##' `soil_depth` is the one argument that is genuinely multi-layer-only, and
+##' passing it on the single-potential path is an error rather than ignored: there
+##' is no depth profile there for anything to read. That is also why
+##' [leaf_supply_single()] keeps `gravity_head` — see its documentation for the one
+##' remaining asymmetry between the two paths, and why it is left in place.
 ##'
 ##' @param x a `Leaf`, from [leaf_model()]
 ##' @param psi_soil soil water potential, MPa, **positive magnitude**. Length
@@ -422,11 +481,13 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
 ##' @param PPFD photosynthetic photon flux density, umol m^-2 s^-1
 ##' @param soil_depth cumulative depth to the bottom of each layer, m. Defaults
 ##'   to 1 m layers.
-##' @param root_network the per-layer root hydraulic resistances, a
-##'   [RootNetwork()]. Defaults to a nominal 20 kg C m^-2 leaf split evenly over
-##'   the layers and put through [root_network_from_carbon()] — a stand-in, not a
-##'   recommendation, which is why it is written out where you can see and replace
-##'   it. Ignored, and an error if supplied, on the single-potential path.
+##' @param root_network the soil-to-collar hydraulic resistances, a
+##'   [RootNetwork()]. **The same argument on both supply paths**: per rooted layer
+##'   from [root_network_from_carbon()] on the multi-layer path, or one series
+##'   resistance from [series_resistance()] on the single-potential path. Defaults
+##'   to a nominal value on either — 20 kg C m^-2 leaf split evenly, or 1e3 —
+##'   written out in the body where you can see and replace it. Stand-ins, not
+##'   recommendations.
 ##' @param leaf_specific_conductance_max maximum leaf-specific hydraulic
 ##'   conductance, kg m^-2 s^-1 MPa^-1
 ##' @param atm_vpd atmospheric vapour pressure deficit, kPa
@@ -485,16 +546,27 @@ set_drivers <- function(x,
            "path; got ", n, " layers. Build the leaf with ",
            "leaf_supply_multilayer() for a layered profile.", call. = FALSE)
     }
-    if (!is.null(soil_depth) || !is.null(root_network)) {
-      stop("`soil_depth` and `root_network` are not used on the ",
-           "single-potential supply path -- the whole soil-to-collar path is ",
-           "the `resistance` given to leaf_supply_single(). Drop them, or ",
-           "build the leaf with leaf_supply_multilayer().", call. = FALSE)
+    # `soil_depth` really is multi-layer-only: nothing on this path reads a depth
+    # profile, and silently accepting one someone took the trouble to pass is how
+    # a plausible wrong number happens.
+    if (!is.null(soil_depth)) {
+      stop("`soil_depth` is not used on the single-potential supply path -- ",
+           "there is no depth profile to read. Drop it, or build the leaf with ",
+           "leaf_supply_multilayer().", call. = FALSE)
     }
-    # set_physiology keeps one signature for both paths; on this path it reads
-    # only psi_soil[1], so these two are placeholders rather than inputs.
+    # `root_network` IS used here, and is the same argument the multi-layer path
+    # takes: one series resistance in r_R_V_sum. That is the whole point of the
+    # consistency change -- the resistance is a driver on both paths now, where it
+    # used to be a leaf_supply_single() argument on this one.
+    if (is.null(root_network)) {
+      root_network <- .default_series_resistance()
+    } else if (!inherits(root_network, "RootNetwork")) {
+      stop("`root_network` must be a RootNetwork, from series_resistance() or ",
+           "RootNetwork(); got ", class(root_network)[[1]], call. = FALSE)
+    }
+    # set_physiology requires psi_soil and soil_depth to agree in length; this
+    # path reads only psi_soil[1], so the depth is a placeholder rather than input.
     soil_depth <- 1.0
-    root_network <- .empty_root_network()
   } else {
     soil_depth <- if (is.null(soil_depth)) {
       seq_len(n) * 1.0

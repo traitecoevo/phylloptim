@@ -402,6 +402,29 @@ derivative still costs two solves, and there is no `pars` name for it. The recor
 values (`beta_R_H`: collar 8.1973e-06, A −2.8802e-04) are kept in a comment in
 `test-gradient.R` for anyone checking a hand-rolled route.
 
+### The two supply paths, made consistent — DONE
+
+`set_physiology` takes the soil-to-collar resistances on **both** paths, from the
+same `RootNetwork` argument. The multi-layer path took its resistances per call and
+the single path took its resistance at construction, so the same quantity arrived at
+a different time depending on which path was in force — and `resistance` was the
+only differentiable parameter whose setter called `setup_clean_leaf()` and reset the
+object. `leaf_supply_single()` loses `resistance`; `series_resistance()` is its
+driver-side counterpart. Bit-identical on both paths over 18 operating points.
+
+`gravity_head` is left as the single path's one piece of configuration, on purpose:
+the multi-layer rule derives it from a depth profile this path does not have, and a
+bare leaf wants zero rather than a geometric default.
+
+⚠️ **A measurement caution that cost real time.** The first before/after comparison
+reported a 1.22e-10 difference AND that the same build was nondeterministic between
+processes. Both were one artefact: the two arms were installed either side of a
+`git stash` round-trip, and `R CMD INSTALL` relinks stale `src/*.o` rather than
+recompiling. Clean builds are bit-identical and reproducible. The guide already says
+`make clean` first; this is the second time that warning has been earned, and the
+tell is `grep -c '^clang++.*-c ' <install log>` coming back lower than the number of
+translation units.
+
 ### Stage 4 — delete plant's `Leaf` bindings (#34)
 
 Hazard 7 exists only because plant's YAML names `Leaf`'s fields; it **dissolves**

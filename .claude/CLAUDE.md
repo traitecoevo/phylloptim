@@ -529,11 +529,20 @@ the per-cause split and the tolerance bands go in the first PR comment — see
    finite differences", so returning 0 or throwing silently degrades TF24f's
    acclimation gradient.** A path with no branch kinks simply never returns it.
 
-   `set_physiology`'s `RootNetwork` argument is **not** part of that contract: it is
-   multi-layer-specific, and `set_physiology` hands it over only under
-   `supply_kind_ == MultiLayer`. `SinglePotential` ignores it, and a third path
-   should too — the one signature serves every path, which is why `set_drivers()` has
-   a cached empty network to pass on the single-potential path.
+   `set_physiology`'s `RootNetwork` argument **is** part of the contract now, and a
+   sixth method with it: `set_supply_resistances`. Both paths take their
+   soil-to-collar resistances from that one argument, so the calling convention does
+   not depend on which path is in force. `MultiLayerRoots` reads one `r_R_H_min` and
+   one `r_R_V_sum` per rooted layer; `SinglePotential` reads `r_R_V_sum[0]` as its
+   series resistance and **refuses** a non-zero `r_R_H_min` rather than ignoring it.
+   A third path must accept the argument and validate what it can use.
+
+   ⚠️ **`gravity_head` is the one thing that is still configuration on the single
+   path**, via `set_supply_single(gravity_head)`, and that is deliberate rather than
+   unfinished: the multi-layer path derives a per-layer head from the depth profile
+   it is given, and a path with no depth profile has nothing to derive one from —
+   while a bare leaf wants zero rather than a geometric default. Do not "finish the
+   job" by inventing a depth for it.
 7. **Moving a public member is a plant API break, because RcppR6 binds fields by
    name.** plant's `inst/RcppR6_classes.yml` lists most of `Leaf`'s state as
    `access: field`, and the generator emits `obj_->psi_soil_` — a getter *and* a

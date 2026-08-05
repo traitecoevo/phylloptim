@@ -29,11 +29,13 @@ sets the number of soil layers.}
 \item{soil_depth}{cumulative depth to the bottom of each layer, m. Defaults
 to 1 m layers.}
 
-\item{root_network}{the per-layer root hydraulic resistances, a
-[RootNetwork()]. Defaults to a nominal 20 kg C m^-2 leaf split evenly over
-the layers and put through [root_network_from_carbon()] — a stand-in, not a
-recommendation, which is why it is written out where you can see and replace
-it. Ignored, and an error if supplied, on the single-potential path.}
+\item{root_network}{the soil-to-collar hydraulic resistances, a
+[RootNetwork()]. **The same argument on both supply paths**: per rooted layer
+from [root_network_from_carbon()] on the multi-layer path, or one series
+resistance from [series_resistance()] on the single-potential path. Defaults
+to a nominal value on either — 20 kg C m^-2 leaf split evenly, or 1e3 —
+written out in the body where you can see and replace it. Stand-ins, not
+recommendations.}
 
 \item{leaf_specific_conductance_max}{maximum leaf-specific hydraulic
 conductance, kg m^-2 s^-1 MPa^-1}
@@ -74,26 +76,37 @@ Pass vectors for `psi_soil`, and optionally for `soil_depth`. Both must end up
 the same length; by default `soil_depth` becomes 1 m layers.
 }
 
-\section{The root network, and why it is not a carbon profile}{
+\section{The supply resistances, on either path}{
 
-Since #33 the leaf takes the per-layer root hydraulic RESISTANCES, not the root
-carbon they may have been derived from. The solve reads two vectors,
+The leaf takes the soil-to-collar hydraulic RESISTANCES, not the root carbon
+they may have been derived from (#33). The solve reads two vectors of them,
 `r_R_H_min` and `r_R_V_sum`, and nothing in it knows about root carbon, layer
 thickness, the 1/3 : 2/3 vertical/horizontal split or either `beta_R_*`
-constant. That matters here rather than only in C++: this function used to ask
-for a root carbon profile, which a leaf physiologist does not have, and it
-invented a default of 20 kg C m^-2 leaf and then apologised for it in this
-paragraph.
+constant. This function used to ask for a root carbon profile, which a leaf
+physiologist does not have, and invented a default of 20 kg C m^-2 leaf.
 
-It still has a default, because the multi-layer path is the default path and
-`leaf_solve(psi_soil = 2)` has to mean something. What changed is that the
-default is now *visible*: it is a nominal carbon profile put through
-[root_network_from_carbon()], written out below, rather than a number buried in
-a signature. Supply `root_network` to replace it — with measured resistances,
-with fitted ones, or with the same helper at your own constants.
+**`root_network` is the same argument on both supply paths**, which is the
+point. On the multi-layer path it carries one `r_R_H_min` and one `r_R_V_sum`
+per rooted layer; on the single-potential path it carries one series resistance
+in `r_R_V_sum` and nothing else, which is that field's own meaning with one
+layer and no vulnerability-weighted term. [root_network_from_carbon()] builds
+the first, [series_resistance()] the second. Before this change the
+single-potential resistance was an argument to [leaf_supply_single()] instead —
+so the same quantity arrived at a different *time* depending on which path was
+in force, and it was the only fitted parameter whose setter reset the object.
 
-The numbers are unchanged from the old default, so this is not a results
-change for anyone who was accepting it.
+Both paths default it, because neither should force a caller to own a supply
+model they do not have, and both defaults are written out in this function's
+body rather than buried in a signature: a nominal 20 kg C m^-2 leaf through
+[root_network_from_carbon()] on the multi-layer path, and a nominal 1e3
+MPa s (mol H2O)^-1 m^2 leaf series resistance on the single-potential one.
+Both are stand-ins, not recommendations.
+
+`soil_depth` is the one argument that is genuinely multi-layer-only, and
+passing it on the single-potential path is an error rather than ignored: there
+is no depth profile there for anything to read. That is also why
+[leaf_supply_single()] keeps `gravity_head` — see its documentation for the one
+remaining asymmetry between the two paths, and why it is left in place.
 }
 
 \examples{

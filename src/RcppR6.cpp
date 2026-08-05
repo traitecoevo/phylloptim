@@ -156,8 +156,8 @@ void Leaf__set_supply_multilayer(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> ob
   obj_->set_supply_multilayer();
 }
 // [[Rcpp::export]]
-void Leaf__set_supply_single(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double resistance, double gravity_head) {
-  obj_->set_supply_single(resistance, gravity_head);
+void Leaf__set_supply_single(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double gravity_head) {
+  obj_->set_supply_single(gravity_head);
 }
 // [[Rcpp::export]]
 void Leaf__setup_transpiration(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double resolution) {

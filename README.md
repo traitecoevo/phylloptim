@@ -296,7 +296,8 @@ soil-to-collar path to one resistance:
 
 ```r
 leaf_solve(psi_soil = 1.5, PPFD = 900,
-           supply = leaf_supply_single(resistance = 1e3))
+           supply = leaf_supply_single(),
+           root_network = series_resistance(1e3))
 ```
 
 The path is chosen when the leaf is built and cannot be flipped afterwards: a
@@ -333,7 +334,8 @@ fits them and nothing in the derivation cares whether a parameter is a trait.
 
 ```r
 leaf_gradient(psi_soil = 1.5, PPFD = 900,
-              supply = leaf_supply_single(resistance = 1e4),
+              supply = leaf_supply_single(),
+              root_network = series_resistance(1e4),
               pars = c("leaf_specific_conductance_max", "resistance"))
 ```
 

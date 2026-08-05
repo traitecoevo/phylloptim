@@ -5,19 +5,14 @@
 \alias{leaf_supply_multilayer}
 \title{Choose how water reaches the root collar}
 \usage{
-leaf_supply_single(resistance, gravity_head = 0)
+leaf_supply_single(gravity_head = 0)
 
 leaf_supply_multilayer()
 }
 \arguments{
-\item{resistance}{the whole soil-to-collar path as one series resistance,
-**per unit leaf area**, MPa s (mol H2O)^-1 m^2 leaf. Must be positive: a
-zero resistance is an infinite flux. Per unit leaf area because the leaf is
-purely intensive — nothing here may scale with plant size.}
-
 \item{gravity_head}{head required to lift water to the collar, MPa. Zero by
 default, which is right for a bare leaf that is not thinking about rooting
-depth.}
+depth. See the section above for why this, alone, is not a driver.}
 }
 \value{
 A `leaf_supply` object, for the `supply` argument of [leaf_model()]
@@ -40,6 +35,27 @@ since Medlyn, Prentice least-cost and Cowan-Farquhar are all formulated
 against a single soil potential — comparing them against a multi-layer root
 network compares two things at once.
 }
+\section{Both paths are configured the same way, and take the same drivers}{
+
+Neither function takes a resistance. The soil-to-collar resistance is a
+per-call **driver** on both paths, supplied to [set_drivers()] as
+`root_network` — [root_network_from_carbon()] on the multi-layer path,
+[series_resistance()] on this one. It used to be an argument here, so the same
+quantity arrived at construction on one path and per call on the other, and
+`resistance` was the only differentiable parameter whose setter reset the whole
+object.
+
+⚠️ **`gravity_head` is the one asymmetry left, and it is deliberate.** The
+multi-layer path derives a per-layer head from the depth profile it is handed
+(`gravity_head * z_soil_mid`); this path has no depth profile to derive one
+from, and a bare leaf wants **zero** rather than a geometric default — which is
+precisely the caller `leaf_supply_single()` exists for. Making it a driver here
+would mean either inventing a depth for a leaf that has none, or adding a
+second supply-shaped argument to [set_drivers()] that only one path reads. If
+you do want the multi-layer rule for a single layer of thickness `d`, pass
+`gravity_head = 0.00981 * d / 2`.
+}
+
 \section{Why this is not a settable field}{
 
 The obvious R interface would be `leaf$supply_kind <- "single"`. It is not
@@ -53,6 +69,9 @@ the two paths read different inputs.
 
 \examples{
 # a bare leaf: one soil potential, one resistance, no root profile
-leaf_solve(psi_soil = 1.5, PPFD = 900,
-           supply = leaf_supply_single(resistance = 1e3))
+leaf_solve(psi_soil = 1.5, PPFD = 900, supply = leaf_supply_single(),
+           root_network = series_resistance(1e3))
+}
+\seealso{
+[series_resistance()] for the resistance itself, which is a driver.
 }

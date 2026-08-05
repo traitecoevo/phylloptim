@@ -212,9 +212,11 @@ Leaf:
     # path's state configured and silently ignored, so there is no settable
     # `supply_kind` here at all -- the only way to change it is
     # set_supply_multilayer() / set_supply_single(), which leave the tag and the
-    # supply agreeing. `resistance` and `gravity_head` are read-only for a
-    # weaker reason: setting them while the multi-layer path is active would do
-    # nothing, which is a confusing thing to allow.
+    # supply agreeing. `gravity_head` is read-only for a weaker reason: setting it
+    # while the multi-layer path is active would do nothing, which is a confusing
+    # thing to allow. `single_resistance_` is read-only for the STRONGER reason --
+    # it is a per-call driver now, so a write here would be overwritten by the next
+    # set_physiology and is exactly the stale-state trap hazard 8 describes.
     supply_kind: {type: "std::string", access: member, name_cpp: supply_kind_name}
     single_resistance_: {type: double, access: field, name_cpp: "single_.resistance_", readonly: true}
     single_gravity_head_: {type: double, access: field, name_cpp: "single_.grav_head_", readonly: true}
@@ -405,7 +407,7 @@ Leaf:
       args: []
     set_supply_single:
       return_type: void
-      args: [resistance: double, gravity_head: double]
+      args: [gravity_head: double]
 
     setup_transpiration:
       return_type: void
