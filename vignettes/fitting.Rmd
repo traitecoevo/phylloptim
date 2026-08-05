@@ -1,0 +1,300 @@
+---
+title: "Fitting traits to data"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Fitting traits to data}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7,
+                      fig.height = 4, dpi = 120, fig.align = "center")
+```
+
+```{r setup, message = FALSE}
+library(phylloptim)
+```
+
+`vignette("phylloptim")` shows the model solving and differentiating. This one
+uses both to recover traits from data, and is honest about the three things that
+make it harder than it looks.
+
+## Simulated data, so the answer is known
+
+Recovery error is the only fit diagnostic that distinguishes "the optimiser
+converged" from "the model works". Real data cannot supply it, so start here.
+
+```{r}
+set.seed(sum(utf8ToInt("phylloptim-fitting")))
+
+truth <- leaf_traits(vcmax_25 = 85, jmax_25 = 140, cost_scale_TF24 = 40)
+
+drivers <- expand.grid(
+  psi_soil = seq(0.4, 3.2, length.out = 12),
+  PPFD = c(400, 900, 1500),
+  atm_vpd = c(1.0, 2.5)
+)
+
+obs <- leaf_solve(psi_soil = drivers$psi_soil, PPFD = drivers$PPFD,
+                  atm_vpd = drivers$atm_vpd, traits = truth)
+
+sigma <- c(A = 0.4, gc = 0.0015, psi_stem = 0.08)
+obs$A_obs <- obs$A + rnorm(nrow(obs), 0, sigma[["A"]])
+obs$gc_obs <- obs$gc + rnorm(nrow(obs), 0, sigma[["gc"]])
+obs$psi_obs <- obs$psi_stem + rnorm(nrow(obs), 0, sigma[["psi_stem"]])
+
+nrow(obs)
+```
+
+Three responses, because they constrain different parts of the model: `psi_stem`
+pins the hydraulic path, `A` and `gc` pin the carbon side. Fitting `A` alone
+leaves the two trading off against each other.
+
+## The objective, and the loop that makes it affordable
+
+```{r}
+FIT <- c("vcmax_25", "jmax_25", "cost_scale_TF24")
+
+predict_at <- function(theta, l) {
+  set_traits(l, do.call(leaf_traits, as.list(exp(theta))))
+  out <- vapply(seq_len(nrow(obs)), function(i) {
+    set_drivers(l, psi_soil = obs$psi_soil[i], PPFD = obs$PPFD[i],
+                atm_vpd = obs$atm_vpd[i])
+    l$find_root_collar_psi()
+    c(l$assim_colimited_, l$stom_cond_CO2_, l$opt_psi_stem_)
+  }, numeric(3))
+  list(A = out[1, ], gc = out[2, ], psi = out[3, ])
+}
+
+ssq <- function(theta, l) {
+  p <- predict_at(theta, l)
+  sum(((obs$A_obs - p$A) / sigma[["A"]])^2) +
+    sum(((obs$gc_obs - p$gc) / sigma[["gc"]])^2) +
+    sum(((obs$psi_obs - p$psi) / sigma[["psi_stem"]])^2)
+}
+```
+
+⚠️ **Build the model once, outside the loop.** `set_traits()` replaces the traits
+on an existing object; constructing a fresh one costs ~204 µs against ~4 µs to
+re-trait, which is 73 solves thrown away per evaluation. In a fit that dominates
+everything else.
+
+⚠️ **And do not write `l$vcmax_25 <- x` instead.** It compiles and is wrong: the
+derived `vcmax_`, `jmax_` and `R_d_` live in a temperature cache keyed on
+`(leaf_temp, atm_o2_kpa)` and *nothing else*, so changing a trait and re-setting
+the drivers takes a cache **hit** and never recomputes them. A sweep written that
+way runs at the first `vcmax` it ever saw and reports plausible numbers
+throughout. `set_traits()` refreshes all of it.
+
+```{r}
+l <- leaf_model(truth)
+start <- log(c(vcmax_25 = 60, jmax_25 = 100, cost_scale_TF24 = 15))
+fit <- optim(start, ssq, l = l, method = "Nelder-Mead",
+             control = list(maxit = 2000, reltol = 1e-10))
+
+data.frame(
+  parameter = FIT,
+  truth = unlist(truth[FIT]),
+  recovered = round(exp(fit$par), 2),
+  `pct error` = round(100 * (exp(fit$par) - unlist(truth[FIT])) /
+                        unlist(truth[FIT]), 2),
+  check.names = FALSE
+)
+```
+
+## Using the gradients
+
+`leaf_gradient()` gives exact derivatives of each output, so the objective's
+gradient follows by the chain rule — no differencing of the solve.
+
+```{r}
+ssq_grad <- function(theta, l) {
+  tr <- do.call(leaf_traits, as.list(exp(theta)))
+  g <- vapply(seq_len(nrow(obs)), function(i) {
+    gi <- leaf_gradient(psi_soil = obs$psi_soil[i], PPFD = obs$PPFD[i],
+                        atm_vpd = obs$atm_vpd[i], traits = tr, pars = FIT)
+    v <- gi$value
+    r <- c((v[["A"]] - obs$A_obs[i]) / sigma[["A"]]^2,
+           (v[["gc"]] - obs$gc_obs[i]) / sigma[["gc"]]^2,
+           (v[["psi_stem"]] - obs$psi_obs[i]) / sigma[["psi_stem"]]^2)
+    2 * (gi$gradient[FIT, "A"] * r[1] +
+           gi$gradient[FIT, "gc"] * r[2] +
+           gi$gradient[FIT, "psi_stem"] * r[3])
+  }, numeric(length(FIT)))
+  rowSums(g) * exp(theta)   # chain rule for the log parameterisation
+}
+```
+
+Note `pars = FIT`. Requesting all sixteen parameters here would compute thirteen
+gradients per observation that the optimiser never reads.
+
+⚠️ **Bound the parameters, or the first step overflows.** The objective is scaled
+by `1/sigma^2` and `sigma_gc` is 0.0015, so the gradient has magnitude ~2e4 in log
+units. Plain `method = "BFGS"` starts from an identity Hessian approximation, which
+makes its first trial point `theta - g` — and `exp()` of that is `Inf`, so the
+objective errors out before the line search gets a chance to shrink the step. This
+is not a pathology of the model; it is what an unscaled least-squares objective
+does to any quasi-Newton method started cold. Bounds are the one-line fix, and are
+what you would want on a real fit anyway.
+
+```{r}
+lower <- log(c(vcmax_25 = 10, jmax_25 = 20, cost_scale_TF24 = 2))
+upper <- log(c(vcmax_25 = 400, jmax_25 = 700, cost_scale_TF24 = 400))
+
+fit_g <- optim(start, ssq, gr = ssq_grad, l = l, method = "L-BFGS-B",
+               lower = lower, upper = upper, control = list(maxit = 500))
+
+fit_n <- optim(start, ssq, l = l, method = "L-BFGS-B",
+               lower = lower, upper = upper, control = list(maxit = 500))
+
+data.frame(
+  method = c("Nelder-Mead (no gradient)", "L-BFGS-B (numerical gradient)",
+             "L-BFGS-B (exact gradient)"),
+  objective = round(c(fit$value, fit_n$value, fit_g$value), 2),
+  `objective evals` = c(fit$counts[["function"]], fit_n$counts[["function"]],
+                        fit_g$counts[["function"]]),
+  `gradient evals` = c(0, fit_n$counts[["gradient"]], fit_g$counts[["gradient"]]),
+  `honest total` = c(fit$counts[["function"]],
+                     fit_n$counts[["function"]] +
+                       2 * length(FIT) * fit_n$counts[["gradient"]],
+                     fit_g$counts[["function"]]),
+  check.names = FALSE
+)
+```
+
+All three find the same optimum. The exact gradient cuts the solve count roughly
+five-fold against Nelder-Mead — and **that is the whole of its advantage here.**
+
+⚠️ **Counting evaluations fairly is harder than it looks.** `optim` reports
+function and gradient calls separately, and when it differences a gradient
+*numerically* it does not count those calls at all. BFGS and L-BFGS-B use central
+differences, so each numerical gradient silently costs `2 × npar` extra objective
+evaluations — the `honest total` column above adds them back. Comparing a
+derivative-free method's reported count against a gradient method's reported count
+without that correction flatters the gradient method by a factor of `2 × npar`.
+
+## ⚠️ The exact gradient is currently *slower* than differencing it
+
+Evaluation counts are not wall clock, and here the two disagree. Measure both arms
+in one process, interleaved:
+
+```{r}
+fd_gradient <- function() {
+  for (j in seq_along(start)) {
+    a <- start; b <- start; a[j] <- a[j] + 1e-5; b[j] <- b[j] - 1e-5
+    ssq(a, l); ssq(b, l)
+  }
+}
+construct_only <- function() for (i in seq_len(nrow(obs))) leaf_model(truth)
+
+# Warm up all three arms first, then interleave. A cold leaf_model() measured
+# three times its steady-state cost, which is enough to turn "a third" into
+# "nine tenths" and point the conclusion at the wrong fix.
+for (k in 1:3) { ssq_grad(start, l); fd_gradient(); construct_only() }
+
+tm <- function(f) {
+  t0 <- Sys.time(); f(); 1000 * as.numeric(difftime(Sys.time(), t0, units = "secs"))
+}
+reps <- replicate(5, c(tm(function() ssq_grad(start, l)),
+                       tm(fd_gradient),
+                       tm(construct_only)))
+data.frame(
+  route = c("exact gradient (72 x leaf_gradient)",
+            "central differences (2 x npar objective evals)",
+            "72 x leaf_model() alone"),
+  ms = round(apply(reps, 1, min), 1)
+)
+```
+
+The exact gradient loses on wall clock while winning on evaluation count, and the
+third row is **about a third** of the reason. `leaf_gradient()` constructs a fresh
+model on every call — there is no argument for handing it one you already have — so
+a gradient over `n` observations pays `n` constructions.
+
+The other two thirds is the R call boundary itself. The composite replaces one
+solve with a handful of much cheaper evaluations, but each of those is an R call
+into C++, and an R call costs more than the C++ work it wraps. The theorem does
+less arithmetic and more crossing.
+
+Three things follow:
+
+- **Do not choose between these on the counts alone.** Time them on your own design.
+  Where the objective is expensive relative to a model construction — many more
+  observations, or a supply path with more soil layers — the ranking flips back.
+- **Model reuse is worth a third of it**, and is tracked as
+  [phylloptim#52](https://github.com/traitecoevo/phylloptim/issues/52): let
+  `leaf_gradient()` accept an existing model the way `set_traits()` does. On its own
+  it would not make the exact gradient the faster arm here.
+- **From C++ neither overhead exists.** `vignette("cpp-interface")` has the same
+  comparison with no R in the way. Moving the composition into C++ is stage 2 of
+  PLAN item 11, and it is what would actually reverse this result.
+
+## ⚠️ Where a gradient-based fit goes wrong
+
+The derivation behind `leaf_gradient()` assumes the optimum is interior. In dry
+soil it often is not, and the boundary is a genuine kink in trait space rather
+than an artefact.
+
+```{r}
+status <- vapply(seq_len(nrow(obs)), function(i) {
+  leaf_gradient(psi_soil = obs$psi_soil[i], PPFD = obs$PPFD[i],
+                atm_vpd = obs$atm_vpd[i], traits = truth,
+                pars = "vcmax_25")$status
+}, character(1))
+table(status)
+```
+
+**A third of the design is pinned**, and the fit above still recovered the traits
+to a few percent — because `leaf_gradient()` detects those points and differences
+the solve there instead of applying a formula that would be wrong by orders of
+magnitude. That is the fallback doing its job on a perfectly ordinary drought
+design, not an exotic case.
+
+Check this *before* trusting a fit rather than after. `status` is reported
+precisely so it can be checked, and a naive finite difference cannot tell you
+which points are which. Where the pinned fraction is large, expect a
+gradient-based optimiser to behave less well than it does here.
+
+Because a fit that straddles the boundary has three problems:
+
+- **the objective is not differentiable there**, so a gradient method is
+  optimising through a corner and may stall or oscillate;
+- `leaf_gradient()` falls back to differencing the solve at pinned points, which
+  is correct but noisier;
+- ⚠️ **`psi_crit` is special.** It does not appear in the profit function at all
+  — it only bounds the feasible range — so the composite returns **exactly zero**
+  for it. At an interior optimum that is right. At a dry-pinned optimum it is
+  binding and the true derivative is not zero, so a silent zero would tell an
+  optimiser the parameter does nothing. The fallback exists for exactly this and
+  is not a degraded path.
+
+## Fitting to real data
+
+The same machinery, with two additions worth planning for.
+
+**Not every parameter is identified.** Parameters that enter the model only in
+combination cannot be separated by data that sees only the combination — fitting
+them independently produces respectable-looking estimates that mean nothing.
+Check with a profile, or a Hessian at the optimum, before reporting anything
+per-parameter.
+
+**Some traits are measured.** `P50` and `P88` determine the Weibull
+`stem_b`/`stem_c` analytically, so a species with a published vulnerability curve
+needs no hydraulic calibration at all:
+
+```{r}
+weibull_from_p50_p88 <- function(P50, P88) {
+  c_ <- log(log(1 / 0.12) / log(2)) / log(P88 / P50)
+  c(stem_b = P50 / log(2)^(1 / c_), stem_c = c_)
+}
+w <- weibull_from_p50_p88(P50 = 6.88, P88 = 9.43)
+round(w, 4)
+
+lw <- leaf_model(leaf_traits(stem_b = w[["stem_b"]], stem_c = w[["stem_c"]]))
+round(c(PLC_at_P50 = 1 - lw$proportion_of_conductivity(6.88),
+        PLC_at_P88 = 1 - lw$proportion_of_conductivity(9.43)), 4)
+```
+
+Exactly 0.50 and 0.88, as they must be. Fitting what is already measured wastes
+the data's ability to constrain what is not.

@@ -323,6 +323,55 @@ g <- leaf_gradient(psi_soil = 2.0, PPFD = 900,
 round(g$gradient, 5)
 ```
 
+### Choosing which gradients to compute
+
+**`pars` selects them, and by default you get all of them.** Omit it and
+`leaf_gradient()` differentiates every parameter it can:
+
+```{r}
+dim(leaf_gradient(psi_soil = 2.0, PPFD = 900)$gradient)
+rownames(leaf_gradient(psi_soil = 2.0, PPFD = 900)$gradient)
+```
+
+Sixteen on the multi-layer path — the fifteen traits from `leaf_traits()`, plus
+`leaf_specific_conductance_max`, which is not a trait but is fitted like one. The
+single-potential path adds `resistance`, making seventeen.
+
+**Selecting fewer genuinely costs less**: the work is one solve plus two cheap
+evaluations per parameter, so it scales with what you ask for.
+
+```{r}
+#| echo: false
+bench <- function(pars) {
+  t0 <- Sys.time()
+  for (i in 1:20) leaf_gradient(psi_soil = 2.0, PPFD = 900, pars = pars)
+  as.numeric(Sys.time() - t0, units = "secs") / 20 * 1000
+}
+tibble::tibble(
+  request = c("`pars = NULL` (all 16)", "4 parameters", "1 parameter"),
+  `ms per call` = round(c(bench(NULL),
+                          bench(c("vcmax_25", "jmax_25", "stem_b",
+                                  "cost_scale_TF24")),
+                          bench("vcmax_25")), 2)
+) |>
+  knitr::kable()
+```
+
+So in a calibration, name only the parameters you are fitting. Asking for all
+sixteen when you fit three is roughly five times the work.
+
+⚠️ **The four outputs are not selectable** — every call returns the derivative of
+`A`, `gc`, `psi_stem` and `collar` with respect to each requested parameter,
+because they are read off the same solve and cost nothing extra. `pars` chooses
+the rows of that matrix, never the columns.
+
+Naming something undifferentiable is an error rather than a silent omission, and
+it tells you what is available:
+
+```{r, error = TRUE}
+leaf_gradient(psi_soil = 2.0, PPFD = 900, pars = "resistance")
+```
+
 These are not finite differences of the solve. The outputs are read at the
 profit-maximising collar potential, so a trait moves them twice over — directly,
 and by moving the optimum itself. Differentiating the optimality condition

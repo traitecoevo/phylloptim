@@ -26,7 +26,8 @@ the user-visible history.
 |---|---|---|---|
 | [#3](https://github.com/traitecoevo/phylloptim/issues/3) | 7a | Make λ(state) pluggable | **unblocked** — #2 is done. ⚠️ Measure the dispatch separately: the cost core is fully inlined where the supply path was not, so 7b's "dispatch is free" does **not** transfer |
 | [#4](https://github.com/traitecoevo/phylloptim/issues/4) | 11e, 11f | Trait gradients — stage 2, and `stem_c`'s rebuild | Stages 1 and 3 landed ([#42](https://github.com/traitecoevo/phylloptim/pull/42), [#46](https://github.com/traitecoevo/phylloptim/pull/46)). ⚠️ Read 11e before quoting any speedup |
-| [#6](https://github.com/traitecoevo/phylloptim/issues/6) | 12 | Calibration vignette, then inversion | **The one with the most downstream** — it specifies what is left of #4, and doing it found #38, #40 and #41 |
+| [#6](https://github.com/traitecoevo/phylloptim/issues/6) | 12 | Real-data calibration, then inversion | **The one with the most downstream** — it specifies what is left of #4, and doing it found #38, #40, #41 and #52. ⚠️ The *synthetic* vignette is done ([#53](https://github.com/traitecoevo/phylloptim/pull/53)) and **AD lost**: read 12a before repeating the comparison |
+| [#52](https://github.com/traitecoevo/phylloptim/issues/52) | 12 | `leaf_gradient()` rebuilds a `Leaf` per call, with no way to pass one in | From #53. A third of a per-observation gradient's cost, and why item 12's "reuse one object" advice cannot be followed as written |
 | [#7](https://github.com/traitecoevo/phylloptim/issues/7) | 13 | Energy balance, in priority order | Leaf-to-air VPD is the cheap win and is **not wired in**; free convection is not worth it |
 | [#28](https://github.com/traitecoevo/phylloptim/issues/28) | 13 | Temperature-dependent outgoing longwave in the Penman-Monteith Rn | from plant #581 / #567 review |
 | [#31](https://github.com/traitecoevo/phylloptim/issues/31) | 31 | `profit_psi_stem_TF` returns a plausible number below `psi_upstream` | Found writing the vignette. Profit is **discontinuous by 1.58** at the boundary |
@@ -38,6 +39,10 @@ the user-visible history.
 | [#49](https://github.com/traitecoevo/phylloptim/issues/49) | 14 | Is `kmax ~ h^-1` defensible? Koçillari et al. 2021 find no height trend | Split out of item 14, which had it filed nowhere |
 | [#50](https://github.com/traitecoevo/phylloptim/issues/50) | 8 | `H2O_CO2_stom_diff_ratio` is 1.67, the g1 literature uses 1.6 | **2.2% offset** in every reported `g1_eff` |
 | [#51](https://github.com/traitecoevo/phylloptim/issues/51) | 10c | `kg_to_mol_h2o` and `kg_per_mol_h2o` are not reciprocals | **0.028%**. The bit-identity baseline it was waiting for now exists |
+| [#55](https://github.com/traitecoevo/phylloptim/issues/55) | 6d | The temperature cache silently invalidates a trait sweep | #42 documents the trap; nothing prevents it. A bare field write still compiles |
+| [#56](https://github.com/traitecoevo/phylloptim/issues/56) | 8, 10c | `gs` is reported only to CO2, and the hydraulic path mixes kg and mol bases | Coupled to #50 and #51 — settle the constants first |
+| [#57](https://github.com/traitecoevo/phylloptim/issues/57) | 12 | A failed solve throws, so a fit needs a per-row `tryCatch` | Wants an opt-in per-row status and a condition class, not a silent NA (#39) |
+| [#58](https://github.com/traitecoevo/phylloptim/issues/58) | 15 | A consumer cannot tell when the model's behaviour changed | Results moved three times on `0.1.0`; bump the version, and consider a fingerprint |
 
 Not filed as issues, and small enough to stay here: the **`Control` struct** and the
 **constants that are really parameters** (item 10b); the **longer, drier SCM run**
@@ -122,6 +127,13 @@ repo**, so reproduce it before relying on it.
 which is where the mistake was made before: using the root parameters for the stem
 cost carried λ ∝ ψ^3.02 into a manuscript draft where it should have been ψ^0.64.
 
+**A reference implementation exists, and it is the useful find here.** Sabot et
+al.'s `TractLSM` implements Medlyn, Tuzet, WUE_LWP, CGain, CMax, LeastCost, CAP, MES,
+SOX, ProfitMax and ProfitMax2 in one place — essentially this item's whole family,
+against which our λ(state) formulations can be checked rather than merely derived.
+That is a stronger check than #40's `plantecophys` comparison, which reaches only the
+Medlyn path, and it makes "apples-to-apples by construction" testable.
+
 ## #4 — trait gradients: what is left
 
 Stage 1 landed in [#42](https://github.com/traitecoevo/phylloptim/pull/42) and stage
@@ -133,6 +145,12 @@ carries the R layer's remaining speed case, and #39 re-sized it: with `leaf_solv
 fixed, a gradient's ~10 R calls per parameter are what is left of the boundary cost.
 `Leaf::operating_point_values()` is the pattern to copy — one call returning a flat
 vector.
+
+⚠️ **Stage 2 is also what an HMC user needs, which makes it more than a speed fix.**
+Stan cannot evaluate a likelihood that calls compiled C++ inside this package, so the
+calibration study reached for a derivative-free sampler instead. A gradient composed
+in C++ and reachable without the R boundary is the enabler for that, and nothing
+else on this list is.
 
 **`stem_c`'s rebuild.** 11f removed the vulnerability-spline rebuild for `stem_b` by
 homogeneity; `stem_c` has no such identity, because it changes the curve's shape
@@ -151,6 +169,14 @@ an accuracy argument rather than a speed one.
 splines, seven read sites and a per-layer cache. Deferred rather than attempted:
 nothing measures or fits the root vulnerability curve, since P50 and P88 are stem
 measurements.
+
+⚠️ **And the customer is further off than "waits for a fit that frees the curve"
+suggests.** The calibration study pins `stem_b` and `stem_c` analytically from
+measured P50 and P88 in *every* fit, and derives `psi_crit` from them — so 11f's
+`stem_b` machinery has never been exercised by it, and neither has #38's domain
+bound. Freeing even the cost *exponent* per species, a much smaller ask than freeing
+the curve, gave no convergence. Treat `stem_c`'s rebuild as unmotivated until
+something actually frees a vulnerability curve.
 
 ## 12. Demonstrate calibration — then consider inversion — #6
 
@@ -182,6 +208,36 @@ FD-only calibration is worthless because the headline result *is* the AD-versus-
 comparison — assumed FD does not work, which 11a fixed. So this item **specifies**
 what is left of #4 rather than waiting on it.
 
+**What the calibration study has established about this item.** It is the customer,
+it is private, and only its package-facing findings are recorded here.
+
+- **No model derivative has been used anywhere in it.** Its fits used finite
+  differences only, and in the 40-parameter hierarchical fit **~98% of the work was
+  computing them**. So the comparison has not been made *on real data* — 12a made it
+  on simulated data, and AD lost there — and the note in that project saying the
+  package "does not expose trait derivatives" predates #42 and #46. ⚠️ **Re-pointing
+  it at `leaf_gradient()` is the first action for this item**, not writing another
+  fit. Expect 12a's result to carry: its species have ~81 rows each, so a
+  per-observation gradient pays the same #52 construction and the same R boundary.
+- ⚠️ **`optim` under-reports the cost of finite differences, and the error is a factor
+  of the dimension.** `counts["function"]` excludes the calls made computing
+  numerical gradients. The honest total is function calls plus one gradient's worth
+  per gradient evaluation — which is exactly the quantity AD removes, so getting it
+  right *is* the comparison. This is 11e's "read this before quoting a speedup"
+  arrived at independently, from the other side.
+- ⚠️ **Two package gaps have to close before a real-data fit means anything.** `R_d`
+  is not settable from R (#41) and there is no leaf energy balance (#7). Both act
+  directly on A, so a fit absorbs the mismatch into `cost_scale_TF24` — the one
+  parameter such a study is usually about. `a`, `curv_fact_elec_trans` and
+  `curv_fact_colim` are settable but easy to leave at defaults, with the same effect.
+- ⚠️ **The deliverable cannot be a self-contained vignette over real data.** This
+  package ships no empirical data — its only tabular file is the golden-file
+  regression fixture, which is model output — and CRAN wants vignettes offline, fast
+  and dependent only on CRAN packages. So the vignette either synthesises its data,
+  or vendors a small extract whose licence permits it, or the real-data study stays
+  outside the package and the vignette demonstrates the machinery on simulated data.
+  Decide that before writing it; it changes what the vignette can claim.
+
 ⚠️ **When the wall-clock comparison is made, there is one specific way for it to come
 out wrong.** `leaf_gradient()` constructs a `Leaf` per call, at **204 µs — 73
 solves** (11e). A fit that calls it once per observation therefore measures object
@@ -192,12 +248,93 @@ pays per call that the FD arm does not. The solve-count half needs no such care:
 central differences cost 2N solves per gradient, so the ratio is bounded below by the
 parameter count.
 
+### 12a. The synthetic vignette — DONE, and AD lost
+
+`vignettes/fitting.Rmd` ([#53](https://github.com/traitecoevo/phylloptim/pull/53))
+fits `vcmax_25`, `jmax_25` and `cost_scale_TF24` to `A`, `gc` and `psi_stem` over 72
+operating points (12 ψ_soil × 3 PPFD × 2 VPD) of noisy simulated data, recovering
+them to −3.5% / +7.5% / −1.2%. Same optimiser, same start, same optimum (201.13):
+
+| | objective evals | honest total | per gradient |
+|---|---:|---:|---:|
+| Nelder-Mead | 106 | 106 | — |
+| L-BFGS-B, numerical | 18 fn + 18 gr | **126** | 6.9 ms |
+| L-BFGS-B, **exact** | 19 fn + 19 gr | **19** | **33.5 ms** |
+
+`honest total` adds back the `2 × npar` central differences `optim` does not count.
+**The exact gradient cuts the solve count ~5× and is 4.9× slower in wall clock**, and
+per the instruction above that is what the vignette says.
+
+⚠️ **This supersedes the construction warning above.** That confound is real and is
+only a **third** of the gap, so it changes the conclusion rather than explaining it
+away: warmed and interleaved, 32.8 ms for the exact arm of which 11.0 ms is the 72
+constructions. The other two thirds is the **R call boundary** — the composite trades
+one solve for several much cheaper evaluations, each an R call costing more than the
+C++ work it wraps. Fixing construction alone would not make the exact arm faster;
+only stage 2 (composition in C++) reaches the rest.
+
+⚠️ **And "reuse one object across observations" cannot be done today**, which is why
+that advice did not save the measurement: `leaf_gradient()` constructs internally and
+takes no model argument. That is **#52**.
+
+Two things the vignette records because both cost time here:
+
+- **Plain `method = "BFGS"` overflows on its first step.** The objective is scaled by
+  `1/sigma²` with `sigma_gc = 0.0015`, so the gradient is ~2e4 in log units; from an
+  identity Hessian the first trial point is `theta − g` and `exp()` of that is `Inf`,
+  so the objective throws before the line search can shrink it. Bound the parameters.
+- **A third of an ordinary drought design is pinned** — 48 interior / 24 pinned of 72
+  — and the fit still recovers the traits, because the active-set guard differences
+  the solve there. The fallback is a normal path, not an exotic one.
+
+⚠️ **Warm up before timing anything in this layer.** An unwarmed `leaf_model()` reads
+~3× its steady-state cost. #52 first claimed 89% off exactly that error, and the
+wrong number pointed at the wrong fix.
+
+**Two companion vignettes landed with it.** `cpp-interface.Rmd` documents the
+linkable half and states that trait gradients are **R-only** — a C++ consumer gets
+`set_traits`, `perturb_stem_b`, `dprofit_droot_collar_psi(psi, &feasible)` and
+`evaluate_root_collar_psi`, but must compose the theorem and reimplement the
+active-set guard itself. `phylloptim.Rmd` gains "Choosing which gradients to
+compute": `pars` selects, omitting it computes all sixteen, and all-16 costs ~4.6×
+one. ⚠️ The four *outputs* are not selectable — `pars` chooses rows, never columns.
+
 **Then the bigger question: inversion.** `plantecophys::fitaci` inverts A-Ci curves
 for Vcmax, Jmax and Rd; this package inverts nothing. Inverting *hydraulic* traits —
 P50-type vulnerability parameters, root conductances — from gas exchange plus water
 potential would be a genuinely new capability rather than a reimplementation, and no
 R package does it. ⚠️ Scope it properly: it is a project, not a task, and it needs
 someone to decide what data it is meant to consume.
+
+## What a calibration can and cannot identify
+
+Three structural results from the calibration study. They are properties of **the
+model's own parameterisation**, not of any dataset, which is why they belong here:
+anything that fits this model will meet them, and two of them suggest what the
+package should offer.
+
+- **`kmax` and the soil-to-collar series resistance are not separately identifiable
+  from leaf water potential.** Only their total is. On the single-potential path that
+  means the split between plant and soil share is whatever the prior says, and it
+  should never be reported as an estimate. ⚠️ This bears on #33: if the leaf takes
+  resistances rather than root carbon, the interface should make the identified
+  quantity the natural thing to supply.
+- **`cost_scale_TF24` and `beta2` are confounded by the algebra of the cost itself.**
+  The TF24 cost is `cost_scale · (1 − k)^beta2`, so at fixed cost
+  `d(log cost_scale)/d(log beta2) = −beta2 · <log(1 − k)>`. The ridge is therefore
+  predictable rather than empirical, and **the identified coordinate is the cost at a
+  reference loss of conductivity**, not either parameter alone. Worth documenting,
+  and arguably worth offering as the parameterisation — these are two of the four
+  parameters whose gradients are 100% argmax-mediated (11c), so they are also the two
+  a gradient-based fit will struggle with.
+- ⚠️ **Reparameterising cannot move a point estimate.** A MAP is invariant to it. It
+  buys interpretability and sampling geometry, and nothing else — recorded because it
+  was tried as a fix for a misfit and could not have worked.
+
+**And the default `cost_scale_TF24` of 7.5 is not a general value** — it was
+calibrated for *Eucalyptus saligna* inside plant. It should be documented as a
+species-specific default, since it is the parameter a calibration is most likely to
+be estimating.
 
 ## 13. Energy balance: the full cut — #7, #28
 
@@ -656,6 +793,13 @@ leaf-temperature clamp is **not** on that list; see 6d.
   `plantecophys`'s `EaV`, `EdVC`, `delsC`, `EaJ`, `EdVJ` and `delsJ`, **whose
   defaults plantecophys changed at v1.4 after a literature review** — and thermal
   acclimation (TF24t) modifies them.
+- ⚠️ **`a`, `curv_fact_elec_trans` and `curv_fact_colim` are already settable, and
+  that is the problem** — they sit at *E. saligna* defaults, they act directly on A,
+  and a calibration that leaves them there absorbs the mismatch into whichever
+  parameter it is fitting. Being settable is not the same as being plumbed through
+  the surface a fit uses; `leaf_traits()` takes them, so this is a documentation and
+  worked-example gap rather than a missing feature. `R_d` is the same family and is
+  worse — see #41, where it is not settable from R at all.
 - The Penman-Monteith block: `longwave_net_offset = -40` is an explicit placeholder
   (plant #581, and item 13); `sw_abs_per_par = 2.0` folds in an absorptance that
   `tealeaves` exposes as `abs_s`/`abs_l` and `plantecophys` as `LeafAbs`;

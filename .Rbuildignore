@@ -4,6 +4,11 @@
 # R CMD build with "invalid regular expression", which is how this note came to
 # be written.
 
+# R excludes a .git DIRECTORY automatically, which covers a normal clone. In a
+# git worktree .git is a 79-byte FILE pointing at the real gitdir, the automatic
+# exclusion does not match it, and it ships silently -- one NOTE, and a tarball
+# carrying a path into someone's filesystem. Costs nothing in a normal clone.
+^\.git$
 ^\.github$
 ^\.claude$
 ^\.vscode$

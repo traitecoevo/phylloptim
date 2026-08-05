@@ -1,0 +1,194 @@
+---
+title: "Using phylloptim from C++"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Using phylloptim from C++}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+The model is a set of self-contained C++ headers. **They use no R and no Rcpp**,
+depend only on Boost and the header-only parts of `odelia`, and compile and run
+with no R installed at all. That is a guarantee rather than an accident, and
+`.github/workflows/cpp-tests.yml` enforces it by building the whole C++ suite on
+runners with no R on them.
+
+This vignette contains no runnable R. It documents the other half of the package,
+which R users never see and `plant` uses exclusively.
+
+## The two umbrella headers, and why the extension matters
+
+```
+#include <phylloptim.hpp>    // the model. Plain C++, no R, no Rcpp.
+#include <phylloptim.h>      // the R binding layer. Pulls in Rcpp.
+```
+
+⚠️ **If you are embedding the model, you want `.hpp`.** The `.h` file exists
+because `RcppR6` hardwires both that name and `<phylloptim/RcppR6_pre.hpp>`, so
+the R-facing umbrella had to take it and the model's had to move. A file
+extension carries the whole one-way dependency rule, which is more weight than an
+extension should bear — hence the banner at the top of each.
+
+The rule: `src/` and `R/` include *downward* into `inst/include/`, never the
+reverse. Nothing reachable from `<phylloptim.hpp>` includes Rcpp. The CMake
+install rules encode the same split, shipping `*.hpp` and **excluding**
+`phylloptim.h` and the generated `RcppR6_*.hpp`, so a non-R consumer is never
+handed a header they cannot compile.
+
+## Building
+
+Two dependencies, both header-only: Boost (a root finder) and `odelia` (the
+spline interpolator and vendored XAD). `odelia` is distributed as an R package
+but the headers used here are plain C++, so a git checkout is enough.
+
+```sh
+git clone https://github.com/traitecoevo/odelia
+cmake -B build -DPHYLLOPTIM_ODELIA_INCLUDE_DIR=$PWD/odelia/inst/include
+cmake --build build
+ctest --test-dir build          # the C++ suite, including the golden file
+cmake --install build --prefix /usr/local
+```
+
+```cmake
+find_package(phylloptim REQUIRED)
+target_link_libraries(my_program PRIVATE phylloptim::phylloptim)
+```
+
+An INTERFACE target: headers, an include path and `cxx_std_20`, nothing to link.
+`add_subdirectory()` works too if you would rather vendor it.
+
+⚠️ **Build with optimisation on if you intend to compare against the golden
+file.** Measured on macOS/arm64, `-O1`, `-O2` and `-O3` all reproduce
+`tests/cpp/golden/operating_points.tsv` bit-for-bit and `-O0` does not, missing by
+about 13 ULP because it declines to contract `a*b + c` into an FMA. A debug build
+failing `test_golden` by ~1e-15 has found nothing.
+
+## A solve
+
+```cpp
+#include <phylloptim.hpp>
+#include <cstdio>
+
+int main() {
+  phylloptim::Leaf l;                    // default Eucalyptus saligna traits
+
+  std::vector<double> psi_soil{2.0};     // positive magnitudes, MPa
+  std::vector<double> soil_depth{1.0};   // m
+  std::vector<double> root_carbon{20.0}; // kg C per m2 LEAF -- intensive
+
+  l.set_physiology(root_carbon, /*PPFD*/ 900, psi_soil, soil_depth,
+                   /*kmax*/ 3.14e-5, /*atm_vpd*/ 2.0, /*ca*/ 40.0,
+                   /*leaf_temp*/ 25.0, /*atm_o2_kpa*/ 21.0,
+                   /*atm_kpa*/ 101.3);
+  l.find_root_collar_psi();
+
+  std::printf("A = %.6f, gc = %.6f, psi_stem = %.6f\n",
+              l.assim_colimited_, l.stom_cond_CO2_, l.opt_psi_stem_);
+  return 0;
+}
+```
+
+Every water potential is a **positive magnitude in MPa**, and that is asserted
+rather than documented — a negative `psi_soil` is an error, not a sign convention
+the model quietly accepts.
+
+## ⚠️ Trait gradients are not available from C++ yet
+
+This is the honest state of it, and the most important thing in this vignette.
+
+`leaf_gradient()` composes the implicit function theorem **in the R layer**
+(`R/gradient.R`). The C++ side supplies the ingredients but not the composition,
+so a C++ consumer cannot call one function and get `dA/dθ`.
+
+What C++ *does* give you:
+
+| piece | what it is |
+|---|---|
+| `set_traits(...)` | replace all fifteen traits, refreshing splines and the temperature cache |
+| `perturb_stem_b(b)` | move `stem_b` by rescaling the curve instead of rebuilding it |
+| `dprofit_droot_collar_psi(psi, &feasible)` | dprofit/dψ at a given collar potential |
+| `evaluate_root_collar_psi(psi)` | solve the inner problem at a fixed collar |
+
+⚠️ **Pass the `feasible` flag.** `dprofit_droot_collar_psi` returns `0.0` on its
+shut-down and reversed-gradient exits, and a bare zero is indistinguishable from a
+stationary point — a root-find looking for `dprofit == 0` would converge onto a
+shut-down state and report it as the optimum. The optional `bool*` second
+argument is how the two are told apart, and a composite that ignores it inherits
+the bug.
+
+Composing them is the work `R/gradient.R` does: perturb a trait, evaluate
+`dprofit` at the **unperturbed** optimum to get the mixed partial `M`, difference
+`dprofit` in ψ to get the curvature `H`, then `dψ*/dθ = −M/H`, and finally chain
+that through the direct effect on the output.
+
+`tests/cpp/bench_gradient.cpp` does exactly this and is compiled by CI, so it is
+a working reference that cannot rot:
+
+```cpp
+// tests/cpp/bench_gradient.cpp -- the composite, hand-rolled
+for (int sign = -1; sign <= 1; sign += 2) {
+  Traits t = kBase;
+  t.v[idx] = perturbed(kBase, idx, sign, r);
+  apply_traits(l, t);
+  set_drivers(l);
+  // The mixed partial, and then the direct term at the same fixed collar.
+  sink += l.dprofit_droot_collar_psi(psi_star);
+  sink += l.evaluate_root_collar_psi(psi_star);
+  sink += l.assim_colimited_;
+}
+```
+
+⚠️ **And the active-set guard is R-only too.** The derivation assumes the optimum
+is interior; where it is pinned against the feasible boundary the formula is wrong
+by orders of magnitude and fails silently. `leaf_gradient()` tests that at every
+point and falls back to differencing. A hand-rolled C++ composite **inherits none
+of that**, so it must implement the same test — the implied Newton step
+`|dprofit(ψ*) / H|`, which is a distance in MPa and needs no scale of its own —
+or be confined to operating points known to be interior.
+
+Moving the composition into C++ is stage 2 of PLAN item 11. It would give C++
+consumers a first-class gradient and remove the R call overhead that currently
+makes the composite 6% *slower* than a finite difference — see below.
+
+## What is fast, and what is not
+
+Measured per parameter at one operating point, both arms in one tree, interleaved:
+
+| route | µs per parameter |
+|---|---:|
+| central FD on the solve, fresh `Leaf` per perturbation | 343 |
+| central FD on the solve, `set_traits` reuse | 84 |
+| the IFT composite, `set_traits` reuse | 89 |
+
+⚠️ **The composite is 6% slower than the finite difference it was built to
+replace**, and the 4× that is real comes from **object reuse, not from the
+theorem** — which accrues to the finite difference equally. The composite does
+replace a 2.78 µs solve with a 0.26 µs gradient evaluation exactly as projected;
+it just costs one extra R call per side to do it, and in the R layer a call costs
+~1.8 µs against the 0.26 µs of C++ work it wraps.
+
+Of the 84 µs per parameter, **only ~6 µs is C++**. So a C++ consumer composing the
+theorem directly avoids the boundary that makes the R version slow, and is where
+the IFT's advantage first becomes visible at all.
+
+**Constructing a `Leaf` from R costs ~204 µs — 73 solves** — of which only ~32 µs
+is the two vulnerability splines; the rest is R-side object construction. From
+C++ that cost is the splines alone. Reuse the object either way.
+
+## The golden file is the contract
+
+`tests/cpp/golden/operating_points.tsv` records 288 operating points at full
+precision and is compared **bit-exactly**. It is what makes a large refactor of
+this code checkable rather than hopeful, and any change that moves it is expected
+to say what moved and by how much.
+
+It is bit-exact on the platform that generated it (macOS/arm64) and compared with
+per-field tolerances elsewhere, because libm's `exp`/`pow` are not
+bit-reproducible across platforms. The fields split into two classes three orders
+apart: `profit` is the maximum itself and well conditioned; everything else is
+evaluated at the *argmax* of a flat maximum and so sqrt-amplified. **If you need a
+portable check of the solve, check `profit`.**
