@@ -88,6 +88,32 @@ green local run and three red CI jobs. That is exactly how #25 first failed CI, 
 make -C tests/cpp && make -C tests/cpp bench
 ```
 
+⚠️ **And there is a third C++ program CI compiles that is not in this repo at all.**
+`cpp-tests.yml`'s "Consume the installed package" step writes a `consumer/main.cpp`
+inline, in a heredoc, and builds it against the *installed* package through
+`find_package`. It calls `set_physiology`, so **any signature change breaks it, and
+neither `make` nor `cmake` locally covers it.** #33 hit this: 359 checks passing, a
+bit-identical golden file, `ctest` 2/2, and three red jobs on
+`cannot convert '<brace-enclosed initializer list>' to 'const RootNetwork&'`.
+
+Reproduce it locally before pushing an interface change — extract the two heredocs
+from the workflow rather than retyping them, or the local copy drifts from the one
+CI actually builds:
+
+```sh
+cmake -B /tmp/bc -DPHYLLOPTIM_ODELIA_INCLUDE_DIR=<odelia>/inst/include
+cmake --build /tmp/bc -j3 && cmake --install /tmp/bc --prefix /tmp/cmp
+# then write consumer/{CMakeLists.txt,main.cpp} from the workflow and:
+cmake -B b -DCMAKE_PREFIX_PATH=/tmp/cmp \
+  -DPHYLLOPTIM_ODELIA_INCLUDE_DIR=<odelia>/inst/include \
+  -DPHYLLOPTIM_BOOST_INCLUDE_DIR=<BH>/include
+cmake --build b && ./b/consumer
+```
+
+The two `-D` include paths are needed **again** at the consumer step:
+`phylloptimConfig.cmake` re-requires them and fails with "phylloptim needs odelia's
+headers", which reads like a broken install and is not.
+
 `bench` reports min-of-N over the golden grid. Use `reps=2000` (the default)
 before believing a small difference: reproducibility is ±0.01 µs there but ±0.5 µs
 at `reps=40`, which is wide enough to invent or hide a few-percent effect.
