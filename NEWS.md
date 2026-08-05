@@ -1,5 +1,43 @@
 # phylloptim 0.2.0
 
+## `leaf_gradient()` can reuse a leaf, which is 38% of a call
+
+Closes #52. `leaf_gradient()` built its own `Leaf` every call and offered no way to
+pass one in, and construction is **~150 us, half of a one-parameter gradient** -- the
+largest single term on the R surface, paid once per observation by a fit that
+differentiates per observation. `leaf_gradient(x = l, traits = tr, ...)` reuses one. Measured over 24 gradients,
+per observation: **511 -> 409 us at four fitted parameters (-20%)** and
+316 -> 200 us at one (-37%).
+
+⚠️ **The four-parameter figure is the one a calibration gets, and it is the smaller
+one.** Construction is a fixed cost per call while the differentiated work is linear
+in `pars`, so the saving falls as `pars` grows. Quoting the one-parameter number
+overstates what a fit sees.
+
+⚠️ **This does not make the exact gradient the faster arm**, and the issue was right
+to say so before the work started. `vignette("fitting")` measures it at ~4.8x the wall
+clock of differencing the objective while using ~5x fewer solves; recovering a third
+leaves it ~3x. The rest is the R call boundary, which only composition in C++ reaches
+(PLAN item 11 stage 2).
+
+Three things about the argument:
+
+* **`x` is a vessel, not the point.** `traits` still says where the gradient is taken
+  and is applied to `x` rather than read from it -- a `Leaf` does not expose its
+  traits. So `traits` is **required** with `x`: defaulting it would differentiate at
+  the package defaults on somebody else's leaf and return a plausible answer for a
+  point nobody asked about.
+* **`control` and `supply` are refused alongside `x`**, since both were fixed when it
+  was built and accepting them invites a silent disagreement. The supply path is read
+  off the object, so `resistance` is differentiable exactly when `x` is on the
+  single-potential path.
+* **`x` comes back solved at the base point**, not at the last perturbation, restored
+  on the way out including on an error -- hazard 8. That costs one re-trait and one
+  solve, ~18 us against the ~150 saved.
+
+`tests/testthat/test-cost.R` asserts the reuse path constructs **zero** leaves and the
+default path exactly one per call, so the argument cannot quietly become decorative.
+
 ## `series_resistance()` no longer pays the 58 us R-boundary cost
 
 Bug fix on the entry above. `series_resistance()` built its `RootNetwork` through the

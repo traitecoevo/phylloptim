@@ -507,3 +507,98 @@ test_that("the gradient is reported for every output the fit needs", {
   expect_gt(g$gradient["vcmax_25", "gc"], 0)
   expect_gt(g$gradient["vcmax_25", "psi_stem"], 0)
 })
+
+# ---------------------------------------------------------------------------
+# Reusing a Leaf across gradients (#52)
+# ---------------------------------------------------------------------------
+
+test_that("leaf_gradient(x =) matches building a leaf per call", {
+  # The whole claim: reuse is a pure cost saving. Bit-identical, not merely close --
+  # the setter applies the same traits and drivers either way, so anything else means
+  # the reused leaf carried state into the answer.
+  # ⚠️ stem_b is raised, not lowered. #38: the vulnerability spline is built over
+  # [0, b*log(100)^(1/c)] and never consults psi_crit, so shrinking stem_b below
+  # ~3.4 at the default psi_crit = 5.87 puts the solve outside its own domain and it
+  # dies naming neither. stem_b = 3.1 does exactly that; 4.2 gives a domain of 7.4.
+  tr <- leaf_traits(vcmax_25 = 105, stem_b = 4.2)
+  args <- list(psi_soil = 2.0, PPFD = 900, atm_vpd = 1.5, traits = tr,
+               pars = c("vcmax_25", "stem_b", "cost_scale_TF24"))
+  fresh <- do.call(leaf_gradient, args)
+
+  l <- leaf_model(traits = tr)
+  reused <- do.call(leaf_gradient, c(args, list(x = l)))
+  expect_identical(reused$gradient, fresh$gradient)
+  expect_identical(reused$value, fresh$value)
+  expect_identical(reused$status, fresh$status)
+  expect_identical(reused$method, fresh$method)
+  expect_identical(reused$H, fresh$H)
+
+  # And again on the SAME object, which is the point of it: a second call must not
+  # inherit the first call's last perturbation.
+  again <- do.call(leaf_gradient, c(args, list(x = l)))
+  expect_identical(again$gradient, fresh$gradient)
+})
+
+test_that("a reused leaf is differentiated at `traits`, not at its own state", {
+  # `x` is a vessel. A leaf built at OTHER traits must give the same answer as a
+  # fresh one, because the setter applies `traits` before anything is read. If it
+  # did not, `value` and `psi_star` -- and so the whole composite -- would describe
+  # the wrong point, plausibly and with no symptom. This is the failure mode that
+  # made seating the leaf with reset() rather than set_drivers() load-bearing.
+  tr <- leaf_traits(vcmax_25 = 105, stem_b = 4.2)
+  args <- list(psi_soil = 2.0, PPFD = 900, traits = tr, pars = "vcmax_25")
+  fresh <- do.call(leaf_gradient, args)
+
+  # Deliberately different, and deliberately still inside the #38 domain -- the
+  # vessel's traits are overwritten before any solve, but leaf_model() does build
+  # its splines, and an invalid vessel would confuse the diagnosis if this failed.
+  wrong <- leaf_model(traits = leaf_traits(vcmax_25 = 60, stem_b = 4.6))
+  reused <- do.call(leaf_gradient, c(args, list(x = wrong)))
+  expect_identical(reused$gradient, fresh$gradient)
+  expect_identical(reused$value, fresh$value)
+})
+
+test_that("leaf_gradient(x =) leaves the caller's leaf solved at the base point", {
+  # hazard 8: an output no path rewrites reads as the previous caller's. The setter
+  # leaves the leaf at the last perturbation, so this function restores it.
+  tr <- leaf_traits()
+  l <- leaf_model(traits = tr)
+  set_drivers(l, psi_soil = 2.0, PPFD = 900)
+  l$find_root_collar_psi()
+  before <- operating_point(l)
+
+  leaf_gradient(psi_soil = 2.0, PPFD = 900, x = l, traits = tr, pars = "vcmax_25")
+  expect_identical(operating_point(l), before)
+
+  # Restored on an ERROR path too -- there are several stop()s downstream of the
+  # first perturbation, and a half-perturbed leaf handed back would be worse than
+  # the error.
+  expect_error(
+    leaf_gradient(psi_soil = 2.0, PPFD = 900, x = l, traits = tr,
+                  pars = "not_a_parameter"),
+    "cannot differentiate")
+  expect_identical(operating_point(l), before)
+})
+
+test_that("leaf_gradient() refuses the combinations that would disagree", {
+  tr <- leaf_traits()
+  l <- leaf_model(traits = tr)
+  expect_error(leaf_gradient(psi_soil = 2, x = l), "`traits` must be given with")
+  expect_error(leaf_gradient(psi_soil = 2, x = l, traits = tr,
+                             control = leaf_control()), "`control` comes from")
+  expect_error(leaf_gradient(psi_soil = 2, x = l, traits = tr,
+                             supply = leaf_supply_multilayer()),
+               "`supply` comes from")
+  expect_error(leaf_gradient(psi_soil = 2, x = leaf_traits(), traits = tr),
+               "must be a Leaf")
+
+  # The supply path is read off the object, so `resistance` is differentiable when
+  # `x` is on the single-potential path and not when it is not -- without the caller
+  # naming the path twice.
+  s <- leaf_model(supply = leaf_supply_single())
+  g <- leaf_gradient(psi_soil = 1.5, x = s, traits = tr,
+                     root_network = series_resistance(1e3), pars = "resistance")
+  expect_true(is.finite(g$gradient["resistance", "A"]))
+  expect_error(leaf_gradient(psi_soil = 2, x = l, traits = tr, pars = "resistance"),
+               "single-potential path only")
+})
