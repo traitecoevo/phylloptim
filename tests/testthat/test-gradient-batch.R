@@ -412,54 +412,60 @@ test_that("the result is shaped and named for a caller applying a Jacobian", {
   expect_identical(g$gradient[, "vcmax_25", ], rev_g$gradient[, "vcmax_25", ])
 })
 
-test_that("the port reproduces #72: `pars` order moves the stem_b gradient", {
-  # ⚠️ THIS PINS A KNOWN DEFECT, and pinning it is deliberate. `pars` order
-  # should not matter, and for `stem_b` it does -- by up to 3.4e-5 relative,
-  # which is four orders above the ~1e-9 `leaf_gradient()` documents as
-  # achievable. The cause is in R and predates this port: the fast path calls
-  # `perturb_stem_b()`, which rescales the spline and touches nothing else, while
-  # `.gradient_ift()` only restores the base state AFTER the whole parameter
-  # loop -- so a `stem_b` that is not first is differentiated at a point
-  # displaced by one step in whichever parameter preceded it. traitecoevo/phylloptim#72
-  # has the per-predecessor table and the fix.
+test_that("`pars` order does not change any gradient (#72)", {
+  # ⚠️ THE REGRESSION GUARD FOR #72, AND IT IS THE PRIMARY ONE -- not the golden
+  # file. The defect was worth up to 3.4e-5 relative, and the golden file is
+  # compared with a 1e-3 tolerance off macOS/arm64, so on Linux it could not
+  # catch a recurrence. This test compares two runs IN THE SAME PROCESS, so it is
+  # exact everywhere and needs no tolerance at all.
   #
-  # It is NOT fixed here, because this PR's acceptance test is that the C++
-  # composite reproduces R bit-for-bit. Fixing both implementations at once would
-  # leave that test passing while no longer able to tell a faithful transcription
-  # from the same mistake made twice, which is the trap #70 hit inside R alone.
-  # So the port reproduces it exactly, that fidelity is what is asserted here,
-  # and the fix moves both routes with its own blast radius on
-  # gradient_golden.tsv.
+  # What went wrong, because the shape of it is what this asserts: the `stem_b`
+  # shortcut calls `perturb_stem_b()`, which rescales the spline and touches
+  # nothing else, while the loops only restore base AFTER the whole parameter
+  # loop. So a `stem_b` that was not first was differentiated at a point
+  # displaced by one step in whichever parameter preceded it.
+  #
+  # ⚠️ Asserted as the GENERAL invariant -- order changes nothing, for any
+  # parameter -- rather than as "stem_b is now reseated". `root_b` obeys the same
+  # homogeneity identity and would get the same shortcut, and a stem_b-shaped
+  # test would silently stop covering the case it was written for.
   b <- leaf_batch(psi_soil = 1.5, PPFD = 900)
-  first <- leaf_gradient_batch(b, pars = c("stem_b", "cost_scale_TF24"))
-  after <- leaf_gradient_batch(b, pars = c("cost_scale_TF24", "stem_b"))
+  pars <- c("vcmax_25", "stem_c", "a", "stem_b", "cost_scale_TF24", "root_b")
 
-  # The defect is present...
-  expect_false(identical(first$gradient[1, "stem_b", "A"],
-                         after$gradient[1, "stem_b", "A"]))
-  # ...at the size #72 measured, so a fix or a regression both show up here
-  # rather than only in the golden file.
-  rel <- abs(after$gradient[1, "stem_b", "A"] -
-               first$gradient[1, "stem_b", "A"]) /
-    abs(first$gradient[1, "stem_b", "A"])
-  expect_gt(rel, 1e-7)
-  expect_lt(rel, 1e-4)
+  for (method in c("auto", "fd")) {
+    for (fast in c(TRUE, FALSE)) {
+      lab <- paste(method, "fast =", fast)
+      ref <- leaf_gradient_batch(b, pars = pars, method = method,
+                                 fast_stem_curve = fast)$gradient[1, , ]
+      # Reversed, and rotated, so the claim is not "one other ordering agrees".
+      for (perm in list(rev(pars), pars[c(4, 1, 6, 2, 5, 3)],
+                        c("stem_b", setdiff(pars, "stem_b")))) {
+        got <- leaf_gradient_batch(b, pars = perm, method = method,
+                                   fast_stem_curve = fast)$gradient[1, , ]
+        expect_identical(got[pars, ], ref[pars, ],
+                         label = paste(lab, paste(perm, collapse = ",")))
+      }
+    }
+  }
 
-  # ...and it is reproduced from R EXACTLY, which is the actual claim: the port
-  # carries the defect rather than a different one.
-  ref <- leaf_gradient(psi_soil = 1.5, PPFD = 900,
-                       pars = c("cost_scale_TF24", "stem_b"))
-  expect_identical(as.vector(after$gradient[1, , ]), as.vector(ref$gradient))
+  # ⚠️ And the predecessor that made the defect WORST, which is not the one you
+  # would pick by eye: `a` = 0.30 and `curv_fact_colim` = 0.99 take the absolute
+  # 1e-6 step floor rather than a relative step, and `stem_c`'s perturbation
+  # REBUILDS the very curve the `stem_b` shortcut then rescales. Each of the
+  # thirteen is checked as a predecessor rather than a sample of them.
+  solo <- leaf_gradient_batch(b, pars = "stem_b")$gradient[1, "stem_b", ]
+  for (p in setdiff(names(leaf_traits()), "stem_b")) {
+    got <- leaf_gradient_batch(b, pars = c(p, "stem_b"))$gradient[1, "stem_b", ]
+    expect_identical(got, solo, label = paste("after", p))
+  }
 
-  # `fast_stem_curve = FALSE` goes through the full setter on every side, which
-  # is what localises the cause -- and it is order-INdependent, on both sides of
-  # the boundary.
-  slow_first <- leaf_gradient_batch(b, pars = c("stem_b", "cost_scale_TF24"),
-                                    fast_stem_curve = FALSE)
-  slow_after <- leaf_gradient_batch(b, pars = c("cost_scale_TF24", "stem_b"),
-                                    fast_stem_curve = FALSE)
-  expect_identical(slow_first$gradient[1, "stem_b", ],
-                   slow_after$gradient[1, "stem_b", ])
+  # The R reference has the same fix, so the two implementations still agree --
+  # which is the point of fixing them together in one change rather than letting
+  # them drift.
+  r_ref <- leaf_gradient(psi_soil = 1.5, PPFD = 900,
+                         pars = c("cost_scale_TF24", "stem_b"))
+  batch <- leaf_gradient_batch(b, pars = c("cost_scale_TF24", "stem_b"))
+  expect_identical(as.vector(batch$gradient[1, , ]), as.vector(r_ref$gradient))
 })
 
 test_that("leaf_batch() recycles its drivers the way leaf_solve() does", {

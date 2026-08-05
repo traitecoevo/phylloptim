@@ -497,9 +497,10 @@ leaf_gradient <- function(psi_soil,
   }
 
   grad <- if (use_ift) {
-    .gradient_ift(l, reset, theta, pars, psi_star, H, dY_dpsi, step)
+    .gradient_ift(l, reset, theta, pars, psi_star, H, dY_dpsi, step,
+                  fast_stem_curve)
   } else {
-    .gradient_fd(l, reset, theta, pars, step)
+    .gradient_fd(l, reset, theta, pars, step, fast_stem_curve)
   }
 
   list(gradient = grad,
@@ -761,11 +762,57 @@ leaf_gradient <- function(psi_soil,
   max(abs(value), floor) * step
 }
 
+# Parameters whose setter takes a SHORTCUT that leaves the rest of the object
+# alone, and which therefore require the object to be at the base point before
+# they run. See `.gradient_reseat_base()`.
+.gradient_shortcut_pars <- function(fast_stem_curve) {
+  if (fast_stem_curve) "stem_b" else character(0)
+}
+
+# ⚠️ THE FIX FOR #72, AND THE INVARIANT IT RESTORES: every parameter's gradient
+# is taken from the BASE point.
+#
+# `perturb_stem_b()` rescales the stem vulnerability spline and touches nothing
+# else, which is sound only if everything else on the object is already at base.
+# The loops below restore base once at the END, not between parameters, because
+# every other parameter's setter goes through the full `set_traits()` +
+# `set_physiology()` path and restores it on the way. `stem_b` on the fast path
+# is the one that does not -- so a `stem_b` that is not the first entry of `pars`
+# was differentiated at a point displaced by one step in whichever parameter
+# preceded it. Measured up to **3.4e-5 relative**, four orders above the ~1e-9
+# this function documents as achievable, and on BOTH routes.
+#
+# Restoring base before the shortcut is the whole fix. It is cheap in the case
+# that matters, because `set_traits()` decides the two spline rebuilds by
+# comparing the pairs it was given: after a parameter that owns no vulnerability
+# curve nothing is rebuilt, so this costs one trait write and one driver write.
+# After `stem_c`/`root_b`/`root_c` it does rebuild -- but those are the
+# parameters whose own gradients cost a rebuild per side anyway.
+#
+# ⚠️ Not `stem_b`-specific by name at the call site, deliberately. `root_b` obeys
+# the same homogeneity identity and would get the same fast path, at which point
+# the condition has to be "this parameter takes a shortcut" rather than a name.
+.gradient_reseat_base <- function(reset, theta, pars, fast_stem_curve) {
+  shortcut <- pars %in% .gradient_shortcut_pars(fast_stem_curve)
+  at_base <- TRUE
+  function(k) {
+    if (shortcut[[k]] && !at_base) {
+      reset(theta)
+    }
+    at_base <<- FALSE
+    invisible(NULL)
+  }
+}
+
 # The implicit-function composite. Two perturbed evaluations per parameter,
 # neither of which re-solves the model: `dprofit` at the UNPERTURBED psi* gives
 # the mixed partial, and the outputs at that same psi* give the direct term.
-.gradient_ift <- function(l, reset, theta, pars, psi_star, H, dY_dpsi, step) {
-  out <- t(vapply(pars, function(p) {
+.gradient_ift <- function(l, reset, theta, pars, psi_star, H, dY_dpsi, step,
+                          fast_stem_curve = TRUE) {
+  seat <- .gradient_reseat_base(reset, theta, pars, fast_stem_curve)
+  out <- t(vapply(seq_along(pars), function(k) {
+    p <- pars[[k]]
+    seat(k)
     h <- .gradient_step(p, theta[[p]], step)
     side <- function(sign) {
       th <- theta
@@ -795,14 +842,18 @@ leaf_gradient <- function(psi_soil,
     g[.gradient_output_names]
   }, numeric(length(.gradient_output_names))))
   reset(theta)
+  rownames(out) <- pars
   out
 }
 
 # The fallback: a central difference of the whole solve. Correct at a pinned
 # optimum because it differences the constrained answer, which is exactly what the
 # composite cannot do.
-.gradient_fd <- function(l, reset, theta, pars, step) {
-  out <- t(vapply(pars, function(p) {
+.gradient_fd <- function(l, reset, theta, pars, step, fast_stem_curve = TRUE) {
+  seat <- .gradient_reseat_base(reset, theta, pars, fast_stem_curve)
+  out <- t(vapply(seq_along(pars), function(k) {
+    p <- pars[[k]]
+    seat(k)
     h <- .gradient_step(p, theta[[p]], step)
     side <- function(sign) {
       th <- theta
@@ -813,6 +864,7 @@ leaf_gradient <- function(psi_soil,
     }
     ((side(1) - side(-1)) / (2 * h))[.gradient_output_names]
   }, numeric(length(.gradient_output_names))))
+  rownames(out) <- pars
   reset(theta)
   out
 }

@@ -1,12 +1,12 @@
 case	status	method	par	A	gc	psi_stem	collar
 interior-1layer	interior	ift	vcmax_25	0x1.19f24c79f383p-6	0x1.3259b788b7cd8p-15	0x1.06a759124089ep-8	0x1.c9aa56f8160ap-10
-interior-1layer	interior	ift	stem_b	0x1.6c5b48ac3f1e1p+1	0x1.7ab19a16d6b9fp-7	0x1.d9c24575209f9p-1	0x1.1add81b78378fp-1
+interior-1layer	interior	ift	stem_b	0x1.6c5b48adf2fp+1	0x1.7ab19a189bb21p-7	0x1.d9c2457829579p-1	0x1.1add81b8d5d2fp-1
 interior-1layer	interior	ift	psi_crit	0x0p+0	0x0p+0	0x0p+0	0x0p+0
 interior-5layer	interior	ift	vcmax_25	0x1.562cd013972cdp-5	0x1.1f2719b2a9b2p-17	0x1.7b34095a49116p-12	0x1.d034f56d422fcp-13
-interior-5layer	interior	ift	stem_b	0x1.bf615f664b973p+0	0x1.40cec782b4191p-6	0x1.35865424426c3p-1	0x1.03506a0a50048p-1
+interior-5layer	interior	ift	stem_b	0x1.bf615f57bdaf1p+0	0x1.40cec78217423p-6	0x1.35865423734e6p-1	0x1.03506a09d13edp-1
 interior-5layer	interior	ift	psi_crit	0x0p+0	0x0p+0	0x0p+0	0x0p+0
 pinned-dry-3layer	pinned	fd	vcmax_25	0x1.d65f7a06148aap-7	0x0p+0	0x0p+0	0x0p+0
-pinned-dry-3layer	pinned	fd	stem_b	0x1.2ccb45183feafp+2	0x1.64b64bdad4946p-6	0x1.33ff011ff4998p-14	0x1.c3ef65a37fee1p-2
+pinned-dry-3layer	pinned	fd	stem_b	0x1.2ccb4ca42ff14p+2	0x1.64b64bdad4946p-6	0x1.33ff011ff4998p-14	0x1.c3ef65a37fee1p-2
 pinned-dry-3layer	pinned	fd	psi_crit	0x1.41dade66b0dcp+0	0x1.7db02a11ba0cbp-8	0x1.fff9995bb6188p-1	0x1.e3a34a2bcbb21p-4
 shutdown-1layer	no-gradient	fd	vcmax_25	-0x1.eb851eb7cb5p-7	0x0p+0	0x0p+0	0x0p+0
 shutdown-1layer	no-gradient	fd	stem_b	0x0p+0	0x0p+0	0x0p+0	0x0p+0

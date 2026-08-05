@@ -56,11 +56,35 @@ has the three things that made bit-for-bit possible, including that
 `a + b * c` written as one expression compiles to a fused multiply-add and disagrees
 with R's two roundings on 28% of random triples.
 
-**Found on the way: #72.** `leaf_gradient()`'s `stem_b` gradient is contaminated by
-whichever parameter precedes it in `pars`, by up to 3.4e-5 -- the fast path rescales
-the spline without restoring the other parameters, which are still one step away from
-base. It affects both routes and predates this change; the C++ port reproduces it
-exactly on purpose, so that the equality test above keeps its meaning. Not fixed here.
+## `pars` order no longer changes the `stem_b` gradient (#72)
+
+`leaf_gradient()`'s `stem_b` gradient was contaminated by whichever parameter preceded
+it in `pars`, by up to **3.4e-5 relative** -- four orders above the ~1e-9 the function
+documents as achievable, and on both routes. `perturb_stem_b()` rescales the
+vulnerability spline and touches nothing else, while the loops only restored the base
+point *after* the whole parameter loop, so a `stem_b` that was not first was
+differentiated one step away from base in the preceding parameter.
+
+Fixed by restoring the invariant rather than special-casing the name: **every
+parameter's gradient is taken from the base point**. Costs +0.15 us per observation
+(0.7%), because `set_traits()` decides its spline rebuilds by comparing the trait pairs
+it is given -- so after a parameter that owns no vulnerability curve nothing is
+rebuilt.
+
+⚠️ **Gradients move.** 9 of 60 recorded cells in `gradient_golden.tsv`, worst 3.8e-7 --
+much smaller than the defect was worth, because every recorded case put `vcmax_25`
+immediately before `stem_b` and that is a benign predecessor. `test-gradient.R`'s
+arbitrated references are unchanged, having been established with `stem_b` first. If
+you have fitted results that differentiated `stem_b` alongside `a`,
+`curv_fact_colim`, `root_b` or `stem_c`, they carried the larger error.
+
+The regression guard is a test comparing two `pars` orderings **in the same process**,
+not the golden file: the golden file is compared with a 1e-3 tolerance off macOS/arm64,
+so it could not have caught a 3.4e-5 recurrence on Linux.
+
+**Also found, and not fixed: [#74](https://github.com/traitecoevo/phylloptim/issues/74).**
+The `stem_b` shortcut is undone by a spline rebuild once per observation, so PLAN 11f's
+24.5x is **2.4x** through `leaf_gradient_batch()`. Say which figure you mean.
 
 ## The gradient's R glue is a third cheaper
 

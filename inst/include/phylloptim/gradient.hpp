@@ -290,6 +290,32 @@ inline void apply(Leaf& l, const double* theta, const Drivers& d, bool single,
 
 // --- the two routes ----------------------------------------------------------
 
+// ⚠️ THE INVARIANT BOTH LOOPS BELOW MAINTAIN, AND IT IS THE FIX FOR #72: every
+// parameter's gradient is taken from the BASE point.
+//
+// The loops restore base once at the END, not between parameters, because every
+// parameter's setter normally goes through the full `set_traits()` +
+// `set_physiology()` path and restores everything on the way. The `stem_b`
+// shortcut is the one that does not: `perturb_stem_b()` rescales the stem spline
+// and touches nothing else, which is sound only if the rest of the object is
+// already at base. So a `stem_b` that is not the FIRST entry of `pars` was
+// differentiated at a point displaced by one step in whichever parameter
+// preceded it -- up to 3.4e-5 relative, four orders above the ~1e-9 this is
+// supposed to deliver, on both routes.
+//
+// Cheap in the case that matters: `set_traits()` decides the two spline rebuilds
+// by comparing the pairs it is given, so after a parameter that owns no
+// vulnerability curve nothing is rebuilt and this costs one trait write plus one
+// driver write. After `stem_c`/`root_b`/`root_c` it does rebuild, and those are
+// the parameters whose own gradients cost a rebuild per side anyway.
+//
+// ⚠️ Written as "this parameter takes a shortcut", not as "this parameter is
+// stem_b". `root_b` obeys the same homogeneity identity and would get the same
+// treatment, at which point a name-based test would silently stop covering it.
+inline bool takes_shortcut(int par, const Settings& s) {
+  return s.fast_stem_curve && par == par_stem_b;
+}
+
 // The implicit-function composite. Two perturbed evaluations per parameter,
 // neither of which re-solves the model: `dprofit` at the UNPERTURBED psi* gives
 // the mixed partial, and the outputs at that same psi* give the direct term.
@@ -300,8 +326,13 @@ inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
   double th[n_pars];
   double up[1 + n_outputs];
   double dn[1 + n_outputs];
+  bool at_base = true;
   for (std::size_t k = 0; k < npars; ++k) {
     const int p = pars[k];
+    if (takes_shortcut(p, s) && !at_base) {
+      apply(l, theta, d, single, -1, s.fast_stem_curve);
+    }
+    at_base = false;
     const double h = step_for(p, theta[p], s.step);
     for (int side = 0; side < 2; ++side) {
       // Up first, then down: R evaluates `up <- side(1)` before `dn <- side(-1)`
@@ -345,8 +376,13 @@ inline void gradient_fd(Leaf& l, const double* theta, const Drivers& d,
   double th[n_pars];
   double up[n_outputs];
   double dn[n_outputs];
+  bool at_base = true;
   for (std::size_t k = 0; k < npars; ++k) {
     const int p = pars[k];
+    if (takes_shortcut(p, s) && !at_base) {
+      apply(l, theta, d, single, -1, s.fast_stem_curve);
+    }
+    at_base = false;
     const double h = step_for(p, theta[p], s.step);
     for (int side = 0; side < 2; ++side) {
       std::copy(theta, theta + n_pars, th);
