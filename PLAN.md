@@ -26,7 +26,7 @@ the user-visible history.
 |---|---|---|---|
 | [#3](https://github.com/traitecoevo/phylloptim/issues/3) | 7a | Make λ(state) pluggable | **unblocked** — #2 is done. ⚠️ Measure the dispatch separately: the cost core is fully inlined where the supply path was not, so 7b's "dispatch is free" does **not** transfer |
 | [#4](https://github.com/traitecoevo/phylloptim/issues/4) | 11f | Trait gradients — `stem_c`'s rebuild | Stages 1, 2 and 3 landed ([#42](https://github.com/traitecoevo/phylloptim/pull/42), #73, [#46](https://github.com/traitecoevo/phylloptim/pull/46)). ⚠️ Read 11e before quoting any speedup, and 11g for which side of the boundary a figure belongs to. `stem_c` is **unmotivated** until something frees a vulnerability curve |
-| [#72](https://github.com/traitecoevo/phylloptim/issues/72) | 11g | `pars` order contaminates the `stem_b` gradient, by up to 3.4e-5 | Found by stage 2's order test. Pre-dates it, affects **both** routes, and is faithfully reproduced by the C++ port on purpose — see 11g |
+| [#74](https://github.com/traitecoevo/phylloptim/issues/74) | 11f, 11g | The `stem_b` shortcut is undone by a rebuild once per observation | 11f's 24.5× is **2.4×** through `leaf_gradient_batch()`. Unmotivated until something frees a vulnerability curve; filed so the wrong figure is not quoted meanwhile |
 | [#6](https://github.com/traitecoevo/phylloptim/issues/6) | 12 | Real-data calibration, then inversion | **The one with the most downstream** — it specifies what is left of #4, and doing it found #38, #40, #41 and #52. ⚠️ The *synthetic* vignette is done ([#53](https://github.com/traitecoevo/phylloptim/pull/53)) and **AD lost**: read 12a before repeating the comparison |
 | [#52](https://github.com/traitecoevo/phylloptim/issues/52) | 12 | `leaf_gradient()` rebuilds a `Leaf` per call, with no way to pass one in | From #53. A third of a per-observation gradient's cost, and why item 12's "reuse one object" advice cannot be followed as written |
 | [#7](https://github.com/traitecoevo/phylloptim/issues/7) | 13 | Energy balance, in priority order | Leaf-to-air VPD is the cheap win and is **not wired in**; free convection is not worth it |
@@ -1275,23 +1275,48 @@ as **hex floats** (R's decimal parser is not correctly rounded; #13). Its values
 with 11c's independently arbitrated references, which is the check that the
 transcription is *right* and not merely self-consistent.
 
-### What the order test found — #72
+### What the order test found — #72, now fixed
 
-Asserting that `pars` order does not matter failed, and the cause is in R and predates
-this port. The `stem_b` fast path calls `perturb_stem_b()`, which rescales the spline
-and touches nothing else, while `.gradient_ift()` only restores the base state **after
-the whole parameter loop** — so a `stem_b` that is not first is differentiated at a
-point displaced by one step in whichever parameter preceded it. Up to **3.4e-5
-relative**, four orders above the ~1e-9 the function documents as achievable, worst
-after the traits whose step hits the absolute `1e-6` floor (`a`, `curv_fact_colim`) and
-after `stem_c`, whose perturbation rebuilds the curve the rescale is then applied to.
-Both routes have it; `fast_stem_curve = FALSE` does not, which localises it exactly.
+Asserting that `pars` order does not matter failed, and the cause was in R and
+predated the port. The `stem_b` shortcut calls `perturb_stem_b()`, which rescales the
+spline and touches nothing else, while the loops only restore base **after the whole
+parameter loop** — so a `stem_b` that was not first was differentiated at a point
+displaced by one step in whichever parameter preceded it. Up to **3.4e-5 relative**,
+four orders above the ~1e-9 the function documents as achievable, worst after the
+traits whose step hits the absolute `1e-6` floor (`a`, `curv_fact_colim`) and after
+`stem_c`, whose perturbation rebuilds the curve the rescale is then applied to. Both
+routes had it; `fast_stem_curve = FALSE` did not, which localised it exactly.
 
-⚠️ **Deliberately not fixed here.** Fixing both implementations in the change whose
-acceptance test is their equality would leave that test passing while no longer able to
-tell a faithful transcription from the same mistake made twice. The port reproduces it,
-`test-gradient-batch.R` pins that fidelity, and #72 has the fix and the
-per-predecessor table.
+⚠️ **It was deliberately NOT fixed in the same change as the port.** Fixing both
+implementations in the change whose acceptance test is their equality would have left
+that test passing while no longer able to tell a faithful transcription from the same
+mistake made twice. So the port reproduced it, and the fix landed separately.
+
+**The fix restores an invariant rather than special-casing a name: every parameter's
+gradient is taken from the base point.** Before a parameter whose setter takes a
+shortcut, base is reseated. Written as "this parameter takes a shortcut" rather than
+"this parameter is `stem_b`", because `root_b` obeys the same homogeneity identity and
+would get the same treatment.
+
+**Cost: +0.15 µs per observation, 0.7%**, because `set_traits()` decides its two
+rebuilds by comparing the pairs it is handed — so after a parameter that owns no
+vulnerability curve, nothing is rebuilt and the reseat is one trait write plus one
+driver write. After `stem_c`/`root_b`/`root_c` it does rebuild, and those are the
+parameters already paying a rebuild per side.
+
+**Blast radius: 9 of 60 `gradient_golden.tsv` cells, worst 3.8e-7.** ⚠️ That is far
+smaller than the 3.4e-5 the defect was worth, and the reason is worth recording: every
+golden case put `vcmax_25` immediately before `stem_b`, which is a *benign*
+predecessor (5.9e-10). **A recorded baseline only measures the configurations it
+records.** `test-gradient.R`'s arbitrated references were unaffected, since they were
+established with `stem_b` first.
+
+⚠️ **And the golden file could not have been the regression guard anyway.** It is
+compared with a 1e-3 tolerance off macOS/arm64 and the defect was 3.4e-5, so a
+recurrence would pass on Linux. The guard is a test that compares two orderings **in
+the same process**, which is exact everywhere and needs no tolerance — all thirteen
+traits as predecessors, four permutations, both routes, both `fast_stem_curve`
+settings.
 
 ### And what it unblocks
 
