@@ -205,6 +205,41 @@ byte-for-byte. If you add a header, you need do nothing. If you want a literal
 Doxygen command, write a `///` comment and the filter will leave it alone.
 Publishing is off until someone sets the repo variable `PUBLISH_DOCS=true`.
 
+## Cost: the one thing the golden file cannot see
+
+`tests/cpp/bench_solve.cpp` and `bench_gradient.cpp` cover the C++ side.
+**`tools/bench_user_cost.R` covers the R side** — one solve, N solves, and a
+gradient — and `tools/bench_history.sh` runs all of them against a list of commits.
+`tests/testthat/test-cost.R` is the guard, and `tools/cost-baseline.tsv` the recorded
+table. PLAN has the numbers.
+
+Three rules, each of which was learned by getting it wrong:
+
+1. **Never pin an absolute microsecond figure.** A bare `.Call` on this machine moved
+   0.69 → 1.10 µs between two runs an hour apart on the same build. Record cost ÷ a
+   trivial `.Call` in the SAME process; that ratio travels between machines and runs.
+2. **Guard by COUNTING, not by timing, wherever you can.** The regression that
+   motivated all this was a `.Call` appearing in a per-row path, and a count of
+   `.Call`s has no variance. `test-cost.R` swaps a namespace binding for a counting
+   one. The timing assertions there are a backstop for what counting cannot foresee,
+   are bounded at ~2× the measurement, and are `skip_on_ci()` because shared runners
+   are too noisy for even that.
+   ⚠️ **The two supply paths reach C++ through different symbols** — the multi-layer
+   default through `root_network_from_carbon()`, the single one through
+   `RootNetwork__ctor`. Counting the wrong one returns 0 forever and the test passes
+   while measuring nothing. That mistake is in this file's history.
+3. ⚠️ **Measure the entry point the USER calls.** #66 nearly doubled
+   `leaf_gradient()` (286× → 539× a `.Call`) while `set_drivers()` and `leaf_solve()`
+   were flat. Both of those were measured and pronounced "at parity"; the gradient
+   path was not in any harness, and a calibration uses the gradient path.
+
+⚠️ **`tools/bench_history.sh` refuses commits before #47**, and the reason is worth
+knowing before you write any harness that installs an old commit: they declare
+`Package: leaf`, install cleanly as `leaf`, and then `library(phylloptim)` silently
+falls back to the SITE build — so the row that comes out describes the current tree
+while looking like history. Two rows were produced that way before it was noticed.
+`bench_user_cost.R` now takes `--expect-version` and hard-fails on a mismatch.
+
 ## The golden file is the safety net — treat it that way
 
 `tests/cpp/golden/operating_points.tsv` records 288 operating points and is
