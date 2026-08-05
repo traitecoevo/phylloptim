@@ -213,10 +213,12 @@ it is private, and only its package-facing findings are recorded here.
 
 - **No model derivative has been used anywhere in it.** Its fits used finite
   differences only, and in the 40-parameter hierarchical fit **~98% of the work was
-  computing them**. So the AD-versus-FD comparison this item demands has not been
-  made — and the note in that project saying the package "does not expose trait
-  derivatives" predates #42 and #46. ⚠️ **Re-pointing it at `leaf_gradient()` is the
-  first action for this item**, not writing another fit.
+  computing them**. So the comparison has not been made *on real data* — 12a made it
+  on simulated data, and AD lost there — and the note in that project saying the
+  package "does not expose trait derivatives" predates #42 and #46. ⚠️ **Re-pointing
+  it at `leaf_gradient()` is the first action for this item**, not writing another
+  fit. Expect 12a's result to carry: its species have ~81 rows each, so a
+  per-observation gradient pays the same #52 construction and the same R boundary.
 - ⚠️ **`optim` under-reports the cost of finite differences, and the error is a factor
   of the dimension.** `counts["function"]` excludes the calls made computing
   numerical gradients. The honest total is function calls plus one gradient's worth
