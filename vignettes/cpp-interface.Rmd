@@ -220,7 +220,7 @@ the IFT's advantage first becomes visible at all.
 
 That is also what an R caller gets from `leaf_gradient_batch()`: the composition
 runs once, in C++, over every observation, so the boundary is crossed once per call
-rather than 112 times per observation. Measured at four fitted parameters, **363 →
+rather than 112 times per observation. Measured at `length(pars)` = 4, **363 →
 10.6 µs per observation, 22×** — and none of it is a faster gradient.
 
 **Constructing a `Leaf` from R costs ~204 µs — 73 solves** — of which only ~32 µs
