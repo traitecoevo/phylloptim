@@ -1,0 +1,6 @@
+commit	subject	version	api	ref_us	one_us	one_ratio	drive_us	drive_ratio	solve_us	read3_us	many_us	many_ratio	ctor_us	grad1_us	grad1_ratio	grad3_us	grad3_ratio	grad_per_par_us	cpp_solve_us	cpp_grad_ift_us	cpp_grad_fd_us
+818ad43	Rescale the stem curve instead of rebuil	0.1.0	root-carbon/supply-cfg	1.044	13.98	13.4	6.43	6.2	3.71	3.31	19.83	19	154.5	304.2	291.3	406.9	389.6	51.3	2.72	1.640	6.980
+e265c6b	ci: cancel superseded runs on the same r	0.1.0	root-carbon/supply-cfg	1.054	14.6	13.9	6.67	6.3	3.81	3.93	21.2	20.1	160.7	322.5	306	436.5	414.2	57	2.72	1.660	7.025
+cf4383e	Take root resistances, not root carbon (	0.2.0	resistance-driver/supply-cfg	1.052	14.44	13.7	6.77	6.4	3.74	3.35	20.51	19.5	151.9	301.2	286.4	401.2	381.5	50	2.76	1.844	7.139
+037673b	Drive both supply paths through the same	0.2.0	resistance-driver/supply-driver	1.037	14.39	13.9	6.67	6.4	3.69	3.3	20.53	19.8	153.8	559.5	539.3	841.6	811.2	141	2.76	1.813	7.087
+27c5dcb	series_resistance(): copy a prototype, n	0.2.0	resistance-driver/supply-driver	1.052	14.43	13.7	6.8	6.5	3.7	3.4	21.13	20.1	159.6	328.8	312.6	410.6	390.3	40.9	2.75	1.819	7.109

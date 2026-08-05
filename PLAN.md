@@ -359,6 +359,50 @@ expensive. In priority order:
    wind ever becomes the priority, prefer a one-step correction to a converged inner
    solve.
 
+## What a user pays, and whether it has regressed
+
+`tools/bench_user_cost.R` measures the R side (one solve, N solves, a gradient);
+`tools/bench_history.sh` runs it plus the two C++ benches against a list of commits.
+`tests/testthat/test-cost.R` is the guard.
+
+⚠️ **Compare the RATIO columns.** A bare `.Call` on one machine moved 0.69 → 1.10 µs
+between two runs an hour apart on the same build, so absolute µs are comparable only
+within a single invocation. Cost ÷ a trivial `.Call` in the same process is what
+travels. Measured macOS/arm64, 2026-08-05, one run:
+
+| | R: 1 solve | R: 32 solves /row | R: gradient, 1 par | C++ solve | C++ IFT /trait |
+|---|---|---|---|---|---|
+| #46 pre-resistance | 13.4× | 19.0× | 291× | 2.72 µs | 1.640 µs |
+| #62 pre-resistance | 13.9× | 20.1× | 306× | 2.72 µs | 1.660 µs |
+| #63 resistances | 13.7× | 19.5× | 286× | 2.76 µs | 1.844 µs |
+| #66 both paths | 13.9× | 19.8× | **539×** | 2.76 µs | 1.813 µs |
+| #67 master | 13.7× | 20.1× | 313× | 2.75 µs | 1.819 µs |
+
+**Three results, and one of them is a regression I shipped and did not measure.**
+
+- **The solve paths never moved.** One solve and 32 solves are flat across all five
+  commits, inside a ~5% band. The whole resistance change is invisible to a user
+  driving solves.
+- ⚠️ **#66 nearly doubled the GRADIENT path — 286× → 539× — and #67 fixed it.**
+  `.gradient_setter` rebuilds `drivers$root_network` on **every** setter call, whatever
+  parameter is being perturbed, so the 86 µs `RootNetwork` constructor landed on every
+  perturbation. I measured `set_drivers` and `leaf_solve` at the time and concluded the
+  R layer was "at parity"; the gradient path was 1.9× worse and I never looked at it.
+  **A calibration uses the gradient path.** The lesson is not "measure more" but
+  "measure the entry point the user calls" — `leaf_gradient()` was not in any harness
+  until now, which is why `tools/bench_user_cost.R` covers all three.
+- **The C++ per-trait IFT gradient is ~10% slower since #63** (1.65 → 1.82 µs) while a
+  whole solve is +1.5%. Same cause, different denominator: `set_physiology`'s
+  copy-assign of five vectors is a fixed cost, and the IFT arm calls it twice against a
+  ~1.8 µs total rather than a ~2.8 µs solve. Known and accepted; it is the price of the
+  boundary move (#33), not a defect.
+
+**The biggest remaining lever is not the driver path — it is issue #52.**
+`leaf_model()` construction is **~155 µs, 50% of a one-parameter gradient** (310 µs).
+Everything the resistance work touched is 4% of that. A `leaf_gradient()` that accepts
+a `Leaf` would roughly halve the cost of a gradient-based calibration; no amount of
+tuning in `set_drivers()` can.
+
 ## 6d. The R interface: what is left — #34
 
 Stages 0 through 3 are done, and **stage 2b is now done too** (#33). Only stage 4
