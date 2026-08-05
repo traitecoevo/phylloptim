@@ -1,5 +1,44 @@
 # phylloptim 0.2.0
 
+## The gradient's R glue is a third cheaper
+
+Profiling `leaf_gradient()` found that the **C++ model is 1.5% of its cost**: 6 us of
+solving against 119 us of `.Call` dispatch over 112 boundary crossings and ~285 us of
+R interpreter. `.gradient_setter()` alone was 60% of a gradient. Three changes, no C++:
+
+* **The drivers are resolved once per gradient, not once per perturbation.**
+  `set_drivers()` is split into `.resolve_drivers()` (validate and default) and the
+  application, and the setter calls the former once and applies the result
+  positionally. There is still ONE definition of the defaulting rules -- a second copy
+  in the gradient code would have been free to drift from `set_drivers()`.
+* **Traits go on positionally**, rather than rebuilding a `leaf_traits` object with
+  `structure(as.list(...))` and re-extracting thirteen fields by name per
+  perturbation.
+* **`.gradient_outputs()` reads all four outputs in one call** instead of four R6
+  active bindings: 4.65 -> 0.93 us, eleven times per four-parameter gradient. `$` was
+  12.7% of a gradient's self time.
+
+Measured per observation over 24 gradients, interleaved three times against the
+commit this lands on:
+
+| 4 fitted parameters | before | after |
+|---|---|---|
+| fresh leaf | 504 us | 366 us (-27%) |
+| reused leaf | 400 us | **231 us (-42%)** |
+
+Together with the entry below, a four-parameter calibration goes from 504 to 231 us per
+observation, **-54%**.
+
+**Gradients are bit-identical** across both supply paths, both methods and eight
+parameters -- asserted rather than assumed, since a change applied to both routes
+would otherwise pass every existing test.
+
+⚠️ Two things to know before copying the pattern. The positional trait call **bypasses
+`set_traits()`'s invariant checks**, which is sound only because the values came from a
+`leaf_traits()` the caller already supplied and the C++ setter asserts #25 itself. And
+it is a hard-coded thirteen arguments that would not fail to compile if a trait were
+added, so `test-gradient.R` asserts the arity.
+
 ## `leaf_gradient()` can reuse a leaf, which is 38% of a call
 
 Closes #52. `leaf_gradient()` built its own `Leaf` every call and offered no way to
