@@ -18,6 +18,10 @@ void Leaf__set_physiology(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, con
   obj_->set_physiology(root_carbon_per_leaf_area, PPFD, psi_soil, soil_depth, leaf_specific_conductance_max, atm_vpd, ca, leaf_temp, atm_o2_kpa, atm_kpa);
 }
 // [[Rcpp::export]]
+void Leaf__perturb_stem_b(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double stem_b) {
+  obj_->perturb_stem_b(stem_b);
+}
+// [[Rcpp::export]]
 void Leaf__set_traits(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double vcmax_25, double stem_c, double stem_b, double psi_crit, double root_c, double root_b, double root_psi_crit, double beta2, double jmax_25, double a, double curv_fact_elec_trans, double curv_fact_colim, double cost_scale_TF24, double beta_R_H, double beta_R_V) {
   obj_->set_traits(vcmax_25, stem_c, stem_b, psi_crit, root_c, root_b, root_psi_crit, beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, cost_scale_TF24, beta_R_H, beta_R_V);
 }

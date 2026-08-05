@@ -1393,6 +1393,84 @@ void test_temperature_parameters_are_settable() {
 //
 // A `l.vcmax_25 = x` written by hand passes none of this, which is why the traits
 // are not bound as settable fields.
+// The homogeneity identity that makes a gradient in stem_b free (PLAN 11f).
+//
+// G(psi; s*b, c) = s * G(psi/s; b, c), because G(psi; b, c) = b * g(psi/b; c) --
+// stem_b enters only as a scale on both axes, and the knot grid scales with it,
+// so the identity holds for the SPLINE and not merely for the integral it
+// approximates. perturb_stem_b() exploits that instead of reseeding 101
+// incomplete gammas, which is 21.8 us against 0.001.
+//
+// ⚠️ This is checked against a REBUILD and not against a formula, because what
+// has to be true is that the rescaled curve is the one a rebuild would have
+// produced. It is not asserted bit-identical: the two differ by the rounding of
+// one multiply and one divide per evaluation, which the nested solvers amplify to
+// the ~1e-9 floor this project's guide records.
+void test_perturb_stem_b_matches_a_rebuild() {
+  printf("perturb_stem_b reproduces a rebuilt stem curve\n");
+  Drivers d;
+  std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
+
+  // ⚠️ The downward range stops at 0.98, and that is issue #38 rather than a
+  // limitation of the rescale: the curve's domain is [0, b*log(100)^(1/c)], which
+  // at the default traits is 6.05 MPa against a psi_crit of 5.87. Shrink stem_b
+  // by more than ~3% and psi_crit falls outside the curve, so the collar solve
+  // asks for a potential the spline refuses to extrapolate to -- and a REBUILT
+  // spline refuses identically. A gradient perturbs by ~1e-6.
+  for (double factor : {0.98, 0.999, 1.000001, 1.05, 1.3}) {
+    const double b_new = 3.898245 * factor;
+
+    // The reference: stem_b through set_traits, which rebuilds the spline.
+    phylloptim::Leaf rebuilt = make_leaf(d, {2.0}, {1.0});
+    rebuilt.find_root_collar_psi();
+    rebuilt.set_traits(96.0, 2.680147, b_new, 5.870283, 2.680147, 3.898245,
+                       5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, 3.4e2,
+                       9.4e3);
+    rebuilt.set_physiology(mrp, d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
+                           d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa,
+                           d.atm_kpa);
+    rebuilt.find_root_collar_psi();
+
+    // The rescale: no rebuild, and no set_physiology either -- nothing it
+    // derives depends on stem_b, which is half of why this is cheap.
+    phylloptim::Leaf rescaled = make_leaf(d, {2.0}, {1.0});
+    rescaled.find_root_collar_psi();
+    rescaled.perturb_stem_b(b_new);
+    rescaled.find_root_collar_psi();
+
+    const std::string what = " at stem_b x " + std::to_string(factor);
+    const double tol = 1e-8;
+    near(rescaled.opt_root_psi_, rebuilt.opt_root_psi_, tol,
+         "the collar matches a rebuild" + what);
+    near(rescaled.opt_psi_stem_, rebuilt.opt_psi_stem_, tol,
+         "psi_stem matches a rebuild" + what);
+    near(rescaled.assim_colimited_, rebuilt.assim_colimited_, tol,
+         "assimilation matches a rebuild" + what);
+    near(rescaled.transpiration_, rebuilt.transpiration_, tol,
+         "transpiration matches a rebuild" + what);
+    near(rescaled.profit_, rebuilt.profit_, tol,
+         "profit matches a rebuild" + what);
+
+    // ⚠️ And set_traits is the way BACK: while the spline is built at another
+    // stem_b, "the parameters did not move" must not be read as "there is
+    // nothing to do". Restoring the defaults has to give a bit-identical leaf,
+    // which is only true if the rebuild is forced.
+    phylloptim::Leaf fresh = make_leaf(d, {2.0}, {1.0});
+    fresh.find_root_collar_psi();
+    rescaled.set_traits(96.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
+                        5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, 3.4e2,
+                        9.4e3);
+    rescaled.set_physiology(mrp, d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
+                            d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa,
+                            d.atm_kpa);
+    rescaled.find_root_collar_psi();
+    ok(rescaled.opt_root_psi_ == fresh.opt_root_psi_,
+       "set_traits restores a bit-identical collar" + what);
+    ok(rescaled.assim_colimited_ == fresh.assim_colimited_,
+       "set_traits restores bit-identical assimilation" + what);
+  }
+}
+
 void test_set_traits_matches_a_fresh_leaf() {
   printf("set_traits is indistinguishable from constructing afresh\n");
   Drivers d;
@@ -1589,6 +1667,7 @@ int main() {
   test_root_network_from_carbon();
   test_temperature_parameters_are_settable();
   test_set_traits_matches_a_fresh_leaf();
+  test_perturb_stem_b_matches_a_rebuild();
   test_bad_input_throws();
   benchmark();
 

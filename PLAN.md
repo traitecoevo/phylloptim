@@ -26,6 +26,7 @@ this file keeps the reasoning behind each one.
 | **6** | **The R interface — issue #5.** `phylloptim::Leaf` is callable from R: generated RcppR6 bindings tied back to the golden file bit-exactly, then a hand-written surface over them — `leaf_solve()` (drivers in, operating point out, vectorised), `leaf_traits()` / `leaf_control()` splitting the constructor's 19 arguments, `leaf_model()` / `set_drivers()` / `operating_point()`, and `vignette("phylloptim")`. λ and `g1_eff` are exposed for the first time. The model stays R-free and gained a CMake package, so it is still linkable from C++ or Python. **#32** landed on top of it. **#33** and **#34** are split out and coupled with plant #591. Reasoning in item 6; #31 was found on the way. |
 | **11** | **`Leaf<T>` — CLOSED, SUPERSEDED, not going to be built.** Both payoffs the item opened with are spent: the `namespace detail` AD replicas were already deleted by **11b**, using scalar-generic *member* templates rather than a class template, and "templating is what turns AD into calibration" is falsified by **11e** plus a calibrating #6. Its last live use was plant #537's cut-point rule, which is about an **outer** AD pass over plant and about *state* rather than traits — and even that now looks avoidable, because the composite works for a driver as well as a trait (`leaf_specific_conductance_max`, which is how height reaches the leaf: ratios 0.99994–0.99996). ⚠️ **Do not reopen this to get exact trait derivatives; that is done.** If it returns it should return from the plant side under a title describing an outer pass. |
 | **11c, 11d, 11e** | **Trait gradients, stage 1 — issue #4.** `leaf_gradient()` returns `dA/dθ`, `dgc/dθ`, `dψ_stem/dθ` and `dψ*/dθ` by the implicit function theorem where the optimum is interior, and by differencing the solve where it is pinned. Matches 11c's arbitrated references to 4 digits; the active-set guard classifies the golden grid **198 interior / 42 pinned / 48 no-gradient** with the two populations **five orders of magnitude apart**, so the threshold is measured rather than chosen. `set_traits()` came with it — a method, not settable fields, because a bare trait write leaves `vcmax_` stale behind `set_physiology`'s temperature cache. ⚠️ **The speed argument is retracted FOR THE R LAYER only: the composite measured 6% slower than the finite difference there**, and the 4× that is real comes from object reuse. **In C++ it wins 4.4× — but only 1.15× on `stem_b`/`stem_c`/`root_b`/`root_c`, because `set_traits` rebuilds a vulnerability spline at 21.8 µs against 6.2 µs for a whole solve, and those are the four traits whose gradient is 100% argmax-mediated.** That argued for stage 3 — ⚠️ but see the 11e tail row: the calibration it was argued *for* holds those four fixed, so stage 3 has the case without the customer. See 11e; quote the split, never the 1.50× total. |
+| **11f** | **A gradient in `stem_b` no longer rebuilds the vulnerability spline — 24.5× in C++.** Not by the parameter-explicit kernels 11e projected, and with no AD: `G(ψ; s·b, c) = s·G(ψ/s; b, c)`, so the spline for a perturbed `stem_b` **is** the existing one with its argument rescaled — measured to reproduce a rebuilt spline to **0–3e-16**. 35.5 → 1.45 µs per parameter, which puts `stem_b` in the same class as `vcmax_25`. The 21.8 µs it removes was **11.9 µs of incomplete gammas**, not spline machinery. ⚠️ **A closed-form version was built first and REJECTED**: it covers `stem_c` too but disagrees with the rebuild route by a systematic **3.5e-3**, because it differentiates the exact integral while the package evaluates the spline. Both routes were step-stable and converged to *different* values, which is the tell. `stem_c` and `root_b` still rebuild. |
 | **11e tail** | **`leaf_solve()` is 16× faster and the R-layer advice is inverted — issue #39.** It built a one-row `data.frame` per row and `rbind`ed them: **344 µs/row against 2.8 µs of solving**, on the path the README and vignette advertise. Columnwise assembly plus one C++ call for the twelve outputs (`Leaf::operating_point_values()`) gives **21.5 µs/row**, bit-identical including the error messages. `operating_point()` went 180 → 4 µs. ⚠️ **So "drive the object, don't use the wrapper" is spent** — `leaf_solve()` is now within **6%** of a hand-written loop, and the remaining lever is the *number of R calls per row*, not which function makes them. ⚠️ Measuring it also **retracted 11e's promotion of stage 3**: the calibration it was promoted for holds `stem_b`/`stem_c` fixed at measured values and fits two non-traits (`K_total`, `f_plant`) that `leaf_gradient()` cannot take at all. |
 | **11a, 11b** | **The collar solve now solves its own first-order condition** (PR #36, `d22907a`). Golden section is gone: `dprofit == 0` by safeguarded TOMS748, so the argmax is resolved to solver precision instead of `GSS_tol_abs` — residual `\|dprofit\|` improved on **240/240** feasible rows, median 7.8e-04 → **5.6e-15**. With it: `psi_stem_to_ci` tightened 1e-7 → 1e-10 (**335×** closer to a converged solve, +3.4%), the `namespace detail` AD replicas **deleted** in favour of scalar-generic member templates the model and its derivative both instantiate, and `dprofit_droot_collar_psi` given a `bool* feasible` out-parameter. **21.7% faster** overall (2.75 vs 3.51 µs/solve). Deliberately moved results — worst 1.5e-03, split by cause under 11a/11b. Hazard 3 **improved** ~1000×. ⚠️ Note the kernels are templated on their **argument**, so this delivered exact derivatives w.r.t. **state**, not w.r.t. traits — trait gradients are still open under #4. |
 
@@ -103,7 +104,7 @@ code rather than of the merge:
 | issue | item | what | note |
 |---|---|---|---|
 | [#3](https://github.com/traitecoevo/leaf_cpp/issues/3) | 7a | Make λ(state) pluggable | **unblocked** — #2 is done. Measure the dispatch separately: the cost core is fully inlined where the supply path was not, so 7b's "dispatch is free" result does **not** transfer |
-| [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11, **11e** | Trait gradients (was: template `Leaf`) | **Stage 1 landed** (#42): exact where the optimum is interior, differenced where it is pinned, active set tested rather than assumed. ⚠️ **Read 11e before quoting a speedup.** 11d's 12× and 72× were computed against the solve and no caller spends its time there: in R the composite is 6% *slower*, in C++ it is **4.4×** on the eleven traits that rebuild no spline and **1.15×** on the four that do. **Reverse mode is not needed and `Leaf<T>` is not on this path**, and that is now closed rather than pending. What is left: the two **non-trait** parameters the calibration actually fits, then stage 2; stage 3 has a case but no customer |
+| [#4](https://github.com/traitecoevo/leaf_cpp/issues/4) | 11, **11e** | Trait gradients (was: template `Leaf`) | **Stage 1 landed** (#42): exact where the optimum is interior, differenced where it is pinned, active set tested rather than assumed. ⚠️ **Read 11e before quoting a speedup.** 11d's 12× and 72× were computed against the solve and no caller spends its time there: in R the composite is 6% *slower*, in C++ it is **4.4×** on the eleven traits that rebuild no spline and **1.15×** on the four that do. **Reverse mode is not needed and `Leaf<T>` is not on this path**, and that is now closed rather than pending. What is left: stage 2, and `stem_c`'s rebuild (11f did `stem_b` by homogeneity, 24.5x) |
 | [#33](https://github.com/traitecoevo/leaf_cpp/issues/33) | 6d | Take resistances, not root carbon | #5 stage 2b, **blocked on plant #591**. Before #34 |
 | [#34](https://github.com/traitecoevo/leaf_cpp/issues/34) | 6d | Delete plant's `Leaf` bindings | #5 stage 4, **blocked on plant #591**. The hazard-7 payoff, and the only stage that can break plant |
 | [#6](https://github.com/traitecoevo/leaf_cpp/issues/6) | 12 | Calibration vignette, then inversion | **UNBLOCKED, and it is now the thing that should go next.** 11c measured trait gradients: FD gives ~4 digits at interior points and is correct at pinned ones, so the fit can be written today. Item 12's old "FD-only calibration is throwaway" rule assumed FD *does not work*, which 11a fixed — so write the fit against FD and let it say whether exactness is worth having. **Doing this is what specifies #4's remainder.** ⚠️ Achievable precision of a target is **~1e-9**, set by `psi_stem_to_ci` |
@@ -2771,8 +2772,14 @@ caller, not against the model.
   gradient's ~10 R calls per parameter are the remaining boundary cost, and
   `operating_point_values()` is the pattern to copy — one call returning a flat
   vector.
-- **Stage 3, for the four hydraulic traits only,** and now without a caller. See
-  the correction above before starting it.
+- ~~**Stage 3, for the four hydraulic traits only**~~ — **`stem_b` DONE, item
+  11f.** Not by parameter-explicit kernels and not with AD: `G` is homogeneous of
+  degree 1 in `stem_b`, so the spline for a perturbed `stem_b` is the existing one
+  with its argument rescaled, and the rebuild is unnecessary. **24.5× in C++**
+  (1.23× from R), which moves `stem_b` into the no-rebuild class. ⚠️ **11f also
+  records a closed-form version that was built and rejected** for differentiating
+  a different model than the package evaluates, by 3e-4 — read that before
+  extending this to `stem_c`, which has no such identity and still rebuilds.
 - **`Leaf<T>` is still not needed for any of this.** And there is now a measured
   argument that plant #537 A1 may not need it either: the composite works for a
   *driver* as well as a trait — differentiating w.r.t.
@@ -2787,6 +2794,131 @@ caller, not against the model.
   is the analytic gradient where the premise holds, and the active-set
   classification — which the crude method cannot report at all — is the part a
   drought calibration actually needs.
+
+### 11f. Stage 3, and the homogeneity result that made most of it unnecessary
+
+**Built and merged as the third of #4's stages.** A gradient in `stem_b` costs
+**24.5× less** — 35.5 → 1.45 µs per parameter in C++ — which puts it in the same
+class as `vcmax_25` at 1.64 µs. `stem_c` is unchanged, and the reason is the
+interesting part.
+
+#### First, what the 21.8 µs actually was
+
+11e reported `set_traits`'s spline rebuild at 21.8 µs without decomposing it.
+Measured:
+
+| | µs |
+|---|---:|
+| seeding 101 knots (101 incomplete gammas) | **11.86** |
+| one interpolator `init` | 3.08 |
+| **rescaling the knots (two vector multiplies)** | **0.013** |
+
+So the cost is the *incomplete gamma function*, not the spline machinery. That
+decomposition is what pointed at the answer, and it is why "measure the components
+before optimising the whole" earns its place in this document again.
+
+#### The identity, which is a property and not a trick
+
+`G(ψ; b, c) = ∫₀^ψ exp(−(s/b)^c) ds = b · g(ψ/b; c)`, so `b` enters **only as a
+scale on both axes**:
+
+> **G(ψ; s·b, c) = s · G(ψ/s; b, c)**
+
+The knot grid scales with it too — `ψ_max = b·log(100)^(1/c)` — so the identity
+holds for the **spline** and not merely for the integral it approximates.
+Measured: the rescaled spline reproduces a rebuilt one to **0–3e-16**, i.e.
+exactly, at scale factors from 1.001 to 1.2.
+
+So moving `stem_b` needs no rebuild at all — the existing spline evaluated at a
+rescaled argument. Four operations, and the two derivative ones need no factor
+because differentiating `s·G(ψ/s)` in ψ cancels it:
+
+| | |
+|---|---|
+| `G(ψ)` | `s · G_spline(ψ/s)` |
+| `G'(ψ)` | `G'_spline(ψ/s)` |
+| `G⁻¹(w)` | `s · G⁻¹_spline(w/s)` |
+| `(G⁻¹)'(w)` | `(G⁻¹)'_spline(w/s)` |
+
+This is the same shape of argument as `area_leaf`'s exit from the supply contract
+(item 2): a homogeneity property, so it holds at every operating point rather than
+approximately.
+
+#### ⚠️⚠️ The closed form was built first, measured, and REJECTED — read this before
+rebuilding it
+
+The obvious way to make a perturbed evaluation cheap is to read `G` from its
+**closed form** — `(b/c)·γ_lower(1/c, (ψ/b)^c)`, one incomplete gamma at 0.117 µs
+against 11.9 for a rebuild — which has the further attraction of covering `stem_c`
+as well as `stem_b`. It was implemented, and it is wrong:
+
+| | rescale route | closed-form route |
+|---|---|---|
+| covers | `stem_b` | `stem_b` **and** `stem_c` |
+| agreement with the rebuild route | **3e-9 to 9e-5** (solver noise) | **3.5e-3** systematic |
+
+**The tell was that both routes were internally stable across five decades of step
+and converged to different values** — 2.62930 against 2.62850. A noise problem
+shrinks or blows up with the step; a *model* mismatch does not move. The closed
+form differentiates the exact integral, and the package evaluates the spline, so it
+returns the derivative of a function `leaf_solve()` does not compute. It is
+inconsistent in a second way too: `M` would come from the closed form while `H`
+and `∂Y/∂ψ` come from the base state's spline, and `−M/H` carries the mismatch.
+
+⚠️ **This is worth stating as a rule, because it is not obvious and it cost most of
+the item: a gradient must differentiate the model that is being evaluated, not the
+model the evaluated one approximates.** A more accurate perturbed evaluation makes
+the gradient *worse*, because the difference is then between two different
+functions. Being right about `G` to 2e-10 is no help at all when the reported value
+comes from a spline.
+
+The rescale route has no such problem: it *is* the spline, so its derivative is the
+spline model's.
+
+#### And it is not only cheaper, it is quieter
+
+A rebuild reseeds 101 incomplete gammas per side, so the two sides of a central
+difference carry **uncorrelated rounding**, which dividing by `h ≈ 4e-6` amplifies.
+Measured over a step sweep, the rebuild route jitters up to **9e-05** between
+neighbouring steps — at `step = 1e-06` it returns 2.6284252697 where its own
+neighbours agree on 2.6284982855 — while the rescale route sits on the plateau
+throughout. So the loose tolerance in the equivalence test is the *rebuild's* noise,
+not the rescale's error.
+
+#### What it did NOT turn out to need
+
+11e projected stage 3 as "parameter-explicit kernels + forward AD", the reasoning
+being that `dprofit_at_collar_psi` already reads the spline's `.deriv()`, so an
+analytic `∂dprofit/∂stem_b` needs no rebuilt spline. **None of that was built and
+none of it is needed for `stem_b`.** No kernel was made parameter-explicit, no AD
+was added, and no derivative was hand-differentiated. What was needed was one
+algebraic identity and four one-line accessors. That is the third time in this item
+that the designed approach was more elaborate than the measured one required.
+
+#### ⚠️ From R it is 1.23×, and that is the 11e lesson arriving again
+
+Per-parameter, end to end through `leaf_gradient()`: 343 → 278 µs. The 34 µs of
+rebuild removed is small beside the **204 µs** `leaf_model()` construction that
+every call pays. So quote **24.5× in C++** and **1.23× from R**, and say which —
+the same discipline 11e had to learn twice.
+
+#### What is left
+
+- **`stem_c` still rebuilds.** There is no homogeneity in `c`: it changes the
+  curve's shape, not its scale. The closed form is the only cheap route and it is
+  the one rejected above. A genuine fix would be an analytic `∂G/∂c` —
+  `∫₀^ψ exp(−(s/b)^c)·(−(s/b)^c ln(s/b)) ds`, one quadrature — used to *correct*
+  the spline rather than replace it, which is a real piece of work with a real
+  accuracy argument to make. Not started.
+- **`root_b` is the same identity applied to `roots.hpp`**, where the root curve
+  has two splines and seven read sites plus a per-layer cache. Deferred, not
+  attempted: nothing measures or fits the root vulnerability curve — Sabot's P50
+  and P88 are stem measurements — so it has even less of a customer than `stem_c`.
+- **`psi_crit` bounds the whole thing, and #38 is why.** The curve's domain is
+  `[0, b·log(100)^(1/c)]` — 6.05 MPa at the defaults, against a `psi_crit` of 5.87.
+  Shrink `stem_b` by more than ~3% and `psi_crit` falls outside the curve and the
+  solve throws. A rebuild throws identically, so this is not a limitation of the
+  rescale, but it does bound how far either route can move `stem_b` in one step.
 
 ## 12. Demonstrate calibration — and then consider inversion
 

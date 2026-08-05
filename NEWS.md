@@ -1,5 +1,37 @@
 # leaf (development version)
 
+## A gradient in `stem_b` no longer rebuilds the vulnerability spline (#4, PLAN 11f)
+
+**24.5× faster in C++** for that parameter — 35.5 → 1.45 µs, which is the same
+cost as a trait that owns no spline at all. Results are unchanged: the golden file
+is bit-identical and the two routes agree to solver noise.
+
+Perturbing `stem_b` used to rebuild the pre-integrated stem curve, and that rebuild
+was essentially the whole cost of its gradient. It is unnecessary, because the
+cumulative integral is homogeneous of degree 1 in `stem_b`:
+
+    G(psi; s*b, c) = s * G(psi/s; b, c)
+
+`stem_b` enters only as a scale on both axes, and the knot grid scales with it too,
+so this holds for the **spline** and not merely for the integral it approximates —
+measured, a rescaled spline reproduces a rebuilt one to 0–3e-16. So the perturbed
+curve is the existing spline read at a rescaled argument.
+
+`leaf_gradient()` gains `fast_stem_curve = TRUE`, which is how this is used;
+`FALSE` rebuilds and exists so the equivalence is checked rather than assumed.
+`Leaf$perturb_stem_b()` is the C++ entry point, for consumers that link the headers.
+
+⚠️ **`stem_c` is unchanged and still rebuilds.** There is no such identity for it —
+it changes the curve's shape, not its scale. The obvious alternative, reading the
+curve from its closed form, was implemented and rejected: it disagrees with the
+rebuild route by a systematic 3.5e-3, because it differentiates the exact integral
+while the package evaluates the spline. PLAN 11f has the measurement and the rule
+that follows from it.
+
+⚠️ **From R this is 1.23×, not 24.5×**, because every `leaf_gradient()` call pays
+204 µs to construct a `Leaf`. Which figure applies depends on which side of the R
+boundary you are.
+
 ## `leaf_gradient()` covers the two parameters that are not traits (#44)
 
 `pars` now accepts **`leaf_specific_conductance_max`** and — on the

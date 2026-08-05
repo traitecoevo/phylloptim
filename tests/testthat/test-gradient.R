@@ -419,6 +419,54 @@ test_that("the active-set guard covers the non-trait parameters too", {
                        c(dry, list(pars = "resistance", method = "ift"))))
 })
 
+test_that("perturbing stem_b by rescaling equals perturbing it by a rebuild", {
+  # PLAN 11f. The stem cumulative-vulnerability integral is homogeneous of degree
+  # 1 in stem_b -- G(psi; s*b, c) = s*G(psi/s; b, c) -- so the spline for a
+  # perturbed stem_b is the existing one with its argument rescaled, and the
+  # 11.9 us of incomplete gammas a rebuild spends is unnecessary. Worth 24x on
+  # that parameter's gradient in C++.
+  #
+  # ⚠️ What has to be true is not the formula but that the two routes give the
+  # SAME GRADIENT, so that is what is asserted, at four operating points and on
+  # both routes through the composite. `fast_stem_curve = FALSE` exists for this.
+  for (psi_soil in c(1.0, 1.5, 2.0, 3.0)) {
+    for (m in c("ift", "fd")) {
+      d <- list(psi_soil = psi_soil, PPFD = 900, atm_vpd = 2.0)
+      fast <- do.call(leaf_gradient, c(d, list(pars = "stem_b", method = m,
+                                               fast_stem_curve = TRUE)))
+      slow <- do.call(leaf_gradient, c(d, list(pars = "stem_b", method = m,
+                                               fast_stem_curve = FALSE)))
+      # 1e-3 rather than tighter, and the reason is worth knowing: a rebuild
+      # reseeds 101 incomplete gammas per side, so the two sides of the central
+      # difference carry UNCORRELATED rounding, which dividing by h ~ 4e-6
+      # amplifies. Measured, the rebuild route jitters by up to 9e-05 between
+      # neighbouring steps where the rescale route does not -- so the loose
+      # tolerance here is the rebuild's noise, not the rescale's error.
+      expect_equal(fast$gradient, slow$gradient, tolerance = 1e-3,
+                   info = paste(psi_soil, m))
+      expect_identical(fast$status, slow$status)
+    }
+  }
+})
+
+test_that("a gradient leaves the leaf's stem curve as it found it", {
+  # ⚠️ perturb_stem_b() leaves the splines built at a different stem_b on
+  # purpose, so the thing that could go wrong is a gradient call that does not
+  # put it back -- after which every later solve is quietly on a rescaled curve.
+  # set_traits() forces the rebuild for exactly this reason, and BIT-identity is
+  # the right test: a restored leaf shares no code path with a fresh one.
+  d <- list(psi_soil = 1.5, PPFD = 900, atm_vpd = 2.0)
+  before <- do.call(leaf_solve, d)
+
+  invisible(do.call(leaf_gradient, c(d, list(pars = "stem_b"))))
+  invisible(do.call(leaf_gradient, c(d, list(pars = c("stem_b", "vcmax_25")))))
+  # ...and one that ends on the fast path, which is the ordering that would leave
+  # it displaced if the restore at the end of the loop were missing.
+  invisible(do.call(leaf_gradient, c(d, list(pars = c("vcmax_25", "stem_b")))))
+
+  expect_identical(do.call(leaf_solve, d), before)
+})
+
 test_that("leaf_gradient() rejects bad arguments", {
   expect_error(grid_gradient(2.0, pars = "not_a_trait"),
                "cannot differentiate")

@@ -44,6 +44,7 @@
 
 #include <phylloptim.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -134,6 +135,26 @@ double ift_arm(phylloptim::Leaf &l, int idx, double psi_star, long reps,
   return us_per(t0, clock_type::now(), reps);
 }
 
+// The same composite, but moving stem_b by the homogeneity rescale instead of
+// through set_traits -- so no spline is rebuilt and set_physiology is not needed
+// either, since nothing it derives depends on stem_b. PLAN 11f.
+double ift_arm_rescaled_stem_b(phylloptim::Leaf &l, double psi_star, long reps,
+                               double &sink) {
+  const auto t0 = clock_type::now();
+  for (long r = 0; r < reps; ++r) {
+    for (int sign = -1; sign <= 1; sign += 2) {
+      l.perturb_stem_b(perturbed(kBase, 2, sign, r));
+      sink += l.dprofit_droot_collar_psi(psi_star);
+      sink += l.evaluate_root_collar_psi(psi_star);
+      sink += l.assim_colimited_;
+    }
+  }
+  const double us = us_per(t0, clock_type::now(), reps);
+  apply_traits(l, kBase);  // set_traits is the way back; it forces the rebuild
+  set_drivers(l);
+  return us;
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -194,6 +215,20 @@ int main(int argc, char **argv) {
     }
     printf("  set_traits, spline rebuild %8.3f us   <-- the finding\n",
            us_per(t0, clock_type::now(), reps));
+
+    // And the way round it, for stem_b only: the curve is homogeneous of degree
+    // 1 in stem_b, so the spline for a perturbed stem_b is this one with its
+    // argument rescaled. PLAN 11f.
+    t0 = clock_type::now();
+    for (long r = 0; r < reps; ++r) {
+      l.perturb_stem_b(kBase.v[2] + double(r) * 1e-9);
+      sink += l.stem_b;
+    }
+    printf("  perturb_stem_b, no rebuild %8.3f us   <-- and the way round it\n",
+           us_per(t0, clock_type::now(), reps));
+    apply_traits(l, kBase);
+    set_drivers(l);
+    l.find_root_collar_psi();
   }
 
   printf("\n%-15s %10s %10s %9s  %s\n", "trait", "FD", "IFT", "speedup",
@@ -239,11 +274,27 @@ int main(int argc, char **argv) {
   printf("  the  4 that rebuild     FD %8.1f us   IFT %8.1f us   %.2fx\n",
          fd_all - fd_cheap, ift_all - ift_cheap,
          (fd_all - fd_cheap) / (ift_all - ift_cheap));
+  // stem_b again, moved by the rescale rather than by a rebuild. Interleaved with
+  // its own rebuild arm rather than compared against the table above, because the
+  // two have to be measured in one run to be comparable at this effect size.
+  double reb = 0.0, resc = 0.0;
+  for (int round = 0; round < 3; ++round) {
+    const double a = ift_arm(l, 2, psi_star, per_round, sink);
+    const double b = ift_arm_rescaled_stem_b(l, psi_star, per_round, sink);
+    reb = round == 0 ? a : std::min(reb, a);
+    resc = round == 0 ? b : std::min(resc, b);
+  }
+  printf("\n  stem_b, IFT: rebuild %8.3f us   rescaled %8.3f us   %.2fx\n",
+         reb, resc, reb / resc);
+
   printf(
       "\nThe four that rebuild a spline are stem_b, stem_c, root_b and root_c --\n"
       "and they are exactly the traits for which the argmax-mediated term is\n"
       "100%% of the gradient. So the composite's advantage is smallest precisely\n"
-      "where the composite is most necessary. PLAN 11e has what follows from that.\n");
+      "where the composite is most necessary. PLAN 11e has what follows from that.\n"
+      "\nstem_b escapes it: G is homogeneous of degree 1 in stem_b, so the spline\n"
+      "for a perturbed stem_b is this one with its argument rescaled and no\n"
+      "rebuild is needed. stem_c has no such identity. PLAN 11f.\n");
   printf("\nchecksum %.6f\n", sink);
   return 0;
 }

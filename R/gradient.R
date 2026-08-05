@@ -179,6 +179,13 @@ set_traits <- function(x, traits) {
 ##'   finite-difference fallback is used. The default `1e-08` sits in the empty
 ##'   band between the two measured populations; there is no operating point in
 ##'   this package's grid within four orders of magnitude of it.
+##' @param fast_stem_curve perturb `stem_b` without rebuilding the stem
+##'   vulnerability spline (`TRUE`, the default). The curve is homogeneous of
+##'   degree 1 in `stem_b`, so the spline for a perturbed `stem_b` is the existing
+##'   one with its argument rescaled — which makes the rebuild, otherwise most of
+##'   the cost of that gradient, unnecessary. `FALSE` rebuilds, and exists so the
+##'   equivalence is checkable rather than assumed; the package's tests require
+##'   the two routes to agree. `stem_c` has no such identity and always rebuilds.
 ##' @param method which route to take: `"auto"` (the default) uses the
 ##'   implicit-function composite where its premise holds and the finite
 ##'   difference where it does not. `"ift"` and `"fd"` force one route, for
@@ -228,7 +235,8 @@ leaf_gradient <- function(psi_soil,
                           pars = NULL,
                           step = 1e-6,
                           stationarity_tol = 1e-8,
-                          method = c("auto", "ift", "fd")) {
+                          method = c("auto", "ift", "fd"),
+                          fast_stem_curve = TRUE) {
   method <- match.arg(method)
   if (!inherits(traits, "leaf_traits")) {
     stop("`traits` must come from leaf_traits()", call. = FALSE)
@@ -275,7 +283,7 @@ leaf_gradient <- function(psi_soil,
   # ~4 us to re-trait and re-drive this one, so reconstructing per perturbation
   # would swamp any difference between the two gradient routes below.
   l <- leaf_model(traits, control, supply)
-  reset <- .gradient_setter(l, traits, drivers, supply)
+  reset <- .gradient_setter(l, traits, drivers, supply, fast_stem_curve)
   do.call(set_drivers, c(list(l), drivers))
   l$find_root_collar_psi()
 
@@ -416,11 +424,36 @@ leaf_gradient <- function(psi_soil,
 # the leaf to its just-constructed state, so the drivers have to be re-supplied
 # AFTER them -- and `set_drivers()` is what re-derives vcmax_/jmax_/R_d_ behind
 # the temperature cache that `set_traits()` has just cleared.
-.gradient_setter <- function(l, traits, drivers, supply) {
+.gradient_setter <- function(l, traits, drivers, supply,
+                             fast_stem_curve = TRUE) {
   trait_names <- names(traits)
   trait_class <- class(traits)
   single <- identical(supply$kind, "single")
-  function(theta) {
+  function(theta, only = NULL) {
+    # THE FAST PATH FOR stem_b, and it is the whole of PLAN 11f.
+    #
+    # stem_b owns the pre-integrated stem vulnerability spline, so moving it
+    # through set_traits() rebuilds it -- 11.9 us of incomplete gammas plus two
+    # interpolator inits, which is essentially the entire cost of its gradient.
+    # But the curve is homogeneous of degree 1 in stem_b, so the spline for
+    # another stem_b IS this one with its argument rescaled, and no rebuild is
+    # needed at all.
+    #
+    # ⚠️ stem_c is NOT here, and that is a measured decision rather than an
+    # omission: it has no such identity, and reading the curve from its closed
+    # form instead -- the obvious alternative -- differentiates a slightly
+    # different model and disagrees by 3e-4. PLAN 11f has the numbers.
+    #
+    # ⚠️ Sound only because `only` names a SINGLE parameter, so everything else in
+    # `theta` is still what the object was last set to. That is true here and
+    # nowhere else, which is why the argument exists rather than the function
+    # guessing: .gradient_ift and .gradient_fd perturb exactly one parameter at a
+    # time, and the next parameter's first call goes through the full path below,
+    # rebuilding the spline on its way.
+    if (fast_stem_curve && identical(only, "stem_b")) {
+      l$perturb_stem_b(theta[["stem_b"]])
+      return(invisible(l))
+    }
     set_traits(l, structure(as.list(theta[trait_names]), class = trait_class))
     if (single) {
       l$set_supply_single(theta[["resistance"]], supply$gravity_head)
@@ -462,7 +495,7 @@ leaf_gradient <- function(psi_soil,
     side <- function(sign) {
       th <- theta
       th[[p]] <- th[[p]] + sign * h
-      reset(th)
+      reset(th, only = p)
       y <- .gradient_outputs_at(l, psi_star)
       if (is.null(y)) {
         stop("leaf_gradient(): perturbing `", p, "` moved the feasible collar ",
@@ -499,7 +532,7 @@ leaf_gradient <- function(psi_soil,
     side <- function(sign) {
       th <- theta
       th[[p]] <- th[[p]] + sign * h
-      reset(th)
+      reset(th, only = p)
       l$find_root_collar_psi()
       .gradient_outputs(l)
     }
