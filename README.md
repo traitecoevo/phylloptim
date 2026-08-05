@@ -112,10 +112,16 @@ l.setup_root_vulnerability(100);
 
 std::vector<double> psi_soil{2.0};             // positive suction, MPa
 std::vector<double> soil_depth{1.0};           // m
-// kg C per m2 LEAF, not absolute carbon: the leaf is purely intensive.
-std::vector<double> root_carbon_per_leaf_area{20.0};
 
-l.set_physiology(root_carbon_per_leaf_area, /*PPFD*/ 900,
+// The per-layer root hydraulic RESISTANCES, per unit leaf area: the leaf is purely
+// intensive, and it takes the resistances rather than the root carbon they came
+// from. If you have carbon, this is the root-architecture model that maps one to
+// the other -- a helper you call, not something the solve does for you.
+const phylloptim::RootNetwork roots = phylloptim::root_network_from_carbon(
+    /*kg C per m2 LEAF*/ {20.0}, phylloptim::layer_thickness(soil_depth),
+    /*beta_R_H*/ 3.4e2, /*beta_R_V*/ 9.4e3);
+
+l.set_physiology(roots, /*PPFD*/ 900,
                  psi_soil, soil_depth,
                  /*leaf_specific_conductance_max*/ 3.14e-5,
                  /*atm_vpd*/ 2.0, /*ca*/ 40.0,
@@ -203,10 +209,23 @@ target_link_libraries(pyleaf PRIVATE phylloptim::phylloptim)
 ```python
 >>> import pyleaf
 >>> l = pyleaf.Leaf()
->>> l.set_physiology([20.0], 900, [2.0], [1.0], 3.14e-5, 2.0, 40.0, 25.0, 21.0, 101.3)
+>>> roots = pyleaf.root_network_from_carbon([20.0], 1.0, 340.0, 9400.0)
+>>> l.set_physiology(roots, 900, [2.0], [1.0], 3.14e-5, 2.0, 40.0, 25.0, 21.0, 101.3)
 >>> l.find_root_collar_psi()
 >>> l.profit
-2.5158434693939866
+2.5158434915102319
+```
+
+`set_physiology` takes a `RootNetwork`, so the binding above needs it exposed too:
+
+```cpp
+  py::class_<phylloptim::RootNetwork>(m, "RootNetwork")
+      .def(py::init<>())
+      .def_readwrite("r_R_H_min", &phylloptim::RootNetwork::r_R_H_min)
+      .def_readwrite("r_R_V_sum", &phylloptim::RootNetwork::r_R_V_sum);
+  m.def("root_network_from_carbon",
+        py::overload_cast<const std::vector<double>&, double, double, double>(
+            &phylloptim::root_network_from_carbon));
 ```
 
 That value is the golden file's `profit` at this operating point, to the last
@@ -242,7 +261,7 @@ the operating point, and `g1_eff` re-expresses the solved conductance as a Medly
 `g1`, which is a convenient common scale for comparison.
 
 Traits and numerical settings are separate, so a calibration loop varying traits
-never has to know which of the C++ constructor's nineteen arguments are
+never has to know which of the C++ constructor's seventeen arguments are
 tolerances:
 
 ```r
@@ -264,7 +283,7 @@ l$profit_            # or reach into the object directly
 l$lambda             # marginal cost of water, dA/dE
 ```
 
-`Leaf()` is also exported: it is the raw C++ constructor, nineteen positional
+`Leaf()` is also exported: it is the raw C++ constructor, seventeen positional
 arguments and no defaults. `leaf_model()` is that with the arguments named,
 defaulted and split into traits versus tolerances, and is what you should use.
 
@@ -283,9 +302,18 @@ leaf_solve(psi_soil = 1.5, PPFD = 900,
 The path is chosen when the leaf is built and cannot be flipped afterwards: a
 settable tag would leave the other path's state configured and silently ignored.
 
-⚠️ On the **multi-layer** path `root_carbon_per_leaf_area` still has no good
-default, and the value the R layer supplies is a stand-in rather than a
-recommendation.
+On the **multi-layer** path the leaf takes the per-layer resistances, so a caller
+with measured or fitted ones can state them directly:
+
+```r
+l <- leaf_model()
+set_drivers(l, psi_soil = 1.5,
+            root_network = RootNetwork(r_R_H_min = 25.5, r_R_V_sum = 1410))
+```
+
+⚠️ The default `root_network` is a nominal 20 kg C m^-2 leaf put through
+`root_network_from_carbon()` — a stand-in rather than a recommendation. It is
+written out in `set_drivers()`' body so it can be seen and replaced.
 
 ### Trait gradients
 
