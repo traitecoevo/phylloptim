@@ -1,3 +1,40 @@
+# phylloptim 0.2.1
+
+## An out-of-domain transport lookup says which spline, and which caller
+
+The stem curve is the only interpolator here built with extrapolation disabled, so
+it is the only one a lookup can throw on — and there are **two** of them,
+`transpiration_from_psi` and its inverse `psi_from_transpiration`. They are
+inverses, they carry different units, and they are read from four places. odelia's
+message names the point and the domain but cannot name the spline or the caller,
+because it does not know either. Now:
+
+```
+Leaf hydraulics: psi_from_transpiration (the INVERSE cumulative xylem
+conductivity integral G^-1, argument in E/K_max) evaluated outside its domain:
+E/K_max = -3.18471e+07 lies 3.18471e+07 beyond the lower end of [0, 3.46004];
+asked by Leaf::transpiration_to_psi_stem, inverting for psi_stem.
+```
+
+That lower-end failure is the
+[traitecoevo/plant#576](https://github.com/traitecoevo/plant/issues/576)
+signature, and reading it is the whole point: a *negative* `E/K_max` says the
+collar cannot supply the demanded flux, so the stem potential that would carry it
+is wetter than saturation and no widening of the domain can help — the caller
+should not have asked. Localising #576 without this meant instrumenting four call
+sites by hand to find out which spline was being read and at what value.
+
+Under a `stem_b` rescale the domain is reported in the **caller's** units, not the
+spline's, and the rescale is named. The value handed to the spline is `psi / s`, so
+quoting the spline's own endpoints would send the reader after a discrepancy that
+is not there.
+
+Behaviour is unchanged: 288 golden operating points are bit-identical, and
+`find_root_collar_psi()` is unchanged at 3.16 µs. A non-finite argument still falls
+through to the spline and returns non-finite rather than throwing — the guard is
+`v < min || v > max`, not the negation of an in-range test, and plant documents a
+`profit_psi_stem_TF(NA, .) -> NA` contract built on exactly that.
+
 # phylloptim 0.2.0
 
 ## The two supply paths are configured and driven the same way
