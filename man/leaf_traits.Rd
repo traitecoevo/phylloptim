@@ -72,8 +72,12 @@ named accordingly, because they were once an unmarked `b`/`c` pair alongside
 
 `beta_R_H` and `beta_R_V` were traits here until #33. They parameterise the
 root-ARCHITECTURE model, which the leaf no longer runs -- it takes the
-resistances. They are arguments to [root_network_from_carbon()] now, and a
-gradient in either is taken there.
+resistances. They are arguments to [root_network_from_carbon()] now.
+
+The cost is real and worth stating: [leaf_gradient()] can no longer
+differentiate with respect to either. Perturbing them is cheap, because
+[root_network_from_carbon()] is homogeneous of degree 1 in each, but the
+derivative of a solved output still needs two solves either side.
 }
 
 \examples{

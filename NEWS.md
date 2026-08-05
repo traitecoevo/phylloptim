@@ -103,13 +103,21 @@ observation. What reverses it is `P_fit` exceeding `P_model`.
 Both regimes are now measured. The vignette gains a scaling sweep that fits the two
 coefficients, and those coefficients — taken from 72 simulated observations —
 **predict** the companion study `leaf-calibration` (1,327 observations, 16 species,
-`P_fit = 40`, `P_model = 4`) to within about 5%: 646 ms predicted against 679
-measured, break-even 12.4 fitted parameters against 13.1. There the composite wins
-**3.4×** and reaches the same optimum as the numerical gradient, and its
+`P_fit = 40`, `P_model = 4`) to within a few percent: **638 ms predicted against
+679 measured**, break-even 12.3 fitted parameters against 13.1. There the composite
+wins **3.4×** and reaches the same optimum as the numerical gradient, and its
 57-parameter variant costs the same as its 40-parameter one.
 
+⚠️ Those two figures read 646 ms and 12.4 when first written, i.e. "within about
+5%" rather than 6%. They moved because the vignette's 13-parameter candidate list
+had to change: `beta_R_H` and `beta_R_V` are not differentiable parameters any more
+(see the `set_physiology` entry above), so `psi_crit` and `root_psi_crit` took their
+places and the fitted coefficients shifted slightly. The prediction is regenerated
+on every build; the *claim* is that two designs differing 18-fold in size agree to a
+few percent, and that is unchanged.
+
 `?leaf_gradient` gains a "What it costs" section, and a warning that was missing:
-**always pass `pars`**, since it *is* `P_model` and the default of all sixteen is
+**always pass `pars`**, since it *is* `P_model` and the default of all fourteen is
 the most expensive request available.
 
 Also: this file's heading said `leaf`, three renames ago.
@@ -149,7 +157,7 @@ boundary you are.
 ## `leaf_gradient()` covers the two parameters that are not traits (#44)
 
 `pars` now accepts **`leaf_specific_conductance_max`** and — on the
-single-potential path — **`resistance`**, alongside the fifteen traits.
+single-potential path — **`resistance`**, alongside the thirteen traits.
 
 They are here because a calibration fits them. Of `leaf-calibration`'s four free
 parameters, two are traits (`cost_scale_TF24`, `beta2`) and two are these
@@ -217,7 +225,7 @@ rather than changing one.
 
 **`leaf_gradient()`** returns the derivatives of the solved outputs with respect to
 the traits: `dA/dθ`, `dgc/dθ`, `dψ_stem/dθ` and `dψ*/dθ`, for any subset of the
-fifteen traits at one operating point. These are not finite differences of the
+thirteen traits at one operating point. These are not finite differences of the
 solve. The outputs are read at the profit-maximising collar potential, so a trait
 moves them both directly and by moving that optimum, and differentiating the
 optimality condition captures both terms — which matters because for
@@ -362,14 +370,14 @@ Two things worth knowing if you are working on this package:
 ## A surface you can type at a console (#5, stage 2)
 
 The bindings above are a faithful translation of the C++, which is what let them
-be checked against the golden file — and it means nineteen positional arguments.
+be checked against the golden file — and it means seventeen positional arguments.
 On top of them:
 
 - **`leaf_solve()`** — drivers in, operating point out as a data.frame,
   vectorised, so a response curve is one call. This is the entry point for
   someone who would otherwise reach for `plantecophys::Photosyn()`.
 - **`leaf_traits()` and `leaf_control()`** — the split the issue asked for. Four
-  of the constructor's nineteen arguments are tolerances sitting among the
+  of the constructor's seventeen arguments are tolerances sitting among the
   physiology, and a trait-calibration loop should not have to know which. A test
   asserts the two functions partition the constructor exactly.
 - **`leaf_model()`** — named and defaulted, and the recommended constructor.

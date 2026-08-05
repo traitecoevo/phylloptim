@@ -202,9 +202,9 @@ set_traits <- function(x, traits) {
 ##' 57-parameter variant costing the same as its 40-parameter one, because
 ##' `P_model` is 4 in both.
 ##'
-##' ⚠️ **Always pass `pars`.** It is `P_model`, so the default — all sixteen —
-##' is the most expensive thing you can ask for, and a fit that reads four of them
-##' pays for twelve it discards.
+##' ⚠️ **Always pass `pars`.** It is `P_model`, so the default — all fourteen on
+##' the multi-layer path — is the most expensive thing you can ask for, and a fit
+##' that reads four of them pays for ten it discards.
 ##'
 ##' The intercept is a fresh `Leaf` per call, which there is currently no way to
 ##' avoid (see phylloptim#52); it is 29% of the exact gradient in the study above.

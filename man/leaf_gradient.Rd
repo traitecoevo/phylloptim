@@ -68,10 +68,12 @@ differentiate at}
   single-potential path only — `"resistance"`. Defaults to all of them.
 
   `beta_R_H` and `beta_R_V` were here until #33 and are not any more: they
-  parameterise the root-architecture model, which the leaf no longer runs. A
-  gradient in either is exact and needs no differencing —
-  [root_network_from_carbon()] is homogeneous of degree 1 in each, so scaling
-  the constant scales `r_R_H_min` (or `r_R_V`) by the same factor.}
+  parameterise the root-architecture model, which the leaf no longer runs, so
+  this function has no way to reach them. Getting a gradient in either means
+  solving at two networks yourself. The perturbation itself is cheap —
+  [root_network_from_carbon()] is homogeneous of degree 1 in each constant, so
+  scaling `beta_R_H` scales `r_R_H_min` by the same factor and needs no
+  rebuild — but the two solves are still two solves.}
 
 \item{step}{relative step for the trait difference. The default `1e-06` is
 near the middle of the five decades over which the mixed partial was
@@ -227,9 +229,9 @@ The companion study `leaf-calibration` has `N = 1327`, `P_fit = 40`,
 57-parameter variant costing the same as its 40-parameter one, because
 `P_model` is 4 in both.
 
-⚠️ **Always pass `pars`.** It is `P_model`, so the default — all sixteen —
-is the most expensive thing you can ask for, and a fit that reads four of them
-pays for twelve it discards.
+⚠️ **Always pass `pars`.** It is `P_model`, so the default — all fourteen on
+the multi-layer path — is the most expensive thing you can ask for, and a fit
+that reads four of them pays for ten it discards.
 
 The intercept is a fresh `Leaf` per call, which there is currently no way to
 avoid (see phylloptim#52); it is 29% of the exact gradient in the study above.

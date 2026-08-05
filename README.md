@@ -358,7 +358,7 @@ has** — `length(pars)`. They are equal only if you fit traits directly. Poolin
 hierarchy, or any derived parameter makes the first much larger than the second,
 which is where this route wins; `vignette("fitting")` measures both regimes and
 `?leaf_gradient` has the cost model. ⚠️ **Always pass `pars`** — the default is all
-sixteen, which is the most expensive request there is.
+fourteen, which is the most expensive request there is.
 
 To vary traits yourself, `set_traits()` replaces them on an existing leaf — much
 cheaper than rebuilding one, and the only correct way to do it, since a trait

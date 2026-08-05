@@ -126,7 +126,7 @@ ssq_grad <- function(theta, l) {
 }
 ```
 
-Note `pars = FIT`. Requesting all sixteen parameters here would compute thirteen
+Note `pars = FIT`. Requesting all fourteen parameters here would compute eleven
 gradients per observation that the optimiser never reads.
 
 ⚠️ **Bound the parameters, or the first step overflows.** The objective is scaled
