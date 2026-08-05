@@ -7,7 +7,7 @@
 #
 # Two things it is for:
 #
-#   1. Separating traits from tolerances. The C++ constructor takes 19 positional
+#   1. Separating traits from tolerances. The C++ constructor takes 17 positional
 #      arguments and four of them -- GSS_tol_abs, ci_abs_tol, ci_niter,
 #      vulnerability_curve_ncontrol -- are numerical settings sitting among the
 #      physiology. A trait-calibration loop should not have to know which of 19
@@ -23,11 +23,15 @@
 # compares bit-exactly against a golden file generated from a default-constructed
 # C++ Leaf. If the two ever drift apart, that file fails.
 #
-# root_c / root_b / root_psi_crit / beta_R_H / beta_R_V default in MultiLayerRoots
-# rather than in Leaf, because a second copy of the root Weibull pair inside Leaf
-# is exactly hazard 1 in the developer guide -- it has already cost this project a
-# wrong exponent in a manuscript draft. They are restated here because the R
-# constructor has to pass them, not because Leaf owns them.
+# root_c / root_b / root_psi_crit default in MultiLayerRoots rather than in Leaf,
+# because a second copy of the root Weibull pair inside Leaf is exactly hazard 1
+# in the developer guide -- it has already cost this project a wrong exponent in a
+# manuscript draft. They are restated here because the R constructor has to pass
+# them, not because Leaf owns them.
+#
+# beta_R_H / beta_R_V are NOT here since #33: they parameterise the
+# root-architecture model, which the leaf no longer runs. Their defaults live with
+# that model, on root_network_from_carbon().
 .leaf_trait_defaults <- list(
   vcmax_25 = 96,
   stem_c = 2.680147,
@@ -41,9 +45,7 @@
   a = 0.30,
   curv_fact_elec_trans = 0.7,
   curv_fact_colim = 0.99,
-  cost_scale_TF24 = 7.5,
-  beta_R_H = 3.4e2,
-  beta_R_V = 9.4e3
+  cost_scale_TF24 = 7.5
 )
 
 .leaf_control_defaults <- list(
@@ -84,12 +86,16 @@
 ##' @param curv_fact_colim curvature of the colimited photosynthesis equation
 ##' @param cost_scale_TF24 cost parameter for the TF24 profit model
 ##'   (umol m^-2 s^-1)
-##' @param beta_R_H proportionality constant between minimum horizontal
-##'   (intralayer) root hydraulic resistance and C_r^-1
-##'   (MPa s mol C / mol H2O)
-##' @param beta_R_V proportionality constant between minimum vertical
-##'   (interlayer) root hydraulic resistance and dz^2/C_r
-##'   (MPa mol C s / mol H2O / m^2)
+##'
+##' @section Where the two root-resistance constants went:
+##' `beta_R_H` and `beta_R_V` were traits here until #33. They parameterise the
+##' root-ARCHITECTURE model, which the leaf no longer runs -- it takes the
+##' resistances. They are arguments to [root_network_from_carbon()] now.
+##'
+##' The cost is real and worth stating: [leaf_gradient()] can no longer
+##' differentiate with respect to either. Perturbing them is cheap, because
+##' [root_network_from_carbon()] is homogeneous of degree 1 in each, but the
+##' derivative of a solved output still needs two solves either side.
 ##'
 ##' @return A `leaf_traits` object; a named list.
 ##' @seealso [leaf_control()], [leaf_model()], [leaf_solve()]
@@ -109,17 +115,14 @@ leaf_traits <- function(vcmax_25 = 96,
                         a = 0.30,
                         curv_fact_elec_trans = 0.7,
                         curv_fact_colim = 0.99,
-                        cost_scale_TF24 = 7.5,
-                        beta_R_H = 3.4e2,
-                        beta_R_V = 9.4e3) {
+                        cost_scale_TF24 = 7.5) {
   out <- list(vcmax_25 = vcmax_25, stem_c = stem_c, stem_b = stem_b,
               psi_crit = psi_crit, root_c = root_c, root_b = root_b,
               root_psi_crit = root_psi_crit, beta2 = beta2,
               jmax_25 = jmax_25, a = a,
               curv_fact_elec_trans = curv_fact_elec_trans,
               curv_fact_colim = curv_fact_colim,
-              cost_scale_TF24 = cost_scale_TF24,
-              beta_R_H = beta_R_H, beta_R_V = beta_R_V)
+              cost_scale_TF24 = cost_scale_TF24)
   .check_scalars(out, "leaf_traits")
   structure(out, class = c("leaf_traits", "list"))
 }
@@ -246,7 +249,7 @@ leaf_supply_multilayer <- function() {
 ##' Build a leaf
 ##'
 ##' The recommended way to construct a leaf. [Leaf()] is the raw C++ constructor,
-##' with all nineteen arguments positional and no defaults; this splits them into
+##' with all seventeen arguments positional and no defaults; this splits them into
 ##' traits and numerical settings, defaults both, and initialises the integrator.
 ##'
 ##' The result is a stateful R6 object: set drivers with [set_drivers()], solve
@@ -301,9 +304,7 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
     vulnerability_curve_ncontrol = control$vulnerability_curve_ncontrol,
     ci_abs_tol = control$ci_abs_tol,
     ci_niter = control$ci_niter,
-    cost_scale_TF24 = traits$cost_scale_TF24,
-    beta_R_H = traits$beta_R_H,
-    beta_R_V = traits$beta_R_V
+    cost_scale_TF24 = traits$cost_scale_TF24
   )
   l$initialize_integrator(control$integration_rule, control$integration_tol)
   # After the integrator, because set_supply_single clears the solved state --
@@ -313,6 +314,68 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
     l$set_supply_single(supply$resistance, supply$gravity_head)
   }
   l
+}
+
+# ---------------------------------------------------------------------------
+# The R-boundary tax on a RootNetwork, and why these two are memoised
+# ---------------------------------------------------------------------------
+#
+# ⚠️ MATERIALISING A RootNetwork AS AN R OBJECT COSTS ~58 us, AND ALMOST NONE OF
+# IT IS OUR CODE. Measured against the installed package: `RootNetwork__ctor()` --
+# the bare `.Call`, before any R wrapper -- is 58 us, where a trivial `.Call` on a
+# Leaf field is 1.1 us and `$set_physiology()` handed a ready-made network is
+# 4.3 us. It is `Rcpp::wrap` building the five-element named list, which RcppR6
+# generates as five successive `ret["name"] = ...` assignments on an initially
+# empty `Rcpp::List` -- each one grows the list and its names attribute.
+#
+# Building the default network per call therefore made `set_drivers()` **9.4 ->
+# 73 us** on the multi-layer path and **5.8 -> 66 us** on the single-potential one,
+# and `leaf_solve()` **23.7 -> 108 us/row** -- a 4.5x regression on a figure this
+# package's own documentation quotes. Caught only by measuring; every test passed.
+#
+# This is the R boundary dominating a loop again, which is the standing lesson
+# here: count R calls, not arithmetic.
+#
+# Both memos are deliberately SIZE ONE rather than keyed caches. A `leaf_solve()`
+# sweep holds `soil_depth` fixed across rows, so a one-entry memo hits on every row
+# after the first, and it cannot grow without bound the way a keyed cache would if
+# someone swept the soil profile. The comparison is `identical()` on the depth
+# vector -- about 1 us -- not a pasted string key, because formatting a numeric
+# vector to build one costs more than it saves.
+#
+# Sharing one R object across calls is safe: `set_physiology` copies it into C++
+# through `Rcpp::as`, nothing mutates it, and R's copy-on-write means a caller who
+# got hold of it could not mutate ours either.
+
+.network_memo <- new.env(parent = emptyenv())
+
+# The multi-layer default: 20 kg C m^-2 leaf split evenly over the layers, through
+# the architecture model the leaf used to run internally (#33) -- so the numbers
+# are the pre-#33 ones and the provenance is on the page rather than buried in a
+# signature. `soil_depth` determines the whole thing, because the default carbon is
+# `rep(20 / n, n)` with `n == length(soil_depth)`, so it is the only key needed.
+.default_root_network <- function(n, soil_depth) {
+  if (!is.null(.network_memo$depth) &&
+      identical(.network_memo$depth, soil_depth)) {
+    return(.network_memo$net)
+  }
+  net <- root_network_from_carbon(
+    root_carbon_per_leaf_area = rep(20 / n, n),
+    soil_depth = soil_depth
+  )
+  .network_memo$depth <- soil_depth
+  .network_memo$net <- net
+  net
+}
+
+# The single-potential path reads `psi_soil[1]` and nothing else, so it needs a
+# network only because `set_physiology` has one signature for both paths. One empty
+# one per session.
+.empty_root_network <- function() {
+  if (is.null(.network_memo$empty)) {
+    .network_memo$empty <- RootNetwork()
+  }
+  .network_memo$empty
 }
 
 ##' Set the drivers for a leaf
@@ -330,9 +393,28 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
 ##' it over -- it does not take `abs()`.
 ##'
 ##' @section Multiple soil layers:
-##' Pass vectors for `psi_soil`, and optionally for `soil_depth` and
-##' `root_carbon_per_leaf_area`. All three must end up the same length. By
-##' default `soil_depth` becomes 1 m layers and the root carbon is split evenly.
+##' Pass vectors for `psi_soil`, and optionally for `soil_depth`. Both must end up
+##' the same length; by default `soil_depth` becomes 1 m layers.
+##'
+##' @section The root network, and why it is not a carbon profile:
+##' Since #33 the leaf takes the per-layer root hydraulic RESISTANCES, not the root
+##' carbon they may have been derived from. The solve reads two vectors,
+##' `r_R_H_min` and `r_R_V_sum`, and nothing in it knows about root carbon, layer
+##' thickness, the 1/3 : 2/3 vertical/horizontal split or either `beta_R_*`
+##' constant. That matters here rather than only in C++: this function used to ask
+##' for a root carbon profile, which a leaf physiologist does not have, and it
+##' invented a default of 20 kg C m^-2 leaf and then apologised for it in this
+##' paragraph.
+##'
+##' It still has a default, because the multi-layer path is the default path and
+##' `leaf_solve(psi_soil = 2)` has to mean something. What changed is that the
+##' default is now *visible*: it is a nominal carbon profile put through
+##' [root_network_from_carbon()], written out below, rather than a number buried in
+##' a signature. Supply `root_network` to replace it — with measured resistances,
+##' with fitted ones, or with the same helper at your own constants.
+##'
+##' The numbers are unchanged from the old default, so this is not a results
+##' change for anyone who was accepting it.
 ##'
 ##' @param x a `Leaf`, from [leaf_model()]
 ##' @param psi_soil soil water potential, MPa, **positive magnitude**. Length
@@ -340,11 +422,11 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
 ##' @param PPFD photosynthetic photon flux density, umol m^-2 s^-1
 ##' @param soil_depth cumulative depth to the bottom of each layer, m. Defaults
 ##'   to 1 m layers.
-##' @param root_carbon_per_leaf_area root carbon **per unit leaf area**, kg C
-##'   m^-2 leaf, per layer. Defaults to 20 split evenly across layers. This is
-##'   the one argument with no good default -- a bare-leaf user does not have a
-##'   root carbon profile, which is why 20 is a stand-in rather than a
-##'   recommendation. It is also why the single-potential supply path exists.
+##' @param root_network the per-layer root hydraulic resistances, a
+##'   [RootNetwork()]. Defaults to a nominal 20 kg C m^-2 leaf split evenly over
+##'   the layers and put through [root_network_from_carbon()] — a stand-in, not a
+##'   recommendation, which is why it is written out where you can see and replace
+##'   it. Ignored, and an error if supplied, on the single-potential path.
 ##' @param leaf_specific_conductance_max maximum leaf-specific hydraulic
 ##'   conductance, kg m^-2 s^-1 MPa^-1
 ##' @param atm_vpd atmospheric vapour pressure deficit, kPa
@@ -367,7 +449,7 @@ set_drivers <- function(x,
                         psi_soil,
                         PPFD = 900,
                         soil_depth = NULL,
-                        root_carbon_per_leaf_area = NULL,
+                        root_network = NULL,
                         leaf_specific_conductance_max = 3.14e-5,
                         atm_vpd = 2.0,
                         ca = 40.0,
@@ -403,39 +485,38 @@ set_drivers <- function(x,
            "path; got ", n, " layers. Build the leaf with ",
            "leaf_supply_multilayer() for a layered profile.", call. = FALSE)
     }
-    if (!is.null(soil_depth) || !is.null(root_carbon_per_leaf_area)) {
-      stop("`soil_depth` and `root_carbon_per_leaf_area` are not used on the ",
+    if (!is.null(soil_depth) || !is.null(root_network)) {
+      stop("`soil_depth` and `root_network` are not used on the ",
            "single-potential supply path -- the whole soil-to-collar path is ",
            "the `resistance` given to leaf_supply_single(). Drop them, or ",
            "build the leaf with leaf_supply_multilayer().", call. = FALSE)
     }
-    # set_physiology keeps one signature for both paths and requires the three
-    # vectors to match in length; on this path it reads only psi_soil[1], so
-    # these two are placeholders rather than inputs.
+    # set_physiology keeps one signature for both paths; on this path it reads
+    # only psi_soil[1], so these two are placeholders rather than inputs.
     soil_depth <- 1.0
-    root_carbon_per_leaf_area <- 0.0
+    root_network <- .empty_root_network()
   } else {
     soil_depth <- if (is.null(soil_depth)) {
       seq_len(n) * 1.0
     } else {
       as.numeric(soil_depth)
     }
-    root_carbon_per_leaf_area <- if (is.null(root_carbon_per_leaf_area)) {
-      rep(20 / n, n)
-    } else {
-      as.numeric(root_carbon_per_leaf_area)
+    if (length(soil_depth) != n) {
+      stop("`psi_soil` (", n, ") and `soil_depth` (", length(soil_depth),
+           ") must have one entry per soil layer", call. = FALSE)
     }
 
-    if (length(soil_depth) != n || length(root_carbon_per_leaf_area) != n) {
-      stop("`psi_soil` (", n, "), `soil_depth` (", length(soil_depth),
-           ") and `root_carbon_per_leaf_area` (",
-           length(root_carbon_per_leaf_area),
-           ") must all have one entry per soil layer", call. = FALSE)
+    if (is.null(root_network)) {
+      root_network <- .default_root_network(n, soil_depth)
+    } else if (!inherits(root_network, "RootNetwork")) {
+      stop("`root_network` must be a RootNetwork, from RootNetwork() or ",
+           "root_network_from_carbon(); got ", class(root_network)[[1]],
+           call. = FALSE)
     }
   }
 
   x$set_physiology(
-    root_carbon_per_leaf_area = root_carbon_per_leaf_area,
+    root_network = root_network,
     PPFD = PPFD,
     psi_soil = psi_soil,
     soil_depth = soil_depth,
@@ -555,16 +636,17 @@ operating_point <- function(x) {
 ##' `leaf_specific_conductance_max` are recycled to a common length, the usual R
 ##' way. `psi_soil` is recycled too **when it is a plain numeric vector** --
 ##' each element is then a separate single-layer solve. For multi-layer solves
-##' pass a list of numeric vectors, one per row; `soil_depth` and
-##' `root_carbon_per_leaf_area` follow the same rule.
+##' pass a list of numeric vectors, one per row; `soil_depth` follows the same
+##' rule. `root_network` is either one [RootNetwork()], used for every row, or a
+##' list of them, one per row.
 ##'
 ##' @inheritParams set_drivers
 ##' @param traits a [leaf_traits()] object
 ##' @param control a [leaf_control()] object
 ##' @param supply how water reaches the root collar: [leaf_supply_multilayer()]
 ##'   (the default) or [leaf_supply_single()]. On the single-potential path
-##'   `soil_depth` and `root_carbon_per_leaf_area` must be omitted, and each
-##'   `psi_soil` is one value rather than a profile.
+##'   `soil_depth` and `root_network` must be omitted, and each `psi_soil` is one
+##'   value rather than a profile.
 ##' @param reuse solve every row with one `Leaf` object (`TRUE`) or construct a
 ##'   fresh one per row (`FALSE`, the default). Reuse is faster because the two
 ##'   vulnerability splines are built once, and it is safe -- every exit from the
@@ -591,7 +673,7 @@ operating_point <- function(x) {
 leaf_solve <- function(psi_soil,
                        PPFD = 900,
                        soil_depth = NULL,
-                       root_carbon_per_leaf_area = NULL,
+                       root_network = NULL,
                        leaf_specific_conductance_max = 3.14e-5,
                        atm_vpd = 2.0,
                        ca = 40.0,
@@ -621,10 +703,16 @@ leaf_solve <- function(psi_soil,
 
   depths <- if (is.null(soil_depth)) NULL else
     .recycle_to(.as_layer_list(soil_depth, "soil_depth"), n, "soil_depth")
-  carbon <- if (is.null(root_carbon_per_leaf_area)) NULL else
-    .recycle_to(.as_layer_list(root_carbon_per_leaf_area,
-                               "root_carbon_per_leaf_area"),
-                n, "root_carbon_per_leaf_area")
+  # One network for every row, or one per row. The inherits() test comes FIRST
+  # because a RootNetwork *is* a list, so length() on it would be 5 and it would
+  # be read as five rows' worth of networks.
+  networks <- if (is.null(root_network)) {
+    NULL
+  } else if (inherits(root_network, "RootNetwork")) {
+    rep(list(root_network), n)
+  } else {
+    .recycle_to(root_network, n, "root_network")
+  }
 
   shared <- if (reuse) leaf_model(traits, control, supply) else NULL
 
@@ -652,8 +740,8 @@ leaf_solve <- function(psi_soil,
                 psi_soil = layered[[i]],
                 PPFD = scalars$PPFD[[i]],
                 soil_depth = if (is.null(depths)) NULL else depths[[i]],
-                root_carbon_per_leaf_area =
-                  if (is.null(carbon)) NULL else carbon[[i]],
+                root_network =
+                  if (is.null(networks)) NULL else networks[[i]],
                 leaf_specific_conductance_max =
                   scalars$leaf_specific_conductance_max[[i]],
                 atm_vpd = scalars$atm_vpd[[i]],

@@ -123,10 +123,10 @@ transpiration needed to support a given assimilation rises with VPD.
 
 ## Traits and numerical settings are separate
 
-The C++ constructor takes nineteen positional arguments, four of which are
+The C++ constructor takes seventeen positional arguments, four of which are
 tolerances sitting among the physiology. `leaf_traits()` and `leaf_control()`
 split them, so a calibration loop varying traits never has to know which of the
-nineteen are not traits.
+seventeen are not traits.
 
 ```{r}
 vulnerable <- leaf_traits(stem_b = 2.5, psi_crit = 4.0,
@@ -201,8 +201,9 @@ leaf_solve(psi_soil = 1.5, PPFD = 900,
   select(psi_soil, psi_stem, collar, A, gc, g1_eff)
 ```
 
-No depth profile, no root carbon, no `beta_R_V`. The resistance is **per unit
-leaf area**, because nothing in this model is allowed to scale with plant size.
+No depth profile and one number instead of a per-layer network. The resistance is
+**per unit leaf area**, because nothing in this model is allowed to scale with
+plant size.
 Raising it makes water harder to get and the leaf closes down:
 
 ```{r, fig.height = 3.4}
@@ -333,9 +334,9 @@ dim(leaf_gradient(psi_soil = 2.0, PPFD = 900)$gradient)
 rownames(leaf_gradient(psi_soil = 2.0, PPFD = 900)$gradient)
 ```
 
-Sixteen on the multi-layer path — the fifteen traits from `leaf_traits()`, plus
+Fourteen on the multi-layer path — the thirteen traits from `leaf_traits()`, plus
 `leaf_specific_conductance_max`, which is not a trait but is fitted like one. The
-single-potential path adds `resistance`, making seventeen.
+single-potential path adds `resistance`, making fifteen.
 
 **Selecting fewer genuinely costs less**: the work is one solve plus two cheap
 evaluations per parameter, so it scales with what you ask for.
@@ -358,7 +359,7 @@ tibble::tibble(
 ```
 
 So in a calibration, name only the parameters you are fitting. Asking for all
-sixteen when you fit three is roughly five times the work.
+fourteen when you fit three is several times the work.
 
 ⚠️ **The four outputs are not selectable** — every call returns the derivative of
 `A`, `gc`, `psi_stem` and `collar` with respect to each requested parameter,

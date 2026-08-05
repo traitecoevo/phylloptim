@@ -19,6 +19,8 @@ namespace traits {
 template <typename T> class Exporter<phylloptim::RcppR6::RcppR6<T> >;
 }
 
+template <> SEXP wrap(const phylloptim::RootNetwork&);
+template <> phylloptim::RootNetwork as(SEXP);
 template <> SEXP wrap(const phylloptim::Leaf&);
 template <> phylloptim::Leaf as(SEXP);
 }

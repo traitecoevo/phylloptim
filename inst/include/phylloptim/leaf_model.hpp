@@ -43,10 +43,8 @@ public:
        double vulnerability_curve_ncontrol,
        double ci_abs_tol,
        double ci_niter,
-      double cost_scale_TF24,
-    double beta_R_H,
-    double beta_R_V); 
-        
+      double cost_scale_TF24);
+
   odelia::interpolator::Interpolator transpiration_from_psi;
   odelia::interpolator::Interpolator psi_from_transpiration;
 
@@ -410,16 +408,40 @@ public:
 
   
   // set-up functions
-  // root_carbon_per_leaf_area: per-layer root carbon PER UNIT LEAF AREA. The leaf
-  // used to take absolute root carbon plus area_leaf and divide, but the two only
-  // ever appeared as that ratio -- r_R = beta/c_r is exactly linear in root carbon,
-  // so E_i is proportional to (root carbon / area_leaf) and nothing else. Passing
-  // the ratio makes the leaf PURELY INTENSIVE: no extensive quantity anywhere in
-  // it. beta_R_H and beta_R_V are unchanged; the scaling cancels exactly.
-  void set_physiology(const std::vector<double>& root_carbon_per_leaf_area, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double leaf_temp, double atm_o2_kpa, double atm_kpa);
+  //
+  // `root_network`: the per-layer root hydraulic RESISTANCES, PER UNIT LEAF AREA.
+  // Not the root carbon they may have been derived from (#33). The solve reads
+  // exactly two of the five fields -- r_R_H_min and r_R_V_sum -- and nothing in it
+  // touches root carbon, the 1/3 : 2/3 vertical/horizontal split, the layer
+  // thickness or either beta_R_* constant. Those are a root-ARCHITECTURE model,
+  // and which one is in force is no more this package's business than which
+  // conductance-versus-height model produced `leaf_specific_conductance_max`,
+  // which plant has always passed in already reduced. `root_network_from_carbon`
+  // is the architecture model that used to run in here; it is still in this
+  // package, still tested, and still what the golden grid calls -- but the CALL is
+  // the caller's now.
+  //
+  // ⚠️ PER UNIT LEAF AREA, which is where the intensiveness lives (hazard 4). The
+  // leaf once took absolute root carbon plus area_leaf and divided, but the two
+  // only ever appeared as that ratio -- r_R = beta/c_r is exactly linear in root
+  // carbon, so E_i depends on (root carbon / area_leaf) and nothing else. That
+  // reduction now happens on the far side of the boundary, so it is the
+  // resistances that arrive already scaled, and a caller passing resistances built
+  // from absolute carbon gets a silently wrong E_up rather than an error: no
+  // check here can see the difference, because both are just positive numbers.
+  void set_physiology(const RootNetwork& root_network, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double leaf_temp, double atm_o2_kpa, double atm_kpa);
 
-  // Replace the fifteen traits on an existing Leaf, leaving the four numerical
+  // Replace the thirteen traits on an existing Leaf, leaving the four numerical
   // controls alone. Same arguments, same order, as the constructor's trait subset.
+  //
+  // It was fifteen before #33. `beta_R_H` and `beta_R_V` left with the root
+  // architecture model, so they are no longer traits of anything here and there is
+  // no route to d(output)/d(beta_R_*) through this object. A caller who needs one
+  // differences the NETWORK, which is now an input: root_network_from_carbon is
+  // homogeneous of degree 1 in each constant (r_R_H_min proportional to beta_R_H,
+  // r_R_V to beta_R_V), so the perturbed network is a scaling of the base one and
+  // costs no rebuild -- but the two solves either side of it are still two solves.
+  // ⚠️ Do not read that as "the gradient is free"; only the perturbation is.
   //
   // ONE ENTRY POINT, NOT FIFTEEN SETTABLE FIELDS, and this is the set_supply_*
   // judgement again (issue #32) rather than a stylistic preference. The traits are
@@ -454,7 +476,7 @@ public:
                   double root_c, double root_b, double root_psi_crit,
                   double beta2, double jmax_25, double a,
                   double curv_fact_elec_trans, double curv_fact_colim,
-                  double cost_scale_TF24, double beta_R_H, double beta_R_V);
+                  double cost_scale_TF24);
 
   // The #25 boundary: the four potentials that must be positive magnitudes. One
   // copy, called from both the constructor and set_traits -- the alternative is
@@ -928,9 +950,7 @@ inline Leaf::Leaf(double vcmax_25, double stem_c, double stem_b,
            double vulnerability_curve_ncontrol,
            double ci_abs_tol,
            double ci_niter,
-           double cost_scale_TF24,
-           double beta_R_H,
-           double beta_R_V)
+           double cost_scale_TF24)
     : vcmax_25(vcmax_25), // umol m^-2 s^-1 
     stem_c(stem_c), //unitless
     stem_b(stem_b), //-MPa
@@ -953,13 +973,11 @@ inline Leaf::Leaf(double vcmax_25, double stem_c, double stem_b,
       // Now it is checkable, so it is checked. set_traits shares this check.
       check_psi_magnitudes(psi_crit, stem_b, root_b, root_psi_crit);
 
-      // The root traits and the two resistance constants belong to the supply
-      // path, so hand them over before its vulnerability curve is built.
+      // The root traits belong to the supply path, so hand them over before its
+      // vulnerability curve is built.
       roots_.root_c = root_c;          //unitless
       roots_.root_b = root_b;          // MPa, positive magnitude
       roots_.root_psi_crit = root_psi_crit; // MPa, positive magnitude
-      roots_.beta_R_H = beta_R_H; //proportionality constant between minimum horizontal (intraleyer) root hydraulic resistance and C_r^-1 in [MPa * s * (mol C) / (mol H2O)]
-      roots_.beta_R_V = beta_R_V; //proportionality constant between minimum vertical (interlayer) root hydraulic resistance and dz^2/C_r in [MPa * (mol C) * s / (mol H2O) / m^2]
 
       setup_transpiration(vulnerability_curve_ncontrol); // arg: num control points for integration
       setup_root_vulnerability(vulnerability_curve_ncontrol);
@@ -992,8 +1010,8 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
                              double root_psi_crit_, double beta2_,
                              double jmax_25_, double a_,
                              double curv_fact_elec_trans_,
-                             double curv_fact_colim_, double cost_scale_TF24_,
-                             double beta_R_H_, double beta_R_V_) {
+                             double curv_fact_colim_,
+                             double cost_scale_TF24_) {
   check_psi_magnitudes(psi_crit_, stem_b_, root_b_, root_psi_crit_);
 
   // Which splines have to be rebuilt, decided BEFORE the assignment. Exact
@@ -1026,12 +1044,7 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
   roots_.root_c = root_c_;
   roots_.root_b = root_b_;
   roots_.root_psi_crit = root_psi_crit_;
-  roots_.beta_R_H = beta_R_H_;
-  roots_.beta_R_V = beta_R_V_;
 
-  // beta_R_H / beta_R_V need no rebuild here: they turn root carbon into
-  // resistances, and that happens in set_physiology, which this call requires
-  // anyway. Same reasoning as psi_crit, which is read directly.
   if (stem_curve_moved) {
     setup_transpiration(vulnerability_curve_ncontrol);
   }
@@ -1117,9 +1130,9 @@ inline void Leaf::setup_clean_leaf() {
 // every call; see the optimisation notes / caching opportunity.
 //
 //sets various parameters which are constant for a given node at a given time
-inline void Leaf::set_physiology(const std::vector<double>& root_carbon_per_leaf_area, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double leaf_temp, double atm_o2_kpa, double atm_kpa) {
-    if (psi_soil.size() != soil_depth.size() || root_carbon_per_leaf_area.size() != soil_depth.size()) {
-    util::stop("soil_depth, psi_soil and root_carbon_per_leaf_area must have the same number of elements");
+inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double leaf_temp, double atm_o2_kpa, double atm_kpa) {
+  if (psi_soil.size() != soil_depth.size()) {
+    util::stop("soil_depth and psi_soil must have the same number of elements");
   }
   if (!std::isfinite(PPFD) || !std::isfinite(leaf_specific_conductance_max) ||
       !std::isfinite(atm_vpd) || !std::isfinite(ca) ||
@@ -1144,11 +1157,12 @@ inline void Leaf::set_physiology(const std::vector<double>& root_carbon_per_leaf
       util::stop("set_physiology received non-finite soil_depth at layer=" + std::to_string(i) +
                  "; soil_depth=" + util::to_string(soil_depth[i]));
     }
-    if (!std::isfinite(root_carbon_per_leaf_area[i])) {
-      util::stop("set_physiology received non-finite root_carbon_per_leaf_area at layer=" + std::to_string(i) +
-                 "; root_carbon_per_leaf_area=" + util::to_string(root_carbon_per_leaf_area[i]));
-    }
   }
+  // The root network is NOT validated here. It is checked in set_root_network
+  // below, which is where the length agreement with the soil profile can actually
+  // be tested -- the network is sized to the deepest ROOTED layer, so it is
+  // shorter than psi_soil whenever the plant is shallower than the soil, and a
+  // check up here would have to duplicate that rule.
    atm_vpd_ = atm_vpd;
    leaf_temp_ = leaf_temp;
    atm_kpa_ = atm_kpa;
@@ -1217,12 +1231,12 @@ inline void Leaf::set_physiology(const std::vector<double>& root_carbon_per_leaf
      photo_temp_cached_ = true;
    }
 
-  // Root architecture (carbon -> resistance) is computed here and handed over as
-  // resistances; roots_ itself no longer knows about root carbon. See
-  // root_network_from_carbon. This is the leaf-side half of that split -- moving
-  // the call itself up to plant is an API change and belongs with item 10b.
+  // The root resistances, handed over as given. #33 moved the carbon ->
+  // resistance step out to the caller, so this is now a validated copy rather
+  // than a model evaluation. It stays HERE, after set_soil_state, because the
+  // length check it performs needs the soil profile to be seated first.
   if (supply_kind_ == SupplyKind::MultiLayer) {
-    roots_.set_root_network_from_carbon(root_carbon_per_leaf_area);
+    roots_.set_root_network(root_network);
   }
 
   // Set up vector of root water uptake from layer. Stays on Leaf: plant writes

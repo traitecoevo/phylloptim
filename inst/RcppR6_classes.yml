@@ -27,6 +27,41 @@
 # moved into a sub-object without the R-side name moving. That is how the
 # `roots_.` entries below work, and it is what makes a future member move cheap.
 
+# The per-layer root hydraulic resistances `set_physiology` takes (#33). A `list:`
+# class rather than an R6 one: it is a value, not a stateful object, and the
+# generated Rcpp::as/wrap is what lets it be a set_physiology ARGUMENT at all.
+#
+# Two of the five fields drive the solve -- r_R_H_min and r_R_V_sum. The other
+# three are diagnostics the model never reads; they are carried because plant
+# exposes them, and they are removal candidates with item 6. A network built by
+# hand can leave them empty.
+RootNetwork:
+  name_cpp: "phylloptim::RootNetwork"
+  roxygen: |
+    Root hydraulic resistances, per layer and per unit leaf area
+
+    What `set_physiology()` takes in place of a root carbon profile (#33). Which
+    root-architecture model turned carbon into these resistances is not this
+    package's business, exactly as which conductance-versus-height model produced
+    `leaf_specific_conductance_max` never was. If you do have a carbon profile,
+    [root_network_from_carbon()] is the model that used to run inside the leaf.
+
+    `r_R_H_min` and `r_R_V_sum` are the two fields the solve reads. Their common
+    length is the number of ROOTED layers, which may be fewer than the number of
+    soil layers but never more. `c_r_V`, `c_r_H` and `r_R_V` are diagnostics and
+    may be left empty.
+
+    @title Root resistance network
+    @param ...,values Values to initialise the struct with (either as
+    variadic arguments, or as a list, but not both).
+    @export
+  list:
+    - r_R_H_min: "std::vector<double>"
+    - r_R_V_sum: "std::vector<double>"
+    - c_r_V: "std::vector<double>"
+    - c_r_H: "std::vector<double>"
+    - r_R_V: "std::vector<double>"
+
 Leaf:
   name_cpp: "phylloptim::Leaf"
   constructor:
@@ -67,8 +102,6 @@ Leaf:
       @param ci_abs_tol absolute tolerance for root-solving ci
       @param ci_niter maximum number of iterations for root-solving ci
       @param cost_scale_TF24 cost parameter for the TF24 profit model (umol m^-2 s^-1)
-      @param beta_R_H proportionality constant between minimum horizontal (intralayer) root hydraulic resistance and C_r^-1 (MPa s mol C / mol H2O)
-      @param beta_R_V proportionality constant between minimum vertical (interlayer) root hydraulic resistance and dz^2/C_r (MPa mol C s / mol H2O / m^2)
 
       @export
     args:
@@ -89,8 +122,6 @@ Leaf:
       - ci_abs_tol: double
       - ci_niter: double
       - cost_scale_TF24: double
-      - beta_R_H: double
-      - beta_R_V: double
 
   active:
     # --- solved operating point ----------------------------------------------
@@ -211,7 +242,7 @@ Leaf:
       args: [integration_rule: int, integration_tol: double]
     set_physiology:
       return_type: void
-      args: [root_carbon_per_leaf_area: "const std::vector<double>&", PPFD: double, psi_soil: "const std::vector<double>&", soil_depth: "const std::vector<double>&", leaf_specific_conductance_max: double, atm_vpd: double, ca: double, leaf_temp: double, atm_o2_kpa: double, atm_kpa: double]
+      args: [root_network: "const phylloptim::RootNetwork&", PPFD: double, psi_soil: "const std::vector<double>&", soil_depth: "const std::vector<double>&", leaf_specific_conductance_max: double, atm_vpd: double, ca: double, leaf_temp: double, atm_o2_kpa: double, atm_kpa: double]
 
     # Replace the traits on an existing Leaf. Fifteen arguments in the
     # constructor's own order, minus the four numerical controls.
@@ -244,7 +275,7 @@ Leaf:
       args: [stem_b: double]
     set_traits:
       return_type: void
-      args: [vcmax_25: double, stem_c: double, stem_b: double, psi_crit: double, root_c: double, root_b: double, root_psi_crit: double, beta2: double, jmax_25: double, a: double, curv_fact_elec_trans: double, curv_fact_colim: double, cost_scale_TF24: double, beta_R_H: double, beta_R_V: double]
+      args: [vcmax_25: double, stem_c: double, stem_b: double, psi_crit: double, root_c: double, root_b: double, root_psi_crit: double, beta2: double, jmax_25: double, a: double, curv_fact_elec_trans: double, curv_fact_colim: double, cost_scale_TF24: double]
 
     # --- transpiration and conductance ---------------------------------------
     proportion_of_conductivity:

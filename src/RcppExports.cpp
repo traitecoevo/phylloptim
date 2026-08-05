@@ -11,9 +11,19 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
+// RootNetwork__ctor
+SEXP RootNetwork__ctor();
+RcppExport SEXP _phylloptim_RootNetwork__ctor() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(RootNetwork__ctor());
+    return rcpp_result_gen;
+END_RCPP
+}
 // Leaf__ctor
-phylloptim::Leaf Leaf__ctor(double vcmax_25, double stem_c, double stem_b, double psi_crit, double root_c, double root_b, double root_psi_crit, double beta2, double jmax_25, double a, double curv_fact_elec_trans, double curv_fact_colim, double GSS_tol_abs, double vulnerability_curve_ncontrol, double ci_abs_tol, double ci_niter, double cost_scale_TF24, double beta_R_H, double beta_R_V);
-RcppExport SEXP _phylloptim_Leaf__ctor(SEXP vcmax_25SEXP, SEXP stem_cSEXP, SEXP stem_bSEXP, SEXP psi_critSEXP, SEXP root_cSEXP, SEXP root_bSEXP, SEXP root_psi_critSEXP, SEXP beta2SEXP, SEXP jmax_25SEXP, SEXP aSEXP, SEXP curv_fact_elec_transSEXP, SEXP curv_fact_colimSEXP, SEXP GSS_tol_absSEXP, SEXP vulnerability_curve_ncontrolSEXP, SEXP ci_abs_tolSEXP, SEXP ci_niterSEXP, SEXP cost_scale_TF24SEXP, SEXP beta_R_HSEXP, SEXP beta_R_VSEXP) {
+phylloptim::Leaf Leaf__ctor(double vcmax_25, double stem_c, double stem_b, double psi_crit, double root_c, double root_b, double root_psi_crit, double beta2, double jmax_25, double a, double curv_fact_elec_trans, double curv_fact_colim, double GSS_tol_abs, double vulnerability_curve_ncontrol, double ci_abs_tol, double ci_niter, double cost_scale_TF24);
+RcppExport SEXP _phylloptim_Leaf__ctor(SEXP vcmax_25SEXP, SEXP stem_cSEXP, SEXP stem_bSEXP, SEXP psi_critSEXP, SEXP root_cSEXP, SEXP root_bSEXP, SEXP root_psi_critSEXP, SEXP beta2SEXP, SEXP jmax_25SEXP, SEXP aSEXP, SEXP curv_fact_elec_transSEXP, SEXP curv_fact_colimSEXP, SEXP GSS_tol_absSEXP, SEXP vulnerability_curve_ncontrolSEXP, SEXP ci_abs_tolSEXP, SEXP ci_niterSEXP, SEXP cost_scale_TF24SEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -34,9 +44,7 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type ci_abs_tol(ci_abs_tolSEXP);
     Rcpp::traits::input_parameter< double >::type ci_niter(ci_niterSEXP);
     Rcpp::traits::input_parameter< double >::type cost_scale_TF24(cost_scale_TF24SEXP);
-    Rcpp::traits::input_parameter< double >::type beta_R_H(beta_R_HSEXP);
-    Rcpp::traits::input_parameter< double >::type beta_R_V(beta_R_VSEXP);
-    rcpp_result_gen = Rcpp::wrap(Leaf__ctor(vcmax_25, stem_c, stem_b, psi_crit, root_c, root_b, root_psi_crit, beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, GSS_tol_abs, vulnerability_curve_ncontrol, ci_abs_tol, ci_niter, cost_scale_TF24, beta_R_H, beta_R_V));
+    rcpp_result_gen = Rcpp::wrap(Leaf__ctor(vcmax_25, stem_c, stem_b, psi_crit, root_c, root_b, root_psi_crit, beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, GSS_tol_abs, vulnerability_curve_ncontrol, ci_abs_tol, ci_niter, cost_scale_TF24));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -64,12 +72,12 @@ BEGIN_RCPP
 END_RCPP
 }
 // Leaf__set_physiology
-void Leaf__set_physiology(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, const std::vector<double>& root_carbon_per_leaf_area, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double leaf_temp, double atm_o2_kpa, double atm_kpa);
-RcppExport SEXP _phylloptim_Leaf__set_physiology(SEXP obj_SEXP, SEXP root_carbon_per_leaf_areaSEXP, SEXP PPFDSEXP, SEXP psi_soilSEXP, SEXP soil_depthSEXP, SEXP leaf_specific_conductance_maxSEXP, SEXP atm_vpdSEXP, SEXP caSEXP, SEXP leaf_tempSEXP, SEXP atm_o2_kpaSEXP, SEXP atm_kpaSEXP) {
+void Leaf__set_physiology(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, const phylloptim::RootNetwork& root_network, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double leaf_temp, double atm_o2_kpa, double atm_kpa);
+RcppExport SEXP _phylloptim_Leaf__set_physiology(SEXP obj_SEXP, SEXP root_networkSEXP, SEXP PPFDSEXP, SEXP psi_soilSEXP, SEXP soil_depthSEXP, SEXP leaf_specific_conductance_maxSEXP, SEXP atm_vpdSEXP, SEXP caSEXP, SEXP leaf_tempSEXP, SEXP atm_o2_kpaSEXP, SEXP atm_kpaSEXP) {
 BEGIN_RCPP
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
-    Rcpp::traits::input_parameter< const std::vector<double>& >::type root_carbon_per_leaf_area(root_carbon_per_leaf_areaSEXP);
+    Rcpp::traits::input_parameter< const phylloptim::RootNetwork& >::type root_network(root_networkSEXP);
     Rcpp::traits::input_parameter< double >::type PPFD(PPFDSEXP);
     Rcpp::traits::input_parameter< const std::vector<double>& >::type psi_soil(psi_soilSEXP);
     Rcpp::traits::input_parameter< const std::vector<double>& >::type soil_depth(soil_depthSEXP);
@@ -79,7 +87,7 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type leaf_temp(leaf_tempSEXP);
     Rcpp::traits::input_parameter< double >::type atm_o2_kpa(atm_o2_kpaSEXP);
     Rcpp::traits::input_parameter< double >::type atm_kpa(atm_kpaSEXP);
-    Leaf__set_physiology(obj_, root_carbon_per_leaf_area, PPFD, psi_soil, soil_depth, leaf_specific_conductance_max, atm_vpd, ca, leaf_temp, atm_o2_kpa, atm_kpa);
+    Leaf__set_physiology(obj_, root_network, PPFD, psi_soil, soil_depth, leaf_specific_conductance_max, atm_vpd, ca, leaf_temp, atm_o2_kpa, atm_kpa);
     return R_NilValue;
 END_RCPP
 }
@@ -95,8 +103,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // Leaf__set_traits
-void Leaf__set_traits(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double vcmax_25, double stem_c, double stem_b, double psi_crit, double root_c, double root_b, double root_psi_crit, double beta2, double jmax_25, double a, double curv_fact_elec_trans, double curv_fact_colim, double cost_scale_TF24, double beta_R_H, double beta_R_V);
-RcppExport SEXP _phylloptim_Leaf__set_traits(SEXP obj_SEXP, SEXP vcmax_25SEXP, SEXP stem_cSEXP, SEXP stem_bSEXP, SEXP psi_critSEXP, SEXP root_cSEXP, SEXP root_bSEXP, SEXP root_psi_critSEXP, SEXP beta2SEXP, SEXP jmax_25SEXP, SEXP aSEXP, SEXP curv_fact_elec_transSEXP, SEXP curv_fact_colimSEXP, SEXP cost_scale_TF24SEXP, SEXP beta_R_HSEXP, SEXP beta_R_VSEXP) {
+void Leaf__set_traits(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double vcmax_25, double stem_c, double stem_b, double psi_crit, double root_c, double root_b, double root_psi_crit, double beta2, double jmax_25, double a, double curv_fact_elec_trans, double curv_fact_colim, double cost_scale_TF24);
+RcppExport SEXP _phylloptim_Leaf__set_traits(SEXP obj_SEXP, SEXP vcmax_25SEXP, SEXP stem_cSEXP, SEXP stem_bSEXP, SEXP psi_critSEXP, SEXP root_cSEXP, SEXP root_bSEXP, SEXP root_psi_critSEXP, SEXP beta2SEXP, SEXP jmax_25SEXP, SEXP aSEXP, SEXP curv_fact_elec_transSEXP, SEXP curv_fact_colimSEXP, SEXP cost_scale_TF24SEXP) {
 BEGIN_RCPP
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
@@ -113,9 +121,7 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type curv_fact_elec_trans(curv_fact_elec_transSEXP);
     Rcpp::traits::input_parameter< double >::type curv_fact_colim(curv_fact_colimSEXP);
     Rcpp::traits::input_parameter< double >::type cost_scale_TF24(cost_scale_TF24SEXP);
-    Rcpp::traits::input_parameter< double >::type beta_R_H(beta_R_HSEXP);
-    Rcpp::traits::input_parameter< double >::type beta_R_V(beta_R_VSEXP);
-    Leaf__set_traits(obj_, vcmax_25, stem_c, stem_b, psi_crit, root_c, root_b, root_psi_crit, beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, cost_scale_TF24, beta_R_H, beta_R_V);
+    Leaf__set_traits(obj_, vcmax_25, stem_c, stem_b, psi_crit, root_c, root_b, root_psi_crit, beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, cost_scale_TF24);
     return R_NilValue;
 END_RCPP
 }
@@ -1829,14 +1835,29 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// root_network_from_carbon
+phylloptim::RootNetwork root_network_from_carbon(const std::vector<double>& root_carbon_per_leaf_area, const std::vector<double>& soil_depth, double beta_R_H, double beta_R_V);
+RcppExport SEXP _phylloptim_root_network_from_carbon(SEXP root_carbon_per_leaf_areaSEXP, SEXP soil_depthSEXP, SEXP beta_R_HSEXP, SEXP beta_R_VSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const std::vector<double>& >::type root_carbon_per_leaf_area(root_carbon_per_leaf_areaSEXP);
+    Rcpp::traits::input_parameter< const std::vector<double>& >::type soil_depth(soil_depthSEXP);
+    Rcpp::traits::input_parameter< double >::type beta_R_H(beta_R_HSEXP);
+    Rcpp::traits::input_parameter< double >::type beta_R_V(beta_R_VSEXP);
+    rcpp_result_gen = Rcpp::wrap(root_network_from_carbon(root_carbon_per_leaf_area, soil_depth, beta_R_H, beta_R_V));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_phylloptim_Leaf__ctor", (DL_FUNC) &_phylloptim_Leaf__ctor, 19},
+    {"_phylloptim_RootNetwork__ctor", (DL_FUNC) &_phylloptim_RootNetwork__ctor, 0},
+    {"_phylloptim_Leaf__ctor", (DL_FUNC) &_phylloptim_Leaf__ctor, 17},
     {"_phylloptim_Leaf__operating_point_values", (DL_FUNC) &_phylloptim_Leaf__operating_point_values, 1},
     {"_phylloptim_Leaf__initialize_integrator", (DL_FUNC) &_phylloptim_Leaf__initialize_integrator, 3},
     {"_phylloptim_Leaf__set_physiology", (DL_FUNC) &_phylloptim_Leaf__set_physiology, 11},
     {"_phylloptim_Leaf__perturb_stem_b", (DL_FUNC) &_phylloptim_Leaf__perturb_stem_b, 2},
-    {"_phylloptim_Leaf__set_traits", (DL_FUNC) &_phylloptim_Leaf__set_traits, 16},
+    {"_phylloptim_Leaf__set_traits", (DL_FUNC) &_phylloptim_Leaf__set_traits, 14},
     {"_phylloptim_Leaf__proportion_of_conductivity", (DL_FUNC) &_phylloptim_Leaf__proportion_of_conductivity, 2},
     {"_phylloptim_Leaf__arrh_curve", (DL_FUNC) &_phylloptim_Leaf__arrh_curve, 4},
     {"_phylloptim_Leaf__peak_arrh_curve", (DL_FUNC) &_phylloptim_Leaf__peak_arrh_curve, 6},
@@ -1989,6 +2010,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__lambda_molar__get", (DL_FUNC) &_phylloptim_Leaf__lambda_molar__get, 1},
     {"_phylloptim_Leaf__lambda_multilayer__get", (DL_FUNC) &_phylloptim_Leaf__lambda_multilayer__get, 1},
     {"_phylloptim_Leaf__g1_eff__get", (DL_FUNC) &_phylloptim_Leaf__g1_eff__get, 1},
+    {"_phylloptim_root_network_from_carbon", (DL_FUNC) &_phylloptim_root_network_from_carbon, 4},
     {NULL, NULL, 0}
 };
 

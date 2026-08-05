@@ -26,7 +26,9 @@ inst/include/phylloptim/
   leaf_model.hpp               the Leaf class: the gas-exchange core, everything inline
   roots.hpp                    MultiLayerRoots (the soil → root-collar water supply)
                                plus root_network_from_carbon, the root architecture
-                               model that feeds it resistances
+                               model NOTHING HERE CALLS: since #33 set_physiology
+                               takes the resistances and the caller runs the model.
+                               layer_thickness() is the dz definition both sides share
   single_potential.hpp         SinglePotential: the other supply path — one ψ_soil
                                and a constant series resistance
   vulnerability.hpp            the Weibull cumulative-integral builder, shared by both
@@ -50,6 +52,9 @@ R/gradient.R                   set_traits() and leaf_gradient() -- trait
                                the active-set guard. Read its header before
                                believing anything about its speed
 tests/cpp/                     plain-C++ suite, no R, no framework
+tests/cpp/root_network.hpp     the suite's root-architecture fixture: the two
+                               ex-Leaf-default beta_R_* constants, in ONE place
+                               because the golden file's bit-exactness depends on them
 tests/cpp/golden/              bit-exact regression baseline, 288 operating points
 tests/cpp/bench_solve.cpp      timing harness for the collar solve (hazard 5)
 tests/cpp/bench_gradient.cpp   timing harness for a TRAIT GRADIENT: the IFT
@@ -82,6 +87,32 @@ green local run and three red CI jobs. That is exactly how #25 first failed CI, 
 ```sh
 make -C tests/cpp && make -C tests/cpp bench
 ```
+
+⚠️ **And there is a third C++ program CI compiles that is not in this repo at all.**
+`cpp-tests.yml`'s "Consume the installed package" step writes a `consumer/main.cpp`
+inline, in a heredoc, and builds it against the *installed* package through
+`find_package`. It calls `set_physiology`, so **any signature change breaks it, and
+neither `make` nor `cmake` locally covers it.** #33 hit this: 359 checks passing, a
+bit-identical golden file, `ctest` 2/2, and three red jobs on
+`cannot convert '<brace-enclosed initializer list>' to 'const RootNetwork&'`.
+
+Reproduce it locally before pushing an interface change — extract the two heredocs
+from the workflow rather than retyping them, or the local copy drifts from the one
+CI actually builds:
+
+```sh
+cmake -B /tmp/bc -DPHYLLOPTIM_ODELIA_INCLUDE_DIR=<odelia>/inst/include
+cmake --build /tmp/bc -j3 && cmake --install /tmp/bc --prefix /tmp/cmp
+# then write consumer/{CMakeLists.txt,main.cpp} from the workflow and:
+cmake -B b -DCMAKE_PREFIX_PATH=/tmp/cmp \
+  -DPHYLLOPTIM_ODELIA_INCLUDE_DIR=<odelia>/inst/include \
+  -DPHYLLOPTIM_BOOST_INCLUDE_DIR=<BH>/include
+cmake --build b && ./b/consumer
+```
+
+The two `-D` include paths are needed **again** at the consumer step:
+`phylloptimConfig.cmake` re-requires them and fails with "phylloptim needs odelia's
+headers", which reads like a broken install and is not.
 
 `bench` reports min-of-N over the golden grid. Use `reps=2000` (the default)
 before believing a small difference: reproducibility is ±0.01 µs there but ±0.5 µs
@@ -455,6 +486,14 @@ the per-cause split and the tolerance bands go in the first PR comment — see
    dimensionless/intensive driver. Nothing scales with plant size — whole-plant
    allometry (`kmax(h)`, root carbon totals) is computed on the plant side and passed
    in already reduced. Keep it that way; it is a one-sentence contract.
+
+   ⚠️ **Since #33 the ROOT RESISTANCES arrive already reduced too, and nothing here
+   can check it.** `set_physiology` takes a `RootNetwork` rather than a root carbon
+   profile, and a network built from *absolute* carbon instead of carbon per unit
+   leaf area is just five vectors of positive numbers — the leaf cannot tell, and
+   `E_up` comes back wrong by the leaf area with no error anywhere. Before, the
+   division happened inside the leaf and the contract was enforced by construction.
+   This is the one place the boundary move traded a guarantee for a convention.
 5. **Hot-path discipline — but measure it, because the intuition has been wrong.**
    `find_root_collar_psi` runs ~10³ inner evaluations per solve, and plant calls it
    millions of times. λ and `g1_eff` are *accessors*, not stored state, for this
@@ -489,6 +528,12 @@ the per-cause split and the tolerance bands go in the first PR comment — see
    count — plus one rule: **`duptake_dpsi` returning NaN means "fall back to
    finite differences", so returning 0 or throwing silently degrades TF24f's
    acclimation gradient.** A path with no branch kinks simply never returns it.
+
+   `set_physiology`'s `RootNetwork` argument is **not** part of that contract: it is
+   multi-layer-specific, and `set_physiology` hands it over only under
+   `supply_kind_ == MultiLayer`. `SinglePotential` ignores it, and a third path
+   should too — the one signature serves every path, which is why `set_drivers()` has
+   a cached empty network to pass on the single-potential path.
 7. **Moving a public member is a plant API break, because RcppR6 binds fields by
    name.** plant's `inst/RcppR6_classes.yml` lists most of `Leaf`'s state as
    `access: field`, and the generator emits `obj_->psi_soil_` — a getter *and* a

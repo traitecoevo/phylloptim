@@ -163,18 +163,31 @@ jobs:
           #include <phylloptim.hpp>
           #include <cmath>
           #include <cstdio>
+          #include <vector>
           int main() {
             phylloptim::Leaf l;
-            l.set_physiology({1.0 / 0.05}, 900, {2.0}, {1.0}, 1.0 * 0.000157 / 5.0,
+            // The root RESISTANCES, via the architecture model (#33). Exercising
+            // root_network_from_carbon and layer_thickness here is deliberate: a
+            // consumer with a carbon profile has to be able to reach both from the
+            // installed headers, so this checks they were shipped and not only that
+            // the solve was.
+            const std::vector<double> soil_depth{1.0};
+            const phylloptim::RootNetwork roots = phylloptim::root_network_from_carbon(
+                {1.0 / 0.05}, phylloptim::layer_thickness(soil_depth), 3.4e2, 9.4e3);
+            l.set_physiology(roots, 900, {2.0}, soil_depth, 1.0 * 0.000157 / 5.0,
                              2.0, 40.0, 25.0, 21.0, 101.3);
             l.find_root_collar_psi();
             std::printf("profit = %.17g\n", l.profit_);
-            // The golden file's profit at this operating point. Compared loosely
-            // on purpose: the point here is that an installed package computes
-            // the model, not that this runner reproduces macOS/arm64 bit-for-bit
-            // -- test_golden above already makes the exact claim, with the right
-            // per-platform tolerances.
-            return std::fabs(l.profit_ - 2.5158434693939866) < 1e-6 ? 0 : 1;
+            // The golden file's profit at this operating point -- the
+            // psi_soil=2, ppfd=900, vpd=2, layers=1 row of
+            // tests/cpp/golden/operating_points.tsv. Compared loosely on purpose:
+            // the point here is that an installed package computes the model, not
+            // that this runner reproduces macOS/arm64 bit-for-bit -- test_golden
+            // above already makes the exact claim, with the right per-platform
+            // tolerances. (The value here read 2.5158434693939866 until #33, which
+            // is 2.2e-08 off the golden row and inside the tolerance, so it never
+            // failed; corrected so it cannot be mistaken for the golden value.)
+            return std::fabs(l.profit_ - 2.5158434915102319) < 1e-6 ? 0 : 1;
           }
           EOF
           cmake -B build \

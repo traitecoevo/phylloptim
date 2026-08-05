@@ -78,9 +78,17 @@ int main() {
 
   std::vector<double> psi_soil{2.0};     // positive magnitudes, MPa
   std::vector<double> soil_depth{1.0};   // m
-  std::vector<double> root_carbon{20.0}; // kg C per m2 LEAF -- intensive
 
-  l.set_physiology(root_carbon, /*PPFD*/ 900, psi_soil, soil_depth,
+  // The per-layer root RESISTANCES, per unit leaf area. If you have root carbon
+  // instead, this is the architecture model that maps one to the other -- but it
+  // is a helper you call, not something the solve does (#33). Supply the
+  // resistances directly if that is what you have.
+  const phylloptim::RootNetwork roots = phylloptim::root_network_from_carbon(
+      /*root carbon per m2 LEAF*/ {20.0},
+      phylloptim::layer_thickness(soil_depth), /*beta_R_H*/ 3.4e2,
+      /*beta_R_V*/ 9.4e3);
+
+  l.set_physiology(roots, /*PPFD*/ 900, psi_soil, soil_depth,
                    /*kmax*/ 3.14e-5, /*atm_vpd*/ 2.0, /*ca*/ 40.0,
                    /*leaf_temp*/ 25.0, /*atm_o2_kpa*/ 21.0,
                    /*atm_kpa*/ 101.3);
@@ -108,7 +116,7 @@ What C++ *does* give you:
 
 | piece | what it is |
 |---|---|
-| `set_traits(...)` | replace all fifteen traits, refreshing splines and the temperature cache |
+| `set_traits(...)` | replace all thirteen traits, refreshing splines and the temperature cache |
 | `perturb_stem_b(b)` | move `stem_b` by rescaling the curve instead of rebuilding it |
 | `dprofit_droot_collar_psi(psi, &feasible)` | dprofit/dψ at a given collar potential |
 | `evaluate_root_collar_psi(psi)` | solve the inner problem at a fixed collar |

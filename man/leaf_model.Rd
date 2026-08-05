@@ -23,7 +23,7 @@ A `Leaf` R6 object.
 }
 \description{
 The recommended way to construct a leaf. [Leaf()] is the raw C++ constructor,
-with all nineteen arguments positional and no defaults; this splits them into
+with all seventeen arguments positional and no defaults; this splits them into
 traits and numerical settings, defaults both, and initialises the integrator.
 }
 \details{

@@ -1,4 +1,80 @@
-# phylloptim (development version)
+# phylloptim 0.2.0
+
+## `set_physiology()` takes root resistances, not root carbon
+
+**Breaking, in both the C++ and R interfaces**, and coupled with a plant PR.
+
+`Leaf::set_physiology()`'s first argument is now a `RootNetwork` — the per-layer
+root hydraulic resistances, per unit leaf area — where it used to be a root carbon
+profile. The solve never touched root carbon: `uptake()` and `duptake_dpsi()` read
+exactly two vectors, `r_R_H_min` and `r_R_V_sum`, and taking carbon made the leaf
+own four things that are not gas exchange — `beta_R_H`, `beta_R_V`, the layer
+thickness `dz`, and the 1/3 : 2/3 vertical/horizontal split. It is the move
+`leaf_specific_conductance_max` already made: plant computes `kmax` from height and
+hands over a scalar, because which conductance-versus-height model is in force is
+not this package's business. Which root-architecture model is in force is not
+either.
+
+What follows:
+
+* `beta_R_H` and `beta_R_V` are no longer `Leaf` constructor arguments, no longer
+  `leaf_traits()` entries, and no longer arguments to `set_traits()`. The C++
+  constructor takes 17 arguments rather than 19; `set_traits()` takes 13 rather
+  than 15.
+* `root_network_from_carbon()` — the architecture model itself — **stays**, is
+  public, is tested, and is now exposed to R. It takes the soil-depth profile
+  rather than `dz`, so a caller never has to reproduce the layer-thickness rule;
+  `phylloptim::layer_thickness()` is the one definition both sides use.
+* `set_drivers()` and `leaf_solve()` take `root_network` in place of
+  `root_carbon_per_leaf_area`. The default is unchanged numerically — a nominal
+  20 kg C m^-2 leaf split evenly — but it is now written out as a call to
+  `root_network_from_carbon()` instead of being a number in a signature.
+* `RootNetwork()` builds one from R. Only `r_R_H_min` and `r_R_V_sum` matter; the
+  other three fields are diagnostics and may be left empty. So a caller with a
+  measured or fitted series resistance and no carbon profile can now state what
+  they have, which was the point.
+
+**Results are unchanged.** The 288-point golden file is bit-identical, and the R
+tie-back to it still passes, because the golden grid now calls
+`root_network_from_carbon()` and then `set_physiology()` — the same two steps, with
+the boundary moved between them.
+
+**Cost: +0.7% per solve** (2.74 -> 2.76 µs/solve, min-of-2000 interleaved over six
+rounds, non-overlapping, identical checksums). `set_physiology()` now copy-assigns
+five vectors instead of filling them, where it used to run the architecture model
+itself; against that, `set_physiology()` alone got cheaper (0.106 -> 0.083 µs).
+`set_root_network()` takes a `const&` and copy-assigns rather than taking by value
+and moving: a caller that holds a `RootNetwork` as a member and refills it — which
+is what plant does — would have its buffers stolen by a move and reallocate all
+five vectors on the next call.
+
+**⚠️ A performance trap the R layer had to be written around.** Materialising a
+`RootNetwork` as an R object costs **~58 µs** — the bare `RootNetwork__ctor()`
+`.Call`, before any R wrapper, against 1.1 µs for a trivial `.Call` and 4.3 µs for
+`$set_physiology()` handed a ready-made network. It is `Rcpp::wrap` building the
+five-element named list. Constructing the default one per call made `set_drivers()`
+9.4 → 73 µs and `leaf_solve()` 23.7 → 108 µs/row, a 4.5× regression that every test
+passed. `set_drivers()` now memoises the default network and the single-potential
+path's placeholder, both in size-one memos keyed by `identical()` on `soil_depth`,
+which restores 9.6 / 5.8 µs and 24.1 µs/row — master's figures within noise. A
+`leaf_solve()` sweep holds `soil_depth` fixed across rows, so it pays the
+construction once. **If you build networks in a loop, build them outside it.**
+
+**A new check, because the length agreement is no longer free.** `max_soil_layer`
+indexes `psi_soil` and the per-layer gravity head directly, so a network with more
+rooted layers than the soil profile has layers is an out-of-bounds read rather than
+a wrong number. That used to be guaranteed by validating root carbon against
+`soil_depth`; `set_root_network()` now checks it, along with finiteness and
+non-negativity of both load-bearing vectors.
+
+**One capability is lost, and it is not dressed up.** `leaf_gradient()` can no
+longer differentiate with respect to `beta_R_H` or `beta_R_V` — there is no `pars`
+name for them, because the leaf does not have them. Perturbing them is cheap
+(`root_network_from_carbon()` is homogeneous of degree 1 in each, so the perturbed
+network is a scaling of the base one and needs no rebuild) but the derivative of a
+solved output still costs two solves. The previously recorded values are kept in a
+comment in `tests/testthat/test-gradient.R` for anyone checking that route.
+
 
 ## Documented when the exact gradient beats differencing, and it is not "at more parameters"
 
@@ -27,13 +103,21 @@ observation. What reverses it is `P_fit` exceeding `P_model`.
 Both regimes are now measured. The vignette gains a scaling sweep that fits the two
 coefficients, and those coefficients — taken from 72 simulated observations —
 **predict** the companion study `leaf-calibration` (1,327 observations, 16 species,
-`P_fit = 40`, `P_model = 4`) to within about 5%: 646 ms predicted against 679
-measured, break-even 12.4 fitted parameters against 13.1. There the composite wins
-**3.4×** and reaches the same optimum as the numerical gradient, and its
+`P_fit = 40`, `P_model = 4`) to within a few percent: **638 ms predicted against
+679 measured**, break-even 12.3 fitted parameters against 13.1. There the composite
+wins **3.4×** and reaches the same optimum as the numerical gradient, and its
 57-parameter variant costs the same as its 40-parameter one.
 
+⚠️ Those two figures read 646 ms and 12.4 when first written, i.e. "within about
+5%" rather than 6%. They moved because the vignette's 13-parameter candidate list
+had to change: `beta_R_H` and `beta_R_V` are not differentiable parameters any more
+(see the `set_physiology` entry above), so `psi_crit` and `root_psi_crit` took their
+places and the fitted coefficients shifted slightly. The prediction is regenerated
+on every build; the *claim* is that two designs differing 18-fold in size agree to a
+few percent, and that is unchanged.
+
 `?leaf_gradient` gains a "What it costs" section, and a warning that was missing:
-**always pass `pars`**, since it *is* `P_model` and the default of all sixteen is
+**always pass `pars`**, since it *is* `P_model` and the default of all fourteen is
 the most expensive request available.
 
 Also: this file's heading said `leaf`, three renames ago.
@@ -73,7 +157,7 @@ boundary you are.
 ## `leaf_gradient()` covers the two parameters that are not traits (#44)
 
 `pars` now accepts **`leaf_specific_conductance_max`** and — on the
-single-potential path — **`resistance`**, alongside the fifteen traits.
+single-potential path — **`resistance`**, alongside the thirteen traits.
 
 They are here because a calibration fits them. Of `leaf-calibration`'s four free
 parameters, two are traits (`cost_scale_TF24`, `beta2`) and two are these
@@ -141,7 +225,7 @@ rather than changing one.
 
 **`leaf_gradient()`** returns the derivatives of the solved outputs with respect to
 the traits: `dA/dθ`, `dgc/dθ`, `dψ_stem/dθ` and `dψ*/dθ`, for any subset of the
-fifteen traits at one operating point. These are not finite differences of the
+thirteen traits at one operating point. These are not finite differences of the
 solve. The outputs are read at the profit-maximising collar potential, so a trait
 moves them both directly and by moving that optimum, and differentiating the
 optimality condition captures both terms — which matters because for
@@ -286,14 +370,14 @@ Two things worth knowing if you are working on this package:
 ## A surface you can type at a console (#5, stage 2)
 
 The bindings above are a faithful translation of the C++, which is what let them
-be checked against the golden file — and it means nineteen positional arguments.
+be checked against the golden file — and it means seventeen positional arguments.
 On top of them:
 
 - **`leaf_solve()`** — drivers in, operating point out as a data.frame,
   vectorised, so a response curve is one call. This is the entry point for
   someone who would otherwise reach for `plantecophys::Photosyn()`.
 - **`leaf_traits()` and `leaf_control()`** — the split the issue asked for. Four
-  of the constructor's nineteen arguments are tolerances sitting among the
+  of the constructor's seventeen arguments are tolerances sitting among the
   physiology, and a trait-calibration loop should not have to know which. A test
   asserts the two functions partition the constructor exactly.
 - **`leaf_model()`** — named and defaulted, and the recommended constructor.

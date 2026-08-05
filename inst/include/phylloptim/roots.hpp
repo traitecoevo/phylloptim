@@ -11,7 +11,6 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <utility>
 #include <string>
 #include <vector>
 
@@ -32,8 +31,17 @@ struct RootNetwork {
 };
 
 // The root-architecture model: how carbon invested in roots becomes hydraulic
-// resistance. Each layer's root carbon is split 1/3 vertical : 2/3 horizontal,
-// and
+// resistance.
+//
+// ⚠️ THIS IS A HELPER, NOT PART OF THE SUPPLY PATH. Nothing in this package
+// calls it. `Leaf::set_physiology` takes the resistances themselves (#33), so
+// which root-architecture model is in force is the caller's business, exactly as
+// which conductance-versus-height model produced `leaf_specific_conductance_max`
+// already was. It stays here, public and tested, because the arithmetic is worth
+// sharing and because the golden grid calls it -- see the note on the in-place
+// overload below.
+//
+// Each layer's root carbon is split 1/3 vertical : 2/3 horizontal, and
 //   network_.r_R_H_min[i] = beta_R_H / c_r_h        (min horizontal resistance, i.e. the
 //                                           reciprocal of max conductance)
 //   r_R_V[i]     = beta_R_V * dz^2 / c_r_v (vertical; dz^2 because vertical
@@ -44,12 +52,9 @@ struct RootNetwork {
 // The returned vectors are sized to the deepest layer with non-zero root carbon,
 // so the hot loop only iterates over layers that actually contain roots.
 //
-// This is deliberately a free function rather than a member: it is the one part
-// of the supply path that is a *model of the plant*, not of water transport, and
-// keeping it out of MultiLayerRoots is what lets an alternative supply path
-// exist without inventing a root system. It stays in this package rather than
-// moving to plant so that it remains covered by the golden file -- the moment
-// this arithmetic crosses the package boundary it leaves the tested surface.
+// A free function rather than a member, because it is a *model of the plant* and
+// not of water transport: keeping it out of MultiLayerRoots is what lets an
+// alternative supply path exist without inventing a root system.
 //
 // NOTE on zero-carbon layers: a layer with no roots currently gets
 // r_R_H_min = 0, i.e. *zero* horizontal resistance, which is infinite
@@ -58,11 +63,13 @@ struct RootNetwork {
 // layer, and plant's Q() root distribution does not produce an exact interior
 // zero), so this preserves the behaviour rather than changing it silently.
 //
-// Fills `out` in place so its buffers are reused: this runs once per
-// set_physiology, which plant calls once per solve, and building five fresh
-// vectors each time measured +0.074 us/call (0.061 -> 0.135), about +2% of a
-// whole solve. The value-returning overload below is for tests and one-off
-// callers, where that does not matter.
+// Fills `out` in place so its buffers are reused: a per-solve caller runs this
+// once per solve, and building five fresh vectors each time measured
+// +0.074 us/call (0.061 -> 0.135), about +2% of a whole solve. That is why this
+// overload exists and why it is the one plant uses -- it holds a RootNetwork as a
+// strategy member and refills it, the same way it already held the root-carbon
+// buffer. The value-returning overload below is for tests and one-off callers,
+// where that does not matter.
 inline void root_network_from_carbon(
     const std::vector<double>& root_carbon_per_layer, double dz,
     double beta_R_H, double beta_R_V, RootNetwork& out) {
@@ -116,6 +123,24 @@ inline RootNetwork root_network_from_carbon(
   RootNetwork out;
   root_network_from_carbon(root_carbon_per_layer, dz, beta_R_H, beta_R_V, out);
   return out;
+}
+
+// Layer thickness implied by a cumulative soil-depth profile.
+//
+// Exported as its own function because since #33 there are TWO callers that must
+// agree on it: MultiLayerRoots::set_soil_state, and whoever builds the root
+// network before handing it over. root_network_from_carbon scales the vertical
+// resistance by dz^2, so two definitions drifting apart would put a silent
+// squared factor on every vertical resistance -- and nothing in either package
+// would notice, because both halves would still be internally consistent.
+inline double layer_thickness(const std::vector<double>& soil_depth) {
+  if (soil_depth.empty()) {
+    // Guarded because this is a public entry point a caller reaches for directly,
+    // where the same expression inside set_soil_state was only ever reachable
+    // after set_physiology had validated the profile against psi_soil.
+    util::stop("layer_thickness: soil_depth must have at least one layer");
+  }
+  return soil_depth.back() / soil_depth.size();
 }
 
 // ---------------------------------------------------------------------------
@@ -178,12 +203,11 @@ public:
   double root_b = 3.898245;       // -MPa
   double root_psi_crit = 5.870283; // -MPa
 
-  // proportionality constant between minimum horizontal (intralayer) root
-  // hydraulic resistance and C_r^-1, [MPa * s * (mol C) / (mol H2O)]
-  double beta_R_H = 3.4e2;
-  // proportionality constant between minimum vertical (interlayer) root
-  // hydraulic resistance and dz^2/C_r, [MPa * (mol C) * s / (mol H2O) / m^2]
-  double beta_R_V = 9.4e3;
+  // NOTE: beta_R_H and beta_R_V used to live here. They are parameters of the
+  // root-architecture model, not of water transport, and since #33 this class
+  // takes resistances rather than the carbon they were applied to -- so they are
+  // arguments to root_network_from_carbon and members of whoever owns that
+  // model. In plant that is TF24_Strategy.
 
   // pre-computed root vulnerability curve f_r(m) = exp(-(m/root_b)^root_c)
   odelia::interpolator::Interpolator root_vuln_from_psi;
@@ -294,7 +318,13 @@ public:
 
     // Layer thickness is soil geometry, not root architecture, so it is set here
     // rather than alongside the resistance network that consumes it.
-    dz_ = soil_depth_.back()/soil_number_of_depths_;
+    //
+    // ⚠️ Since #33 nothing in this package READS dz_: the only thing that did was
+    // the carbon -> resistance map, which is now the caller's. It is kept because
+    // it is a property of the soil profile this object is given, and because the
+    // caller needs the same number -- see layer_thickness, which is the shared
+    // definition. It is a removal candidate with the diagnostics (item 6).
+    dz_ = layer_thickness(soil_depth_);
   }
 
   // Per-timestep root resistance network. Takes the resistances themselves, not
@@ -314,20 +344,47 @@ public:
   // c_r_V_, c_r_H_ and r_R_V ride along as diagnostics: nothing in the model
   // reads them, but plant exposes them through RcppR6, so they are carried
   // rather than dropped. They are removal candidates with item 6.
-  // Takes by value and moves: the caller always passes a freshly-built
-  // RootNetwork, so this hands over its buffers rather than copying five vectors
-  // on every set_physiology.
-  void set_root_network(RootNetwork network) {
-    network_ = std::move(network);
-    max_soil_layer = static_cast<int>(network_.r_R_H_min.size());
-  }
-
-  // The carbon-based caller. Kept as an entry point (rather than making everyone
-  // go through root_network_from_carbon) so the fill happens straight into
-  // network_ and its buffers are reused across calls.
-  void set_root_network_from_carbon(const std::vector<double>& root_carbon_per_layer) {
-    root_network_from_carbon(root_carbon_per_layer, dz_, beta_R_H, beta_R_V,
-                             network_);
+  //
+  // ⚠️ TAKES const& AND COPY-ASSIGNS, WHERE IT USED TO TAKE BY VALUE AND MOVE.
+  // The move was right when the caller built a throwaway network per call; it is
+  // WRONG now that the caller holds one as a member and refills it, because
+  // moving would empty the caller's buffers and force root_network_from_carbon to
+  // reallocate all five vectors on the next call -- reintroducing exactly the
+  // +0.074 us the in-place overload exists to avoid. Copy-assigning into
+  // already-sized vectors allocates nothing on either side once both are warm.
+  void set_root_network(const RootNetwork& network) {
+    if (network.r_R_V_sum.size() != network.r_R_H_min.size()) {
+      util::stop("set_root_network: r_R_H_min and r_R_V_sum must have the same "
+                 "length; got " + std::to_string(network.r_R_H_min.size()) +
+                 " and " + std::to_string(network.r_R_V_sum.size()));
+    }
+    // The rooted layers index psi_soil_ and grav_head_z_ directly in uptake(),
+    // so a network deeper than the soil profile is an out-of-bounds read rather
+    // than a wrong number. Before #33 the length agreement came for free, because
+    // set_physiology validated root carbon against soil_depth; now the network
+    // arrives from outside the package and the check has to be here.
+    if (soil_number_of_depths_ > 0 &&
+        network.r_R_H_min.size() >
+            static_cast<size_t>(soil_number_of_depths_)) {
+      util::stop("set_root_network: network has " +
+                 std::to_string(network.r_R_H_min.size()) +
+                 " rooted layers but the soil profile has only " +
+                 std::to_string(static_cast<int>(soil_number_of_depths_)));
+    }
+    for (size_t i = 0; i < network.r_R_H_min.size(); ++i) {
+      // Resistances, so non-negative. Zero is permitted, and means infinite
+      // conductance: root_network_from_carbon produces it for a zero-carbon
+      // layer, which is backwards but is the behaviour this preserves (see its
+      // note on zero-carbon layers).
+      if (!std::isfinite(network.r_R_H_min[i]) || network.r_R_H_min[i] < 0.0 ||
+          !std::isfinite(network.r_R_V_sum[i]) || network.r_R_V_sum[i] < 0.0) {
+        util::stop("set_root_network: root resistances must be finite and "
+                   "non-negative; layer=" + std::to_string(i) +
+                   "; r_R_H_min=" + util::to_string(network.r_R_H_min[i]) +
+                   "; r_R_V_sum=" + util::to_string(network.r_R_V_sum[i]));
+      }
+    }
+    network_ = network;
     max_soil_layer = static_cast<int>(network_.r_R_H_min.size());
   }
 

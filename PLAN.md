@@ -31,8 +31,7 @@ the user-visible history.
 | [#7](https://github.com/traitecoevo/phylloptim/issues/7) | 13 | Energy balance, in priority order | Leaf-to-air VPD is the cheap win and is **not wired in**; free convection is not worth it |
 | [#28](https://github.com/traitecoevo/phylloptim/issues/28) | 13 | Temperature-dependent outgoing longwave in the Penman-Monteith Rn | from plant #581 / #567 review |
 | [#31](https://github.com/traitecoevo/phylloptim/issues/31) | 31 | `profit_psi_stem_TF` returns a plausible number below `psi_upstream` | Found writing the vignette. Profit is **discontinuous by 1.58** at the boundary |
-| [#33](https://github.com/traitecoevo/phylloptim/issues/33) | 6d | Take resistances, not root carbon | **blocked on plant #591**. Before #34 |
-| [#34](https://github.com/traitecoevo/phylloptim/issues/34) | 6d | Delete plant's `Leaf` bindings | **blocked on plant #591**. The hazard-7 payoff, and the only stage that can break plant |
+| [#34](https://github.com/traitecoevo/phylloptim/issues/34) | 6d | Delete plant's `Leaf` bindings | Unblocked (plant #591 merged, and #33 is done). The hazard-7 payoff, and the only stage that can break plant |
 | [#38](https://github.com/traitecoevo/phylloptim/issues/38) | 38 | `psi_crit` above the curve's domain fails with an error naming neither | Bounds how far `stem_b` can move in one step; see 11f |
 | [#40](https://github.com/traitecoevo/phylloptim/issues/40) | 40 | Cross-validate the Medlyn path against `plantecophys` | From #6. Ties to #3, which needs Medlyn first-class |
 | [#41](https://github.com/traitecoevo/phylloptim/issues/41) | 41 | `R_d` cannot be set from R: `rd_to_vcmax_ratio_` is unbound | From #6. **74% Rd overstatement** for *Q. ilex* against Sabot's data |
@@ -316,9 +315,10 @@ package should offer.
 - **`kmax` and the soil-to-collar series resistance are not separately identifiable
   from leaf water potential.** Only their total is. On the single-potential path that
   means the split between plant and soil share is whatever the prior says, and it
-  should never be reported as an estimate. ⚠️ This bears on #33: if the leaf takes
-  resistances rather than root carbon, the interface should make the identified
-  quantity the natural thing to supply.
+  should never be reported as an estimate. ⚠️ This bore on #33, which is now done:
+  the multi-layer path takes `r_R_H_min` and `r_R_V_sum` directly, so the resistances
+  are statable rather than derivable-only, and `RootNetwork()` is the entry point for
+  a caller who has measured or fitted them.
 - **`cost_scale_TF24` and `beta2` are confounded by the algebra of the cost itself.**
   The TF24 cost is `cost_scale · (1 − k)^beta2`, so at fixed cost
   `d(log cost_scale)/d(log beta2) = −beta2 · <log(1 − k)>`. The ridge is therefore
@@ -359,34 +359,48 @@ expensive. In priority order:
    wind ever becomes the priority, prefer a one-step correction to a converged inner
    solve.
 
-## 6d. The R interface: what is left — #33, #34
+## 6d. The R interface: what is left — #34
 
-Stages 0 through 3 are done. Both remaining stages are **blocked on plant #591**,
-and **2b comes before 4**.
+Stages 0 through 3 are done, and **stage 2b is now done too** (#33). Only stage 4
+remains.
 
-### Stage 2b — take resistances, not root carbon (#33)
+### Stage 2b — take resistances, not root carbon (#33) — DONE
 
-**The solve never touches root carbon.** `uptake_impl` and `duptake_dpsi` read
-exactly `network_.r_R_H_min` and `network_.r_R_V_sum`, plus `grav_head_z_` and
-`max_soil_layer`. `c_r_V`, `c_r_H` and `r_R_V` are carried only because plant
-exposes them through RcppR6. So taking carbon makes the leaf own `beta_R_H`,
-`beta_R_V`, `dz_` and the 1/3 : 2/3 horizontal/vertical split — none of which is a
-leaf-level quantity. `leaf_specific_conductance_max` is the precedent: plant computes
-`kmax = K_s·θ/(h·η_c)` and passes it in already reduced.
+`set_physiology` takes a `RootNetwork`. `beta_R_H`, `beta_R_V` and the 1/3 : 2/3
+split left the leaf's surface with it; `root_network_from_carbon` stayed, is public,
+is exposed to R, and is what the golden grid calls before `set_physiology`, so the
+architecture model is still inside the tested surface. Golden file bit-identical.
 
-Two objections, both answerable:
+Four things worth carrying out of it:
 
-- *It leaves the tested surface.* Keep `root_network_from_carbon` as a documented
-  helper, and have the golden grid call helper-then-`set_physiology`, so the tested
-  path is still exercised end to end.
-- *Cost.* Rebuilding five fresh vectors per call measured **+0.074 µs (0.061 →
-  0.135), about +2% of a whole solve**; `std::move` did not help; an in-place
-  `RootNetwork& out` overload brought it back to 0.056–0.061. ⚠️ Re-measure
-  interleaved, per hazard 5, rather than assuming it still holds.
+- **The cost is +0.7%, not zero.** 2.74 → 2.76 µs/solve, min-of-2000, interleaved
+  six times with non-overlapping ranges and identical checksums. The prediction here
+  was "neutral done that way"; it is small but real, and it is the copy-assign of
+  five vectors that used to be filled in place. `set_physiology` *alone* got cheaper
+  (0.106 → 0.083 µs) because it no longer runs the architecture model — the two
+  facts are not in tension, they are the work moving across the boundary.
+- **`set_root_network` must take `const&`, not by value.** It took by value and
+  moved, which was right when the caller built a throwaway per call and is WRONG now
+  that the caller holds one as a member: the move empties the caller's buffers, so
+  the next `root_network_from_carbon` reallocates all five vectors and reintroduces
+  exactly the +0.074 µs the in-place overload exists to avoid.
+- **A length check had to be added, and it guards a segfault rather than a wrong
+  number.** `max_soil_layer` indexes `psi_soil_` and `grav_head_z_` directly, and the
+  network is sized to the deepest ROOTED layer, so it is legitimately shorter than
+  the soil profile but must never be longer. That agreement used to come free from
+  validating root carbon against `soil_depth`.
+- **`layer_thickness()` exists because dz now has two callers.** The vertical
+  resistance scales with dz², so a caller deriving dz differently from
+  `set_soil_state` would be wrong by a squared factor with both halves internally
+  consistent and nothing to catch it.
 
-The R-user argument is the decisive one: a bare-leaf caller has no root carbon
-profile, no layer thickness and no opinion about `beta_R_V`, so `set_drivers()`
-currently has to invent a default and document it. That is the smell.
+⚠️ **It cost a capability: `leaf_gradient()` can no longer differentiate `beta_R_H`
+or `beta_R_V`.** They were two of the four parameters whose gradient is 100%
+argmax-mediated (11c). Perturbing them is free — `root_network_from_carbon` is
+homogeneous of degree 1 in each, so the perturbed network is a scaling — but the
+derivative still costs two solves, and there is no `pars` name for it. The recorded
+values (`beta_R_H`: collar 8.1973e-06, A −2.8802e-04) are kept in a comment in
+`test-gradient.R` for anyone checking a hand-rolled route.
 
 ### Stage 4 — delete plant's `Leaf` bindings (#34)
 

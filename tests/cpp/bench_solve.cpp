@@ -24,6 +24,8 @@
 
 #include <phylloptim.hpp>
 
+#include "root_network.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -90,10 +92,20 @@ std::vector<Point> grid() {
 // keeps each timed solve a genuine cold solve rather than a memo hit.
 double pass(std::vector<phylloptim::Leaf> &leaves, const std::vector<Point> &pts) {
   double checksum = 0.0;
+  // ONE reused RootNetwork, refilled in place per point. This is deliberately
+  // what plant does since #33 -- it holds the network as a TF24_Strategy member,
+  // exactly as it used to hold the root-carbon buffer, and refills it through the
+  // in-place overload. Building a fresh network per point instead measures
+  // +0.074 us/solve of allocation that plant does not pay, which would make an
+  // interleaved before/after comparison of this harness meaningless.
+  phylloptim::RootNetwork net;
   for (size_t i = 0; i < pts.size(); ++i) {
     const Point &pt = pts[i];
     phylloptim::Leaf &l = leaves[i];
-    l.set_physiology(pt.root, pt.ppfd, pt.ps, pt.depth, kKs * kTheta / kH,
+    phylloptim::root_network_from_carbon(pt.root,
+                                        phylloptim::layer_thickness(pt.depth),
+                                        fixture::beta_R_H, fixture::beta_R_V, net);
+    l.set_physiology(net, pt.ppfd, pt.ps, pt.depth, kKs * kTheta / kH,
                      pt.vpd, kCa, kTleaf, kO2, kPatm);
     l.find_root_collar_psi();
     for (double v : {l.opt_psi_stem_, l.opt_root_psi_, l.ci_,
