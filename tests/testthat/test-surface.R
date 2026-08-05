@@ -500,3 +500,39 @@ test_that("the root network is rejected when it cannot be read safely", {
                 root_network = RootNetwork(r_R_H_min = -1, r_R_V_sum = 1)),
     "finite and non-negative")
 })
+
+test_that("the default-root-network memo cannot go stale", {
+  # `set_drivers()` memoises the default network because materialising one costs
+  # ~58 us at the R boundary (see the note above set_drivers). It is a SIZE-ONE
+  # memo keyed on `soil_depth` by identical(), so the failure mode to rule out is a
+  # second call with a different profile silently reusing the first profile's
+  # resistances -- a wrong number with nothing to signal it, since both are
+  # plausible.
+  op <- function(depth) {
+    l <- leaf_model()
+    set_drivers(l, psi_soil = rep(1.5, length(depth)), soil_depth = depth)
+    l$find_root_collar_psi()
+    list(point = operating_point(l), r_R_V_sum = l$r_R_V_sum)
+  }
+
+  shallow <- op(c(0.2, 0.4))     # dz = 0.2
+  deep    <- op(c(1.0, 2.0))     # dz = 1.0
+  # r_R_V scales with dz^2, so a 5x thicker layer is 25x the vertical resistance.
+  expect_equal(deep$r_R_V_sum, 25 * shallow$r_R_V_sum)
+  expect_false(isTRUE(all.equal(deep$point$A, shallow$point$A)))
+
+  # Going back must recompute, not return the `deep` entry the memo now holds.
+  expect_identical(op(c(0.2, 0.4))$point, shallow$point)
+
+  # And a hit must be indistinguishable from a miss.
+  expect_identical(op(c(0.2, 0.4))$point, shallow$point)
+
+  # The same for the single-potential path's cached empty network: reused across
+  # calls, and reuse must not carry state.
+  s1 <- leaf_model(supply = leaf_supply_single(1e3))
+  set_drivers(s1, psi_soil = 1.5); s1$find_root_collar_psi()
+  first <- operating_point(s1)
+  s2 <- leaf_model(supply = leaf_supply_single(1e3))
+  set_drivers(s2, psi_soil = 1.5); s2$find_root_collar_psi()
+  expect_identical(operating_point(s2), first)
+})

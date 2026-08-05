@@ -48,6 +48,18 @@ and moving: a caller that holds a `RootNetwork` as a member and refills it — w
 is what plant does — would have its buffers stolen by a move and reallocate all
 five vectors on the next call.
 
+**⚠️ A performance trap the R layer had to be written around.** Materialising a
+`RootNetwork` as an R object costs **~58 µs** — the bare `RootNetwork__ctor()`
+`.Call`, before any R wrapper, against 1.1 µs for a trivial `.Call` and 4.3 µs for
+`$set_physiology()` handed a ready-made network. It is `Rcpp::wrap` building the
+five-element named list. Constructing the default one per call made `set_drivers()`
+9.4 → 73 µs and `leaf_solve()` 23.7 → 108 µs/row, a 4.5× regression that every test
+passed. `set_drivers()` now memoises the default network and the single-potential
+path's placeholder, both in size-one memos keyed by `identical()` on `soil_depth`,
+which restores 9.6 / 5.8 µs and 24.1 µs/row — master's figures within noise. A
+`leaf_solve()` sweep holds `soil_depth` fixed across rows, so it pays the
+construction once. **If you build networks in a loop, build them outside it.**
+
 **A new check, because the length agreement is no longer free.** `max_soil_layer`
 indexes `psi_soil` and the per-layer gravity head directly, so a network with more
 rooted layers than the soil profile has layers is an out-of-bounds read rather than

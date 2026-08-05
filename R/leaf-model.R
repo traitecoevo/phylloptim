@@ -316,6 +316,68 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
   l
 }
 
+# ---------------------------------------------------------------------------
+# The R-boundary tax on a RootNetwork, and why these two are memoised
+# ---------------------------------------------------------------------------
+#
+# ⚠️ MATERIALISING A RootNetwork AS AN R OBJECT COSTS ~58 us, AND ALMOST NONE OF
+# IT IS OUR CODE. Measured against the installed package: `RootNetwork__ctor()` --
+# the bare `.Call`, before any R wrapper -- is 58 us, where a trivial `.Call` on a
+# Leaf field is 1.1 us and `$set_physiology()` handed a ready-made network is
+# 4.3 us. It is `Rcpp::wrap` building the five-element named list, which RcppR6
+# generates as five successive `ret["name"] = ...` assignments on an initially
+# empty `Rcpp::List` -- each one grows the list and its names attribute.
+#
+# Building the default network per call therefore made `set_drivers()` **9.4 ->
+# 73 us** on the multi-layer path and **5.8 -> 66 us** on the single-potential one,
+# and `leaf_solve()` **23.7 -> 108 us/row** -- a 4.5x regression on a figure this
+# package's own documentation quotes. Caught only by measuring; every test passed.
+#
+# This is the R boundary dominating a loop again, which is the standing lesson
+# here: count R calls, not arithmetic.
+#
+# Both memos are deliberately SIZE ONE rather than keyed caches. A `leaf_solve()`
+# sweep holds `soil_depth` fixed across rows, so a one-entry memo hits on every row
+# after the first, and it cannot grow without bound the way a keyed cache would if
+# someone swept the soil profile. The comparison is `identical()` on the depth
+# vector -- about 1 us -- not a pasted string key, because formatting a numeric
+# vector to build one costs more than it saves.
+#
+# Sharing one R object across calls is safe: `set_physiology` copies it into C++
+# through `Rcpp::as`, nothing mutates it, and R's copy-on-write means a caller who
+# got hold of it could not mutate ours either.
+
+.network_memo <- new.env(parent = emptyenv())
+
+# The multi-layer default: 20 kg C m^-2 leaf split evenly over the layers, through
+# the architecture model the leaf used to run internally (#33) -- so the numbers
+# are the pre-#33 ones and the provenance is on the page rather than buried in a
+# signature. `soil_depth` determines the whole thing, because the default carbon is
+# `rep(20 / n, n)` with `n == length(soil_depth)`, so it is the only key needed.
+.default_root_network <- function(n, soil_depth) {
+  if (!is.null(.network_memo$depth) &&
+      identical(.network_memo$depth, soil_depth)) {
+    return(.network_memo$net)
+  }
+  net <- root_network_from_carbon(
+    root_carbon_per_leaf_area = rep(20 / n, n),
+    soil_depth = soil_depth
+  )
+  .network_memo$depth <- soil_depth
+  .network_memo$net <- net
+  net
+}
+
+# The single-potential path reads `psi_soil[1]` and nothing else, so it needs a
+# network only because `set_physiology` has one signature for both paths. One empty
+# one per session.
+.empty_root_network <- function() {
+  if (is.null(.network_memo$empty)) {
+    .network_memo$empty <- RootNetwork()
+  }
+  .network_memo$empty
+}
+
 ##' Set the drivers for a leaf
 ##'
 ##' Named and defaulted, over the C++ `set_physiology()`'s ten positional
@@ -432,7 +494,7 @@ set_drivers <- function(x,
     # set_physiology keeps one signature for both paths; on this path it reads
     # only psi_soil[1], so these two are placeholders rather than inputs.
     soil_depth <- 1.0
-    root_network <- RootNetwork()
+    root_network <- .empty_root_network()
   } else {
     soil_depth <- if (is.null(soil_depth)) {
       seq_len(n) * 1.0
@@ -445,14 +507,7 @@ set_drivers <- function(x,
     }
 
     if (is.null(root_network)) {
-      # THE DEFAULT, WRITTEN OUT. 20 kg C m^-2 leaf split evenly, through the
-      # architecture model the leaf used to run internally -- so the numbers are
-      # the pre-#33 ones and the provenance is on the page instead of in a
-      # signature. Anyone who cares about the root system replaces this argument.
-      root_network <- root_network_from_carbon(
-        root_carbon_per_leaf_area = rep(20 / n, n),
-        soil_depth = soil_depth
-      )
+      root_network <- .default_root_network(n, soil_depth)
     } else if (!inherits(root_network, "RootNetwork")) {
       stop("`root_network` must be a RootNetwork, from RootNetwork() or ",
            "root_network_from_carbon(); got ", class(root_network)[[1]],
