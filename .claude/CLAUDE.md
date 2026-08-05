@@ -528,6 +528,12 @@ the per-cause split and the tolerance bands go in the first PR comment — see
    count — plus one rule: **`duptake_dpsi` returning NaN means "fall back to
    finite differences", so returning 0 or throwing silently degrades TF24f's
    acclimation gradient.** A path with no branch kinks simply never returns it.
+
+   `set_physiology`'s `RootNetwork` argument is **not** part of that contract: it is
+   multi-layer-specific, and `set_physiology` hands it over only under
+   `supply_kind_ == MultiLayer`. `SinglePotential` ignores it, and a third path
+   should too — the one signature serves every path, which is why `set_drivers()` has
+   a cached empty network to pass on the single-potential path.
 7. **Moving a public member is a plant API break, because RcppR6 binds fields by
    name.** plant's `inst/RcppR6_classes.yml` lists most of `Leaf`'s state as
    `access: field`, and the generator emits `obj_->psi_soil_` — a getter *and* a
