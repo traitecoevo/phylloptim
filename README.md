@@ -365,7 +365,7 @@ fourteen, which is the most expensive request there is.
 **For a fit, use `leaf_gradient_batch()`.** It is the same gradient, composed in C++
 and vectorised over observations, so a likelihood evaluation crosses the R boundary
 once instead of 112 times per observation — **363 → 10.6 µs per observation** at four
-fitted parameters, 22×.
+differentiated parameters (`length(pars)`), 22×.
 
 ```r
 b <- leaf_batch(psi_soil = obs$psi_soil, PPFD = obs$PPFD)   # once per fit

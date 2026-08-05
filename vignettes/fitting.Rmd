@@ -370,7 +370,7 @@ Four things follow:
 - **And the slope is gone too, which supersedes this whole comparison.**
   `leaf_gradient_batch()` composes the theorem in C++ and loops over observations
   there, so the boundary is crossed once per call instead of 112 times per
-  observation: **363 → 10.6 µs per observation** at four fitted parameters, 22×.
+  observation: **363 → 10.6 µs per observation** at `length(pars)` = 4, 22×.
 
 ⚠️ **So do not read the table above as the state of the art — read it as what the R
 boundary costs.** It is kept because the cost *model* is still the thing to reason

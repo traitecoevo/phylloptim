@@ -13,7 +13,8 @@ b <- leaf_batch(psi_soil = obs$psi_soil, PPFD = obs$PPFD)   # once per fit
 g <- leaf_gradient_batch(b, traits, pars = FIT)             # once per draw
 ```
 
-Measured per observation over 24 gradients at four fitted parameters, both arms in one
+Measured per observation over 24 gradients at four DIFFERENTIATED parameters --
+`length(pars)`, not the number an optimiser moves -- both arms in one
 process:
 
 | | us/observation | x a trivial `.Call` |
@@ -107,7 +108,7 @@ R interpreter. `.gradient_setter()` alone was 60% of a gradient. Three changes, 
 Measured per observation over 24 gradients, interleaved three times against the
 commit this lands on:
 
-| 4 fitted parameters | before | after |
+| `length(pars)` = 4 | before | after |
 |---|---|---|
 | fresh leaf | 504 us | 366 us (-27%) |
 | reused leaf | 400 us | **231 us (-42%)** |
@@ -131,7 +132,7 @@ Closes #52. `leaf_gradient()` built its own `Leaf` every call and offered no way
 pass one in, and construction is **~150 us, half of a one-parameter gradient** -- the
 largest single term on the R surface, paid once per observation by a fit that
 differentiates per observation. `leaf_gradient(x = l, traits = tr, ...)` reuses one. Measured over 24 gradients,
-per observation: **511 -> 409 us at four fitted parameters (-20%)** and
+per observation: **511 -> 409 us at four differentiated parameters (-20%)** and
 316 -> 200 us at one (-37%).
 
 ⚠️ **The four-parameter figure is the one a calibration gets, and it is the smaller

@@ -145,7 +145,8 @@ if (exists("leaf_gradient")) {
 # figures: `leaf_gradient_batch()` amortises its own per-call cost over the
 # observations, so quoting it at N = 1 understates it and quoting the R loop at
 # N = 1 overstates that. Both arms here run the same NOBS observations over the
-# same fitted parameters, and the batch is prepared OUTSIDE the timed region --
+# same DIFFERENTIATED parameters (`length(pars)`), and the batch is prepared
+# OUTSIDE the timed region --
 # which is what a fit does, since the drivers do not change across draws.
 gbatch <- c(p1 = NA_real_, p4 = NA_real_)
 gprep <- NA_real_
@@ -232,13 +233,14 @@ if (tsv) {
     cat(sprintf("    gradient, 1 par, x = a Leaf   %8.1f  %8.1f   <-- #52\n",
                 out$grad1_reuse_us, out$grad1_reuse_ratio))
   cat(sprintf("\n  THE CALIBRATION SHAPE: %d gradients, us PER OBSERVATION\n", NOBS))
+  cat("  (the count below is P_model = length(pars), NOT what an optimiser moves)\n")
   cat("                                  fresh     reused    saved     in C++   vs reused\n")
   for (nm in c("p1", "p4")) {
     f <- out[[paste0("gradN_", nm, "_fresh_us")]]
     r <- out[[paste0("gradN_", nm, "_reuse_us")]]
     bt <- out[[paste0("gradN_", nm, "_batch_us")]]
-    cat(sprintf("    %d fitted par%-2s               %8.1f %10s %8s %10s %10s\n",
-                length(PSET[[nm]]), if (nm == "p1") "" else "s", f,
+    cat(sprintf("    length(pars) = %-3d           %8.1f %10s %8s %10s %10s\n",
+                length(PSET[[nm]]), f,
                 if (is.na(r)) "-" else sprintf("%.1f", r),
                 if (is.na(r)) "-" else sprintf("-%.0f%%", 100 * (f - r) / f),
                 if (is.na(bt)) "-" else sprintf("%.2f", bt),

@@ -421,7 +421,7 @@ resolve the drivers once rather than per perturbation (`.resolve_drivers()`, spl
 of `set_drivers()` so there is still one definition of the defaults), apply traits
 positionally rather than rebuilding a `leaf_traits` each time, and read the four
 outputs in one call rather than four R6 active bindings. **400 → 231 µs per observation
-at four fitted parameters (−42%)** on the reused path, 504 → 366 (−27%) on the fresh
+at four DIFFERENTIATED parameters (−42%)** on the reused path, 504 → 366 (−27%) on the fresh
 one; gradients bit-identical. With #52 together, 504 → 231 µs, −54%.
 
 ⚠️ **What this says about "move it to C++".** Moving a small R helper across the
@@ -1205,18 +1205,40 @@ to construct a `Leaf`.
 ## 11g. Stage 2 — the boundary, removed rather than tuned
 
 **22×, measured, and the projection was right for once.** Same 24 observations, same
-four fitted parameters, both arms in one process, cost quoted against a trivial
+four differentiated parameters (`length(pars)` = `P_model`, not what an
+optimiser moves), both arms in one process, cost quoted against a trivial
 `.Call` in that process:
 
-| per observation, 4 fitted parameters | µs | × `.Call` |
+| per observation, `length(pars)` = 4 | µs | × `.Call` |
 |---|---:|---:|
 | `leaf_gradient()` in a loop, fresh `Leaf` | 363.3 | 340 |
 | `leaf_gradient(x = )`, reusing one (#52) | 235.2 | 220 |
 | **`leaf_gradient_batch()`** | **10.59** | **9.9** |
 
 `leaf_batch()` costs 335 µs once, for all 24 — it resolves the drivers and converts
-them to C++, and a fit pays it once against 30,000-odd draws. At one fitted parameter
+them to C++, and a fit pays it once against 30,000-odd draws. At `length(pars)` = 1
 the ratio is 19×; the four-parameter row is the one to quote, for 11e's reason.
+
+⚠️ **THE FOUR IS `P_model`, NOT THE NUMBER AN OPTIMISER MOVES**, and this section
+said "fitted parameters" until someone read it and asked. 11e's whole point is that
+there are two counts and conflating them has cost this family a retraction in each
+direction, so the figures above name the one they are denominated in:
+`length(pars)`, the model parameters this package differentiates.
+
+The worked example is `leaf-calibration`, where the gap is large in both directions:
+
+| | count |
+|---|---:|
+| `pars` handed to `leaf_gradient_batch()` | **4** |
+| gradient components returned to `optim`, single species | 7 |
+| gradient components returned to `optim`, hierarchical | **40** |
+
+**Both fits ask this package for the same four**, per observation, whichever they
+are. The other 3 or 36 components come from the caller's chain rule in R —
+`leaf_natural_jacobian()` and the hierarchical expansion — which is linear algebra
+over a matrix, not model work. That is exactly why the split in this design puts the
+Jacobian on the R side, and it is why the batch's cost does not follow the
+optimiser's dimension.
 
 **Nothing about the gradient got faster.** 11e measured the C++ model at 1.5% of a
 gradient — 6 µs of solving against 112 boundary crossings and the interpreter around
