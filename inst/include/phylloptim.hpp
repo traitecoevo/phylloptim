@@ -29,6 +29,7 @@
 
 #include <phylloptim/closed_form.hpp>
 #include <phylloptim/constants.hpp>
+#include <phylloptim/gradient.hpp>
 #include <phylloptim/leaf_model.hpp>
 #include <phylloptim/optimize.hpp>
 #include <phylloptim/quadrature.hpp>

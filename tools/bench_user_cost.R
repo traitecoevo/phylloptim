@@ -140,6 +140,30 @@ if (exists("leaf_gradient")) {
   }
 }
 
+# --- 4b. THE SAME SHAPE, COMPOSED IN C++ (#4 stage 2) ----------------------
+# ⚠️ THE ONLY FAIR COMPARISON IS AGAINST SECTION 4, not against the single-call
+# figures: `leaf_gradient_batch()` amortises its own per-call cost over the
+# observations, so quoting it at N = 1 understates it and quoting the R loop at
+# N = 1 overstates that. Both arms here run the same NOBS observations over the
+# same fitted parameters, and the batch is prepared OUTSIDE the timed region --
+# which is what a fit does, since the drivers do not change across draws.
+gbatch <- c(p1 = NA_real_, p4 = NA_real_)
+gprep <- NA_real_
+if (exists("leaf_gradient_batch")) {
+  batch_args <- c(list(psi_soil = psv, PPFD = 900, atm_vpd = 1.5,
+                       supply = supply), extra)
+  bb <- do.call(leaf_batch, batch_args)
+  for (nm in names(PSET)) {
+    fit <- PSET[[nm]]
+    gbatch[[nm]] <- timeit(function() leaf_gradient_batch(bb, pars = fit),
+                           30, reps) / NOBS
+  }
+  # Reported separately rather than folded in, because it is paid ONCE per fit
+  # against 30,000-odd draws -- and because it is the term that would grow if
+  # someone moved driver resolution back inside the hot path.
+  gprep <- timeit(function() do.call(leaf_batch, batch_args), 5, reps)
+}
+
 # --- 5. a gradient, per call and per parameter -----------------------------
 # NA on commits before #42, which is where leaf_gradient() was added. The whole
 # point of running this against history is that the surface changes, so absence is
@@ -184,6 +208,10 @@ out <- data.frame(
   gradN_p1_reuse_us = round(gN$p1[["reuse"]], 1),
   gradN_p4_fresh_us = round(gN$p4[["fresh"]], 1),
   gradN_p4_reuse_us = round(gN$p4[["reuse"]], 1),
+  gradN_p1_batch_us = round(gbatch[["p1"]], 2),
+  gradN_p4_batch_us = round(gbatch[["p4"]], 2),
+  gradN_p4_batch_ratio = round(gbatch[["p4"]] / ref, 1),
+  batch_prepare_us = round(gprep, 0),
   grad_per_par_us = round((g3 - g1) / 2, 1)
 )
 if (tsv) {
@@ -204,14 +232,21 @@ if (tsv) {
     cat(sprintf("    gradient, 1 par, x = a Leaf   %8.1f  %8.1f   <-- #52\n",
                 out$grad1_reuse_us, out$grad1_reuse_ratio))
   cat(sprintf("\n  THE CALIBRATION SHAPE: %d gradients, us PER OBSERVATION\n", NOBS))
-  cat("                                  fresh     reused    saved\n")
+  cat("                                  fresh     reused    saved     in C++   vs reused\n")
   for (nm in c("p1", "p4")) {
     f <- out[[paste0("gradN_", nm, "_fresh_us")]]
     r <- out[[paste0("gradN_", nm, "_reuse_us")]]
-    cat(sprintf("    %d fitted par%-2s               %8.1f %10s %8s\n",
+    bt <- out[[paste0("gradN_", nm, "_batch_us")]]
+    cat(sprintf("    %d fitted par%-2s               %8.1f %10s %8s %10s %10s\n",
                 length(PSET[[nm]]), if (nm == "p1") "" else "s", f,
                 if (is.na(r)) "-" else sprintf("%.1f", r),
-                if (is.na(r)) "-" else sprintf("-%.0f%%", 100 * (f - r) / f)))
+                if (is.na(r)) "-" else sprintf("-%.0f%%", 100 * (f - r) / f),
+                if (is.na(bt)) "-" else sprintf("%.2f", bt),
+                if (is.na(bt) || is.na(r)) "-" else sprintf("%.1fx", r / bt)))
+  }
+  if (!is.na(out$batch_prepare_us)) {
+    cat(sprintf("      leaf_batch() prepare        %8.0f us once, for all %d\n",
+                out$batch_prepare_us, NOBS))
   }
   cat(sprintf("      marginal cost per par       %8.1f\n", out$grad_per_par_us))
   if (!is.na(out$grad1_us))
