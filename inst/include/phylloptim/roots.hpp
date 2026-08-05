@@ -11,7 +11,6 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <utility>
 #include <string>
 #include <vector>
 
@@ -53,14 +52,9 @@ struct RootNetwork {
 // The returned vectors are sized to the deepest layer with non-zero root carbon,
 // so the hot loop only iterates over layers that actually contain roots.
 //
-// This is deliberately a free function rather than a member: it is the one part
-// of the supply path that is a *model of the plant*, not of water transport, and
-// keeping it out of MultiLayerRoots is what lets an alternative supply path
-// exist without inventing a root system. It stays in this package rather than
-// moving to plant so that it remains covered by the golden file -- the moment
-// this arithmetic crosses the package boundary it leaves the tested surface.
-// The golden grid therefore calls this and then hands the result to
-// set_physiology, so the tested path is still carbon -> resistance -> solve.
+// A free function rather than a member, because it is a *model of the plant* and
+// not of water transport: keeping it out of MultiLayerRoots is what lets an
+// alternative supply path exist without inventing a root system.
 //
 // NOTE on zero-carbon layers: a layer with no roots currently gets
 // r_R_H_min = 0, i.e. *zero* horizontal resistance, which is infinite
@@ -140,6 +134,12 @@ inline RootNetwork root_network_from_carbon(
 // squared factor on every vertical resistance -- and nothing in either package
 // would notice, because both halves would still be internally consistent.
 inline double layer_thickness(const std::vector<double>& soil_depth) {
+  if (soil_depth.empty()) {
+    // Guarded because this is a public entry point a caller reaches for directly,
+    // where the same expression inside set_soil_state was only ever reachable
+    // after set_physiology had validated the profile against psi_soil.
+    util::stop("layer_thickness: soil_depth must have at least one layer");
+  }
   return soil_depth.back() / soil_depth.size();
 }
 
