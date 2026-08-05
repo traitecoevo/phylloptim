@@ -556,3 +556,36 @@ test_that("the default-root-network memo cannot go stale", {
   set_drivers(s2, psi_soil = 1.5); s2$find_root_collar_psi()
   expect_identical(operating_point(s2), first)
 })
+
+test_that("series_resistance() copies its prototype rather than mutating it", {
+  # It avoids `RootNetwork()`'s ~58 us C++ round trip by overwriting one field of a
+  # session-cached prototype. That is only safe because R copies on write, so the
+  # failure mode to rule out is one call corrupting the prototype and every later
+  # call inheriting it -- which would be a wrong resistance, silently, in whichever
+  # caller happened to run second.
+  a <- series_resistance(1500)
+  b <- series_resistance(2500)
+  expect_identical(a$r_R_V_sum, 1500)
+  expect_identical(b$r_R_V_sum, 2500)
+  # Third call, after two different values have been through: still correct.
+  expect_identical(series_resistance(1500)$r_R_V_sum, 1500)
+
+  # Mutating a returned network must not reach the prototype either.
+  a$r_R_V_sum <- 99
+  expect_identical(series_resistance(1500)$r_R_V_sum, 1500)
+
+  # And the shape is the real struct's, not a hand-written list that could drift.
+  expect_identical(sort(names(a)), sort(names(RootNetwork())))
+  expect_s3_class(a, "RootNetwork")
+  expect_length(a$r_R_H_min, 0L)
+
+  # It must still drive a solve identically to the constructor route it replaced.
+  by_ctor <- leaf_model(supply = leaf_supply_single())
+  set_drivers(by_ctor, psi_soil = 1.5,
+              root_network = RootNetwork(r_R_V_sum = 1500))
+  by_ctor$find_root_collar_psi()
+  by_helper <- leaf_model(supply = leaf_supply_single())
+  set_drivers(by_helper, psi_soil = 1.5, root_network = series_resistance(1500))
+  by_helper$find_root_collar_psi()
+  expect_identical(operating_point(by_helper), operating_point(by_ctor))
+})
