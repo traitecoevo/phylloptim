@@ -830,7 +830,7 @@ R API, compared bit-exactly. Four things that were not in the plan:
    the R-facing umbrella *must* be `leaf.h` and the model's had to stay
    `leaf.hpp`. A file extension now carries the one-way-dependency rule, which is
    more weight than an extension should bear — hence the banner in `leaf.h`.
-2. **The generated `RcppR6_*.hpp` live in `inst/include/leaf/` and do include
+2. **The generated `RcppR6_*.hpp` live in `inst/include/phylloptim/` and do include
    Rcpp**, so "no Rcpp under `inst/include/`" is no longer the invariant. The
    invariant is *directional*; hazard 9 in the developer guide was rewritten.
 3. **The R test's expected values must be C99 hex floats.** Decimal `%.17g`

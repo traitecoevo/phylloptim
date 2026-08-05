@@ -10,7 +10,7 @@
 // plain C++ with no R anywhere in its include graph, and keeping it that way is
 // issue #11's guarantee.
 //
-// Only src/RcppR6.cpp includes this header. Nothing in inst/include/leaf/
+// Only src/RcppR6.cpp includes this header. Nothing in inst/include/phylloptim/
 // includes it, and nothing there may: the dependency runs one way, downward
 // from the R layer into the model, and the moment it runs the other way plant
 // starts inheriting Rcpp through a header it compiles into its own translation

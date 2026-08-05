@@ -22,7 +22,7 @@ inst/include/leaf.h            the R layer's umbrella: <phylloptim.hpp> plus the
                                support headers, so it pulls in Rcpp. ONLY
                                src/RcppR6.cpp includes it. The .h/.hpp split is
                                forced by RcppR6, which hardwires both names
-inst/include/leaf/
+inst/include/phylloptim/
   leaf_model.hpp               the Leaf class: the gas-exchange core, everything inline
   roots.hpp                    MultiLayerRoots (the soil → root-collar water supply)
                                plus root_network_from_carbon, the root architecture
