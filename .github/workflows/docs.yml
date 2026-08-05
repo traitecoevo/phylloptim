@@ -13,6 +13,16 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Supersede in-flight runs on the same ref -- see the note in cpp-tests.yml.
+#
+# Cancellation is scoped to pull requests here, unlike the other two workflows,
+# because this one has a `deploy` job: a master run may be publishing, and half a
+# publish is worse than a redundant one. PR iterations have nothing to leave in a
+# broken state, so those still supersede.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
