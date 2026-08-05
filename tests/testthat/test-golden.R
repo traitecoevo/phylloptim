@@ -165,7 +165,7 @@ test_that("a shut-down point writes every output, not just the ones it changed",
 
   run <- function(l, drivers) {
     l$set_physiology(
-      root_carbon_per_leaf_area = 1.0 / golden_area_leaf,
+      root_network = golden_network_1m,
       PPFD = drivers$ppfd, psi_soil = drivers$psi_soil, soil_depth = 1.0,
       leaf_specific_conductance_max = golden_ks * golden_theta / golden_h,
       atm_vpd = drivers$vpd, ca = golden_ca, leaf_temp = golden_tleaf,
@@ -196,7 +196,7 @@ test_that("psi_soil is rejected as a signed potential, through the R layer too",
   l <- default_leaf()
   expect_error(
     l$set_physiology(
-      root_carbon_per_leaf_area = 1.0 / golden_area_leaf,
+      root_network = golden_network_1m,
       PPFD = 900, psi_soil = -2.0, soil_depth = 1.0,
       leaf_specific_conductance_max = golden_ks * golden_theta / golden_h,
       atm_vpd = 2.0, ca = golden_ca, leaf_temp = golden_tleaf,
@@ -212,7 +212,7 @@ test_that("lambda and g1_eff are reachable and read-only", {
   # pinning is that they compute from the solved state and cannot be assigned.
   l <- default_leaf()
   l$set_physiology(
-    root_carbon_per_leaf_area = 1.0 / golden_area_leaf,
+    root_network = golden_network_1m,
     PPFD = 900, psi_soil = 2.0, soil_depth = 1.0,
     leaf_specific_conductance_max = golden_ks * golden_theta / golden_h,
     atm_vpd = 2.0, ca = golden_ca, leaf_temp = golden_tleaf,

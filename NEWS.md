@@ -1,4 +1,68 @@
-# phylloptim (development version)
+# phylloptim 0.2.0
+
+## `set_physiology()` takes root resistances, not root carbon
+
+**Breaking, in both the C++ and R interfaces**, and coupled with a plant PR.
+
+`Leaf::set_physiology()`'s first argument is now a `RootNetwork` — the per-layer
+root hydraulic resistances, per unit leaf area — where it used to be a root carbon
+profile. The solve never touched root carbon: `uptake()` and `duptake_dpsi()` read
+exactly two vectors, `r_R_H_min` and `r_R_V_sum`, and taking carbon made the leaf
+own four things that are not gas exchange — `beta_R_H`, `beta_R_V`, the layer
+thickness `dz`, and the 1/3 : 2/3 vertical/horizontal split. It is the move
+`leaf_specific_conductance_max` already made: plant computes `kmax` from height and
+hands over a scalar, because which conductance-versus-height model is in force is
+not this package's business. Which root-architecture model is in force is not
+either.
+
+What follows:
+
+* `beta_R_H` and `beta_R_V` are no longer `Leaf` constructor arguments, no longer
+  `leaf_traits()` entries, and no longer arguments to `set_traits()`. The C++
+  constructor takes 17 arguments rather than 19; `set_traits()` takes 13 rather
+  than 15.
+* `root_network_from_carbon()` — the architecture model itself — **stays**, is
+  public, is tested, and is now exposed to R. It takes the soil-depth profile
+  rather than `dz`, so a caller never has to reproduce the layer-thickness rule;
+  `phylloptim::layer_thickness()` is the one definition both sides use.
+* `set_drivers()` and `leaf_solve()` take `root_network` in place of
+  `root_carbon_per_leaf_area`. The default is unchanged numerically — a nominal
+  20 kg C m^-2 leaf split evenly — but it is now written out as a call to
+  `root_network_from_carbon()` instead of being a number in a signature.
+* `RootNetwork()` builds one from R. Only `r_R_H_min` and `r_R_V_sum` matter; the
+  other three fields are diagnostics and may be left empty. So a caller with a
+  measured or fitted series resistance and no carbon profile can now state what
+  they have, which was the point.
+
+**Results are unchanged.** The 288-point golden file is bit-identical, and the R
+tie-back to it still passes, because the golden grid now calls
+`root_network_from_carbon()` and then `set_physiology()` — the same two steps, with
+the boundary moved between them.
+
+**Cost: +0.7% per solve** (2.74 -> 2.76 µs/solve, min-of-2000 interleaved over six
+rounds, non-overlapping, identical checksums). `set_physiology()` now copy-assigns
+five vectors instead of filling them, where it used to run the architecture model
+itself; against that, `set_physiology()` alone got cheaper (0.106 -> 0.083 µs).
+`set_root_network()` takes a `const&` and copy-assigns rather than taking by value
+and moving: a caller that holds a `RootNetwork` as a member and refills it — which
+is what plant does — would have its buffers stolen by a move and reallocate all
+five vectors on the next call.
+
+**A new check, because the length agreement is no longer free.** `max_soil_layer`
+indexes `psi_soil` and the per-layer gravity head directly, so a network with more
+rooted layers than the soil profile has layers is an out-of-bounds read rather than
+a wrong number. That used to be guaranteed by validating root carbon against
+`soil_depth`; `set_root_network()` now checks it, along with finiteness and
+non-negativity of both load-bearing vectors.
+
+**One capability is lost, and it is not dressed up.** `leaf_gradient()` can no
+longer differentiate with respect to `beta_R_H` or `beta_R_V` — there is no `pars`
+name for them, because the leaf does not have them. Perturbing them is cheap
+(`root_network_from_carbon()` is homogeneous of degree 1 in each, so the perturbed
+network is a scaling of the base one and needs no rebuild) but the derivative of a
+solved output still costs two solves. The previously recorded values are kept in a
+comment in `tests/testthat/test-gradient.R` for anyone checking that route.
+
 
 ## Documented when the exact gradient beats differencing, and it is not "at more parameters"
 

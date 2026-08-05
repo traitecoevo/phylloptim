@@ -8,7 +8,7 @@ leaf_gradient(
   psi_soil,
   PPFD = 900,
   soil_depth = NULL,
-  root_carbon_per_leaf_area = NULL,
+  root_network = NULL,
   leaf_specific_conductance_max = 3.14e-05,
   atm_vpd = 2,
   ca = 40,
@@ -34,11 +34,11 @@ sets the number of soil layers.}
 \item{soil_depth}{cumulative depth to the bottom of each layer, m. Defaults
 to 1 m layers.}
 
-\item{root_carbon_per_leaf_area}{root carbon **per unit leaf area**, kg C
-m^-2 leaf, per layer. Defaults to 20 split evenly across layers. This is
-the one argument with no good default -- a bare-leaf user does not have a
-root carbon profile, which is why 20 is a stand-in rather than a
-recommendation. It is also why the single-potential supply path exists.}
+\item{root_network}{the per-layer root hydraulic resistances, a
+[RootNetwork()]. Defaults to a nominal 20 kg C m^-2 leaf split evenly over
+the layers and put through [root_network_from_carbon()] — a stand-in, not a
+recommendation, which is why it is written out where you can see and replace
+it. Ignored, and an error if supplied, on the single-potential path.}
 
 \item{leaf_specific_conductance_max}{maximum leaf-specific hydraulic
 conductance, kg m^-2 s^-1 MPa^-1}
@@ -63,9 +63,15 @@ differentiate at}
 \item{supply}{how water reaches the root collar: [leaf_supply_multilayer()]
 (the default) or [leaf_supply_single()]}
 
-\item{pars}{what to differentiate with respect to. Any of the fifteen
-[leaf_traits()] names, plus `"leaf_specific_conductance_max"` and — on the
-single-potential path only — `"resistance"`. Defaults to all of them.}
+\item{pars}{what to differentiate with respect to. Any of the thirteen
+  [leaf_traits()] names, plus `"leaf_specific_conductance_max"` and — on the
+  single-potential path only — `"resistance"`. Defaults to all of them.
+
+  `beta_R_H` and `beta_R_V` were here until #33 and are not any more: they
+  parameterise the root-architecture model, which the leaf no longer runs. A
+  gradient in either is exact and needs no differencing —
+  [root_network_from_carbon()] is homogeneous of degree 1 in each, so scaling
+  the constant scales `r_R_H_min` (or `r_R_V`) by the same factor.}
 
 \item{step}{relative step for the trait difference. The default `1e-06` is
 near the middle of the five decades over which the mixed partial was

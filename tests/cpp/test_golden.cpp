@@ -28,6 +28,8 @@
 
 #include <phylloptim.hpp>
 
+#include "root_network.hpp"
+
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -68,7 +70,7 @@ Row solve(double psi_soil, double ppfd, double vpd, int layers) {
     root[i] = 1.0 / layers / kAreaLeaf;
   }
 
-  l.set_physiology(root, ppfd, ps, depth, kKs * kTheta / kH, vpd, kCa,
+  l.set_physiology(fixture::root_network(root, depth), ppfd, ps, depth, kKs * kTheta / kH, vpd, kCa,
                    kTleaf, kO2, kPatm);
   l.find_root_collar_psi();
 

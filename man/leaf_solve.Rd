@@ -8,7 +8,7 @@ leaf_solve(
   psi_soil,
   PPFD = 900,
   soil_depth = NULL,
-  root_carbon_per_leaf_area = NULL,
+  root_network = NULL,
   leaf_specific_conductance_max = 3.14e-05,
   atm_vpd = 2,
   ca = 40,
@@ -30,11 +30,11 @@ sets the number of soil layers.}
 \item{soil_depth}{cumulative depth to the bottom of each layer, m. Defaults
 to 1 m layers.}
 
-\item{root_carbon_per_leaf_area}{root carbon **per unit leaf area**, kg C
-m^-2 leaf, per layer. Defaults to 20 split evenly across layers. This is
-the one argument with no good default -- a bare-leaf user does not have a
-root carbon profile, which is why 20 is a stand-in rather than a
-recommendation. It is also why the single-potential supply path exists.}
+\item{root_network}{the per-layer root hydraulic resistances, a
+[RootNetwork()]. Defaults to a nominal 20 kg C m^-2 leaf split evenly over
+the layers and put through [root_network_from_carbon()] — a stand-in, not a
+recommendation, which is why it is written out where you can see and replace
+it. Ignored, and an error if supplied, on the single-potential path.}
 
 \item{leaf_specific_conductance_max}{maximum leaf-specific hydraulic
 conductance, kg m^-2 s^-1 MPa^-1}
@@ -57,8 +57,8 @@ assimilation by percent, not by rounding.}
 
 \item{supply}{how water reaches the root collar: [leaf_supply_multilayer()]
 (the default) or [leaf_supply_single()]. On the single-potential path
-`soil_depth` and `root_carbon_per_leaf_area` must be omitted, and each
-`psi_soil` is one value rather than a profile.}
+`soil_depth` and `root_network` must be omitted, and each `psi_soil` is one
+value rather than a profile.}
 
 \item{reuse}{solve every row with one `Leaf` object (`TRUE`) or construct a
 fresh one per row (`FALSE`, the default). Reuse is faster because the two
@@ -112,8 +112,9 @@ varying traits without reconstructing, and note it costs 21.8 µs rather than
 `leaf_specific_conductance_max` are recycled to a common length, the usual R
 way. `psi_soil` is recycled too **when it is a plain numeric vector** --
 each element is then a separate single-layer solve. For multi-layer solves
-pass a list of numeric vectors, one per row; `soil_depth` and
-`root_carbon_per_leaf_area` follow the same rule.
+pass a list of numeric vectors, one per row; `soil_depth` follows the same
+rule. `root_network` is either one [RootNetwork()], used for every row, or a
+list of them, one per row.
 }
 
 \examples{

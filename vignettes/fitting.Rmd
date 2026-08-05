@@ -191,8 +191,8 @@ tm <- function(f) {
 }
 
 CAND <- c("vcmax_25", "jmax_25", "cost_scale_TF24", "beta2", "a",
-          "curv_fact_elec_trans", "curv_fact_colim", "beta_R_H", "beta_R_V",
-          "stem_b", "stem_c", "root_b", "root_c")
+          "curv_fact_elec_trans", "curv_fact_colim", "psi_crit",
+          "root_psi_crit", "stem_b", "stem_c", "root_b", "root_c")
 
 exact_n <- function(pars) {
   vapply(seq_len(nrow(obs)), function(i) {

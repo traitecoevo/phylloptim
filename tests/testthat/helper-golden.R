@@ -64,6 +64,12 @@ golden_tleaf <- 25.0
 golden_patm <- 101.3
 golden_kmax <- golden_ks * golden_theta / golden_h
 
+# The single-layer root network the C++ grid's one-layer rows use: all the root
+# carbon in one 1 m layer, through the architecture model (#33). Named rather than
+# rebuilt at each call site so the three tests that use it cannot drift apart.
+golden_network_1m <- root_network_from_carbon(1.0 / golden_area_leaf,
+                                             soil_depth = 1.0)
+
 # One grid point, set up exactly as test_golden.cpp's solve() does: the soil
 # profile spread over `layers` equal 1 m layers drying with depth, and the root
 # carbon split evenly. Returns the same nine outputs the golden file records.
@@ -72,6 +78,12 @@ golden_kmax <- golden_ks * golden_theta / golden_h
 # set_drivers(). This is the tie-back to the C++ baseline, so it wants as little
 # of our own R between it and the binding as possible; test-surface.R covers
 # set_drivers() on its own and checks the two agree on the same point.
+#
+# Since #33 the carbon -> resistance step is a separate call. That is the point of
+# the change rather than a cost of it: this file now exercises exactly the two
+# steps the C++ grid does, root_network_from_carbon() then $set_physiology(), so
+# the R route to the golden numbers goes through the same public helper a user
+# would call.
 golden_solve <- function(psi_soil, ppfd, vpd, layers) {
   l <- default_leaf()
 
@@ -81,7 +93,7 @@ golden_solve <- function(psi_soil, ppfd, vpd, layers) {
   root <- rep(1.0 / layers / golden_area_leaf, layers)
 
   l$set_physiology(
-    root_carbon_per_leaf_area = root,
+    root_network = root_network_from_carbon(root, soil_depth = depth),
     PPFD = ppfd,
     psi_soil = ps,
     soil_depth = depth,

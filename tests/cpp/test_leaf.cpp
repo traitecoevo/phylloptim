@@ -10,6 +10,8 @@
 
 #include <phylloptim.hpp>
 
+#include "root_network.hpp"
+
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -63,7 +65,7 @@ phylloptim::Leaf make_leaf(const Drivers &d, std::vector<double> psi_soil,
   // root carbon per unit leaf area: the old absolute carbon divided by area_leaf
   std::vector<double> mass_root_prop(psi_soil.size(),
                                      1.0 / double(psi_soil.size()) / d.area_leaf);
-  l.set_physiology(mass_root_prop, d.PPFD, psi_soil, soil_depth,
+  l.set_physiology(fixture::root_network(mass_root_prop, soil_depth), d.PPFD, psi_soil, soil_depth,
                    d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
                    d.atm_o2_kpa, d.atm_kpa);
   return l;
@@ -240,7 +242,7 @@ void test_shutdown_writes_its_own_fluxes() {
   std::vector<double> mrp{1.0 / d.area_leaf}, depth{1.0};
   const auto solve = [&](double psi) {
     std::vector<double> ps{psi};
-    l.set_physiology(mrp, d.PPFD, ps, depth,
+    l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, ps, depth,
                      d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
                      d.atm_o2_kpa, d.atm_kpa);
     l.find_root_collar_psi();
@@ -291,7 +293,7 @@ void test_shallow_roots_do_not_inherit_deep_uptake() {
   const std::vector<double> psi_soil{1.0, 1.5, 2.0};
   const std::vector<double> depth{1.0, 2.0, 3.0};
   const auto solve = [&](std::vector<double> root_carbon) {
-    l.set_physiology(root_carbon, d.PPFD, psi_soil, depth,
+    l.set_physiology(fixture::root_network(root_carbon, depth), d.PPFD, psi_soil, depth,
                      d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
                      d.atm_o2_kpa, d.atm_kpa);
     l.find_root_collar_psi();
@@ -318,7 +320,7 @@ void test_shallow_roots_do_not_inherit_deep_uptake() {
   phylloptim::Leaf fresh;
   fresh.setup_transpiration(100);
   fresh.setup_root_vulnerability(100);
-  fresh.set_physiology({1.0 / d.area_leaf, 0.0, 0.0}, d.PPFD, psi_soil, depth,
+  fresh.set_physiology(fixture::root_network({1.0 / d.area_leaf, 0.0, 0.0}, depth), d.PPFD, psi_soil, depth,
                        d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
                        d.atm_o2_kpa, d.atm_kpa);
   fresh.find_root_collar_psi();
@@ -342,7 +344,7 @@ void test_negative_assim_exit_writes_its_own_rates() {
   const std::vector<double> psi_soil{1.0}, depth{1.0};
   const std::vector<double> root{1.0 / d.area_leaf};
   const auto solve = [&](double ppfd) {
-    l.set_physiology(root, ppfd, psi_soil, depth, d.K_s * d.theta / d.h,
+    l.set_physiology(fixture::root_network(root, depth), ppfd, psi_soil, depth, d.K_s * d.theta / d.h,
                      d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
     l.find_root_collar_psi();
   };
@@ -367,7 +369,7 @@ void test_negative_assim_exit_writes_its_own_rates() {
   phylloptim::Leaf fresh;
   fresh.setup_transpiration(100);
   fresh.setup_root_vulnerability(100);
-  fresh.set_physiology(root, 10.0, psi_soil, depth, d.K_s * d.theta / d.h,
+  fresh.set_physiology(fixture::root_network(root, depth), 10.0, psi_soil, depth, d.K_s * d.theta / d.h,
                        d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
   fresh.find_root_collar_psi();
   ok(fresh.transpiration_ == l.transpiration_,
@@ -663,7 +665,7 @@ void test_collar_argmax_is_smooth_in_a_trait() {
     l.setup_transpiration(100);
     l.setup_root_vulnerability(100);
     std::vector<double> ps{2.0}, depth{1.0}, root{1.0 / d.area_leaf};
-    l.set_physiology(root, d.PPFD, ps, depth, d.K_s * d.theta / d.h, d.atm_vpd,
+    l.set_physiology(fixture::root_network(root, depth), d.PPFD, ps, depth, d.K_s * d.theta / d.h, d.atm_vpd,
                      d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
     l.find_root_collar_psi();
     collar[i] = l.opt_root_psi_;
@@ -729,7 +731,7 @@ void test_signed_potentials_are_rejected() {
   l.setup_root_vulnerability(100);
   bool threw = false;
   try {
-    l.set_physiology({1.0 / d.area_leaf}, d.PPFD, {-2.0}, {1.0},
+    l.set_physiology(fixture::root_network({1.0 / d.area_leaf}, {1.0}), d.PPFD, {-2.0}, {1.0},
                      d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
                      d.atm_o2_kpa, d.atm_kpa);
   } catch (const std::exception &) {
@@ -751,7 +753,7 @@ void test_signed_potentials_are_rejected() {
   threw = false;
   try {
     phylloptim::Leaf bad(100, 2.04, -3.0, 5.0, 2.65, 1.29, 1.9, 1, 167 * 100, 0.3,
-                   0.7, 0.99, 1e-8, 100, 1e-6, 1000, 46.32995, 3.4e3, 9.4e4);
+                   0.7, 0.99, 1e-8, 100, 1e-6, 1000, 46.32995);
     static_cast<void>(bad);
   } catch (const std::exception &) {
     threw = true;
@@ -778,7 +780,7 @@ void test_root_psi_crit_clamp_binds() {
     l.setup_transpiration(100);
     l.setup_root_vulnerability(100);
     std::vector<double> ps{psi_soil}, depth{1.0}, root{1.0 / d.area_leaf};
-    l.set_physiology(root, d.PPFD, ps, depth, d.K_s * d.theta / d.h, d.atm_vpd,
+    l.set_physiology(fixture::root_network(root, depth), d.PPFD, ps, depth, d.K_s * d.theta / d.h, d.atm_vpd,
                      d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
     l.find_root_collar_psi();
     return l;
@@ -924,7 +926,7 @@ phylloptim::Leaf make_pm_leaf(const Drivers &d, std::vector<double> psi_soil,
   l.d_ = leaf_dim;
   std::vector<double> root(psi_soil.size(),
                            1.0 / double(psi_soil.size()) / d.area_leaf);
-  l.set_physiology(root, d.PPFD, psi_soil, soil_depth,
+  l.set_physiology(fixture::root_network(root, soil_depth), d.PPFD, psi_soil, soil_depth,
                    d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
                    d.atm_o2_kpa, d.atm_kpa);
   return l;
@@ -1057,9 +1059,16 @@ void test_closed_form() {
   // single layer, kmax from height.
   const double eta = 12.0, eta_c = 1 - 2 / (1 + eta) + 1 / (1 + 2 * eta);
   const double theta = 1.0 / 4669.0;
+  // The root network is built ONCE, outside the closure. It does not depend on h
+  // or vpd, and the timing loop below reports a "set_physiology" figure -- if the
+  // architecture model were rebuilt per call that figure would be measuring the
+  // caller's helper as much as the leaf's setter (measured: 0.106 -> 0.243 us,
+  // i.e. more than half the reported cost would have been the helper).
+  const std::vector<double> depth_1m{1.0};
+  const phylloptim::RootNetwork net_1m = fixture::root_network({1.0}, depth_1m);
   const auto setp = [&](phylloptim::Leaf &l, double h, double vpd) {
-    std::vector<double> ps{0.0}, dp{1.0}, rt{1.0};
-    l.set_physiology(rt, 900.0, ps, dp, 1.0 * theta / (h * eta_c), vpd, 40.0,
+    std::vector<double> ps{0.0}, dp{1.0};
+    l.set_physiology(net_1m, 900.0, ps, dp, 1.0 * theta / (h * eta_c), vpd, 40.0,
                      25.0, 21.0, 101.3);
   };
   phylloptim::Leaf l;
@@ -1107,7 +1116,7 @@ void test_closed_form() {
   // The beta2 = 1/c leaf, where xi is constant and nothing needs solving.
   phylloptim::Leaf exact_leaf(96.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
                         5.870283, 1.0 / 2.680147, 157.44, 0.30, 0.7, 0.99, 1e-3,
-                        100, 1e-3, 1000, 7.5, 3.4e2, 9.4e3);
+                        100, 1e-3, 1000, 7.5);
   ok(phylloptim::closed_form::beta2_is_exact(exact_leaf),
      "beta2_is_exact recognises beta2 = 1/stem_c");
   ok(!phylloptim::closed_form::beta2_is_exact(l), "and rejects the default beta2 = 1.5");
@@ -1178,7 +1187,7 @@ void test_leaf_on_single_potential() {
   // set_physiology keeps its signature; on this path only psi_soil[0] is read,
   // so the depth and root-mass vectors are ignored rather than forbidden.
   std::vector<double> psi_soil{1.0}, depth{1.0}, root{1.0};
-  l.set_physiology(root, d.PPFD, psi_soil, depth,
+  l.set_physiology(fixture::root_network(root, depth), d.PPFD, psi_soil, depth,
                    d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
                    d.atm_o2_kpa, d.atm_kpa);
   l.find_root_collar_psi();
@@ -1205,7 +1214,7 @@ void test_leaf_on_single_potential() {
   dry.supply_kind_ = phylloptim::Leaf::SupplyKind::SinglePotential;
   dry.single_.resistance_ = 1.0e3;
   std::vector<double> psi_dry{3.0};
-  dry.set_physiology(root, d.PPFD, psi_dry, depth,
+  dry.set_physiology(fixture::root_network(root, depth), d.PPFD, psi_dry, depth,
                      d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
                      d.atm_o2_kpa, d.atm_kpa);
   dry.find_root_collar_psi();
@@ -1218,7 +1227,7 @@ void test_leaf_on_single_potential() {
   tight.setup_root_vulnerability(100);
   tight.supply_kind_ = phylloptim::Leaf::SupplyKind::SinglePotential;
   tight.single_.resistance_ = 1.0e4;
-  tight.set_physiology(root, d.PPFD, psi_soil, depth,
+  tight.set_physiology(fixture::root_network(root, depth), d.PPFD, psi_soil, depth,
                        d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
                        d.atm_o2_kpa, d.atm_kpa);
   tight.find_root_collar_psi();
@@ -1425,9 +1434,8 @@ void test_perturb_stem_b_matches_a_rebuild() {
     phylloptim::Leaf rebuilt = make_leaf(d, {2.0}, {1.0});
     rebuilt.find_root_collar_psi();
     rebuilt.set_traits(96.0, 2.680147, b_new, 5.870283, 2.680147, 3.898245,
-                       5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, 3.4e2,
-                       9.4e3);
-    rebuilt.set_physiology(mrp, d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
+                       5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5);
+    rebuilt.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                            d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa,
                            d.atm_kpa);
     rebuilt.find_root_collar_psi();
@@ -1459,9 +1467,8 @@ void test_perturb_stem_b_matches_a_rebuild() {
     phylloptim::Leaf fresh = make_leaf(d, {2.0}, {1.0});
     fresh.find_root_collar_psi();
     rescaled.set_traits(96.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
-                        5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, 3.4e2,
-                        9.4e3);
-    rescaled.set_physiology(mrp, d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
+                        5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5);
+    rescaled.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                             d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa,
                             d.atm_kpa);
     rescaled.find_root_collar_psi();
@@ -1489,16 +1496,16 @@ void test_set_traits_matches_a_fresh_leaf() {
 
   for (const Case &c : cases) {
     // The default trait vector, in set_traits' own argument order.
-    double t[15] = {96.0,     2.680147, 3.898245, 5.870283, 2.680147,
+    double t[13] = {96.0,     2.680147, 3.898245, 5.870283, 2.680147,
                     3.898245, 5.870283, 1.5,      157.44,   0.30,
-                    0.7,      0.99,     7.5,      3.4e2,    9.4e3};
+                    0.7,      0.99,     7.5};
     t[c.which] = c.value;
 
     // Fresh: the traits go through the constructor.
     phylloptim::Leaf fresh(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9],
-                     t[10], t[11], 1e-3, 100, 1e-3, 1000, t[12], t[13], t[14]);
+                     t[10], t[11], 1e-3, 100, 1e-3, 1000, t[12]);
     std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
-    fresh.set_physiology(mrp, d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
+    fresh.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                          d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
     fresh.find_root_collar_psi();
 
@@ -1509,8 +1516,8 @@ void test_set_traits_matches_a_fresh_leaf() {
     phylloptim::Leaf reused = make_leaf(d, {2.0}, {1.0});
     reused.find_root_collar_psi();
     reused.set_traits(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9],
-                      t[10], t[11], t[12], t[13], t[14]);
-    reused.set_physiology(mrp, d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
+                      t[10], t[11], t[12]);
+    reused.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                           d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
     reused.find_root_collar_psi();
 
@@ -1539,10 +1546,10 @@ void test_set_traits_matches_a_fresh_leaf() {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     const double vcmax_before = l.vcmax_;
     l.set_traits(96.0 * 2.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
-                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, 3.4e2, 9.4e3);
+                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5);
     std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
     // The SAME leaf_temp and atm_o2_kpa, which is what arms the cache.
-    l.set_physiology(mrp, d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
+    l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                      d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
     near(l.vcmax_ / vcmax_before, 2.0, 1e-12,
          "doubling vcmax_25 doubles vcmax_ at an unchanged temperature");
@@ -1556,9 +1563,9 @@ void test_set_traits_matches_a_fresh_leaf() {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     const double E_before = l.transpiration(3.0, 1.0);
     l.set_traits(96.0, 2.680147, 3.898245 * 1.5, 5.870283, 2.680147, 3.898245,
-                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, 3.4e2, 9.4e3);
+                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5);
     std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
-    l.set_physiology(mrp, d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
+    l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                      d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
     // A less vulnerable stem (larger stem_b) holds more conductivity, so the
     // integral of the vulnerability curve over the same span is larger.
@@ -1570,21 +1577,21 @@ void test_set_traits_matches_a_fresh_leaf() {
   // which is the fourth reason these are not settable fields.
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
-    const double good[15] = {96.0,     2.680147, 3.898245, 5.870283, 2.680147,
+    const double good[13] = {96.0,     2.680147, 3.898245, 5.870283, 2.680147,
                              3.898245, 5.870283, 1.5,      157.44,   0.30,
-                             0.7,      0.99,     7.5,      3.4e2,    9.4e3};
+                             0.7,      0.99,     7.5};
     const int signed_positions[] = {3, 2, 5, 6};  // psi_crit, stem_b, root_b, root_psi_crit
     const char *labels[] = {"psi_crit", "stem_b", "root_b", "root_psi_crit"};
     for (int k = 0; k < 4; ++k) {
-      double t[15];
-      for (int i = 0; i < 15; ++i) {
+      double t[13];
+      for (int i = 0; i < 13; ++i) {
         t[i] = good[i];
       }
       t[signed_positions[k]] = -t[signed_positions[k]];  // the pre-#25 sign
       bool threw = false;
       try {
         l.set_traits(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9],
-                     t[10], t[11], t[12], t[13], t[14]);
+                     t[10], t[11], t[12]);
       } catch (const std::runtime_error &) {
         threw = true;
       }
@@ -1602,7 +1609,7 @@ void test_bad_input_throws() {
   bool threw = false;
   try {
     std::vector<double> psi_soil{2.0}, depth{1.0, 2.0}, mrp{1.0 / d.area_leaf};
-    l.set_physiology(mrp, d.PPFD, psi_soil, depth,
+    l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth,
                      d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
                      d.atm_o2_kpa, d.atm_kpa);
   } catch (const std::runtime_error &) {

@@ -21,7 +21,9 @@ grid_drivers <- function(psi_soil, ppfd = 900, vpd = 2.0, layers = 1L) {
   list(psi_soil = psi_soil + 0.25 * (seq_len(layers) - 1),
        PPFD = ppfd,
        soil_depth = 1.0 * seq_len(layers),
-       root_carbon_per_leaf_area = rep(1 / layers / area_leaf, layers),
+       root_network = root_network_from_carbon(
+         rep(1 / layers / area_leaf, layers),
+         soil_depth = 1.0 * seq_len(layers)),
        leaf_specific_conductance_max = 1.0 * theta / 5.0,
        atm_vpd = vpd, ca = 40, leaf_temp = 25, atm_o2_kpa = 21,
        atm_kpa = 101.3)
@@ -96,8 +98,12 @@ test_that("the composite reproduces the arbitrated reference gradients", {
     beta2           = c(collar = -4.2610e-02, A = -2.1954e-01),
     stem_b          = c(collar =  5.5247e-01, A =  2.8465e+00),
     stem_c          = c(collar = -1.6390e-01, A = -8.4448e-01),
-    root_b          = c(collar =  2.6656e-04, A =  2.3895e-02),
-    beta_R_H        = c(collar =  8.1973e-06, A = -2.8802e-04))
+    root_b          = c(collar =  2.6656e-04, A =  2.3895e-02))
+  # beta_R_H used to be an eighth row here (collar 8.1973e-06, A -2.8802e-04).
+  # #33 removed it from the trait vector along with the root-architecture model,
+  # so there is no longer a `pars` name for it. The recorded values are kept in
+  # this comment rather than deleted, because they are what a hand-rolled
+  # two-network difference should reproduce if anyone needs to check that route.
 
   g <- grid_gradient(2.0, pars = rownames(ref))
   expect_identical(g$status, "interior")

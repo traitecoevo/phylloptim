@@ -9,7 +9,7 @@ set_drivers(
   psi_soil,
   PPFD = 900,
   soil_depth = NULL,
-  root_carbon_per_leaf_area = NULL,
+  root_network = NULL,
   leaf_specific_conductance_max = 3.14e-05,
   atm_vpd = 2,
   ca = 40,
@@ -29,11 +29,11 @@ sets the number of soil layers.}
 \item{soil_depth}{cumulative depth to the bottom of each layer, m. Defaults
 to 1 m layers.}
 
-\item{root_carbon_per_leaf_area}{root carbon **per unit leaf area**, kg C
-m^-2 leaf, per layer. Defaults to 20 split evenly across layers. This is
-the one argument with no good default -- a bare-leaf user does not have a
-root carbon profile, which is why 20 is a stand-in rather than a
-recommendation. It is also why the single-potential supply path exists.}
+\item{root_network}{the per-layer root hydraulic resistances, a
+[RootNetwork()]. Defaults to a nominal 20 kg C m^-2 leaf split evenly over
+the layers and put through [root_network_from_carbon()] — a stand-in, not a
+recommendation, which is why it is written out where you can see and replace
+it. Ignored, and an error if supplied, on the single-potential path.}
 
 \item{leaf_specific_conductance_max}{maximum leaf-specific hydraulic
 conductance, kg m^-2 s^-1 MPa^-1}
@@ -70,9 +70,30 @@ it over -- it does not take `abs()`.
 
 \section{Multiple soil layers}{
 
-Pass vectors for `psi_soil`, and optionally for `soil_depth` and
-`root_carbon_per_leaf_area`. All three must end up the same length. By
-default `soil_depth` becomes 1 m layers and the root carbon is split evenly.
+Pass vectors for `psi_soil`, and optionally for `soil_depth`. Both must end up
+the same length; by default `soil_depth` becomes 1 m layers.
+}
+
+\section{The root network, and why it is not a carbon profile}{
+
+Since #33 the leaf takes the per-layer root hydraulic RESISTANCES, not the root
+carbon they may have been derived from. The solve reads two vectors,
+`r_R_H_min` and `r_R_V_sum`, and nothing in it knows about root carbon, layer
+thickness, the 1/3 : 2/3 vertical/horizontal split or either `beta_R_*`
+constant. That matters here rather than only in C++: this function used to ask
+for a root carbon profile, which a leaf physiologist does not have, and it
+invented a default of 20 kg C m^-2 leaf and then apologised for it in this
+paragraph.
+
+It still has a default, because the multi-layer path is the default path and
+`leaf_solve(psi_soil = 2)` has to mean something. What changed is that the
+default is now *visible*: it is a nominal carbon profile put through
+[root_network_from_carbon()], written out below, rather than a number buried in
+a signature. Supply `root_network` to replace it — with measured resistances,
+with fitted ones, or with the same helper at your own constants.
+
+The numbers are unchanged from the old default, so this is not a results
+change for anyone who was accepting it.
 }
 
 \examples{

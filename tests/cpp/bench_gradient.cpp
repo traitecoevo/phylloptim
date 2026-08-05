@@ -44,6 +44,8 @@
 
 #include <phylloptim.hpp>
 
+#include "root_network.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -53,18 +55,23 @@
 namespace {
 
 // The default trait vector, in set_traits' argument order.
+// Thirteen, not fifteen: beta_R_H and beta_R_V left with the root-architecture
+// model in #33. They were two of the four traits whose gradient is 100%
+// argmax-mediated, and a gradient in either is now taken where the network is
+// built -- exactly, because root_network_from_carbon is homogeneous of degree 1
+// in each.
 struct Traits {
-  double v[15];
+  double v[13];
 };
 
 const Traits kBase{{96.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
-                    5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, 3.4e2, 9.4e3}};
+                    5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5}};
 
-const char *kNames[15] = {"vcmax_25",  "stem_c",     "stem_b",
+const char *kNames[13] = {"vcmax_25",  "stem_c",     "stem_b",
                           "psi_crit",  "root_c",     "root_b",
                           "root_psi_crit", "beta2",  "jmax_25",
                           "a",         "curv_elec",  "curv_colim",
-                          "cost_scale", "beta_R_H",  "beta_R_V"};
+                          "cost_scale"};
 
 // Whether perturbing this trait forces a vulnerability spline to be rebuilt:
 // stem_c/stem_b own the transpiration pair, root_c/root_b own the root curve.
@@ -75,7 +82,7 @@ bool rebuilds_a_spline(int i) {
 
 void apply_traits(phylloptim::Leaf &l, const Traits &t) {
   l.set_traits(t.v[0], t.v[1], t.v[2], t.v[3], t.v[4], t.v[5], t.v[6], t.v[7],
-               t.v[8], t.v[9], t.v[10], t.v[11], t.v[12], t.v[13], t.v[14]);
+               t.v[8], t.v[9], t.v[10], t.v[11], t.v[12]);
 }
 
 // One interior operating point. Drivers from plant's tests/testthat/test-leaf.r,
@@ -84,7 +91,7 @@ const double kTheta = 0.000157, kKs = 1.0, kH = 5.0, kAreaLeaf = 0.05;
 
 void set_drivers(phylloptim::Leaf &l) {
   std::vector<double> root{1.0 / kAreaLeaf}, psi_soil{2.0}, depth{1.0};
-  l.set_physiology(root, 900.0, psi_soil, depth, kKs * kTheta / kH, 2.0, 40.0,
+  l.set_physiology(fixture::root_network(root, depth), 900.0, psi_soil, depth, kKs * kTheta / kH, 2.0, 40.0,
                    25.0, 21.0, 101.3);
 }
 
@@ -235,7 +242,7 @@ int main(int argc, char **argv) {
          "rebuilds a spline");
   double fd_all = 0.0, ift_all = 0.0, fd_cheap = 0.0, ift_cheap = 0.0;
   int n_cheap = 0;
-  for (int i = 0; i < 15; ++i) {
+  for (int i = 0; i < 13; ++i) {
     double fd = 1e300, ift = 1e300;
     for (int round = 0; round < 3; ++round) {
       // Reset to the base state before each arm so neither inherits the other's
@@ -267,7 +274,7 @@ int main(int argc, char **argv) {
     }
   }
 
-  printf("\n  all 15 traits        FD %8.1f us   IFT %8.1f us   %.2fx\n",
+  printf("\n  all 13 traits        FD %8.1f us   IFT %8.1f us   %.2fx\n",
          fd_all, ift_all, fd_all / ift_all);
   printf("  the %2d with no rebuild  FD %8.1f us   IFT %8.1f us   %.2fx\n",
          n_cheap, fd_cheap, ift_cheap, fd_cheap / ift_cheap);

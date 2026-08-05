@@ -26,7 +26,9 @@ inst/include/phylloptim/
   leaf_model.hpp               the Leaf class: the gas-exchange core, everything inline
   roots.hpp                    MultiLayerRoots (the soil → root-collar water supply)
                                plus root_network_from_carbon, the root architecture
-                               model that feeds it resistances
+                               model NOTHING HERE CALLS: since #33 set_physiology
+                               takes the resistances and the caller runs the model.
+                               layer_thickness() is the dz definition both sides share
   single_potential.hpp         SinglePotential: the other supply path — one ψ_soil
                                and a constant series resistance
   vulnerability.hpp            the Weibull cumulative-integral builder, shared by both
@@ -50,6 +52,9 @@ R/gradient.R                   set_traits() and leaf_gradient() -- trait
                                the active-set guard. Read its header before
                                believing anything about its speed
 tests/cpp/                     plain-C++ suite, no R, no framework
+tests/cpp/root_network.hpp     the suite's root-architecture fixture: the two
+                               ex-Leaf-default beta_R_* constants, in ONE place
+                               because the golden file's bit-exactness depends on them
 tests/cpp/golden/              bit-exact regression baseline, 288 operating points
 tests/cpp/bench_solve.cpp      timing harness for the collar solve (hazard 5)
 tests/cpp/bench_gradient.cpp   timing harness for a TRAIT GRADIENT: the IFT
@@ -455,6 +460,14 @@ the per-cause split and the tolerance bands go in the first PR comment — see
    dimensionless/intensive driver. Nothing scales with plant size — whole-plant
    allometry (`kmax(h)`, root carbon totals) is computed on the plant side and passed
    in already reduced. Keep it that way; it is a one-sentence contract.
+
+   ⚠️ **Since #33 the ROOT RESISTANCES arrive already reduced too, and nothing here
+   can check it.** `set_physiology` takes a `RootNetwork` rather than a root carbon
+   profile, and a network built from *absolute* carbon instead of carbon per unit
+   leaf area is just five vectors of positive numbers — the leaf cannot tell, and
+   `E_up` comes back wrong by the leaf area with no error anywhere. Before, the
+   division happened inside the leaf and the contract was enforced by construction.
+   This is the one place the boundary move traded a guarantee for a convention.
 5. **Hot-path discipline — but measure it, because the intuition has been wrong.**
    `find_root_collar_psi` runs ~10³ inner evaluations per solve, and plant calls it
    millions of times. λ and `g1_eff` are *accessors*, not stored state, for this

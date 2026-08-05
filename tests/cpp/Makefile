@@ -45,7 +45,11 @@ SYS_INC  = $(foreach d,$(filter-out /usr/include /usr/include/,$(strip $(DEP_INC
 INCLUDES = -I$(PHYLLOPTIM_INC) $(SYS_INC)
 
 .PHONY: all build clean golden bench
-HEADERS = $(wildcard $(PHYLLOPTIM_INC)/phylloptim/*.hpp) $(PHYLLOPTIM_INC)/phylloptim.hpp
+# The suite's own headers are prerequisites too: root_network.hpp holds the two
+# ex-`Leaf`-default constants the golden file's bit-exactness depends on, so a
+# stale rebuild after editing it would be a silently wrong baseline.
+HEADERS = $(wildcard $(PHYLLOPTIM_INC)/phylloptim/*.hpp) $(PHYLLOPTIM_INC)/phylloptim.hpp \
+          $(wildcard *.hpp)
 
 # Extra arguments for the golden comparison. Empty means bit-exact, which is what
 # you want locally and on the platform that generated the file. CI passes

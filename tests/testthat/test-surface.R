@@ -29,18 +29,18 @@ test_that("leaf_traits() and leaf_control() partition the C++ constructor", {
 })
 
 test_that("leaf_model() and the raw Leaf() constructor agree", {
-  # The reason leaf_model() exists is that mapping 15 traits and 4 tolerances
-  # onto 19 positional slots is exactly the kind of thing that goes wrong once
+  # The reason leaf_model() exists is that mapping 13 traits and 4 tolerances
+  # onto 17 positional slots is exactly the kind of thing that goes wrong once
   # and is never noticed. So check it against a hand-written positional call
   # with the same values, on a full solve rather than on the arguments.
   raw <- Leaf(96, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245, 5.870283,
-              1.5, 157.44, 0.30, 0.7, 0.99, 1e-3, 100, 1e-3, 1000, 7.5,
-              3.4e2, 9.4e3)
+              1.5, 157.44, 0.30, 0.7, 0.99, 1e-3, 100, 1e-3, 1000, 7.5)
   raw$initialize_integrator(21, 1e-8)
   friendly <- leaf_model()
 
+  net <- root_network_from_carbon(20, soil_depth = 1.0)
   for (l in list(raw, friendly)) {
-    l$set_physiology(20, 900, 2.0, 1.0, golden_kmax, 2.0, 40.0, 25, 21, 101.3)
+    l$set_physiology(net, 900, 2.0, 1.0, golden_kmax, 2.0, 40.0, 25, 21, 101.3)
     l$find_root_collar_psi()
   }
   expect_identical(operating_point(raw), operating_point(friendly))
@@ -75,8 +75,10 @@ test_that("a control setting reaches the model and is not treated as a trait", {
 
 test_that("set_drivers() agrees with a positional set_physiology()", {
   raw <- leaf_model()
-  raw$set_physiology(rep(20 / 3, 3), 900, c(1, 1.25, 1.5), c(1, 2, 3),
-                     golden_kmax, 2.0, 40.0, 25, 21, 101.3)
+  raw$set_physiology(
+    root_network_from_carbon(rep(20 / 3, 3), soil_depth = c(1, 2, 3)),
+    900, c(1, 1.25, 1.5), c(1, 2, 3),
+    golden_kmax, 2.0, 40.0, 25, 21, 101.3)
   raw$find_root_collar_psi()
 
   friendly <- leaf_model()
@@ -84,8 +86,10 @@ test_that("set_drivers() agrees with a positional set_physiology()", {
               leaf_specific_conductance_max = golden_kmax)
   friendly$find_root_collar_psi()
 
-  # The defaults set_drivers() supplies -- 1 m layers, root carbon split evenly
-  # -- must be exactly what was passed by hand above.
+  # The default set_drivers() supplies -- 1 m layers, and 20 kg C m^-2 leaf split
+  # evenly through root_network_from_carbon() -- must be exactly what was passed by
+  # hand above. This is also the assertion that pins the #33 default to the numbers
+  # it had before, since the hand-written call is the pre-#33 one.
   expect_identical(operating_point(raw), operating_point(friendly))
 })
 
@@ -103,9 +107,15 @@ test_that("set_drivers() rejects mismatched layer counts", {
   l <- leaf_model()
   expect_error(set_drivers(l, psi_soil = c(1, 2), soil_depth = 1),
                "one entry per soil layer")
+  # A network deeper than the soil profile is an out-of-bounds read in uptake(),
+  # not a wrong number, so the C++ boundary rejects it (#33).
   expect_error(
-    set_drivers(l, psi_soil = c(1, 2), root_carbon_per_leaf_area = c(1, 2, 3)),
-    "one entry per soil layer")
+    set_drivers(l, psi_soil = c(1, 2),
+                root_network = root_network_from_carbon(c(1, 2, 3),
+                                                        soil_depth = 1:3)),
+    "rooted layers but the soil profile has only")
+  expect_error(set_drivers(l, psi_soil = 2, root_network = list(a = 1)),
+               "must be a RootNetwork")
   expect_error(set_drivers(l, psi_soil = numeric(0)), "at least one layer")
 })
 
@@ -183,7 +193,8 @@ test_that("operating_point_values() returns the twelve fields, in that order", {
   ml <- leaf_model()
   set_drivers(ml, psi_soil = c(1.0, 2.0, 3.0), PPFD = 900,
               soil_depth = c(0.3, 0.6, 1.0),
-              root_carbon_per_leaf_area = c(0.1, 0.05, 0.02))
+              root_network = root_network_from_carbon(
+                c(0.1, 0.05, 0.02), soil_depth = c(0.3, 0.6, 1.0)))
   ml$find_root_collar_psi()
   expect_identical(ml$operating_point_values(),
                    unname(outputs_one_at_a_time(ml)))
@@ -379,7 +390,8 @@ test_that("the single path refuses inputs it would otherwise ignore", {
   expect_error(set_drivers(l, psi_soil = c(1, 2)), "single value")
   expect_error(set_drivers(l, psi_soil = 1, soil_depth = 1), "are not used")
   expect_error(
-    set_drivers(l, psi_soil = 1, root_carbon_per_leaf_area = 20),
+    set_drivers(l, psi_soil = 1,
+                root_network = root_network_from_carbon(20, soil_depth = 1)),
     "are not used")
 
   expect_error(leaf_supply_single(0), "must be positive")
@@ -406,4 +418,85 @@ test_that("atm_kpa is not decorative", {
   a <- leaf_solve(psi_soil = 2.0, PPFD = 900, atm_kpa = 101.3)
   b <- leaf_solve(psi_soil = 2.0, PPFD = 900, atm_kpa = 100.5)
   expect_false(identical(a$A, b$A))
+})
+
+# ---------------------------------------------------------------------------
+# The root network as an input (#33)
+# ---------------------------------------------------------------------------
+
+test_that("root_network_from_carbon() reproduces the leaf's own layer thickness", {
+  # The one thing that could go silently wrong when the carbon -> resistance step
+  # crossed the package boundary: dz is derived from the soil-depth profile, and
+  # the vertical resistance scales with dz^2, so a caller deriving dz differently
+  # would be wrong by a squared factor with nothing to catch it. This asserts the
+  # R helper agrees with what the leaf computes from the same profile.
+  depth <- c(0.4, 0.9, 1.5)
+  l <- leaf_model()
+  set_drivers(l, psi_soil = c(1, 2, 3), soil_depth = depth)
+  expect_equal(l$dz_, depth[[3]] / 3)
+
+  n <- root_network_from_carbon(rep(2, 3), soil_depth = depth)
+  # r_R_V[i] = beta_R_V * dz^2 / (carbon/3)
+  expect_equal(n$r_R_V, rep(9.4e3 * (depth[[3]] / 3)^2 / (2 / 3), 3))
+})
+
+test_that("root_network_from_carbon() is homogeneous of degree 1 in each beta", {
+  # The claim made in leaf_traits()' and leaf_gradient()'s documentation, where it
+  # is what a caller who wants a beta_R_* gradient is told to rely on. Asserted so
+  # the claim cannot rot: scaling one constant scales one vector and leaves the
+  # other alone.
+  carbon <- c(3, 6, 1)
+  depth <- 1:3
+  base <- root_network_from_carbon(carbon, soil_depth = depth)
+  h2 <- root_network_from_carbon(carbon, soil_depth = depth, beta_R_H = 2 * 3.4e2)
+  v2 <- root_network_from_carbon(carbon, soil_depth = depth, beta_R_V = 2 * 9.4e3)
+
+  expect_equal(h2$r_R_H_min, 2 * base$r_R_H_min)
+  expect_equal(h2$r_R_V_sum, base$r_R_V_sum)
+  expect_equal(v2$r_R_V_sum, 2 * base$r_R_V_sum)
+  expect_equal(v2$r_R_H_min, base$r_R_H_min)
+})
+
+test_that("a hand-built RootNetwork needs only the two load-bearing vectors", {
+  # The R-user argument for #33: someone with a measured or fitted series
+  # resistance has no carbon profile, no layer thickness and no opinion about
+  # beta_R_V. They should be able to state the resistances and solve.
+  l <- leaf_model()
+  set_drivers(l, psi_soil = 1.5,
+              root_network = RootNetwork(r_R_H_min = 25.5, r_R_V_sum = 1410))
+  l$find_root_collar_psi()
+  expect_true(is.finite(l$profit_))
+
+  # And it must agree with the carbon route that produces those same numbers --
+  # 20 kg C m^-2 leaf in one 1 m layer is r_R_H_min = 25.5, r_R_V_sum = 1410.
+  from_carbon <- root_network_from_carbon(20, soil_depth = 1)
+  expect_equal(from_carbon$r_R_H_min, 25.5)
+  expect_equal(from_carbon$r_R_V_sum, 1410)
+
+  ref <- leaf_model()
+  set_drivers(ref, psi_soil = 1.5, root_network = from_carbon)
+  ref$find_root_collar_psi()
+  expect_identical(operating_point(l), operating_point(ref))
+})
+
+test_that("the root network is rejected when it cannot be read safely", {
+  # max_soil_layer indexes psi_soil and the per-layer gravity head directly, so a
+  # network longer than the soil profile is an out-of-bounds read rather than a
+  # wrong number. Before #33 the agreement came for free from a length check on
+  # root carbon; now it has to be asserted where the network arrives.
+  l <- leaf_model()
+  expect_error(
+    set_drivers(l, psi_soil = 1,
+                root_network = RootNetwork(r_R_H_min = c(1, 2),
+                                           r_R_V_sum = c(1, 2))),
+    "rooted layers but the soil profile has only")
+  expect_error(
+    set_drivers(l, psi_soil = 1,
+                root_network = RootNetwork(r_R_H_min = 1,
+                                           r_R_V_sum = c(1, 2))),
+    "must have the same length")
+  expect_error(
+    set_drivers(l, psi_soil = 1,
+                root_network = RootNetwork(r_R_H_min = -1, r_R_V_sum = 1)),
+    "finite and non-negative")
 })

@@ -17,9 +17,7 @@ leaf_traits(
   a = 0.3,
   curv_fact_elec_trans = 0.7,
   curv_fact_colim = 0.99,
-  cost_scale_TF24 = 7.5,
-  beta_R_H = 340,
-  beta_R_V = 9400
+  cost_scale_TF24 = 7.5
 )
 }
 \arguments{
@@ -49,14 +47,6 @@ leaf_traits(
 
 \item{cost_scale_TF24}{cost parameter for the TF24 profit model
 (umol m^-2 s^-1)}
-
-\item{beta_R_H}{proportionality constant between minimum horizontal
-(intralayer) root hydraulic resistance and C_r^-1
-(MPa s mol C / mol H2O)}
-
-\item{beta_R_V}{proportionality constant between minimum vertical
-(interlayer) root hydraulic resistance and dz^2/C_r
-(MPa mol C s / mol H2O / m^2)}
 }
 \value{
 A `leaf_traits` object; a named list.
@@ -76,6 +66,14 @@ hydraulic cost; `root_b`/`root_c` describe the ROOT curve, which drives
 uptake. They are separate parameters with separate meanings and they are
 named accordingly, because they were once an unmarked `b`/`c` pair alongside
 `root_b`/`root_c` and an analysis used the root parameters for the stem cost.
+}
+
+\section{Where the two root-resistance constants went}{
+
+`beta_R_H` and `beta_R_V` were traits here until #33. They parameterise the
+root-ARCHITECTURE model, which the leaf no longer runs -- it takes the
+resistances. They are arguments to [root_network_from_carbon()] now, and a
+gradient in either is taken there.
 }
 
 \examples{

@@ -13,13 +13,19 @@
 //
 //   #include <phylloptim.hpp>
 //
-//   phylloptim::Leaf l;                       // default Eucalyptus saligna traits
+//   phylloptim::Leaf l;                 // default Eucalyptus saligna traits
 //   l.setup_transpiration(100);         // build the vulnerability splines
 //   l.setup_root_vulnerability(100);
-//   l.set_physiology(root_carbon_per_leaf_area, PPFD, psi_soil, soil_depth,
+//   l.set_physiology(root_network, PPFD, psi_soil, soil_depth,
 //                    leaf_specific_conductance_max, atm_vpd, ca,
 //                    leaf_temp, atm_o2_kpa, atm_kpa);
 //   l.find_root_collar_psi();           // solve; results in l.opt_psi_stem_ etc.
+//
+// `root_network` is a phylloptim::RootNetwork: the per-layer root hydraulic
+// resistances per unit leaf area. If you have root carbon rather than
+// resistances, phylloptim::root_network_from_carbon is the architecture model
+// that maps one to the other -- but it is a helper you call, not something the
+// solve does for you (#33).
 
 #include <phylloptim/closed_form.hpp>
 #include <phylloptim/constants.hpp>

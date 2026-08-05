@@ -58,7 +58,7 @@
 ##' `R_d_` are derived from the traits inside `set_physiology()`, so they are
 ##' genuinely unknown until the drivers are re-supplied.
 ##'
-##' The reason it is a function rather than fifteen assignable fields is that
+##' The reason it is a function rather than thirteen assignable fields is that
 ##' `leaf$vcmax_25 <- x` could not be made correct. Three separate pieces of
 ##' derived state go stale on a bare trait write: the two pre-integrated
 ##' vulnerability splines, the solved operating point, and -- least visibly --
@@ -90,8 +90,7 @@ set_traits <- function(x, traits) {
   x$set_traits(traits$vcmax_25, traits$stem_c, traits$stem_b, traits$psi_crit,
                traits$root_c, traits$root_b, traits$root_psi_crit, traits$beta2,
                traits$jmax_25, traits$a, traits$curv_fact_elec_trans,
-               traits$curv_fact_colim, traits$cost_scale_TF24, traits$beta_R_H,
-               traits$beta_R_V)
+               traits$curv_fact_colim, traits$cost_scale_TF24)
   invisible(x)
 }
 
@@ -221,9 +220,17 @@ set_traits <- function(x, traits) {
 ##' @param control a [leaf_control()] object
 ##' @param supply how water reaches the root collar: [leaf_supply_multilayer()]
 ##'   (the default) or [leaf_supply_single()]
-##' @param pars what to differentiate with respect to. Any of the fifteen
+##' @param pars what to differentiate with respect to. Any of the thirteen
 ##'   [leaf_traits()] names, plus `"leaf_specific_conductance_max"` and — on the
 ##'   single-potential path only — `"resistance"`. Defaults to all of them.
+##'
+##'   `beta_R_H` and `beta_R_V` were here until #33 and are not any more: they
+##'   parameterise the root-architecture model, which the leaf no longer runs, so
+##'   this function has no way to reach them. Getting a gradient in either means
+##'   solving at two networks yourself. The perturbation itself is cheap —
+##'   [root_network_from_carbon()] is homogeneous of degree 1 in each constant, so
+##'   scaling `beta_R_H` scales `r_R_H_min` by the same factor and needs no
+##'   rebuild — but the two solves are still two solves.
 ##' @param step relative step for the trait difference. The default `1e-06` is
 ##'   near the middle of the five decades over which the mixed partial was
 ##'   measured stable; it is also used, relative to the collar potential, for the
@@ -276,7 +283,7 @@ set_traits <- function(x, traits) {
 leaf_gradient <- function(psi_soil,
                           PPFD = 900,
                           soil_depth = NULL,
-                          root_carbon_per_leaf_area = NULL,
+                          root_network = NULL,
                           leaf_specific_conductance_max = 3.14e-5,
                           atm_vpd = 2.0,
                           ca = 40.0,
@@ -300,12 +307,12 @@ leaf_gradient <- function(psi_soil,
   }
 
   drivers <- list(psi_soil = psi_soil, PPFD = PPFD, soil_depth = soil_depth,
-                  root_carbon_per_leaf_area = root_carbon_per_leaf_area,
+                  root_network = root_network,
                   leaf_specific_conductance_max = leaf_specific_conductance_max,
                   atm_vpd = atm_vpd, ca = ca, leaf_temp = leaf_temp,
                   atm_o2_kpa = atm_o2_kpa, atm_kpa = atm_kpa)
 
-  # The differentiable parameters: the fifteen traits, plus the two that are not
+  # The differentiable parameters: the thirteen traits, plus the two that are not
   # traits and that a calibration nonetheless fits (#44). See .gradient_theta.
   theta <- .gradient_theta(traits, leaf_specific_conductance_max, supply)
   if (is.null(pars)) {
@@ -447,7 +454,7 @@ leaf_gradient <- function(psi_soil,
 
 # Everything this can differentiate, and its current value, as one named vector.
 #
-# The fifteen traits, plus the two quantities a calibration fits that are NOT
+# The thirteen traits, plus the two quantities a calibration fits that are NOT
 # traits (#44) and that `pars` therefore used to reject:
 #
 #   * `leaf_specific_conductance_max` -- a DRIVER, set through set_drivers(). It
@@ -455,9 +462,10 @@ leaf_gradient <- function(psi_soil,
 #     plant #537's question about differentiating w.r.t. state.
 #   * `resistance` -- the single-potential path's whole soil-to-collar
 #     resistance, set through $set_supply_single(). Only present on that path: on
-#     the multi-layer path the resistances are derived from root carbon and there
-#     is no such parameter, which is why it appears here conditionally rather
-#     than being rejected later with a worse message.
+#     the multi-layer path the resistances are per-layer vectors handed to
+#     set_physiology (#33) rather than one scalar, so there is no such parameter --
+#     which is why it appears here conditionally rather than being rejected later
+#     with a worse message.
 #
 # Nothing in the derivation cares that theta is a trait -- `dpsi*/dtheta = -M/H`
 # and `dY/dtheta = dY/dtheta|_psi + (dY/dpsi)(dpsi*/dtheta)` hold for any
@@ -524,7 +532,7 @@ leaf_gradient <- function(psi_soil,
 
 # The step: relative to the parameter for values above 1, and plain `step` below
 # it. Not a relative step with an epsilon floor -- the floor is at 1, which is
-# deliberate. Traits here span `a` = 0.3 to `beta_R_V` = 9.4e3, and a strictly
+# deliberate. Traits here span `a` = 0.3 to `jmax_25` = 157.44, and a strictly
 # relative step would perturb the small ones so little that the difference is
 # dominated by the solve's ~1e-09 noise. It also means a trait sitting at zero is
 # still perturbed rather than not differentiated at all.
