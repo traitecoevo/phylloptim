@@ -100,11 +100,51 @@ many <- timeit(function() do.call(leaf_solve, solve_args), 40, reps) / N
 # --- 3. constructing a Leaf, which is 3's dominant term --------------------
 ctor <- timeit(function() leaf_model(supply = supply), 300, reps)
 
-# --- 4. a gradient, per call and per parameter -----------------------------
+# --- 4. N gradients x P pars: THE CALIBRATION SHAPE -----------------------
+# ⚠️ THIS IS THE NUMBER A USER FEELS, and it is neither of the single-call figures
+# above. A calibration takes a gradient PER OBSERVATION over SEVERAL fitted
+# parameters, so both counts matter and they pull opposite ways: construction is a
+# fixed cost per call, while the differentiated work is linear in P. Reuse therefore
+# saves a large fraction at P = 1 and a much smaller one at P = 4, and quoting the
+# P = 1 figure overstates what a fit gets.
+NOBS <- 24L
+PSET <- list(p1 = "vcmax_25",
+             p4 = c("vcmax_25", "jmax_25", "cost_scale_TF24", "beta2"))
+gN <- list(p1 = c(fresh = NA_real_, reuse = NA_real_),
+           p4 = c(fresh = NA_real_, reuse = NA_real_))
+if (exists("leaf_gradient")) {
+  psv <- seq(0.5, 3.0, length.out = NOBS)
+  # Built here rather than reused from section 5, which runs after this one.
+  # `supply` is dropped for the reuse arm: it is fixed when the leaf is built and
+  # passing both is refused rather than resolved.
+  loop_args <- c(list(PPFD = 900, atm_vpd = 1.5, supply = supply), extra)
+  loop_reuse <- c(list(PPFD = 900, atm_vpd = 1.5), extra)
+  can_reuse <- "x" %in% names(formals(leaf_gradient))
+  ll <- if (can_reuse) leaf_model(traits = leaf_traits(), supply = supply) else NULL
+  for (nm in names(PSET)) {
+    fit <- PSET[[nm]]
+    gN[[nm]]["fresh"] <- timeit(function() {
+      for (p in psv) {
+        do.call(leaf_gradient, c(loop_args, list(psi_soil = p, pars = fit)))
+      }
+    }, 3, min(reps, 3)) / NOBS
+    if (can_reuse) {
+      gN[[nm]]["reuse"] <- timeit(function() {
+        for (p in psv) {
+          do.call(leaf_gradient, c(loop_reuse, list(psi_soil = p, pars = fit,
+                                                    x = ll,
+                                                    traits = leaf_traits())))
+        }
+      }, 3, min(reps, 3)) / NOBS
+    }
+  }
+}
+
+# --- 5. a gradient, per call and per parameter -----------------------------
 # NA on commits before #42, which is where leaf_gradient() was added. The whole
 # point of running this against history is that the surface changes, so absence is
 # recorded rather than fatal.
-g1 <- g3 <- NA_real_
+g1 <- g3 <- greuse <- NA_real_
 if (exists("leaf_gradient")) {
   gp <- c("vcmax_25", "stem_b", "cost_scale_TF24")
   grad_args <- c(list(psi_soil = 1.5, PPFD = 900, atm_vpd = 1.5, supply = supply,
@@ -113,6 +153,17 @@ if (exists("leaf_gradient")) {
   g1 <- timeit(function() do.call(leaf_gradient,
                 c(grad_args[setdiff(names(grad_args), "pars")],
                   list(pars = gp[1]))), 30, reps)
+  # The reuse path (#52), where this version has one. NA before it, so the column
+  # shows when it arrived rather than pretending it was always there.
+  if ("x" %in% names(formals(leaf_gradient))) {
+    gl <- leaf_model(traits = leaf_traits(), supply = supply)
+    # `supply` must come OUT: it is fixed when `gl` is built, and passing both is
+    # rejected rather than resolved. `traits` must go IN, since a Leaf does not
+    # expose its own.
+    reuse_args <- c(grad_args[setdiff(names(grad_args), c("pars", "supply"))],
+                    list(pars = gp[1], x = gl, traits = leaf_traits()))
+    greuse <- timeit(function() do.call(leaf_gradient, reuse_args), 30, reps)
+  }
 }
 
 out <- data.frame(
@@ -127,6 +178,12 @@ out <- data.frame(
   ctor_us = round(ctor, 1),
   grad1_us = round(g1, 1),     grad1_ratio = round(g1 / ref, 1),
   grad3_us = round(g3, 1),     grad3_ratio = round(g3 / ref, 1),
+  grad1_reuse_us = round(greuse, 1),
+  grad1_reuse_ratio = round(greuse / ref, 1),
+  gradN_p1_fresh_us = round(gN$p1[["fresh"]], 1),
+  gradN_p1_reuse_us = round(gN$p1[["reuse"]], 1),
+  gradN_p4_fresh_us = round(gN$p4[["fresh"]], 1),
+  gradN_p4_reuse_us = round(gN$p4[["reuse"]], 1),
   grad_per_par_us = round((g3 - g1) / 2, 1)
 )
 if (tsv) {
@@ -143,6 +200,19 @@ if (tsv) {
   cat(sprintf("    leaf_model() construction     %8.1f\n", out$ctor_us))
   cat(sprintf("    gradient, 1 par               %8.1f  %8.1f\n", out$grad1_us, out$grad1_ratio))
   cat(sprintf("    gradient, 3 pars              %8.1f  %8.1f\n", out$grad3_us, out$grad3_ratio))
+  if (!is.na(out$grad1_reuse_us))
+    cat(sprintf("    gradient, 1 par, x = a Leaf   %8.1f  %8.1f   <-- #52\n",
+                out$grad1_reuse_us, out$grad1_reuse_ratio))
+  cat(sprintf("\n  THE CALIBRATION SHAPE: %d gradients, us PER OBSERVATION\n", NOBS))
+  cat("                                  fresh     reused    saved\n")
+  for (nm in c("p1", "p4")) {
+    f <- out[[paste0("gradN_", nm, "_fresh_us")]]
+    r <- out[[paste0("gradN_", nm, "_reuse_us")]]
+    cat(sprintf("    %d fitted par%-2s               %8.1f %10s %8s\n",
+                length(PSET[[nm]]), if (nm == "p1") "" else "s", f,
+                if (is.na(r)) "-" else sprintf("%.1f", r),
+                if (is.na(r)) "-" else sprintf("-%.0f%%", 100 * (f - r) / f)))
+  }
   cat(sprintf("      marginal cost per par       %8.1f\n", out$grad_per_par_us))
   if (!is.na(out$grad1_us))
     cat(sprintf("      construction is %.0f%% of a 1-par gradient  <-- issue #52\n",

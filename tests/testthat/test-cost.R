@@ -98,6 +98,31 @@ test_that("leaf_solve() crosses the boundary a bounded number of times per row",
                         leaf_solve(psi_soil = rep(1.5, 8), reuse = FALSE)), 4L)
 })
 
+test_that("leaf_gradient(x =) constructs no Leaf at all", {
+  # #52. Construction is ~146 us, about 40% of a one-parameter gradient, and `x`
+  # exists to remove it from a per-observation loop. The guard is a COUNT: reuse must
+  # construct zero, however many gradients are taken, or the argument is decorative.
+  tr <- leaf_traits()
+  l <- leaf_model(traits = tr)
+  leaf_gradient(psi_soil = 2.0, x = l, traits = tr, pars = "vcmax_25")   # warm
+
+  n <- count_calls("Leaf__ctor", {
+    for (i in 1:5) {
+      leaf_gradient(psi_soil = 2.0, x = l, traits = tr, pars = "vcmax_25")
+    }
+  })
+  expect_identical(n, 0L)
+
+  # And without `x` it constructs exactly one per call -- if that stopped being true
+  # the test above would be measuring nothing.
+  n <- count_calls("Leaf__ctor", {
+    for (i in 1:5) {
+      leaf_gradient(psi_soil = 2.0, traits = tr, pars = "vcmax_25")
+    }
+  })
+  expect_identical(n, 5L)
+})
+
 test_that("a driven row costs a bounded multiple of a trivial .Call", {
   # The backstop for what counting cannot foresee. Bound is ~2x the measured ratio,
   # so it catches a doubling and ignores machine noise. Measured on macOS/arm64,

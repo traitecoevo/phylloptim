@@ -214,7 +214,34 @@ set_traits <- function(x, traits) {
 ##' achievable precision of the solved outputs themselves, set by the tolerance of
 ##' the intercellular-CO2 root-find.
 ##'
+##' @section Reusing a leaf across gradients:
+##' Constructing a `Leaf` costs ~155 µs and this function does it once per call, which
+##' is **about 40% of a one-parameter gradient** — the largest single term on this
+##' surface, and paid once per observation by a fit that differentiates per
+##' observation. Pass `x` to reuse one:
+##'
+##' ```r
+##' l <- leaf_model(traits, control, supply)
+##' for (i in seq_len(n)) leaf_gradient(psi_soil = ps[i], x = l, traits = traits, pars = FIT)
+##' ```
+##'
+##' `x` is a **vessel, not the point**: `traits` still says where the gradient is
+##' taken and is applied to `x`, rather than read from it (a `Leaf` does not expose
+##' its traits). That is why `traits` is required with `x` — defaulting it would
+##' differentiate at the package defaults on somebody else's leaf and return a
+##' plausible answer for a point nobody asked about.
+##'
+##' `control` and `supply` are fixed when `x` is built, so passing them alongside it
+##' is an error rather than silently resolved.
+##'
+##' **`x` is left solved at the base point**, not at the last perturbation — the
+##' state this function seats it in, restored on the way out including on an error.
+##' The restore costs one re-trait and one solve, ~20 µs against the ~155 saved.
+##'
 ##' @inheritParams set_drivers
+##' @param x an existing `Leaf` from [leaf_model()] to reuse instead of building
+##'   one, for a loop that takes many gradients. `traits` is required with it, and
+##'   `control`/`supply` must be omitted. See the section above.
 ##' @param traits a [leaf_traits()] object: the point in trait space to
 ##'   differentiate at
 ##' @param control a [leaf_control()] object
@@ -290,6 +317,7 @@ leaf_gradient <- function(psi_soil,
                           leaf_temp = 25.0,
                           atm_o2_kpa = 21.0,
                           atm_kpa = 101.3,
+                          x = NULL,
                           traits = leaf_traits(),
                           control = leaf_control(),
                           supply = leaf_supply_multilayer(),
@@ -304,6 +332,43 @@ leaf_gradient <- function(psi_soil,
   }
   if (!(is.numeric(step) && length(step) == 1L && step > 0)) {
     stop("`step` must be a single positive number", call. = FALSE)
+  }
+
+  # --- reusing a Leaf (#52) -------------------------------------------------
+  # `x` is a VESSEL, not the point being differentiated: `traits` still says where
+  # the gradient is taken, and the setter applies it. That is why `traits` becomes
+  # REQUIRED here rather than optional -- with `x` supplied and `traits` left at its
+  # default, this would differentiate at the package defaults on somebody else's
+  # leaf and return a plausible answer for a point nobody asked about.
+  #
+  # `control` and `supply` are baked into `x`, so accepting them alongside it would
+  # invite a silent disagreement (a `supply` naming one path, an `x` built on the
+  # other). Rejected rather than resolved. `supply` is still needed internally --
+  # only its `kind` is ever read -- so it is derived from the object.
+  if (!is.null(x)) {
+    if (!inherits(x, "Leaf")) {
+      stop("`x` must be a Leaf, from leaf_model(); got ", class(x)[[1]],
+           call. = FALSE)
+    }
+    if (missing(traits)) {
+      stop("`traits` must be given with `x`: it is the point the gradient is ",
+           "taken at, and it is applied to `x` rather than read from it. Pass ",
+           "the same leaf_traits() the leaf was built with.", call. = FALSE)
+    }
+    if (!missing(control)) {
+      stop("`control` comes from `x` and cannot be given alongside it -- the ",
+           "tolerances and the integrator were fixed when `x` was built.",
+           call. = FALSE)
+    }
+    if (!missing(supply)) {
+      stop("`supply` comes from `x` and cannot be given alongside it. `x` is on ",
+           "the ", x$supply_kind, " path.", call. = FALSE)
+    }
+    supply <- if (identical(x$supply_kind, "single")) {
+      leaf_supply_single()
+    } else {
+      leaf_supply_multilayer()
+    }
   }
 
   # Resolve the single path's default resistance HERE rather than letting
@@ -351,12 +416,36 @@ leaf_gradient <- function(psi_soil,
   }
 
   # ONE leaf for the whole gradient, re-traited rather than reconstructed. This is
-  # the measurement that reordered PLAN 11d: a fresh Leaf costs ~204 us against
-  # ~4 us to re-trait and re-drive this one, so reconstructing per perturbation
+  # the measurement that reordered PLAN 11d: a fresh Leaf costs ~155 us against
+  # ~14 us to re-trait and re-drive this one, so reconstructing per perturbation
   # would swamp any difference between the two gradient routes below.
-  l <- leaf_model(traits, control, supply)
+  #
+  # And with `x`, one leaf across gradients too -- which is #52, and worth ~40% of
+  # a call in a per-observation fit. Construction is the single largest term on
+  # this surface.
+  l <- if (is.null(x)) leaf_model(traits, control, supply) else x
   reset <- .gradient_setter(l, traits, drivers, supply, fast_stem_curve)
-  do.call(set_drivers, c(list(l), drivers))
+
+  if (is.null(x)) {
+    do.call(set_drivers, c(list(l), drivers))
+  } else {
+    # ⚠️ A REUSED LEAF MUST BE SEATED WITH reset(), NOT set_drivers() ALONE. It
+    # arrives carrying whatever traits its last user left on it, and everything
+    # below -- `value`, `psi_star`, `H`, and the whole composite -- is supposed to
+    # describe `traits`. set_drivers() re-derives the drivers and never touches
+    # traits, so a leaf built at other traits would be differentiated at the wrong
+    # point: plausibly, and with no symptom. reset() applies both.
+    reset(theta)
+    # Hand the caller's object back as this function found it -- solved at the base
+    # point -- rather than at whichever perturbation happened to run last, which is
+    # hazard 8 territory. `on.exit` because several paths below stop().
+    on.exit({
+      try({
+        reset(theta)
+        l$find_root_collar_psi()
+      }, silent = TRUE)
+    }, add = TRUE)
+  }
   l$find_root_collar_psi()
 
   psi_star <- l$opt_root_psi_

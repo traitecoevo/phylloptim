@@ -397,11 +397,30 @@ travels. Measured macOS/arm64, 2026-08-05, one run:
   ~1.8 µs total rather than a ~2.8 µs solve. Known and accepted; it is the price of the
   boundary move (#33), not a defect.
 
-**The biggest remaining lever is not the driver path — it is issue #52.**
-`leaf_model()` construction is **~155 µs, 50% of a one-parameter gradient** (310 µs).
-Everything the resistance work touched is 4% of that. A `leaf_gradient()` that accepts
-a `Leaf` would roughly halve the cost of a gradient-based calibration; no amount of
-tuning in `set_drivers()` can.
+**#52 IS DONE, and it was the biggest lever on this surface.** `leaf_model()`
+construction is ~150 µs of fixed cost per call, and `leaf_gradient(x =)` removes it.
+Measured over 24 gradients, per observation:
+
+| fitted pars | fresh leaf | one reused | saved |
+|---|---|---|---|
+| 1 | 316 µs | 200 µs | **−37%** |
+| 4 | 511 µs | 409 µs | **−20%** |
+
+⚠️ **Quote the four-parameter row for a calibration.** Construction is fixed per call
+while the differentiated work is linear in `pars`, so the saving shrinks as the fit
+grows — 37% at one parameter is the most flattering case, not the representative one.
+Everything the resistance work touched is 4% of the same call, which is why no amount
+of tuning in `set_drivers()` could have competed.
+
+⚠️ **It does not reverse the arm comparison, and the issue said so first.** The exact
+gradient is ~4.8× differencing the objective in wall clock while using ~5× fewer
+solves; a third off leaves it ~3×. The remainder is the R call boundary, and only
+composition in C++ (item 11 stage 2) reaches it. Recording this because the numbers
+invite the opposite reading.
+
+The saving shrinks as `pars` grows — construction is a fixed cost against a term
+linear in `P_model`, so it is 38% at one parameter and 26% at three. A fit asking for
+many parameters gains less.
 
 ## 6d. The R interface: what is left — #34
 

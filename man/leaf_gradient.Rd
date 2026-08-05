@@ -15,6 +15,7 @@ leaf_gradient(
   leaf_temp = 25,
   atm_o2_kpa = 21,
   atm_kpa = 101.3,
+  x = NULL,
   traits = leaf_traits(),
   control = leaf_control(),
   supply = leaf_supply_multilayer(),
@@ -56,6 +57,10 @@ conductance, kg m^-2 s^-1 MPa^-1}
 \item{atm_kpa}{atmospheric pressure, kPa. Note this is not decorative: the
 ppm-to-Pa conversion is derived from it, and getting it wrong moves
 assimilation by percent, not by rounding.}
+
+\item{x}{an existing `Leaf` from [leaf_model()] to reuse instead of building
+one, for a loop that takes many gradients. `traits` is required with it, and
+`control`/`supply` must be omitted. See the section above.}
 
 \item{traits}{a [leaf_traits()] object: the point in trait space to
 differentiate at}
@@ -244,6 +249,32 @@ avoid (see phylloptim#52); it is 29% of the exact gradient in the study above.
 Do not ask for more than about `1e-09` from any of this. That is the
 achievable precision of the solved outputs themselves, set by the tolerance of
 the intercellular-CO2 root-find.
+}
+
+\section{Reusing a leaf across gradients}{
+
+Constructing a `Leaf` costs ~155 µs and this function does it once per call, which
+is **about 40% of a one-parameter gradient** — the largest single term on this
+surface, and paid once per observation by a fit that differentiates per
+observation. Pass `x` to reuse one:
+
+```r
+l <- leaf_model(traits, control, supply)
+for (i in seq_len(n)) leaf_gradient(psi_soil = ps[i], x = l, traits = traits, pars = FIT)
+```
+
+`x` is a **vessel, not the point**: `traits` still says where the gradient is
+taken and is applied to `x`, rather than read from it (a `Leaf` does not expose
+its traits). That is why `traits` is required with `x` — defaulting it would
+differentiate at the package defaults on somebody else's leaf and return a
+plausible answer for a point nobody asked about.
+
+`control` and `supply` are fixed when `x` is built, so passing them alongside it
+is an error rather than silently resolved.
+
+**`x` is left solved at the base point**, not at the last perturbation — the
+state this function seats it in, restored on the way out including on an error.
+The restore costs one re-trait and one solve, ~20 µs against the ~155 saved.
 }
 
 \examples{
