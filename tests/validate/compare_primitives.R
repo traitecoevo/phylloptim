@@ -1,3 +1,16 @@
+# ⚠️⚠️ THIS HARNESS NO LONGER APPLIES, AND HAS NOT SINCE #15. Read this first.
+#
+# The note below says to "run this against `main`, whose set_physiology signature
+# still matches plant's". That branch is gone: `feature/api-cleanup` merged as #15,
+# which changed the signature on master, and #33 changed it again (root carbon ->
+# RootNetwork). Both this script and its companion compare_primitives.R build a
+# Leaf with beta_R_H/beta_R_V constructor arguments that no longer exist.
+#
+# Kept for the reasoning it records -- what has been ruled out, and why comparing
+# primitives beats comparing the solve -- not as something you can run today.
+# Reviving it means a decision about what the reference build should now be, since
+# plant no longer has its own copy of this model. Filed as #64.
+#
 # Localise the 1-2 ULP disagreement with plant to a single function (issue #13).
 #
 #   Rscript tests/validate/compare_primitives.R

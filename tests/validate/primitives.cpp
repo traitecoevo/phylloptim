@@ -1,3 +1,18 @@
+// ⚠️⚠️ THIS FILE DOES NOT COMPILE, AND HAS NOT SINCE #15. Read this before
+// trying to use it.
+//
+// The set_physiology call below passes the PRE-#15 thirteen-argument signature
+// (area_leaf, root carbon, rho, a_bio, ..., sapwood volume per leaf area). #15
+// deleted those four dead arguments; #33 then replaced the root carbon profile
+// with a RootNetwork. So this harness is two interface changes behind, and
+// nothing builds it -- neither `make -C tests/cpp`, nor CMake, nor CI.
+//
+// It is left in place rather than deleted because the METHOD it encodes is still
+// the right one (see the reasoning below: compare the primitives, not the solve,
+// because the nested solvers destroy the localisation). Reviving it means
+// updating the call and deciding whether the primitive list is still current.
+// Filed as #64.
+//
 // Dump the leaf model's PRIMITIVES at fixed inputs, for issue #13.
 //
 // `compare_with_plant.R` compares end-to-end solve outputs against plant and
