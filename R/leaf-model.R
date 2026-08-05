@@ -282,7 +282,21 @@ series_resistance <- function(resistance) {
     stop("series_resistance(): `resistance` must be positive; a zero ",
          "resistance is an infinite flux", call. = FALSE)
   }
-  RootNetwork(r_R_V_sum = resistance)
+  # ⚠️ NOT `RootNetwork(r_R_V_sum = resistance)`, WHICH COSTS ~58 us. That call
+  # reaches C++ for a default-constructed network and pays `Rcpp::wrap` building the
+  # five-element named list -- measured at 58 us against 1.1 us for a trivial
+  # `.Call`. This function is reached per likelihood evaluation by a calibration
+  # whose fitted resistance changes every proposal, so it cannot be hoisted out of
+  # the caller's loop the way a fixed network can.
+  #
+  # Instead: take ONE default-constructed network per session and overwrite the one
+  # field. R's copy-on-write means the assignment copies rather than mutating the
+  # cached prototype, so callers cannot corrupt each other -- asserted in
+  # test-surface.R. The field list still comes from the real constructor, so it
+  # cannot drift from the C++ struct the way a hand-written `structure()` would.
+  out <- .root_network_prototype()
+  out$r_R_V_sum <- resistance
+  out
 }
 
 ##' @rdname leaf_supply_single
@@ -419,6 +433,15 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
 # multi-layer default it is a stand-in rather than a recommendation -- but it means
 # `leaf_solve(psi_soil = 2, supply = leaf_supply_single())` means something, exactly
 # as it does on the other path. Neither path forces a caller to own a supply model.
+# One default-constructed RootNetwork per session, as a prototype to copy. See
+# series_resistance() for why, and .network_memo above for the measurement.
+.root_network_prototype <- function() {
+  if (is.null(.network_memo$proto)) {
+    .network_memo$proto <- RootNetwork()
+  }
+  .network_memo$proto
+}
+
 .default_series_resistance <- function() {
   if (is.null(.network_memo$series)) {
     .network_memo$series <- series_resistance(1e3)

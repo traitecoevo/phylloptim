@@ -1,5 +1,25 @@
 # phylloptim 0.2.0
 
+## `series_resistance()` no longer pays the 58 us R-boundary cost
+
+Bug fix on the entry above. `series_resistance()` built its `RootNetwork` through the
+generated constructor, which reaches C++ for a default-constructed struct and pays
+`Rcpp::wrap` assembling the five-element named list — **58 us**, against 1.1 us for a
+trivial `.Call`. It now overwrites one field of a session-cached prototype instead:
+**58 -> 3.1 us**.
+
+This matters because, unlike a fixed root network, a fitted series resistance cannot
+be hoisted out of a caller's loop — it changes every proposal. Measured in the
+companion calibration study, whose likelihood is 24 rows: the migration to the new
+API had made `leaf_predict()` **17% slower** (0.517 -> 0.606 ms) where it was
+predicted to get slightly *faster*, because removing one object-resetting
+`$set_supply_single()` call saved less than the per-evaluation network build cost.
+
+The prototype is shared, and safe only because R copies on write; `test-surface.R`
+pins that a returned network cannot corrupt it and that the field list still comes
+from the real constructor rather than a hand-written `structure()` that could drift
+from the C++ struct.
+
 ## The two supply paths are configured and driven the same way
 
 Follows the entry below, and finishes what it started. `set_physiology()` now takes
