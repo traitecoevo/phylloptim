@@ -344,6 +344,11 @@ reassociation, split by cause because the two classes are four orders apart. A P
 that regenerates the golden file without saying what moved and why is the thing to
 refuse.
 
+The commit message carries **one line** of that: the magnitude and where the
+breakdown lives ("moves 240 golden cells; split by cause in #15"). The cell counts,
+the per-cause split and the tolerance bands go in the first PR comment — see
+"Writing commits here" below.
+
 ## Hazards, each of which has cost someone real numbers
 
 1. **There are TWO Weibull vulnerability curves.** Stem (`stem_b`, `stem_c`) drives
@@ -637,8 +642,21 @@ Three things that will waste your time otherwise:
 
 ## Writing commits here
 
-The commit log is doing real work in this repo: several commits record *why* a
-change is safe, what its measured blast radius was, and which explanations turned
-out to be wrong. Two of the more useful ones retract an earlier claim. Keep that up —
-state the measurement, not the intention, and if an earlier commit was wrong say so
-plainly rather than quietly correcting it.
+**State the measurement, not the intention** — that part of the old rule here stands.
+What has changed is *where* the rest of it goes.
+
+This repo squash-merges, so a PR's title and body are copied verbatim into permanent
+history. Commit bodies here reached a median of 450 words and a maximum of 1822, and
+two commits exist for nothing but correcting an earlier commit message. That is the
+habit to drop: a reader three years from now is bisecting, and needs what the change
+does, not the order in which it was understood.
+
+So: keep the commit to why the change was needed and what it does to observable
+behaviour, in under 20 lines. Everything else — the measurements in full, the
+explanations that turned out wrong, the alternatives rejected, what was tried first —
+goes in the **first comment on the PR**, which is just as permanent and is linked from
+the squashed subject. Never write a commit whose purpose is to correct an earlier
+commit message; correct the record on the issue or PR instead.
+
+The family guideline, with the split set out as a table, is
+[`commit-messages.md`](https://github.com/traitecoevo/plant-meta/blob/main/governance/commit-messages.md).
