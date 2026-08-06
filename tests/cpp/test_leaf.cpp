@@ -102,6 +102,122 @@ void test_vulnerability_curve() {
      "conductivity declines monotonically");
 }
 
+// The analytic trait partials of the cumulative vulnerability integral, against
+// central differences of the closed form they differentiate. No new reference
+// values: the function being differenced is the one the knot builder already
+// seeds every knot from.
+//
+// ⚠️ The tolerance below is the CENTRAL DIFFERENCE's accuracy, not the analytic
+// form's. Measured on this grid, the worst disagreement walks as h^2 -- 2.9e-5,
+// 2.9e-7, 3.1e-9 at relative steps 1e-3, 1e-4, 1e-5 -- and then back UP to 2.9e-7
+// at 1e-7 as cancellation takes over. A clean quadratic decay is what says the
+// residual belongs to the difference and not to the formula, so tightening this
+// without shrinking h would only be pinning the difference's own error.
+//
+// b and c are deliberately neutral here, and the grid brackets both curves rather
+// than either: vulnerability.hpp is shared by the stem (stem_b, stem_c) and the
+// root (root_b, root_c), whose defaults are both 3.898245 / 2.680147 (hazard 1).
+void test_vulnerability_integral_derivatives() {
+  printf("analytic trait derivatives of the vulnerability integral\n");
+  using phylloptim::cumulative_vulnerability_integral_at;
+  using phylloptim::cumulative_vulnerability_integral_derivatives_at;
+
+  // (psi/b)^c past this is past the curve's last knot, so it is unreachable and
+  // the series is not asked to hold there. It bounds the grid instead of the grid
+  // bounding it -- for c = 12, psi/b = 8 means (psi/b)^c = 7e10.
+  const double x_max = phylloptim::vulnerability_x_max();
+  const double rel_step = 1e-5;
+
+  double worst_value = 0.0, worst_dpsi = 0.0, worst_db = 0.0, worst_dc = 0.0;
+  int points = 0;
+  for (double b : {0.5, 2.0, 7.0}) {
+    for (double c = 0.4; c <= 12.001; c += 0.1) {
+      for (double u = 0.075; u <= 8.001; u *= 1.1) {
+        if (pow(u, c) > x_max) {
+          continue;
+        }
+        ++points;
+        const double psi = u * b;
+        const auto d = cumulative_vulnerability_integral_derivatives_at(psi, b, c);
+
+        // The series' own value against boost's. Not the point of the test, but
+        // it is the cheapest check that the series is the right series.
+        const double scale = std::max(1.0, std::abs(d.value));
+        worst_value = std::max(
+            worst_value,
+            std::abs(d.value - cumulative_vulnerability_integral_at(psi, b, c)) /
+                scale);
+
+        const double hb = rel_step * b, hc = rel_step * c, hp = rel_step * psi;
+        const double fd_psi =
+            (cumulative_vulnerability_integral_at(psi + hp, b, c) -
+             cumulative_vulnerability_integral_at(psi - hp, b, c)) /
+            (2.0 * hp);
+        const double fd_b =
+            (cumulative_vulnerability_integral_at(psi, b + hb, c) -
+             cumulative_vulnerability_integral_at(psi, b - hb, c)) /
+            (2.0 * hb);
+        const double fd_c =
+            (cumulative_vulnerability_integral_at(psi, b, c + hc) -
+             cumulative_vulnerability_integral_at(psi, b, c - hc)) /
+            (2.0 * hc);
+        // Relative to the derivative, floored: dG/dc passes through zero on this
+        // grid, and a relative error against a vanishing denominator says nothing.
+        worst_dpsi = std::max(worst_dpsi, std::abs(d.dpsi - fd_psi) /
+                                              std::max(1e-2, std::abs(fd_psi)));
+        worst_db = std::max(worst_db, std::abs(d.db - fd_b) /
+                                          std::max(1e-2, std::abs(fd_b)));
+        worst_dc = std::max(worst_dc, std::abs(d.dc - fd_c) /
+                                          std::max(1e-2, std::abs(fd_c)));
+      }
+    }
+  }
+  printf("    %d points | value %.3g | dpsi %.3g | db %.3g | dc %.3g\n", points,
+         worst_value, worst_dpsi, worst_db, worst_dc);
+  ok(points > 10000, "the grid inside the curve's domain is not empty");
+  near(worst_value, 0.0, 1e-14, "the series value matches the closed form");
+  near(worst_dpsi, 0.0, 1e-7, "dG/dpsi matches a central difference");
+  near(worst_db, 0.0, 1e-7, "dG/db matches a central difference");
+  near(worst_dc, 0.0, 1e-7, "dG/dc matches a central difference");
+
+  // dG/dpsi is the vulnerability curve itself, which is worth stating once
+  // directly rather than only through a difference.
+  const auto at_default =
+      cumulative_vulnerability_integral_derivatives_at(3.0, 3.898245, 2.680147);
+  near(at_default.dpsi, std::exp(-std::pow(3.0 / 3.898245, 2.680147)), 1e-15,
+       "dG/dpsi is exp(-(psi/b)^c)");
+
+  // G is identically zero at psi = 0 for every b and c, so both trait partials
+  // are zero there and neither pow(0, c) nor log(0) is evaluated.
+  const auto at_zero =
+      cumulative_vulnerability_integral_derivatives_at(0.0, 3.898245, 2.680147);
+  ok(at_zero.value == 0.0, "G is exactly zero at psi = 0");
+  ok(at_zero.dpsi == 1.0, "dG/dpsi is exactly 1 at psi = 0");
+  ok(at_zero.db == 0.0, "dG/db is exactly zero at psi = 0");
+  ok(at_zero.dc == 0.0, "dG/dc is exactly zero at psi = 0");
+
+  // Past the last knot the series would overflow rather than mislead, so the
+  // bound is asserted instead of branched around.
+  bool threw = false;
+  try {
+    cumulative_vulnerability_integral_derivatives_at(3.0, 1.0, 2.0);
+  } catch (const std::runtime_error &) {
+    threw = true;
+  }
+  ok(threw, "an argument past the curve's domain throws");
+  double just_inside = 0.0;
+  try {
+    just_inside =
+        cumulative_vulnerability_integral_derivatives_at(
+            phylloptim::vulnerability_psi_max(3.898245, 2.680147), 3.898245,
+            2.680147)
+            .value;
+  } catch (const std::runtime_error &) {
+    just_inside = -1.0;
+  }
+  ok(just_inside > 0.0, "the last knot itself is inside the bound");
+}
+
 void test_spline_matches_direct_integration() {
   printf("pre-integrated spline vs direct quadrature\n");
   Drivers d;
@@ -1766,6 +1882,7 @@ void benchmark() {
 int main() {
   test_defaults_are_unset();
   test_vulnerability_curve();
+  test_vulnerability_integral_derivatives();
   test_spline_matches_direct_integration();
   test_arrhenius();
   test_saturation_vapour_pressure();
