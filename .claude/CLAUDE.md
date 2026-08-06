@@ -8,6 +8,10 @@ Read alongside:
 
 - **[README.md](../README.md)** — what it is and how to use it
 - **[PLAN.md](../PLAN.md)** — status table, then the reasoning behind every open issue
+- **[`vignettes/fitting.Rmd`](../vignettes/fitting.Rmd)** — ⚠️ read *"Fitting a
+  different collection of parameters"* before answering anything about `pars`:
+  what a different collection costs, which parameters return exactly zero and
+  why, which are unreachable, and what a new study has to write itself
 - **[COMPARISON.md](../COMPARISON.md)** — how this differs from `plantecophys`, `tealeaves`, `bigleaf`
 - **[issues](https://github.com/traitecoevo/phylloptim/issues)** — the work queue; PLAN.md is the *why* behind each
 
