@@ -1955,8 +1955,11 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
   // NOT the out-of-line EB term (gated at the call site, so gate-off never
   // calls it); dprofit_at_collar_psi is out of line in both builds. Unexplained,
   // and worth explaining before this reaches plant, which runs this millions of
-  // times. Candidates not yet excluded: the extra bool's effect on Leaf's
-  // layout, and the compensation branch's code enlarging the function.
+  // times. Object layout is EXCLUDED: sizeof(Leaf) is 2008 both before and
+  // after, so the extra bool packed into existing padding. What remains
+  // untested is whether the compensation branch's code enlarges
+  // dprofit_at_collar_psi enough to change how it is scheduled -- it is out of
+  // line in both builds, so this is about the body, not about the call.
   const double dEup_dpsi = dE_from_soil_dpsi_collar(psi, supply_psi_soil());
   double dpsistem_dpsi;
   if (std::isfinite(dEup_dpsi)) {
