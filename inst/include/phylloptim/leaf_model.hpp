@@ -2218,6 +2218,26 @@ inline void Leaf::update_temperature_dependent_params(double leaf_temp) {
   gamma_ = arrh_curve(gamma_ha_, gamma_25_, leaf_temp);
   ko_ = arrh_curve(ko_ha_, ko_25_, leaf_temp);
   kc_ = arrh_curve(kc_ha_, kc_25_, leaf_temp);
+  // ⚠️ RESPIRATION INHERITS VCMAX'S PEAKED CURVE, SO IT FALLS ABOVE THE THERMAL
+  // OPTIMUM. That is wrong: dark respiration rises with temperature over this
+  // range, and a Q10 near 2 is the standard description. Tying R_d to vcmax_(T)
+  // -- which is what this line does -- makes it peak wherever Vcmax peaks and
+  // decline after. Matched at 25 C against a Q10 of 2, the two diverge in
+  // OPPOSITE directions and by an order of magnitude:
+  //
+  //     T (C)        25     35     40     45      50
+  //     here       0.395  0.543  0.466  0.284   0.135
+  //     Q10 = 2    0.395  0.790  1.117  1.580   2.234
+  //     ratio        1.0    1.5    2.4    5.6    16.5
+  //
+  // No value of rd_to_vcmax_ratio_ repairs this -- it is a scale on a function
+  // of the wrong shape. It matters most for anything studying high-temperature
+  // behaviour, because understating respiration above the optimum understates
+  // how fast NET assimilation declines there.
+  //
+  // Left as-is rather than changed unilaterally: R_d feeds every operating point
+  // and the golden file, so switching to a Q10 moves published plant results and
+  // needs its own change with its own measured blast radius.
   R_d_ = vcmax_ * rd_to_vcmax_ratio_;
   km_ = (kc_*umol_per_mol_to_Pa_)*(1 + (atm_o2_kpa_*kPa_to_Pa)/(ko_*umol_per_mol_to_Pa_));
   electron_transport_ = electron_transport();
