@@ -152,6 +152,47 @@ Leaf:
     vcmax_: {type: double, access: field}
     jmax_: {type: double, access: field}
 
+    # --- the temperature RESPONSE itself, which was C++-only until now -------
+    #
+    # The eight fields above are DERIVED: set_physiology recomputes them from
+    # leaf temperature on every call, so writing one from R is overwritten by
+    # the next solve. These thirteen are the parameters that generate them, and
+    # they were public C++ members with no entry here at all -- so from R the
+    # shape of the temperature response was fixed and unreachable.
+    #
+    # ⚠️ That is not a small gap. The defaults imply a thermal optimum near
+    # 31.2 C for Vcmax and 27.9 C for Jmax (Topt = H_d / (d_S - R*log(ha/(H_d -
+    # ha)))), and any study calibrating a temperature response -- which is most
+    # of the reason to reach for this model -- needs to move them. Jones et al.
+    # (2026) fit 35 C for both.
+    #
+    # ⚠️ `rd_to_vcmax_ratio_` matters for a different reason. Rd is
+    # `rd_to_vcmax_ratio_ * vcmax_`, so it inherits Vcmax's PEAKED Arrhenius and
+    # therefore FALLS above the thermal optimum, where a Q10 respiration rises.
+    # It is fixed at 0.015 while Sabot's own data imply 0.0046 to 0.0302 across
+    # species -- a factor of 6.5 -- and for Q. ilex the model uses 0.914 against
+    # the data's 0.525, a 74% overstatement.
+    #
+    # ⚠️ SETTING THESE DOES NOT RECOMPUTE ANYTHING. Like the traits (hazard 10),
+    # they feed a cache: set_physiology's temperature block is keyed on
+    # (leaf_temp_, atm_o2_kpa_) and on nothing else, so changing one of these
+    # and calling set_physiology again takes a cache HIT and silently keeps the
+    # old response. Call set_traits() -- which ends in setup_clean_leaf() and
+    # clears the cache -- or construct afresh.
+    vcmax_ha_: {type: double, access: field}
+    vcmax_H_d_: {type: double, access: field}
+    vcmax_d_S_: {type: double, access: field}
+    jmax_ha_: {type: double, access: field}
+    jmax_H_d_: {type: double, access: field}
+    jmax_d_S_: {type: double, access: field}
+    gamma_25_: {type: double, access: field}
+    gamma_ha_: {type: double, access: field}
+    kc_25_: {type: double, access: field}
+    kc_ha_: {type: double, access: field}
+    ko_25_: {type: double, access: field}
+    ko_ha_: {type: double, access: field}
+    rd_to_vcmax_ratio_: {type: double, access: field}
+
     # --- drivers, as last set by set_physiology ------------------------------
     PPFD_: {type: double, access: field}
     atm_vpd_: {type: double, access: field}
