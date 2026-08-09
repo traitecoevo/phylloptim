@@ -18,6 +18,9 @@
 #include <cstdio>
 #include <limits>
 #include <string>
+#include <algorithm>
+#include <iterator>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -1196,7 +1199,7 @@ void test_energy_balance_collar_solve_is_measured() {
   printf("MEASUREMENT: the EB collar solve against a derivative-free scan\n");
 
   double worst_dpsi = 0.0, worst_resid = 0.0, worst_dprofit = 0.0;
-  int rows = 0;
+  int rows = 0, pinned_rows = 0;
 
   for (double ppfd : {500.0, 1500.0}) {
     for (double tair : {20.0, 30.0, 40.0}) {
@@ -1232,28 +1235,161 @@ void test_energy_balance_collar_solve_is_measured() {
         const double dpsi = std::abs(best_psi - psi_solver);
         const double dprofit = best_profit - profit_solver;
         worst_dpsi = std::max(worst_dpsi, dpsi);
-        worst_resid = std::max(worst_resid, std::abs(resid));
         worst_dprofit = std::max(worst_dprofit, dprofit);
+
+        // ⚠️ INTERIOR ROWS ONLY for the residual. A CONSTRAINED optimum sits on
+        // a bracket bound, where dprofit is genuinely non-zero and "the gradient
+        // should vanish" is simply the wrong statement -- the same distinction
+        // test_collar_optimum_pinned_to_its_constraint makes on the non-EB path.
+        // Lumping the two together reports a pinned row's honest gradient as if
+        // it were a solver failure.
+        const double span = std::max(hi - lo, 1e-12);
+        const bool pinned = (psi_solver - lo) < 1e-3 * span ||
+                            (hi - psi_solver) < 1e-3 * span;
+        if (pinned) { ++pinned_rows; }
+        else { worst_resid = std::max(worst_resid, std::abs(resid)); }
         ++rows;
       }
     }
   }
 
-  printf("    %d feasible rows | worst |dprofit| at the returned collar: %.3e\n",
-         rows, worst_resid);
+  printf("    %d feasible rows (%d pinned) | worst |dprofit|, interior only: %.3e\n",
+         rows, pinned_rows, worst_resid);
   printf("    worst |psi_scan - psi_solver|: %.3e MPa | worst profit shortfall: %.3e\n",
          worst_dpsi, worst_dprofit);
 
   ok(rows > 0, "the EB grid has feasible rows to measure");
-  // Loose, and deliberately so: these record the CURRENT state. A fix should
-  // drive the residual to ~1e-9 and the scan disagreement to the scan's own
-  // resolution, at which point these bounds are tightened rather than deleted.
-  ok(worst_resid < 1e3, "the residual is finite and bounded (measurement only)");
-  ok(worst_dpsi < 1e3, "the scan disagreement is finite and bounded (measurement only)");
+
+  // The bounds this test landed with, and what they replaced. Before the three
+  // edits (seat the temperature parameters, add the dA/dTleaf chain term, handle
+  // the compensation point) the same grid gave: residual 5.76, collar 0.83 MPa
+  // from the argmax, 2.34 umol m^-2 s^-1 of profit left behind.
+  ok(worst_resid < 1e-9,
+     "interior EB optima satisfy dprofit == 0 to solver precision");
+  // The scan resolves the argmax only to (hi-lo)/20000, ~5e-5 MPa on this grid,
+  // so agreement AT that scale is agreement -- asking for more would be asking
+  // the oracle for precision it does not have.
+  ok(worst_dpsi < 1e-3,
+     "the collar agrees with a derivative-free scan to the scan's resolution");
   // The scan can only ever find a profit >= the solver's, up to its own grid
   // resolution. A NEGATIVE shortfall beyond that would mean the scan is broken,
   // which is the one way this measurement could mislead.
   ok(worst_dprofit > -1e-6, "the scan never finds LESS profit than the solver");
+  ok(worst_dprofit < 1e-6, "and never finds MORE: the solver is at the maximum");
+}
+
+// Gate-off inertness, proved by POISONING rather than by a recorded value. The
+// golden file already pins values; what it cannot say is that the energy-balance
+// inputs are never *read* when the gate is off. Setting them to NaN and demanding
+// bit-identical results says exactly that: if any of the new code path touched
+// Rn_, ra_ or Tair_ off-gate, a NaN would propagate and nothing would compare
+// equal. Same shape as test_pm_wind_speed_validation uses for wind_speed_.
+void test_energy_balance_gate_off_is_inert() {
+  printf("gate off: the EB inputs are never read (NaN poisoning)\n");
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  for (double tair : {20.0, 40.0}) {
+    Drivers d;
+    d.leaf_temp = tair;
+    phylloptim::Leaf clean = make_pm_leaf(d, {2.0}, {1.0}, false);
+    phylloptim::Leaf poisoned = make_pm_leaf(d, {2.0}, {1.0}, false);
+    poisoned.Rn_ = nan; poisoned.ra_ = nan; poisoned.Tair_ = nan;
+
+    clean.find_root_collar_psi();
+    poisoned.find_root_collar_psi();
+    const std::string at = " at Tair=" + std::to_string(int(tair));
+    ok(clean.profit_ == poisoned.profit_, "profit is bit-identical" + at);
+    ok(clean.assim_colimited_ == poisoned.assim_colimited_,
+       "assimilation is bit-identical" + at);
+    ok(clean.opt_root_psi_ == poisoned.opt_root_psi_,
+       "the collar is bit-identical" + at);
+    // And the derivative, which is where the new code lives.
+    const double psi = clean.opt_root_psi_;
+    ok(clean.dprofit_droot_collar_psi(psi) ==
+           poisoned.dprofit_droot_collar_psi(psi),
+       "dprofit is bit-identical" + at);
+  }
+}
+
+// THE SCIENTIFIC ACCEPTANCE TEST. Jones et al. (2026, Global Change Biology
+// 32:e70972) report that stomatal conductance keeps rising above the
+// photosynthetic thermal optimum while assimilation falls, and that an
+// optimality model reproduces it only when leaf temperature is inside the
+// objective. This asserts that the corrected first-order condition produces that
+// behaviour, and -- the half that matters -- that the gate-off arm does NOT, at
+// the same drivers. Without the contrast the test could pass on the Arrhenius
+// optimum alone, which has nothing to do with energy balance.
+//
+// ⚠️ What this can and cannot show. stom_cond_CO2 still divides by the
+// PRESCRIBED air VPD however hot the leaf gets (PLAN 13.1), so only the
+// A(Tleaf) channel is exercised here; the leaf-to-air VPD channel is absent.
+// The sweep therefore holds VPD fixed, which is the protocol of the paper's
+// Figure S2 rather than its Figure 2.
+void test_energy_balance_stomatal_decoupling() {
+  printf("decoupling: gs rises where A falls, and only with the gate on\n");
+  // ⚠️ THE FIXTURE DEFAULTS CANNOT SHOW THIS, and the reason is physical rather
+  // than numerical. kmax = K_s*theta/h is 3.14e-5 at the defaults, and a leaf
+  // that conductive simply cannot move enough water to cool itself: measured in
+  // R against Jones's own drivers, Tleaf - Tair floors at +1.9 K where their
+  // leaf reaches -2.0 K, so the evaporative-cooling benefit never becomes large
+  // enough to reverse the conductance response. Shortening the path length to
+  // 1.5 m (kmax ~ 1.05e-4) puts the leaf in the range their measured species
+  // occupy. This is choosing a regime where the mechanism is active, not tuning
+  // until a test passes -- at the defaults the honest answer is "no decoupling",
+  // and that is what the probe found.
+  auto sweep = [&](bool gate) {
+    std::vector<double> Ta, A, gs;
+    for (double t = 15.0; t <= 45.0; t += 1.0) {
+      Drivers d;
+      d.PPFD = 1200.0; d.leaf_temp = t; d.atm_vpd = 1.0; d.h = 1.5;
+      phylloptim::Leaf l = make_pm_leaf(d, {0.5}, {1.0}, gate);
+      // ⚠️ OVERRIDE THE DERIVED RADIATION, and this is the second thing the
+      // defaults cannot express. phylloptim sets Rn = 2*PPFD/4.57 - 40, which at
+      // PPFD 1200 is 485 W m^-2 with net longwave fixed at -40 -- against an
+      // isothermal value that runs -98 to -133 over this range. Combined with
+      // ra from the wind model (31.6 s m^-1) the leaf runs ~18 K above air and
+      // its thermal optimum falls off the bottom of any sensible sweep: the
+      // first version of this test measured a curve that had already peaked
+      // before 15 C. These are the values Jones et al. drive with (their eq. 25
+      // and 29 at Iabs = 500, ra = 10), and both fields are settable precisely
+      // so a caller can supply a better radiation budget than the minimal cut.
+      l.Rn_ = 400.0;
+      l.ra_ = 12.0;
+      l.find_root_collar_psi();
+      if (!std::isfinite(l.assim_colimited_) || !std::isfinite(l.stom_cond_CO2_)) continue;
+      Ta.push_back(t); A.push_back(l.assim_colimited_); gs.push_back(l.stom_cond_CO2_);
+    }
+    return std::make_tuple(Ta, A, gs);
+  };
+
+  auto count_decoupled = [](const std::vector<double>& Ta,
+                            const std::vector<double>& A,
+                            const std::vector<double>& gs) {
+    if (Ta.size() < 5) return 0;
+    const size_t peak = std::distance(A.begin(), std::max_element(A.begin(), A.end()));
+    int n = 0;
+    for (size_t i = peak + 2; i + 1 < Ta.size(); ++i) {
+      const double dA = (A[i + 1] - A[i - 1]);
+      const double dg = (gs[i + 1] - gs[i - 1]);
+      if (dA < 0.0 && dg > 0.0) ++n;
+    }
+    return n;
+  };
+
+  const auto on = sweep(true);
+  const auto off = sweep(false);
+  const int n_on = count_decoupled(std::get<0>(on), std::get<1>(on), std::get<2>(on));
+  const int n_off = count_decoupled(std::get<0>(off), std::get<1>(off), std::get<2>(off));
+  printf("    decoupled points: gate on %d, gate off %d\n", n_on, n_off);
+
+  const auto& A_on = std::get<1>(on);
+  ok(A_on.size() > 5, "the decoupling sweep produced a curve");
+  const size_t peak = std::distance(A_on.begin(),
+                                    std::max_element(A_on.begin(), A_on.end()));
+  ok(peak > 0 && peak + 1 < A_on.size(),
+     "assimilation has an interior thermal optimum");
+  ok(n_on > 0, "with the gate ON, conductance rises where assimilation falls");
+  ok(n_on > n_off,
+     "and it does so more than with the gate off -- the energy balance is why");
 }
 
 // The closed-form fast path (leaf/closed_form.hpp). Two things matter: that it is
@@ -2002,6 +2138,8 @@ int main() {
   test_pm_wind_speed_validation();
   test_pm_leaf_temperature_response();
   test_energy_balance_collar_solve_is_measured();
+  test_energy_balance_gate_off_is_inert();
+  test_energy_balance_stomatal_decoupling();
   test_closed_form();
   test_single_potential();
   test_leaf_on_single_potential();
