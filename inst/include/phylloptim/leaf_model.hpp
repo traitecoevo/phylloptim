@@ -1942,13 +1942,21 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
   //
   // ⚠️ It was briefly a separate member function, and this comment claimed that
   // cost 1.4% because the compiler stopped inlining it. THAT WAS WRONG, and
-  // measuring it properly is what showed so: with both binaries interleaved
-  // under identical load, the factored and inlined versions are
-  // indistinguishable (3.56 us each) and both sit ~1% above the pre-change
-  // build (3.52). The residual is the rest of the change -- an extra bool
-  // member, two branch tests -- not the call. Kept inline anyway because
-  // sharing one evaluation between the two branches is less work regardless,
-  // but do not repeat the performance claim: it did not survive its own test.
+  // measuring it properly is what showed so: with both binaries interleaved,
+  // the factored and inlined versions are indistinguishable. Kept inline anyway
+  // because sharing one evaluation between the two branches is less work
+  // regardless -- but not for the reason first given.
+  //
+  // ⚠️ AND THE GATE-OFF COST OF THIS WHOLE CHANGE IS 3.1%, NOT THE ~1% FIRST
+  // REPORTED. The first figure was taken at load average 8.9 with another
+  // job's eight workers on the machine, where the arms straddled the noise.
+  // Re-measured at load 5.9, six interleaved rounds, each arm stable to
+  // 0.03 us: 3.132 us before, 3.230 us after. It is NOT the factoring and it is
+  // NOT the out-of-line EB term (gated at the call site, so gate-off never
+  // calls it); dprofit_at_collar_psi is out of line in both builds. Unexplained,
+  // and worth explaining before this reaches plant, which runs this millions of
+  // times. Candidates not yet excluded: the extra bool's effect on Leaf's
+  // layout, and the compensation branch's code enlarging the function.
   const double dEup_dpsi = dE_from_soil_dpsi_collar(psi, supply_psi_soil());
   double dpsistem_dpsi;
   if (std::isfinite(dEup_dpsi)) {
