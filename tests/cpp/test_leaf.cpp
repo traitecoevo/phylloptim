@@ -1167,6 +1167,95 @@ void test_pm_leaf_temperature_response() {
   }
 }
 
+// ============================================================================
+// MEASUREMENT, NOT A GUARD. What the collar solve currently does under the
+// energy-balance gate, recorded before anything is changed.
+//
+// The claim being measured: with `use_energy_balance_` on, the solver does not
+// find the maximum of the objective it evaluates. Two separate defects compound.
+//
+//  1. STALENESS. `dprofit_at_collar_psi` never calls
+//     `set_leaf_states_rates_from_psi_stem`, and `set_physiology` gates its
+//     temperature cache on `!use_energy_balance_`, so the derivative is
+//     evaluated with vcmax_/jmax_/gamma_/km_/R_d_ left at the AIR-temperature
+//     baseline while the objective is evaluated at Tleaf(E(psi)).
+//  2. THE MISSING CHAIN TERM. Even seated correctly, the derivative has no
+//     dA/dTleaf * dTleaf/dE * dE/dpsi. `use_energy_balance_` appears at six
+//     sites in leaf_model.hpp and none of them is in the derivative.
+//
+// So `maximise_profit_over_collar` root-finds the first-order condition of a
+// DIFFERENT MODEL from the one it reports. The tolerances below are the
+// currently-observed values; the fix tightens them. They are asserted loosely on
+// purpose so this lands green and the numbers are in the history.
+//
+// The oracle is a derivative-free scan of profit itself -- the method PLAN 11a
+// used to arbitrate the last collar-solver change. It cannot inherit the
+// derivative's defect, because it never evaluates a derivative.
+// ============================================================================
+void test_energy_balance_collar_solve_is_measured() {
+  printf("MEASUREMENT: the EB collar solve against a derivative-free scan\n");
+
+  double worst_dpsi = 0.0, worst_resid = 0.0, worst_dprofit = 0.0;
+  int rows = 0;
+
+  for (double ppfd : {500.0, 1500.0}) {
+    for (double tair : {20.0, 30.0, 40.0}) {
+      for (double vpd : {1.0, 2.0}) {
+        Drivers d;
+        d.PPFD = ppfd; d.leaf_temp = tair; d.atm_vpd = vpd;
+
+        phylloptim::Leaf eb = make_pm_leaf(d, {2.0}, {1.0}, true);
+        eb.find_root_collar_psi();
+        const double psi_solver = eb.opt_root_psi_;
+        const double profit_solver = eb.profit_;
+
+        // The residual the solver believes it drove to zero. On the non-EB path
+        // this is ~5.6e-15 (PLAN 11a); here it is whatever staleness leaves.
+        bool feasible = true;
+        const double resid = eb.dprofit_droot_collar_psi(psi_solver, &feasible);
+        if (!feasible) continue;
+
+        // ORACLE: scan profit over the same feasible interval. A fresh leaf,
+        // because dprofit_droot_collar_psi above has just re-seated the
+        // temperature parameters at yet another point.
+        phylloptim::Leaf scan = make_pm_leaf(d, {2.0}, {1.0}, true);
+        double lo = 0.0, hi = 0.0;
+        if (!scan.prepare_collar_solve(lo, hi)) continue;
+        const int N = 20001;
+        double best_psi = lo, best_profit = -std::numeric_limits<double>::max();
+        for (int i = 0; i < N; ++i) {
+          const double psi = lo + (hi - lo) * double(i) / double(N - 1);
+          const double p = scan.profit_at_collar_psi(psi, lo, hi);
+          if (p > best_profit) { best_profit = p; best_psi = psi; }
+        }
+
+        const double dpsi = std::abs(best_psi - psi_solver);
+        const double dprofit = best_profit - profit_solver;
+        worst_dpsi = std::max(worst_dpsi, dpsi);
+        worst_resid = std::max(worst_resid, std::abs(resid));
+        worst_dprofit = std::max(worst_dprofit, dprofit);
+        ++rows;
+      }
+    }
+  }
+
+  printf("    %d feasible rows | worst |dprofit| at the returned collar: %.3e\n",
+         rows, worst_resid);
+  printf("    worst |psi_scan - psi_solver|: %.3e MPa | worst profit shortfall: %.3e\n",
+         worst_dpsi, worst_dprofit);
+
+  ok(rows > 0, "the EB grid has feasible rows to measure");
+  // Loose, and deliberately so: these record the CURRENT state. A fix should
+  // drive the residual to ~1e-9 and the scan disagreement to the scan's own
+  // resolution, at which point these bounds are tightened rather than deleted.
+  ok(worst_resid < 1e3, "the residual is finite and bounded (measurement only)");
+  ok(worst_dpsi < 1e3, "the scan disagreement is finite and bounded (measurement only)");
+  // The scan can only ever find a profit >= the solver's, up to its own grid
+  // resolution. A NEGATIVE shortfall beyond that would mean the scan is broken,
+  // which is the one way this measurement could mislead.
+  ok(worst_dprofit > -1e-6, "the scan never finds LESS profit than the solver");
+}
+
 // The closed-form fast path (leaf/closed_form.hpp). Two things matter: that it is
 // actually fast, and that its error is characterised honestly rather than asserted
 // to be small.
@@ -1912,6 +2001,7 @@ int main() {
   test_energy_balance_path_runs();
   test_pm_wind_speed_validation();
   test_pm_leaf_temperature_response();
+  test_energy_balance_collar_solve_is_measured();
   test_closed_form();
   test_single_potential();
   test_leaf_on_single_potential();
