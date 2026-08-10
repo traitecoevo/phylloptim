@@ -355,21 +355,32 @@ public:
   // individual. The sentinel keeps the derivation live until someone opts out of
   // it.
   double R_d_25 = std::numeric_limits<double>::quiet_NaN();
-  // Q10 for dark respiration: R_d(T) = R_d(25) * Q10^((T-25)/10).
+  // Dark respiration's temperature response, Tjoelker et al. (2001):
+  //
+  //     R_d(T) = R_d(25) * Q10(T)^((T - 25) / 10)
+  //     Q10(T) = rd_q10_intercept_ - rd_q10_slope_ * (T + 25) / 2
+  //
+  // where the Q10 is evaluated at the MEAN of the measurement and reference
+  // temperatures, which is the form the land-surface literature implements.
   //
   // ⚠️ THIS REPLACES A RESPONSE OF THE WRONG SHAPE, and it MOVES RESULTS at every
   // temperature except 25 C. R_d used to be `rd_to_vcmax_ratio_ * vcmax_(T)`, so
   // it inherited Vcmax's PEAKED Arrhenius and therefore FELL above the thermal
-  // optimum, where real dark respiration rises. Matched at 25 C the two diverge
-  // in opposite directions and by an order of magnitude by 50 C (the table in
-  // update_temperature_dependent_params). No value of the ratio repaired that --
-  // it was a scale on the wrong function.
+  // optimum, where real dark respiration rises. No value of the ratio repaired
+  // that -- it was a scale on the wrong function.
   //
-  // 2.0 is the conventional value. It is settable because it is a real parameter,
-  // and because a declining-with-temperature Q10 (Tjoelker et al. 2001) is the
-  // better description if anyone needs it -- that would be a different functional
-  // form, not another value, so it is not pretended to be reachable from here.
-  double rd_q10_ = 2.0;
+  // ⚠️ WHY A DECLINING Q10 RATHER THAN A CONSTANT 2.0, WHICH WAS TRIED FIRST AND
+  // MEASURED. A constant Q10 = 2 is conventional and is wrong at the top of the
+  // range in a way that matters here: it put R_d at 4.07 at 40 C -- 2.8x its 25 C
+  // value over 15 K -- cost 73% of assimilation there, and by 45 C left the solve
+  // with NO OPERATING POINT at all. That is not the physics; it is a constant Q10
+  // used far outside where it holds, which is exactly what Tjoelker measured.
+  //
+  // ⚠️ A CONSTANT Q10 IS STILL REACHABLE, and deliberately so: set the slope to
+  // zero and the intercept is the constant. The declining form is the default
+  // rather than the only option.
+  double rd_q10_intercept_ = 3.09;
+  double rd_q10_slope_ = 0.0430;
   double atm_kpa_;
   // Conversion from a mixing ratio (umol mol^-1) to a partial pressure (Pa).
   // DERIVED from atm_kpa_, not a constant: it is 1e-6 * P, so the old
@@ -445,7 +456,7 @@ public:
   //   * the cost is 17 double comparisons per set_physiology() call, i.e. per
   //     driver set, NOT per inner solve iteration. Measured: within run-to-run
   //     noise on bench_solve.
-  static constexpr int photo_temp_key_size = 18;
+  static constexpr int photo_temp_key_size = 19;
   std::array<double, photo_temp_key_size> photo_temp_cache_key_{};
   std::array<double, photo_temp_key_size> photo_temp_key() const;
   // Dark respiration at 25 C, with the sentinel resolved. ⚠️ Used by BOTH the
@@ -2470,7 +2481,7 @@ inline std::array<double, Leaf::photo_temp_key_size> Leaf::photo_temp_key() cons
           // keeps NaN out of an `==` comparison, and it is also more complete:
           // it invalidates on a change to whichever of the two is actually in
           // force, and on neither when the other is.
-          rd_reference(), rd_q10_};
+          rd_reference(), rd_q10_intercept_, rd_q10_slope_};
 }
 
 inline double Leaf::rd_reference() const {
@@ -2504,7 +2515,9 @@ inline void Leaf::update_temperature_dependent_params(double leaf_temp) {
   //
   // The reference value is a sentinel-defaulted parameter so that a caller who
   // sets `vcmax_25` still gets respiration that scales with it (see R_d_25).
-  R_d_ = rd_reference() * std::pow(rd_q10_, (leaf_temp - 25.0) / 10.0);
+  const double q10 =
+      rd_q10_intercept_ - rd_q10_slope_ * (leaf_temp + 25.0) / 2.0;
+  R_d_ = rd_reference() * std::pow(q10, (leaf_temp - 25.0) / 10.0);
   km_ = (kc_*umol_per_mol_to_Pa_)*(1 + (atm_o2_kpa_*kPa_to_Pa)/(ko_*umol_per_mol_to_Pa_));
   electron_transport_ = electron_transport();
 }

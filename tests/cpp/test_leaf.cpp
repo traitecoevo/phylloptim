@@ -2145,13 +2145,33 @@ void test_rd_temperature_response() {
     rd_prev = l.R_d_;
   }
 
-  // Q10 semantics: a 10 K rise multiplies R_d by exactly Q10.
+  // Tjoelker semantics. Q10 is evaluated at the MEAN of T and the reference, so a
+  // 10 K rise from 25 C multiplies R_d by Q10(30) = 3.09 - 0.043*30 = 1.80 -- not
+  // by the 2.015 that Q10(25) would give. Checking the number rather than just the
+  // direction is what distinguishes this from a constant Q10.
   {
     phylloptim::Leaf a = make_leaf(d, {2.0}, {1.0});
     phylloptim::Leaf b = make_leaf(d, {2.0}, {1.0});
     a.update_temperature_dependent_params(25.0);
     b.update_temperature_dependent_params(35.0);
-    near(b.R_d_, 2.0 * a.R_d_, 1e-12, "a 10 K rise doubles R_d at Q10 = 2");
+    const double q10_at_30 = 3.09 - 0.0430 * 30.0;
+    near(b.R_d_, q10_at_30 * a.R_d_, 1e-12,
+         "a 10 K rise scales R_d by Q10 at the midpoint temperature");
+    ok(q10_at_30 < 2.0, "and that Q10 is below 2, i.e. the decline is active");
+  }
+
+  // ⚠️ A CONSTANT Q10 MUST STILL BE REACHABLE -- slope zero, intercept the value.
+  // Kept as an assertion because it is the escape hatch for anyone who wants the
+  // conventional form, and a silent loss of it would be hard to notice.
+  {
+    phylloptim::Leaf a = make_leaf(d, {2.0}, {1.0});
+    phylloptim::Leaf b = make_leaf(d, {2.0}, {1.0});
+    a.rd_q10_intercept_ = 2.0;  a.rd_q10_slope_ = 0.0;
+    b.rd_q10_intercept_ = 2.0;  b.rd_q10_slope_ = 0.0;
+    a.update_temperature_dependent_params(25.0);
+    b.update_temperature_dependent_params(35.0);
+    near(b.R_d_, 2.0 * a.R_d_, 1e-12,
+         "slope zero recovers a constant Q10 exactly");
   }
 
   // Setting the value directly overrides the ratio entirely.
@@ -2211,7 +2231,8 @@ void test_rd_temperature_response() {
       phylloptim::Leaf then = make_leaf(d, {2.0}, {1.0});
       then.update_temperature_dependent_params(T);  // seat vcmax_(T)
       then.R_d_25 = 0.015 * then.vcmax_;            // the old R_d at this T
-      then.rd_q10_ = 1.0;                           // and no Q10 scaling
+      then.rd_q10_intercept_ = 1.0;                 // and no Q10 scaling at all
+      then.rd_q10_slope_ = 0.0;
       then.update_temperature_dependent_params(T);
       then.find_root_collar_psi();
       A_then = then.assim_colimited_;
