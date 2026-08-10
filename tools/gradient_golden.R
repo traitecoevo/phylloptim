@@ -98,6 +98,7 @@ out <- do.call(rbind, lapply(cases, function(cs) {
                gc = sprintf("%a", g$gradient[1, p, "gc"]),
                psi_stem = sprintf("%a", g$gradient[1, p, "psi_stem"]),
                collar = sprintf("%a", g$gradient[1, p, "collar"]),
+               profit = sprintf("%a", g$gradient[1, p, "profit"]),
                stringsAsFactors = FALSE)
   }))
 }))

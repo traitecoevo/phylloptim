@@ -105,29 +105,44 @@ inline const std::vector<std::string>& par_names() {
   return names;
 }
 
-// --- the four differentiated outputs -----------------------------------------
+// --- the five differentiated outputs ------------------------------------------
 //
-// A, gc, psi_stem and collar, in that order, which is R's
+// A, gc, psi_stem, collar and profit, in that order, which is R's
 // `.gradient_output_names`. `collar` is psi* itself, which is what makes
 // dcollar/dtheta equal dpsi*/dtheta and lets the two routes below compute the
 // same quantity by different means.
-inline constexpr int n_outputs = 4;
+//
+// ⚠️ APPENDING IS SAFE AND REORDERING IS NOT, exactly as for `par_names` above.
+//
+// The first four are what a gas-exchange calibration OBSERVES. `profit` is here
+// because it is what plant CONSUMES: `leaf.profit_`, not `assim_colimited_`, is
+// the carbon that reaches its mass budget, so until #87 the two sets were
+// disjoint and no gradient this package produced reached a demographic model.
+inline constexpr int n_outputs = 5;
 inline constexpr int out_collar = 3;
+inline constexpr int out_profit = 4;
 
 inline const std::vector<std::string>& output_names() {
-  static const std::vector<std::string> names{"A", "gc", "psi_stem", "collar"};
+  static const std::vector<std::string> names{"A", "gc", "psi_stem", "collar",
+                                              "profit"};
   return names;
 }
 
 // Read straight off the members rather than through `operating_point_values()`,
-// which is what R has to use. Bit-identical: that reader copies these same four
-// fields into positions 3, 5, 0 and 1 of its twelve, and the three columns it
+// which is what R has to use. Bit-identical: that reader copies these same five
+// fields into positions 3, 5, 0, 1 and 6 of its twelve, and the three columns it
 // computes rather than copies (uptake, lambda, g1_eff) are not among them.
+//
+// ⚠️ That is why `profit` was cheap to add here and `uptake` would not be. Every
+// output in this list has to be a field R COPIES; `uptake` is one R sums over
+// the finite soil layers, so adding it means reproducing that summation -- and
+// its order -- on this side too.
 inline void outputs(const Leaf& l, double* y) {
   y[0] = l.assim_colimited_;
   y[1] = l.stom_cond_CO2_;
   y[2] = l.opt_psi_stem_;
   y[3] = l.opt_root_psi_;
+  y[4] = l.profit_;
 }
 
 // The outputs with the collar held at `psi` rather than optimised. False when
@@ -228,9 +243,10 @@ struct Settings {
 };
 
 struct Result {
-  // The four outputs the gradient is taken at.
+  // The five outputs the gradient is taken at.
   double value[n_outputs];
-  // npars * n_outputs, parameter-major: d(output j)/d(pars[k]) at [k * 4 + j].
+  // npars * n_outputs, parameter-major: d(output j)/d(pars[k]) at
+  // [k * n_outputs + j].
   std::vector<double> grad;
   Status status = Status::Error;
   bool used_ift = false;
@@ -500,6 +516,23 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
     } else {
       for (int j = 0; j < n_outputs; ++j) {
         dY_dpsi[j] = (hi[j] - lo[j]) / (2.0 * h_psi);
+      }
+      // ⚠️ THIS ASSIGNMENT IS THE ENVELOPE THEOREM, and it is the only place in
+      // this package that uses it. `dY_dpsi[out_profit]` is a central difference
+      // of the objective at its own maximum, so it estimates a quantity that is
+      // ANALYTICALLY ZERO -- and `gradient_ift` multiplies it by dpsi*/dtheta and
+      // adds the product to an exact direct term. Zeroing it makes
+      // dprofit/dtheta exactly `direct`, rather than `direct` plus O(h^2) of the
+      // objective's third derivative.
+      //
+      // Conditional on `status`, not on `use_ift`, on purpose. The identity comes
+      // from dprofit/dpsi == 0, which is what Interior MEANS; at a pinned optimum
+      // psi* is a theta-dependent BOUND, dprofit/dpsi is not zero, and the
+      // indirect term survives. Someone forcing Method::Ift there already gets a
+      // confidently wrong number and should not get a differently wrong one for
+      // this column alone.
+      if (out.status == Status::Interior) {
+        dY_dpsi[out_profit] = 0.0;
       }
     }
   }

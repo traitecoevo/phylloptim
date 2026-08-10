@@ -96,8 +96,9 @@ set_traits <- function(x, traits) {
 
 ##' Trait gradients of a solved operating point
 ##'
-##' The derivatives of the solved outputs with respect to the traits: `dA/dtheta`,
-##' `dgc/dtheta`, `dpsi_stem/dtheta` and `dcollar/dtheta`, at one operating point.
+##' The derivatives of the solved outputs with respect to the traits:
+##' `dA/dtheta`, `dgc/dtheta`, `dpsi_stem/dtheta`, `dcollar/dtheta` and
+##' `dprofit/dtheta`, at one operating point.
 ##'
 ##' @section The maths, and why it is not just a finite difference:
 ##' The reported outputs are evaluated at the profit-maximising collar potential
@@ -119,6 +120,44 @@ set_traits <- function(x, traits) {
 ##'
 ##' The second term is not a correction. For `cost_scale_TF24`, `beta2`, `stem_b`
 ##' and `stem_c` it is 100% of the answer, and for `vcmax_25` 52%.
+##'
+##' @section profit, which is the one output the envelope theorem reaches:
+##' The first four outputs are what a gas-exchange calibration observes. `profit`
+##' is here because it is what a **demographic** consumer bills: plant's carbon
+##' budget reads `leaf.profit_`, not `assim_colimited_`, so before it was added
+##' the two sets were disjoint and no gradient from this package reached a
+##' demographic model at all.
+##'
+##' It is also the cheapest of the five, because it is the objective. At an
+##' interior optimum `dprofit/dpsi = 0`, so the indirect term above vanishes
+##' identically and
+##'
+##' \deqn{dprofit/d\theta = \partial profit/\partial\theta|_{\psi^*}}
+##'
+##' -- the direct partial alone, with no `dY/dpsi` and no `-M/H`. That is the
+##' envelope theorem, and it is the only place this package uses it.
+##'
+##' ⚠️ **The term this drops is noise, not an `h^2` truncation, and that is why
+##' dropping it matters.** `profit` is the maximum, so it is flat, and a central
+##' difference of it at `psi*` divides the solve's ~1e-09 floor by a ~1e-06 step.
+##' Over the golden grid's 136 interior rows:
+##'
+##' | | median | max |
+##' |---|---|---|
+##' | `\|dprofit/dpsi\|`, exact (forward AD) | 4.9e-15 | 5.4e-10 |
+##' | `\|dprofit/dpsi\|`, central difference | 7.8e-10 | 2.1e-04 |
+##' | relative move in `dprofit/dtheta` if kept | 3.3e-10 | 8.0e-05 |
+##'
+##' Eleven orders between the two instruments at the median, and the worst row
+##' sits in the band this package calls a real difference. So `dprofit/dtheta` is
+##' set from the direct term rather than computed through the composite, exactly
+##' as `collar` is set from `dpsi*/dtheta` rather than differenced.
+##'
+##' ⚠️ **The envelope does not survive the active set.** At a pinned optimum
+##' `psi*` is a trait-dependent bound and `dprofit/dpsi` is not zero there, so the
+##' indirect term is real. This applies the identity only where `status` is
+##' `"interior"`; everywhere else `profit` goes through the same finite-difference
+##' fallback as the other four.
 ##'
 ##' @section The active set, which is the reason this function is careful:
 ##' Stationarity is the premise of the whole derivation, and it fails when the
@@ -288,7 +327,8 @@ set_traits <- function(x, traits) {
 ##' @return A list with
 ##'   \describe{
 ##'     \item{`gradient`}{a matrix, one row per trait in `pars`, with columns
-##'       `A` (umol C m^-2 s^-1 per trait unit), `gc`, `psi_stem` and `collar`}
+##'       `A` (umol C m^-2 s^-1 per trait unit), `gc`, `psi_stem`, `collar` and
+##'       `profit` (also umol C m^-2 s^-1 per trait unit)}
 ##'     \item{`value`}{the solved outputs the gradient is taken at}
 ##'     \item{`method`}{`"ift"` if the implicit-function composite was used,
 ##'       `"fd"` if the fallback was}
@@ -497,6 +537,26 @@ leaf_gradient <- function(psi_soil,
       status <- "pinned"
     } else {
       dY_dpsi <- (hi - lo) / (2 * h_psi)
+      # ⚠️ THIS ASSIGNMENT IS THE ENVELOPE THEOREM, and it is the only place in
+      # this package that uses it. `dY_dpsi[["profit"]]` is a central difference
+      # of the objective at its own maximum, so it estimates a quantity that is
+      # ANALYTICALLY ZERO -- and the composite below multiplies it by
+      # dpsi*/dtheta and adds the product to an exact direct term. Zeroing it
+      # makes dprofit/dtheta exactly `direct`, which is the right answer, rather
+      # than the right answer plus O(h^2) of the objective's third derivative.
+      #
+      # It is conditional on `status` and not on `use_ift` on purpose. The
+      # identity comes from dprofit/dpsi == 0, which is what "interior" means;
+      # at a pinned optimum psi* is a theta-dependent BOUND, dprofit/dpsi is not
+      # zero there, and the indirect term survives. Someone who forces
+      # method = "ift" at such a point already gets a confidently wrong number
+      # (that is what `auto` exists to avoid) and should not get a differently
+      # wrong one for this column alone.
+      #
+      # The measured size of what this removes is in ?leaf_gradient.
+      if (identical(status, "interior")) {
+        dY_dpsi[["profit"]] <- 0
+      }
     }
   }
 
@@ -517,11 +577,22 @@ leaf_gradient <- function(psi_soil,
 
 # --- internals ---------------------------------------------------------------
 
-# The four differentiated outputs, in one place so the composite and the fallback
+# The five differentiated outputs, in one place so the composite and the fallback
 # cannot disagree about what they are. `collar` is psi* itself, which makes
 # dcollar/dtheta equal to dpsi*/dtheta -- so the two routes compute the same
 # quantity by different means, and a test can compare them.
-.gradient_output_names <- c("A", "gc", "psi_stem", "collar")
+#
+# ⚠️ APPENDING IS SAFE AND REORDERING IS NOT, for the reason `.gradient_par_names`
+# records: the C++ side keeps its own copy in `phylloptim::gradient::output_names`
+# and indexes these positions by integer.
+#
+# The first four are what a gas-exchange calibration OBSERVES. `profit` is here
+# because it is what plant CONSUMES -- `leaf.profit_`, not `assim_colimited_`, is
+# the carbon that reaches its mass budget -- and until #87 the two sets were
+# disjoint, so no gradient this package produced reached a demographic model at
+# all. See the envelope section of ?leaf_gradient for why it is also the cheapest
+# of the five.
+.gradient_output_names <- c("A", "gc", "psi_stem", "collar", "profit")
 
 # ⚠️ ONE call, not four field reads. Every `l$field` is an R6 ACTIVE BINDING -- a
 # closure call wrapping a `.Call` -- and this function runs once per perturbation, so

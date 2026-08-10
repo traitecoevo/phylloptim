@@ -370,7 +370,8 @@ test_that("the two non-trait parameters agree with a resolved reference", {
       a[[par]] <- value
     }
     x <- do.call(leaf_solve, a)
-    c(A = x$A, gc = x$gc, psi_stem = x$psi_stem, collar = x$collar)
+    c(A = x$A, gc = x$gc, psi_stem = x$psi_stem, collar = x$collar,
+      profit = x$profit)
   }
 
   g <- do.call(leaf_gradient,
@@ -495,16 +496,88 @@ test_that("leaf_gradient() rejects bad arguments", {
 
 test_that("the gradient is reported for every output the fit needs", {
   # leaf-calibration fits three responses -- A, gs and psi_leaf -- so all three
-  # are differentiated, not just A. `collar` comes along because it is psi*.
+  # are differentiated, not just A. `collar` comes along because it is psi*, and
+  # `profit` because it is what a DEMOGRAPHIC consumer bills: plant's carbon is
+  # `leaf.profit_`, not `assim_colimited_`, so without it the four columns above
+  # -- the calibration set -- were disjoint from plant's (#87).
   g <- grid_gradient(2.0, pars = "vcmax_25")
-  expect_identical(colnames(g$gradient), c("A", "gc", "psi_stem", "collar"))
-  expect_identical(names(g$value), c("A", "gc", "psi_stem", "collar"))
+  expect_identical(colnames(g$gradient),
+                   c("A", "gc", "psi_stem", "collar", "profit"))
+  expect_identical(names(g$value),
+                   c("A", "gc", "psi_stem", "collar", "profit"))
   expect_true(all(is.finite(g$gradient)))
   # Raising vcmax_25 raises assimilation and opens the stomata, and the leaf pays
   # for it with a more negative water potential (a larger positive magnitude).
   expect_gt(g$gradient["vcmax_25", "A"], 0)
   expect_gt(g$gradient["vcmax_25", "gc"], 0)
   expect_gt(g$gradient["vcmax_25", "psi_stem"], 0)
+  # More photosynthetic capacity is worth having: profit is A minus the hydraulic
+  # cost, and the extra carbon exceeds the extra cost. It is BELOW dA/dvcmax_25,
+  # which is the statement that the cost is not zero -- the cheapest available
+  # check that this column is the objective and not a copy of A.
+  expect_gt(g$gradient["vcmax_25", "profit"], 0)
+  expect_lt(g$gradient["vcmax_25", "profit"], g$gradient["vcmax_25", "A"])
+})
+
+test_that("profit's gradient is the direct term alone at an interior optimum", {
+  # The envelope theorem, which is the ONE place this package uses it. At an
+  # interior optimum dprofit/dpsi == 0, so the indirect term
+  # (dprofit/dpsi)(dpsi*/dtheta) vanishes IDENTICALLY, and dprofit/dtheta is the
+  # direct partial at fixed psi. `leaf_gradient()` encodes that by zeroing
+  # dY_dpsi["profit"], so the check is that the reported column equals a direct
+  # central difference with the collar HELD at psi*.
+  #
+  # ⚠️ THE OPERATING POINT IS CHOSEN, NOT ARBITRARY, and choosing it is what makes
+  # this a test rather than a formality. Zeroing only matters where the term it
+  # removes is big enough to see, and that term is NOISE rather than an h^2
+  # truncation: `profit` is the maximum, so it is flat, and a central difference
+  # of it divides the solve's ~1e-9 floor by a ~1e-6 step. Measured over the
+  # golden grid's 136 interior rows:
+  #
+  #   |dprofit/dpsi| exact (forward AD)   median 4.9e-15   max 5.4e-10
+  #   |dprofit/dpsi| central difference   median 7.8e-10   max 2.1e-04
+  #   relative move in dprofit/dtheta     median 3.3e-10   max 8.0e-05
+  #
+  # -- up to eleven orders between the two instruments. `psi_soil = 0.5,
+  # vpd = 2, 3 layers` is the worst of the 136 (8.0e-05), so a tolerance three
+  # orders inside it fails if the zeroing is removed. At the suite's usual
+  # `grid_drivers(2.0)` the same term is 2.9e-10 and this test would pass either
+  # way, which is the version of it that was written first.
+  d <- grid_drivers(0.5, vpd = 2.0, layers = 3L)
+  g <- do.call(leaf_gradient, c(d, list(pars = "vcmax_25")))
+  expect_identical(g$status, "interior")
+
+  l <- leaf_model(leaf_traits(), leaf_control(), leaf_supply_multilayer())
+  do.call(set_drivers, c(list(l), d))
+  l$find_root_collar_psi()
+  psi_star <- l$opt_root_psi_
+
+  # The two instruments, both read on a leaf still at base traits.
+  hp <- max(abs(psi_star), 1) * 1e-6
+  exact <- l$dprofit_droot_collar_psi(psi_star)
+  l$evaluate_root_collar_psi(psi_star + hp)
+  hi <- l$profit_
+  l$evaluate_root_collar_psi(psi_star - hp)
+  lo <- l$profit_
+  fd <- (hi - lo) / (2 * hp)
+  # The exact one says stationary to solver precision; the differenced one says
+  # nothing of the kind. Asserting BOTH is the point -- it is the difference
+  # between "the dropped term is small" and "the dropped term is unmeasurable by
+  # the route that would have supplied it".
+  expect_lt(abs(exact), 1e-12)
+  expect_gt(abs(fd), 1e-5)
+
+  # And now the answer itself, against a direct difference at fixed collar.
+  v <- leaf_traits()$vcmax_25
+  h <- max(abs(v), 1) * 1e-6
+  at <- function(x) {
+    set_traits(l, leaf_traits(vcmax_25 = x))
+    do.call(set_drivers, c(list(l), d))
+    l$evaluate_root_collar_psi(psi_star)
+    l$profit_
+  }
+  direct <- (at(v + h) - at(v - h)) / (2 * h)
+  expect_equal(g$gradient["vcmax_25", "profit"], direct, tolerance = 1e-7)
 })
 
 # ---------------------------------------------------------------------------

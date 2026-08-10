@@ -161,6 +161,50 @@ optimum, where real dark respiration rises. No value of the ratio repairs a func
 of the wrong shape — see the note in `update_temperature_dependent_params()`. And
 `rd_to_vcmax_ratio` is still not a `leaf_traits()` member, so it cannot yet be
 fitted or differentiated; it is set as a field.
+## The gradient differentiates `profit`, which is what a demographic caller bills
+
+`leaf_gradient()` and `leaf_gradient_batch()` return a fifth column. The four
+that were there — `A`, `gc`, `psi_stem`, `collar` — are what a gas-exchange
+calibration observes, and they were chosen for the customer this feature was
+built for. They are **disjoint** from what `plant` reads off a solved leaf: its
+carbon budget is `leaf.profit_` (not `assim_colimited_`) and its water budget is
+`leaf.soil_consumption_`. So no trait gradient this package produced reached a
+demographic model at all, at the optimum or anywhere else
+([#87](https://github.com/traitecoevo/phylloptim/issues/87)).
+
+⚠️ **`profit` is the one output the envelope theorem reaches, and the only place
+this package uses it.** At an interior optimum `dprofit/dpsi = 0`, so the
+indirect term `(dprofit/dpsi)(dpsi*/dtheta)` vanishes identically and
+`dprofit/dtheta` is the direct partial at fixed ψ — no `dY/dpsi`, no `−M/H`. It
+is set from that term rather than computed through the composite, exactly as
+`collar` is set from `dpsi*/dtheta` rather than differenced.
+
+**That is a numerical decision, not a tidiness one, and the measurement is the
+reason.** The dropped term is *noise*, not an `h²` truncation: `profit` is the
+maximum, so it is flat, and a central difference of it divides the solve's ~1e-09
+floor by a ~1e-06 step. Over the golden grid's 136 interior rows —
+
+| | median | max |
+|---|---|---|
+| `\|dprofit/dpsi\|`, exact (forward AD) | 4.9e-15 | 5.4e-10 |
+| `\|dprofit/dpsi\|`, central difference | 7.8e-10 | 2.1e-04 |
+| relative move in `dprofit/dtheta` if kept | 3.3e-10 | 8.0e-05 |
+
+— eleven orders between the two instruments at the median, and the worst row sits
+in the band this repo calls a real difference rather than rounding. The identity
+is applied only where `status == "interior"`; at a pinned optimum `psi*` is a
+trait-dependent bound, `dprofit/dpsi` is not zero, and `profit` takes the same
+finite-difference fallback as the other four.
+
+The four existing columns are **bit-identical** — this is additive, like
+appending to `gradient_par_names()`. `tests/testthat/gradient_golden.tsv` gains a
+column and no existing cell moved.
+
+⚠️ **`uptake` was considered and is not here.** Every output must be a field R
+*copies* out of `operating_point_values()`; `uptake` is one R *computes*, by
+summing over the finite soil layers, so adding it means reproducing that
+summation and its order on the C++ side too. That is a separate decision from
+this one.
 
 ## An out-of-domain transport lookup says which spline, and which caller
 
