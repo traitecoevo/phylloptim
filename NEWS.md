@@ -162,6 +162,72 @@ of the wrong shape — see the note in `update_temperature_dependent_params()`. 
 `rd_to_vcmax_ratio` is still not a `leaf_traits()` member, so it cannot yet be
 fitted or differentiated; it is set as a field.
 
+## A trait gradient at a collar potential the caller supplies
+
+`leaf_gradient()` and `leaf_gradient_batch()` take `psi`, and evaluate there
+instead of solving for the profit-maximising collar
+([#88](https://github.com/traitecoevo/phylloptim/issues/88)). Until now both
+called `find_root_collar_psi()` unconditionally and read `opt_root_psi_` back,
+so a model that **tracks** the optimum rather than finding it — plant's TF24f
+carries the collar as an ODE state, `dpsi/dt = k * dprofit/dpsi` — could not ask
+this package for a trait gradient at the point it was actually operating at. It
+got a confident answer about the re-solved optimum instead, with nothing saying
+so.
+
+The maths simplifies rather than breaks: `psi` is exogenous, so the indirect term
+is whatever the caller says it is, via `dpsi_dtheta` (default zero, the partial
+at fixed collar). Nothing is derived from `-M/H`, so nothing needs stationarity,
+and `method` is refused — the two routes it chooses between are both about a
+solved optimum.
+
+`M`, `H`, `dY_dpsi` and `psi` now come back in the result on both paths. A caller
+whose `psi` is *dynamic* cannot supply `dpsi_dtheta` as a constant: for the
+gradient-ascent law above it obeys `ds/dt = k(M + H s)`, and those are its
+coefficients (traitecoevo/plant#614).
+
+⚠️ **`stationarity` is still computed on the prescribed path, and now means
+something better.** It no longer routes anything — it measures how far the collar
+you supplied sits from the optimum. It makes exactly one decision, `profit`'s:
+at a stationary point the envelope theorem applies and the analytic zero is used;
+away from one the *exact* `dprofit/dpsi` is used rather than a difference of it.
+One rule, both paths — which is why `psi = <the solved psi*>` with
+`dpsi_dtheta = -M/H` reproduces the solving path **bit-for-bit**, asserted with
+`identical()` rather than a tolerance.
+
+⚠️ **A clamped `psi` returns no gradient, and this is the case to understand.**
+The collar actually used is `psi` clamped into the feasible interval, so it moves
+with the *bound* rather than with `dpsi_dtheta` — the active-set problem arriving
+through the clamp instead of through the optimiser, where the direct term alone
+is plausible and wrong. `status` reports `"clamped"`, the gradient is `NA`, and
+`psi` in the result is the collar that was used. Reported rather than thrown
+because a tracking model reaches these points routinely: the clamp is how TF24f
+pulls an out-of-range state back inside. It also fires for a `psi` within one
+step of an end, where `dY/dpsi` cannot be centred.
+
+The solving path is unchanged and bit-identical, including `gradient_golden.tsv`.
+
+⚠️ **An INFEASIBLE prescribed `psi` is `"no-gradient"`, not a sentinel zero.**
+`dprofit_droot_collar_psi` returns a hard `0.0` on its shut-down and
+reversed-gradient exits, and a bare zero is indistinguishable from a stationary
+point. The solving path got away with reading the value alone because `H`
+collapses to zero with it and `usable` catches the pair; the prescribed path
+never divides by `H`, so it would have adopted the sentinel *as* `dprofit/dpsi`
+— silently losing profit's indirect term at exactly the dry points a tracking
+model lives in. Most such points are caught as `"clamped"` first, but not the one
+where the caller hands back the collar the shut-down state itself seated.
+
+**`Leaf$dprofit_droot_collar_psi_checked()` is new and is what makes that
+possible.** The `bool* feasible` out-parameter has been there since #79 and the
+C++ vignette has always said a composite ignoring it inherits the bug — but
+RcppR6 has no form for a `bool*`, so the generated binding dropped it and every
+R-side composite *was* that composite. It returns `{dprofit, feasible}`.
+
+C++ consumers get the same through `gradient::Prescribed` and the new
+`psi`/`dpsi_dtheta` arguments to `gradient::batch`. `Status` gains `Prescribed`
+and `Clamped` — ⚠️ **appended after `Error`, so no existing integer value
+moves**, and `status_name`'s switch is exhaustive with no `default:` so the next
+member added is a compiler diagnostic rather than a silent `"error"` label.
+
 ## The gradient differentiates `profit`, which is what a demographic caller bills
 
 `leaf_gradient()` and `leaf_gradient_batch()` return a fifth column. The four

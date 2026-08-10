@@ -548,3 +548,98 @@ test_that("a batch that has lost its C++ pointer says so rather than crashing", 
   # dereferencing a double as a pointer is not an error the session survives.
   expect_error(phylloptim:::gradient_batch_check(1.0), "not a prepared batch")
 })
+
+# --- a collar potential the caller supplies (#88) -----------------------------
+
+test_that("the batch's prescribed psi agrees with leaf_gradient(), bit-for-bit", {
+  # The batch is a transcription and has to stay one, so the assertion is the
+  # same one the solving path gets: equality with the R reference, not agreement
+  # to a tolerance. Both routes of the new path are covered -- the collar it
+  # solved for handed back (which must reproduce the solve), and a collar
+  # deliberately off it.
+  pars <- c("vcmax_25", "stem_b", "cost_scale_TF24")
+  soils <- c(1.0, 2.0, 3.0)
+  b <- leaf_batch(psi_soil = soils, PPFD = 900)
+  a <- leaf_gradient_batch(b, pars = pars)
+  expect_true(all(a$status == "interior"))
+
+  g <- leaf_gradient_batch(b, pars = pars, psi = a$psi,
+                           dpsi_dtheta = -a$M / a$H)
+  expect_true(all(g$status == "prescribed"))
+  expect_true(all(g$method == "prescribed"))
+  expect_identical(g$gradient, a$gradient)
+  expect_identical(g$M, a$M)
+  expect_identical(g$dY_dpsi, a$dY_dpsi)
+
+  off <- a$psi + 0.2
+  h <- leaf_gradient_batch(b, pars = pars, psi = off)
+  for (i in seq_along(soils)) {
+    r <- leaf_gradient(psi_soil = soils[[i]], PPFD = 900, pars = pars,
+                       psi = off[[i]])
+    expect_identical(as.vector(h$gradient[i, , ]), as.vector(r$gradient),
+                     label = paste("row", i))
+    expect_identical(as.vector(h$M[i, ]), unname(r$M), label = paste("M", i))
+    expect_identical(as.vector(h$dY_dpsi[i, ]), unname(r$dY_dpsi),
+                     label = paste("dY_dpsi", i))
+    expect_identical(h$psi[[i]], r$psi)
+  }
+})
+
+test_that("a clamped row costs that row and not the batch", {
+  # The same per-row discipline `status == "error"` has, for a case that is not
+  # an error: a tracking model will hand over collar potentials that have drifted
+  # outside the feasible interval, and taking out the whole likelihood evaluation
+  # for one of them would take out the draw.
+  pars <- c("vcmax_25", "stem_b")
+  soils <- c(1.0, 2.0, 3.0)
+  b <- leaf_batch(psi_soil = soils, PPFD = 900)
+  a <- leaf_gradient_batch(b, pars = pars)
+
+  g <- leaf_gradient_batch(b, pars = pars, psi = c(99, a$psi[2:3]))
+  expect_identical(g$status, c("clamped", "prescribed", "prescribed"))
+  expect_true(all(is.na(g$gradient[1, , ])))
+  expect_true(all(is.na(g$M[1, ])))
+  # The clamped row still says where it was pulled to, and the rows either side
+  # are BIT-IDENTICAL to being asked alone -- the leaf must not carry the clamped
+  # row's state into its neighbours.
+  expect_lt(g$psi[[1]], 99)
+  expect_true(all(is.finite(g$value[1, ])))
+  for (i in 2:3) {
+    solo <- leaf_gradient_batch(leaf_batch(psi_soil = soils[[i]], PPFD = 900),
+                                pars = pars, psi = a$psi[[i]])
+    expect_identical(as.vector(g$gradient[i, , ]),
+                     as.vector(solo$gradient[1, , ]),
+                     label = paste("row", i))
+  }
+})
+
+test_that("the batch validates psi and dpsi_dtheta by shape", {
+  pars <- c("vcmax_25", "stem_b")
+  b <- leaf_batch(psi_soil = c(1.0, 2.0, 3.0), PPFD = 900)
+  expect_error(leaf_gradient_batch(b, pars = pars, psi = 2.0),
+               "one collar potential per observation")
+  expect_error(leaf_gradient_batch(b, pars = pars, psi = rep(-1, 3)),
+               "finite and positive")
+  expect_error(leaf_gradient_batch(b, pars = pars, psi = rep(2, 3),
+                                   method = "fd"),
+               "cannot be given with `psi`")
+  expect_error(leaf_gradient_batch(b, pars = pars, dpsi_dtheta = c(1, 2)),
+               "needs `psi`")
+  expect_error(leaf_gradient_batch(b, pars = pars, psi = rep(2, 3),
+                                   dpsi_dtheta = matrix(0, 2, 2)),
+               "3 x 2")
+
+  # A vector is one value per parameter, shared by every observation -- and it
+  # must equal the matrix that spells that out, or the recycling is wrong. Each
+  # row is given its OWN psi* so none of them clamps; a shared psi across three
+  # soil potentials would, and then the columns compared here would be NA.
+  psi <- leaf_gradient_batch(b, pars = pars)$psi
+  shared <- leaf_gradient_batch(b, pars = pars, psi = psi,
+                                dpsi_dtheta = c(0.1, 0.2))
+  spelt <- leaf_gradient_batch(b, pars = pars, psi = psi,
+                               dpsi_dtheta = matrix(c(0.1, 0.1, 0.1,
+                                                      0.2, 0.2, 0.2), 3, 2))
+  expect_identical(shared$gradient, spelt$gradient)
+  expect_identical(unname(shared$gradient[, , "collar"]),
+                   matrix(c(0.1, 0.1, 0.1, 0.2, 0.2, 0.2), 3, 2))
+})

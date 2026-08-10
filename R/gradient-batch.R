@@ -187,6 +187,16 @@ print.leaf_batch <- function(x, ...) {
 ##' [leaf_batch()]. One crossing of the R boundary per call, in place of 112 per
 ##' observation.
 ##'
+##' @param psi one collar water potential per observation to evaluate at
+##'   (positive magnitudes, MPa) instead of solving for the profit-maximising
+##'   one. See [leaf_gradient()]'s section on it. Recycling a single value across
+##'   the batch is deliberately not offered — rows sharing an imposed collar is a
+##'   coincidence rather than a design, and broadcasting one would make a length
+##'   mismatch look intentional.
+##' @param dpsi_dtheta how each prescribed `psi` responds to each parameter:
+##'   an `n` × `length(pars)` matrix, or one vector of `length(pars)` shared by
+##'   every observation. Defaults to zero. Only meaningful with `psi`.
+##'
 ##' @section What it computes, and where the maths is written down:
 ##' The same five derivatives at the same solved operating point, by the same two
 ##' routes, with the same active-set test deciding between them. **Read
@@ -242,10 +252,15 @@ print.leaf_batch <- function(x, ...) {
 ##'     \item{`gradient`}{an `n` × `length(pars)` × 5 array, the last dimension
 ##'       being `A`, `gc`, `psi_stem`, `collar` and `profit`}
 ##'     \item{`value`}{an `n` × 5 matrix of the solved outputs}
-##'     \item{`method`}{`"ift"` or `"fd"` per observation}
-##'     \item{`status`}{`"interior"`, `"pinned"`, `"no-gradient"` or `"error"`}
+##'     \item{`method`}{`"ift"`, `"fd"` or `"prescribed"` per observation}
+##'     \item{`status`}{`"interior"`, `"pinned"`, `"no-gradient"`, `"error"`,
+##'       or with `psi` one of `"prescribed"`, `"clamped"`, `"no-gradient"`}
 ##'     \item{`H`, `stationarity`}{the curvature and the implied Newton step
 ##'       `method` was decided on, per observation}
+##'     \item{`M`}{an `n` × `length(pars)` matrix of mixed partials
+##'       `d2profit/dpsi dtheta`}
+##'     \item{`dY_dpsi`}{an `n` × 5 matrix of `dY/dpsi` at fixed traits}
+##'     \item{`psi`}{the collar each row was evaluated at}
 ##'     \item{`message`}{`""`, or why that row failed}
 ##'   }
 ##'
@@ -261,6 +276,8 @@ leaf_gradient_batch <- function(batch,
                                 traits = NULL,
                                 pars = NULL,
                                 theta = NULL,
+                                psi = NULL,
+                                dpsi_dtheta = NULL,
                                 step = 1e-6,
                                 stationarity_tol = 1e-8,
                                 method = c("auto", "ift", "fd"),
@@ -310,16 +327,88 @@ leaf_gradient_batch <- function(batch,
     theta <- .gradient_check_theta(theta, batch, par_names)
   }
 
+  psi <- .gradient_check_psi_batch(psi, batch$n, method)
+  dpsi_dtheta <- .gradient_dpsi_dtheta_batch(dpsi_dtheta, pars, batch$n,
+                                             !is.null(psi))
+
   res <- gradient_batch_run(batch$leaf, batch$drivers, theta,
                             match(pars, par_names) - 1L, step,
-                            stationarity_tol, method, fast_stem_curve)
+                            stationarity_tol, method, fast_stem_curve,
+                            psi, dpsi_dtheta)
 
   dimnames(res$gradient) <- list(NULL, pars, .gradient_output_names())
   dimnames(res$value) <- list(NULL, .gradient_output_names())
+  dimnames(res$M) <- list(NULL, pars)
+  dimnames(res$dY_dpsi) <- list(NULL, .gradient_output_names())
   res
 }
 
 # --- internals ---------------------------------------------------------------
+
+# The batch counterparts of `.gradient_check_psi()` and
+# `.gradient_dpsi_dtheta()`: one collar potential per observation, and one
+# dpsi/dtheta per observation per parameter. Recycling a length-1 `psi` across a
+# batch is deliberately NOT offered -- a batch whose rows share an imposed collar
+# is a coincidence rather than a design, and silently broadcasting one would make
+# a length mismatch look intentional.
+.gradient_check_psi_batch <- function(psi, n, method) {
+  if (is.null(psi)) {
+    return(NULL)
+  }
+  if (!identical(method, "auto")) {
+    stop("`method` cannot be given with `psi`; see ?leaf_gradient.",
+         call. = FALSE)
+  }
+  if (!(is.numeric(psi) && length(psi) == n)) {
+    stop("`psi` must be one collar potential per observation (", n,
+         " for this batch); got ", length(psi), call. = FALSE)
+  }
+  if (!all(is.finite(psi) & psi > 0)) {
+    stop("`psi` must be finite and positive: it is a collar water potential ",
+         "in MPa, as a positive magnitude.", call. = FALSE)
+  }
+  as.numeric(psi)
+}
+
+.gradient_dpsi_dtheta_batch <- function(dpsi_dtheta, pars, n, prescribed) {
+  if (is.null(dpsi_dtheta)) {
+    # NULL is zero on the C++ side, so nothing is allocated for the common case
+    # of a partial derivative at fixed collar.
+    return(NULL)
+  }
+  if (!prescribed) {
+    stop("`dpsi_dtheta` is the trait response of a collar potential YOU ",
+         "imposed, so it needs `psi`.", call. = FALSE)
+  }
+  if (!is.numeric(dpsi_dtheta) || anyNA(dpsi_dtheta)) {
+    stop("`dpsi_dtheta` must be numeric and free of NA", call. = FALSE)
+  }
+  if (is.null(dim(dpsi_dtheta))) {
+    if (length(dpsi_dtheta) != length(pars)) {
+      stop("`dpsi_dtheta` as a vector is one value per parameter (",
+           length(pars), "), shared by every observation; got ",
+           length(dpsi_dtheta), ". Pass an ", n, " x ", length(pars),
+           " matrix to vary it by observation.", call. = FALSE)
+    }
+    if (!is.null(names(dpsi_dtheta))) {
+      dpsi_dtheta <- .gradient_dpsi_dtheta(dpsi_dtheta, pars, TRUE)
+    }
+    return(matrix(dpsi_dtheta, nrow = n, ncol = length(pars), byrow = TRUE))
+  }
+  if (!identical(dim(dpsi_dtheta), c(n, length(pars)))) {
+    stop("`dpsi_dtheta` must be ", n, " x ", length(pars),
+         " (observations x `pars`); got ",
+         paste(dim(dpsi_dtheta), collapse = " x "), call. = FALSE)
+  }
+  if (!is.null(colnames(dpsi_dtheta))) {
+    if (!setequal(colnames(dpsi_dtheta), pars)) {
+      stop("`dpsi_dtheta` has column names, so they must be exactly `pars`.",
+           call. = FALSE)
+    }
+    dpsi_dtheta <- dpsi_dtheta[, pars, drop = FALSE]
+  }
+  matrix(as.numeric(dpsi_dtheta), nrow = n, ncol = length(pars))
+}
 
 # `theta` from a leaf_traits() plus the batch's own conductance and resistance.
 # The counterpart of `.gradient_theta()`, which builds the same vector for one
