@@ -561,6 +561,15 @@ A study that wants respiration to track Vcmax should say so in its own
 parameterisation — plant's `TF24_hyperpar` is where every other derived parameter is
 computed.
 
+**How that A/B was run**, since `compare_with_plant.R` cannot do it (below) and there
+is no harness for it: install phylloptim twice (`origin/master` and the branch) into
+separate libraries, then install plant twice from a **clean** source copy each time
+with `R_LIBS` pointing at one phylloptim library and the site library — a stale
+`src/*.o` would silently give you the other arm — and run the same script under each,
+with `leaf_temp` and `vcmax_25` varied. ⚠️ Print and CHECK `find.package()` for both
+packages in the script: `R_LIBS` falls back to the site build without a word, which
+happened here and produced a plausible file describing the wrong package.
+
 ⚠️ **The golden file was blind to all of this** — 288 points at one temperature, where
 every reference value is defined. It now carries a 40 °C block as well.
 
