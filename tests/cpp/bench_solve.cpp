@@ -8,9 +8,16 @@
 // kept because the question recurs (issue #3 asks the same thing about lambda,
 // and gets a different answer).
 //
-// Workload is the golden-file grid: 288 operating points over psi_soil, PPFD,
-// VPD and 1/3/5 soil layers, i.e. the same state space the regression baseline
-// covers, shutdown corner included.
+// Workload is 288 operating points over psi_soil, PPFD, VPD and 1/3/5 soil layers,
+// all at a leaf temperature of 25 C, shutdown corner included.
+//
+// ⚠️ That WAS the golden-file grid and is now a subset of it: #41 gave the golden
+// grid a temperature axis (4 temperatures, 1152 points) and this harness
+// deliberately did not follow. A timing baseline is only useful against its own
+// history -- tools/cost-baseline.tsv and tools/bench_history.sh compare across
+// commits -- and quadrupling the workload would end that history to measure nothing
+// new about the solve. If a temperature-dependent cost ever needs measuring, add a
+// second workload rather than growing this one.
 //
 // Reports min-of-N, not mean. This is a deterministic computation on a noisy
 // machine, so the minimum is the least-contaminated estimate of its cost; the

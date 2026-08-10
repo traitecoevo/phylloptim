@@ -1,5 +1,57 @@
 # phylloptim 0.2.1
 
+## The golden grid has a temperature axis: 288 points become 1152 (#41)
+
+⚠️ **The golden file was blind to every temperature response in the model, and had
+been all along.** Its grid was 6 ψ_soil × 4 PPFD × 4 VPD × 3 layer counts, **all at
+a leaf temperature of 25 °C** — and the reference values of Vcmax, Jmax and R_d are
+*defined* at 25 °C, so a change to any response curve is inert there **by
+construction**. #41 changed R_d's shape at every temperature except 25 °C and this
+file did not move a bit. The same blindness covered the thirteen temperature-response
+parameters bound just before it.
+
+The grid is now that same state space at **15 / 25 / 35 / 40 °C** — 1152 rows, with a
+`leaf_temp` column. 40 °C is in the list deliberately: it is where the response bites
+hardest, and the extra shut-down rows at the hot end pin the temperature at which the
+model stops having an operating point, which is a limit that moved in #41.
+
+**Regenerated deliberately, and the regeneration is checkable as an ADDITION rather
+than taken on trust.** Temperature is the OUTERMOST loop, so the file is four
+contiguous copies of the original grid, and the 25 °C block is **byte-identical** to
+the pre-#41 file in all nine output columns. Nothing moved; 864 rows were added.
+
+**The classification is now counted per temperature, and it moves:**
+
+| T | interior | pinned wet | pinned dry | shutdown |
+|---|---|---|---|---|
+| 15 °C | 198 | 24 | 18 | 48 |
+| 25 °C | 198 | 24 | 18 | 48 |
+| 35 °C | 194 | 43 | 3 | 48 |
+| 40 °C | 160 | 80 | 0 | 48 |
+
+A single total would have let points move between branches and still add up. The
+direction is physical: a hot leaf assimilates less and respires more, so it has less
+to gain from water and its optimum presses against the **wet** bound instead of the
+dry one. The 48 shut-down rows are temperature-*independent*, which is also right —
+those are the ψ_soil = 6 MPa rows, where hydraulics forbid transpiration whatever the
+temperature.
+
+Two things the hot end does **not** reach, recorded so the zeros are not read as
+coverage: `shade-death` (that is reached by light, not by heat) and the
+compensation-point exit, which needs about 45 °C at the defaults.
+`test_rd_temperature_response` covers the latter.
+
+`tests/cpp/bench_solve.cpp` deliberately did **not** follow. A timing baseline is
+only useful against its own history — `tools/cost-baseline.tsv` and
+`tools/bench_history.sh` compare across commits — so quadrupling its workload would
+end that history to measure nothing new about the solve. Its comment no longer claims
+to cover the same state space as the baseline.
+
+`tests/validate/compare_with_plant.R` mirrors the grid, so it gained the axis too.
+⚠️ At 15 / 35 / 40 °C phylloptim and a pre-#41 plant are *expected* to differ, since
+R_d's shape changed; `rd_tracks_vcmax_` is what makes that arm comparable.
+
+
 ## An escape hatch back to the pre-#41 respiration shape (#41)
 
 `rd_tracks_vcmax_` makes `R_d` be `rd_to_vcmax_ratio_ * vcmax_(T)` again — Vcmax's

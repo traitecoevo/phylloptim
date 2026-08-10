@@ -779,7 +779,7 @@ void test_collar_solve_handles_a_pinned_optimum() {
 // bit-identical golden run says nothing here. The sequence below alternates kinds
 // on purpose, so an unwritten tag reads as the step before it.
 //
-// The count check over the whole 288-point grid lives in test_golden.cpp; this is
+// The count check over the whole 1152-point grid lives in test_golden.cpp; this is
 // the other half -- that every path writes, and that the tag comes from the
 // branch rather than from the numbers.
 void test_operating_point_kind_is_written_by_every_path() {

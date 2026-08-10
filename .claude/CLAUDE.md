@@ -72,7 +72,8 @@ tests/cpp/                     plain-C++ suite, no R, no framework
 tests/cpp/root_network.hpp     the suite's root-architecture fixture: the two
                                ex-Leaf-default beta_R_* constants, in ONE place
                                because the golden file's bit-exactness depends on them
-tests/cpp/golden/              bit-exact regression baseline, 288 operating points
+tests/cpp/golden/              bit-exact regression baseline, 1152 operating points
+                               -- the 288-point state grid at 4 leaf temperatures
 tests/cpp/bench_solve.cpp      timing harness for the collar solve (hazard 5)
 tests/cpp/bench_gradient.cpp   timing harness for a TRAIT GRADIENT: the IFT
                                composite against differencing the solve, with
@@ -276,12 +277,23 @@ while looking like history. Two rows were produced that way before it was notice
 
 ## The golden file is the safety net — treat it that way
 
-`tests/cpp/golden/operating_points.tsv` records 288 operating points and is
+`tests/cpp/golden/operating_points.tsv` records 1152 operating points and is
 compared **bit-exactly** (`%.17g` round-trips a double). It is what makes a large
 refactor of this code checkable rather than hopeful, and it earned that role
 repeatedly: it proved three "surely dead" `set_physiology` arguments really were
 dead, confined the shutdown fix to exactly 48 rows × 5 fields, and showed the
 `area_leaf` change was 2 ULP.
+
+⚠️ **It was 288 points until #41, all at one leaf temperature, and that made it
+blind to every temperature response in the model.** The reference values of Vcmax,
+Jmax and R_d are *defined* at 25 °C, so a change to any response curve is inert
+there **by construction** — #41 changed R_d's shape at every temperature except
+25 °C and the file did not move a bit. It is now the same 288-point state grid at
+15 / 25 / 35 / 40 °C, with temperature as the OUTERMOST loop so the 25 °C block
+stayed byte-identical through the regeneration. Read a bit-identical run
+accordingly: it is evidence about the temperature responses now and it was not
+before — and the classification it prints is per temperature, because points move
+between branches as the leaf warms (dry-pinned 18 → 0, wet-pinned 24 → 80).
 
 **Only run `make golden` deliberately.** Running it after an accidental change
 rubber-stamps the change. If a diff is intended, regenerate and say so in the

@@ -1065,7 +1065,8 @@ public:
     // operating point in this state reads NA sentinels.
     Unsolved,
     // Interior profit maximum: dprofit == 0 was solved for, strictly inside the
-    // feasible collar interval. 198 of the 288 golden grid points.
+    // feasible collar interval. 198 of the 288 golden grid points at 25 C -- 160 of
+    // them at 40 C, where the optimum presses against the WET bound instead.
     Interior,
     // Constrained optimum pinned at the WET end of the feasible interval, just
     // inside root_zero_E (the collar at which uptake is exactly zero). profit is
@@ -1082,7 +1083,8 @@ public:
     // Shutdown on water: no collar potential both moves water and stays inside
     // the stem's and the root's critical potentials. The stem holds at psi_crit,
     // transpiration is zero, and the leaf pays respiration plus the hydraulic
-    // cost there. 48 of the 288 golden grid points. The water response is zero;
+    // cost there. 48 of the 288 golden grid points at every temperature, since it is
+    // hydraulics rather than heat that forbids transpiration. The water response is zero;
     // the carbon response is not.
     HydraulicShutdown,
     // Shutdown on light: assim_max_ < 0, so gross assimilation at ci = ca cannot
