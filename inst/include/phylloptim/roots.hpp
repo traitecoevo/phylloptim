@@ -282,8 +282,8 @@ public:
   // two answers differ because the two limits do. Both are applied by the
   // accessors below, which are the only way the rest of this class reads a curve.
   // Issue #1 measured what taking odelia's extrapolant unexamined cost instead: a
-  // conductivity that turns negative past 7.31 MPa, and an integral 4x its own
-  // limit at 1000 MPa.
+  // conductivity that turns negative past 7.3742 MPa, and an integral 4.35x its
+  // own limit at 1000 MPa.
   void setup_vulnerability(double resolution) {
     std::vector<double> x_psi_root, y_integral;
     cumulative_vulnerability_integral(root_b, root_c, resolution, x_psi_root,
@@ -303,9 +303,13 @@ public:
 
     // Integral: extrapolation stays ON, under a ceiling. Its limit is finite and
     // non-zero, and the end-knot polynomial tracks the true G closely over the
-    // half-MPa it takes to reach that limit (3.46212 against 3.4624 at 7 MPa), so
+    // half-MPa it takes to reach that limit (3.46212 against 3.46176 at 7 MPa), so
     // capping the VALUE is both smooth and tighter than clamping the argument
     // would be. root_vuln_integral_at applies the cap.
+    //
+    // Do not set this false "to match" the conductivity spline: odelia's deriv()
+    // has no extrapolation check where eval() does, so eval would throw while
+    // deriv went on extrapolating.
     root_vuln_integral_from_psi.init(x_psi_root, y_integral);
     root_vuln_integral_from_psi.set_extrapolate(true);
 
@@ -318,19 +322,22 @@ public:
         cumulative_vulnerability_integral_limit(root_b, root_c);
   }
 
-  // f_r at a suction, with the argument clamped to the last knot. Conductivity
-  // there is ~1% and falling to zero, so holding the last knot's value is the
-  // bounded reading of "as embolised as this curve describes" -- and unlike the
-  // extrapolant it cannot change sign. This is the clamp the comment on the
-  // set_extrapolate call used to claim and did not have.
+  // f_r at a suction, clamped into the knot domain -- set_extrapolate(false)
+  // throws at both ends, and the last knot's ~1% is the driest conductivity this
+  // curve describes.
+  //
+  // Operand order is load-bearing: written this way both clamps return psi when
+  // psi is NaN, where the reversed forms return the bound. The uptake call site's
+  // !isfinite(f_ri) guard is what reads that NaN.
   double root_vuln_at(double psi) const {
-    return root_vuln_from_psi.eval(std::min(psi, root_vuln_last_knot_));
+    return root_vuln_from_psi.eval(
+        std::max(std::min(psi, root_vuln_last_knot_), 0.0));
   }
 
   // G at a suction, with the closed-form limit G(inf) = (b/c)*Gamma(1/c) as a
   // ceiling. The spline sits below that ceiling at every knot (99.83% of it at
   // the last), so this is continuous, monotone, and identical to a bare eval
-  // everywhere on the grid: it binds only past 7.31 MPa, where the end-knot
+  // everywhere on the grid: it binds only past 7.3132 MPa, where the end-knot
   // polynomial would otherwise carry on accumulating for ever.
   //
   // WHY IT MATTERS: the general branch of uptake_impl forms the layer's mean
@@ -717,11 +724,15 @@ private:
 
     // span = T_src_max - T_src_min > 0 here (the equal-potentials case is
     // handled in the branch above). integral comes from the monotone-increasing
-    // cumulative-vulnerability spline so it is strictly > 0 over a span>0
-    // interval; forming r_R_H as r_R_H_min * span / integral is one division
-    // (vs the old f_r_average = integral/span then r_R_H_min/f_r_average two),
-    // and needs no per-layer finiteness guard (any stray NaN/Inf propagates to
-    // the post-loop isfinite(E_up) net).
+    // cumulative-vulnerability curve so it is > 0 over a span>0 interval;
+    // forming r_R_H as r_R_H_min * span / integral is one division (vs the old
+    // f_r_average = integral/span then r_R_H_min/f_r_average two), and needs no
+    // per-layer finiteness guard (any stray NaN/Inf propagates to the post-loop
+    // isfinite(E_up) net).
+    //
+    // The exception, since the cap: with BOTH bounds past 7.3132 MPa the integral
+    // is exactly 0 and r_R_H +Inf. E_i is then -0 and duptake_dpsi NaN, which its
+    // caller reads as "use central differences".
     const double span = T_src_max - T_src_min;
 
     // Find the horizantal resistance in a given layer by dividing the minimum resistance (i.e. maximum conductivity) by the fractional loss of conductivity

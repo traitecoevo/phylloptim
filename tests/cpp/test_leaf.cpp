@@ -724,7 +724,7 @@ void test_soil_conductance_is_positive() {
 // Issue #1: the two root vulnerability curves stop at the 1%-conductivity point,
 // and a soil layer drier than that is an ordinary state -- plant's soil potential
 // is capped at 1000 MPa, the grid at 6.82. Taken as odelia extrapolants the
-// conductivity curve crossed zero at 7.31 MPa (-20 at 1000) and the cumulative
+// conductivity curve crossed zero at 7.3742 MPa (-20.35 at 1000) and the cumulative
 // integral kept accumulating past a limit it had already reached, which made the
 // per-layer mean resistance r_R_H = r_R_H_min * span / integral FALL as the layer
 // dried: measured on the fixture below, a reverse flux 5.70x its bound.
@@ -765,6 +765,7 @@ void test_root_vulnerability_is_bounded_past_its_grid() {
   }
   near(r.root_vuln_integral_at(1000.0), G_inf, 1e-12,
        "G saturates at its closed form (b/c)*Gamma(1/c)");
+
   // dG/dpsi has to agree with that: zero where the value is pinned, f_r where
   // it is not. duptake_dpsi differentiates the integral through this.
   ok(r.root_vuln_integral_deriv_at(1000.0) == 0.0,
@@ -772,6 +773,13 @@ void test_root_vulnerability_is_bounded_past_its_grid() {
   near(r.root_vuln_integral_deriv_at(4.0),
        std::exp(-std::pow(4.0 / r.root_b, r.root_c)), 1e-4,
        "dG/dpsi is f_r inside the grid");
+
+  // The wet end throws too, and MultiLayerRoots validates nothing it is handed.
+  // NaN has to come back out for the caller's !isfinite(f_ri) guard to read it.
+  ok(r.root_vuln_at(-0.5) == r.root_vuln_at(0.0),
+     "a negative suction reads as the wet end");
+  ok(std::isnan(r.root_vuln_at(std::numeric_limits<double>::quiet_NaN())),
+     "and a NaN suction survives both clamps");
 
   // The live consequence. One rooted layer, unit horizontal resistance and no
   // vertical resistance, collar held at 1 MPa: the layer is drier, so it GAINS
@@ -799,8 +807,9 @@ void test_root_vulnerability_is_bounded_past_its_grid() {
            std::to_string(psi_soil));
     (psi_soil > 500.0 ? E_at_1000 : E_at_100) = E_i;
   }
-  // A tenfold drier layer must not pump ten times harder. Before the fix these
-  // two differed by 3.96x (-3.557 against -14.085).
+  // A tenfold drier layer must not pump ten times harder. The 1.10e-4 between
+  // them is gravitational head: integral * gravity_head * z_mid * (1/99 - 1/999),
+  // the layer midpoint being 0.5 m.
   near(E_at_1000, E_at_100, 1e-3,
        "a tenfold drier layer does not become a stronger pump");
 }
