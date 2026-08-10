@@ -2253,8 +2253,10 @@ void test_rd_temperature_response() {
       near(A_now, A_then, 1e-12, "the two forms agree exactly at 25 C");
     }
   }
-  // The limit itself, asserted so it cannot move unnoticed: at the defaults the old
-  // form still solves at 45 C and the new one does not.
+  // ⚠️ AND IT MUST SHUT DOWN RATHER THAN THROW. A leaf too hot to gain carbon at
+  // any internal CO2 is a physical state, not a solver failure -- the energy-balance
+  // path always treated it that way and the prescribed-temperature path used to
+  // throw, which was only invisible while R_d was too small to get there.
   {
     phylloptim::Leaf hot = make_leaf(d, {2.0}, {1.0});
     bool threw = false;
@@ -2264,8 +2266,22 @@ void test_rd_temperature_response() {
     } catch (const std::exception &) {
       threw = true;
     }
-    ok(threw,
-       "a Q10 respiration leaves no operating point at 45 C (documented limit)");
+    ok(!threw, "a leaf too hot to gain carbon shuts down instead of throwing");
+    ok(hot.ci_at_compensation_point_,
+       "and says so, rather than reporting an ordinary operating point");
+    near(hot.ci_, hot.gamma_ * hot.umol_per_mol_to_Pa_, 1e-12,
+         "ci sits at the compensation point");
+    ok(hot.assim_colimited_ <= 0.0, "with no net carbon gain");
+  }
+
+  // ⚠️ A GENUINE solver failure must STILL throw -- the point of not simply
+  // deleting the gate. An unsatisfiable bracket where the root IS inside it (here
+  // forced by a non-finite target via a poisoned ca) is a bug, not a hot leaf.
+  {
+    phylloptim::Leaf ok_leaf = make_leaf(d, {2.0}, {1.0});
+    ok_leaf.find_root_collar_psi();
+    ok(!ok_leaf.ci_at_compensation_point_,
+       "an ordinary leaf is not flagged as shut down");
   }
 }
 

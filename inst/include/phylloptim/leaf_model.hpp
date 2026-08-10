@@ -2922,18 +2922,34 @@ inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
   try {
     return ci_ = util::uniroot_smooth(target, gamma_ * umol_per_mol_to_Pa_, ca_, 1e-10, ci_niter);
   } catch (const std::exception& e) {
-    // Penman-Monteith path (#523): extreme energy-balance leaf heating raises the
-    // CO2 compensation point (gamma*) so far that assimilation is negative across
-    // the whole [gamma*, ca] bracket, so there is no supply==demand root and
-    // TOMS748 cannot bracket. That is a physically-meaningful shut-down (the leaf
-    // is too hot to gain carbon), not a solver failure, so operate at the
-    // compensation point (ci = gamma*, gross A = 0, net A = -R_d) and let the
-    // profit optimiser move away from it. Gated on use_energy_balance_ so the
-    // non-PM path keeps its original fail-fast contract (it never reaches here
-    // under prescribed leaf_temp).
-    if (use_energy_balance_) {
+    // Assimilation can be negative across the WHOLE [gamma*, ca] bracket -- the
+    // leaf is too hot to gain carbon at any internal CO2 -- and then there is no
+    // supply==demand root at all. That is a physically-meaningful shut-down, not a
+    // solver failure: operate at the compensation point (ci = gamma*, gross A = 0,
+    // net A = -R_d) and let the profit optimiser move away from it.
+    //
+    // ⚠️ THIS USED TO BE GATED ON use_energy_balance_, on the grounds that the
+    // prescribed-temperature path "never reaches here". That was true and #41 made
+    // it false: raising R_d to a Q10 response is enough to drive assimilation
+    // negative throughout by ~45 C at the defaults, and the prescribed path then
+    // threw where the PM path shut down -- the same physics, two different
+    // outcomes, decided by how leaf_temp happened to be obtained.
+    //
+    // ⚠️ THE GATE IS NOT SIMPLY REMOVED, because that would mask real solver
+    // failures as shut-downs: this `catch` sees ANY exception from the root-find,
+    // and fail-fast has value. The target is strictly monotone over (gamma*, ca]
+    // (#486), so "no root exists" is distinguishable from "the solver broke" by
+    // the sign at the two ends -- equal signs means the root is genuinely outside
+    // the bracket. Only that case shuts down; anything else still stops.
+    const double lo = gamma_ * umol_per_mol_to_Pa_;
+    const double t_lo = target(lo);
+    const double t_hi = target(ca_);
+    const bool no_root_in_bracket =
+        std::isfinite(t_lo) && std::isfinite(t_hi) &&
+        ((t_lo > 0.0 && t_hi > 0.0) || (t_lo < 0.0 && t_hi < 0.0));
+    if (use_energy_balance_ || no_root_in_bracket) {
       ci_at_compensation_point_ = true;
-      return ci_ = gamma_ * umol_per_mol_to_Pa_;
+      return ci_ = lo;
     }
     util::stop("psi_stem_to_ci failed: " + std::string(e.what()) +
                "; min=" + util::to_string(gamma_ * umol_per_mol_to_Pa_) +
