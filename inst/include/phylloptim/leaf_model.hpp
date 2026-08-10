@@ -2213,15 +2213,10 @@ inline double Leaf::peak_arrh_curve(double Ea, double ref_value, double leaf_tem
 //
 // ⚠️ R_d INHERITS VCMAX'S PEAKED CURVE AND SO FALLS ABOVE THE THERMAL OPTIMUM,
 // where dark respiration should rise. Matched at 25 C against a Q10 of 2, the
-// two diverge in opposite directions and by an order of magnitude:
-//
-//     T (C)        25     35     40     45      50
-//     here       0.395  0.543  0.466  0.284   0.135
-//     Q10 = 2    0.395  0.790  1.117  1.580   2.234
-//     ratio        1.0    1.5    2.4    5.6    16.5
-//
-// See the note at the R_d_ assignment below for why it is recorded rather than
-// changed.
+// two diverge in opposite directions: at 25/35/40/45/50 C this gives 0.395,
+// 0.543, 0.466, 0.284, 0.135 against the Q10's 0.395, 0.790, 1.117, 1.580,
+// 2.234 -- a factor of 16.5 apart by 50 C, and moving the wrong way. See the
+// note at the R_d_ assignment below for why it is recorded rather than changed.
 inline void Leaf::update_temperature_dependent_params(double leaf_temp) {
   vcmax_ =
       peak_arrh_curve(vcmax_ha_, vcmax_25, leaf_temp, vcmax_H_d_, vcmax_d_S_);
