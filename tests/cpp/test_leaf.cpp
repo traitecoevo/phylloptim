@@ -61,11 +61,9 @@ struct Drivers {
   double area_leaf = 0.05;
 };
 
-// set_traits' fourteenth argument, R_d_25. NaN is the SENTINEL for "derive as
-// rd_to_vcmax_ratio_ * vcmax_25", so passing it keeps a call at the default
-// respiration rather than pinning one -- which is what every call below wants
-// except the tests that are specifically about R_d.
-const double kRdDefault = std::numeric_limits<double>::quiet_NaN();
+// set_traits' fourteenth argument, R_d_25: dark respiration at 25 C. The class
+// default, so a call that is not about respiration can pass it and change nothing.
+const double kRd25 = 1.44;
 
 phylloptim::Leaf make_leaf(const Drivers &d, std::vector<double> psi_soil,
                      std::vector<double> soil_depth) {
@@ -2009,7 +2007,7 @@ void test_temperature_parameters_are_settable() {
   ok(base.vcmax_ha_ == phylloptim::vcmax_ha, "vcmax_ha_ defaults to the constant");
   ok(base.jmax_d_S_ == phylloptim::jmax_d_S, "jmax_d_S_ defaults to the constant");
   ok(base.gamma_25_ == phylloptim::gamma_25, "gamma_25_ defaults to the constant");
-  near(base.rd_to_vcmax_ratio_, 0.015, 1e-12, "rd_to_vcmax_ratio_ default");
+  near(base.R_d_25, 1.44, 1e-12, "R_d_25 default");
 
   // Raising the Vcmax activation energy raises Vcmax above the 25 C reference,
   // so a 25 C leaf should be unaffected but a warm one should assimilate more.
@@ -2024,14 +2022,13 @@ void test_temperature_parameters_are_settable() {
        "a larger activation energy gives a larger vcmax at 35 C");
   }
 
-  // Respiration fraction: doubling it must lower assimilation.
+  // Respiration: doubling it must lower assimilation.
   {
     phylloptim::Leaf r2 = make_leaf(d, {2.0}, {1.0});
-    r2.rd_to_vcmax_ratio_ = 0.030;
+    r2.R_d_25 = 2.0 * r2.R_d_25;
     r2.update_temperature_dependent_params(d.leaf_temp);
     r2.find_root_collar_psi();
-    ok(r2.assim_colimited_ < A_base,
-       "doubling the respiration fraction lowers assimilation");
+    ok(r2.assim_colimited_ < A_base, "doubling R_d_25 lowers assimilation");
     ok(r2.R_d_ > base.R_d_, "and raises R_d");
   }
 
@@ -2069,7 +2066,7 @@ void test_temperature_params_invalidate_cache() {
   const double A_before = warm.assim_colimited_;
   const double Rd_before = warm.R_d_;
 
-  warm.rd_to_vcmax_ratio_ = 0.030;
+  warm.R_d_25 = 2.0 * warm.R_d_25;
   warm.set_physiology(fixture::root_network({1.0 / d.area_leaf}, {1.0}), d.PPFD,
                       {2.0}, {1.0}, d.K_s * d.theta / d.h, d.atm_vpd, d.ca,
                       d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
@@ -2080,11 +2077,11 @@ void test_temperature_params_invalidate_cache() {
   ok(warm.assim_colimited_ != A_before,
      "and the operating point moves");
   near(warm.R_d_, 2.0 * Rd_before, 1e-12,
-       "doubling the ratio doubles R_d at the same temperature");
+       "doubling R_d_25 doubles R_d at the same temperature");
 
   // And it must agree bit-for-bit with never having had the stale value.
   phylloptim::Leaf fresh = make_leaf(d, {2.0}, {1.0});
-  fresh.rd_to_vcmax_ratio_ = 0.030;
+  fresh.R_d_25 = 2.0 * fresh.R_d_25;
   fresh.set_physiology(fixture::root_network({1.0 / d.area_leaf}, {1.0}), d.PPFD,
                        {2.0}, {1.0}, d.K_s * d.theta / d.h, d.atm_vpd, d.ca,
                        d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
@@ -2119,31 +2116,25 @@ void test_temperature_params_invalidate_cache() {
      "unchanged inputs still give a bit-identical answer");
 }
 
-// R_d's TEMPERATURE RESPONSE, and the blast radius of changing it (#41).
+// R_d's TEMPERATURE RESPONSE (#41).
 //
-// ⚠️ THE GOLDEN FILE CANNOT SEE ANY OF THIS. Its grid is 6 psi_soil x 4 PPFD x 4
-// VPD x 3 layer counts, all at ONE leaf temperature (25 C), so a change to how R_d
-// varies with temperature leaves it bit-identical BY CONSTRUCTION. Reading that
-// silence as "no results moved" would be exactly the mistake the guide warns about.
-// This is the test that can see it.
-//
-// The old response is exactly reproducible, which is what makes this a measurement
-// rather than archaeology: R_d used to be `ratio * vcmax_(T)`, so setting
-// `R_d_25 = ratio * vcmax_(T)` with `rd_q10_ = 1` reconstructs it at any T.
+// ⚠️ THE GOLDEN FILE IS NEARLY BLIND TO THIS, and that is the reason this test
+// exists. Every reference value in the model is DEFINED at 25 C, so a change to any
+// response curve is inert there by construction; the golden grid carries one hot
+// block for exactly this reason, and this test is what pins the response itself.
 void test_rd_temperature_response() {
-  printf("R_d rises with temperature, and the change is measured\n");
+  printf("R_d rises with temperature\n");
   Drivers d;
 
-  // At the reference the two forms must agree EXACTLY, not approximately -- the
-  // default reference value is `ratio * vcmax_25` and vcmax_(25) == vcmax_25.
+  // R_d IS R_d_25 at the reference, exactly. The trait is the value there, not a
+  // scale on anything.
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
-    near(l.R_d_, 0.015 * l.vcmax_25, 1e-12, "R_d at 25 C is ratio * vcmax_25");
-    near(l.R_d_, 0.015 * l.vcmax_, 1e-12, "and equals the old form there");
+    near(l.R_d_, l.R_d_25, 1e-12, "R_d at 25 C is R_d_25");
   }
 
-  // The direction that was wrong: R_d must now RISE above the thermal optimum.
-  // vcmax_ peaks near 31 C, so 45 C is comfortably past it -- the old form fell.
+  // The direction: R_d must RISE, including above Vcmax's thermal optimum near
+  // 31 C, so 45 C is comfortably past it.
   double rd_prev = -1.0;
   for (double T : {25.0, 35.0, 45.0}) {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
@@ -2167,9 +2158,7 @@ void test_rd_temperature_response() {
     ok(q10_at_30 < 2.0, "and that Q10 is below 2, i.e. the decline is active");
   }
 
-  // ⚠️ A CONSTANT Q10 MUST STILL BE REACHABLE -- slope zero, intercept the value.
-  // Kept as an assertion because it is the escape hatch for anyone who wants the
-  // conventional form, and a silent loss of it would be hard to notice.
+  // A constant Q10 must stay reachable: slope zero, intercept the value.
   {
     phylloptim::Leaf a = make_leaf(d, {2.0}, {1.0});
     phylloptim::Leaf b = make_leaf(d, {2.0}, {1.0});
@@ -2181,150 +2170,45 @@ void test_rd_temperature_response() {
          "slope zero recovers a constant Q10 exactly");
   }
 
-  // Setting the value directly overrides the ratio entirely.
+  // A measured value is used verbatim, and is INDEPENDENT of vcmax_25 -- R_d_25 is
+  // a trait in its own right, not a fraction of Vcmax.
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     l.R_d_25 = 0.525;                 // Sabot's Rlref, as measured
     l.update_temperature_dependent_params(25.0);
     near(l.R_d_, 0.525, 1e-12, "a set R_d_25 is used verbatim at 25 C");
-    ok(l.R_d_ != 0.015 * l.vcmax_25, "and the ratio no longer applies");
+    l.vcmax_25 = 2.0 * l.vcmax_25;
+    l.update_temperature_dependent_params(25.0);
+    near(l.R_d_, 0.525, 1e-12, "and does not follow vcmax_25");
   }
 
-  // ⚠️ The sentinel must keep respiration TIED to Vcmax for a caller who changes
-  // vcmax_25 and never touches R_d_25 -- which is what plant does per individual.
-  // A default computed at construction would silently decouple them.
-  {
+  // An unset or negative R_d_25 FAILS rather than falling back to a derivation.
+  for (double bad : {std::numeric_limits<double>::quiet_NaN(), -1.0}) {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
-    const double rd_default = l.R_d_;
-    l.vcmax_25 = l.vcmax_25 * 2.0;
-    l.update_temperature_dependent_params(d.leaf_temp);
-    near(l.R_d_, 2.0 * rd_default, 1e-12,
-         "R_d still scales with vcmax_25 while R_d_25 is unset");
-  }
-
-  // THE BLAST RADIUS. The old form is the `rd_tracks_vcmax_` branch itself, so the
-  // "old" column below is the escape hatch rather than an emulation of it -- which
-  // makes this table evidence that the hatch reproduces what plant used to compute,
-  // not merely a record of what changed. The emulation it used to use survives just
-  // above, as the bit-exactness check on the branch.
-  //
-  // ⚠️⚠️ AND A LIMIT THIS CHANGE MAKES REACHABLE, which is the most important thing
-  // here. A higher R_d can drive net assimilation negative across the WHOLE
-  // [gamma*, ca] bracket, and then psi_stem_to_ci has no supply==demand root and
-  // THROWS: "toms748_solve: Parameters a and b do not bracket the root". At the
-  // defaults that happens by 45 C.
-  //
-  // The model already knows this physical case -- `ci_at_compensation_point_`
-  // places ci at the compensation point instead -- but that fallback fires only on
-  // the ENERGY-BALANCE path. On the default prescribed-temperature path the same
-  // situation is an exception. Raising R_d is what makes it reachable there.
-  //
-  // Recorded as a measured limit rather than avoided by choosing a cooler sweep:
-  // the temperature at which the model stops having an operating point is exactly
-  // what a caller needs to know, and it moved.
-  // ⚠️ THE ESCAPE HATCH BACK TO THE OLD SHAPE, and it is checked against the same
-  // emulation the blast-radius table below uses rather than against a recorded
-  // number. That is the strong form: the table's "then" arm and `rd_tracks_vcmax_`
-  // are two independent routes to `rd_to_vcmax_ratio_ * vcmax_(T)`, so if either
-  // drifts they stop agreeing. BIT-EXACT, deliberately -- reproducing an old plant
-  // result is the whole reason the flag exists, and "close" does not reproduce it.
-  {
-    for (double T : {15.0, 25.0, 35.0, 40.0, 45.0}) {
-      phylloptim::Leaf old_shape = make_leaf(d, {2.0}, {1.0});
-      old_shape.rd_tracks_vcmax_ = true;
-      old_shape.update_temperature_dependent_params(T);
-
-      phylloptim::Leaf emulated = make_leaf(d, {2.0}, {1.0});
-      emulated.update_temperature_dependent_params(T);  // seat vcmax_(T)
-      ok(old_shape.R_d_ == 0.015 * emulated.vcmax_,
-         "rd_tracks_vcmax_ reproduces ratio * vcmax_(T) bit-exactly");
-      // And it really is PEAKED, which is the property no Q10 can imitate: R_d
-      // above the thermal optimum is BELOW its 25 C value under the old shape and
-      // above it under the new one.
-      if (T == 45.0) {
-        phylloptim::Leaf at25 = make_leaf(d, {2.0}, {1.0});
-        at25.rd_tracks_vcmax_ = true;
-        at25.update_temperature_dependent_params(25.0);
-        ok(old_shape.R_d_ < at25.R_d_,
-           "and it falls above the thermal optimum, as the old shape did");
-        phylloptim::Leaf now45 = make_leaf(d, {2.0}, {1.0});
-        now45.update_temperature_dependent_params(45.0);
-        ok(now45.R_d_ > at25.R_d_, "where the declining-Q10 form rises");
-      }
-    }
-
-    // ⚠️ The flag must be IN THE CACHE KEY. Flipping it on a leaf that has already
-    // been driven changes R_d at every temperature but 25 C and nothing else the
-    // key mentions, so a key that missed it would take a HIT here and silently run
-    // the whole comparison under whichever shape was seated first (hazard 10).
-    phylloptim::Leaf flipped = make_leaf(d, {2.0}, {1.0});
-    flipped.update_temperature_dependent_params(40.0);
-    const double rd_new_shape = flipped.R_d_;
-    flipped.rd_tracks_vcmax_ = true;
-    flipped.set_physiology(fixture::root_network({1.0 / d.area_leaf}, {1.0}),
-                           d.PPFD, {2.0}, {1.0}, d.K_s * d.theta / d.h,
-                           d.atm_vpd, d.ca, 40.0, d.atm_o2_kpa, d.atm_kpa);
-    ok(flipped.R_d_ != rd_new_shape,
-       "setting rd_tracks_vcmax_ invalidates the temperature cache");
-
-    // Refused rather than resolved: the old shape has no reading in which a
-    // measured reference value means anything.
-    phylloptim::Leaf both = make_leaf(d, {2.0}, {1.0});
-    both.rd_tracks_vcmax_ = true;
-    both.R_d_25 = 0.525;
+    l.R_d_25 = bad;
     bool threw = false;
     try {
-      both.update_temperature_dependent_params(30.0);
+      l.update_temperature_dependent_params(30.0);
     } catch (const std::runtime_error &) {
       threw = true;
     }
-    ok(threw, "rd_tracks_vcmax_ with a measured R_d_25 is refused, not resolved");
+    ok(threw, "an unusable R_d_25 is refused, not worked around");
   }
 
-  // ⚠️ THE LABEL BELOW SAID "Q10 = 2" AND THAT WAS STALE. A constant Q10 of 2 was
-  // the first implementation and was rejected on measurement (R_d 4.07 and -73% on
-  // A at 40 C, no operating point at all by 45 C); the "now" arm here is the
-  // shipped Tjoelker declining curve, which is what the numbers below describe.
-  // A printed label is not asserted by anything, so it outlived the thing it named.
-  printf("  blast radius on assimilation (old form vs declining Q10):\n");
+  // The response, and the LIMIT it makes reachable, printed rather than asserted
+  // cell by cell: a higher R_d can drive net assimilation negative across the whole
+  // [gamma*, ca] bracket, and then there is no supply == demand root at all. At the
+  // defaults that happens by 45 C, which is a number a caller needs.
+  printf("  R_d and assimilation against leaf temperature:\n");
   for (double T : {15.0, 25.0, 35.0, 40.0, 45.0}) {
-    double A_now = 0.0, Rd_now = 0.0;
-    bool now_ok = true;
-    try {
-      phylloptim::Leaf now = make_leaf(d, {2.0}, {1.0});
-      now.update_temperature_dependent_params(T);
-      now.find_root_collar_psi();
-      A_now = now.assim_colimited_;
-      Rd_now = now.R_d_;
-    } catch (const std::exception &) {
-      now_ok = false;
-    }
-
-    double A_then = 0.0, Rd_then = 0.0;
-    bool then_ok = true;
-    try {
-      phylloptim::Leaf then = make_leaf(d, {2.0}, {1.0});
-      then.rd_tracks_vcmax_ = true;
-      then.update_temperature_dependent_params(T);
-      then.find_root_collar_psi();
-      A_then = then.assim_colimited_;
-      Rd_then = then.R_d_;
-    } catch (const std::exception &) {
-      then_ok = false;
-    }
-
-    if (now_ok && then_ok) {
-      printf("    T = %4.1f C   R_d %6.3f -> %6.3f   A %8.4f -> %8.4f  (%+.2f%%)\n",
-             T, Rd_then, Rd_now, A_then, A_now,
-             100.0 * (A_now - A_then) / A_then);
-    } else {
-      printf("    T = %4.1f C   old %s / new %s  <-- no operating point\n", T,
-             then_ok ? "solves" : "THROWS", now_ok ? "solves" : "THROWS");
-    }
-    if (T == 25.0) {
-      near(A_now, A_then, 1e-12, "the two forms agree exactly at 25 C");
-    }
+    phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
+    l.update_temperature_dependent_params(T);
+    l.find_root_collar_psi();
+    printf("    T = %4.1f C   R_d %6.3f   A %8.4f%s\n", T, l.R_d_,
+           l.assim_colimited_,
+           l.ci_at_compensation_point_ ? "   <-- shut down" : "");
   }
+
   // ⚠️ AND IT MUST SHUT DOWN RATHER THAN THROW. A leaf too hot to gain carbon at
   // any internal CO2 is a physical state, not a solver failure -- the energy-balance
   // path always treated it that way and the prescribed-temperature path used to
@@ -2406,7 +2290,7 @@ void test_perturb_stem_b_matches_a_rebuild() {
     phylloptim::Leaf rebuilt = make_leaf(d, {2.0}, {1.0});
     rebuilt.find_root_collar_psi();
     rebuilt.set_traits(96.0, 2.680147, b_new, 5.870283, 2.680147, 3.898245,
-                       5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRdDefault);
+                       5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
     rebuilt.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                            d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa,
                            d.atm_kpa);
@@ -2439,7 +2323,7 @@ void test_perturb_stem_b_matches_a_rebuild() {
     phylloptim::Leaf fresh = make_leaf(d, {2.0}, {1.0});
     fresh.find_root_collar_psi();
     rescaled.set_traits(96.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
-                        5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRdDefault);
+                        5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
     rescaled.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                             d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa,
                             d.atm_kpa);
@@ -2488,7 +2372,7 @@ void test_set_traits_matches_a_fresh_leaf() {
     phylloptim::Leaf reused = make_leaf(d, {2.0}, {1.0});
     reused.find_root_collar_psi();
     reused.set_traits(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9],
-                      t[10], t[11], t[12], kRdDefault);
+                      t[10], t[11], t[12], kRd25);
     reused.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                           d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
     reused.find_root_collar_psi();
@@ -2518,7 +2402,7 @@ void test_set_traits_matches_a_fresh_leaf() {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     const double vcmax_before = l.vcmax_;
     l.set_traits(96.0 * 2.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
-                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRdDefault);
+                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
     std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
     // The SAME leaf_temp and atm_o2_kpa, which is what arms the cache.
     l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
@@ -2535,7 +2419,7 @@ void test_set_traits_matches_a_fresh_leaf() {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     const double E_before = l.transpiration(3.0, 1.0);
     l.set_traits(96.0, 2.680147, 3.898245 * 1.5, 5.870283, 2.680147, 3.898245,
-                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRdDefault);
+                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
     std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
     l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                      d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
@@ -2563,7 +2447,7 @@ void test_set_traits_matches_a_fresh_leaf() {
       bool threw = false;
       try {
         l.set_traits(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9],
-                     t[10], t[11], t[12], kRdDefault);
+                     t[10], t[11], t[12], kRd25);
       } catch (const std::runtime_error &) {
         threw = true;
       }

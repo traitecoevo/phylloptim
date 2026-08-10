@@ -74,17 +74,9 @@ differentiate at}
   [leaf_traits()] names, plus `"leaf_specific_conductance_max"` and — on the
   single-potential path only — `"resistance"`. Defaults to all of them.
 
-  ⚠️ The ORDER of the enumeration is not `leaf_traits()`' order: `"R_d_25"`
-  comes last, after the two non-traits, because the C++ side indexes this list
-  by position and inserting it would have moved the other two. That matters
-  only if you build `theta` yourself; `pars` itself is matched by name.
-
-  `"R_d_25"` is differentiable at its `NA` default, which is resolved to
-  `rd_to_vcmax_ratio_ * vcmax_25` before anything is perturbed. The
-  consequence worth knowing: `dY/dvcmax_25` is then a PARTIAL at fixed
-  respiration. It used to carry the respiration term as well, because `R_d`
-  was derived from `vcmax_25` with nothing else to hold it. Add
-  `rd_to_vcmax_ratio_ * dY/dR_d_25` for the total derivative.
+  `dY/dvcmax_25` is a PARTIAL at fixed respiration: `R_d_25` is its own trait,
+  so a fit that wants respiration to follow Vcmax moves both and adds the two
+  columns.
 
   `beta_R_H` and `beta_R_V` were here until #33 and are not any more: they
   parameterise the root-architecture model, which the leaf no longer runs, so

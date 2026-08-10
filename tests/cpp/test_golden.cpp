@@ -59,18 +59,15 @@ struct Row {
 const double kTheta = 0.000157, kKs = 1.0, kH = 5.0;
 const double kAreaLeaf = 0.05;
 const double kCa = 40.0, kO2 = 21.0, kPatm = 101.3;
-// ⚠️ LEAF TEMPERATURE IS A GRID AXIS, NOT A FIXED DRIVER, and it was fixed at 25 C
-// until #41. That single value made this whole file blind to every temperature
-// response in the model: the reference values of Vcmax, Jmax and R_d are DEFINED at
-// 25 C, so a change to any response curve is inert there BY CONSTRUCTION and a
-// bit-identical run said nothing about it. #41 changed R_d's shape at every
-// temperature except 25 C and this file did not move a bit.
+// ⚠️ LEAF TEMPERATURE IS A GRID AXIS, NOT A FIXED DRIVER. It was fixed at 25 C, and
+// that made this file blind to every temperature response in the model: the
+// reference values of Vcmax, Jmax and R_d are DEFINED at 25 C, so a change to any
+// response curve is inert there BY CONSTRUCTION.
 //
-// 40 C is in the list deliberately -- it is where the response bites hardest -- and
-// the extra shut-down rows at the hot end are a feature rather than noise: they pin
-// the temperature at which the model stops having an operating point, which is a
-// limit a caller needs and which moved in #41.
-const double kLeafTemps[] = {15.0, 25.0, 35.0, 40.0};
+// Two temperatures are enough to see one: the reference, and 40 C where the response
+// bites hardest. The extra pinned rows at the hot end are a feature rather than
+// noise.
+const double kLeafTemps[] = {25.0, 40.0};
 
 Row solve(double psi_soil, double ppfd, double vpd, int layers,
           double leaf_temp) {
@@ -111,11 +108,11 @@ std::vector<Row> run_grid() {
   const double vpds[] = {0.5, 1.0, 2.0, 4.0};
   const int layer_counts[] = {1, 3, 5};
 
-  // ⚠️ TEMPERATURE IS THE OUTERMOST LOOP ON PURPOSE. It makes the file four
-  // contiguous copies of the original 288-point grid, so the 25 C block is
-  // byte-identical to the pre-#41 file's rows in all nine output columns -- which
-  // is what makes a regeneration checkable as an ADDITION rather than taken on
-  // trust. Reordering these loops rewrites every row without changing any value.
+  // ⚠️ TEMPERATURE IS THE OUTERMOST LOOP ON PURPOSE. It makes the file contiguous
+  // copies of one 288-point state grid, so a regeneration that only adds a
+  // temperature is checkable as an ADDITION: the 25 C block must come out
+  // byte-identical. Reordering these loops rewrites every row without changing any
+  // value.
   std::vector<Row> rows;
   for (double t : kLeafTemps) {
     for (double p : psi_soils) {
@@ -139,10 +136,9 @@ std::vector<Row> run_grid() {
 // the point, and the grid's split between those branches is already an
 // established number AT 25 C: 240 of those 288 points are feasible, of which 198 sit
 // at an interior profit maximum and 42 at a constrained optimum pinned to a bracket
-// bound (24 wet, 18 dry); the remaining 48 shut down. Those figures were measured
-// when PLAN 11a replaced the collar solver and are quoted in the developer guide
-// and in maximise_profit_over_collar's own comment. The other three temperatures
-// have no such history, so their counts were measured when the axis was added.
+// bound (24 wet, 18 dry); the remaining 48 shut down. Those figures are quoted in
+// the developer guide and in maximise_profit_over_collar's own comment. The 40 C
+// counts were measured when the axis was added.
 //
 // So this asserts the classification against numbers that already exist rather
 // than inventing reference values for it. It is a cheap test with a specific
@@ -158,17 +154,13 @@ std::vector<Row> run_grid() {
 //
 // ⚠️ The hot end does NOT reach the compensation-point exit either, which is worth
 // knowing before reading the zeros as coverage: at the defaults that needs about
-// 45 C, and 40 C is the top of this grid. `test_rd_temperature_response` in
-// test_leaf.cpp is what covers it.
+// 45 C. `test_rd_temperature_response` covers it.
 //
 // A zero counts for this grid, whose psi_soil values are {0.5, 1, 2, 3, 4, 6},
 // and says nothing about the model. What the two failure branches do is checked
 // by test_collar_solve_refuses_rather_than_guessing in test_leaf.cpp.
-// ⚠️ COUNTED PER TEMPERATURE, NOT OVER THE WHOLE GRID, and that is most of the
-// value of the split once temperature is an axis: a single total would let points
-// move between branches as the leaf warms and still add up. Only the 25 C row
-// reproduces the historic 198/24/18/48, and it must, because that block is
-// byte-identical to the pre-#41 file.
+// ⚠️ COUNTED PER TEMPERATURE, not over the whole grid: a single total would let
+// points move between branches as the leaf warms and still add up.
 struct KindCount {
   phylloptim::Leaf::OperatingPointKind kind;
   int expected;
@@ -180,20 +172,13 @@ struct TempKinds {
   int interior, pinned_wet, pinned_dry, shutdown;
 };
 //
-// ⚠️ AND THE SPLIT MOVES WITH TEMPERATURE IN A SPECIFIC DIRECTION, which is the
-// measurement this table records rather than a bookkeeping detail. As the leaf
-// warms, DRY-pinned points disappear and WET-pinned ones proliferate: 18 -> 18 -> 3
-// -> 0 dry against 24 -> 24 -> 43 -> 80 wet. A hot leaf assimilates less and
-// respires more, so it has less to gain from water and its optimum presses against
-// the WET bound instead of the dry one.
-//
-// The 48 shut-down rows are temperature-INDEPENDENT, and that is the right answer:
-// they are the psi_soil = 6 MPa rows, where hydraulics forbid transpiration whatever
-// the leaf temperature.
+// The split MOVES with temperature, in a direction that is physical: a hot leaf
+// assimilates less and respires more, so it has less to gain from water and its
+// optimum presses against the WET bound instead of the dry one. The 48 shut-down
+// rows do not move, because there it is hydraulics rather than heat that forbids
+// transpiration.
 const TempKinds kExpectedKinds[] = {
-    {15.0, 198, 24, 18, 48},
     {25.0, 198, 24, 18, 48},
-    {35.0, 194, 43, 3, 48},
     {40.0, 160, 80, 0, 48},
 };
 

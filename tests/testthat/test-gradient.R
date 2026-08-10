@@ -172,15 +172,11 @@ test_that("a pinned optimum takes the fallback, and the composite would be wrong
   expect_equal(dry$gradient["vcmax_25", "A"], 0.017548, tolerance = 1e-3)
   expect_equal(dry$gradient["stem_b", "A"], 4.6991, tolerance = 1e-3)
 
-  # ⚠️ THE `vcmax_25` NUMBER ABOVE WAS 0.014357 UNTIL #41, and the difference is
-  # not a change in the model -- it is which derivative the column reports.
-  # `R_d_25` is a parameter now, so `dA/dvcmax_25` is a PARTIAL at fixed
-  # respiration where it used to carry `ratio * dA/dR_d_25` too. Asserted as an
-  # identity rather than left as two unrelated recorded numbers, because that is
-  # what says the two columns still add up to the old one.
-  ratio <- leaf_model()$rd_to_vcmax_ratio_
+  # `dA/dvcmax_25` is a PARTIAL at fixed respiration, since `R_d_25` is its own
+  # trait. A fit that wants respiration to follow Vcmax adds the two columns, so
+  # that combination is asserted rather than left implicit.
   expect_equal(dry$gradient["vcmax_25", "A"] +
-                 ratio * dry$gradient["R_d_25", "A"],
+                 0.015 * dry$gradient["R_d_25", "A"],
                0.014357, tolerance = 1e-3)
 })
 
@@ -220,24 +216,14 @@ test_that("a shut-down operating point reports no gradient and still differences
   # -- but the gradient itself is not all zero, because a shut-down leaf still
   # respires, so the fallback still has work to do.
   #
-  # ⚠️ WHICH PARAMETER CARRIES THAT IS THE SHARPEST TEST OF #41 IN THE SUITE, and
-  # it changed there. A = -R_d exactly at a shut-down point, so:
-  #
-  #   before   R_d was derived from vcmax_25, so dA/dvcmax_25 = -ratio = -0.015
-  #            and there was no R_d_25 column at all;
-  #   now      R_d_25 is a parameter, so dA/dR_d_25 = -1 and dA/dvcmax_25 = 0.
-  #
-  # The zero is EXACT and asserted as such: `vcmax_25` no longer reaches A here at
-  # all, so both perturbed solves return the same bits and their difference is a
-  # true zero rather than a small number. The -1 is not exact -- it is still a
-  # central difference of the solve -- and it lands within ~6e-11, which is the
-  # difference's own round-off and not a modelling residual.
+  # WHICH parameter carries it is the sharpest statement in the suite: `A = -R_d`
+  # exactly here, so `dA/dR_d_25` is -1 and `dA/dvcmax_25` is EXACTLY zero --
+  # vcmax_25 does not reach A at all at a shut-down point, so both perturbed solves
+  # return the same bits. The -1 is a central difference and lands within ~6e-11.
   g <- grid_gradient(6.0, pars = c("vcmax_25", "stem_b", "R_d_25"))
   expect_identical(g$status, "no-gradient")
   expect_identical(g$method, "fd")
-  # A = -R_d, and at 25 C R_d IS the reference value.
-  expect_equal(g$value[["A"]],
-               -leaf_model()$rd_to_vcmax_ratio_ * leaf_traits()$vcmax_25)
+  expect_equal(g$value[["A"]], -leaf_traits()$R_d_25)
   expect_equal(g$gradient["R_d_25", "A"], -1, tolerance = 1e-8)
   expect_identical(g$gradient["vcmax_25", "A"], 0)
   expect_equal(g$gradient["stem_b", "A"], 0)
@@ -623,10 +609,6 @@ test_that("the setter's positional trait call cannot drift in arity", {
   # fails to compile -- it would silently pass the wrong value for every argument
   # after the new one. So the arity is asserted here rather than trusted.
   #
-  # ⚠️ THIS TEST'S OWN PREDICTION CAME TRUE, and it is the reason the count is
-  # fourteen now. Adding `R_d_25` (#41) broke `.gradient_setter()` at run time and
-  # nowhere else, with "argument R_d_25 is missing" raised inside the generated
-  # binding -- a message naming neither the call nor the arity.
   expect_length(leaf_traits(), 14L)
   expect_length(formals(leaf_model()$set_traits), 14L)
   expect_identical(names(leaf_traits()), names(formals(leaf_model()$set_traits)))

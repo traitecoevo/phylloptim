@@ -492,15 +492,6 @@ void Leaf__ko_ha___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double
 }
 
 // [[Rcpp::export]]
-double Leaf__rd_to_vcmax_ratio___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
-  return obj_->rd_to_vcmax_ratio_;
-}
-// [[Rcpp::export]]
-void Leaf__rd_to_vcmax_ratio___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
-  obj_->rd_to_vcmax_ratio_ = value;
-}
-
-// [[Rcpp::export]]
 double Leaf__R_d_25__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
   return obj_->R_d_25;
 }
@@ -525,15 +516,6 @@ double Leaf__rd_q10_slope___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj
 // [[Rcpp::export]]
 void Leaf__rd_q10_slope___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
   obj_->rd_q10_slope_ = value;
-}
-
-// [[Rcpp::export]]
-bool Leaf__rd_tracks_vcmax___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
-  return obj_->rd_tracks_vcmax_;
-}
-// [[Rcpp::export]]
-void Leaf__rd_tracks_vcmax___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, bool value) {
-  obj_->rd_tracks_vcmax_ = value;
 }
 
 // [[Rcpp::export]]

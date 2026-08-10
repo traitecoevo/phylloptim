@@ -1,248 +1,54 @@
 # phylloptim 0.2.1
 
-## Revalidated against plant, at temperatures other than 25 °C (#41)
+## `R_d_25` is a trait, and respiration rises with temperature (#41)
 
-⚠️ **The obvious way to do this was to pin leaf temperature at 25 °C, and it would
-have been worthless.** #41 is inert at 25 °C *by construction* — respiration's
-reference value is defined there — so a bit-identical result at 25 °C proves the
-reference point survived and nothing else. Both harnesses are new and both vary
-temperature: `tests/validate/rd_shape_grid.cpp` on this package's grid, and
-`tests/validate/rd_shape_arms.R` on plant.
+Dark respiration was `rd_to_vcmax_ratio_ * vcmax_(T)`: a fixed fraction of Vcmax,
+unreachable from R, and — because it inherited Vcmax's **peaked** Arrhenius — it
+**fell** above the thermal optimum, where real dark respiration rises. No value of
+the fraction repairs a function of the wrong shape.
 
-**Three arms over the 1152-point grid**, against phylloptim at `origin/master`:
-
-| arm | cells differing | what it isolates |
-|---|---|---|
-| default, 25 °C only | **0 of 2592** | the control |
-| `rd_tracks_vcmax_ = TRUE`, all four temperatures | **0 of 10368** | the shape change alone |
-| default, all four temperatures | 6018 of 10368 | the blast radius |
-
-The middle row is the strong result: with the old shape restored, **everything else
-in #41 — the cache key, the settable `R_d_25`, the shut-down exit, the R API — is
-jointly bit-identical to master.** That is proved rather than argued, and it is what
-the escape hatch was added for.
-
-Assimilation moves +0.05% to +3.51% at 15 °C, exactly 0 at 25 °C, −5.7% to −100% at
-35 °C, and −35% to −213% at 40 °C. **No row changed feasibility** — the 48 shut-down
-rows per temperature are the same rows. Of the 864 rows whose A moves, 269 keep their
-exact operating point: 144 shut down, and 125 sit pinned to a bound that temperature
-does not move, so only their carbon balance changes.
-
-**On the plant side**, TF24 SCM offspring production (one species,
-`max_patch_lifetime = 5`, the setup plant's own regression test uses):
-
-| plant configuration | master | this branch | change |
-|---|---|---|---|
-| default (`leaf_temp` = 25, PM off) | 81.857087216483691 | 81.857087216483691 | **bit-identical** |
-| `leaf_temp` driver = 30 °C | 24.2830737 | 22.3699929 | −7.9% |
-| `leaf_temp` driver = 35 °C | 2.1302e-04 | 6.4472e-07 | ÷331 |
-| Penman-Monteith on | 2.2034982 | 1.1638497 | **−47.2%** |
-
-⚠️ **plant pins 25 °C itself at its defaults**, which is what makes the first row
-exact: `TF24_Environment` sets `leaf_temp` as a *constant* extrinsic driver at 25 and
-`use_energy_balance` defaults to 0. So a default plant run is unaffected, and the
-exposure is entirely in the two configurations that leave 25 °C.
-
-⚠️ **The Penman-Monteith row is the one to carry forward.** On that path leaf
-temperature reaches **62 °C, up to +22 K above air temperature** (measured over PAR
-400–2000 × Tair 20–40 × VPD 1–3), so a PM leaf at 25 °C air already sits at 32.9 °C
-and loses 23% of its assimilation. `Tleaf` itself moved on 22 of 90 cells, because
-the energy balance couples back through transpiration — on that path leaf temperature
-is an output, not an input.
-
-plant needs no source change: it never calls `set_traits`, so the fourteenth argument
-is invisible to it, and it binds only `R_d_` of the respiration fields. Its
-leaf/TF24 test files give **486 checks, 0 failures** and one error, and that error is
-**present identically on the control** — pre-existing on plant develop, not #41.
-
-**Still not covered, and recorded so the next attempt starts from the real
-obstacle**: `compare_with_plant.R`, which compares against plant's own independent
-`Leaf`, still does not run. Its header blames the constructor signature; that is no
-longer the obstacle. Against plant at 76df7169 both `Leaf()` and `set_physiology()`
-work, and what stops it is `root_collar_psi_` versus `opt_root_psi_` — the #25
-rename, which flipped the sign — on top of results deliberately moved by #15, 11a,
-11b, #25, #77 and #84. That is issue #64 and it needs a decision about the reference,
-not a rename.
-
-
-## The golden grid has a temperature axis: 288 points become 1152 (#41)
-
-⚠️ **The golden file was blind to every temperature response in the model, and had
-been all along.** Its grid was 6 ψ_soil × 4 PPFD × 4 VPD × 3 layer counts, **all at
-a leaf temperature of 25 °C** — and the reference values of Vcmax, Jmax and R_d are
-*defined* at 25 °C, so a change to any response curve is inert there **by
-construction**. #41 changed R_d's shape at every temperature except 25 °C and this
-file did not move a bit. The same blindness covered the thirteen temperature-response
-parameters bound just before it.
-
-The grid is now that same state space at **15 / 25 / 35 / 40 °C** — 1152 rows, with a
-`leaf_temp` column. 40 °C is in the list deliberately: it is where the response bites
-hardest, and the extra shut-down rows at the hot end pin the temperature at which the
-model stops having an operating point, which is a limit that moved in #41.
-
-**Regenerated deliberately, and the regeneration is checkable as an ADDITION rather
-than taken on trust.** Temperature is the OUTERMOST loop, so the file is four
-contiguous copies of the original grid, and the 25 °C block is **byte-identical** to
-the pre-#41 file in all nine output columns. Nothing moved; 864 rows were added.
-
-**The classification is now counted per temperature, and it moves:**
-
-| T | interior | pinned wet | pinned dry | shutdown |
-|---|---|---|---|---|
-| 15 °C | 198 | 24 | 18 | 48 |
-| 25 °C | 198 | 24 | 18 | 48 |
-| 35 °C | 194 | 43 | 3 | 48 |
-| 40 °C | 160 | 80 | 0 | 48 |
-
-A single total would have let points move between branches and still add up. The
-direction is physical: a hot leaf assimilates less and respires more, so it has less
-to gain from water and its optimum presses against the **wet** bound instead of the
-dry one. The 48 shut-down rows are temperature-*independent*, which is also right —
-those are the ψ_soil = 6 MPa rows, where hydraulics forbid transpiration whatever the
-temperature.
-
-Two things the hot end does **not** reach, recorded so the zeros are not read as
-coverage: `shade-death` (that is reached by light, not by heat) and the
-compensation-point exit, which needs about 45 °C at the defaults.
-`test_rd_temperature_response` covers the latter.
-
-`tests/cpp/bench_solve.cpp` deliberately did **not** follow. A timing baseline is
-only useful against its own history — `tools/cost-baseline.tsv` and
-`tools/bench_history.sh` compare across commits — so quadrupling its workload would
-end that history to measure nothing new about the solve. Its comment no longer claims
-to cover the same state space as the baseline.
-
-`tests/validate/compare_with_plant.R` mirrors the grid, so it gained the axis too.
-⚠️ At 15 / 35 / 40 °C phylloptim and a pre-#41 plant are *expected* to differ, since
-R_d's shape changed; `rd_tracks_vcmax_` is what makes that arm comparable.
-
-
-## An escape hatch back to the pre-#41 respiration shape (#41)
-
-`rd_tracks_vcmax_` makes `R_d` be `rd_to_vcmax_ratio_ * vcmax_(T)` again — Vcmax's
-peaked Arrhenius — bit-identically to what this model computed before #41.
-
-⚠️ **This closes a reproducibility hole we made.** No combination of
-`rd_q10_intercept_` and `rd_q10_slope_` produces a *peaked* function, so with #41
-landed and no flag, **any published plant result computed under the old shape could
-not be regenerated with this code.** It is not a deprecation switch or a
-compatibility mode: the default shape is the correct one, and this reproduces a shape
-known to be wrong above the thermal optimum. It exists so an old number can be
-checked, and so the plant revalidation is a controlled A/B — the flag on with
-temperature varying isolates the shape change from everything else on the branch —
-rather than an argument.
-
-The two shapes agree exactly at 25 °C and diverge in **opposite directions** above
-the thermal optimum: at 45 °C the peaked curve gives `R_d` 0.507, below its 25 °C
-value of 1.440, where the declining-Q10 form gives 3.618. That opposition is why a
-flag was needed and a parameter would not do.
-
-Three things it had to get right:
-
-- ⚠️ **It is in the temperature cache key.** Flipping it changes `R_d` at every
-  temperature but 25 °C while leaving every other key entry alone, so a key that
-  missed it would take a cache *hit* on the first `set_physiology()` after the flip
-  and run the whole A/B under whichever shape was seated first (hazard 10).
-- ⚠️ **Setting it together with a measured `R_d_25` is REFUSED, not resolved.** The
-  peaked curve has no reading in which a measured reference value means anything, so
-  a caller who sets both is confused about which model they are running.
-- **The branch is asserted bit-exactly**, against the same `ratio * vcmax_(T)`
-  emulation the blast-radius table used to build for itself — and that table's "old"
-  column is now the flag rather than an emulation of it, so the table is evidence the
-  hatch reproduces what plant used to compute rather than only a record of what
-  changed. Its printed numbers are unchanged.
-
-`plant` binds `Leaf`'s fields by name in its own `RcppR6_classes.yml`, so it needs
-its own line for this field.
-
-**No cost**: 3.03–3.04 µs/solve on both arms, interleaved ×3 from one tree, with
-identical checksums — inside the ±0.01 within-process noise. The key is compared
-once per `set_physiology()`, not per solve iteration. Golden file bit-identical.
-
-
-## `R_d_25` is settable and differentiable from R, at its default as well as when pinned (#41)
-
-`leaf_traits(R_d_25 = 0.525)` now reaches the model, and `"R_d_25"` is a `pars`
-entry for both `leaf_gradient()` and `leaf_gradient_batch()`. Measured at one
-observation: `dA/dR_d_25 = -0.24874` against a central difference of the solve at
-`-0.24868`. ⚠️ Not ≈ −1, because the optimiser moves the operating point in
-response, so the total derivative is well below the direct `-R_d` term.
-
-`R_d_25` defaults to `NA`, meaning *derive it as `rd_to_vcmax_ratio_ * vcmax_25`*,
-and **the sentinel is resolved where `theta` is built** rather than carried into it.
-That is what makes the parameter differentiable AT THE DEFAULT — a calibration does
-not have to pin a value first — and it is also what the batch path needs: `theta`
-there is a numeric matrix in which an `NA` is indistinguishable from a trait the
-caller forgot, which is how it first failed (`` `traits` is missing: NA ``).
-
-⚠️ **`dY/dvcmax_25` IS NOW A PARTIAL DERIVATIVE AT FIXED RESPIRATION.** It used to
-carry `rd_to_vcmax_ratio_ * dY/dR_d_25` as well, because `R_d` was derived from
-`vcmax_25` and there was nothing else to hold it. That is the correct Jacobian
-column for a fit that moves both, and the total derivative is recovered exactly by
-adding the `R_d_25` column back.
-
-**Measured blast radius, and it is confined to that one column.** Of the 60 cells in
-`tests/testthat/gradient_golden.tsv`, **14 moved and all 14 are `vcmax_25`**, by 16%
-to 250%; every `stem_b`, `psi_crit`, `leaf_specific_conductance_max` and
-`resistance` cell is bit-identical, as is every solved value. The 250% is the
-five-layer row, where the two terms nearly cancelled. The chain rule reconstructs
-all 14 old numbers — exactly where both arms are exact, and to 2.8e-04 at worst
-where they are not, that residual being the direct term's own finite-difference
-round-off (it falls to 2.5e-06 at `step = 1e-4`).
-
-The sharpest case is a shut-down operating point, where `A = -R_d` exactly:
-`dA/dvcmax_25` was `-0.015` and is now **exactly 0**, with the `-1` moved to
-`dA/dR_d_25`. `R_d_25` is recorded at all five golden operating points now, so the
-new column has a baseline of its own.
-
-Two traps worth carrying, both of which cost time here:
-
-- ⚠️ **The parameter enumeration deliberately does NOT follow `set_traits()`'
-  argument order.** `R_d_25` is `set_traits()`' fourteenth argument but the
-  enumeration's sixteenth, appended after the two non-traits, because inserting it
-  at 13 would displace `par_kmax` and `par_resistance` — and C++ indexes `theta` by
-  position. Appending is safe; reordering differentiates the wrong parameter and
-  returns plausible numbers.
-- ⚠️ **`.gradient_setter()`'s positional trait call is where this broke**, at run
-  time, with `argument R_d_25 is missing` raised inside the generated binding — a
-  message naming neither the call nor the arity. Its own comment predicted exactly
-  that. The arity is asserted in `test-gradient.R`.
-
-The generated `Leaf` constructor still does not take `R_d_25`; `leaf_model()`
-assigns the field afterwards, and `test-surface.R` now records that as a fact and
-checks the assignment is really there — without it, `leaf_traits(R_d_25 = )` would
-be accepted and silently ignored, which is worse than not offering the argument.
-
-## A leaf too hot to gain carbon shuts down instead of throwing
-
-Raising `R_d` makes a case reachable that the prescribed-temperature path could not
-previously reach: net assimilation negative across the whole `[gamma*, ca]` bracket,
-so `psi_stem_to_ci` has no supply-equals-demand root and `toms748_solve` throws
-`Parameters a and b do not bracket the root`. At the defaults that happens by 45 °C.
-
-The model already knew the physical case — `ci_at_compensation_point_` places `ci`
-at the compensation point — but that fallback only fired on the energy-balance path.
-It now applies on the default path too, and the answer is a shut-down operating
-point rather than an exception. The temperature at which the model stops having an
-operating point is pinned as a measurement rather than avoided by choosing a cooler
-sweep.
-
-## ⚠️ R_d rises with temperature now, on Tjoelker's declining Q10 (#41)
-
-`R_d` was `rd_to_vcmax_ratio_ * vcmax_(T)`, so it inherited Vcmax's **peaked**
-Arrhenius and therefore **fell** above the thermal optimum, where real dark
-respiration rises. No value of the ratio repairs a function of the wrong shape, so
-the shape is what changed:
+Now `R_d_25` is a `leaf_traits()` trait like any other, and the response is
+Tjoelker's declining Q10:
 
 ```
 Q10(T) = rd_q10_intercept_ - rd_q10_slope_ * (T + 25) / 2      3.09, 0.0430
 R_d(T) = R_d_25 * Q10(T)^((T - 25) / 10)
 ```
 
-**This moves results at every temperature except 25 °C, deliberately.** The 25 °C
-agreement is exact rather than approximate: the reference value defaults to
-`rd_to_vcmax_ratio_ * vcmax_25`, and `vcmax_(25) == vcmax_25` by construction of the
-peaked Arrhenius.
+The Q10 is evaluated at the mean of T and the reference, which is the form the
+land-surface literature implements. Set the slope to zero and the intercept is a
+constant Q10, for anyone who wants the conventional form; a constant Q10 of 2 was
+tried first and measured too aggressive (R_d 2.8× its 25 °C value over 15 K, −73% on
+assimilation at 40 °C, no operating point at all by 45 °C).
+
+**There is no fallback and no sentinel.** `R_d_25` defaults to **1.44** — which is
+`0.015 * 96`, the value the old derivation gave at the default `vcmax_25`, and the
+same double — so a caller who does not touch it gets exactly what they got before.
+An unset or negative value fails rather than deriving something.
+
+⚠️ **RESPIRATION NO LONGER FOLLOWS `vcmax_25`.** That is the point of making it a
+trait, and it is the one place "same defaults ⇒ same results" has an exception:
+a run that *varies* `vcmax_25` used to get proportionally more or less respiration
+and now does not. Measured on plant's TF24 SCM, offspring production:
+
+| | phylloptim master | this branch |
+|---|---|---|
+| default (`vcmax_25` = 96) | 81.857087216483691 | 81.857087216483691 |
+| `vcmax_25` = 60 | 0.40692 | 0.34336 |
+| `vcmax_25` = 150 | 73.703 | 92.026 |
+
+The default arm is bit-identical to all 17 digits. If a study wants respiration to
+track Vcmax, that coupling belongs in the caller's parameterisation — plant's
+`TF24_hyperpar` is where every other derived parameter is already computed.
+
+`R_d_25` is also a `pars` entry for `leaf_gradient()` and `leaf_gradient_batch()`:
+`dA/dR_d_25 = -0.24874` against a central difference of the solve at −0.24868. ⚠️ Not
+≈ −1, because the optimiser moves the operating point in response. `dY/dvcmax_25` is
+correspondingly a **partial** at fixed respiration; a fit that moves both adds the
+two columns.
+
+**Blast radius**, and it is zero at 25 °C by construction — the trait *is* the value
+there:
 
 | T | R_d old → new | A old → new | |
 |---|---|---|---|
@@ -252,20 +58,70 @@ peaked Arrhenius.
 | 40 °C | 1.012 → 3.171 | 1.8265 → 0.8555 | −53.16% |
 | 45 °C | 0.507 → 3.618 | 0.6339 → −3.6176 | shut-down |
 
-⚠️ **The golden grid is entirely at 25 °C, so its bit-identicality is BY
-CONSTRUCTION and is not evidence about this change.** `test_rd_temperature_response`
-is. The same blindness covers the thirteen temperature-response parameters bound
-earlier.
+Two further consequences:
 
-**A constant Q10 remains reachable** — slope zero, intercept the value — and that is
-asserted, because it is the escape hatch for anyone who wants the conventional form.
-A constant Q10 of 2 was in fact implemented first and rejected on measurement: `R_d`
-4.07 at 40 °C, −73% on A, and no operating point at all by 45 °C.
+- **A leaf too hot to gain carbon now shuts down instead of throwing.** A higher R_d
+  can drive net assimilation negative across the whole `[gamma*, ca]` bracket, and
+  then `psi_stem_to_ci` has no supply-equals-demand root. The model already knew that
+  case — `ci_at_compensation_point_` — but only on the energy-balance path; it now
+  applies on the default path too, and the temperature at which the model stops
+  having an operating point is pinned as a measurement.
+- **On plant's Penman-Monteith path the change is large**, because leaf temperature
+  there reaches **62 °C, up to +22 K above air**: offspring production −47.2%
+  (2.2035 → 1.1638). ⚠️ plant's *default* configuration is unaffected — it sets
+  `leaf_temp` as a constant 25 °C driver with PM off — so the exposure is entirely in
+  configurations that leave 25 °C.
 
-⚠️ **Slope zero does NOT recover the pre-#41 shape**, which was peaked. No
-combination of intercept and slope produces a peaked function, so the old behaviour
-is not reachable through these two parameters.
+`R_d_25` is the fourteenth entry of the gradient enumeration, i.e. in `set_traits()`'
+own argument order, with `leaf_specific_conductance_max` and `resistance` after it.
+Every index in `gradient.hpp` now has a name (`par_vcmax_25`, `par_R_d_25`, ...) so
+nothing indexes `theta` with a bare integer.
 
+**API removal:** `rd_to_vcmax_ratio_` is gone, from both C++ and the R bindings. It
+existed only as the fraction, and there is no fraction now. plant never used it.
+
+## The golden grid gains a temperature axis: 288 points become 576 (#41)
+
+⚠️ **A grid at one leaf temperature is blind to every temperature response in the
+model**, and this one was, at 25 °C. The reference values of Vcmax, Jmax and R_d are
+*defined* there, so a change to any response curve is inert **by construction** — the
+respiration change above moved results at every temperature except 25 °C and this
+file did not move a bit.
+
+The grid is now the same 288 operating points at **25 and 40 °C**, with a `leaf_temp`
+column. 40 °C is where the response bites hardest, and the extra pinned rows at the
+hot end are a feature.
+
+**Regenerated deliberately, and checkable as an addition**: temperature is the
+outermost loop, so the 25 °C block is **byte-identical** to the previous file in all
+nine output columns. 288 rows added, none moved.
+
+The classification is counted per temperature now, because it moves:
+
+| T | interior | pinned wet | pinned dry | shutdown |
+|---|---|---|---|---|
+| 25 °C | 198 | 24 | 18 | 48 |
+| 40 °C | 160 | 80 | 0 | 48 |
+
+A single total would let points move between branches and still add up. The direction
+is physical: a hot leaf assimilates less and respires more, so it has less to gain
+from water and its optimum presses against the **wet** bound instead of the dry one.
+The 48 shut-down rows do not move, because there it is hydraulics rather than heat
+that forbids transpiration.
+
+`tests/cpp/bench_solve.cpp` deliberately stays at 288 points at 25 °C: a timing
+baseline is only useful against its own history (`tools/cost-baseline.tsv`,
+`tools/bench_history.sh`).
+
+## The recorded gradients have their own tolerance
+
+`gradient_golden.tsv` used the solved-output baseline's tolerance, and that was
+wrong. A value there is a **finite difference**, so cross-platform it carries the
+solve's ~1e-9 floor **divided by the step** — one amplification more than the outputs
+it is built from. The step is relative, so the smallest-magnitude parameter sets the
+tolerance for the whole file: `R_d_25` is 1.44 where `vcmax_25` is 96, a 67× smaller
+absolute step, and it disagrees 1.3e-03 on Linux against 1.3e-04 for the other
+columns. `gradient_golden_tolerance()` is 5e-03, with the arithmetic.
 
 ## The temperature cache now keys on everything it reads, so R_d is genuinely settable (#41)
 

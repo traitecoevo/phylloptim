@@ -453,14 +453,6 @@ Leaf__ko_ha___set <- function(obj_, value) {
     invisible(.Call('_phylloptim_Leaf__ko_ha___set', PACKAGE = 'phylloptim', obj_, value))
 }
 
-Leaf__rd_to_vcmax_ratio___get <- function(obj_) {
-    .Call('_phylloptim_Leaf__rd_to_vcmax_ratio___get', PACKAGE = 'phylloptim', obj_)
-}
-
-Leaf__rd_to_vcmax_ratio___set <- function(obj_, value) {
-    invisible(.Call('_phylloptim_Leaf__rd_to_vcmax_ratio___set', PACKAGE = 'phylloptim', obj_, value))
-}
-
 Leaf__R_d_25__get <- function(obj_) {
     .Call('_phylloptim_Leaf__R_d_25__get', PACKAGE = 'phylloptim', obj_)
 }
@@ -483,14 +475,6 @@ Leaf__rd_q10_slope___get <- function(obj_) {
 
 Leaf__rd_q10_slope___set <- function(obj_, value) {
     invisible(.Call('_phylloptim_Leaf__rd_q10_slope___set', PACKAGE = 'phylloptim', obj_, value))
-}
-
-Leaf__rd_tracks_vcmax___get <- function(obj_) {
-    .Call('_phylloptim_Leaf__rd_tracks_vcmax___get', PACKAGE = 'phylloptim', obj_)
-}
-
-Leaf__rd_tracks_vcmax___set <- function(obj_, value) {
-    invisible(.Call('_phylloptim_Leaf__rd_tracks_vcmax___set', PACKAGE = 'phylloptim', obj_, value))
 }
 
 Leaf__PPFD___get <- function(obj_) {

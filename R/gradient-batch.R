@@ -326,6 +326,10 @@ leaf_gradient_batch <- function(batch,
 # observation -- and it reads the two non-traits back out of the resolved drivers
 # for the same reason that one does: theta has to hold the value the solve will
 # actually use.
+#
+# The two non-traits are `leaf_specific_conductance_max` and, on the
+# single-potential path only, `resistance`: both are DRIVERS that a calibration
+# fits like traits (#44), so the enumeration carries them after the traits.
 .gradient_theta_matrix <- function(batch, traits) {
   nr <- batch$theta_nrow
   par_names <- .gradient_par_names()
@@ -333,31 +337,17 @@ leaf_gradient_batch <- function(batch,
   # By NAME, not by position. `leaf_traits()` is in `set_traits()`'s order and
   # test-gradient.R asserts it, but this is the one place a silent reordering
   # would produce plausible numbers for the wrong parameters.
-  #
-  # ⚠️ AND THE TRAITS ARE NO LONGER THE LEADING BLOCK OF `par_names`. `R_d_25` is a
-  # trait that the enumeration appends AFTER the two non-traits, so "all but the
-  # last two" reads `leaf_specific_conductance_max` as a trait -- which is how #41
-  # first failed here, reporting "`traits` is missing: NA" -- where the NA was the
-  # NAME of a trait that does not exist, not a missing value. The names are taken
-  # by set difference and placed by `match()`, so
-  # neither end of the list is assumed contiguous.
-  non_traits <- c("leaf_specific_conductance_max", "resistance")
-  trait_names <- setdiff(par_names, non_traits)
+  trait_names <- par_names[seq_len(length(par_names) - 2L)]
   tv <- unlist(traits)[trait_names]
-  # The sentinel resolved here rather than passed through: see `.resolve_rd_25()`.
-  # It has to happen BEFORE the anyNA() check, which would otherwise read the
-  # default `R_d_25` as a missing trait.
-  tv[["R_d_25"]] <- .resolve_rd_25(tv[["R_d_25"]], tv[["vcmax_25"]],
-                                   batch$leaf$rd_to_vcmax_ratio_)
   if (anyNA(tv)) {
     stop("`traits` is missing: ",
          paste(trait_names[is.na(tv)], collapse = ", "), call. = FALSE)
   }
-  m[, match(trait_names, par_names)] <- rep(tv, each = nr)
-  m[, match("leaf_specific_conductance_max", par_names)] <- batch$kmax
+  m[, seq_along(tv)] <- rep(tv, each = nr)
+  m[, length(par_names) - 1L] <- batch$kmax
   # NA on the multi-layer path, where there is no such parameter and C++ never
   # reads the column.
-  m[, match("resistance", par_names)] <- batch$resistance
+  m[, length(par_names)] <- batch$resistance
   m
 }
 

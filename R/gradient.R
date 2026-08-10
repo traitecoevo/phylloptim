@@ -87,10 +87,6 @@ set_traits <- function(x, traits) {
   }
   # Positional, in the C++ argument order, for the same reason leaf_model() is:
   # the ordering is written down once rather than at every call site.
-  # ⚠️ `R_d_25` is last and is usually NA -- the sentinel for "derive from
-  # vcmax_25". It must be passed rather than dropped: leaving it out would make a
-  # re-traited leaf differ from a fresh one built with the same traits, which is
-  # exactly the invariant test_set_traits_matches_a_fresh_leaf asserts bit-exactly.
   x$set_traits(traits$vcmax_25, traits$stem_c, traits$stem_b, traits$psi_crit,
                traits$root_c, traits$root_b, traits$root_psi_crit, traits$beta2,
                traits$jmax_25, traits$a, traits$curv_fact_elec_trans,
@@ -255,17 +251,9 @@ set_traits <- function(x, traits) {
 ##'   [leaf_traits()] names, plus `"leaf_specific_conductance_max"` and — on the
 ##'   single-potential path only — `"resistance"`. Defaults to all of them.
 ##'
-##'   ⚠️ The ORDER of the enumeration is not `leaf_traits()`' order: `"R_d_25"`
-##'   comes last, after the two non-traits, because the C++ side indexes this list
-##'   by position and inserting it would have moved the other two. That matters
-##'   only if you build `theta` yourself; `pars` itself is matched by name.
-##'
-##'   `"R_d_25"` is differentiable at its `NA` default, which is resolved to
-##'   `rd_to_vcmax_ratio_ * vcmax_25` before anything is perturbed. The
-##'   consequence worth knowing: `dY/dvcmax_25` is then a PARTIAL at fixed
-##'   respiration. It used to carry the respiration term as well, because `R_d`
-##'   was derived from `vcmax_25` with nothing else to hold it. Add
-##'   `rd_to_vcmax_ratio_ * dY/dR_d_25` for the total derivative.
+##'   `dY/dvcmax_25` is a PARTIAL at fixed respiration: `R_d_25` is its own trait,
+##'   so a fit that wants respiration to follow Vcmax moves both and adds the two
+##'   columns.
 ##'
 ##'   `beta_R_H` and `beta_R_V` were here until #33 and are not any more: they
 ##'   parameterise the root-architecture model, which the leaf no longer runs, so
@@ -403,8 +391,12 @@ leaf_gradient <- function(psi_soil,
                   atm_vpd = atm_vpd, ca = ca, leaf_temp = leaf_temp,
                   atm_o2_kpa = atm_o2_kpa, atm_kpa = atm_kpa)
 
+  # The differentiable parameters: the fourteen traits, plus the two that are not
+  # traits and that a calibration nonetheless fits (#44). See .gradient_theta.
+  theta <- .gradient_theta(traits, leaf_specific_conductance_max, supply,
+                           root_network)
   if (is.null(pars)) {
-    pars <- .gradient_available_pars(identical(supply$kind, "single"))
+    pars <- names(theta)
   }
   # Shared with leaf_gradient_batch(), so the two entry points cannot disagree
   # about which parameters exist or explain a rejection differently.
@@ -419,20 +411,6 @@ leaf_gradient <- function(psi_soil,
   # a call in a per-observation fit. Construction is the single largest term on
   # this surface.
   l <- if (is.null(x)) leaf_model(traits, control, supply) else x
-
-  # The differentiable parameters: the thirteen traits, plus `R_d_25` and the two
-  # that are not traits and that a calibration nonetheless fits (#44). See
-  # .gradient_theta.
-  #
-  # ⚠️ AFTER the leaf, because resolving `R_d_25`'s sentinel needs
-  # `rd_to_vcmax_ratio_`, which is a field of the leaf and not of `traits`. Reading
-  # it from `l` rather than defaulting it here is what keeps the resolved value
-  # equal to the one `set_physiology()` would have derived, including for a caller
-  # who passes an `x` carrying a non-default ratio. `pars` no longer comes from
-  # theta's names for the same reason: it is available earlier, and
-  # `.gradient_available_pars()` is the same list in the same order.
-  theta <- .gradient_theta(traits, leaf_specific_conductance_max, supply,
-                           root_network, l$rd_to_vcmax_ratio_)
   reset <- .gradient_setter(l, traits, drivers, supply, fast_stem_curve)
 
   if (is.null(x)) {
@@ -603,16 +581,8 @@ leaf_gradient <- function(psi_soil,
   nms <- NULL
   function() {
     if (is.null(nms)) {
-      # ⚠️ `R_d_25` GOES LAST, NOT IN leaf_traits()' ORDER, and this deviation is
-      # forced rather than chosen. C++ appends it at index 15 because putting it in
-      # `set_traits`' argument order would place it at 13 and displace `par_kmax` /
-      # `par_resistance` -- the reorder `gradient.hpp` warns is unsafe. The two
-      # lists must agree position-for-position, so R follows suit. The
-      # C++-versus-R comparison in `test-gradient-batch.R` is what holds them
-      # together; drop the `setdiff` and it fails there rather than silently
-      # differentiating the wrong parameter.
-      traits <- setdiff(names(.leaf_trait_defaults), "R_d_25")
-      nms <<- c(traits, "leaf_specific_conductance_max", "resistance", "R_d_25")
+      nms <<- c(names(.leaf_trait_defaults), "leaf_specific_conductance_max",
+                "resistance")
     }
     nms
   }
@@ -671,66 +641,14 @@ leaf_gradient <- function(psi_soil,
 # and `dY/dtheta = dY/dtheta|_psi + (dY/dpsi)(dpsi*/dtheta)` hold for any
 # parameter profit depends on. What differs per parameter is only which setter
 # applies it, which is .gradient_setter's job.
-.gradient_theta <- function(traits, kmax, supply, root_network,
-                            rd_to_vcmax_ratio) {
-  # ⚠️ `R_d_25` LAST, matching `.gradient_par_names()` and C++'s `par_names()`.
-  # `unlist(traits)` alone would put it at position 14 -- leaf_traits()' own order
-  # -- which is NOT the enumeration order, because C++ appends it after the two
-  # non-traits rather than displacing them. Getting this wrong differentiates the
-  # wrong parameter silently, so it is built from the canonical name list rather
-  # than from whatever order the traits object happens to have.
-  tr <- unlist(traits)
-  theta <- c(tr[setdiff(names(tr), "R_d_25")],
-             leaf_specific_conductance_max = kmax)
+.gradient_theta <- function(traits, kmax, supply, root_network) {
+  theta <- c(unlist(traits), leaf_specific_conductance_max = kmax)
   if (identical(supply$kind, "single")) {
     theta <- c(theta, resistance = root_network$r_R_V_sum[[1]])
   }
-  theta <- c(theta, R_d_25 = .resolve_rd_25(tr[["R_d_25"]], tr[["vcmax_25"]],
-                                            rd_to_vcmax_ratio))
-  stopifnot("theta must be in gradient_par_names() order" =
-              identical(names(theta),
-                        intersect(.gradient_par_names(), names(theta))))
   theta
 }
 
-# `R_d_25`'s NA sentinel, resolved to the number the model would have derived.
-#
-# ⚠️ THETA MUST NEVER CARRY THE SENTINEL, and two separate things say so.
-#
-#   * It is not a value the batch path can even represent. `theta` there is a
-#     numeric matrix, in which an NA is indistinguishable from a trait the caller
-#     forgot -- which is exactly how it was first reported ("`traits` is missing:
-#     NA"). And `NaN == NaN` is false, so nothing downstream could compare such a
-#     column against anything either.
-#   * A parameter whose value is "derive it" is not differentiable: perturbing NA
-#     gives NA. Left unresolved, `R_d_25` would become a gradient parameter only
-#     after a caller had already pinned a finite value -- the opposite of what a
-#     calibration that starts from the default needs.
-#
-# The substitution is `rd_to_vcmax_ratio_ * vcmax_25`, which is the same
-# expression `Leaf::rd_reference()` evaluates, so the base point is BIT-IDENTICAL:
-# one multiply of the same two doubles either side of the boundary. The ratio is
-# read off the leaf rather than defaulted here, so there is no second copy of
-# 0.015 to drift from the field's own default.
-#
-# ⚠️ WHAT IT DOES CHANGE IS THE `vcmax_25` DERIVATIVE, and that is deliberate: with
-# `R_d_25` a parameter in its own right, `dY/dvcmax_25` is a PARTIAL at fixed
-# respiration, where before it carried `ratio * dY/dR_d_25` as well. That is the
-# correct Jacobian column for a fit that moves both, and the total derivative is
-# recovered exactly as `dY/dvcmax_25 + ratio * dY/dR_d_25`.
-#
-# It is the only column that moves. Measured over `gradient_golden.tsv`'s five
-# operating points: 14 of 60 recorded cells changed, ALL of them `vcmax_25`, by
-# between 16% and 250% -- the 250% is the five-layer row, where the two terms
-# nearly cancelled, so dropping one is not a small edit. The chain rule above
-# reconstructs every one of the 14 old values, exactly where both arms are exact
-# and to 2.8e-04 at worst where they are not (that residual is the direct term's
-# own finite-difference round-off: it falls to 2.5e-06 at `step = 1e-4`).
-# `dA/dvcmax_25` at a shut-down point is the cleanest case -- exactly -0.015
-# before, exactly 0 now, with the -1 moved to `dA/dR_d_25`.
-.resolve_rd_25 <- function(R_d_25, vcmax_25, rd_to_vcmax_ratio) {
-  if (is.na(R_d_25)) rd_to_vcmax_ratio * vcmax_25 else R_d_25
-}
 
 # Push a parameter vector back onto the leaf, in the one order that is correct.
 #
@@ -806,18 +724,10 @@ leaf_gradient <- function(psi_soil,
     # the #25 positive-magnitude invariants itself. Do not copy this pattern anywhere
     # the values are not already known-good.
     # ⚠️ POSITIONAL, so the count is load-bearing. `set_traits()`'s C++ signature and
-    # `leaf_traits()` must agree on FOURTEEN; if a trait is ever added, this call is
-    # the one place that will not fail to compile. test-gradient.R asserts the arity.
-    #
-    # ⚠️ THAT PREDICTION CAME TRUE. Adding `R_d_25` (#41) broke here and nowhere
-    # else, at run time, with "argument R_d_25 is missing" from inside the generated
-    # binding -- a message that names neither this line nor the trait count. The
-    # arity assertion in test-gradient.R is what should catch the next one.
-    #
-    # `tv` is in `leaf_traits()`' order, where R_d_25 is fourteenth -- which is
-    # set_traits' argument order. It is NOT `.gradient_par_names()` order, in which
-    # R_d_25 comes after the two non-traits; `theta[trait_names]` is what reconciles
-    # the two.
+    # `leaf_traits()` must agree on FOURTEEN, and adding a trait breaks here and
+    # nowhere else -- at run time, with "argument <name> is missing" raised inside
+    # the generated binding, which names neither this line nor the count. That is
+    # how #41 broke; test-gradient.R asserts the arity so the next one is caught.
     tv <- theta[trait_names]
     apply_traits(tv[[1L]], tv[[2L]], tv[[3L]], tv[[4L]], tv[[5L]], tv[[6L]],
                  tv[[7L]], tv[[8L]], tv[[9L]], tv[[10L]], tv[[11L]], tv[[12L]],

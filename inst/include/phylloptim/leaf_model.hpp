@@ -335,75 +335,31 @@ public:
   double kc_ha_ = phylloptim::kc_ha;
   double ko_25_ = phylloptim::ko_25;          // Rubisco Km for O2, umol mol^-1
   double ko_ha_ = phylloptim::ko_ha;
-  // Dark respiration as a fraction of vcmax. Was the bare literal 0.015 inline in
-  // update_temperature_dependent_params -- a named, species-variable parameter
-  // (Collatz/Farquhar) hiding as a magic number.
+  // Dark respiration at the 25 C reference, umol m^-2 s^-1. Many datasets report
+  // it directly (Sabot et al. give `Rlref` per site), and across their 16 species
+  // the implied fraction of vcmax_25 spans 0.0046 to 0.0302, so it is a trait in
+  // its own right rather than a fixed multiple of anything.
   //
-  // ⚠️ THIS IS NOW A FALLBACK, NOT THE INTERFACE. It is consulted only when
-  // `R_d_25` is left unset; see there.
-  double rd_to_vcmax_ratio_ = 0.015;
-  // Dark respiration at the 25 C reference, umol m^-2 s^-1 -- the parameter a
-  // caller with a MEASURED respiration should set (#41). Many datasets report
-  // R_d directly (Sabot et al. give `Rlref` per site) and no ratio reproduces
-  // them: across their 16 species the implied ratio spans 0.0046 to 0.0302.
-  //
-  // ⚠️ THE DEFAULT IS A SENTINEL, NOT A NUMBER, AND THAT IS LOAD-BEARING. NaN
-  // means "derive as `rd_to_vcmax_ratio_ * vcmax_25`", which is exactly the old
-  // behaviour. Defaulting it to a *computed* `0.015 * vcmax_25` would look
-  // equivalent and would silently decouple respiration from Vcmax for every
-  // caller that sets `vcmax_25` afterwards -- which is what plant does for every
-  // individual. The sentinel keeps the derivation live until someone opts out of
-  // it.
-  double R_d_25 = std::numeric_limits<double>::quiet_NaN();
+  // The default is 0.015 * 96, the value the old vcmax-derived form gave at the
+  // default vcmax_25. Initialised here rather than in the constructors' init lists
+  // because plant's RcppR6 bindings pin the 17-argument constructor by arity, so
+  // this cannot become an 18th argument without breaking plant's generated glue.
+  double R_d_25 = 1.44;
   // Dark respiration's temperature response, Tjoelker et al. (2001):
   //
-  //     R_d(T) = R_d(25) * Q10(T)^((T - 25) / 10)
+  //     R_d(T) = R_d_25 * Q10(T)^((T - 25) / 10)
   //     Q10(T) = rd_q10_intercept_ - rd_q10_slope_ * (T + 25) / 2
   //
-  // where the Q10 is evaluated at the MEAN of the measurement and reference
-  // temperatures, which is the form the land-surface literature implements.
+  // The Q10 is evaluated at the MEAN of the measurement and reference
+  // temperatures, which is the form the land-surface literature implements, and it
+  // DECLINES with temperature: a constant Q10 of 2 is too aggressive at the top of
+  // the range, putting R_d 2.8x its 25 C value over 15 K and leaving the solve no
+  // operating point at all by 45 C.
   //
-  // ⚠️ THIS REPLACES A RESPONSE OF THE WRONG SHAPE, and it MOVES RESULTS at every
-  // temperature except 25 C. R_d used to be `rd_to_vcmax_ratio_ * vcmax_(T)`, so
-  // it inherited Vcmax's PEAKED Arrhenius and therefore FELL above the thermal
-  // optimum, where real dark respiration rises. No value of the ratio repaired
-  // that -- it was a scale on the wrong function.
-  //
-  // ⚠️ WHY A DECLINING Q10 RATHER THAN A CONSTANT 2.0, WHICH WAS TRIED FIRST AND
-  // MEASURED. A constant Q10 = 2 is conventional and is wrong at the top of the
-  // range in a way that matters here: it put R_d at 4.07 at 40 C -- 2.8x its 25 C
-  // value over 15 K -- cost 73% of assimilation there, and by 45 C left the solve
-  // with NO OPERATING POINT at all. That is not the physics; it is a constant Q10
-  // used far outside where it holds, which is exactly what Tjoelker measured.
-  //
-  // ⚠️ A CONSTANT Q10 IS STILL REACHABLE, and deliberately so: set the slope to
-  // zero and the intercept is the constant. The declining form is the default
-  // rather than the only option.
+  // Set the slope to zero and the intercept IS a constant Q10, for anyone who
+  // wants the conventional form.
   double rd_q10_intercept_ = 3.09;
   double rd_q10_slope_ = 0.0430;
-  // ⚠️ THE PRE-#41 RESPIRATION SHAPE, AND THE ONLY WAY BACK TO IT. With this set,
-  // `R_d_ = rd_to_vcmax_ratio_ * vcmax_` -- Vcmax's peaked Arrhenius, bit-identical
-  // to what this model did before #41 -- and the Q10 coefficients above are not
-  // consulted at all.
-  //
-  // It exists because the alternative was worse than a flag. No combination of
-  // `rd_q10_intercept_` and `rd_q10_slope_` produces a PEAKED function, so without
-  // this the old shape was unreachable and **no published plant result computed
-  // under it could be regenerated with this code**. That is a reproducibility hole
-  // we made, not a feature request.
-  //
-  // It is also what turns the plant revalidation from an argument into a controlled
-  // A/B: with the flag on, T varying, the answer must be bit-identical to
-  // pre-#41 plant, which isolates the shape change from everything else in the
-  // same branch. ⚠️ plant binds Leaf's fields by name in its own
-  // RcppR6_classes.yml, so it needs its own line for this one.
-  //
-  // ⚠️ NOT a deprecation switch and not a "compatibility mode": the default shape
-  // is the correct one, and this reproduces a shape known to be wrong above the
-  // thermal optimum. Setting it together with a measured `R_d_25` is REFUSED rather
-  // than resolved -- see update_temperature_dependent_params -- because the old
-  // shape has no reading in which a measured reference value means anything.
-  bool rd_tracks_vcmax_ = false;
   double atm_kpa_;
   // Conversion from a mixing ratio (umol mol^-1) to a partial pressure (Pa).
   // DERIVED from atm_kpa_, not a constant: it is 1e-6 * P, so the old
@@ -462,10 +418,9 @@ public:
   // It used to be (leaf_temp_, atm_o2_kpa_) alone, and the argument for that was
   // "same inputs -> bit-identical outputs, so reusing is exact". That argument was
   // true while the temperature-response parameters were unreachable C++ members
-  // and became FALSE the moment they were bound to R: `l$rd_to_vcmax_ratio_ <-
-  // 0.03` followed by `set_drivers()` at the same temperature took a cache HIT and
-  // silently kept the old response. Measured before the fix: R_d stayed at 1.44
-  // where a cold object gave 2.88, and A was unchanged to every digit.
+  // and became FALSE the moment they were bound to R: `l$rd_q10_slope_ <- 0`
+  // followed by `set_drivers()` at the same temperature took a cache HIT and
+  // silently kept the old response, with A unchanged to every digit.
   //
   // So the key is now every input of update_temperature_dependent_params(). Two
   // consequences worth knowing:
@@ -479,15 +434,9 @@ public:
   //   * the cost is 17 double comparisons per set_physiology() call, i.e. per
   //     driver set, NOT per inner solve iteration. Measured: within run-to-run
   //     noise on bench_solve.
-  static constexpr int photo_temp_key_size = 20;
+  static constexpr int photo_temp_key_size = 19;
   std::array<double, photo_temp_key_size> photo_temp_cache_key_{};
   std::array<double, photo_temp_key_size> photo_temp_key() const;
-  // Dark respiration at 25 C, with the sentinel resolved. ⚠️ Used by BOTH the
-  // cache key and update_temperature_dependent_params, deliberately: keying on
-  // the raw `R_d_25` would put a NaN in an array compared with `==`, and
-  // `NaN == NaN` is false, so the cache would never hit for any caller who left
-  // the default -- a silent, total loss of caching that no test would notice.
-  double rd_reference() const;
   std::vector<double> f_r;
   // TODO: move into environment?
 
@@ -573,10 +522,6 @@ public:
   // resets both caches and requires set_physiology() before the next solve, exactly
   // as a fresh Leaf would. That last part is not conservatism: the derived
   // photosynthetic parameters really are unknown until the drivers are re-supplied.
-  // ⚠️ `R_d_25` is LAST and may be NaN, which is a value rather than an error --
-  // the sentinel meaning "derive from rd_to_vcmax_ratio_ * vcmax_25". So it is
-  // deliberately outside check_psi_magnitudes' remit and must not be validated as
-  // finite.
   void set_traits(double vcmax_25, double stem_c, double stem_b, double psi_crit,
                   double root_c, double root_b, double root_psi_crit,
                   double beta2, double jmax_25, double a,
@@ -1282,8 +1227,6 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
   curv_fact_elec_trans = curv_fact_elec_trans_;
   curv_fact_colim = curv_fact_colim_;
   cost_scale_TF24 = cost_scale_TF24_;
-  // NaN is a legitimate value here, so this is a plain assignment: it restores the
-  // "derive from the ratio" default as readily as it sets a measured value.
   R_d_25 = R_d_25_;
 
   roots_.root_c = root_c_;
@@ -2484,12 +2427,9 @@ inline double Leaf::peak_arrh_curve(double Ea, double ref_value, double leaf_tem
 // depends on the per-call PPFD_ and is (re)computed here from the just-updated
 // jmax_ -- on the non-PM cache-hit path set_physiology refreshes it separately.
 //
-// ⚠️ R_d INHERITS VCMAX'S PEAKED CURVE AND SO FALLS ABOVE THE THERMAL OPTIMUM,
-// where dark respiration should rise. Matched at 25 C against a Q10 of 2, the
-// two diverge in opposite directions: at 25/35/40/45/50 C this gives 0.395,
-// 0.543, 0.466, 0.284, 0.135 against the Q10's 0.395, 0.790, 1.117, 1.580,
-// 2.234 -- a factor of 16.5 apart by 50 C, and moving the wrong way. See the
-// note at the R_d_ assignment below for why it is recorded rather than changed.
+// R_d comes from R_d_25 and the declining Q10, so it RISES with temperature.
+// It used to be a fraction of vcmax_(T) and therefore fell above the thermal
+// optimum, which was the wrong direction (#41).
 
 // Every scalar update_temperature_dependent_params() below reads, in one place so
 // the cache key and the computation cannot drift apart.
@@ -2509,22 +2449,7 @@ inline std::array<double, Leaf::photo_temp_key_size> Leaf::photo_temp_key() cons
           gamma_25_, gamma_ha_,
           kc_25_, kc_ha_,
           ko_25_, ko_ha_,
-          // ⚠️ The RESOLVED reference, not the raw `R_d_25`/ratio pair. That
-          // keeps NaN out of an `==` comparison, and it is also more complete:
-          // it invalidates on a change to whichever of the two is actually in
-          // force, and on neither when the other is.
-          rd_reference(), rd_q10_intercept_, rd_q10_slope_,
-          // A bool in an array of doubles, because the key is one contiguous
-          // `==` comparison and 0.0/1.0 compares exactly. It has to be here:
-          // flipping the flag changes R_d at every temperature but 25 C while
-          // leaving every other key entry alone, so without it the first
-          // set_physiology() after the flip takes a cache HIT and the whole
-          // A/B runs under whichever shape happened to be seated first.
-          rd_tracks_vcmax_ ? 1.0 : 0.0};
-}
-
-inline double Leaf::rd_reference() const {
-  return std::isnan(R_d_25) ? rd_to_vcmax_ratio_ * vcmax_25 : R_d_25;
+          R_d_25, rd_q10_intercept_, rd_q10_slope_};
 }
 
 inline void Leaf::update_temperature_dependent_params(double leaf_temp) {
@@ -2534,48 +2459,19 @@ inline void Leaf::update_temperature_dependent_params(double leaf_temp) {
   gamma_ = arrh_curve(gamma_ha_, gamma_25_, leaf_temp);
   ko_ = arrh_curve(ko_ha_, ko_25_, leaf_temp);
   kc_ = arrh_curve(kc_ha_, kc_25_, leaf_temp);
-  // ⚠️ RESPIRATION USED TO INHERIT VCMAX'S PEAKED CURVE AND THEREFORE FELL ABOVE
-  // THE THERMAL OPTIMUM, where real dark respiration rises. It was
-  // `rd_to_vcmax_ratio_ * vcmax_`, which peaks wherever Vcmax peaks and declines
-  // after. It diverged from a Q10 response in the opposite direction and by an
-  // order of magnitude by 50 C -- the numbers are tabulated in this function's doc
-  // block above, rather than here, because an indented block inside a function
-  // body is what Doxygen 1.9 on CI rejects.
+  // Respiration RISES with temperature, on the declining Q10 above. ⚠️ It is
+  // exactly R_d_25 at 25 C and larger above, so any check taken at 25 C alone is
+  // blind to this whole response -- test_rd_temperature_response is what covers it.
   //
-  // No value of the ratio repaired it -- a scale cannot fix a function of the
-  // wrong shape -- so the shape is what changed (#41).
-  //
-  // ⚠️ THIS MOVES RESULTS AT EVERY TEMPERATURE EXCEPT 25 C, deliberately, and the
-  // 25 C agreement is exact rather than approximate: the reference value defaults
-  // to `rd_to_vcmax_ratio_ * vcmax_25`, and `vcmax_(25) == vcmax_25` by
-  // construction of the peaked Arrhenius. ⚠️ The golden grid is entirely at 25 C,
-  // so it is bit-identical BY CONSTRUCTION and is not evidence about this change
-  // -- test_rd_temperature_response is.
-  //
-  // The reference value is a sentinel-defaulted parameter so that a caller who
-  // sets `vcmax_25` still gets respiration that scales with it (see R_d_25).
-  if (rd_tracks_vcmax_) {
-    // The pre-#41 shape, for reproducing a result computed under it. Written as
-    // the same expression the old code used rather than as `rd_reference() *
-    // vcmax_ / vcmax_25`, which is algebraically equal and not bit-equal --
-    // bit-equality with the old model is the entire purpose of this branch.
-    //
-    // ⚠️ Refused rather than resolved. `R_d_25` is a measured reference value and
-    // the peaked curve has no reading in which one means anything, so a caller who
-    // sets both is confused about which model they are running. The Q10
-    // coefficients above are simply unused here, which is different: they are
-    // defaults the caller did not ask for.
-    if (!std::isnan(R_d_25)) {
-      util::stop("rd_tracks_vcmax_ reproduces the pre-#41 shape, in which R_d is "
-                 "rd_to_vcmax_ratio_ * vcmax_(T) and a measured R_d_25 has no "
-                 "meaning. Set one or the other, not both.");
-    }
-    R_d_ = rd_to_vcmax_ratio_ * vcmax_;
-  } else {
-    const double q10 =
-        rd_q10_intercept_ - rd_q10_slope_ * (leaf_temp + 25.0) / 2.0;
-    R_d_ = rd_reference() * std::pow(q10, (leaf_temp - 25.0) / 10.0);
+  // Fail rather than fall back: R_d_25 is a trait, and an unset one is a caller
+  // error, not a cue to derive something from vcmax.
+  if (!std::isfinite(R_d_25) || R_d_25 < 0.0) {
+    util::stop("R_d_25 must be a finite, non-negative dark respiration at 25 C; "
+               "got " + util::format_double(R_d_25));
   }
+  const double q10 =
+      rd_q10_intercept_ - rd_q10_slope_ * (leaf_temp + 25.0) / 2.0;
+  R_d_ = R_d_25 * std::pow(q10, (leaf_temp - 25.0) / 10.0);
   km_ = (kc_*umol_per_mol_to_Pa_)*(1 + (atm_o2_kpa_*kPa_to_Pa)/(ko_*umol_per_mol_to_Pa_));
   electron_transport_ = electron_transport();
 }

@@ -45,7 +45,8 @@
   a = 0.30,
   curv_fact_elec_trans = 0.7,
   curv_fact_colim = 0.99,
-  cost_scale_TF24 = 7.5
+  cost_scale_TF24 = 7.5,
+  R_d_25 = 1.44
 )
 
 .leaf_control_defaults <- list(
@@ -86,15 +87,8 @@
 ##' @param curv_fact_colim curvature of the colimited photosynthesis equation
 ##' @param cost_scale_TF24 cost parameter for the TF24 profit model
 ##'   (umol m^-2 s^-1)
-##' @param R_d_25 dark respiration at 25 C (umol m^-2 s^-1). `NA`, the default,
-##'   means *derive it* as `rd_to_vcmax_ratio_ * vcmax_25`, which is what the
-##'   model has always done; a number pins it and breaks that link. Unlike every
-##'   other trait it accepts `NA`, and it is the one trait the generated `Leaf`
-##'   constructor does not take -- [leaf_model()] assigns the field afterwards.
-##'
-##'   Either way it is the value at 25 C only: respiration rises from there with
-##'   Tjoelker's declining-Q10 curve (#41), so pinning `R_d_25` fixes the
-##'   reference point and not the temperature response.
+##' @param R_d_25 dark respiration at 25 C (umol m^-2 s^-1). It is the value at
+##'   25 C only: respiration rises from there on Tjoelker's declining-Q10 curve.
 ##'
 ##' @section Where the two root-resistance constants went:
 ##' `beta_R_H` and `beta_R_V` were traits here until #33. They parameterise the
@@ -125,28 +119,19 @@ leaf_traits <- function(vcmax_25 = 96,
                         curv_fact_elec_trans = 0.7,
                         curv_fact_colim = 0.99,
                         cost_scale_TF24 = 7.5,
-                        R_d_25 = NA_real_) {
+                        R_d_25 = 1.44) {
   out <- list(vcmax_25 = vcmax_25, stem_c = stem_c, stem_b = stem_b,
               psi_crit = psi_crit, root_c = root_c, root_b = root_b,
               root_psi_crit = root_psi_crit, beta2 = beta2,
               jmax_25 = jmax_25, a = a,
               curv_fact_elec_trans = curv_fact_elec_trans,
               curv_fact_colim = curv_fact_colim,
-              cost_scale_TF24 = cost_scale_TF24)
+              cost_scale_TF24 = cost_scale_TF24,
+              R_d_25 = R_d_25)
   .check_scalars(out, "leaf_traits")
-  # ⚠️ `R_d_25` is checked SEPARATELY because `NA` is a legitimate value for it and
-  # `.check_scalars()` demands finiteness. NA means "derive as
-  # 0.015 * vcmax_25", i.e. the behaviour every other trait combination has always
-  # had; a number overrides that. Folding it into the loop above would reject the
-  # default.
-  if (!(is.numeric(R_d_25) && length(R_d_25) == 1L)) {
-    stop("leaf_traits(): R_d_25 must be a single number, or NA to derive it ",
-         "from vcmax_25", call. = FALSE)
-  }
-  if (!is.na(R_d_25) && R_d_25 < 0) {
+  if (R_d_25 < 0) {
     stop("leaf_traits(): R_d_25 must be non-negative", call. = FALSE)
   }
-  out$R_d_25 <- as.numeric(R_d_25)
   structure(out, class = c("leaf_traits", "list"))
 }
 
@@ -388,11 +373,9 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
     ci_niter = control$ci_niter,
     cost_scale_TF24 = traits$cost_scale_TF24
   )
-  # ⚠️ R_d_25 goes on AFTER construction, because the generated constructor does not
-  # take it -- and it must go on at all, or `leaf_traits(R_d_25 = 0.525)` would be
-  # accepted and silently ignored, which is worse than not offering the argument.
-  # Safe here: nothing has been solved yet, and the temperature cache keys on the
-  # resolved reference value, so the next set_drivers() picks it up.
+  # ⚠️ AFTER construction, because plant's RcppR6 bindings pin the generated
+  # constructor by arity so R_d_25 cannot be an argument to it. Without this line
+  # `leaf_traits(R_d_25 = )` would be accepted and silently ignored.
   l$R_d_25 <- traits$R_d_25
   l$initialize_integrator(control$integration_rule, control$integration_tol)
   # After the integrator, because set_supply_single clears the solved state --

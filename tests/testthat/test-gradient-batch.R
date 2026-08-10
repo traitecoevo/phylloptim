@@ -81,23 +81,13 @@ test_that("the parameter enumeration is the same order in R and in C++", {
   # integer positions into C++'s `phylloptim::gradient::par_names`, so appending
   # is safe and reordering would differentiate the wrong parameter and report
   # plausible numbers for it. Compared rather than trusted, in both directions.
-  #
-  # ⚠️ AND THE ENUMERATION IS NOT `leaf_traits()`' ORDER ANY MORE. `R_d_25` is a
-  # trait -- `set_traits()`' fourteenth argument -- but the enumeration APPENDS it
-  # after the two non-traits, because slotting it in at 13 would have displaced
-  # `par_kmax` and `par_resistance`, which is the reorder this comment warns about.
-  # So the two lists agree on the first thirteen and then deliberately diverge, and
-  # THAT is what is asserted: appending is the safe move and is what happened.
-  traits <- names(leaf_traits())
-  r_side <- c(setdiff(traits, "R_d_25"), "leaf_specific_conductance_max",
-              "resistance", "R_d_25")
+  r_side <- c(names(leaf_traits()), "leaf_specific_conductance_max",
+              "resistance")
   expect_identical(gradient_par_names(), r_side)
   # And the count, which is what a positional trait call would silently break:
-  # thirteen traits, the two that are not traits, then R_d_25.
+  # fourteen traits then the two that are not traits.
   expect_length(gradient_par_names(), 16L)
-  expect_identical(gradient_par_names()[1:13], traits[1:13])
-  expect_identical(gradient_par_names()[[16]], "R_d_25")
-  expect_identical(traits[[14]], "R_d_25")
+  expect_identical(gradient_par_names()[1:14], names(leaf_traits()))
 })
 
 test_that("the batch reproduces leaf_gradient() bit-for-bit across the grid", {
@@ -220,19 +210,10 @@ test_that("the recorded gradients have not moved", {
   # test-golden.R's first version made. libm's exp/pow are not bit-reproducible
   # between glibc on x86-64 and Apple's libm on arm64.
   #
-  # ⚠️ THIS FILE USED `golden_tolerance()` AND THAT WAS WRONG -- borrowed from the
-  # solved-output baseline, where it happened not to fail until #41 added a column.
-  # A gradient here is a FINITE DIFFERENCE, so it carries the solve's ~1e-9 floor
-  # DIVIDED BY THE STEP, and since the step is relative the amplification is set by
-  # the differentiated parameter's own magnitude. `R_d_25` is 1.44 where `vcmax_25`
-  # is 96, so it takes a 67x smaller absolute step and disagrees 10x more --
-  # 1.3e-03 on Linux against 1.3e-04 for every column that was here before.
-  # `gradient_golden_tolerance()` is that measurement, with the arithmetic.
-  #
-  # The pre-existing columns were, and remain, in the golden file's own
-  # sqrt-amplified class: derivatives of outputs evaluated at the ARGMAX of a flat
-  # maximum, where a central difference cancels the systematic part of a libm
-  # difference but not all of it.
+  # THE TOLERANCE IS `gradient_golden_tolerance()`, not the solved-output one: a
+  # gradient here is a finite difference, so it carries the solve's floor divided by
+  # the step, and the smallest-magnitude parameter sets it for the whole file. See
+  # that function for the arithmetic.
   #
   # ⚠️ Read the SUMMARY LINE below for a magnitude, never the FAIL lines. The
   # figures in this package's guide were wrong twice because a truncated failure
@@ -350,18 +331,8 @@ test_that("per-observation theta differentiates each row at its own parameters",
   })
 
   b <- leaf_batch(psi_soil = psv, PPFD = 900)
-  # ⚠️ `R_d_25` LAST, and RESOLVED rather than left as its NA sentinel. A caller
-  # who builds `theta` themselves takes on the job `.gradient_theta_matrix()` does,
-  # and the contract is that theta holds the value the solve will USE: an NA there
-  # would leave each row's respiration derived from its own `vcmax_25`, so these
-  # rows would be differentiated at a different point than the `leaf_gradient()`
-  # references below -- which resolve it -- and the two would disagree by the
-  # respiration term rather than fail. The ratio comes off the leaf so there is no
-  # second copy of 0.015 in the tests either.
-  ratio <- b$leaf$rd_to_vcmax_ratio_
   theta <- t(vapply(traits, function(tr) {
-    unname(c(unlist(tr)[gradient_par_names()[1:13]], 3.14e-5, NA_real_,
-             ratio * tr$vcmax_25))
+    unname(c(unlist(tr)[gradient_par_names()[1:14]], 3.14e-5, NA_real_))
   }, numeric(16)))
   g <- leaf_gradient_batch(b, theta = theta, pars = pars)
 

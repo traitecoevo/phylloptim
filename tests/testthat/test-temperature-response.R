@@ -22,7 +22,9 @@ test_that("the temperature-response parameters are readable at their defaults", 
   expect_equal(l$jmax_ha_, 30000)
   expect_equal(l$jmax_H_d_, 200000)
   expect_equal(l$jmax_d_S_, 650)
-  expect_equal(l$rd_to_vcmax_ratio_, 0.015)
+  expect_equal(l$R_d_25, 1.44)
+  expect_equal(l$rd_q10_intercept_, 3.09)
+  expect_equal(l$rd_q10_slope_, 0.0430)
 
   for (f in c("gamma_25_", "gamma_ha_", "kc_25_", "kc_ha_", "ko_25_", "ko_ha_")) {
     expect_true(is.finite(l[[f]]), info = f)
@@ -76,59 +78,24 @@ test_that("changing a temperature parameter changes the solve, via set_traits", 
   expect_gt(moved, base)
 })
 
-test_that("rd_to_vcmax_ratio_ reaches the solve", {
+test_that("R_d_25 reaches the solve, and rises with temperature", {
   tr <- leaf_traits()
-  drive <- function(ratio) {
-    l <- leaf_model(traits = tr, control = leaf_control(),
-                    supply = leaf_supply_single())
-    if (!is.null(ratio)) l$rd_to_vcmax_ratio_ <- ratio
-    set_traits(l, tr)
+  drive <- function(rd_25, temp = 25) {
+    l <- leaf_model(traits = leaf_traits(R_d_25 = rd_25),
+                    control = leaf_control(), supply = leaf_supply_single())
     set_drivers(l, psi_soil = 0.5, PPFD = 1200,
                 root_network = series_resistance(50),
                 leaf_specific_conductance_max = 1e-4, atm_vpd = 1.0, ca = 40,
-                leaf_temp = 25, atm_o2_kpa = 20.9, atm_kpa = 101.325)
+                leaf_temp = temp, atm_o2_kpa = 20.9, atm_kpa = 101.325)
     l$find_root_collar_psi()
-    l$assim_colimited_
+    c(A = l$assim_colimited_, R_d = l$R_d_)
   }
 
-  # More respiration, less net assimilation. Sabot's data imply ratios from
-  # 0.0046 to 0.0302 across species against the hard-coded 0.015, so this is the
+  # More respiration, less net assimilation. Sabot's data imply 0.44 to 2.90
+  # umol m^-2 s^-1 across their 16 species against the 1.44 default, so this is the
   # range a calibration actually needs, not an extreme.
-  expect_lt(drive(0.0302), drive(0.0046))
-})
-
-test_that("rd_tracks_vcmax_ restores the pre-#41 respiration shape from R", {
-  # ⚠️ THIS IS A REPRODUCIBILITY ESCAPE HATCH, NOT A MODELLING OPTION. `R_d` used to
-  # be `rd_to_vcmax_ratio_ * vcmax_(T)`, tracking Vcmax's PEAKED Arrhenius, and no
-  # combination of `rd_q10_intercept_` and `rd_q10_slope_` produces a peaked
-  # function -- so without this flag no published plant result computed under the
-  # old shape could be regenerated. The C++ suite pins the branch bit-exactly; what
-  # this test adds is that it is reachable from R at all, which is what the plant
-  # A/B needs.
-  rd_at <- function(temp, old_shape) {
-    l <- leaf_model()
-    l$rd_tracks_vcmax_ <- old_shape
-    set_drivers(l, psi_soil = 0.5, PPFD = 900, leaf_temp = temp)
-    c(R_d = l$R_d_, vcmax = l$vcmax_)
-  }
-
-  ratio <- leaf_model()$rd_to_vcmax_ratio_
-  for (temp in c(15, 25, 35, 45)) {
-    old <- rd_at(temp, TRUE)
-    expect_identical(old[["R_d"]], ratio * old[["vcmax"]],
-                     label = sprintf("old shape at %g C", temp))
-  }
-
-  # The two shapes agree at the 25 C reference and diverge in OPPOSITE DIRECTIONS
-  # above the thermal optimum -- the peaked curve falls, the declining-Q10 curve
-  # rises. That opposition is the reason a flag was needed rather than a parameter.
-  expect_identical(rd_at(25, TRUE)[["R_d"]], rd_at(25, FALSE)[["R_d"]])
-  expect_lt(rd_at(45, TRUE)[["R_d"]], rd_at(25, TRUE)[["R_d"]])
-  expect_gt(rd_at(45, FALSE)[["R_d"]], rd_at(25, FALSE)[["R_d"]])
-
-  # And it is refused rather than resolved alongside a measured reference value.
-  l <- leaf_model(leaf_traits(R_d_25 = 0.525))
-  l$rd_tracks_vcmax_ <- TRUE
-  expect_error(set_drivers(l, psi_soil = 0.5, PPFD = 900, leaf_temp = 30),
-               "not both")
+  expect_lt(drive(2.90)[["A"]], drive(0.44)[["A"]])
+  # And the trait is the value AT 25 C: it is used verbatim there and larger above.
+  expect_equal(drive(0.525)[["R_d"]], 0.525)
+  expect_gt(drive(0.525, temp = 40)[["R_d"]], 0.525)
 })
