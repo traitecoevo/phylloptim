@@ -1,5 +1,70 @@
 # phylloptim 0.2.1
 
+## Revalidated against plant, at temperatures other than 25 °C (#41)
+
+⚠️ **The obvious way to do this was to pin leaf temperature at 25 °C, and it would
+have been worthless.** #41 is inert at 25 °C *by construction* — respiration's
+reference value is defined there — so a bit-identical result at 25 °C proves the
+reference point survived and nothing else. Both harnesses are new and both vary
+temperature: `tests/validate/rd_shape_grid.cpp` on this package's grid, and
+`tests/validate/rd_shape_arms.R` on plant.
+
+**Three arms over the 1152-point grid**, against phylloptim at `origin/master`:
+
+| arm | cells differing | what it isolates |
+|---|---|---|
+| default, 25 °C only | **0 of 2592** | the control |
+| `rd_tracks_vcmax_ = TRUE`, all four temperatures | **0 of 10368** | the shape change alone |
+| default, all four temperatures | 6018 of 10368 | the blast radius |
+
+The middle row is the strong result: with the old shape restored, **everything else
+in #41 — the cache key, the settable `R_d_25`, the shut-down exit, the R API — is
+jointly bit-identical to master.** That is proved rather than argued, and it is what
+the escape hatch was added for.
+
+Assimilation moves +0.05% to +3.51% at 15 °C, exactly 0 at 25 °C, −5.7% to −100% at
+35 °C, and −35% to −213% at 40 °C. **No row changed feasibility** — the 48 shut-down
+rows per temperature are the same rows. Of the 864 rows whose A moves, 269 keep their
+exact operating point: 144 shut down, and 125 sit pinned to a bound that temperature
+does not move, so only their carbon balance changes.
+
+**On the plant side**, TF24 SCM offspring production (one species,
+`max_patch_lifetime = 5`, the setup plant's own regression test uses):
+
+| plant configuration | master | this branch | change |
+|---|---|---|---|
+| default (`leaf_temp` = 25, PM off) | 81.857087216483691 | 81.857087216483691 | **bit-identical** |
+| `leaf_temp` driver = 30 °C | 24.2830737 | 22.3699929 | −7.9% |
+| `leaf_temp` driver = 35 °C | 2.1302e-04 | 6.4472e-07 | ÷331 |
+| Penman-Monteith on | 2.2034982 | 1.1638497 | **−47.2%** |
+
+⚠️ **plant pins 25 °C itself at its defaults**, which is what makes the first row
+exact: `TF24_Environment` sets `leaf_temp` as a *constant* extrinsic driver at 25 and
+`use_energy_balance` defaults to 0. So a default plant run is unaffected, and the
+exposure is entirely in the two configurations that leave 25 °C.
+
+⚠️ **The Penman-Monteith row is the one to carry forward.** On that path leaf
+temperature reaches **62 °C, up to +22 K above air temperature** (measured over PAR
+400–2000 × Tair 20–40 × VPD 1–3), so a PM leaf at 25 °C air already sits at 32.9 °C
+and loses 23% of its assimilation. `Tleaf` itself moved on 22 of 90 cells, because
+the energy balance couples back through transpiration — on that path leaf temperature
+is an output, not an input.
+
+plant needs no source change: it never calls `set_traits`, so the fourteenth argument
+is invisible to it, and it binds only `R_d_` of the respiration fields. Its
+leaf/TF24 test files give **486 checks, 0 failures** and one error, and that error is
+**present identically on the control** — pre-existing on plant develop, not #41.
+
+**Still not covered, and recorded so the next attempt starts from the real
+obstacle**: `compare_with_plant.R`, which compares against plant's own independent
+`Leaf`, still does not run. Its header blames the constructor signature; that is no
+longer the obstacle. Against plant at 76df7169 both `Leaf()` and `set_physiology()`
+work, and what stops it is `root_collar_psi_` versus `opt_root_psi_` — the #25
+rename, which flipped the sign — on top of results deliberately moved by #15, 11a,
+11b, #25, #77 and #84. That is issue #64 and it needs a decision about the reference,
+not a rename.
+
+
 ## The golden grid has a temperature axis: 288 points become 1152 (#41)
 
 ⚠️ **The golden file was blind to every temperature response in the model, and had

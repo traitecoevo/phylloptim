@@ -35,7 +35,7 @@ the user-visible history.
 | [#34](https://github.com/traitecoevo/phylloptim/issues/34) | 6d | Delete plant's `Leaf` bindings | Unblocked (plant #591 merged, and #33 is done). The hazard-7 payoff, and the only stage that can break plant |
 | [#38](https://github.com/traitecoevo/phylloptim/issues/38) | 38 | `psi_crit` above the curve's domain fails with an error naming neither | Bounds how far `stem_b` can move in one step; see 11f |
 | [#40](https://github.com/traitecoevo/phylloptim/issues/40) | 40 | Cross-validate the Medlyn path against `plantecophys` | From #6. Ties to #3, which needs Medlyn first-class |
-| [#41](https://github.com/traitecoevo/phylloptim/issues/41) | 41 | `R_d` cannot be set from R: `rd_to_vcmax_ratio_` is unbound | From #6. **74% Rd overstatement** for *Q. ilex* against Sabot's data |
+| [#41](https://github.com/traitecoevo/phylloptim/issues/41) | 41 | `R_d`: settable, differentiable, and rising with temperature | **DONE.** From #6. The scale was the smaller half — the SHAPE was peaked and fell above the thermal optimum. Bit-identical at plant's defaults, −47% offspring production on the PM path |
 | [#49](https://github.com/traitecoevo/phylloptim/issues/49) | 14 | Is `kmax ~ h^-1` defensible? Koçillari et al. 2021 find no height trend | Split out of item 14, which had it filed nowhere |
 | [#50](https://github.com/traitecoevo/phylloptim/issues/50) | 8 | `H2O_CO2_stom_diff_ratio` is 1.67, the g1 literature uses 1.6 | **2.2% offset** in every reported `g1_eff` |
 | [#51](https://github.com/traitecoevo/phylloptim/issues/51) | 10c | `kg_to_mol_h2o` and `kg_per_mol_h2o` are not reciprocals | **0.028%**. The bit-identity baseline it was waiting for now exists |
@@ -529,15 +529,70 @@ an established external implementation to check against — and #3 needs it
 first-class. `plantecophys` also solves the coupled system analytically rather than
 by root-finding, which is worth considering on its own merits. Found doing #6.
 
-## 41. `R_d` cannot be set from R
+## 41. `R_d` — DONE, and the shape mattered more than the scale
 
-`rd_to_vcmax_ratio_` became a settable C++ member in #15, but it is **absent from
-`inst/RcppR6_classes.yml`** and is not a constructor argument, so from R a fixed
-0.015 is imposed. `R_d_` is bound read/write, but every `set_physiology()` recomputes
-it. Sabot's data imply ratios of **0.0046–0.0302** — a factor of 6.5 — and for
-*Q. ilex* the model uses 0.914 against the data's 0.525, a **74% Rd overstatement**
-and a systematic ~4% species-varying bias in A. ⚠️ Item 10b's claim that this
-parameter "is now settable" is true of C++ and false from R.
+The original complaint: `rd_to_vcmax_ratio_` became a settable C++ member in #15 but
+was **absent from `inst/RcppR6_classes.yml`** and not a constructor argument, so from
+R a fixed 0.015 was imposed, and `R_d_`, though bound read/write, was recomputed by
+every `set_physiology()`. Sabot's data imply ratios of **0.0046–0.0302** — a factor
+of 6.5 — and for *Q. ilex* the model used 0.914 against the data's 0.525, a **74% Rd
+overstatement** and a systematic ~4% species-varying bias in A.
+
+All of that is fixed: the temperature cache keys on everything it reads, `R_d_25` is
+a trait, and it is differentiable at its default. But the reachable part turned out to
+be the smaller half of the problem.
+
+⚠️ **THE SHAPE WAS WRONG, NOT JUST THE SCALE, AND NO VALUE OF THE RATIO COULD FIX
+IT.** `R_d` was `ratio * vcmax_(T)`, so it inherited Vcmax's **peaked** Arrhenius and
+therefore **fell** above the thermal optimum, where real dark respiration rises — the
+opposite direction, and an order of magnitude out by 50 °C. Replaced with Tjoelker's
+declining Q10. A constant Q10 = 2 was implemented first and rejected on measurement
+(R_d 4.07 at 40 °C, −73% on A, no operating point at all by 45 °C).
+
+`rd_tracks_vcmax_` is the way back to the old shape, and it exists because without it
+**no published plant result computed under the old shape could be regenerated** — a
+reproducibility hole this item created. It is also what makes the revalidation a
+controlled A/B rather than an argument.
+
+**What the A/B says.** Over the 1152-point golden grid
+(`tests/validate/rd_shape_grid.cpp`), against phylloptim at `origin/master`:
+
+| arm | cells differing | verdict |
+|---|---|---|
+| default, 25 °C only | **0 of 2592** | the control holds |
+| `rd_tracks_vcmax_ = TRUE`, all four temperatures | **0 of 10368** | the whole of #41 is the shape and nothing else |
+| default, all four temperatures | 6018 of 10368 | the blast radius |
+
+The second row is the strong one: the cache key, the settable `R_d_25`, the shut-down
+exit and the R API are jointly **behaviour-neutral**, proved rather than argued.
+
+Assimilation moves +0.05 to +3.51% at 15 °C, exactly 0 at 25 °C, −5.7 to −100% at
+35 °C and −35 to −213% at 40 °C. **No row changed feasibility** — the 48 shut-down
+rows per temperature are the same rows. Of the 864 rows whose A moves, 269 keep their
+exact operating point: 144 shut down, and 125 sit pinned to a bound temperature does
+not move, so only their carbon balance changes.
+
+**On the plant side** (`tests/validate/rd_shape_arms.R`), TF24 SCM offspring
+production is **bit-identical at plant's defaults** — because `TF24_Environment` pins
+`leaf_temp` as a constant 25 °C driver with Penman-Monteith off, so #41 is inert there
+by construction — then **−7.9%** at a 30 °C driver, **÷331** at 35 °C, and **−47.2%**
+with PM on. The PM row is the one to carry forward: leaf temperature there runs to
+**62 °C, up to +22 K above air**, and `Tleaf` itself moves, because the energy balance
+couples back through transpiration.
+
+⚠️ **The golden file was blind to all of this and had been all along** — 288 points at
+one temperature, where every reference value is defined. It has a temperature axis
+now. Read the developer guide's golden-file section before trusting a bit-identical
+run about any temperature response.
+
+**Still open:** `compare_with_plant.R`, against plant's own independent `Leaf`, does
+not run — item 64. The obstacle is not the constructor signature its header blames:
+against plant at 76df7169 both `Leaf()` and `set_physiology()` work, and what stops it
+is `root_collar_psi_` versus `opt_root_psi_` (the #25 rename, which flipped the sign)
+on top of results deliberately moved by #15, 11a, 11b, #25, #77 and #84.
+
+⚠️ Item 10b's claim that this parameter "is now settable" was true of C++ and false
+from R; it is now true of both.
 
 ## 14. Naming, home, publication
 
