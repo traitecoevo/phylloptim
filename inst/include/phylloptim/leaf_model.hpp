@@ -14,6 +14,7 @@
 #include <odelia/interpolator.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <string>
@@ -334,10 +335,31 @@ public:
   double kc_ha_ = phylloptim::kc_ha;
   double ko_25_ = phylloptim::ko_25;          // Rubisco Km for O2, umol mol^-1
   double ko_ha_ = phylloptim::ko_ha;
-  // Dark respiration as a fraction of vcmax. Was the bare literal 0.015 inline in
-  // update_temperature_dependent_params -- a named, species-variable parameter
-  // (Collatz/Farquhar) hiding as a magic number.
-  double rd_to_vcmax_ratio_ = 0.015;
+  // Dark respiration at the 25 C reference, umol m^-2 s^-1. Many datasets report
+  // it directly (Sabot et al. give `Rlref` per site), and across their 16 species
+  // the implied fraction of vcmax_25 spans 0.0046 to 0.0302, so it is a trait in
+  // its own right rather than a fixed multiple of anything.
+  //
+  // The default is 0.015 * 96, the value the old vcmax-derived form gave at the
+  // default vcmax_25. Initialised here rather than in the constructors' init lists
+  // because plant's RcppR6 bindings pin the 17-argument constructor by arity, so
+  // this cannot become an 18th argument without breaking plant's generated glue.
+  double R_d_25 = 1.44;
+  // Dark respiration's temperature response, Tjoelker et al. (2001):
+  //
+  //     R_d(T) = R_d_25 * Q10(T)^((T - 25) / 10)
+  //     Q10(T) = rd_q10_intercept_ - rd_q10_slope_ * (T + 25) / 2
+  //
+  // The Q10 is evaluated at the MEAN of the measurement and reference
+  // temperatures, which is the form the land-surface literature implements, and it
+  // DECLINES with temperature: a constant Q10 of 2 is too aggressive at the top of
+  // the range, putting R_d 2.8x its 25 C value over 15 K and leaving the solve no
+  // operating point at all by 45 C.
+  //
+  // Set the slope to zero and the intercept IS a constant Q10, for anyone who
+  // wants the conventional form.
+  double rd_q10_intercept_ = 3.09;
+  double rd_q10_slope_ = 0.0430;
   double atm_kpa_;
   // Conversion from a mixing ratio (umol mol^-1) to a partial pressure (Pa).
   // DERIVED from atm_kpa_, not a constant: it is 1e-6 * P, so the old
@@ -392,8 +414,29 @@ public:
   // NOTE: electron_transport_ is deliberately NOT cached here -- it also depends
   // on the per-call PPFD_ and is recomputed every call.
   bool   photo_temp_cached_ = false;
-  double photo_temp_cache_leaf_temp_ = 0.0;
-  double photo_temp_cache_atm_o2_kpa_ = 0.0;
+  // ⚠️ THE KEY MUST COVER EVERY SCALAR THE BLOCK READS, NOT JUST THE DRIVERS.
+  // It used to be (leaf_temp_, atm_o2_kpa_) alone, and the argument for that was
+  // "same inputs -> bit-identical outputs, so reusing is exact". That argument was
+  // true while the temperature-response parameters were unreachable C++ members
+  // and became FALSE the moment they were bound to R: `l$rd_q10_slope_ <- 0`
+  // followed by `set_drivers()` at the same temperature took a cache HIT and
+  // silently kept the old response, with A unchanged to every digit.
+  //
+  // So the key is now every input of update_temperature_dependent_params(). Two
+  // consequences worth knowing:
+  //
+  //   * it also covers `vcmax_25` and `jmax_25`, which closes the third and least
+  //     visible half of hazard 10 -- a bare `l$vcmax_25 <- x` write no longer
+  //     leaves `vcmax_`/`jmax_`/`R_d_` describing the old value. `set_traits()` is
+  //     still the right way to change a trait (the vulnerability splines and the
+  //     solved point need clearing too), but the silent-wrong-number failure mode
+  //     is gone.
+  //   * the cost is 17 double comparisons per set_physiology() call, i.e. per
+  //     driver set, NOT per inner solve iteration. Measured: within run-to-run
+  //     noise on bench_solve.
+  static constexpr int photo_temp_key_size = 19;
+  std::array<double, photo_temp_key_size> photo_temp_cache_key_{};
+  std::array<double, photo_temp_key_size> photo_temp_key() const;
   std::vector<double> f_r;
   // TODO: move into environment?
 
@@ -438,13 +481,14 @@ public:
   // check here can see the difference, because both are just positive numbers.
   void set_physiology(const RootNetwork& root_network, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double leaf_temp, double atm_o2_kpa, double atm_kpa);
 
-  // Replace the thirteen traits on an existing Leaf, leaving the four numerical
-  // controls alone. Same arguments, same order, as the constructor's trait subset.
+  // Replace the fourteen traits on an existing Leaf, leaving the four numerical
+  // controls alone. Same arguments, same order, as the constructor's trait subset,
+  // plus R_d_25 which the constructor does not take.
   //
-  // It was fifteen before #33. `beta_R_H` and `beta_R_V` left with the root
-  // architecture model, so they are no longer traits of anything here and there is
-  // no route to d(output)/d(beta_R_*) through this object. A caller who needs one
-  // differences the NETWORK, which is now an input: root_network_from_carbon is
+  // `beta_R_H` and `beta_R_V` are NOT traits here since #33: they left with the root
+  // architecture model, so there is no route to d(output)/d(beta_R_*) through this
+  // object. A caller who needs one differences the NETWORK, which is now an input:
+  // root_network_from_carbon is
   // homogeneous of degree 1 in each constant (r_R_H_min proportional to beta_R_H,
   // r_R_V to beta_R_V), so the perturbed network is a scaling of the base one and
   // costs no rebuild -- but the two solves either side of it are still two solves.
@@ -483,7 +527,7 @@ public:
                   double root_c, double root_b, double root_psi_crit,
                   double beta2, double jmax_25, double a,
                   double curv_fact_elec_trans, double curv_fact_colim,
-                  double cost_scale_TF24);
+                  double cost_scale_TF24, double R_d_25);
 
   // The #25 boundary: the four potentials that must be positive magnitudes. One
   // copy, called from both the constructor and set_traits -- the alternative is
@@ -967,7 +1011,8 @@ public:
     // operating point in this state reads NA sentinels.
     Unsolved,
     // Interior profit maximum: dprofit == 0 was solved for, strictly inside the
-    // feasible collar interval. 198 of the 288 golden grid points.
+    // feasible collar interval. 198 of the 288 golden grid points at 25 C -- 160 of
+    // them at 40 C, where the optimum presses against the WET bound instead.
     Interior,
     // Constrained optimum pinned at the WET end of the feasible interval, just
     // inside root_zero_E (the collar at which uptake is exactly zero). profit is
@@ -984,7 +1029,8 @@ public:
     // Shutdown on water: no collar potential both moves water and stays inside
     // the stem's and the root's critical potentials. The stem holds at psi_crit,
     // transpiration is zero, and the leaf pays respiration plus the hydraulic
-    // cost there. 48 of the 288 golden grid points. The water response is zero;
+    // cost there. 48 of the 288 golden grid points at every temperature, since it is
+    // hydraulics rather than heat that forbids transpiration. The water response is zero;
     // the carbon response is not.
     HydraulicShutdown,
     // Shutdown on light: assim_max_ < 0, so gross assimilation at ci = ca cannot
@@ -1146,14 +1192,14 @@ inline void Leaf::check_psi_magnitudes(double psi_crit, double stem_b,
   }
 }
 
-// See the header for why this exists rather than fifteen settable fields.
+// See the header for why this exists rather than fourteen settable fields.
 inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
                              double psi_crit_, double root_c_, double root_b_,
                              double root_psi_crit_, double beta2_,
                              double jmax_25_, double a_,
                              double curv_fact_elec_trans_,
                              double curv_fact_colim_,
-                             double cost_scale_TF24_) {
+                             double cost_scale_TF24_, double R_d_25_) {
   check_psi_magnitudes(psi_crit_, stem_b_, root_b_, root_psi_crit_);
 
   // Which splines have to be rebuilt, decided BEFORE the assignment. Exact
@@ -1182,6 +1228,7 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
   curv_fact_elec_trans = curv_fact_elec_trans_;
   curv_fact_colim = curv_fact_colim_;
   cost_scale_TF24 = cost_scale_TF24_;
+  R_d_25 = R_d_25_;
 
   roots_.root_c = root_c_;
   roots_.root_b = root_b_;
@@ -1364,17 +1411,16 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
    // candidate psi in set_leaf_states_rates_from_psi_stem, so we always recompute
    // the Tair baseline (used for assim_max_ / feasibility) and let the solve
    // override it.
+   const std::array<double, photo_temp_key_size> photo_key = photo_temp_key();
    if (!use_energy_balance_ &&
        photo_temp_cached_ &&
-       leaf_temp_ == photo_temp_cache_leaf_temp_ &&
-       atm_o2_kpa_ == photo_temp_cache_atm_o2_kpa_) {
-     // Cache hit (non-PM): temperature params unchanged; only electron_transport_
+       photo_key == photo_temp_cache_key_) {
+     // Cache hit (non-PM): every input unchanged; only electron_transport_
      // depends on the per-call PPFD_, so refresh just that (as before).
      electron_transport_ = electron_transport();
    } else {
      update_temperature_dependent_params(leaf_temp_);
-     photo_temp_cache_leaf_temp_ = leaf_temp_;
-     photo_temp_cache_atm_o2_kpa_ = atm_o2_kpa_;
+     photo_temp_cache_key_ = photo_key;
      photo_temp_cached_ = true;
    }
 
@@ -2382,12 +2428,31 @@ inline double Leaf::peak_arrh_curve(double Ea, double ref_value, double leaf_tem
 // depends on the per-call PPFD_ and is (re)computed here from the just-updated
 // jmax_ -- on the non-PM cache-hit path set_physiology refreshes it separately.
 //
-// ⚠️ R_d INHERITS VCMAX'S PEAKED CURVE AND SO FALLS ABOVE THE THERMAL OPTIMUM,
-// where dark respiration should rise. Matched at 25 C against a Q10 of 2, the
-// two diverge in opposite directions: at 25/35/40/45/50 C this gives 0.395,
-// 0.543, 0.466, 0.284, 0.135 against the Q10's 0.395, 0.790, 1.117, 1.580,
-// 2.234 -- a factor of 16.5 apart by 50 C, and moving the wrong way. See the
-// note at the R_d_ assignment below for why it is recorded rather than changed.
+// R_d comes from R_d_25 and the declining Q10, so it RISES with temperature.
+// It used to be a fraction of vcmax_(T) and therefore fell above the thermal
+// optimum, which was the wrong direction (#41).
+
+// Every scalar update_temperature_dependent_params() below reads, in one place so
+// the cache key and the computation cannot drift apart.
+//
+// ⚠️ KEEP THIS IMMEDIATELY ABOVE THAT FUNCTION AND IN STEP WITH IT. Adding an input
+// there without adding it here reintroduces exactly the silent staleness this key
+// exists to remove -- the fit still converges and the numbers stay plausible.
+// `photo_temp_key_size` is the guard: the compiler rejects a mismatched list.
+//
+// Bit equality (`==`) is the right comparison. The question is "did any input
+// change", not "did it change materially": an input that moved by one ULP produces
+// a different response and must invalidate.
+inline std::array<double, Leaf::photo_temp_key_size> Leaf::photo_temp_key() const {
+  return {leaf_temp_, atm_o2_kpa_,
+          vcmax_25, vcmax_ha_, vcmax_H_d_, vcmax_d_S_,
+          jmax_25, jmax_ha_, jmax_H_d_, jmax_d_S_,
+          gamma_25_, gamma_ha_,
+          kc_25_, kc_ha_,
+          ko_25_, ko_ha_,
+          R_d_25, rd_q10_intercept_, rd_q10_slope_};
+}
+
 inline void Leaf::update_temperature_dependent_params(double leaf_temp) {
   vcmax_ =
       peak_arrh_curve(vcmax_ha_, vcmax_25, leaf_temp, vcmax_H_d_, vcmax_d_S_);
@@ -2395,24 +2460,19 @@ inline void Leaf::update_temperature_dependent_params(double leaf_temp) {
   gamma_ = arrh_curve(gamma_ha_, gamma_25_, leaf_temp);
   ko_ = arrh_curve(ko_ha_, ko_25_, leaf_temp);
   kc_ = arrh_curve(kc_ha_, kc_25_, leaf_temp);
-  // ⚠️ RESPIRATION INHERITS VCMAX'S PEAKED CURVE, SO IT FALLS ABOVE THE THERMAL
-  // OPTIMUM. That is wrong: dark respiration rises with temperature over this
-  // range, and a Q10 near 2 is the standard description. Tying R_d to vcmax_(T)
-  // -- which is what this line does -- makes it peak wherever Vcmax peaks and
-  // decline after. It diverges from a Q10 of 2 in the opposite direction and by
-  // an order of magnitude by 50 C -- the numbers are tabulated in this
-  // function's doc block above, rather than here, because an indented block
-  // inside a function body is what Doxygen 1.9 on CI rejects.
+  // Respiration RISES with temperature, on the declining Q10 above. ⚠️ It is
+  // exactly R_d_25 at 25 C and larger above, so any check taken at 25 C alone is
+  // blind to this whole response -- test_rd_temperature_response is what covers it.
   //
-  // No value of rd_to_vcmax_ratio_ repairs this -- it is a scale on a function
-  // of the wrong shape. It matters most for anything studying high-temperature
-  // behaviour, because understating respiration above the optimum understates
-  // how fast NET assimilation declines there.
-  //
-  // Left as-is rather than changed unilaterally: R_d feeds every operating point
-  // and the golden file, so switching to a Q10 moves published plant results and
-  // needs its own change with its own measured blast radius.
-  R_d_ = vcmax_ * rd_to_vcmax_ratio_;
+  // Fail rather than fall back: R_d_25 is a trait, and an unset one is a caller
+  // error, not a cue to derive something from vcmax.
+  if (!std::isfinite(R_d_25) || R_d_25 < 0.0) {
+    util::stop("R_d_25 must be a finite, non-negative dark respiration at 25 C; "
+               "got " + util::format_double(R_d_25));
+  }
+  const double q10 =
+      rd_q10_intercept_ - rd_q10_slope_ * (leaf_temp + 25.0) / 2.0;
+  R_d_ = R_d_25 * std::pow(q10, (leaf_temp - 25.0) / 10.0);
   km_ = (kc_*umol_per_mol_to_Pa_)*(1 + (atm_o2_kpa_*kPa_to_Pa)/(ko_*umol_per_mol_to_Pa_));
   electron_transport_ = electron_transport();
 }
@@ -2817,18 +2877,34 @@ inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
   try {
     return ci_ = util::uniroot_smooth(target, gamma_ * umol_per_mol_to_Pa_, ca_, 1e-10, ci_niter);
   } catch (const std::exception& e) {
-    // Penman-Monteith path (#523): extreme energy-balance leaf heating raises the
-    // CO2 compensation point (gamma*) so far that assimilation is negative across
-    // the whole [gamma*, ca] bracket, so there is no supply==demand root and
-    // TOMS748 cannot bracket. That is a physically-meaningful shut-down (the leaf
-    // is too hot to gain carbon), not a solver failure, so operate at the
-    // compensation point (ci = gamma*, gross A = 0, net A = -R_d) and let the
-    // profit optimiser move away from it. Gated on use_energy_balance_ so the
-    // non-PM path keeps its original fail-fast contract (it never reaches here
-    // under prescribed leaf_temp).
-    if (use_energy_balance_) {
+    // Assimilation can be negative across the WHOLE [gamma*, ca] bracket -- the
+    // leaf is too hot to gain carbon at any internal CO2 -- and then there is no
+    // supply==demand root at all. That is a physically-meaningful shut-down, not a
+    // solver failure: operate at the compensation point (ci = gamma*, gross A = 0,
+    // net A = -R_d) and let the profit optimiser move away from it.
+    //
+    // ⚠️ THIS USED TO BE GATED ON use_energy_balance_, on the grounds that the
+    // prescribed-temperature path "never reaches here". That was true and #41 made
+    // it false: raising R_d to a Q10 response is enough to drive assimilation
+    // negative throughout by ~45 C at the defaults, and the prescribed path then
+    // threw where the PM path shut down -- the same physics, two different
+    // outcomes, decided by how leaf_temp happened to be obtained.
+    //
+    // ⚠️ THE GATE IS NOT SIMPLY REMOVED, because that would mask real solver
+    // failures as shut-downs: this `catch` sees ANY exception from the root-find,
+    // and fail-fast has value. The target is strictly monotone over (gamma*, ca]
+    // (#486), so "no root exists" is distinguishable from "the solver broke" by
+    // the sign at the two ends -- equal signs means the root is genuinely outside
+    // the bracket. Only that case shuts down; anything else still stops.
+    const double lo = gamma_ * umol_per_mol_to_Pa_;
+    const double t_lo = target(lo);
+    const double t_hi = target(ca_);
+    const bool no_root_in_bracket =
+        std::isfinite(t_lo) && std::isfinite(t_hi) &&
+        ((t_lo > 0.0 && t_hi > 0.0) || (t_lo < 0.0 && t_hi < 0.0));
+    if (use_energy_balance_ || no_root_in_bracket) {
       ci_at_compensation_point_ = true;
-      return ci_ = gamma_ * umol_per_mol_to_Pa_;
+      return ci_ = lo;
     }
     util::stop("psi_stem_to_ci failed: " + std::string(e.what()) +
                "; min=" + util::to_string(gamma_ * umol_per_mol_to_Pa_) +

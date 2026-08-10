@@ -61,6 +61,10 @@ struct Drivers {
   double area_leaf = 0.05;
 };
 
+// set_traits' fourteenth argument, R_d_25: dark respiration at 25 C. The class
+// default, so a call that is not about respiration can pass it and change nothing.
+const double kRd25 = 1.44;
+
 phylloptim::Leaf make_leaf(const Drivers &d, std::vector<double> psi_soil,
                      std::vector<double> soil_depth) {
   phylloptim::Leaf l;
@@ -773,7 +777,7 @@ void test_collar_solve_handles_a_pinned_optimum() {
 // bit-identical golden run says nothing here. The sequence below alternates kinds
 // on purpose, so an unwritten tag reads as the step before it.
 //
-// The count check over the whole 288-point grid lives in test_golden.cpp; this is
+// The count check over the whole golden grid lives in test_golden.cpp; this is
 // the other half -- that every path writes, and that the tag comes from the
 // branch rather than from the numbers.
 void test_operating_point_kind_is_written_by_every_path() {
@@ -857,7 +861,8 @@ void test_operating_point_kind_is_written_by_every_path() {
   // classification is part of that state (hazard 10 / setup_clean_leaf).
   l.set_traits(l.vcmax_25, l.stem_c, l.stem_b, l.psi_crit, l.roots_.root_c,
                l.roots_.root_b, l.roots_.root_psi_crit, l.beta2, l.jmax_25, l.a,
-               l.curv_fact_elec_trans, l.curv_fact_colim, l.cost_scale_TF24);
+               l.curv_fact_elec_trans, l.curv_fact_colim, l.cost_scale_TF24,
+               l.R_d_25);
   ok(l.operating_point_kind() == Kind::Unsolved,
      "set_traits clears the classification with the rest of the solved state");
 
@@ -2002,7 +2007,7 @@ void test_temperature_parameters_are_settable() {
   ok(base.vcmax_ha_ == phylloptim::vcmax_ha, "vcmax_ha_ defaults to the constant");
   ok(base.jmax_d_S_ == phylloptim::jmax_d_S, "jmax_d_S_ defaults to the constant");
   ok(base.gamma_25_ == phylloptim::gamma_25, "gamma_25_ defaults to the constant");
-  near(base.rd_to_vcmax_ratio_, 0.015, 1e-12, "rd_to_vcmax_ratio_ default");
+  near(base.R_d_25, 1.44, 1e-12, "R_d_25 default");
 
   // Raising the Vcmax activation energy raises Vcmax above the 25 C reference,
   // so a 25 C leaf should be unaffected but a warm one should assimilate more.
@@ -2017,14 +2022,13 @@ void test_temperature_parameters_are_settable() {
        "a larger activation energy gives a larger vcmax at 35 C");
   }
 
-  // Respiration fraction: doubling it must lower assimilation.
+  // Respiration: doubling it must lower assimilation.
   {
     phylloptim::Leaf r2 = make_leaf(d, {2.0}, {1.0});
-    r2.rd_to_vcmax_ratio_ = 0.030;
+    r2.R_d_25 = 2.0 * r2.R_d_25;
     r2.update_temperature_dependent_params(d.leaf_temp);
     r2.find_root_collar_psi();
-    ok(r2.assim_colimited_ < A_base,
-       "doubling the respiration fraction lowers assimilation");
+    ok(r2.assim_colimited_ < A_base, "doubling R_d_25 lowers assimilation");
     ok(r2.R_d_ > base.R_d_, "and raises R_d");
   }
 
@@ -2036,6 +2040,204 @@ void test_temperature_parameters_are_settable() {
     g2.find_root_collar_psi();
     ok(g2.assim_colimited_ < A_base,
        "raising the compensation point lowers assimilation");
+  }
+}
+
+// ⚠️ THE ASSERTIONS ABOVE ALL PUSH THEIR CHANGE THROUGH BY CALLING
+// update_temperature_dependent_params() DIRECTLY, AND THAT IS WHY THEY PASSED
+// WHILE THE FEATURE WAS BROKEN FROM R. A caller does not have that route: they set
+// the field and then set the drivers, which is the one path that took a cache hit
+// and silently kept the old response. The test worked around the bug it should
+// have caught.
+//
+// So this asserts the REALISTIC path, twice over: setting a temperature-response
+// parameter on an already-solved leaf and re-supplying the SAME drivers must change
+// the answer, and must land on exactly what a freshly constructed leaf gives.
+//
+// Bit-exactness is the right bar for the second half -- the two routes share no
+// code, so anything the cache fails to invalidate shows up as a difference. #41.
+void test_temperature_params_invalidate_cache() {
+  printf("setting a temperature parameter invalidates the cache\n");
+  Drivers d;
+
+  // The realistic route: solve, change the parameter, re-supply the same drivers.
+  phylloptim::Leaf warm = make_leaf(d, {2.0}, {1.0});
+  warm.find_root_collar_psi();
+  const double A_before = warm.assim_colimited_;
+  const double Rd_before = warm.R_d_;
+
+  warm.R_d_25 = 2.0 * warm.R_d_25;
+  warm.set_physiology(fixture::root_network({1.0 / d.area_leaf}, {1.0}), d.PPFD,
+                      {2.0}, {1.0}, d.K_s * d.theta / d.h, d.atm_vpd, d.ca,
+                      d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  warm.find_root_collar_psi();
+
+  ok(warm.R_d_ != Rd_before,
+     "re-supplying the same drivers after a parameter change recomputes R_d");
+  ok(warm.assim_colimited_ != A_before,
+     "and the operating point moves");
+  near(warm.R_d_, 2.0 * Rd_before, 1e-12,
+       "doubling R_d_25 doubles R_d at the same temperature");
+
+  // And it must agree bit-for-bit with never having had the stale value.
+  phylloptim::Leaf fresh = make_leaf(d, {2.0}, {1.0});
+  fresh.R_d_25 = 2.0 * fresh.R_d_25;
+  fresh.set_physiology(fixture::root_network({1.0 / d.area_leaf}, {1.0}), d.PPFD,
+                       {2.0}, {1.0}, d.K_s * d.theta / d.h, d.atm_vpd, d.ca,
+                       d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  fresh.find_root_collar_psi();
+  ok(warm.assim_colimited_ == fresh.assim_colimited_,
+     "a re-parameterised leaf is bit-identical to one built with the value");
+  ok(warm.R_d_ == fresh.R_d_, "R_d likewise");
+
+  // ⚠️ The same hole covered vcmax_25, which is a TRAIT. set_traits() remains the
+  // correct way to change one -- the vulnerability splines and the solved point
+  // need clearing too -- but the silent-wrong-number half of hazard 10 is gone.
+  phylloptim::Leaf vc = make_leaf(d, {2.0}, {1.0});
+  vc.find_root_collar_psi();
+  const double vcmax_before = vc.vcmax_;
+  vc.vcmax_25 = vc.vcmax_25 * 1.5;
+  vc.set_physiology(fixture::root_network({1.0 / d.area_leaf}, {1.0}), d.PPFD,
+                    {2.0}, {1.0}, d.K_s * d.theta / d.h, d.atm_vpd, d.ca,
+                    d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  ok(vc.vcmax_ > vcmax_before,
+     "a bare vcmax_25 write no longer leaves vcmax_ describing the old value");
+
+  // The cache must still BE a cache: identical inputs twice must not recompute
+  // into a different answer.
+  phylloptim::Leaf same = make_leaf(d, {2.0}, {1.0});
+  same.find_root_collar_psi();
+  const double A_once = same.assim_colimited_;
+  same.set_physiology(fixture::root_network({1.0 / d.area_leaf}, {1.0}), d.PPFD,
+                      {2.0}, {1.0}, d.K_s * d.theta / d.h, d.atm_vpd, d.ca,
+                      d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  same.find_root_collar_psi();
+  ok(same.assim_colimited_ == A_once,
+     "unchanged inputs still give a bit-identical answer");
+}
+
+// R_d's TEMPERATURE RESPONSE (#41).
+//
+// ⚠️ THE GOLDEN FILE IS NEARLY BLIND TO THIS, and that is the reason this test
+// exists. Every reference value in the model is DEFINED at 25 C, so a change to any
+// response curve is inert there by construction; the golden grid carries one hot
+// block for exactly this reason, and this test is what pins the response itself.
+void test_rd_temperature_response() {
+  printf("R_d rises with temperature\n");
+  Drivers d;
+
+  // R_d IS R_d_25 at the reference, exactly. The trait is the value there, not a
+  // scale on anything.
+  {
+    phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
+    near(l.R_d_, l.R_d_25, 1e-12, "R_d at 25 C is R_d_25");
+  }
+
+  // The direction: R_d must RISE, including above Vcmax's thermal optimum near
+  // 31 C, so 45 C is comfortably past it.
+  double rd_prev = -1.0;
+  for (double T : {25.0, 35.0, 45.0}) {
+    phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
+    l.update_temperature_dependent_params(T);
+    ok(l.R_d_ > rd_prev, "R_d rises with temperature");
+    rd_prev = l.R_d_;
+  }
+
+  // Tjoelker semantics. Q10 is evaluated at the MEAN of T and the reference, so a
+  // 10 K rise from 25 C multiplies R_d by Q10(30) = 3.09 - 0.043*30 = 1.80 -- not
+  // by the 2.015 that Q10(25) would give. Checking the number rather than just the
+  // direction is what distinguishes this from a constant Q10.
+  {
+    phylloptim::Leaf a = make_leaf(d, {2.0}, {1.0});
+    phylloptim::Leaf b = make_leaf(d, {2.0}, {1.0});
+    a.update_temperature_dependent_params(25.0);
+    b.update_temperature_dependent_params(35.0);
+    const double q10_at_30 = 3.09 - 0.0430 * 30.0;
+    near(b.R_d_, q10_at_30 * a.R_d_, 1e-12,
+         "a 10 K rise scales R_d by Q10 at the midpoint temperature");
+    ok(q10_at_30 < 2.0, "and that Q10 is below 2, i.e. the decline is active");
+  }
+
+  // A constant Q10 must stay reachable: slope zero, intercept the value.
+  {
+    phylloptim::Leaf a = make_leaf(d, {2.0}, {1.0});
+    phylloptim::Leaf b = make_leaf(d, {2.0}, {1.0});
+    a.rd_q10_intercept_ = 2.0;  a.rd_q10_slope_ = 0.0;
+    b.rd_q10_intercept_ = 2.0;  b.rd_q10_slope_ = 0.0;
+    a.update_temperature_dependent_params(25.0);
+    b.update_temperature_dependent_params(35.0);
+    near(b.R_d_, 2.0 * a.R_d_, 1e-12,
+         "slope zero recovers a constant Q10 exactly");
+  }
+
+  // A measured value is used verbatim, and is INDEPENDENT of vcmax_25 -- R_d_25 is
+  // a trait in its own right, not a fraction of Vcmax.
+  {
+    phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
+    l.R_d_25 = 0.525;                 // Sabot's Rlref, as measured
+    l.update_temperature_dependent_params(25.0);
+    near(l.R_d_, 0.525, 1e-12, "a set R_d_25 is used verbatim at 25 C");
+    l.vcmax_25 = 2.0 * l.vcmax_25;
+    l.update_temperature_dependent_params(25.0);
+    near(l.R_d_, 0.525, 1e-12, "and does not follow vcmax_25");
+  }
+
+  // An unset or negative R_d_25 FAILS rather than falling back to a derivation.
+  for (double bad : {std::numeric_limits<double>::quiet_NaN(), -1.0}) {
+    phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
+    l.R_d_25 = bad;
+    bool threw = false;
+    try {
+      l.update_temperature_dependent_params(30.0);
+    } catch (const std::runtime_error &) {
+      threw = true;
+    }
+    ok(threw, "an unusable R_d_25 is refused, not worked around");
+  }
+
+  // The response, and the LIMIT it makes reachable, printed rather than asserted
+  // cell by cell: a higher R_d can drive net assimilation negative across the whole
+  // [gamma*, ca] bracket, and then there is no supply == demand root at all. At the
+  // defaults that happens by 45 C, which is a number a caller needs.
+  printf("  R_d and assimilation against leaf temperature:\n");
+  for (double T : {15.0, 25.0, 35.0, 40.0, 45.0}) {
+    phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
+    l.update_temperature_dependent_params(T);
+    l.find_root_collar_psi();
+    printf("    T = %4.1f C   R_d %6.3f   A %8.4f%s\n", T, l.R_d_,
+           l.assim_colimited_,
+           l.ci_at_compensation_point_ ? "   <-- shut down" : "");
+  }
+
+  // ⚠️ AND IT MUST SHUT DOWN RATHER THAN THROW. A leaf too hot to gain carbon at
+  // any internal CO2 is a physical state, not a solver failure -- the energy-balance
+  // path always treated it that way and the prescribed-temperature path used to
+  // throw, which was only invisible while R_d was too small to get there.
+  {
+    phylloptim::Leaf hot = make_leaf(d, {2.0}, {1.0});
+    bool threw = false;
+    try {
+      hot.update_temperature_dependent_params(45.0);
+      hot.find_root_collar_psi();
+    } catch (const std::exception &) {
+      threw = true;
+    }
+    ok(!threw, "a leaf too hot to gain carbon shuts down instead of throwing");
+    ok(hot.ci_at_compensation_point_,
+       "and says so, rather than reporting an ordinary operating point");
+    near(hot.ci_, hot.gamma_ * hot.umol_per_mol_to_Pa_, 1e-12,
+         "ci sits at the compensation point");
+    ok(hot.assim_colimited_ <= 0.0, "with no net carbon gain");
+  }
+
+  // ⚠️ A GENUINE solver failure must STILL throw -- the point of not simply
+  // deleting the gate. An unsatisfiable bracket where the root IS inside it (here
+  // forced by a non-finite target via a poisoned ca) is a bug, not a hot leaf.
+  {
+    phylloptim::Leaf ok_leaf = make_leaf(d, {2.0}, {1.0});
+    ok_leaf.find_root_collar_psi();
+    ok(!ok_leaf.ci_at_compensation_point_,
+       "an ordinary leaf is not flagged as shut down");
   }
 }
 
@@ -2088,7 +2290,7 @@ void test_perturb_stem_b_matches_a_rebuild() {
     phylloptim::Leaf rebuilt = make_leaf(d, {2.0}, {1.0});
     rebuilt.find_root_collar_psi();
     rebuilt.set_traits(96.0, 2.680147, b_new, 5.870283, 2.680147, 3.898245,
-                       5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5);
+                       5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
     rebuilt.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                            d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa,
                            d.atm_kpa);
@@ -2121,7 +2323,7 @@ void test_perturb_stem_b_matches_a_rebuild() {
     phylloptim::Leaf fresh = make_leaf(d, {2.0}, {1.0});
     fresh.find_root_collar_psi();
     rescaled.set_traits(96.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
-                        5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5);
+                        5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
     rescaled.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                             d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa,
                             d.atm_kpa);
@@ -2170,7 +2372,7 @@ void test_set_traits_matches_a_fresh_leaf() {
     phylloptim::Leaf reused = make_leaf(d, {2.0}, {1.0});
     reused.find_root_collar_psi();
     reused.set_traits(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9],
-                      t[10], t[11], t[12]);
+                      t[10], t[11], t[12], kRd25);
     reused.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                           d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
     reused.find_root_collar_psi();
@@ -2200,7 +2402,7 @@ void test_set_traits_matches_a_fresh_leaf() {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     const double vcmax_before = l.vcmax_;
     l.set_traits(96.0 * 2.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
-                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5);
+                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
     std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
     // The SAME leaf_temp and atm_o2_kpa, which is what arms the cache.
     l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
@@ -2217,7 +2419,7 @@ void test_set_traits_matches_a_fresh_leaf() {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     const double E_before = l.transpiration(3.0, 1.0);
     l.set_traits(96.0, 2.680147, 3.898245 * 1.5, 5.870283, 2.680147, 3.898245,
-                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5);
+                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
     std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
     l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                      d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
@@ -2245,7 +2447,7 @@ void test_set_traits_matches_a_fresh_leaf() {
       bool threw = false;
       try {
         l.set_traits(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9],
-                     t[10], t[11], t[12]);
+                     t[10], t[11], t[12], kRd25);
       } catch (const std::runtime_error &) {
         threw = true;
       }
@@ -2417,6 +2619,8 @@ int main() {
   test_leaf_on_single_potential();
   test_root_network_from_carbon();
   test_temperature_parameters_are_settable();
+  test_temperature_params_invalidate_cache();
+  test_rd_temperature_response();
   test_set_traits_matches_a_fresh_leaf();
   test_perturb_stem_b_matches_a_rebuild();
   test_bad_input_throws();

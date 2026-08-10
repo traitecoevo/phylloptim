@@ -167,10 +167,17 @@ test_that("a pinned optimum takes the fallback, and the composite would be wrong
   # a factor of 1.6 out for vcmax_25 there rather than seven orders, so a test
   # that only looked at the wet rows would let a threshold drift past it.
   dry <- grid_gradient(4, vpd = 0.5, layers = 3L,
-                       pars = c("stem_b", "vcmax_25"))
+                       pars = c("stem_b", "vcmax_25", "R_d_25"))
   expect_identical(dry$status, "pinned")
-  expect_equal(dry$gradient["vcmax_25", "A"], 0.014357, tolerance = 1e-3)
+  expect_equal(dry$gradient["vcmax_25", "A"], 0.017548, tolerance = 1e-3)
   expect_equal(dry$gradient["stem_b", "A"], 4.6991, tolerance = 1e-3)
+
+  # `dA/dvcmax_25` is a PARTIAL at fixed respiration, since `R_d_25` is its own
+  # trait. A fit that wants respiration to follow Vcmax adds the two columns, so
+  # that combination is asserted rather than left implicit.
+  expect_equal(dry$gradient["vcmax_25", "A"] +
+                 0.015 * dry$gradient["R_d_25", "A"],
+               0.014357, tolerance = 1e-3)
 })
 
 test_that("at a pinned optimum the BOUND's own trait carries the gradient", {
@@ -206,12 +213,19 @@ test_that("a shut-down operating point reports no gradient and still differences
   # psi_soil = 6 is drier than psi_crit, so there is no optimisation to
   # differentiate: dprofit returns a sentinel zero rather than a derivative, and
   # H comes back zero with it. The composite has nothing to stand on and says so
-  # -- but the gradient itself is not zero, because R_d still depends on
-  # vcmax_25, so the fallback still has work to do.
-  g <- grid_gradient(6.0, pars = c("vcmax_25", "stem_b"))
+  # -- but the gradient itself is not all zero, because a shut-down leaf still
+  # respires, so the fallback still has work to do.
+  #
+  # WHICH parameter carries it is the sharpest statement in the suite: `A = -R_d`
+  # exactly here, so `dA/dR_d_25` is -1 and `dA/dvcmax_25` is EXACTLY zero --
+  # vcmax_25 does not reach A at all at a shut-down point, so both perturbed solves
+  # return the same bits. The -1 is a central difference and lands within ~6e-11.
+  g <- grid_gradient(6.0, pars = c("vcmax_25", "stem_b", "R_d_25"))
   expect_identical(g$status, "no-gradient")
   expect_identical(g$method, "fd")
-  expect_equal(g$gradient["vcmax_25", "A"], -0.015, tolerance = 1e-4)
+  expect_equal(g$value[["A"]], -leaf_traits()$R_d_25)
+  expect_equal(g$gradient["R_d_25", "A"], -1, tolerance = 1e-8)
+  expect_identical(g$gradient["vcmax_25", "A"], 0)
   expect_equal(g$gradient["stem_b", "A"], 0)
 
   # Forcing the composite here is an error rather than a wrong number: unlike a
@@ -590,11 +604,12 @@ test_that("leaf_gradient() refuses the combinations that would disagree", {
 
 test_that("the setter's positional trait call cannot drift in arity", {
   # `.gradient_setter()` applies traits POSITIONALLY, straight onto the object, to
-  # skip rebuilding a leaf_traits per perturbation. That is a hard-coded thirteen. If
+  # skip rebuilding a leaf_traits per perturbation. That is a hard-coded FOURTEEN. If
   # a trait is added to leaf_traits() and to the C++ setter, nothing about that call
   # fails to compile -- it would silently pass the wrong value for every argument
   # after the new one. So the arity is asserted here rather than trusted.
-  expect_length(leaf_traits(), 13L)
-  expect_length(formals(leaf_model()$set_traits), 13L)
+  #
+  expect_length(leaf_traits(), 14L)
+  expect_length(formals(leaf_model()$set_traits), 14L)
   expect_identical(names(leaf_traits()), names(formals(leaf_model()$set_traits)))
 })
