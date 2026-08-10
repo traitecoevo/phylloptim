@@ -505,10 +505,27 @@ public:
   //
   // The two derivative lines have no leading `s` on purpose: differentiating
   // s*G(psi/s) with respect to psi cancels it.
-  double stem_curve_integral(double psi) const;
+  //
+  // The two non-derivative reads take an optional `caller` label, which is
+  // appended to an out-of-domain failure. See eval_stem_curve for why the two
+  // splines cannot identify themselves and why the caller has to.
+  double stem_curve_integral(double psi, const char* caller = nullptr) const;
   double stem_curve_integral_deriv(double psi) const;
-  double stem_curve_integral_inverse(double w) const;
+  double stem_curve_integral_inverse(double w, const char* caller = nullptr) const;
   double stem_curve_integral_inverse_deriv(double w) const;
+
+  // Domain-guarded read behind the two accessors above. The stem curve is the
+  // only interpolator in this file built with extrapolation DISABLED (the root
+  // vulnerability pair clamps instead -- see setup_root_vulnerability), so it is
+  // the only one a lookup can throw on. odelia's message names the point and the
+  // domain but cannot name WHICH spline, because it does not know: there are two
+  // here, they are inverses of each other, and they carry different units, so
+  // "u = 7.5 beyond the upper end" is ambiguous in exactly the way that matters.
+  // Nor can it name the caller -- the same spline is read from four places, and
+  // localising plant#576 came down to which.
+  static double eval_stem_curve(const odelia::interpolator::Interpolator& spline,
+                                double u, double scale, const char* spline_name,
+                                const char* arg_name, const char* caller);
 
   // Move stem_b WITHOUT rebuilding the stem vulnerability spline, by the
   // homogeneity identity above. stem_c is not accepted: it has no such identity.
@@ -1925,7 +1942,9 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
   if (std::isfinite(dEup_dpsi)) {
     E_from_Soil_to_Root_Collar(psi, supply_psi_soil());  // refresh E_up_ at psi
     const double E_psi_stem =
-        E_up_ / leaf_specific_conductance_max_ + stem_curve_integral(psi);
+        E_up_ / leaf_specific_conductance_max_ +
+        stem_curve_integral(psi, "Leaf::dprofit_at_collar_psi, forming "
+                                 "dpsi_stem/dpsi at the operating point");
     const double dEpsistem_dpsi =
         dEup_dpsi / leaf_specific_conductance_max_ + stem_curve_integral_deriv(psi);
     dpsistem_dpsi = stem_curve_integral_inverse_deriv(E_psi_stem) * dEpsistem_dpsi;
@@ -2029,12 +2048,88 @@ inline void Leaf::setup_transpiration(double resolution) {
 // See the declarations for the identity these implement. Each returns the spline
 // unchanged when nothing is rescaled, which is the production path.
 
-inline double Leaf::stem_curve_integral(double psi) const {
-  if (stem_b == stem_b_spline_) {
-    return transpiration_from_psi.eval(psi);
+// Named, scale-aware domain check in front of the spline read. Checked here
+// rather than by catching odelia's throw and rethrowing, so the hot path carries
+// no exception machinery: one comparison on a path that already does a spline
+// solve.
+//
+// The domain is reported in the CALLER's units, not the spline's. Under a stem_b
+// rescale (#46) the value handed to the spline is u/s, so the range the caller
+// can actually reach is [s*min, s*max]; quoting the spline's own endpoints would
+// send the reader after a discrepancy that is not there. At s == 1 -- the
+// production path -- the two coincide.
+//
+// ⚠️ The comparison is `v < lo || v > hi` and NOT the negation of an in-range
+// test, matching odelia's Interpolator::eval for the same reason: every
+// comparison against NaN is false, so a non-finite u must keep falling through to
+// the spline and coming back non-finite. Callers rely on it (plant documents a
+// profit_psi_stem_TF(NA, .) -> NA contract built on exactly this), and negating
+// an in-range test here would read as a tightening while being a behaviour
+// change.
+// Off the hot path: only reached when the lookup is about to fail, so the string
+// building costs nothing in production. Kept out of line from eval_stem_curve so
+// that function stays small enough to inline.
+[[noreturn]] inline void stem_curve_out_of_domain(
+    const odelia::interpolator::Interpolator& spline, double u, double v,
+    double scale, const char* spline_name, const char* arg_name,
+    const char* caller);
+
+inline double Leaf::eval_stem_curve(const odelia::interpolator::Interpolator& spline,
+                                    double u, double scale,
+                                    const char* spline_name,
+                                    const char* arg_name, const char* caller) {
+  // scale == 1.0 is the production path (no stem_b rescale), and it must not pay
+  // for the rescaled one: dividing and re-multiplying by 1.0 is exact but not
+  // free, and collapsing the two cases into one measured +5% on
+  // find_root_collar_psi. The check itself is a duplicate of the one inside
+  // odelia's eval and costs nothing measurable -- it exists only to raise a
+  // message that names this spline and its caller.
+  if (scale == 1.0) {
+    if (u < spline.min() || u > spline.max()) {
+      stem_curve_out_of_domain(spline, u, u, scale, spline_name, arg_name, caller);
+    }
+    return spline.eval(u);
   }
-  const double s = stem_b / stem_b_spline_;
-  return s * transpiration_from_psi.eval(psi / s);
+  const double v = u / scale;
+  if (v < spline.min() || v > spline.max()) {
+    stem_curve_out_of_domain(spline, u, v, scale, spline_name, arg_name, caller);
+  }
+  return scale * spline.eval(v);
+}
+
+inline void stem_curve_out_of_domain(
+    const odelia::interpolator::Interpolator& spline, double u, double v,
+    double scale, const char* spline_name, const char* arg_name,
+    const char* caller) {
+    const bool below = v < spline.min();
+    const double lo = scale * spline.min();
+    const double hi = scale * spline.max();
+    util::stop(std::string("Leaf hydraulics: ") + spline_name +
+               " evaluated outside its domain: " + arg_name + " = " +
+               util::format_double(u) + " lies " +
+               util::format_double(below ? lo - u : u - hi) + " beyond the " +
+               (below ? "lower" : "upper") + " end of [" +
+               util::format_double(lo) + ", " + util::format_double(hi) + "]" +
+               (scale == 1.0 ? std::string()
+                             : "; the spline is rescaled by stem_b / "
+                               "stem_b_spline = " +
+                                   util::format_double(scale) +
+                                   ", so it was read at " +
+                                   util::format_double(v)) +
+               (caller == nullptr ? std::string()
+                                  : std::string("; asked by ") + caller) +
+               ".");
+}
+
+inline double Leaf::stem_curve_integral(double psi, const char* caller) const {
+  // x/x is exactly 1.0 for any finite non-zero x, so the equal case would fall
+  // out of the division anyway; the branch is kept because stem_b_spline_ is 0.0
+  // before the first setup_transpiration and 0/0 is not 1.
+  const double s = (stem_b == stem_b_spline_) ? 1.0 : stem_b / stem_b_spline_;
+  return eval_stem_curve(transpiration_from_psi, psi, s,
+                         "transpiration_from_psi (the cumulative xylem "
+                         "conductivity integral G, psi in +MPa)",
+                         "psi", caller);
 }
 
 inline double Leaf::stem_curve_integral_deriv(double psi) const {
@@ -2044,12 +2139,12 @@ inline double Leaf::stem_curve_integral_deriv(double psi) const {
   return transpiration_from_psi.deriv(psi / (stem_b / stem_b_spline_));
 }
 
-inline double Leaf::stem_curve_integral_inverse(double w) const {
-  if (stem_b == stem_b_spline_) {
-    return psi_from_transpiration.eval(w);
-  }
-  const double s = stem_b / stem_b_spline_;
-  return s * psi_from_transpiration.eval(w / s);
+inline double Leaf::stem_curve_integral_inverse(double w, const char* caller) const {
+  const double s = (stem_b == stem_b_spline_) ? 1.0 : stem_b / stem_b_spline_;
+  return eval_stem_curve(psi_from_transpiration, w, s,
+                         "psi_from_transpiration (the INVERSE cumulative xylem "
+                         "conductivity integral G^-1, argument in E/K_max)",
+                         "E/K_max", caller);
 }
 
 inline double Leaf::stem_curve_integral_inverse_deriv(double w) const {
@@ -2100,7 +2195,8 @@ inline double Leaf::transpiration(double psi_stem, double psi_upstream) {
 
   // integration of proportion_of_conductivity over [opt_root_psi_, psi_stem]
   const double E = leaf_specific_conductance_max_ *
-    (stem_curve_integral(psi_stem) - stem_curve_integral(psi_upstream));
+    (stem_curve_integral(psi_stem, "Leaf::transpiration, at psi_stem") -
+     stem_curve_integral(psi_upstream, "Leaf::transpiration, at psi_upstream"));
   // return (transpiration_full_integration(psi_stem));
 
   transpiration_cache_psi_stem_ = psi_stem;
@@ -2122,10 +2218,17 @@ inline double Leaf::transpiration_to_psi_stem(double transpiration_, double psi_
   // with opposite-sign arguments. Under one representation they are not, and the
   // negation is deleted (#25).
 
-  double E_psi_stem = transpiration_/leaf_specific_conductance_max_ +  stem_curve_integral(psi_upstream);
+  double E_psi_stem = transpiration_/leaf_specific_conductance_max_ +
+    stem_curve_integral(psi_upstream, "Leaf::transpiration_to_psi_stem, at psi_upstream");
 
-
-  return stem_curve_integral_inverse(E_psi_stem);
+  // The lookup that killed plant#576, and the reason the inverse names its units:
+  // E_psi_stem below the spline's lower end means the demanded flux is NEGATIVE,
+  // i.e. the collar cannot supply it and the stem potential that would carry it is
+  // wetter than saturation. There is no such potential, so widening the domain is
+  // not the fix -- the caller should not have asked. Naming the argument E/K_max
+  // rather than a bare `u` is what makes that readable from the message.
+  return stem_curve_integral_inverse(
+      E_psi_stem, "Leaf::transpiration_to_psi_stem, inverting for psi_stem");
   }
 
 // returns stomatal conductance to CO2, mol C m^-2 LA s^-1

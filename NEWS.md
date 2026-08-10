@@ -1,3 +1,40 @@
+# phylloptim 0.2.1
+
+## An out-of-domain transport lookup says which spline, and which caller
+
+The stem curve is the only interpolator here built with extrapolation disabled, so
+it is the only one a lookup can throw on — and there are **two** of them,
+`transpiration_from_psi` and its inverse `psi_from_transpiration`. They are
+inverses, they carry different units, and they are read from four places. odelia's
+message names the point and the domain but cannot name the spline or the caller,
+because it does not know either. Now:
+
+```
+Leaf hydraulics: psi_from_transpiration (the INVERSE cumulative xylem
+conductivity integral G^-1, argument in E/K_max) evaluated outside its domain:
+E/K_max = -3.18471e+07 lies 3.18471e+07 beyond the lower end of [0, 3.46004];
+asked by Leaf::transpiration_to_psi_stem, inverting for psi_stem.
+```
+
+That lower-end failure is the
+[traitecoevo/plant#576](https://github.com/traitecoevo/plant/issues/576)
+signature, and reading it is the whole point: a *negative* `E/K_max` says the
+collar cannot supply the demanded flux, so the stem potential that would carry it
+is wetter than saturation and no widening of the domain can help — the caller
+should not have asked. Localising #576 without this meant instrumenting four call
+sites by hand to find out which spline was being read and at what value.
+
+Under a `stem_b` rescale the domain is reported in the **caller's** units, not the
+spline's, and the rescale is named. The value handed to the spline is `psi / s`, so
+quoting the spline's own endpoints would send the reader after a discrepancy that
+is not there.
+
+Behaviour is unchanged: 288 golden operating points are bit-identical, and
+`find_root_collar_psi()` is unchanged at 3.16 µs. A non-finite argument still falls
+through to the spline and returns non-finite rather than throwing — the guard is
+`v < min || v > max`, not the negation of an in-range test, and plant documents a
+`profit_psi_stem_TF(NA, .) -> NA` contract built on exactly that.
+
 # phylloptim 0.2.0
 
 ## A near-embolised root is no longer an ever-stronger pump
@@ -27,6 +64,92 @@ rows x 9 fields are bit-identical to a baseline generated on the same machine.
 instead. Costs +2.0% on the collar solve (7.33 -> 7.48 us, interleaved x11); a no-op
 wrapper around the same `.eval` measures 7.43, so two thirds of that is the extra call
 rather than the bound.
+## Trait gradients over a batch of observations, composed in C++ -- 22x
+
+`leaf_batch()` and `leaf_gradient_batch()`. The same gradient `leaf_gradient()`
+computes, by the same two routes with the same active-set test, but composed in
+`inst/include/phylloptim/gradient.hpp` and looped over observations there -- so a
+calibration crosses the R boundary **once per likelihood evaluation** instead of 112
+times per observation.
+
+```r
+b <- leaf_batch(psi_soil = obs$psi_soil, PPFD = obs$PPFD)   # once per fit
+g <- leaf_gradient_batch(b, traits, pars = FIT)             # once per draw
+```
+
+Measured per observation over 24 gradients at four DIFFERENTIATED parameters --
+`length(pars)`, not the number an optimiser moves -- both arms in one
+process:
+
+| | us/observation | x a trivial `.Call` |
+|---|---:|---:|
+| `leaf_gradient()` in a loop | 363.3 | 340 |
+| `leaf_gradient(x = )`, reusing one leaf | 235.2 | 220 |
+| **`leaf_gradient_batch()`** | **10.59** | **9.9** |
+
+`leaf_batch()` costs 335 us once, for all 24. For a 1,327-observation fit at 30,000
+draws that is minutes rather than hours.
+
+⚠️ **Nothing about the gradient got faster.** The C++ model was already 1.5% of a
+gradient's cost; this removes the boundary from under it. So the figure needs a batch
+to be realised -- calling it with one observation pays the whole per-call overhead for
+one row's work.
+
+**Not a likelihood, and not the parameterisation Jacobian.** Both stay in R: the
+likelihood is your model, and the chain rule belongs where the win is -- C++ returns
+`dY/dtheta` for the four parameters a leaf has, and R applies your `P_fit x P_model`
+Jacobian vectorised over observations.
+
+**Per-row status, not an error.** A proposal will reach operating points the solve
+cannot handle, and that costs those rows rather than the dataset: every row reports
+`status`, a failure is `"error"` with a `message`, and a failed row's gradient is all
+`NA` rather than partially filled.
+
+⚠️ **`leaf_batch()` holds C++ pointers, so it does not survive `saveRDS()` or a new
+session.** Rebuild it; it says so rather than crashing.
+
+⚠️ **`psi_soil` recycles the way `leaf_solve()`'s does.** A plain numeric vector is N
+single-layer observations; a list of numeric vectors is one multi-layer observation
+each. This is the easiest mistake to make with `leaf_batch()`, and it fails loudly
+rather than silently.
+
+The C++ composite reproduces `leaf_gradient()` **bit-for-bit** -- 0 mismatches over 25
+operating points x three methods, including every pinned and shut-down row -- and the
+values are also pinned to `tests/testthat/gradient_golden.tsv`, because an equality
+test between two implementations cannot see a change applied to both. PLAN item 11g
+has the three things that made bit-for-bit possible, including that
+`a + b * c` written as one expression compiles to a fused multiply-add and disagrees
+with R's two roundings on 28% of random triples.
+
+## `pars` order no longer changes the `stem_b` gradient (#72)
+
+`leaf_gradient()`'s `stem_b` gradient was contaminated by whichever parameter preceded
+it in `pars`, by up to **3.4e-5 relative** -- four orders above the ~1e-9 the function
+documents as achievable, and on both routes. `perturb_stem_b()` rescales the
+vulnerability spline and touches nothing else, while the loops only restored the base
+point *after* the whole parameter loop, so a `stem_b` that was not first was
+differentiated one step away from base in the preceding parameter.
+
+Fixed by restoring the invariant rather than special-casing the name: **every
+parameter's gradient is taken from the base point**. Costs +0.15 us per observation
+(0.7%), because `set_traits()` decides its spline rebuilds by comparing the trait pairs
+it is given -- so after a parameter that owns no vulnerability curve nothing is
+rebuilt.
+
+⚠️ **Gradients move.** 9 of 60 recorded cells in `gradient_golden.tsv`, worst 3.8e-7 --
+much smaller than the defect was worth, because every recorded case put `vcmax_25`
+immediately before `stem_b` and that is a benign predecessor. `test-gradient.R`'s
+arbitrated references are unchanged, having been established with `stem_b` first. If
+you have fitted results that differentiated `stem_b` alongside `a`,
+`curv_fact_colim`, `root_b` or `stem_c`, they carried the larger error.
+
+The regression guard is a test comparing two `pars` orderings **in the same process**,
+not the golden file: the golden file is compared with a 1e-3 tolerance off macOS/arm64,
+so it could not have caught a 3.4e-5 recurrence on Linux.
+
+**Also found, and not fixed: [#74](https://github.com/traitecoevo/phylloptim/issues/74).**
+The `stem_b` shortcut is undone by a spline rebuild once per observation, so PLAN 11f's
+24.5x is **2.4x** through `leaf_gradient_batch()`. Say which figure you mean.
 
 ## The gradient's R glue is a third cheaper
 
@@ -49,7 +172,7 @@ R interpreter. `.gradient_setter()` alone was 60% of a gradient. Three changes, 
 Measured per observation over 24 gradients, interleaved three times against the
 commit this lands on:
 
-| 4 fitted parameters | before | after |
+| `length(pars)` = 4 | before | after |
 |---|---|---|
 | fresh leaf | 504 us | 366 us (-27%) |
 | reused leaf | 400 us | **231 us (-42%)** |
@@ -73,7 +196,7 @@ Closes #52. `leaf_gradient()` built its own `Leaf` every call and offered no way
 pass one in, and construction is **~150 us, half of a one-parameter gradient** -- the
 largest single term on the R surface, paid once per observation by a fit that
 differentiates per observation. `leaf_gradient(x = l, traits = tr, ...)` reuses one. Measured over 24 gradients,
-per observation: **511 -> 409 us at four fitted parameters (-20%)** and
+per observation: **511 -> 409 us at four differentiated parameters (-20%)** and
 316 -> 200 us at one (-37%).
 
 ⚠️ **The four-parameter figure is the one a calibration gets, and it is the smaller

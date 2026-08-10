@@ -362,16 +362,121 @@ Four things follow:
 - **`P_fit` = `P_model` is the worst case for the composite**, and it is the case a
   vignette naturally demonstrates because fitting traits directly is the simplest
   thing to show. Real fits are usually not that case.
-- **Model reuse is most of the intercept**, and is tracked as
-  [phylloptim#52](https://github.com/traitecoevo/phylloptim/issues/52): let
-  `leaf_gradient()` accept an existing model the way `set_traits()` does. In
-  `leaf-calibration` it is 29% of the exact gradient, and closing it would move that
-  study's break-even from ~13 fitted parameters to ~9. It would not make the
-  composite the faster arm *here*, because here the problem is the slope.
-- **From C++ neither overhead exists**, so neither does the slope.
-  `vignette("cpp-interface")` has the same comparison with no R in the way, where the
-  composite wins 4.4× on the eleven traits that touch no spline. Moving the
-  composition into C++ is stage 2 of PLAN item 11.
+- **Model reuse was most of the intercept, and it is fixed**
+  ([phylloptim#52](https://github.com/traitecoevo/phylloptim/issues/52)):
+  `leaf_gradient(x = )` takes a model you already have. In `leaf-calibration` that
+  was 29% of the exact gradient. It did not make the composite the faster arm
+  *here*, because here the problem is the slope.
+- **And the slope is gone too, which supersedes this whole comparison.**
+  `leaf_gradient_batch()` composes the theorem in C++ and loops over observations
+  there, so the boundary is crossed once per call instead of 112 times per
+  observation: **363 → 10.6 µs per observation** at `length(pars)` = 4, 22×.
+
+⚠️ **So do not read the table above as the state of the art — read it as what the R
+boundary costs.** It is kept because the cost *model* is still the thing to reason
+with, and because `P_fit` versus `P_model` still decides which arm wins. What has
+changed is only the constant in front of the exact arm. The same fit through
+`leaf_batch()` + `leaf_gradient_batch()`:
+
+```r
+b <- leaf_batch(psi_soil = obs$psi_soil, PPFD = obs$PPFD)   # once, not per draw
+g <- leaf_gradient_batch(b, traits, pars = FIT)
+```
+
+with the likelihood and your parameterisation Jacobian still in R, vectorised over
+observations — which is where they belong, and is why the `P_fit > P_model`
+structure is what the exact route exploits.
+
+## Fitting a different collection of parameters
+
+Nothing above is specific to the parameters it fits. `pars` is an argument, so a
+second study wanting a different collection changes that argument and nothing else —
+the same prepared `leaf_batch()` serves any of them, because a batch holds the
+*drivers*, and which parameters you differentiate is not a property of the data.
+
+```{r}
+#| label: collections
+b <- leaf_batch(psi_soil = seq(0.6, 3.0, length.out = 40), PPFD = 900,
+                atm_vpd = 2)
+
+studies <- list(
+  "demand only"      = c("vcmax_25", "jmax_25"),
+  "the cost model"   = c("cost_scale_TF24", "beta2"),
+  "hydraulic supply" = c("leaf_specific_conductance_max", "stem_b", "stem_c"),
+  "adds thresholds"  = c("vcmax_25", "psi_crit", "root_psi_crit")
+)
+
+do.call(rbind, lapply(names(studies), function(nm) {
+  p <- studies[[nm]]
+  t0 <- Sys.time()
+  g <- leaf_gradient_batch(b, pars = p)
+  ms <- 1000 * as.numeric(Sys.time() - t0, units = "secs")
+  # Which parameters came back with NO signal at all, anywhere?
+  dead <- p[colSums(abs(g$gradient[, , "A", drop = FALSE])) == 0]
+  data.frame(study = nm, n_pars = length(p), ms = round(ms, 2),
+             `ms per par` = round(ms / length(p), 2),
+             `zero gradient` = if (length(dead)) paste(dead, collapse = ", ")
+                               else "-",
+             check.names = FALSE)
+}))
+```
+
+Three things in that table are worth more than the timings, and none of them is
+obvious from the interface.
+
+### Cost per parameter is not uniform
+
+Compare the `ms per par` column across rows: the hydraulic study is several times
+the others, and that ratio is the point rather than its exact value, which moves
+with the machine. `stem_b` and
+`stem_c` own the pre-integrated stem vulnerability spline, so perturbing either
+**rebuilds** it — 11.9 µs of incomplete gamma functions per side, several times the
+cost of a whole solve. `stem_b` escapes most of that by a homogeneity identity
+(`fast_stem_curve`, on by default); `stem_c` has no such identity and cannot.
+
+So **a fit that frees a vulnerability curve is in a different cost regime from one
+that does not**, and it is the regime the exact gradient helps least with — the
+four hydraulic traits are also the ones whose gradient is *entirely*
+argmax-mediated, which is to say the ones you most need it for. Budget for it, and
+see `?leaf_gradient`'s `fast_stem_curve`.
+
+### ⚠️ `psi_crit` and `root_psi_crit` come back EXACTLY ZERO, and that is correct
+
+This is the sharpest trap on this surface, and the table above provokes it
+deliberately.
+
+Neither appears in the profit function. They set the dry end of the *feasible*
+collar interval and nothing else — so at an interior optimum, moving them moves
+nothing, and the composite reports exactly that. **At a pinned optimum the same
+parameter carries a real gradient of order 1**, because there it *is* the binding
+constraint, and `leaf_gradient()` differences the solve instead precisely so that
+case is not lost.
+
+A silent zero is a worse failure than a wildly wrong number: it tells an optimiser
+the parameter does nothing, and nothing about it looks suspicious. If you fit a
+threshold parameter, **check `status` alongside the gradient** — an all-interior
+dataset cannot inform it at all, and that is a statement about your design rather
+than about the solver.
+
+### Not everything is reachable
+
+`resistance` exists only on the single-potential supply path; ask for it on the
+multi-layer path and you get an error naming the path rather than "unknown
+parameter". `beta_R_H` and `beta_R_V` left with the root-architecture model
+entirely — a fit that needs them has to difference `root_network_from_carbon()`
+itself, which is cheap to perturb (it is homogeneous of degree 1 in each) but still
+costs two solves.
+
+### What a new study actually has to write
+
+Not the gradient — the **map from its own sampled parameters onto the model's**, and
+that map's Jacobian. `pars` names four things; an optimiser moving forty needs a
+40 × 4 chain rule, and that is the caller's arithmetic because it encodes the
+caller's model. `vignette("phylloptim")` and the companion `leaf-calibration` study
+both do this; the latter's `leaf_natural_jacobian()` is the worked example, including
+the case worth being careful about — **one sampled parameter that reaches two model
+quantities, in opposite directions**. Getting a sign wrong there does not fail. It
+converges, somewhere else.
 
 ## ⚠️ Where a gradient-based fit goes wrong
 

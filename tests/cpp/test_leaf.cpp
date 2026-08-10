@@ -14,6 +14,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <functional>
 #include <cstdio>
 #include <limits>
 #include <string>
@@ -99,6 +100,122 @@ void test_vulnerability_curve() {
      "conductivity at psi_crit is a few percent");
   ok(l.proportion_of_conductivity(1.0) > l.proportion_of_conductivity(2.0),
      "conductivity declines monotonically");
+}
+
+// The analytic trait partials of the cumulative vulnerability integral, against
+// central differences of the closed form they differentiate. No new reference
+// values: the function being differenced is the one the knot builder already
+// seeds every knot from.
+//
+// ⚠️ The tolerance below is the CENTRAL DIFFERENCE's accuracy, not the analytic
+// form's. Measured on this grid, the worst disagreement walks as h^2 -- 2.9e-5,
+// 2.9e-7, 3.1e-9 at relative steps 1e-3, 1e-4, 1e-5 -- and then back UP to 2.9e-7
+// at 1e-7 as cancellation takes over. A clean quadratic decay is what says the
+// residual belongs to the difference and not to the formula, so tightening this
+// without shrinking h would only be pinning the difference's own error.
+//
+// b and c are deliberately neutral here, and the grid brackets both curves rather
+// than either: vulnerability.hpp is shared by the stem (stem_b, stem_c) and the
+// root (root_b, root_c), whose defaults are both 3.898245 / 2.680147 (hazard 1).
+void test_vulnerability_integral_derivatives() {
+  printf("analytic trait derivatives of the vulnerability integral\n");
+  using phylloptim::cumulative_vulnerability_integral_at;
+  using phylloptim::cumulative_vulnerability_integral_derivatives_at;
+
+  // (psi/b)^c past this is past the curve's last knot, so it is unreachable and
+  // the series is not asked to hold there. It bounds the grid instead of the grid
+  // bounding it -- for c = 12, psi/b = 8 means (psi/b)^c = 7e10.
+  const double x_max = phylloptim::vulnerability_x_max();
+  const double rel_step = 1e-5;
+
+  double worst_value = 0.0, worst_dpsi = 0.0, worst_db = 0.0, worst_dc = 0.0;
+  int points = 0;
+  for (double b : {0.5, 2.0, 7.0}) {
+    for (double c = 0.4; c <= 12.001; c += 0.1) {
+      for (double u = 0.075; u <= 8.001; u *= 1.1) {
+        if (pow(u, c) > x_max) {
+          continue;
+        }
+        ++points;
+        const double psi = u * b;
+        const auto d = cumulative_vulnerability_integral_derivatives_at(psi, b, c);
+
+        // The series' own value against boost's. Not the point of the test, but
+        // it is the cheapest check that the series is the right series.
+        const double scale = std::max(1.0, std::abs(d.value));
+        worst_value = std::max(
+            worst_value,
+            std::abs(d.value - cumulative_vulnerability_integral_at(psi, b, c)) /
+                scale);
+
+        const double hb = rel_step * b, hc = rel_step * c, hp = rel_step * psi;
+        const double fd_psi =
+            (cumulative_vulnerability_integral_at(psi + hp, b, c) -
+             cumulative_vulnerability_integral_at(psi - hp, b, c)) /
+            (2.0 * hp);
+        const double fd_b =
+            (cumulative_vulnerability_integral_at(psi, b + hb, c) -
+             cumulative_vulnerability_integral_at(psi, b - hb, c)) /
+            (2.0 * hb);
+        const double fd_c =
+            (cumulative_vulnerability_integral_at(psi, b, c + hc) -
+             cumulative_vulnerability_integral_at(psi, b, c - hc)) /
+            (2.0 * hc);
+        // Relative to the derivative, floored: dG/dc passes through zero on this
+        // grid, and a relative error against a vanishing denominator says nothing.
+        worst_dpsi = std::max(worst_dpsi, std::abs(d.dpsi - fd_psi) /
+                                              std::max(1e-2, std::abs(fd_psi)));
+        worst_db = std::max(worst_db, std::abs(d.db - fd_b) /
+                                          std::max(1e-2, std::abs(fd_b)));
+        worst_dc = std::max(worst_dc, std::abs(d.dc - fd_c) /
+                                          std::max(1e-2, std::abs(fd_c)));
+      }
+    }
+  }
+  printf("    %d points | value %.3g | dpsi %.3g | db %.3g | dc %.3g\n", points,
+         worst_value, worst_dpsi, worst_db, worst_dc);
+  ok(points > 10000, "the grid inside the curve's domain is not empty");
+  near(worst_value, 0.0, 1e-14, "the series value matches the closed form");
+  near(worst_dpsi, 0.0, 1e-7, "dG/dpsi matches a central difference");
+  near(worst_db, 0.0, 1e-7, "dG/db matches a central difference");
+  near(worst_dc, 0.0, 1e-7, "dG/dc matches a central difference");
+
+  // dG/dpsi is the vulnerability curve itself, which is worth stating once
+  // directly rather than only through a difference.
+  const auto at_default =
+      cumulative_vulnerability_integral_derivatives_at(3.0, 3.898245, 2.680147);
+  near(at_default.dpsi, std::exp(-std::pow(3.0 / 3.898245, 2.680147)), 1e-15,
+       "dG/dpsi is exp(-(psi/b)^c)");
+
+  // G is identically zero at psi = 0 for every b and c, so both trait partials
+  // are zero there and neither pow(0, c) nor log(0) is evaluated.
+  const auto at_zero =
+      cumulative_vulnerability_integral_derivatives_at(0.0, 3.898245, 2.680147);
+  ok(at_zero.value == 0.0, "G is exactly zero at psi = 0");
+  ok(at_zero.dpsi == 1.0, "dG/dpsi is exactly 1 at psi = 0");
+  ok(at_zero.db == 0.0, "dG/db is exactly zero at psi = 0");
+  ok(at_zero.dc == 0.0, "dG/dc is exactly zero at psi = 0");
+
+  // Past the last knot the series would overflow rather than mislead, so the
+  // bound is asserted instead of branched around.
+  bool threw = false;
+  try {
+    cumulative_vulnerability_integral_derivatives_at(3.0, 1.0, 2.0);
+  } catch (const std::runtime_error &) {
+    threw = true;
+  }
+  ok(threw, "an argument past the curve's domain throws");
+  double just_inside = 0.0;
+  try {
+    just_inside =
+        cumulative_vulnerability_integral_derivatives_at(
+            phylloptim::vulnerability_psi_max(3.898245, 2.680147), 3.898245,
+            2.680147)
+            .value;
+  } catch (const std::runtime_error &) {
+    just_inside = -1.0;
+  }
+  ok(just_inside > 0.0, "the last knot itself is inside the bound");
 }
 
 void test_spline_matches_direct_integration() {
@@ -1754,6 +1871,88 @@ void test_bad_input_throws() {
   ok(threw, "mismatched soil vector lengths throw std::runtime_error");
 }
 
+// What an out-of-domain transport lookup says. The stem curve is the only
+// interpolator here with extrapolation disabled, so it is the only one a lookup
+// can throw on -- and there are two of them, they are inverses, and they carry
+// different units, so odelia's message (which names the point and the domain but
+// not the spline) is ambiguous in the way that matters. Localising plant#576 came
+// down to which of the four call sites was asking; these assertions are what make
+// that a read rather than a bisect.
+std::string message_of(const std::function<void()>& f) {
+  try {
+    f();
+  } catch (const std::exception& e) {
+    return std::string(e.what());
+  }
+  return std::string();
+}
+
+bool mentions(const std::string& haystack, const char* needle) {
+  return haystack.find(needle) != std::string::npos;
+}
+
+void test_out_of_domain_names_the_spline() {
+  printf("out-of-domain reporting\n");
+  Drivers d;
+  phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
+
+  // Forward direction, past the far end of the vulnerability curve.
+  const std::string fwd = message_of([&] { l.transpiration(50.0, 0.0); });
+  ok(mentions(fwd, "transpiration_from_psi"), "forward lookup names its spline");
+  ok(mentions(fwd, "psi = 50"), "forward lookup reports the point");
+  ok(mentions(fwd, "beyond the upper end"), "forward lookup reports which end");
+  ok(mentions(fwd, "Leaf::transpiration"), "forward lookup names the caller");
+
+  // Inverse direction, below the lower end -- the plant#576 signature. A
+  // sufficiently negative flux puts E/K_max below the domain, which is the
+  // statement "the collar cannot supply this, so no stem potential carries it".
+  const std::string inv =
+      message_of([&] { l.transpiration_to_psi_stem(-1e3, 0.0); });
+  ok(mentions(inv, "psi_from_transpiration"), "inverse lookup names its spline");
+  ok(mentions(inv, "beyond the lower end"), "inverse lookup reports which end");
+  ok(mentions(inv, "E/K_max"), "inverse lookup names its argument's units");
+  ok(mentions(inv, "Leaf::transpiration_to_psi_stem"),
+     "inverse lookup names the caller");
+
+  // The two are distinguishable, which is the entire point.
+  ok(fwd != inv && !fwd.empty() && !inv.empty(),
+     "the two splines give different messages");
+
+  // A non-finite point must NOT become a domain complaint: the guard uses the
+  // same comparison odelia does rather than negating an in-range test, so NaN
+  // falls through to the spline and comes back non-finite. plant documents a
+  // profit_psi_stem_TF(NA, .) -> NA contract built on this.
+  const std::string nan_msg =
+      message_of([&] { l.transpiration(std::nan(""), 0.0); });
+  ok(nan_msg.empty(), "a non-finite psi_stem does not throw a domain error");
+  ok(!std::isfinite(l.transpiration(std::nan(""), 0.0)),
+     "a non-finite psi_stem returns non-finite");
+
+  // In-domain reads are untouched.
+  ok(std::isfinite(l.transpiration(2.5, 0.0)),
+     "an in-domain lookup still returns a finite value");
+}
+
+// The rescaled path reports the domain in the CALLER's units, not the spline's.
+// Under perturb_stem_b the value handed to the spline is psi/s, so quoting the
+// spline's own endpoints would send the reader after a discrepancy that is not
+// there.
+void test_out_of_domain_under_rescale() {
+  Drivers d;
+  phylloptim::Leaf wide = make_leaf(d, {2.0}, {1.0});
+  const std::string before = message_of([&] { wide.transpiration(50.0, 0.0); });
+
+  phylloptim::Leaf rescaled = make_leaf(d, {2.0}, {1.0});
+  rescaled.perturb_stem_b(rescaled.stem_b * 2.0);
+  const std::string after =
+      message_of([&] { rescaled.transpiration(50.0, 0.0); });
+
+  ok(!before.empty() && !after.empty(), "both report a domain failure");
+  ok(before != after, "the rescaled domain is reported, not the spline's own");
+  ok(mentions(after, "rescaled by"),
+     "the rescale is named so the two domains are not confused");
+}
+
 void benchmark() {
   printf("\ntiming\n");
   Drivers d;
@@ -1776,6 +1975,7 @@ void benchmark() {
 int main() {
   test_defaults_are_unset();
   test_vulnerability_curve();
+  test_vulnerability_integral_derivatives();
   test_spline_matches_direct_integration();
   test_arrhenius();
   test_saturation_vapour_pressure();
@@ -1814,6 +2014,8 @@ int main() {
   test_set_traits_matches_a_fresh_leaf();
   test_perturb_stem_b_matches_a_rebuild();
   test_bad_input_throws();
+  test_out_of_domain_names_the_spline();
+  test_out_of_domain_under_rescale();
   benchmark();
 
   printf("\n%d checks, %d failures\n", checks, failures);

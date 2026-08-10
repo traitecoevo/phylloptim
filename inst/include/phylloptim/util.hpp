@@ -15,6 +15,7 @@
 #include <string>
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 #include <stdexcept>
 
@@ -29,6 +30,18 @@ namespace util {
 }
 
 template <typename T> std::string to_string(T x) { return std::to_string(x); }
+
+// A double in an error message. to_string above is std::to_string, which for a
+// double is fixed-point with six DECIMALS -- it renders a transpiration of 1e-22
+// as "0.000000" and a hydraulic potential of 6.8918 with trailing zeros. Six
+// significant figures instead, matching odelia's and plant's util::format_double
+// so the family renders numbers the same way. For reading, not for reconstructing
+// a double.
+inline std::string format_double(double x) {
+  char buf[32];
+  std::snprintf(buf, sizeof(buf), "%.6g", x);
+  return std::string(buf);
+}
 
 inline bool is_finite(double x) { return std::isfinite(x); }
 

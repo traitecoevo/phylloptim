@@ -394,26 +394,9 @@ leaf_gradient <- function(psi_soil,
   if (is.null(pars)) {
     pars <- names(theta)
   }
-  unknown <- setdiff(pars, names(theta))
-  if (length(unknown)) {
-    # Name the multi-layer case specially: `resistance` is a real parameter on
-    # the other supply path, so "not differentiable" would be misleading rather
-    # than merely unhelpful.
-    why <- if (identical(supply$kind, "multilayer") &&
-               "resistance" %in% unknown) {
-      paste(" `resistance` is a parameter of the single-potential path only;",
-            "on the multi-layer path the soil-to-collar resistances are derived",
-            "from root carbon.")
-    } else {
-      ""
-    }
-    stop("`pars` names things this cannot differentiate: ",
-         paste(unknown, collapse = ", "),
-         ". Available: the traits from leaf_traits(), plus ",
-         "`leaf_specific_conductance_max`",
-         if (identical(supply$kind, "single")) " and `resistance`" else "",
-         ".", why, call. = FALSE)
-  }
+  # Shared with leaf_gradient_batch(), so the two entry points cannot disagree
+  # about which parameters exist or explain a rejection differently.
+  .gradient_check_pars(pars, identical(supply$kind, "single"))
 
   # ONE leaf for the whole gradient, re-traited rather than reconstructed. This is
   # the measurement that reordered PLAN 11d: a fresh Leaf costs ~155 us against
@@ -514,9 +497,10 @@ leaf_gradient <- function(psi_soil,
   }
 
   grad <- if (use_ift) {
-    .gradient_ift(l, reset, theta, pars, psi_star, H, dY_dpsi, step)
+    .gradient_ift(l, reset, theta, pars, psi_star, H, dY_dpsi, step,
+                  fast_stem_curve)
   } else {
-    .gradient_fd(l, reset, theta, pars, step)
+    .gradient_fd(l, reset, theta, pars, step, fast_stem_curve)
   }
 
   list(gradient = grad,
@@ -575,6 +559,59 @@ leaf_gradient <- function(psi_soil,
     return(NULL)
   }
   .gradient_outputs(l)
+}
+
+# The differentiable parameters, in the order C++ indexes them (#4 stage 2).
+#
+# Derived from leaf_traits() rather than written out, so it cannot drift from the
+# trait vector. The C++ side has its own copy, in `phylloptim::gradient::par_names`,
+# because it has no way to read this one; `test-gradient-batch.R` compares them
+# rather than trusting them, since R passes integer POSITIONS into that
+# enumeration -- appending to it is safe and reordering it would silently
+# differentiate the wrong parameter.
+#
+# ⚠️ Computed at FIRST CALL, not at build time, for the reason
+# `.gradient_outputs_idx` records: R collates `R/` alphabetically, so this file is
+# sourced before `leaf-model.R` and `.leaf_trait_defaults` does not exist yet.
+.gradient_par_names <- local({
+  nms <- NULL
+  function() {
+    if (is.null(nms)) {
+      nms <<- c(names(.leaf_trait_defaults), "leaf_specific_conductance_max",
+                "resistance")
+    }
+    nms
+  }
+})
+
+# What `pars` may name, and the message when it names something else. One
+# definition, used by `leaf_gradient()` and by `leaf_gradient_batch()`: the
+# multi-layer case has to be named specially, because `resistance` is a real
+# parameter on the OTHER supply path and "not differentiable" would be misleading
+# rather than merely unhelpful.
+.gradient_available_pars <- function(single) {
+  nms <- .gradient_par_names()
+  if (single) nms else setdiff(nms, "resistance")
+}
+
+.gradient_check_pars <- function(pars, single) {
+  unknown <- setdiff(pars, .gradient_available_pars(single))
+  if (length(unknown)) {
+    why <- if (!single && "resistance" %in% unknown) {
+      paste(" `resistance` is a parameter of the single-potential path only;",
+            "on the multi-layer path the soil-to-collar resistances are derived",
+            "from root carbon.")
+    } else {
+      ""
+    }
+    stop("`pars` names things this cannot differentiate: ",
+         paste(unknown, collapse = ", "),
+         ". Available: the traits from leaf_traits(), plus ",
+         "`leaf_specific_conductance_max`",
+         if (single) " and `resistance`" else "",
+         ".", why, call. = FALSE)
+  }
+  invisible(pars)
 }
 
 # Everything this can differentiate, and its current value, as one named vector.
@@ -725,11 +762,57 @@ leaf_gradient <- function(psi_soil,
   max(abs(value), floor) * step
 }
 
+# Parameters whose setter takes a SHORTCUT that leaves the rest of the object
+# alone, and which therefore require the object to be at the base point before
+# they run. See `.gradient_reseat_base()`.
+.gradient_shortcut_pars <- function(fast_stem_curve) {
+  if (fast_stem_curve) "stem_b" else character(0)
+}
+
+# ⚠️ THE FIX FOR #72, AND THE INVARIANT IT RESTORES: every parameter's gradient
+# is taken from the BASE point.
+#
+# `perturb_stem_b()` rescales the stem vulnerability spline and touches nothing
+# else, which is sound only if everything else on the object is already at base.
+# The loops below restore base once at the END, not between parameters, because
+# every other parameter's setter goes through the full `set_traits()` +
+# `set_physiology()` path and restores it on the way. `stem_b` on the fast path
+# is the one that does not -- so a `stem_b` that is not the first entry of `pars`
+# was differentiated at a point displaced by one step in whichever parameter
+# preceded it. Measured up to **3.4e-5 relative**, four orders above the ~1e-9
+# this function documents as achievable, and on BOTH routes.
+#
+# Restoring base before the shortcut is the whole fix. It is cheap in the case
+# that matters, because `set_traits()` decides the two spline rebuilds by
+# comparing the pairs it was given: after a parameter that owns no vulnerability
+# curve nothing is rebuilt, so this costs one trait write and one driver write.
+# After `stem_c`/`root_b`/`root_c` it does rebuild -- but those are the
+# parameters whose own gradients cost a rebuild per side anyway.
+#
+# ⚠️ Not `stem_b`-specific by name at the call site, deliberately. `root_b` obeys
+# the same homogeneity identity and would get the same fast path, at which point
+# the condition has to be "this parameter takes a shortcut" rather than a name.
+.gradient_reseat_base <- function(reset, theta, pars, fast_stem_curve) {
+  shortcut <- pars %in% .gradient_shortcut_pars(fast_stem_curve)
+  at_base <- TRUE
+  function(k) {
+    if (shortcut[[k]] && !at_base) {
+      reset(theta)
+    }
+    at_base <<- FALSE
+    invisible(NULL)
+  }
+}
+
 # The implicit-function composite. Two perturbed evaluations per parameter,
 # neither of which re-solves the model: `dprofit` at the UNPERTURBED psi* gives
 # the mixed partial, and the outputs at that same psi* give the direct term.
-.gradient_ift <- function(l, reset, theta, pars, psi_star, H, dY_dpsi, step) {
-  out <- t(vapply(pars, function(p) {
+.gradient_ift <- function(l, reset, theta, pars, psi_star, H, dY_dpsi, step,
+                          fast_stem_curve = TRUE) {
+  seat <- .gradient_reseat_base(reset, theta, pars, fast_stem_curve)
+  out <- t(vapply(seq_along(pars), function(k) {
+    p <- pars[[k]]
+    seat(k)
     h <- .gradient_step(p, theta[[p]], step)
     side <- function(sign) {
       th <- theta
@@ -759,14 +842,18 @@ leaf_gradient <- function(psi_soil,
     g[.gradient_output_names]
   }, numeric(length(.gradient_output_names))))
   reset(theta)
+  rownames(out) <- pars
   out
 }
 
 # The fallback: a central difference of the whole solve. Correct at a pinned
 # optimum because it differences the constrained answer, which is exactly what the
 # composite cannot do.
-.gradient_fd <- function(l, reset, theta, pars, step) {
-  out <- t(vapply(pars, function(p) {
+.gradient_fd <- function(l, reset, theta, pars, step, fast_stem_curve = TRUE) {
+  seat <- .gradient_reseat_base(reset, theta, pars, fast_stem_curve)
+  out <- t(vapply(seq_along(pars), function(k) {
+    p <- pars[[k]]
+    seat(k)
     h <- .gradient_step(p, theta[[p]], step)
     side <- function(sign) {
       th <- theta
@@ -777,6 +864,7 @@ leaf_gradient <- function(psi_soil,
     }
     ((side(1) - side(-1)) / (2 * h))[.gradient_output_names]
   }, numeric(length(.gradient_output_names))))
+  rownames(out) <- pars
   reset(theta)
   out
 }

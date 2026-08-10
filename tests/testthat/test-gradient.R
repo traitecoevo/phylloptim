@@ -13,25 +13,10 @@
 #      fires. `method = "ift"` exists so that failure can be provoked on demand
 #      rather than described in a comment.
 
-# The golden grid's drivers, so a row here is the same operating point the C++
-# suite and test-golden.R use. Taken from tests/cpp/test_golden.cpp.
-grid_drivers <- function(psi_soil, ppfd = 900, vpd = 2.0, layers = 1L) {
-  theta <- 0.000157
-  area_leaf <- 0.05
-  list(psi_soil = psi_soil + 0.25 * (seq_len(layers) - 1),
-       PPFD = ppfd,
-       soil_depth = 1.0 * seq_len(layers),
-       root_network = root_network_from_carbon(
-         rep(1 / layers / area_leaf, layers),
-         soil_depth = 1.0 * seq_len(layers)),
-       leaf_specific_conductance_max = 1.0 * theta / 5.0,
-       atm_vpd = vpd, ca = 40, leaf_temp = 25, atm_o2_kpa = 21,
-       atm_kpa = 101.3)
-}
-
-grid_gradient <- function(psi_soil, ppfd = 900, vpd = 2.0, layers = 1L, ...) {
-  do.call(leaf_gradient, c(grid_drivers(psi_soil, ppfd, vpd, layers), list(...)))
-}
+# `grid_drivers()` and `grid_gradient()` moved to helper-gradient.R when
+# test-gradient-batch.R needed the same operating points: each test file gets its
+# own environment, so a second copy would have been free to drift and the two
+# files would have pinned different points while appearing to pin the same ones.
 
 test_that("set_traits() on a used leaf equals a leaf built with those traits", {
   # The R-side statement of the C++ suite's test_set_traits_matches_a_fresh_leaf,

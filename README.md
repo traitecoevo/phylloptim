@@ -362,6 +362,24 @@ which is where this route wins; `vignette("fitting")` measures both regimes and
 `?leaf_gradient` has the cost model. ⚠️ **Always pass `pars`** — the default is all
 fourteen, which is the most expensive request there is.
 
+**For a fit, use `leaf_gradient_batch()`.** It is the same gradient, composed in C++
+and vectorised over observations, so a likelihood evaluation crosses the R boundary
+once instead of 112 times per observation — **363 → 10.6 µs per observation** at four
+differentiated parameters (`length(pars)`), 22×.
+
+```r
+b <- leaf_batch(psi_soil = obs$psi_soil, PPFD = obs$PPFD)   # once per fit
+g <- leaf_gradient_batch(b, traits, pars = c("vcmax_25", "stem_b"))
+g$gradient   # [observation, parameter, output]
+g$status     # per observation: "interior", "pinned", "no-gradient" or "error"
+```
+
+The likelihood and your parameterisation Jacobian stay in R, vectorised over
+observations: the likelihood is your model, and the chain rule belongs where the win
+is — this returns `dY/dθ` for the four parameters the leaf has, and you map your own
+onto them. ⚠️ Nothing about the gradient got faster; the boundary was removed from
+under it, so the figure needs a batch to be realised.
+
 To vary traits yourself, `set_traits()` replaces them on an existing leaf — much
 cheaper than rebuilding one, and the only correct way to do it, since a trait
 change invalidates derived state that is not obvious from the outside:
