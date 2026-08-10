@@ -1995,8 +1995,7 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
   //
   // On this branch gross assimilation is identically zero, so A = -R_d(T) and
   // the only surviving temperature dependence is respiration's:
-  //
-  //     dprofit/dpsi = -R_d'(T) * tau - C'(psi_stem) * dpsi_stem/dpsi
+  // `dprofit/dpsi = -R_d'(T) * tau - C'(psi_stem) * dpsi_stem/dpsi`.
   //
   // R_d' is obtained the same way A_T is, by differencing the model's own
   // temperature block, so the two cannot drift apart.
@@ -2211,6 +2210,18 @@ inline double Leaf::peak_arrh_curve(double Ea, double ref_value, double leaf_tem
 // lets the PM path recompute per operating-point Tleaf. electron_transport_ also
 // depends on the per-call PPFD_ and is (re)computed here from the just-updated
 // jmax_ -- on the non-PM cache-hit path set_physiology refreshes it separately.
+//
+// ⚠️ R_d INHERITS VCMAX'S PEAKED CURVE AND SO FALLS ABOVE THE THERMAL OPTIMUM,
+// where dark respiration should rise. Matched at 25 C against a Q10 of 2, the
+// two diverge in opposite directions and by an order of magnitude:
+//
+//     T (C)        25     35     40     45      50
+//     here       0.395  0.543  0.466  0.284   0.135
+//     Q10 = 2    0.395  0.790  1.117  1.580   2.234
+//     ratio        1.0    1.5    2.4    5.6    16.5
+//
+// See the note at the R_d_ assignment below for why it is recorded rather than
+// changed.
 inline void Leaf::update_temperature_dependent_params(double leaf_temp) {
   vcmax_ =
       peak_arrh_curve(vcmax_ha_, vcmax_25, leaf_temp, vcmax_H_d_, vcmax_d_S_);
@@ -2222,13 +2233,10 @@ inline void Leaf::update_temperature_dependent_params(double leaf_temp) {
   // OPTIMUM. That is wrong: dark respiration rises with temperature over this
   // range, and a Q10 near 2 is the standard description. Tying R_d to vcmax_(T)
   // -- which is what this line does -- makes it peak wherever Vcmax peaks and
-  // decline after. Matched at 25 C against a Q10 of 2, the two diverge in
-  // OPPOSITE directions and by an order of magnitude:
-  //
-  //     T (C)        25     35     40     45      50
-  //     here       0.395  0.543  0.466  0.284   0.135
-  //     Q10 = 2    0.395  0.790  1.117  1.580   2.234
-  //     ratio        1.0    1.5    2.4    5.6    16.5
+  // decline after. It diverges from a Q10 of 2 in the opposite direction and by
+  // an order of magnitude by 50 C -- the numbers are tabulated in this
+  // function's doc block above, rather than here, because an indented block
+  // inside a function body is what Doxygen 1.9 on CI rejects.
   //
   // No value of rd_to_vcmax_ratio_ repairs this -- it is a scale on a function
   // of the wrong shape. It matters most for anything studying high-temperature
