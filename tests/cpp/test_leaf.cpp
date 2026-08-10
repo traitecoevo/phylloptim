@@ -742,11 +742,92 @@ void test_operating_point_kind_is_written_by_every_path() {
      "set_traits clears the classification with the rest of the solved state");
 
   // Neither failure kind is reachable from a driver sweep, and that is the point
-  // of separating them from a pin: they mean "no plant is described". Nothing in
-  // this suite or on the golden grid produces one.
+  // of separating them from a pin: they mean "no plant is described". What each
+  // one DOES is driven directly, through maximise_profit_over_collar, in
+  // test_collar_solve_refuses_rather_than_guessing below.
   ok(std::string(phylloptim::Leaf::operating_point_kind_name(
          Kind::SolverRefused)) == "solver-refused",
      "the failure kinds are named, not numbered");
+}
+
+// The two branches of maximise_profit_over_collar that change what the solver
+// RETURNS rather than only how it is labelled. Neither is reachable by driving a
+// leaf -- not on the golden grid, and not on a 43200-combination sweep of
+// psi_soil, ppfd, vpd, temperature and layer count -- so both are driven through
+// maximise_profit_over_collar, which is public, with brackets constructed to
+// land on them. Without this nothing checks either one.
+void test_collar_solve_refuses_rather_than_guessing() {
+  printf("the collar solve refuses a bracket it cannot resolve\n");
+  using Kind = phylloptim::Leaf::OperatingPointKind;
+  Drivers d;
+  const std::vector<double> psi{2.0, 2.25, 2.5, 2.75, 3.0};
+  const std::vector<double> depth{1.0, 2.0, 3.0, 4.0, 5.0};
+
+  // A comfortably interior optimum, and the interval it was found in.
+  phylloptim::Leaf l = make_leaf(d, psi, depth);
+  double bound_a = 0.0, bound_b = 0.0;
+  ok(l.prepare_collar_solve(bound_a, bound_b),
+     "the reference case has a feasible collar interval");
+  l.find_root_collar_psi();
+  ok(l.operating_point_kind() == Kind::Interior,
+     "and an interior optimum inside it to straddle");
+  const double star = l.opt_root_psi_;
+
+  // Hand the bounds over the wrong way round, so the interval runs from a DRIER
+  // potential to a WETTER one. That is precisely the leftover case: profit
+  // decreasing at bound_a (dprofit <= 0) and increasing at bound_b (>= 0), so
+  // each end is a local maximum and the stationary point between them is a
+  // minimum. Two gradients cannot say which end wins; two profits can.
+  const double dry_end = star + 0.9 * (bound_b - star);
+  const double wet_end = star - 0.9 * (star - bound_a);
+
+  phylloptim::Leaf p = make_leaf(d, psi, depth);
+  double pa = 0.0, pb = 0.0;
+  p.prepare_collar_solve(pa, pb);
+  const double profit_dry = p.profit_psi_stem_TF(
+      p.find_psi_stem_from_psi_root(dry_end, p.supply_psi_soil()), dry_end);
+  const double profit_wet = p.profit_psi_stem_TF(
+      p.find_psi_stem_from_psi_root(wet_end, p.supply_psi_soil()), wet_end);
+  ok(profit_wet > profit_dry,
+     "the wetter end is the better of the two, by construction");
+
+  phylloptim::Leaf m = make_leaf(d, psi, depth);
+  double ma = 0.0, mb = 0.0;
+  m.prepare_collar_solve(ma, mb);
+  const double refused = m.maximise_profit_over_collar(dry_end, wet_end);
+  ok(m.operating_point_kind() == Kind::SolverRefused,
+     "the solve reports that it could not resolve the bracket");
+  ok(m.operating_point_kind() != Kind::PinnedWet &&
+         m.operating_point_kind() != Kind::PinnedDry,
+     "and does not pass it off as a constrained optimum");
+  // The endpoint the solve returns is stepped a fraction of the width inside the
+  // bound it came from, so compare against the bound rather than for equality.
+  ok(std::abs(refused - wet_end) < 1e-5,
+     "and returns the end with the higher profit, not the one the tests reach "
+     "first");
+  ok(std::abs(refused - dry_end) > 0.1,
+     "which is a different answer from the unchecked wet-bound default");
+
+  // No usable gradient at either end: a bracket lying wholly inside the
+  // infeasible sliver at bound_a, where dprofit takes its reversed-gradient exit
+  // and reports itself infeasible. Falls back to the golden-section search, which
+  // must still land inside the interval it was given. The other half of this
+  // guard -- a feasible endpoint whose partial is non-finite, tagged
+  // non-finite-gradient -- has no driver and no crafted bracket that reaches it,
+  // and is not covered here.
+  phylloptim::Leaf s = make_leaf(d, psi, depth);
+  double sa = 0.0, sb = 0.0;
+  s.prepare_collar_solve(sa, sb);
+  const double sliver = 1e-9;
+  bool feasible = true;
+  s.dprofit_at_collar_psi(sa + 1e-6 * sliver, &feasible);
+  ok(!feasible, "the wet bound admits no informative gradient");
+  const double fallen_back = s.maximise_profit_over_collar(sa, sa + sliver);
+  ok(s.operating_point_kind() == Kind::SolverRefused,
+     "a bracket with no usable gradient at either end is refused too");
+  ok(std::isfinite(fallen_back) && fallen_back >= sa &&
+         fallen_back <= sa + sliver,
+     "and the fallback stays inside the bracket it was handed");
 }
 
 // Hazard 3, re-measured rather than argued. The guide's constraint is that the
@@ -1810,6 +1891,7 @@ int main() {
   test_collar_solve_satisfies_its_own_first_order_condition();
   test_collar_solve_handles_a_pinned_optimum();
   test_operating_point_kind_is_written_by_every_path();
+  test_collar_solve_refuses_rather_than_guessing();
   test_collar_argmax_is_smooth_in_a_trait();
   test_soil_conductance_is_positive();
   test_root_psi_crit_clamp_binds();

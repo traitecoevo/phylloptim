@@ -993,8 +993,9 @@ private:
   OperatingPointKind operating_point_kind_ = OperatingPointKind::Unsolved;
 };
 
-// Human-readable tag, for diagnostics and test output. Kept beside the enum so a
-// new kind that misses a name fails to compile rather than printing a number.
+// Human-readable tag, for diagnostics and test output. The switch has no
+// default, so a kind added without a name here is a -Wswitch warning -- an error
+// under the test suite's -Werror=switch, and elsewhere the string "unknown".
 inline const char* Leaf::operating_point_kind_name(OperatingPointKind kind) {
   switch (kind) {
     case OperatingPointKind::Unsolved:          return "unsolved";
@@ -1822,9 +1823,10 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
     }
   }
 
-  // No usable gradient at one end. Nothing measured reaches this -- both ends are
-  // feasible on all 240 feasible golden-grid rows -- so treat it as a signal
-  // rather than a routine path if it ever fires. Falling back to the search this
+  // No usable gradient at one end. No driver sweep reaches this -- both ends are
+  // feasible on all 240 feasible golden-grid rows, and on the 43200-combination
+  // sweep described at the pin tests below -- so treat it as a signal rather than
+  // a routine path if it ever fires. Falling back to the search this
   // replaced means the change cannot make a previously-working case fail, which
   // is worth six lines on a solve plant runs millions of times.
   //
@@ -1833,9 +1835,15 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
   // report: no point near that end admits an informative gradient at all.
   // `ok && !isfinite` is a partial that came back non-finite where feasibility
   // said it would not -- checked here because there is nowhere downstream to put
-  // that test, and because without it a NaN endpoint falls through the two pin
-  // comparisons below (NaN compares false against everything) and into the
-  // root-find on a bracket it cannot have.
+  // that test.
+  //
+  // What that check changes, stated exactly: a NaN endpoint fails both pin
+  // comparisons below, since NaN compares false against everything. So it reached
+  // the root-find only when the OTHER endpoint also failed its pin test; with
+  // f_lo NaN and f_hi >= 0 the old code returned hi, a pinned-dry answer that
+  // does not depend on f_lo at all. Diverting that case here loses a sound answer
+  // and gains a tag saying an input was not a number, which is the trade taken on
+  // purpose -- a consumer reading the kind can tell, where before it could not.
   if (!ok_lo || !ok_hi || !std::isfinite(f_lo) || !std::isfinite(f_hi)) {
     operating_point_kind_ =
         ((ok_lo && !std::isfinite(f_lo)) || (ok_hi && !std::isfinite(f_hi)))
@@ -1883,16 +1891,39 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
   // ⚠️ The two pin tests are not exhaustive, and the leftover case is a FAILURE
   // rather than a third pin. dprofit <= 0 at the wet end AND >= 0 at the dry end
   // means profit falls away from both ends into the interval: the interior
-  // stationary point is a MINIMUM, the maximum sits at one of the two bounds, and
-  // these two evaluations cannot say which. Tagged SolverRefused, because
-  // reporting it as a pin -- to whichever bound the ordering of the tests happens
-  // to reach first -- would hand back a plausible, finite, wrong answer with a
-  // gradient that is genuinely non-zero in the wrong direction. The returned
-  // value is unchanged (`lo`, as before): what is added is that the caller can
-  // tell it apart from a pin.
+  // stationary point is a MINIMUM and the maximum sits at one of the two bounds.
+  // Tagged SolverRefused, because reporting it as a pin -- to whichever bound the
+  // ordering of the tests happens to reach first -- would describe a constrained
+  // optimum that is not there.
+  //
+  // The GRADIENTS cannot say which end, but the PROFITS can: f_lo <= 0 makes lo a
+  // local maximum and f_hi >= 0 makes hi one, so comparing the two values picks
+  // the larger instead of always returning the wet end. Returning `lo` unchecked
+  // was measured on crafted brackets straddling an interior optimum at psi_soil=2
+  // over 5 layers: profit -0.327 at the end returned against -0.210 at the other,
+  // and -1.617 against -0.652 on a wider bracket. The two extra evaluations are
+  // paid only on this branch, which no driver sweep reaches (see below), so they
+  // cost nothing on the hot path.
+  //
+  // Reachability, measured rather than assumed: 43200 driver combinations --
+  // psi_soil 0.01 to 12.0 in steps of 0.01, ppfd {30, 300, 900}, vpd {0.5, 2},
+  // leaf temperature {15, 25}, layers {1, 2, 5} -- reach this branch zero times,
+  // at the package defaults and with the stem's psi_crit set drier than the
+  // root's so the clamp window opens. It is driven in the suite through
+  // maximise_profit_over_collar directly.
   if (f_lo <= 0.0 && f_hi >= 0.0) {
     operating_point_kind_ = OperatingPointKind::SolverRefused;
-    return lo;
+    const double p_lo = profit_psi_stem_TF(
+        find_psi_stem_from_psi_root(lo, supply_psi_soil()), lo);
+    const double p_hi = profit_psi_stem_TF(
+        find_psi_stem_from_psi_root(hi, supply_psi_soil()), hi);
+    if (!std::isfinite(p_hi)) {
+      return lo;
+    }
+    if (!std::isfinite(p_lo)) {
+      return hi;
+    }
+    return p_hi > p_lo ? hi : lo;
   }
   if (f_lo <= 0.0) {
     operating_point_kind_ = OperatingPointKind::PinnedWet;

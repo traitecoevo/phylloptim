@@ -129,11 +129,22 @@ std::vector<Row> run_grid() {
 // not reproduce this split, because dprofit's shut-down sentinel is exactly 0.0
 // and would move all 48 shutdown points into `interior`.
 //
-// Three kinds are expected to be EMPTY here, and each absence is meaningful:
-// `shade-death` because the grid's minimum assim_max_ is 3.71 (it is reached by
-// light, not by drying); `solver-refused` and `non-finite-gradient` because both
-// bracket endpoints admit a usable gradient on all 240 feasible rows. If one of
-// those becomes non-zero, something changed that this file is here to notice.
+// Three kinds are expected to be EMPTY here: `shade-death` because the grid's
+// minimum assim_max_ is 3.71 (it is reached by light, not by drying);
+// `solver-refused` and `non-finite-gradient` because both bracket endpoints
+// admit a usable gradient on all 240 feasible rows.
+//
+// ⚠️ A zero here is a fact about THIS GRID, not about the model, and the two
+// failure kinds are the ones where that distinction bites. The grid's psi_soil
+// values are {0.5, 1, 2, 3, 4, 6}, so it samples the drydown coarsely. A finer
+// sweep -- psi_soil 0.01 to 12.0 in steps of 0.01, ppfd {30, 300, 900}, vpd
+// {0.5, 2}, leaf temperature {15, 25}, layers {1, 2, 5}, 43200 combinations, run
+// at the package defaults and again with the stem's psi_crit set drier than the
+// root's -- also reaches neither, which is a wider statement but still not a
+// proof of absence. Both branches ARE driven, through
+// maximise_profit_over_collar directly, by
+// test_collar_solve_refuses_rather_than_guessing in test_leaf.cpp; read that for
+// what they do, and this only for what the grid happens to contain.
 struct KindCount {
   phylloptim::Leaf::OperatingPointKind kind;
   int expected;
