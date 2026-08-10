@@ -1417,6 +1417,28 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// Leaf__rd_tracks_vcmax___get
+bool Leaf__rd_tracks_vcmax___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__rd_tracks_vcmax___get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__rd_tracks_vcmax___get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__rd_tracks_vcmax___set
+void Leaf__rd_tracks_vcmax___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, bool value);
+RcppExport SEXP _phylloptim_Leaf__rd_tracks_vcmax___set(SEXP obj_SEXP, SEXP valueSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    Rcpp::traits::input_parameter< bool >::type value(valueSEXP);
+    Leaf__rd_tracks_vcmax___set(obj_, value);
+    return R_NilValue;
+END_RCPP
+}
 // Leaf__PPFD___get
 double Leaf__PPFD___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
 RcppExport SEXP _phylloptim_Leaf__PPFD___get(SEXP obj_SEXP) {
@@ -2381,6 +2403,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__rd_q10_intercept___set", (DL_FUNC) &_phylloptim_Leaf__rd_q10_intercept___set, 2},
     {"_phylloptim_Leaf__rd_q10_slope___get", (DL_FUNC) &_phylloptim_Leaf__rd_q10_slope___get, 1},
     {"_phylloptim_Leaf__rd_q10_slope___set", (DL_FUNC) &_phylloptim_Leaf__rd_q10_slope___set, 2},
+    {"_phylloptim_Leaf__rd_tracks_vcmax___get", (DL_FUNC) &_phylloptim_Leaf__rd_tracks_vcmax___get, 1},
+    {"_phylloptim_Leaf__rd_tracks_vcmax___set", (DL_FUNC) &_phylloptim_Leaf__rd_tracks_vcmax___set, 2},
     {"_phylloptim_Leaf__PPFD___get", (DL_FUNC) &_phylloptim_Leaf__PPFD___get, 1},
     {"_phylloptim_Leaf__PPFD___set", (DL_FUNC) &_phylloptim_Leaf__PPFD___set, 2},
     {"_phylloptim_Leaf__atm_vpd___get", (DL_FUNC) &_phylloptim_Leaf__atm_vpd___get, 1},

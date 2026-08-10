@@ -528,6 +528,15 @@ void Leaf__rd_q10_slope___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_,
 }
 
 // [[Rcpp::export]]
+bool Leaf__rd_tracks_vcmax___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->rd_tracks_vcmax_;
+}
+// [[Rcpp::export]]
+void Leaf__rd_tracks_vcmax___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, bool value) {
+  obj_->rd_tracks_vcmax_ = value;
+}
+
+// [[Rcpp::export]]
 double Leaf__PPFD___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
   return obj_->PPFD_;
 }

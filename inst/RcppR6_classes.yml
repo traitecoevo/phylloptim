@@ -224,6 +224,14 @@ Leaf:
     # by 45 C. See NEWS for the blast radius.
     rd_q10_intercept_: {type: double, access: field}
     rd_q10_slope_: {type: double, access: field}
+    # ⚠️ THE PRE-#41 RESPIRATION SHAPE, and the only way back to it: R_d becomes
+    # rd_to_vcmax_ratio_ * vcmax_(T), bit-identical to what this model did before
+    # #41, and the two Q10 coefficients above are not consulted. It exists because
+    # no combination of them produces a PEAKED function, so without it no published
+    # plant result computed under the old shape could be regenerated. Bound so the
+    # plant A/B can be driven from R. Setting it together with a measured R_d_25 is
+    # refused rather than resolved.
+    rd_tracks_vcmax_: {type: bool, access: field}
 
     # --- drivers, as last set by set_physiology ------------------------------
     PPFD_: {type: double, access: field}

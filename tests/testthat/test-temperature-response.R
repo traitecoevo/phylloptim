@@ -96,3 +96,39 @@ test_that("rd_to_vcmax_ratio_ reaches the solve", {
   # range a calibration actually needs, not an extreme.
   expect_lt(drive(0.0302), drive(0.0046))
 })
+
+test_that("rd_tracks_vcmax_ restores the pre-#41 respiration shape from R", {
+  # ⚠️ THIS IS A REPRODUCIBILITY ESCAPE HATCH, NOT A MODELLING OPTION. `R_d` used to
+  # be `rd_to_vcmax_ratio_ * vcmax_(T)`, tracking Vcmax's PEAKED Arrhenius, and no
+  # combination of `rd_q10_intercept_` and `rd_q10_slope_` produces a peaked
+  # function -- so without this flag no published plant result computed under the
+  # old shape could be regenerated. The C++ suite pins the branch bit-exactly; what
+  # this test adds is that it is reachable from R at all, which is what the plant
+  # A/B needs.
+  rd_at <- function(temp, old_shape) {
+    l <- leaf_model()
+    l$rd_tracks_vcmax_ <- old_shape
+    set_drivers(l, psi_soil = 0.5, PPFD = 900, leaf_temp = temp)
+    c(R_d = l$R_d_, vcmax = l$vcmax_)
+  }
+
+  ratio <- leaf_model()$rd_to_vcmax_ratio_
+  for (temp in c(15, 25, 35, 45)) {
+    old <- rd_at(temp, TRUE)
+    expect_identical(old[["R_d"]], ratio * old[["vcmax"]],
+                     label = sprintf("old shape at %g C", temp))
+  }
+
+  # The two shapes agree at the 25 C reference and diverge in OPPOSITE DIRECTIONS
+  # above the thermal optimum -- the peaked curve falls, the declining-Q10 curve
+  # rises. That opposition is the reason a flag was needed rather than a parameter.
+  expect_identical(rd_at(25, TRUE)[["R_d"]], rd_at(25, FALSE)[["R_d"]])
+  expect_lt(rd_at(45, TRUE)[["R_d"]], rd_at(25, TRUE)[["R_d"]])
+  expect_gt(rd_at(45, FALSE)[["R_d"]], rd_at(25, FALSE)[["R_d"]])
+
+  # And it is refused rather than resolved alongside a measured reference value.
+  l <- leaf_model(leaf_traits(R_d_25 = 0.525))
+  l$rd_tracks_vcmax_ <- TRUE
+  expect_error(set_drivers(l, psi_soil = 0.5, PPFD = 900, leaf_temp = 30),
+               "not both")
+})

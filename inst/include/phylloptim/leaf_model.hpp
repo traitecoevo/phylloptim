@@ -381,6 +381,29 @@ public:
   // rather than the only option.
   double rd_q10_intercept_ = 3.09;
   double rd_q10_slope_ = 0.0430;
+  // ⚠️ THE PRE-#41 RESPIRATION SHAPE, AND THE ONLY WAY BACK TO IT. With this set,
+  // `R_d_ = rd_to_vcmax_ratio_ * vcmax_` -- Vcmax's peaked Arrhenius, bit-identical
+  // to what this model did before #41 -- and the Q10 coefficients above are not
+  // consulted at all.
+  //
+  // It exists because the alternative was worse than a flag. No combination of
+  // `rd_q10_intercept_` and `rd_q10_slope_` produces a PEAKED function, so without
+  // this the old shape was unreachable and **no published plant result computed
+  // under it could be regenerated with this code**. That is a reproducibility hole
+  // we made, not a feature request.
+  //
+  // It is also what turns the plant revalidation from an argument into a controlled
+  // A/B: with the flag on, T varying, the answer must be bit-identical to
+  // pre-#41 plant, which isolates the shape change from everything else in the
+  // same branch. ⚠️ plant binds Leaf's fields by name in its own
+  // RcppR6_classes.yml, so it needs its own line for this one.
+  //
+  // ⚠️ NOT a deprecation switch and not a "compatibility mode": the default shape
+  // is the correct one, and this reproduces a shape known to be wrong above the
+  // thermal optimum. Setting it together with a measured `R_d_25` is REFUSED rather
+  // than resolved -- see update_temperature_dependent_params -- because the old
+  // shape has no reading in which a measured reference value means anything.
+  bool rd_tracks_vcmax_ = false;
   double atm_kpa_;
   // Conversion from a mixing ratio (umol mol^-1) to a partial pressure (Pa).
   // DERIVED from atm_kpa_, not a constant: it is 1e-6 * P, so the old
@@ -456,7 +479,7 @@ public:
   //   * the cost is 17 double comparisons per set_physiology() call, i.e. per
   //     driver set, NOT per inner solve iteration. Measured: within run-to-run
   //     noise on bench_solve.
-  static constexpr int photo_temp_key_size = 19;
+  static constexpr int photo_temp_key_size = 20;
   std::array<double, photo_temp_key_size> photo_temp_cache_key_{};
   std::array<double, photo_temp_key_size> photo_temp_key() const;
   // Dark respiration at 25 C, with the sentinel resolved. ⚠️ Used by BOTH the
@@ -2488,7 +2511,14 @@ inline std::array<double, Leaf::photo_temp_key_size> Leaf::photo_temp_key() cons
           // keeps NaN out of an `==` comparison, and it is also more complete:
           // it invalidates on a change to whichever of the two is actually in
           // force, and on neither when the other is.
-          rd_reference(), rd_q10_intercept_, rd_q10_slope_};
+          rd_reference(), rd_q10_intercept_, rd_q10_slope_,
+          // A bool in an array of doubles, because the key is one contiguous
+          // `==` comparison and 0.0/1.0 compares exactly. It has to be here:
+          // flipping the flag changes R_d at every temperature but 25 C while
+          // leaving every other key entry alone, so without it the first
+          // set_physiology() after the flip takes a cache HIT and the whole
+          // A/B runs under whichever shape happened to be seated first.
+          rd_tracks_vcmax_ ? 1.0 : 0.0};
 }
 
 inline double Leaf::rd_reference() const {
@@ -2522,9 +2552,28 @@ inline void Leaf::update_temperature_dependent_params(double leaf_temp) {
   //
   // The reference value is a sentinel-defaulted parameter so that a caller who
   // sets `vcmax_25` still gets respiration that scales with it (see R_d_25).
-  const double q10 =
-      rd_q10_intercept_ - rd_q10_slope_ * (leaf_temp + 25.0) / 2.0;
-  R_d_ = rd_reference() * std::pow(q10, (leaf_temp - 25.0) / 10.0);
+  if (rd_tracks_vcmax_) {
+    // The pre-#41 shape, for reproducing a result computed under it. Written as
+    // the same expression the old code used rather than as `rd_reference() *
+    // vcmax_ / vcmax_25`, which is algebraically equal and not bit-equal --
+    // bit-equality with the old model is the entire purpose of this branch.
+    //
+    // ⚠️ Refused rather than resolved. `R_d_25` is a measured reference value and
+    // the peaked curve has no reading in which one means anything, so a caller who
+    // sets both is confused about which model they are running. The Q10
+    // coefficients above are simply unused here, which is different: they are
+    // defaults the caller did not ask for.
+    if (!std::isnan(R_d_25)) {
+      util::stop("rd_tracks_vcmax_ reproduces the pre-#41 shape, in which R_d is "
+                 "rd_to_vcmax_ratio_ * vcmax_(T) and a measured R_d_25 has no "
+                 "meaning. Set one or the other, not both.");
+    }
+    R_d_ = rd_to_vcmax_ratio_ * vcmax_;
+  } else {
+    const double q10 =
+        rd_q10_intercept_ - rd_q10_slope_ * (leaf_temp + 25.0) / 2.0;
+    R_d_ = rd_reference() * std::pow(q10, (leaf_temp - 25.0) / 10.0);
+  }
   km_ = (kc_*umol_per_mol_to_Pa_)*(1 + (atm_o2_kpa_*kPa_to_Pa)/(ko_*umol_per_mol_to_Pa_));
   electron_transport_ = electron_transport();
 }

@@ -1,5 +1,48 @@
 # phylloptim 0.2.1
 
+## An escape hatch back to the pre-#41 respiration shape (#41)
+
+`rd_tracks_vcmax_` makes `R_d` be `rd_to_vcmax_ratio_ * vcmax_(T)` again — Vcmax's
+peaked Arrhenius — bit-identically to what this model computed before #41.
+
+⚠️ **This closes a reproducibility hole we made.** No combination of
+`rd_q10_intercept_` and `rd_q10_slope_` produces a *peaked* function, so with #41
+landed and no flag, **any published plant result computed under the old shape could
+not be regenerated with this code.** It is not a deprecation switch or a
+compatibility mode: the default shape is the correct one, and this reproduces a shape
+known to be wrong above the thermal optimum. It exists so an old number can be
+checked, and so the plant revalidation is a controlled A/B — the flag on with
+temperature varying isolates the shape change from everything else on the branch —
+rather than an argument.
+
+The two shapes agree exactly at 25 °C and diverge in **opposite directions** above
+the thermal optimum: at 45 °C the peaked curve gives `R_d` 0.507, below its 25 °C
+value of 1.440, where the declining-Q10 form gives 3.618. That opposition is why a
+flag was needed and a parameter would not do.
+
+Three things it had to get right:
+
+- ⚠️ **It is in the temperature cache key.** Flipping it changes `R_d` at every
+  temperature but 25 °C while leaving every other key entry alone, so a key that
+  missed it would take a cache *hit* on the first `set_physiology()` after the flip
+  and run the whole A/B under whichever shape was seated first (hazard 10).
+- ⚠️ **Setting it together with a measured `R_d_25` is REFUSED, not resolved.** The
+  peaked curve has no reading in which a measured reference value means anything, so
+  a caller who sets both is confused about which model they are running.
+- **The branch is asserted bit-exactly**, against the same `ratio * vcmax_(T)`
+  emulation the blast-radius table used to build for itself — and that table's "old"
+  column is now the flag rather than an emulation of it, so the table is evidence the
+  hatch reproduces what plant used to compute rather than only a record of what
+  changed. Its printed numbers are unchanged.
+
+`plant` binds `Leaf`'s fields by name in its own `RcppR6_classes.yml`, so it needs
+its own line for this field.
+
+**No cost**: 3.03–3.04 µs/solve on both arms, interleaved ×3 from one tree, with
+identical checksums — inside the ±0.01 within-process noise. The key is compared
+once per `set_physiology()`, not per solve iteration. Golden file bit-identical.
+
+
 ## `R_d_25` is settable and differentiable from R, at its default as well as when pinned (#41)
 
 `leaf_traits(R_d_25 = 0.525)` now reaches the model, and `"R_d_25"` is a `pars`

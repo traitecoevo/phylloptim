@@ -2202,7 +2202,11 @@ void test_rd_temperature_response() {
          "R_d still scales with vcmax_25 while R_d_25 is unset");
   }
 
-  // THE BLAST RADIUS. Old form emulated as ratio * vcmax_(T) via q10 = 1.
+  // THE BLAST RADIUS. The old form is the `rd_tracks_vcmax_` branch itself, so the
+  // "old" column below is the escape hatch rather than an emulation of it -- which
+  // makes this table evidence that the hatch reproduces what plant used to compute,
+  // not merely a record of what changed. The emulation it used to use survives just
+  // above, as the bit-exactness check on the branch.
   //
   // ⚠️⚠️ AND A LIMIT THIS CHANGE MAKES REACHABLE, which is the most important thing
   // here. A higher R_d can drive net assimilation negative across the WHOLE
@@ -2218,6 +2222,65 @@ void test_rd_temperature_response() {
   // Recorded as a measured limit rather than avoided by choosing a cooler sweep:
   // the temperature at which the model stops having an operating point is exactly
   // what a caller needs to know, and it moved.
+  // ⚠️ THE ESCAPE HATCH BACK TO THE OLD SHAPE, and it is checked against the same
+  // emulation the blast-radius table below uses rather than against a recorded
+  // number. That is the strong form: the table's "then" arm and `rd_tracks_vcmax_`
+  // are two independent routes to `rd_to_vcmax_ratio_ * vcmax_(T)`, so if either
+  // drifts they stop agreeing. BIT-EXACT, deliberately -- reproducing an old plant
+  // result is the whole reason the flag exists, and "close" does not reproduce it.
+  {
+    for (double T : {15.0, 25.0, 35.0, 40.0, 45.0}) {
+      phylloptim::Leaf old_shape = make_leaf(d, {2.0}, {1.0});
+      old_shape.rd_tracks_vcmax_ = true;
+      old_shape.update_temperature_dependent_params(T);
+
+      phylloptim::Leaf emulated = make_leaf(d, {2.0}, {1.0});
+      emulated.update_temperature_dependent_params(T);  // seat vcmax_(T)
+      ok(old_shape.R_d_ == 0.015 * emulated.vcmax_,
+         "rd_tracks_vcmax_ reproduces ratio * vcmax_(T) bit-exactly");
+      // And it really is PEAKED, which is the property no Q10 can imitate: R_d
+      // above the thermal optimum is BELOW its 25 C value under the old shape and
+      // above it under the new one.
+      if (T == 45.0) {
+        phylloptim::Leaf at25 = make_leaf(d, {2.0}, {1.0});
+        at25.rd_tracks_vcmax_ = true;
+        at25.update_temperature_dependent_params(25.0);
+        ok(old_shape.R_d_ < at25.R_d_,
+           "and it falls above the thermal optimum, as the old shape did");
+        phylloptim::Leaf now45 = make_leaf(d, {2.0}, {1.0});
+        now45.update_temperature_dependent_params(45.0);
+        ok(now45.R_d_ > at25.R_d_, "where the declining-Q10 form rises");
+      }
+    }
+
+    // ⚠️ The flag must be IN THE CACHE KEY. Flipping it on a leaf that has already
+    // been driven changes R_d at every temperature but 25 C and nothing else the
+    // key mentions, so a key that missed it would take a HIT here and silently run
+    // the whole comparison under whichever shape was seated first (hazard 10).
+    phylloptim::Leaf flipped = make_leaf(d, {2.0}, {1.0});
+    flipped.update_temperature_dependent_params(40.0);
+    const double rd_new_shape = flipped.R_d_;
+    flipped.rd_tracks_vcmax_ = true;
+    flipped.set_physiology(fixture::root_network({1.0 / d.area_leaf}, {1.0}),
+                           d.PPFD, {2.0}, {1.0}, d.K_s * d.theta / d.h,
+                           d.atm_vpd, d.ca, 40.0, d.atm_o2_kpa, d.atm_kpa);
+    ok(flipped.R_d_ != rd_new_shape,
+       "setting rd_tracks_vcmax_ invalidates the temperature cache");
+
+    // Refused rather than resolved: the old shape has no reading in which a
+    // measured reference value means anything.
+    phylloptim::Leaf both = make_leaf(d, {2.0}, {1.0});
+    both.rd_tracks_vcmax_ = true;
+    both.R_d_25 = 0.525;
+    bool threw = false;
+    try {
+      both.update_temperature_dependent_params(30.0);
+    } catch (const std::runtime_error &) {
+      threw = true;
+    }
+    ok(threw, "rd_tracks_vcmax_ with a measured R_d_25 is refused, not resolved");
+  }
+
   // ⚠️ THE LABEL BELOW SAID "Q10 = 2" AND THAT WAS STALE. A constant Q10 of 2 was
   // the first implementation and was rejected on measurement (R_d 4.07 and -73% on
   // A at 40 C, no operating point at all by 45 C); the "now" arm here is the
@@ -2241,10 +2304,7 @@ void test_rd_temperature_response() {
     bool then_ok = true;
     try {
       phylloptim::Leaf then = make_leaf(d, {2.0}, {1.0});
-      then.update_temperature_dependent_params(T);  // seat vcmax_(T)
-      then.R_d_25 = 0.015 * then.vcmax_;            // the old R_d at this T
-      then.rd_q10_intercept_ = 1.0;                 // and no Q10 scaling at all
-      then.rd_q10_slope_ = 0.0;
+      then.rd_tracks_vcmax_ = true;
       then.update_temperature_dependent_params(T);
       then.find_root_collar_psi();
       A_then = then.assim_colimited_;
