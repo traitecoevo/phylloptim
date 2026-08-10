@@ -2039,6 +2039,79 @@ void test_temperature_parameters_are_settable() {
   }
 }
 
+// ⚠️ THE ASSERTIONS ABOVE ALL PUSH THEIR CHANGE THROUGH BY CALLING
+// update_temperature_dependent_params() DIRECTLY, AND THAT IS WHY THEY PASSED
+// WHILE THE FEATURE WAS BROKEN FROM R. A caller does not have that route: they set
+// the field and then set the drivers, which is the one path that took a cache hit
+// and silently kept the old response. The test worked around the bug it should
+// have caught.
+//
+// So this asserts the REALISTIC path, twice over: setting a temperature-response
+// parameter on an already-solved leaf and re-supplying the SAME drivers must change
+// the answer, and must land on exactly what a freshly constructed leaf gives.
+//
+// Bit-exactness is the right bar for the second half -- the two routes share no
+// code, so anything the cache fails to invalidate shows up as a difference. #41.
+void test_temperature_params_invalidate_cache() {
+  printf("setting a temperature parameter invalidates the cache\n");
+  Drivers d;
+
+  // The realistic route: solve, change the parameter, re-supply the same drivers.
+  phylloptim::Leaf warm = make_leaf(d, {2.0}, {1.0});
+  warm.find_root_collar_psi();
+  const double A_before = warm.assim_colimited_;
+  const double Rd_before = warm.R_d_;
+
+  warm.rd_to_vcmax_ratio_ = 0.030;
+  warm.set_physiology(fixture::root_network({1.0 / d.area_leaf}, {1.0}), d.PPFD,
+                      {2.0}, {1.0}, d.K_s * d.theta / d.h, d.atm_vpd, d.ca,
+                      d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  warm.find_root_collar_psi();
+
+  ok(warm.R_d_ != Rd_before,
+     "re-supplying the same drivers after a parameter change recomputes R_d");
+  ok(warm.assim_colimited_ != A_before,
+     "and the operating point moves");
+  near(warm.R_d_, 2.0 * Rd_before, 1e-12,
+       "doubling the ratio doubles R_d at the same temperature");
+
+  // And it must agree bit-for-bit with never having had the stale value.
+  phylloptim::Leaf fresh = make_leaf(d, {2.0}, {1.0});
+  fresh.rd_to_vcmax_ratio_ = 0.030;
+  fresh.set_physiology(fixture::root_network({1.0 / d.area_leaf}, {1.0}), d.PPFD,
+                       {2.0}, {1.0}, d.K_s * d.theta / d.h, d.atm_vpd, d.ca,
+                       d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  fresh.find_root_collar_psi();
+  ok(warm.assim_colimited_ == fresh.assim_colimited_,
+     "a re-parameterised leaf is bit-identical to one built with the value");
+  ok(warm.R_d_ == fresh.R_d_, "R_d likewise");
+
+  // ⚠️ The same hole covered vcmax_25, which is a TRAIT. set_traits() remains the
+  // correct way to change one -- the vulnerability splines and the solved point
+  // need clearing too -- but the silent-wrong-number half of hazard 10 is gone.
+  phylloptim::Leaf vc = make_leaf(d, {2.0}, {1.0});
+  vc.find_root_collar_psi();
+  const double vcmax_before = vc.vcmax_;
+  vc.vcmax_25 = vc.vcmax_25 * 1.5;
+  vc.set_physiology(fixture::root_network({1.0 / d.area_leaf}, {1.0}), d.PPFD,
+                    {2.0}, {1.0}, d.K_s * d.theta / d.h, d.atm_vpd, d.ca,
+                    d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  ok(vc.vcmax_ > vcmax_before,
+     "a bare vcmax_25 write no longer leaves vcmax_ describing the old value");
+
+  // The cache must still BE a cache: identical inputs twice must not recompute
+  // into a different answer.
+  phylloptim::Leaf same = make_leaf(d, {2.0}, {1.0});
+  same.find_root_collar_psi();
+  const double A_once = same.assim_colimited_;
+  same.set_physiology(fixture::root_network({1.0 / d.area_leaf}, {1.0}), d.PPFD,
+                      {2.0}, {1.0}, d.K_s * d.theta / d.h, d.atm_vpd, d.ca,
+                      d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  same.find_root_collar_psi();
+  ok(same.assim_colimited_ == A_once,
+     "unchanged inputs still give a bit-identical answer");
+}
+
 // set_traits exists so a gradient loop can perturb a trait without rebuilding the
 // object. That is only worth having if re-traiting is INDISTINGUISHABLE from
 // constructing afresh, so that is what is asserted -- bit-exactly, which is a
@@ -2417,6 +2490,7 @@ int main() {
   test_leaf_on_single_potential();
   test_root_network_from_carbon();
   test_temperature_parameters_are_settable();
+  test_temperature_params_invalidate_cache();
   test_set_traits_matches_a_fresh_leaf();
   test_perturb_stem_b_matches_a_rebuild();
   test_bad_input_throws();

@@ -1,5 +1,44 @@
 # phylloptim 0.2.1
 
+## The temperature cache now keys on everything it reads, so R_d is genuinely settable (#41)
+
+Binding the temperature-response parameters to R made them *writable* but not
+*effective*. `set_physiology()`'s temperature block was cached on
+`(leaf_temp_, atm_o2_kpa_)` alone, justified by "same inputs → bit-identical
+outputs, so reusing is exact" — a statement that was true while those parameters
+were unreachable C++ members and **became false the moment they were bound**. The
+block's outputs depend on fourteen further inputs the key never mentioned.
+
+The failure was silent. Setting `rd_to_vcmax_ratio_ <- 0.03` on a solved leaf and
+re-supplying the same drivers left `R_d` at **1.44** where a freshly built leaf gave
+**2.88**, and assimilation unchanged to every digit. Which is the outcome #41 cared
+about: a calibration that cannot move respiration absorbs the mismatch into whatever
+it *can* move.
+
+The cache key now covers every scalar `update_temperature_dependent_params()` reads.
+Two consequences beyond the reported bug:
+
+- **It also covers `vcmax_25` and `jmax_25`**, which closes the third and least
+  visible part of hazard 10 — a bare `l$vcmax_25 <- x` no longer leaves
+  `vcmax_`/`jmax_`/`R_d_` describing the old value. ⚠️ `set_traits()` is still the
+  correct way to change a trait; the vulnerability splines and the solved operating
+  point need clearing too, and a cache key cannot do that.
+- ⚠️ **The existing test passed while the feature was broken**, because it pushed
+  each change through by calling `update_temperature_dependent_params()` directly —
+  a route no caller has. `test_temperature_params_invalidate_cache` uses the real
+  one, and fails four ways without this fix.
+
+**No behaviour change at the defaults**: the golden file is bit-identical, and the
+solve is 2.99 against 3.00 µs/solve interleaved ×3, inside the ±0.01 within-process
+noise.
+
+⚠️ **What this does NOT fix**, recorded because the numbers invite it: `R_d` still
+inherits Vcmax's *peaked* Arrhenius and therefore **falls** above the thermal
+optimum, where real dark respiration rises. No value of the ratio repairs a function
+of the wrong shape — see the note in `update_temperature_dependent_params()`. And
+`rd_to_vcmax_ratio` is still not a `leaf_traits()` member, so it cannot yet be
+fitted or differentiated; it is set as a field.
+
 ## An out-of-domain transport lookup says which spline, and which caller
 
 The stem curve is the only interpolator here built with extrapolation disabled, so

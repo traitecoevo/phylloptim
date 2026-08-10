@@ -173,12 +173,30 @@ Leaf:
     # species -- a factor of 6.5 -- and for Q. ilex the model uses 0.914 against
     # the data's 0.525, a 74% overstatement.
     #
-    # ⚠️ SETTING THESE DOES NOT RECOMPUTE ANYTHING. Like the traits (hazard 10),
-    # they feed a cache: set_physiology's temperature block is keyed on
-    # (leaf_temp_, atm_o2_kpa_) and on nothing else, so changing one of these
-    # and calling set_physiology again takes a cache HIT and silently keeps the
-    # old response. Call set_traits() -- which ends in setup_clean_leaf() and
-    # clears the cache -- or construct afresh.
+    # ⚠️ ~~SETTING THESE DOES NOT RECOMPUTE ANYTHING.~~ **FIXED (#41).** This
+    # warning was true and is now obsolete, and the history is worth one line
+    # because the shape of the mistake recurs: the temperature cache was keyed on
+    # (leaf_temp_, atm_o2_kpa_) and on nothing else, justified by "same inputs ->
+    # bit-identical outputs, so reusing is exact". **Binding these parameters made
+    # that justification false** -- the outputs now depended on fourteen more
+    # inputs the key did not mention -- and the first response was to document the
+    # trap rather than repair the key.
+    #
+    # The key now covers every scalar `update_temperature_dependent_params()`
+    # reads, so setting any of these and re-supplying the drivers recomputes, as a
+    # caller would expect. `test_temperature_params_invalidate_cache` asserts it
+    # through the route a caller actually takes, and fails four ways without the
+    # fix.
+    #
+    # ⚠️ `set_traits()` is STILL the right way to change a TRAIT (`vcmax_25`,
+    # `jmax_25`, ...): the vulnerability splines and the solved operating point
+    # need clearing too, and the cache key does not do that. What is gone is the
+    # silent-wrong-number half of hazard 10 -- a bare trait write no longer leaves
+    # `vcmax_`/`jmax_`/`R_d_` describing the old value.
+    #
+    # Behaviour at the defaults is unchanged: the golden file is bit-identical and
+    # the solve is 2.99 vs 3.00 us/solve, interleaved x3 -- inside the +-0.01
+    # within-process noise.
     vcmax_ha_: {type: double, access: field}
     vcmax_H_d_: {type: double, access: field}
     vcmax_d_S_: {type: double, access: field}

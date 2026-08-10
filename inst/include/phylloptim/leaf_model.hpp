@@ -14,6 +14,7 @@
 #include <odelia/interpolator.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <string>
@@ -392,8 +393,30 @@ public:
   // NOTE: electron_transport_ is deliberately NOT cached here -- it also depends
   // on the per-call PPFD_ and is recomputed every call.
   bool   photo_temp_cached_ = false;
-  double photo_temp_cache_leaf_temp_ = 0.0;
-  double photo_temp_cache_atm_o2_kpa_ = 0.0;
+  // ⚠️ THE KEY MUST COVER EVERY SCALAR THE BLOCK READS, NOT JUST THE DRIVERS.
+  // It used to be (leaf_temp_, atm_o2_kpa_) alone, and the argument for that was
+  // "same inputs -> bit-identical outputs, so reusing is exact". That argument was
+  // true while the temperature-response parameters were unreachable C++ members
+  // and became FALSE the moment they were bound to R: `l$rd_to_vcmax_ratio_ <-
+  // 0.03` followed by `set_drivers()` at the same temperature took a cache HIT and
+  // silently kept the old response. Measured before the fix: R_d stayed at 1.44
+  // where a cold object gave 2.88, and A was unchanged to every digit.
+  //
+  // So the key is now every input of update_temperature_dependent_params(). Two
+  // consequences worth knowing:
+  //
+  //   * it also covers `vcmax_25` and `jmax_25`, which closes the third and least
+  //     visible half of hazard 10 -- a bare `l$vcmax_25 <- x` write no longer
+  //     leaves `vcmax_`/`jmax_`/`R_d_` describing the old value. `set_traits()` is
+  //     still the right way to change a trait (the vulnerability splines and the
+  //     solved point need clearing too), but the silent-wrong-number failure mode
+  //     is gone.
+  //   * the cost is 17 double comparisons per set_physiology() call, i.e. per
+  //     driver set, NOT per inner solve iteration. Measured: within run-to-run
+  //     noise on bench_solve.
+  static constexpr int photo_temp_key_size = 17;
+  std::array<double, photo_temp_key_size> photo_temp_cache_key_{};
+  std::array<double, photo_temp_key_size> photo_temp_key() const;
   std::vector<double> f_r;
   // TODO: move into environment?
 
@@ -1364,17 +1387,16 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
    // candidate psi in set_leaf_states_rates_from_psi_stem, so we always recompute
    // the Tair baseline (used for assim_max_ / feasibility) and let the solve
    // override it.
+   const std::array<double, photo_temp_key_size> photo_key = photo_temp_key();
    if (!use_energy_balance_ &&
        photo_temp_cached_ &&
-       leaf_temp_ == photo_temp_cache_leaf_temp_ &&
-       atm_o2_kpa_ == photo_temp_cache_atm_o2_kpa_) {
-     // Cache hit (non-PM): temperature params unchanged; only electron_transport_
+       photo_key == photo_temp_cache_key_) {
+     // Cache hit (non-PM): every input unchanged; only electron_transport_
      // depends on the per-call PPFD_, so refresh just that (as before).
      electron_transport_ = electron_transport();
    } else {
      update_temperature_dependent_params(leaf_temp_);
-     photo_temp_cache_leaf_temp_ = leaf_temp_;
-     photo_temp_cache_atm_o2_kpa_ = atm_o2_kpa_;
+     photo_temp_cache_key_ = photo_key;
      photo_temp_cached_ = true;
    }
 
@@ -2388,6 +2410,28 @@ inline double Leaf::peak_arrh_curve(double Ea, double ref_value, double leaf_tem
 // 0.543, 0.466, 0.284, 0.135 against the Q10's 0.395, 0.790, 1.117, 1.580,
 // 2.234 -- a factor of 16.5 apart by 50 C, and moving the wrong way. See the
 // note at the R_d_ assignment below for why it is recorded rather than changed.
+
+// Every scalar update_temperature_dependent_params() below reads, in one place so
+// the cache key and the computation cannot drift apart.
+//
+// ⚠️ KEEP THIS IMMEDIATELY ABOVE THAT FUNCTION AND IN STEP WITH IT. Adding an input
+// there without adding it here reintroduces exactly the silent staleness this key
+// exists to remove -- the fit still converges and the numbers stay plausible.
+// `photo_temp_key_size` is the guard: the compiler rejects a mismatched list.
+//
+// Bit equality (`==`) is the right comparison. The question is "did any input
+// change", not "did it change materially": an input that moved by one ULP produces
+// a different response and must invalidate.
+inline std::array<double, Leaf::photo_temp_key_size> Leaf::photo_temp_key() const {
+  return {leaf_temp_, atm_o2_kpa_,
+          vcmax_25, vcmax_ha_, vcmax_H_d_, vcmax_d_S_,
+          jmax_25, jmax_ha_, jmax_H_d_, jmax_d_S_,
+          gamma_25_, gamma_ha_,
+          kc_25_, kc_ha_,
+          ko_25_, ko_ha_,
+          rd_to_vcmax_ratio_};
+}
+
 inline void Leaf::update_temperature_dependent_params(double leaf_temp) {
   vcmax_ =
       peak_arrh_curve(vcmax_ha_, vcmax_25, leaf_temp, vcmax_H_d_, vcmax_d_S_);
