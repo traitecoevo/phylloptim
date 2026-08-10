@@ -338,9 +338,18 @@ dim(leaf_gradient(psi_soil = 2.0, PPFD = 900)$gradient)
 rownames(leaf_gradient(psi_soil = 2.0, PPFD = 900)$gradient)
 ```
 
-Fourteen on the multi-layer path — the thirteen traits from `leaf_traits()`, plus
+Fifteen on the multi-layer path — the fourteen traits from `leaf_traits()`, plus
 `leaf_specific_conductance_max`, which is not a trait but is fitted like one. The
-single-potential path adds `resistance`, making fifteen.
+single-potential path adds `resistance`, making sixteen.
+
+⚠️ `R_d_25` comes last rather than in `leaf_traits()`' own order, which puts it
+fourteenth. The enumeration appends it because inserting it would have moved
+`leaf_specific_conductance_max` and `resistance`, and the C++ side indexes this
+list by position. Its value defaults to `NA`, meaning *derive it as
+`rd_to_vcmax_ratio_ * vcmax_25`* — and it is differentiable **at that default**,
+which is what makes `dY/dvcmax_25` a partial at fixed respiration rather than the
+total derivative it used to be. If you want the total, add
+`rd_to_vcmax_ratio_ * dY/dR_d_25` back.
 
 **Selecting fewer genuinely costs less**: the work is one solve plus two cheap
 evaluations per parameter, so it scales with what you ask for.
@@ -353,7 +362,12 @@ bench <- function(pars) {
   as.numeric(Sys.time() - t0, units = "secs") / 20 * 1000
 }
 tibble::tibble(
-  request = c("`pars = NULL` (all 16)", "4 parameters", "1 parameter"),
+  # Counted, not written down: this label said 16 for a while when the answer was
+  # 14, which is exactly the way a number beside a chunk rots (the chunk runs, the
+  # prose next to it is never asserted).
+  request = c(sprintf("`pars = NULL` (all %d)",
+                      nrow(leaf_gradient(psi_soil = 2.0, PPFD = 900)$gradient)),
+              "4 parameters", "1 parameter"),
   `ms per call` = round(c(bench(NULL),
                           bench(c("vcmax_25", "jmax_25", "stem_b",
                                   "cost_scale_TF24")),

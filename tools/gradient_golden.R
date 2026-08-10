@@ -59,24 +59,31 @@ grid_drivers <- function(psi_soil, ppfd = 900, vpd = 2.0, layers = 1L) {
 # function at all, so the composite must return EXACTLY zero for it at an
 # interior optimum and the fallback must return ~1.26 at a dry-pinned one. A pin
 # that omitted it would miss the sharpest statement of why there are two routes.
+#
+# `R_d_25` is in `pars` throughout for the opposite reason: it is the newest
+# parameter (#41) and the one with no history in this file, so every row records
+# it. It also makes each row's `vcmax_25` entry checkable rather than merely
+# recorded -- `dY/dvcmax_25 + rd_to_vcmax_ratio_ * dY/dR_d_25` is the total
+# derivative the `vcmax_25` column used to hold on its own.
 cases <- list(
   list(label = "interior-1layer",
        args = grid_drivers(2.0),
-       pars = c("vcmax_25", "stem_b", "psi_crit")),
+       pars = c("vcmax_25", "stem_b", "psi_crit", "R_d_25")),
   list(label = "interior-5layer",
        args = grid_drivers(0.5, vpd = 0.5, layers = 5L),
-       pars = c("vcmax_25", "stem_b", "psi_crit")),
+       pars = c("vcmax_25", "stem_b", "psi_crit", "R_d_25")),
   list(label = "pinned-dry-3layer",
        args = grid_drivers(4.0, vpd = 0.5, layers = 3L),
-       pars = c("vcmax_25", "stem_b", "psi_crit")),
+       pars = c("vcmax_25", "stem_b", "psi_crit", "R_d_25")),
   list(label = "shutdown-1layer",
        args = grid_drivers(6.0),
-       pars = c("vcmax_25", "stem_b", "psi_crit")),
+       pars = c("vcmax_25", "stem_b", "psi_crit", "R_d_25")),
   list(label = "single-potential",
        args = list(psi_soil = 1.5, PPFD = 900, atm_vpd = 2.0,
                    supply = leaf_supply_single(),
                    root_network = series_resistance(1e4)),
-       pars = c("vcmax_25", "leaf_specific_conductance_max", "resistance"))
+       pars = c("vcmax_25", "leaf_specific_conductance_max", "resistance",
+                "R_d_25"))
 )
 
 out <- do.call(rbind, lapply(cases, function(cs) {

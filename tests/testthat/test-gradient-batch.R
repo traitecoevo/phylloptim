@@ -81,13 +81,23 @@ test_that("the parameter enumeration is the same order in R and in C++", {
   # integer positions into C++'s `phylloptim::gradient::par_names`, so appending
   # is safe and reordering would differentiate the wrong parameter and report
   # plausible numbers for it. Compared rather than trusted, in both directions.
-  r_side <- c(names(leaf_traits()), "leaf_specific_conductance_max",
-              "resistance")
+  #
+  # ⚠️ AND THE ENUMERATION IS NOT `leaf_traits()`' ORDER ANY MORE. `R_d_25` is a
+  # trait -- `set_traits()`' fourteenth argument -- but the enumeration APPENDS it
+  # after the two non-traits, because slotting it in at 13 would have displaced
+  # `par_kmax` and `par_resistance`, which is the reorder this comment warns about.
+  # So the two lists agree on the first thirteen and then deliberately diverge, and
+  # THAT is what is asserted: appending is the safe move and is what happened.
+  traits <- names(leaf_traits())
+  r_side <- c(setdiff(traits, "R_d_25"), "leaf_specific_conductance_max",
+              "resistance", "R_d_25")
   expect_identical(gradient_par_names(), r_side)
   # And the count, which is what a positional trait call would silently break:
-  # thirteen traits then the two that are not traits.
-  expect_length(gradient_par_names(), 15L)
-  expect_identical(gradient_par_names()[1:13], names(leaf_traits()))
+  # thirteen traits, the two that are not traits, then R_d_25.
+  expect_length(gradient_par_names(), 16L)
+  expect_identical(gradient_par_names()[1:13], traits[1:13])
+  expect_identical(gradient_par_names()[[16]], "R_d_25")
+  expect_identical(traits[[14]], "R_d_25")
 })
 
 test_that("the batch reproduces leaf_gradient() bit-for-bit across the grid", {
@@ -187,21 +197,21 @@ test_that("the recorded gradients have not moved", {
   # back one ULP out (#13).
   gold <- utils::read.delim(test_path("gradient_golden.tsv"),
                            stringsAsFactors = FALSE)
+  pars_grid <- c("vcmax_25", "stem_b", "psi_crit", "R_d_25")
   cases <- list(
-    "interior-1layer" = list(args = batch_drivers(2.0),
-                             pars = c("vcmax_25", "stem_b", "psi_crit")),
+    "interior-1layer" = list(args = batch_drivers(2.0), pars = pars_grid),
     "interior-5layer" = list(args = batch_drivers(0.5, vpd = 0.5, layers = 5L),
-                             pars = c("vcmax_25", "stem_b", "psi_crit")),
+                             pars = pars_grid),
     "pinned-dry-3layer" = list(args = batch_drivers(4.0, vpd = 0.5,
                                                     layers = 3L),
-                               pars = c("vcmax_25", "stem_b", "psi_crit")),
-    "shutdown-1layer" = list(args = batch_drivers(6.0),
-                             pars = c("vcmax_25", "stem_b", "psi_crit")),
+                               pars = pars_grid),
+    "shutdown-1layer" = list(args = batch_drivers(6.0), pars = pars_grid),
     "single-potential" = list(
       args = list(psi_soil = 1.5, PPFD = 900, atm_vpd = 2.0,
                   supply = leaf_supply_single(),
                   root_network = series_resistance(1e4)),
-      pars = c("vcmax_25", "leaf_specific_conductance_max", "resistance")))
+      pars = c("vcmax_25", "leaf_specific_conductance_max", "resistance",
+               "R_d_25")))
 
   expect_setequal(unique(gold$case), names(cases))
   # ⚠️ BIT-EXACT ONLY ON THE PLATFORM THAT GENERATED IT, macOS/arm64, exactly as
@@ -332,9 +342,19 @@ test_that("per-observation theta differentiates each row at its own parameters",
   })
 
   b <- leaf_batch(psi_soil = psv, PPFD = 900)
+  # ⚠️ `R_d_25` LAST, and RESOLVED rather than left as its NA sentinel. A caller
+  # who builds `theta` themselves takes on the job `.gradient_theta_matrix()` does,
+  # and the contract is that theta holds the value the solve will USE: an NA there
+  # would leave each row's respiration derived from its own `vcmax_25`, so these
+  # rows would be differentiated at a different point than the `leaf_gradient()`
+  # references below -- which resolve it -- and the two would disagree by the
+  # respiration term rather than fail. The ratio comes off the leaf so there is no
+  # second copy of 0.015 in the tests either.
+  ratio <- b$leaf$rd_to_vcmax_ratio_
   theta <- t(vapply(traits, function(tr) {
-    unname(c(unlist(tr)[gradient_par_names()[1:13]], 3.14e-5, NA_real_))
-  }, numeric(15)))
+    unname(c(unlist(tr)[gradient_par_names()[1:13]], 3.14e-5, NA_real_,
+             ratio * tr$vcmax_25))
+  }, numeric(16)))
   g <- leaf_gradient_batch(b, theta = theta, pars = pars)
 
   for (i in seq_along(psv)) {
@@ -510,11 +530,11 @@ test_that("leaf_gradient_batch() rejects what it cannot do", {
 
   # `traits` and `theta` both say where the gradient is taken, so passing both is
   # refused rather than resolved in favour of one of them.
-  th <- matrix(1, nrow = 1, ncol = 15)
+  th <- matrix(1, nrow = 1, ncol = 16)
   expect_error(leaf_gradient_batch(b, traits = leaf_traits(), theta = th),
                "pass one")
-  expect_error(leaf_gradient_batch(b, theta = matrix(1, 1, 14)), "15 columns")
-  expect_error(leaf_gradient_batch(b, theta = matrix(1, 3, 15)),
+  expect_error(leaf_gradient_batch(b, theta = matrix(1, 1, 15)), "16 columns")
+  expect_error(leaf_gradient_batch(b, theta = matrix(1, 3, 16)),
                "1 row or one per observation")
   expect_error(leaf_gradient_batch(b, theta = as.data.frame(th)),
                "numeric matrix")

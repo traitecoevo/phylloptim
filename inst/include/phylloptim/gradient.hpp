@@ -73,13 +73,20 @@ namespace gradient {
 // back out of C++ and compares them with R's, so the two cannot drift apart
 // without a failure.
 inline constexpr int n_traits = 13;
-inline constexpr int n_pars = 15;
+inline constexpr int n_pars = 16;
 
-// The two indices the code below has to know by name: one takes the fast
-// homogeneity path, and the two non-traits take a relative step.
+// The indices the code below has to know by name: one takes the fast homogeneity
+// path, and the two non-traits take a relative step.
 inline constexpr int par_stem_b = 2;
 inline constexpr int par_kmax = 13;
 inline constexpr int par_resistance = 14;
+// ⚠️ `R_d_25` IS A TRAIT AND IS APPENDED AT THE END RATHER THAN PUT IN
+// `set_traits`' ARGUMENT ORDER, WHICH WOULD PLACE IT AT 13. That would displace
+// `par_kmax` and `par_resistance` -- a reorder, which the warning above says is
+// exactly the unsafe move. So this enumeration and `set_traits`' argument order
+// agree for the first thirteen and deliberately diverge here; `set_setter` passes
+// `theta[par_R_d_25]` as that function's fourteenth argument.
+inline constexpr int par_R_d_25 = 15;
 
 inline const std::vector<std::string>& par_names() {
   static const std::vector<std::string> names{
@@ -89,7 +96,8 @@ inline const std::vector<std::string>& par_names() {
       "a",         "curv_fact_elec_trans", "curv_fact_colim",
       "cost_scale_TF24",
       "leaf_specific_conductance_max",
-      "resistance"};
+      "resistance",
+      "R_d_25"};
   return names;
 }
 
@@ -270,7 +278,7 @@ inline void apply(Leaf& l, const double* theta, const Drivers& d, bool single,
   }
   l.set_traits(theta[0], theta[1], theta[2], theta[3], theta[4], theta[5],
                theta[6], theta[7], theta[8], theta[9], theta[10], theta[11],
-               theta[12]);
+               theta[12], theta[par_R_d_25]);
   if (single) {
     // R's `series_resistance()`: a default-constructed network carrying one
     // series resistance in `r_R_V_sum`, which is that field's own meaning with

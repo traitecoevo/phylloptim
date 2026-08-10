@@ -17,7 +17,8 @@ leaf_traits(
   a = 0.3,
   curv_fact_elec_trans = 0.7,
   curv_fact_colim = 0.99,
-  cost_scale_TF24 = 7.5
+  cost_scale_TF24 = 7.5,
+  R_d_25 = NA_real_
 )
 }
 \arguments{
@@ -47,6 +48,16 @@ leaf_traits(
 
 \item{cost_scale_TF24}{cost parameter for the TF24 profit model
 (umol m^-2 s^-1)}
+
+\item{R_d_25}{dark respiration at 25 C (umol m^-2 s^-1). `NA`, the default,
+  means *derive it* as `rd_to_vcmax_ratio_ * vcmax_25`, which is what the
+  model has always done; a number pins it and breaks that link. Unlike every
+  other trait it accepts `NA`, and it is the one trait the generated `Leaf`
+  constructor does not take -- [leaf_model()] assigns the field afterwards.
+
+  Either way it is the value at 25 C only: respiration rises from there with
+  Tjoelker's declining-Q10 curve (#41), so pinning `R_d_25` fixes the
+  reference point and not the temperature response.}
 }
 \value{
 A `leaf_traits` object; a named list.

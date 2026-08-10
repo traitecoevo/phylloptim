@@ -210,6 +210,20 @@ Leaf:
     ko_25_: {type: double, access: field}
     ko_ha_: {type: double, access: field}
     rd_to_vcmax_ratio_: {type: double, access: field}
+    # Dark respiration at 25 C. NA/NaN means "derive as rd_to_vcmax_ratio_ *
+    # vcmax_25" -- the historical behaviour -- and a number overrides it. Bound as a
+    # field as well as being a `set_traits()` argument, because `leaf_model()` needs
+    # to apply it after the generated constructor (which does not take it).
+    R_d_25: {type: double, access: field}
+    # The Tjoelker (2001) declining-Q10 coefficients:
+    #   Q10(T) = rd_q10_intercept_ - rd_q10_slope_ * (T + 25) / 2
+    # ⚠️ Set the slope to zero and the intercept IS a constant Q10, which is the
+    # escape hatch for anyone who wants the conventional form. A constant Q10 = 2
+    # was the first implementation and was measured too aggressive at the top of the
+    # range: R_d 4.07 at 40 C, -73% on assimilation, and no operating point at all
+    # by 45 C. See NEWS for the blast radius.
+    rd_q10_intercept_: {type: double, access: field}
+    rd_q10_slope_: {type: double, access: field}
 
     # --- drivers, as last set by set_physiology ------------------------------
     PPFD_: {type: double, access: field}
@@ -336,7 +350,7 @@ Leaf:
       args: [stem_b: double]
     set_traits:
       return_type: void
-      args: [vcmax_25: double, stem_c: double, stem_b: double, psi_crit: double, root_c: double, root_b: double, root_psi_crit: double, beta2: double, jmax_25: double, a: double, curv_fact_elec_trans: double, curv_fact_colim: double, cost_scale_TF24: double]
+      args: [vcmax_25: double, stem_c: double, stem_b: double, psi_crit: double, root_c: double, root_b: double, root_psi_crit: double, beta2: double, jmax_25: double, a: double, curv_fact_elec_trans: double, curv_fact_colim: double, cost_scale_TF24: double, R_d_25: double]
 
     # --- transpiration and conductance ---------------------------------------
     proportion_of_conductivity:

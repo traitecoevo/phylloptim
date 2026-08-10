@@ -550,11 +550,15 @@ public:
   // resets both caches and requires set_physiology() before the next solve, exactly
   // as a fresh Leaf would. That last part is not conservatism: the derived
   // photosynthetic parameters really are unknown until the drivers are re-supplied.
+  // ⚠️ `R_d_25` is LAST and may be NaN, which is a value rather than an error --
+  // the sentinel meaning "derive from rd_to_vcmax_ratio_ * vcmax_25". So it is
+  // deliberately outside check_psi_magnitudes' remit and must not be validated as
+  // finite.
   void set_traits(double vcmax_25, double stem_c, double stem_b, double psi_crit,
                   double root_c, double root_b, double root_psi_crit,
                   double beta2, double jmax_25, double a,
                   double curv_fact_elec_trans, double curv_fact_colim,
-                  double cost_scale_TF24);
+                  double cost_scale_TF24, double R_d_25);
 
   // The #25 boundary: the four potentials that must be positive magnitudes. One
   // copy, called from both the constructor and set_traits -- the alternative is
@@ -1224,7 +1228,7 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
                              double jmax_25_, double a_,
                              double curv_fact_elec_trans_,
                              double curv_fact_colim_,
-                             double cost_scale_TF24_) {
+                             double cost_scale_TF24_, double R_d_25_) {
   check_psi_magnitudes(psi_crit_, stem_b_, root_b_, root_psi_crit_);
 
   // Which splines have to be rebuilt, decided BEFORE the assignment. Exact
@@ -1253,6 +1257,9 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
   curv_fact_elec_trans = curv_fact_elec_trans_;
   curv_fact_colim = curv_fact_colim_;
   cost_scale_TF24 = cost_scale_TF24_;
+  // NaN is a legitimate value here, so this is a plain assignment: it restores the
+  // "derive from the ratio" default as readily as it sets a measured value.
+  R_d_25 = R_d_25_;
 
   roots_.root_c = root_c_;
   roots_.root_b = root_b_;

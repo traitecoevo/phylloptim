@@ -70,9 +70,21 @@ differentiate at}
 \item{supply}{how water reaches the root collar: [leaf_supply_multilayer()]
 (the default) or [leaf_supply_single()]}
 
-\item{pars}{what to differentiate with respect to. Any of the thirteen
+\item{pars}{what to differentiate with respect to. Any of the fourteen
   [leaf_traits()] names, plus `"leaf_specific_conductance_max"` and — on the
   single-potential path only — `"resistance"`. Defaults to all of them.
+
+  ⚠️ The ORDER of the enumeration is not `leaf_traits()`' order: `"R_d_25"`
+  comes last, after the two non-traits, because the C++ side indexes this list
+  by position and inserting it would have moved the other two. That matters
+  only if you build `theta` yourself; `pars` itself is matched by name.
+
+  `"R_d_25"` is differentiable at its `NA` default, which is resolved to
+  `rd_to_vcmax_ratio_ * vcmax_25` before anything is perturbed. The
+  consequence worth knowing: `dY/dvcmax_25` is then a PARTIAL at fixed
+  respiration. It used to carry the respiration term as well, because `R_d`
+  was derived from `vcmax_25` with nothing else to hold it. Add
+  `rd_to_vcmax_ratio_ * dY/dR_d_25` for the total derivative.
 
   `beta_R_H` and `beta_R_V` were here until #33 and are not any more: they
   parameterise the root-architecture model, which the leaf no longer runs, so
@@ -236,9 +248,9 @@ The companion study `leaf-calibration` has `N = 1327`, `P_fit = 40`,
 57-parameter variant costing the same as its 40-parameter one, because
 `P_model` is 4 in both.
 
-⚠️ **Always pass `pars`.** It is `P_model`, so the default — all fourteen on
+⚠️ **Always pass `pars`.** It is `P_model`, so the default — all fifteen on
 the multi-layer path — is the most expensive thing you can ask for, and a fit
-that reads four of them pays for ten it discards.
+that reads four of them pays for eleven it discards.
 
 The intercept is a fresh `Leaf` per call, which there is currently no way to
 avoid (see phylloptim#52); it is 29% of the exact gradient in the study above.

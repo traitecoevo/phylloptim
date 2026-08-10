@@ -1,5 +1,112 @@
 # phylloptim 0.2.1
 
+## `R_d_25` is settable and differentiable from R, at its default as well as when pinned (#41)
+
+`leaf_traits(R_d_25 = 0.525)` now reaches the model, and `"R_d_25"` is a `pars`
+entry for both `leaf_gradient()` and `leaf_gradient_batch()`. Measured at one
+observation: `dA/dR_d_25 = -0.24874` against a central difference of the solve at
+`-0.24868`. ⚠️ Not ≈ −1, because the optimiser moves the operating point in
+response, so the total derivative is well below the direct `-R_d` term.
+
+`R_d_25` defaults to `NA`, meaning *derive it as `rd_to_vcmax_ratio_ * vcmax_25`*,
+and **the sentinel is resolved where `theta` is built** rather than carried into it.
+That is what makes the parameter differentiable AT THE DEFAULT — a calibration does
+not have to pin a value first — and it is also what the batch path needs: `theta`
+there is a numeric matrix in which an `NA` is indistinguishable from a trait the
+caller forgot, which is how it first failed (`` `traits` is missing: NA ``).
+
+⚠️ **`dY/dvcmax_25` IS NOW A PARTIAL DERIVATIVE AT FIXED RESPIRATION.** It used to
+carry `rd_to_vcmax_ratio_ * dY/dR_d_25` as well, because `R_d` was derived from
+`vcmax_25` and there was nothing else to hold it. That is the correct Jacobian
+column for a fit that moves both, and the total derivative is recovered exactly by
+adding the `R_d_25` column back.
+
+**Measured blast radius, and it is confined to that one column.** Of the 60 cells in
+`tests/testthat/gradient_golden.tsv`, **14 moved and all 14 are `vcmax_25`**, by 16%
+to 250%; every `stem_b`, `psi_crit`, `leaf_specific_conductance_max` and
+`resistance` cell is bit-identical, as is every solved value. The 250% is the
+five-layer row, where the two terms nearly cancelled. The chain rule reconstructs
+all 14 old numbers — exactly where both arms are exact, and to 2.8e-04 at worst
+where they are not, that residual being the direct term's own finite-difference
+round-off (it falls to 2.5e-06 at `step = 1e-4`).
+
+The sharpest case is a shut-down operating point, where `A = -R_d` exactly:
+`dA/dvcmax_25` was `-0.015` and is now **exactly 0**, with the `-1` moved to
+`dA/dR_d_25`. `R_d_25` is recorded at all five golden operating points now, so the
+new column has a baseline of its own.
+
+Two traps worth carrying, both of which cost time here:
+
+- ⚠️ **The parameter enumeration deliberately does NOT follow `set_traits()`'
+  argument order.** `R_d_25` is `set_traits()`' fourteenth argument but the
+  enumeration's sixteenth, appended after the two non-traits, because inserting it
+  at 13 would displace `par_kmax` and `par_resistance` — and C++ indexes `theta` by
+  position. Appending is safe; reordering differentiates the wrong parameter and
+  returns plausible numbers.
+- ⚠️ **`.gradient_setter()`'s positional trait call is where this broke**, at run
+  time, with `argument R_d_25 is missing` raised inside the generated binding — a
+  message naming neither the call nor the arity. Its own comment predicted exactly
+  that. The arity is asserted in `test-gradient.R`.
+
+The generated `Leaf` constructor still does not take `R_d_25`; `leaf_model()`
+assigns the field afterwards, and `test-surface.R` now records that as a fact and
+checks the assignment is really there — without it, `leaf_traits(R_d_25 = )` would
+be accepted and silently ignored, which is worse than not offering the argument.
+
+## A leaf too hot to gain carbon shuts down instead of throwing
+
+Raising `R_d` makes a case reachable that the prescribed-temperature path could not
+previously reach: net assimilation negative across the whole `[gamma*, ca]` bracket,
+so `psi_stem_to_ci` has no supply-equals-demand root and `toms748_solve` throws
+`Parameters a and b do not bracket the root`. At the defaults that happens by 45 °C.
+
+The model already knew the physical case — `ci_at_compensation_point_` places `ci`
+at the compensation point — but that fallback only fired on the energy-balance path.
+It now applies on the default path too, and the answer is a shut-down operating
+point rather than an exception. The temperature at which the model stops having an
+operating point is pinned as a measurement rather than avoided by choosing a cooler
+sweep.
+
+## ⚠️ R_d rises with temperature now, on Tjoelker's declining Q10 (#41)
+
+`R_d` was `rd_to_vcmax_ratio_ * vcmax_(T)`, so it inherited Vcmax's **peaked**
+Arrhenius and therefore **fell** above the thermal optimum, where real dark
+respiration rises. No value of the ratio repairs a function of the wrong shape, so
+the shape is what changed:
+
+```
+Q10(T) = rd_q10_intercept_ - rd_q10_slope_ * (T + 25) / 2      3.09, 0.0430
+R_d(T) = R_d_25 * Q10(T)^((T - 25) / 10)
+```
+
+**This moves results at every temperature except 25 °C, deliberately.** The 25 °C
+agreement is exact rather than approximate: the reference value defaults to
+`rd_to_vcmax_ratio_ * vcmax_25`, and `vcmax_(25) == vcmax_25` by construction of the
+peaked Arrhenius.
+
+| T | R_d old → new | A old → new | |
+|---|---|---|---|
+| 15 °C | 0.669 → 0.646 | 6.1505 → 6.1572 | +0.11% |
+| 25 °C | 1.440 → 1.440 | 5.5992 → 5.5992 | **exact** |
+| 35 °C | 1.610 → 2.592 | 3.4924 → 3.1550 | −9.66% |
+| 40 °C | 1.012 → 3.171 | 1.8265 → 0.8555 | −53.16% |
+| 45 °C | 0.507 → 3.618 | 0.6339 → −3.6176 | shut-down |
+
+⚠️ **The golden grid is entirely at 25 °C, so its bit-identicality is BY
+CONSTRUCTION and is not evidence about this change.** `test_rd_temperature_response`
+is. The same blindness covers the thirteen temperature-response parameters bound
+earlier.
+
+**A constant Q10 remains reachable** — slope zero, intercept the value — and that is
+asserted, because it is the escape hatch for anyone who wants the conventional form.
+A constant Q10 of 2 was in fact implemented first and rejected on measurement: `R_d`
+4.07 at 40 °C, −73% on A, and no operating point at all by 45 °C.
+
+⚠️ **Slope zero does NOT recover the pre-#41 shape**, which was peaked. No
+combination of intercept and slope produces a peaked function, so the old behaviour
+is not reachable through these two parameters.
+
+
 ## The temperature cache now keys on everything it reads, so R_d is genuinely settable (#41)
 
 Binding the temperature-response parameters to R made them *writable* but not

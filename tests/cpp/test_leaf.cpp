@@ -61,6 +61,12 @@ struct Drivers {
   double area_leaf = 0.05;
 };
 
+// set_traits' fourteenth argument, R_d_25. NaN is the SENTINEL for "derive as
+// rd_to_vcmax_ratio_ * vcmax_25", so passing it keeps a call at the default
+// respiration rather than pinning one -- which is what every call below wants
+// except the tests that are specifically about R_d.
+const double kRdDefault = std::numeric_limits<double>::quiet_NaN();
+
 phylloptim::Leaf make_leaf(const Drivers &d, std::vector<double> psi_soil,
                      std::vector<double> soil_depth) {
   phylloptim::Leaf l;
@@ -857,7 +863,8 @@ void test_operating_point_kind_is_written_by_every_path() {
   // classification is part of that state (hazard 10 / setup_clean_leaf).
   l.set_traits(l.vcmax_25, l.stem_c, l.stem_b, l.psi_crit, l.roots_.root_c,
                l.roots_.root_b, l.roots_.root_psi_crit, l.beta2, l.jmax_25, l.a,
-               l.curv_fact_elec_trans, l.curv_fact_colim, l.cost_scale_TF24);
+               l.curv_fact_elec_trans, l.curv_fact_colim, l.cost_scale_TF24,
+               l.R_d_25);
   ok(l.operating_point_kind() == Kind::Unsolved,
      "set_traits clears the classification with the rest of the solved state");
 
@@ -2211,7 +2218,12 @@ void test_rd_temperature_response() {
   // Recorded as a measured limit rather than avoided by choosing a cooler sweep:
   // the temperature at which the model stops having an operating point is exactly
   // what a caller needs to know, and it moved.
-  printf("  blast radius on assimilation (old form vs Q10 = 2):\n");
+  // ⚠️ THE LABEL BELOW SAID "Q10 = 2" AND THAT WAS STALE. A constant Q10 of 2 was
+  // the first implementation and was rejected on measurement (R_d 4.07 and -73% on
+  // A at 40 C, no operating point at all by 45 C); the "now" arm here is the
+  // shipped Tjoelker declining curve, which is what the numbers below describe.
+  // A printed label is not asserted by anything, so it outlived the thing it named.
+  printf("  blast radius on assimilation (old form vs declining Q10):\n");
   for (double T : {15.0, 25.0, 35.0, 40.0, 45.0}) {
     double A_now = 0.0, Rd_now = 0.0;
     bool now_ok = true;
@@ -2334,7 +2346,7 @@ void test_perturb_stem_b_matches_a_rebuild() {
     phylloptim::Leaf rebuilt = make_leaf(d, {2.0}, {1.0});
     rebuilt.find_root_collar_psi();
     rebuilt.set_traits(96.0, 2.680147, b_new, 5.870283, 2.680147, 3.898245,
-                       5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5);
+                       5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRdDefault);
     rebuilt.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                            d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa,
                            d.atm_kpa);
@@ -2367,7 +2379,7 @@ void test_perturb_stem_b_matches_a_rebuild() {
     phylloptim::Leaf fresh = make_leaf(d, {2.0}, {1.0});
     fresh.find_root_collar_psi();
     rescaled.set_traits(96.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
-                        5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5);
+                        5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRdDefault);
     rescaled.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                             d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa,
                             d.atm_kpa);
@@ -2416,7 +2428,7 @@ void test_set_traits_matches_a_fresh_leaf() {
     phylloptim::Leaf reused = make_leaf(d, {2.0}, {1.0});
     reused.find_root_collar_psi();
     reused.set_traits(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9],
-                      t[10], t[11], t[12]);
+                      t[10], t[11], t[12], kRdDefault);
     reused.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                           d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
     reused.find_root_collar_psi();
@@ -2446,7 +2458,7 @@ void test_set_traits_matches_a_fresh_leaf() {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     const double vcmax_before = l.vcmax_;
     l.set_traits(96.0 * 2.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
-                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5);
+                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRdDefault);
     std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
     // The SAME leaf_temp and atm_o2_kpa, which is what arms the cache.
     l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
@@ -2463,7 +2475,7 @@ void test_set_traits_matches_a_fresh_leaf() {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     const double E_before = l.transpiration(3.0, 1.0);
     l.set_traits(96.0, 2.680147, 3.898245 * 1.5, 5.870283, 2.680147, 3.898245,
-                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5);
+                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRdDefault);
     std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
     l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                      d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
@@ -2491,7 +2503,7 @@ void test_set_traits_matches_a_fresh_leaf() {
       bool threw = false;
       try {
         l.set_traits(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9],
-                     t[10], t[11], t[12]);
+                     t[10], t[11], t[12], kRdDefault);
       } catch (const std::runtime_error &) {
         threw = true;
       }

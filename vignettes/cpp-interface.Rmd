@@ -130,10 +130,18 @@ const std::vector<g::Result> out =
 // out[i].status is Interior / Pinned / NoGradient / Error
 ```
 
-`theta` is `g::n_pars` = 15 doubles: the thirteen traits in `set_traits`' argument
-order, then `leaf_specific_conductance_max`, then the single-potential path's
-`resistance`. `g::par_names()` is that order, and `pars` holds positions into it —
-⚠️ appending to the enumeration is safe and reordering it is not.
+`theta` is `g::n_pars` = 16 doubles: the first thirteen traits in `set_traits`'
+argument order, then `leaf_specific_conductance_max`, then the single-potential
+path's `resistance`, then `R_d_25`. `g::par_names()` is that order, and `pars` holds
+positions into it — ⚠️ appending to the enumeration is safe and reordering it is
+not, which is why `R_d_25` sits at the end (`g::par_R_d_25` = 15) rather than at 13
+where `set_traits` takes it: slotting it in would have displaced `g::par_kmax` and
+`g::par_resistance`.
+
+⚠️ **Do not put `set_traits`' NaN sentinel in `theta`.** `R_d_25` may be NaN as a
+trait, meaning *derive it from `rd_to_vcmax_ratio_ * vcmax_25`*, but a NaN in
+`theta` is not differentiable — perturbing it yields NaN — so resolve it first, as
+`R/gradient.R` does. `Leaf::rd_reference()` is that expression.
 
 Three things the free function gives you that a hand-rolled loop would not:
 
@@ -157,7 +165,7 @@ The ingredients are still public, if you want to compose something else:
 
 | piece | what it is |
 |---|---|
-| `set_traits(...)` | replace all thirteen traits, refreshing splines and the temperature cache |
+| `set_traits(...)` | replace all fourteen traits, refreshing splines and the temperature cache |
 | `perturb_stem_b(b)` | move `stem_b` by rescaling the curve instead of rebuilding it |
 | `dprofit_droot_collar_psi(psi, &feasible)` | dprofit/dψ at a given collar potential |
 | `evaluate_root_collar_psi(psi)` | solve the inner problem at a fixed collar |

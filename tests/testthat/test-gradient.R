@@ -167,10 +167,21 @@ test_that("a pinned optimum takes the fallback, and the composite would be wrong
   # a factor of 1.6 out for vcmax_25 there rather than seven orders, so a test
   # that only looked at the wet rows would let a threshold drift past it.
   dry <- grid_gradient(4, vpd = 0.5, layers = 3L,
-                       pars = c("stem_b", "vcmax_25"))
+                       pars = c("stem_b", "vcmax_25", "R_d_25"))
   expect_identical(dry$status, "pinned")
-  expect_equal(dry$gradient["vcmax_25", "A"], 0.014357, tolerance = 1e-3)
+  expect_equal(dry$gradient["vcmax_25", "A"], 0.017548, tolerance = 1e-3)
   expect_equal(dry$gradient["stem_b", "A"], 4.6991, tolerance = 1e-3)
+
+  # ⚠️ THE `vcmax_25` NUMBER ABOVE WAS 0.014357 UNTIL #41, and the difference is
+  # not a change in the model -- it is which derivative the column reports.
+  # `R_d_25` is a parameter now, so `dA/dvcmax_25` is a PARTIAL at fixed
+  # respiration where it used to carry `ratio * dA/dR_d_25` too. Asserted as an
+  # identity rather than left as two unrelated recorded numbers, because that is
+  # what says the two columns still add up to the old one.
+  ratio <- leaf_model()$rd_to_vcmax_ratio_
+  expect_equal(dry$gradient["vcmax_25", "A"] +
+                 ratio * dry$gradient["R_d_25", "A"],
+               0.014357, tolerance = 1e-3)
 })
 
 test_that("at a pinned optimum the BOUND's own trait carries the gradient", {
@@ -206,12 +217,29 @@ test_that("a shut-down operating point reports no gradient and still differences
   # psi_soil = 6 is drier than psi_crit, so there is no optimisation to
   # differentiate: dprofit returns a sentinel zero rather than a derivative, and
   # H comes back zero with it. The composite has nothing to stand on and says so
-  # -- but the gradient itself is not zero, because R_d still depends on
-  # vcmax_25, so the fallback still has work to do.
-  g <- grid_gradient(6.0, pars = c("vcmax_25", "stem_b"))
+  # -- but the gradient itself is not all zero, because a shut-down leaf still
+  # respires, so the fallback still has work to do.
+  #
+  # ⚠️ WHICH PARAMETER CARRIES THAT IS THE SHARPEST TEST OF #41 IN THE SUITE, and
+  # it changed there. A = -R_d exactly at a shut-down point, so:
+  #
+  #   before   R_d was derived from vcmax_25, so dA/dvcmax_25 = -ratio = -0.015
+  #            and there was no R_d_25 column at all;
+  #   now      R_d_25 is a parameter, so dA/dR_d_25 = -1 and dA/dvcmax_25 = 0.
+  #
+  # The zero is EXACT and asserted as such: `vcmax_25` no longer reaches A here at
+  # all, so both perturbed solves return the same bits and their difference is a
+  # true zero rather than a small number. The -1 is not exact -- it is still a
+  # central difference of the solve -- and it lands within ~6e-11, which is the
+  # difference's own round-off and not a modelling residual.
+  g <- grid_gradient(6.0, pars = c("vcmax_25", "stem_b", "R_d_25"))
   expect_identical(g$status, "no-gradient")
   expect_identical(g$method, "fd")
-  expect_equal(g$gradient["vcmax_25", "A"], -0.015, tolerance = 1e-4)
+  # A = -R_d, and at 25 C R_d IS the reference value.
+  expect_equal(g$value[["A"]],
+               -leaf_model()$rd_to_vcmax_ratio_ * leaf_traits()$vcmax_25)
+  expect_equal(g$gradient["R_d_25", "A"], -1, tolerance = 1e-8)
+  expect_identical(g$gradient["vcmax_25", "A"], 0)
   expect_equal(g$gradient["stem_b", "A"], 0)
 
   # Forcing the composite here is an error rather than a wrong number: unlike a
@@ -590,11 +618,16 @@ test_that("leaf_gradient() refuses the combinations that would disagree", {
 
 test_that("the setter's positional trait call cannot drift in arity", {
   # `.gradient_setter()` applies traits POSITIONALLY, straight onto the object, to
-  # skip rebuilding a leaf_traits per perturbation. That is a hard-coded thirteen. If
+  # skip rebuilding a leaf_traits per perturbation. That is a hard-coded FOURTEEN. If
   # a trait is added to leaf_traits() and to the C++ setter, nothing about that call
   # fails to compile -- it would silently pass the wrong value for every argument
   # after the new one. So the arity is asserted here rather than trusted.
-  expect_length(leaf_traits(), 13L)
-  expect_length(formals(leaf_model()$set_traits), 13L)
+  #
+  # ⚠️ THIS TEST'S OWN PREDICTION CAME TRUE, and it is the reason the count is
+  # fourteen now. Adding `R_d_25` (#41) broke `.gradient_setter()` at run time and
+  # nowhere else, with "argument R_d_25 is missing" raised inside the generated
+  # binding -- a message naming neither the call nor the arity.
+  expect_length(leaf_traits(), 14L)
+  expect_length(formals(leaf_model()$set_traits), 14L)
   expect_identical(names(leaf_traits()), names(formals(leaf_model()$set_traits)))
 })
