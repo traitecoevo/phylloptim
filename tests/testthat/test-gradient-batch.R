@@ -220,12 +220,19 @@ test_that("the recorded gradients have not moved", {
   # test-golden.R's first version made. libm's exp/pow are not bit-reproducible
   # between glibc on x86-64 and Apple's libm on arm64.
   #
-  # THE TOLERANCE IS NOT A GUESS AND NOT NEW. These are derivatives of outputs
-  # evaluated at the ARGMAX of a flat maximum, so they belong to the golden file's
-  # own sqrt-amplified class -- and `golden_tolerance()` is that policy, reused
-  # here rather than restated. Measured worst relative disagreement on Linux is
-  # 1.3e-4, against the golden file's 1.4e-4 for the same class: a central
-  # difference cancels the systematic part of a libm difference but not all of it.
+  # ⚠️ THIS FILE USED `golden_tolerance()` AND THAT WAS WRONG -- borrowed from the
+  # solved-output baseline, where it happened not to fail until #41 added a column.
+  # A gradient here is a FINITE DIFFERENCE, so it carries the solve's ~1e-9 floor
+  # DIVIDED BY THE STEP, and since the step is relative the amplification is set by
+  # the differentiated parameter's own magnitude. `R_d_25` is 1.44 where `vcmax_25`
+  # is 96, so it takes a 67x smaller absolute step and disagrees 10x more --
+  # 1.3e-03 on Linux against 1.3e-04 for every column that was here before.
+  # `gradient_golden_tolerance()` is that measurement, with the arithmetic.
+  #
+  # The pre-existing columns were, and remain, in the golden file's own
+  # sqrt-amplified class: derivatives of outputs evaluated at the ARGMAX of a flat
+  # maximum, where a central difference cancels the systematic part of a libm
+  # difference but not all of it.
   #
   # ⚠️ Read the SUMMARY LINE below for a magnitude, never the FAIL lines. The
   # figures in this package's guide were wrong twice because a truncated failure
@@ -242,7 +249,8 @@ test_that("the recorded gradients have not moved", {
       for (out in c("A", "gc", "psi_stem", "collar")) {
         got <- g$gradient[1, rows$par[[i]], out]
         expect_golden(got, rows[[out]][[i]], out,
-                      paste(nm, rows$par[[i]]))
+                      paste(nm, rows$par[[i]]),
+                      tolerance = gradient_golden_tolerance())
         ref <- as.numeric(rows[[out]][[i]])
         if (ref != 0) {
           worst <- max(worst, abs(got - ref) / abs(ref))

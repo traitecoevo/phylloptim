@@ -88,7 +88,10 @@ tests/testthat/gradient_golden.tsv
                                on that platform only, like tests/cpp/golden/ --
                                these are derivatives of argmax-evaluated outputs,
                                so they inherit its sqrt-amplified class and
-                               disagree cross-platform by up to 1.3e-4
+                               disagree cross-platform by up to 1.3e-3 -- ten
+                               times the solved outputs, because a finite
+                               difference divides the solver floor by the step
+                               and `R_d_25`'s step is the smallest here
 tests/validate/                R scripts comparing against plant (needs R)
 CMakeLists.txt                 the no-R build: C++ and Python consumers, and the
                                thing that makes "does not need R" runnable
@@ -348,10 +351,21 @@ magnitude apart:
 
 | field | gcc | clang | why |
 |---|---|---|---|
-| `profit` | **1.82e-07** | **1.82e-07** | it is the maximum itself — well-conditioned |
+| `profit` | **2.14e-09** | **2.14e-09** | it is the maximum itself — well-conditioned |
 | the other eight | **1.4e-04** | **1.4e-04** | evaluated at the **argmax** — sqrt-amplified |
 
-**These figures changed when PLAN 11a replaced the collar solver, and how they
+Read off CI's summary line on the 1152-point grid, 7702 of 10368 values differing,
+against tolerances of 1e-05 and 5e-03.
+
+⚠️ **The `profit` row said 1.82e-07 until #41 and that was stale, not superseded by
+the bigger grid.** A grid can only move a *maximum* upward, and the 25 °C block is
+byte-identical — so the improvement is a change to the model on `master` since the
+figure was recorded (#77 and #84 are the candidates), and it is NOT attributed here
+because doing so needs a cross-platform run of master, which no macOS box can give
+you. Take the lesson rather than the number: **this table is a CI reading, and it
+goes stale silently because nothing asserts it.** Read the summary line.
+
+**These figures also changed when PLAN 11a replaced the collar solver, and how they
 changed is informative.** They were `profit` 1.85e-06 / 5.87e-07 and the other
 eight 5.53e-04 / 2.73e-04. Two things to take from the move:
 
@@ -361,11 +375,16 @@ eight 5.53e-04 / 2.73e-04. Two things to take from the move:
   left is libm's `exp`/`pow`, which is a property of the platform and not of the
   compiler. So do not expect a compiler-dependent column here any more — and if one
   reappears, something has reintroduced a discrete decision into the solve.
-- **The sqrt story now fits better than it did.** `sqrt(1.82e-07)` ≈ 4.3e-04
-  against the 1.4e-04 observed, where before it was `sqrt(1.85e-06)` ≈ 1.4e-03
-  against 5.5e-04. Same order in both cases, but the residual factor shrank, which
-  is what you would expect once the argmax stopped carrying an extra `GSS_tol_abs`
-  of arbitrary displacement on top of the flat-maximum amplification.
+- **The sqrt story fits, but no longer tightly.** At 11a it was `sqrt(1.85e-06)` ≈
+  1.4e-03 against 5.5e-04 observed, then `sqrt(1.82e-07)` ≈ 4.3e-04 against
+  1.4e-04 — same order, with the residual factor shrinking as expected once the
+  argmax stopped carrying an extra `GSS_tol_abs` of arbitrary displacement. It does
+  NOT survive the current pair: `sqrt(2.14e-09)` ≈ 4.6e-05 against 1.4e-04
+  observed, which is three times the other way. ⚠️ Do not read that as a broken
+  identity — it never was one. The two column maxima fall at *different* operating
+  points, and the argmax column now has 864 hot rows the profit column's worst case
+  is not among. `sqrt(worst profit)` is a sanity check on the mechanism, not a
+  prediction of `worst argmax`.
 
 The maximum is *flat*: curvature measured directly at the two worst points gives
 k ≈ 1.0 and 0.9 in `profit ≈ p* − k(psi_stem−x*)²`. For a flat maximum an error
