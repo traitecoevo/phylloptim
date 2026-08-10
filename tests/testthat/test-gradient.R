@@ -543,6 +543,9 @@ test_that("profit's gradient is the direct term alone at an interior optimum", {
   # orders inside it fails if the zeroing is removed. At the suite's usual
   # `grid_drivers(2.0)` the same term is 2.9e-10 and this test would pass either
   # way, which is the version of it that was written first.
+  #
+  # ⚠️ Those figures are macOS/arm64's, and the second half of this test says why
+  # that matters. Read it before adding an assertion on a magnitude here.
   d <- grid_drivers(0.5, vpd = 2.0, layers = 3L)
   g <- do.call(leaf_gradient, c(d, list(pars = "vcmax_25")))
   expect_identical(g$status, "interior")
@@ -560,14 +563,10 @@ test_that("profit's gradient is the direct term alone at an interior optimum", {
   l$evaluate_root_collar_psi(psi_star - hp)
   lo <- l$profit_
   fd <- (hi - lo) / (2 * hp)
-  # The exact one says stationary to solver precision; the differenced one says
-  # nothing of the kind. Asserting BOTH is the point -- it is the difference
-  # between "the dropped term is small" and "the dropped term is unmeasurable by
-  # the route that would have supplied it".
-  expect_lt(abs(exact), 1e-12)
-  expect_gt(abs(fd), 1e-5)
 
-  # And now the answer itself, against a direct difference at fixed collar.
+  # The answer itself, against a direct difference at fixed collar. THIS IS THE
+  # PART THAT HOLDS EVERYWHERE -- it is the claim the feature makes, and it does
+  # not depend on how big the term that was dropped happens to be.
   v <- leaf_traits()$vcmax_25
   h <- max(abs(v), 1) * 1e-6
   at <- function(x) {
@@ -578,6 +577,31 @@ test_that("profit's gradient is the direct term alone at an interior optimum", {
   }
   direct <- (at(v + h) - at(v - h)) / (2 * h)
   expect_equal(g$gradient["vcmax_25", "profit"], direct, tolerance = 1e-7)
+
+  # ⚠️ THE MAGNITUDES BELOW ARE PLATFORM-SPECIFIC, AND THE FIRST VERSION OF THIS
+  # TEST ASSERTED THEM EVERYWHERE. It passed on macOS/arm64 and failed on Linux
+  # CI, where the same operating point gives `exact` = 6.6e-11 and `fd` = 8.0e-10
+  # rather than 2.4e-15 and 2.1e-04.
+  #
+  # That is not a different answer, it is a different NOISE FLOOR: which side of
+  # the collar solver's tolerance the root-find lands on is set by libm's exp/pow,
+  # and those are not reproducible between Apple's arm64 libm and glibc on
+  # x86-64. The package already has a name for that -- it is the same reason the
+  # golden files compare bit-exactly on one platform and with a tolerance
+  # elsewhere -- so the same predicate gates it here.
+  #
+  # ⚠️ So this test has TEETH only on the platform the measurement was made on.
+  # Off it, the check above still holds and the one below is skipped; a Linux-only
+  # run would not catch the zeroing being removed. Said plainly rather than left
+  # for someone to discover from a green CI.
+  skip_if_not(golden_bit_exact_platform(),
+              "the noise floor these two numbers measure is macOS/arm64's")
+  # The exact instrument says stationary to solver precision; the differenced one
+  # says nothing of the kind. Asserting BOTH is the point -- it is the difference
+  # between "the dropped term is small" and "the dropped term is unmeasurable by
+  # the route that would have supplied it".
+  expect_lt(abs(exact), 1e-12)
+  expect_gt(abs(fd), 1e-5)
 })
 
 # ---------------------------------------------------------------------------
