@@ -481,13 +481,14 @@ public:
   // check here can see the difference, because both are just positive numbers.
   void set_physiology(const RootNetwork& root_network, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double leaf_temp, double atm_o2_kpa, double atm_kpa);
 
-  // Replace the thirteen traits on an existing Leaf, leaving the four numerical
-  // controls alone. Same arguments, same order, as the constructor's trait subset.
+  // Replace the fourteen traits on an existing Leaf, leaving the four numerical
+  // controls alone. Same arguments, same order, as the constructor's trait subset,
+  // plus R_d_25 which the constructor does not take.
   //
-  // It was fifteen before #33. `beta_R_H` and `beta_R_V` left with the root
-  // architecture model, so they are no longer traits of anything here and there is
-  // no route to d(output)/d(beta_R_*) through this object. A caller who needs one
-  // differences the NETWORK, which is now an input: root_network_from_carbon is
+  // `beta_R_H` and `beta_R_V` are NOT traits here since #33: they left with the root
+  // architecture model, so there is no route to d(output)/d(beta_R_*) through this
+  // object. A caller who needs one differences the NETWORK, which is now an input:
+  // root_network_from_carbon is
   // homogeneous of degree 1 in each constant (r_R_H_min proportional to beta_R_H,
   // r_R_V to beta_R_V), so the perturbed network is a scaling of the base one and
   // costs no rebuild -- but the two solves either side of it are still two solves.
@@ -1191,7 +1192,7 @@ inline void Leaf::check_psi_magnitudes(double psi_crit, double stem_b,
   }
 }
 
-// See the header for why this exists rather than fifteen settable fields.
+// See the header for why this exists rather than fourteen settable fields.
 inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
                              double psi_crit_, double root_c_, double root_b_,
                              double root_psi_crit_, double beta2_,

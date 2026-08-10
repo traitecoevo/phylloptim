@@ -920,8 +920,9 @@ actually need, not to police one you could remove.**
 
 Done in #15: five dead entities removed and `set_physiology` taken 14 → 11 arguments,
 three further dead constants deleted, and **thirteen** temperature-response
-parameters made settable. ⚠️ One of those, `rd_to_vcmax_ratio_`, is settable in C++
-but **not bound to R** — that is #41, and this item overstated it.
+parameters made settable in C++. ⚠️ One of those, `rd_to_vcmax_ratio_`, was never
+bound to R — item 41, which resolved it by deleting the parameter rather than
+binding it. Fifteen are bound now.
 
 `area_leaf` is out of the supply contract, not merely out of `set_physiology`. Why
 that was safe is a **homogeneity property** rather than a coincidence: every term in
@@ -1376,9 +1377,8 @@ established with `stem_b` first.
 ⚠️ **And the golden file could not have been the regression guard anyway.** It is
 compared with a 1e-3 tolerance off macOS/arm64 and the defect was 3.4e-5, so a
 recurrence would pass on Linux. The guard is a test that compares two orderings **in
-the same process**, which is exact everywhere and needs no tolerance — all thirteen
-traits as predecessors, four permutations, both routes, both `fast_stem_curve`
-settings.
+the same process**, which is exact everywhere and needs no tolerance — every trait
+as a predecessor, four permutations, both routes, both `fast_stem_curve` settings.
 
 ### And what it unblocks
 

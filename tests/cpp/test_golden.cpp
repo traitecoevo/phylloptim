@@ -483,9 +483,9 @@ int compare(Tolerance tol) {
 // platform is NOT the fix -- it just moves the failure to the first one.
 //
 // The interesting part is the SIZE of the disagreement, because it is not one
-// number. Read off this program's own summary line on Linux CI over the 1152-point
-// grid, the nine reported fields split into two classes five orders of magnitude
-// apart, and gcc and clang now agree exactly:
+// number. Read off this program's own summary line on Linux CI, the nine reported
+// fields split into two classes five orders of magnitude apart, and gcc and clang
+// agree exactly:
 //
 //                                   gcc        clang
 //     profit                        2.14e-09   2.14e-09
@@ -493,14 +493,10 @@ int compare(Tolerance tol) {
 //     transpiration, gc, e_up,
 //     uptake                        1.4e-04    1.4e-04
 //
-// ⚠️ THOSE NUMBERS READ 1.85e-06 / 5.87e-07 AND 5.53e-04 / 2.73e-04 UNTIL #41 --
-// two generations stale, and still carrying a gcc-versus-clang split that PLAN 11a
-// removed (it was which way a golden-section comparison fell; what is left is libm,
-// a property of the platform and not the compiler). Nothing asserts this comment,
-// so it rots in silence. **If you need a magnitude, read the summary line above the
-// FAIL lines, not this block and not the FAIL lines** -- the truncated failure list
-// is biased toward whichever rows come first, which is how the figure in the
-// developer guide came to be wrong twice.
+// ⚠️ NOTHING ASSERTS THAT BLOCK, so it rots in silence -- it has been wrong three
+// times. **If you need a magnitude, read the summary line, not this comment and not
+// the FAIL lines**: the failure list is truncated at 20 and biased toward whichever
+// rows come first.
 //
 // That split is structural, not luck. `find_root_collar_psi` maximises profit
 // over the collar potential, and the maximum is FLAT: curvature k measured

@@ -64,11 +64,9 @@ grid_drivers <- function(psi_soil, ppfd = 900, vpd = 2.0, layers = 1L) {
 # interior optimum and the fallback must return ~1.26 at a dry-pinned one. A pin
 # that omitted it would miss the sharpest statement of why there are two routes.
 #
-# `R_d_25` is in `pars` throughout for the opposite reason: it is the newest
-# parameter (#41) and the one with no history in this file, so every row records
-# it. It also makes each row's `vcmax_25` entry checkable rather than merely
-# recorded -- `dY/dvcmax_25 + rd_to_vcmax_ratio_ * dY/dR_d_25` is the total
-# derivative the `vcmax_25` column used to hold on its own.
+# `R_d_25` is in `pars` throughout because it is the smallest-magnitude parameter
+# here, so it takes the smallest absolute step and sets this file's cross-platform
+# tolerance -- see `gradient_golden_tolerance()`.
 cases <- list(
   list(label = "interior-1layer",
        args = grid_drivers(2.0),

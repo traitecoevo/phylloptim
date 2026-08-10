@@ -342,14 +342,9 @@ Fifteen on the multi-layer path — the fourteen traits from `leaf_traits()`, pl
 `leaf_specific_conductance_max`, which is not a trait but is fitted like one. The
 single-potential path adds `resistance`, making sixteen.
 
-⚠️ `R_d_25` comes last rather than in `leaf_traits()`' own order, which puts it
-fourteenth. The enumeration appends it because inserting it would have moved
-`leaf_specific_conductance_max` and `resistance`, and the C++ side indexes this
-list by position. Its value defaults to `NA`, meaning *derive it as
-`rd_to_vcmax_ratio_ * vcmax_25`* — and it is differentiable **at that default**,
-which is what makes `dY/dvcmax_25` a partial at fixed respiration rather than the
-total derivative it used to be. If you want the total, add
-`rd_to_vcmax_ratio_ * dY/dR_d_25` back.
+`R_d_25`, dark respiration at 25 °C, is one of those fourteen and behaves like any
+other trait. So `dY/dvcmax_25` is a **partial** derivative at fixed respiration: a
+fit that wants respiration to follow Vcmax moves both and adds the two columns.
 
 **Selecting fewer genuinely costs less**: the work is one solve plus two cheap
 evaluations per parameter, so it scales with what you ask for.

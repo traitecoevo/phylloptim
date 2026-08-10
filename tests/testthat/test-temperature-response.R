@@ -1,6 +1,6 @@
 # The temperature-response parameters, now reachable from R.
 #
-# WHY THIS FILE EXISTS. These thirteen were public C++ members with no entry in
+# WHY THIS FILE EXISTS. These fifteen were public C++ members with no entry in
 # inst/RcppR6_classes.yml, so from R the SHAPE of the temperature response was
 # fixed and unreachable. The eight derived quantities (vcmax_, jmax_, gamma_,
 # ko_, kc_, km_, R_d_, electron_transport_) were bound and settable, which made

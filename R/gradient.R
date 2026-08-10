@@ -620,7 +620,7 @@ leaf_gradient <- function(psi_soil,
 
 # Everything this can differentiate, and its current value, as one named vector.
 #
-# The thirteen traits, plus the two quantities a calibration fits that are NOT
+# The fourteen traits, plus the two quantities a calibration fits that are NOT
 # traits (#44) and that `pars` therefore used to reject:
 #
 #   * `leaf_specific_conductance_max` -- a DRIVER, set through set_drivers(). It
@@ -714,7 +714,7 @@ leaf_gradient <- function(psi_soil,
     }
     # Positional, straight onto the object, rather than through `set_traits()` and
     # `set_drivers()`. Those two rebuild a `leaf_traits` object with
-    # `structure(as.list(...))`, re-extract thirteen fields by name, and re-run the
+    # `structure(as.list(...))`, re-extract fourteen fields by name, and re-run the
     # driver validation -- 3.0% + 3.3% + 4.9% of a gradient's self time between them,
     # for work whose answer cannot change across perturbations.
     #

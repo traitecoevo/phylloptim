@@ -450,8 +450,8 @@ test_that("`pars` order does not change any gradient (#72)", {
   # ⚠️ And the predecessor that made the defect WORST, which is not the one you
   # would pick by eye: `a` = 0.30 and `curv_fact_colim` = 0.99 take the absolute
   # 1e-6 step floor rather than a relative step, and `stem_c`'s perturbation
-  # REBUILDS the very curve the `stem_b` shortcut then rescales. Each of the
-  # thirteen is checked as a predecessor rather than a sample of them.
+  # REBUILDS the very curve the `stem_b` shortcut then rescales. Every trait is
+  # checked as a predecessor rather than a sample of them.
   solo <- leaf_gradient_batch(b, pars = "stem_b")$gradient[1, "stem_b", ]
   for (p in setdiff(names(leaf_traits()), "stem_b")) {
     got <- leaf_gradient_batch(b, pars = c(p, "stem_b"))$gradient[1, "stem_b", ]

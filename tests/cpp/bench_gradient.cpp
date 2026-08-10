@@ -12,8 +12,8 @@
 // distinction matters because **plant links these headers directly**. So the
 // arithmetic has to be done again with the boundary removed, which is what this
 // measures. PLAN 11e records the answer; the short version is that the composite
-// does win here, by rather less than 12x, and for four of the fifteen traits by
-// almost nothing at all -- for a reason neither 11d nor 11e anticipated.
+// does win here, by rather less than 12x, and for four of the traits by almost
+// nothing at all -- for a reason neither 11d nor 11e anticipated.
 //
 // WHAT THE TWO ARMS ARE. Both perturb one trait by a relative 1e-6 either side
 // and both pay set_traits + set_physiology per perturbation, because a trait
@@ -55,11 +55,13 @@
 namespace {
 
 // The default trait vector, in set_traits' argument order.
-// Thirteen, not fifteen: beta_R_H and beta_R_V left with the root-architecture
-// model in #33. They were two of the four traits whose gradient is 100%
-// argmax-mediated, and a gradient in either is now taken where the network is
-// built -- exactly, because root_network_from_carbon is homogeneous of degree 1
-// in each.
+//
+// Thirteen of the fourteen traits: `R_d_25` is left at its default because it needs
+// no spline rebuild and so lands in the cheap bucket, which the split below already
+// has twelve examples of. `beta_R_H` and `beta_R_V` are not here at all -- they left
+// with the root-architecture model in #33, and a gradient in either is now taken
+// where the network is built, exactly, because root_network_from_carbon is
+// homogeneous of degree 1 in each.
 struct Traits {
   double v[13];
 };
@@ -276,7 +278,7 @@ int main(int argc, char **argv) {
     }
   }
 
-  printf("\n  all 13 traits        FD %8.1f us   IFT %8.1f us   %.2fx\n",
+  printf("\n  13 of the 14 traits  FD %8.1f us   IFT %8.1f us   %.2fx\n",
          fd_all, ift_all, fd_all / ift_all);
   printf("  the %2d with no rebuild  FD %8.1f us   IFT %8.1f us   %.2fx\n",
          n_cheap, fd_cheap, ift_cheap, fd_cheap / ift_cheap);

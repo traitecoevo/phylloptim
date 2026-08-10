@@ -156,9 +156,7 @@ Leaf:
     #
     # The eight fields above are DERIVED: set_physiology recomputes them from
     # leaf temperature on every call, so writing one from R is overwritten by
-    # the next solve. These thirteen are the parameters that generate them, and
-    # they were public C++ members with no entry here at all -- so from R the
-    # shape of the temperature response was fixed and unreachable.
+    # the next solve. These fifteen are the parameters that generate them.
     #
     # ⚠️ That is not a small gap. The defaults imply a thermal optimum near
     # 31.2 C for Vcmax and 27.9 C for Jmax (Topt = H_d / (d_S - R*log(ha/(H_d -
