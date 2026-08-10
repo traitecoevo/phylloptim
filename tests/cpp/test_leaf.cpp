@@ -2112,6 +2112,142 @@ void test_temperature_params_invalidate_cache() {
      "unchanged inputs still give a bit-identical answer");
 }
 
+// R_d's TEMPERATURE RESPONSE, and the blast radius of changing it (#41).
+//
+// ⚠️ THE GOLDEN FILE CANNOT SEE ANY OF THIS. Its grid is 6 psi_soil x 4 PPFD x 4
+// VPD x 3 layer counts, all at ONE leaf temperature (25 C), so a change to how R_d
+// varies with temperature leaves it bit-identical BY CONSTRUCTION. Reading that
+// silence as "no results moved" would be exactly the mistake the guide warns about.
+// This is the test that can see it.
+//
+// The old response is exactly reproducible, which is what makes this a measurement
+// rather than archaeology: R_d used to be `ratio * vcmax_(T)`, so setting
+// `R_d_25 = ratio * vcmax_(T)` with `rd_q10_ = 1` reconstructs it at any T.
+void test_rd_temperature_response() {
+  printf("R_d rises with temperature, and the change is measured\n");
+  Drivers d;
+
+  // At the reference the two forms must agree EXACTLY, not approximately -- the
+  // default reference value is `ratio * vcmax_25` and vcmax_(25) == vcmax_25.
+  {
+    phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
+    near(l.R_d_, 0.015 * l.vcmax_25, 1e-12, "R_d at 25 C is ratio * vcmax_25");
+    near(l.R_d_, 0.015 * l.vcmax_, 1e-12, "and equals the old form there");
+  }
+
+  // The direction that was wrong: R_d must now RISE above the thermal optimum.
+  // vcmax_ peaks near 31 C, so 45 C is comfortably past it -- the old form fell.
+  double rd_prev = -1.0;
+  for (double T : {25.0, 35.0, 45.0}) {
+    phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
+    l.update_temperature_dependent_params(T);
+    ok(l.R_d_ > rd_prev, "R_d rises with temperature");
+    rd_prev = l.R_d_;
+  }
+
+  // Q10 semantics: a 10 K rise multiplies R_d by exactly Q10.
+  {
+    phylloptim::Leaf a = make_leaf(d, {2.0}, {1.0});
+    phylloptim::Leaf b = make_leaf(d, {2.0}, {1.0});
+    a.update_temperature_dependent_params(25.0);
+    b.update_temperature_dependent_params(35.0);
+    near(b.R_d_, 2.0 * a.R_d_, 1e-12, "a 10 K rise doubles R_d at Q10 = 2");
+  }
+
+  // Setting the value directly overrides the ratio entirely.
+  {
+    phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
+    l.R_d_25 = 0.525;                 // Sabot's Rlref, as measured
+    l.update_temperature_dependent_params(25.0);
+    near(l.R_d_, 0.525, 1e-12, "a set R_d_25 is used verbatim at 25 C");
+    ok(l.R_d_ != 0.015 * l.vcmax_25, "and the ratio no longer applies");
+  }
+
+  // ⚠️ The sentinel must keep respiration TIED to Vcmax for a caller who changes
+  // vcmax_25 and never touches R_d_25 -- which is what plant does per individual.
+  // A default computed at construction would silently decouple them.
+  {
+    phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
+    const double rd_default = l.R_d_;
+    l.vcmax_25 = l.vcmax_25 * 2.0;
+    l.update_temperature_dependent_params(d.leaf_temp);
+    near(l.R_d_, 2.0 * rd_default, 1e-12,
+         "R_d still scales with vcmax_25 while R_d_25 is unset");
+  }
+
+  // THE BLAST RADIUS. Old form emulated as ratio * vcmax_(T) via q10 = 1.
+  //
+  // ⚠️⚠️ AND A LIMIT THIS CHANGE MAKES REACHABLE, which is the most important thing
+  // here. A higher R_d can drive net assimilation negative across the WHOLE
+  // [gamma*, ca] bracket, and then psi_stem_to_ci has no supply==demand root and
+  // THROWS: "toms748_solve: Parameters a and b do not bracket the root". At the
+  // defaults that happens by 45 C.
+  //
+  // The model already knows this physical case -- `ci_at_compensation_point_`
+  // places ci at the compensation point instead -- but that fallback fires only on
+  // the ENERGY-BALANCE path. On the default prescribed-temperature path the same
+  // situation is an exception. Raising R_d is what makes it reachable there.
+  //
+  // Recorded as a measured limit rather than avoided by choosing a cooler sweep:
+  // the temperature at which the model stops having an operating point is exactly
+  // what a caller needs to know, and it moved.
+  printf("  blast radius on assimilation (old form vs Q10 = 2):\n");
+  for (double T : {15.0, 25.0, 35.0, 40.0, 45.0}) {
+    double A_now = 0.0, Rd_now = 0.0;
+    bool now_ok = true;
+    try {
+      phylloptim::Leaf now = make_leaf(d, {2.0}, {1.0});
+      now.update_temperature_dependent_params(T);
+      now.find_root_collar_psi();
+      A_now = now.assim_colimited_;
+      Rd_now = now.R_d_;
+    } catch (const std::exception &) {
+      now_ok = false;
+    }
+
+    double A_then = 0.0, Rd_then = 0.0;
+    bool then_ok = true;
+    try {
+      phylloptim::Leaf then = make_leaf(d, {2.0}, {1.0});
+      then.update_temperature_dependent_params(T);  // seat vcmax_(T)
+      then.R_d_25 = 0.015 * then.vcmax_;            // the old R_d at this T
+      then.rd_q10_ = 1.0;                           // and no Q10 scaling
+      then.update_temperature_dependent_params(T);
+      then.find_root_collar_psi();
+      A_then = then.assim_colimited_;
+      Rd_then = then.R_d_;
+    } catch (const std::exception &) {
+      then_ok = false;
+    }
+
+    if (now_ok && then_ok) {
+      printf("    T = %4.1f C   R_d %6.3f -> %6.3f   A %8.4f -> %8.4f  (%+.2f%%)\n",
+             T, Rd_then, Rd_now, A_then, A_now,
+             100.0 * (A_now - A_then) / A_then);
+    } else {
+      printf("    T = %4.1f C   old %s / new %s  <-- no operating point\n", T,
+             then_ok ? "solves" : "THROWS", now_ok ? "solves" : "THROWS");
+    }
+    if (T == 25.0) {
+      near(A_now, A_then, 1e-12, "the two forms agree exactly at 25 C");
+    }
+  }
+  // The limit itself, asserted so it cannot move unnoticed: at the defaults the old
+  // form still solves at 45 C and the new one does not.
+  {
+    phylloptim::Leaf hot = make_leaf(d, {2.0}, {1.0});
+    bool threw = false;
+    try {
+      hot.update_temperature_dependent_params(45.0);
+      hot.find_root_collar_psi();
+    } catch (const std::exception &) {
+      threw = true;
+    }
+    ok(threw,
+       "a Q10 respiration leaves no operating point at 45 C (documented limit)");
+  }
+}
+
 // set_traits exists so a gradient loop can perturb a trait without rebuilding the
 // object. That is only worth having if re-traiting is INDISTINGUISHABLE from
 // constructing afresh, so that is what is asserted -- bit-exactly, which is a
@@ -2491,6 +2627,7 @@ int main() {
   test_root_network_from_carbon();
   test_temperature_parameters_are_settable();
   test_temperature_params_invalidate_cache();
+  test_rd_temperature_response();
   test_set_traits_matches_a_fresh_leaf();
   test_perturb_stem_b_matches_a_rebuild();
   test_bad_input_throws();
