@@ -134,17 +134,9 @@ std::vector<Row> run_grid() {
 // `solver-refused` and `non-finite-gradient` because both bracket endpoints
 // admit a usable gradient on all 240 feasible rows.
 //
-// ⚠️ A zero here is a fact about THIS GRID, not about the model, and the two
-// failure kinds are the ones where that distinction bites. The grid's psi_soil
-// values are {0.5, 1, 2, 3, 4, 6}, so it samples the drydown coarsely. A finer
-// sweep -- psi_soil 0.01 to 12.0 in steps of 0.01, ppfd {30, 300, 900}, vpd
-// {0.5, 2}, leaf temperature {15, 25}, layers {1, 2, 5}, 43200 combinations, run
-// at the package defaults and again with the stem's psi_crit set drier than the
-// root's -- also reaches neither, which is a wider statement but still not a
-// proof of absence. Both branches ARE driven, through
-// maximise_profit_over_collar directly, by
-// test_collar_solve_refuses_rather_than_guessing in test_leaf.cpp; read that for
-// what they do, and this only for what the grid happens to contain.
+// ⚠️ A zero counts for this grid, whose psi_soil values are {0.5, 1, 2, 3, 4, 6},
+// and says nothing about the model. What the two failure branches do is checked
+// by test_collar_solve_refuses_rather_than_guessing in test_leaf.cpp.
 struct KindCount {
   phylloptim::Leaf::OperatingPointKind kind;
   int expected;

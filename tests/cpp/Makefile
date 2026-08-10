@@ -16,9 +16,8 @@
 CXX      ?= c++
 CXXSTD   ?= -std=c++20
 OPT      ?= -O2
-# -Werror=switch, and only that one promoted: Leaf::operating_point_kind_name
-# switches over OperatingPointKind with no default, so a kind added without a
-# name stops this build instead of returning "unknown" at run time.
+# -Werror=switch only: operating_point_kind_name switches over OperatingPointKind
+# with no default, so a kind added without a name stops this build.
 WARN     ?= -Wall -Wextra -Wno-unused-parameter -Werror=switch
 
 PHYLLOPTIM_INC   ?= ../../inst/include

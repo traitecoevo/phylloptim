@@ -993,9 +993,8 @@ private:
   OperatingPointKind operating_point_kind_ = OperatingPointKind::Unsolved;
 };
 
-// Human-readable tag, for diagnostics and test output. The switch has no
-// default, so a kind added without a name here is a -Wswitch warning -- an error
-// under the test suite's -Werror=switch, and elsewhere the string "unknown".
+// Human-readable tag. The switch has no default, so a missing name is a -Wswitch
+// warning -- an error under the test suite's -Werror=switch, "unknown" elsewhere.
 inline const char* Leaf::operating_point_kind_name(OperatingPointKind kind) {
   switch (kind) {
     case OperatingPointKind::Unsolved:          return "unsolved";
@@ -1824,9 +1823,8 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
   }
 
   // No usable gradient at one end. No driver sweep reaches this -- both ends are
-  // feasible on all 240 feasible golden-grid rows, and on the 43200-combination
-  // sweep described at the pin tests below -- so treat it as a signal rather than
-  // a routine path if it ever fires. Falling back to the search this
+  // feasible on all 240 feasible golden-grid rows -- so treat it as a signal
+  // rather than a routine path if it ever fires. Falling back to the search this
   // replaced means the change cannot make a previously-working case fail, which
   // is worth six lines on a solve plant runs millions of times.
   //
@@ -1835,15 +1833,10 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
   // report: no point near that end admits an informative gradient at all.
   // `ok && !isfinite` is a partial that came back non-finite where feasibility
   // said it would not -- checked here because there is nowhere downstream to put
-  // that test.
-  //
-  // What that check changes, stated exactly: a NaN endpoint fails both pin
-  // comparisons below, since NaN compares false against everything. So it reached
-  // the root-find only when the OTHER endpoint also failed its pin test; with
-  // f_lo NaN and f_hi >= 0 the old code returned hi, a pinned-dry answer that
-  // does not depend on f_lo at all. Diverting that case here loses a sound answer
-  // and gains a tag saying an input was not a number, which is the trade taken on
-  // purpose -- a consumer reading the kind can tell, where before it could not.
+  // that test. A NaN endpoint fails both pin comparisons below, since NaN
+  // compares false against everything, so without this it reaches the root-find
+  // on a bracket it cannot have whenever the other endpoint also fails its pin
+  // test.
   if (!ok_lo || !ok_hi || !std::isfinite(f_lo) || !std::isfinite(f_hi)) {
     operating_point_kind_ =
         ((ok_lo && !std::isfinite(f_lo)) || (ok_hi && !std::isfinite(f_hi)))
@@ -1893,24 +1886,12 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
   // means profit falls away from both ends into the interval: the interior
   // stationary point is a MINIMUM and the maximum sits at one of the two bounds.
   // Tagged SolverRefused, because reporting it as a pin -- to whichever bound the
-  // ordering of the tests happens to reach first -- would describe a constrained
-  // optimum that is not there.
+  // ordering of the tests happens to reach first -- would hand back a plausible,
+  // finite, wrong answer with a gradient that is genuinely non-zero in the wrong
+  // direction.
   //
-  // The GRADIENTS cannot say which end, but the PROFITS can: f_lo <= 0 makes lo a
-  // local maximum and f_hi >= 0 makes hi one, so comparing the two values picks
-  // the larger instead of always returning the wet end. Returning `lo` unchecked
-  // was measured on crafted brackets straddling an interior optimum at psi_soil=2
-  // over 5 layers: profit -0.327 at the end returned against -0.210 at the other,
-  // and -1.617 against -0.652 on a wider bracket. The two extra evaluations are
-  // paid only on this branch, which no driver sweep reaches (see below), so they
-  // cost nothing on the hot path.
-  //
-  // Reachability, measured rather than assumed: 43200 driver combinations --
-  // psi_soil 0.01 to 12.0 in steps of 0.01, ppfd {30, 300, 900}, vpd {0.5, 2},
-  // leaf temperature {15, 25}, layers {1, 2, 5} -- reach this branch zero times,
-  // at the package defaults and with the stem's psi_crit set drier than the
-  // root's so the clamp window opens. It is driven in the suite through
-  // maximise_profit_over_collar directly.
+  // The gradients cannot say which of the two bounds it is; the profits can,
+  // since f_lo <= 0 makes lo a local maximum and f_hi >= 0 makes hi one.
   if (f_lo <= 0.0 && f_hi >= 0.0) {
     operating_point_kind_ = OperatingPointKind::SolverRefused;
     const double p_lo = profit_psi_stem_TF(

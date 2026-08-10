@@ -742,20 +742,16 @@ void test_operating_point_kind_is_written_by_every_path() {
      "set_traits clears the classification with the rest of the solved state");
 
   // Neither failure kind is reachable from a driver sweep, and that is the point
-  // of separating them from a pin: they mean "no plant is described". What each
-  // one DOES is driven directly, through maximise_profit_over_collar, in
-  // test_collar_solve_refuses_rather_than_guessing below.
+  // of separating them from a pin: they mean "no plant is described".
+  // test_collar_solve_refuses_rather_than_guessing drives both directly.
   ok(std::string(phylloptim::Leaf::operating_point_kind_name(
          Kind::SolverRefused)) == "solver-refused",
      "the failure kinds are named, not numbered");
 }
 
-// The two branches of maximise_profit_over_collar that change what the solver
-// RETURNS rather than only how it is labelled. Neither is reachable by driving a
-// leaf -- not on the golden grid, and not on a 43200-combination sweep of
-// psi_soil, ppfd, vpd, temperature and layer count -- so both are driven through
-// maximise_profit_over_collar, which is public, with brackets constructed to
-// land on them. Without this nothing checks either one.
+// The two branches of maximise_profit_over_collar that change the collar it
+// returns. No driver reaches either, so both are driven through the public
+// maximise_profit_over_collar with brackets built to land on them.
 void test_collar_solve_refuses_rather_than_guessing() {
   printf("the collar solve refuses a bracket it cannot resolve\n");
   using Kind = phylloptim::Leaf::OperatingPointKind;
@@ -773,11 +769,8 @@ void test_collar_solve_refuses_rather_than_guessing() {
      "and an interior optimum inside it to straddle");
   const double star = l.opt_root_psi_;
 
-  // Hand the bounds over the wrong way round, so the interval runs from a DRIER
-  // potential to a WETTER one. That is precisely the leftover case: profit
-  // decreasing at bound_a (dprofit <= 0) and increasing at bound_b (>= 0), so
-  // each end is a local maximum and the stationary point between them is a
-  // minimum. Two gradients cannot say which end wins; two profits can.
+  // Bounds handed over inverted, so the interval runs dry to wet: dprofit <= 0 at
+  // bound_a and >= 0 at bound_b, which makes each end a local maximum.
   const double dry_end = star + 0.9 * (bound_b - star);
   const double wet_end = star - 0.9 * (star - bound_a);
 
@@ -803,18 +796,13 @@ void test_collar_solve_refuses_rather_than_guessing() {
   // The endpoint the solve returns is stepped a fraction of the width inside the
   // bound it came from, so compare against the bound rather than for equality.
   ok(std::abs(refused - wet_end) < 1e-5,
-     "and returns the end with the higher profit, not the one the tests reach "
-     "first");
-  ok(std::abs(refused - dry_end) > 0.1,
-     "which is a different answer from the unchecked wet-bound default");
+     "and returns the end with the higher profit");
+  ok(std::abs(refused - dry_end) > 0.1, "which is not the drier end");
 
-  // No usable gradient at either end: a bracket lying wholly inside the
-  // infeasible sliver at bound_a, where dprofit takes its reversed-gradient exit
-  // and reports itself infeasible. Falls back to the golden-section search, which
-  // must still land inside the interval it was given. The other half of this
-  // guard -- a feasible endpoint whose partial is non-finite, tagged
-  // non-finite-gradient -- has no driver and no crafted bracket that reaches it,
-  // and is not covered here.
+  // A bracket lying wholly inside the infeasible sliver at bound_a, where dprofit
+  // takes its reversed-gradient exit: no usable gradient at either end. The
+  // non-finite-gradient half of the same guard has no bracket that reaches it and
+  // is not covered.
   phylloptim::Leaf s = make_leaf(d, psi, depth);
   double sa = 0.0, sb = 0.0;
   s.prepare_collar_solve(sa, sb);
