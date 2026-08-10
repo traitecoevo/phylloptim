@@ -1014,6 +1014,99 @@ void test_soil_conductance_is_positive() {
   }
 }
 
+// Issue #1: the two root vulnerability curves stop at the 1%-conductivity point,
+// and a soil layer drier than that is an ordinary state -- plant's soil potential
+// is capped at 1000 MPa, the grid at 6.82. Taken as odelia extrapolants the
+// conductivity curve crossed zero at 7.3742 MPa (-20.35 at 1000) and the cumulative
+// integral kept accumulating past a limit it had already reached, which made the
+// per-layer mean resistance r_R_H = r_R_H_min * span / integral FALL as the layer
+// dried: measured on the fixture below, a reverse flux 5.70x its bound.
+//
+// ⚠️ THE GOLDEN FILE CANNOT SEE ANY OF THIS. Instrumented over the whole grid,
+// the driest argument the integral ever gets is 7.0 MPa -- past the last knot
+// (16 of 20644 lookups are) but short of 7.3132 where the cap binds -- and the
+// conductivity curve is never read past 4.0. Every golden cell is bit-identical,
+// so this test is the only thing standing behind the fix.
+void test_root_vulnerability_is_bounded_past_its_grid() {
+  printf("root vulnerability curves are bounded past their last knot\n");
+  phylloptim::MultiLayerRoots r;
+  r.setup_vulnerability(100);
+  const double last_knot = r.root_vuln_from_psi.max();
+  const double G_inf =
+      phylloptim::cumulative_vulnerability_integral_limit(r.root_b, r.root_c);
+
+  // On the grid the accessors ARE the bare splines, bit for bit. That is what
+  // makes this fix golden-identical rather than merely golden-tolerable.
+  for (double psi : {0.0, 0.5, 2.0, 4.0, 6.0}) {
+    const std::string at = " at psi=" + std::to_string(psi);
+    ok(r.root_vuln_at(psi) == r.root_vuln_from_psi.eval(psi),
+       "f_r is the unmodified spline on the grid" + at);
+    ok(r.root_vuln_integral_at(psi) == r.root_vuln_integral_from_psi.eval(psi),
+       "G is the unmodified spline on the grid" + at);
+  }
+
+  // Past it, both stay in range and neither runs away.
+  double prev_G = r.root_vuln_integral_at(last_knot);
+  for (double psi : {7.0, 7.5, 8.0, 10.0, 100.0, 1000.0}) {
+    const std::string at = " at psi=" + std::to_string(psi);
+    const double f_r = r.root_vuln_at(psi);
+    const double G = r.root_vuln_integral_at(psi);
+    ok(f_r > 0.0 && f_r <= r.root_vuln_at(last_knot),
+       "f_r stays positive and does not exceed the last knot" + at);
+    ok(G >= prev_G && G <= G_inf, "G is monotone and at most G(inf)" + at);
+    prev_G = G;
+  }
+  near(r.root_vuln_integral_at(1000.0), G_inf, 1e-12,
+       "G saturates at its closed form (b/c)*Gamma(1/c)");
+
+  // dG/dpsi has to agree with that: zero where the value is pinned, f_r where
+  // it is not. duptake_dpsi differentiates the integral through this.
+  ok(r.root_vuln_integral_deriv_at(1000.0) == 0.0,
+     "dG/dpsi is zero where G is at its limit");
+  near(r.root_vuln_integral_deriv_at(4.0),
+       std::exp(-std::pow(4.0 / r.root_b, r.root_c)), 1e-4,
+       "dG/dpsi is f_r inside the grid");
+
+  // The wet end throws too, and MultiLayerRoots validates nothing it is handed.
+  // NaN has to come back out for the caller's !isfinite(f_ri) guard to read it.
+  ok(r.root_vuln_at(-0.5) == r.root_vuln_at(0.0),
+     "a negative suction reads as the wet end");
+  ok(std::isnan(r.root_vuln_at(std::numeric_limits<double>::quiet_NaN())),
+     "and a NaN suction survives both clamps");
+
+  // The live consequence. One rooted layer, unit horizontal resistance and no
+  // vertical resistance, collar held at 1 MPa: the layer is drier, so it GAINS
+  // water (hydraulic redistribution), and the gain is bounded by the whole area
+  // under the conductivity curve, integral/r_R_H_min.
+  const double bound = G_inf - phylloptim::cumulative_vulnerability_integral_at(
+                                   1.0, r.root_b, r.root_c);
+  double E_at_100 = 0.0, E_at_1000 = 0.0;
+  for (double psi_soil : {100.0, 1000.0}) {
+    r.set_soil_state(std::vector<double>{psi_soil}, std::vector<double>{1.0});
+    phylloptim::RootNetwork n;
+    n.r_R_H_min = {1.0};
+    n.r_R_V_sum = {0.0};
+    n.c_r_V = {1.0};
+    n.c_r_H = {1.0};
+    n.r_R_V = {0.0};
+    r.set_root_network(n);
+    r.begin_solve();
+    std::vector<double> consumption(1, 0.0);
+    double E_up = 0.0;
+    r.uptake(1.0, consumption, E_up);
+    const double E_i = consumption[0];
+    ok(E_i < 0.0 && std::abs(E_i) <= bound * 1.001,
+       "the reverse flux is bounded by the area under the curve at psi_soil=" +
+           std::to_string(psi_soil));
+    (psi_soil > 500.0 ? E_at_1000 : E_at_100) = E_i;
+  }
+  // A tenfold drier layer must not pump ten times harder. The 1.10e-4 between
+  // them is gravitational head: integral * gravity_head * z_mid * (1/99 - 1/999),
+  // the layer midpoint being 0.5 m.
+  near(E_at_1000, E_at_100, 1e-3,
+       "a tenfold drier layer does not become a stronger pump");
+}
+
 // The convention is now checkable, so check that it is checked: a caller still
 // holding the pre-#25 signed vector must fail loudly, not run.
 void test_signed_potentials_are_rejected() {
@@ -2082,6 +2175,7 @@ int main() {
   test_collar_solve_refuses_rather_than_guessing();
   test_collar_argmax_is_smooth_in_a_trait();
   test_soil_conductance_is_positive();
+  test_root_vulnerability_is_bounded_past_its_grid();
   test_root_psi_crit_clamp_binds();
   test_signed_potentials_are_rejected();
   test_lambda_equals_dA_dE_single_layer();
