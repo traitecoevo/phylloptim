@@ -134,7 +134,7 @@ std::vector<Row> run_grid() {
 // `solver-refused` and `non-finite-gradient` because both bracket endpoints
 // admit a usable gradient on all 240 feasible rows.
 //
-// ⚠️ A zero counts for this grid, whose psi_soil values are {0.5, 1, 2, 3, 4, 6},
+// A zero counts for this grid, whose psi_soil values are {0.5, 1, 2, 3, 4, 6},
 // and says nothing about the model. What the two failure branches do is checked
 // by test_collar_solve_refuses_rather_than_guessing in test_leaf.cpp.
 struct KindCount {
