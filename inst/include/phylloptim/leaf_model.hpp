@@ -2098,21 +2098,20 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
 // THE DERIVATION. When the gate is on, psi reaches profit by two further routes
 // beyond the two already accounted for:
 //
-//   psi -> psi_stem -> E -> Tleaf -> theta(Tleaf) -> A          (direct)
-//   psi -> psi_stem -> E -> Tleaf -> the ci residual -> ci -> A (indirect)
+//  * DIRECT:   psi -> psi_stem -> E -> Tleaf -> theta(Tleaf) -> A
+//  * INDIRECT: psi -> psi_stem -> E -> Tleaf -> the ci residual -> ci -> A
 //
 // The second is the subtle one. psi_stem_to_ci root-finds
 // g(ci; psi_stem, psi, T) = A(ci,T)*umol_to_mol - gc*(ca-ci)*inv_atm = 0, and the
 // demand side reads the temperature-dependent members, so g gains an EXPLICIT T
 // argument. Differentiating g = 0 totally in psi adds g_T * dT/dpsi to the
-// existing terms, with g_T = A_T * umol_to_mol, so
+// existing terms, with g_T = A_T * umol_to_mol, so `dci/dpsi` gains
+// `-(A_T * umol_to_mol * tau) / g_ci`.
 //
-//   dci/dpsi  +=  -(A_T * umol_to_mol * tau) / g_ci .
-//
-// Adding that to the direct term A_T * tau and collecting:
-//
-//   Delta = A_T * tau * (1 - A_prime*umol_to_mol/g_ci)
-//         = A_T * tau * (gc*inv_atm) / g_ci        since g_ci = A_prime*umol_to_mol + gc*inv_atm
+// Adding that to the direct term `A_T * tau` and collecting gives
+// `Delta = A_T * tau * (1 - A_prime*umol_to_mol/g_ci)`, which since
+// `g_ci = A_prime*umol_to_mol + gc*inv_atm` is the same as
+// `Delta = A_T * tau * (gc*inv_atm) / g_ci`.
 //
 // Two consequences worth keeping, because each is a free check on the algebra:
 //
