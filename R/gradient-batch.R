@@ -314,8 +314,8 @@ leaf_gradient_batch <- function(batch,
                             match(pars, par_names) - 1L, step,
                             stationarity_tol, method, fast_stem_curve)
 
-  dimnames(res$gradient) <- list(NULL, pars, .gradient_output_names)
-  dimnames(res$value) <- list(NULL, .gradient_output_names)
+  dimnames(res$gradient) <- list(NULL, pars, .gradient_output_names())
+  dimnames(res$value) <- list(NULL, .gradient_output_names())
   res
 }
 

@@ -220,13 +220,41 @@ test_that("a shut-down operating point reports no gradient and still differences
   # exactly here, so `dA/dR_d_25` is -1 and `dA/dvcmax_25` is EXACTLY zero --
   # vcmax_25 does not reach A at all at a shut-down point, so both perturbed solves
   # return the same bits. The -1 is a central difference and lands within ~6e-11.
-  g <- grid_gradient(6.0, pars = c("vcmax_25", "stem_b", "R_d_25"))
+  g <- grid_gradient(6.0, pars = c("vcmax_25", "stem_b", "R_d_25", "psi_crit"))
   expect_identical(g$status, "no-gradient")
   expect_identical(g$method, "fd")
   expect_equal(g$value[["A"]], -leaf_traits()$R_d_25)
   expect_equal(g$gradient["R_d_25", "A"], -1, tolerance = 1e-8)
   expect_identical(g$gradient["vcmax_25", "A"], 0)
   expect_equal(g$gradient["stem_b", "A"], 0)
+
+  # ⚠️ `profit` NEEDS ITS OWN CLOSED FORM HERE, AND HAS ONE. This is the single
+  # regime where `profit_` is written by a branch that leaves the other outputs
+  # alone (hazard 8), so a recorded hex with nothing saying what it ought to be
+  # would pin a number rather than a fact. Two identities close it:
+  #
+  #   E = 0, so A = -R_d exactly and R_d(25 C) = R_d_25 -- and the hydraulic cost
+  #   does not depend on R_d_25 at all. So dprofit/dR_d_25 = dA/dR_d_25 = -1.
+  l <- leaf_model()
+  do.call(set_drivers, c(list(l), grid_drivers(6.0)))
+  l$find_root_collar_psi()
+  expect_identical(l$transpiration_, 0)
+  expect_identical(l$assim_colimited_, -l$R_d_)
+  expect_identical(g$value[["profit"]],
+                   l$assim_colimited_ - l$hydraulic_cost_)
+  expect_equal(g$gradient["R_d_25", "profit"], -1, tolerance = 1e-8)
+  expect_equal(g$gradient["R_d_25", "profit"], g$gradient["R_d_25", "A"],
+               tolerance = 1e-8)
+
+  #   The shut-down collar is PINNED AT psi_crit, so dcollar/dpsi_crit is exactly
+  #   1 -- which is why psi_crit, alone among the four, carries a non-zero profit
+  #   gradient here: it moves the collar, and the collar sets the hydraulic cost.
+  #   That is the whole explanation of a column that would otherwise look like
+  #   noise, and it is asserted rather than described.
+  expect_equal(g$gradient["psi_crit", "collar"], 1, tolerance = 1e-8)
+  expect_equal(g$gradient["psi_crit", "psi_stem"], 1, tolerance = 1e-8)
+  expect_lt(g$gradient["psi_crit", "profit"], 0)
+  expect_identical(g$gradient["psi_crit", "A"], 0)
 
   # Forcing the composite here is an error rather than a wrong number: unlike a
   # pinned point, there is no curvature to divide by at all.
@@ -531,18 +559,12 @@ test_that("profit's gradient is the direct term alone at an interior optimum", {
   # this a test rather than a formality. Zeroing only matters where the term it
   # removes is big enough to see, and that term is NOISE rather than an h^2
   # truncation: `profit` is the maximum, so it is flat, and a central difference
-  # of it divides the solve's ~1e-9 floor by a ~1e-6 step. Measured over the
-  # golden grid's 136 interior rows:
-  #
-  #   |dprofit/dpsi| exact (forward AD)   median 4.9e-15   max 5.4e-10
-  #   |dprofit/dpsi| central difference   median 7.8e-10   max 2.1e-04
-  #   relative move in dprofit/dtheta     median 3.3e-10   max 8.0e-05
-  #
-  # -- up to eleven orders between the two instruments. `psi_soil = 0.5,
-  # vpd = 2, 3 layers` is the worst of the 136 (8.0e-05), so a tolerance three
-  # orders inside it fails if the zeroing is removed. At the suite's usual
-  # `grid_drivers(2.0)` the same term is 2.9e-10 and this test would pass either
-  # way, which is the version of it that was written first.
+  # of it divides the solve's ~1e-9 floor by a ~1e-6 step. `?leaf_gradient` has
+  # the distribution over the golden grid's 136 interior rows; what matters here
+  # is that `psi_soil = 0.5, vpd = 2, 3 layers` is the WORST of them at 8.0e-05,
+  # so a tolerance three orders inside that fails if the assignment is removed.
+  # At the suite's usual `grid_drivers(2.0)` the same term is 2.9e-10 and this
+  # test would pass either way, which is the version of it written first.
   #
   # ⚠️ Those figures are macOS/arm64's, and the second half of this test says why
   # that matters. Read it before adding an assertion on a magnitude here.

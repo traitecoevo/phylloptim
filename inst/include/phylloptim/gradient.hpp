@@ -353,7 +353,7 @@ inline bool takes_shortcut(int par, const Settings& s) {
 inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
                          bool single, const int* pars, std::size_t npars,
                          double psi_star, double H, const double* dY_dpsi,
-                         const Settings& s, double* out) {
+                         const Settings& s, bool envelope, double* out) {
   double th[n_pars];
   double up[1 + n_outputs];
   double dn[1 + n_outputs];
@@ -394,6 +394,15 @@ inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
     // dpsi*/dtheta. Set explicitly rather than left as the difference of two
     // identical numbers.
     out[k * n_outputs + out_collar] = dpsi_dtheta;
+    // The envelope theorem, ASSIGNED for the same reason `collar` is: profit's
+    // indirect term is identically zero at a stationary point, so stating that
+    // beats multiplying a measured near-zero by dpsi*/dtheta. It is also immune
+    // to a non-finite dpsi*/dtheta, where `0 * x` would be NaN in this one column
+    // while the other four carried +-Inf.
+    if (envelope) {
+      out[k * n_outputs + out_profit] =
+          (up[1 + out_profit] - dn[1 + out_profit]) / (2.0 * h);
+    }
   }
   apply(l, theta, d, single, -1, s.fast_stem_curve);
 }
@@ -517,30 +526,32 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
       for (int j = 0; j < n_outputs; ++j) {
         dY_dpsi[j] = (hi[j] - lo[j]) / (2.0 * h_psi);
       }
-      // ⚠️ THIS ASSIGNMENT IS THE ENVELOPE THEOREM, and it is the only place in
-      // this package that uses it. `dY_dpsi[out_profit]` is a central difference
-      // of the objective at its own maximum, so it estimates a quantity that is
-      // ANALYTICALLY ZERO -- and `gradient_ift` multiplies it by dpsi*/dtheta and
-      // adds the product to an exact direct term. Zeroing it makes
-      // dprofit/dtheta exactly `direct`, rather than `direct` plus O(h^2) of the
-      // objective's third derivative.
-      //
-      // Conditional on `status`, not on `use_ift`, on purpose. The identity comes
-      // from dprofit/dpsi == 0, which is what Interior MEANS; at a pinned optimum
-      // psi* is a theta-dependent BOUND, dprofit/dpsi is not zero, and the
-      // indirect term survives. Someone forcing Method::Ift there already gets a
-      // confidently wrong number and should not get a differently wrong one for
-      // this column alone.
-      if (out.status == Status::Interior) {
-        dY_dpsi[out_profit] = 0.0;
-      }
+      // `dprofit_droot_collar_psi` is EXACT in psi -- forward AD plus the IFT at
+      // the ci root-find -- so for profit alone there is something better than a
+      // difference of the same quantity, and it is already computed. The other
+      // four have no such route and must be differenced.
+      dY_dpsi[out_profit] = resid;
     }
   }
+
+  // ⚠️ THE ENVELOPE THEOREM, and the only place this package uses it. At a
+  // STATIONARY point dprofit/dpsi is analytically zero, so profit's indirect
+  // term vanishes identically and dprofit/dtheta is the direct partial alone.
+  // `gradient_ift` is told to ASSIGN that column rather than reach it by
+  // multiplying a near-zero dY/dpsi -- the same treatment `collar` gets, for the
+  // same reason: an identity is stated, not arrived at.
+  //
+  // ⚠️ Conditional on stationarity, not on `use_ift`. The identity comes from
+  // dprofit/dpsi == 0; at a pinned optimum psi* is a theta-dependent BOUND,
+  // dprofit/dpsi is not zero there, and the indirect term survives. Someone
+  // forcing Method::Ift there already gets a confidently wrong number and should
+  // not get a differently wrong one for this column alone.
+  const bool envelope = usable && out.stationarity <= s.stationarity_tol;
 
   out.used_ift = use_ift;
   if (use_ift) {
     gradient_ift(l, theta, d, single, pars, npars, psi_star, H, dY_dpsi, s,
-                 out.grad.data());
+                 envelope, out.grad.data());
   } else {
     gradient_fd(l, theta, d, single, pars, npars, s, out.grad.data());
   }

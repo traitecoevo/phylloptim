@@ -179,9 +179,9 @@ Over the golden grid's 136 interior rows:
 
 | | median | max |
 |---|---|---|
-| `\|dprofit/dpsi\|`, exact (forward AD) | 4.9e-15 | 5.4e-10 |
+| `\|dprofit/dpsi\|`, exact (forward AD) | 4.8e-15 | 5.4e-10 |
 | `\|dprofit/dpsi\|`, central difference | 7.8e-10 | 2.1e-04 |
-| relative move in `dprofit/dtheta` if kept | 3.3e-10 | 8.0e-05 |
+| relative move in `dprofit/dtheta` if kept | 2.7e-10 | 8.0e-05 |
 
 Eleven orders between the two instruments at the median, and the worst row
 sits in the band this package calls a real difference. So `dprofit/dtheta` is

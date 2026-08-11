@@ -144,9 +144,9 @@ set_traits <- function(x, traits) {
 ##'
 ##' | | median | max |
 ##' |---|---|---|
-##' | `\|dprofit/dpsi\|`, exact (forward AD) | 4.9e-15 | 5.4e-10 |
+##' | `\|dprofit/dpsi\|`, exact (forward AD) | 4.8e-15 | 5.4e-10 |
 ##' | `\|dprofit/dpsi\|`, central difference | 7.8e-10 | 2.1e-04 |
-##' | relative move in `dprofit/dtheta` if kept | 3.3e-10 | 8.0e-05 |
+##' | relative move in `dprofit/dtheta` if kept | 2.7e-10 | 8.0e-05 |
 ##'
 ##' Eleven orders between the two instruments at the median, and the worst row
 ##' sits in the band this package calls a real difference. So `dprofit/dtheta` is
@@ -537,32 +537,33 @@ leaf_gradient <- function(psi_soil,
       status <- "pinned"
     } else {
       dY_dpsi <- (hi - lo) / (2 * h_psi)
-      # ⚠️ THIS ASSIGNMENT IS THE ENVELOPE THEOREM, and it is the only place in
-      # this package that uses it. `dY_dpsi[["profit"]]` is a central difference
-      # of the objective at its own maximum, so it estimates a quantity that is
-      # ANALYTICALLY ZERO -- and the composite below multiplies it by
-      # dpsi*/dtheta and adds the product to an exact direct term. Zeroing it
-      # makes dprofit/dtheta exactly `direct`, which is the right answer, rather
-      # than the right answer plus O(h^2) of the objective's third derivative.
-      #
-      # It is conditional on `status` and not on `use_ift` on purpose. The
-      # identity comes from dprofit/dpsi == 0, which is what "interior" means;
-      # at a pinned optimum psi* is a theta-dependent BOUND, dprofit/dpsi is not
-      # zero there, and the indirect term survives. Someone who forces
-      # method = "ift" at such a point already gets a confidently wrong number
-      # (that is what `auto` exists to avoid) and should not get a differently
-      # wrong one for this column alone.
-      #
-      # The measured size of what this removes is in ?leaf_gradient.
-      if (identical(status, "interior")) {
-        dY_dpsi[["profit"]] <- 0
-      }
+      # `dprofit_droot_collar_psi` is EXACT in psi -- forward AD plus the IFT at
+      # the ci root-find -- so for profit alone the package has something better
+      # than a difference of the same quantity, and it is already computed. The
+      # other four have no such route and must be differenced.
+      dY_dpsi[["profit"]] <- resid
     }
   }
 
+  # ⚠️ THE ENVELOPE THEOREM, and the only place this package uses it. At a
+  # STATIONARY point dprofit/dpsi is analytically zero, so profit's indirect term
+  # vanishes identically and dprofit/dtheta is the direct partial alone. The
+  # composite is told to ASSIGN that column rather than reach it by multiplying a
+  # near-zero dY/dpsi -- the same treatment `collar` gets, and for the same
+  # reason: an identity is stated, not arrived at.
+  #
+  # ⚠️ It is conditional on stationarity and not on `use_ift`. The identity comes
+  # from dprofit/dpsi == 0; at a pinned optimum psi* is a theta-dependent BOUND,
+  # dprofit/dpsi is not zero there, and the indirect term survives. Someone who
+  # forces method = "ift" at such a point already gets a confidently wrong number
+  # and should not get a differently wrong one for this column alone.
+  #
+  # The measured size of what this removes is in ?leaf_gradient.
+  envelope <- isTRUE(usable && stationarity <= stationarity_tol)
+
   grad <- if (use_ift) {
     .gradient_ift(l, reset, theta, pars, psi_star, H, dY_dpsi, step,
-                  fast_stem_curve)
+                  fast_stem_curve, envelope = envelope)
   } else {
     .gradient_fd(l, reset, theta, pars, step, fast_stem_curve)
   }
@@ -577,22 +578,34 @@ leaf_gradient <- function(psi_soil,
 
 # --- internals ---------------------------------------------------------------
 
-# The five differentiated outputs, in one place so the composite and the fallback
-# cannot disagree about what they are. `collar` is psi* itself, which makes
-# dcollar/dtheta equal to dpsi*/dtheta -- so the two routes compute the same
-# quantity by different means, and a test can compare them.
+# The differentiated outputs, READ from C++ rather than restated here.
 #
-# ⚠️ APPENDING IS SAFE AND REORDERING IS NOT, for the reason `.gradient_par_names`
-# records: the C++ side keeps its own copy in `phylloptim::gradient::output_names`
-# and indexes these positions by integer.
+# ⚠️ This is deliberately NOT the pattern `.gradient_par_names` uses. That one is a
+# second copy kept honest by a test comparing it with `gradient_par_names()`, and
+# it has to be, because R builds `theta` from `leaf_traits()` and so needs the
+# order before any C++ call. The OUTPUT list has no such constraint, so it is a
+# single definition and there is no hazard comment to write: adding an output is
+# one edit in `gradient.hpp`, not two that can disagree.
 #
-# The first four are what a gas-exchange calibration OBSERVES. `profit` is here
-# because it is what plant CONSUMES -- `leaf.profit_`, not `assim_colimited_`, is
-# the carbon that reaches its mass budget -- and until #87 the two sets were
-# disjoint, so no gradient this package produced reached a demographic model at
-# all. See the envelope section of ?leaf_gradient for why it is also the cheapest
-# of the five.
-.gradient_output_names <- c("A", "gc", "psi_stem", "collar", "profit")
+# `collar` is psi* itself, which makes dcollar/dtheta equal to dpsi*/dtheta -- so
+# the two routes compute the same quantity by different means and a test can
+# compare them. `profit` is what plant CONSUMES (`leaf.profit_`, not
+# `assim_colimited_`) and is the one output the envelope theorem reaches; see
+# ?leaf_gradient.
+#
+# ⚠️ Cached at FIRST CALL, not at build time, for the reason
+# `.gradient_outputs_idx()` below records -- and here there is a second reason:
+# calling into the shared library while the package is still being sourced is not
+# something to rely on.
+.gradient_output_names <- local({
+  nms <- NULL
+  function() {
+    if (is.null(nms)) {
+      nms <<- gradient_output_names()
+    }
+    nms
+  }
+})
 
 # ⚠️ ONE call, not four field reads. Every `l$field` is an R6 ACTIVE BINDING -- a
 # closure call wrapping a `.Call` -- and this function runs once per perturbation, so
@@ -612,7 +625,7 @@ leaf_gradient <- function(psi_soil,
   idx <- NULL
   function() {
     if (is.null(idx)) {
-      idx <<- match(.gradient_output_names, .operating_point_names)
+      idx <<- match(.gradient_output_names(), .operating_point_names)
     }
     idx
   }
@@ -620,7 +633,7 @@ leaf_gradient <- function(psi_soil,
 
 .gradient_outputs <- function(l) {
   v <- l$operating_point_values()[.gradient_outputs_idx()]
-  names(v) <- .gradient_output_names
+  names(v) <- .gradient_output_names()
   v
 }
 
@@ -886,7 +899,7 @@ leaf_gradient <- function(psi_soil,
 # neither of which re-solves the model: `dprofit` at the UNPERTURBED psi* gives
 # the mixed partial, and the outputs at that same psi* give the direct term.
 .gradient_ift <- function(l, reset, theta, pars, psi_star, H, dY_dpsi, step,
-                          fast_stem_curve = TRUE) {
+                          fast_stem_curve = TRUE, envelope = FALSE) {
   seat <- .gradient_reseat_base(reset, theta, pars, fast_stem_curve)
   out <- t(vapply(seq_along(pars), function(k) {
     p <- pars[[k]]
@@ -917,8 +930,16 @@ leaf_gradient <- function(psi_soil,
     # difference of two identical numbers.
     g <- direct + dY_dpsi * dpsi_dtheta
     g[["collar"]] <- dpsi_dtheta
-    g[.gradient_output_names]
-  }, numeric(length(.gradient_output_names))))
+    # The envelope theorem, ASSIGNED for the same reason `collar` is: profit's
+    # indirect term is identically zero at a stationary point, so stating that is
+    # better than multiplying a measured near-zero by dpsi*/dtheta. It is also
+    # immune to a non-finite dpsi*/dtheta, where `0 * x` would be NaN in this one
+    # column while the other four carried +-Inf.
+    if (envelope) {
+      g[["profit"]] <- direct[["profit"]]
+    }
+    g[.gradient_output_names()]
+  }, numeric(length(.gradient_output_names()))))
   reset(theta)
   rownames(out) <- pars
   out
@@ -940,8 +961,8 @@ leaf_gradient <- function(psi_soil,
       l$find_root_collar_psi()
       .gradient_outputs(l)
     }
-    ((side(1) - side(-1)) / (2 * h))[.gradient_output_names]
-  }, numeric(length(.gradient_output_names))))
+    ((side(1) - side(-1)) / (2 * h))[.gradient_output_names()]
+  }, numeric(length(.gradient_output_names()))))
   rownames(out) <- pars
   reset(theta)
   out

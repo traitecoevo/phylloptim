@@ -186,9 +186,9 @@ floor by a ~1e-06 step. Over the golden grid's 136 interior rows —
 
 | | median | max |
 |---|---|---|
-| `\|dprofit/dpsi\|`, exact (forward AD) | 4.9e-15 | 5.4e-10 |
+| `\|dprofit/dpsi\|`, exact (forward AD) | 4.8e-15 | 5.4e-10 |
 | `\|dprofit/dpsi\|`, central difference | 7.8e-10 | 2.1e-04 |
-| relative move in `dprofit/dtheta` if kept | 3.3e-10 | 8.0e-05 |
+| relative move in `dprofit/dtheta` if kept | 2.7e-10 | 8.0e-05 |
 
 — eleven orders between the two instruments at the median, and the worst row sits
 in the band this repo calls a real difference rather than rounding. The identity
@@ -198,7 +198,22 @@ finite-difference fallback as the other four.
 
 The four existing columns are **bit-identical** — this is additive, like
 appending to `gradient_par_names()`. `tests/testthat/gradient_golden.tsv` gains a
-column and no existing cell moved.
+column and no existing cell moved, checked against master rather than against the
+branch point.
+
+⚠️ **The shut-down row's profit column is asserted against a closed form, not
+only recorded.** It is the one regime where `profit_` is written by a branch that
+leaves the other outputs alone (hazard 8), so a hex with nothing saying what it
+ought to be would pin a number rather than a fact. There `E = 0`, so `A = -R_d`
+exactly and the hydraulic cost does not depend on `R_d_25`: `dprofit/dR_d_25` is
+**−1**. And the shut-down collar is pinned at `psi_crit`, so
+`dcollar/dpsi_crit` is **1** — which is why `psi_crit` alone carries a non-zero
+profit gradient there.
+
+**`gradient_output_names()` is exported**, and R now *reads* the list rather than
+keeping a second copy. `gradient_par_names()` has to be duplicated-and-compared
+because R builds `theta` before any C++ call; the outputs have no such
+constraint, so adding one is a single edit.
 
 ⚠️ **`uptake` was considered and is not here.** Every output must be a field R
 *copies* out of `operating_point_values()`; `uptake` is one R *computes*, by

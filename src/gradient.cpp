@@ -71,6 +71,27 @@ std::vector<std::string> gradient_par_names() {
   return phylloptim::gradient::par_names();
 }
 
+//' The differentiated outputs, in the order C++ indexes them
+//'
+//' `A`, `gc`, `psi_stem`, `collar` and `profit`. Unlike [gradient_par_names()],
+//' which R holds its own copy of and a test compares, R **reads** this one — so
+//' the list exists once and adding an output is one edit rather than two that
+//' can disagree.
+//'
+//' The first four are what a gas-exchange calibration observes; `profit` is what
+//' a demographic consumer bills, and it is the one output the envelope theorem
+//' reaches. See [leaf_gradient()].
+//'
+//' @return A character vector of five names.
+//' @seealso [leaf_gradient()], [leaf_gradient_batch()]
+//' @examples
+//' gradient_output_names()
+//' @export
+// [[Rcpp::export]]
+std::vector<std::string> gradient_output_names() {
+  return phylloptim::gradient::output_names();
+}
+
 // Convert N observations' drivers to C++ once. Everything is already resolved
 // and recycled to length N on the R side by `leaf_batch()`, which calls
 // `.resolve_drivers()` per row -- so the defaults (1 m layers, the nominal
