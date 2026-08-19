@@ -1,4 +1,13 @@
-# phylloptim 0.2.1
+# phylloptim 0.3.0
+
+⚠️ **This section was headed `0.2.1` until now, and the renumbering is the point of
+#58's first ask rather than tidying.** `0.2.1` was never tagged or released, and it
+accumulated `#41` (dark respiration reallocated, which moved results), `#84`, `#86`,
+`#89`, `#90` and `#91` on top of the changes below — so a consumer caching computed
+results had no signal that any of it had happened. The rule from here: **a PR that
+moves results moves the minor version**, in the same PR that regenerates the golden
+file. Downstream, plant's `LinkingTo: phylloptim (>= 0.2.0)` floor should become
+`>= 0.3.0` when this merges, or the pin means nothing.
 
 ## The vulnerability spline reaches the domain it claims (#92) — MOVES RESULTS
 
