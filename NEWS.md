@@ -6,8 +6,41 @@ accumulated `#41` (dark respiration reallocated, which moved results), `#84`, `#
 `#89`, `#90` and `#91` on top of the changes below — so a consumer caching computed
 results had no signal that any of it had happened. The rule from here: **a PR that
 moves results moves the minor version**, in the same PR that regenerates the golden
-file. Downstream, plant's `LinkingTo: phylloptim (>= 0.2.0)` floor should become
-`>= 0.3.0` when this merges, or the pin means nothing.
+file.
+
+⚠️ **Downstream, plant still pins `LinkingTo: phylloptim (>= 0.2.0)`, and that floor
+is now two minor versions stale.** #99 has merged, so the bump this note asked for has
+happened here and the plant-side half has not: a `>= 0.2.0` floor is satisfied by
+every build that predates the vulnerability-domain fix, which is exactly the
+"consumer cannot tell" problem one repo over. Raising it to `>= 0.3.0` — together with
+the `Remotes: traitecoevo/phylloptim@<sha>` it sits beside — is what makes the pin
+mean anything.
+
+## `leaf_behaviour_fingerprint()`, so a consumer can tell when the numbers moved (#58)
+
+The version bump above is the discipline; this is the mechanism, because a promise
+about future PRs cannot help a cache built against the history it sits on.
+`leaf_behaviour_fingerprint()` returns a 12-character digest of the two recorded
+baselines together — `tests/cpp/golden/operating_points.tsv` and
+`tests/testthat/gradient_golden.tsv` — so a pipeline can depend on one value instead
+of reimplementing "has phylloptim changed?".
+
+Those files already *are* this package's definition of the numbers, and they are
+regenerated deliberately, so the fingerprint inherits that discipline rather than
+needing new enforcement. `test-fingerprint.R` is what holds it: it recomputes the
+digest from the files on disk, so a PR that regenerates a golden file and forgets
+`Rscript tools/fingerprint.R` fails.
+
+Two properties chosen against the workaround it replaces — the calibration study
+hashed `inst/include`, `R/` and `src/`, which #47's rename would have moved without
+moving a number. So **file names are not in the digest** (a rename cannot move it)
+and **contents are hashed by line with the trailing `\r` stripped** (a CRLF checkout
+cannot either). Both are asserted.
+
+⚠️ It reports what the golden grids *reach*. They build a fresh `Leaf` per point, so
+a stale-state bug of hazard 8's kind can be fixed or introduced without moving it —
+all three of #15's were golden-bit-identical. `?leaf_behaviour_fingerprint` lists
+that and the other two limits.
 
 ## The vulnerability spline reaches the domain it claims (#92) — MOVES RESULTS
 
