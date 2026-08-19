@@ -2503,24 +2503,18 @@ void test_water_mass_conversions_are_reciprocal() {
        "the molar mass is water's, in g/mol");
 }
 
-// The gas constant is the SI value, and both Arrhenius curves are exactly inert at
-// 25 C (#51 audit). The second claim is the load-bearing one: it is why a change to
-// R moves the golden grid's 40 C block and leaves its 25 C block byte-identical, and
-// why the whole R-side suite -- which runs at 25 C throughout -- was blind to this
-// change and passed unaltered.
+// Both Arrhenius curves are exactly inert at 25 C, which is why a change to any
+// temperature response is invisible on a 25 C-only grid. That is the claim worth
+// holding: it bounds the blast radius of anything touched in this area.
 void test_gas_constant_and_arrhenius_reference_point() {
   printf("gas constant and the 25 C reference\n");
-  // Exact: R = N_A * k_B has been an exact SI quantity since the 2019 redefinition,
-  // so there is no tolerance to allow. Pinned against the old truncation too.
+  // Exact SI quantity, so there is no tolerance to allow.
   near(phylloptim::gas_constant, 8.314462618153240, 1e-15,
        "gas_constant is the SI value");
-  ok(std::abs(phylloptim::gas_constant - 8.314) > 1e-4,
-     "gas_constant is no longer the 8.314 truncation");
 
-  // Inertness at the reference temperature, through the object. Every reference
-  // value in this model is DEFINED at 25 C, so a temperature response can only be
-  // seen away from it -- assert that rather than leaving it as an argument in a
-  // comment, because it is what bounds the blast radius of any change in here.
+  // Inertness at the reference temperature, through the object: every reference
+  // value in this model is DEFINED at 25 C, so a response can only be seen away
+  // from it.
   Drivers d;
   phylloptim::Leaf ref = make_leaf(d, {2.0}, {1.0});   // d.leaf_temp is 25
   ok(ref.vcmax_ == ref.vcmax_25, "vcmax_ IS vcmax_25 at 25 C, bit for bit");

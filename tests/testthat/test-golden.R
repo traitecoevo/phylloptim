@@ -163,21 +163,11 @@ for (row in golden_rows) {
   })
 }
 
-# ⚠️ AND TWO POINTS AT 40 C, which is the gap the SI gas-constant correction exposed.
-#
-# Every value above is a 25 C value, because `golden_solve` used to hard-code the
-# temperature -- and every reference parameter in this model is DEFINED at 25 C, so
-# every temperature response in it is inert there BY CONSTRUCTION. The C++ grid
-# carries a second temperature for exactly that reason; the R side did not, and the
-# consequence was measured rather than imagined: correcting `gas_constant` to the SI
-# value moved 1728 cells of the C++ golden file, all of them at 40 C, and **the whole
-# R suite passed unaltered**.
-#
-# test-temperature-response.R does drive at 35 and 40 C, so the gap was not "no
-# coverage" -- it is that every assertion up there is DIRECTIONAL (`expect_gt`,
-# `expect_lt`, "not all.equal"). A change to a response curve that preserves the
-# ordering satisfies all of them. What was missing was a PINNED value off 25 C, which
-# is what these two rows are.
+# ⚠️ TWO POINTS AT 40 C, and keep at least one. Every value above is a 25 C value,
+# where every reference parameter in this model is DEFINED -- so every temperature
+# response is inert there by construction and a 25 C-only set of pinned values cannot
+# see a response curve change at all. The C++ grid carries a second temperature for
+# the same reason.
 #
 # One 1-layer and one 3-layer, both interior at 40 C. Regenerate with the same recipe
 # as above, with `$4==40`.

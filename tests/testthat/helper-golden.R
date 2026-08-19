@@ -116,14 +116,10 @@ golden_network_1m <- root_network_from_carbon(1.0 / golden_area_leaf,
 # steps the C++ grid does, root_network_from_carbon() then $set_physiology(), so
 # the R route to the golden numbers goes through the same public helper a user
 # would call.
-# ⚠️ `leaf_temp` IS A PARAMETER, defaulting to the 25 C the C++ grid's first block
-# uses. It was hard-coded at `golden_tleaf`, and that made every pinned value on the
-# R side a 25 C value -- where every reference parameter in this model is DEFINED, so
-# every temperature response is inert there by construction. The suite did drive at
-# 35 and 40 C in test-temperature-response.R, but only ever asserted a DIRECTION
-# there (expect_gt, expect_lt, "not all.equal"), so a change to a response curve that
-# preserved the ordering passed silently. The SI gas-constant correction moved 1728
-# C++ cells and the whole R suite passed unaltered, which is how this was noticed.
+# ⚠️ KEEP `leaf_temp` A PARAMETER, and keep pinning at least one point away from its
+# 25 C default. Every reference parameter in this model is DEFINED at 25 C, so every
+# temperature response is inert there by construction -- a 25 C-only set of pinned
+# values cannot see a response curve change at all.
 golden_solve <- function(psi_soil, ppfd, vpd, layers, leaf_temp = golden_tleaf) {
   l <- default_leaf()
 
