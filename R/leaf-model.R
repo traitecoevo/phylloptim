@@ -264,9 +264,10 @@ leaf_control <- function(GSS_tol_abs = 1e-3,
 ##'   default, which is right for a bare leaf that is not thinking about rooting
 ##'   depth. See the section above for why this, alone, is not a driver.
 ##'
-##' @section \u26a0 The two ends of this path are in different unit bases:
-##' This is the one thing to get right before parameterising a whole soil-to-leaf
-##' path, which is exactly what this supply path is for (#56).
+##' @section The two ends of this path are in different unit bases:
+##' \strong{Read this before parameterising a whole soil-to-leaf path}, which is
+##' exactly what this supply path is for (#56).
+
 ##'
 ##' - `leaf_specific_conductance_max` is **kg** m^-2 s^-1 MPa^-1
 ##' - [series_resistance()]'s `resistance` is MPa s **mol**^-1 m^2
