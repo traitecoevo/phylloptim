@@ -58,9 +58,18 @@ jobs:
           path: odelia
           fetch-depth: 1
 
+      # The mirror fix is a local composite action; its `action.yml` records why
+      # this is needed and what was measured. It must precede every apt call.
+      - uses: ./.github/actions/working-apt-mirror
+
       - name: Install Boost headers (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libboost-dev
+        timeout-minutes: 5
+        run: |
+          set -eu
+          apt_opts="-o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2"
+          sudo apt-get $apt_opts update
+          sudo apt-get $apt_opts install -y libboost-dev
 
       - name: Install Boost headers (macOS)
         if: runner.os == 'macOS'

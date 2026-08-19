@@ -32,8 +32,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The mirror fix is a local composite action; its `action.yml` records why
+      # this is needed and what was measured. It must precede every apt call.
+      - uses: ./.github/actions/working-apt-mirror
+
       - name: Install Doxygen and graphviz
-        run: sudo apt-get update && sudo apt-get install -y doxygen graphviz
+        timeout-minutes: 5
+        run: |
+          set -eu
+          apt_opts="-o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2"
+          sudo apt-get $apt_opts update
+          sudo apt-get $apt_opts install -y doxygen graphviz
 
       # The renderer reads the headers through tools/doxygen_filter.awk, which
       # rewrites comments so Doxygen can see them. A bug there could silently
