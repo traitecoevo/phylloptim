@@ -411,6 +411,34 @@ lines.**
 **Never regenerate the golden file to make another platform pass.** It just moves
 the failure to the platform the file came from.
 
+### ⚠️ R's `sum()` is not C++'s `+=`, and a test comparing them is platform-dependent
+
+Found by #92, on `test-surface.R`'s check that `Leaf::operating_point_values()` — one
+flat vector across the boundary — agrees with reading the twelve outputs one binding
+at a time. Eleven of the twelve are bindings and were bit-identical. The twelfth,
+`uptake`, is a **sum over soil layers**, so the R side had to derive it, and it used
+`sum()`.
+
+**R's `sum()` accumulates in `LDOUBLE`: 80-bit on x86-64, 64-bit on arm64.**
+`operating_point_values()` accumulates in `double`. So `sum()` agrees bit-for-bit on
+arm64 and can differ by an ULP on x86-64 — for any sum of more than one term. The
+assertion passed on macOS and on Linux for years, and it was luck on Linux: #92 moved
+the values and the three-layer case came apart on ubuntu only, at element [10] of
+twelve, while macOS stayed green. **The code under test had not changed platform
+behaviour; the assertion had always been platform-dependent.**
+
+`Reduce("+", finite, 0)` accumulates left to right in plain double addition from the
+same zero the C++ loop starts at, so the comparison is bit-exact everywhere. Prefer
+that to widening a tolerance: what the test exists to catch is a **shifted column**,
+which is worth catching at the last bit.
+
+Generalising, because it is not only `sum()`: **before demanding bit-equality across
+the R/C++ boundary, check that both sides use the same accumulator width and the same
+association order.** `sum`, `mean`, `cumsum` and `prod` all use `LDOUBLE`; `+` on
+doubles does not. This is the mirror image of the entry below on R's decimal parser —
+there the instrument was `as.numeric`, here it is `sum`, and both times the model was
+right and the measurement was not.
+
 ### One measurement to carry forward: TOMS748 is not sign-symmetric
 
 It comes up whenever something is "supposed to be bit-identical". #25 predicted
