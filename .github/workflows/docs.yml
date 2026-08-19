@@ -32,8 +32,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ⚠️ `apt-get update` CAN HANG FOR HOURS HERE, and the two guards below are
+      # both load-bearing. Measured on 2026-08-19: azure.archive.ubuntu.com --
+      # the mirror the runner image prefers -- stopped accepting connections from
+      # some runners, and `apt-get update` sat retrying across ~30 index files
+      # with no per-connection timeout. One job held a runner for 26 minutes on
+      # this line and was still going; three re-runs did the same while the g++
+      # job on an identical step passed, because the fault is per-VM network
+      # reachability and nothing in the config distinguishes them.
+      #
+      # `apt-get install` does NOT have the problem: apt's mirror list falls back
+      # to archive.ubuntu.com, which the log shows it doing -- `Ign:` on the Azure
+      # host, then a successful fetch over https. So the update is what needs a
+      # short timeout, and it must not be joined to the install with `&&`: a
+      # failed update still leaves the image's package lists usable, while a
+      # hung one otherwise means the install never runs at all.
+      #
+      # `timeout-minutes` is the backstop for whatever this mirror does next.
       - name: Install Doxygen and graphviz
-        run: sudo apt-get update && sudo apt-get install -y doxygen graphviz
+        timeout-minutes: 5
+        run: |
+          set -eu
+          apt_opts="-o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2"
+          sudo apt-get $apt_opts update \
+            || echo "apt-get update failed; continuing, the install falls back to another mirror"
+          sudo apt-get $apt_opts install -y doxygen graphviz
 
       # The renderer reads the headers through tools/doxygen_filter.awk, which
       # rewrites comments so Doxygen can see them. A bug there could silently
