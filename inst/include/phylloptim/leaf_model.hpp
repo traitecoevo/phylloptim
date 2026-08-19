@@ -305,8 +305,42 @@ public:
   // set_physiology falls back to the fixed ra. Only read on the PM path.
   double d_ = 0.05;          // characteristic leaf dimension, m
   double wind_speed_ = 2.0;  // above-canopy wind speed U0, m s^-1
+
+  // --- Sicangco et al. (2026) thermal cost, default OFF -----------------------
+  // An instantaneous cost of PSII damage, sigmoid in LEAF temperature:
+  //
+  //   TC(Tleaf) = 1 / (1 + exp(-r*(Tleaf - T50))),   r = 2/(T50 - Tcrit)
+  //
+  // and, in the same paper's ProfitMaxTC, Jmax is scaled by (1 - TC) so electron
+  // transport is destroyed at the same rate the cost is incurred. Both halves are
+  // behind this one gate.
+  //
+  // ⚠️ IT IS INSTANTANEOUS, and that is a modelling position rather than an
+  // omission. plant's ATLS layer models thermal damage as a LASTING ratchet --
+  // damage accumulated at one time step is still there at the next. This is the
+  // other thing: a cost paid at the temperature the leaf is at right now, with no
+  // memory. They are not interchangeable and neither is a port of the other.
+  //
+  // ⚠️ AND THE PAPER AND ITS CODE DISAGREE ON r. The published Eqn 8 area reads
+  // "r = (T50 - Tcrit)/2"; gsthermal's F0_func and TJmax_updated both compute
+  // `r = 2/(T50 - Tcrit)`. The code is what produced the figures, so the code is
+  // what is implemented here.
+  bool use_thermal_cost_ = false;
+  double T50_ = 50.4;    // deg C; Sicangco Table 2, heatwave treatment
+  double Tcrit_ = 46.5;  // deg C; Sicangco Table 2, heatwave treatment
+
+  // Points used to scan the transpiration supply stream for |A|max, which is what
+  // Sperry's carbon gain is normalised by. Sicangco's Ps_to_Pcrit defaults to 500
+  // and their instantaneous simulations use 600. A member rather than a
+  // constructor argument on purpose: the constructor's arity is pinned by plant's
+  // generated RcppR6 glue and by the CI consumer program.
+  int profitmax_scan_n_ = 500;
   double PPFD_;
   double atm_vpd_;
+  // The vapour pressure deficit the DIFFUSION equations use, kPa. Off the
+  // energy-balance path it is exactly `atm_vpd_`; on it, the leaf-to-air deficit
+  // at the operating-point leaf temperature (PLAN 13.1, #7). See set_leaf_vpd.
+  double vpd_leaf_;
   double atm_o2_kpa_;
 
   // --- Temperature-response parameters ---------------------------------------
@@ -374,6 +408,22 @@ public:
   double opt_root_psi_;
   double assim_max_;
 
+  // --- Sperry (2017) ProfitMax outputs, all unitless -------------------------
+  // Written ONLY by the ProfitMax path (optimise_psi_stem_ProfitMax and
+  // profit_psi_stem_ProfitMax). Separate members rather than reusing
+  // `hydraulic_cost_`, which is in carbon units on the TF24 path and in
+  // conductance units on the Sperry-cost one: three meanings behind one name is
+  // hazard 8 waiting to happen.
+  // Normalisers, seeded by prepare_profitmax() and read by the two functions
+  // above. Cached rather than recomputed per candidate because they are constant
+  // over one solve and each costs an exp+pow.
+  double profitmax_A_max_;   // |A|max over the supply stream, umol m^-2 s^-1
+  double profitmax_k_soil_;  // k(psi_soil), kg m^-2 s^-1 MPa^-1
+  double profitmax_k_span_;  // k(psi_soil) - k_crit, the HC denominator
+  double carbon_gain_;         // CG = A/|A|max over the supply stream
+  double hydraulic_cost_norm_; // HC = [k(psi_soil)-k(psi)]/[k(psi_soil)-k_crit]
+  double thermal_cost_;        // TC, zero unless use_thermal_cost_
+
   
   double opt_psi_stem_;
   double opt_ci_;
@@ -434,7 +484,7 @@ public:
   //   * the cost is 17 double comparisons per set_physiology() call, i.e. per
   //     driver set, NOT per inner solve iteration. Measured: within run-to-run
   //     noise on bench_solve.
-  static constexpr int photo_temp_key_size = 19;
+  static constexpr int photo_temp_key_size = 22;
   std::array<double, photo_temp_key_size> photo_temp_cache_key_{};
   std::array<double, photo_temp_key_size> photo_temp_key() const;
   std::vector<double> f_r;
@@ -739,9 +789,9 @@ public:
   // gate-off path; the derivation and the two sign checks are at the definition.
   double dprofit_energy_balance_term(double ci, double gc, double g_ci,
                                      double inv_atm, double gc_const,
-                                     double dgc_dpsistem, double dgc_dpsi,
-                                     double dpsistem_dpsi, double dT_dE,
-                                     double Tleaf);
+                                     double A_prime, double dgc_dpsistem,
+                                     double dgc_dpsi, double dpsistem_dpsi,
+                                     double dT_dE, double Tleaf);
   // The profit-maximising collar potential within [bound_a, bound_b], by a
   // safeguarded root-find on dprofit == 0 (PLAN 11a). Returns a bound when the
   // optimum is pinned to it, which is the case on 42 of the 240 feasible
@@ -789,6 +839,19 @@ public:
   // kept); provided and unit-tested for the leaf-to-air VPD in the full cut.
   double saturation_vapour_pressure(double temp) const;
   double saturation_vapour_pressure_slope(double temp) const;
+
+  // Seat `vpd_leaf_` at a leaf temperature. THE ONE PLACE the leaf-to-air deficit
+  // is defined, called wherever a leaf temperature is established: set_physiology
+  // (at Tair, so off-path callers get atm_vpd_ back exactly),
+  // set_leaf_states_rates_from_psi_stem, and dprofit_at_collar_psi.
+  //
+  // ⚠️ NOT folded into update_temperature_dependent_params, even though that is
+  // the other function taking a leaf temperature. The two finite-difference
+  // blocks call that one at T +/- h and restore the photosynthesis members by
+  // assignment; `vpd_leaf_` must NOT move with them, because dA/dTleaf there is
+  // taken at fixed ci and assim_colimited() reads no VPD at all. The VPD route
+  // into the derivative is carried separately, by dgc_dT.
+  void set_leaf_vpd(double leaf_temp);
   // Explicit leaf energy balance: Tleaf = Tair + (Rn - lambda*E) * ra / (rho*cp).
   // E is the hydraulically-pinned transpiration (kg H2O m^-2 s^-1); no PM
   // inversion and no A->E feedback, so this is a single algebraic forward pass.
@@ -982,9 +1045,34 @@ public:
   double profit_psi_stem_Sperry(double psi_stem, double psi_upstream);
   double profit_psi_stem_TF(double psi_stem, double psi_upstream);
 
+  // The instantaneous thermal cost at a leaf temperature, in [0,1]. Zero when the
+  // gate is off, so callers need not branch.
+  double thermal_cost_at(double leaf_temp) const;
+
+  // Sperry (2017) ProfitMax, with BOTH terms normalised as the paper defines them
+  // -- see optimise_psi_stem_ProfitMax for what that buys over the lambda form.
+  // Seeds |A|max and the conductance span; the two below read what it seeds.
+  void prepare_profitmax();
+  double profit_psi_stem_ProfitMax(double psi_stem, double psi_upstream);
+
+  // The whole cost/gain/profit curve over [psi_soil, psi_crit] in ONE crossing of
+  // the R boundary: n rows of (psi, CG, HC, TC, profit), flattened column-major.
+  // This is Sicangco et al.'s Figures 2, 3 and S4, and building it row by row from
+  // R would pay ~1.8 us of call overhead against a ~3 us model evaluation.
+  std::vector<double> profitmax_curve(int n);
+
 // optimiser functions
   void optimise_psi_stem_Sperry();
   void optimise_psi_stem_TF();
+  void optimise_psi_stem_ProfitMax();
+
+  // Clear the outputs a single-layer optimiser does NOT write. Hazard 8: these
+  // three describe a ROOT-COLLAR solve, and optimise_psi_stem_* never runs one,
+  // so leaving the last find_root_collar_psi()'s values standing reports an
+  // operating point whose parts came from two different solves. Measured before
+  // this existed: E = 9.216e-5 from the Sperry solve sitting beside E_up =
+  // 2.626e-5 from a collar solve several calls earlier.
+  void clear_collar_solve_state();
 
   // --- WHICH KIND of operating point the collar solve found -------------------
   //
@@ -1258,6 +1346,12 @@ inline void Leaf::setup_clean_leaf() {
   transpiration_= util::na_value; // kg m^-2 s^-1 
   profit_= util::na_value; // umol C m^-2 s^-1 
   lambda_= util::na_value; // umol C m^-2 s^-1 kg^-1 m^2 s^1
+  carbon_gain_= util::na_value;
+  hydraulic_cost_norm_= util::na_value;
+  thermal_cost_= util::na_value;
+  profitmax_A_max_= util::na_value;
+  profitmax_k_soil_= util::na_value;
+  profitmax_k_span_= util::na_value;
   lambda_analytical_= util::na_value; // umol C m^-2 s^-1 kg^-1 m^2 s^1
   hydraulic_cost_= util::na_value; // umol C m^-2 s^-1 
   electron_transport_= util::na_value; //electron transport rate umol m^-2 s^-1
@@ -1278,7 +1372,8 @@ inline void Leaf::setup_clean_leaf() {
   Rn_= util::na_value; // W m^-2
   ra_= util::na_value; // s m^-1
   PPFD_= util::na_value; //umol m^-2 s^-1
-  atm_vpd_= util::na_value; //kPa 
+  atm_vpd_= util::na_value; //kPa
+  vpd_leaf_= util::na_value; //kPa 
   atm_o2_kpa_= util::na_value; // kPa
   atm_kpa_= util::na_value; // kPa
   umol_per_mol_to_Pa_ = util::na_value;
@@ -1402,6 +1497,11 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
           d_ > 0.0 && wind_speed_ > 0.0)
              ? aerodynamic_resistance_coef * std::sqrt(d_ / wind_speed_)
              : aerodynamic_resistance_fixed;
+
+   // The diffusion deficit at the baseline temperature. On the PM path the solve
+   // re-seats this per candidate psi; here it makes assim_max_ and any bare
+   // stom_cond_CO2() call well defined before one has run.
+   set_leaf_vpd(leaf_temp_);
 
    // Temperature/O2-dependent block. Off the PM path this is recomputed only
    // when (leaf_temp_, atm_o2_kpa_) changes from the previous call (see
@@ -2148,6 +2248,7 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
   if (use_energy_balance_) {
     Tleaf_here = leaf_temp_from_E(transpiration(psi_stem, psi), &dT_dE);
     update_temperature_dependent_params(Tleaf_here);
+    set_leaf_vpd(Tleaf_here);
   }
 
   const double ci = psi_stem_to_ci(psi_stem, psi);
@@ -2232,15 +2333,15 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
       vcmax_ = vc0; jmax_ = jm0; gamma_ = ga0; ko_ = ko0; kc_ = kc0;
       R_d_ = rd0; km_ = km0; electron_transport_ = J0;
       const double Rd_T = (Rd_up - Rd_dn) / (2.0 * h);
-      // gc = gc_const * E, so dE/dpsi comes from the same spline derivatives the
-      // main branch uses; recomputed here because the main branch's locals are
-      // below this early return.
-      const double gc_c = atm_kpa_ * kg_to_mol_h2o / atm_vpd_ / H2O_CO2_stom_diff_ratio;
-      const double dgc_ps = gc_c * leaf_specific_conductance_max_ *
-                            stem_curve_integral_deriv(psi_stem);
-      const double dgc_p = gc_c * leaf_specific_conductance_max_ *
-                           (-stem_curve_integral_deriv(psi));
-      const double dE_dpsi = (dgc_ps * dpsistem_dpsi + dgc_p) / gc_c;
+      // dE/dpsi from the same spline derivatives the main branch uses;
+      // recomputed here because the main branch's locals are below this early
+      // return. It used to be written as the two gc partials divided back by
+      // their shared constant, which cancelled a coefficient that is no longer a
+      // single number now that the deficit moves with Tleaf. Stated directly.
+      const double dE_dpsi =
+          leaf_specific_conductance_max_ *
+          (stem_curve_integral_deriv(psi_stem) * dpsistem_dpsi -
+           stem_curve_integral_deriv(psi));
       dprofit += -Rd_T * dT_dE * dE_dpsi;
     }
     return std::isfinite(dprofit) ? dprofit : 0.0;
@@ -2265,7 +2366,7 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
   // (transp_from_psi(psi_stem) - transp_from_psi(psi)), so the partials use the
   // analytic spline derivative.
   const double gc_const =
-      atm_kpa_ * kg_to_mol_h2o / atm_vpd_ / H2O_CO2_stom_diff_ratio;
+      atm_kpa_ * kg_to_mol_h2o / vpd_leaf_ / H2O_CO2_stom_diff_ratio;
   const double gc = gc_const * transpiration(psi_stem, psi);
   const double dgc_dpsistem =
       gc_const * leaf_specific_conductance_max_ * stem_curve_integral_deriv(psi_stem);
@@ -2298,7 +2399,7 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
     return base;
   }
   return base + dprofit_energy_balance_term(ci, gc, g_ci, inv_atm, gc_const,
-                                            dgc_dpsistem, dgc_dpsi,
+                                            A_prime, dgc_dpsistem, dgc_dpsi,
                                             dpsistem_dpsi, dT_dE, Tleaf_here);
 }
 
@@ -2342,14 +2443,31 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
 //    cooling back toward the optimum. That is the decoupling mechanism, and its
 //    sign is the sharpest available test that this term is right.
 //
-// `dgc_dT` is a named zero rather than an omission: stom_cond_CO2 currently
-// divides by the prescribed AIR vpd, so gc does not depend on Tleaf. Wiring
-// leaf-to-air VPD (PLAN 13.1) makes it non-zero and this becomes a one-line
-// change instead of a re-derivation.
+// ⚠️ `dgc_dT` IS NOW NON-ZERO, and the placeholder algebra that stood here while
+// it was zero did NOT generalise. This block used to carry a named
+// `const double dgc_dT = 0.0` with a note promising that PLAN 13.1 would make it
+// "a one-line change instead of a re-derivation". The note was wrong: the
+// damping factor it multiplied, `(gc*inv_atm - dgc_dT*(ca-ci)*inv_atm)/g_ci`,
+// puts the new term under `A_T` where the derivation puts it under `A_prime`.
+// The two agree only at dgc_dT = 0, which is why nothing caught it. Derived
+// again, in full, below.
+//
+// g(ci; psi_stem, psi, T) = A(ci,T)*umol_to_mol - gc(T)*(ca-ci)*inv_atm = 0, so
+//
+//   g_T    = A_T*umol_to_mol - dgc_dT*(ca-ci)*inv_atm
+//   dci/dT = -g_T/g_ci
+//   dA/dT (total) = A_T + A_prime*dci/dT
+//                 = [A_T*gc*inv_atm + A_prime*dgc_dT*(ca-ci)*inv_atm] / g_ci
+//
+// using g_ci = A_prime*umol_to_mol + gc*inv_atm to collect. At dgc_dT = 0 this is
+// `A_T * (gc*inv_atm)/g_ci`, i.e. exactly what the old expression returned, so
+// the prescribed-VPD behaviour is unchanged. The two checks in the paragraph
+// above still hold for the first term; the second is new and has its own sign
+// argument at the assignment.
 inline double Leaf::dprofit_energy_balance_term(
     double ci, double gc, double g_ci, double inv_atm, double gc_const,
-    double dgc_dpsistem, double dgc_dpsi, double dpsistem_dpsi, double dT_dE,
-    double Tleaf) {
+    double A_prime, double dgc_dpsistem, double dgc_dpsi, double dpsistem_dpsi,
+    double dT_dE, double Tleaf) {
   if (!use_energy_balance_ || dT_dE == 0.0) {
     return 0.0;
   }
@@ -2401,10 +2519,19 @@ inline double Leaf::dprofit_energy_balance_term(
   const double dE_dpsi = (dgc_dpsistem * dpsistem_dpsi + dgc_dpsi) / gc_const;
   const double tau = dT_dE * dE_dpsi;
 
-  const double dgc_dT = 0.0;  // see the note above; non-zero once PLAN 13.1 lands
-  const double damping = (gc * inv_atm - dgc_dT * (ca_ - ci) * inv_atm) / g_ci;
+  // dgc/dTleaf through the deficit alone. gc = K*E/D(T) with E hydraulically
+  // pinned, so dgc/dT = -gc * D'(T)/D, and D'(T) = esat'(Tleaf) since e_air is
+  // fixed. NEGATIVE: a hotter leaf has a larger deficit, so the same water flux
+  // implies a SMALLER conductance. Zero where the deficit is on its floor, for
+  // the same reason leaf_temp_from_E returns dT_dE = 0 on its clamp -- the
+  // reported value no longer responds to the input.
+  const double dgc_dT =
+      (vpd_leaf_ > vpd_leaf_min)
+          ? -gc * saturation_vapour_pressure_slope(Tleaf) / vpd_leaf_
+          : 0.0;
 
-  return A_T * tau * damping;
+  return tau *
+         (A_T * gc * inv_atm + A_prime * dgc_dT * (ca_ - ci) * inv_atm) / g_ci;
 }
 
 inline double Leaf::arrh_curve(double Ea, double ref_value, double leaf_temp) const {
@@ -2450,13 +2577,23 @@ inline std::array<double, Leaf::photo_temp_key_size> Leaf::photo_temp_key() cons
           gamma_25_, gamma_ha_,
           kc_25_, kc_ha_,
           ko_25_, ko_ha_,
-          R_d_25, rd_q10_intercept_, rd_q10_slope_};
+          R_d_25, rd_q10_intercept_, rd_q10_slope_,
+          // The thermal cost reaches jmax_ above, so it belongs in the key. A
+          // bool widens to 0.0/1.0, which compares by == exactly like the rest.
+          double(use_thermal_cost_), T50_, Tcrit_};
 }
 
 inline void Leaf::update_temperature_dependent_params(double leaf_temp) {
   vcmax_ =
       peak_arrh_curve(vcmax_ha_, vcmax_25, leaf_temp, vcmax_H_d_, vcmax_d_S_);
   jmax_ = peak_arrh_curve(jmax_ha_, jmax_25, leaf_temp, jmax_H_d_, jmax_d_S_);
+  // Sicangco et al. (2026) Eqn 12: irreversible PSII damage takes electron
+  // transport down with it, so the peaked Arrhenius Jmax is scaled by (1 - TC).
+  // Branched rather than multiplied by a gate-off zero, so the gate-off
+  // arithmetic is untouched.
+  if (use_thermal_cost_) {
+    jmax_ *= 1.0 - thermal_cost_at(leaf_temp);
+  }
   gamma_ = arrh_curve(gamma_ha_, gamma_25_, leaf_temp);
   ko_ = arrh_curve(ko_ha_, ko_25_, leaf_temp);
   kc_ = arrh_curve(kc_ha_, kc_25_, leaf_temp);
@@ -2485,6 +2622,39 @@ inline double Leaf::saturation_vapour_pressure(double temp) const {
 // Slope of the saturation vapour pressure curve Delta(T) in kPa K^-1, T in deg C.
 inline double Leaf::saturation_vapour_pressure_slope(double temp) const {
   return 4098.0 * saturation_vapour_pressure(temp) / ((temp + 237.3) * (temp + 237.3));
+}
+
+// The deficit that drives diffusion out of the leaf (PLAN 13.1, issue #7).
+//
+// Fick's law needs the deficit between the SUB-STOMATAL cavity, saturated at the
+// LEAF temperature, and the air. The driver `atm_vpd_` is the deficit at AIR
+// temperature, so the two agree only when the leaf is at air temperature:
+//
+//   e_air     = esat(Tair) - atm_vpd
+//   vpd_leaf  = esat(Tleaf) - e_air = atm_vpd + [esat(Tleaf) - esat(Tair)]
+//
+// ⚠️ WRITTEN AS `atm_vpd_ + (esat(T) - esat(Tair_))` FOR AN ARITHMETIC REASON.
+// Off the energy-balance path the leaf IS at air temperature, so the bracket is
+// a value minus itself: exactly +0.0, and `x + 0.0 == x` for every finite x. The
+// prescribed-temperature path is therefore bit-identical, which is what keeps
+// the golden file untouched. Computing it as `esat(T) - esat(Tair) + atm_vpd` in
+// a different association would not guarantee that.
+//
+// ⚠️ AND IT CAN GO NON-POSITIVE. A leaf transpiring hard enough to sit well below
+// air temperature has esat(Tleaf) < e_air, i.e. condensation rather than
+// evaporation, which Fick's law in this direction does not describe -- and a
+// deficit passing through zero is an infinite conductance. Clamped to
+// `vpd_leaf_min` rather than allowed to invert the flux: the model would
+// otherwise report a NEGATIVE stomatal conductance for a positive transpiration.
+inline void Leaf::set_leaf_vpd(double leaf_temp) {
+  if (!use_energy_balance_) {
+    vpd_leaf_ = atm_vpd_;
+    return;
+  }
+  const double d =
+      atm_vpd_ + (saturation_vapour_pressure(leaf_temp) -
+                  saturation_vapour_pressure(Tair_));
+  vpd_leaf_ = std::max(d, vpd_leaf_min);
 }
 
 // Explicit leaf energy balance (#523): Tleaf = Tair + (Rn - lambda*E)*ra/(rho*cp).
@@ -2731,7 +2901,7 @@ inline double Leaf::transpiration_to_psi_stem(double transpiration_, double psi_
 // returns stomatal conductance to CO2, mol C m^-2 LA s^-1
 inline double Leaf:: stom_cond_CO2(double psi_stem, double psi_upstream) {
   double transpiration_ = transpiration(psi_stem, psi_upstream);
-  return atm_kpa_ * transpiration_ * kg_to_mol_h2o / atm_vpd_ / H2O_CO2_stom_diff_ratio;
+  return atm_kpa_ * transpiration_ * kg_to_mol_h2o / vpd_leaf_ / H2O_CO2_stom_diff_ratio;
 }
 
 
@@ -2938,10 +3108,13 @@ inline void Leaf::set_leaf_states_rates_from_psi_stem(double psi_stem, double ps
         // is a single forward pass: recompute the Farquhar temperature params at
         // this candidate's Tleaf before solving for ci. Defeats the photo_temp
         // cache by design -- Tleaf varies per operating point.
-        update_temperature_dependent_params(leaf_temp_from_E(transpiration_));
+        const double Tleaf_candidate = leaf_temp_from_E(transpiration_);
+        update_temperature_dependent_params(Tleaf_candidate);
+        // ...and the deficit Fick's law divides by, which moves with it.
+        set_leaf_vpd(Tleaf_candidate);
       }
       ci_ = psi_stem_to_ci(psi_stem, psi_upstream);
-      stom_cond_CO2_ = atm_kpa_ * transpiration_ * kg_to_mol_h2o / atm_vpd_ / H2O_CO2_stom_diff_ratio;
+      stom_cond_CO2_ = atm_kpa_ * transpiration_ * kg_to_mol_h2o / vpd_leaf_ / H2O_CO2_stom_diff_ratio;
       }
     }
   assim_colimited_ = assim_colimited(ci_);
@@ -3009,7 +3182,7 @@ inline double Leaf::g1_eff() const {
   if (!std::isfinite(chi) || chi >= 1.0) {
     return util::na_value;
   }
-  return chi * std::sqrt(atm_vpd_) / (1.0 - chi);
+  return chi * std::sqrt(vpd_leaf_) / (1.0 - chi);
 }
 
 // Pure: no write to hydraulic_cost_, so the AD pass cannot scribble model state
@@ -3024,6 +3197,24 @@ inline double Leaf::hydraulic_cost_TF(double psi_stem) {
   hydraulic_cost_ = hydraulic_cost_TF_kernel(psi_stem);
 
 return hydraulic_cost_;
+}
+
+// Sicangco et al. (2026) Eqns 8-9: the fraction of maximum PSII damage sustained
+// at this leaf temperature, in [0,1]. `r` follows gsthermal, not the printed Eqn
+// 8 -- see the note on use_thermal_cost_.
+//
+// Exactly 0.0 with the gate off, so every caller can add it unconditionally.
+inline double Leaf::thermal_cost_at(double leaf_temp) const {
+  if (!use_thermal_cost_) {
+    return 0.0;
+  }
+  const double span = T50_ - Tcrit_;
+  if (!(span > 0.0)) {
+    util::stop("thermal cost needs T50 > Tcrit; got T50 = " +
+               util::format_double(T50_) + ", Tcrit = " +
+               util::format_double(Tcrit_));
+  }
+  return 1.0 / (1.0 + std::exp(-(2.0 / span) * (leaf_temp - T50_)));
 }
 
 // Profit functions
@@ -3051,17 +3242,40 @@ double benefit_ = assim_colimited_;
 
 //optimisation functions
 
+// Everything a single-layer optimiser leaves untouched, cleared rather than
+// inherited. See the declaration for what it cost when this did not exist.
+inline void Leaf::clear_collar_solve_state() {
+  operating_point_kind_ = OperatingPointKind::Unsolved;
+  opt_root_psi_ = util::na_value;
+  E_up_ = util::na_value;
+  soil_consumption_.assign(soil_consumption_.size(), util::na_value);
+}
 
 // need docs on Golden Section Search.
 inline void Leaf::optimise_psi_stem_Sperry() {
 
-    // These two optimise psi_stem directly and produce no root-collar operating
-    // point, so they have no kind to report -- clear it rather than leave the
-    // last collar solve's classification standing over their outputs.
-    operating_point_kind_ = OperatingPointKind::Unsolved;
+    clear_collar_solve_state();
 
     if (!supply_is_single_layer()) {
     util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
+  }
+
+  // ⚠️ lambda_ IS AN INPUT HERE AND HAS NO DEFAULT. setup_clean_leaf sets it to
+  // the NA sentinel and set_physiology does not touch it, so a caller who drives
+  // the leaf and calls this without setting it is optimising a NaN objective --
+  // and brent_fmin does not report that. It returns a plausible-looking potential
+  // (2.551266 MPa at the package defaults) with profit_ = NaN beside it, and the
+  // potential is a property of the bracket rather than of the model. Refuse.
+  //
+  // Note the asymmetry this guards: set_traits() clears lambda_ (via
+  // setup_clean_leaf) and set_drivers() does not, so whether it survives depends
+  // on the order of two calls that look interchangeable.
+  if (!std::isfinite(lambda_)) {
+    util::stop("optimise_psi_stem_Sperry needs lambda_ set: it is a PRESCRIBED "
+               "marginal water cost, cleared to NA by the constructor and by "
+               "set_traits, and never set by set_physiology. For Sperry (2017)'s "
+               "own normalised profit use optimise_psi_stem_ProfitMax, which "
+               "computes its own.");
   }
 
   opt_psi_stem_ = supply_psi_soil_scalar();
@@ -3086,10 +3300,180 @@ inline void Leaf::optimise_psi_stem_Sperry() {
   }
   
 
+// ===========================================================================
+// Sperry et al. (2017) ProfitMax, as Sicangco et al. (2026) implement it
+// ---------------------------------------------------------------------------
+// WHY THIS EXISTS ALONGSIDE optimise_psi_stem_Sperry, WHICH IS THE SAME MODEL.
+// Sperry maximises
+//
+//     Profit = CG - HC,   CG = A(psi)/|A|max,   HC = [k(psi_soil)-k(psi)] / [k(psi_soil)-kcrit]
+//
+// while this package's older entry point maximises `A - lambda*(k(psi_soil)-k(psi))`.
+// Multiplying Sperry's objective by |A|max shows the two are the same function up
+// to a positive scale factor, so they share an argmax EXACTLY when
+//
+//     lambda* = |A|max / [k(psi_soil) - kcrit]
+//
+// Checked numerically on a 4001-point grid at gross assimilation, at net, and at
+// a leaf temperature of 48 C where CG is negative throughout: same grid point
+// every time. So the lambda form is not wrong -- it is unusable, because lambda*
+// is not a constant. |A|max moves with every driver and k(psi_soil) with the
+// soil, so a caller has to rescan the supply stream and recompute lambda at every
+// observation, from R, at ~1.8 us of call overhead per crossing against a ~3 us
+// model. This does it in C++ and reports the profit in Sperry's own units, so a
+// figure from this package can be laid over one from the paper.
+//
+// THE NORMALISATION IS NOT COSMETIC, which is the other reason to have it. HC
+// runs 0 to 1 across the operating range HOWEVER WIDE the vulnerability curve is,
+// because the denominator rescales with the curve -- so a ProfitMax cost cannot
+// become numerically negligible the way the TF24 cost does as stem_b widens
+// (measured at 1.3e-5 at stem_b = 200). Both terms are scale-free, which also
+// means the plant's willingness to spend water does not depend on how much carbon
+// is at stake in absolute terms. That is exactly what cost_scale_TF24 decides on
+// the TF24 path, and it is the parameter a calibration cannot identify without
+// leaf water potential.
+//
+// ⚠️ kcrit IS 5% OF kmax, and that is the same convention this package already
+// has rather than a new one. Sperry, Sabot et al. (2020) and Sicangco all set
+// kcrit = 0.05*kmax, i.e. psi_crit is P95; at this package's defaults
+// f(psi_crit) = 0.0500 exactly, so nothing has to be reconciled.
+inline void Leaf::prepare_profitmax() {
+  if (!supply_is_single_layer()) {
+    util::stop("psi soil must have only one value to use non-root-based profit "
+               "optimisation methods");
+  }
+  const double psi_soil = supply_psi_soil_scalar();
+  profitmax_k_soil_ =
+      leaf_specific_conductance_max_ * proportion_of_conductivity(psi_soil);
+  profitmax_k_span_ =
+      profitmax_k_soil_ -
+      leaf_specific_conductance_max_ * proportion_of_conductivity(psi_crit);
+
+  // |A|max over the transpiration supply stream (Sperry Eqn 4; Sicangco use
+  // max|Anet| because CG_net can be negative). A scan rather than "A at psi_crit"
+  // on purpose: that shortcut is only valid for GROSS assimilation, where A is
+  // monotone in psi, and the net-assimilation arms of this paper are precisely
+  // where it stops being.
+  //
+  // ⚠️ THE psi_soil ENDPOINT IS SKIPPED, matching gsthermal's `A[E == 0] <- NA`.
+  // There E is exactly zero and this model shuts down and reports A = -R_d, a
+  // number that describes a leaf with closed stomata rather than a point on the
+  // supply stream. Including it would set |A|max from respiration whenever
+  // assimilation is small, which is the whole high-temperature regime.
+  const int n = profitmax_scan_n_;
+  if (n < 3) {
+    util::stop("profitmax_scan_n_ must be at least 3");
+  }
+  double a_max = 0.0;
+  const double step = (psi_crit - psi_soil) / double(n - 1);
+  for (int i = 1; i < n; ++i) {
+    set_leaf_states_rates_from_psi_stem(psi_soil + step * double(i), psi_soil);
+    if (std::isfinite(assim_colimited_)) {
+      a_max = std::max(a_max, std::abs(assim_colimited_));
+    }
+  }
+  profitmax_A_max_ = a_max;
+}
+
+// CG - (HC + TC) at one candidate potential, with the normalisers prepare_profitmax
+// seeded. Writes carbon_gain_, hydraulic_cost_norm_ and thermal_cost_ so a caller
+// plotting the paper's Figure 2 can read the three components off the object.
+inline double Leaf::profit_psi_stem_ProfitMax(double psi_stem,
+                                              double psi_upstream) {
+  set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
+
+  carbon_gain_ = (profitmax_A_max_ > 0.0)
+                     ? assim_colimited_ / profitmax_A_max_
+                     : 0.0;
+  hydraulic_cost_norm_ =
+      (profitmax_k_soil_ -
+       leaf_specific_conductance_max_ * proportion_of_conductivity(psi_stem)) /
+      profitmax_k_span_;
+  // At the operating-point leaf temperature, which on the energy-balance path is
+  // the one set_leaf_states_rates_from_psi_stem just solved for. Off it the leaf
+  // is at the prescribed temperature and TC is constant across the stream --
+  // which is Sicangco's ProfitMaxTC run with the energy balance disabled, and is
+  // why their thermal cost does nothing without it.
+  thermal_cost_ = thermal_cost_at(use_energy_balance_
+                                      ? leaf_temp_from_E(transpiration_)
+                                      : leaf_temp_);
+
+  return carbon_gain_ - (hydraulic_cost_norm_ + thermal_cost_);
+}
+
+inline std::vector<double> Leaf::profitmax_curve(int n) {
+  if (n < 2) {
+    util::stop("profitmax_curve needs at least 2 points");
+  }
+  prepare_profitmax();
+  const double psi_soil = supply_psi_soil_scalar();
+  const double step = (psi_crit - psi_soil) / double(n - 1);
+  std::vector<double> out(static_cast<std::size_t>(5 * n));
+  for (int i = 0; i < n; ++i) {
+    const double p = psi_soil + step * double(i);
+    const double profit = profit_psi_stem_ProfitMax(p, psi_soil);
+    const std::size_t k = static_cast<std::size_t>(i);
+    const std::size_t N = static_cast<std::size_t>(n);
+    out[k] = p;
+    out[N + k] = carbon_gain_;
+    out[2 * N + k] = hydraulic_cost_norm_;
+    out[3 * N + k] = thermal_cost_;
+    out[4 * N + k] = profit;
+  }
+  return out;
+}
+
+inline void Leaf::optimise_psi_stem_ProfitMax() {
+  clear_collar_solve_state();
+
+  const double psi_soil = supply_psi_soil_scalar();  // also checks single-layer
+  opt_psi_stem_ = psi_soil;
+
+  if ((PPFD_ < 1.5e-8) | (psi_soil > psi_crit)) {
+    profit_ = 0;
+    transpiration_ = 0;
+    stom_cond_CO2_ = 0;
+    carbon_gain_ = 0;
+    hydraulic_cost_norm_ = 0;
+    thermal_cost_ = 0;
+    lambda_ = util::na_value;
+    return;
+  }
+
+  prepare_profitmax();
+  if (!(profitmax_k_span_ > 0.0) || !(profitmax_A_max_ > 0.0)) {
+    // No usable normalisation: either the soil is already at the critical
+    // potential (no conductance to spend) or nothing on the stream assimilates.
+    profit_ = 0;
+    transpiration_ = 0;
+    stom_cond_CO2_ = 0;
+    carbon_gain_ = 0;
+    hydraulic_cost_norm_ = 0;
+    thermal_cost_ = 0;
+    lambda_ = util::na_value;
+    return;
+  }
+
+  // Reported so the equivalence above is inspectable rather than asserted: this
+  // is the lambda that makes optimise_psi_stem_Sperry find the same point.
+  lambda_ = profitmax_A_max_ / profitmax_k_span_;
+
+  double neg_profit_opt = 0.0;
+  opt_psi_stem_ = util::brent_fmin(
+      [&](double psi_stem) { return -profit_psi_stem_ProfitMax(psi_stem, psi_soil); },
+      psi_soil, psi_crit, GSS_tol_abs, &neg_profit_opt);
+  profit_ = -neg_profit_opt;
+
+  // brent_fmin's last evaluation is not necessarily at the returned argmax, so
+  // re-evaluate to leave every reported field describing ONE operating point.
+  // Hazard 8, in the form where the fields are individually plausible.
+  profit_psi_stem_ProfitMax(opt_psi_stem_, psi_soil);
+}
+
 inline void Leaf::optimise_psi_stem_TF() {
 
-  // See optimise_psi_stem_Sperry: no root-collar operating point, so no kind.
-  operating_point_kind_ = OperatingPointKind::Unsolved;
+  // See optimise_psi_stem_Sperry: no root-collar operating point.
+  clear_collar_solve_state();
 
   if (!supply_is_single_layer()) {
     util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");

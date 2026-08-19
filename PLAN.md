@@ -29,7 +29,7 @@ the user-visible history.
 | [#74](https://github.com/traitecoevo/phylloptim/issues/74) | 11f, 11g | The `stem_b` shortcut is undone by a rebuild once per observation | 11f's 24.5× is **2.4×** through `leaf_gradient_batch()`. Unmotivated until something frees a vulnerability curve; filed so the wrong figure is not quoted meanwhile |
 | [#6](https://github.com/traitecoevo/phylloptim/issues/6) | 12 | Real-data calibration, then inversion | **The one with the most downstream** — it specifies what is left of #4, and doing it found #38, #40, #41 and #52. ⚠️ The *synthetic* vignette is done ([#53](https://github.com/traitecoevo/phylloptim/pull/53)) and **AD lost**: read 12a before repeating the comparison |
 | [#52](https://github.com/traitecoevo/phylloptim/issues/52) | 12 | `leaf_gradient()` rebuilds a `Leaf` per call, with no way to pass one in | From #53. A third of a per-observation gradient's cost, and why item 12's "reuse one object" advice cannot be followed as written |
-| [#7](https://github.com/traitecoevo/phylloptim/issues/7) | 13 | Energy balance, in priority order | Leaf-to-air VPD is the cheap win and is **not wired in**; free convection is not worth it |
+| [#7](https://github.com/traitecoevo/phylloptim/issues/7) | 13 | Energy balance, in priority order | ⚠️ **Item 1, leaf-to-air VPD, is DONE.** What is left is temperature-dependent longwave (#28); free convection is not worth it |
 | [#28](https://github.com/traitecoevo/phylloptim/issues/28) | 13 | Temperature-dependent outgoing longwave in the Penman-Monteith Rn | from plant #581 / #567 review |
 | [#31](https://github.com/traitecoevo/phylloptim/issues/31) | 31 | `profit_psi_stem_TF` returns a plausible number below `psi_upstream` | Found writing the vignette. Profit is **discontinuous by 1.58** at the boundary |
 | [#34](https://github.com/traitecoevo/phylloptim/issues/34) | 6d | Delete plant's `Leaf` bindings | Unblocked (plant #591 merged, and #33 is done). The hazard-7 payoff, and the only stage that can break plant |
@@ -86,12 +86,25 @@ The package carries three formulations and only one is usable:
 | formulation | state |
 |---|---|
 | TF24 hydraulic gain-risk | production; the whole solve is built on it |
-| Sperry et al. (2017) cost | present but **hardwired to `psi_soil_[0]`**, and nothing routes to it |
+| Sperry et al. (2017) ProfitMax | **runnable**: `optimise_psi_stem_ProfitMax()` on the single-potential path, with both terms normalised as the paper defines them |
 | Medlyn et al. (2011) USO | present but **bypasses the hydraulic solve altogether** |
 
-So you cannot run the same drivers through two of them and compare, which is the
-obvious thing to want. The goal is each as a first-class member, alongside Prentice
-et al. (2014) least-cost and Cowan-Farquhar.
+⚠️ **The Sperry row used to read "hardwired to `psi_soil_[0]`, and nothing routes to
+it", and both halves were misleading.** Being evaluated at `psi_soil` is what Eqn 5
+of Sperry (2017) *specifies* — the cost is defined against `k(psi_soil)` — so that
+was never the defect. The defect was that `profit_psi_stem_Sperry` uses the
+unnormalised form `A - lambda*cost` with `lambda_` a prescribed input that nothing
+sets, and `lambda_` is not a constant: the equivalent value is
+`|A|max/(k_soil - kcrit)`, which moves with every driver. `optimise_psi_stem_ProfitMax`
+computes it and reports it in `lambda_`, so the two forms can be checked against
+each other rather than assumed equivalent.
+
+`optimise_psi_stem_TF()` is the same off-path solver for the TF24 cost, so **the same
+drivers can now be run through both formulations on the same footing** — which this
+section used to say was impossible. What is still missing is dispatch on the
+PRODUCTION path (`find_root_collar_psi`, the collar first-order condition, the root
+network); the goal is each as a first-class member there, alongside Prentice et al.
+(2014) least-cost and Cowan-Farquhar.
 
 **What should be pluggable is λ, not the cost function.** All of these maximise a
 profit, so all satisfy `dA/dE = λ` and differ **only** in λ(state). Given λ, each

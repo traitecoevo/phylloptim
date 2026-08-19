@@ -136,6 +136,26 @@ void Leaf__optimise_psi_stem_Sperry(phylloptim::RcppR6::RcppR6<phylloptim::Leaf>
   obj_->optimise_psi_stem_Sperry();
 }
 // [[Rcpp::export]]
+double Leaf__thermal_cost_at(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double leaf_temp) {
+  return obj_->thermal_cost_at(leaf_temp);
+}
+// [[Rcpp::export]]
+void Leaf__prepare_profitmax(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  obj_->prepare_profitmax();
+}
+// [[Rcpp::export]]
+double Leaf__profit_psi_stem_ProfitMax(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem, double psi_upstream) {
+  return obj_->profit_psi_stem_ProfitMax(psi_stem, psi_upstream);
+}
+// [[Rcpp::export]]
+std::vector<double> Leaf__profitmax_curve(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int n) {
+  return obj_->profitmax_curve(n);
+}
+// [[Rcpp::export]]
+void Leaf__optimise_psi_stem_ProfitMax(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  obj_->optimise_psi_stem_ProfitMax();
+}
+// [[Rcpp::export]]
 void Leaf__optimise_psi_stem_TF(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
   obj_->optimise_psi_stem_TF();
 }
@@ -237,6 +257,33 @@ double Leaf__lambda___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
 // [[Rcpp::export]]
 void Leaf__lambda___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
   obj_->lambda_ = value;
+}
+
+// [[Rcpp::export]]
+double Leaf__carbon_gain___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->carbon_gain_;
+}
+// [[Rcpp::export]]
+void Leaf__carbon_gain___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
+  obj_->carbon_gain_ = value;
+}
+
+// [[Rcpp::export]]
+double Leaf__hydraulic_cost_norm___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->hydraulic_cost_norm_;
+}
+// [[Rcpp::export]]
+void Leaf__hydraulic_cost_norm___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
+  obj_->hydraulic_cost_norm_ = value;
+}
+
+// [[Rcpp::export]]
+double Leaf__thermal_cost___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->thermal_cost_;
+}
+// [[Rcpp::export]]
+void Leaf__thermal_cost___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
+  obj_->thermal_cost_ = value;
 }
 
 // [[Rcpp::export]]
@@ -696,6 +743,51 @@ bool Leaf__use_energy_balance___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf>
 // [[Rcpp::export]]
 void Leaf__use_energy_balance___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, bool value) {
   obj_->use_energy_balance_ = value;
+}
+
+// [[Rcpp::export]]
+double Leaf__vpd_leaf___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->vpd_leaf_;
+}
+// [[Rcpp::export]]
+void Leaf__vpd_leaf___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
+  obj_->vpd_leaf_ = value;
+}
+
+// [[Rcpp::export]]
+bool Leaf__use_thermal_cost___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->use_thermal_cost_;
+}
+// [[Rcpp::export]]
+void Leaf__use_thermal_cost___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, bool value) {
+  obj_->use_thermal_cost_ = value;
+}
+
+// [[Rcpp::export]]
+double Leaf__T50___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->T50_;
+}
+// [[Rcpp::export]]
+void Leaf__T50___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
+  obj_->T50_ = value;
+}
+
+// [[Rcpp::export]]
+double Leaf__Tcrit___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->Tcrit_;
+}
+// [[Rcpp::export]]
+void Leaf__Tcrit___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
+  obj_->Tcrit_ = value;
+}
+
+// [[Rcpp::export]]
+int Leaf__profitmax_scan_n___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->profitmax_scan_n_;
+}
+// [[Rcpp::export]]
+void Leaf__profitmax_scan_n___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int value) {
+  obj_->profitmax_scan_n_ = value;
 }
 
 // [[Rcpp::export]]

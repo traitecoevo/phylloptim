@@ -133,6 +133,26 @@ Leaf__optimise_psi_stem_Sperry <- function(obj_) {
     invisible(.Call('_phylloptim_Leaf__optimise_psi_stem_Sperry', PACKAGE = 'phylloptim', obj_))
 }
 
+Leaf__thermal_cost_at <- function(obj_, leaf_temp) {
+    .Call('_phylloptim_Leaf__thermal_cost_at', PACKAGE = 'phylloptim', obj_, leaf_temp)
+}
+
+Leaf__prepare_profitmax <- function(obj_) {
+    invisible(.Call('_phylloptim_Leaf__prepare_profitmax', PACKAGE = 'phylloptim', obj_))
+}
+
+Leaf__profit_psi_stem_ProfitMax <- function(obj_, psi_stem, psi_upstream) {
+    .Call('_phylloptim_Leaf__profit_psi_stem_ProfitMax', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
+}
+
+Leaf__profitmax_curve <- function(obj_, n) {
+    .Call('_phylloptim_Leaf__profitmax_curve', PACKAGE = 'phylloptim', obj_, n)
+}
+
+Leaf__optimise_psi_stem_ProfitMax <- function(obj_) {
+    invisible(.Call('_phylloptim_Leaf__optimise_psi_stem_ProfitMax', PACKAGE = 'phylloptim', obj_))
+}
+
 Leaf__optimise_psi_stem_TF <- function(obj_) {
     invisible(.Call('_phylloptim_Leaf__optimise_psi_stem_TF', PACKAGE = 'phylloptim', obj_))
 }
@@ -227,6 +247,30 @@ Leaf__lambda___get <- function(obj_) {
 
 Leaf__lambda___set <- function(obj_, value) {
     invisible(.Call('_phylloptim_Leaf__lambda___set', PACKAGE = 'phylloptim', obj_, value))
+}
+
+Leaf__carbon_gain___get <- function(obj_) {
+    .Call('_phylloptim_Leaf__carbon_gain___get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__carbon_gain___set <- function(obj_, value) {
+    invisible(.Call('_phylloptim_Leaf__carbon_gain___set', PACKAGE = 'phylloptim', obj_, value))
+}
+
+Leaf__hydraulic_cost_norm___get <- function(obj_) {
+    .Call('_phylloptim_Leaf__hydraulic_cost_norm___get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__hydraulic_cost_norm___set <- function(obj_, value) {
+    invisible(.Call('_phylloptim_Leaf__hydraulic_cost_norm___set', PACKAGE = 'phylloptim', obj_, value))
+}
+
+Leaf__thermal_cost___get <- function(obj_) {
+    .Call('_phylloptim_Leaf__thermal_cost___get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__thermal_cost___set <- function(obj_, value) {
+    invisible(.Call('_phylloptim_Leaf__thermal_cost___set', PACKAGE = 'phylloptim', obj_, value))
 }
 
 Leaf__lambda_analytical___get <- function(obj_) {
@@ -635,6 +679,46 @@ Leaf__use_energy_balance___get <- function(obj_) {
 
 Leaf__use_energy_balance___set <- function(obj_, value) {
     invisible(.Call('_phylloptim_Leaf__use_energy_balance___set', PACKAGE = 'phylloptim', obj_, value))
+}
+
+Leaf__vpd_leaf___get <- function(obj_) {
+    .Call('_phylloptim_Leaf__vpd_leaf___get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__vpd_leaf___set <- function(obj_, value) {
+    invisible(.Call('_phylloptim_Leaf__vpd_leaf___set', PACKAGE = 'phylloptim', obj_, value))
+}
+
+Leaf__use_thermal_cost___get <- function(obj_) {
+    .Call('_phylloptim_Leaf__use_thermal_cost___get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__use_thermal_cost___set <- function(obj_, value) {
+    invisible(.Call('_phylloptim_Leaf__use_thermal_cost___set', PACKAGE = 'phylloptim', obj_, value))
+}
+
+Leaf__T50___get <- function(obj_) {
+    .Call('_phylloptim_Leaf__T50___get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__T50___set <- function(obj_, value) {
+    invisible(.Call('_phylloptim_Leaf__T50___set', PACKAGE = 'phylloptim', obj_, value))
+}
+
+Leaf__Tcrit___get <- function(obj_) {
+    .Call('_phylloptim_Leaf__Tcrit___get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__Tcrit___set <- function(obj_, value) {
+    invisible(.Call('_phylloptim_Leaf__Tcrit___set', PACKAGE = 'phylloptim', obj_, value))
+}
+
+Leaf__profitmax_scan_n___get <- function(obj_) {
+    .Call('_phylloptim_Leaf__profitmax_scan_n___get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__profitmax_scan_n___set <- function(obj_, value) {
+    invisible(.Call('_phylloptim_Leaf__profitmax_scan_n___set', PACKAGE = 'phylloptim', obj_, value))
 }
 
 Leaf__d___get <- function(obj_) {
