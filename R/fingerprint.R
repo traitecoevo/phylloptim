@@ -56,7 +56,7 @@ leaf_behaviour_fingerprint <- function() {
   # ⚠️ GENERATED. Regenerate with tools/fingerprint.R after regenerating a golden
   # file, and never by hand -- test-fingerprint.R recomputes it and fails on a
   # mismatch, which is the whole mechanism.
-  "7a0f1e194fc8"
+  "e4f5a6ebd157"
 }
 
 # The digest itself, in one place so the exported constant above, the regeneration

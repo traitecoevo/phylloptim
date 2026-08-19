@@ -219,8 +219,10 @@ jobs:
               return 1;
             }
             // The R layer's arbitrated reference for this operating point, loosely
-            // compared for the same reason profit is below.
-            if (std::fabs(g[0].grad[0] - 0.0209349) > 1e-5) {
+            // compared for the same reason profit is below. ⚠️ COPY THIS FROM
+            // tests/testthat/gradient_golden.tsv WHENEVER RESULTS MOVE -- the
+            // `interior-1layer` / `vcmax_25` / `A` cell. Do not re-derive it.
+            if (std::fabs(g[0].grad[0] - 0.0209510) > 1e-5) {
               return 1;
             }
             l.set_physiology(roots, 900, {2.0}, soil_depth,
@@ -235,7 +237,11 @@ jobs:
             // tolerances. (The value here read 2.5158434693939866 until #33, which
             // is 2.2e-08 off the golden row and inside the tolerance, so it never
             // failed; corrected so it cannot be mistaken for the golden value.)
-            return std::fabs(l.profit_ - 2.5158434915102319) < 1e-6 ? 0 : 1;
+            //
+            // ⚠️ COPY THIS FROM THE GOLDEN FILE WHENEVER RESULTS MOVE -- it is the
+            // psi_soil=2, ppfd=900, vpd=2, T=25, layers=1 row. No local build
+            // compiles this program, so forgetting it is green locally and red in CI.
+            return std::fabs(l.profit_ - 2.517156924533102) < 1e-6 ? 0 : 1;
           }
           EOF
           cmake -B build \

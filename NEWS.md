@@ -1,3 +1,41 @@
+# phylloptim 0.4.0
+
+## One molar mass of water, so the kg <-> mol conversions are reciprocal (#51) — MOVES RESULTS
+
+`kg_to_mol_h2o` was 55.4939 and `kg_per_mol_h2o` was 0.018015 — two constants naming
+the same physical quantity in opposite directions, disagreeing by **0.0277%**, used in
+opposite halves of the model. The demand side converted transpiration kg -> mol with
+the first; the supply side converted uptake mol -> kg with the second. So a water flux
+pushed through both did not come back. The header said the discrepancy was deliberate,
+"kept at the historical 0.018015 to preserve results".
+
+**Which one was wrong is not a matter of convention, which is what let this be settled
+rather than argued.** 55.4939 is 1/0.018020, i.e. it encodes a molar mass of 18.0200
+g/mol. The molar mass of water is 18.015 g/mol — from the standard atomic weights,
+2(1.008) + 15.999. So `0.018015` is the physical value and the forward constant was the
+odd one. There is now one `molar_mass_h2o = 0.018015` and both old names are derived
+from it, reciprocal by construction; both names are kept because plant `using`-declares
+both.
+
+Note this is the **larger** of the two possible moves — unifying the other way would
+have preserved more digits by adopting a molar mass water does not have.
+
+**Blast radius.** 3710 of 5184 golden cells, median relative move 9.4e-05, and **3377
+of the 3710 move by no more than 2x the constant's own 2.77e-04** — i.e. the bulk is
+that constant propagating. The largest **absolute** move anywhere in the file is
+1.6e-03. The 184 cells whose relative move exceeds 1e-03 are near-zero quantities: the
+worst, 2.7e-02, is `profit` = 0.0088 at a 40 C five-layer point where benefit nearly
+cancels cost. Recorded gradients: 60 of 100 cells, median 3.2e-04, worst 2.9e-03.
+⚠️ That worst is the same order as the gradient file's own cross-platform disagreement
+(~2.3e-03), so **off macOS/arm64 this change is not cleanly separable from noise in
+that file.**
+
+Directionally: the forward constant rose 0.0277%, so conductance per unit transpiration
+rose with it, and the leaf buys slightly more carbon for the same water.
+
+⚠️ **plant's `LinkingTo: phylloptim (>= 0.2.0)` floor is now three minor versions
+stale**, and this is a results change it should be able to require. `>= 0.4.0`.
+
 # phylloptim 0.3.0
 
 ⚠️ **This section was headed `0.2.1` until now, and the renumbering is the point of

@@ -94,13 +94,9 @@ test_that("a non-default trait reaches the model through leaf_model()", {
                          traits = leaf_traits(vcmax_25 = 150))
   expect_gt(hi_vcmax$A, base$A)
 
-  # ⚠️ `psi_crit` MOVES WITH `stem_b` HERE, and it has to. This case used to pass
-  # `stem_b = 2.0` alone, leaving the default `psi_crit` of 5.870283 -- which at
-  # that stem_b is past the curve's own P99 of 3.5359, i.e. a combination the model
-  # cannot evaluate. It went unnoticed because nothing here solved: the constructor
-  # did not check it and `proportion_of_conductivity` is a closed form that never
-  # reads the spline. #38's check refuses it now, so the trait pair moves together,
-  # and 3.0 is roughly the P95 that stem_b implies (3.0118).
+  # ⚠️ `psi_crit` MOVES WITH `stem_b`, and it has to: at stem_b = 2.0 the curve's P99
+  # is 3.5359, so the default psi_crit of 5.870283 is off the end of it and #38's
+  # check refuses the pair. 3.0 is roughly the P95 that stem_b implies (3.0118).
   brittle <- leaf_model(leaf_traits(stem_b = 2.0, psi_crit = 3.0))
   expect_lt(brittle$proportion_of_conductivity(2.0),
             leaf_model()$proportion_of_conductivity(2.0))

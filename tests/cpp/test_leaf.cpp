@@ -274,15 +274,12 @@ void test_solve_single_layer() {
   ok(l.opt_psi_stem_ <= l.psi_crit, "stem stays within psi_crit");
   ok(l.transpiration_ > 0.0, "transpiration is positive");
   ok(l.assim_colimited_ > 0.0, "assimilation is positive");
-  // Regression guards -- see the note at the top of this file. Moved by PLAN 11a
-  // (the collar root-find): opt_psi_stem_ 3.595247 -> 3.595088 and
-  // assim_colimited_ 5.599511 -> 5.599153, both ~1e-4 relative, which is the
-  // argmax correction and not rounding. profit_ and transpiration_ did not move at
-  // this tolerance -- profit_ because it is the maximum and therefore flat.
-  near(l.opt_psi_stem_, 3.595088, 1e-5, "opt_psi_stem_");
-  near(l.assim_colimited_, 5.599153, 1e-5, "assim_colimited_");
+  // Regression guards -- see the note at the top of this file. Regenerate these
+  // deliberately, alongside the golden file, and state the movement in the PR.
+  near(l.opt_psi_stem_, 3.595332, 1e-5, "opt_psi_stem_");
+  near(l.assim_colimited_, 5.601016, 1e-5, "assim_colimited_");
   near(l.transpiration_, 1.141941e-05, 1e-5, "transpiration_");
-  near(l.profit_, 2.515843, 1e-5, "profit_");
+  near(l.profit_, 2.517157, 1e-5, "profit_");
 }
 
 void test_solve_is_deterministic() {
@@ -2477,6 +2474,35 @@ bool mentions(const std::string& haystack, const char* needle) {
 // before, which is exactly why the accumulating `psi += step` loop could drop its
 // last knot for years: the shortfall is invisible from outside unless the domain
 // edge is compared with the function that is supposed to define it.
+// The kg <-> mol water conversions are reciprocal, and the round trip is the
+// identity (#51). Asserted rather than documented: the demand side converts
+// transpiration kg -> mol and the supply side converts uptake mol -> kg, so a
+// second literal anywhere breaks the round trip silently.
+void test_water_mass_conversions_are_reciprocal() {
+  printf("kg <-> mol water conversions\n");
+  // Exact to the last bit in one direction: kg_to_mol_h2o IS 1/molar_mass_h2o.
+  ok(phylloptim::kg_to_mol_h2o == 1.0 / phylloptim::molar_mass_h2o,
+     "kg_to_mol_h2o is exactly the reciprocal of the molar mass");
+  ok(phylloptim::kg_per_mol_h2o == phylloptim::molar_mass_h2o,
+     "kg_per_mol_h2o IS the molar mass, not a second copy of it");
+
+  // The round trip cannot be bit-exact -- 1/x then *x is not the identity for most
+  // x -- so the claim is that it is within one rounding, which is what "reciprocal"
+  // can actually buy.
+  for (double kg : {1e-9, 1e-6, 1e-3, 1.0, 1e3}) {
+    const double round_trip = kg * phylloptim::kg_to_mol_h2o *
+                              phylloptim::kg_per_mol_h2o;
+    near(round_trip, kg, 4.0 * std::numeric_limits<double>::epsilon(),
+         "kg -> mol -> kg returns the input at " +
+             phylloptim::util::format_double(kg));
+  }
+
+  // The value is water's molar mass, not a neighbouring one: 18.015 g/mol from the
+  // standard atomic weights, 2(1.008) + 15.999.
+  near(phylloptim::molar_mass_h2o * 1000.0, 18.015, 1e-9,
+       "the molar mass is water's, in g/mol");
+}
+
 void test_knot_grid_reaches_its_intended_domain() {
   printf("vulnerability knot grid\n");
   const double resolutions[] = {10.0, 50.0, 100.0, 200.0, 1000.0};
@@ -2753,6 +2779,7 @@ int main() {
   test_rd_temperature_response();
   test_set_traits_matches_a_fresh_leaf();
   test_perturb_stem_b_matches_a_rebuild();
+  test_water_mass_conversions_are_reciprocal();
   test_knot_grid_reaches_its_intended_domain();
   test_psi_crit_must_lie_on_the_stem_curve();
   test_bad_input_throws();

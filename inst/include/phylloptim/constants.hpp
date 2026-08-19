@@ -56,12 +56,16 @@ inline constexpr double ko_ha = 36.38e3;
 // Leaf::umol_per_mol_to_Pa_, derived from atm_kpa_. The old `0.1013` was 101.3
 // kPa hard-coded; don't reinstate it.
 
-// mol H2o kg ^-1
-inline constexpr double kg_to_mol_h2o = 55.4939;
-// kg mol^-1: molar mass of water, for converting molar water flux back to kg.
-// (Intentionally distinct from 1/kg_to_mol_h2o, which it does not exactly equal;
-// kept at the historical 0.018015 to preserve results.)
-inline constexpr double kg_per_mol_h2o = 0.018015;
+// The molar mass of water -- 18.015 g/mol, from the standard atomic weights -- and
+// the ONE place it is written down. Both conversion directions derive from it, so
+// they are reciprocal by construction; do not reintroduce a second literal (#51).
+//
+// Both names below are kept because plant `using`-declares both.
+inline constexpr double molar_mass_h2o = 0.018015; // kg mol^-1
+// kg mol^-1, for converting a molar water flux back to kg.
+inline constexpr double kg_per_mol_h2o = molar_mass_h2o;
+// mol H2O kg^-1 -- the reciprocal, now genuinely so.
+inline constexpr double kg_to_mol_h2o = 1.0 / molar_mass_h2o;
 // mol mol ^-1 / (umol mol ^-1)
 inline constexpr double umol_to_mol = 1e-6;
 // Pa kPa^-1
