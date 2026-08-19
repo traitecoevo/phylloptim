@@ -73,6 +73,14 @@ Set the drivers with `$set_physiology()`, solve with
 `$opt_psi_stem_`, `$profit_`, `$assim_colimited_`, `$transpiration_`,
 `$lambda`, `$g1_eff`.
 
+A second optimality formulation is available on the single-soil-layer
+supply path: `$optimise_psi_stem_ProfitMax()` maximises Sperry (2017)'s
+normalised profit, and `$profitmax_curve()` returns the whole cost, gain
+and profit curve in one call. `$optimise_psi_stem_TF()` runs the TF24 cost
+through the same solver, so the two can be compared at identical drivers.
+These write `$carbon_gain_`, `$hydraulic_cost_norm_` and `$thermal_cost_`,
+which are unitless and are NOT the same quantities as `$hydraulic_cost_`.
+
 All water potentials are **positive magnitudes in MPa**. There is one
 representation throughout and it is asserted, not documented: a negative
 `psi_crit`, `stem_b`, `root_b` or `root_psi_crit` is an error here, and a
