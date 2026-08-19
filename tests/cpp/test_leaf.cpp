@@ -2902,6 +2902,44 @@ void test_transpiration_survives_negative_assim() {
        "and both leaves report the same transpiration at the same potential");
 }
 
+// ⚠️ THE OBJECTIVE IS NOT UNIMODAL AND ITS MAXIMUM CAN BE AN ENDPOINT. This is
+// the test that a bare Brent search fails: at a leaf hot enough that net
+// assimilation is negative everywhere, the profit is highest at FULL CLOSURE and
+// there is a local maximum out in the interior. Brent steps in from the bounds
+// and cannot return an endpoint, so it used to report the local one -- an open
+// stoma where the model says the leaf should be shut.
+void test_profitmax_finds_a_closed_optimum() {
+  printf("ProfitMax finds a boundary optimum, which Brent alone cannot\n");
+  Drivers d;
+  d.PPFD = 1500.0;
+  d.leaf_temp = 50.0;
+
+  phylloptim::Leaf l = make_single_leaf(d, 0.5);
+  l.use_thermal_cost_ = true;
+  l.optimise_psi_stem_ProfitMax();
+
+  // Reconstruct the objective on a coarse grid and find its global maximum
+  // independently of the solver.
+  const std::vector<double> curve = l.profitmax_curve(201);
+  const std::size_t n = 201;
+  std::size_t best = 0;
+  for (std::size_t i = 1; i < n; ++i) {
+    if (curve[4 * n + i] > curve[4 * n + best]) best = i;
+  }
+  printf("    grid argmax at psi = %.4f (index %zu of %zu), solver returned %.4f\n",
+         curve[best], best, n, l.opt_psi_stem_);
+
+  // profitmax_curve re-prepares, so re-solve before reading the operating point.
+  l.optimise_psi_stem_ProfitMax();
+  const double step = curve[1] - curve[0];
+  ok(std::abs(l.opt_psi_stem_ - curve[best]) < 3.0 * step,
+     "the solver lands on the objective's GLOBAL maximum, not a local one");
+
+  // And the profit it reports is at least the grid's best.
+  ok(l.profit_ >= curve[4 * n + best] - 1e-9,
+     "at no lower profit than the grid's best");
+}
+
 void benchmark() {
   printf("\ntiming\n");
   Drivers d;
@@ -2979,6 +3017,7 @@ int main() {
   test_single_layer_optimisers_clear_collar_state();
   test_sperry_refuses_an_unset_lambda();
   test_transpiration_survives_negative_assim();
+  test_profitmax_finds_a_closed_optimum();
   benchmark();
 
   printf("\n%d checks, %d failures\n", checks, failures);

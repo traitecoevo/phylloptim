@@ -420,6 +420,12 @@ public:
   double profitmax_A_max_;   // |A|max over the supply stream, umol m^-2 s^-1
   double profitmax_k_soil_;  // k(psi_soil), kg m^-2 s^-1 MPa^-1
   double profitmax_k_span_;  // k(psi_soil) - k_crit, the HC denominator
+  // The scan prepare_profitmax() already runs, kept so the objective can be
+  // rebuilt on it without evaluating the model a second time. See
+  // optimise_psi_stem_ProfitMax for why a grid is needed at all.
+  std::vector<double> profitmax_scan_psi_;
+  std::vector<double> profitmax_scan_A_;
+  std::vector<double> profitmax_scan_Tleaf_;
   double carbon_gain_;         // CG = A/|A|max over the supply stream
   double hydraulic_cost_norm_; // HC = [k(psi_soil)-k(psi)]/[k(psi_soil)-k_crit]
   double thermal_cost_;        // TC, zero unless use_thermal_cost_
@@ -3275,6 +3281,17 @@ inline void Leaf::clear_collar_solve_state() {
   soil_consumption_.assign(soil_consumption_.size(), util::na_value);
 }
 
+// ⚠️ THE TWO OPTIMISERS BELOW USE A BARE BRENT SEARCH AND SHARE A HAZARD.
+// Brent is a LOCAL optimiser that steps in from the bounds, so it cannot return
+// an endpoint and it cannot see past a local maximum. `optimise_psi_stem_TF` is
+// therefore wrong wherever the TF24 profit is maximised at full closure, and
+// `optimise_psi_stem_Sperry` wherever the caller's lambda makes it so.
+// `optimise_psi_stem_ProfitMax` scans a grid first for exactly this reason -- see
+// the note there, with the measured case that motivated it. These two are left
+// alone because neither has a scan to reuse, so fixing them costs 500 model
+// evaluations per solve rather than nothing; the collar solve is unaffected,
+// since maximise_profit_over_collar handles a pinned optimum explicitly.
+
 // need docs on Golden Section Search.
 inline void Leaf::optimise_psi_stem_Sperry() {
 
@@ -3390,9 +3407,22 @@ inline void Leaf::prepare_profitmax() {
   }
   double a_max = 0.0;
   const double step = (psi_crit - psi_soil) / double(n - 1);
-  for (int i = 1; i < n; ++i) {
-    set_leaf_states_rates_from_psi_stem(psi_soil + step * double(i), psi_soil);
-    if (std::isfinite(assim_colimited_)) {
+  profitmax_scan_psi_.assign(static_cast<std::size_t>(n), util::na_value);
+  profitmax_scan_A_.assign(static_cast<std::size_t>(n), util::na_value);
+  profitmax_scan_Tleaf_.assign(static_cast<std::size_t>(n), util::na_value);
+  for (int i = 0; i < n; ++i) {
+    const double p = psi_soil + step * double(i);
+    set_leaf_states_rates_from_psi_stem(p, psi_soil);
+    const std::size_t k = static_cast<std::size_t>(i);
+    profitmax_scan_psi_[k] = p;
+    profitmax_scan_A_[k] = assim_colimited_;
+    profitmax_scan_Tleaf_[k] =
+        use_energy_balance_ ? leaf_temp_from_E(transpiration_) : leaf_temp_;
+    // i == 0 is the psi_soil endpoint, where E is exactly zero and this model
+    // reports A = -R_d: a closed stoma rather than a point on the supply stream.
+    // It is RECORDED (the profit at full closure is a legitimate candidate) but
+    // excluded from |A|max, which is what gsthermal's `A[E == 0] <- NA` does.
+    if (i > 0 && std::isfinite(assim_colimited_)) {
       a_max = std::max(a_max, std::abs(assim_colimited_));
     }
   }
@@ -3482,16 +3512,81 @@ inline void Leaf::optimise_psi_stem_ProfitMax() {
   // is the lambda that makes optimise_psi_stem_Sperry find the same point.
   lambda_ = profitmax_A_max_ / profitmax_k_span_;
 
+  // ⚠️ GRID FIRST, THEN REFINE, AND A BARE BRENT SEARCH IS WRONG HERE.
+  //
+  // This used to be `brent_fmin` over [psi_soil, psi_crit] alone. Brent is a
+  // LOCAL optimiser that steps in from the bounds, so it cannot return an
+  // endpoint and it cannot see past a local maximum -- and this objective has
+  // both of those, in exactly the regime the model is interesting in. Measured at
+  // Tair 50 C with the thermal cost on: the profit runs -1.5314 at psi_soil,
+  // -1.5510 at 1.19, -1.5459 at 1.88, then falls away, so the GLOBAL maximum is
+  // the closed-stomata endpoint and there is a local one near 1.9. Brent returned
+  // 1.643. The model was reporting a leaf with open stomata where the objective
+  // says it should be shut.
+  //
+  // It is not a hypothetical: full closure at high temperature is what Sicangco
+  // et al. (2026) report for their CGnet arms -- "for sufficiently high
+  // temperatures CGnet is negative for all possible values of Psi_leaf and the
+  // optimum shifts toward stomatal closure" -- and their own implementation finds
+  // it because it takes `which.max` over a 500-point grid rather than searching.
+  //
+  // So: evaluate the objective on the scan prepare_profitmax() has ALREADY run
+  // (no extra model evaluations -- A and Tleaf are stored, and HC and TC are
+  // analytic in psi and Tleaf), take the grid argmax, and refine with Brent only
+  // when that argmax is interior. An endpoint argmax is returned as the endpoint,
+  // which is the answer rather than a failure to search.
+  const std::size_t n = profitmax_scan_psi_.size();
+  const double inv_A = 1.0 / profitmax_A_max_;
+  const double inv_k = 1.0 / profitmax_k_span_;
+  auto grid_profit = [&](std::size_t i) {
+    const double A = profitmax_scan_A_[i];
+    if (!std::isfinite(A)) {
+      return -std::numeric_limits<double>::infinity();
+    }
+    const double hc = (profitmax_k_soil_ - leaf_specific_conductance_max_ *
+                                               proportion_of_conductivity(
+                                                   profitmax_scan_psi_[i])) *
+                      inv_k;
+    return A * inv_A - (hc + thermal_cost_at(profitmax_scan_Tleaf_[i]));
+  };
+
+  std::size_t best = 0;
+  double best_profit = grid_profit(0);
+  for (std::size_t i = 1; i < n; ++i) {
+    const double p = grid_profit(i);
+    if (p > best_profit) {
+      best_profit = p;
+      best = i;
+    }
+  }
+
+  if (best == 0 || best + 1 == n) {
+    // Pinned to a bound. Re-evaluate through the real objective so every reported
+    // field describes the returned point rather than the grid's reconstruction.
+    opt_psi_stem_ = profitmax_scan_psi_[best];
+    profit_ = profit_psi_stem_ProfitMax(opt_psi_stem_, psi_soil);
+    return;
+  }
+
   double neg_profit_opt = 0.0;
   opt_psi_stem_ = util::brent_fmin(
       [&](double psi_stem) { return -profit_psi_stem_ProfitMax(psi_stem, psi_soil); },
-      psi_soil, psi_crit, GSS_tol_abs, &neg_profit_opt);
+      profitmax_scan_psi_[best - 1], profitmax_scan_psi_[best + 1], GSS_tol_abs,
+      &neg_profit_opt);
   profit_ = -neg_profit_opt;
+
+  // ⚠️ Refining inside one grid cell can come out WORSE than the grid point when
+  // the cell is narrow relative to GSS_tol_abs, because Brent terminates on
+  // bracket width. Keep whichever is better; the grid point is always a feasible
+  // candidate.
+  if (best_profit > profit_) {
+    opt_psi_stem_ = profitmax_scan_psi_[best];
+  }
 
   // brent_fmin's last evaluation is not necessarily at the returned argmax, so
   // re-evaluate to leave every reported field describing ONE operating point.
   // Hazard 8, in the form where the fields are individually plausible.
-  profit_psi_stem_ProfitMax(opt_psi_stem_, psi_soil);
+  profit_ = profit_psi_stem_ProfitMax(opt_psi_stem_, psi_soil);
 }
 
 inline void Leaf::optimise_psi_stem_TF() {
