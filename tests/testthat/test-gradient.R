@@ -920,6 +920,34 @@ test_that("psi and dpsi_dtheta are validated together", {
   expect_error(gr(psi = 2, dpsi_dtheta = c(1, 2)), "length 1 or one value")
   expect_error(gr(psi = 2, dpsi_dtheta = c(nope = 1)), "names must be exactly")
 
+  # ⚠️ AN INFINITE `dpsi_dtheta` IS REFUSED, AND THE ENVELOPE IS WHY. The
+  # composite is `direct + dY_dpsi * dpsi_dtheta`, so four columns come back
+  # +-Inf -- but `profit` is ASSIGNED from the direct term at a stationary psi
+  # rather than multiplied through, so it came back finite and plausible beside
+  # them. Measured at `psi = psi*` with `dpsi_dtheta = Inf`: A, gc, psi_stem and
+  # collar all Inf, profit 0.0105. Reading `profit` alone is plant's own case
+  # (#87), so the one surviving column was the one most likely to be believed.
+  #
+  # `anyNA` already caught NA and NaN; `Inf` it did not, and `is.finite` is the
+  # single check that covers all three.
+  expect_error(gr(psi = 2, dpsi_dtheta = Inf), "finite")
+  expect_error(gr(psi = 2, dpsi_dtheta = -Inf), "finite")
+  expect_error(gr(psi = 2, dpsi_dtheta = NaN), "finite")
+  # At psi* specifically, which is where the envelope fires and where the
+  # asymmetry was, rather than only at an arbitrary prescribed collar.
+  solved <- do.call(leaf_gradient, c(d, list(pars = "vcmax_25")))
+  expect_error(gr(psi = solved$psi, dpsi_dtheta = Inf), "finite")
+
+  # The batch entry point validates the same way, on BOTH shapes it accepts --
+  # the matrix form never reaches `.gradient_dpsi_dtheta()`, so one check there
+  # would have left it open.
+  b <- leaf_batch(psi_soil = c(2.0, 2.5), PPFD = 900)
+  expect_error(leaf_gradient_batch(b, pars = "vcmax_25", psi = c(3, 3),
+                                   dpsi_dtheta = Inf), "finite")
+  expect_error(leaf_gradient_batch(b, pars = "vcmax_25", psi = c(3, 3),
+                                   dpsi_dtheta = matrix(c(1, Inf), nrow = 2)),
+               "finite")
+
   # Named is matched by name, not by position -- the same discipline `pars` has,
   # for the same reason.
   pars <- c("vcmax_25", "stem_b")

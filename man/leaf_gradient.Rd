@@ -95,7 +95,10 @@ default) solves. See the section above; `method` cannot be given with it.}
 \item{dpsi_dtheta}{how the prescribed `psi` itself responds to each
 parameter, as one value per entry of `pars` (or one value recycled, or a
 vector named by `pars`). Defaults to zero, which is the partial derivative
-at fixed collar. Only meaningful with `psi`.}
+at fixed collar. Must be finite — an infinite value would return an
+all-infinite gradient row with a finite, plausible-looking `profit` in it,
+because the envelope theorem assigns that column rather than multiplying
+through. Only meaningful with `psi`.}
 
 \item{step}{relative step for the trait difference. The default `1e-06` is
 near the middle of the five decades over which the mixed partial was

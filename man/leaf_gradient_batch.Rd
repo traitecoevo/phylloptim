@@ -40,7 +40,8 @@ mismatch look intentional.}
 
 \item{dpsi_dtheta}{how each prescribed `psi` responds to each parameter:
 an `n` × `length(pars)` matrix, or one vector of `length(pars)` shared by
-every observation. Defaults to zero. Only meaningful with `psi`.}
+every observation. Defaults to zero. Must be finite, for the reason
+[leaf_gradient()] records. Only meaningful with `psi`.}
 
 \item{step}{relative step for the trait difference. The default `1e-06` is
 near the middle of the five decades over which the mixed partial was

@@ -355,7 +355,10 @@ set_traits <- function(x, traits) {
 ##' @param dpsi_dtheta how the prescribed `psi` itself responds to each
 ##'   parameter, as one value per entry of `pars` (or one value recycled, or a
 ##'   vector named by `pars`). Defaults to zero, which is the partial derivative
-##'   at fixed collar. Only meaningful with `psi`.
+##'   at fixed collar. Must be finite — an infinite value would return an
+##'   all-infinite gradient row with a finite, plausible-looking `profit` in it,
+##'   because the envelope theorem assigns that column rather than multiplying
+##'   through. Only meaningful with `psi`.
 ##' @param step relative step for the trait difference. The default `1e-06` is
 ##'   near the middle of the five decades over which the mixed partial was
 ##'   measured stable; it is also used, relative to the collar potential, for the
@@ -1188,8 +1191,22 @@ leaf_gradient <- function(psi_soil,
   if (is.null(dpsi_dtheta)) {
     return(stats::setNames(numeric(length(pars)), pars))
   }
-  if (!is.numeric(dpsi_dtheta) || anyNA(dpsi_dtheta)) {
-    stop("`dpsi_dtheta` must be numeric and free of NA", call. = FALSE)
+  # ⚠️ FINITE, AND `anyNA` WAS NOT ENOUGH -- `is.finite` covers NA and NaN,
+  # so this is one check rather than two, and it adds the case that matters. An
+  # infinite `dpsi_dtheta` does not fail loudly. The composite is
+  # `direct + dY_dpsi * dpsi_dtheta`, so four columns come back +-Inf -- and
+  # `profit`, which the envelope theorem ASSIGNS from the direct term at a
+  # stationary psi, comes back FINITE AND PLAUSIBLE beside them. Measured at
+  # `psi = psi*` with `dpsi_dtheta = Inf`: A, gc, psi_stem and collar all Inf,
+  # profit 0.0105. Reading `profit` alone is plant's own case (#87), so the one
+  # column that survives is the one most likely to be believed. The sibling
+  # argument is already checked this way -- `.gradient_check_psi()` demands
+  # `is.finite(psi)`.
+  if (!is.numeric(dpsi_dtheta) || !all(is.finite(dpsi_dtheta))) {
+    stop("`dpsi_dtheta` must be numeric and finite -- no NA, NaN or Inf. It ",
+         "is dpsi/dtheta for a collar YOU imposed; a non-finite value returns ",
+         "an all-infinite gradient row with a plausible `profit` in it.",
+         call. = FALSE)
   }
   # ⚠️ NAMES ARE CHECKED BEFORE RECYCLING, and the order matters. Recycling first
   # overwrote whatever the caller wrote with `pars`, so `dpsi_dtheta =

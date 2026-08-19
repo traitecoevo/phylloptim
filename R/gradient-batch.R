@@ -195,7 +195,8 @@ print.leaf_batch <- function(x, ...) {
 ##'   mismatch look intentional.
 ##' @param dpsi_dtheta how each prescribed `psi` responds to each parameter:
 ##'   an `n` × `length(pars)` matrix, or one vector of `length(pars)` shared by
-##'   every observation. Defaults to zero. Only meaningful with `psi`.
+##'   every observation. Defaults to zero. Must be finite, for the reason
+##'   [leaf_gradient()] records. Only meaningful with `psi`.
 ##'
 ##' @section What it computes, and where the maths is written down:
 ##' The same five derivatives at the same solved operating point, by the same two
@@ -380,8 +381,15 @@ leaf_gradient_batch <- function(batch,
     stop("`dpsi_dtheta` is the trait response of a collar potential YOU ",
          "imposed, so it needs `psi`.", call. = FALSE)
   }
-  if (!is.numeric(dpsi_dtheta) || anyNA(dpsi_dtheta)) {
-    stop("`dpsi_dtheta` must be numeric and free of NA", call. = FALSE)
+  # Finite, for the reason `.gradient_dpsi_dtheta()` records: an infinite value
+  # returns an all-Inf row with a finite, plausible `profit` in it. Checked here
+  # as well as there because the MATRIX form never reaches that function -- only
+  # the named-vector form does, further down.
+  if (!is.numeric(dpsi_dtheta) || !all(is.finite(dpsi_dtheta))) {
+    stop("`dpsi_dtheta` must be numeric and finite -- no NA, NaN or Inf. It ",
+         "is dpsi/dtheta for a collar YOU imposed; a non-finite value returns ",
+         "an all-infinite gradient row with a plausible `profit` in it.",
+         call. = FALSE)
   }
   if (is.null(dim(dpsi_dtheta))) {
     if (length(dpsi_dtheta) != length(pars)) {
