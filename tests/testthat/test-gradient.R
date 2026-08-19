@@ -93,7 +93,9 @@ test_that("the composite reproduces the arbitrated reference gradients", {
   g <- grid_gradient(2.0, pars = rownames(ref))
   expect_identical(g$status, "interior")
   expect_identical(g$method, "ift")
-  expect_equal(g$H, -8.9561, tolerance = 1e-4)
+  # -8.9561 until #51 unified the kg <-> mol water constants; the move is 1.86e-04,
+  # which is the 2.77e-04 change in `kg_to_mol_h2o` propagating into the Hessian.
+  expect_equal(g$H, -8.9578, tolerance = 1e-4)
 
   expect_equal(g$gradient[rownames(ref), "collar"], ref[, "collar"],
                tolerance = 5e-3)
@@ -561,16 +563,36 @@ test_that("profit's gradient is the direct term alone at an interior optimum", {
   # this a test rather than a formality. The assignment only matters where the term
   # it removes is big enough to see, and that term is NOISE rather than an h^2
   # truncation: `profit` is the maximum, so it is flat, and a central difference
-  # of it divides the solve's ~1e-9 floor by a ~1e-6 step. `?leaf_gradient` has
-  # the distribution over the golden grid's 136 interior rows; what matters here
-  # is that `psi_soil = 0.5, vpd = 2, 3 layers` is the WORST of them at 8.0e-05,
-  # so a tolerance three orders inside that fails if the assignment is removed.
-  # At the suite's usual `grid_drivers(2.0)` the same term is 2.9e-10 and this
-  # test would pass either way, which is the version of it written first.
+  # of it divides the solve's ~1e-9 floor by a ~1e-6 step. So the point has to be
+  # one where that noise is LARGE; at the suite's usual `grid_drivers(2.0)` the same
+  # term is ~1e-10 and this test would pass either way, which is the version of it
+  # written first.
+  #
+  # ⚠️ AND THE CHOICE DOES NOT SURVIVE A RESULTS CHANGE, which is the part that was
+  # not known when this was written. It pinned `psi_soil = 0.5, vpd = 2, 3 layers`,
+  # the worst of the interior rows at 8.0e-05. #51 moved the numbers by 2.8e-04 and
+  # that point's noise collapsed to 1.5e-09 — a ratio of 24 between the two
+  # instruments, where the test needs orders — so the test stopped demonstrating its
+  # own claim and failed on the `fd` side rather than the `exact` side.
+  #
+  # It is now `psi_soil = 1.0, ppfd = 1500, vpd = 1.0, 1 layer`, the worst of the
+  # 198 interior rows: `exact` 7.8e-16 against `fd` 2.7e-04, a ratio of **3.5e+11**
+  # and a stronger demonstration than the point it replaces.
+  #
+  # ⚠️ SO RE-DERIVE THE POINT, do not adjust the bounds, whenever this fails on the
+  # `fd` assertion. Sweep the interior rows and take the largest |fd|:
+  #
+  #   for each (psi_soil, ppfd, vpd, layers) in the golden grid:
+  #     g <- leaf_gradient(..., pars = "vcmax_25"); keep if g$status == "interior"
+  #     solve, then fd <- central difference of profit_ in the collar at psi*
+  #   pick argmax |fd|
+  #
+  # A failure here saying `abs(fd) <= 1e-5` means the point went quiet, NOT that the
+  # feature broke. A failure on `abs(exact)` is the real signal.
   #
   # ⚠️ Those figures are macOS/arm64's, and the second half of this test says why
   # that matters. Read it before adding an assertion on a magnitude here.
-  d <- grid_drivers(0.5, vpd = 2.0, layers = 3L)
+  d <- grid_drivers(1.0, ppfd = 1500, vpd = 1.0, layers = 1L)
   g <- do.call(leaf_gradient, c(d, list(pars = "vcmax_25")))
   expect_identical(g$status, "interior")
 
@@ -633,9 +655,11 @@ test_that("profit's gradient is the direct term alone at an interior optimum", {
   # 1e-12 was pinning a landing point, and this package's own guide names ~1e-9 as
   # the floor, so that is what the bound should have been all along.
   #
-  # What carries the test is the GAP, not either bound: measured here, `exact`
-  # 1.2e-10 against `fd` 2.1e-04 is a factor of 1.7e+06. Both bounds sit three or
-  # more orders inside that, so removing the assignment still fails this.
+  # What carries the test is the GAP, not either bound: at the re-derived point
+  # (see above) `exact` is 7.8e-16 against `fd` 2.7e-04, a factor of **3.5e+11**.
+  # Both bounds sit orders inside that, so removing the assignment still fails this.
+  # At the point this pinned before #51 the gap was 1.7e+06, itself ample; the
+  # margin is not the fragile part, the choice of point is.
   expect_lt(abs(exact), 1e-9)
   expect_gt(abs(fd), 1e-5)
 })
