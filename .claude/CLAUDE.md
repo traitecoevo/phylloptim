@@ -735,6 +735,31 @@ the per-cause split and the tolerance bands go in the first PR comment — see
    removed the same composite wins 4.4× on the eleven traits that touch no spline.
 
 
+11. **The single-layer optimisers search a LOCAL maximum, and the profit is
+   neither unimodal nor interior.** `brent_fmin` steps in from the bounds, so it
+   can return neither an endpoint nor the global maximum of a multi-modal
+   objective. Both happen: at a leaf hot enough that net assimilation is negative
+   across the whole supply stream, the ProfitMax profit is highest at **full
+   closure** and carries a local maximum out in the interior. Measured at Tair
+   50 °C with the thermal cost on — profit −1.5314 at `psi_soil`, −1.5510 at 1.19,
+   −1.5459 at 1.88 — and the solver returned **1.643**, reporting an open stoma
+   where the objective says shut.
+
+   `optimise_psi_stem_ProfitMax` now evaluates the objective on the scan
+   `prepare_profitmax` already runs, takes the grid argmax, and refines with Brent
+   only when it is interior. No extra model evaluations: `A` and `Tleaf` are
+   stored per grid point and `HC`/`TC` are analytic.
+
+   ⚠️ **`optimise_psi_stem_TF` and `optimise_psi_stem_Sperry` still have it**, and
+   are documented rather than fixed because neither has a scan to reuse. The
+   collar solve is unaffected — `maximise_profit_over_collar` handles a pinned
+   optimum explicitly, which is why 42 of 240 feasible golden rows are pinned and
+   correct.
+
+   The general form: **a bracketing optimiser answers "where is the interior
+   maximum", and that is not the same question as "where is the maximum".** If an
+   objective can be maximised at a constraint, the search has to be told.
+
 ## Validating against plant
 
 `tests/validate/` holds the harnesses. Read the header of
