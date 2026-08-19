@@ -96,8 +96,9 @@ set_traits <- function(x, traits) {
 
 ##' Trait gradients of a solved operating point
 ##'
-##' The derivatives of the solved outputs with respect to the traits: `dA/dtheta`,
-##' `dgc/dtheta`, `dpsi_stem/dtheta` and `dcollar/dtheta`, at one operating point.
+##' The derivatives of the solved outputs with respect to the traits:
+##' `dA/dtheta`, `dgc/dtheta`, `dpsi_stem/dtheta`, `dcollar/dtheta` and
+##' `dprofit/dtheta`, at one operating point.
 ##'
 ##' @section The maths, and why it is not just a finite difference:
 ##' The reported outputs are evaluated at the profit-maximising collar potential
@@ -119,6 +120,44 @@ set_traits <- function(x, traits) {
 ##'
 ##' The second term is not a correction. For `cost_scale_TF24`, `beta2`, `stem_b`
 ##' and `stem_c` it is 100% of the answer, and for `vcmax_25` 52%.
+##'
+##' @section profit, which is the one output the envelope theorem reaches:
+##' The first four outputs are what a gas-exchange calibration observes. `profit`
+##' is here because it is what a **demographic** consumer bills: plant's carbon
+##' budget reads `leaf.profit_`, not `assim_colimited_`, so before it was added
+##' the two sets were disjoint and no gradient from this package reached a
+##' demographic model at all.
+##'
+##' It is also the cheapest of the five, because it is the objective. At an
+##' interior optimum `dprofit/dpsi = 0`, so the indirect term above vanishes
+##' identically and
+##'
+##' \deqn{dprofit/d\theta = \partial profit/\partial\theta|_{\psi^*}}
+##'
+##' -- the direct partial alone, with no `dY/dpsi` and no `-M/H`. That is the
+##' envelope theorem, and it is the only place this package uses it.
+##'
+##' ⚠️ **The term this drops is noise, not an `h^2` truncation, and that is why
+##' dropping it matters.** `profit` is the maximum, so it is flat, and a central
+##' difference of it at `psi*` divides the solve's ~1e-09 floor by a ~1e-06 step.
+##' Over the golden grid's 136 interior rows:
+##'
+##' | | median | max |
+##' |---|---|---|
+##' | `\|dprofit/dpsi\|`, exact (forward AD) | 4.8e-15 | 5.4e-10 |
+##' | `\|dprofit/dpsi\|`, central difference | 7.8e-10 | 2.1e-04 |
+##' | relative move in `dprofit/dtheta` if kept | 2.7e-10 | 8.0e-05 |
+##'
+##' Eleven orders between the two instruments at the median, and the worst row
+##' sits in the band this package calls a real difference. So `dprofit/dtheta` is
+##' set from the direct term rather than computed through the composite, exactly
+##' as `collar` is set from `dpsi*/dtheta` rather than differenced.
+##'
+##' ⚠️ **The envelope does not survive the active set.** At a pinned optimum
+##' `psi*` is a trait-dependent bound and `dprofit/dpsi` is not zero there, so the
+##' indirect term is real. This applies the identity only where `status` is
+##' `"interior"`; everywhere else `profit` goes through the same finite-difference
+##' fallback as the other four.
 ##'
 ##' @section The active set, which is the reason this function is careful:
 ##' Stationarity is the premise of the whole derivation, and it fails when the
@@ -288,7 +327,8 @@ set_traits <- function(x, traits) {
 ##' @return A list with
 ##'   \describe{
 ##'     \item{`gradient`}{a matrix, one row per trait in `pars`, with columns
-##'       `A` (umol C m^-2 s^-1 per trait unit), `gc`, `psi_stem` and `collar`}
+##'       `A` (umol C m^-2 s^-1 per trait unit), `gc`, `psi_stem`, `collar` and
+##'       `profit` (also umol C m^-2 s^-1 per trait unit)}
 ##'     \item{`value`}{the solved outputs the gradient is taken at}
 ##'     \item{`method`}{`"ift"` if the implicit-function composite was used,
 ##'       `"fd"` if the fallback was}
@@ -497,12 +537,40 @@ leaf_gradient <- function(psi_soil,
       status <- "pinned"
     } else {
       dY_dpsi <- (hi - lo) / (2 * h_psi)
+      # `dprofit_droot_collar_psi` is EXACT in psi -- forward AD plus the IFT at
+      # the ci root-find -- so for profit alone the package has something better
+      # than a difference of the same quantity, and it is already computed. The
+      # other four have no such route and must be differenced.
+      #
+      # ⚠️ NOTHING CONSUMES THIS TODAY, and it is here rather than deleted for #88.
+      # The only reader is `.gradient_ift()` with `envelope = FALSE`, i.e. a FORCED
+      # method = "ift" at a pinned point -- and the 288-point grid test records that
+      # forcing it there throws ("narrower than one step") at all 42 pinned rows
+      # before this value is reached. So it is unexercised, not load-bearing: do
+      # not read a green suite as evidence about it.
+      dY_dpsi[["profit"]] <- resid
     }
   }
 
+  # ⚠️ THE ENVELOPE THEOREM, and the only place this package uses it. At a
+  # STATIONARY point dprofit/dpsi is analytically zero, so profit's indirect term
+  # vanishes identically and dprofit/dtheta is the direct partial alone. The
+  # composite is told to ASSIGN that column rather than reach it by multiplying a
+  # near-zero dY/dpsi -- the same treatment `collar` gets, and for the same
+  # reason: an identity is stated, not arrived at.
+  #
+  # ⚠️ It is conditional on stationarity and not on `use_ift`. The identity comes
+  # from dprofit/dpsi == 0; at a pinned optimum psi* is a theta-dependent BOUND,
+  # dprofit/dpsi is not zero there, and the indirect term survives. Someone who
+  # forces method = "ift" at such a point already gets a confidently wrong number
+  # and should not get a differently wrong one for this column alone.
+  #
+  # The measured size of what this removes is in ?leaf_gradient.
+  envelope <- isTRUE(usable && stationarity <= stationarity_tol)
+
   grad <- if (use_ift) {
     .gradient_ift(l, reset, theta, pars, psi_star, H, dY_dpsi, step,
-                  fast_stem_curve)
+                  fast_stem_curve, envelope = envelope)
   } else {
     .gradient_fd(l, reset, theta, pars, step, fast_stem_curve)
   }
@@ -517,11 +585,34 @@ leaf_gradient <- function(psi_soil,
 
 # --- internals ---------------------------------------------------------------
 
-# The four differentiated outputs, in one place so the composite and the fallback
-# cannot disagree about what they are. `collar` is psi* itself, which makes
-# dcollar/dtheta equal to dpsi*/dtheta -- so the two routes compute the same
-# quantity by different means, and a test can compare them.
-.gradient_output_names <- c("A", "gc", "psi_stem", "collar")
+# The differentiated outputs, READ from C++ rather than restated here.
+#
+# ⚠️ This is deliberately NOT the pattern `.gradient_par_names` uses. That one is a
+# second copy kept honest by a test comparing it with `gradient_par_names()`, and
+# it has to be, because R builds `theta` from `leaf_traits()` and so needs the
+# order before any C++ call. The OUTPUT list has no such constraint, so it is a
+# single definition and there is no hazard comment to write: adding an output is
+# one edit in `gradient.hpp`, not two that can disagree.
+#
+# `collar` is psi* itself, which makes dcollar/dtheta equal to dpsi*/dtheta -- so
+# the two routes compute the same quantity by different means and a test can
+# compare them. `profit` is what plant CONSUMES (`leaf.profit_`, not
+# `assim_colimited_`) and is the one output the envelope theorem reaches; see
+# ?leaf_gradient.
+#
+# ⚠️ Cached at FIRST CALL, not at build time, for the reason
+# `.gradient_outputs_idx()` below records -- and here there is a second reason:
+# calling into the shared library while the package is still being sourced is not
+# something to rely on.
+.gradient_output_names <- local({
+  nms <- NULL
+  function() {
+    if (is.null(nms)) {
+      nms <<- gradient_output_names()
+    }
+    nms
+  }
+})
 
 # ⚠️ ONE call, not four field reads. Every `l$field` is an R6 ACTIVE BINDING -- a
 # closure call wrapping a `.Call` -- and this function runs once per perturbation, so
@@ -541,7 +632,7 @@ leaf_gradient <- function(psi_soil,
   idx <- NULL
   function() {
     if (is.null(idx)) {
-      idx <<- match(.gradient_output_names, .operating_point_names)
+      idx <<- match(.gradient_output_names(), .operating_point_names)
     }
     idx
   }
@@ -549,7 +640,7 @@ leaf_gradient <- function(psi_soil,
 
 .gradient_outputs <- function(l) {
   v <- l$operating_point_values()[.gradient_outputs_idx()]
-  names(v) <- .gradient_output_names
+  names(v) <- .gradient_output_names()
   v
 }
 
@@ -815,7 +906,7 @@ leaf_gradient <- function(psi_soil,
 # neither of which re-solves the model: `dprofit` at the UNPERTURBED psi* gives
 # the mixed partial, and the outputs at that same psi* give the direct term.
 .gradient_ift <- function(l, reset, theta, pars, psi_star, H, dY_dpsi, step,
-                          fast_stem_curve = TRUE) {
+                          fast_stem_curve = TRUE, envelope = FALSE) {
   seat <- .gradient_reseat_base(reset, theta, pars, fast_stem_curve)
   out <- t(vapply(seq_along(pars), function(k) {
     p <- pars[[k]]
@@ -846,8 +937,16 @@ leaf_gradient <- function(psi_soil,
     # difference of two identical numbers.
     g <- direct + dY_dpsi * dpsi_dtheta
     g[["collar"]] <- dpsi_dtheta
-    g[.gradient_output_names]
-  }, numeric(length(.gradient_output_names))))
+    # The envelope theorem, ASSIGNED for the same reason `collar` is: profit's
+    # indirect term is identically zero at a stationary point, so stating that is
+    # better than multiplying a measured near-zero by dpsi*/dtheta. It is also
+    # immune to a non-finite dpsi*/dtheta, where `0 * x` would be NaN in this one
+    # column while the other four carried +-Inf.
+    if (envelope) {
+      g[["profit"]] <- direct[["profit"]]
+    }
+    g[.gradient_output_names()]
+  }, numeric(length(.gradient_output_names()))))
   reset(theta)
   rownames(out) <- pars
   out
@@ -869,8 +968,8 @@ leaf_gradient <- function(psi_soil,
       l$find_root_collar_psi()
       .gradient_outputs(l)
     }
-    ((side(1) - side(-1)) / (2 * h))[.gradient_output_names]
-  }, numeric(length(.gradient_output_names))))
+    ((side(1) - side(-1)) / (2 * h))[.gradient_output_names()]
+  }, numeric(length(.gradient_output_names()))))
   rownames(out) <- pars
   reset(theta)
   out

@@ -220,13 +220,41 @@ test_that("a shut-down operating point reports no gradient and still differences
   # exactly here, so `dA/dR_d_25` is -1 and `dA/dvcmax_25` is EXACTLY zero --
   # vcmax_25 does not reach A at all at a shut-down point, so both perturbed solves
   # return the same bits. The -1 is a central difference and lands within ~6e-11.
-  g <- grid_gradient(6.0, pars = c("vcmax_25", "stem_b", "R_d_25"))
+  g <- grid_gradient(6.0, pars = c("vcmax_25", "stem_b", "R_d_25", "psi_crit"))
   expect_identical(g$status, "no-gradient")
   expect_identical(g$method, "fd")
   expect_equal(g$value[["A"]], -leaf_traits()$R_d_25)
   expect_equal(g$gradient["R_d_25", "A"], -1, tolerance = 1e-8)
   expect_identical(g$gradient["vcmax_25", "A"], 0)
   expect_equal(g$gradient["stem_b", "A"], 0)
+
+  # ⚠️ `profit` NEEDS ITS OWN CLOSED FORM HERE, AND HAS ONE. This is the single
+  # regime where `profit_` is written by a branch that leaves the other outputs
+  # alone (hazard 8), so a recorded hex with nothing saying what it ought to be
+  # would pin a number rather than a fact. Two identities close it:
+  #
+  #   E = 0, so A = -R_d exactly and R_d(25 C) = R_d_25 -- and the hydraulic cost
+  #   does not depend on R_d_25 at all. So dprofit/dR_d_25 = dA/dR_d_25 = -1.
+  l <- leaf_model()
+  do.call(set_drivers, c(list(l), grid_drivers(6.0)))
+  l$find_root_collar_psi()
+  expect_identical(l$transpiration_, 0)
+  expect_identical(l$assim_colimited_, -l$R_d_)
+  expect_identical(g$value[["profit"]],
+                   l$assim_colimited_ - l$hydraulic_cost_)
+  expect_equal(g$gradient["R_d_25", "profit"], -1, tolerance = 1e-8)
+  expect_equal(g$gradient["R_d_25", "profit"], g$gradient["R_d_25", "A"],
+               tolerance = 1e-8)
+
+  #   The shut-down collar is PINNED AT psi_crit, so dcollar/dpsi_crit is exactly
+  #   1 -- which is why psi_crit, alone among the four, carries a non-zero profit
+  #   gradient here: it moves the collar, and the collar sets the hydraulic cost.
+  #   That is the whole explanation of a column that would otherwise look like
+  #   noise, and it is asserted rather than described.
+  expect_equal(g$gradient["psi_crit", "collar"], 1, tolerance = 1e-8)
+  expect_equal(g$gradient["psi_crit", "psi_stem"], 1, tolerance = 1e-8)
+  expect_lt(g$gradient["psi_crit", "profit"], 0)
+  expect_identical(g$gradient["psi_crit", "A"], 0)
 
   # Forcing the composite here is an error rather than a wrong number: unlike a
   # pinned point, there is no curvature to divide by at all.
@@ -370,7 +398,8 @@ test_that("the two non-trait parameters agree with a resolved reference", {
       a[[par]] <- value
     }
     x <- do.call(leaf_solve, a)
-    c(A = x$A, gc = x$gc, psi_stem = x$psi_stem, collar = x$collar)
+    c(A = x$A, gc = x$gc, psi_stem = x$psi_stem, collar = x$collar,
+      profit = x$profit)
   }
 
   g <- do.call(leaf_gradient,
@@ -495,16 +524,108 @@ test_that("leaf_gradient() rejects bad arguments", {
 
 test_that("the gradient is reported for every output the fit needs", {
   # leaf-calibration fits three responses -- A, gs and psi_leaf -- so all three
-  # are differentiated, not just A. `collar` comes along because it is psi*.
+  # are differentiated, not just A. `collar` comes along because it is psi*, and
+  # `profit` because it is what a DEMOGRAPHIC consumer bills: plant's carbon is
+  # `leaf.profit_`, not `assim_colimited_`, so without it the four columns above
+  # -- the calibration set -- were disjoint from plant's (#87).
   g <- grid_gradient(2.0, pars = "vcmax_25")
-  expect_identical(colnames(g$gradient), c("A", "gc", "psi_stem", "collar"))
-  expect_identical(names(g$value), c("A", "gc", "psi_stem", "collar"))
+  expect_identical(colnames(g$gradient),
+                   c("A", "gc", "psi_stem", "collar", "profit"))
+  expect_identical(names(g$value),
+                   c("A", "gc", "psi_stem", "collar", "profit"))
   expect_true(all(is.finite(g$gradient)))
   # Raising vcmax_25 raises assimilation and opens the stomata, and the leaf pays
   # for it with a more negative water potential (a larger positive magnitude).
   expect_gt(g$gradient["vcmax_25", "A"], 0)
   expect_gt(g$gradient["vcmax_25", "gc"], 0)
   expect_gt(g$gradient["vcmax_25", "psi_stem"], 0)
+  # More photosynthetic capacity is worth having: profit is A minus the hydraulic
+  # cost, and the extra carbon exceeds the extra cost. It is BELOW dA/dvcmax_25,
+  # which is the statement that the cost is not zero -- the cheapest available
+  # check that this column is the objective and not a copy of A.
+  expect_gt(g$gradient["vcmax_25", "profit"], 0)
+  expect_lt(g$gradient["vcmax_25", "profit"], g$gradient["vcmax_25", "A"])
+})
+
+test_that("profit's gradient is the direct term alone at an interior optimum", {
+  # The envelope theorem, which is the ONE place this package uses it. At an
+  # interior optimum dprofit/dpsi == 0, so the indirect term
+  # (dprofit/dpsi)(dpsi*/dtheta) vanishes IDENTICALLY, and dprofit/dtheta is the
+  # direct partial at fixed psi. `leaf_gradient()` encodes that by ASSIGNING the
+  # profit column from the direct term -- it does not zero dY_dpsi["profit"],
+  # which carries the exact dprofit/dpsi for the pinned route -- so the check is
+  # that the reported column equals a direct central difference with the collar
+  # HELD at psi*.
+  #
+  # ⚠️ THE OPERATING POINT IS CHOSEN, NOT ARBITRARY, and choosing it is what makes
+  # this a test rather than a formality. The assignment only matters where the term
+  # it removes is big enough to see, and that term is NOISE rather than an h^2
+  # truncation: `profit` is the maximum, so it is flat, and a central difference
+  # of it divides the solve's ~1e-9 floor by a ~1e-6 step. `?leaf_gradient` has
+  # the distribution over the golden grid's 136 interior rows; what matters here
+  # is that `psi_soil = 0.5, vpd = 2, 3 layers` is the WORST of them at 8.0e-05,
+  # so a tolerance three orders inside that fails if the assignment is removed.
+  # At the suite's usual `grid_drivers(2.0)` the same term is 2.9e-10 and this
+  # test would pass either way, which is the version of it written first.
+  #
+  # ⚠️ Those figures are macOS/arm64's, and the second half of this test says why
+  # that matters. Read it before adding an assertion on a magnitude here.
+  d <- grid_drivers(0.5, vpd = 2.0, layers = 3L)
+  g <- do.call(leaf_gradient, c(d, list(pars = "vcmax_25")))
+  expect_identical(g$status, "interior")
+
+  l <- leaf_model(leaf_traits(), leaf_control(), leaf_supply_multilayer())
+  do.call(set_drivers, c(list(l), d))
+  l$find_root_collar_psi()
+  psi_star <- l$opt_root_psi_
+
+  # The two instruments, both read on a leaf still at base traits.
+  hp <- max(abs(psi_star), 1) * 1e-6
+  exact <- l$dprofit_droot_collar_psi(psi_star)
+  l$evaluate_root_collar_psi(psi_star + hp)
+  hi <- l$profit_
+  l$evaluate_root_collar_psi(psi_star - hp)
+  lo <- l$profit_
+  fd <- (hi - lo) / (2 * hp)
+
+  # The answer itself, against a direct difference at fixed collar. THIS IS THE
+  # PART THAT HOLDS EVERYWHERE -- it is the claim the feature makes, and it does
+  # not depend on how big the term that was dropped happens to be.
+  v <- leaf_traits()$vcmax_25
+  h <- max(abs(v), 1) * 1e-6
+  at <- function(x) {
+    set_traits(l, leaf_traits(vcmax_25 = x))
+    do.call(set_drivers, c(list(l), d))
+    l$evaluate_root_collar_psi(psi_star)
+    l$profit_
+  }
+  direct <- (at(v + h) - at(v - h)) / (2 * h)
+  expect_equal(g$gradient["vcmax_25", "profit"], direct, tolerance = 1e-7)
+
+  # ⚠️ THE MAGNITUDES BELOW ARE PLATFORM-SPECIFIC, AND THE FIRST VERSION OF THIS
+  # TEST ASSERTED THEM EVERYWHERE. It passed on macOS/arm64 and failed on Linux
+  # CI, where the same operating point gives `exact` = 6.6e-11 and `fd` = 8.0e-10
+  # rather than 2.4e-15 and 2.1e-04.
+  #
+  # That is not a different answer, it is a different NOISE FLOOR: which side of
+  # the collar solver's tolerance the root-find lands on is set by libm's exp/pow,
+  # and those are not reproducible between Apple's arm64 libm and glibc on
+  # x86-64. The package already has a name for that -- it is the same reason the
+  # golden files compare bit-exactly on one platform and with a tolerance
+  # elsewhere -- so the same predicate gates it here.
+  #
+  # ⚠️ So this test has TEETH only on the platform the measurement was made on.
+  # Off it, the check above still holds and the one below is skipped; a Linux-only
+  # run would not catch the assignment being removed. Said plainly rather than left
+  # for someone to discover from a green CI.
+  skip_if_not(golden_bit_exact_platform(),
+              "the noise floor these two numbers measure is macOS/arm64's")
+  # The exact instrument says stationary to solver precision; the differenced one
+  # says nothing of the kind. Asserting BOTH is the point -- it is the difference
+  # between "the dropped term is small" and "the dropped term is unmeasurable by
+  # the route that would have supplied it".
+  expect_lt(abs(exact), 1e-12)
+  expect_gt(abs(fd), 1e-5)
 })
 
 # ---------------------------------------------------------------------------

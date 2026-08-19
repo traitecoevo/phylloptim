@@ -774,6 +774,26 @@ gradient_par_names <- function() {
     .Call('_phylloptim_gradient_par_names', PACKAGE = 'phylloptim')
 }
 
+#' The differentiated outputs, in the order C++ indexes them
+#'
+#' `A`, `gc`, `psi_stem`, `collar` and `profit`. Unlike [gradient_par_names()],
+#' which R holds its own copy of and a test compares, R **reads** this one — so
+#' the list exists once and adding an output is one edit rather than two that
+#' can disagree.
+#'
+#' The first four are what a gas-exchange calibration observes; `profit` is what
+#' a demographic consumer bills, and it is the one output the envelope theorem
+#' reaches. See [leaf_gradient()].
+#'
+#' @return A character vector of five names.
+#' @seealso [leaf_gradient()], [leaf_gradient_batch()]
+#' @examples
+#' gradient_output_names()
+#' @export
+gradient_output_names <- function() {
+    .Call('_phylloptim_gradient_output_names', PACKAGE = 'phylloptim')
+}
+
 gradient_batch_prepare <- function(root_network, psi_soil, soil_depth, PPFD, atm_vpd, ca, leaf_temp, atm_o2_kpa, atm_kpa) {
     .Call('_phylloptim_gradient_batch_prepare', PACKAGE = 'phylloptim', root_network, psi_soil, soil_depth, PPFD, atm_vpd, ca, leaf_temp, atm_o2_kpa, atm_kpa)
 }

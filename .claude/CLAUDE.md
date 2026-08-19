@@ -88,10 +88,12 @@ tests/testthat/gradient_golden.tsv
                                on that platform only, like tests/cpp/golden/ --
                                these are derivatives of argmax-evaluated outputs,
                                so they inherit its sqrt-amplified class and
-                               disagree cross-platform by up to 1.3e-3 -- ten
-                               times the solved outputs, because a finite
-                               difference divides the solver floor by the step
-                               and `R_d_25`'s step is the smallest here
+                               disagree cross-platform by up to 2.34e-3 (was
+                               1.3e-3 before #87 added `profit`) -- twenty times
+                               the solved outputs, because a finite difference
+                               divides the solver floor by the step, `R_d_25`'s
+                               step is the smallest here, and `profit` is the
+                               smallest magnitude carrying that same floor
 tests/validate/                R scripts comparing against plant (needs R)
 CMakeLists.txt                 the no-R build: C++ and Python consumers, and the
                                thing that makes "does not need R" runnable

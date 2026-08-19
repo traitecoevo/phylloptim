@@ -227,7 +227,7 @@ test_that("the recorded gradients have not moved", {
     expect_identical(g$status[[1]], rows$status[[1]], label = nm)
     expect_identical(g$method[[1]], rows$method[[1]], label = nm)
     for (i in seq_len(nrow(rows))) {
-      for (out in c("A", "gc", "psi_stem", "collar")) {
+      for (out in c("A", "gc", "psi_stem", "collar", "profit")) {
         got <- g$gradient[1, rows$par[[i]], out]
         expect_golden(got, rows[[out]][[i]], out,
                       paste(nm, rows$par[[i]]),
@@ -272,7 +272,7 @@ test_that("an unsolvable row costs that row and not the batch", {
   solo <- vapply(ok, function(p) {
     as.vector(leaf_gradient_batch(leaf_batch(psi_soil = p, PPFD = 900),
                                   pars = pars, method = "ift")$gradient[1, , ])
-  }, numeric(length(pars) * 4L))
+  }, numeric(length(pars) * dim(g$gradient)[[3]]))
   for (i in seq_along(ok)) {
     expect_identical(as.vector(g$gradient[2 * i - 1, , ]), solo[, i],
                      label = paste("row", 2 * i - 1))
@@ -391,12 +391,13 @@ test_that("the result is shaped and named for a caller applying a Jacobian", {
   pars <- c("vcmax_25", "stem_b", "cost_scale_TF24")
   b <- leaf_batch(psi_soil = c(1.0, 1.5, 2.0, 2.5), PPFD = 900)
   g <- leaf_gradient_batch(b, pars = pars)
-  expect_identical(dim(g$gradient), c(4L, 3L, 4L))
+  expect_identical(dim(g$gradient), c(4L, 3L, 5L))
   expect_identical(dimnames(g$gradient)[[2]], pars)
   expect_identical(dimnames(g$gradient)[[3]],
-                   c("A", "gc", "psi_stem", "collar"))
-  expect_identical(dim(g$value), c(4L, 4L))
-  expect_identical(colnames(g$value), c("A", "gc", "psi_stem", "collar"))
+                   c("A", "gc", "psi_stem", "collar", "profit"))
+  expect_identical(dim(g$value), c(4L, 5L))
+  expect_identical(colnames(g$value),
+                   c("A", "gc", "psi_stem", "collar", "profit"))
   for (f in c("status", "method", "message")) {
     expect_length(g[[f]], 4L)
   }

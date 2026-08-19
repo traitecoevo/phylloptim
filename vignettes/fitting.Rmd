@@ -108,6 +108,12 @@ data.frame(
 `leaf_gradient()` gives exact derivatives of each output, so the objective's
 gradient follows by the chain rule — no differencing of the solve.
 
+This fit names three of the five columns, and that is the normal case here: `A`,
+`gc` and `psi_stem` are measured, `collar` and `profit` are not. `profit` is in
+the matrix for a *demographic* consumer rather than a calibration one — `plant`
+bills carbon from it — so a fit against gas exchange simply ignores that column.
+It costs nothing to leave there; the whole row is read off one solve.
+
 ```{r}
 ssq_grad <- function(theta, l) {
   tr <- do.call(leaf_traits, as.list(exp(theta)))

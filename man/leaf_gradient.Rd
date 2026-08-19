@@ -116,7 +116,8 @@ the two routes to agree. `stem_c` has no such identity and always rebuilds.}
 A list with
   \describe{
     \item{`gradient`}{a matrix, one row per trait in `pars`, with columns
-      `A` (umol C m^-2 s^-1 per trait unit), `gc`, `psi_stem` and `collar`}
+      `A` (umol C m^-2 s^-1 per trait unit), `gc`, `psi_stem`, `collar` and
+      `profit` (also umol C m^-2 s^-1 per trait unit)}
     \item{`value`}{the solved outputs the gradient is taken at}
     \item{`method`}{`"ift"` if the implicit-function composite was used,
       `"fd"` if the fallback was}
@@ -127,8 +128,9 @@ A list with
   }
 }
 \description{
-The derivatives of the solved outputs with respect to the traits: `dA/dtheta`,
-`dgc/dtheta`, `dpsi_stem/dtheta` and `dcollar/dtheta`, at one operating point.
+The derivatives of the solved outputs with respect to the traits:
+`dA/dtheta`, `dgc/dtheta`, `dpsi_stem/dtheta`, `dcollar/dtheta` and
+`dprofit/dtheta`, at one operating point.
 }
 \section{The maths, and why it is not just a finite difference}{
 
@@ -151,6 +153,46 @@ stable to seven significant figures across five decades of step size.
 
 The second term is not a correction. For `cost_scale_TF24`, `beta2`, `stem_b`
 and `stem_c` it is 100% of the answer, and for `vcmax_25` 52%.
+}
+
+\section{profit, which is the one output the envelope theorem reaches}{
+
+The first four outputs are what a gas-exchange calibration observes. `profit`
+is here because it is what a **demographic** consumer bills: plant's carbon
+budget reads `leaf.profit_`, not `assim_colimited_`, so before it was added
+the two sets were disjoint and no gradient from this package reached a
+demographic model at all.
+
+It is also the cheapest of the five, because it is the objective. At an
+interior optimum `dprofit/dpsi = 0`, so the indirect term above vanishes
+identically and
+
+\deqn{dprofit/d\theta = \partial profit/\partial\theta|_{\psi^*}}
+
+-- the direct partial alone, with no `dY/dpsi` and no `-M/H`. That is the
+envelope theorem, and it is the only place this package uses it.
+
+⚠️ **The term this drops is noise, not an `h^2` truncation, and that is why
+dropping it matters.** `profit` is the maximum, so it is flat, and a central
+difference of it at `psi*` divides the solve's ~1e-09 floor by a ~1e-06 step.
+Over the golden grid's 136 interior rows:
+
+| | median | max |
+|---|---|---|
+| `\|dprofit/dpsi\|`, exact (forward AD) | 4.8e-15 | 5.4e-10 |
+| `\|dprofit/dpsi\|`, central difference | 7.8e-10 | 2.1e-04 |
+| relative move in `dprofit/dtheta` if kept | 2.7e-10 | 8.0e-05 |
+
+Eleven orders between the two instruments at the median, and the worst row
+sits in the band this package calls a real difference. So `dprofit/dtheta` is
+set from the direct term rather than computed through the composite, exactly
+as `collar` is set from `dpsi*/dtheta` rather than differenced.
+
+⚠️ **The envelope does not survive the active set.** At a pinned optimum
+`psi*` is a trait-dependent bound and `dprofit/dpsi` is not zero there, so the
+indirect term is real. This applies the identity only where `status` is
+`"interior"`; everywhere else `profit` goes through the same finite-difference
+fallback as the other four.
 }
 
 \section{The active set, which is the reason this function is careful}{
