@@ -130,6 +130,26 @@ const std::vector<g::Result> out =
 // out[i].status is Interior / Pinned / NoGradient / Error
 ```
 
+To evaluate at a collar potential you are carrying rather than one to be solved
+for — the case a model that *tracks* the optimum has — pass `psi`, one per
+observation, and optionally an `n × npars` column-major `dpsi_dtheta`:
+
+```cpp
+const double psi[2] = {2.7, 2.8};              // positive magnitudes, MPa
+const std::vector<g::Result> out =
+  g::batch(l, theta, 1, {d, d}, /*single=*/false, pars, 1, g::Settings(),
+           psi, /*dpsi_dtheta=*/nullptr);      // null here means ZERO...
+// out[i].status is now Prescribed or Clamped
+// out[i].M / out[i].H are the coefficients of ds/dt = k(M + H s)
+```
+
+⚠️ **A null `dpsi_dtheta` means zero here and "derive it" one layer down**, which
+is the one place this API can bite: `gradient_ift`'s null is the implicit function
+theorem, correct for a collar that was *solved* for, and passing it through would
+hand a prescribed caller the solving path's indirect term on top of their partial.
+`at()` materialises the zeros so no consumer has to know that. For one
+observation, use `g::at()` with a `g::Prescribed`.
+
 `theta` is `g::n_pars` = 16 doubles: the fourteen traits in `set_traits`' argument
 order, then `leaf_specific_conductance_max`, then the single-potential path's
 `resistance`. `g::par_names()` is that order and every position has a name
@@ -162,6 +182,7 @@ The ingredients are still public, if you want to compose something else:
 | `set_traits(...)` | replace all fourteen traits, refreshing splines and the temperature cache |
 | `perturb_stem_b(b)` | move `stem_b` by rescaling the curve instead of rebuilding it |
 | `dprofit_droot_collar_psi(psi, &feasible)` | dprofit/dψ at a given collar potential |
+| `dprofit_droot_collar_psi_checked(psi)` | the same as `{dprofit, feasible}`, for R — RcppR6 has no form for a `bool*`, so the generated binding drops the flag |
 | `evaluate_root_collar_psi(psi)` | solve the inner problem at a fixed collar |
 
 ⚠️ **Pass the `feasible` flag.** `dprofit_droot_collar_psi` returns `0.0` on its

@@ -429,6 +429,9 @@ Leaf:
     dprofit_droot_collar_psi:
       return_type: double
       args: [opt_root_psi: double]
+    dprofit_droot_collar_psi_checked:
+      return_type: "std::vector<double>"
+      args: [opt_root_psi: double]
     psi_stem_to_ci:
       return_type: double
       args: [psi_stem: double, psi_upstream: double]

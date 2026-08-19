@@ -56,10 +56,18 @@ golden_tolerance <- function(field) {
 # already moved 1.3% while `vcmax_25` has moved 0.2%. That column goes
 # noise-dominated first, and it is the one that sets this number.
 #
-# 5e-03 leaves ~4x headroom over the one observation there is. It cannot hide a real
-# change: #41's own reallocation moved these cells by 16% to 250%, two orders above
-# this. ⚠️ It IS one CI observation, so read the worst-difference line the test
-# prints on every run rather than assuming the headroom is still there.
+# ⚠️ THE HEADROOM IS 2.1x, NOT THE ~4x THIS COMMENT USED TO CLAIM, and what halved it
+# was #87 adding the `profit` column. Same mechanism one step further: at a given row
+# `profit` is SMALLER in magnitude than `A` while carrying the same absolute floor, so
+# its relative disagreement is larger. Measured on Linux CI, the whole-file worst:
+#
+#   master (four columns)  1.30e-03
+#   with `profit`          2.34e-03
+#
+# It still cannot hide a real change -- #41's own reallocation moved these cells by 16%
+# to 250%, two orders above this. But the margin is now one order, not two, so read
+# the worst-difference line the test prints on every run; do not assume the headroom
+# is still there, and do not add a sixth column without re-reading it.
 gradient_golden_tolerance <- function() 5.0e-3
 
 # expect_identical where it can hold, expect_equal with the measured per-field

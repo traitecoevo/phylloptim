@@ -71,6 +71,27 @@ std::vector<std::string> gradient_par_names() {
   return phylloptim::gradient::par_names();
 }
 
+//' The differentiated outputs, in the order C++ indexes them
+//'
+//' `A`, `gc`, `psi_stem`, `collar` and `profit`. Unlike [gradient_par_names()],
+//' which R holds its own copy of and a test compares, R **reads** this one — so
+//' the list exists once and adding an output is one edit rather than two that
+//' can disagree.
+//'
+//' The first four are what a gas-exchange calibration observes; `profit` is what
+//' a demographic consumer bills, and it is the one output the envelope theorem
+//' reaches. See [leaf_gradient()].
+//'
+//' @return A character vector of five names.
+//' @seealso [leaf_gradient()], [leaf_gradient_batch()]
+//' @examples
+//' gradient_output_names()
+//' @export
+// [[Rcpp::export]]
+std::vector<std::string> gradient_output_names() {
+  return phylloptim::gradient::output_names();
+}
+
 // Convert N observations' drivers to C++ once. Everything is already resolved
 // and recycled to length N on the R side by `leaf_batch()`, which calls
 // `.resolve_drivers()` per row -- so the defaults (1 m layers, the nominal
@@ -125,7 +146,8 @@ Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_,
                               SEXP drivers, Rcpp::NumericMatrix theta,
                               Rcpp::IntegerVector pars, double step,
                               double stationarity_tol, std::string method,
-                              bool fast_stem_curve) {
+                              bool fast_stem_curve, SEXP psi,
+                              SEXP dpsi_dtheta) {
   DriverBatch* batch_drivers = checked(drivers);
   const std::size_t n = batch_drivers->size();
   const std::size_t npars = static_cast<std::size_t>(pars.size());
@@ -165,11 +187,36 @@ Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_,
   // one thing that has to stay simple here.
   const std::vector<int> par_idx(pars.begin(), pars.end());
 
+  // `psi` is NULL to solve, or one collar potential per observation to impose;
+  // `dpsi_dtheta` is then an n x npars matrix. R validates both -- shape,
+  // positivity and the `method` conflict -- so this only holds the shape it was
+  // promised, and says so rather than reading past the end if it was not.
+  Rcpp::NumericVector psi_v;
+  Rcpp::NumericVector dpsi_v;
+  const double* psi_p = nullptr;
+  const double* dpsi_p = nullptr;
+  if (psi != R_NilValue) {
+    psi_v = Rcpp::as<Rcpp::NumericVector>(psi);
+    if (static_cast<std::size_t>(psi_v.size()) != n) {
+      Rcpp::stop("gradient_batch_run(): `psi` must have one value per "
+                 "observation");
+    }
+    psi_p = psi_v.begin();
+    if (dpsi_dtheta != R_NilValue) {
+      dpsi_v = Rcpp::as<Rcpp::NumericVector>(dpsi_dtheta);
+      if (static_cast<std::size_t>(dpsi_v.size()) != n * npars) {
+        Rcpp::stop("gradient_batch_run(): `dpsi_dtheta` must be n x npars");
+      }
+      dpsi_p = dpsi_v.begin();
+    }
+  }
+
   const std::vector<phylloptim::gradient::Result> res =
       phylloptim::gradient::batch(*obj_, theta.begin(), theta_nrow,
                                   *batch_drivers,
                                   obj_->supply_kind_name() == "single",
-                                  par_idx.data(), npars, settings);
+                                  par_idx.data(), npars, settings, psi_p,
+                                  dpsi_p);
 
   const int n_out = phylloptim::gradient::n_outputs;
   Rcpp::NumericMatrix value(static_cast<int>(n), n_out);
@@ -180,12 +227,21 @@ Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_,
   Rcpp::CharacterVector message(static_cast<R_xlen_t>(n));
   Rcpp::NumericVector H(static_cast<R_xlen_t>(n));
   Rcpp::NumericVector stationarity(static_cast<R_xlen_t>(n));
+  Rcpp::NumericMatrix M(static_cast<int>(n), static_cast<int>(npars));
+  Rcpp::NumericMatrix dY_dpsi(static_cast<int>(n), n_out);
+  Rcpp::NumericVector psi_used(static_cast<R_xlen_t>(n));
 
   for (std::size_t i = 0; i < n; ++i) {
     const phylloptim::gradient::Result& r = res[i];
     for (int j = 0; j < n_out; ++j) {
       value(static_cast<int>(i), j) = r.value[j];
+      dY_dpsi(static_cast<int>(i), j) = r.dY_dpsi[j];
     }
+    for (std::size_t k = 0; k < npars; ++k) {
+      M(static_cast<int>(i), static_cast<int>(k)) =
+          k < r.M.size() ? r.M[k] : NA_REAL;
+    }
+    psi_used[i] = r.psi;
     // R's array layout: [i, k, j] lives at i + n*k + n*npars*j.
     for (std::size_t k = 0; k < npars; ++k) {
       for (int j = 0; j < n_out; ++j) {
@@ -195,7 +251,17 @@ Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_,
       }
     }
     status[i] = phylloptim::gradient::status_name(r.status);
-    method_used[i] = r.used_ift ? "ift" : "fd";
+    // `method` names the route, and a prescribed collar is a third one: neither
+    // "ift" (nothing was derived from -M/H) nor "fd" (the solve was not
+    // differenced).
+    //
+    // ⚠️ `psi_p` is CALL-level, so this does not vary across `i` -- the whole
+    // batch is prescribed or none of it is. A row that threw therefore reports
+    // `status = "error"` with `method = "prescribed"`, which is right: `method`
+    // says which route was asked for, and `status` says what happened to the row.
+    method_used[i] = psi_p != nullptr
+                         ? "prescribed"
+                         : (r.used_ift ? "ift" : "fd");
     message[i] = r.message;
     H[i] = r.H;
     stationarity[i] = r.stationarity;
@@ -208,5 +274,6 @@ Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_,
       Rcpp::_["value"] = value, Rcpp::_["gradient"] = grad,
       Rcpp::_["status"] = status, Rcpp::_["method"] = method_used,
       Rcpp::_["H"] = H, Rcpp::_["stationarity"] = stationarity,
-      Rcpp::_["message"] = message);
+      Rcpp::_["M"] = M, Rcpp::_["dY_dpsi"] = dY_dpsi,
+      Rcpp::_["psi"] = psi_used, Rcpp::_["message"] = message);
 }

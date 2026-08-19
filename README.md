@@ -327,9 +327,14 @@ traits, which is what a gradient-based optimiser or a Hamiltonian sampler wants:
 ```r
 g <- leaf_gradient(psi_soil = 2.0, PPFD = 900,
                    pars = c("vcmax_25", "stem_b", "cost_scale_TF24"))
-g$gradient   # rows: parameters.  columns: A, gc, psi_stem, collar
+g$gradient   # rows: parameters.  columns: A, gc, psi_stem, collar, profit
 g$method     # "ift" or "fd" -- see below
 ```
+
+The first four columns are what a gas-exchange calibration observes. `profit` is
+the objective, and it is there for a demographic consumer: `plant` bills carbon
+from the leaf's profit rather than its assimilation, so without that column no
+gradient from this package reached a demographic model at all.
 
 `pars` is not restricted to traits: `leaf_specific_conductance_max` and, on the
 single-potential path, `resistance` are differentiable too, because a calibration
@@ -347,6 +352,26 @@ profit-maximising collar potential, so a trait moves them both directly and by
 moving that optimum — and for `cost_scale_TF24`, `beta2`, `stem_b` and `stem_c`
 the second route is **100%** of the answer. Differentiating the optimality
 condition rather than the solved output gets both terms exactly.
+
+`profit` is the exception, and it is the cheapest column for the reason it is the
+exception: it *is* the objective, so at an interior optimum the second route
+contributes nothing and its gradient is the direct partial alone. That is the
+envelope theorem, and the only place this package uses it.
+
+If your model **tracks** the optimum instead of finding it, pass the collar
+potential you are operating at and the derivation simplifies rather than breaks:
+
+```r
+leaf_gradient(psi_soil = 2.0, PPFD = 900, pars = c("vcmax_25", "stem_b"),
+              psi = 2.7)                # evaluate here, do not solve
+```
+
+`psi` is exogenous, so the answer is the partial at fixed collar — plus whatever
+`dpsi_dtheta` you supply, if the collar you imposed itself moves with the traits.
+`M`, `H` and `dY_dpsi` come back so a caller integrating its own sensitivity of
+`psi` has the coefficients. This is what plant's TF24f needs, and giving back the
+collar the solver found, with the response it derived, reproduces the solving
+path exactly.
 
 That derivation assumes the optimum is interior, and at the dry end it often is
 not: with the optimum pinned to the edge of the feasible range the formula returns

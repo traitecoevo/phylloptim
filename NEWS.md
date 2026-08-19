@@ -162,6 +162,132 @@ of the wrong shape — see the note in `update_temperature_dependent_params()`. 
 `rd_to_vcmax_ratio` is still not a `leaf_traits()` member, so it cannot yet be
 fitted or differentiated; it is set as a field.
 
+## A trait gradient at a collar potential the caller supplies
+
+`leaf_gradient()` and `leaf_gradient_batch()` take `psi`, and evaluate there
+instead of solving for the profit-maximising collar
+([#88](https://github.com/traitecoevo/phylloptim/issues/88)). Until now both
+called `find_root_collar_psi()` unconditionally and read `opt_root_psi_` back,
+so a model that **tracks** the optimum rather than finding it — plant's TF24f
+carries the collar as an ODE state, `dpsi/dt = k * dprofit/dpsi` — could not ask
+this package for a trait gradient at the point it was actually operating at. It
+got a confident answer about the re-solved optimum instead, with nothing saying
+so.
+
+The maths simplifies rather than breaks: `psi` is exogenous, so the indirect term
+is whatever the caller says it is, via `dpsi_dtheta` (default zero, the partial
+at fixed collar). Nothing is derived from `-M/H`, so nothing needs stationarity,
+and `method` is refused — the two routes it chooses between are both about a
+solved optimum.
+
+`M`, `H`, `dY_dpsi` and `psi` now come back in the result on both paths. A caller
+whose `psi` is *dynamic* cannot supply `dpsi_dtheta` as a constant: for the
+gradient-ascent law above it obeys `ds/dt = k(M + H s)`, and those are its
+coefficients (traitecoevo/plant#614).
+
+⚠️ **`stationarity` is still computed on the prescribed path, and now means
+something better.** It no longer routes anything — it measures how far the collar
+you supplied sits from the optimum. It makes exactly one decision, `profit`'s:
+at a stationary point the envelope theorem applies and the analytic zero is used;
+away from one the *exact* `dprofit/dpsi` is used rather than a difference of it.
+One rule, both paths — which is why `psi = <the solved psi*>` with
+`dpsi_dtheta = -M/H` reproduces the solving path **bit-for-bit**, asserted with
+`identical()` rather than a tolerance.
+
+⚠️ **A clamped `psi` returns no gradient, and this is the case to understand.**
+The collar actually used is `psi` clamped into the feasible interval, so it moves
+with the *bound* rather than with `dpsi_dtheta` — the active-set problem arriving
+through the clamp instead of through the optimiser, where the direct term alone
+is plausible and wrong. `status` reports `"clamped"`, the gradient is `NA`, and
+`psi` in the result is the collar that was used. Reported rather than thrown
+because a tracking model reaches these points routinely: the clamp is how TF24f
+pulls an out-of-range state back inside. It also fires for a `psi` within one
+step of an end, where `dY/dpsi` cannot be centred.
+
+The solving path is unchanged and bit-identical, including `gradient_golden.tsv`.
+
+⚠️ **An INFEASIBLE prescribed `psi` is `"no-gradient"`, not a sentinel zero.**
+`dprofit_droot_collar_psi` returns a hard `0.0` on its shut-down and
+reversed-gradient exits, and a bare zero is indistinguishable from a stationary
+point. The solving path got away with reading the value alone because `H`
+collapses to zero with it and `usable` catches the pair; the prescribed path
+never divides by `H`, so it would have adopted the sentinel *as* `dprofit/dpsi`
+— silently losing profit's indirect term at exactly the dry points a tracking
+model lives in. Most such points are caught as `"clamped"` first, but not the one
+where the caller hands back the collar the shut-down state itself seated.
+
+**`Leaf$dprofit_droot_collar_psi_checked()` is new and is what makes that
+possible.** The `bool* feasible` out-parameter has been there since #79 and the
+C++ vignette has always said a composite ignoring it inherits the bug — but
+RcppR6 has no form for a `bool*`, so the generated binding dropped it and every
+R-side composite *was* that composite. It returns `{dprofit, feasible}`.
+
+C++ consumers get the same through `gradient::Prescribed` and the new
+`psi`/`dpsi_dtheta` arguments to `gradient::batch`. `Status` gains `Prescribed`
+and `Clamped` — ⚠️ **appended after `Error`, so no existing integer value
+moves**, and `status_name`'s switch is exhaustive with no `default:` so the next
+member added is a compiler diagnostic rather than a silent `"error"` label.
+
+## The gradient differentiates `profit`, which is what a demographic caller bills
+
+`leaf_gradient()` and `leaf_gradient_batch()` return a fifth column. The four
+that were there — `A`, `gc`, `psi_stem`, `collar` — are what a gas-exchange
+calibration observes, and they were chosen for the customer this feature was
+built for. They are **disjoint** from what `plant` reads off a solved leaf: its
+carbon budget is `leaf.profit_` (not `assim_colimited_`) and its water budget is
+`leaf.soil_consumption_`. So no trait gradient this package produced reached a
+demographic model at all, at the optimum or anywhere else
+([#87](https://github.com/traitecoevo/phylloptim/issues/87)).
+
+⚠️ **`profit` is the one output the envelope theorem reaches, and the only place
+this package uses it.** At an interior optimum `dprofit/dpsi = 0`, so the
+indirect term `(dprofit/dpsi)(dpsi*/dtheta)` vanishes identically and
+`dprofit/dtheta` is the direct partial at fixed ψ — no `dY/dpsi`, no `−M/H`. It
+is set from that term rather than computed through the composite, exactly as
+`collar` is set from `dpsi*/dtheta` rather than differenced.
+
+**That is a numerical decision, not a tidiness one, and the measurement is the
+reason.** The dropped term is *noise*, not an `h²` truncation: `profit` is the
+maximum, so it is flat, and a central difference of it divides the solve's ~1e-09
+floor by a ~1e-06 step. Over the golden grid's 136 interior rows —
+
+| | median | max |
+|---|---|---|
+| `\|dprofit/dpsi\|`, exact (forward AD) | 4.8e-15 | 5.4e-10 |
+| `\|dprofit/dpsi\|`, central difference | 7.8e-10 | 2.1e-04 |
+| relative move in `dprofit/dtheta` if kept | 2.7e-10 | 8.0e-05 |
+
+— eleven orders between the two instruments at the median, and the worst row sits
+in the band this repo calls a real difference rather than rounding. The identity
+is applied only where `status == "interior"`; at a pinned optimum `psi*` is a
+trait-dependent bound, `dprofit/dpsi` is not zero, and `profit` takes the same
+finite-difference fallback as the other four.
+
+The four existing columns are **bit-identical** — this is additive, like
+appending to `gradient_par_names()`. `tests/testthat/gradient_golden.tsv` gains a
+column and no existing cell moved, checked against master rather than against the
+branch point.
+
+⚠️ **The shut-down row's profit column is asserted against a closed form, not
+only recorded.** It is the one regime where `profit_` is written by a branch that
+leaves the other outputs alone (hazard 8), so a hex with nothing saying what it
+ought to be would pin a number rather than a fact. There `E = 0`, so `A = -R_d`
+exactly and the hydraulic cost does not depend on `R_d_25`: `dprofit/dR_d_25` is
+**−1**. And the shut-down collar is pinned at `psi_crit`, so
+`dcollar/dpsi_crit` is **1** — which is why `psi_crit` alone carries a non-zero
+profit gradient there.
+
+**`gradient_output_names()` is exported**, and R now *reads* the list rather than
+keeping a second copy. `gradient_par_names()` has to be duplicated-and-compared
+because R builds `theta` before any C++ call; the outputs have no such
+constraint, so adding one is a single edit.
+
+⚠️ **`uptake` was considered and is not here.** Every output must be a field R
+*copies* out of `operating_point_values()`; `uptake` is one R *computes*, by
+summing over the finite soil layers, so adding it means reproducing that
+summation and its order on the C++ side too. That is a separate decision from
+this one.
+
 ## An out-of-domain transport lookup says which spline, and which caller
 
 The stem curve is the only interpolator here built with extrapolation disabled, so

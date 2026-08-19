@@ -9,6 +9,8 @@ leaf_gradient_batch(
   traits = NULL,
   pars = NULL,
   theta = NULL,
+  psi = NULL,
+  dpsi_dtheta = NULL,
   step = 1e-06,
   stationarity_tol = 1e-08,
   method = c("auto", "ift", "fd"),
@@ -28,6 +30,18 @@ the most expensive thing you can ask for.}
 
 \item{theta}{the model parameters as a matrix, for the case where they vary
 by observation. See the section above.}
+
+\item{psi}{one collar water potential per observation to evaluate at
+(positive magnitudes, MPa) instead of solving for the profit-maximising
+one. See [leaf_gradient()]'s section on it. Recycling a single value across
+the batch is deliberately not offered — rows sharing an imposed collar is a
+coincidence rather than a design, and broadcasting one would make a length
+mismatch look intentional.}
+
+\item{dpsi_dtheta}{how each prescribed `psi` responds to each parameter:
+an `n` × `length(pars)` matrix, or one vector of `length(pars)` shared by
+every observation. Defaults to zero. Must be finite, for the reason
+[leaf_gradient()] records. Only meaningful with `psi`.}
 
 \item{step}{relative step for the trait difference. The default `1e-06` is
 near the middle of the five decades over which the mixed partial was
@@ -58,13 +72,18 @@ the two routes to agree. `stem_c` has no such identity and always rebuilds.}
 \value{
 A list with
   \describe{
-    \item{`gradient`}{an `n` × `length(pars)` × 4 array, the last dimension
-      being `A`, `gc`, `psi_stem` and `collar`}
-    \item{`value`}{an `n` × 4 matrix of the solved outputs}
-    \item{`method`}{`"ift"` or `"fd"` per observation}
-    \item{`status`}{`"interior"`, `"pinned"`, `"no-gradient"` or `"error"`}
+    \item{`gradient`}{an `n` × `length(pars)` × 5 array, the last dimension
+      being `A`, `gc`, `psi_stem`, `collar` and `profit`}
+    \item{`value`}{an `n` × 5 matrix of the solved outputs}
+    \item{`method`}{`"ift"`, `"fd"` or `"prescribed"` per observation}
+    \item{`status`}{`"interior"`, `"pinned"`, `"no-gradient"`, `"error"`,
+      or with `psi` one of `"prescribed"`, `"clamped"`, `"no-gradient"`}
     \item{`H`, `stationarity`}{the curvature and the implied Newton step
       `method` was decided on, per observation}
+    \item{`M`}{an `n` × `length(pars)` matrix of mixed partials
+      `d2profit/dpsi dtheta`}
+    \item{`dY_dpsi`}{an `n` × 5 matrix of `dY/dpsi` at fixed traits}
+    \item{`psi`}{the collar each row was evaluated at}
     \item{`message`}{`""`, or why that row failed}
   }
 }
@@ -75,7 +94,7 @@ observation.
 }
 \section{What it computes, and where the maths is written down}{
 
-The same four derivatives at the same solved operating point, by the same two
+The same five derivatives at the same solved operating point, by the same two
 routes, with the same active-set test deciding between them. **Read
 [leaf_gradient()]'s documentation for all of it** — the implicit function
 theorem, why the second term is not a correction, why the premise is tested

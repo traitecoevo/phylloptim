@@ -378,6 +378,18 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// Leaf__dprofit_droot_collar_psi_checked
+std::vector<double> Leaf__dprofit_droot_collar_psi_checked(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double opt_root_psi);
+RcppExport SEXP _phylloptim_Leaf__dprofit_droot_collar_psi_checked(SEXP obj_SEXP, SEXP opt_root_psiSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    Rcpp::traits::input_parameter< double >::type opt_root_psi(opt_root_psiSEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__dprofit_droot_collar_psi_checked(obj_, opt_root_psi));
+    return rcpp_result_gen;
+END_RCPP
+}
 // Leaf__psi_stem_to_ci
 double Leaf__psi_stem_to_ci(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem, double psi_upstream);
 RcppExport SEXP _phylloptim_Leaf__psi_stem_to_ci(SEXP obj_SEXP, SEXP psi_stemSEXP, SEXP psi_upstreamSEXP) {
@@ -2420,6 +2432,16 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// gradient_output_names
+std::vector<std::string> gradient_output_names();
+RcppExport SEXP _phylloptim_gradient_output_names() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(gradient_output_names());
+    return rcpp_result_gen;
+END_RCPP
+}
 // gradient_batch_prepare
 SEXP gradient_batch_prepare(Rcpp::List root_network, Rcpp::List psi_soil, Rcpp::List soil_depth, Rcpp::NumericVector PPFD, Rcpp::NumericVector atm_vpd, Rcpp::NumericVector ca, Rcpp::NumericVector leaf_temp, Rcpp::NumericVector atm_o2_kpa, Rcpp::NumericVector atm_kpa);
 RcppExport SEXP _phylloptim_gradient_batch_prepare(SEXP root_networkSEXP, SEXP psi_soilSEXP, SEXP soil_depthSEXP, SEXP PPFDSEXP, SEXP atm_vpdSEXP, SEXP caSEXP, SEXP leaf_tempSEXP, SEXP atm_o2_kpaSEXP, SEXP atm_kpaSEXP) {
@@ -2450,8 +2472,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // gradient_batch_run
-Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, SEXP drivers, Rcpp::NumericMatrix theta, Rcpp::IntegerVector pars, double step, double stationarity_tol, std::string method, bool fast_stem_curve);
-RcppExport SEXP _phylloptim_gradient_batch_run(SEXP obj_SEXP, SEXP driversSEXP, SEXP thetaSEXP, SEXP parsSEXP, SEXP stepSEXP, SEXP stationarity_tolSEXP, SEXP methodSEXP, SEXP fast_stem_curveSEXP) {
+Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, SEXP drivers, Rcpp::NumericMatrix theta, Rcpp::IntegerVector pars, double step, double stationarity_tol, std::string method, bool fast_stem_curve, SEXP psi, SEXP dpsi_dtheta);
+RcppExport SEXP _phylloptim_gradient_batch_run(SEXP obj_SEXP, SEXP driversSEXP, SEXP thetaSEXP, SEXP parsSEXP, SEXP stepSEXP, SEXP stationarity_tolSEXP, SEXP methodSEXP, SEXP fast_stem_curveSEXP, SEXP psiSEXP, SEXP dpsi_dthetaSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -2463,7 +2485,9 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type stationarity_tol(stationarity_tolSEXP);
     Rcpp::traits::input_parameter< std::string >::type method(methodSEXP);
     Rcpp::traits::input_parameter< bool >::type fast_stem_curve(fast_stem_curveSEXP);
-    rcpp_result_gen = Rcpp::wrap(gradient_batch_run(obj_, drivers, theta, pars, step, stationarity_tol, method, fast_stem_curve));
+    Rcpp::traits::input_parameter< SEXP >::type psi(psiSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type dpsi_dtheta(dpsi_dthetaSEXP);
+    rcpp_result_gen = Rcpp::wrap(gradient_batch_run(obj_, drivers, theta, pars, step, stationarity_tol, method, fast_stem_curve, psi, dpsi_dtheta));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -2510,6 +2534,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__find_psi_stem_from_psi_root", (DL_FUNC) &_phylloptim_Leaf__find_psi_stem_from_psi_root, 3},
     {"_phylloptim_Leaf__evaluate_root_collar_psi", (DL_FUNC) &_phylloptim_Leaf__evaluate_root_collar_psi, 2},
     {"_phylloptim_Leaf__dprofit_droot_collar_psi", (DL_FUNC) &_phylloptim_Leaf__dprofit_droot_collar_psi, 2},
+    {"_phylloptim_Leaf__dprofit_droot_collar_psi_checked", (DL_FUNC) &_phylloptim_Leaf__dprofit_droot_collar_psi_checked, 2},
     {"_phylloptim_Leaf__psi_stem_to_ci", (DL_FUNC) &_phylloptim_Leaf__psi_stem_to_ci, 3},
     {"_phylloptim_Leaf__hydraulic_cost_Sperry", (DL_FUNC) &_phylloptim_Leaf__hydraulic_cost_Sperry, 3},
     {"_phylloptim_Leaf__hydraulic_cost_TF", (DL_FUNC) &_phylloptim_Leaf__hydraulic_cost_TF, 2},
@@ -2695,9 +2720,10 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__lambda_multilayer__get", (DL_FUNC) &_phylloptim_Leaf__lambda_multilayer__get, 1},
     {"_phylloptim_Leaf__g1_eff__get", (DL_FUNC) &_phylloptim_Leaf__g1_eff__get, 1},
     {"_phylloptim_gradient_par_names", (DL_FUNC) &_phylloptim_gradient_par_names, 0},
+    {"_phylloptim_gradient_output_names", (DL_FUNC) &_phylloptim_gradient_output_names, 0},
     {"_phylloptim_gradient_batch_prepare", (DL_FUNC) &_phylloptim_gradient_batch_prepare, 9},
     {"_phylloptim_gradient_batch_check", (DL_FUNC) &_phylloptim_gradient_batch_check, 1},
-    {"_phylloptim_gradient_batch_run", (DL_FUNC) &_phylloptim_gradient_batch_run, 8},
+    {"_phylloptim_gradient_batch_run", (DL_FUNC) &_phylloptim_gradient_batch_run, 10},
     {"_phylloptim_root_network_from_carbon", (DL_FUNC) &_phylloptim_root_network_from_carbon, 4},
     {NULL, NULL, 0}
 };

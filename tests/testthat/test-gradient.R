@@ -220,13 +220,41 @@ test_that("a shut-down operating point reports no gradient and still differences
   # exactly here, so `dA/dR_d_25` is -1 and `dA/dvcmax_25` is EXACTLY zero --
   # vcmax_25 does not reach A at all at a shut-down point, so both perturbed solves
   # return the same bits. The -1 is a central difference and lands within ~6e-11.
-  g <- grid_gradient(6.0, pars = c("vcmax_25", "stem_b", "R_d_25"))
+  g <- grid_gradient(6.0, pars = c("vcmax_25", "stem_b", "R_d_25", "psi_crit"))
   expect_identical(g$status, "no-gradient")
   expect_identical(g$method, "fd")
   expect_equal(g$value[["A"]], -leaf_traits()$R_d_25)
   expect_equal(g$gradient["R_d_25", "A"], -1, tolerance = 1e-8)
   expect_identical(g$gradient["vcmax_25", "A"], 0)
   expect_equal(g$gradient["stem_b", "A"], 0)
+
+  # ⚠️ `profit` NEEDS ITS OWN CLOSED FORM HERE, AND HAS ONE. This is the single
+  # regime where `profit_` is written by a branch that leaves the other outputs
+  # alone (hazard 8), so a recorded hex with nothing saying what it ought to be
+  # would pin a number rather than a fact. Two identities close it:
+  #
+  #   E = 0, so A = -R_d exactly and R_d(25 C) = R_d_25 -- and the hydraulic cost
+  #   does not depend on R_d_25 at all. So dprofit/dR_d_25 = dA/dR_d_25 = -1.
+  l <- leaf_model()
+  do.call(set_drivers, c(list(l), grid_drivers(6.0)))
+  l$find_root_collar_psi()
+  expect_identical(l$transpiration_, 0)
+  expect_identical(l$assim_colimited_, -l$R_d_)
+  expect_identical(g$value[["profit"]],
+                   l$assim_colimited_ - l$hydraulic_cost_)
+  expect_equal(g$gradient["R_d_25", "profit"], -1, tolerance = 1e-8)
+  expect_equal(g$gradient["R_d_25", "profit"], g$gradient["R_d_25", "A"],
+               tolerance = 1e-8)
+
+  #   The shut-down collar is PINNED AT psi_crit, so dcollar/dpsi_crit is exactly
+  #   1 -- which is why psi_crit, alone among the four, carries a non-zero profit
+  #   gradient here: it moves the collar, and the collar sets the hydraulic cost.
+  #   That is the whole explanation of a column that would otherwise look like
+  #   noise, and it is asserted rather than described.
+  expect_equal(g$gradient["psi_crit", "collar"], 1, tolerance = 1e-8)
+  expect_equal(g$gradient["psi_crit", "psi_stem"], 1, tolerance = 1e-8)
+  expect_lt(g$gradient["psi_crit", "profit"], 0)
+  expect_identical(g$gradient["psi_crit", "A"], 0)
 
   # Forcing the composite here is an error rather than a wrong number: unlike a
   # pinned point, there is no curvature to divide by at all.
@@ -370,7 +398,8 @@ test_that("the two non-trait parameters agree with a resolved reference", {
       a[[par]] <- value
     }
     x <- do.call(leaf_solve, a)
-    c(A = x$A, gc = x$gc, psi_stem = x$psi_stem, collar = x$collar)
+    c(A = x$A, gc = x$gc, psi_stem = x$psi_stem, collar = x$collar,
+      profit = x$profit)
   }
 
   g <- do.call(leaf_gradient,
@@ -495,16 +524,108 @@ test_that("leaf_gradient() rejects bad arguments", {
 
 test_that("the gradient is reported for every output the fit needs", {
   # leaf-calibration fits three responses -- A, gs and psi_leaf -- so all three
-  # are differentiated, not just A. `collar` comes along because it is psi*.
+  # are differentiated, not just A. `collar` comes along because it is psi*, and
+  # `profit` because it is what a DEMOGRAPHIC consumer bills: plant's carbon is
+  # `leaf.profit_`, not `assim_colimited_`, so without it the four columns above
+  # -- the calibration set -- were disjoint from plant's (#87).
   g <- grid_gradient(2.0, pars = "vcmax_25")
-  expect_identical(colnames(g$gradient), c("A", "gc", "psi_stem", "collar"))
-  expect_identical(names(g$value), c("A", "gc", "psi_stem", "collar"))
+  expect_identical(colnames(g$gradient),
+                   c("A", "gc", "psi_stem", "collar", "profit"))
+  expect_identical(names(g$value),
+                   c("A", "gc", "psi_stem", "collar", "profit"))
   expect_true(all(is.finite(g$gradient)))
   # Raising vcmax_25 raises assimilation and opens the stomata, and the leaf pays
   # for it with a more negative water potential (a larger positive magnitude).
   expect_gt(g$gradient["vcmax_25", "A"], 0)
   expect_gt(g$gradient["vcmax_25", "gc"], 0)
   expect_gt(g$gradient["vcmax_25", "psi_stem"], 0)
+  # More photosynthetic capacity is worth having: profit is A minus the hydraulic
+  # cost, and the extra carbon exceeds the extra cost. It is BELOW dA/dvcmax_25,
+  # which is the statement that the cost is not zero -- the cheapest available
+  # check that this column is the objective and not a copy of A.
+  expect_gt(g$gradient["vcmax_25", "profit"], 0)
+  expect_lt(g$gradient["vcmax_25", "profit"], g$gradient["vcmax_25", "A"])
+})
+
+test_that("profit's gradient is the direct term alone at an interior optimum", {
+  # The envelope theorem, which is the ONE place this package uses it. At an
+  # interior optimum dprofit/dpsi == 0, so the indirect term
+  # (dprofit/dpsi)(dpsi*/dtheta) vanishes IDENTICALLY, and dprofit/dtheta is the
+  # direct partial at fixed psi. `leaf_gradient()` encodes that by ASSIGNING the
+  # profit column from the direct term -- it does not zero dY_dpsi["profit"],
+  # which carries the exact dprofit/dpsi for the pinned route -- so the check is
+  # that the reported column equals a direct central difference with the collar
+  # HELD at psi*.
+  #
+  # ⚠️ THE OPERATING POINT IS CHOSEN, NOT ARBITRARY, and choosing it is what makes
+  # this a test rather than a formality. The assignment only matters where the term
+  # it removes is big enough to see, and that term is NOISE rather than an h^2
+  # truncation: `profit` is the maximum, so it is flat, and a central difference
+  # of it divides the solve's ~1e-9 floor by a ~1e-6 step. `?leaf_gradient` has
+  # the distribution over the golden grid's 136 interior rows; what matters here
+  # is that `psi_soil = 0.5, vpd = 2, 3 layers` is the WORST of them at 8.0e-05,
+  # so a tolerance three orders inside that fails if the assignment is removed.
+  # At the suite's usual `grid_drivers(2.0)` the same term is 2.9e-10 and this
+  # test would pass either way, which is the version of it written first.
+  #
+  # ⚠️ Those figures are macOS/arm64's, and the second half of this test says why
+  # that matters. Read it before adding an assertion on a magnitude here.
+  d <- grid_drivers(0.5, vpd = 2.0, layers = 3L)
+  g <- do.call(leaf_gradient, c(d, list(pars = "vcmax_25")))
+  expect_identical(g$status, "interior")
+
+  l <- leaf_model(leaf_traits(), leaf_control(), leaf_supply_multilayer())
+  do.call(set_drivers, c(list(l), d))
+  l$find_root_collar_psi()
+  psi_star <- l$opt_root_psi_
+
+  # The two instruments, both read on a leaf still at base traits.
+  hp <- max(abs(psi_star), 1) * 1e-6
+  exact <- l$dprofit_droot_collar_psi(psi_star)
+  l$evaluate_root_collar_psi(psi_star + hp)
+  hi <- l$profit_
+  l$evaluate_root_collar_psi(psi_star - hp)
+  lo <- l$profit_
+  fd <- (hi - lo) / (2 * hp)
+
+  # The answer itself, against a direct difference at fixed collar. THIS IS THE
+  # PART THAT HOLDS EVERYWHERE -- it is the claim the feature makes, and it does
+  # not depend on how big the term that was dropped happens to be.
+  v <- leaf_traits()$vcmax_25
+  h <- max(abs(v), 1) * 1e-6
+  at <- function(x) {
+    set_traits(l, leaf_traits(vcmax_25 = x))
+    do.call(set_drivers, c(list(l), d))
+    l$evaluate_root_collar_psi(psi_star)
+    l$profit_
+  }
+  direct <- (at(v + h) - at(v - h)) / (2 * h)
+  expect_equal(g$gradient["vcmax_25", "profit"], direct, tolerance = 1e-7)
+
+  # ⚠️ THE MAGNITUDES BELOW ARE PLATFORM-SPECIFIC, AND THE FIRST VERSION OF THIS
+  # TEST ASSERTED THEM EVERYWHERE. It passed on macOS/arm64 and failed on Linux
+  # CI, where the same operating point gives `exact` = 6.6e-11 and `fd` = 8.0e-10
+  # rather than 2.4e-15 and 2.1e-04.
+  #
+  # That is not a different answer, it is a different NOISE FLOOR: which side of
+  # the collar solver's tolerance the root-find lands on is set by libm's exp/pow,
+  # and those are not reproducible between Apple's arm64 libm and glibc on
+  # x86-64. The package already has a name for that -- it is the same reason the
+  # golden files compare bit-exactly on one platform and with a tolerance
+  # elsewhere -- so the same predicate gates it here.
+  #
+  # ⚠️ So this test has TEETH only on the platform the measurement was made on.
+  # Off it, the check above still holds and the one below is skipped; a Linux-only
+  # run would not catch the assignment being removed. Said plainly rather than left
+  # for someone to discover from a green CI.
+  skip_if_not(golden_bit_exact_platform(),
+              "the noise floor these two numbers measure is macOS/arm64's")
+  # The exact instrument says stationary to solver precision; the differenced one
+  # says nothing of the kind. Asserting BOTH is the point -- it is the difference
+  # between "the dropped term is small" and "the dropped term is unmeasurable by
+  # the route that would have supplied it".
+  expect_lt(abs(exact), 1e-12)
+  expect_gt(abs(fd), 1e-5)
 })
 
 # ---------------------------------------------------------------------------
@@ -612,4 +733,228 @@ test_that("the setter's positional trait call cannot drift in arity", {
   expect_length(leaf_traits(), 14L)
   expect_length(formals(leaf_model()$set_traits), 14L)
   expect_identical(names(leaf_traits()), names(formals(leaf_model()$set_traits)))
+})
+
+# --- a collar potential the caller supplies (#88) -----------------------------
+
+test_that("a prescribed psi at psi* reproduces the solving path bit-for-bit", {
+  # ⚠️ THE LOAD-BEARING TEST OF THE WHOLE FEATURE, and the reason `psi` reuses
+  # `.gradient_ift()` rather than getting a composite of its own. Give it back
+  # the collar it solved for, and the response of that collar that it derived,
+  # and the two paths are the same arithmetic -- so this is `identical()` and not
+  # a tolerance. Anything that made the prescribed path a second implementation
+  # would show up here as a last-bit difference rather than as a design note.
+  d <- grid_drivers(2.0)
+  pars <- c("vcmax_25", "stem_b", "cost_scale_TF24")
+  a <- do.call(leaf_gradient, c(d, list(pars = pars)))
+  expect_identical(a$status, "interior")
+
+  b <- do.call(leaf_gradient,
+               c(d, list(pars = pars, psi = a$psi, dpsi_dtheta = -a$M / a$H)))
+  expect_identical(b$status, "prescribed")
+  expect_identical(b$method, "prescribed")
+  expect_identical(b$gradient, a$gradient)
+  expect_identical(b$M, a$M)
+  expect_identical(b$dY_dpsi, a$dY_dpsi)
+  expect_identical(b$psi, a$psi)
+
+  # `collar` IS psi, so its column must be exactly what was supplied -- the one
+  # column whose value the caller controls outright.
+  expect_identical(unname(b$gradient[, "collar"]), unname(-a$M / a$H))
+
+  # And the equivalence is not an accident of the default: dpsi_dtheta = 0 gives
+  # the direct terms, which differ from the solving path by the indirect term.
+  z <- do.call(leaf_gradient, c(d, list(pars = pars, psi = a$psi)))
+  expect_identical(unname(z$gradient[, "collar"]), rep(0, length(pars)))
+  expect_true(all(abs(z$gradient[, "A"] - a$gradient[, "A"]) > 1e-12))
+})
+
+test_that("a prescribed psi off the optimum matches a difference at fixed collar", {
+  # The claim the feature makes: at a collar the caller chose, dY/dtheta is the
+  # direct partial. Checked against a central difference computed the long way,
+  # at a psi deliberately away from psi* so the indirect term the solving path
+  # would add is large and its absence is visible.
+  d <- grid_drivers(2.0)
+  a <- do.call(leaf_gradient, c(d, list(pars = "vcmax_25")))
+  psi_off <- a$psi + 0.2
+  g <- do.call(leaf_gradient, c(d, list(pars = "vcmax_25", psi = psi_off)))
+  expect_identical(g$status, "prescribed")
+  # Far from stationary, which is the regime this exists for.
+  expect_gt(g$stationarity, 1e-3)
+
+  l <- leaf_model(leaf_traits(), leaf_control(), leaf_supply_multilayer())
+  v <- leaf_traits()$vcmax_25
+  h <- max(abs(v), 1) * 1e-6
+  at <- function(x, field) {
+    set_traits(l, leaf_traits(vcmax_25 = x))
+    do.call(set_drivers, c(list(l), d))
+    l$evaluate_root_collar_psi(psi_off)
+    l[[field]]
+  }
+  fields <- c(A = "assim_colimited_", profit = "profit_")
+  for (column in names(fields)) {
+    ref <- (at(v + h, fields[[column]]) - at(v - h, fields[[column]])) / (2 * h)
+    expect_equal(g$gradient["vcmax_25", column], ref, tolerance = 1e-7,
+                 label = column)
+  }
+
+  # profit's dY/dpsi is the EXACT dprofit/dpsi here, not a difference of it --
+  # the same rule as the envelope, reaching the opposite answer because the point
+  # is not stationary. Compare against the primitive directly.
+  set_traits(l, leaf_traits())
+  do.call(set_drivers, c(list(l), d))
+  expect_identical(g$dY_dpsi[["profit"]], l$dprofit_droot_collar_psi(psi_off))
+  expect_gt(abs(g$dY_dpsi[["profit"]]), 1)
+})
+
+test_that("a clamped psi reports itself and returns no gradient", {
+  # ⚠️ NOT AN ERROR, AND NOT THE DIRECT TERM EITHER. The collar used is `psi`
+  # clamped into the feasible interval, so it moves with the BOUND rather than
+  # with the caller's dpsi_dtheta -- the active-set problem arriving through the
+  # clamp. The direct term alone would be plausible and wrong, so it is withheld;
+  # a tracking model reaches these points routinely, so it is reported and not
+  # thrown.
+  d <- grid_drivers(2.0)
+  pars <- c("vcmax_25", "stem_b")
+
+  g <- do.call(leaf_gradient, c(d, list(pars = pars, psi = 99)))
+  expect_identical(g$status, "clamped")
+  expect_identical(g$method, "prescribed")
+  expect_true(all(is.na(g$gradient)))
+  expect_true(all(is.na(g$M)))
+  expect_true(all(is.na(g$dY_dpsi)))
+  # What the point IS still comes back: `psi` is the collar actually used, and
+  # `value` describes it. That is what lets a caller see where it was pulled to.
+  expect_lt(g$psi, 99)
+  expect_true(all(is.finite(g$value)))
+
+  # And it fires one step inside the end too, because dY/dpsi cannot be centred
+  # there -- a one-sided difference over a shortened interval is the same failure
+  # the solving path's clamp detector refuses.
+  a <- do.call(leaf_gradient, c(d, list(pars = pars)))
+  expect_identical(
+    do.call(leaf_gradient, c(d, list(pars = pars, psi = g$psi)))$status,
+    "clamped")
+  # ...while a psi comfortably inside it does not.
+  expect_identical(
+    do.call(leaf_gradient, c(d, list(pars = pars, psi = a$psi)))$status,
+    "prescribed")
+})
+
+test_that("an integer psi is not mistaken for a clamped one", {
+  # ⚠️ THE CLAMP TEST IS `identical()` AGAINST WHAT THE CALLER PASSED, and
+  # `identical(3, 3L)` is FALSE. So an integer `psi` -- `psi = 3L`, or the
+  # entirely ordinary `for (p in 2:5)`, since `2:5` yields integers -- was
+  # reported CLAMPED at a collar it had been given exactly, with an all-NA
+  # gradient and a `psi` in the result showing no movement, so there was nothing
+  # to notice.
+  #
+  # Neither sibling had it: `.gradient_check_psi_batch()` already coerced, and
+  # C++'s `util::identical` is `a == b`. R alone, and only because the checker's
+  # return was discarded.
+  d <- grid_drivers(2.0)
+  a <- do.call(leaf_gradient, c(d, list(pars = "vcmax_25")))
+  whole <- 3                        # inside the feasible interval at this point
+  dbl <- do.call(leaf_gradient, c(d, list(pars = "vcmax_25", psi = whole)))
+  int <- do.call(leaf_gradient,
+                 c(d, list(pars = "vcmax_25", psi = as.integer(whole))))
+  expect_identical(dbl$status, "prescribed")
+  expect_identical(int$status, "prescribed")
+  expect_identical(int$gradient, dbl$gradient)
+  expect_identical(int$psi, dbl$psi)
+
+  # And the batch entry point agrees on the same input, which it did not before.
+  b <- leaf_batch(psi_soil = 2.0, PPFD = 900)
+  expect_identical(
+    leaf_gradient_batch(b, pars = "vcmax_25",
+                        psi = as.integer(whole))$status, "prescribed")
+})
+
+test_that("an infeasible prescribed psi is no-gradient, not a sentinel zero", {
+  # ⚠️ `dprofit_droot_collar_psi` RETURNS A HARD 0.0 ON ITS SHUT-DOWN EXIT, and a
+  # bare zero is indistinguishable from a stationary point. The solving path got
+  # away with reading the value alone because `H` collapses to zero with it and
+  # `usable` catches the pair; the prescribed path never divides by `H`, so it
+  # would have adopted the sentinel AS dprofit/dpsi -- and with a non-zero
+  # `dpsi_dtheta`, which is the case this feature exists for, silently lost
+  # profit's indirect term at exactly the dry points a tracking model lives in.
+  #
+  # The fix reads the feasibility flag the header has always had and R could not
+  # reach. Most such points are caught as `clamped` first -- the shut-down state
+  # seats a collar of its own choosing -- so the test hands back exactly that
+  # collar, which is the case `clamped` cannot see.
+  d <- grid_drivers(6.0)                       # drier than psi_crit: shut down
+  solved <- do.call(leaf_gradient, c(d, list(pars = "vcmax_25")))
+  expect_identical(solved$status, "no-gradient")
+
+  g <- do.call(leaf_gradient,
+               c(d, list(pars = "vcmax_25", psi = solved$psi,
+                         dpsi_dtheta = 1)))
+  # Unclamped -- it is the collar the shut-down state itself seated -- and still
+  # refused, which is the whole point of the test.
+  expect_identical(g$psi, solved$psi)
+  expect_identical(g$status, "no-gradient")
+  expect_true(all(is.na(g$gradient)))
+  expect_true(all(is.na(g$dY_dpsi)))
+
+  b <- leaf_batch(psi_soil = 6.0, PPFD = 900)
+  expect_identical(leaf_gradient_batch(b, pars = "vcmax_25",
+                                       psi = solved$psi)$status, "no-gradient")
+})
+
+test_that("psi and dpsi_dtheta are validated together", {
+  d <- grid_drivers(2.0)
+  gr <- function(...) do.call(leaf_gradient, c(d, list(pars = "vcmax_25", ...)))
+  expect_error(gr(psi = -1), "positive")
+  expect_error(gr(psi = 0), "positive")
+  expect_error(gr(psi = c(1, 2)), "single")
+  expect_error(gr(psi = NA_real_), "finite")
+  # `method` is about a solved optimum, so it cannot come with a collar the
+  # caller chose -- "fd" especially, which would difference the solve and answer
+  # a question about the optimum instead.
+  expect_error(gr(psi = 2, method = "fd"), "cannot be given with `psi`")
+  expect_error(gr(psi = 2, method = "ift"), "cannot be given with `psi`")
+  # dpsi_dtheta without psi is meaningless: there the collar's response is
+  # derived, not supplied.
+  expect_error(gr(dpsi_dtheta = 1), "needs `psi`")
+  expect_error(gr(psi = 2, dpsi_dtheta = c(1, 2)), "length 1 or one value")
+  expect_error(gr(psi = 2, dpsi_dtheta = c(nope = 1)), "names must be exactly")
+
+  # ⚠️ AN INFINITE `dpsi_dtheta` IS REFUSED, AND THE ENVELOPE IS WHY. The
+  # composite is `direct + dY_dpsi * dpsi_dtheta`, so four columns come back
+  # +-Inf -- but `profit` is ASSIGNED from the direct term at a stationary psi
+  # rather than multiplied through, so it came back finite and plausible beside
+  # them. Measured at `psi = psi*` with `dpsi_dtheta = Inf`: A, gc, psi_stem and
+  # collar all Inf, profit 0.0105. Reading `profit` alone is plant's own case
+  # (#87), so the one surviving column was the one most likely to be believed.
+  #
+  # `anyNA` already caught NA and NaN; `Inf` it did not, and `is.finite` is the
+  # single check that covers all three.
+  expect_error(gr(psi = 2, dpsi_dtheta = Inf), "finite")
+  expect_error(gr(psi = 2, dpsi_dtheta = -Inf), "finite")
+  expect_error(gr(psi = 2, dpsi_dtheta = NaN), "finite")
+  # At psi* specifically, which is where the envelope fires and where the
+  # asymmetry was, rather than only at an arbitrary prescribed collar.
+  solved <- do.call(leaf_gradient, c(d, list(pars = "vcmax_25")))
+  expect_error(gr(psi = solved$psi, dpsi_dtheta = Inf), "finite")
+
+  # The batch entry point validates the same way, on BOTH shapes it accepts --
+  # the matrix form never reaches `.gradient_dpsi_dtheta()`, so one check there
+  # would have left it open.
+  b <- leaf_batch(psi_soil = c(2.0, 2.5), PPFD = 900)
+  expect_error(leaf_gradient_batch(b, pars = "vcmax_25", psi = c(3, 3),
+                                   dpsi_dtheta = Inf), "finite")
+  expect_error(leaf_gradient_batch(b, pars = "vcmax_25", psi = c(3, 3),
+                                   dpsi_dtheta = matrix(c(1, Inf), nrow = 2)),
+               "finite")
+
+  # Named is matched by name, not by position -- the same discipline `pars` has,
+  # for the same reason.
+  pars <- c("vcmax_25", "stem_b")
+  by_name <- do.call(leaf_gradient,
+                     c(d, list(pars = pars, psi = 3.0,
+                               dpsi_dtheta = c(stem_b = 2, vcmax_25 = 1))))
+  by_pos <- do.call(leaf_gradient,
+                    c(d, list(pars = pars, psi = 3.0, dpsi_dtheta = c(1, 2))))
+  expect_identical(by_name$gradient, by_pos$gradient)
 })

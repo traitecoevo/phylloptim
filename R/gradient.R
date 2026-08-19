@@ -96,8 +96,9 @@ set_traits <- function(x, traits) {
 
 ##' Trait gradients of a solved operating point
 ##'
-##' The derivatives of the solved outputs with respect to the traits: `dA/dtheta`,
-##' `dgc/dtheta`, `dpsi_stem/dtheta` and `dcollar/dtheta`, at one operating point.
+##' The derivatives of the solved outputs with respect to the traits:
+##' `dA/dtheta`, `dgc/dtheta`, `dpsi_stem/dtheta`, `dcollar/dtheta` and
+##' `dprofit/dtheta`, at one operating point.
 ##'
 ##' @section The maths, and why it is not just a finite difference:
 ##' The reported outputs are evaluated at the profit-maximising collar potential
@@ -119,6 +120,92 @@ set_traits <- function(x, traits) {
 ##'
 ##' The second term is not a correction. For `cost_scale_TF24`, `beta2`, `stem_b`
 ##' and `stem_c` it is 100% of the answer, and for `vcmax_25` 52%.
+##'
+##' @section profit, which is the one output the envelope theorem reaches:
+##' The first four outputs are what a gas-exchange calibration observes. `profit`
+##' is here because it is what a **demographic** consumer bills: plant's carbon
+##' budget reads `leaf.profit_`, not `assim_colimited_`, so before it was added
+##' the two sets were disjoint and no gradient from this package reached a
+##' demographic model at all.
+##'
+##' It is also the cheapest of the five, because it is the objective. At an
+##' interior optimum `dprofit/dpsi = 0`, so the indirect term above vanishes
+##' identically and
+##'
+##' \deqn{dprofit/d\theta = \partial profit/\partial\theta|_{\psi^*}}
+##'
+##' -- the direct partial alone, with no `dY/dpsi` and no `-M/H`. That is the
+##' envelope theorem, and it is the only place this package uses it.
+##'
+##' ⚠️ **The term this drops is noise, not an `h^2` truncation, and that is why
+##' dropping it matters.** `profit` is the maximum, so it is flat, and a central
+##' difference of it at `psi*` divides the solve's ~1e-09 floor by a ~1e-06 step.
+##' Over the golden grid's 136 interior rows:
+##'
+##' | | median | max |
+##' |---|---|---|
+##' | `\|dprofit/dpsi\|`, exact (forward AD) | 4.8e-15 | 5.4e-10 |
+##' | `\|dprofit/dpsi\|`, central difference | 7.8e-10 | 2.1e-04 |
+##' | relative move in `dprofit/dtheta` if kept | 2.7e-10 | 8.0e-05 |
+##'
+##' Eleven orders between the two instruments at the median, and the worst row
+##' sits in the band this package calls a real difference. So `dprofit/dtheta` is
+##' set from the direct term rather than computed through the composite, exactly
+##' as `collar` is set from `dpsi*/dtheta` rather than differenced.
+##'
+##' ⚠️ **The envelope does not survive the active set.** At a pinned optimum
+##' `psi*` is a trait-dependent bound and `dprofit/dpsi` is not zero there, so the
+##' indirect term is real. This applies the identity only where `status` is
+##' `"interior"`; everywhere else `profit` goes through the same finite-difference
+##' fallback as the other four.
+##'
+##' @section A collar potential you supply, instead of the one this solves for:
+##' Pass `psi` and the outputs are evaluated at that collar rather than at the
+##' argmax. This is for a caller whose model **tracks** the optimum instead of
+##' finding it — plant's TF24f carries the collar potential as an ODE state,
+##' `dpsi/dt = k * dprofit/dpsi`, so at finite gain its `dprofit/dpsi` is
+##' deliberately non-zero and *is* the acclimation rate.
+##'
+##' There the derivation above simplifies rather than breaks. `psi` is exogenous,
+##' so the indirect term is whatever the caller says it is:
+##'
+##' \deqn{dY/d\theta = \partial Y/\partial\theta|_\psi +
+##'                    (\partial Y/\partial\psi)(d\psi/d\theta)}
+##'
+##' with `dpsi_dtheta` supplied — defaulting to zero, the partial at fixed
+##' collar. Nothing is derived from `-M/H`, so nothing needs stationarity, and
+##' `method` is refused because the two routes it chooses between are both about
+##' a solved optimum.
+##'
+##' `M`, `H` and `dY_dpsi` come back in the result, because a caller with a
+##' *dynamic* `psi` cannot supply `dpsi_dtheta` as a constant: for the
+##' gradient-ascent law above it obeys `ds/dt = k(M + H s)`, and those are its
+##' coefficients. Its fixed point is `-M/H`, which is what the solving path
+##' returns — the two agree in the large-gain limit.
+##'
+##' ⚠️ **`stationarity` is still reported, and is used for exactly one thing.**
+##' It no longer routes anything; it now measures how far the collar you supplied
+##' sits from the optimum. The one decision it makes is `profit`'s: at a
+##' stationary point the envelope theorem applies and the analytic zero is used,
+##' and away from one the exact `dprofit/dpsi` is used instead of differencing
+##' it. So `psi = <the solved psi*>` with `dpsi_dtheta = -M/H` reproduces the
+##' solving path **bit-for-bit**, which the tests assert.
+##'
+##' ⚠️ **An infeasible `psi` gets no gradient either**, reported as
+##' `"no-gradient"`. `dprofit/dpsi` is a sentinel `0.0` on the shut-down and
+##' reversed-gradient exits rather than a derivative, and this path never divides
+##' by `H`, so it would otherwise adopt that zero as the real thing.
+##'
+##' ⚠️ **A clamped `psi` gets no gradient, and that is the interesting case.**
+##' The collar actually used is `psi` clamped into the feasible interval, so it
+##' moves with the *bound* rather than with `dpsi_dtheta` — the active-set
+##' problem, arriving through the clamp instead of through the optimiser. The
+##' direct term alone would be plausible and wrong. `status` reports `"clamped"`
+##' and the gradient is all `NA`; `psi` in the result is the collar that was
+##' used. This is reported rather than thrown because a tracking model reaches
+##' these points routinely — the clamp is how TF24f pulls an out-of-range state
+##' back inside — and it fires for a `psi` within one step of an end too, since
+##' `dY/dpsi` cannot be centred there.
 ##'
 ##' @section The active set, which is the reason this function is careful:
 ##' Stationarity is the premise of the whole derivation, and it fails when the
@@ -262,6 +349,16 @@ set_traits <- function(x, traits) {
 ##'   [root_network_from_carbon()] is homogeneous of degree 1 in each constant, so
 ##'   scaling `beta_R_H` scales `r_R_H_min` by the same factor and needs no
 ##'   rebuild — but the two solves are still two solves.
+##' @param psi a collar water potential to evaluate at, in MPa as a positive
+##'   magnitude, instead of solving for the profit-maximising one. `NULL` (the
+##'   default) solves. See the section above; `method` cannot be given with it.
+##' @param dpsi_dtheta how the prescribed `psi` itself responds to each
+##'   parameter, as one value per entry of `pars` (or one value recycled, or a
+##'   vector named by `pars`). Defaults to zero, which is the partial derivative
+##'   at fixed collar. Must be finite — an infinite value would return an
+##'   all-infinite gradient row with a finite, plausible-looking `profit` in it,
+##'   because the envelope theorem assigns that column rather than multiplying
+##'   through. Only meaningful with `psi`.
 ##' @param step relative step for the trait difference. The default `1e-06` is
 ##'   near the middle of the five decades over which the mixed partial was
 ##'   measured stable; it is also used, relative to the collar potential, for the
@@ -288,14 +385,27 @@ set_traits <- function(x, traits) {
 ##' @return A list with
 ##'   \describe{
 ##'     \item{`gradient`}{a matrix, one row per trait in `pars`, with columns
-##'       `A` (umol C m^-2 s^-1 per trait unit), `gc`, `psi_stem` and `collar`}
+##'       `A` (umol C m^-2 s^-1 per trait unit), `gc`, `psi_stem`, `collar` and
+##'       `profit` (also umol C m^-2 s^-1 per trait unit)}
 ##'     \item{`value`}{the solved outputs the gradient is taken at}
 ##'     \item{`method`}{`"ift"` if the implicit-function composite was used,
-##'       `"fd"` if the fallback was}
-##'     \item{`status`}{`"interior"`, `"pinned"` or `"no-gradient"`}
-##'     \item{`H`}{the curvature of profit in the collar potential at `psi*`}
-##'     \item{`stationarity`}{the implied Newton step, in MPa, that `method` was
-##'       decided on}
+##'       `"fd"` if the fallback was, `"prescribed"` if `psi` was given}
+##'     \item{`status`}{`"interior"`, `"pinned"` or `"no-gradient"` on the
+##'       solving path; `"prescribed"`, `"clamped"` or `"no-gradient"` with
+##'       `psi`}
+##'     \item{`H`}{the curvature of profit in the collar potential}
+##'     \item{`stationarity`}{the implied Newton step, in MPa: what `method` was
+##'       decided on, or with `psi` how far the collar you gave is from the
+##'       optimum}
+##'     \item{`M`}{the mixed partial `d2profit/dpsi dtheta`, one per entry of
+##'       `pars`, or `NA` where the fallback ran}
+##'     \item{`dY_dpsi`}{`dY/dpsi` at fixed traits, one per output. `profit`'s
+##'       entry is the analytic zero at a stationary point and the exact
+##'       `dprofit/dpsi` elsewhere -- see the envelope section}
+##'     \item{`psi`}{the collar the outputs were evaluated at: `psi*` on the
+##'       solving path, and on the prescribed path the value actually used,
+##'       which differs from the `psi` argument exactly when `status` is
+##'       `"clamped"`}
 ##'   }
 ##'
 ##' @seealso [leaf_solve()] for the operating point itself, [set_traits()].
@@ -326,6 +436,8 @@ leaf_gradient <- function(psi_soil,
                           control = leaf_control(),
                           supply = leaf_supply_multilayer(),
                           pars = NULL,
+                          psi = NULL,
+                          dpsi_dtheta = NULL,
                           step = 1e-6,
                           stationarity_tol = 1e-8,
                           method = c("auto", "ift", "fd"),
@@ -337,6 +449,12 @@ leaf_gradient <- function(psi_soil,
   if (!(is.numeric(step) && length(step) == 1L && step > 0)) {
     stop("`step` must be a single positive number", call. = FALSE)
   }
+  # ⚠️ THE RETURN IS THE POINT, NOT JUST THE CHECK. `psi` is compared against
+  # `opt_root_psi_` to detect the clamp, and a caller writing `psi = 3L` -- or the
+  # entirely ordinary `for (p in 2:5)`, since `2:5` is integer -- would otherwise
+  # be reported CLAMPED at a collar it was given exactly. The checker coerces;
+  # discarding what it returns was the bug.
+  psi <- .gradient_check_psi(psi, dpsi_dtheta, method)
 
   # --- reusing a Leaf (#52) -------------------------------------------------
   # `x` is a VESSEL, not the point being differentiated: `traits` still says where
@@ -401,6 +519,12 @@ leaf_gradient <- function(psi_soil,
   # Shared with leaf_gradient_batch(), so the two entry points cannot disagree
   # about which parameters exist or explain a rejection differently.
   .gradient_check_pars(pars, identical(supply$kind, "single"))
+  # ⚠️ HERE, NOT WHERE IT IS USED. `dpsi_dtheta` is only READ inside the
+  # composite, which a clamped or shut-down operating point never reaches -- so
+  # validating it there made a wrong-length vector an error at some psi and
+  # silently accepted at others. Argument checking cannot be conditional on what
+  # the model does with the arguments.
+  dpsi_dtheta <- .gradient_dpsi_dtheta(dpsi_dtheta, pars, !is.null(psi))
 
   # ONE leaf for the whole gradient, re-traited rather than reconstructed. This is
   # the measurement that reordered PLAN 11d: a fresh Leaf costs ~155 us against
@@ -433,15 +557,43 @@ leaf_gradient <- function(psi_soil,
       }, silent = TRUE)
     }, add = TRUE)
   }
-  l$find_root_collar_psi()
-
-  psi_star <- l$opt_root_psi_
+  # --- seat the operating point ---------------------------------------------
+  # Two ways in, and which one ran is what everything below branches on. The
+  # default SOLVES for the collar potential; `psi` IMPOSES one, which is what a
+  # caller tracking the optimum rather than finding it has (#88).
+  #
+  # ⚠️ `psi_star` keeps its name on both paths and it is no longer always the
+  # argmax. It is "the collar the outputs were evaluated at", which is what every
+  # use of it below actually means.
+  prescribed <- !is.null(psi)
+  if (prescribed) {
+    l$evaluate_root_collar_psi(psi)
+    # Exact equality, for the reason `.gradient_outputs_at` documents: the clamp
+    # is a min/max, so an unclamped target returns bit-identically.
+    clamped <- !identical(l$opt_root_psi_, psi)
+    psi_star <- l$opt_root_psi_
+  } else {
+    l$find_root_collar_psi()
+    clamped <- FALSE
+    psi_star <- l$opt_root_psi_
+  }
   value <- .gradient_outputs(l)
 
-  # Is the premise true here? See the active-set section: the test is the implied
-  # Newton step, which is a distance in MPa and so needs no scale of its own.
+  # The curvature and the residual, at whichever collar was seated. Both are
+  # differences of `dprofit_droot_collar_psi`, which takes psi as an ARGUMENT --
+  # so neither needs the point to be an optimum, and both mean the same thing on
+  # the two paths.
   h_psi <- max(abs(psi_star), 1) * step
-  resid <- l$dprofit_droot_collar_psi(psi_star)
+  # ⚠️ WITH ITS FEASIBILITY, not bare. `dprofit_droot_collar_psi` returns a hard
+  # 0.0 SENTINEL on its shut-down and reversed-gradient exits, and a bare zero is
+  # indistinguishable from a stationary point -- the header says so, and says a
+  # composite that ignores the flag inherits the bug. The solving path got away
+  # with reading the value alone because `H` collapses to zero too and `usable`
+  # catches the pair; the prescribed path does NOT divide by `H`, so it would
+  # have adopted the sentinel as if it were dprofit/dpsi.
+  checked <- l$dprofit_droot_collar_psi_checked(psi_star)
+  resid <- checked[[1L]]
+  feasible <- checked[[2L]] == 1
   H <- (l$dprofit_droot_collar_psi(psi_star + h_psi) -
         l$dprofit_droot_collar_psi(psi_star - h_psi)) / (2 * h_psi)
   # H == 0 with resid == 0 is the shut-down signature: dprofit returns a sentinel
@@ -449,21 +601,60 @@ leaf_gradient <- function(psi_soil,
   # would not be a maximum. Both mean the composite has nothing to stand on.
   usable <- is.finite(H) && H < 0 && is.finite(resid)
   stationarity <- if (usable) abs(resid / H) else Inf
-  status <- if (!usable) "no-gradient" else
-    if (stationarity > stationarity_tol) "pinned" else "interior"
+
+  if (prescribed) {
+    # ⚠️ THE STATIONARITY TEST DOES NOT ROUTE HERE, AND IS STILL WORTH TAKING.
+    # What it decides on the solving path -- composite or fallback -- is
+    # meaningless at a collar the caller chose: there is no argmax to be pinned
+    # against, and differencing the solve would answer a question about the
+    # optimum instead of about this point. So `method` is rejected upstream.
+    #
+    # The NUMBER keeps its meaning, though, and gains a better one: it is how far
+    # the point you handed over sits from the optimum, in MPa. It is reported,
+    # and it is used for exactly one thing -- see `envelope` below.
+    #
+    # ⚠️ `no-gradient` REACHES THIS PATH TOO, and it is not the same condition as
+    # the solving path's. There, `usable` also demands `H < 0` -- a MAXIMUM test,
+    # which is exactly what a caller-chosen collar has no business satisfying: a
+    # prescribed psi away from the optimum may sit where profit is convex, and
+    # that is fine, because nothing here divides by `H`. What genuinely disables
+    # the point is INFEASIBILITY: the shut-down and reversed-gradient exits, where
+    # `dprofit` is a sentinel rather than a derivative. Almost every such point is
+    # already caught as `clamped` -- the shut-down state seats a collar of its own
+    # choosing -- but "almost" is not a guarantee, since a caller can pass exactly
+    # that collar back.
+    status <- if (clamped) "clamped" else if (!feasible) "no-gradient" else
+      "prescribed"
+  } else {
+    status <- if (!usable) "no-gradient" else
+      if (stationarity > stationarity_tol) "pinned" else "interior"
+  }
 
   # `status` describes the POINT and is reported whichever route runs; `use_ift`
   # is the route. They differ only when the caller has forced one.
-  use_ift <- switch(method,
+  use_ift <- if (prescribed) !clamped && feasible else switch(method,
                     auto = identical(status, "interior"),
                     ift = TRUE,
                     fd = FALSE)
-  if (use_ift && !usable) {
+  if (use_ift && !prescribed && !usable) {
     stop("leaf_gradient(): method = \"ift\" was asked for at a point with no ",
          "usable curvature (H = ", format(H), "), so -M/H has nothing to stand ",
          "on. This is a shut-down or otherwise determined operating point; use ",
          "method = \"auto\".", call. = FALSE)
   }
+  # ⚠️ A CLAMPED PRESCRIBED PSI GETS NO GRADIENT, RATHER THAN THE DIRECT TERM.
+  # It is not a failure -- the outputs at the clamped collar are perfectly good,
+  # and TF24f relies on the clamp to pull an out-of-range tracked state back
+  # inside. It is that the derivative is not the one this can compute: the collar
+  # actually used is `min(max(psi, a(theta)), b(theta))`, so it moves with the
+  # BOUND, and dY/dtheta picks up the bound's derivative rather than the caller's
+  # `dpsi_dtheta`. That is the active-set problem arriving through the clamp
+  # instead of through the optimiser, and the direct term alone would be
+  # plausible and wrong in exactly the documented way.
+  #
+  # Reported rather than thrown, because a fit will visit these points routinely
+  # and `status` is how a batch tells its caller which rows to distrust. The
+  # all-NA result is assembled below, with the second way of reaching it.
 
   if (use_ift) {
     # dY/dpsi at fixed traits. evaluate_root_collar_psi CLAMPS its target into the
@@ -488,40 +679,124 @@ leaf_gradient <- function(psi_soil,
     hi <- .gradient_outputs_at(l, psi_star + h_psi)
     lo <- .gradient_outputs_at(l, psi_star - h_psi)
     if (is.null(hi) || is.null(lo)) {
-      if (identical(method, "ift")) {
+      if (prescribed) {
+        # Same reasoning as the clamp on `psi` itself, one step out: a psi that
+        # is inside the interval but within `h_psi` of an end cannot have dY/dpsi
+        # centred on it, and a one-sided difference over a shortened interval is
+        # the failure this detector exists for. There is no fallback to offer --
+        # differencing the solve would answer about the optimum -- so the row is
+        # reported as clamped.
+        clamped <- TRUE
+        status <- "clamped"
+        use_ift <- FALSE
+      } else if (identical(method, "ift")) {
         stop("leaf_gradient(): method = \"ift\" was asked for at a point whose ",
              "feasible collar interval is narrower than one step, so dY/dpsi ",
              "cannot be centred on psi*. Use method = \"auto\".", call. = FALSE)
+      } else {
+        use_ift <- FALSE
+        status <- "pinned"
       }
-      use_ift <- FALSE
-      status <- "pinned"
     } else {
       dY_dpsi <- (hi - lo) / (2 * h_psi)
+      # `dprofit_droot_collar_psi` is EXACT in psi -- forward AD plus the IFT at
+      # the ci root-find -- so for profit alone the package has something better
+      # than a difference of the same quantity, and it is already computed. The
+      # other four have no such route and must be differenced. One rule, both
+      # paths, which is what keeps `psi = psi*` reproducing the solve exactly.
+      #
+      # ⚠️ THIS IS THE READER #87 SAID DID NOT EXIST YET. Until the prescribed path
+      # landed, the only consumer was `.gradient_ift(envelope = FALSE)` -- a forced
+      # method = "ift" at a pinned point, which throws at all 42 pinned rows of the
+      # grid. A prescribed psi away from the optimum is not stationary, so it takes
+      # this branch for real, and the exactness now matters.
+      dY_dpsi[["profit"]] <- resid
     }
   }
 
-  grad <- if (use_ift) {
-    .gradient_ift(l, reset, theta, pars, psi_star, H, dY_dpsi, step,
-                  fast_stem_curve)
+  # ⚠️ THE ENVELOPE THEOREM, and the only place this package uses it. At a
+  # STATIONARY point dprofit/dpsi is analytically zero, so profit's indirect term
+  # vanishes identically and dprofit/dtheta is the direct partial alone. The
+  # composite is told to ASSIGN that column rather than reach it by multiplying a
+  # near-zero dY/dpsi -- the same treatment `collar` gets, and for the same
+  # reason: an identity is stated, not arrived at.
+  #
+  # ⚠️ The test is `stationarity`, NOT `status`, so the two paths agree at a psi
+  # that happens to BE psi*: `status` carries "prescribed" on one and "interior"
+  # on the other, and routing on it would break the bit-for-bit equivalence while
+  # looking equivalent. It is also not `use_ift`: at a pinned optimum psi* is a
+  # theta-dependent BOUND, dprofit/dpsi is not zero, and the indirect term
+  # survives -- someone forcing method = "ift" there already gets a confidently
+  # wrong number and should not get a differently wrong one for this column.
+  #
+  # The measured size of what this removes is in ?leaf_gradient.
+  envelope <- isTRUE(usable && stationarity <= stationarity_tol)
+
+  if (prescribed && !use_ift) {
+    grad <- matrix(NA_real_, length(pars), length(.gradient_output_names()),
+                   dimnames = list(pars, .gradient_output_names()))
+    M <- stats::setNames(rep(NA_real_, length(pars)), pars)
+    dY_dpsi <- stats::setNames(rep(NA_real_, length(.gradient_output_names())),
+                               .gradient_output_names())
+  } else if (use_ift) {
+    # ONE composite for both paths, which is what makes the equivalence above a
+    # real assertion rather than two implementations that happen to agree. The
+    # only difference is where dpsi/dtheta comes from: derived by the implicit
+    # function theorem when the collar was solved for, and supplied by the caller
+    # when it was imposed -- because then it is not this function's to know.
+    fit <- .gradient_ift(l, reset, theta, pars, psi_star, H, dY_dpsi, step,
+                         fast_stem_curve, dpsi_dtheta = dpsi_dtheta,
+                         envelope = envelope)
+    grad <- fit$gradient
+    M <- fit$M
   } else {
-    .gradient_fd(l, reset, theta, pars, step, fast_stem_curve)
+    grad <- .gradient_fd(l, reset, theta, pars, step, fast_stem_curve)
+    M <- stats::setNames(rep(NA_real_, length(pars)), pars)
+    dY_dpsi <- stats::setNames(rep(NA_real_, length(.gradient_output_names())),
+                               .gradient_output_names())
   }
 
   list(gradient = grad,
        value = value,
-       method = if (use_ift) "ift" else "fd",
+       method = if (prescribed) "prescribed" else if (use_ift) "ift" else "fd",
        status = status,
        H = H,
-       stationarity = stationarity)
+       stationarity = stationarity,
+       M = M,
+       dY_dpsi = dY_dpsi,
+       psi = psi_star)
 }
 
 # --- internals ---------------------------------------------------------------
 
-# The four differentiated outputs, in one place so the composite and the fallback
-# cannot disagree about what they are. `collar` is psi* itself, which makes
-# dcollar/dtheta equal to dpsi*/dtheta -- so the two routes compute the same
-# quantity by different means, and a test can compare them.
-.gradient_output_names <- c("A", "gc", "psi_stem", "collar")
+# The differentiated outputs, READ from C++ rather than restated here.
+#
+# ⚠️ This is deliberately NOT the pattern `.gradient_par_names` uses. That one is a
+# second copy kept honest by a test comparing it with `gradient_par_names()`, and
+# it has to be, because R builds `theta` from `leaf_traits()` and so needs the
+# order before any C++ call. The OUTPUT list has no such constraint, so it is a
+# single definition and there is no hazard comment to write: adding an output is
+# one edit in `gradient.hpp`, not two that can disagree.
+#
+# `collar` is psi* itself, which makes dcollar/dtheta equal to dpsi*/dtheta -- so
+# the two routes compute the same quantity by different means and a test can
+# compare them. `profit` is what plant CONSUMES (`leaf.profit_`, not
+# `assim_colimited_`) and is the one output the envelope theorem reaches; see
+# ?leaf_gradient.
+#
+# ⚠️ Cached at FIRST CALL, not at build time, for the reason
+# `.gradient_outputs_idx()` below records -- and here there is a second reason:
+# calling into the shared library while the package is still being sourced is not
+# something to rely on.
+.gradient_output_names <- local({
+  nms <- NULL
+  function() {
+    if (is.null(nms)) {
+      nms <<- gradient_output_names()
+    }
+    nms
+  }
+})
 
 # ⚠️ ONE call, not four field reads. Every `l$field` is an R6 ACTIVE BINDING -- a
 # closure call wrapping a `.Call` -- and this function runs once per perturbation, so
@@ -541,7 +816,7 @@ leaf_gradient <- function(psi_soil,
   idx <- NULL
   function() {
     if (is.null(idx)) {
-      idx <<- match(.gradient_output_names, .operating_point_names)
+      idx <<- match(.gradient_output_names(), .operating_point_names)
     }
     idx
   }
@@ -549,7 +824,7 @@ leaf_gradient <- function(psi_soil,
 
 .gradient_outputs <- function(l) {
   v <- l$operating_point_values()[.gradient_outputs_idx()]
-  names(v) <- .gradient_output_names
+  names(v) <- .gradient_output_names()
   v
 }
 
@@ -815,8 +1090,14 @@ leaf_gradient <- function(psi_soil,
 # neither of which re-solves the model: `dprofit` at the UNPERTURBED psi* gives
 # the mixed partial, and the outputs at that same psi* give the direct term.
 .gradient_ift <- function(l, reset, theta, pars, psi_star, H, dY_dpsi, step,
-                          fast_stem_curve = TRUE) {
+                          fast_stem_curve = TRUE, dpsi_dtheta = NULL,
+                          envelope = FALSE) {
   seat <- .gradient_reseat_base(reset, theta, pars, fast_stem_curve)
+  # The mixed partials, kept rather than consumed. `-M/H` is what this function
+  # needs, but `M` and `H` are also what a caller integrating its own sensitivity
+  # of psi needs (traitecoevo/plant#614), and they are not recoverable from the
+  # gradient once divided.
+  M <- numeric(length(pars))
   out <- t(vapply(seq_along(pars), function(k) {
     p <- pars[[k]]
     seat(k)
@@ -838,19 +1119,121 @@ leaf_gradient <- function(psi_soil,
     up <- side(1)
     dn <- side(-1)
     # M = d2profit/dpsi dtheta, with psi held FIXED at psi*.
-    dpsi_dtheta <- -((up[["dprofit"]] - dn[["dprofit"]]) / (2 * h)) / H
+    M[[k]] <<- (up[["dprofit"]] - dn[["dprofit"]]) / (2 * h)
+    # Where the collar was SOLVED for, psi* moves with theta and the implicit
+    # function theorem says how. Where it was IMPOSED, it does not move unless
+    # the caller says it does -- so the caller supplies dpsi/dtheta, defaulting
+    # to zero, and this function has no business deriving one.
+    d_psi <- if (is.null(dpsi_dtheta)) -M[[k]] / H else dpsi_dtheta[[k]]
     direct <- (up[-1L] - dn[-1L]) / (2 * h)
     # `collar` is not an output of the evaluation -- it IS psi*, held fixed, so
     # its direct term is zero by construction and the composite reduces to
     # dpsi*/dtheta. Setting it explicitly says so, rather than relying on the
     # difference of two identical numbers.
-    g <- direct + dY_dpsi * dpsi_dtheta
-    g[["collar"]] <- dpsi_dtheta
-    g[.gradient_output_names]
-  }, numeric(length(.gradient_output_names))))
+    g <- direct + dY_dpsi * d_psi
+    g[["collar"]] <- d_psi
+    # The envelope theorem, ASSIGNED for the same reason `collar` is: profit's
+    # indirect term is identically zero at a stationary point, so stating that is
+    # better than multiplying a measured near-zero by dpsi/dtheta. It is also
+    # immune to a non-finite `d_psi` -- which a CALLER supplies on the prescribed
+    # path -- where `0 * x` would be NaN in this one column while the other four
+    # carried +-Inf.
+    if (envelope) {
+      g[["profit"]] <- direct[["profit"]]
+    }
+    g[.gradient_output_names()]
+  }, numeric(length(.gradient_output_names()))))
   reset(theta)
   rownames(out) <- pars
-  out
+  list(gradient = out, M = stats::setNames(M, pars))
+}
+
+# `psi` and `dpsi_dtheta` only mean anything together, and neither means anything
+# alongside `method`.
+.gradient_check_psi <- function(psi, dpsi_dtheta, method) {
+  if (is.null(psi)) {
+    if (!is.null(dpsi_dtheta)) {
+      stop("`dpsi_dtheta` is the trait response of a collar potential YOU ",
+           "imposed, so it needs `psi`. Without one the collar is solved for ",
+           "and its response is derived by the implicit function theorem.",
+           call. = FALSE)
+    }
+    return(NULL)
+  }
+  if (!(is.numeric(psi) && length(psi) == 1L && is.finite(psi) && psi > 0)) {
+    stop("`psi` must be a single finite positive number: it is a collar water ",
+         "potential in MPa, as a positive magnitude (see the sign convention ",
+         "in ?leaf_model).", call. = FALSE)
+  }
+  if (!identical(method, "auto")) {
+    stop("`method` cannot be given with `psi`. The two routes it chooses ",
+         "between are about a SOLVED operating point -- \"fd\" differences the ",
+         "solve, which would answer about the optimum rather than about the ",
+         "collar you gave -- so at a prescribed psi neither applies and the ",
+         "reported method is \"prescribed\".", call. = FALSE)
+  }
+  # ⚠️ COERCED, AND THE CALLER MUST USE THE RETURN. `psi` is compared against
+  # `opt_root_psi_` with `identical()` to detect the clamp, and `identical(3, 3L)`
+  # is FALSE -- so an integer `psi` was reported clamped at a collar it had been
+  # given exactly, with the "where it was pulled to" diagnostic showing no
+  # movement and nothing to notice. `.gradient_check_psi_batch()` already returned
+  # `as.numeric(psi)`, and C++'s `util::identical` is `a == b`, so R alone had it.
+  as.numeric(psi)
+}
+
+# dpsi/dtheta as one value per parameter, in `pars` order. NULL on the solving
+# path means "derive it"; NULL on the prescribed path means "the collar does not
+# move with theta", which is zero and not the same statement.
+.gradient_dpsi_dtheta <- function(dpsi_dtheta, pars, prescribed) {
+  if (!prescribed) {
+    return(NULL)
+  }
+  if (is.null(dpsi_dtheta)) {
+    return(stats::setNames(numeric(length(pars)), pars))
+  }
+  # ⚠️ FINITE, AND `anyNA` WAS NOT ENOUGH -- `is.finite` covers NA and NaN,
+  # so this is one check rather than two, and it adds the case that matters. An
+  # infinite `dpsi_dtheta` does not fail loudly. The composite is
+  # `direct + dY_dpsi * dpsi_dtheta`, so four columns come back +-Inf -- and
+  # `profit`, which the envelope theorem ASSIGNS from the direct term at a
+  # stationary psi, comes back FINITE AND PLAUSIBLE beside them. Measured at
+  # `psi = psi*` with `dpsi_dtheta = Inf`: A, gc, psi_stem and collar all Inf,
+  # profit 0.0105. Reading `profit` alone is plant's own case (#87), so the one
+  # column that survives is the one most likely to be believed. The sibling
+  # argument is already checked this way -- `.gradient_check_psi()` demands
+  # `is.finite(psi)`.
+  if (!is.numeric(dpsi_dtheta) || !all(is.finite(dpsi_dtheta))) {
+    stop("`dpsi_dtheta` must be numeric and finite -- no NA, NaN or Inf. It ",
+         "is dpsi/dtheta for a collar YOU imposed; a non-finite value returns ",
+         "an all-infinite gradient row with a plausible `profit` in it.",
+         call. = FALSE)
+  }
+  # ⚠️ NAMES ARE CHECKED BEFORE RECYCLING, and the order matters. Recycling first
+  # overwrote whatever the caller wrote with `pars`, so `dpsi_dtheta =
+  # c(stem_b = 1)` against `pars = "vcmax_25"` was silently applied to vcmax_25 --
+  # a named argument quietly meaning a different parameter, which is the exact
+  # failure naming it was supposed to prevent.
+  if (!is.null(names(dpsi_dtheta))) {
+    # Matched, not assumed aligned: reordering it silently would be the same
+    # class of bug as reordering `pars`.
+    if (!setequal(names(dpsi_dtheta), pars)) {
+      stop("`dpsi_dtheta` is named, so its names must be exactly `pars`. ",
+           "Missing: ", paste(setdiff(pars, names(dpsi_dtheta)),
+                              collapse = ", "),
+           "; unexpected: ", paste(setdiff(names(dpsi_dtheta), pars),
+                                   collapse = ", "), call. = FALSE)
+    }
+    return(dpsi_dtheta[pars])
+  }
+  if (length(dpsi_dtheta) == 1L) {
+    return(stats::setNames(rep(dpsi_dtheta, length(pars)), pars))
+  }
+  if (length(dpsi_dtheta) != length(pars)) {
+    stop("`dpsi_dtheta` must be length 1 or one value per parameter (",
+         length(pars), " for this `pars`); got ", length(dpsi_dtheta),
+         call. = FALSE)
+  }
+  stats::setNames(dpsi_dtheta, pars)
 }
 
 # The fallback: a central difference of the whole solve. Correct at a pinned
@@ -869,8 +1252,8 @@ leaf_gradient <- function(psi_soil,
       l$find_root_collar_psi()
       .gradient_outputs(l)
     }
-    ((side(1) - side(-1)) / (2 * h))[.gradient_output_names]
-  }, numeric(length(.gradient_output_names))))
+    ((side(1) - side(-1)) / (2 * h))[.gradient_output_names()]
+  }, numeric(length(.gradient_output_names()))))
   rownames(out) <- pars
   reset(theta)
   out

@@ -783,6 +783,12 @@ public:
   // indistinguishable; and defaulting to nullptr leaves every existing call site
   // and the generated R binding untouched.
   double dprofit_droot_collar_psi(double opt_root_psi, bool* feasible = nullptr);
+  // The same, with the flag as a return rather than an out-parameter, because
+  // R cannot reach a `bool*` -- RcppR6 has no form for one, so the generated
+  // binding drops it and every R-side composite silently gets the "a composite
+  // that ignores it inherits the bug" case this header warns about above.
+  // `{dprofit, feasible}`, in that order.
+  std::vector<double> dprofit_droot_collar_psi_checked(double opt_root_psi);
   // Post-prepare body of dprofit_droot_collar_psi, with the same `feasible`
   // contract. Assumes the supply path's per-solve caches are already seated, so
   // the collar solve can share ONE supply_begin_solve across all ~10 of its
@@ -2205,6 +2211,13 @@ inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi, bool* feasible
   // collar solve call the body directly and seat them once for the whole solve.
   supply_begin_solve();
   return dprofit_at_collar_psi(opt_root_psi, feasible);
+}
+
+inline std::vector<double> Leaf::dprofit_droot_collar_psi_checked(
+    double opt_root_psi) {
+  bool feasible = false;
+  const double d = dprofit_droot_collar_psi(opt_root_psi, &feasible);
+  return {d, feasible ? 1.0 : 0.0};
 }
 
 inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
