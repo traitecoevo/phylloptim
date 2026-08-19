@@ -45,11 +45,21 @@
 #      preformatted text and stop rendering as lists.
 #
 # ESCAPING. Text outside a verbatim run is escaped, because none of it was
-# written with Doxygen in mind: `\`, `@`, `#`, `%`, `&`, `<` and `>` all mean
-# something to Doxygen and here they never do. Without it, `#include <phylloptim.hpp>`
+# written with Doxygen in mind: `\`, `@`, `#`, `%`, `&`, `<`, `>` and `|` all
+# mean something to Doxygen and here they never do. Without it, `#include <phylloptim.hpp>`
 # becomes a broken link to an entity called "include" followed by a swallowed
 # HTML tag, and the `\int` in the roots.hpp head-loss note becomes an unknown
-# command; both were observed before this was added. Verbatim runs are NOT
+# command; both were observed before this was added.
+#
+# ⚠️ `|` WAS ADDED LAST AND COST A CI-ONLY DEBUGGING ROUND. Doxygen reads a `|`
+# in a paragraph as a table delimiter, and `\verbatim` is not allowed inside a
+# table cell: it drops the OPEN, and then reports `unexpected command
+# endverbatim` at a line that is neither -- in the case that found this, 80 lines
+# further on, inside unrelated code. Doxygen 1.17 renders the same input in
+# silence, so a local `doxygen` run says nothing; only the 1.9 that CI installs
+# objects. The comment that triggered it wrote the maximum of A over the supply
+# stream as `|A|max`. `|` in prose is common in these headers and was harmless
+# until one such comment also contained an indented block. Verbatim runs are NOT
 # escaped -- Doxygen reproduces them literally, so an escape would show up as a
 # stray backslash. If you genuinely want a Doxygen command, write a `///`
 # comment and rule 1 will leave it alone.
@@ -89,6 +99,7 @@ function escape(s) {
   gsub(/&/,  "\\&",  s)
   gsub(/</,  "\\<",  s)
   gsub(/>/,  "\\>",  s)
+  gsub(/\|/, "\\|",  s)
   return s
 }
 
