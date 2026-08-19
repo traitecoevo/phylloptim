@@ -21,9 +21,22 @@ Blast radius, all at 40 C: median relative 6.49e-05, largest absolute move 2.04e
 two cells above 1e-02 are `profit` at 5-layer 40 C points where it is ~1e-03, i.e. small
 denominators. `gradient_golden.tsv` does not move at all, because `grid_drivers` is 25 C.
 
-⚠️ **The R-side suite was blind to this**: all 1107 tests passed unaltered, because
-nothing on the R side runs above 25 C. Only the golden grid's second temperature caught
-it — which is what that second temperature is for.
+⚠️ **The R-side suite was blind to this**: all 1107 tests passed unaltered, and only the
+golden grid's second temperature caught it — which is what that second temperature is
+for.
+
+The reason was **not** that nothing on the R side runs above 25 C; `test-temperature-
+response.R` drives at 35 and 40 C. It is that every assertion up there was
+**directional** — `expect_gt`, `expect_lt`, "not `all.equal`" — so a change to a
+response curve that preserves the ordering satisfied all of them. There was no *pinned*
+value off 25 C anywhere in `tests/testthat/`, because `golden_solve()` hard-coded the
+temperature.
+
+**Fixed in the same PR.** `golden_solve()` takes `leaf_temp`, and `test-golden.R` pins
+two 40 C points (1-layer and 3-layer, both interior) to hex, alongside a check that they
+really are a different operating point from their 25 C counterparts. Measured: reverting
+`gas_constant` to 8.314 now fails **18** R-side assertions — exactly the two new rows x
+nine fields — against **0** before.
 
 ⚠️ plant does **not** re-export `gas_constant` (its `leaf_model.h` says so explicitly),
 so nothing over there references it by name; its results still move through the leaf.
