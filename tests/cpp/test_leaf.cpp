@@ -2456,6 +2456,146 @@ void test_set_traits_matches_a_fresh_leaf() {
   }
 }
 
+// Capture the message a throwing call produced, or "" if it did not throw. Used
+// by every test below that asserts on what an error SAYS rather than that one
+// happened -- see test_out_of_domain_names_the_spline for why the wording is
+// load-bearing here.
+std::string message_of(const std::function<void()>& f) {
+  try {
+    f();
+  } catch (const std::exception& e) {
+    return std::string(e.what());
+  }
+  return std::string();
+}
+
+bool mentions(const std::string& haystack, const char* needle) {
+  return haystack.find(needle) != std::string::npos;
+}
+
+// The realised knot grid against the intended one (#92). Nothing checked this
+// before, which is exactly why the accumulating `psi += step` loop could drop its
+// last knot for years: the shortfall is invisible from outside unless the domain
+// edge is compared with the function that is supposed to define it.
+void test_knot_grid_reaches_its_intended_domain() {
+  printf("vulnerability knot grid\n");
+  const double resolutions[] = {10.0, 50.0, 100.0, 200.0, 1000.0};
+  int wrong_count = 0, wrong_end = 0, not_increasing = 0, cases = 0;
+  double worst_end_rel = 0.0;
+  for (double res : resolutions) {
+    for (int bi = 1; bi <= 60; ++bi) {
+      for (double c : {0.4, 1.0, 2.04, 2.680147, 6.0, 12.0}) {
+        const double b = bi / 10.0;
+        std::vector<double> x, y;
+        phylloptim::cumulative_vulnerability_integral(b, c, res, x, y);
+        ++cases;
+        // ⚠️ BIT-EXACT on the endpoint, not `near`. The whole defect was an
+        // endpoint that was *close* to vulnerability_psi_max and not equal to it,
+        // and both splines built from this grid disable extrapolation -- so a
+        // last knot one ULP short is the difference between a lookup at
+        // vulnerability_psi_max working and throwing. A tolerance here would pass
+        // on the code this test exists to reject.
+        const double want_end = phylloptim::vulnerability_psi_max(b, c);
+        if (x.size() != static_cast<std::size_t>(res) + 1) ++wrong_count;
+        if (x.back() != want_end) {
+          ++wrong_end;
+          worst_end_rel = std::max(worst_end_rel,
+                                   std::abs(x.back() - want_end) / want_end);
+        }
+        if (x.size() != y.size()) ++not_increasing;
+        for (std::size_t i = 1; i < x.size(); ++i) {
+          if (!(x[i] > x[i - 1])) { ++not_increasing; break; }
+        }
+      }
+    }
+  }
+  ok(cases == 1800, "the sweep ran the grid it meant to");
+  ok(wrong_count == 0,
+     "every grid has exactly resolution + 1 knots (" +
+         std::to_string(wrong_count) + " of " + std::to_string(cases) + " did not)");
+  ok(wrong_end == 0,
+     "every grid ends exactly at vulnerability_psi_max (" +
+         std::to_string(wrong_end) + " did not; worst rel " +
+         std::to_string(worst_end_rel) + ")");
+  ok(not_increasing == 0, "every grid is strictly increasing and paired with its y");
+
+  // A resolution below one control point is refused by name rather than reaching
+  // the interpolator, which used to report it as its own domain problem.
+  const std::string msg = message_of(
+      [] { std::vector<double> x, y;
+           phylloptim::cumulative_vulnerability_integral(3.9, 2.7, 0.0, x, y); });
+  ok(mentions(msg, "resolution"), "resolution < 1 is refused by name");
+}
+
+// psi_crit against the domain stem_b/stem_c set (#38). The trait LOOKS
+// independent of the curve and is not: the knot grid stops at P99 and every solve
+// evaluates the stem curve at psi_crit, so the combination used to fail from
+// inside the interpolator in a message naming neither trait.
+void test_psi_crit_must_lie_on_the_stem_curve() {
+  printf("psi_crit against the curve's domain\n");
+  // Sabot et al. (2022) P50/P88 territory, which is where this was found: far from
+  // the defaults, and psi_crit picked as though it were free.
+  const std::string msg = message_of(
+      [] { phylloptim::Leaf l(96, 3.5463, 7.6291, 14.145, 2.680147, 3.898245,
+                              5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 1e-3, 100,
+                              1e-3, 1000, 7.5); });
+  ok(!msg.empty(), "a psi_crit past the stem curve's domain is refused");
+  ok(mentions(msg, "psi_crit"), "the message names psi_crit");
+  ok(mentions(msg, "stem_b"), "the message names the trait that sets the domain");
+  ok(mentions(msg, "P95"), "the message quotes a psi_crit that would work");
+
+  // And the value it quotes really does work, which is what makes the message
+  // actionable rather than merely informative.
+  const double b = 7.6291, c = 3.5463;
+  const double p95 = b * std::pow(std::log(1.0 / 0.05), 1.0 / c);
+  ok(message_of([&] { phylloptim::Leaf l(96, c, b, p95, 2.680147, 3.898245,
+                                         5.870283, 1.5, 157.44, 0.30, 0.7, 0.99,
+                                         1e-3, 100, 1e-3, 1000, 7.5); }).empty(),
+     "the P95 the message quotes constructs");
+
+  // The boundary itself is REACHABLE, which is what makes `>` the right comparison
+  // in the check rather than a nervous `>=`. ⚠️ It is #92 that makes this a
+  // guarantee rather than a coincidence: under the accumulating knot loop the last
+  // knot sat anywhere from one ULP to one full step short of
+  // vulnerability_psi_max, so whether psi_crit == P99 was inside the spline
+  // depended on stem_b and stem_c. This pair happened to land on the good side,
+  // which is precisely why the knot-count sweep above is the test with teeth here
+  // and this one is a statement of the contract.
+  const double p99 = phylloptim::vulnerability_psi_max(b, c);
+  ok(message_of([&] { phylloptim::Leaf l(96, c, b, p99, 2.680147, 3.898245,
+                                         5.870283, 1.5, 157.44, 0.30, 0.7, 0.99,
+                                         1e-3, 100, 1e-3, 1000, 7.5); }).empty(),
+     "psi_crit exactly at P99 is inside the domain, not a rounding away from it");
+
+  // The defaults have headroom, and the relationship the message asserts is the
+  // one they encode: psi_crit IS P95 of the default curve, to six decimals.
+  phylloptim::Leaf def;
+  near(def.psi_crit,
+       def.stem_b * std::pow(std::log(1.0 / 0.05), 1.0 / def.stem_c), 1e-6,
+       "the default psi_crit is P95 of the default stem curve");
+  ok(def.psi_crit < phylloptim::vulnerability_psi_max(def.stem_b, def.stem_c),
+     "the default psi_crit is inside the default domain");
+
+  // set_traits shares the check, so the object cannot be walked into the state the
+  // constructor refuses.
+  phylloptim::Leaf l;
+  ok(!message_of([&] {
+       l.set_traits(96, c, b, 14.145, 2.680147, 3.898245, 5.870283, 1.5, 157.44,
+                    0.30, 0.7, 0.99, 7.5, kRd25);
+     }).empty(),
+     "set_traits refuses the same combination");
+  near(l.psi_crit, def.psi_crit, 0.0,
+       "the refused set_traits left psi_crit alone");
+
+  // perturb_stem_b is the third route, and the only one where the DOMAIN moves
+  // rather than psi_crit: shrinking stem_b shrinks P99 under a fixed psi_crit.
+  phylloptim::Leaf p;
+  ok(!message_of([&] { p.perturb_stem_b(p.stem_b * 0.5); }).empty(),
+     "perturb_stem_b refuses a stem_b that takes psi_crit off the curve");
+  ok(message_of([&] { p.perturb_stem_b(p.stem_b * 1.05); }).empty(),
+     "a perturbation that keeps psi_crit on the curve is still allowed");
+}
+
 void test_bad_input_throws() {
   printf("input validation\n");
   Drivers d;
@@ -2481,18 +2621,8 @@ void test_bad_input_throws() {
 // not the spline) is ambiguous in the way that matters. Localising plant#576 came
 // down to which of the four call sites was asking; these assertions are what make
 // that a read rather than a bisect.
-std::string message_of(const std::function<void()>& f) {
-  try {
-    f();
-  } catch (const std::exception& e) {
-    return std::string(e.what());
-  }
-  return std::string();
-}
-
-bool mentions(const std::string& haystack, const char* needle) {
-  return haystack.find(needle) != std::string::npos;
-}
+// (message_of / mentions are defined above test_knot_grid_reaches_its_intended_domain,
+// which is the first test that needs them.)
 
 void test_out_of_domain_names_the_spline() {
   printf("out-of-domain reporting\n");
@@ -2623,6 +2753,8 @@ int main() {
   test_rd_temperature_response();
   test_set_traits_matches_a_fresh_leaf();
   test_perturb_stem_b_matches_a_rebuild();
+  test_knot_grid_reaches_its_intended_domain();
+  test_psi_crit_must_lie_on_the_stem_curve();
   test_bad_input_throws();
   test_out_of_domain_names_the_spline();
   test_out_of_domain_under_rescale();

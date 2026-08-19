@@ -41,6 +41,48 @@
 # carries the arithmetic.
 suppressMessages(library(phylloptim))
 
+# ⚠️ AND SAY WHICH BUILD THAT WAS. `library(phylloptim)` resolves against the
+# library path, NOT against the tree you are standing in, so running this from a
+# working tree with uninstalled changes regenerates the file from the SITE build --
+# reproducing the values you were trying to replace, exactly, with no warning. That
+# is not hypothetical: it happened while regenerating for #92 and reported "0 cells
+# moved" against a suite that was failing on 63 of them. It is the same trap
+# `tools/bench_history.sh` guards with --expect-version, and the same one the guide
+# records for plant under "Validating against plant".
+#
+# So the path goes to stderr on every run, where it does not corrupt the TSV on
+# stdout. Check it before believing the diff:
+#
+#   R CMD INSTALL --library=/tmp/lib . && \
+#     R_LIBS=/tmp/lib Rscript tools/gradient_golden.R > tests/testthat/gradient_golden.tsv
+# The check compares the INSTALLED HEADERS against this tree's, which is the actual
+# question. `R CMD INSTALL` copies `inst/include/` into the package directory, so
+# `system.file("include", ...)` is a verbatim copy of the headers the loaded build
+# was compiled from -- comparing paths cannot work (an installed package is never
+# in the working tree) and comparing versions cannot either, since the version is
+# rarely bumped for a numerics change.
+message("phylloptim from: ", find.package("phylloptim"),
+        " (version ", as.character(utils::packageVersion("phylloptim")), ")")
+local({
+  tree <- "inst/include"
+  if (!dir.exists(tree)) return(invisible(NULL))  # not run from the package root
+  installed <- system.file("include", package = "phylloptim")
+  digest_dir <- function(d) {
+    f <- sort(list.files(d, recursive = TRUE, pattern = "[.]hpp?$"))
+    vapply(f, function(p) paste(readLines(file.path(d, p), warn = FALSE),
+                                collapse = "\n"), character(1))
+  }
+  if (!nzchar(installed) || !identical(digest_dir(tree), digest_dir(installed))) {
+    stop("the loaded phylloptim was built from DIFFERENT headers than ", tree,
+         ".\nRegenerating now would reproduce the installed build's values, not ",
+         "this tree's.\nInstall first:\n",
+         "  R CMD INSTALL --library=/tmp/lib . && \\\n",
+         "    R_LIBS=/tmp/lib Rscript tools/gradient_golden.R > ",
+         "tests/testthat/gradient_golden.tsv",
+         call. = FALSE)
+  }
+})
+
 # The golden grid's drivers, so every row here is an operating point the rest of
 # the suite already knows -- tests/cpp/test_golden.cpp, test-golden.R and
 # test-gradient.R all use these.

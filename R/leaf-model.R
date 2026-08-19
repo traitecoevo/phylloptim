@@ -73,6 +73,26 @@
 ##' named accordingly, because they were once an unmarked `b`/`c` pair alongside
 ##' `root_b`/`root_c` and an analysis used the root parameters for the stem cost.
 ##'
+##' @section psi_crit is not a free trait:
+##' `psi_crit` looks independent of `stem_b`/`stem_c` and is not. The stem
+##' vulnerability curve is pre-integrated over `[0, P99]`, where
+##' `P99 = stem_b * log(100)^(1/stem_c)` is derived from those two alone, and every
+##' solve evaluates the curve *at* `psi_crit` -- so a `psi_crit` past `P99` is not a
+##' configuration that sometimes works, and [leaf_model()] refuses it.
+##'
+##' What the defaults say is that `psi_crit` is **P95** of the same curve:
+##'
+##' ```
+##' stem_b = 3.898245, stem_c = 2.680147
+##' 3.898245 * log(1/0.05)^(1/2.680147) = 5.870283 = psi_crit
+##' ```
+##'
+##' to six decimal places, against `P99 = 6.891842`. So the two move together: a
+##' species whose measured vulnerability curve gives a different `stem_b`/`stem_c`
+##' needs a `psi_crit` derived from that curve, not one carried over from these
+##' defaults. `vignette("fitting")` derives `stem_b`/`stem_c` from a published
+##' P50/P88 pair, which is the right way round.
+##'
 ##' @param vcmax_25 maximum carboxylation rate at 25 C (umol m^-2 s^-1)
 ##' @param stem_c shape parameter of the stem vulnerability curve (unitless)
 ##' @param stem_b sensitivity parameter of the stem vulnerability curve (MPa)
@@ -104,7 +124,10 @@
 ##' @seealso [leaf_control()], [leaf_model()], [leaf_solve()]
 ##' @examples
 ##' leaf_traits()
-##' leaf_traits(vcmax_25 = 120, stem_b = 2.5)
+##' # A more brittle stem: psi_crit moves with the curve, not independently of it.
+##' # (stem_b = 2.5 puts P99 at 4.42, so the default psi_crit of 5.87 is off the
+##' # end of it; 3.76 is the P95 that stem_b implies.)
+##' leaf_traits(vcmax_25 = 120, stem_b = 2.5, psi_crit = 3.76)
 ##' @export
 leaf_traits <- function(vcmax_25 = 96,
                         stem_c = 2.680147,

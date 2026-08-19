@@ -24,14 +24,24 @@
 # To regenerate after a DELIBERATE change to the golden file:
 #
 #   cc -O2 -o /tmp/tsv_to_hex tests/validate/tsv_to_hex.c
-#   grep -P '^2\t900\t2\t3\t' tests/cpp/golden/operating_points.tsv | /tmp/tsv_to_hex
+#   awk -F'\t' 'NR==1 || ($4==25 && $1==2 && $2==900 && $3==2 && $5==3)' \
+#     tests/cpp/golden/operating_points.tsv | /tmp/tsv_to_hex
 #
 # and paste the row. The C tool parses with the C library's strtod, which is
 # correctly rounded, and prints %a.
 #
-# Last regenerated for PLAN 11b. 11a (the collar root-find) moved 27 of these 36
-# values; 11b moved 18 of them again. The nine that never move are the
-# shut-down row -- it never reaches the collar solve, which is why it is here.
+# ⚠️ The `$4==25` is not decoration. The golden file's columns are psi_soil, ppfd,
+# vpd, LEAF_TEMP, layers, and the second temperature was added after this recipe
+# was first written -- so the tab-anchored `grep` this comment used to give
+# matched leaf_temp where it meant layers and pulled the wrong row. Select on the
+# named column, not on position in a remembered layout.
+#
+# Last regenerated for #92 (the indexed knot grid), which moved 27 of these 36
+# values. The size scales with how dry the point is, because that is how far up the
+# vulnerability curve it reads: 1e-15 at psi_soil 0.5, 1e-15 at 2, and 1e-11 to
+# 3e-11 at 4. The nine that never move are the shut-down row -- it never reaches
+# the collar solve, which is why it is here. Before that: PLAN 11b moved 18, and
+# 11a (the collar root-find) 27.
 
 # Four points, chosen to exercise different parts of the model rather than to
 # sample the grid evenly:
@@ -52,43 +62,43 @@ golden_rows <- list(
   list(
     inputs = list(psi_soil = 0.5, ppfd = 1500, vpd = 0.5, layers = 1L),
     expected = list(
-      psi_stem      = "0x1.70a14c7893a63p+1",
-      opt_root_psi  = "0x1.0671f2de624bbp+1",
-      ci            = "0x1.9f448245054cp+4",
-      assim         = "0x1.2157d30459d32p+4",
-      transpiration = "0x1.4504d2a13351p-16",
-      gc            = "0x1.0b1ba25cac3bbp-3",
-      profit        = "0x1.0790ff442a37dp+4",
-      e_up          = "0x1.4504d35b65ac9p-16",
-      uptake        = "0x1.19e645c6a3924p-10"
+      psi_stem      = "0x1.70a14c7893a68p+1",
+      opt_root_psi  = "0x1.0671f2de624bep+1",
+      ci            = "0x1.9f448245054c6p+4",
+      assim         = "0x1.2157d30459d3ap+4",
+      transpiration = "0x1.4504d2a133518p-16",
+      gc            = "0x1.0b1ba25cac3c1p-3",
+      profit        = "0x1.0790ff442a384p+4",
+      e_up          = "0x1.4504d35b65acfp-16",
+      uptake        = "0x1.19e645c6a3929p-10"
     )
   ),
   list(
     inputs = list(psi_soil = 2.0, ppfd = 900, vpd = 2.0, layers = 3L),
     expected = list(
-      psi_stem      = "0x1.b1b38a3125b71p+1",
-      opt_root_psi  = "0x1.8211ae5c473c8p+1",
-      ci            = "0x1.0ddbcc40f558p+3",
-      assim         = "0x1.b2abf3fc8af53p+1",
-      transpiration = "0x1.b282b1733fcf9p-18",
-      gc            = "0x1.651739b6d3d23p-7",
-      profit        = "0x1.8a0d7bc525718p-1",
-      e_up          = "0x1.b282b4820ffc9p-18",
-      uptake        = "0x1.78dd817d62345p-12"
+      psi_stem      = "0x1.b1b38a3125b53p+1",
+      opt_root_psi  = "0x1.8211ae5c473bap+1",
+      ci            = "0x1.0ddbcc40f5572p+3",
+      assim         = "0x1.b2abf3fc8af1bp+1",
+      transpiration = "0x1.b282b1733fcb7p-18",
+      gc            = "0x1.651739b6d3cecp-7",
+      profit        = "0x1.8a0d7bc52574p-1",
+      e_up          = "0x1.b282b4820ff91p-18",
+      uptake        = "0x1.78dd817d62314p-12"
     )
   ),
   list(
     inputs = list(psi_soil = 4.0, ppfd = 500, vpd = 1.0, layers = 5L),
     expected = list(
-      psi_stem      = "0x1.77b2b5b3436bp+2",
-      opt_root_psi  = "0x1.37e82d8840ff2p+2",
-      ci            = "0x1.0bcf9df500a4p+3",
-      assim         = "0x1.9d87d2667966dp+1",
-      transpiration = "0x1.9c8a7e60e4353p-19",
-      gc            = "0x1.5309210eddb78p-7",
-      profit        = "-0x1.db6089328069fp+1",
-      e_up          = "0x1.9c8a84340ca09p-19",
-      uptake        = "0x1.65cf766e15e4ep-13"
+      psi_stem      = "0x1.77b2b5b35503dp+2",
+      opt_root_psi  = "0x1.37e82d8840f02p+2",
+      ci            = "0x1.0bcf9df50cef4p+3",
+      assim         = "0x1.9d87d266adc85p+1",
+      transpiration = "0x1.9c8a7e611d793p-19",
+      gc            = "0x1.5309210f0cc77p-7",
+      profit        = "-0x1.db608932666c9p+1",
+      e_up          = "0x1.9c8a84340bf42p-19",
+      uptake        = "0x1.65cf766e154f5p-13"
     )
   ),
   list(

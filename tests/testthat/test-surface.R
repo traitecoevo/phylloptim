@@ -31,6 +31,41 @@ test_that("leaf_traits() and leaf_control() partition the C++ constructor", {
   expect_false(any(grepl("tol|niter", names(leaf_traits()))))
 })
 
+test_that("every trait can be read back from the object (#95)", {
+  # The traits were `set_traits()` arguments and nothing else, so from R they could
+  # be written and not read. A caller who needed one to compute a derived quantity
+  # -- Sperry's cost normalises by `k_crit = kmax * proportion_of_conductivity(psi_crit)`
+  # -- had to carry it themselves, and in leaf_calibration_test/sicangco-2026 that
+  # was a hard-coded 5.870283 in a probe script.
+  #
+  # This is a COVERAGE test on purpose: it asserts the readable set contains the
+  # whole trait list rather than naming four fields, so a trait added to
+  # leaf_traits() without a binding fails here instead of being noticed by the next
+  # caller who needs it.
+  traits <- leaf_traits(vcmax_25 = 111, stem_b = 3.1, psi_crit = 4.4, beta2 = 1.7,
+                        root_b = 3.3, root_psi_crit = 4.9, a = 0.28)
+  l <- leaf_model(traits)
+  for (nm in names(traits)) {
+    expect_true(nm %in% names(l), label = paste("Leaf binds", nm))
+    expect_identical(l[[nm]], traits[[nm]], label = paste("Leaf$", nm, sep = ""))
+  }
+
+  # ⚠️ Read-only, and that is hazard 10 rather than tidiness: changing a trait means
+  # rebuilding up to two vulnerability splines and clearing the solved operating
+  # point, so a bare write would leave the object describing two different curves.
+  # `R_d_25` is the documented exception -- it is settable because plant's bindings
+  # pin the generated constructor by arity, so `leaf_model()` applies it afterwards.
+  for (nm in setdiff(names(traits), "R_d_25")) {
+    expect_error(l[[nm]] <- 1, "read-only", label = paste(nm, "rejects a write"))
+  }
+
+  # And the read tracks set_traits(), which is what makes it a read-back rather
+  # than a second copy of the constructor arguments.
+  set_traits(l, leaf_traits(psi_crit = 5.0, stem_b = 3.9))
+  expect_identical(l$psi_crit, 5.0)
+  expect_identical(l$stem_b, 3.9)
+})
+
 test_that("leaf_model() and the raw Leaf() constructor agree", {
   # The reason leaf_model() exists is that mapping 13 traits and 4 tolerances
   # onto 17 positional slots is exactly the kind of thing that goes wrong once
@@ -59,7 +94,14 @@ test_that("a non-default trait reaches the model through leaf_model()", {
                          traits = leaf_traits(vcmax_25 = 150))
   expect_gt(hi_vcmax$A, base$A)
 
-  brittle <- leaf_model(leaf_traits(stem_b = 2.0))
+  # ⚠️ `psi_crit` MOVES WITH `stem_b` HERE, and it has to. This case used to pass
+  # `stem_b = 2.0` alone, leaving the default `psi_crit` of 5.870283 -- which at
+  # that stem_b is past the curve's own P99 of 3.5359, i.e. a combination the model
+  # cannot evaluate. It went unnoticed because nothing here solved: the constructor
+  # did not check it and `proportion_of_conductivity` is a closed form that never
+  # reads the spline. #38's check refuses it now, so the trait pair moves together,
+  # and 3.0 is roughly the P95 that stem_b implies (3.0118).
+  brittle <- leaf_model(leaf_traits(stem_b = 2.0, psi_crit = 3.0))
   expect_lt(brittle$proportion_of_conductivity(2.0),
             leaf_model()$proportion_of_conductivity(2.0))
 
@@ -162,8 +204,27 @@ test_that("leaf_solve() reproduces the stateful path exactly", {
 # Read the twelve outputs the slow way -- one active binding at a time, which is
 # what operating_point() did before #39 -- so the one-call C++ reader can be
 # checked against it.
+#
+# ⚠️ `uptake` IS NOT A BINDING, it is a sum, so this helper has to derive it -- and
+# `sum()` IS THE WRONG WAY TO DERIVE IT for a comparison that demands bit-equality
+# with C++. R's `sum()` accumulates in `LDOUBLE`, which is 80-bit on x86-64 Linux and
+# 64-bit on arm64 macOS; `Leaf::operating_point_values()` accumulates in `double`. So
+# `sum()` agrees with it bit-for-bit on arm64 and can differ by an ULP on x86-64,
+# for a sum of more than one term.
+#
+# That is exactly how it failed: this test passed on macOS and on Linux for years,
+# then #92 moved the values and the three-layer case came apart on ubuntu only,
+# element [10] of twelve, 4.05328878168362639e-06 against ...724e-06. Nothing about
+# the code under test had changed platform behaviour -- the assertion had always been
+# platform-dependent and had happened to hold.
+#
+# `Reduce("+", ...)` accumulates left to right in plain double addition, which is
+# what the C++ loop does, so the comparison is bit-exact on every platform rather
+# than relaxed on some. Preferred over widening the tolerance because a shifted
+# column -- the thing this test exists to catch -- is worth catching at the last bit.
 outputs_one_at_a_time <- function(l) {
   consumption <- l$soil_consumption_
+  finite <- consumption[is.finite(consumption)]
   c(psi_stem = l$opt_psi_stem_,
     collar = l$opt_root_psi_,
     ci = l$ci_,
@@ -173,7 +234,7 @@ outputs_one_at_a_time <- function(l) {
     profit = l$profit_,
     hydraulic_cost = l$hydraulic_cost_,
     E_up = l$E_up_,
-    uptake = sum(consumption[is.finite(consumption)]),
+    uptake = Reduce(`+`, finite, 0),
     lambda = l$lambda,
     g1_eff = l$g1_eff)
 }

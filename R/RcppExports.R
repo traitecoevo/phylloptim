@@ -169,6 +169,58 @@ Leaf__setup_root_vulnerability <- function(obj_, resolution) {
     invisible(.Call('_phylloptim_Leaf__setup_root_vulnerability', PACKAGE = 'phylloptim', obj_, resolution))
 }
 
+Leaf__vcmax_25__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__vcmax_25__get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__jmax_25__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__jmax_25__get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__stem_c__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__stem_c__get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__stem_b__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__stem_b__get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__psi_crit__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__psi_crit__get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__root_c__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__root_c__get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__root_b__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__root_b__get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__root_psi_crit__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__root_psi_crit__get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__beta2__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__beta2__get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__a__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__a__get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__curv_fact_elec_trans__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__curv_fact_elec_trans__get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__curv_fact_colim__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__curv_fact_colim__get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__cost_scale_TF24__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__cost_scale_TF24__get', PACKAGE = 'phylloptim', obj_)
+}
+
 Leaf__ci___get <- function(obj_) {
     .Call('_phylloptim_Leaf__ci___get', PACKAGE = 'phylloptim', obj_)
 }

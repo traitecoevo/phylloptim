@@ -624,7 +624,19 @@ test_that("profit's gradient is the direct term alone at an interior optimum", {
   # says nothing of the kind. Asserting BOTH is the point -- it is the difference
   # between "the dropped term is small" and "the dropped term is unmeasurable by
   # the route that would have supplied it".
-  expect_lt(abs(exact), 1e-12)
+  #
+  # ⚠️ THE BOUND ON `exact` IS THE SOLVER FLOOR, NOT 1e-12, and it was 1e-12 here
+  # for one commit's worth of luck. #92's knot grid moved where the collar
+  # root-find lands inside its own tolerance, and `exact` went from 2.4e-15 to
+  # 1.2e-10 on this platform without anything about the answer changing -- which is
+  # precisely the mechanism the note above describes for Linux, arriving on macOS.
+  # 1e-12 was pinning a landing point, and this package's own guide names ~1e-9 as
+  # the floor, so that is what the bound should have been all along.
+  #
+  # What carries the test is the GAP, not either bound: measured here, `exact`
+  # 1.2e-10 against `fd` 2.1e-04 is a factor of 1.7e+06. Both bounds sit three or
+  # more orders inside that, so removing the assignment still fails this.
+  expect_lt(abs(exact), 1e-9)
   expect_gt(abs(fd), 1e-5)
 })
 
