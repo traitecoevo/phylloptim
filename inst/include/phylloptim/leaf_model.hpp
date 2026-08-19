@@ -507,12 +507,15 @@ public:
   //   * the solved OPERATING POINT, which is hazard 8: an output that no code path
   //     rewrites goes on reading as though it belonged to the new traits.
   //   * vcmax_, jmax_ and R_d_, which are derived from vcmax_25/jmax_25 inside
-  //     set_physiology's TEMPERATURE CACHE. That cache is keyed on (leaf_temp_,
-  //     atm_o2_kpa_) and on nothing else, so calling set_physiology again after a
-  //     bare trait write at the SAME temperature takes the cache hit and never
-  //     recomputes them. The obvious repair -- "change the trait, then set the
-  //     drivers again" -- therefore does not work, which is what makes a settable
-  //     field actively dangerous here rather than merely untidy.
+  //     set_physiology's TEMPERATURE CACHE. ⚠️ THIS ONE IS CLOSED (#55) and the
+  //     entry stays only so the repair is not undone: the key is now every scalar
+  //     update_temperature_dependent_params() reads, vcmax_25 and jmax_25 among
+  //     them, so "change the trait, then set the drivers again" DOES recompute
+  //     them. It used to be keyed on (leaf_temp_, atm_o2_kpa_) alone and took a
+  //     cache hit, which ran a whole trait sweep at the first vcmax the object
+  //     ever saw and reported plausible numbers throughout. The guarantee lives
+  //     in photo_temp_key(), not in the field: a member added to the temperature
+  //     block and left out of that key reopens it silently.
   //
   // A fourth, which is not derived state but is the same argument: a bare write
   // bypasses the #25 positive-magnitude checks below entirely.
@@ -534,6 +537,41 @@ public:
   // two copies that agree until one of them is edited.
   static void check_psi_magnitudes(double psi_crit, double stem_b, double root_b,
                                    double root_psi_crit);
+
+  // The #38 boundary, and the STRONGER of the two: `psi_crit` must lie inside the
+  // stem vulnerability spline's domain, which `stem_b`/`stem_c` set and `psi_crit`
+  // does not enter. The knot grid stops at P99 =
+  // vulnerability_psi_max(stem_b, stem_c) and setup_transpiration disables
+  // extrapolation, while every solve evaluates the stem curve AT `psi_crit` -- the
+  // dry bracket bound, the shutdown exit's cost, and E_column's feasibility test
+  // all do. So `psi_crit > P99` is not a configuration that sometimes works: it
+  // throws, out of the interpolator, in a message naming neither trait.
+  //
+  // ⚠️ A caller is much more likely to violate this than the positivity checks,
+  // because `psi_crit` LOOKS independent of the curve and is not. What the
+  // defaults actually say is that it is P95:
+  //
+  //   stem_b = 3.898245, stem_c = 2.680147  ->  P95 = 5.870283 = psi_crit
+  //
+  // to six decimal places, against P99 = 6.891842. That relationship is the thing
+  // a caller fitting measured vulnerability curves needs and cannot find anywhere
+  // else, so the message quotes the P95 that WOULD work rather than only the bound
+  // that failed.
+  //
+  // Separate from check_psi_magnitudes rather than folded into it, because that
+  // one is `static` and reached by name from plant's generated glue and from the
+  // CI consumer program: extending its signature is an API break where adding a
+  // function is not.
+  //
+  // ⚠️ NOT applied to the root curve, and that is a finding rather than an
+  // omission. #38 assumed `root_psi_crit` carried the same latent constraint;
+  // since #77 bounded the root curves past their last knot it does not throw --
+  // `root_vuln_at` CLAMPS its argument to the last knot instead. So a
+  // `root_psi_crit` past the root P99 silently reports the floor conductivity
+  // rather than failing, which is a different defect and is #85's question, not
+  // this check's.
+  static void check_psi_crit_domain(double psi_crit, double stem_b,
+                                    double stem_c);
 
   void setup_transpiration(double resolution);
 
@@ -1166,6 +1204,7 @@ inline Leaf::Leaf(double vcmax_25, double stem_c, double stem_b,
       // <= 0 -- which is precisely why the convention had to live in comments.
       // Now it is checkable, so it is checked. set_traits shares this check.
       check_psi_magnitudes(psi_crit, stem_b, root_b, root_psi_crit);
+      check_psi_crit_domain(psi_crit, stem_b, stem_c);
 
       // The root traits belong to the supply path, so hand them over before its
       // vulnerability curve is built.
@@ -1198,6 +1237,25 @@ inline void Leaf::check_psi_magnitudes(double psi_crit, double stem_b,
   }
 }
 
+// See the header for why psi_crit is not the free trait it looks like.
+inline void Leaf::check_psi_crit_domain(double psi_crit, double stem_b,
+                                       double stem_c) {
+  const double psi_max = vulnerability_psi_max(stem_b, stem_c);
+  if (psi_crit > psi_max) {
+    // P95 from the same curve, which is what the package defaults use and so the
+    // value a caller who has fitted stem_b/stem_c most likely wants.
+    const double p95 = stem_b * pow(log(1.0 / 0.05), 1.0 / stem_c);
+    util::stop("psi_crit (" + util::to_string(psi_crit) +
+               " MPa) is past the stem vulnerability curve's domain, which ends "
+               "at P99 = " + util::to_string(psi_max) +
+               " MPa and is set by stem_b = " + util::to_string(stem_b) +
+               " / stem_c = " + util::to_string(stem_c) +
+               ", not by psi_crit itself (#38). The package defaults take psi_crit "
+               "to be P95 of the same curve, which here is " +
+               util::to_string(p95) + " MPa.");
+  }
+}
+
 // See the header for why this exists rather than fourteen settable fields.
 inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
                              double psi_crit_, double root_c_, double root_b_,
@@ -1207,6 +1265,7 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
                              double curv_fact_colim_,
                              double cost_scale_TF24_, double R_d_25_) {
   check_psi_magnitudes(psi_crit_, stem_b_, root_b_, root_psi_crit_);
+  check_psi_crit_domain(psi_crit_, stem_b_, stem_c_);
 
   // Which splines have to be rebuilt, decided BEFORE the assignment. Exact
   // equality is the right test and not a sloppy one: the spline is a pure
@@ -2666,6 +2725,12 @@ inline double Leaf::stem_curve_integral_inverse_deriv(double w) const {
 
 inline void Leaf::perturb_stem_b(double stem_b_new) {
   check_psi_magnitudes(psi_crit, stem_b_new, roots_.root_b, roots_.root_psi_crit);
+  // ⚠️ The perturbed stem_b carries a perturbed domain with it, and this is the
+  // one caller where that can newly bind: lowering stem_b lowers P99 while
+  // psi_crit stays put, so a gradient step in stem_b at a psi_crit already near
+  // P99 can walk off the end of the curve it is rescaling. Checked against
+  // stem_b_new, not stem_b.
+  check_psi_crit_domain(psi_crit, stem_b_new, stem_c);
   stem_b = stem_b_new;
   // ⚠️ The transpiration memo is keyed on (psi_stem, psi_upstream) and NOT on the
   // curve, so a perturbation that leaves the potentials alone -- which is every

@@ -1,5 +1,68 @@
 # phylloptim 0.2.1
 
+## The vulnerability spline reaches the domain it claims (#92) — MOVES RESULTS
+
+`cumulative_vulnerability_integral` built its knot grid by accumulating
+`psi += step`. Rounding accumulates, so after `resolution` additions `psi` landed a
+few ULP either side of `psi_max` and the loop yielded **`resolution` or
+`resolution - 1` knots depending on the values of `b` and `c`** — an upper domain
+bound that was neither reproducible across parameter values nor equal to
+`vulnerability_psi_max`, which the comment there says the inverse "needs the same
+bound" as. Both splines built from that grid have extrapolation **disabled**, so the
+edge decides whether a lookup at the dry end throws.
+
+**The package defaults were on the losing side of it**: 99 knots, ending at 6.8229
+against a `psi_max` of 6.8918 — one full step, 1.0% of the intended domain, silently
+missing from both the stem and the root curve.
+
+Indexing the grid fixes the count and makes the last knot exactly
+`vulnerability_psi_max(b, c)`. **This moves results**: 3496 of 5184 golden cells,
+median 2.0e-15, and the largest **absolute** move anywhere in the file is 1.97e-10.
+The 71 cells whose *relative* move exceeds 1e-7 are all at `psi_soil = 3` with 5
+layers, where the quantities themselves are 1e-11 to 1e-3. Nothing reaches the
+~1e-4 band this package calls a real difference. Recorded gradients move further,
+as finite differences of the same solve must: 63 of 100 cells, median 1.1e-08,
+worst 5.1e-04 — an order inside the 5e-3 that file is already compared with
+cross-platform.
+
+## `psi_crit` is checked against the curve that bounds it (#38)
+
+`psi_crit` looks independent of `stem_b`/`stem_c` and is not: the spline stops at
+`P99 = stem_b * log(100)^(1/stem_c)`, `psi_crit` never enters that, and every solve
+evaluates the curve *at* `psi_crit`. So `psi_crit > P99` used to fail from inside
+the interpolator, in a message naming neither trait — which reads as "the solver
+went somewhere strange" when the real answer is a trait combination that was never
+valid. Found while calibrating against measured P50/P88 curves, where `stem_b` and
+`stem_c` are far from the defaults.
+
+The constructor, `set_traits()` and `perturb_stem_b()` now refuse it by name, and
+the message quotes the **P95** that would work — because that is what the defaults
+encode: `3.898245 * log(1/0.05)^(1/2.680147) = 5.870283 = psi_crit`, to six decimal
+places. `?leaf_traits` states the relationship, which was written down nowhere.
+
+⚠️ **The root curve is deliberately not checked.** #38 assumed `root_psi_crit`
+carried the same constraint; since #77 bounded the root curves past their last knot
+it does not throw, it **clamps** — a different defect, and #85's question.
+
+This rejects only combinations that already failed, so nothing that worked stops
+working. It did catch one inconsistent pair inside this repo's own suite
+(`leaf_traits(stem_b = 2.0)` at the default `psi_crit`) and one in `?leaf_traits`'s
+example, both now fixed.
+
+## Traits can be read back from the object (#95)
+
+The thirteen `set_traits()` traits were write-only from R: `psi_crit`, `stem_b`,
+`stem_c`, `beta2`, `root_*` and the rest could be set and not read. Anything that
+had to compute a quantity the model defines in terms of one had to carry it —
+Sperry's cost normalises by `k_crit = kmax * proportion_of_conductivity(psi_crit)`,
+and a probe script in `leaf_calibration_test/sicangco-2026` therefore held a
+hard-coded `5.870283`.
+
+All thirteen are now bound **read-only**. `set_traits()` is still the only way to
+change one, for the reason hazard 10 gives at length: a bare write leaves up to two
+vulnerability splines and the solved operating point describing the old value.
+`R_d_25` stays settable, as it already was.
+
 ## `R_d_25` is a trait, and respiration rises with temperature (#41)
 
 Dark respiration was `rd_to_vcmax_ratio_ * vcmax_(T)`: a fixed fraction of Vcmax,

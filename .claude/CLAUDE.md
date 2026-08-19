@@ -464,6 +464,31 @@ the per-cause split and the tolerance bands go in the first PR comment — see
    parameters for the stem cost and carried λ ∝ ψ^3.02 into a manuscript draft where
    it should have been ψ^0.64. Never leave an unmarked default for a parameter that
    exists in two versions.
+
+   ⚠️ **And `psi_crit` is not a free trait — it belongs to the stem curve (#38).**
+   The spline is pre-integrated over `[0, P99]` with `P99 = stem_b *
+   log(100)^(1/stem_c)`, `psi_crit` never enters that bound, and every solve
+   evaluates the curve *at* `psi_crit`. What the defaults say is that `psi_crit` is
+   **P95** of the same curve — `3.898245 * log(1/0.05)^(1/2.680147) = 5.870283`, to
+   six decimal places, against a P99 of 6.891842. That was written down nowhere, so
+   anyone fitting a measured vulnerability curve picked something plausible and got
+   a domain error naming only the interpolator. **Move the pair together.** The
+   constructor, `set_traits` and `perturb_stem_b` all check it now, and
+   `?leaf_traits` has the relationship. This repo's own suite had one inconsistent
+   pair in it when the check went in.
+
+   The root curve is the exception, and knowing why saves re-deriving it:
+   `root_psi_crit` past the root P99 does **not** throw, because #77 made
+   `root_vuln_at` clamp to the last knot instead. A layer silently reporting the
+   floor conductivity is #85's question, not this one.
+
+   ⚠️ **The domain edge itself was unstable until #92.** The knot grid accumulated
+   `psi += step`, so it produced `resolution` *or* `resolution - 1` knots depending
+   on `b` and `c` — the realised bound was not `vulnerability_psi_max` and was not
+   reproducible across parameter values. At the package defaults it fell one full
+   step (1.0%) short. It is indexed now, and `x.back() == vulnerability_psi_max(b,
+   c)` is asserted **bit-exactly** over 1800 (b, c, resolution) triples: a
+   tolerance there would pass on the code the test exists to reject.
 2. **~~Signed versus magnitude water potentials.~~ RESOLVED — there is now ONE
    representation: every ψ is a positive magnitude in MPa (#25).** The hazard this
    entry used to describe is gone rather than managed, and the two attempts to
@@ -702,13 +727,24 @@ the per-cause split and the tolerance bands go in the first PR comment — see
    curve) and the **solved operating point** (hazard 8). The third is the one that
    cost the time:
 
-   ⚠️ **`vcmax_`, `jmax_` and `R_d_` are derived inside `set_physiology`'s
+   ⚠️ **~~`vcmax_`, `jmax_` and `R_d_` are derived inside `set_physiology`'s
    temperature cache, which is keyed on `(leaf_temp_, atm_o2_kpa_)` and on nothing
-   else.** So the obvious repair — change the trait, then call `set_physiology`
-   again — takes a cache *hit* and never recomputes them. Only
-   `electron_transport_` gets refreshed. A trait sweep written that way runs the
-   whole sweep at the first vcmax it ever saw, and every number it reports is
-   plausible.
+   else.~~ FIXED (#55), and the entry stays only so the repair is not undone.** It
+   used to be keyed on that pair alone, so the obvious repair — change the trait,
+   then call `set_physiology` again — took a cache *hit* and never recomputed them:
+   a trait sweep written that way ran the whole sweep at the first vcmax it ever
+   saw, and every number it reported was plausible.
+
+   The key is now every scalar `update_temperature_dependent_params()` reads,
+   `vcmax_25` and `jmax_25` among them, so re-driving after a bare trait write
+   *does* recompute. **The guarantee lives in `photo_temp_key()`, not in the
+   field** — a member added to the temperature block and left out of that key
+   reopens this silently, and `photo_temp_key_size` is the only thing that will
+   complain. `test_temperature_params_invalidate_cache` asserts it through the
+   route a caller actually takes.
+
+   `set_traits()` is still the right way to change a trait: the splines and the
+   solved operating point need clearing too, and the cache key does not do that.
 
    `set_traits` ends with `setup_clean_leaf()`, which is what resets the cache; the
    cost is that `set_physiology` must genuinely be called again afterwards.
