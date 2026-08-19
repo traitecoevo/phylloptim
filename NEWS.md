@@ -161,6 +161,7 @@ optimum, where real dark respiration rises. No value of the ratio repairs a func
 of the wrong shape — see the note in `update_temperature_dependent_params()`. And
 `rd_to_vcmax_ratio` is still not a `leaf_traits()` member, so it cannot yet be
 fitted or differentiated; it is set as a field.
+
 ## The gradient differentiates `profit`, which is what a demographic caller bills
 
 `leaf_gradient()` and `leaf_gradient_batch()` return a fifth column. The four

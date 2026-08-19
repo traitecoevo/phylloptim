@@ -551,13 +551,15 @@ test_that("profit's gradient is the direct term alone at an interior optimum", {
   # The envelope theorem, which is the ONE place this package uses it. At an
   # interior optimum dprofit/dpsi == 0, so the indirect term
   # (dprofit/dpsi)(dpsi*/dtheta) vanishes IDENTICALLY, and dprofit/dtheta is the
-  # direct partial at fixed psi. `leaf_gradient()` encodes that by zeroing
-  # dY_dpsi["profit"], so the check is that the reported column equals a direct
-  # central difference with the collar HELD at psi*.
+  # direct partial at fixed psi. `leaf_gradient()` encodes that by ASSIGNING the
+  # profit column from the direct term -- it does not zero dY_dpsi["profit"],
+  # which carries the exact dprofit/dpsi for the pinned route -- so the check is
+  # that the reported column equals a direct central difference with the collar
+  # HELD at psi*.
   #
   # ⚠️ THE OPERATING POINT IS CHOSEN, NOT ARBITRARY, and choosing it is what makes
-  # this a test rather than a formality. Zeroing only matters where the term it
-  # removes is big enough to see, and that term is NOISE rather than an h^2
+  # this a test rather than a formality. The assignment only matters where the term
+  # it removes is big enough to see, and that term is NOISE rather than an h^2
   # truncation: `profit` is the maximum, so it is flat, and a central difference
   # of it divides the solve's ~1e-9 floor by a ~1e-6 step. `?leaf_gradient` has
   # the distribution over the golden grid's 136 interior rows; what matters here
@@ -614,7 +616,7 @@ test_that("profit's gradient is the direct term alone at an interior optimum", {
   #
   # ⚠️ So this test has TEETH only on the platform the measurement was made on.
   # Off it, the check above still holds and the one below is skipped; a Linux-only
-  # run would not catch the zeroing being removed. Said plainly rather than left
+  # run would not catch the assignment being removed. Said plainly rather than left
   # for someone to discover from a green CI.
   skip_if_not(golden_bit_exact_platform(),
               "the noise floor these two numbers measure is macOS/arm64's")

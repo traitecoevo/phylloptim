@@ -530,6 +530,13 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
       // the ci root-find -- so for profit alone there is something better than a
       // difference of the same quantity, and it is already computed. The other
       // four have no such route and must be differenced.
+      //
+      // ⚠️ NOTHING CONSUMES THIS TODAY, and it is here rather than deleted for
+      // #88. The only reader is `gradient_ift` with `envelope` false, i.e. a
+      // FORCED Method::Ift at a pinned point -- and the 288-point grid test
+      // records that forcing it there throws ("narrower than one step") at all
+      // 42 pinned rows before this value is reached. So it is unexercised, not
+      // load-bearing: do not read a green suite as evidence about it.
       dY_dpsi[out_profit] = resid;
     }
   }
