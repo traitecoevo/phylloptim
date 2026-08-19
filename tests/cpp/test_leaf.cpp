@@ -2503,6 +2503,44 @@ void test_water_mass_conversions_are_reciprocal() {
        "the molar mass is water's, in g/mol");
 }
 
+// The gas constant is the SI value, and both Arrhenius curves are exactly inert at
+// 25 C (#51 audit). The second claim is the load-bearing one: it is why a change to
+// R moves the golden grid's 40 C block and leaves its 25 C block byte-identical, and
+// why the whole R-side suite -- which runs at 25 C throughout -- was blind to this
+// change and passed unaltered.
+void test_gas_constant_and_arrhenius_reference_point() {
+  printf("gas constant and the 25 C reference\n");
+  // Exact: R = N_A * k_B has been an exact SI quantity since the 2019 redefinition,
+  // so there is no tolerance to allow. Pinned against the old truncation too.
+  near(phylloptim::gas_constant, 8.314462618153240, 1e-15,
+       "gas_constant is the SI value");
+  ok(std::abs(phylloptim::gas_constant - 8.314) > 1e-4,
+     "gas_constant is no longer the 8.314 truncation");
+
+  // Inertness at the reference temperature, through the object. Every reference
+  // value in this model is DEFINED at 25 C, so a temperature response can only be
+  // seen away from it -- assert that rather than leaving it as an argument in a
+  // comment, because it is what bounds the blast radius of any change in here.
+  Drivers d;
+  phylloptim::Leaf ref = make_leaf(d, {2.0}, {1.0});   // d.leaf_temp is 25
+  ok(ref.vcmax_ == ref.vcmax_25, "vcmax_ IS vcmax_25 at 25 C, bit for bit");
+  ok(ref.jmax_ == ref.jmax_25, "jmax_ IS jmax_25 at 25 C, bit for bit");
+  ok(ref.R_d_ == ref.R_d_25, "R_d_ IS R_d_25 at 25 C, bit for bit");
+  // gamma_, kc_ and ko_ also sit at their 25 C reference values, but they carry a
+  // umol/mol -> Pa conversion through atm_kpa_ that this test would have to restate
+  // to check -- and a second copy of a conversion is what hazard 1 is about. The
+  // three identities above are the same claim without the duplication.
+
+  // And NOT inert away from it, which is the other half: a test that only checked
+  // 25 C would pass on a broken response curve.
+  Drivers hot;
+  hot.leaf_temp = 40.0;
+  phylloptim::Leaf warm = make_leaf(hot, {2.0}, {1.0});
+  ok(warm.vcmax_ != warm.vcmax_25, "vcmax_ has moved at 40 C");
+  ok(warm.jmax_ != warm.jmax_25, "jmax_ has moved at 40 C");
+  ok(warm.R_d_ > ref.R_d_, "respiration is higher at 40 C than at 25 C");
+}
+
 void test_knot_grid_reaches_its_intended_domain() {
   printf("vulnerability knot grid\n");
   const double resolutions[] = {10.0, 50.0, 100.0, 200.0, 1000.0};
@@ -2780,6 +2818,7 @@ int main() {
   test_set_traits_matches_a_fresh_leaf();
   test_perturb_stem_b_matches_a_rebuild();
   test_water_mass_conversions_are_reciprocal();
+  test_gas_constant_and_arrhenius_reference_point();
   test_knot_grid_reaches_its_intended_domain();
   test_psi_crit_must_lie_on_the_stem_curve();
   test_bad_input_throws();

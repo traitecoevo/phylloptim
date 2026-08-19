@@ -1,5 +1,51 @@
 # phylloptim 0.4.0
 
+## The gas constant is the SI value (#51 audit) — MOVES RESULTS, AT 40 C ONLY
+
+`gas_constant` was `8.314`. Since the 2019 SI redefinition R = N_A k_B is **exact**, at
+8.314462618153240 J mol^-1 K^-1, so there was no reading on which 8.314 was right — the
+only question was whether a 5.56e-05 correction justified a results change.
+
+It does, because the amplification is not 5.56e-05. This constant appears only in
+`arrh_curve` and `peak_arrh_curve`, always as `Ea/(R*T)` with `Ea/RT` of order 24 at the
+defaults, so a relative change eps in R moves the exponent by ~24 eps and the rate by
+~1.3e-03 — an order above the 1e-04 this package calls a real difference.
+
+**And it moves nothing at 25 C, exactly.** `arrh_curve` carries `(leaf_temp - 25)` in its
+numerator, so it returns its reference value through `exp(0)` whatever R is;
+`peak_arrh_curve`'s `arg2` and `arg3` are the same expression at the same temperature, so
+their ratio is exactly 1. Predicted before measuring, and confirmed: **1728 of 1728 moved
+golden cells are at 40 C, and the 25 C block is byte-identical.**
+
+Blast radius, all at 40 C: median relative 6.49e-05, largest absolute move 2.04e-03. The
+two cells above 1e-02 are `profit` at 5-layer 40 C points where it is ~1e-03, i.e. small
+denominators. `gradient_golden.tsv` does not move at all, because `grid_drivers` is 25 C.
+
+⚠️ **The R-side suite was blind to this**: all 1107 tests passed unaltered, because
+nothing on the R side runs above 25 C. Only the golden grid's second temperature caught
+it — which is what that second temperature is for.
+
+⚠️ plant does **not** re-export `gas_constant` (its `leaf_model.h` says so explicitly),
+so nothing over there references it by name; its results still move through the leaf.
+
+## Two constants audited and deliberately left alone
+
+The same audit flagged two more, neither of which has a forced answer, so both are
+documented at the constant rather than changed:
+
+- **`gravity_head = 9.8e-3`** is 6.78e-04 below `1000 * 9.80665 / 1e6`. Above the
+  real-difference threshold, and it moves results through the per-layer head — but the
+  right value depends on a water-density convention nobody has stated (nominal 1000,
+  4 C 999.97, 25 C 997.05 span 0.3%, four times the discrepancy). Needs a decision.
+- **`latent_heat_vap = 2.45e6`** and its own comment disagree: the comment said "fixed at
+  25 deg C", where lambda(25 C) is 2.442e6; 2.45e6 is ~21.5 C. Only reaches the
+  default-off Penman-Monteith path, and on that path lambda is arguably the wrong *shape*
+  rather than the wrong value, since it depends on the leaf temperature being solved for.
+  Left to #28; the comment no longer states a temperature the value does not have.
+
+`C_to_K`, `umol_par_per_joule`, `vol_heat_cap_air` and (since #51) `molar_mass_h2o` check
+out. `H2O_CO2_stom_diff_ratio` is #50 and is a convention question, not an error.
+
 ## One molar mass of water, so the kg <-> mol conversions are reciprocal (#51) — MOVES RESULTS
 
 `kg_to_mol_h2o` was 55.4939 and `kg_per_mol_h2o` was 0.018015 — two constants naming
