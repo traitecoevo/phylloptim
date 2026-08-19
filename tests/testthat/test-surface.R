@@ -204,8 +204,27 @@ test_that("leaf_solve() reproduces the stateful path exactly", {
 # Read the twelve outputs the slow way -- one active binding at a time, which is
 # what operating_point() did before #39 -- so the one-call C++ reader can be
 # checked against it.
+#
+# ⚠️ `uptake` IS NOT A BINDING, it is a sum, so this helper has to derive it -- and
+# `sum()` IS THE WRONG WAY TO DERIVE IT for a comparison that demands bit-equality
+# with C++. R's `sum()` accumulates in `LDOUBLE`, which is 80-bit on x86-64 Linux and
+# 64-bit on arm64 macOS; `Leaf::operating_point_values()` accumulates in `double`. So
+# `sum()` agrees with it bit-for-bit on arm64 and can differ by an ULP on x86-64,
+# for a sum of more than one term.
+#
+# That is exactly how it failed: this test passed on macOS and on Linux for years,
+# then #92 moved the values and the three-layer case came apart on ubuntu only,
+# element [10] of twelve, 4.05328878168362639e-06 against ...724e-06. Nothing about
+# the code under test had changed platform behaviour -- the assertion had always been
+# platform-dependent and had happened to hold.
+#
+# `Reduce("+", ...)` accumulates left to right in plain double addition, which is
+# what the C++ loop does, so the comparison is bit-exact on every platform rather
+# than relaxed on some. Preferred over widening the tolerance because a shifted
+# column -- the thing this test exists to catch -- is worth catching at the last bit.
 outputs_one_at_a_time <- function(l) {
   consumption <- l$soil_consumption_
+  finite <- consumption[is.finite(consumption)]
   c(psi_stem = l$opt_psi_stem_,
     collar = l$opt_root_psi_,
     ci = l$ci_,
@@ -215,7 +234,7 @@ outputs_one_at_a_time <- function(l) {
     profit = l$profit_,
     hydraulic_cost = l$hydraulic_cost_,
     E_up = l$E_up_,
-    uptake = sum(consumption[is.finite(consumption)]),
+    uptake = Reduce(`+`, finite, 0),
     lambda = l$lambda,
     g1_eff = l$g1_eff)
 }
