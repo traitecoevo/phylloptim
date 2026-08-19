@@ -236,6 +236,15 @@ byte-for-byte. If you add a header, you need do nothing. If you want a literal
 Doxygen command, write a `///` comment and the filter will leave it alone.
 Publishing is off until someone sets the repo variable `PUBLISH_DOCS=true`.
 
+⚠️ **One indented display per comment block.** An indented run becomes
+`\verbatim`, and Doxygen 1.9 — which is the version CI installs, where local
+Homebrew is 1.17 — drops the second one's OPEN and then reports `unexpected
+command endverbatim` at a line in the *filtered* stream that lands in unrelated
+code, 120 lines away in the case that found it. **A local `doxygen` run renders
+it in silence**, so this is only ever visible in CI and only cryptically. Put the
+equations in one display rather than one on each side of a paragraph; `docs.yml`
+now asserts the shape and names the block, so it fails legibly.
+
 ## Cost: the one thing the golden file cannot see
 
 `tests/cpp/bench_solve.cpp` and `bench_gradient.cpp` cover the C++ side.

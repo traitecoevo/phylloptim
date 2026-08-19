@@ -3345,14 +3345,14 @@ inline void Leaf::optimise_psi_stem_Sperry() {
 // Sperry et al. (2017) ProfitMax, as Sicangco et al. (2026) implement it
 // ---------------------------------------------------------------------------
 // WHY THIS EXISTS ALONGSIDE optimise_psi_stem_Sperry, WHICH IS THE SAME MODEL.
-// Sperry maximises
-//
-//     Profit = CG - HC,   CG = A(psi)/|A|max,   HC = [k(psi_soil)-k(psi)] / [k(psi_soil)-kcrit]
-//
-// while this package's older entry point maximises `A - lambda*(k(psi_soil)-k(psi))`.
+// Sperry maximises `Profit = CG - HC` with both terms normalised, where this
+// package's older entry point maximises `A - lambda*(k(psi_soil)-k(psi))`.
 // Multiplying Sperry's objective by |A|max shows the two are the same function up
-// to a positive scale factor, so they share an argmax EXACTLY when
+// to a positive scale factor, so they share an argmax EXACTLY when lambda takes
+// the value below:
 //
+//     CG      = A(psi)/|A|max
+//     HC      = [k(psi_soil)-k(psi)] / [k(psi_soil)-kcrit]
 //     lambda* = |A|max / [k(psi_soil) - kcrit]
 //
 // Checked numerically on a 4001-point grid at gross assimilation, at net, and at

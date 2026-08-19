@@ -35,6 +35,25 @@
 #      one unreadable line. A run of lines indented relative to the surrounding
 #      prose is reproduced exactly instead.
 #
+#      ⚠️ ONE RUN PER COMMENT BLOCK. Doxygen 1.9 -- which is what CI installs --
+#      handles the FIRST `\verbatim` in a block and then drops the second one's
+#      OPEN, reporting `unexpected command endverbatim` at its close. The line it
+#      names is in the filtered stream and lands in unrelated code, so it reads
+#      like a parser bug somewhere else entirely: the report that found this was
+#      120 lines past the comment responsible. Doxygen 1.17 renders the same input
+#      in silence, so a local `doxygen` run says nothing.
+#
+#      Established by a probe header of eight isolated constructs rendered in CI:
+#      one run, banner rules, `|` in prose, `|` inside the run, and an emoji are
+#      all clean; every block with two runs errors, and only at the SECOND close.
+#      So write one indented display per comment block -- put the equations
+#      together rather than one on each side of a paragraph. `docs.yml` asserts
+#      it, because nothing else can.
+#
+#      The `/*! \file */` block rule 2 emits is EXEMPT, and that is measured
+#      rather than assumed: closed_form.hpp's file block has carried two runs
+#      across a long green master. So the assertion counts `///` blocks only.
+#
 #      A run only OPENS after a blank line and only on a line that is not a list
 #      item. Both conditions are load-bearing. Without the first, the hanging
 #      indent under a bullet (`  * POSITIVE magnitudes -- ...` followed by
@@ -45,21 +64,11 @@
 #      preformatted text and stop rendering as lists.
 #
 # ESCAPING. Text outside a verbatim run is escaped, because none of it was
-# written with Doxygen in mind: `\`, `@`, `#`, `%`, `&`, `<`, `>` and `|` all
-# mean something to Doxygen and here they never do. Without it, `#include <phylloptim.hpp>`
+# written with Doxygen in mind: `\`, `@`, `#`, `%`, `&`, `<` and `>` all mean
+# something to Doxygen and here they never do. Without it, `#include <phylloptim.hpp>`
 # becomes a broken link to an entity called "include" followed by a swallowed
 # HTML tag, and the `\int` in the roots.hpp head-loss note becomes an unknown
-# command; both were observed before this was added.
-#
-# ⚠️ `|` WAS ADDED LAST AND COST A CI-ONLY DEBUGGING ROUND. Doxygen reads a `|`
-# in a paragraph as a table delimiter, and `\verbatim` is not allowed inside a
-# table cell: it drops the OPEN, and then reports `unexpected command
-# endverbatim` at a line that is neither -- in the case that found this, 80 lines
-# further on, inside unrelated code. Doxygen 1.17 renders the same input in
-# silence, so a local `doxygen` run says nothing; only the 1.9 that CI installs
-# objects. The comment that triggered it wrote the maximum of A over the supply
-# stream as `|A|max`. `|` in prose is common in these headers and was harmless
-# until one such comment also contained an indented block. Verbatim runs are NOT
+# command; both were observed before this was added. Verbatim runs are NOT
 # escaped -- Doxygen reproduces them literally, so an escape would show up as a
 # stray backslash. If you genuinely want a Doxygen command, write a `///`
 # comment and rule 1 will leave it alone.
@@ -99,7 +108,6 @@ function escape(s) {
   gsub(/&/,  "\\&",  s)
   gsub(/</,  "\\<",  s)
   gsub(/>/,  "\\>",  s)
-  gsub(/\|/, "\\|",  s)
   return s
 }
 
