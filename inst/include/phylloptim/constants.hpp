@@ -56,35 +56,11 @@ inline constexpr double ko_ha = 36.38e3;
 // Leaf::umol_per_mol_to_Pa_, derived from atm_kpa_. The old `0.1013` was 101.3
 // kPa hard-coded; don't reinstate it.
 
-// The molar mass of water, and the ONE place it is written down (#51). Everything
-// that crosses between a kg basis and a mol basis is derived from this, so the two
-// directions are reciprocal by construction and a round trip is the identity to
-// within one rounding.
+// The molar mass of water -- 18.015 g/mol, from the standard atomic weights -- and
+// the ONE place it is written down. Both conversion directions derive from it, so
+// they are reciprocal by construction; do not reintroduce a second literal (#51).
 //
-// ⚠️ THIS USED TO BE TWO INDEPENDENT NUMBERS THAT DISAGREED BY 0.0277%, and the
-// header said so on purpose: `kg_to_mol_h2o` was 55.4939 while `kg_per_mol_h2o` was
-// 0.018015, with a comment recording that the first was "intentionally distinct
-// from 1/kg_to_mol_h2o ... kept at the historical 0.018015 to preserve results".
-// Two constants naming the same physical quantity in opposite directions, used in
-// opposite halves of the model: the demand side converted transpiration kg -> mol
-// with the first, the supply side converted uptake mol -> kg with the second.
-//
-// WHICH ONE WAS WRONG IS NOT A MATTER OF CONVENTION, which is what let this be
-// settled rather than argued. 55.4939 is 1/0.018020, i.e. it encodes a molar mass of
-// 18.0200 g/mol. The molar mass of water is 18.015 g/mol -- from the standard atomic
-// weights, 2(1.008) + 15.999 -- so 0.018015 is the physical value and the forward
-// constant was the odd one. Unifying therefore moves `kg_to_mol_h2o` from 55.4939 to
-// 55.509298..., which is the LARGER of the two possible moves, and it is still the
-// right one: the alternative preserves more digits by adopting a molar mass water
-// does not have.
-//
-// It also happens to leave plant's `using ::phylloptim::kg_per_mol_h2o` --
-// tf24_strategy.cpp's water consumption rate, the only live use of either name over
-// there -- multiplying by an unchanged constant. That is a convenience, not the
-// reason; plant's results still move, because the leaf's operating point does.
-//
-// Both old names are kept, and deliberately: plant `using`-declares both, so
-// deleting either would break its build for no benefit.
+// Both names below are kept because plant `using`-declares both.
 inline constexpr double molar_mass_h2o = 0.018015; // kg mol^-1
 // kg mol^-1, for converting a molar water flux back to kg.
 inline constexpr double kg_per_mol_h2o = molar_mass_h2o;
