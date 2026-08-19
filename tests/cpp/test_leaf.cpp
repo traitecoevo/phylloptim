@@ -2847,6 +2847,61 @@ void test_sperry_refuses_an_unset_lambda() {
   ok(threw, "rather than searching a NaN objective");
 }
 
+// ⚠️ THE TEST THE GOLDEN FILE CANNOT BE. `set_leaf_states_rates_from_psi_stem`
+// used to zero transpiration wherever `assim_max_ < 0`, and the golden grid's
+// minimum assim_max_ is 3.71, so it never reached the branch. The collar solve
+// cannot reach it either -- prepare_collar_solve exits first -- so the ONLY way
+// to see this is to call the forward evaluation directly in that regime, which is
+// what the single-layer optimisers and the ProfitMax curve do.
+void test_transpiration_survives_negative_assim() {
+  printf("water moves whether or not there is carbon to be had\n");
+  Drivers d;
+  d.PPFD = 1500.0;
+  d.leaf_temp = 50.0;  // hot enough that A(ci = ca) cannot cover R_d
+
+  phylloptim::Leaf l = make_single_leaf(d, 0.5);
+  ok(l.assim_max_ < 0.0, "the regime is reached: assim_max_ is negative");
+
+  const double psi = 3.0;
+  l.set_leaf_states_rates_from_psi_stem(psi, 0.5);
+  const double E = l.transpiration_;
+  ok(E > 0.0, "transpiration follows the hydraulic supply, not the carbon");
+  near(E, l.transpiration(psi, 0.5), 1e-12,
+       "and equals the supply function exactly");
+  ok(l.stom_cond_CO2_ > 0.0, "so the conductance is positive too");
+
+  // The carbon state is the one the branch used to set by hand, and it now comes
+  // from the ci solver's own compensation-point fallback.
+  near(l.ci_, l.gamma_ * l.umol_per_mol_to_Pa_, 1e-9,
+       "ci sits at the compensation point");
+  near(l.assim_colimited_, -l.R_d_, 1e-9,
+       "and net assimilation is exactly -R_d");
+  printf("    Tleaf %.0f C: assim_max_ %.3f, E %.3e kg m-2 s-1, A %.3f\n",
+         d.leaf_temp, l.assim_max_, E, l.assim_colimited_);
+
+  // ⚠️ AND TWO LEAVES AT THE SAME OPERATING POINT NOW AGREE ABOUT THE WATER. This
+  // is how the old behaviour was found: an arm optimised with respiration off and
+  // scored with it on reported a potential that moves water beside a transpiration
+  // of exactly zero.
+  Drivers dg = d;
+  phylloptim::Leaf gross = make_single_leaf(dg, 0.5);
+  gross.set_traits(96, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
+                   5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, /*R_d_25=*/0.0);
+  phylloptim::RootNetwork rn;
+  rn.r_R_V_sum = std::vector<double>{1.0e3};
+  rn.r_R_H_min = std::vector<double>{0.0};
+  rn.r_R_V = std::vector<double>{1.0e3};
+  rn.c_r_V = std::vector<double>{0.0};
+  rn.c_r_H = std::vector<double>{0.0};
+  gross.set_physiology(rn, dg.PPFD, {0.5}, {1.0}, dg.K_s * dg.theta / dg.h,
+                       dg.atm_vpd, dg.ca, dg.leaf_temp, dg.atm_o2_kpa,
+                       dg.atm_kpa);
+  gross.set_leaf_states_rates_from_psi_stem(psi, 0.5);
+  ok(gross.assim_max_ > 0.0, "with R_d_25 = 0 the same drivers are NOT shut down");
+  near(gross.transpiration_, E, 1e-12,
+       "and both leaves report the same transpiration at the same potential");
+}
+
 void benchmark() {
   printf("\ntiming\n");
   Drivers d;
@@ -2923,6 +2978,7 @@ int main() {
   test_profitmax_thermal_cost();
   test_single_layer_optimisers_clear_collar_state();
   test_sperry_refuses_an_unset_lambda();
+  test_transpiration_survives_negative_assim();
   benchmark();
 
   printf("\n%d checks, %d failures\n", checks, failures);

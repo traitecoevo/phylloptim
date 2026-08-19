@@ -281,6 +281,18 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// Leaf__leaf_temp_from_E
+double Leaf__leaf_temp_from_E(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double E);
+RcppExport SEXP _phylloptim_Leaf__leaf_temp_from_E(SEXP obj_SEXP, SEXP ESEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    Rcpp::traits::input_parameter< double >::type E(ESEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__leaf_temp_from_E(obj_, E));
+    return rcpp_result_gen;
+END_RCPP
+}
 // Leaf__set_leaf_states_rates_from_psi_stem
 void Leaf__set_leaf_states_rates_from_psi_stem(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem, double psi_upstream);
 RcppExport SEXP _phylloptim_Leaf__set_leaf_states_rates_from_psi_stem(SEXP obj_SEXP, SEXP psi_stemSEXP, SEXP psi_upstreamSEXP) {
@@ -2490,6 +2502,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__assim_colimited", (DL_FUNC) &_phylloptim_Leaf__assim_colimited, 2},
     {"_phylloptim_Leaf__assim_minus_stom_cond_CO2", (DL_FUNC) &_phylloptim_Leaf__assim_minus_stom_cond_CO2, 4},
     {"_phylloptim_Leaf__electron_transport", (DL_FUNC) &_phylloptim_Leaf__electron_transport, 1},
+    {"_phylloptim_Leaf__leaf_temp_from_E", (DL_FUNC) &_phylloptim_Leaf__leaf_temp_from_E, 2},
     {"_phylloptim_Leaf__set_leaf_states_rates_from_psi_stem", (DL_FUNC) &_phylloptim_Leaf__set_leaf_states_rates_from_psi_stem, 3},
     {"_phylloptim_Leaf__E_from_Soil_to_Root_Collar", (DL_FUNC) &_phylloptim_Leaf__E_from_Soil_to_Root_Collar, 3},
     {"_phylloptim_Leaf__find_root_collar_psi", (DL_FUNC) &_phylloptim_Leaf__find_root_collar_psi, 1},

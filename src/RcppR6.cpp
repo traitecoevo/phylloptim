@@ -80,6 +80,10 @@ double Leaf__electron_transport(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj
   return obj_->electron_transport();
 }
 // [[Rcpp::export]]
+double Leaf__leaf_temp_from_E(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double E) {
+  return obj_->leaf_temp_from_E(E);
+}
+// [[Rcpp::export]]
 void Leaf__set_leaf_states_rates_from_psi_stem(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem, double psi_upstream) {
   obj_->set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
 }

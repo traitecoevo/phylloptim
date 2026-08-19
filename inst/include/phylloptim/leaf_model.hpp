@@ -3087,16 +3087,40 @@ inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
 // given psi_stem, find assimilation, transpiration and stomal conductance to c02
 inline void Leaf::set_leaf_states_rates_from_psi_stem(double psi_stem, double psi_upstream) {
 
+  // ⚠️ AN `assim_max_ < 0` EARLY EXIT USED TO SIT HERE, AND IT ZEROED THE WATER.
+  // It read: if gross assimilation at ci = ca cannot cover respiration, put ci at
+  // the compensation point and set transpiration and conductance to zero. The
+  // first half is right and is now the ci solver's own job; the second half is
+  // wrong, and wrong in a way that matters.
+  //
+  // Transpiration on this path is the HYDRAULIC SUPPLY at the candidate potential.
+  // It does not ask whether there is carbon to be had -- water moves down a
+  // potential gradient whatever photosynthesis is doing. Zeroing it made two leaves
+  // at the SAME operating point disagree about whether water was moving purely
+  // because one of them had respiration switched on, which is how it was found.
+  //
+  // Deleting it changes nothing about the shut-down STATE it was reaching for.
+  // Where `assim_max_ < 0` the ci root-find has no supply==demand root anywhere in
+  // [gamma*, ca] -- assimilation is monotone in ci and negative at both ends -- so
+  // psi_stem_to_ci takes its compensation-point fallback and returns ci = gamma*
+  // with gross assimilation zero and net = -R_d, which is exactly what this branch
+  // set by hand. That fallback did not exist when the branch was written; it was
+  // added with the Q10 respiration in #41, which is also what made this regime
+  // reachable at ordinary light.
+  //
+  // ⚠️ AND IT IS UNREACHABLE FROM THE COLLAR SOLVE, which is why plant is
+  // unaffected: prepare_collar_solve has its OWN `assim_max_ < 0` exit and returns
+  // false before any candidate potential is evaluated. The golden grid's minimum
+  // assim_max_ is 3.71, so the file never reaches this branch either and is
+  // bit-identical across the change -- which is a statement about the grid, not
+  // evidence that the change is inert. test_transpiration_survives_negative_assim
+  // is the test that can see it.
   if (psi_upstream >= psi_stem){
     ci_ = gamma_*umol_per_mol_to_Pa_;
     transpiration_ = 0;
     stom_cond_CO2_ = 0;
     } else{
-      if(assim_max_ < 0){
-        ci_ = gamma_*umol_per_mol_to_Pa_;
-        transpiration_ = 0;
-        stom_cond_CO2_ = 0;
-        } else{
+      {
       // Transpiration is the hydraulic supply, independent of ci; compute it
       // first so the PM path can derive the operating-point leaf temperature.
       // Off the PM path this is a memoised no-op reorder (psi_stem_to_ci ->

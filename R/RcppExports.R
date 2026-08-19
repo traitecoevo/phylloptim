@@ -77,6 +77,10 @@ Leaf__electron_transport <- function(obj_) {
     .Call('_phylloptim_Leaf__electron_transport', PACKAGE = 'phylloptim', obj_)
 }
 
+Leaf__leaf_temp_from_E <- function(obj_, E) {
+    .Call('_phylloptim_Leaf__leaf_temp_from_E', PACKAGE = 'phylloptim', obj_, E)
+}
+
 Leaf__set_leaf_states_rates_from_psi_stem <- function(obj_, psi_stem, psi_upstream) {
     invisible(.Call('_phylloptim_Leaf__set_leaf_states_rates_from_psi_stem', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream))
 }

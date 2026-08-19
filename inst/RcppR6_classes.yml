@@ -383,6 +383,14 @@ Leaf:
     electron_transport:
       return_type: double
       args: []
+    # The operating-point leaf temperature at a given transpiration, on the
+    # energy-balance path. Bound so a caller aligning an EXTERNAL energy balance to
+    # this one can iterate on the model's own function rather than transcribing
+    # `Tair + (Rn - lambda*E)*ra/rho_cp` into R -- where it would go stale the
+    # first time this one changed, silently.
+    leaf_temp_from_E:
+      return_type: double
+      args: [E: double]
     set_leaf_states_rates_from_psi_stem:
       return_type: void
       args: [psi_stem: double, psi_upstream: double]
