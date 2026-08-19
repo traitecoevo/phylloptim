@@ -58,37 +58,15 @@ jobs:
           path: odelia
           fetch-depth: 1
 
-      # ⚠️ `apt-get update` CAN HANG FOR HOURS HERE, and the mirror line below is
-      # what stops it. Measured on 2026-08-19: azure.archive.ubuntu.com -- the
-      # mirror the runner image prefers -- stopped accepting connections from some
-      # runners. One job held a runner for 26 minutes on this line and was still
-      # going; three re-runs did the same, while the g++ job on a byte-identical
-      # step passed. The step references nothing from the matrix, so the fault is
-      # per-VM network reachability rather than anything in this file.
-      #
-      # The runner lists that host in /etc/apt/apt-mirrors.txt with
-      # archive.ubuntu.com behind it, so DELETING THE LINE is the fix: apt then
-      # goes straight to a mirror that answers.
-      #
-      # ⚠️ Per-connection timeouts alone were tried first and are NOT sufficient,
-      # which is worth knowing before someone simplifies this. With
-      # `Acquire::http::Timeout=15` and `Retries=2` the dead host is still
-      # consulted for every one of ~30 index targets, so `update` blew a 5-minute
-      # budget anyway -- a red job instead of a hung one, but still red. They stay
-      # as a backstop for a mirror that is slow rather than absent, not as the
-      # mechanism.
-      #
-      # `timeout-minutes` bounds whatever this mirror does next.
+      # The mirror fix is a local composite action; its `action.yml` records why
+      # this is needed and what was measured. It must precede every apt call.
+      - uses: ./.github/actions/working-apt-mirror
+
       - name: Install Boost headers (Linux)
         if: runner.os == 'Linux'
         timeout-minutes: 5
         run: |
           set -eu
-          list=/etc/apt/apt-mirrors.txt
-          if [ -f "$list" ] &&
-             grep -E "^[^#]*https?://" "$list" | grep -qv azure.archive.ubuntu.com; then
-            sudo sed -i "/azure.archive.ubuntu.com/d" "$list"
-          fi
           apt_opts="-o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2"
           sudo apt-get $apt_opts update
           sudo apt-get $apt_opts install -y libboost-dev
