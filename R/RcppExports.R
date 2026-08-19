@@ -105,6 +105,10 @@ Leaf__dprofit_droot_collar_psi <- function(obj_, opt_root_psi) {
     .Call('_phylloptim_Leaf__dprofit_droot_collar_psi', PACKAGE = 'phylloptim', obj_, opt_root_psi)
 }
 
+Leaf__dprofit_droot_collar_psi_checked <- function(obj_, opt_root_psi) {
+    .Call('_phylloptim_Leaf__dprofit_droot_collar_psi_checked', PACKAGE = 'phylloptim', obj_, opt_root_psi)
+}
+
 Leaf__psi_stem_to_ci <- function(obj_, psi_stem, psi_upstream) {
     .Call('_phylloptim_Leaf__psi_stem_to_ci', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
 }
@@ -802,8 +806,8 @@ gradient_batch_check <- function(drivers) {
     invisible(.Call('_phylloptim_gradient_batch_check', PACKAGE = 'phylloptim', drivers))
 }
 
-gradient_batch_run <- function(obj_, drivers, theta, pars, step, stationarity_tol, method, fast_stem_curve) {
-    .Call('_phylloptim_gradient_batch_run', PACKAGE = 'phylloptim', obj_, drivers, theta, pars, step, stationarity_tol, method, fast_stem_curve)
+gradient_batch_run <- function(obj_, drivers, theta, pars, step, stationarity_tol, method, fast_stem_curve, psi, dpsi_dtheta) {
+    .Call('_phylloptim_gradient_batch_run', PACKAGE = 'phylloptim', obj_, drivers, theta, pars, step, stationarity_tol, method, fast_stem_curve, psi, dpsi_dtheta)
 }
 
 #' Root resistances from a root carbon profile

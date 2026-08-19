@@ -355,6 +355,21 @@ exception: it *is* the objective, so at an interior optimum the second route
 contributes nothing and its gradient is the direct partial alone. That is the
 envelope theorem, and the only place this package uses it.
 
+If your model **tracks** the optimum instead of finding it, pass the collar
+potential you are operating at and the derivation simplifies rather than breaks:
+
+```r
+leaf_gradient(psi_soil = 2.0, PPFD = 900, pars = c("vcmax_25", "stem_b"),
+              psi = 2.7)                # evaluate here, do not solve
+```
+
+`psi` is exogenous, so the answer is the partial at fixed collar — plus whatever
+`dpsi_dtheta` you supply, if the collar you imposed itself moves with the traits.
+`M`, `H` and `dY_dpsi` come back so a caller integrating its own sensitivity of
+`psi` has the coefficients. This is what plant's TF24f needs, and giving back the
+collar the solver found, with the response it derived, reproduces the solving
+path exactly.
+
 That derivation assumes the optimum is interior, and at the dry end it often is
 not: with the optimum pinned to the edge of the feasible range the formula returns
 a confidently wrong number, off by up to seven orders of magnitude. So the

@@ -20,6 +20,8 @@ leaf_gradient(
   control = leaf_control(),
   supply = leaf_supply_multilayer(),
   pars = NULL,
+  psi = NULL,
+  dpsi_dtheta = NULL,
   step = 1e-06,
   stationarity_tol = 1e-08,
   method = c("auto", "ift", "fd"),
@@ -86,6 +88,18 @@ differentiate at}
   scaling `beta_R_H` scales `r_R_H_min` by the same factor and needs no
   rebuild — but the two solves are still two solves.}
 
+\item{psi}{a collar water potential to evaluate at, in MPa as a positive
+magnitude, instead of solving for the profit-maximising one. `NULL` (the
+default) solves. See the section above; `method` cannot be given with it.}
+
+\item{dpsi_dtheta}{how the prescribed `psi` itself responds to each
+parameter, as one value per entry of `pars` (or one value recycled, or a
+vector named by `pars`). Defaults to zero, which is the partial derivative
+at fixed collar. Must be finite — an infinite value would return an
+all-infinite gradient row with a finite, plausible-looking `profit` in it,
+because the envelope theorem assigns that column rather than multiplying
+through. Only meaningful with `psi`.}
+
 \item{step}{relative step for the trait difference. The default `1e-06` is
 near the middle of the five decades over which the mixed partial was
 measured stable; it is also used, relative to the collar potential, for the
@@ -120,11 +134,23 @@ A list with
       `profit` (also umol C m^-2 s^-1 per trait unit)}
     \item{`value`}{the solved outputs the gradient is taken at}
     \item{`method`}{`"ift"` if the implicit-function composite was used,
-      `"fd"` if the fallback was}
-    \item{`status`}{`"interior"`, `"pinned"` or `"no-gradient"`}
-    \item{`H`}{the curvature of profit in the collar potential at `psi*`}
-    \item{`stationarity`}{the implied Newton step, in MPa, that `method` was
-      decided on}
+      `"fd"` if the fallback was, `"prescribed"` if `psi` was given}
+    \item{`status`}{`"interior"`, `"pinned"` or `"no-gradient"` on the
+      solving path; `"prescribed"`, `"clamped"` or `"no-gradient"` with
+      `psi`}
+    \item{`H`}{the curvature of profit in the collar potential}
+    \item{`stationarity`}{the implied Newton step, in MPa: what `method` was
+      decided on, or with `psi` how far the collar you gave is from the
+      optimum}
+    \item{`M`}{the mixed partial `d2profit/dpsi dtheta`, one per entry of
+      `pars`, or `NA` where the fallback ran}
+    \item{`dY_dpsi`}{`dY/dpsi` at fixed traits, one per output. `profit`'s
+      entry is the analytic zero at a stationary point and the exact
+      `dprofit/dpsi` elsewhere -- see the envelope section}
+    \item{`psi`}{the collar the outputs were evaluated at: `psi*` on the
+      solving path, and on the prescribed path the value actually used,
+      which differs from the `psi` argument exactly when `status` is
+      `"clamped"`}
   }
 }
 \description{
@@ -193,6 +219,56 @@ as `collar` is set from `dpsi*/dtheta` rather than differenced.
 indirect term is real. This applies the identity only where `status` is
 `"interior"`; everywhere else `profit` goes through the same finite-difference
 fallback as the other four.
+}
+
+\section{A collar potential you supply, instead of the one this solves for}{
+
+Pass `psi` and the outputs are evaluated at that collar rather than at the
+argmax. This is for a caller whose model **tracks** the optimum instead of
+finding it — plant's TF24f carries the collar potential as an ODE state,
+`dpsi/dt = k * dprofit/dpsi`, so at finite gain its `dprofit/dpsi` is
+deliberately non-zero and *is* the acclimation rate.
+
+There the derivation above simplifies rather than breaks. `psi` is exogenous,
+so the indirect term is whatever the caller says it is:
+
+\deqn{dY/d\theta = \partial Y/\partial\theta|_\psi +
+                   (\partial Y/\partial\psi)(d\psi/d\theta)}
+
+with `dpsi_dtheta` supplied — defaulting to zero, the partial at fixed
+collar. Nothing is derived from `-M/H`, so nothing needs stationarity, and
+`method` is refused because the two routes it chooses between are both about
+a solved optimum.
+
+`M`, `H` and `dY_dpsi` come back in the result, because a caller with a
+*dynamic* `psi` cannot supply `dpsi_dtheta` as a constant: for the
+gradient-ascent law above it obeys `ds/dt = k(M + H s)`, and those are its
+coefficients. Its fixed point is `-M/H`, which is what the solving path
+returns — the two agree in the large-gain limit.
+
+⚠️ **`stationarity` is still reported, and is used for exactly one thing.**
+It no longer routes anything; it now measures how far the collar you supplied
+sits from the optimum. The one decision it makes is `profit`'s: at a
+stationary point the envelope theorem applies and the analytic zero is used,
+and away from one the exact `dprofit/dpsi` is used instead of differencing
+it. So `psi = <the solved psi*>` with `dpsi_dtheta = -M/H` reproduces the
+solving path **bit-for-bit**, which the tests assert.
+
+⚠️ **An infeasible `psi` gets no gradient either**, reported as
+`"no-gradient"`. `dprofit/dpsi` is a sentinel `0.0` on the shut-down and
+reversed-gradient exits rather than a derivative, and this path never divides
+by `H`, so it would otherwise adopt that zero as the real thing.
+
+⚠️ **A clamped `psi` gets no gradient, and that is the interesting case.**
+The collar actually used is `psi` clamped into the feasible interval, so it
+moves with the *bound* rather than with `dpsi_dtheta` — the active-set
+problem, arriving through the clamp instead of through the optimiser. The
+direct term alone would be plausible and wrong. `status` reports `"clamped"`
+and the gradient is all `NA`; `psi` in the result is the collar that was
+used. This is reported rather than thrown because a tracking model reaches
+these points routinely — the clamp is how TF24f pulls an out-of-range state
+back inside — and it fires for a `psi` within one step of an end too, since
+`dY/dpsi` cannot be centred there.
 }
 
 \section{The active set, which is the reason this function is careful}{

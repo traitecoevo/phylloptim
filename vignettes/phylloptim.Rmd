@@ -386,6 +386,38 @@ theorem reaches — at an interior optimum its gradient is the direct partial
 alone — which `?leaf_gradient` explains along with the measurement that makes
 that worth doing rather than merely true.
 
+### A collar potential you supply
+
+If your model carries the collar potential rather than solving for it each step,
+pass it and the gradient is taken there:
+
+```{r}
+g <- leaf_gradient(psi_soil = 2.0, PPFD = 900, pars = "vcmax_25", psi = 2.7)
+c(status = g$status, method = g$method)
+```
+
+`psi` is exogenous, so the answer is the partial derivative at fixed collar, plus
+`dpsi_dtheta` if the collar you imposed itself moves with the traits. `stationarity`
+still comes back and now says how far the point you chose is from the optimum;
+`M`, `H` and `dY_dpsi` come back so a caller integrating its own sensitivity of
+`psi` has the coefficients.
+
+Hand back the collar the solver found, with the response it derived, and the two
+paths agree exactly:
+
+```{r}
+a <- leaf_gradient(psi_soil = 2.0, PPFD = 900, pars = "vcmax_25")
+b <- leaf_gradient(psi_soil = 2.0, PPFD = 900, pars = "vcmax_25",
+                   psi = a$psi, dpsi_dtheta = -a$M / a$H)
+identical(a$gradient, b$gradient)
+```
+
+⚠️ **A `psi` outside the feasible collar interval gets no gradient.** It is
+clamped, so the collar actually used moves with the *bound* rather than with your
+`dpsi_dtheta`, and the direct term alone would be plausible and wrong. `status`
+says `"clamped"`, the gradient is `NA`, and `g$psi` tells you where it was pulled
+to.
+
 Naming something undifferentiable is an error rather than a silent omission, and
 it tells you what is available:
 

@@ -9,6 +9,8 @@ leaf_gradient_batch(
   traits = NULL,
   pars = NULL,
   theta = NULL,
+  psi = NULL,
+  dpsi_dtheta = NULL,
   step = 1e-06,
   stationarity_tol = 1e-08,
   method = c("auto", "ift", "fd"),
@@ -28,6 +30,18 @@ the most expensive thing you can ask for.}
 
 \item{theta}{the model parameters as a matrix, for the case where they vary
 by observation. See the section above.}
+
+\item{psi}{one collar water potential per observation to evaluate at
+(positive magnitudes, MPa) instead of solving for the profit-maximising
+one. See [leaf_gradient()]'s section on it. Recycling a single value across
+the batch is deliberately not offered — rows sharing an imposed collar is a
+coincidence rather than a design, and broadcasting one would make a length
+mismatch look intentional.}
+
+\item{dpsi_dtheta}{how each prescribed `psi` responds to each parameter:
+an `n` × `length(pars)` matrix, or one vector of `length(pars)` shared by
+every observation. Defaults to zero. Must be finite, for the reason
+[leaf_gradient()] records. Only meaningful with `psi`.}
 
 \item{step}{relative step for the trait difference. The default `1e-06` is
 near the middle of the five decades over which the mixed partial was
@@ -61,10 +75,15 @@ A list with
     \item{`gradient`}{an `n` × `length(pars)` × 5 array, the last dimension
       being `A`, `gc`, `psi_stem`, `collar` and `profit`}
     \item{`value`}{an `n` × 5 matrix of the solved outputs}
-    \item{`method`}{`"ift"` or `"fd"` per observation}
-    \item{`status`}{`"interior"`, `"pinned"`, `"no-gradient"` or `"error"`}
+    \item{`method`}{`"ift"`, `"fd"` or `"prescribed"` per observation}
+    \item{`status`}{`"interior"`, `"pinned"`, `"no-gradient"`, `"error"`,
+      or with `psi` one of `"prescribed"`, `"clamped"`, `"no-gradient"`}
     \item{`H`, `stationarity`}{the curvature and the implied Newton step
       `method` was decided on, per observation}
+    \item{`M`}{an `n` × `length(pars)` matrix of mixed partials
+      `d2profit/dpsi dtheta`}
+    \item{`dY_dpsi`}{an `n` × 5 matrix of `dY/dpsi` at fixed traits}
+    \item{`psi`}{the collar each row was evaluated at}
     \item{`message`}{`""`, or why that row failed}
   }
 }

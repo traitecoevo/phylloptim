@@ -224,15 +224,29 @@ enum class Method { Auto, Ift, Fd };
 // What the OPERATING POINT is, not whether the call worked -- except for `Error`,
 // which is the batch's per-row failure and is the reason this is a status rather
 // than an exception (see `batch` below).
-enum class Status { Interior, Pinned, NoGradient, Error };
+// `Prescribed` and `Clamped` are the two the caller-supplied-psi path can end in
+// (#88): the collar was imposed, and in the second case the feasible interval
+// moved it, so the derivative belongs to the BOUND and is not reported.
+// ⚠️ APPEND AFTER `Error`, DO NOT INSERT BEFORE IT. The names are
+// source-compatible either way, but the VALUES are not: a consumer holding the
+// integer would break quietly if `Error` moved from 3 to 5. `Prescribed` and
+// `Clamped` are therefore last, out of narrative order, on purpose.
+enum class Status { Interior, Pinned, NoGradient, Error, Prescribed, Clamped };
 
+// ⚠️ NO `default:`. An exhaustive switch turns the next member added here into a
+// compiler diagnostic; a `default: return "error"` would silently LABEL it
+// "error" instead, which is exactly the kind of quiet mislabelling `Prescribed`
+// and `Clamped` were added to avoid.
 inline std::string status_name(Status s) {
   switch (s) {
     case Status::Interior:   return "interior";
     case Status::Pinned:     return "pinned";
     case Status::NoGradient: return "no-gradient";
-    default:                 return "error";
+    case Status::Prescribed: return "prescribed";
+    case Status::Clamped:    return "clamped";
+    case Status::Error:      return "error";
   }
+  return "error";  // unreachable; silences -Wreturn-type on a bad cast
 }
 
 struct Settings {
@@ -240,6 +254,18 @@ struct Settings {
   double stationarity_tol = 1e-8;
   Method method = Method::Auto;
   bool fast_stem_curve = true;
+};
+
+// A collar potential the caller imposes, in place of the one `at` would solve
+// for, plus how that collar responds to each parameter (#88).
+//
+// ⚠️ `dpsi_dtheta` is npars long and in `pars` order, NOT n_pars: it is one value
+// per parameter ASKED FOR, because that is the vector a caller integrating its
+// own sensitivity state is carrying. Null means zero -- the partial at fixed
+// collar -- which is a different statement from the solving path's "derive it".
+struct Prescribed {
+  double psi = 0.0;
+  const double* dpsi_dtheta = nullptr;
 };
 
 struct Result {
@@ -252,17 +278,30 @@ struct Result {
   bool used_ift = false;
   double H = util::na_value;
   double stationarity = util::na_value;
+  // The mixed partials d2profit/dpsi dtheta, npars long, and dY/dpsi at fixed
+  // traits. Kept rather than consumed: `-M/H` is what the composite needs, but M
+  // and H are also the coefficients of a caller's own sensitivity ODE for psi
+  // (traitecoevo/plant#614), and they cannot be recovered once divided.
+  std::vector<double> M;
+  double dY_dpsi[n_outputs];
+  // The collar the outputs were evaluated at -- psi* when solved, and when
+  // prescribed the value actually USED, which differs from the requested one
+  // exactly when `status` is Clamped.
+  double psi = util::na_value;
   std::string message;
 
   void reset(std::size_t npars) {
     for (int j = 0; j < n_outputs; ++j) {
       value[j] = util::na_value;
+      dY_dpsi[j] = util::na_value;
     }
     grad.assign(npars * n_outputs, util::na_value);
+    M.assign(npars, util::na_value);
     status = Status::Error;
     used_ift = false;
     H = util::na_value;
     stationarity = util::na_value;
+    psi = util::na_value;
     message.clear();
   }
 };
@@ -350,10 +389,17 @@ inline bool takes_shortcut(int par, const Settings& s) {
 // The implicit-function composite. Two perturbed evaluations per parameter,
 // neither of which re-solves the model: `dprofit` at the UNPERTURBED psi* gives
 // the mixed partial, and the outputs at that same psi* give the direct term.
+//
+// ONE composite for both paths. `dpsi_dtheta` null means "derive it by the
+// implicit function theorem", which is right where the collar was solved for;
+// non-null means the caller imposed the collar and knows how it moves. Keeping
+// them in one function is what makes the two paths' agreement at psi* a real
+// assertion rather than two implementations that happen to line up.
 inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
                          bool single, const int* pars, std::size_t npars,
                          double psi_star, double H, const double* dY_dpsi,
-                         const Settings& s, bool envelope, double* out) {
+                         const Settings& s, const double* dpsi_dtheta,
+                         bool envelope, double* M_out, double* out) {
   double th[n_pars];
   double up[1 + n_outputs];
   double dn[1 + n_outputs];
@@ -384,21 +430,24 @@ inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
       dst[0] = l.dprofit_droot_collar_psi(psi_star);
     }
     // M = d2profit/dpsi dtheta, with psi held FIXED at psi*.
-    const double dpsi_dtheta = -((up[0] - dn[0]) / (2.0 * h)) / H;
+    const double M = (up[0] - dn[0]) / (2.0 * h);
+    M_out[k] = M;
+    const double d_psi = dpsi_dtheta == nullptr ? -M / H : dpsi_dtheta[k];
     for (int j = 0; j < n_outputs; ++j) {
       const double direct = (up[1 + j] - dn[1 + j]) / (2.0 * h);
-      out[k * n_outputs + j] = direct + rounded(dY_dpsi[j] * dpsi_dtheta);
+      out[k * n_outputs + j] = direct + rounded(dY_dpsi[j] * d_psi);
     }
     // `collar` is not an output of the evaluation -- it IS psi*, held fixed, so
     // its direct term is zero by construction and the composite reduces to
     // dpsi*/dtheta. Set explicitly rather than left as the difference of two
     // identical numbers.
-    out[k * n_outputs + out_collar] = dpsi_dtheta;
+    out[k * n_outputs + out_collar] = d_psi;
     // The envelope theorem, ASSIGNED for the same reason `collar` is: profit's
     // indirect term is identically zero at a stationary point, so stating that
-    // beats multiplying a measured near-zero by dpsi*/dtheta. It is also immune
-    // to a non-finite dpsi*/dtheta, where `0 * x` would be NaN in this one column
-    // while the other four carried +-Inf.
+    // beats multiplying a measured near-zero by dpsi/dtheta. It is also immune
+    // to a non-finite `d_psi` -- which a CALLER supplies on the prescribed path
+    // -- where `0 * x` would be NaN in this one column while the other four
+    // carried +-Inf.
     if (envelope) {
       out[k * n_outputs + out_profit] =
           (up[1 + out_profit] - dn[1 + out_profit]) / (2.0 * h);
@@ -445,13 +494,28 @@ inline void gradient_fd(Leaf& l, const double* theta, const Drivers& d,
 // when `batch` catches. See `batch` for why the batch does not propagate.
 inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
                const int* pars, std::size_t npars, const Settings& s,
-               Result& out) {
+               Result& out, const Prescribed* prescribed = nullptr) {
   out.reset(npars);
 
   apply(l, theta, d, single, -1, s.fast_stem_curve);
-  l.find_root_collar_psi();
 
+  // Two ways in. The default SOLVES for the collar potential; `prescribed`
+  // IMPOSES one, which is what a caller tracking the optimum rather than
+  // finding it has (#88).
+  //
+  // ⚠️ `psi_star` keeps its name on both paths and is no longer always the
+  // argmax. It is "the collar the outputs were evaluated at", which is what
+  // every use of it below actually means.
+  bool clamped = false;
+  if (prescribed != nullptr) {
+    l.evaluate_root_collar_psi(prescribed->psi);
+    // Exact equality, for the reason `outputs_at` documents above.
+    clamped = !util::identical(l.opt_root_psi_, prescribed->psi);
+  } else {
+    l.find_root_collar_psi();
+  }
   const double psi_star = l.opt_root_psi_;
+  out.psi = psi_star;
   outputs(l, out.value);
 
   // Is the composite's premise true HERE? Stationarity is what the whole
@@ -466,7 +530,14 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
   // mildest pinned one 6.3e-06, so the 1e-08 default sits in an empty band four
   // orders wide on each side.
   const double h_psi = std::max(std::abs(psi_star), 1.0) * s.step;
-  const double resid = l.dprofit_droot_collar_psi(psi_star);
+  // ⚠️ WITH ITS FEASIBILITY, not bare. `dprofit_droot_collar_psi` returns a hard
+  // 0.0 SENTINEL on its shut-down and reversed-gradient exits, and a bare zero is
+  // indistinguishable from a stationary point. The solving path got away with the
+  // value alone because `H` collapses to zero too and `usable` catches the pair;
+  // the prescribed path does not divide by `H`, so it would adopt the sentinel as
+  // if it were dprofit/dpsi.
+  bool resid_feasible = false;
+  const double resid = l.dprofit_droot_collar_psi(psi_star, &resid_feasible);
   // Named halves: `f(a) - f(b)` has unspecified operand order in C++ and
   // left-to-right order in R, and `dprofit_droot_collar_psi` mutates the leaf.
   const double d_hi = l.dprofit_droot_collar_psi(psi_star + h_psi);
@@ -480,15 +551,41 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
   out.H = H;
   out.stationarity = usable ? std::abs(resid / H)
                             : std::numeric_limits<double>::infinity();
-  out.status = !usable ? Status::NoGradient
-               : (out.stationarity > s.stationarity_tol ? Status::Pinned
-                                                        : Status::Interior);
+  if (prescribed != nullptr) {
+    // ⚠️ THE STATIONARITY TEST DOES NOT ROUTE HERE, AND IS STILL WORTH TAKING.
+    // What it decides on the solving path -- composite or fallback -- is
+    // meaningless at a collar the caller chose: there is no argmax to be pinned
+    // against, and differencing the solve would answer about the optimum
+    // instead. So `Method` is refused at the R boundary.
+    //
+    // The NUMBER keeps its meaning and gains a better one: it is how far the
+    // point handed over sits from the optimum, in MPa. Reported, and used for
+    // exactly one thing -- see the envelope below.
+    //
+    // ⚠️ NoGradient REACHES THIS PATH TOO, and it is not the solving path's
+    // condition. There `usable` also demands `H < 0` -- a MAXIMUM test, which a
+    // caller-chosen collar has no business satisfying: a prescribed psi away from
+    // the optimum may sit where profit is convex, and that is fine because
+    // nothing here divides by `H`. What disables the point is INFEASIBILITY.
+    // Almost every such point is already Clamped -- the shut-down state seats a
+    // collar of its own choosing -- but a caller can pass exactly that collar
+    // back, so "almost" is not a guarantee.
+    out.status = clamped ? Status::Clamped
+                 : (resid_feasible ? Status::Prescribed : Status::NoGradient);
+  } else {
+    out.status = !usable ? Status::NoGradient
+                 : (out.stationarity > s.stationarity_tol ? Status::Pinned
+                                                          : Status::Interior);
+  }
 
   // `status` describes the POINT and is reported whichever route runs;
   // `use_ift` is the route. They differ only when the caller has forced one.
-  bool use_ift = s.method == Method::Auto ? out.status == Status::Interior
-                                          : s.method == Method::Ift;
-  if (use_ift && !usable) {
+  bool use_ift = prescribed != nullptr
+                     ? (!clamped && resid_feasible)
+                     : (s.method == Method::Auto
+                            ? out.status == Status::Interior
+                            : s.method == Method::Ift);
+  if (use_ift && prescribed == nullptr && !usable) {
     util::stop("leaf_gradient(): method = \"ift\" was asked for at a point with "
                "no usable curvature (H = " + util::to_string(H) + "), so -M/H "
                "has nothing to stand on. This is a shut-down or otherwise "
@@ -514,14 +611,25 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
     const bool hi_ok = outputs_at(l, psi_star + h_psi, hi);
     const bool lo_ok = outputs_at(l, psi_star - h_psi, lo);
     if (!hi_ok || !lo_ok) {
-      if (s.method == Method::Ift) {
+      if (prescribed != nullptr) {
+        // The same reasoning as the clamp on psi itself, one step out: a psi
+        // inside the interval but within h_psi of an end cannot have dY/dpsi
+        // centred on it, and a one-sided difference over a shortened interval is
+        // exactly what this detector exists to refuse. No fallback to offer --
+        // differencing the solve would answer about the optimum -- so the row is
+        // reported clamped.
+        clamped = true;
+        use_ift = false;
+        out.status = Status::Clamped;
+      } else if (s.method == Method::Ift) {
         util::stop("leaf_gradient(): method = \"ift\" was asked for at a point "
                    "whose feasible collar interval is narrower than one step, "
                    "so dY/dpsi cannot be centred on psi*. Use "
                    "method = \"auto\".");
+      } else {
+        use_ift = false;
+        out.status = Status::Pinned;
       }
-      use_ift = false;
-      out.status = Status::Pinned;
     } else {
       for (int j = 0; j < n_outputs; ++j) {
         dY_dpsi[j] = (hi[j] - lo[j]) / (2.0 * h_psi);
@@ -529,14 +637,14 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
       // `dprofit_droot_collar_psi` is EXACT in psi -- forward AD plus the IFT at
       // the ci root-find -- so for profit alone there is something better than a
       // difference of the same quantity, and it is already computed. The other
-      // four have no such route and must be differenced.
+      // four have no such route and must be differenced. One rule, both paths,
+      // which is what keeps a prescribed psi* reproducing the solve exactly.
       //
-      // ⚠️ NOTHING CONSUMES THIS TODAY, and it is here rather than deleted for
-      // #88. The only reader is `gradient_ift` with `envelope` false, i.e. a
-      // FORCED Method::Ift at a pinned point -- and the 288-point grid test
-      // records that forcing it there throws ("narrower than one step") at all
-      // 42 pinned rows before this value is reached. So it is unexercised, not
-      // load-bearing: do not read a green suite as evidence about it.
+      // ⚠️ THIS IS THE READER #87 SAID DID NOT EXIST YET. Until the prescribed
+      // path landed, the only consumer was `gradient_ift` with `envelope` false --
+      // a forced Method::Ift at a pinned point, which throws at all 42 pinned rows
+      // of the grid. A prescribed psi away from the optimum is not stationary, so
+      // it takes this branch for real, and the exactness now matters.
       dY_dpsi[out_profit] = resid;
     }
   }
@@ -557,8 +665,44 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
 
   out.used_ift = use_ift;
   if (use_ift) {
+    for (int j = 0; j < n_outputs; ++j) {
+      out.dY_dpsi[j] = dY_dpsi[j];
+    }
+    // ⚠️ NULL MEANS TWO DIFFERENT THINGS AND ONLY ONE OF THEM REACHES
+    // `gradient_ift`. There, null is "derive dpsi/dtheta by the implicit
+    // function theorem", which is right for a collar that was SOLVED for. A
+    // prescribed collar with no dpsi_dtheta means the opposite -- it does not
+    // move with theta, so the answer is the partial at fixed collar -- and
+    // passing the null straight through would silently give the caller the
+    // solving path's indirect term on top of it. Zeros are materialised here so
+    // that every C++ caller gets that, not just `batch`.
+    std::vector<double> zeros;
+    const double* d_psi = nullptr;
+    if (prescribed != nullptr) {
+      d_psi = prescribed->dpsi_dtheta;
+      if (d_psi == nullptr) {
+        zeros.assign(npars, 0.0);
+        d_psi = zeros.data();
+      }
+    }
     gradient_ift(l, theta, d, single, pars, npars, psi_star, H, dY_dpsi, s,
-                 envelope, out.grad.data());
+                 d_psi, envelope, out.M.data(), out.grad.data());
+  } else if (prescribed != nullptr) {
+    // ⚠️ A CLAMPED PRESCRIBED PSI GETS NO GRADIENT, RATHER THAN THE DIRECT TERM.
+    // Not a failure -- the outputs at the clamped collar are perfectly good, and
+    // TF24f relies on the clamp to pull an out-of-range tracked state back
+    // inside. It is that the derivative is not the one this can compute: the
+    // collar used is min(max(psi, a(theta)), b(theta)), so it moves with the
+    // BOUND, and dY/dtheta picks up the bound's derivative rather than the
+    // caller's dpsi_dtheta. That is the active-set problem arriving through the
+    // clamp instead of through the optimiser, and the direct term alone would be
+    // plausible and wrong in the documented way.
+    //
+    // `reset` already left grad, M and dY_dpsi as NA; value, H, stationarity and
+    // psi stay, because they describe the point rather than the derivative.
+    //
+    // The same holds for an INFEASIBLE one, where `dprofit` is a sentinel rather
+    // than a derivative -- see the status block above.
   } else {
     gradient_fd(l, theta, d, single, pars, npars, s, out.grad.data());
   }
@@ -584,21 +728,39 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
 // checks the status per row and not per cell would be reading a gradient with a
 // hole in it. Its `value`, `H` and `stationarity` are kept where they were
 // determined, because those describe the point rather than the derivative.
+//
+// `psi` is null to solve, or one collar potential per observation to impose
+// (#88); `dpsi_dtheta` is then a COLUMN-MAJOR n x npars matrix, again as R hands
+// one over, and null means zero throughout.
 inline std::vector<Result> batch(Leaf& l, const double* theta,
                                 std::size_t theta_nrow,
                                 const std::vector<Drivers>& drivers,
                                 bool single, const int* pars,
-                                std::size_t npars, const Settings& s) {
+                                std::size_t npars, const Settings& s,
+                                const double* psi = nullptr,
+                                const double* dpsi_dtheta = nullptr) {
   const std::size_t n = drivers.size();
   std::vector<Result> out(n);
   double th[n_pars];
+  std::vector<double> dpsi(npars);
   for (std::size_t i = 0; i < n; ++i) {
     const std::size_t row = theta_nrow == 1 ? 0 : i;
     for (int j = 0; j < n_pars; ++j) {
       th[j] = theta[row + std::size_t(j) * theta_nrow];
     }
+    Prescribed p;
+    if (psi != nullptr) {
+      p.psi = psi[i];
+      if (dpsi_dtheta != nullptr) {
+        for (std::size_t k = 0; k < npars; ++k) {
+          dpsi[k] = dpsi_dtheta[i + k * n];
+        }
+        p.dpsi_dtheta = dpsi.data();
+      }
+    }
     try {
-      at(l, th, drivers[i], single, pars, npars, s, out[i]);
+      at(l, th, drivers[i], single, pars, npars, s, out[i],
+         psi == nullptr ? nullptr : &p);
     } catch (const std::exception& e) {
       out[i].status = Status::Error;
       out[i].used_ift = false;
