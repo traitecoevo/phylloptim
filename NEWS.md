@@ -1,3 +1,54 @@
+# phylloptim 0.5.3
+
+## The single-layer optimisers reach a maximum at a bound (#94)
+
+⚠️ **Results move on `optimise_psi_stem_TF` and `optimise_psi_stem_Sperry`.** Both
+maximised profit with a bare `brent_fmin`, which steps in from the bounds and
+follows one basin — so it could return neither endpoint nor the taller of two
+humps. Both failure modes are reachable and neither is rare: over a 1728-row
+driver sweep (4 gate combinations × 8 air temperatures × 6 soil potentials × 3
+deficits × 3 light levels), measured against a 2001-point scan of the same
+objective,
+
+| entry point | rows short of the reference | worst profit lost | worst ψ gap |
+|---|---|---|---|
+| `optimise_psi_stem_TF` | **866 / 1728** | 1.70e-01 | 1.77 MPa |
+| `optimise_psi_stem_Sperry` | **837 / 1728** | 4.71e-01 | 4.50 MPa |
+| `optimise_psi_stem_ProfitMax` | 29 / 1728 | 2.54e-05 | 2e-04 MPa |
+
+824 and 780 of those rows have their true optimum **at** a bound. All three now
+match the reference on **every row**, exactly.
+
+Both now route through `util::maximise_over_closed_interval`, which evaluates the
+endpoints, scans `boundary_scan_n_` cells to locate the basin, and refines with
+Brent inside the winning cell. `optimise_psi_stem_ProfitMax` keeps reusing
+`prepare_profitmax`'s own 500-point scan, so it gains no evaluations.
+
+**One part of this is easy to get wrong and was:** the refinement tolerance has to
+scale with the CELL, not with the interval. Brent terminates on bracket width, so a
+fixed `GSS_tol_abs` comparable to a cell leaves the answer at essentially the grid
+point — and then adding grid points makes the result *worse*, because cells narrow
+while the tolerance does not. Measured: with a fixed tolerance the Sperry shortfall
+count **rose** from 64 (32 cells) to 104 (64 cells); with the cell-scaled tolerance
+64 cells is exact. `optimise_psi_stem_ProfitMax` had the fixed-tolerance form and
+now uses the scaled one; that is what closes its remaining 29 rows.
+
+⚠️ **Cost, and it is not small.** `optimise_psi_stem_TF` goes **157 → 395 µs**
+(+150%, interleaved ×3, reproducible to ~1%) because its objective is cheap and 65
+extra evaluations dominate it. `optimise_psi_stem_Sperry` pays the same ~240 µs on a
+larger base (+9%). `optimise_psi_stem_ProfitMax` is unchanged (2443 vs 2445 µs) and
+so is **`find_root_collar_psi` — 77.9 µs both ways, checksum identical.** The
+production path is untouched: these three entry points require
+`supply_is_single_layer()` and plant does not call them.
+
+`boundary_scan_n_` is R-settable for callers who would rather have the speed. 32
+cells halves the added cost and is exact for TF24, leaving 6 Sperry rows short by
+3.9e-04; 8 cells leaves 17 and 7 rows short by 3.2e-03 and 3.9e-04. Below that the
+boundary half still works and the second-hump half stops being reliable.
+
+Both golden files are bit-identical — the grid uses the collar solve, so it never
+touched any of this, which is why the defect survived to be measured here.
+
 # phylloptim 0.5.2
 
 ## `lambda_analytical_` is deleted (#113)

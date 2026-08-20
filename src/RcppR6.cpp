@@ -864,6 +864,15 @@ void Leaf__profitmax_scan_n___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> o
 }
 
 // [[Rcpp::export]]
+int Leaf__boundary_scan_n___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->boundary_scan_n_;
+}
+// [[Rcpp::export]]
+void Leaf__boundary_scan_n___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int value) {
+  obj_->boundary_scan_n_ = value;
+}
+
+// [[Rcpp::export]]
 double Leaf__d___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
   return obj_->d_;
 }

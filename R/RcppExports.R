@@ -781,6 +781,14 @@ Leaf__profitmax_scan_n___set <- function(obj_, value) {
     invisible(.Call('_phylloptim_Leaf__profitmax_scan_n___set', PACKAGE = 'phylloptim', obj_, value))
 }
 
+Leaf__boundary_scan_n___get <- function(obj_) {
+    .Call('_phylloptim_Leaf__boundary_scan_n___get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__boundary_scan_n___set <- function(obj_, value) {
+    invisible(.Call('_phylloptim_Leaf__boundary_scan_n___set', PACKAGE = 'phylloptim', obj_, value))
+}
+
 Leaf__d___get <- function(obj_) {
     .Call('_phylloptim_Leaf__d___get', PACKAGE = 'phylloptim', obj_)
 }

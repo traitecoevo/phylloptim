@@ -295,6 +295,10 @@ Leaf:
     Tcrit_: {type: double, access: field}
     # Points used to scan the supply stream for |A|max. Sicangco use 500-600.
     profitmax_scan_n_: {type: int, access: field}
+    # Cells optimise_psi_stem_TF/_Sperry scan before refining, so a maximum at
+    # full closure or past a second hump is reachable. 64 matches a 2001-point
+    # reference over a 1728-row driver sweep; lower it only with a measurement.
+    boundary_scan_n_: {type: int, access: field}
     d_: {type: double, access: field}
     wind_speed_: {type: double, access: field}
     Tair_: {type: double, access: field}

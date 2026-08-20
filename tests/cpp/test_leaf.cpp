@@ -3774,6 +3774,194 @@ void test_profitmax_finds_a_closed_optimum() {
      "at no lower profit than the grid's best");
 }
 
+// util::maximise_over_closed_interval, on functions whose answers are known by
+// inspection rather than by running the leaf. Here because the three leaf
+// optimisers all route through it, so a failure in the leaf tests below should be
+// attributable to the leaf rather than to the search.
+void test_maximise_over_closed_interval() {
+  printf("maximise_over_closed_interval\n");
+  const int n = 64;
+
+  // 1. Maximum AT the left endpoint. A bracketing search cannot return this, and
+  //    that is the whole reason this function exists.
+  {
+    double fmax = 0.0;
+    const double x = phylloptim::util::maximise_over_closed_interval(
+        [](double v) { return -v; }, 0.0, 1.0, n, &fmax);
+    ok(x == 0.0, "a maximum at the left endpoint is returned exactly");
+    ok(fmax == 0.0, "with its value");
+  }
+  // 2. ...and at the right.
+  {
+    double fmax = 0.0;
+    const double x = phylloptim::util::maximise_over_closed_interval(
+        [](double v) { return v; }, 0.0, 1.0, n, &fmax);
+    ok(x == 1.0, "a maximum at the right endpoint is returned exactly");
+    ok(fmax == 1.0, "with its value");
+  }
+  // 3. An interior maximum is refined, not left on the scan grid. The grid is
+  //    64 cells over [0,1] so 0.3 is NOT a grid point; landing within 1e-6 of it
+  //    is only possible if the refinement ran.
+  {
+    double fmax = 0.0;
+    const double x = phylloptim::util::maximise_over_closed_interval(
+        [](double v) { return -(v - 0.3) * (v - 0.3); }, 0.0, 1.0, n, &fmax);
+    ok(std::abs(x - 0.3) < 1e-6,
+       "an interior maximum is refined off the scan grid");
+    ok(fmax <= 0.0 && fmax > -1e-12, "and its value is the peak's");
+  }
+  // 4. TWO humps, the taller one NOT the one a search from the bounds finds
+  //    first. This is the half that endpoints alone do not fix.
+  {
+    auto two_humps = [](double v) {
+      // Peaks at 0.25 (height 1.0) and 0.75 (height 2.0).
+      const double a = std::exp(-200.0 * (v - 0.25) * (v - 0.25));
+      const double b = 2.0 * std::exp(-200.0 * (v - 0.75) * (v - 0.75));
+      return a + b;
+    };
+    double fmax = 0.0;
+    const double x = phylloptim::util::maximise_over_closed_interval(
+        two_humps, 0.0, 1.0, n, &fmax);
+    ok(std::abs(x - 0.75) < 1e-5, "the TALLER of two humps is found");
+    ok(fmax > 1.9, "and its height is reported");
+    // The premise: a bare Brent on the same interval really does miss it, so this
+    // case is not vacuous.
+    double neg = 0.0;
+    const double brent = phylloptim::util::brent_fmin(
+        [&](double v) { return -two_humps(v); }, 0.0, 1.0, 1e-3, &neg);
+    ok(std::abs(brent - 0.75) > 1e-5,
+       "and a bare Brent on the same interval does not");
+  }
+  // 5. Degenerate inputs: a collapsed interval and a nonsense cell count must
+  //    still return a point in range rather than reading off the end of the scan.
+  {
+    double fmax = 0.0;
+    const double x = phylloptim::util::maximise_over_closed_interval(
+        [](double v) { return -v; }, 0.5, 0.5, n, &fmax);
+    ok(x == 0.5, "a collapsed interval returns its one point");
+    const double y = phylloptim::util::maximise_over_closed_interval(
+        [](double v) { return v; }, 0.0, 1.0, 1, &fmax);
+    ok(y == 1.0, "and n < 2 still compares the endpoints");
+  }
+  // 6. A non-finite region is skipped rather than selected.
+  {
+    double fmax = 0.0;
+    const double x = phylloptim::util::maximise_over_closed_interval(
+        [](double v) {
+          return v > 0.6 ? std::numeric_limits<double>::quiet_NaN() : v;
+        },
+        0.0, 1.0, n, &fmax);
+    ok(x <= 0.6 && std::isfinite(fmax), "a NaN region is not selected");
+  }
+}
+
+// The two single-layer optimisers reach a maximum that sits AT a bound, and do
+// not stop at an interior local one (#94, hazard 11).
+//
+// ⚠️ WHAT THIS ASSERTS IS "no better point exists", not a particular potential.
+// The objective is flat near its maximum, so pinning `opt_psi_stem_` to a
+// tolerance would either be loose enough to pass on the defect or tight enough to
+// break on a platform's libm. Comparing the returned profit against the best of a
+// fine independent scan of the SAME objective is the property, and it is the one
+// that fails on a bare bracketing search.
+//
+// ⚠️ These are single-layer entry points, so they need `set_supply_single`; the
+// production collar solve is unaffected and reaches a pinned optimum by its own
+// route (`maximise_profit_over_collar`).
+void test_single_layer_optimisers_reach_a_bound() {
+  printf("single-layer optimisers reach a maximum at a bound\n");
+
+  // Rows chosen so both regimes are present: hot-and-bright, where the TF24 and
+  // Sperry objectives are maximised at full closure, and mild, where the optimum
+  // is interior. A test with only the first would pass on an optimiser that
+  // always returned the wet bound.
+  struct Row { double PPFD, leaf_temp, psi_soil, atm_vpd; };
+  const Row rows[] = {
+      {1500.0, 50.0, 0.5, 2.0},   // shut
+      {1500.0, 45.0, 1.0, 3.0},   // shut
+      {900.0, 25.0, 0.5, 1.5},    // interior
+      {900.0, 30.0, 2.0, 2.0},    // interior
+      {200.0, 35.0, 3.0, 0.5},
+  };
+
+  int pinned_TF = 0, pinned_Sperry = 0, interior_TF = 0;
+  for (const Row &r : rows) {
+    Drivers d;
+    d.PPFD = r.PPFD;
+    d.leaf_temp = r.leaf_temp;
+    d.atm_vpd = r.atm_vpd;
+
+    // --- TF24 -------------------------------------------------------------
+    {
+      phylloptim::Leaf l = make_single_leaf(d, r.psi_soil);
+      l.use_thermal_cost_ = true;
+      l.optimise_psi_stem_TF();
+      const double psi = l.opt_psi_stem_, p = l.profit_;
+
+      // Independent scan of the same objective, on a fresh leaf so the solve's
+      // own state cannot influence it.
+      phylloptim::Leaf m = make_single_leaf(d, r.psi_soil);
+      m.use_thermal_cost_ = true;
+      double best = -std::numeric_limits<double>::infinity(), best_psi = r.psi_soil;
+      for (int i = 0; i <= 1000; ++i) {
+        const double q = r.psi_soil + (m.psi_crit - r.psi_soil) * double(i) / 1000.0;
+        const double v = m.profit_psi_stem_TF(q, r.psi_soil);
+        if (std::isfinite(v) && v > best) { best = v; best_psi = q; }
+      }
+      ok(p >= best - 1e-9,
+         "optimise_psi_stem_TF is at no lower profit than a 1001-point scan");
+      // And the reported fields describe the returned point rather than the
+      // search's last probe (hazard 8).
+      ok(l.profit_ == m.profit_psi_stem_TF(psi, r.psi_soil),
+         "and its profit is that point's, bit-for-bit");
+      if (best_psi <= r.psi_soil + (m.psi_crit - r.psi_soil) * 1e-3) {
+        ++pinned_TF;
+        ok(psi <= r.psi_soil + (m.psi_crit - r.psi_soil) * 1e-3,
+           "where the scan says shut, the optimiser says shut");
+      } else {
+        ++interior_TF;
+      }
+    }
+
+    // --- Sperry, at the lambda ProfitMax derives ---------------------------
+    {
+      phylloptim::Leaf ref = make_single_leaf(d, r.psi_soil);
+      ref.use_thermal_cost_ = true;
+      ref.prepare_profitmax();
+      if (!(ref.profitmax_A_max_ > 0.0) || !(ref.profitmax_k_span_ > 0.0)) continue;
+      const double lambda = ref.profitmax_A_max_ / ref.profitmax_k_span_;
+
+      phylloptim::Leaf l = make_single_leaf(d, r.psi_soil);
+      l.use_thermal_cost_ = true;
+      l.lambda_ = lambda;
+      l.optimise_psi_stem_Sperry();
+      const double psi = l.opt_psi_stem_, p = l.profit_;
+
+      phylloptim::Leaf m = make_single_leaf(d, r.psi_soil);
+      m.use_thermal_cost_ = true;
+      m.lambda_ = lambda;
+      double best = -std::numeric_limits<double>::infinity(), best_psi = r.psi_soil;
+      for (int i = 0; i <= 1000; ++i) {
+        const double q = r.psi_soil + (m.psi_crit - r.psi_soil) * double(i) / 1000.0;
+        const double v = m.profit_psi_stem_Sperry(q, r.psi_soil);
+        if (std::isfinite(v) && v > best) { best = v; best_psi = q; }
+      }
+      ok(p >= best - 1e-9,
+         "optimise_psi_stem_Sperry is at no lower profit than a 1001-point scan");
+      ok(l.profit_ == m.profit_psi_stem_Sperry(psi, r.psi_soil),
+         "and its profit is that point's, bit-for-bit");
+      if (best_psi <= r.psi_soil + (m.psi_crit - r.psi_soil) * 1e-3) ++pinned_Sperry;
+    }
+  }
+
+  // The premise, so the block above cannot pass by covering only one regime.
+  printf("    TF24: %d rows shut, %d interior; Sperry: %d rows shut\n",
+         pinned_TF, interior_TF, pinned_Sperry);
+  ok(pinned_TF > 0 && interior_TF > 0,
+     "the rows really span both the pinned and the interior regime");
+  ok(pinned_Sperry > 0, "and Sperry reaches the pinned one too");
+}
+
 void benchmark() {
   printf("\ntiming\n");
   Drivers d;
@@ -3863,6 +4051,8 @@ int main() {
   test_sperry_refuses_an_unset_lambda();
   test_transpiration_survives_negative_assim();
   test_profitmax_finds_a_closed_optimum();
+  test_maximise_over_closed_interval();
+  test_single_layer_optimisers_reach_a_bound();
   benchmark();
 
   printf("\n%d checks, %d failures\n", checks, failures);
