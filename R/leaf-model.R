@@ -264,6 +264,24 @@ leaf_control <- function(GSS_tol_abs = 1e-3,
 ##'   default, which is right for a bare leaf that is not thinking about rooting
 ##'   depth. See the section above for why this, alone, is not a driver.
 ##'
+##' @section The two ends of this path are in different unit bases:
+##' \strong{Read this before parameterising a whole soil-to-leaf path}, which is
+##' exactly what this supply path is for (#56).
+
+##'
+##' - `leaf_specific_conductance_max` is **kg** m^-2 s^-1 MPa^-1
+##' - [series_resistance()]'s `resistance` is MPa s **mol**^-1 m^2
+##'
+##' So the two quantities the package presents as the two ends of one series are on
+##' opposite sides of a kg-per-mol factor, and a caller carrying the whole path has to
+##' supply it. The calibration study recorded dropping that factor of 0.018 as its
+##' original error, **worth three orders of magnitude** — which is why it ended up
+##' named in their code rather than inlined.
+##'
+##' The factor is `molar_mass_h2o` = 0.018015 kg/mol. ⚠️ Nothing here can check you
+##' applied it: both quantities are just positive numbers, so a path built on the wrong
+##' basis returns a plausible operating point, off by ~55x one way or ~0.018x the other.
+##'
 ##' @return A `leaf_supply` object, for the `supply` argument of [leaf_model()]
 ##'   and [leaf_solve()].
 ##' @seealso [series_resistance()] for the resistance itself, which is a driver.

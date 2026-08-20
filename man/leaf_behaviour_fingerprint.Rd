@@ -41,8 +41,9 @@ enforcement — and `test-fingerprint.R` is what holds it to that, by recomputin
 the digest from the files on disk and failing if this constant disagrees. A PR
 that regenerates a golden file and forgets the fingerprint does not pass.
 
-Both files are hashed by *content lines*, not raw bytes, so a CRLF checkout
-cannot change the answer.
+Both files are hashed by *content lines* with the trailing carriage return
+stripped, not by raw bytes, so a CRLF checkout cannot change the answer. Their
+*names* are deliberately not in the digest, so a rename cannot either.
 }
 
 \section{⚠️ What it does NOT tell you}{

@@ -66,6 +66,49 @@ test_that("every trait can be read back from the object (#95)", {
   expect_identical(l$stem_b, 3.9)
 })
 
+test_that("conductance is reported to water as well as to CO2 (#56)", {
+  l <- leaf_model()
+  set_drivers(l, psi_soil = 2.0, PPFD = 900)
+  l$find_root_collar_psi()
+
+  # Exactly the ratio, bit for bit: one multiply on the solved value, not a second
+  # derivation that could drift from it.
+  expect_identical(l$gs_H2O, l$stom_cond_CO2_ * l$H2O_CO2_stom_diff_ratio_)
+  expect_gt(l$gs_H2O, l$stom_cond_CO2_)   # water diffuses faster than CO2
+
+  # Read-only: it is an accessor over solved state, so a write would be the stale-
+  # state trap hazard 8 describes.
+  expect_error(l$gs_H2O <- 1, "read-only")
+})
+
+test_that("the H2O:CO2 diffusion ratio is settable, and 1.67 changes nothing (#50)", {
+  expect_identical(leaf_model()$H2O_CO2_stom_diff_ratio_, 1.67)
+
+  solve_at <- function(ratio) {
+    l <- leaf_model()
+    l$H2O_CO2_stom_diff_ratio_ <- ratio
+    set_drivers(l, psi_soil = 2.0, PPFD = 900)
+    l$find_root_collar_psi()
+    l
+  }
+
+  # The default must stay bit-identical to not touching the field at all.
+  base <- leaf_model()
+  set_drivers(base, psi_soil = 2.0, PPFD = 900)
+  base$find_root_collar_psi()
+  expect_identical(solve_at(1.67)$profit_, base$profit_)
+  expect_identical(solve_at(1.67)$stom_cond_CO2_, base$stom_cond_CO2_)
+
+  # ⚠️ IT REACHES THE SOLVE, and `g1_eff` does not contain the ratio at all -- it is
+  # chi*sqrt(D)/(1-chi) -- so the effect arrives through ci moving. That is why the
+  # offset below is not predictable from the ratio and has to be pinned.
+  at_16 <- solve_at(1.60)
+  expect_false(isTRUE(all.equal(at_16$profit_, base$profit_)))
+  expect_gt(at_16$g1_eff, base$g1_eff)
+  expect_equal(abs(at_16$g1_eff - base$g1_eff) / base$g1_eff, 0.0367,
+               tolerance = 0.02)
+})
+
 test_that("leaf_model() and the raw Leaf() constructor agree", {
   # The reason leaf_model() exists is that mapping 13 traits and 4 tolerances
   # onto 17 positional slots is exactly the kind of thing that goes wrong once

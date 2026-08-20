@@ -307,6 +307,17 @@ Leaf:
     lambda_molar: {type: double, access: member, name_cpp: marginal_cost_water_molar}
     lambda_multilayer: {type: double, access: member, name_cpp: marginal_cost_water_multilayer}
     g1_eff: {type: double, access: member, name_cpp: g1_eff}
+    # Conductance to WATER, mol H2O m^-2 s^-1 (#56). Every data source and the g1
+    # literature record gs to water; the model solves for gs to CO2. An accessor, not
+    # stored state (hazard 5).
+    gs_H2O: {type: double, access: member, name_cpp: stom_cond_H2O}
+
+    # The H2O:CO2 stomatal diffusion ratio (#50). 1.67 here; Medlyn et al. (2011) and
+    # the g1 literature use 1.6, and `g1_eff` exists to be compared against those.
+    #
+    # ⚠️ Settable, and it REACHES THE SOLVE rather than only a reported output, so a
+    # solved leaf must be re-solved after changing it.
+    H2O_CO2_stom_diff_ratio_: {type: double, access: field}
 
   methods:
     # All twelve reported outputs in ONE call, for the R boundary's benefit.
