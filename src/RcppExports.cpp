@@ -2235,6 +2235,28 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// Leaf__boundary_scan_n___get
+int Leaf__boundary_scan_n___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__boundary_scan_n___get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__boundary_scan_n___get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__boundary_scan_n___set
+void Leaf__boundary_scan_n___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int value);
+RcppExport SEXP _phylloptim_Leaf__boundary_scan_n___set(SEXP obj_SEXP, SEXP valueSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    Rcpp::traits::input_parameter< int >::type value(valueSEXP);
+    Leaf__boundary_scan_n___set(obj_, value);
+    return R_NilValue;
+END_RCPP
+}
 // Leaf__d___get
 double Leaf__d___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
 RcppExport SEXP _phylloptim_Leaf__d___get(SEXP obj_SEXP) {
@@ -2878,6 +2900,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__Tcrit___set", (DL_FUNC) &_phylloptim_Leaf__Tcrit___set, 2},
     {"_phylloptim_Leaf__profitmax_scan_n___get", (DL_FUNC) &_phylloptim_Leaf__profitmax_scan_n___get, 1},
     {"_phylloptim_Leaf__profitmax_scan_n___set", (DL_FUNC) &_phylloptim_Leaf__profitmax_scan_n___set, 2},
+    {"_phylloptim_Leaf__boundary_scan_n___get", (DL_FUNC) &_phylloptim_Leaf__boundary_scan_n___get, 1},
+    {"_phylloptim_Leaf__boundary_scan_n___set", (DL_FUNC) &_phylloptim_Leaf__boundary_scan_n___set, 2},
     {"_phylloptim_Leaf__d___get", (DL_FUNC) &_phylloptim_Leaf__d___get, 1},
     {"_phylloptim_Leaf__d___set", (DL_FUNC) &_phylloptim_Leaf__d___set, 2},
     {"_phylloptim_Leaf__wind_speed___get", (DL_FUNC) &_phylloptim_Leaf__wind_speed___get, 1},

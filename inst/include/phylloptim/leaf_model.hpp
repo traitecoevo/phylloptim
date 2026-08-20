@@ -390,6 +390,15 @@ public:
   // constructor argument on purpose: the constructor's arity is pinned by plant's
   // generated RcppR6 glue and by the CI consumer program.
   int profitmax_scan_n_ = 500;
+  // Cells the two single-layer optimisers WITHOUT a scan of their own use to
+  // locate the basin before refining (see util::maximise_over_closed_interval).
+  // Costs n+1 objective evaluations per solve, so it is not free -- but these are
+  // off the production path, and 64 is where the answer stops moving: measured
+  // over a 1728-row driver sweep against a 2001-point reference, 64 matches it on
+  // every row of both objectives while 32 leaves 6 Sperry rows short by 3.9e-04.
+  // A member for the same reason as profitmax_scan_n_: the constructor's arity is
+  // pinned by plant's generated glue and by the CI consumer program.
+  int boundary_scan_n_ = 64;
   double PPFD_;
   double atm_vpd_;
   // The vapour pressure deficit the DIFFUSION equations use, kPa. Off the
@@ -3593,14 +3602,20 @@ inline void Leaf::optimise_psi_stem_Sperry() {
     return;
   }
 
-  // Maximise carbon profit over [psi_soil, psi_crit]. Brent's method (golden-
-  // section + parabolic interpolation) converges super-linearly on this smooth
-  // objective; we minimise -profit and recover the maximum from neg_profit_opt.
-    double neg_profit_opt = 0.0;
-    opt_psi_stem_ = util::brent_fmin(
-        [&](double psi_stem) { return -profit_psi_stem_Sperry(psi_stem, supply_psi_soil_scalar()); },
-        supply_psi_soil_scalar(), psi_crit, GSS_tol_abs, &neg_profit_opt);
-    profit_ = -neg_profit_opt;
+  // Maximise carbon profit over the CLOSED interval [psi_soil, psi_crit]. The
+  // objective is maximised at full closure whenever the caller's lambda prices
+  // water above what the carbon is worth, and it carries a second interior hump
+  // at high leaf temperature -- so a bare bracketing search is the wrong
+  // instrument here. See maximise_over_closed_interval.
+    double profit_opt = 0.0;
+    opt_psi_stem_ = util::maximise_over_closed_interval(
+        [&](double psi_stem) { return profit_psi_stem_Sperry(psi_stem, supply_psi_soil_scalar()); },
+        supply_psi_soil_scalar(), psi_crit, boundary_scan_n_, &profit_opt);
+    // Re-evaluated rather than taken from the search, so every reported field
+    // describes the returned operating point (hazard 8, in the form where the
+    // fields are individually plausible).
+    profit_ = profit_psi_stem_Sperry(opt_psi_stem_, supply_psi_soil_scalar());
+    (void)profit_opt;
 
   }
   
@@ -3840,17 +3855,23 @@ inline void Leaf::optimise_psi_stem_ProfitMax() {
     return;
   }
 
+  // ⚠️ THE TOLERANCE IS SCALED TO THE CELL, not taken from GSS_tol_abs. Brent
+  // terminates on bracket width, so an absolute tolerance comparable to the cell
+  // leaves the answer at essentially the grid point -- and then a FINER scan is
+  // worse, because the cells narrow while the tolerance does not. The two
+  // single-layer optimisers use the same rule through
+  // util::maximise_over_closed_interval; the measurement is on its declaration.
+  const double cell_a = profitmax_scan_psi_[best - 1];
+  const double cell_b = profitmax_scan_psi_[best + 1];
   double neg_profit_opt = 0.0;
   opt_psi_stem_ = util::brent_fmin(
       [&](double psi_stem) { return -profit_psi_stem_ProfitMax(psi_stem, psi_soil); },
-      profitmax_scan_psi_[best - 1], profitmax_scan_psi_[best + 1], GSS_tol_abs,
-      &neg_profit_opt);
+      cell_a, cell_b, (cell_b - cell_a) * 1e-4, &neg_profit_opt);
   profit_ = -neg_profit_opt;
 
-  // ⚠️ Refining inside one grid cell can come out WORSE than the grid point when
-  // the cell is narrow relative to GSS_tol_abs, because Brent terminates on
-  // bracket width. Keep whichever is better; the grid point is always a feasible
-  // candidate.
+  // ⚠️ Keep whichever of the grid point and the refinement is better. The grid
+  // point is always a feasible candidate, and the refinement is only a refinement
+  // if it wins.
   if (best_profit > profit_) {
     opt_psi_stem_ = profitmax_scan_psi_[best];
   }
@@ -3877,13 +3898,20 @@ inline void Leaf::optimise_psi_stem_TF() {
     return;
   }
 
-  // Maximise carbon profit over [psi_soil, psi_crit] via Brent's method
-  // (minimise -profit), matching find_root_collar_psi's multi-layer solver.
-    double neg_profit_opt = 0.0;
-    opt_psi_stem_ = util::brent_fmin(
-        [&](double psi_stem) { return -profit_psi_stem_TF(psi_stem, supply_psi_soil_scalar()); },
-        supply_psi_soil_scalar(), psi_crit, GSS_tol_abs, &neg_profit_opt);
-    profit_ = -neg_profit_opt;
+  // Maximise carbon profit over the CLOSED interval [psi_soil, psi_crit]. The
+  // TF24 objective is maximised at full closure wherever the leaf should be
+  // shut, so the endpoints have to be candidates; see
+  // maximise_over_closed_interval. The multi-layer solver reaches the same
+  // conclusion by a different route -- maximise_profit_over_collar tests for a
+  // pinned optimum explicitly.
+    double profit_opt = 0.0;
+    opt_psi_stem_ = util::maximise_over_closed_interval(
+        [&](double psi_stem) { return profit_psi_stem_TF(psi_stem, supply_psi_soil_scalar()); },
+        supply_psi_soil_scalar(), psi_crit, boundary_scan_n_, &profit_opt);
+    // As in optimise_psi_stem_Sperry: re-evaluate so the reported fields and the
+    // returned potential are one operating point.
+    profit_ = profit_psi_stem_TF(opt_psi_stem_, supply_psi_soil_scalar());
+    (void)profit_opt;
 
     return;
   }
