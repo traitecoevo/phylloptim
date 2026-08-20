@@ -360,15 +360,6 @@ void Leaf__thermal_cost___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_,
 }
 
 // [[Rcpp::export]]
-double Leaf__lambda_analytical___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
-  return obj_->lambda_analytical_;
-}
-// [[Rcpp::export]]
-void Leaf__lambda_analytical___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
-  obj_->lambda_analytical_ = value;
-}
-
-// [[Rcpp::export]]
 double Leaf__hydraulic_cost___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
   return obj_->hydraulic_cost_;
 }

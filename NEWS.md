@@ -1,3 +1,31 @@
+# phylloptim 0.5.2
+
+## `lambda_analytical_` is deleted (#113)
+
+**API change, no numbers move.** The field was declared, bound to R as a settable
+field, and read by nothing — no model code, no test, no solve path, no gradient. It
+was write-only from R and had no effect on any number. Isaac's reading is that it
+belonged to an `optimise_psi_stem_sperry_analytical` that no longer exists.
+
+Deleted rather than populated, and the reason matters because the obvious repair is
+wrong. The one λ this class derives is `profitmax_A_max_ / profitmax_k_span_`, and
+`profitmax_A_max_` comes from a 500-point scan of the transpiration supply stream —
+`prepare_profitmax` explains why the closed form is unavailable once assimilation is
+net rather than gross. So the only candidate value was the one value that must not be
+called *analytical*, while the genuinely closed-form λs, `lambda_TF24()` and
+`marginal_cost_water()`, are accessors by design (hazard 5).
+
+⚠️ **The dual-role problem this field looked like a home for is still open.**
+`lambda_` is an input to `optimise_psi_stem_Sperry` and an output of
+`optimise_psi_stem_ProfitMax`, so calling the second and then the first silently
+optimises a derived λ rather than a prescribed one. That wants a new member with an
+honest name; it is #114's third recommendation, not this change.
+
+⚠️ **Hazard 7: plant carries the same generated glue** (`inst/RcppR6_classes.yml`,
+`src/RcppR6.cpp`), and `plant::Leaf` *is* `phylloptim::Leaf`, so plant's generated
+`obj_->lambda_analytical_` stops compiling against a phylloptim without the field.
+plant pins `traitecoevo/phylloptim@037673b7` in `Remotes:` rather than master, so
+this merge breaks nothing today — plant's half lands with its next sha bump.
 # phylloptim 0.5.1
 
 ## The zero-transpiration branch inside the objective (#110, #112)

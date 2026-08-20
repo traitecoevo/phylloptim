@@ -187,7 +187,6 @@ Leaf:
     carbon_gain_: {type: double, access: field}
     hydraulic_cost_norm_: {type: double, access: field}
     thermal_cost_: {type: double, access: field}
-    lambda_analytical_: {type: double, access: field}
     hydraulic_cost_: {type: double, access: field}
     opt_psi_stem_: {type: double, access: field}
     opt_root_psi_: {type: double, access: field}

@@ -333,14 +333,6 @@ Leaf__thermal_cost___set <- function(obj_, value) {
     invisible(.Call('_phylloptim_Leaf__thermal_cost___set', PACKAGE = 'phylloptim', obj_, value))
 }
 
-Leaf__lambda_analytical___get <- function(obj_) {
-    .Call('_phylloptim_Leaf__lambda_analytical___get', PACKAGE = 'phylloptim', obj_)
-}
-
-Leaf__lambda_analytical___set <- function(obj_, value) {
-    invisible(.Call('_phylloptim_Leaf__lambda_analytical___set', PACKAGE = 'phylloptim', obj_, value))
-}
-
 Leaf__hydraulic_cost___get <- function(obj_) {
     .Call('_phylloptim_Leaf__hydraulic_cost___get', PACKAGE = 'phylloptim', obj_)
 }
