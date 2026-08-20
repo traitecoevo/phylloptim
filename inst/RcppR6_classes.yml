@@ -179,6 +179,12 @@ Leaf:
     E_up_: {type: double, access: field}
     assim_max_: {type: double, access: field}
     count: {type: double, access: field}
+    # The leaf's OWN temperature at the operating point, deg C. Bound here rather
+    # than in the energy-balance block below, because that block is the PM path's
+    # configuration and this is an output on both paths -- off the PM path it is a
+    # copy of the `leaf_temp_` driver, on it `leaf_temp_` is air temperature and
+    # this is the only place the leaf's temperature appears at all.
+    Tleaf_: {type: double, access: field}
 
     # --- temperature-dependent photosynthetic parameters ---------------------
     electron_transport_: {type: double, access: field}
@@ -320,14 +326,14 @@ Leaf:
     H2O_CO2_stom_diff_ratio_: {type: double, access: field}
 
   methods:
-    # All twelve reported outputs in ONE call, for the R boundary's benefit.
+    # All thirteen reported outputs in ONE call, for the R boundary's benefit.
     #
     # A method rather than an `active` entry because it does a little work (the
     # uptake sum), and it is bound at all because reading the twelve outputs
     # through their individual active bindings costs ~15 us -- five times the ~3
     # us solve that produced them (#39). R's operating_point() and leaf_solve()
     # both read it, and test-surface.R asserts it agrees element-for-element
-    # with the twelve separate bindings, which is what keeps the ORDER honest:
+    # with the thirteen separate bindings, which is what keeps the ORDER honest:
     # the position of each value here is the interface.
     operating_point_values:
       return_type: "std::vector<double>"

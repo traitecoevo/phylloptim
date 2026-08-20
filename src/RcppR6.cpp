@@ -381,6 +381,15 @@ void Leaf__count__set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double 
 }
 
 // [[Rcpp::export]]
+double Leaf__Tleaf___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->Tleaf_;
+}
+// [[Rcpp::export]]
+void Leaf__Tleaf___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
+  obj_->Tleaf_ = value;
+}
+
+// [[Rcpp::export]]
 double Leaf__electron_transport___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
   return obj_->electron_transport_;
 }

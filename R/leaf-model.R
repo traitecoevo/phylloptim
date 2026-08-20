@@ -740,7 +740,7 @@ operating_point <- function(x) {
   structure(v, class = "data.frame", row.names = 1L)
 }
 
-# What an operating point IS: the names of the twelve values
+# What an operating point IS: the names of the thirteen values
 # `Leaf::operating_point_values()` returns, in its order. `operating_point()`
 # wraps them in a one-row data.frame and `leaf_solve()` fills a matrix row with
 # them, so the two cannot disagree about which outputs there are.
@@ -748,7 +748,7 @@ operating_point <- function(x) {
 # ⚠️ THE ORDER IS AN INTERFACE, and it is one nothing in the types enforces --
 # the C++ side returns a flat vector, because a flat vector is what crosses the
 # boundary for free. test-surface.R asserts these names line up with the
-# twelve individual bindings by reading each one and comparing, so a field
+# thirteen individual bindings by reading each one and comparing, so a field
 # inserted on either side without the other fails there instead of silently
 # shifting a column. test-golden.R then compares leaf_solve()'s output
 # bit-exactly against a file generated in C++.
@@ -764,7 +764,19 @@ operating_point <- function(x) {
   "E_up",
   "uptake",
   "lambda",         # dA/dE
-  "g1_eff"          # the Medlyn g1 this leaf implies
+  "g1_eff",         # the Medlyn g1 this leaf implies
+  # deg C. APPENDED rather than placed beside the other state variables, because
+  # these names are positions and a saved output would shift under an insertion.
+  #
+  # ⚠️ It is NOT the `leaf_temp` driver column, and on the energy-balance path it
+  # is not equal to it: there `leaf_temp` is AIR temperature and this is the
+  # leaf's own, solved from its transpiration. Off that path the two agree, which
+  # is why the column is a copy rather than NA.
+  #
+  # ⚠️ At a PM shut-down the reported `A` does not correspond to this temperature
+  # -- respiration is still the Tair value. That is #105, not a property of this
+  # column.
+  "Tleaf"
 )
 
 ##' Solve a leaf, in one call
@@ -777,6 +789,18 @@ operating_point <- function(x) {
 ##' the package: `gc` here is not from a fitted conductance model, it is what
 ##' falls out of maximising profit over an explicit hydraulic path, and `g1_eff`
 ##' reports the Medlyn `g1` that would have been needed to reproduce it.
+##'
+##' @section `leaf_temp` is a driver, `Tleaf` is an output:
+##' Two temperature columns come back and they are not the same thing.
+##' `leaf_temp` is the driver you supplied. `Tleaf` is the temperature the
+##' reported fluxes were computed at.
+##'
+##' By default they are equal, because the default path takes leaf temperature as
+##' prescribed. With the Penman-Monteith energy balance on
+##' (`$use_energy_balance_ <- TRUE`) they are not: `leaf_temp` is then **air**
+##' temperature, and `Tleaf` is solved per operating point from the leaf's own
+##' transpiration — so it rises as the stomata close, and it is the column to plot
+##' assimilation against.
 ##'
 ##' @section Performance, and what the lever actually is:
 ##' About **20 µs per row**, of which the model is **2.8 µs**. The rest is the R
