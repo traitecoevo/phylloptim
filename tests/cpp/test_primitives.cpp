@@ -278,9 +278,34 @@ std::vector<Row> run_grid() {
 // here is a real change rather than a tight bound being grazed.
 //
 // The REAL figures come from this program's own summary line, which prints on every
-// tolerant run whether or not it passes. Tighten these once CI has printed them a
-// few times, and read the summary line -- never the FAIL list, which is truncated at
-// 20 and biased toward whichever rows come first.
+// tolerant run whether or not it passes -- never from the FAIL list, which is
+// truncated at 20 and biased toward whichever rows come first.
+//
+// FIRST READING, ubuntu-latest against a macOS/arm64 file, one CI run, and labelled
+// as a reading rather than promoted to a fact:
+//
+//     tier            g++        clang++    ceiling    worst row
+//     arithmetic      3.97e-15   4.21e-15   1e-13      peak_arrh_curve(96, 45)
+//     vulnerability   7.01e-16   7.01e-16   1e-12      cumulative_..._at(4.1351, 3.9)
+//     assimilation    1.75e-15   1.75e-15   1e-11      assim_colimited(7)
+//     spline          3.07e-14   3.07e-14   1e-10      stem_curve_integral_deriv(3.75)
+//     iterative       8.01e-11   8.01e-11   1e-6       psi_stem_to_ci(2.75)
+//
+// The two compilers agree on four tiers exactly and differ only in tier 1, at the
+// same operating point -- so what is being measured is the platform's libm, not the
+// compiler, which is the same conclusion test_golden reached.
+//
+// ⚠️ READ THE SHAPE, NOT JUST THE SIZES, because the shape is the result. Four tiers
+// sit at 1e-14 to 1e-16 -- libm and FMA contraction, nothing else -- and the
+// iterative tier sits three orders higher at 8.01e-11, which is `psi_stem_to_ci`'s
+// own 1e-10 tolerance showing through. So the 1.4e-04 that operating_points.tsv
+// reports for its argmax-derived fields is NOT present in the primitives at all: it
+// is amplification by the solve, and this file is what establishes that rather than
+// assuming it.
+//
+// The ceilings are deliberately NOT tightened to these numbers yet. One run on one
+// runner image is not a distribution, and a bound set to the first reading fails on
+// the second. Tighten when several agree.
 struct Tolerance {
   double per_tier[kTierCount];
 };
