@@ -735,3 +735,35 @@ test_that("series_resistance() copies its prototype rather than mutating it", {
   by_helper$find_root_collar_psi()
   expect_identical(operating_point(by_helper), operating_point(by_ctor))
 })
+
+test_that("a prescribed lambda_ survives both re-driving calls (#96)", {
+  # The issue's own reproduction, from R, which is where it was found: two calls
+  # that look interchangeable in a sweep disagreed about whether the caller's
+  # `lambda_` survived. `lambda_` is Sperry's prescribed marginal water cost --
+  # an input -- so the answer is that neither call touches it.
+  #
+  # Both arms matter. `set_drivers` always kept it; asserting only that one
+  # passes on the code this test exists to reject.
+  l <- leaf_model(supply = leaf_supply_single())
+  expect_true(is.na(l$lambda_))          # not "never initialised"
+
+  l$lambda_ <- 30
+  set_drivers(l, psi_soil = 1.5, root_network = series_resistance(1500))
+  expect_identical(l$lambda_, 30)
+
+  set_traits(l, leaf_traits(vcmax_25 = 120))
+  expect_identical(l$lambda_, 30)
+
+  # And it is still there after a solve on the re-traited object, which is the
+  # sequence a sweep actually runs.
+  set_drivers(l, psi_soil = 1.5, root_network = series_resistance(1500))
+  l$find_root_collar_psi()
+  expect_identical(l$lambda_, 30)
+
+  # The derived state around it is still cleared, so the fix did not widen into
+  # hazard 8: set_traits must leave nothing describing the old traits.
+  set_traits(l, leaf_traits(vcmax_25 = 96))
+  expect_true(is.na(l$profit_))
+  expect_true(is.na(l$opt_psi_stem_))
+  expect_identical(l$lambda_, 30)
+})

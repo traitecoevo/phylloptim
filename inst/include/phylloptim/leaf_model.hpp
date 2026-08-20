@@ -277,8 +277,25 @@ public:
   std::vector<double> soil_consumption_;
   double profit_;
   double psi_stem;
-  double lambda_;
-  double lambda_analytical_;
+  // ⚠️ THE ONLY TWO INPUTS IN THIS BLOCK, and the reason they carry their default
+  // here rather than in setup_clean_leaf(). Everything around them is derived
+  // state or a solved output, which setup_clean_leaf() exists to wipe; these are
+  // Sperry's prescribed marginal water cost, supplied by the CALLER and read by
+  // profit_psi_stem_Sperry. Wiping an input on the caller's behalf made whether a
+  // prescribed value survived depend on which of two interchangeable-looking
+  // re-driving calls came next -- `l$lambda_ <- 30; set_drivers(...)` kept it,
+  // `l$lambda_ <- 30; l$set_traits(...)` did not, and neither warned (#96).
+  //
+  // An in-class initialiser, not a line in setup_clean_leaf(), so a fresh Leaf
+  // still reads the NA sentinel: the member is otherwise uninitialised, and
+  // "never reset" must not become "never initialised".
+  // ⚠️ AND `lambda_` IS ALSO AN OUTPUT, of one caller: since #93
+  // optimise_psi_stem_ProfitMax assigns the lambda its normalisation implies, so
+  // the same field is prescribed on one path and reported on another. That is the
+  // dual role #114 is about; it does not change the argument above, because a
+  // field that is an input on ANY path must not be wiped on the caller's behalf.
+  double lambda_ = util::na_value;         // umol C m^-2 s^-1 kg^-1 m^2 s^1
+  double lambda_analytical_ = util::na_value; // same units; nothing here reads it
   double hydraulic_cost_;
   
   double electron_transport_;
@@ -1469,6 +1486,10 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
   // output left unwritten becomes the previous solve's value), and resets both
   // the transpiration memo and the photosynthesis temperature cache -- the one
   // that would otherwise hand back the old vcmax_.
+  //
+  // "The just-constructed state" is exact for the derived state and the outputs,
+  // which is all of it bar `lambda_`/`lambda_analytical_` -- caller inputs, left
+  // standing on purpose (#96, see their declarations).
   setup_clean_leaf();
 }
 
@@ -1479,16 +1500,18 @@ inline void Leaf::setup_clean_leaf() {
   stom_cond_CO2_= util::na_value; //mol Co2 m^-2 s^-1 
   assim_colimited_= util::na_value; // umol C m^-2 s^-1 
   transpiration_= util::na_value; // kg m^-2 s^-1 
-  profit_= util::na_value; // umol C m^-2 s^-1 
-  lambda_= util::na_value; // umol C m^-2 s^-1 kg^-1 m^2 s^1
+  profit_= util::na_value; // umol C m^-2 s^-1
+  // lambda_ and lambda_analytical_ are deliberately NOT here: they are the
+  // caller's inputs, not derived state, and carry their NA default at the
+  // declaration instead (#96). Adding either back makes a prescribed lambda
+  // survive set_drivers() and vanish on set_traits().
   carbon_gain_= util::na_value;
   hydraulic_cost_norm_= util::na_value;
   thermal_cost_= util::na_value;
   profitmax_A_max_= util::na_value;
   profitmax_k_soil_= util::na_value;
   profitmax_k_span_= util::na_value;
-  lambda_analytical_= util::na_value; // umol C m^-2 s^-1 kg^-1 m^2 s^1
-  hydraulic_cost_= util::na_value; // umol C m^-2 s^-1 
+  hydraulic_cost_= util::na_value; // umol C m^-2 s^-1
   electron_transport_= util::na_value; //electron transport rate umol m^-2 s^-1
   gamma_= util::na_value;
   ko_= util::na_value;
@@ -3519,22 +3542,29 @@ inline void Leaf::optimise_psi_stem_Sperry() {
     util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
   }
 
-  // ⚠️ lambda_ IS AN INPUT HERE AND HAS NO DEFAULT. setup_clean_leaf sets it to
-  // the NA sentinel and set_physiology does not touch it, so a caller who drives
-  // the leaf and calls this without setting it is optimising a NaN objective --
-  // and brent_fmin does not report that. It returns a plausible-looking potential
+  // ⚠️ lambda_ IS AN INPUT HERE AND HAS NO DEFAULT. It is NA until the caller sets
+  // it, and no model code on this path assigns one, so a caller who drives the leaf
+  // and calls this without setting it is optimising a NaN objective -- and
+  // brent_fmin does not report that. It returns a plausible-looking potential
   // (2.551266 MPa at the package defaults) with profit_ = NaN beside it, and the
   // potential is a property of the bracket rather than of the model. Refuse.
   //
-  // Note the asymmetry this guards: set_traits() clears lambda_ (via
-  // setup_clean_leaf) and set_drivers() does not, so whether it survives depends
-  // on the order of two calls that look interchangeable.
+  // This guard used to describe the #96 asymmetry it was working around --
+  // set_traits() cleared lambda_ and set_drivers() did not, so whether a
+  // prescribed value survived depended on the order of two interchangeable-looking
+  // calls. That is fixed: NEITHER clears it now. The guard stands on its own,
+  // because "the caller never set one" is still reachable.
+  //
+  // ⚠️ WHAT IT DOES NOT CATCH, and cannot: optimise_psi_stem_ProfitMax *writes*
+  // lambda_ as a report, so calling that and then this one silently optimises
+  // ProfitMax's derived lambda rather than a prescribed one. Finite, plausible, and
+  // not the caller's number. That the same field is an input here and an output
+  // there is the design question in #114.
   if (!std::isfinite(lambda_)) {
     util::stop("optimise_psi_stem_Sperry needs lambda_ set: it is a PRESCRIBED "
-               "marginal water cost, cleared to NA by the constructor and by "
-               "set_traits, and never set by set_physiology. For Sperry (2017)'s "
-               "own normalised profit use optimise_psi_stem_ProfitMax, which "
-               "computes its own.");
+               "marginal water cost, NA until you assign one, and never set by "
+               "set_physiology or set_traits. For Sperry (2017)'s own normalised "
+               "profit use optimise_psi_stem_ProfitMax, which computes its own.");
   }
 
   opt_psi_stem_ = supply_psi_soil_scalar();
