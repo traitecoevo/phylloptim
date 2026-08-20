@@ -610,7 +610,8 @@ private:
                    std::vector<double>& soil_consumption, double& E_up) const {
 
     if (!std::isfinite(T_collar)) {
-      util::stop("E_from_Soil_to_Root_Collar invalid input; T_collar=" + util::to_string(T_collar));
+      util::stop_infeasible("uptake",
+          "E_from_Soil_to_Root_Collar invalid input; T_collar=" + util::to_string(T_collar));
     }
 
     E_up = 0;
@@ -662,7 +663,8 @@ private:
       // knot's conductivity rather than an extrapolated (eventually negative) one.
       double f_ri = root_vuln_at(T_src_max);
       if (!std::isfinite(f_ri) || f_ri <= 0.0) {
-        util::stop("E_from_Soil_to_Root_Collar invalid f_ri; layer=" + std::to_string(i) +
+        util::stop_infeasible("uptake",
+            "E_from_Soil_to_Root_Collar invalid f_ri; layer=" + std::to_string(i) +
                    "; f_ri=" + util::to_string(f_ri) +
                    "; T_src_max=" + util::to_string(T_src_max) +
                    "; T_collar=" + util::to_string(T_collar));
@@ -759,7 +761,8 @@ private:
   // The two siblings therefore carry different units by design.
   E_up = E_up * kg_per_mol_h2o;
   if (!std::isfinite(E_up)) {
-    util::stop("E_from_Soil_to_Root_Collar non-finite E_up_; T_collar=" + util::to_string(T_collar) +
+    util::stop_infeasible("uptake",
+        "E_from_Soil_to_Root_Collar non-finite E_up_; T_collar=" + util::to_string(T_collar) +
                "; max_soil_layer=" + std::to_string(max_soil_layer));
   }
   }

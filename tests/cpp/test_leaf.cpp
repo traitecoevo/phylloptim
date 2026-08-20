@@ -2883,6 +2883,79 @@ void test_bad_input_throws() {
   ok(threw, "mismatched soil vector lengths throw std::runtime_error");
 }
 
+// Infeasibility is a distinguishable kind of failure (#57).
+//
+// ⚠️ THE C++ SIDE MATTERS ON ITS OWN, not just as the R layer's supplier: plant links
+// these headers directly, so it sees the type rather than the token. Both halves are
+// asserted here -- a `catch (const infeasible_error&)` works, and the message carries
+// the prefix R parses.
+//
+// ⚠️ And the asymmetry is asserted too. An input-validation failure must NOT be an
+// `infeasible_error`, because the whole point is that a caller may legitimately
+// swallow one and must not be able to swallow the other. A test that only checked the
+// positive direction would pass on a `stop_infeasible` applied to everything.
+void test_infeasible_is_a_distinct_failure() {
+  printf("infeasibility is distinguishable from a caller error\n");
+  Drivers d;
+  std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
+
+  // A well-formed call whose operating point cannot be evaluated: with the stem
+  // conductance this small the transpiration the solve needs is off the end of the
+  // inverse spline's domain.
+  {
+    phylloptim::Leaf l;
+    l.setup_transpiration(100);
+    l.setup_root_vulnerability(100);
+    l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth,
+                     1e-30, d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa,
+                     d.atm_kpa);
+    bool caught_as_infeasible = false;
+    std::string msg;
+    try {
+      l.find_root_collar_psi();
+    } catch (const phylloptim::util::infeasible_error &e) {
+      caught_as_infeasible = true;
+      msg = e.what();
+    } catch (const std::runtime_error &e) {
+      msg = e.what();
+    }
+    ok(caught_as_infeasible,
+       "an unevaluable operating point throws util::infeasible_error");
+    ok(msg.rfind(phylloptim::util::infeasible_token("stem_curve_domain"), 0) == 0,
+       "and its message opens with the token R parses");
+  }
+
+  // The other direction: a mismatched driver vector is NOT infeasible. This is #39's
+  // warning as an assertion -- an all-NA or wrong-length driver classified as
+  // infeasible would be swallowed by the caller's tryCatch and the fit would report
+  // a plausible likelihood over whichever rows survived.
+  {
+    phylloptim::Leaf l;
+    l.setup_transpiration(100);
+    l.setup_root_vulnerability(100);
+    bool infeasible = false, threw = false;
+    try {
+      std::vector<double> bad_depth{1.0, 2.0};
+      l.set_physiology(fixture::root_network(mrp, bad_depth), d.PPFD, psi_soil,
+                       bad_depth, d.K_s * d.theta / d.h, d.atm_vpd, d.ca,
+                       d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+    } catch (const phylloptim::util::infeasible_error &) {
+      infeasible = true;
+      threw = true;
+    } catch (const std::runtime_error &) {
+      threw = true;
+    }
+    ok(threw, "a mismatched driver vector still throws");
+    ok(!infeasible, "and it is NOT classified as infeasible");
+  }
+
+  // The token is a prefix and nothing else parses as one: these messages embed
+  // `e.what()` from a nested solver, so a quoted token must not re-classify.
+  ok(phylloptim::util::infeasible_token("uptake") ==
+         "[phylloptim:infeasible:uptake] ",
+     "the token has the exact shape R's anchored pattern expects");
+}
+
 // What an out-of-domain transport lookup says. The stem curve is the only
 // interpolator here with extrapolation disabled, so it is the only one a lookup
 // can throw on -- and there are two of them, they are inverses, and they carry
@@ -3029,6 +3102,7 @@ int main() {
   test_knot_grid_reaches_its_intended_domain();
   test_psi_crit_must_lie_on_the_stem_curve();
   test_bad_input_throws();
+  test_infeasible_is_a_distinct_failure();
   test_out_of_domain_names_the_spline();
   test_out_of_domain_under_rescale();
   benchmark();

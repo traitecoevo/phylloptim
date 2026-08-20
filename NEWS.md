@@ -1,5 +1,57 @@
 # phylloptim 0.4.0
 
+## Infeasibility is a condition class, not a message to match on (#57)
+
+A failed solve can now be caught by class:
+
+```r
+tryCatch(leaf_solve(...), phylloptim_infeasible = function(e) e$code)
+```
+
+`leaf_infeasible_codes()` documents the seven codes and what each means.
+`leaf_solve()` and `leaf_gradient_batch()` classify without the caller doing
+anything; `with_phylloptim_conditions()` is for the caller driving a `Leaf` directly,
+since `$find_root_collar_psi()` is generated glue that cannot signal on its own.
+
+**Why not message text.** That was the only option before, and it was never stable:
+#65 and #79 each rewrote the out-of-domain wording and #92 added a third variant, so
+any caller matching on prose was silently broken by an improvement to an error
+message.
+
+**Two layers, because it cannot be one.** C++ tags the exit with a stable token —
+`[phylloptim:infeasible:collar_bracket] …`, via a new `util::stop_infeasible` and an
+`infeasible_error` type — and hand-written R reads the token and re-signals. The join
+could not live at the boundary: that is RcppR6-generated and must not be hand-edited,
+and `util.hpp` must not reach for Rcpp. A C++ consumer such as plant catches the type
+directly.
+
+⚠️ **Seventeen of about fifty `stop` sites are classified, and the conservative
+direction was taken everywhere it was arguable.** Every input-validation failure stays
+an ordinary error, because classifying one as infeasible would let it be swallowed by
+the very `tryCatch` this enables — a fit would then report a plausible likelihood over
+whichever rows survived, which is exactly what #39 rejected silent NA rows to prevent.
+`?leaf_infeasible_codes` lists the three genuinely arguable sites left ordinary
+(`psi_crit` past P99, an explicit `method = "ift"` at a point where the IFT does not
+hold, and the trait sign checks) with the reasoning, so the calls can be overruled
+deliberately.
+
+⚠️ **The classification cannot drift from its documentation**: a test scans the
+*installed* headers for `stop_infeasible("…")` and requires the set to equal
+`names(leaf_infeasible_codes())` exactly.
+
+**Still not done, deliberately: `on_error = "na"` with a per-row status column.** The
+issue is explicit that it must not be built before the classification is reviewed, or
+the opt-in returns `NA` for programming errors too. `leaf_gradient_batch()` already
+reports per-row `status`, which is that idea where it was already safe.
+
+⚠️ **`leaf_gradient()` is not routed through the wrapper** — it depends on `missing()`
+for two arguments, so delegating to an inner implementation would change argument
+matching. Wrap the call, or use `leaf_gradient_batch()`, which a fit should be on
+anyway. The gap is documented at `?with_phylloptim_conditions`.
+
+The wrapper is **one `tryCatch` per call, outside the row loop**, so per-row cost is
+unchanged.
+
 ## A primitive-level baseline, and three dead harnesses removed (#64)
 
 `tests/cpp/golden/primitives.tsv` records **544 values from the functions the solve

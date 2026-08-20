@@ -448,7 +448,9 @@ inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
       // Evaluate first, then read dprofit at the same fixed collar -- R's order,
       // and `evaluate_root_collar_psi` is what seats the state `dprofit` reads.
       if (!outputs_at(l, psi_star, dst + 1)) {
-        util::stop("leaf_gradient(): perturbing `" + par_names()[std::size_t(p)] +
+        util::stop_infeasible(
+            "gradient_active_set",
+            "leaf_gradient(): perturbing `" + par_names()[std::size_t(p)] +
                    "` moved the feasible collar interval past psi*, so the "
                    "operating point could not be evaluated there. This point is "
                    "on an active-set boundary; lower `stationarity_tol` or "
