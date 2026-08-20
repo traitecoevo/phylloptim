@@ -87,7 +87,7 @@ leaf_infeasible_codes <- function() {
             "shut-down (which is an answer, not an error)"),
     stem_curve_domain =
       paste("a vulnerability spline was asked for a potential outside the domain",
-            "its traits give it — usually psi_crit past the curve's P99 (#38)"),
+            "its traits give it -- usually psi_crit past the curve's P99 (#38)"),
     uptake =
       paste("the soil-to-root-collar flux is non-finite, or a layer's",
             "vulnerability weighting is unusable, at this candidate collar"),
