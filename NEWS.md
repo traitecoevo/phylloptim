@@ -1,3 +1,58 @@
+# phylloptim 0.5.1
+
+## The zero-transpiration branch inside the objective (#110, #112)
+
+⚠️ **Results move on the energy-balance path.** `set_leaf_states_rates_from_psi_stem`
+has a `psi_upstream >= psi_stem` branch for the no-flow / reversed-gradient case. It
+wrote `Tleaf_` but re-derived neither the Farquhar block nor the leaf-to-air deficit
+at it — while `ci_` is read off `gamma_`, `vpd_leaf_` is a reported field, and
+`assim_colimited_` at the bottom of the function is evaluated against the whole
+block. So the branch assembled a state out of two temperatures.
+
+⚠️ **The other temperature was not the air baseline**, which is what separates this
+from #105 rather than making it a repeat. The transpiring branch re-derives the block
+per candidate *by design*, so this branch inherited whatever ψ the optimiser last
+probed. The objective's value at a fixed ψ therefore depended on the **order**
+candidates were visited — hazard 3's mechanism, arrived at from the model rather than
+from the solver.
+
+Measured at Tair 30 °C, PPFD 900, ψ_soil 1 MPa, D_air 1.5 kPa, where the branch's own
+leaf temperature is 39.33 °C:
+
+| reported at the zero-E point | on a cold object | after one transpiring candidate | correct |
+|---|---|---|---|
+| `assim_colimited_` | −1.9888 | −2.5355 | **−3.0978** |
+| `vpd_leaf_` (kPa) | 1.5000 | 2.7368 | **4.3714** |
+| `ci_` (Pa) | 5.5700 | 6.9492 | **8.7173** |
+
+Each branch now derives the block and the deficit at the temperature it reports,
+before `ci_` is read out of them — the same repair #111 made at the exits *outside*
+the solve, and in the same order, so `Tleaf_` moves to the top of the branch.
+
+**Where it changes an answer, not just a report.** `prepare_profitmax` scans from
+ψ_soil, which *is* this branch, and records the assimilation there as a profit
+candidate — so `optimise_psi_stem_ProfitMax`'s argmax moves. At Tair 40 °C with the
+thermal cost on, ψ_soil 0.5 and 1.0 MPa move from full closure to an interior optimum
+(1.605 and 1.760 MPa, profit −1.2309 against −1.2825); at Tair 50 and 55 °C the
+argmax moves the other way, from barely open (0.5004) to exactly shut. The
+prescribed-collar path moves too, where a caller's target clamps onto the wet bound:
+profit −2.4329 → −2.5415 at Tair 25 °C.
+
+**`find_root_collar_psi` itself is unmoved** at every PM-path driver tried, because
+`dprofit_at_collar_psi` has its own reversed-gradient exit and the collar it returns
+is stepped inside the wet bound. That is a statement about the drivers tried, not a
+proof: the golden-section fallback and the two-pin failure case both evaluate profit
+at that bound.
+
+Cost, interleaved ×4 (hazard 5, since this adds transcendentals to a branch of a
+function the collar solve runs ~10³ times per solve): **no signal**. The branch itself
+is ≤1% slower per (transpiring + zero-E) pair, within the round-to-round scatter; the
+PM collar solve, the ProfitMax optimiser and the gate-off solve are all
+indistinguishable. Gate-off is unchanged by construction — the recompute is inside the
+gate, and `set_leaf_vpd` returns `atm_vpd_` exactly there. Both golden files are
+bit-identical, which here is a statement about the grid (it runs gate-off) rather
+than evidence.
+
 # phylloptim 0.5.0
 
 ## Documentation: claims that #55 and #93 outlived

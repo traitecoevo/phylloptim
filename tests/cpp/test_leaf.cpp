@@ -1527,6 +1527,138 @@ void test_shutdown_reports_one_temperature() {
   }
 }
 
+// `set_leaf_states_rates_from_psi_stem`'s zero-transpiration branch is
+// SELF-CONTAINED: every quantity it reports is derived from its own `Tleaf_` and
+// from nothing the caller left behind.
+//
+// ⚠️ WHY THE ASSERTIONS ARE ORDER-INDEPENDENCE RATHER THAN VALUES. The transpiring
+// branch re-derives the temperature block per candidate by design, so this branch
+// runs with the PREVIOUS candidate's block in place. A wrong value here is
+// therefore plausible at any single history and only shows up as disagreement
+// BETWEEN histories -- and because this function is the objective the collar solve
+// maximises, that disagreement is an objective whose value depends on evaluation
+// order, which is what hazard 3 forbids. Add a value assertion here if it helps,
+// but the one that has teeth is "the same call twice, from two histories, agrees".
+//
+// ⚠️ `operating_points.tsv` cannot see any of this: the grid runs gate-off, where
+// `set_leaf_vpd` returns `atm_vpd_` exactly and the block is never re-derived. A
+// bit-identical golden run is not evidence about this test's subject.
+void test_zero_E_branch_derives_its_own_block() {
+  printf("the zero-E branch inside the objective reads its own temperature\n");
+  Drivers d;
+  d.leaf_temp = 30.0;  // AIR temperature on this path
+  d.PPFD = 900.0;      // full sun, so a leaf that stops transpiring runs hot
+
+  // The same (psi_stem, psi_upstream) from two histories: one object whose block
+  // still holds set_physiology's baseline, one where a transpiring candidate has
+  // moved it. Bit-exact, since the branch derives all of these from its own
+  // `Tleaf_`.
+  {
+    phylloptim::Leaf cold = make_pm_leaf(d, {1.0}, {1.0}, true);
+    cold.set_leaf_states_rates_from_psi_stem(1.0, 1.0);
+
+    phylloptim::Leaf warm = make_pm_leaf(d, {1.0}, {1.0}, true);
+    warm.set_leaf_states_rates_from_psi_stem(5.0, 1.0);  // transpiring
+    const double T_transpiring = warm.Tleaf_;
+    warm.set_leaf_states_rates_from_psi_stem(1.0, 1.0);  // the SAME zero-E point
+
+    // The premise, asserted rather than assumed: the two histories must really
+    // differ, or the comparisons below pass on a block that never moved. Re-check
+    // these two if the drivers here are ever retuned.
+    ok(T_transpiring != cold.Tleaf_,
+       "the transpiring candidate sits at a different temperature");
+    ok(cold.Tleaf_ > cold.Tair_,
+       "and the zero-E leaf is hotter than the air -- no latent cooling");
+
+    ok(warm.Tleaf_ == cold.Tleaf_, "Tleaf does not depend on the history");
+    ok(warm.assim_colimited_ == cold.assim_colimited_,
+       "and neither does assimilation");
+    ok(warm.R_d_ == cold.R_d_, "nor respiration");
+    ok(warm.vpd_leaf_ == cold.vpd_leaf_, "nor the leaf-to-air deficit");
+    ok(warm.ci_ == cold.ci_, "nor the internal CO2");
+  }
+
+  // Order-independence alone would also hold if every history were wrong the same
+  // way, so pin the value too: it is this branch's own temperature's. Same
+  // identities the exits outside the solve carry, checked again here because this
+  // branch reaches them by a different route.
+  {
+    phylloptim::Leaf l = make_pm_leaf(d, {1.0}, {1.0}, true);
+    l.set_leaf_states_rates_from_psi_stem(1.0, 1.0);
+    const double Tleaf = l.Tleaf_, Tair = l.Tair_;
+
+    ok(l.transpiration_ == 0.0, "the branch really transpires nothing");
+    ok(l.Tleaf_ == l.leaf_temp_from_E(0.0),
+       "and its temperature is the E = 0 one");
+    ok(l.ci_ == l.gamma_ * l.umol_per_mol_to_Pa_,
+       "ci sits at the compensation point");
+    // ⚠️ A TOLERANCE, DELIBERATELY, AND DO NOT TIGHTEN IT TO EXACT. Gross
+    // assimilation at ci = gamma* is analytically zero, so net is -R_d, but the
+    // co-limiting expression rounds -- 4.44e-16, one ULP. The exits outside the
+    // solve assign `-R_d_` directly and so are bit-exact; this branch goes through
+    // `assim_colimited`, and cannot be. The bit-exact statement that pins the
+    // TEMPERATURE is the next one.
+    near(l.assim_colimited_, -l.R_d_, 1e-14,
+         "net assimilation is -R_d at zero transpiration");
+    ok(l.assim_colimited_ == l.assim_colimited(l.ci_),
+       "and it is this block's value at this branch's ci, bit-for-bit");
+    ok(l.vpd_leaf_ == l.atm_vpd_ + (l.saturation_vapour_pressure(Tleaf) -
+                                    l.saturation_vapour_pressure(Tair)),
+       "and the deficit is the leaf-to-air one at that temperature");
+    ok(l.vpd_leaf_ != l.atm_vpd_,
+       "which is not the air deficit -- there is something to get wrong");
+
+    // Bit-exact against the model's own curves at the reported temperature. A
+    // tolerance here would pass on a block derived at some third temperature.
+    const double rd = l.R_d_, gamma = l.gamma_, ci = l.ci_;
+    l.update_temperature_dependent_params(Tleaf);
+    ok(l.R_d_ == rd, "R_d is the curve's value at the reported Tleaf");
+    ok(l.gamma_ == gamma, "and so is the compensation point");
+    ok(ci == gamma * l.umol_per_mol_to_Pa_, "so ci follows it");
+    l.update_temperature_dependent_params(Tair);
+    ok(l.R_d_ != rd, "and it is NOT the Tair value -- the two really differ");
+  }
+
+  // The scan is how this branch reaches an ARGMAX rather than only a reported
+  // state: `prepare_profitmax` starts at psi_soil, which IS this branch, and
+  // records the A there as a profit candidate that `optimise_psi_stem_ProfitMax`
+  // can select (hazard 11). So index 0 has to be reproducible across scans.
+  {
+    phylloptim::Leaf l = make_pm_leaf(d, {1.0}, {1.0}, true);
+    l.use_thermal_cost_ = true;
+    l.prepare_profitmax();
+    const double a0 = l.profitmax_scan_A_[0];
+    l.prepare_profitmax();
+    ok(l.profitmax_scan_A_[0] == a0,
+       "the scan's closure candidate does not depend on the previous scan");
+    // And it must belong to the temperature the scan records beside it: the grid
+    // argmax reads `profitmax_scan_A_` and `profitmax_scan_Tleaf_` together, so a
+    // mismatch is one candidate whose carbon and whose thermal cost come from
+    // different leaves.
+    ok(l.profitmax_scan_Tleaf_[0] == l.leaf_temp_from_E(0.0),
+       "the closure candidate's recorded Tleaf is the E = 0 one");
+    l.update_temperature_dependent_params(l.profitmax_scan_Tleaf_[0]);
+    near(l.profitmax_scan_A_[0], -l.R_d_, 1e-14,
+         "and its carbon is -R_d at that same temperature");
+  }
+
+  // Gate off, which is the arm the golden file covers and which must stay exactly
+  // as it is: the recompute is inside `if (use_energy_balance_)`, and
+  // `set_leaf_vpd` returns `atm_vpd_` there. This is the guard on that.
+  {
+    phylloptim::Leaf a = make_pm_leaf(d, {1.0}, {1.0}, false);
+    a.set_leaf_states_rates_from_psi_stem(1.0, 1.0);
+    phylloptim::Leaf b = make_pm_leaf(d, {1.0}, {1.0}, false);
+    b.set_leaf_states_rates_from_psi_stem(5.0, 1.0);
+    b.set_leaf_states_rates_from_psi_stem(1.0, 1.0);
+    ok(a.Tleaf_ == a.leaf_temp_, "gate off: Tleaf is still the driver");
+    ok(a.vpd_leaf_ == a.atm_vpd_, "gate off: the deficit is still the air one");
+    ok(b.assim_colimited_ == a.assim_colimited_ && b.ci_ == a.ci_ &&
+           b.vpd_leaf_ == a.vpd_leaf_,
+       "gate off: the branch was already history-independent");
+  }
+}
+
 void test_energy_balance_path_runs() {
   printf("Penman-Monteith energy-balance path\n");
   Drivers d;
@@ -3701,6 +3833,7 @@ int main() {
   test_g1_eff();
   test_leaf_temperature_is_reported();
   test_shutdown_reports_one_temperature();
+  test_zero_E_branch_derives_its_own_block();
   test_energy_balance_path_runs();
   test_pm_wind_speed_validation();
   test_pm_leaf_temperature_response();
