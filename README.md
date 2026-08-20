@@ -25,10 +25,13 @@ so it can be tested, profiled, extended and embedded on its own.
 **A home for several stomatal models, not just ours.** The package carries our
 hydraulic gain-risk formulation, and it already contains two alternatives — the
 Sperry et al. (2017) cost formulation and the Medlyn et al. (2011) optimal
-stomatal model — inherited from plant. Today those are second-class:
-`optimise_psi_stem_Sperry` is hardwired to a single soil layer, and the Medlyn path
-bypasses the hydraulic solve altogether, so neither can be swapped in as a
-like-for-like alternative. The goal is to make each one a **first-class member**,
+stomatal model — inherited from plant. The Sperry side is now runnable as the paper
+defines it: `optimise_psi_stem_ProfitMax()` maximises `CG - HC` with both terms
+normalised, on the single-potential supply path, and `optimise_psi_stem_TF()` runs
+the TF24 cost through the same solver so the two can be compared at identical
+drivers. Both are still off the production collar solve, and the Medlyn path
+bypasses the hydraulic solve altogether. The goal is to make each one a
+**first-class member** there too,
 selectable and runnable against identical drivers, alongside Prentice et al. (2014)
 least-cost and Cowan-Farquhar.
 

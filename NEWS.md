@@ -611,6 +611,126 @@ of the wrong shape — see the note in `update_temperature_dependent_params()`. 
 `rd_to_vcmax_ratio` is still not a `leaf_traits()` member, so it cannot yet be
 fitted or differentiated; it is set as a field.
 
+## Fick's law uses the LEAF-to-air vapour deficit, not the air's (#7)
+
+Transpiration and stomatal conductance divided by `atm_vpd_` however hot the leaf
+got. Diffusion out of a stoma is driven by the deficit *at the leaf*, and on the
+energy-balance path the leaf runs above air temperature, so that deficit is the
+larger one. Measured at the package defaults it is **3.4× / 3.2× / 4.0× the air's
+at Tair 25 / 35 / 45 °C** — the factor by which `gs` and `A` were overstated
+([#7](https://github.com/traitecoevo/phylloptim/issues/7), PLAN 13.1).
+
+⚠️ **Off the energy balance nothing moves, and that is a property of the grid
+rather than evidence the change is inert.** At air temperature
+`vpd_leaf_ == atm_vpd_` exactly, so the prescribed-temperature path is untouched
+and `tests/cpp/golden/` is **bit-identical across all five commits** — because
+the grid runs with `use_energy_balance_` off. A bit-identical golden run says
+nothing here.
+
+⚠️ **The decoupling signature moves from conductance to transpiration.** Over the
+acceptance window `E` rises ×1.034 against `D_leaf` ×1.089, so `gs` falls ×0.950.
+A test written against the old arithmetic would read the same physics off the
+wrong variable.
+
+`constants::vpd_leaf_min = 0.01` kPa floors it. A leaf cooled below the dew point
+has a *negative* deficit, and dividing a positive transpiration by it reports a
+negative conductance; the floor keeps such points finite and unattractive instead
+of sign-inverted. The driver defaults are 1.5–2 kPa, so it binds only where a
+one-way diffusion equation has already stopped describing the leaf.
+
+## Sperry's ProfitMax, on the same footing as TF24
+
+`$optimise_psi_stem_ProfitMax()` maximises Sperry (2017)'s profit with **both**
+terms normalised, and reports the λ that makes the existing entry point agree.
+`$profitmax_curve()` returns the whole cost, gain and profit curve in one call,
+and `$optimise_psi_stem_TF()` runs the TF24 cost through the same solver — so the
+two formulations can be compared at identical drivers. An optional instantaneous
+thermal cost is included, **default off**.
+
+⚠️ **These write `$carbon_gain_`, `$hydraulic_cost_norm_` and `$thermal_cost_`,
+which are unitless and are NOT `$hydraulic_cost_`.** Reading the normalised cost
+as the TF24 one is a units error the names are chosen to prevent.
+
+The normalised hydraulic cost is invariant to `kmax` by construction, and it is
+asserted rather than assumed: worst difference **1.1e-16** across a 3× change.
+
+Motivated by `leaf_calibration_test/sicangco-2026`, a replication of Sicangco et
+al. (2026), which needed ProfitMax measured against TF24 rather than described.
+
+## ⚠️ Four fixes on the single-layer optimisers, and the fourth is a solver bug
+
+These paths are reachable only from `optimise_psi_stem_*`, not from
+`find_root_collar_psi()` — so **`plant` is unaffected, provably rather than
+probably**: `prepare_collar_solve` has its own `assim_max_ < 0` exit and returns
+false before any candidate potential is evaluated.
+
+1. **`optimise_psi_stem_Sperry` searched a NaN objective silently.** `lambda_` is
+   an input with no default, cleared by `setup_clean_leaf` and never set by
+   `set_physiology`, so a caller who drove the leaf and called this got a
+   plausible potential (2.551266 MPa at the defaults) beside `profit_ = NaN`. It
+   now refuses.
+2. **Hazard 8, live on this path.** `opt_root_psi_`, `E_up_` and
+   `soil_consumption_` survived from an earlier collar solve, so the object
+   reported `E = 9.216e-5` beside `E_up = 2.626e-5`.
+3. **`set_leaf_states_rates_from_psi_stem` zeroed transpiration wherever
+   `assim_max_ < 0`.** Transpiration there is the hydraulic supply and does not
+   depend on photosynthesis, so the branch made two leaves at the same operating
+   point disagree about whether water was moving — purely because one had
+   respiration switched on. The shut-down *state* it reached for is unchanged:
+   the `ci` root-find has no root in `[gamma*, ca]` and takes its
+   compensation-point fallback, which is what the branch set by hand. That
+   fallback did not exist when the branch was written.
+4. **`optimise_psi_stem_ProfitMax` now scans a grid before refining.**
+   `brent_fmin` steps in from the bounds, so it returns neither an endpoint nor
+   the global maximum of a multi-modal objective — and at Tair 50 °C with the
+   thermal cost on it returned **1.643 MPa where the objective is maximised at
+   full closure** (−1.5314 at `psi_soil` against −1.5459 at the interior local
+   max), reporting an open stoma where the model says shut. The scan reuses
+   `prepare_profitmax`'s own grid, so this costs no extra model evaluations.
+   Found by comparing against Sicangco et al.'s Figure 4: their model closed at
+   48–56 °C and ours did not, and the whole difference was the search.
+
+⚠️ **`optimise_psi_stem_TF` and `optimise_psi_stem_Sperry` still have fault 4**,
+and are documented rather than fixed because neither has a scan to reuse. The
+general form is now hazard 11 in the developer guide: *a bracketing optimiser
+answers "where is the interior maximum", which is not the same question as "where
+is the maximum".*
+
+## The `dgc_dT` term in the energy-balance derivative was re-derived, not sign-flipped
+
+`dprofit_energy_balance_term` carried a named `const double dgc_dT = 0.0` and a
+note promising PLAN 13.1 would make it "a one-line change instead of a
+re-derivation". It would not have been: the damping factor it multiplied puts the
+new term under `A_T` where the derivation puts it under `A_prime`. The two agree
+**only at `dgc_dT = 0`**, which is why nothing caught it. The derivation is
+written out at the function, and at `dgc_dT = 0` it reduces to exactly the old
+expression — so the prescribed-VPD behaviour is unchanged, which is the other
+half of why the golden file does not move.
+
+## A comment block may open only one `\verbatim` run, and only CI can see it
+
+Doxygen 1.9.8 — what the runner installs — handles the first `\verbatim` in a
+`///` block and drops the second one's OPEN, then reports `unexpected command
+endverbatim` at a line in the *filtered* stream that lands in unrelated code: 120
+lines past the responsible comment, in the case that found it. Doxygen 1.17
+renders the same input in silence, so a local run is not an oracle. `docs.yml`
+now counts opens per block and names the offending block.
+
+Established with a probe header of eight isolated constructs in one render: one
+run, banner rules, `|` in prose, `|` inside a run, and emoji are all clean; only
+two-runs-in-one-block errors. ⚠️ **Two earlier explanations were asserted before
+being measured and are both wrong** — a setext heading swallowing the block, and
+a bare `\|` opening a Markdown table. A `\|`-escaping change to
+`tools/doxygen_filter.awk` had been committed on the second and written into the
+filter's header as fact; **that commit is reverted**, and the filter's header now
+records the measurement instead.
+
+⚠️ The `/*! \file */` block is exempt from the count, measured rather than
+assumed: `closed_form.hpp`'s file block has carried two runs across a long green
+master, so counting it would fail the build on code Doxygen renders happily.
+
+C++ suite **486 → 534 checks**, 0 failures.
+
 ## A trait gradient at a collar potential the caller supplies
 
 `leaf_gradient()` and `leaf_gradient_batch()` take `psi`, and evaluate there

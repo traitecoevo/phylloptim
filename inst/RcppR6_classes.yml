@@ -80,6 +80,14 @@ Leaf:
       `$opt_psi_stem_`, `$profit_`, `$assim_colimited_`, `$transpiration_`,
       `$lambda`, `$g1_eff`.
 
+      A second optimality formulation is available on the single-soil-layer
+      supply path: `$optimise_psi_stem_ProfitMax()` maximises Sperry (2017)'s
+      normalised profit, and `$profitmax_curve()` returns the whole cost, gain
+      and profit curve in one call. `$optimise_psi_stem_TF()` runs the TF24 cost
+      through the same solver, so the two can be compared at identical drivers.
+      These write `$carbon_gain_`, `$hydraulic_cost_norm_` and `$thermal_cost_`,
+      which are unitless and are NOT the same quantities as `$hydraulic_cost_`.
+
       All water potentials are **positive magnitudes in MPa**. There is one
       representation throughout and it is asserted, not documented: a negative
       `psi_crit`, `stem_b`, `root_b` or `root_psi_crit` is an error here, and a
@@ -171,6 +179,14 @@ Leaf:
     profit_: {type: double, access: field}
     psi_stem: {type: double, access: field}
     lambda_: {type: double, access: field}
+    # --- Sperry (2017) ProfitMax, all unitless -------------------------------
+    # Written ONLY by the ProfitMax path. `hydraulic_cost_` is deliberately NOT
+    # reused: it holds carbon units on the TF24 path and conductance units on the
+    # Sperry-cost one, and a third meaning behind the same name is how a reader
+    # quotes the wrong number.
+    carbon_gain_: {type: double, access: field}
+    hydraulic_cost_norm_: {type: double, access: field}
+    thermal_cost_: {type: double, access: field}
     lambda_analytical_: {type: double, access: field}
     hydraulic_cost_: {type: double, access: field}
     opt_psi_stem_: {type: double, access: field}
@@ -266,6 +282,20 @@ Leaf:
 
     # --- energy balance (#523) ------------------------------------------------
     use_energy_balance_: {type: bool, access: field}
+    # The deficit Fick's law divides by (PLAN 13.1). READ-ONLY in practice: it is
+    # derived by set_leaf_vpd from `atm_vpd` and the leaf temperature, and every
+    # solve overwrites it. Bound because a caller checking why gs moved needs to
+    # see it, and because `vpd_leaf_ == atm_vpd_` is the statement that the
+    # prescribed-temperature path is unchanged.
+    vpd_leaf_: {type: double, access: field}
+    # --- Sicangco et al. (2026) instantaneous thermal cost, default OFF -------
+    # ⚠️ NOT plant's ATLS thermal damage, which is a LASTING ratchet. This is a
+    # cost paid at the temperature the leaf is at now, with no memory.
+    use_thermal_cost_: {type: bool, access: field}
+    T50_: {type: double, access: field}
+    Tcrit_: {type: double, access: field}
+    # Points used to scan the supply stream for |A|max. Sicangco use 500-600.
+    profitmax_scan_n_: {type: int, access: field}
     d_: {type: double, access: field}
     wind_speed_: {type: double, access: field}
     Tair_: {type: double, access: field}
@@ -416,6 +446,14 @@ Leaf:
     electron_transport:
       return_type: double
       args: []
+    # The operating-point leaf temperature at a given transpiration, on the
+    # energy-balance path. Bound so a caller aligning an EXTERNAL energy balance to
+    # this one can iterate on the model's own function rather than transcribing
+    # `Tair + (Rn - lambda*E)*ra/rho_cp` into R -- where it would go stale the
+    # first time this one changed, silently.
+    leaf_temp_from_E:
+      return_type: double
+      args: [E: double]
     set_leaf_states_rates_from_psi_stem:
       return_type: void
       args: [psi_stem: double, psi_upstream: double]
@@ -472,6 +510,39 @@ Leaf:
 
     # --- optimisers -----------------------------------------------------------
     optimise_psi_stem_Sperry:
+      return_type: void
+      args: []
+
+    # --- Sperry (2017) ProfitMax with BOTH terms normalised -------------------
+    #
+    # `optimise_psi_stem_Sperry` maximises `A - lambda*cost` with lambda a
+    # PRESCRIBED input; these maximise `CG - (HC + TC)` with CG and HC normalised
+    # as Sperry defines them. The two share an argmax exactly when
+    # lambda = |A|max/(k_soil - kcrit), and `optimise_psi_stem_ProfitMax` reports
+    # that lambda in `$lambda_` so the equivalence can be checked rather than
+    # believed. Use these unless you have a lambda of your own: |A|max is a
+    # property of the drivers, so the equivalent lambda has to be recomputed at
+    # every observation and doing that from R costs more than the model does.
+    #
+    # Single soil layer only, like the other two -- which is not a restriction for
+    # this model, whose supply is the integral of one vulnerability curve with no
+    # root network in it.
+    thermal_cost_at:
+      return_type: double
+      args: [leaf_temp: double]
+    prepare_profitmax:
+      return_type: void
+      args: []
+    profit_psi_stem_ProfitMax:
+      return_type: double
+      args: [psi_stem: double, psi_upstream: double]
+    # n rows of (psi, CG, HC, TC, profit), flattened COLUMN-MAJOR, in one crossing
+    # of the R boundary. This is Sicangco et al.'s Figures 2, 3 and S4; building it
+    # row by row from R would pay ~1.8 us of call overhead against a ~3 us model.
+    profitmax_curve:
+      return_type: "std::vector<double>"
+      args: [n: int]
+    optimise_psi_stem_ProfitMax:
       return_type: void
       args: []
     optimise_psi_stem_TF:
