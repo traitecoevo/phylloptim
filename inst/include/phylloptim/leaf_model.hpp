@@ -1887,6 +1887,12 @@ inline void Leaf::set_shutdown_state(double root_collar) {
   // Zero transpiration is where the gap is LARGEST, not smallest: no latent
   // cooling, so this is the hottest the leaf gets.
   Tleaf_ = use_energy_balance_ ? leaf_temp_from_E(0.0) : leaf_temp_;
+  // The leaf-to-air deficit belongs to the same temperature, for the same reason
+  // and by the same argument #93 makes at the zero-transpiration branch of
+  // set_leaf_states_rates_from_psi_stem: `vpd_leaf_` is reported, and `g1_eff()`
+  // reads it. Left alone it held the Tair deficit set_physiology seated. A no-op
+  // off the PM path -- `set_leaf_vpd` returns `atm_vpd_` there exactly.
+  set_leaf_vpd(Tleaf_);
   if (use_energy_balance_) {
     // Leaves the block at Tleaf rather than Tair. Safe because set_physiology
     // bypasses the photo_temp cache entirely when the gate is on, so the next
@@ -1996,6 +2002,7 @@ if(assim_max_ < 0){
     // asymmetry is therefore: the branch is chosen on the transpiring baseline, the
     // state it reports is self-consistent at the temperature it describes.
     Tleaf_ = use_energy_balance_ ? leaf_temp_from_E(0.0) : leaf_temp_;
+    set_leaf_vpd(Tleaf_);
     if (use_energy_balance_) {
       update_temperature_dependent_params(Tleaf_);
     }

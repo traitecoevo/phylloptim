@@ -1499,6 +1499,14 @@ void test_shutdown_reports_one_temperature() {
     ok(std::isfinite(l.ci_), "ci is written, and finite" + what);
     ok(l.ci_ == l.gamma_ * l.umol_per_mol_to_Pa_,
        "ci sits at the compensation point of the reported temperature" + what);
+    // #93's leaf-to-air deficit is on the same footing: reported, read by
+    // g1_eff(), and derived from a temperature -- so it has to be THIS
+    // temperature and not set_physiology's Tair baseline.
+    ok(l.vpd_leaf_ == l.atm_vpd_ + (l.saturation_vapour_pressure(l.Tleaf_) -
+                                    l.saturation_vapour_pressure(l.Tair_)),
+       "the leaf-to-air deficit is at the reported Tleaf" + what);
+    ok(l.vpd_leaf_ != l.atm_vpd_,
+       "and it is not the air deficit -- there is something to get wrong" + what);
   }
 
   // Off the PM path nothing moves: leaf_temp_ IS the temperature the block was
