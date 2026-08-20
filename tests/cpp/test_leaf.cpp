@@ -1402,6 +1402,131 @@ void test_leaf_temperature_is_reported() {
   }
 }
 
+// One temperature per reported operating point, at the exits that transpire
+// nothing (#105).
+//
+// The gap: on the PM path both shut-down exits reported a leaf temperature and a
+// respiration rate belonging to DIFFERENT temperatures. They do not go through
+// set_leaf_states_rates_from_psi_stem, so they inherited the Tair baseline
+// set_physiology derives and then described a state whose transpiration is zero.
+//
+// ⚠️ `operating_points.tsv` cannot see any of this -- the golden grid runs with
+// the gate off, where Tleaf IS leaf_temp_ and there is nothing to disagree with.
+// A bit-identical golden run is not evidence here, which is why this test exists
+// rather than a regenerated baseline.
+//
+// ⚠️ The two exits move in OPPOSITE directions, so a test that only checked "R_d
+// went up" would pass on half the fix. Rn is proportional to PPFD with a fixed
+// longwave offset subtracted, so a hydraulically shut leaf in full sun is hotter
+// than the air and a shade-dead one is cooler.
+void test_shutdown_reports_one_temperature() {
+  printf("a shut-down leaf reports one temperature, not two\n");
+  using Kind = phylloptim::Leaf::OperatingPointKind;
+  Drivers d;
+  d.leaf_temp = 30.0;  // AIR temperature on this path
+
+  // (psi_soil, PPFD, expected kind) -- one row per exit. Reached through the
+  // drivers rather than by calling the exits directly, so the test breaks if a
+  // future bracket change stops routing here.
+  struct Case {
+    const char *name;
+    double psi_soil;
+    double PPFD;
+    Kind kind;
+    bool hotter_than_air;
+  };
+  const Case cases[] = {
+      // Soil drier than psi_crit: no collar potential both moves water and stays
+      // inside the critical potentials. Full sun, so the leaf runs hot.
+      {"hydraulic shutdown", 6.0, 900.0,
+       Kind::HydraulicShutdown, true},
+      // Wet soil, no light: gross assimilation at ci = ca cannot cover R_d. Rn is
+      // NEGATIVE here, so this leaf is cooler than the air.
+      {"shade death", 1.0, 1.0, Kind::ShadeDeath, false},
+  };
+
+  for (const Case &c : cases) {
+    Drivers dc = d;
+    dc.PPFD = c.PPFD;
+    phylloptim::Leaf l = make_pm_leaf(dc, {c.psi_soil}, {1.0}, true);
+    l.find_root_collar_psi();
+    const std::string what = std::string(" (") + c.name + ")";
+
+    ok(l.operating_point_kind() == c.kind,
+       "the drivers really reach this exit" + what);
+    ok(l.transpiration_ == 0.0, "and it transpires nothing" + what);
+
+    // The premise: the two temperatures differ, so there is something to get
+    // wrong. Without this the assertions below would pass on a leaf at Tair.
+    ok(l.Tleaf_ != l.Tair_, "Tleaf is not air temperature" + what);
+    ok(c.hotter_than_air ? (l.Tleaf_ > l.Tair_) : (l.Tleaf_ < l.Tair_),
+       "and it sits on the expected side of it" + what);
+
+    // The fix, stated as the identity it restores: the respiration in force is
+    // the one the model's OWN curve gives at the temperature being reported.
+    // Bit-exact -- same function, same argument, so a tolerance here would pass
+    // on a value derived at some third temperature.
+    const double rd_reported = l.R_d_;
+    const double gamma_reported = l.gamma_;
+    const double Tleaf = l.Tleaf_, Tair = l.Tair_;
+
+    l.update_temperature_dependent_params(Tleaf);
+    ok(l.R_d_ == rd_reported, "R_d is the curve's value at the reported Tleaf" + what);
+    ok(l.gamma_ == gamma_reported,
+       "and so is the compensation point" + what);
+
+    l.update_temperature_dependent_params(Tair);
+    ok(l.R_d_ != rd_reported,
+       "and it is NOT the Tair value -- the two really differ here" + what);
+  }
+
+  // The accounting identity every branch is supposed to satisfy, re-checked at
+  // these exits because they form profit by hand rather than through
+  // profit_psi_stem_TF. `ci_` is in here because the shade-death exit did not
+  // write it at all: it reported the previous solve's internal CO2, or the NA
+  // sentinel on a cold object.
+  for (const Case &c : cases) {
+    Drivers dc = d;
+    dc.PPFD = c.PPFD;
+    phylloptim::Leaf l = make_pm_leaf(dc, {c.psi_soil}, {1.0}, true);
+    l.find_root_collar_psi();
+    const std::string what = std::string(" (") + c.name + ")";
+
+    ok(l.assim_colimited_ == -l.R_d_,
+       "net assimilation is -R_d at zero transpiration" + what);
+    near(l.profit_, l.assim_colimited_ - l.hydraulic_cost_TF(l.opt_psi_stem_),
+         1e-12, "profit == assimilation - hydraulic cost" + what);
+    ok(std::isfinite(l.ci_), "ci is written, and finite" + what);
+    ok(l.ci_ == l.gamma_ * l.umol_per_mol_to_Pa_,
+       "ci sits at the compensation point of the reported temperature" + what);
+    // #93's leaf-to-air deficit is on the same footing: reported, read by
+    // g1_eff(), and derived from a temperature -- so it has to be THIS
+    // temperature and not set_physiology's Tair baseline.
+    ok(l.vpd_leaf_ == l.atm_vpd_ + (l.saturation_vapour_pressure(l.Tleaf_) -
+                                    l.saturation_vapour_pressure(l.Tair_)),
+       "the leaf-to-air deficit is at the reported Tleaf" + what);
+    ok(l.vpd_leaf_ != l.atm_vpd_,
+       "and it is not the air deficit -- there is something to get wrong" + what);
+  }
+
+  // Off the PM path nothing moves: leaf_temp_ IS the temperature the block was
+  // derived at, so there was never a disagreement to fix. Asserted because the
+  // change adds a conditional recompute, and the gate-off arm has to stay exactly
+  // as it was -- this is the arm the golden file covers.
+  {
+    Drivers dc = d;
+    dc.PPFD = 900.0;
+    phylloptim::Leaf l = make_pm_leaf(dc, {6.0}, {1.0}, false);
+    l.find_root_collar_psi();
+    ok(l.operating_point_kind() == Kind::HydraulicShutdown,
+       "the prescribed path shuts down here too");
+    ok(l.Tleaf_ == l.leaf_temp_, "and Tleaf is still the driver");
+    const double rd = l.R_d_;
+    l.update_temperature_dependent_params(l.leaf_temp_);
+    ok(l.R_d_ == rd, "R_d is the driver temperature's value, bit-for-bit");
+  }
+}
+
 void test_energy_balance_path_runs() {
   printf("Penman-Monteith energy-balance path\n");
   Drivers d;
@@ -3560,6 +3685,7 @@ int main() {
   test_multilayer_lambda_identity();
   test_g1_eff();
   test_leaf_temperature_is_reported();
+  test_shutdown_reports_one_temperature();
   test_energy_balance_path_runs();
   test_pm_wind_speed_validation();
   test_pm_leaf_temperature_response();

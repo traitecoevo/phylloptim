@@ -1,3 +1,53 @@
+# phylloptim 0.5.0
+
+## A shut-down leaf reports one temperature, not two (#105)
+
+⚠️ **Results move on the energy-balance path.** Both zero-transpiration exits of the
+collar solve — hydraulic shut-down and shade death — reported a leaf temperature and a
+respiration rate that belonged to *different* temperatures. They do not go through
+`set_leaf_states_rates_from_psi_stem`, so they inherited the Tair baseline
+`set_physiology` derives and then described a state whose transpiration is zero. Both
+now re-derive the temperature block at the temperature they report, before profit is
+formed.
+
+Measured against `origin/master` at `atm_vpd = 2`, `atm_kpa = 101.3`, Tair 30 °C:
+
+| exit | Tleaf | | `R_d_` | `profit_` | `ci_` | `vpd_leaf_` |
+|---|---:|---|---:|---:|---:|---:|
+| hydraulic shut-down | 39.325 | before | 1.9888 | −8.9334 | 5.5700 | 2.0000 |
+| (`psi_soil = 6.0`, PPFD 900) | | **after** | **3.0978** | **−10.0423** | **8.7173** | **4.8714** |
+| shade death | 28.957 | before | 1.9888 | −2.0204 | **NaN** | 2.0000 |
+| (`psi_soil = 1.0`, PPFD 1) | | **after** | **1.8679** | **−1.8995** | **5.2889** | **1.7528** |
+
+**The two exits move in opposite directions.** `Rn` is proportional to PPFD with a
+fixed longwave offset subtracted, so a hydraulically shut leaf in full sun runs hotter
+than the air while a shade-dead one runs cooler.
+
+**`vpd_leaf_` is on the same footing**, and is the half that #93 created. The
+leaf-to-air deficit is derived from a leaf temperature and is read by `g1_eff()`, but
+these exits left it at the Tair deficit `set_physiology` seated — so a shut-down leaf
+reported a 39.3 °C temperature beside the deficit belonging to 30 °C, 2.44× too small.
+#93 already makes exactly this argument at its own zero-transpiration branch; the two
+exits outside the solve were simply not on its list.
+
+The shade-death exit also never wrote `ci_` at all — it reported the previous solve's
+internal CO2, or `NaN` on a cold object. It is now the compensation point, as at the
+other exits.
+
+**Nothing moves with the gate off**, which is the default and what both golden files
+cover: there `Tleaf_` *is* the `leaf_temp` driver and the block was already derived at
+it. `operating_points.tsv` and `primitives.tsv` are bit-identical, and
+`leaf_behaviour_fingerprint()` therefore does **not** move — the golden grids run
+gate-off, which is the incompleteness its own documentation warns about. The version
+bump is what signals this one.
+
+**The feasibility test stays at the Tair baseline, deliberately.** `assim_max_ < 0`
+asks whether any *open* operating point is worth taking, and an open leaf transpires
+and is therefore cooler than these exits' leaf. Re-taking that test at the
+zero-transpiration temperature would judge the coolest option at the hottest
+temperature. So the branch is chosen on the transpiring baseline and the state it
+reports is self-consistent at the temperature it describes.
+
 # phylloptim 0.4.0
 
 ## Infeasibility is a condition class, not a message to match on (#57)
