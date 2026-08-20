@@ -307,23 +307,16 @@ Leaf:
     lambda_molar: {type: double, access: member, name_cpp: marginal_cost_water_molar}
     lambda_multilayer: {type: double, access: member, name_cpp: marginal_cost_water_multilayer}
     g1_eff: {type: double, access: member, name_cpp: g1_eff}
-    # Conductance to WATER, mol H2O m^-2 s^-1 (#56). Every data source and the whole
-    # g1 literature record gs to water; the model solves for gs to CO2. Reporting only
-    # the CO2 form left the conversion in user code, where a wrong factor becomes a
-    # constant multiplicative bias on one response that a fit launders into kmax.
-    # An accessor, not stored state (hazard 5).
+    # Conductance to WATER, mol H2O m^-2 s^-1 (#56). Every data source and the g1
+    # literature record gs to water; the model solves for gs to CO2. An accessor, not
+    # stored state (hazard 5).
     gs_H2O: {type: double, access: member, name_cpp: stom_cond_H2O}
 
-    # The H2O:CO2 stomatal diffusion ratio, SETTABLE (#50).
+    # The H2O:CO2 stomatal diffusion ratio (#50). 1.67 here; Medlyn et al. (2011) and
+    # the g1 literature use 1.6, and `g1_eff` exists to be compared against those.
     #
-    # 1.67 here; Medlyn et al. (2011) and the g1 literature built on it use 1.6, from
-    # the binary diffusivities. `g1_eff` exists to be compared against fitted g1 and
-    # tabulated values (Lin et al. 2015), so a caller whose comparison wants 1.6 needs
-    # to be able to say so -- and could not, because this was a compile-time constant.
-    #
-    # ⚠️ SETTABLE, and it REACHES THE SOLVE rather than only a reported output: it is
-    # in the conductance conversion and in dprofit's gc_const. So a solved leaf must be
-    # re-solved after changing it. Default 1.67, so nothing moves unless asked.
+    # ⚠️ Settable, and it REACHES THE SOLVE rather than only a reported output, so a
+    # solved leaf must be re-solved after changing it.
     H2O_CO2_stom_diff_ratio_: {type: double, access: field}
 
   methods:

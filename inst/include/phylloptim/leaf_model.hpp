@@ -389,21 +389,13 @@ public:
   double g0 = 0.022;        // residual stomatal conductance (umol m^-2 s^-1)
   double g1 = 2.57;         // sensitivity to vpd (kPa^0.5)
 
-  // The H2O:CO2 stomatal diffusion ratio, SETTABLE (#50), defaulting to the
-  // compile-time `H2O_CO2_stom_diff_ratio` so nothing moves unless a caller asks.
+  // The H2O:CO2 stomatal diffusion ratio. Settable because it encodes a CONVENTION,
+  // not a property of this leaf: 1.67 here, 1.6 in Medlyn et al. (2011) and the `g1`
+  // literature built on it, from the binary diffusivities (#50).
   //
-  // It is settable because it encodes a CONVENTION rather than a measured quantity of
-  // this leaf, and the convention is not settled: this package uses 1.67, while
-  // Medlyn et al. (2011) and the `g1` literature built on it use 1.6, from the
-  // binary diffusivities (D_H2O/D_CO2 ~= 2.42e-5/1.51e-5 ~= 1.60 at 25 C). A user who
-  // knows their comparison wants 1.6 could not previously say so -- it was a
-  // `constexpr` -- which is the whole of #50.
-  //
-  // ⚠️ IT REACHES THE SOLVE, not just a reported output: it is in the conductance
-  // conversion AND in `dprofit`'s `gc_const`. So changing it changes the operating
-  // point, and a solved leaf must be re-solved afterwards. Same contract as g0/g1
-  // and the drivers -- there is no cache keyed on it, because nothing caches a
-  // conductance.
+  // ⚠️ IT REACHES THE SOLVE, not just a reported output -- the conductance conversion
+  // and `dprofit`'s `gc_const` -- so a solved leaf must be re-solved after changing
+  // it. Nothing caches a conductance, so there is no cache to invalidate.
   double H2O_CO2_stom_diff_ratio_ = phylloptim::H2O_CO2_stom_diff_ratio;
   double medlyn_model_gs_;  // mol CO2 m^-2 s^-1
   double theta_w_;          // current soil water content at wilting point (m^3 m^-3)
@@ -996,19 +988,12 @@ public:
   // companion manuscript's job, not this header's.
   double g1_eff() const;
 
-  // Stomatal conductance to WATER VAPOUR, mol H2O m^-2 s^-1 (#56).
+  // Stomatal conductance to WATER VAPOUR, mol H2O m^-2 s^-1 (#56). The model solves
+  // for conductance to CO2; every data source and the g1 literature record it to
+  // water, so the conversion belongs here rather than in each caller.
   //
-  // The model solves and reports `stom_cond_CO2_`, and **every data source records
-  // conductance to water**, as does the g1 literature. So a caller comparing against
-  // measurements had to multiply by the diffusion ratio outside the package — and as
-  // the calibration study put it, if that factor is wrong then `gs` is biased by a
-  // constant and the fit launders it into `kmax`. That is the worst kind of error to
-  // leave in user code: a constant multiplicative bias on one response, which a fit
-  // absorbs rather than reveals.
-  //
-  // An ACCESSOR, not a member, per hazard 5: `find_root_collar_psi` runs ~10^3 inner
-  // evaluations per solve and nothing in the solve reads this, so it does not earn
-  // storage. One multiply on a value already computed.
+  // An ACCESSOR, not a member, per hazard 5: nothing in the solve reads it, so it
+  // does not earn storage.
   double stom_cond_H2O() const {
     return stom_cond_CO2_ * H2O_CO2_stom_diff_ratio_;
   }

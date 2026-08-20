@@ -67,10 +67,6 @@ test_that("every trait can be read back from the object (#95)", {
 })
 
 test_that("conductance is reported to water as well as to CO2 (#56)", {
-  # Every data source records gs to WATER, as does the g1 literature; the model
-  # solves for gs to CO2. Leaving the conversion in user code makes a wrong factor a
-  # constant multiplicative bias on one response — which a fit launders into kmax
-  # rather than revealing.
   l <- leaf_model()
   set_drivers(l, psi_soil = 2.0, PPFD = 900)
   l$find_root_collar_psi()
@@ -86,9 +82,6 @@ test_that("conductance is reported to water as well as to CO2 (#56)", {
 })
 
 test_that("the H2O:CO2 diffusion ratio is settable, and 1.67 changes nothing (#50)", {
-  # The point of #50 is that the ratio encodes a CONVENTION — 1.67 here, 1.6 in
-  # Medlyn (2011) and the g1 literature — and was a compile-time constant, so a user
-  # who knew their comparison wanted 1.6 could not say so.
   expect_identical(leaf_model()$H2O_CO2_stom_diff_ratio_, 1.67)
 
   solve_at <- function(ratio) {
@@ -99,19 +92,16 @@ test_that("the H2O:CO2 diffusion ratio is settable, and 1.67 changes nothing (#5
     l
   }
 
-  # The default is bit-identical to not touching it at all -- which is the promise
-  # that lets this land without moving results.
+  # The default must stay bit-identical to not touching the field at all.
   base <- leaf_model()
   set_drivers(base, psi_soil = 2.0, PPFD = 900)
   base$find_root_collar_psi()
   expect_identical(solve_at(1.67)$profit_, base$profit_)
   expect_identical(solve_at(1.67)$stom_cond_CO2_, base$stom_cond_CO2_)
 
-  # ⚠️ AND IT REACHES THE SOLVE, which is the half #50 understates. `g1_eff` does not
-  # contain the ratio at all -- it is chi*sqrt(D)/(1-chi) -- so the whole effect comes
-  # through ci moving. Measured at these drivers, 1.67 -> 1.60: the ratio changes by
-  # 4.19%, g1_eff by 3.67%, gc by 6.20%, A by 5.19%. The issue says "~2.2%"; it is
-  # 3.67%, and it is not a direct unit factor.
+  # ⚠️ IT REACHES THE SOLVE, and `g1_eff` does not contain the ratio at all -- it is
+  # chi*sqrt(D)/(1-chi) -- so the effect arrives through ci moving. That is why the
+  # offset below is not predictable from the ratio and has to be pinned.
   at_16 <- solve_at(1.60)
   expect_false(isTRUE(all.equal(at_16$profit_, base$profit_)))
   expect_gt(at_16$g1_eff, base$g1_eff)

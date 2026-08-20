@@ -81,14 +81,9 @@ supply it. The calibration study recorded dropping that factor of 0.018 as its
 original error, **worth three orders of magnitude** — which is why it ended up
 named in their code rather than inlined.
 
-The factor is `molar_mass_h2o` = 0.018015 kg/mol (one number since #51, so the
-forward and reverse conversions are reciprocal). Nothing here can check you applied
-it: both quantities are just positive numbers, so a path built on the wrong basis
-returns a plausible operating point, off by ~55x in one direction or ~0.018x in the
-other.
-
-It is documented rather than unified because unifying moves results and changes a
-published argument's units — a decision, not a tidy-up.
+The factor is `molar_mass_h2o` = 0.018015 kg/mol. ⚠️ Nothing here can check you
+applied it: both quantities are just positive numbers, so a path built on the wrong
+basis returns a plausible operating point, off by ~55x one way or ~0.018x the other.
 }
 
 \examples{
