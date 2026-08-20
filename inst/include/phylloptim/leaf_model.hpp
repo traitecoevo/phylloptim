@@ -444,6 +444,15 @@ public:
   // set from the default soil-moisture members in set_physiology.
   double g0 = 0.022;        // residual stomatal conductance (umol m^-2 s^-1)
   double g1 = 2.57;         // sensitivity to vpd (kPa^0.5)
+
+  // The H2O:CO2 stomatal diffusion ratio. Settable because it encodes a CONVENTION,
+  // not a property of this leaf: 1.67 here, 1.6 in Medlyn et al. (2011) and the `g1`
+  // literature built on it, from the binary diffusivities (#50).
+  //
+  // ⚠️ IT REACHES THE SOLVE, not just a reported output -- the conductance conversion
+  // and `dprofit`'s `gc_const` -- so a solved leaf must be re-solved after changing
+  // it. Nothing caches a conductance, so there is no cache to invalidate.
+  double H2O_CO2_stom_diff_ratio_ = phylloptim::H2O_CO2_stom_diff_ratio;
   double medlyn_model_gs_;  // mol CO2 m^-2 s^-1
   double theta_w_;          // current soil water content at wilting point (m^3 m^-3)
   double theta_fc_;         // current soil water content at field capacity (m^3 m^-3)
@@ -563,12 +572,15 @@ public:
   //   * the solved OPERATING POINT, which is hazard 8: an output that no code path
   //     rewrites goes on reading as though it belonged to the new traits.
   //   * vcmax_, jmax_ and R_d_, which are derived from vcmax_25/jmax_25 inside
-  //     set_physiology's TEMPERATURE CACHE. That cache is keyed on (leaf_temp_,
-  //     atm_o2_kpa_) and on nothing else, so calling set_physiology again after a
-  //     bare trait write at the SAME temperature takes the cache hit and never
-  //     recomputes them. The obvious repair -- "change the trait, then set the
-  //     drivers again" -- therefore does not work, which is what makes a settable
-  //     field actively dangerous here rather than merely untidy.
+  //     set_physiology's TEMPERATURE CACHE. ⚠️ THIS ONE IS CLOSED (#55) and the
+  //     entry stays only so the repair is not undone: the key is now every scalar
+  //     update_temperature_dependent_params() reads, vcmax_25 and jmax_25 among
+  //     them, so "change the trait, then set the drivers again" DOES recompute
+  //     them. It used to be keyed on (leaf_temp_, atm_o2_kpa_) alone and took a
+  //     cache hit, which ran a whole trait sweep at the first vcmax the object
+  //     ever saw and reported plausible numbers throughout. The guarantee lives
+  //     in photo_temp_key(), not in the field: a member added to the temperature
+  //     block and left out of that key reopens it silently.
   //
   // A fourth, which is not derived state but is the same argument: a bare write
   // bypasses the #25 positive-magnitude checks below entirely.
@@ -590,6 +602,41 @@ public:
   // two copies that agree until one of them is edited.
   static void check_psi_magnitudes(double psi_crit, double stem_b, double root_b,
                                    double root_psi_crit);
+
+  // The #38 boundary, and the STRONGER of the two: `psi_crit` must lie inside the
+  // stem vulnerability spline's domain, which `stem_b`/`stem_c` set and `psi_crit`
+  // does not enter. The knot grid stops at P99 =
+  // vulnerability_psi_max(stem_b, stem_c) and setup_transpiration disables
+  // extrapolation, while every solve evaluates the stem curve AT `psi_crit` -- the
+  // dry bracket bound, the shutdown exit's cost, and E_column's feasibility test
+  // all do. So `psi_crit > P99` is not a configuration that sometimes works: it
+  // throws, out of the interpolator, in a message naming neither trait.
+  //
+  // ⚠️ A caller is much more likely to violate this than the positivity checks,
+  // because `psi_crit` LOOKS independent of the curve and is not. What the
+  // defaults actually say is that it is P95:
+  //
+  //   stem_b = 3.898245, stem_c = 2.680147  ->  P95 = 5.870283 = psi_crit
+  //
+  // to six decimal places, against P99 = 6.891842. That relationship is the thing
+  // a caller fitting measured vulnerability curves needs and cannot find anywhere
+  // else, so the message quotes the P95 that WOULD work rather than only the bound
+  // that failed.
+  //
+  // Separate from check_psi_magnitudes rather than folded into it, because that
+  // one is `static` and reached by name from plant's generated glue and from the
+  // CI consumer program: extending its signature is an API break where adding a
+  // function is not.
+  //
+  // ⚠️ NOT applied to the root curve, and that is a finding rather than an
+  // omission. #38 assumed `root_psi_crit` carried the same latent constraint;
+  // since #77 bounded the root curves past their last knot it does not throw --
+  // `root_vuln_at` CLAMPS its argument to the last knot instead. So a
+  // `root_psi_crit` past the root P99 silently reports the floor conductivity
+  // rather than failing, which is a different defect and is #85's question, not
+  // this check's.
+  static void check_psi_crit_domain(double psi_crit, double stem_b,
+                                    double stem_c);
 
   void setup_transpiration(double resolution);
 
@@ -1010,6 +1057,16 @@ public:
   // companion manuscript's job, not this header's.
   double g1_eff() const;
 
+  // Stomatal conductance to WATER VAPOUR, mol H2O m^-2 s^-1 (#56). The model solves
+  // for conductance to CO2; every data source and the g1 literature record it to
+  // water, so the conversion belongs here rather than in each caller.
+  //
+  // An ACCESSOR, not a member, per hazard 5: nothing in the solve reads it, so it
+  // does not earn storage.
+  double stom_cond_H2O() const {
+    return stom_cond_CO2_ * H2O_CO2_stom_diff_ratio_;
+  }
+
   // Every reported output of a solved point, in one call.
   //
   // ⚠️ THIS EXISTS FOR THE R BOUNDARY AND FOR NOTHING ELSE. A C++ caller should
@@ -1260,6 +1317,7 @@ inline Leaf::Leaf(double vcmax_25, double stem_c, double stem_b,
       // <= 0 -- which is precisely why the convention had to live in comments.
       // Now it is checkable, so it is checked. set_traits shares this check.
       check_psi_magnitudes(psi_crit, stem_b, root_b, root_psi_crit);
+      check_psi_crit_domain(psi_crit, stem_b, stem_c);
 
       // The root traits belong to the supply path, so hand them over before its
       // vulnerability curve is built.
@@ -1292,6 +1350,25 @@ inline void Leaf::check_psi_magnitudes(double psi_crit, double stem_b,
   }
 }
 
+// See the header for why psi_crit is not the free trait it looks like.
+inline void Leaf::check_psi_crit_domain(double psi_crit, double stem_b,
+                                       double stem_c) {
+  const double psi_max = vulnerability_psi_max(stem_b, stem_c);
+  if (psi_crit > psi_max) {
+    // P95 from the same curve, which is what the package defaults use and so the
+    // value a caller who has fitted stem_b/stem_c most likely wants.
+    const double p95 = stem_b * pow(log(1.0 / 0.05), 1.0 / stem_c);
+    util::stop("psi_crit (" + util::to_string(psi_crit) +
+               " MPa) is past the stem vulnerability curve's domain, which ends "
+               "at P99 = " + util::to_string(psi_max) +
+               " MPa and is set by stem_b = " + util::to_string(stem_b) +
+               " / stem_c = " + util::to_string(stem_c) +
+               ", not by psi_crit itself (#38). The package defaults take psi_crit "
+               "to be P95 of the same curve, which here is " +
+               util::to_string(p95) + " MPa.");
+  }
+}
+
 // See the header for why this exists rather than fourteen settable fields.
 inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
                              double psi_crit_, double root_c_, double root_b_,
@@ -1301,6 +1378,7 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
                              double curv_fact_colim_,
                              double cost_scale_TF24_, double R_d_25_) {
   check_psi_magnitudes(psi_crit_, stem_b_, root_b_, root_psi_crit_);
+  check_psi_crit_domain(psi_crit_, stem_b_, stem_c_);
 
   // Which splines have to be rebuilt, decided BEFORE the assignment. Exact
   // equality is the right test and not a sloppy one: the spline is a pure
@@ -2385,7 +2463,7 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
   // (transp_from_psi(psi_stem) - transp_from_psi(psi)), so the partials use the
   // analytic spline derivative.
   const double gc_const =
-      atm_kpa_ * kg_to_mol_h2o / vpd_leaf_ / H2O_CO2_stom_diff_ratio;
+      atm_kpa_ * kg_to_mol_h2o / vpd_leaf_ / H2O_CO2_stom_diff_ratio_;
   const double gc = gc_const * transpiration(psi_stem, psi);
   const double dgc_dpsistem =
       gc_const * leaf_specific_conductance_max_ * stem_curve_integral_deriv(psi_stem);
@@ -2842,6 +2920,12 @@ inline double Leaf::stem_curve_integral_inverse_deriv(double w) const {
 
 inline void Leaf::perturb_stem_b(double stem_b_new) {
   check_psi_magnitudes(psi_crit, stem_b_new, roots_.root_b, roots_.root_psi_crit);
+  // ⚠️ The perturbed stem_b carries a perturbed domain with it, and this is the
+  // one caller where that can newly bind: lowering stem_b lowers P99 while
+  // psi_crit stays put, so a gradient step in stem_b at a psi_crit already near
+  // P99 can walk off the end of the curve it is rescaling. Checked against
+  // stem_b_new, not stem_b.
+  check_psi_crit_domain(psi_crit, stem_b_new, stem_c);
   stem_b = stem_b_new;
   // ⚠️ The transpiration memo is keyed on (psi_stem, psi_upstream) and NOT on the
   // curve, so a perturbation that leaves the potentials alone -- which is every
@@ -2920,7 +3004,7 @@ inline double Leaf::transpiration_to_psi_stem(double transpiration_, double psi_
 // returns stomatal conductance to CO2, mol C m^-2 LA s^-1
 inline double Leaf:: stom_cond_CO2(double psi_stem, double psi_upstream) {
   double transpiration_ = transpiration(psi_stem, psi_upstream);
-  return atm_kpa_ * transpiration_ * kg_to_mol_h2o / vpd_leaf_ / H2O_CO2_stom_diff_ratio;
+  return atm_kpa_ * transpiration_ * kg_to_mol_h2o / vpd_leaf_ / H2O_CO2_stom_diff_ratio_;
 }
 
 
@@ -3157,7 +3241,7 @@ inline void Leaf::set_leaf_states_rates_from_psi_stem(double psi_stem, double ps
         set_leaf_vpd(Tleaf_candidate);
       }
       ci_ = psi_stem_to_ci(psi_stem, psi_upstream);
-      stom_cond_CO2_ = atm_kpa_ * transpiration_ * kg_to_mol_h2o / vpd_leaf_ / H2O_CO2_stom_diff_ratio;
+      stom_cond_CO2_ = atm_kpa_ * transpiration_ * kg_to_mol_h2o / vpd_leaf_ / H2O_CO2_stom_diff_ratio_;
       }
     }
   assim_colimited_ = assim_colimited(ci_);

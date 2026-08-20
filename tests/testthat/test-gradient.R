@@ -93,7 +93,7 @@ test_that("the composite reproduces the arbitrated reference gradients", {
   g <- grid_gradient(2.0, pars = rownames(ref))
   expect_identical(g$status, "interior")
   expect_identical(g$method, "ift")
-  expect_equal(g$H, -8.9561, tolerance = 1e-4)
+  expect_equal(g$H, -8.9578, tolerance = 1e-4)
 
   expect_equal(g$gradient[rownames(ref), "collar"], ref[, "collar"],
                tolerance = 5e-3)
@@ -561,16 +561,26 @@ test_that("profit's gradient is the direct term alone at an interior optimum", {
   # this a test rather than a formality. The assignment only matters where the term
   # it removes is big enough to see, and that term is NOISE rather than an h^2
   # truncation: `profit` is the maximum, so it is flat, and a central difference
-  # of it divides the solve's ~1e-9 floor by a ~1e-6 step. `?leaf_gradient` has
-  # the distribution over the golden grid's 136 interior rows; what matters here
-  # is that `psi_soil = 0.5, vpd = 2, 3 layers` is the WORST of them at 8.0e-05,
-  # so a tolerance three orders inside that fails if the assignment is removed.
-  # At the suite's usual `grid_drivers(2.0)` the same term is 2.9e-10 and this
-  # test would pass either way, which is the version of it written first.
+  # of it divides the solve's ~1e-9 floor by a ~1e-6 step. So the point has to be
+  # one where that noise is LARGE; at the suite's usual `grid_drivers(2.0)` the same
+  # term is ~1e-10 and this test would pass either way, which is the version of it
+  # written first.
+  #
+  # ⚠️ THE POINT DOES NOT SURVIVE A RESULTS CHANGE, so RE-DERIVE IT rather than
+  # adjusting the bounds whenever this fails on the `fd` assertion: sweep the golden
+  # grid's interior rows and take the largest |fd|.
+  #
+  #   for each (psi_soil, ppfd, vpd, layers) in the golden grid:
+  #     g <- leaf_gradient(..., pars = "vcmax_25"); keep if g$status == "interior"
+  #     solve, then fd <- central difference of profit_ in the collar at psi*
+  #   pick argmax |fd|
+  #
+  # A failure saying `abs(fd) <= 1e-5` means the point went quiet, NOT that the
+  # feature broke. A failure on `abs(exact)` is the real signal.
   #
   # ⚠️ Those figures are macOS/arm64's, and the second half of this test says why
   # that matters. Read it before adding an assertion on a magnitude here.
-  d <- grid_drivers(0.5, vpd = 2.0, layers = 3L)
+  d <- grid_drivers(1.0, ppfd = 1500, vpd = 1.0, layers = 1L)
   g <- do.call(leaf_gradient, c(d, list(pars = "vcmax_25")))
   expect_identical(g$status, "interior")
 
@@ -624,7 +634,14 @@ test_that("profit's gradient is the direct term alone at an interior optimum", {
   # says nothing of the kind. Asserting BOTH is the point -- it is the difference
   # between "the dropped term is small" and "the dropped term is unmeasurable by
   # the route that would have supplied it".
-  expect_lt(abs(exact), 1e-12)
+  #
+  # ⚠️ THE BOUND ON `exact` IS THE SOLVER FLOOR (~1e-9), not a landing point. Pinning
+  # it tighter pins which side of its own tolerance the collar root-find lands on,
+  # which moves for reasons unrelated to this feature.
+  #
+  # What carries the test is the GAP, not either bound: `exact` 7.8e-16 against `fd`
+  # 2.7e-04 is a factor of 3.5e+11, so both bounds sit orders inside it.
+  expect_lt(abs(exact), 1e-9)
   expect_gt(abs(fd), 1e-5)
 })
 

@@ -274,15 +274,12 @@ void test_solve_single_layer() {
   ok(l.opt_psi_stem_ <= l.psi_crit, "stem stays within psi_crit");
   ok(l.transpiration_ > 0.0, "transpiration is positive");
   ok(l.assim_colimited_ > 0.0, "assimilation is positive");
-  // Regression guards -- see the note at the top of this file. Moved by PLAN 11a
-  // (the collar root-find): opt_psi_stem_ 3.595247 -> 3.595088 and
-  // assim_colimited_ 5.599511 -> 5.599153, both ~1e-4 relative, which is the
-  // argmax correction and not rounding. profit_ and transpiration_ did not move at
-  // this tolerance -- profit_ because it is the maximum and therefore flat.
-  near(l.opt_psi_stem_, 3.595088, 1e-5, "opt_psi_stem_");
-  near(l.assim_colimited_, 5.599153, 1e-5, "assim_colimited_");
+  // Regression guards -- see the note at the top of this file. Regenerate these
+  // deliberately, alongside the golden file, and state the movement in the PR.
+  near(l.opt_psi_stem_, 3.595332, 1e-5, "opt_psi_stem_");
+  near(l.assim_colimited_, 5.601016, 1e-5, "assim_colimited_");
   near(l.transpiration_, 1.141941e-05, 1e-5, "transpiration_");
-  near(l.profit_, 2.515843, 1e-5, "profit_");
+  near(l.profit_, 2.517157, 1e-5, "profit_");
 }
 
 void test_solve_is_deterministic() {
@@ -2501,6 +2498,207 @@ void test_set_traits_matches_a_fresh_leaf() {
   }
 }
 
+// Capture the message a throwing call produced, or "" if it did not throw. Used
+// by every test below that asserts on what an error SAYS rather than that one
+// happened -- see test_out_of_domain_names_the_spline for why the wording is
+// load-bearing here.
+std::string message_of(const std::function<void()>& f) {
+  try {
+    f();
+  } catch (const std::exception& e) {
+    return std::string(e.what());
+  }
+  return std::string();
+}
+
+bool mentions(const std::string& haystack, const char* needle) {
+  return haystack.find(needle) != std::string::npos;
+}
+
+// The realised knot grid against the intended one (#92). Nothing checked this
+// before, which is exactly why the accumulating `psi += step` loop could drop its
+// last knot for years: the shortfall is invisible from outside unless the domain
+// edge is compared with the function that is supposed to define it.
+// The kg <-> mol water conversions are reciprocal, and the round trip is the
+// identity (#51). Asserted rather than documented: the demand side converts
+// transpiration kg -> mol and the supply side converts uptake mol -> kg, so a
+// second literal anywhere breaks the round trip silently.
+void test_water_mass_conversions_are_reciprocal() {
+  printf("kg <-> mol water conversions\n");
+  // Exact to the last bit in one direction: kg_to_mol_h2o IS 1/molar_mass_h2o.
+  ok(phylloptim::kg_to_mol_h2o == 1.0 / phylloptim::molar_mass_h2o,
+     "kg_to_mol_h2o is exactly the reciprocal of the molar mass");
+  ok(phylloptim::kg_per_mol_h2o == phylloptim::molar_mass_h2o,
+     "kg_per_mol_h2o IS the molar mass, not a second copy of it");
+
+  // The round trip cannot be bit-exact -- 1/x then *x is not the identity for most
+  // x -- so the claim is that it is within one rounding, which is what "reciprocal"
+  // can actually buy.
+  for (double kg : {1e-9, 1e-6, 1e-3, 1.0, 1e3}) {
+    const double round_trip = kg * phylloptim::kg_to_mol_h2o *
+                              phylloptim::kg_per_mol_h2o;
+    near(round_trip, kg, 4.0 * std::numeric_limits<double>::epsilon(),
+         "kg -> mol -> kg returns the input at " +
+             phylloptim::util::format_double(kg));
+  }
+
+  // The value is water's molar mass, not a neighbouring one: 18.015 g/mol from the
+  // standard atomic weights, 2(1.008) + 15.999.
+  near(phylloptim::molar_mass_h2o * 1000.0, 18.015, 1e-9,
+       "the molar mass is water's, in g/mol");
+}
+
+// Both Arrhenius curves are exactly inert at 25 C, which is why a change to any
+// temperature response is invisible on a 25 C-only grid. That is the claim worth
+// holding: it bounds the blast radius of anything touched in this area.
+void test_gas_constant_and_arrhenius_reference_point() {
+  printf("gas constant and the 25 C reference\n");
+  // Exact SI quantity, so there is no tolerance to allow.
+  near(phylloptim::gas_constant, 8.314462618153240, 1e-15,
+       "gas_constant is the SI value");
+
+  // Inertness at the reference temperature, through the object: every reference
+  // value in this model is DEFINED at 25 C, so a response can only be seen away
+  // from it.
+  Drivers d;
+  phylloptim::Leaf ref = make_leaf(d, {2.0}, {1.0});   // d.leaf_temp is 25
+  ok(ref.vcmax_ == ref.vcmax_25, "vcmax_ IS vcmax_25 at 25 C, bit for bit");
+  ok(ref.jmax_ == ref.jmax_25, "jmax_ IS jmax_25 at 25 C, bit for bit");
+  ok(ref.R_d_ == ref.R_d_25, "R_d_ IS R_d_25 at 25 C, bit for bit");
+  // gamma_, kc_ and ko_ also sit at their 25 C reference values, but they carry a
+  // umol/mol -> Pa conversion through atm_kpa_ that this test would have to restate
+  // to check -- and a second copy of a conversion is what hazard 1 is about. The
+  // three identities above are the same claim without the duplication.
+
+  // And NOT inert away from it, which is the other half: a test that only checked
+  // 25 C would pass on a broken response curve.
+  Drivers hot;
+  hot.leaf_temp = 40.0;
+  phylloptim::Leaf warm = make_leaf(hot, {2.0}, {1.0});
+  ok(warm.vcmax_ != warm.vcmax_25, "vcmax_ has moved at 40 C");
+  ok(warm.jmax_ != warm.jmax_25, "jmax_ has moved at 40 C");
+  ok(warm.R_d_ > ref.R_d_, "respiration is higher at 40 C than at 25 C");
+}
+
+void test_knot_grid_reaches_its_intended_domain() {
+  printf("vulnerability knot grid\n");
+  const double resolutions[] = {10.0, 50.0, 100.0, 200.0, 1000.0};
+  int wrong_count = 0, wrong_end = 0, not_increasing = 0, cases = 0;
+  double worst_end_rel = 0.0;
+  for (double res : resolutions) {
+    for (int bi = 1; bi <= 60; ++bi) {
+      for (double c : {0.4, 1.0, 2.04, 2.680147, 6.0, 12.0}) {
+        const double b = bi / 10.0;
+        std::vector<double> x, y;
+        phylloptim::cumulative_vulnerability_integral(b, c, res, x, y);
+        ++cases;
+        // ⚠️ BIT-EXACT on the endpoint, not `near`. The whole defect was an
+        // endpoint that was *close* to vulnerability_psi_max and not equal to it,
+        // and both splines built from this grid disable extrapolation -- so a
+        // last knot one ULP short is the difference between a lookup at
+        // vulnerability_psi_max working and throwing. A tolerance here would pass
+        // on the code this test exists to reject.
+        const double want_end = phylloptim::vulnerability_psi_max(b, c);
+        if (x.size() != static_cast<std::size_t>(res) + 1) ++wrong_count;
+        if (x.back() != want_end) {
+          ++wrong_end;
+          worst_end_rel = std::max(worst_end_rel,
+                                   std::abs(x.back() - want_end) / want_end);
+        }
+        if (x.size() != y.size()) ++not_increasing;
+        for (std::size_t i = 1; i < x.size(); ++i) {
+          if (!(x[i] > x[i - 1])) { ++not_increasing; break; }
+        }
+      }
+    }
+  }
+  ok(cases == 1800, "the sweep ran the grid it meant to");
+  ok(wrong_count == 0,
+     "every grid has exactly resolution + 1 knots (" +
+         std::to_string(wrong_count) + " of " + std::to_string(cases) + " did not)");
+  ok(wrong_end == 0,
+     "every grid ends exactly at vulnerability_psi_max (" +
+         std::to_string(wrong_end) + " did not; worst rel " +
+         std::to_string(worst_end_rel) + ")");
+  ok(not_increasing == 0, "every grid is strictly increasing and paired with its y");
+
+  // A resolution below one control point is refused by name rather than reaching
+  // the interpolator, which used to report it as its own domain problem.
+  const std::string msg = message_of(
+      [] { std::vector<double> x, y;
+           phylloptim::cumulative_vulnerability_integral(3.9, 2.7, 0.0, x, y); });
+  ok(mentions(msg, "resolution"), "resolution < 1 is refused by name");
+}
+
+// psi_crit against the domain stem_b/stem_c set (#38). The trait LOOKS
+// independent of the curve and is not: the knot grid stops at P99 and every solve
+// evaluates the stem curve at psi_crit, so the combination used to fail from
+// inside the interpolator in a message naming neither trait.
+void test_psi_crit_must_lie_on_the_stem_curve() {
+  printf("psi_crit against the curve's domain\n");
+  // Sabot et al. (2022) P50/P88 territory, which is where this was found: far from
+  // the defaults, and psi_crit picked as though it were free.
+  const std::string msg = message_of(
+      [] { phylloptim::Leaf l(96, 3.5463, 7.6291, 14.145, 2.680147, 3.898245,
+                              5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 1e-3, 100,
+                              1e-3, 1000, 7.5); });
+  ok(!msg.empty(), "a psi_crit past the stem curve's domain is refused");
+  ok(mentions(msg, "psi_crit"), "the message names psi_crit");
+  ok(mentions(msg, "stem_b"), "the message names the trait that sets the domain");
+  ok(mentions(msg, "P95"), "the message quotes a psi_crit that would work");
+
+  // And the value it quotes really does work, which is what makes the message
+  // actionable rather than merely informative.
+  const double b = 7.6291, c = 3.5463;
+  const double p95 = b * std::pow(std::log(1.0 / 0.05), 1.0 / c);
+  ok(message_of([&] { phylloptim::Leaf l(96, c, b, p95, 2.680147, 3.898245,
+                                         5.870283, 1.5, 157.44, 0.30, 0.7, 0.99,
+                                         1e-3, 100, 1e-3, 1000, 7.5); }).empty(),
+     "the P95 the message quotes constructs");
+
+  // The boundary itself is REACHABLE, which is what makes `>` the right comparison
+  // in the check rather than a nervous `>=`. ⚠️ It is #92 that makes this a
+  // guarantee rather than a coincidence: under the accumulating knot loop the last
+  // knot sat anywhere from one ULP to one full step short of
+  // vulnerability_psi_max, so whether psi_crit == P99 was inside the spline
+  // depended on stem_b and stem_c. This pair happened to land on the good side,
+  // which is precisely why the knot-count sweep above is the test with teeth here
+  // and this one is a statement of the contract.
+  const double p99 = phylloptim::vulnerability_psi_max(b, c);
+  ok(message_of([&] { phylloptim::Leaf l(96, c, b, p99, 2.680147, 3.898245,
+                                         5.870283, 1.5, 157.44, 0.30, 0.7, 0.99,
+                                         1e-3, 100, 1e-3, 1000, 7.5); }).empty(),
+     "psi_crit exactly at P99 is inside the domain, not a rounding away from it");
+
+  // The defaults have headroom, and the relationship the message asserts is the
+  // one they encode: psi_crit IS P95 of the default curve, to six decimals.
+  phylloptim::Leaf def;
+  near(def.psi_crit,
+       def.stem_b * std::pow(std::log(1.0 / 0.05), 1.0 / def.stem_c), 1e-6,
+       "the default psi_crit is P95 of the default stem curve");
+  ok(def.psi_crit < phylloptim::vulnerability_psi_max(def.stem_b, def.stem_c),
+     "the default psi_crit is inside the default domain");
+
+  // set_traits shares the check, so the object cannot be walked into the state the
+  // constructor refuses.
+  phylloptim::Leaf l;
+  ok(!message_of([&] {
+       l.set_traits(96, c, b, 14.145, 2.680147, 3.898245, 5.870283, 1.5, 157.44,
+                    0.30, 0.7, 0.99, 7.5, kRd25);
+     }).empty(),
+     "set_traits refuses the same combination");
+  near(l.psi_crit, def.psi_crit, 0.0,
+       "the refused set_traits left psi_crit alone");
+
+  // perturb_stem_b is the third route, and the only one where the DOMAIN moves
+  // rather than psi_crit: shrinking stem_b shrinks P99 under a fixed psi_crit.
+  phylloptim::Leaf p;
+  ok(!message_of([&] { p.perturb_stem_b(p.stem_b * 0.5); }).empty(),
+     "perturb_stem_b refuses a stem_b that takes psi_crit off the curve");
+  ok(message_of([&] { p.perturb_stem_b(p.stem_b * 1.05); }).empty(),
+     "a perturbation that keeps psi_crit on the curve is still allowed");
+}
+
 void test_bad_input_throws() {
   printf("input validation\n");
   Drivers d;
@@ -2526,18 +2724,8 @@ void test_bad_input_throws() {
 // not the spline) is ambiguous in the way that matters. Localising plant#576 came
 // down to which of the four call sites was asking; these assertions are what make
 // that a read rather than a bisect.
-std::string message_of(const std::function<void()>& f) {
-  try {
-    f();
-  } catch (const std::exception& e) {
-    return std::string(e.what());
-  }
-  return std::string();
-}
-
-bool mentions(const std::string& haystack, const char* needle) {
-  return haystack.find(needle) != std::string::npos;
-}
+// (message_of / mentions are defined above test_knot_grid_reaches_its_intended_domain,
+// which is the first test that needs them.)
 
 void test_out_of_domain_names_the_spline() {
   printf("out-of-domain reporting\n");
@@ -3007,6 +3195,10 @@ int main() {
   test_rd_temperature_response();
   test_set_traits_matches_a_fresh_leaf();
   test_perturb_stem_b_matches_a_rebuild();
+  test_water_mass_conversions_are_reciprocal();
+  test_gas_constant_and_arrhenius_reference_point();
+  test_knot_grid_reaches_its_intended_domain();
+  test_psi_crit_must_lie_on_the_stem_curve();
   test_bad_input_throws();
   test_out_of_domain_names_the_spline();
   test_out_of_domain_under_rescale();

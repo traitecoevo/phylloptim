@@ -116,7 +116,11 @@ golden_network_1m <- root_network_from_carbon(1.0 / golden_area_leaf,
 # steps the C++ grid does, root_network_from_carbon() then $set_physiology(), so
 # the R route to the golden numbers goes through the same public helper a user
 # would call.
-golden_solve <- function(psi_soil, ppfd, vpd, layers) {
+# ⚠️ KEEP `leaf_temp` A PARAMETER, and keep pinning at least one point away from its
+# 25 C default. Every reference parameter in this model is DEFINED at 25 C, so every
+# temperature response is inert there by construction -- a 25 C-only set of pinned
+# values cannot see a response curve change at all.
+golden_solve <- function(psi_soil, ppfd, vpd, layers, leaf_temp = golden_tleaf) {
   l <- default_leaf()
 
   i <- seq_len(layers) - 1L
@@ -132,7 +136,7 @@ golden_solve <- function(psi_soil, ppfd, vpd, layers) {
     leaf_specific_conductance_max = golden_kmax,
     atm_vpd = vpd,
     ca = golden_ca,
-    leaf_temp = golden_tleaf,
+    leaf_temp = leaf_temp,
     atm_o2_kpa = golden_o2,
     atm_kpa = golden_patm
   )

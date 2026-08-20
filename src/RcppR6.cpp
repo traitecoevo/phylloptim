@@ -196,6 +196,71 @@ void Leaf__setup_root_vulnerability(phylloptim::RcppR6::RcppR6<phylloptim::Leaf>
   obj_->setup_root_vulnerability(resolution);
 }
 // [[Rcpp::export]]
+double Leaf__vcmax_25__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->vcmax_25;
+}
+
+// [[Rcpp::export]]
+double Leaf__jmax_25__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->jmax_25;
+}
+
+// [[Rcpp::export]]
+double Leaf__stem_c__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->stem_c;
+}
+
+// [[Rcpp::export]]
+double Leaf__stem_b__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->stem_b;
+}
+
+// [[Rcpp::export]]
+double Leaf__psi_crit__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->psi_crit;
+}
+
+// [[Rcpp::export]]
+double Leaf__root_c__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->roots_.root_c;
+}
+
+// [[Rcpp::export]]
+double Leaf__root_b__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->roots_.root_b;
+}
+
+// [[Rcpp::export]]
+double Leaf__root_psi_crit__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->roots_.root_psi_crit;
+}
+
+// [[Rcpp::export]]
+double Leaf__beta2__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->beta2;
+}
+
+// [[Rcpp::export]]
+double Leaf__a__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->a;
+}
+
+// [[Rcpp::export]]
+double Leaf__curv_fact_elec_trans__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->curv_fact_elec_trans;
+}
+
+// [[Rcpp::export]]
+double Leaf__curv_fact_colim__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->curv_fact_colim;
+}
+
+// [[Rcpp::export]]
+double Leaf__cost_scale_TF24__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->cost_scale_TF24;
+}
+
+// [[Rcpp::export]]
 double Leaf__ci___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
   return obj_->ci_;
 }
@@ -935,6 +1000,20 @@ double Leaf__lambda_multilayer__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf>
 // [[Rcpp::export]]
 double Leaf__g1_eff__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
   return obj_->g1_eff();
+}
+
+// [[Rcpp::export]]
+double Leaf__gs_H2O__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->stom_cond_H2O();
+}
+
+// [[Rcpp::export]]
+double Leaf__H2O_CO2_stom_diff_ratio___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->H2O_CO2_stom_diff_ratio_;
+}
+// [[Rcpp::export]]
+void Leaf__H2O_CO2_stom_diff_ratio___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
+  obj_->H2O_CO2_stom_diff_ratio_ = value;
 }
 
 

@@ -132,6 +132,44 @@ Leaf:
       - cost_scale_TF24: double
 
   active:
+    # --- the traits, READ-ONLY (#95) ------------------------------------------
+    #
+    # They were `set_traits()` arguments and nothing else, so from R they could be
+    # written and not read. That is fine while a caller only ever sets them, and
+    # stops being fine the moment anything has to compute a quantity the model
+    # defines in terms of one. The case that raised it: Sperry's hydraulic cost
+    # normalises by `k(psi_soil) - k_crit`, and `k_crit = kmax *
+    # proportion_of_conductivity(psi_crit)` -- both of those are bound, so the only
+    # missing piece was `psi_crit`, and a probe script in
+    # `leaf_calibration_test/sicangco-2026` carried a hard-coded 5.870283 for it.
+    #
+    # ⚠️ READ-ONLY, and that is hazard 10 rather than caution: changing a trait
+    # means rebuilding up to two vulnerability splines and clearing the solved
+    # operating point, so `set_traits()` is still the only way to move one. These
+    # exist so a caller can read back what they set. RcppR6 makes an
+    # `access: field` binding read-only exactly when `readonly: true` is given --
+    # the same mechanism the three `single_*` fields below use.
+    #
+    # `R_d_25` is NOT here because it is already bound, and settable, further down:
+    # plant's own bindings pin the generated constructor by arity, so `leaf_model()`
+    # has to apply it after construction.
+    vcmax_25: {type: double, access: field, readonly: true}
+    jmax_25: {type: double, access: field, readonly: true}
+    stem_c: {type: double, access: field, readonly: true}
+    stem_b: {type: double, access: field, readonly: true}
+    psi_crit: {type: double, access: field, readonly: true}
+    root_c: {type: double, access: field, readonly: true, name_cpp: "roots_.root_c"}
+    root_b: {type: double, access: field, readonly: true, name_cpp: "roots_.root_b"}
+    root_psi_crit: {type: double, access: field, readonly: true, name_cpp: "roots_.root_psi_crit"}
+    beta2: {type: double, access: field, readonly: true}
+    # `a` reads badly as a field name and stays `a` anyway: it is what `set_traits()`
+    # and `leaf_traits()` call the quantum yield, and a read whose name differs from
+    # the write's cannot be round-tripped by a caller iterating over trait names.
+    a: {type: double, access: field, readonly: true}
+    curv_fact_elec_trans: {type: double, access: field, readonly: true}
+    curv_fact_colim: {type: double, access: field, readonly: true}
+    cost_scale_TF24: {type: double, access: field, readonly: true}
+
     # --- solved operating point ----------------------------------------------
     ci_: {type: double, access: field}
     stom_cond_CO2_: {type: double, access: field}
@@ -299,6 +337,17 @@ Leaf:
     lambda_molar: {type: double, access: member, name_cpp: marginal_cost_water_molar}
     lambda_multilayer: {type: double, access: member, name_cpp: marginal_cost_water_multilayer}
     g1_eff: {type: double, access: member, name_cpp: g1_eff}
+    # Conductance to WATER, mol H2O m^-2 s^-1 (#56). Every data source and the g1
+    # literature record gs to water; the model solves for gs to CO2. An accessor, not
+    # stored state (hazard 5).
+    gs_H2O: {type: double, access: member, name_cpp: stom_cond_H2O}
+
+    # The H2O:CO2 stomatal diffusion ratio (#50). 1.67 here; Medlyn et al. (2011) and
+    # the g1 literature use 1.6, and `g1_eff` exists to be compared against those.
+    #
+    # ⚠️ Settable, and it REACHES THE SOLVE rather than only a reported output, so a
+    # solved leaf must be re-solved after changing it.
+    H2O_CO2_stom_diff_ratio_: {type: double, access: field}
 
   methods:
     # All twelve reported outputs in ONE call, for the R boundary's benefit.

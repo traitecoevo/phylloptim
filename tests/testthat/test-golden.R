@@ -24,14 +24,24 @@
 # To regenerate after a DELIBERATE change to the golden file:
 #
 #   cc -O2 -o /tmp/tsv_to_hex tests/validate/tsv_to_hex.c
-#   grep -P '^2\t900\t2\t3\t' tests/cpp/golden/operating_points.tsv | /tmp/tsv_to_hex
+#   awk -F'\t' 'NR==1 || ($4==25 && $1==2 && $2==900 && $3==2 && $5==3)' \
+#     tests/cpp/golden/operating_points.tsv | /tmp/tsv_to_hex
 #
 # and paste the row. The C tool parses with the C library's strtod, which is
 # correctly rounded, and prints %a.
 #
-# Last regenerated for PLAN 11b. 11a (the collar root-find) moved 27 of these 36
-# values; 11b moved 18 of them again. The nine that never move are the
-# shut-down row -- it never reaches the collar solve, which is why it is here.
+# ⚠️ The `$4==25` is not decoration. The golden file's columns are psi_soil, ppfd,
+# vpd, LEAF_TEMP, layers, and the second temperature was added after this recipe
+# was first written -- so the tab-anchored `grep` this comment used to give
+# matched leaf_temp where it meant layers and pulled the wrong row. Select on the
+# named column, not on position in a remembered layout.
+#
+# Last regenerated for #92 (the indexed knot grid), which moved 27 of these 36
+# values. The size scales with how dry the point is, because that is how far up the
+# vulnerability curve it reads: 1e-15 at psi_soil 0.5, 1e-15 at 2, and 1e-11 to
+# 3e-11 at 4. The nine that never move are the shut-down row -- it never reaches
+# the collar solve, which is why it is here. Before that: PLAN 11b moved 18, and
+# 11a (the collar root-find) 27.
 
 # Four points, chosen to exercise different parts of the model rather than to
 # sample the grid evenly:
@@ -52,43 +62,43 @@ golden_rows <- list(
   list(
     inputs = list(psi_soil = 0.5, ppfd = 1500, vpd = 0.5, layers = 1L),
     expected = list(
-      psi_stem      = "0x1.70a14c7893a63p+1",
-      opt_root_psi  = "0x1.0671f2de624bbp+1",
-      ci            = "0x1.9f448245054cp+4",
-      assim         = "0x1.2157d30459d32p+4",
-      transpiration = "0x1.4504d2a13351p-16",
-      gc            = "0x1.0b1ba25cac3bbp-3",
-      profit        = "0x1.0790ff442a37dp+4",
-      e_up          = "0x1.4504d35b65ac9p-16",
-      uptake        = "0x1.19e645c6a3924p-10"
+      psi_stem      = "0x1.709c081328cc2p+1",
+      opt_root_psi  = "0x1.066f367df1809p+1",
+      ci            = "0x1.9f4d94a46507cp+4",
+      assim         = "0x1.215cb3277c68cp+4",
+      transpiration = "0x1.450056425b687p-16",
+      gc            = "0x1.0b2aeb7aea326p-3",
+      profit        = "0x1.07970c77e0c6cp+4",
+      e_up          = "0x1.450056ffb743bp-16",
+      uptake        = "0x1.19e261c46cdc1p-10"
     )
   ),
   list(
     inputs = list(psi_soil = 2.0, ppfd = 900, vpd = 2.0, layers = 3L),
     expected = list(
-      psi_stem      = "0x1.b1b38a3125b71p+1",
-      opt_root_psi  = "0x1.8211ae5c473c8p+1",
-      ci            = "0x1.0ddbcc40f558p+3",
-      assim         = "0x1.b2abf3fc8af53p+1",
-      transpiration = "0x1.b282b1733fcf9p-18",
-      gc            = "0x1.651739b6d3d23p-7",
-      profit        = "0x1.8a0d7bc525718p-1",
-      e_up          = "0x1.b282b4820ffc9p-18",
-      uptake        = "0x1.78dd817d62345p-12"
+      psi_stem      = "0x1.b1bde83d4fd06p+1",
+      opt_root_psi  = "0x1.8217d4b43c8dap+1",
+      ci            = "0x1.0de738d727e36p+3",
+      assim         = "0x1.b2de91f13cc6bp+1",
+      transpiration = "0x1.b29b56450f3c6p-18",
+      gc            = "0x1.6544d94906decp-7",
+      profit        = "0x1.8a7e0f7ece124p-1",
+      e_up          = "0x1.b29b597525db4p-18",
+      uptake        = "0x1.78f2e172d2649p-12"
     )
   ),
   list(
     inputs = list(psi_soil = 4.0, ppfd = 500, vpd = 1.0, layers = 5L),
     expected = list(
-      psi_stem      = "0x1.77b2b5b3436bp+2",
-      opt_root_psi  = "0x1.37e82d8840ff2p+2",
-      ci            = "0x1.0bcf9df500a4p+3",
-      assim         = "0x1.9d87d2667966dp+1",
-      transpiration = "0x1.9c8a7e60e4353p-19",
-      gc            = "0x1.5309210eddb78p-7",
-      profit        = "-0x1.db6089328069fp+1",
-      e_up          = "0x1.9c8a84340ca09p-19",
-      uptake        = "0x1.65cf766e15e4ep-13"
+      psi_stem      = "0x1.77b2b5b35503dp+2",
+      opt_root_psi  = "0x1.37e82d8840f02p+2",
+      ci            = "0x1.0bd5e8671ee81p+3",
+      assim         = "0x1.9da29ffb2c45dp+1",
+      transpiration = "0x1.9c8a7e611d793p-19",
+      gc            = "0x1.532136245deedp-7",
+      profit        = "-0x1.db45bb9de7ef1p+1",
+      e_up          = "0x1.9c8a84340bf42p-19",
+      uptake        = "0x1.65cf766e154f5p-13"
     )
   ),
   list(
@@ -152,6 +162,77 @@ for (row in golden_rows) {
     })
   })
 }
+
+# ⚠️ TWO POINTS AT 40 C, and keep at least one. Every value above is a 25 C value,
+# where every reference parameter in this model is DEFINED -- so every temperature
+# response is inert there by construction and a 25 C-only set of pinned values cannot
+# see a response curve change at all. The C++ grid carries a second temperature for
+# the same reason.
+#
+# One 1-layer and one 3-layer, both interior at 40 C. Regenerate with the same recipe
+# as above, with `$4==40`.
+golden_rows_40 <- list(
+  list(
+    inputs = list(psi_soil = 2.0, ppfd = 900, vpd = 2.0, layers = 1L,
+                  leaf_temp = 40.0),
+    expected = list(
+      psi_stem      = "0x1.3c43e37156646p+1",
+      opt_root_psi  = "0x1.27d3960b3ddb5p+1",
+      ci            = "0x1.a8bae66f05f1cp+4",
+      assim         = "0x1.b63aaeb24f87cp-1",
+      transpiration = "0x1.00e1073b4f1f6p-18",
+      gc            = "0x1.a655d667a73bcp-8",
+      profit        = "-0x1.c630b50508c68p-4",
+      e_up          = "0x1.00e10869a886cp-18",
+      uptake        = "0x1.bd99660ee389ap-13"
+    )
+  ),
+  list(
+    inputs = list(psi_soil = 0.5, ppfd = 1500, vpd = 0.5, layers = 3L,
+                  leaf_temp = 40.0),
+    expected = list(
+      psi_stem      = "0x1.ca0d1eb1eb587p+0",
+      opt_root_psi  = "0x1.8cdab97918e7ap+0",
+      ci            = "0x1.1428b2ad818f7p+5",
+      assim         = "0x1.3ba43a52dfbe5p+1",
+      transpiration = "0x1.c63fc557c2da5p-18",
+      gc            = "0x1.756a7a5445fcep-5",
+      profit        = "0x1.156375e8bdc6ep+1",
+      e_up          = "0x1.c63fc55f91a86p-18",
+      uptake        = "0x1.89fc320b7ba24p-12"
+    )
+  )
+)
+
+for (row in golden_rows_40) {
+  local({
+    inputs <- row$inputs
+    expected <- row$expected
+    label <- sprintf("psi_soil=%g ppfd=%g vpd=%g layers=%d T=%g",
+                     inputs$psi_soil, inputs$ppfd, inputs$vpd, inputs$layers,
+                     inputs$leaf_temp)
+
+    test_that(paste("the R API reproduces the golden point", label), {
+      got <- do.call(golden_solve, inputs)
+      for (field in names(expected)) {
+        expect_golden(got[[field]], expected[[field]], field, label)
+      }
+    })
+  })
+}
+
+# The 40 C rows must not equal the 25 C ones -- otherwise the two blocks above are
+# measuring one temperature twice and the coverage is still missing. Asserted rather
+# than assumed, because a `leaf_temp` argument that silently failed to reach
+# set_physiology would give exactly that.
+test_that("the 40 C block is a different operating point from the 25 C block", {
+  hot  <- golden_solve(psi_soil = 2.0, ppfd = 900, vpd = 2.0, layers = 1L,
+                       leaf_temp = 40.0)
+  cool <- golden_solve(psi_soil = 2.0, ppfd = 900, vpd = 2.0, layers = 1L)
+  expect_false(isTRUE(all.equal(hot$assim, cool$assim)))
+  expect_lt(hot$assim, cool$assim)     # past the thermal optimum at 40 C
+  expect_gt(hot$psi_stem, 0)
+})
 
 test_that("a shut-down point writes every output, not just the ones it changed", {
   # Hazard 8: Leaf is a value member that plant reuses for every individual in a

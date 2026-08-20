@@ -73,6 +73,26 @@
 ##' named accordingly, because they were once an unmarked `b`/`c` pair alongside
 ##' `root_b`/`root_c` and an analysis used the root parameters for the stem cost.
 ##'
+##' @section psi_crit is not a free trait:
+##' `psi_crit` looks independent of `stem_b`/`stem_c` and is not. The stem
+##' vulnerability curve is pre-integrated over `[0, P99]`, where
+##' `P99 = stem_b * log(100)^(1/stem_c)` is derived from those two alone, and every
+##' solve evaluates the curve *at* `psi_crit` -- so a `psi_crit` past `P99` is not a
+##' configuration that sometimes works, and [leaf_model()] refuses it.
+##'
+##' What the defaults say is that `psi_crit` is **P95** of the same curve:
+##'
+##' ```
+##' stem_b = 3.898245, stem_c = 2.680147
+##' 3.898245 * log(1/0.05)^(1/2.680147) = 5.870283 = psi_crit
+##' ```
+##'
+##' to six decimal places, against `P99 = 6.891842`. So the two move together: a
+##' species whose measured vulnerability curve gives a different `stem_b`/`stem_c`
+##' needs a `psi_crit` derived from that curve, not one carried over from these
+##' defaults. `vignette("fitting")` derives `stem_b`/`stem_c` from a published
+##' P50/P88 pair, which is the right way round.
+##'
 ##' @param vcmax_25 maximum carboxylation rate at 25 C (umol m^-2 s^-1)
 ##' @param stem_c shape parameter of the stem vulnerability curve (unitless)
 ##' @param stem_b sensitivity parameter of the stem vulnerability curve (MPa)
@@ -104,7 +124,10 @@
 ##' @seealso [leaf_control()], [leaf_model()], [leaf_solve()]
 ##' @examples
 ##' leaf_traits()
-##' leaf_traits(vcmax_25 = 120, stem_b = 2.5)
+##' # A more brittle stem: psi_crit moves with the curve, not independently of it.
+##' # (stem_b = 2.5 puts P99 at 4.42, so the default psi_crit of 5.87 is off the
+##' # end of it; 3.76 is the P95 that stem_b implies.)
+##' leaf_traits(vcmax_25 = 120, stem_b = 2.5, psi_crit = 3.76)
 ##' @export
 leaf_traits <- function(vcmax_25 = 96,
                         stem_c = 2.680147,
@@ -240,6 +263,24 @@ leaf_control <- function(GSS_tol_abs = 1e-3,
 ##' @param gravity_head head required to lift water to the collar, MPa. Zero by
 ##'   default, which is right for a bare leaf that is not thinking about rooting
 ##'   depth. See the section above for why this, alone, is not a driver.
+##'
+##' @section The two ends of this path are in different unit bases:
+##' \strong{Read this before parameterising a whole soil-to-leaf path}, which is
+##' exactly what this supply path is for (#56).
+
+##'
+##' - `leaf_specific_conductance_max` is **kg** m^-2 s^-1 MPa^-1
+##' - [series_resistance()]'s `resistance` is MPa s **mol**^-1 m^2
+##'
+##' So the two quantities the package presents as the two ends of one series are on
+##' opposite sides of a kg-per-mol factor, and a caller carrying the whole path has to
+##' supply it. The calibration study recorded dropping that factor of 0.018 as its
+##' original error, **worth three orders of magnitude** — which is why it ended up
+##' named in their code rather than inlined.
+##'
+##' The factor is `molar_mass_h2o` = 0.018015 kg/mol. ⚠️ Nothing here can check you
+##' applied it: both quantities are just positive numbers, so a path built on the wrong
+##' basis returns a plausible operating point, off by ~55x one way or ~0.018x the other.
 ##'
 ##' @return A `leaf_supply` object, for the `supply` argument of [leaf_model()]
 ##'   and [leaf_solve()].

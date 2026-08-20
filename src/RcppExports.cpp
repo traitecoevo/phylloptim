@@ -618,6 +618,149 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// Leaf__vcmax_25__get
+double Leaf__vcmax_25__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__vcmax_25__get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__vcmax_25__get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__jmax_25__get
+double Leaf__jmax_25__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__jmax_25__get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__jmax_25__get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__stem_c__get
+double Leaf__stem_c__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__stem_c__get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__stem_c__get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__stem_b__get
+double Leaf__stem_b__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__stem_b__get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__stem_b__get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__psi_crit__get
+double Leaf__psi_crit__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__psi_crit__get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__psi_crit__get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__root_c__get
+double Leaf__root_c__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__root_c__get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__root_c__get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__root_b__get
+double Leaf__root_b__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__root_b__get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__root_b__get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__root_psi_crit__get
+double Leaf__root_psi_crit__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__root_psi_crit__get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__root_psi_crit__get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__beta2__get
+double Leaf__beta2__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__beta2__get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__beta2__get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__a__get
+double Leaf__a__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__a__get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__a__get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__curv_fact_elec_trans__get
+double Leaf__curv_fact_elec_trans__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__curv_fact_elec_trans__get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__curv_fact_elec_trans__get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__curv_fact_colim__get
+double Leaf__curv_fact_colim__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__curv_fact_colim__get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__curv_fact_colim__get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__cost_scale_TF24__get
+double Leaf__cost_scale_TF24__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__cost_scale_TF24__get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__cost_scale_TF24__get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
 // Leaf__ci___get
 double Leaf__ci___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
 RcppExport SEXP _phylloptim_Leaf__ci___get(SEXP obj_SEXP) {
@@ -2422,6 +2565,39 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// Leaf__gs_H2O__get
+double Leaf__gs_H2O__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__gs_H2O__get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__gs_H2O__get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__H2O_CO2_stom_diff_ratio___get
+double Leaf__H2O_CO2_stom_diff_ratio___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__H2O_CO2_stom_diff_ratio___get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__H2O_CO2_stom_diff_ratio___get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__H2O_CO2_stom_diff_ratio___set
+void Leaf__H2O_CO2_stom_diff_ratio___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value);
+RcppExport SEXP _phylloptim_Leaf__H2O_CO2_stom_diff_ratio___set(SEXP obj_SEXP, SEXP valueSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    Rcpp::traits::input_parameter< double >::type value(valueSEXP);
+    Leaf__H2O_CO2_stom_diff_ratio___set(obj_, value);
+    return R_NilValue;
+END_RCPP
+}
 // gradient_par_names
 std::vector<std::string> gradient_par_names();
 RcppExport SEXP _phylloptim_gradient_par_names() {
@@ -2555,6 +2731,19 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__set_supply_single", (DL_FUNC) &_phylloptim_Leaf__set_supply_single, 2},
     {"_phylloptim_Leaf__setup_transpiration", (DL_FUNC) &_phylloptim_Leaf__setup_transpiration, 2},
     {"_phylloptim_Leaf__setup_root_vulnerability", (DL_FUNC) &_phylloptim_Leaf__setup_root_vulnerability, 2},
+    {"_phylloptim_Leaf__vcmax_25__get", (DL_FUNC) &_phylloptim_Leaf__vcmax_25__get, 1},
+    {"_phylloptim_Leaf__jmax_25__get", (DL_FUNC) &_phylloptim_Leaf__jmax_25__get, 1},
+    {"_phylloptim_Leaf__stem_c__get", (DL_FUNC) &_phylloptim_Leaf__stem_c__get, 1},
+    {"_phylloptim_Leaf__stem_b__get", (DL_FUNC) &_phylloptim_Leaf__stem_b__get, 1},
+    {"_phylloptim_Leaf__psi_crit__get", (DL_FUNC) &_phylloptim_Leaf__psi_crit__get, 1},
+    {"_phylloptim_Leaf__root_c__get", (DL_FUNC) &_phylloptim_Leaf__root_c__get, 1},
+    {"_phylloptim_Leaf__root_b__get", (DL_FUNC) &_phylloptim_Leaf__root_b__get, 1},
+    {"_phylloptim_Leaf__root_psi_crit__get", (DL_FUNC) &_phylloptim_Leaf__root_psi_crit__get, 1},
+    {"_phylloptim_Leaf__beta2__get", (DL_FUNC) &_phylloptim_Leaf__beta2__get, 1},
+    {"_phylloptim_Leaf__a__get", (DL_FUNC) &_phylloptim_Leaf__a__get, 1},
+    {"_phylloptim_Leaf__curv_fact_elec_trans__get", (DL_FUNC) &_phylloptim_Leaf__curv_fact_elec_trans__get, 1},
+    {"_phylloptim_Leaf__curv_fact_colim__get", (DL_FUNC) &_phylloptim_Leaf__curv_fact_colim__get, 1},
+    {"_phylloptim_Leaf__cost_scale_TF24__get", (DL_FUNC) &_phylloptim_Leaf__cost_scale_TF24__get, 1},
     {"_phylloptim_Leaf__ci___get", (DL_FUNC) &_phylloptim_Leaf__ci___get, 1},
     {"_phylloptim_Leaf__ci___set", (DL_FUNC) &_phylloptim_Leaf__ci___set, 2},
     {"_phylloptim_Leaf__stom_cond_CO2___get", (DL_FUNC) &_phylloptim_Leaf__stom_cond_CO2___get, 1},
@@ -2719,6 +2908,9 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__lambda_molar__get", (DL_FUNC) &_phylloptim_Leaf__lambda_molar__get, 1},
     {"_phylloptim_Leaf__lambda_multilayer__get", (DL_FUNC) &_phylloptim_Leaf__lambda_multilayer__get, 1},
     {"_phylloptim_Leaf__g1_eff__get", (DL_FUNC) &_phylloptim_Leaf__g1_eff__get, 1},
+    {"_phylloptim_Leaf__gs_H2O__get", (DL_FUNC) &_phylloptim_Leaf__gs_H2O__get, 1},
+    {"_phylloptim_Leaf__H2O_CO2_stom_diff_ratio___get", (DL_FUNC) &_phylloptim_Leaf__H2O_CO2_stom_diff_ratio___get, 1},
+    {"_phylloptim_Leaf__H2O_CO2_stom_diff_ratio___set", (DL_FUNC) &_phylloptim_Leaf__H2O_CO2_stom_diff_ratio___set, 2},
     {"_phylloptim_gradient_par_names", (DL_FUNC) &_phylloptim_gradient_par_names, 0},
     {"_phylloptim_gradient_output_names", (DL_FUNC) &_phylloptim_gradient_output_names, 0},
     {"_phylloptim_gradient_batch_prepare", (DL_FUNC) &_phylloptim_gradient_batch_prepare, 9},

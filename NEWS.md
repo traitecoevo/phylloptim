@@ -1,4 +1,248 @@
-# phylloptim 0.2.1
+# phylloptim 0.4.0
+
+## Conductance to water, and a settable diffusion ratio (#50, #56)
+
+`gs_H2O` reports stomatal conductance to **water vapour**, alongside the `stom_cond_CO2_`
+the model solves for. Every data source records conductance to water, as does the g1
+literature, so the conversion was being left to user code — where, as the calibration
+study put it, a wrong factor biases `gs` by a constant and the fit launders it into
+`kmax` rather than revealing it. An accessor, not stored state (hazard 5).
+
+`H2O_CO2_stom_diff_ratio_` is now a settable field, **defaulting to 1.67 so nothing
+moves**: the golden file is bit-identical. It encodes a convention rather than a
+measured property of this leaf — Medlyn et al. (2011) and the `g1` literature use 1.6,
+from the binary diffusivities — and it was a compile-time constant, so a caller who knew
+their comparison wanted 1.6 could not say so.
+
+⚠️ **#50's "~2.2% offset in every reported g1_eff" is wrong, and the correction matters
+in both directions.** `g1_eff` does not contain the ratio at all — it is
+`chi*sqrt(D)/(1-chi)` — so the effect arrives entirely through `ci` moving in the solve.
+Measured at `psi_soil = 2, PPFD = 900`, taking 1.67 to 1.60 (a 4.19% change in the
+ratio):
+
+| quantity | 1.67 | 1.60 | rel diff |
+|---|---|---|---|
+| `g1_eff` | 0.502639 | 0.521100 | **3.67%** |
+| `gc` | 0.0192260 | 0.0204187 | 6.20% |
+| `gs_H2O` | 0.0321075 | 0.0326700 | 1.75% |
+| `A` | 5.60102 | 5.89174 | 5.19% |
+
+So the offset is **1.7x larger than the issue states**, and it is not a unit factor that
+could be corrected outside the package — which strengthens the case for exposing it. Note
+`gs_H2O` moves *least*, because the ratio partly cancels there.
+
+⚠️ It reaches the solve, not only a reported output (the conductance conversion and
+`dprofit`'s `gc_const`), so a solved leaf must be re-solved after changing it.
+
+**#56's second half is documented rather than fixed**, which is what that issue asks for
+regardless: `?leaf_supply_single` now states that `leaf_specific_conductance_max` is
+kg-based while `series_resistance()`'s resistance is mol-based, so a caller
+parameterising the whole path carries a `molar_mass_h2o` factor between two quantities
+presented as two ends of one series. The calibration study recorded dropping that 0.018
+as its original error, worth three orders of magnitude. Unifying the bases would move
+results *and* change a published argument's units, so it stays a decision.
+
+## The gas constant is the SI value (#51 audit) — MOVES RESULTS, AT 40 C ONLY
+
+`gas_constant` was `8.314`. Since the 2019 SI redefinition R = N_A k_B is **exact**, at
+8.314462618153240 J mol^-1 K^-1, so there was no reading on which 8.314 was right — the
+only question was whether a 5.56e-05 correction justified a results change.
+
+It does, because the amplification is not 5.56e-05. This constant appears only in
+`arrh_curve` and `peak_arrh_curve`, always as `Ea/(R*T)` with `Ea/RT` of order 24 at the
+defaults, so a relative change eps in R moves the exponent by ~24 eps and the rate by
+~1.3e-03 — an order above the 1e-04 this package calls a real difference.
+
+**And it moves nothing at 25 C, exactly.** `arrh_curve` carries `(leaf_temp - 25)` in its
+numerator, so it returns its reference value through `exp(0)` whatever R is;
+`peak_arrh_curve`'s `arg2` and `arg3` are the same expression at the same temperature, so
+their ratio is exactly 1. Predicted before measuring, and confirmed: **1728 of 1728 moved
+golden cells are at 40 C, and the 25 C block is byte-identical.**
+
+Blast radius, all at 40 C: median relative 6.49e-05, largest absolute move 2.04e-03. The
+two cells above 1e-02 are `profit` at 5-layer 40 C points where it is ~1e-03, i.e. small
+denominators. `gradient_golden.tsv` does not move at all, because `grid_drivers` is 25 C.
+
+⚠️ **The R-side suite was blind to this**: all 1107 tests passed unaltered, and only the
+golden grid's second temperature caught it — which is what that second temperature is
+for.
+
+The reason was **not** that nothing on the R side runs above 25 C; `test-temperature-
+response.R` drives at 35 and 40 C. It is that every assertion up there was
+**directional** — `expect_gt`, `expect_lt`, "not `all.equal`" — so a change to a
+response curve that preserves the ordering satisfied all of them. There was no *pinned*
+value off 25 C anywhere in `tests/testthat/`, because `golden_solve()` hard-coded the
+temperature.
+
+**Fixed in the same PR.** `golden_solve()` takes `leaf_temp`, and `test-golden.R` pins
+two 40 C points (1-layer and 3-layer, both interior) to hex, alongside a check that they
+really are a different operating point from their 25 C counterparts. Measured: reverting
+`gas_constant` to 8.314 now fails **18** R-side assertions — exactly the two new rows x
+nine fields — against **0** before.
+
+⚠️ plant does **not** re-export `gas_constant` (its `leaf_model.h` says so explicitly),
+so nothing over there references it by name; its results still move through the leaf.
+
+## Two constants audited and deliberately left alone
+
+The same audit flagged two more, neither of which has a forced answer, so both are
+documented at the constant rather than changed:
+
+- **`gravity_head = 9.8e-3`** is 6.78e-04 below `1000 * 9.80665 / 1e6`. Above the
+  real-difference threshold, and it moves results through the per-layer head — but the
+  right value depends on a water-density convention nobody has stated (nominal 1000,
+  4 C 999.97, 25 C 997.05 span 0.3%, four times the discrepancy). Needs a decision.
+- **`latent_heat_vap = 2.45e6`** and its own comment disagree: the comment said "fixed at
+  25 deg C", where lambda(25 C) is 2.442e6; 2.45e6 is ~21.5 C. Only reaches the
+  default-off Penman-Monteith path, and on that path lambda is arguably the wrong *shape*
+  rather than the wrong value, since it depends on the leaf temperature being solved for.
+  Left to #28; the comment no longer states a temperature the value does not have.
+
+`C_to_K`, `umol_par_per_joule`, `vol_heat_cap_air` and (since #51) `molar_mass_h2o` check
+out. `H2O_CO2_stom_diff_ratio` is #50 and is a convention question, not an error.
+
+## One molar mass of water, so the kg <-> mol conversions are reciprocal (#51) — MOVES RESULTS
+
+`kg_to_mol_h2o` was 55.4939 and `kg_per_mol_h2o` was 0.018015 — two constants naming
+the same physical quantity in opposite directions, disagreeing by **0.0277%**, used in
+opposite halves of the model. The demand side converted transpiration kg -> mol with
+the first; the supply side converted uptake mol -> kg with the second. So a water flux
+pushed through both did not come back. The header said the discrepancy was deliberate,
+"kept at the historical 0.018015 to preserve results".
+
+**Which one was wrong is not a matter of convention, which is what let this be settled
+rather than argued.** 55.4939 is 1/0.018020, i.e. it encodes a molar mass of 18.0200
+g/mol. The molar mass of water is 18.015 g/mol — from the standard atomic weights,
+2(1.008) + 15.999. So `0.018015` is the physical value and the forward constant was the
+odd one. There is now one `molar_mass_h2o = 0.018015` and both old names are derived
+from it, reciprocal by construction; both names are kept because plant `using`-declares
+both.
+
+Note this is the **larger** of the two possible moves — unifying the other way would
+have preserved more digits by adopting a molar mass water does not have.
+
+**Blast radius.** 3710 of 5184 golden cells, median relative move 9.4e-05, and **3377
+of the 3710 move by no more than 2x the constant's own 2.77e-04** — i.e. the bulk is
+that constant propagating. The largest **absolute** move anywhere in the file is
+1.6e-03. The 184 cells whose relative move exceeds 1e-03 are near-zero quantities: the
+worst, 2.7e-02, is `profit` = 0.0088 at a 40 C five-layer point where benefit nearly
+cancels cost. Recorded gradients: 60 of 100 cells, median 3.2e-04, worst 2.9e-03.
+⚠️ That worst is the same order as the gradient file's own cross-platform disagreement
+(~2.3e-03), so **off macOS/arm64 this change is not cleanly separable from noise in
+that file.**
+
+Directionally: the forward constant rose 0.0277%, so conductance per unit transpiration
+rose with it, and the leaf buys slightly more carbon for the same water.
+
+⚠️ **plant's `LinkingTo: phylloptim (>= 0.2.0)` floor is now three minor versions
+stale**, and this is a results change it should be able to require. `>= 0.4.0`.
+
+# phylloptim 0.3.0
+
+⚠️ **This section was headed `0.2.1` until now, and the renumbering is the point of
+#58's first ask rather than tidying.** `0.2.1` was never tagged or released, and it
+accumulated `#41` (dark respiration reallocated, which moved results), `#84`, `#86`,
+`#89`, `#90` and `#91` on top of the changes below — so a consumer caching computed
+results had no signal that any of it had happened. The rule from here: **a PR that
+moves results moves the minor version**, in the same PR that regenerates the golden
+file.
+
+⚠️ **Downstream, plant still pins `LinkingTo: phylloptim (>= 0.2.0)`, and that floor
+is now two minor versions stale.** #99 has merged, so the bump this note asked for has
+happened here and the plant-side half has not: a `>= 0.2.0` floor is satisfied by
+every build that predates the vulnerability-domain fix, which is exactly the
+"consumer cannot tell" problem one repo over. Raising it to `>= 0.3.0` — together with
+the `Remotes: traitecoevo/phylloptim@<sha>` it sits beside — is what makes the pin
+mean anything.
+
+## `leaf_behaviour_fingerprint()`, so a consumer can tell when the numbers moved (#58)
+
+The version bump above is the discipline; this is the mechanism, because a promise
+about future PRs cannot help a cache built against the history it sits on.
+`leaf_behaviour_fingerprint()` returns a 12-character digest of the two recorded
+baselines together — `tests/cpp/golden/operating_points.tsv` and
+`tests/testthat/gradient_golden.tsv` — so a pipeline can depend on one value instead
+of reimplementing "has phylloptim changed?".
+
+Those files already *are* this package's definition of the numbers, and they are
+regenerated deliberately, so the fingerprint inherits that discipline rather than
+needing new enforcement. `test-fingerprint.R` is what holds it: it recomputes the
+digest from the files on disk, so a PR that regenerates a golden file and forgets
+`Rscript tools/fingerprint.R` fails.
+
+Two properties chosen against the workaround it replaces — the calibration study
+hashed `inst/include`, `R/` and `src/`, which #47's rename would have moved without
+moving a number. So **file names are not in the digest** (a rename cannot move it)
+and **contents are hashed by line with the trailing `\r` stripped** (a CRLF checkout
+cannot either). Both are asserted.
+
+⚠️ It reports what the golden grids *reach*. They build a fresh `Leaf` per point, so
+a stale-state bug of hazard 8's kind can be fixed or introduced without moving it —
+all three of #15's were golden-bit-identical. `?leaf_behaviour_fingerprint` lists
+that and the other two limits.
+
+## The vulnerability spline reaches the domain it claims (#92) — MOVES RESULTS
+
+`cumulative_vulnerability_integral` built its knot grid by accumulating
+`psi += step`. Rounding accumulates, so after `resolution` additions `psi` landed a
+few ULP either side of `psi_max` and the loop yielded **`resolution` or
+`resolution - 1` knots depending on the values of `b` and `c`** — an upper domain
+bound that was neither reproducible across parameter values nor equal to
+`vulnerability_psi_max`, which the comment there says the inverse "needs the same
+bound" as. Both splines built from that grid have extrapolation **disabled**, so the
+edge decides whether a lookup at the dry end throws.
+
+**The package defaults were on the losing side of it**: 99 knots, ending at 6.8229
+against a `psi_max` of 6.8918 — one full step, 1.0% of the intended domain, silently
+missing from both the stem and the root curve.
+
+Indexing the grid fixes the count and makes the last knot exactly
+`vulnerability_psi_max(b, c)`. **This moves results**: 3496 of 5184 golden cells,
+median 2.0e-15, and the largest **absolute** move anywhere in the file is 1.97e-10.
+The 71 cells whose *relative* move exceeds 1e-7 are all at `psi_soil = 3` with 5
+layers, where the quantities themselves are 1e-11 to 1e-3. Nothing reaches the
+~1e-4 band this package calls a real difference. Recorded gradients move further,
+as finite differences of the same solve must: 63 of 100 cells, median 1.1e-08,
+worst 5.1e-04 — an order inside the 5e-3 that file is already compared with
+cross-platform.
+
+## `psi_crit` is checked against the curve that bounds it (#38)
+
+`psi_crit` looks independent of `stem_b`/`stem_c` and is not: the spline stops at
+`P99 = stem_b * log(100)^(1/stem_c)`, `psi_crit` never enters that, and every solve
+evaluates the curve *at* `psi_crit`. So `psi_crit > P99` used to fail from inside
+the interpolator, in a message naming neither trait — which reads as "the solver
+went somewhere strange" when the real answer is a trait combination that was never
+valid. Found while calibrating against measured P50/P88 curves, where `stem_b` and
+`stem_c` are far from the defaults.
+
+The constructor, `set_traits()` and `perturb_stem_b()` now refuse it by name, and
+the message quotes the **P95** that would work — because that is what the defaults
+encode: `3.898245 * log(1/0.05)^(1/2.680147) = 5.870283 = psi_crit`, to six decimal
+places. `?leaf_traits` states the relationship, which was written down nowhere.
+
+⚠️ **The root curve is deliberately not checked.** #38 assumed `root_psi_crit`
+carried the same constraint; since #77 bounded the root curves past their last knot
+it does not throw, it **clamps** — a different defect, and #85's question.
+
+This rejects only combinations that already failed, so nothing that worked stops
+working. It did catch one inconsistent pair inside this repo's own suite
+(`leaf_traits(stem_b = 2.0)` at the default `psi_crit`) and one in `?leaf_traits`'s
+example, both now fixed.
+
+## Traits can be read back from the object (#95)
+
+The thirteen `set_traits()` traits were write-only from R: `psi_crit`, `stem_b`,
+`stem_c`, `beta2`, `root_*` and the rest could be set and not read. Anything that
+had to compute a quantity the model defines in terms of one had to carry it —
+Sperry's cost normalises by `k_crit = kmax * proportion_of_conductivity(psi_crit)`,
+and a probe script in `leaf_calibration_test/sicangco-2026` therefore held a
+hard-coded `5.870283`.
+
+All thirteen are now bound **read-only**. `set_traits()` is still the only way to
+change one, for the reason hazard 10 gives at length: a bare write leaves up to two
+vulnerability splines and the solved operating point describing the old value.
+`R_d_25` stays settable, as it already was.
 
 ## `R_d_25` is a trait, and respiration rises with temperature (#41)
 
