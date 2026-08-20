@@ -2664,6 +2664,84 @@ void test_set_traits_matches_a_fresh_leaf() {
   }
 }
 
+// A prescribed `lambda_` survives everything that is not a caller writing to it
+// (#96). It is Sperry's marginal water cost, an INPUT, and it used to be cleared
+// by setup_clean_leaf() -- so whether a sweep kept it depended on which of two
+// interchangeable-looking calls came next, and neither warned.
+//
+// ⚠️ The two arms are the point, not the pair of assertions. `set_drivers` always
+// kept the value and `set_traits` always lost it; asserting only one arm passes
+// on the code this test exists to reject.
+void test_prescribed_lambda_survives_redriving() {
+  printf("a prescribed lambda_ survives set_traits and set_drivers\n");
+  Drivers d;
+  std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
+
+  // A fresh Leaf reads the NA sentinel: "no longer reset" must not have become
+  // "never initialised", which is the one way this change could go wrong quietly.
+  {
+    phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
+    ok(std::isnan(l.lambda_), "lambda_ is NA on a freshly constructed leaf");
+    ok(std::isnan(l.lambda_analytical_),
+       "lambda_analytical_ is NA on a freshly constructed leaf");
+  }
+
+  const double prescribed = 30.0;
+
+  // Arm 1: re-drive. This arm passed before the fix too.
+  {
+    phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
+    l.lambda_ = prescribed;
+    l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth,
+                     d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                     d.atm_o2_kpa, d.atm_kpa);
+    ok(l.lambda_ == prescribed, "set_physiology leaves a prescribed lambda_ alone");
+  }
+
+  // Arm 2: re-trait. This is the arm that lost the value.
+  {
+    phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
+    l.lambda_ = prescribed;
+    l.lambda_analytical_ = prescribed;
+    l.set_traits(96.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
+                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
+    ok(l.lambda_ == prescribed, "set_traits leaves a prescribed lambda_ alone");
+    ok(l.lambda_analytical_ == prescribed,
+       "set_traits leaves a prescribed lambda_analytical_ alone");
+  }
+
+  // And it survives a SOLVE, which is the case a sweep actually runs: solve at
+  // the defaults, re-trait, solve again, all on one object.
+  {
+    phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
+    l.lambda_ = prescribed;
+    l.find_root_collar_psi();
+    l.set_traits(96.0 * 1.05, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
+                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
+    l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth,
+                     d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                     d.atm_o2_kpa, d.atm_kpa);
+    l.find_root_collar_psi();
+    ok(l.lambda_ == prescribed,
+       "lambda_ survives a solve, a re-trait and a second solve");
+  }
+
+  // The derived state around it is still wiped -- the fix removed two lines from
+  // setup_clean_leaf(), and taking any more would reopen hazard 8.
+  {
+    phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
+    l.lambda_ = prescribed;
+    l.find_root_collar_psi();
+    ok(!std::isnan(l.opt_psi_stem_), "the solve seated an operating point");
+    l.set_traits(96.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
+                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
+    ok(std::isnan(l.opt_psi_stem_),
+       "set_traits still clears the solved operating point");
+    ok(std::isnan(l.profit_), "set_traits still clears profit_");
+    ok(std::isnan(l.R_d_), "set_traits still clears the temperature block");
+  }
+}
+
 // Capture the message a throwing call produced, or "" if it did not throw. Used
 // by every test below that asserts on what an error SAYS rather than that one
 // happened -- see test_out_of_domain_names_the_spline for why the wording is
@@ -3095,6 +3173,7 @@ int main() {
   test_temperature_params_invalidate_cache();
   test_rd_temperature_response();
   test_set_traits_matches_a_fresh_leaf();
+  test_prescribed_lambda_survives_redriving();
   test_perturb_stem_b_matches_a_rebuild();
   test_stem_b_shortcut_needs_no_rebuild();
   test_water_mass_conversions_are_reciprocal();

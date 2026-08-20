@@ -277,8 +277,20 @@ public:
   std::vector<double> soil_consumption_;
   double profit_;
   double psi_stem;
-  double lambda_;
-  double lambda_analytical_;
+  // ⚠️ THE ONLY TWO INPUTS IN THIS BLOCK, and the reason they carry their default
+  // here rather than in setup_clean_leaf(). Everything around them is derived
+  // state or a solved output, which setup_clean_leaf() exists to wipe; these are
+  // Sperry's prescribed marginal water cost, supplied by the CALLER and read by
+  // profit_psi_stem_Sperry. Wiping an input on the caller's behalf made whether a
+  // prescribed value survived depend on which of two interchangeable-looking
+  // re-driving calls came next -- `l$lambda_ <- 30; set_drivers(...)` kept it,
+  // `l$lambda_ <- 30; l$set_traits(...)` did not, and neither warned (#96).
+  //
+  // An in-class initialiser, not a line in setup_clean_leaf(), so a fresh Leaf
+  // still reads the NA sentinel: the member is otherwise uninitialised, and
+  // "never reset" must not become "never initialised".
+  double lambda_ = util::na_value;         // umol C m^-2 s^-1 kg^-1 m^2 s^1
+  double lambda_analytical_ = util::na_value; // same units; nothing here reads it
   double hydraulic_cost_;
   
   double electron_transport_;
@@ -1375,6 +1387,10 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
   // output left unwritten becomes the previous solve's value), and resets both
   // the transpiration memo and the photosynthesis temperature cache -- the one
   // that would otherwise hand back the old vcmax_.
+  //
+  // "The just-constructed state" is exact for the derived state and the outputs,
+  // which is all of it bar `lambda_`/`lambda_analytical_` -- caller inputs, left
+  // standing on purpose (#96, see their declarations).
   setup_clean_leaf();
 }
 
@@ -1385,10 +1401,12 @@ inline void Leaf::setup_clean_leaf() {
   stom_cond_CO2_= util::na_value; //mol Co2 m^-2 s^-1 
   assim_colimited_= util::na_value; // umol C m^-2 s^-1 
   transpiration_= util::na_value; // kg m^-2 s^-1 
-  profit_= util::na_value; // umol C m^-2 s^-1 
-  lambda_= util::na_value; // umol C m^-2 s^-1 kg^-1 m^2 s^1
-  lambda_analytical_= util::na_value; // umol C m^-2 s^-1 kg^-1 m^2 s^1
-  hydraulic_cost_= util::na_value; // umol C m^-2 s^-1 
+  profit_= util::na_value; // umol C m^-2 s^-1
+  // lambda_ and lambda_analytical_ are deliberately NOT here: they are the
+  // caller's inputs, not derived state, and carry their NA default at the
+  // declaration instead (#96). Adding either back makes a prescribed lambda
+  // survive set_drivers() and vanish on set_traits().
+  hydraulic_cost_= util::na_value; // umol C m^-2 s^-1
   electron_transport_= util::na_value; //electron transport rate umol m^-2 s^-1
   gamma_= util::na_value;
   ko_= util::na_value;

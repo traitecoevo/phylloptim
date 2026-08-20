@@ -13,6 +13,7 @@
 *.dylib
 tests/cpp/test_leaf
 tests/cpp/test_golden
+tests/cpp/test_primitives
 tests/cpp/bench_solve
 tests/cpp/bench_gradient
 tests/cpp/*.dSYM/
