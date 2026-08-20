@@ -46,7 +46,7 @@ DEP_INC  = $(ODELIA_INC) $(BH_INC)
 SYS_INC  = $(foreach d,$(filter-out /usr/include /usr/include/,$(strip $(DEP_INC))),-isystem $(d))
 INCLUDES = -I$(PHYLLOPTIM_INC) $(SYS_INC)
 
-.PHONY: all build clean golden bench
+.PHONY: all build clean golden primitives-golden bench
 # The suite's own headers are prerequisites too: root_network.hpp holds the two
 # ex-`Leaf`-default constants the golden file's bit-exactness depends on, so a
 # stale rebuild after editing it would be a silently wrong baseline.
@@ -59,11 +59,18 @@ HEADERS = $(wildcard $(PHYLLOPTIM_INC)/phylloptim/*.hpp) $(PHYLLOPTIM_INC)/phyll
 # above main() in test_golden.cpp for why that is correct and not a loosening.
 GOLDEN_ARGS ?=
 
+# ⚠️ EVERY TEST PROGRAM MUST BE NAMED HERE. This Makefile lists its sources
+# explicitly, and that is exactly how tests/validate/ rotted through two interface
+# changes without anyone noticing (#64): a file no build touches compiles in
+# nobody's head. Adding a .cpp under tests/cpp/ without adding it to `build`, to
+# `all`, to CMakeLists.txt and to cpp-tests.yml leaves it in the same state, with a
+# newer date on it.
 all: build
 	./test_leaf
 	./test_golden $(GOLDEN_ARGS)
+	./test_primitives $(GOLDEN_ARGS)
 
-build: test_leaf test_golden
+build: test_leaf test_golden test_primitives
 
 # Not built or run by `make all` -- it takes a few seconds and measures the
 # machine as much as the code. Run it deliberately when a change might have
@@ -78,6 +85,9 @@ test_leaf: test_leaf.cpp $(HEADERS)
 test_golden: test_golden.cpp $(HEADERS)
 	$(CXX) $(CXXSTD) $(OPT) $(WARN) $(INCLUDES) $< -o $@
 
+test_primitives: test_primitives.cpp $(HEADERS)
+	$(CXX) $(CXXSTD) $(OPT) $(WARN) $(INCLUDES) $< -o $@
+
 bench_solve: bench_solve.cpp $(HEADERS)
 	$(CXX) $(CXXSTD) $(OPT) $(WARN) $(INCLUDES) $< -o $@
 
@@ -89,5 +99,10 @@ bench_gradient: bench_gradient.cpp $(HEADERS)
 golden: test_golden
 	./test_golden --generate
 
+# The primitive-level baseline, regenerated on the same terms: only ever
+# deliberately, and only on macOS/arm64, which is the platform it is bit-exact on.
+primitives-golden: test_primitives
+	./test_primitives --generate
+
 clean:
-	rm -f test_leaf test_golden bench_solve bench_gradient
+	rm -f test_leaf test_golden test_primitives bench_solve bench_gradient

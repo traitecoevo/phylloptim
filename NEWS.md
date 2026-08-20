@@ -1,5 +1,48 @@
 # phylloptim 0.4.0
 
+## A primitive-level baseline, and three dead harnesses removed (#64)
+
+`tests/cpp/golden/primitives.tsv` records **544 values from the functions the solve
+calls**, in five call-tree tiers — arithmetic, vulnerability, assimilation, spline,
+iterative — read by `tests/cpp/test_primitives.cpp`. Bit-exact on macOS/arm64, with
+per-**tier** tolerances elsewhere.
+
+**Why a second baseline.** `operating_points.tsv` detects a difference and cannot
+attribute one: the nested solvers amplify a last-bit change up to the loosest
+tolerance, so by the time it reaches a reported output it points nowhere. #92 proved
+that twice over — the knot grid had dropped its last knot for years and the golden
+file recorded the consequences as *correct*, and then the fix's 3496 moved cells could
+not be split into "knot displacement" versus "added knot" without a standalone
+primitive program, written in a scratch directory and thrown away. Both times.
+
+Demonstrated rather than asserted: a 1e-12 perturbation to
+`proportion_of_conductivity` leaves the arithmetic and assimilation tiers at
+**exactly 0**, moves vulnerability at 1e-12 and spline at 4.2e-12. **The lowest tier
+that moved is the cause.**
+
+The knot grid is now pinned per (b, c) pair — `knot_grid_last_psi` sits beside
+`vulnerability_psi_max` for nine pairs, so #92's defect is a row in a file rather
+than a test nobody thought to write.
+
+**Deleted:** `tests/validate/compare_with_plant.R`, `compare_primitives.R` and
+`primitives.cpp`. The first two compared against plant's own `Leaf`, and plant has no
+independent copy of this model any more — it consumes these headers — so that
+comparison had become this package against itself. What they established is PLAN
+decision 1. `scm_regression.R`, `scm_compare.R` and `tsv_to_hex.c` are kept; the last
+is live, in `test-golden.R`'s regeneration recipe.
+
+⚠️ **The enforcement is the deliverable.** Those files rotted through two interface
+changes because **no build touched them**, so a revived harness in no build would be
+the same defect with a newer date. `test_primitives` is named in `tests/cpp/Makefile`,
+`CMakeLists.txt` (as the `leaf_primitives` ctest), `tests/cpp.R` and `.Rbuildignore`,
+and CI reaches it through `make` on all three platforms. Adding a program under
+`tests/cpp/` now means editing four files, and each of them says so.
+
+⚠️ **The cross-platform tolerances are mechanism-derived ceilings, not measured worst
+cases**, and they are labelled as such — the guide's cross-platform table has been
+wrong three times from a reading written down as a fact. The real figures come from
+the summary line the tolerant mode prints on every run, pass or fail.
+
 ## The leaf's own temperature is an output
 
 `Tleaf` joins the reported operating point, as a thirteenth column on
