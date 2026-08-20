@@ -1,5 +1,35 @@
 # phylloptim 0.5.0
 
+## `lambda_` is a caller input, so nothing resets it (#96)
+
+`setup_clean_leaf()` cleared `lambda_`, so whether a prescribed Sperry marginal water
+cost survived depended on which of two interchangeable-looking calls came next:
+
+```r
+l$lambda_ <- 30; set_drivers(l, ...)   # lambda_ is 30
+l$lambda_ <- 30; l$set_traits(...)     # lambda_ was NaN -- now 30
+```
+
+Neither call touches it now. It is read by `profit_psi_stem_Sperry` and set by no
+model code on that path, so wiping it on the caller's behalf was never right — and
+clearing it in `set_physiology` too, the other way to make the rule consistent, would
+have made a prescribed λ unusable, since the multi-layer path requires
+`set_physiology` before every solve. `lambda_analytical_` moves with it, on the same
+argument.
+
+Both carry their NA default at the declaration instead, so a fresh `Leaf` still reads
+NA and `optimise_psi_stem_Sperry`'s guard against an unset λ still fires. Derived
+state and solved outputs are cleared exactly as before.
+
+⚠️ **`lambda_` is now dual-role**, and this change does not fix that: #93's
+`optimise_psi_stem_ProfitMax` *writes* it, so calling ProfitMax and then Sperry
+optimises ProfitMax's derived λ rather than a prescribed one — finite, plausible, and
+past the guard. Documented at both sites and pinned by a test; #114 is the design
+question, #113 a possible resolution.
+
+No numbers move: `lambda_` reaches only `profit_psi_stem_Sperry`, which no golden path
+calls. Both golden files are bit-identical.
+
 ## A shut-down leaf reports one temperature, not two (#105)
 
 ⚠️ **Results move on the energy-balance path.** Both zero-transpiration exits of the
