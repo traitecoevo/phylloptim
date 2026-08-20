@@ -1674,13 +1674,36 @@ void test_energy_balance_gate_off_is_inert() {
 // the same drivers. Without the contrast the test could pass on the Arrhenius
 // optimum alone, which has nothing to do with energy balance.
 //
-// ⚠️ What this can and cannot show. stom_cond_CO2 still divides by the
-// PRESCRIBED air VPD however hot the leaf gets (PLAN 13.1), so only the
-// A(Tleaf) channel is exercised here; the leaf-to-air VPD channel is absent.
-// The sweep therefore holds VPD fixed, which is the protocol of the paper's
-// Figure S2 rather than its Figure 2.
+// ⚠️ THE SIGNATURE IS IN TRANSPIRATION, NOT IN CONDUCTANCE, AND THAT CHANGED HERE.
+// This test used to assert that CONDUCTANCE rises where assimilation falls. It
+// did, and the reason was a bug: stom_cond_CO2 divided by the prescribed AIR
+// deficit however hot the leaf got, so gs was simply E rescaled by a constant and
+// inherited E's shape exactly. With the leaf-to-air deficit wired in (PLAN 13.1)
+// the two come apart, because
+//
+//     gs = P*E / (1.6 * D_leaf),      D_leaf = atm_vpd + esat(Tleaf) - esat(Tair)
+//
+// and over the decoupled window D_leaf grows FASTER than E does. Measured on this
+// sweep, between the thermal optimum and E's own peak: E x1.034, D_leaf x1.089,
+// so gs x0.950 -- falling throughout. The gs counts went from a positive number
+// to gate-on 0, gate-off 1.
+//
+// That is not a loss of the mechanism, and the assertions below are rewritten to
+// say which is which:
+//
+//   * the ENERGY-BALANCE mechanism is intact and is what the gate buys. E keeps
+//     rising above the thermal optimum, and it does so over a wider window with
+//     the gate on (4 points) than off (1).
+//   * the CONDUCTANCE signature, which is what a gas-exchange dataset reports,
+//     does not survive the correction at these drivers. Anyone comparing this
+//     model to a measured dgs/dT needs to know that, and the third assertion pins
+//     the ratio that causes it rather than the count it produces.
+//
+// The sweep holds AIR VPD fixed, which is the protocol of the paper's Figure S2
+// rather than its Figure 2 -- and note that fixing the air deficit no longer
+// fixes the deficit the leaf actually sees.
 void test_energy_balance_stomatal_decoupling() {
-  printf("decoupling: gs rises where A falls, and only with the gate on\n");
+  printf("decoupling: E rises where A falls; gs does not, once D moves with Tleaf\n");
   // ⚠️ THE FIXTURE DEFAULTS CANNOT SHOW THIS, and the reason is physical rather
   // than numerical. kmax = K_s*theta/h is 3.14e-5 at the defaults, and a leaf
   // that conductive simply cannot move enough water to cool itself: measured in
@@ -1692,7 +1715,7 @@ void test_energy_balance_stomatal_decoupling() {
   // until a test passes -- at the defaults the honest answer is "no decoupling",
   // and that is what the probe found.
   auto sweep = [&](bool gate) {
-    std::vector<double> Ta, A, gs;
+    std::vector<double> Ta, A, gs, E, D;
     for (double t = 15.0; t <= 45.0; t += 1.0) {
       Drivers d;
       d.PPFD = 1200.0; d.leaf_temp = t; d.atm_vpd = 1.0; d.h = 1.5;
@@ -1712,39 +1735,61 @@ void test_energy_balance_stomatal_decoupling() {
       l.find_root_collar_psi();
       if (!std::isfinite(l.assim_colimited_) || !std::isfinite(l.stom_cond_CO2_)) continue;
       Ta.push_back(t); A.push_back(l.assim_colimited_); gs.push_back(l.stom_cond_CO2_);
+      E.push_back(l.transpiration_); D.push_back(l.vpd_leaf_);
     }
-    return std::make_tuple(Ta, A, gs);
+    return std::make_tuple(Ta, A, gs, E, D);
   };
 
-  auto count_decoupled = [](const std::vector<double>& Ta,
-                            const std::vector<double>& A,
-                            const std::vector<double>& gs) {
-    if (Ta.size() < 5) return 0;
+  // Points above the thermal optimum where the response variable RISES while
+  // assimilation falls. `y` is E for the mechanism and gs for the signature.
+  auto count_decoupled = [](const std::vector<double>& A,
+                            const std::vector<double>& y) {
+    if (A.size() < 5) return 0;
     const size_t peak = std::distance(A.begin(), std::max_element(A.begin(), A.end()));
     int n = 0;
-    for (size_t i = peak + 2; i + 1 < Ta.size(); ++i) {
-      const double dA = (A[i + 1] - A[i - 1]);
-      const double dg = (gs[i + 1] - gs[i - 1]);
-      if (dA < 0.0 && dg > 0.0) ++n;
+    for (size_t i = peak + 2; i + 1 < A.size(); ++i) {
+      if ((A[i + 1] - A[i - 1]) < 0.0 && (y[i + 1] - y[i - 1]) > 0.0) ++n;
     }
     return n;
   };
 
   const auto on = sweep(true);
   const auto off = sweep(false);
-  const int n_on = count_decoupled(std::get<0>(on), std::get<1>(on), std::get<2>(on));
-  const int n_off = count_decoupled(std::get<0>(off), std::get<1>(off), std::get<2>(off));
-  printf("    decoupled points: gate on %d, gate off %d\n", n_on, n_off);
-
   const auto& A_on = std::get<1>(on);
+  const auto& gs_on = std::get<2>(on);
+  const auto& E_on = std::get<3>(on);
+  const auto& D_on = std::get<4>(on);
+
+  const int nE_on = count_decoupled(A_on, E_on);
+  const int nE_off = count_decoupled(std::get<1>(off), std::get<3>(off));
+  const int ng_on = count_decoupled(A_on, gs_on);
+  const int ng_off = count_decoupled(std::get<1>(off), std::get<2>(off));
+  printf("    decoupled points -- in E: gate on %d, gate off %d;"
+         " in gs: gate on %d, gate off %d\n", nE_on, nE_off, ng_on, ng_off);
+
   ok(A_on.size() > 5, "the decoupling sweep produced a curve");
   const size_t peak = std::distance(A_on.begin(),
                                     std::max_element(A_on.begin(), A_on.end()));
   ok(peak > 0 && peak + 1 < A_on.size(),
      "assimilation has an interior thermal optimum");
-  ok(n_on > 0, "with the gate ON, conductance rises where assimilation falls");
-  ok(n_on > n_off,
-     "and it does so more than with the gate off -- the energy balance is why");
+  ok(nE_on > 0, "with the gate ON, transpiration rises where assimilation falls");
+  ok(nE_on > nE_off,
+     "and it does so over a wider window than with the gate off -- "
+     "the energy balance is why");
+
+  // WHY the conductance signature does not follow, stated as the ratio rather
+  // than as the count it happens to produce here. Over the window from the
+  // thermal optimum to E's own peak, the deficit outgrows the flux, and
+  // gs = P*E/(1.6*D) therefore falls even though E is rising.
+  const size_t Epeak = std::distance(E_on.begin(),
+                                     std::max_element(E_on.begin(), E_on.end()));
+  ok(Epeak > peak, "transpiration peaks ABOVE the assimilation optimum");
+  const double E_growth = E_on[Epeak] / E_on[peak];
+  const double D_growth = D_on[Epeak] / D_on[peak];
+  printf("    optimum -> E peak: E x%.4f, D_leaf x%.4f, gs x%.4f\n",
+         E_growth, D_growth, gs_on[Epeak] / gs_on[peak]);
+  ok(D_growth > E_growth,
+     "the leaf-to-air deficit outgrows the flux, so gs falls where E rises");
 }
 
 // The closed-form fast path (leaf/closed_form.hpp). Two things matter: that it is
@@ -3106,6 +3151,362 @@ void test_out_of_domain_under_rescale() {
      "the rescale is named so the two domains are not confused");
 }
 
+// ===========================================================================
+// Leaf-to-air VPD (PLAN 13.1, #7)
+// ---------------------------------------------------------------------------
+void test_leaf_to_air_vpd() {
+  printf("leaf-to-air VPD: the deficit Fick's law divides by\n");
+  Drivers d;
+  d.atm_vpd = 1.5;
+
+  // Gate off, the leaf IS at air temperature, so the two deficits must agree --
+  // and EXACTLY, not nearly. That is what keeps the prescribed-temperature path,
+  // and therefore the golden file, untouched by this change.
+  phylloptim::Leaf off = make_pm_leaf(d, {2.0}, {1.0}, false);
+  ok(off.vpd_leaf_ == off.atm_vpd_,
+     "gate off: vpd_leaf_ is bit-identical to the driver");
+  off.find_root_collar_psi();
+  ok(off.vpd_leaf_ == off.atm_vpd_,
+     "gate off: and still is after a solve");
+
+  // Gate on, with the leaf running hot: the deficit it sees is larger than the
+  // air's, so the same water flux implies a SMALLER conductance.
+  phylloptim::Leaf on = make_pm_leaf(d, {2.0}, {1.0}, true);
+  on.Rn_ = 400.0;
+  on.ra_ = 12.0;
+  on.find_root_collar_psi();
+  const double Tleaf = on.leaf_temp_from_E(on.transpiration_);
+  ok(Tleaf > on.Tair_, "the gate-on leaf is hotter than the air here");
+  ok(on.vpd_leaf_ > on.atm_vpd_,
+     "gate on: a hotter leaf sees a larger deficit than the air's");
+  // And the value is the definition, not an approximation of it.
+  near(on.vpd_leaf_,
+       on.atm_vpd_ + on.saturation_vapour_pressure(Tleaf) -
+           on.saturation_vapour_pressure(on.Tair_),
+       1e-12, "vpd_leaf_ = atm_vpd + esat(Tleaf) - esat(Tair)");
+  printf("    Tair %.1f C, Tleaf %.2f C: D_air %.3f kPa -> D_leaf %.3f kPa (x%.2f)\n",
+         on.Tair_, Tleaf, on.atm_vpd_, on.vpd_leaf_, on.vpd_leaf_ / on.atm_vpd_);
+
+  // The consequence, stated as an identity rather than a direction: gs is E
+  // rescaled by the deficit, so getting the deficit wrong scales gs by the ratio.
+  near(on.stom_cond_CO2_,
+       on.atm_kpa_ * on.transpiration_ * phylloptim::kg_to_mol_h2o /
+           on.vpd_leaf_ / phylloptim::H2O_CO2_stom_diff_ratio,
+       1e-12, "gs is the transpiration divided by the deficit it sees");
+}
+
+// Build a leaf on the single-potential path, which is what the ProfitMax entry
+// points require and what Sicangco's model is (one soil potential, no root
+// resistance network).
+phylloptim::Leaf make_single_leaf(const Drivers &d, double psi_soil,
+                                  bool gate = false) {
+  phylloptim::Leaf l;
+  l.setup_transpiration(100);
+  l.setup_root_vulnerability(100);
+  l.use_energy_balance_ = gate;
+  l.set_supply_single(0.0);
+  phylloptim::RootNetwork rn;
+  rn.r_R_V_sum = std::vector<double>{1.0e3};
+  rn.r_R_H_min = std::vector<double>{0.0};
+  rn.r_R_V = std::vector<double>{1.0e3};
+  rn.c_r_V = std::vector<double>{0.0};
+  rn.c_r_H = std::vector<double>{0.0};
+  l.set_physiology(rn, d.PPFD, {psi_soil}, {1.0}, d.K_s * d.theta / d.h,
+                   d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  return l;
+}
+
+// ===========================================================================
+// Sperry (2017) ProfitMax
+// ---------------------------------------------------------------------------
+// THE LOAD-BEARING CLAIM is that the normalised objective and this package's
+// older `A - lambda*cost` form are the same function up to a positive scale, so
+// they share an argmax when lambda = |A|max/(k_soil - kcrit). Everything the
+// Sicangco et al. (2026) replication does rests on it.
+void test_profitmax_matches_the_lambda_form() {
+  printf("ProfitMax: the normalised objective and the lambda form agree\n");
+  Drivers d;
+  d.PPFD = 1500.0;
+
+  for (double psi_soil : {0.5, 2.0}) {
+    for (double t : {25.0, 40.0}) {
+      d.leaf_temp = t;
+      phylloptim::Leaf l = make_single_leaf(d, psi_soil);
+
+      l.optimise_psi_stem_ProfitMax();
+      const double psi_pm = l.opt_psi_stem_;
+      const double lambda_star = l.lambda_;
+      ok(std::isfinite(lambda_star) && lambda_star > 0.0,
+         "ProfitMax reports the equivalent lambda");
+
+      l.lambda_ = lambda_star;
+      l.optimise_psi_stem_Sperry();
+
+      // Both are Brent searches terminating on bracket width GSS_tol_abs, so
+      // agreement to that scale is the most that can be asked of them.
+      near(psi_pm, l.opt_psi_stem_, 5.0e-3,
+           "the two objectives find the same collar potential");
+    }
+  }
+}
+
+void test_profitmax_normalisation() {
+  printf("ProfitMax: what the normalisation does and does not remove\n");
+  Drivers d;
+  d.PPFD = 1500.0;
+
+  phylloptim::Leaf l = make_single_leaf(d, 0.5);
+  const std::vector<double> curve = l.profitmax_curve(101);
+  const std::size_t n = 101;
+  ok(curve.size() == 5 * n, "profitmax_curve returns five columns");
+
+  // HC runs from 0 at the soil potential to 1 at psi_crit, monotonically. That is
+  // the definition and it is what makes the cost unable to vanish.
+  near(curve[2 * n + 0], 0.0, 1e-12, "HC is zero at the soil potential");
+  near(curve[2 * n + (n - 1)], 1.0, 1e-9, "HC is one at psi_crit");
+  bool hc_monotone = true;
+  for (std::size_t i = 1; i < n; ++i) {
+    if (!(curve[2 * n + i] >= curve[2 * n + i - 1])) hc_monotone = false;
+  }
+  ok(hc_monotone, "HC increases monotonically along the supply stream");
+
+  // ⚠️ AND HC DOES NOT DEPEND ON kmax AT ALL. Both the numerator and the
+  // denominator carry one factor of leaf_specific_conductance_max_, so it cancels
+  // exactly. That is worth pinning because Sicangco's ProfitMaxkmax(T) arm gives
+  // kmax a temperature response and the paper describes it as changing the cost:
+  // it does not. It changes the SUPPLY, and reaches the cost only through which
+  // potentials the leaf can reach and how hot it gets there.
+  Drivers d2 = d;
+  d2.K_s = d.K_s * 3.0;
+  phylloptim::Leaf l2 = make_single_leaf(d2, 0.5);
+  const std::vector<double> curve2 = l2.profitmax_curve(101);
+  double hc_worst = 0.0;
+  for (std::size_t i = 0; i < n; ++i) {
+    hc_worst = std::max(hc_worst, std::abs(curve2[2 * n + i] - curve[2 * n + i]));
+  }
+  ok(hc_worst < 1e-12, "HC is invariant to a 3x change in kmax");
+  printf("    HC under kmax x3: worst difference %.3e\n", hc_worst);
+
+  // The optimiser lands on the curve's own maximum.
+  l.optimise_psi_stem_ProfitMax();
+  double best = -1e300;
+  std::size_t at = 0;
+  for (std::size_t i = 0; i < n; ++i) {
+    if (curve[4 * n + i] > best) { best = curve[4 * n + i]; at = i; }
+  }
+  ok(std::abs(l.opt_psi_stem_ - curve[at]) < 2.0 * (curve[1] - curve[0]),
+     "the optimiser lands within a grid step of the curve's maximum");
+  ok(l.profit_ >= best - 1e-9, "and at no lower profit than the grid's best");
+}
+
+void test_profitmax_thermal_cost() {
+  printf("ProfitMax: the thermal cost, and that it is inert when off\n");
+  Drivers d;
+  d.PPFD = 1500.0;
+  d.leaf_temp = 48.0;
+
+  phylloptim::Leaf off = make_single_leaf(d, 0.5);
+  off.optimise_psi_stem_ProfitMax();
+  ok(off.thermal_cost_ == 0.0, "gate off: TC is exactly zero");
+
+  phylloptim::Leaf on = make_single_leaf(d, 0.5);
+  on.use_thermal_cost_ = true;
+  on.T50_ = 50.4;
+  on.Tcrit_ = 46.5;
+  // The gate reaches jmax_ through the temperature block, so the drivers have to
+  // be re-supplied for the cache key to notice. Doing it the way a caller would.
+  on = make_single_leaf(d, 0.5);
+  on.use_thermal_cost_ = true;
+  on.T50_ = 50.4;
+  on.Tcrit_ = 46.5;
+  phylloptim::RootNetwork rn;
+  rn.r_R_V_sum = std::vector<double>{1.0e3};
+  rn.r_R_H_min = std::vector<double>{0.0};
+  rn.r_R_V = std::vector<double>{1.0e3};
+  rn.c_r_V = std::vector<double>{0.0};
+  rn.c_r_H = std::vector<double>{0.0};
+  on.set_physiology(rn, d.PPFD, {0.5}, {1.0}, d.K_s * d.theta / d.h, d.atm_vpd,
+                    d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  on.optimise_psi_stem_ProfitMax();
+  ok(on.thermal_cost_ > 0.0 && on.thermal_cost_ < 1.0,
+     "gate on at 48 C: TC is in (0,1)");
+  ok(on.jmax_ < off.jmax_, "and Jmax is scaled down by (1 - TC)");
+  near(on.jmax_, off.jmax_ * (1.0 - on.thermal_cost_at(d.leaf_temp)), 1e-12,
+       "by exactly that factor");
+  printf("    Tleaf %.1f C, Tcrit %.1f, T50 %.1f: TC %.4f, Jmax %.3f -> %.3f\n",
+         d.leaf_temp, on.Tcrit_, on.T50_, on.thermal_cost_, off.jmax_, on.jmax_);
+
+  // ⚠️ THE COST AT Tcrit IS A FIXED 11.9%, AND THAT CONTRADICTS THE PAPER'S PROSE.
+  // Sicangco et al. write that "(1 - TC) equals one for temperatures below Tcrit,
+  // [so] Eqns 10 and 11 yield the same result under such conditions". The equation
+  // they cite does not do that: with r = 2/(T50 - Tcrit), the argument at Tcrit is
+  // exactly -2 whatever the two thresholds are, so
+  //
+  //     TC(Tcrit) = 1/(1 + e^2) = 0.1192...
+  //
+  // independent of parameterisation. A leaf sitting AT its critical temperature
+  // has already lost 11.9% of Jmax in this model, and a leaf 4 K below it still
+  // pays 3%. Pinned as an identity because it is a property of the functional
+  // form rather than of the values in Table 2.
+  near(on.thermal_cost_at(on.Tcrit_), 1.0 / (1.0 + std::exp(2.0)), 1e-14,
+       "TC at Tcrit is 1/(1+e^2), not zero");
+  {
+    phylloptim::Leaf wide = make_single_leaf(d, 0.5);
+    wide.use_thermal_cost_ = true;
+    wide.T50_ = 55.0;
+    wide.Tcrit_ = 43.0;
+    near(wide.thermal_cost_at(wide.Tcrit_), on.thermal_cost_at(on.Tcrit_), 1e-14,
+         "and is the same 11.9% for a threshold pair three times as wide");
+  }
+  near(on.thermal_cost_at(on.T50_), 0.5, 1e-12, "and is exactly 0.5 at T50");
+}
+
+void test_single_layer_optimisers_clear_collar_state() {
+  printf("single-layer optimisers do not inherit a collar solve's outputs\n");
+  Drivers d;
+  phylloptim::Leaf l = make_single_leaf(d, 0.5);
+  l.find_root_collar_psi();
+  ok(std::isfinite(l.opt_root_psi_) && std::isfinite(l.E_up_),
+     "the collar solve wrote a collar operating point");
+
+  l.optimise_psi_stem_ProfitMax();
+  ok(!std::isfinite(l.opt_root_psi_), "ProfitMax clears opt_root_psi_");
+  ok(!std::isfinite(l.E_up_), "ProfitMax clears E_up_");
+  bool consumption_cleared = true;
+  for (double c : l.soil_consumption_) {
+    if (std::isfinite(c)) consumption_cleared = false;
+  }
+  ok(consumption_cleared, "ProfitMax clears soil_consumption_");
+  ok(std::isfinite(l.transpiration_) && l.transpiration_ > 0.0,
+     "while still writing its own transpiration");
+}
+
+void test_sperry_refuses_an_unset_lambda() {
+  printf("optimise_psi_stem_Sperry refuses an unset lambda\n");
+  Drivers d;
+  phylloptim::Leaf l = make_single_leaf(d, 0.5);
+  ok(!std::isfinite(l.lambda_), "lambda_ starts unset");
+  bool threw = false;
+  try {
+    l.optimise_psi_stem_Sperry();
+  } catch (const std::exception &e) {
+    threw = true;
+    ok(std::string(e.what()).find("lambda_") != std::string::npos,
+       "and the message names lambda_");
+  }
+  ok(threw, "rather than searching a NaN objective");
+}
+
+// `lambda_` is an input to optimise_psi_stem_Sperry and an OUTPUT of
+// optimise_psi_stem_ProfitMax, which #93 introduced. Asserted rather than left as a
+// comment at the field, so that #114's eventual resolution has to update this
+// deliberately -- and so the ⚠️ in the Sperry guard about silently inheriting
+// ProfitMax's number is a checked statement rather than a plausible one.
+void test_profitmax_reports_its_own_lambda() {
+  printf("ProfitMax reports a lambda where Sperry consumes one\n");
+  Drivers d;
+  const double prescribed = 30.0;
+  phylloptim::Leaf l = make_single_leaf(d, 0.5);
+  l.lambda_ = prescribed;
+  l.optimise_psi_stem_ProfitMax();
+  ok(std::isfinite(l.lambda_), "ProfitMax leaves a finite lambda_ behind");
+  ok(l.lambda_ != prescribed,
+     "and it is ITS number, not the one the caller prescribed (#114)");
+}
+
+// ⚠️ THE TEST THE GOLDEN FILE CANNOT BE. `set_leaf_states_rates_from_psi_stem`
+// used to zero transpiration wherever `assim_max_ < 0`, and the golden grid's
+// minimum assim_max_ is 3.71, so it never reached the branch. The collar solve
+// cannot reach it either -- prepare_collar_solve exits first -- so the ONLY way
+// to see this is to call the forward evaluation directly in that regime, which is
+// what the single-layer optimisers and the ProfitMax curve do.
+void test_transpiration_survives_negative_assim() {
+  printf("water moves whether or not there is carbon to be had\n");
+  Drivers d;
+  d.PPFD = 1500.0;
+  d.leaf_temp = 50.0;  // hot enough that A(ci = ca) cannot cover R_d
+
+  phylloptim::Leaf l = make_single_leaf(d, 0.5);
+  ok(l.assim_max_ < 0.0, "the regime is reached: assim_max_ is negative");
+
+  const double psi = 3.0;
+  l.set_leaf_states_rates_from_psi_stem(psi, 0.5);
+  const double E = l.transpiration_;
+  ok(E > 0.0, "transpiration follows the hydraulic supply, not the carbon");
+  near(E, l.transpiration(psi, 0.5), 1e-12,
+       "and equals the supply function exactly");
+  ok(l.stom_cond_CO2_ > 0.0, "so the conductance is positive too");
+
+  // The carbon state is the one the branch used to set by hand, and it now comes
+  // from the ci solver's own compensation-point fallback.
+  near(l.ci_, l.gamma_ * l.umol_per_mol_to_Pa_, 1e-9,
+       "ci sits at the compensation point");
+  near(l.assim_colimited_, -l.R_d_, 1e-9,
+       "and net assimilation is exactly -R_d");
+  printf("    Tleaf %.0f C: assim_max_ %.3f, E %.3e kg m-2 s-1, A %.3f\n",
+         d.leaf_temp, l.assim_max_, E, l.assim_colimited_);
+
+  // ⚠️ AND TWO LEAVES AT THE SAME OPERATING POINT NOW AGREE ABOUT THE WATER. This
+  // is how the old behaviour was found: an arm optimised with respiration off and
+  // scored with it on reported a potential that moves water beside a transpiration
+  // of exactly zero.
+  Drivers dg = d;
+  phylloptim::Leaf gross = make_single_leaf(dg, 0.5);
+  gross.set_traits(96, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
+                   5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, /*R_d_25=*/0.0);
+  phylloptim::RootNetwork rn;
+  rn.r_R_V_sum = std::vector<double>{1.0e3};
+  rn.r_R_H_min = std::vector<double>{0.0};
+  rn.r_R_V = std::vector<double>{1.0e3};
+  rn.c_r_V = std::vector<double>{0.0};
+  rn.c_r_H = std::vector<double>{0.0};
+  gross.set_physiology(rn, dg.PPFD, {0.5}, {1.0}, dg.K_s * dg.theta / dg.h,
+                       dg.atm_vpd, dg.ca, dg.leaf_temp, dg.atm_o2_kpa,
+                       dg.atm_kpa);
+  gross.set_leaf_states_rates_from_psi_stem(psi, 0.5);
+  ok(gross.assim_max_ > 0.0, "with R_d_25 = 0 the same drivers are NOT shut down");
+  near(gross.transpiration_, E, 1e-12,
+       "and both leaves report the same transpiration at the same potential");
+}
+
+// ⚠️ THE OBJECTIVE IS NOT UNIMODAL AND ITS MAXIMUM CAN BE AN ENDPOINT. This is
+// the test that a bare Brent search fails: at a leaf hot enough that net
+// assimilation is negative everywhere, the profit is highest at FULL CLOSURE and
+// there is a local maximum out in the interior. Brent steps in from the bounds
+// and cannot return an endpoint, so it used to report the local one -- an open
+// stoma where the model says the leaf should be shut.
+void test_profitmax_finds_a_closed_optimum() {
+  printf("ProfitMax finds a boundary optimum, which Brent alone cannot\n");
+  Drivers d;
+  d.PPFD = 1500.0;
+  d.leaf_temp = 50.0;
+
+  phylloptim::Leaf l = make_single_leaf(d, 0.5);
+  l.use_thermal_cost_ = true;
+  l.optimise_psi_stem_ProfitMax();
+
+  // Reconstruct the objective on a coarse grid and find its global maximum
+  // independently of the solver.
+  const std::vector<double> curve = l.profitmax_curve(201);
+  const std::size_t n = 201;
+  std::size_t best = 0;
+  for (std::size_t i = 1; i < n; ++i) {
+    if (curve[4 * n + i] > curve[4 * n + best]) best = i;
+  }
+  printf("    grid argmax at psi = %.4f (index %zu of %zu), solver returned %.4f\n",
+         curve[best], best, n, l.opt_psi_stem_);
+
+  // profitmax_curve re-prepares, so re-solve before reading the operating point.
+  l.optimise_psi_stem_ProfitMax();
+  const double step = curve[1] - curve[0];
+  ok(std::abs(l.opt_psi_stem_ - curve[best]) < 3.0 * step,
+     "the solver lands on the objective's GLOBAL maximum, not a local one");
+
+  // And the profit it reports is at least the grid's best.
+  ok(l.profit_ >= curve[4 * n + best] - 1e-9,
+     "at no lower profit than the grid's best");
+}
+
 void benchmark() {
   printf("\ntiming\n");
   Drivers d;
@@ -3174,6 +3575,7 @@ int main() {
   test_rd_temperature_response();
   test_set_traits_matches_a_fresh_leaf();
   test_prescribed_lambda_survives_redriving();
+  test_profitmax_reports_its_own_lambda();
   test_perturb_stem_b_matches_a_rebuild();
   test_stem_b_shortcut_needs_no_rebuild();
   test_water_mass_conversions_are_reciprocal();
@@ -3184,6 +3586,14 @@ int main() {
   test_infeasible_is_a_distinct_failure();
   test_out_of_domain_names_the_spline();
   test_out_of_domain_under_rescale();
+  test_leaf_to_air_vpd();
+  test_profitmax_matches_the_lambda_form();
+  test_profitmax_normalisation();
+  test_profitmax_thermal_cost();
+  test_single_layer_optimisers_clear_collar_state();
+  test_sperry_refuses_an_unset_lambda();
+  test_transpiration_survives_negative_assim();
+  test_profitmax_finds_a_closed_optimum();
   benchmark();
 
   printf("\n%d checks, %d failures\n", checks, failures);
