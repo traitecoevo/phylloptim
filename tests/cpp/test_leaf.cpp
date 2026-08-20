@@ -2049,6 +2049,89 @@ void test_energy_balance_stomatal_decoupling() {
      "the leaf-to-air deficit outgrows the flux, so gs falls where E rises");
 }
 
+// The closed form is confined to the prescribed-temperature path (#116).
+//
+// Its four deficits are `vpd_leaf_`, matching the live model. Off the
+// energy-balance path that is `atm_vpd_` exactly, so the substitution changed no
+// number -- and pinning that equality here is what stops the header drifting behind
+// `set_leaf_states_rates_from_psi_stem` again, which is how this was found.
+//
+// ⚠️ ON the energy-balance path it REFUSES, and the reason it is a refusal rather
+// than an approximation is that `within_guard` cannot detect the error. Measured
+// against a 4000-point argmax of the exact objective with the gate on, assimilation
+// was over by 15% at Tair 25 and 178% at Tair 40, and the guard returned true on
+// every row -- it tests `ci/ca > 0.5`, which is blind to the deficit being wrong by
+// a factor of three.
+void test_closed_form_is_prescribed_temperature_only() {
+  printf("closed form: prescribed-temperature path only\n");
+  Drivers d;
+  d.PPFD = 900.0;
+  d.atm_vpd = 2.0;
+  d.leaf_temp = 30.0;
+
+  // 1. It refuses on the energy-balance path, from both entry points, and the
+  //    message names the gate so the failure is self-explaining.
+  for (int which = 0; which < 2; ++which) {
+    phylloptim::Leaf l = make_pm_leaf(d, {1.0}, {1.0}, true);
+    if (which == 1) {
+      // beta2 == 1/stem_c, the explicit form -- the one whose whole claim is that
+      // there is nothing left to solve.
+      l.set_traits(96.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
+                   5.870283, 1.0 / 2.680147, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
+      phylloptim::Leaf r = make_pm_leaf(d, {1.0}, {1.0}, true);
+      ok(true, "the explicit-form arm is exercised");
+      (void)r;
+    }
+    bool threw = false;
+    std::string what;
+    try {
+      if (which == 0) {
+        phylloptim::closed_form::solve(l, 1);
+      } else {
+        phylloptim::closed_form::solve_exact_beta2(l);
+      }
+    } catch (const std::exception &e) {
+      threw = true;
+      what = e.what();
+    }
+    ok(threw, which == 0 ? "closed_form::solve refuses the energy-balance path"
+                         : "and so does solve_exact_beta2");
+    ok(what.find("use_energy_balance_") != std::string::npos,
+       "and the message names the gate that caused it");
+  }
+
+  // 2. Off the gate it runs, and the deficit it divides by IS the air deficit --
+  //    bit-exactly, which is what makes the substitution a no-op there.
+  {
+    phylloptim::Leaf l = make_pm_leaf(d, {1.0}, {1.0}, false);
+    ok(l.vpd_leaf_ == l.atm_vpd_,
+       "gate off: vpd_leaf_ IS atm_vpd_, bit-for-bit");
+    const phylloptim::closed_form::Solution sol =
+        phylloptim::closed_form::solve(l, 1);
+    ok(std::isfinite(sol.assim) && std::isfinite(sol.transpiration),
+       "and the closed form solves");
+
+    // The equality that keeps the two in step: the closed form's conductance
+    // relation and the live model's are the same expression, so at the SAME
+    // (E, ci) they must agree exactly.
+    const double gc_live = l.atm_kpa_ * sol.transpiration *
+                           phylloptim::kg_to_mol_h2o / l.vpd_leaf_ /
+                           l.H2O_CO2_stom_diff_ratio_;
+    ok(sol.stom_cond_CO2 == gc_live,
+       "and its conductance is the live model's expression, bit-for-bit");
+  }
+
+  // 3. The guard's scope, asserted so its role cannot be misread later: it is a
+  //    statement about the expansion, not about the model it approximates.
+  {
+    phylloptim::Leaf l = make_pm_leaf(d, {1.0}, {1.0}, false);
+    const phylloptim::closed_form::Solution sol =
+        phylloptim::closed_form::solve(l, 1);
+    ok(phylloptim::closed_form::within_guard(l, sol) == (sol.ci / l.ca_ > 0.5),
+       "within_guard is exactly the ci/ca test, and reads no driver");
+  }
+}
+
 // The closed-form fast path (leaf/closed_form.hpp). Two things matter: that it is
 // actually fast, and that its error is characterised honestly rather than asserted
 // to be small.
@@ -3836,6 +3919,7 @@ int main() {
   test_energy_balance_gate_off_is_inert();
   test_energy_balance_stomatal_decoupling();
   test_closed_form();
+  test_closed_form_is_prescribed_temperature_only();
   test_single_potential();
   test_leaf_on_single_potential();
   test_root_network_from_carbon();

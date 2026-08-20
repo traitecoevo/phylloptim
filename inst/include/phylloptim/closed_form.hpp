@@ -32,18 +32,31 @@
 // within_guard below and PLAN.md item 9) before it can replace the exact solve on
 // a production path.
 //
-// ⚠️ AND IT HAS DRIFTED FROM THE SOLVE IT APPROXIMATES. Every `D` below is
-// `atm_vpd_`, the deficit at AIR temperature, because that is what Fick's law
-// divided by when this was written. #93 moved the live model to `vpd_leaf_`, the
-// leaf-to-air deficit, which on the energy-balance path is 3-4x the air's over
-// Tair 25-45 -- so on that path these formulae now approximate a model that no
-// longer exists. Off it the two are equal by construction (`set_leaf_vpd` returns
-// `atm_vpd_` exactly), so the prescribed-temperature path is unaffected.
+// ⚠️ PRESCRIBED-TEMPERATURE PATH ONLY. `solve` and `solve_exact_beta2` REFUSE when
+// `use_energy_balance_` is set, and that is a modelling boundary rather than a
+// missing feature (#116).
 //
-// Not repaired here: it is a numerics change to dormant, PM-untested code, and the
-// substitution is not obviously just a rename -- `vpd_leaf_` depends on Tleaf,
-// which depends on E, which is what these expressions solve for, so the closed
-// form may not stay closed. Filed rather than guessed.
+// Every `D` below is `vpd_leaf_`, the deficit Fick's law actually divides by. Off
+// the energy-balance path that IS `atm_vpd_`, exactly -- `set_leaf_vpd` returns it
+// unchanged there -- so these formulae are the same numbers they always were. On
+// the energy-balance path `vpd_leaf_` is a function of Tleaf, Tleaf of E, and E is
+// what these expressions solve for. The USO relation needs `D` *before* it can
+// produce `ci`, so with `D = D(E)` the form stops being closed: a scalar fixed
+// point in `ci` is left over, and at beta2 = 1/stem_c -- the 47x case, where the
+// leaf solve has "essentially vanished" -- there would suddenly be something to
+// solve again.
+//
+// ⚠️ AND THE GUARD CANNOT CATCH IT, which is why the refusal is in the code rather
+// than in this comment. Measured against a 4000-point argmax of the exact
+// objective with the gate ON, the closed form overestimates assimilation by 15% at
+// Tair 25, 38% at 30, 146% at 35 and 178% at 40 -- and `within_guard` returns true
+// on every one of those rows. Off the gate the same comparison is 0-4%, which is
+// the accuracy this header claims.
+//
+// The two routes that would make the energy-balance case work are recorded in #116:
+// one Picard pass over `D` (roughly halving the speedup), or linearising
+// `esat(Tleaf)` about Tair, which makes `E` explicit again but leaves the fixed
+// point in `ci`. Neither is done.
 //
 // FOUR THINGS NOT TO GET WRONG, all learned the expensive way over there:
 //
@@ -67,9 +80,11 @@
 // not exist yet. See PLAN.md item 7b.
 
 #include <phylloptim/constants.hpp>
+#include <phylloptim/util.hpp>
 #include <phylloptim/leaf_model.hpp>
 
 #include <cmath>
+#include <string>
 
 namespace phylloptim {
 namespace closed_form {
@@ -92,7 +107,7 @@ inline double uso_group(const Leaf &l) {
 // The supply-side counterpart is Leaf::transpiration; the closed form works by
 // driving their difference to zero.
 inline double transpiration_from_assim(const Leaf &l, double assim, double ci) {
-  return l.H2O_CO2_stom_diff_ratio_ * 1e-3 * assim * l.atm_vpd_ /
+  return l.H2O_CO2_stom_diff_ratio_ * 1e-3 * assim * l.vpd_leaf_ /
          ((l.ca_ - ci) * kg_to_mol_h2o);
 }
 
@@ -130,6 +145,23 @@ inline double dassim_dci(const Leaf &l, double ci, double electron_transport) {
   return (ds - ddisc) / (2.0 * cv);
 }
 
+// Both entry points refuse the energy-balance path. Factored so the two cannot
+// drift apart, and a hard stop rather than a NaN: a NaN would propagate into
+// `within_guard`, which would then report `false`, which a caller reads as "outside
+// the expansion, fall back to the exact solve" -- the same silent behaviour as
+// before, one step further from the cause.
+inline void require_prescribed_temperature(const Leaf &l, const char *who) {
+  if (l.use_energy_balance_) {
+    util::stop(std::string(who) +
+               ": the closed form is valid on the prescribed-temperature path "
+               "only. With use_energy_balance_ set, the deficit Fick's law "
+               "divides by depends on the leaf temperature, which depends on the "
+               "transpiration this solves for -- so the form is not closed, and "
+               "the error (up to 178% in assimilation) passes within_guard. Use "
+               "optimise_psi_stem_TF instead; see issue #116.");
+  }
+}
+
 struct Solution {
   double psi_stem;      // MPa, positive magnitude (NaN for the explicit form)
   double ci;            // Pa
@@ -147,7 +179,7 @@ inline Solution evaluate_at(Leaf &l, double psi, double Q, double sqrt_D) {
   const double assim = l.assim_colimited(ci);
   const double E = transpiration_from_assim(l, assim, ci);
   return Solution{psi, ci, assim, E,
-                  l.atm_kpa_ * E * kg_to_mol_h2o / l.atm_vpd_ /
+                  l.atm_kpa_ * E * kg_to_mol_h2o / l.vpd_leaf_ /
                       l.H2O_CO2_stom_diff_ratio_,
                   xi};
 }
@@ -156,8 +188,9 @@ inline Solution evaluate_at(Leaf &l, double psi, double Q, double sqrt_D) {
 // steps on the full supply-minus-demand residual. Requires set_physiology to have
 // run. See note 1 above: leave newton_steps at 1.
 inline Solution solve(Leaf &l, int newton_steps = 1) {
+  require_prescribed_temperature(l, "closed_form::solve");
   const double kmax = l.leaf_specific_conductance_max_;
-  const double sqrt_D = std::sqrt(l.atm_vpd_);
+  const double sqrt_D = std::sqrt(l.vpd_leaf_);
   const double Q = uso_group(l);
   const double K_lambda = l.cost_scale_TF24 * l.beta2 * l.stem_c / (l.stem_b * kmax);
   const double Xi = std::sqrt(Q / K_lambda);
@@ -182,7 +215,7 @@ inline Solution solve(Leaf &l, int newton_steps = 1) {
     const double dassim = dassim_dci(l, ci, electron_transport);
     const double u = l.ca_ - ci;
     const double E = transpiration_from_assim(l, assim, ci);
-    const double dE_dci = l.H2O_CO2_stom_diff_ratio_ * 1e-3 * l.atm_vpd_ /
+    const double dE_dci = l.H2O_CO2_stom_diff_ratio_ * 1e-3 * l.vpd_leaf_ /
                           kg_to_mol_h2o * (dassim * u + assim) / (u * u);
     const double dci_dxi = l.ca_ * sqrt_D / ((xi + sqrt_D) * (xi + sqrt_D));
     const double dxi_dpsi = -0.5 * xi / lambda * dlambda_TF24(l, psi);
@@ -205,7 +238,8 @@ inline Solution solve(Leaf &l, int newton_steps = 1) {
 // constant and there is nothing to solve -- no power law, no Newton step. This is
 // the 47x case. Only correct when beta2 == 1/stem_c; check beta2_is_exact below.
 inline Solution solve_exact_beta2(Leaf &l) {
-  const double sqrt_D = std::sqrt(l.atm_vpd_);
+  require_prescribed_temperature(l, "closed_form::solve_exact_beta2");
+  const double sqrt_D = std::sqrt(l.vpd_leaf_);
   const double Q = uso_group(l);
   const double xi = std::sqrt(Q * l.stem_b * l.leaf_specific_conductance_max_ /
                               (l.cost_scale_TF24 * l.beta2 * l.stem_c));
@@ -213,7 +247,7 @@ inline Solution solve_exact_beta2(Leaf &l) {
   const double assim = l.assim_colimited(ci);
   const double E = transpiration_from_assim(l, assim, ci);
   return Solution{std::nan(""), ci, assim, E,
-                  l.atm_kpa_ * E * kg_to_mol_h2o / l.atm_vpd_ /
+                  l.atm_kpa_ * E * kg_to_mol_h2o / l.vpd_leaf_ /
                       l.H2O_CO2_stom_diff_ratio_,
                   xi};
 }
@@ -226,6 +260,12 @@ inline bool beta2_is_exact(const Leaf &l, double tol = 1e-12) {
 // wet-end limit its leading order is expanded about, and ci/ca is the diagnostic:
 // the reference reports good agreement while ci/ca > 0.5 and does not claim it
 // below. Tests an OUTPUT, so it can only be applied after solving -- see note 2.
+//
+// ⚠️ IT GUARDS THE EXPANSION, NOT THE MODEL. It compares the solution against
+// itself, so it cannot see the INPUTS being wrong: on the energy-balance path,
+// where the deficit was out by a factor of three and assimilation by up to 178%,
+// this returned true on every row (#116). A `false` means "outside the expansion,
+// fall back to the exact solve"; it never means "the answer is right".
 inline bool within_guard(const Leaf &l, const Solution &s) {
   return std::isfinite(s.ci) && std::isfinite(s.assim) && s.ci / l.ca_ > 0.5;
 }
