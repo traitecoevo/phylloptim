@@ -32,6 +32,19 @@
 // within_guard below and PLAN.md item 9) before it can replace the exact solve on
 // a production path.
 //
+// ⚠️ AND IT HAS DRIFTED FROM THE SOLVE IT APPROXIMATES. Every `D` below is
+// `atm_vpd_`, the deficit at AIR temperature, because that is what Fick's law
+// divided by when this was written. #93 moved the live model to `vpd_leaf_`, the
+// leaf-to-air deficit, which on the energy-balance path is 3-4x the air's over
+// Tair 25-45 -- so on that path these formulae now approximate a model that no
+// longer exists. Off it the two are equal by construction (`set_leaf_vpd` returns
+// `atm_vpd_` exactly), so the prescribed-temperature path is unaffected.
+//
+// Not repaired here: it is a numerics change to dormant, PM-untested code, and the
+// substitution is not obviously just a rename -- `vpd_leaf_` depends on Tleaf,
+// which depends on E, which is what these expressions solve for, so the closed
+// form may not stay closed. Filed rather than guessed.
+//
 // FOUR THINGS NOT TO GET WRONG, all learned the expensive way over there:
 //
 //  1. `newton_steps = 1` is deliberate. Two steps are *worse* in the tail.

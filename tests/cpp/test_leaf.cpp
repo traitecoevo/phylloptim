@@ -2770,19 +2770,34 @@ void test_set_traits_matches_a_fresh_leaf() {
        "transpiration is bit-identical" + what);
   }
 
-  // The specific trap, isolated, because the bit-exact comparisons above would
-  // also pass if set_traits rebuilt everything unconditionally and the reason it
-  // works were lost. vcmax_ is derived inside set_physiology's temperature cache,
-  // which is keyed on (leaf_temp, atm_o2_kpa) and NOT on the traits -- so this is
-  // the assertion that "change the trait, then set the drivers again" is a
-  // sufficient recipe, which it is only because set_traits invalidates the cache.
+  // "Change the trait, then set the drivers again" really does recompute the
+  // temperature block, checked end to end through the route a caller takes.
+  //
+  // ⚠️ THIS NO LONGER ISOLATES set_traits' CACHE INVALIDATION, and the comment
+  // here claimed it did for two releases. It said vcmax_ is derived behind a cache
+  // "keyed on (leaf_temp, atm_o2_kpa) and NOT on the traits", so the recipe worked
+  // "only because set_traits invalidates the cache". #55 widened the key to every
+  // scalar update_temperature_dependent_params() reads -- `vcmax_25` included --
+  // so the trap is now closed TWICE OVER: the key would miss on the changed trait
+  // even if set_traits cleared nothing. The assertion below cannot tell which
+  // mechanism carried it, and pretending otherwise is how a test comes to describe
+  // a guarantee it is not testing.
+  //
+  // The two halves are covered separately and deliberately:
+  //   * the KEY -- test_temperature_params_invalidate_cache, which sets a response
+  //     parameter and re-drives without going through set_traits at all;
+  //   * set_traits' CLEARING -- the bit-exact comparisons above (the splines and
+  //     the solved operating point are not in any key), plus the NA assertions in
+  //     test_prescribed_lambda_survives_redriving.
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     const double vcmax_before = l.vcmax_;
     l.set_traits(96.0 * 2.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
                  5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
     std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
-    // The SAME leaf_temp and atm_o2_kpa, which is what arms the cache.
+    // The same leaf_temp and atm_o2_kpa -- which used to be the whole key, and so
+    // used to be what ARMED the trap. It no longer is: `vcmax_25` has moved, so the
+    // key differs whatever set_traits did.
     l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                      d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
     near(l.vcmax_ / vcmax_before, 2.0, 1e-12,
