@@ -163,6 +163,77 @@ for (row in golden_rows) {
   })
 }
 
+# ⚠️ TWO POINTS AT 40 C, and keep at least one. Every value above is a 25 C value,
+# where every reference parameter in this model is DEFINED -- so every temperature
+# response is inert there by construction and a 25 C-only set of pinned values cannot
+# see a response curve change at all. The C++ grid carries a second temperature for
+# the same reason.
+#
+# One 1-layer and one 3-layer, both interior at 40 C. Regenerate with the same recipe
+# as above, with `$4==40`.
+golden_rows_40 <- list(
+  list(
+    inputs = list(psi_soil = 2.0, ppfd = 900, vpd = 2.0, layers = 1L,
+                  leaf_temp = 40.0),
+    expected = list(
+      psi_stem      = "0x1.3c43e37156646p+1",
+      opt_root_psi  = "0x1.27d3960b3ddb5p+1",
+      ci            = "0x1.a8bae66f05f1cp+4",
+      assim         = "0x1.b63aaeb24f87cp-1",
+      transpiration = "0x1.00e1073b4f1f6p-18",
+      gc            = "0x1.a655d667a73bcp-8",
+      profit        = "-0x1.c630b50508c68p-4",
+      e_up          = "0x1.00e10869a886cp-18",
+      uptake        = "0x1.bd99660ee389ap-13"
+    )
+  ),
+  list(
+    inputs = list(psi_soil = 0.5, ppfd = 1500, vpd = 0.5, layers = 3L,
+                  leaf_temp = 40.0),
+    expected = list(
+      psi_stem      = "0x1.ca0d1eb1eb587p+0",
+      opt_root_psi  = "0x1.8cdab97918e7ap+0",
+      ci            = "0x1.1428b2ad818f7p+5",
+      assim         = "0x1.3ba43a52dfbe5p+1",
+      transpiration = "0x1.c63fc557c2da5p-18",
+      gc            = "0x1.756a7a5445fcep-5",
+      profit        = "0x1.156375e8bdc6ep+1",
+      e_up          = "0x1.c63fc55f91a86p-18",
+      uptake        = "0x1.89fc320b7ba24p-12"
+    )
+  )
+)
+
+for (row in golden_rows_40) {
+  local({
+    inputs <- row$inputs
+    expected <- row$expected
+    label <- sprintf("psi_soil=%g ppfd=%g vpd=%g layers=%d T=%g",
+                     inputs$psi_soil, inputs$ppfd, inputs$vpd, inputs$layers,
+                     inputs$leaf_temp)
+
+    test_that(paste("the R API reproduces the golden point", label), {
+      got <- do.call(golden_solve, inputs)
+      for (field in names(expected)) {
+        expect_golden(got[[field]], expected[[field]], field, label)
+      }
+    })
+  })
+}
+
+# The 40 C rows must not equal the 25 C ones -- otherwise the two blocks above are
+# measuring one temperature twice and the coverage is still missing. Asserted rather
+# than assumed, because a `leaf_temp` argument that silently failed to reach
+# set_physiology would give exactly that.
+test_that("the 40 C block is a different operating point from the 25 C block", {
+  hot  <- golden_solve(psi_soil = 2.0, ppfd = 900, vpd = 2.0, layers = 1L,
+                       leaf_temp = 40.0)
+  cool <- golden_solve(psi_soil = 2.0, ppfd = 900, vpd = 2.0, layers = 1L)
+  expect_false(isTRUE(all.equal(hot$assim, cool$assim)))
+  expect_lt(hot$assim, cool$assim)     # past the thermal optimum at 40 C
+  expect_gt(hot$psi_stem, 0)
+})
+
 test_that("a shut-down point writes every output, not just the ones it changed", {
   # Hazard 8: Leaf is a value member that plant reuses for every individual in a
   # patch, so an output a branch declines to write silently becomes the previous

@@ -71,8 +71,13 @@ inline constexpr double umol_to_mol = 1e-6;
 // Pa kPa^-1
 inline constexpr double kPa_to_Pa = 1000.0;
 
-// universal gas constant J mol^-1 K^-1
-inline constexpr double gas_constant = 8.314;
+// universal gas constant J mol^-1 K^-1. Exact since the 2019 SI redefinition
+// (R = N_A k_B), so it is not a value to round.
+//
+// ⚠️ Read only by arrh_curve and peak_arrh_curve, always as `Ea/(R*T)` with Ea/RT
+// of order 24 -- so a relative change here reaches the rates ~24x amplified, and a
+// change too small to look like it matters does.
+inline constexpr double gas_constant = 8.314462618153240;
 
 //convert deg C to deg K
 inline constexpr double C_to_K = 273.15;
@@ -80,12 +85,24 @@ inline constexpr double C_to_K = 273.15;
 //H20:CO2 stomatal diffusion ratio
 inline constexpr double H2O_CO2_stom_diff_ratio = 1.67;
 
+// rho_w * g, as a head in MPa per metre of depth.
+//
+// ⚠️ 9.8e-3 is 6.8e-04 below `1000 * 9.80665 / 1e6`, above this package's 1e-04
+// "real difference" threshold, and it reaches results through the per-layer head.
+// Deliberately not "corrected": the right value needs a water-density convention
+// stated first (nominal 1000, 4 C and 25 C span 0.3%, four times the discrepancy),
+// so it is a modelling decision rather than arithmetic.
 inline constexpr double gravity_head = 9.8e-3; // MPa / m
 
 // --- Penman-Monteith leaf energy balance (minimal core; #523) -----------------
 // See notes/penman-monteith/. These back Leaf::leaf_temp_from_E and the es/Delta
 // helpers. Only used on the (default-off) use_energy_balance_ path.
-// latent heat of vaporisation of water, J kg^-1 (fixed at 25 deg C)
+// latent heat of vaporisation of water, J kg^-1, at about 21.5 C.
+//
+// ⚠️ NOT a 25 C value, which an earlier comment here claimed: lambda(T) ~= 2.501e6
+// - 2370*T gives 2.442e6 at 25 C. Left as-is because on the (default-off)
+// Penman-Monteith path lambda should become a function of the leaf temperature the
+// balance solves for, not a better constant -- see #28.
 inline constexpr double latent_heat_vap = 2.45e6;
 // volumetric heat capacity of air, J m^-3 K^-1
 inline constexpr double vol_heat_cap_air = 1200.0;
