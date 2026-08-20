@@ -80,6 +80,19 @@ public:
   // the perturbed state leaves it set.
   double stem_b_spline_ = 0.0;
 
+  // INSTRUMENTATION, not state: how many times the stem curve has been built.
+  // Nothing in the model reads it, and `set_traits()` deliberately does NOT reset
+  // it -- it counts events over an object's whole life, so a caller takes
+  // differences.
+  //
+  // It exists because a rebuild is invisible to every other instrument. The spline
+  // is a pure function of (stem_b, stem_c), so a rebuild at an unchanged pair is
+  // bit-identical to not rebuilding: the only thing it costs is 11.9 us, and a
+  // timing assertion for one rebuild per observation would drift with the machine
+  // and still pass on a fast day. This is the countable form (#74), which is what
+  // the cost rules in the developer guide ask for wherever one exists.
+  long stem_curve_builds_ = 0;
+
   // The soil -> root-collar water supply (issue #2). Everything the leaf needs
   // from the soil enters through this object: `uptake` and its derivative. It is
   // held by value -- Leaf must stay copyable, because plant's
@@ -2629,6 +2642,7 @@ inline void Leaf::setup_transpiration(double resolution) {
   // Recording it HERE rather than at each caller is what makes it impossible to
   // rebuild and forget.
   stem_b_spline_ = stem_b;
+  ++stem_curve_builds_;
 }
 
 // --- the stem curve, as the four operations performed on it ------------------
