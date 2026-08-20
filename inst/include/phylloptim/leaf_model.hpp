@@ -1877,6 +1877,28 @@ inline double Leaf::find_psi_stem_from_psi_root(double psi_root, const std::vect
 inline void Leaf::set_shutdown_state(double root_collar) {
   opt_root_psi_ = root_collar;
   opt_psi_stem_ = psi_crit;
+  // FIRST, because every number below is read off the temperature block: on the
+  // PM path this exit's own leaf temperature is the E = 0 one, and the block
+  // arrives holding the Tair baseline set_physiology derived. Forming profit
+  // before this line reported a respiration rate belonging to a different
+  // temperature than the Tleaf beside it -- 35.8% low at Tair 30, in the
+  // direction that makes shutting down look cheaper than it is (#105).
+  //
+  // Zero transpiration is where the gap is LARGEST, not smallest: no latent
+  // cooling, so this is the hottest the leaf gets.
+  Tleaf_ = use_energy_balance_ ? leaf_temp_from_E(0.0) : leaf_temp_;
+  // The leaf-to-air deficit belongs to the same temperature, for the same reason
+  // and by the same argument #93 makes at the zero-transpiration branch of
+  // set_leaf_states_rates_from_psi_stem: `vpd_leaf_` is reported, and `g1_eff()`
+  // reads it. Left alone it held the Tair deficit set_physiology seated. A no-op
+  // off the PM path -- `set_leaf_vpd` returns `atm_vpd_` there exactly.
+  set_leaf_vpd(Tleaf_);
+  if (use_energy_balance_) {
+    // Leaves the block at Tleaf rather than Tair. Safe because set_physiology
+    // bypasses the photo_temp cache entirely when the gate is on, so the next
+    // solve re-derives the baseline instead of taking a hit on stale members.
+    update_temperature_dependent_params(Tleaf_);
+  }
   profit_ = -R_d_ - hydraulic_cost_TF(psi_crit);
   // Tagged here rather than at the four call sites, so a fifth reason to shut
   // down cannot arrive without a classification. All four are the same
@@ -1902,15 +1924,9 @@ inline void Leaf::set_shutdown_state(double root_collar) {
   assim_colimited_ = -R_d_;
   ci_ = gamma_ * umol_per_mol_to_Pa_;
   E_up_ = 0.0;
-  // The leaf's own temperature, for the same reason as the fluxes beside it: this
-  // exit does not go through set_leaf_states_rates_from_psi_stem, so without this
-  // line a reused Leaf reports the previous plant's leaf temperature.
-  //
-  // ⚠️ On the PM path a leaf that moves no water is the HOTTEST one, so E = 0 is
-  // the operating point being described and not a fallback. ⚠️ And it is the one
-  // number here that `R_d_` above disagrees with: this exit never re-derives the
-  // temperature block, so that respiration is still at Tair. #105.
-  Tleaf_ = use_energy_balance_ ? leaf_temp_from_E(0.0) : leaf_temp_;
+  // `Tleaf_` is written at the top of this function, not here, because the
+  // temperature block is derived from it and `R_d_`/`gamma_` above are read out
+  // of that block. The two used to be set at opposite ends and disagree.
   std::fill(soil_consumption_.begin(), soil_consumption_.end(), 0.0);
   // Invalidate the transpiration memo: it is keyed on (psi_stem, psi_upstream) and
   // we have just written transpiration_ without going through transpiration().
@@ -1973,6 +1989,24 @@ if(assim_max_ < 0){
     opt_root_psi_ = root_zero_E;
     E_from_Soil_to_Root_Collar(opt_root_psi_, supply_psi_soil());
 
+    // As at the shut-down exits, and for the same reason: the reported state is
+    // the E = 0 one, so the temperature block has to be at the E = 0 temperature
+    // before `R_d_` and `gamma_` are read out of it (#105).
+    //
+    // ⚠️ THE TEST ABOVE STAYS AT THE Tair BASELINE, and that is a decision rather
+    // than an oversight. `assim_max_` asks "can gross assimilation at ci = ca
+    // cover respiration", i.e. whether any OPEN operating point is worth taking --
+    // and an open leaf transpires, so it is cooler than this exit's leaf. Re-taking
+    // the test at the zero-transpiration temperature would judge the coolest option
+    // at the hottest temperature and shut down leaves that would have paid. The
+    // asymmetry is therefore: the branch is chosen on the transpiring baseline, the
+    // state it reports is self-consistent at the temperature it describes.
+    Tleaf_ = use_energy_balance_ ? leaf_temp_from_E(0.0) : leaf_temp_;
+    set_leaf_vpd(Tleaf_);
+    if (use_energy_balance_) {
+      update_temperature_dependent_params(Tleaf_);
+    }
+
     profit_ = - R_d_ - hydraulic_cost_TF(opt_root_psi_);
     // As on the shut-down exits: transpiration is zero here, so gross
     // assimilation is zero and the reported net rate is -R_d_. Set it
@@ -1993,11 +2027,11 @@ if(assim_max_ < 0){
     // previous solve's values -- see set_shutdown_state for why that matters.
     transpiration_ = 0.0;
     stom_cond_CO2_ = 0.0;
-    // As for the leaf-side flux pair: this path writes its own outputs or
-    // inherits the last solve's. Zero transpiration, so the PM temperature is
-    // the E = 0 one -- and, as at the shut-down exit, the `R_d_` beside it is
-    // still the Tair one (#105).
-    Tleaf_ = use_energy_balance_ ? leaf_temp_from_E(0.0) : leaf_temp_;
+    // And `ci_`, which this exit never wrote at all -- so it reported the last
+    // solve's internal CO2 beside a state that moves no gas, or the NA sentinel
+    // on a cold object. The compensation point, matching `set_shutdown_state` and
+    // both zero-transpiration branches of set_leaf_states_rates_from_psi_stem.
+    ci_ = gamma_ * umol_per_mol_to_Pa_;
 
         if(std::isnan(profit_)){
           util::stop_infeasible("collar_solve", "profit is not finite at the shade-death "
