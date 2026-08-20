@@ -127,6 +127,15 @@ inline constexpr double aerodynamic_resistance_coef = 200.0;
 // profit and are simply rejected.
 inline constexpr double leaf_temp_min = -40.0;
 inline constexpr double leaf_temp_max = 70.0;
+// Floor on the leaf-to-air vapour pressure deficit (kPa) used by Fick's law
+// (PLAN 13.1). The same argument as the temperature clamp above, one step
+// downstream: a leaf cooled below the dew point has a NEGATIVE deficit, and
+// dividing a positive transpiration by it reports a negative stomatal
+// conductance. Flooring keeps such points finite and unattractive rather than
+// sign-inverted. 0.01 kPa is far below any operating deficit -- the driver
+// defaults are 1.5-2 kPa -- so it binds only where the model is already outside
+// what a one-way diffusion equation describes.
+inline constexpr double vpd_leaf_min = 0.01;
 
 
 } // namespace phylloptim

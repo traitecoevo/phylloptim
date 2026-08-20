@@ -35,6 +35,25 @@
 #      one unreadable line. A run of lines indented relative to the surrounding
 #      prose is reproduced exactly instead.
 #
+#      ⚠️ ONE RUN PER COMMENT BLOCK. Doxygen 1.9 -- which is what CI installs --
+#      handles the FIRST `\verbatim` in a block and then drops the second one's
+#      OPEN, reporting `unexpected command endverbatim` at its close. The line it
+#      names is in the filtered stream and lands in unrelated code, so it reads
+#      like a parser bug somewhere else entirely: the report that found this was
+#      120 lines past the comment responsible. Doxygen 1.17 renders the same input
+#      in silence, so a local `doxygen` run says nothing.
+#
+#      Established by a probe header of eight isolated constructs rendered in CI:
+#      one run, banner rules, `|` in prose, `|` inside the run, and an emoji are
+#      all clean; every block with two runs errors, and only at the SECOND close.
+#      So write one indented display per comment block -- put the equations
+#      together rather than one on each side of a paragraph. `docs.yml` asserts
+#      it, because nothing else can.
+#
+#      The `/*! \file */` block rule 2 emits is EXEMPT, and that is measured
+#      rather than assumed: closed_form.hpp's file block has carried two runs
+#      across a long green master. So the assertion counts `///` blocks only.
+#
 #      A run only OPENS after a blank line and only on a line that is not a list
 #      item. Both conditions are load-bearing. Without the first, the hanging
 #      indent under a bullet (`  * POSITIVE magnitudes -- ...` followed by
