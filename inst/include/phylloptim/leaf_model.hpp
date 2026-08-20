@@ -294,6 +294,32 @@ public:
   double lma_; //kg m^-2
   
   double leaf_temp_;
+
+  // THE LEAF'S OWN TEMPERATURE AT THE OPERATING POINT, deg C -- an OUTPUT, not a
+  // driver, and the distinction is the whole reason this member exists.
+  //
+  // ⚠️ `leaf_temp_` is not it on the energy-balance path. There `set_physiology`
+  // reinterprets the `leaf_temp` driver as AIR temperature (`Tair_ = leaf_temp_`)
+  // and the leaf's temperature is solved per operating point from its own
+  // transpiration. That value was computed, used to re-derive the whole Farquhar
+  // temperature block, and then thrown away -- so the one quantity the PM path
+  // exists to produce was the one thing a caller could not read. It reaches 62 C
+  // at plant's drivers, which is not a detail a consumer should have to infer
+  // from an assimilation it cannot explain.
+  //
+  // Off the PM path this is a copy of `leaf_temp_`, deliberately rather than NA:
+  // an output column that is sometimes the driver and sometimes NA cannot be
+  // plotted against anything.
+  //
+  // ⚠️ IT IS THE LEAF'S TEMPERATURE AT THE OPERATING POINT, which is NOT always
+  // the temperature the reported fluxes were derived at -- and the difference is
+  // #105, not a looseness in this definition. At the two shut-down exits the
+  // Farquhar block still holds its Tair baseline, so the reported `R_d_` there is
+  // 36% low against this temperature. Reporting Tair instead would make the pair
+  // agree by reporting a temperature the leaf is not at, which is what kept that
+  // inconsistency invisible.
+  double Tleaf_;
+
   // Penman-Monteith leaf energy balance state (#523), only meaningful on the
   // use_energy_balance_ path. Set once per set_physiology; Tleaf itself is a
   // per-operating-point quantity computed in set_leaf_states_rates_from_psi_stem.
@@ -1015,16 +1041,21 @@ public:
   //
   // ⚠️ THIS EXISTS FOR THE R BOUNDARY AND FOR NOTHING ELSE. A C++ caller should
   // read the members; they are public and free. From R each read is a separate
-  // call through an RcppR6 active binding at ~1.1 us, so the twelve of them cost
+  // call through an RcppR6 active binding at ~1.1 us, so the thirteen of them cost
   // ~15 us against a ~3 us solve -- five times the model, to report it (#39).
   // One call is ~1.5 us. That is the whole justification, and it is why this is
   // a flat vector rather than a struct: it crosses the boundary as a numeric
   // vector with no glue.
   //
   // The ORDER is the interface. R's .operating_point_names names these positions
-  // and test-surface.R checks the two agree by reading all twelve fields
+  // and test-surface.R checks the two agree by reading all thirteen fields
   // individually and comparing -- so a field inserted here without a
   // corresponding R change fails rather than silently shifting a column.
+  //
+  // ⚠️ APPEND, NEVER INSERT. `Tleaf` was added at the END for that reason, even
+  // though it reads more naturally beside the other state variables: R names
+  // these by POSITION, and anything already reading position 6 as `profit`
+  // includes the golden comparison and every consumer's saved output.
   //
   // Index 9 is the total soil uptake, summed over FINITE layers only: before a
   // solve the layers hold the NA sentinel, and R's own reader did the same
@@ -1048,7 +1079,8 @@ public:
             E_up_,
             uptake,
             marginal_cost_water(),
-            g1_eff()};
+            g1_eff(),
+            Tleaf_};        // deg C -- APPENDED, see below
   }
 
 // leaf economics functions
@@ -1371,6 +1403,7 @@ inline void Leaf::setup_clean_leaf() {
   // solve has run, so there is no kind of point to report.
   operating_point_kind_ = OperatingPointKind::Unsolved;
   leaf_temp_= util::na_value; // deg C
+  Tleaf_= util::na_value; // deg C -- an output, so NA until a solve writes it
   Tair_= util::na_value; // deg C
   Rn_= util::na_value; // W m^-2
   ra_= util::na_value; // s m^-1
@@ -1761,6 +1794,15 @@ inline void Leaf::set_shutdown_state(double root_collar) {
   assim_colimited_ = -R_d_;
   ci_ = gamma_ * umol_per_mol_to_Pa_;
   E_up_ = 0.0;
+  // The leaf's own temperature, for the same reason as the fluxes beside it: this
+  // exit does not go through set_leaf_states_rates_from_psi_stem, so without this
+  // line a reused Leaf reports the previous plant's leaf temperature.
+  //
+  // ⚠️ On the PM path a leaf that moves no water is the HOTTEST one, so E = 0 is
+  // the operating point being described and not a fallback. ⚠️ And it is the one
+  // number here that `R_d_` above disagrees with: this exit never re-derives the
+  // temperature block, so that respiration is still at Tair. #105.
+  Tleaf_ = use_energy_balance_ ? leaf_temp_from_E(0.0) : leaf_temp_;
   std::fill(soil_consumption_.begin(), soil_consumption_.end(), 0.0);
   // Invalidate the transpiration memo: it is keyed on (psi_stem, psi_upstream) and
   // we have just written transpiration_ without going through transpiration().
@@ -1843,6 +1885,11 @@ if(assim_max_ < 0){
     // previous solve's values -- see set_shutdown_state for why that matters.
     transpiration_ = 0.0;
     stom_cond_CO2_ = 0.0;
+    // As for the leaf-side flux pair: this path writes its own outputs or
+    // inherits the last solve's. Zero transpiration, so the PM temperature is
+    // the E = 0 one -- and, as at the shut-down exit, the `R_d_` beside it is
+    // still the Tair one (#105).
+    Tleaf_ = use_energy_balance_ ? leaf_temp_from_E(0.0) : leaf_temp_;
 
         if(std::isnan(profit_)){
           util::stop("Error: profit nan");
@@ -3028,15 +3075,23 @@ inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
 // given psi_stem, find assimilation, transpiration and stomal conductance to c02
 inline void Leaf::set_leaf_states_rates_from_psi_stem(double psi_stem, double psi_upstream) {
 
+  // ⚠️ `Tleaf_` IS WRITTEN ON ALL THREE PATHS BELOW, which is hazard 8 applied to
+  // the one output whose value is a driver on one path and a solved quantity on
+  // the other. The two shut-down branches transpire nothing, and on the PM path a
+  // leaf that transpires nothing is the HOTTEST one -- so leaving `Tleaf_` to the
+  // third branch would report the previous candidate's temperature for exactly
+  // the operating points where the answer is most extreme.
   if (psi_upstream >= psi_stem){
     ci_ = gamma_*umol_per_mol_to_Pa_;
     transpiration_ = 0;
     stom_cond_CO2_ = 0;
+    Tleaf_ = use_energy_balance_ ? leaf_temp_from_E(0.0) : leaf_temp_;
     } else{
       if(assim_max_ < 0){
         ci_ = gamma_*umol_per_mol_to_Pa_;
         transpiration_ = 0;
         stom_cond_CO2_ = 0;
+        Tleaf_ = use_energy_balance_ ? leaf_temp_from_E(0.0) : leaf_temp_;
         } else{
       // Transpiration is the hydraulic supply, independent of ci; compute it
       // first so the PM path can derive the operating-point leaf temperature.
@@ -3044,12 +3099,18 @@ inline void Leaf::set_leaf_states_rates_from_psi_stem(double psi_stem, double ps
       // stom_cond_CO2 requests the same (psi_stem, psi_upstream), returning the
       // bit-identical cached value), so the non-PM result is unchanged.
       transpiration_ = transpiration(psi_stem, psi_upstream);
+      // Tleaf = f(E) is explicit (no PM inversion, no A->E feedback), so this is
+      // a single forward pass: recompute the Farquhar temperature params at this
+      // candidate's Tleaf before solving for ci. Defeats the photo_temp cache by
+      // design -- Tleaf varies per operating point.
+      //
+      // Stored rather than passed straight through, so the temperature the
+      // parameters were derived at and the temperature reported to the caller
+      // cannot be two different numbers. No extra `leaf_temp_from_E` call: this
+      // is the hot path, ~10^3 candidates per solve.
+      Tleaf_ = use_energy_balance_ ? leaf_temp_from_E(transpiration_) : leaf_temp_;
       if (use_energy_balance_) {
-        // Tleaf = f(E) is explicit (no PM inversion, no A->E feedback), so this
-        // is a single forward pass: recompute the Farquhar temperature params at
-        // this candidate's Tleaf before solving for ci. Defeats the photo_temp
-        // cache by design -- Tleaf varies per operating point.
-        update_temperature_dependent_params(leaf_temp_from_E(transpiration_));
+        update_temperature_dependent_params(Tleaf_);
       }
       ci_ = psi_stem_to_ci(psi_stem, psi_upstream);
       stom_cond_CO2_ = atm_kpa_ * transpiration_ * kg_to_mol_h2o / atm_vpd_ / H2O_CO2_stom_diff_ratio_;

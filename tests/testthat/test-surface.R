@@ -240,7 +240,7 @@ test_that("leaf_solve() reproduces the stateful path exactly", {
                    operating_point(stateful))
 })
 
-# Read the twelve outputs the slow way -- one active binding at a time, which is
+# Read the thirteen outputs the slow way -- one active binding at a time, which is
 # what operating_point() did before #39 -- so the one-call C++ reader can be
 # checked against it.
 #
@@ -275,10 +275,11 @@ outputs_one_at_a_time <- function(l) {
     E_up = l$E_up_,
     uptake = Reduce(`+`, finite, 0),
     lambda = l$lambda,
-    g1_eff = l$g1_eff)
+    g1_eff = l$g1_eff,
+    Tleaf = l$Tleaf_)
 }
 
-test_that("operating_point_values() returns the twelve fields, in that order", {
+test_that("operating_point_values() returns the thirteen fields, in that order", {
   # ⚠️ THE ORDER IS AN INTERFACE AND NOTHING IN THE TYPES ENFORCES IT. The C++
   # method returns a flat vector because that is what crosses the R boundary for
   # free (#39: twelve active bindings cost ~15 us against a ~3 us solve, one call
@@ -321,6 +322,30 @@ test_that("operating_point_values() returns the twelve fields, in that order", {
   expect_length(ml$soil_consumption_, 3L)
 })
 
+test_that("Tleaf is reported, and is not the leaf_temp driver on the PM path", {
+  # The gap: on the energy-balance path leaf temperature is SOLVED per operating
+  # point, and `leaf_temp` has been reinterpreted as air temperature — so before
+  # this column existed the only quantity that path produces was the one thing an
+  # R caller could not read. Off that path the two agree, which is why `Tleaf` is
+  # a copy of the driver rather than NA.
+  d <- leaf_solve(psi_soil = c(1.0, 2.0, 3.0), PPFD = 900, leaf_temp = 30)
+  expect_true("Tleaf" %in% names(d))
+  expect_identical(d$Tleaf, rep(30, 3L))
+  # Last column, not inserted: these names are positions, and a saved output
+  # would shift under an insertion.
+  expect_identical(names(d)[[length(names(d))]], "Tleaf")
+
+  # With the energy balance on, driven by hand because the gate is a field.
+  l <- leaf_model()
+  l$use_energy_balance_ <- TRUE
+  set_drivers(l, psi_soil = 2.0, PPFD = 900, leaf_temp = 30)
+  l$find_root_collar_psi()
+  op <- operating_point(l)
+  expect_false(isTRUE(all.equal(op$Tleaf, 30)))
+  expect_gt(op$Tleaf, 30)  # absorbing radiation, shedding only part of it
+  expect_identical(op$Tleaf, l$Tleaf_)
+})
+
 test_that("operating_point() is the data.frame it replaced", {
   # #39 replaced a twelve-argument data.frame() call -- 158 us, on a function
   # called once per 3 us solve -- with a direct list-to-data.frame construction
@@ -344,7 +369,8 @@ test_that("operating_point() is the data.frame it replaced", {
     E_up = l$E_up_,
     uptake = sum(consumption[is.finite(consumption)]),
     lambda = l$lambda,
-    g1_eff = l$g1_eff
+    g1_eff = l$g1_eff,
+    Tleaf = l$Tleaf_
   )
   expect_identical(operating_point(l), as_written_before)
 

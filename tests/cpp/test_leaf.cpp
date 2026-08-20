@@ -1323,6 +1323,85 @@ phylloptim::Leaf make_pm_leaf(const Drivers &d, std::vector<double> psi_soil,
   return l;
 }
 
+// Tleaf as a reported OUTPUT, on both paths and out of every exit.
+//
+// The gap this closes: on the PM path the leaf's temperature is solved per
+// operating point, was used to re-derive the whole Farquhar block, and was then
+// discarded -- so the one quantity that path exists to produce was the one thing a
+// caller could not read. `leaf_temp_` is not it there, because set_physiology has
+// reinterpreted that driver as AIR temperature.
+//
+// ⚠️ The shut-down cases are the point of this test, not an afterthought. They do
+// not go through set_leaf_states_rates_from_psi_stem, so they are where hazard 8
+// bites: an output a branch declines to write becomes the PREVIOUS solve's value,
+// and plant drives every individual in a patch through one persistent Leaf.
+void test_leaf_temperature_is_reported() {
+  printf("Tleaf is reported, on both paths and from every exit\n");
+  Drivers d;
+
+  // Unsolved: the NA sentinel, like every other output.
+  {
+    phylloptim::Leaf bare;
+    ok(!std::isfinite(bare.Tleaf_), "Tleaf is NA before a solve");
+  }
+
+  // Off the PM path Tleaf IS the driver, and exactly so -- a tolerance here would
+  // pass on a value that had been round-tripped through the energy balance.
+  for (double T : {15.0, 25.0, 40.0}) {
+    Drivers dt = d;
+    dt.leaf_temp = T;
+    phylloptim::Leaf l = make_leaf(dt, {2.0}, {1.0});
+    l.find_root_collar_psi();
+    ok(l.Tleaf_ == T,
+       "off the energy-balance path Tleaf is the driver, at T = " +
+           std::to_string(T));
+    ok(l.operating_point_values().back() == l.Tleaf_,
+       "operating_point_values() reports it, at T = " + std::to_string(T));
+  }
+
+  // On the PM path it is not the driver, and it is hotter: the leaf absorbs
+  // radiation and sheds only part of it as latent heat.
+  {
+    phylloptim::Leaf eb = make_pm_leaf(d, {2.0}, {1.0}, true);
+    eb.find_root_collar_psi();
+    ok(eb.Tleaf_ != eb.leaf_temp_,
+       "on the energy-balance path Tleaf is not the leaf_temp driver");
+    ok(eb.Tleaf_ == eb.leaf_temp_from_E(eb.transpiration_),
+       "and it is the temperature the solve's own transpiration implies");
+    ok(eb.Tleaf_ > eb.Tair_, "the leaf runs hotter than the air here");
+  }
+
+  // ONE leaf, driven twice, second time into shut-down: the case a fresh-object
+  // test cannot see. Both paths, because the two exits differ.
+  for (bool gate : {false, true}) {
+    const std::string what = gate ? " (energy balance on)" : " (prescribed)";
+    phylloptim::Leaf l = make_pm_leaf(d, {2.0}, {1.0}, gate);
+    l.find_root_collar_psi();
+    const double wet = l.Tleaf_;
+    ok(std::isfinite(wet), "a wet solve reports a finite Tleaf" + what);
+
+    // Drier than psi_crit, so the collar solve takes a shut-down exit.
+    std::vector<double> root{1.0 / d.area_leaf}, dry{6.5}, depth{1.0};
+    l.set_physiology(fixture::root_network(root, depth), d.PPFD, dry, depth,
+                     d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                     d.atm_o2_kpa, d.atm_kpa);
+    l.find_root_collar_psi();
+    ok(l.transpiration_ == 0.0, "the second solve really did shut down" + what);
+    // The claim is not "it changed" -- it is that the value describes THIS
+    // operating point. At zero transpiration there is no latent cooling, so the
+    // PM answer is leaf_temp_from_E(0); off that path it is still the driver.
+    const double want = gate ? l.leaf_temp_from_E(0.0) : l.leaf_temp_;
+    ok(l.Tleaf_ == want,
+       "a shut-down leaf reports its own temperature, not the last solve's" +
+           what);
+    if (gate) {
+      ok(l.Tleaf_ > wet,
+         "and a leaf that has stopped transpiring is hotter than one that had"
+         " not" + what);
+    }
+  }
+}
+
 void test_energy_balance_path_runs() {
   printf("Penman-Monteith energy-balance path\n");
   Drivers d;
@@ -1339,6 +1418,11 @@ void test_energy_balance_path_runs() {
   const double Tleaf = eb.leaf_temp_from_E(eb.transpiration_);
   ok(Tleaf >= phylloptim::leaf_temp_min && Tleaf <= phylloptim::leaf_temp_max,
      "leaf temperature stays inside the physical clamp");
+  // This line used to be the ONLY way to get at the leaf's temperature: derive it
+  // again, outside the model, from an output. It is now reported, and the two
+  // agreeing bit-for-bit is what says the reported value is the one the solve
+  // actually ran at rather than a plausible recomputation.
+  ok(eb.Tleaf_ == Tleaf, "the reported Tleaf is the solve's own");
 
   // The wind model really is what set ra_, rather than the fixed fallback. This
   // used to be untested: the previous version of this test set wind_speed_/d_ and
@@ -2923,6 +3007,7 @@ int main() {
   test_lambda_equals_dA_dE_single_layer();
   test_multilayer_lambda_identity();
   test_g1_eff();
+  test_leaf_temperature_is_reported();
   test_energy_balance_path_runs();
   test_pm_wind_speed_validation();
   test_pm_leaf_temperature_response();

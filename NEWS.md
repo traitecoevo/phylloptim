@@ -1,5 +1,40 @@
 # phylloptim 0.4.0
 
+## The leaf's own temperature is an output
+
+`Tleaf` joins the reported operating point, as a thirteenth column on
+`leaf_solve()` / `operating_point()` and as a `$Tleaf_` field.
+
+**On the energy-balance path it was unreachable.** Leaf temperature is solved there
+per operating point, used to re-derive the whole Farquhar block, and was then
+discarded — and `leaf_temp` is no substitute, because `set_physiology` reinterprets
+that driver as **air** temperature on that path. So the one quantity the
+Penman-Monteith path exists to produce was the one thing a caller could not read;
+`test_energy_balance_path_runs` had to derive it again from an output to say anything
+about it. Measured at `PPFD = 900`, `atm_vpd = 2`, air 30 °C, the leaf runs 8.4–9.3 K
+hotter than the air and warms by ~1 K along a drydown as the stomata close.
+
+Off that path `Tleaf` equals the `leaf_temp` driver, deliberately rather than being
+NA: a column that is sometimes a temperature and sometimes missing cannot be plotted
+against anything.
+
+**Appended, not inserted.** These names are positions, so `profit` stays at index 7
+and a saved output does not shift.
+
+⚠️ **Written by every exit from the solve, which is hazard 8 and is the part with
+teeth.** The two shut-down exits do not go through
+`set_leaf_states_rates_from_psi_stem`, and a leaf that transpires nothing is the
+*hottest* one — so leaving them to inherit would have reported the previous
+individual's leaf temperature at exactly the operating points where the answer is
+most extreme. plant drives every individual in a patch through one persistent `Leaf`.
+
+⚠️ **Exposing it revealed an inconsistency, filed as #105 rather than fixed here.** At
+a PM shut-down the reported `A = -R_d` is still computed at *air* temperature while
+`Tleaf` is 39.3 °C: respiration 35.8% low, profit −8.93 against −10.04. This release
+reports the physically correct E = 0 temperature and leaves the arithmetic alone —
+reporting air temperature instead would have made the pair agree by reporting a
+temperature the leaf is not at, which is what kept it invisible.
+
 ## The `stem_b` shortcut keeps its saving through the batch (#74)
 
 `perturb_stem_b()` exists so that a gradient in `stem_b` needs no vulnerability-spline
