@@ -2999,8 +2999,6 @@ void test_prescribed_lambda_survives_redriving() {
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     ok(std::isnan(l.lambda_), "lambda_ is NA on a freshly constructed leaf");
-    ok(std::isnan(l.lambda_analytical_),
-       "lambda_analytical_ is NA on a freshly constructed leaf");
   }
 
   const double prescribed = 30.0;
@@ -3019,12 +3017,9 @@ void test_prescribed_lambda_survives_redriving() {
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     l.lambda_ = prescribed;
-    l.lambda_analytical_ = prescribed;
     l.set_traits(96.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
                  5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
     ok(l.lambda_ == prescribed, "set_traits leaves a prescribed lambda_ alone");
-    ok(l.lambda_analytical_ == prescribed,
-       "set_traits leaves a prescribed lambda_analytical_ alone");
   }
 
   // And it survives a SOLVE, which is the case a sweep actually runs: solve at

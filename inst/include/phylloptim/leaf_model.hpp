@@ -295,7 +295,6 @@ public:
   // dual role #114 is about; it does not change the argument above, because a
   // field that is an input on ANY path must not be wiped on the caller's behalf.
   double lambda_ = util::na_value;         // umol C m^-2 s^-1 kg^-1 m^2 s^1
-  double lambda_analytical_ = util::na_value; // same units; nothing here reads it
   double hydraulic_cost_;
   
   double electron_transport_;
@@ -1488,8 +1487,8 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
   // that would otherwise hand back the old vcmax_.
   //
   // "The just-constructed state" is exact for the derived state and the outputs,
-  // which is all of it bar `lambda_`/`lambda_analytical_` -- caller inputs, left
-  // standing on purpose (#96, see their declarations).
+  // which is all of it bar `lambda_` -- a caller input, left standing on purpose
+  // (#96, see its declaration).
   setup_clean_leaf();
 }
 
@@ -1501,10 +1500,10 @@ inline void Leaf::setup_clean_leaf() {
   assim_colimited_= util::na_value; // umol C m^-2 s^-1 
   transpiration_= util::na_value; // kg m^-2 s^-1 
   profit_= util::na_value; // umol C m^-2 s^-1
-  // lambda_ and lambda_analytical_ are deliberately NOT here: they are the
-  // caller's inputs, not derived state, and carry their NA default at the
-  // declaration instead (#96). Adding either back makes a prescribed lambda
-  // survive set_drivers() and vanish on set_traits().
+  // lambda_ is deliberately NOT here: it is the caller's input, not derived
+  // state, and carries its NA default at the declaration instead (#96). Adding
+  // it back makes a prescribed lambda survive set_drivers() and vanish on
+  // set_traits().
   carbon_gain_= util::na_value;
   hydraulic_cost_norm_= util::na_value;
   thermal_cost_= util::na_value;
@@ -3773,8 +3772,16 @@ inline void Leaf::optimise_psi_stem_ProfitMax() {
     return;
   }
 
-  // Reported so the equivalence above is inspectable rather than asserted: this
-  // is the lambda that makes optimise_psi_stem_Sperry find the same point.
+  // Reported so the relation to the lambda form is inspectable rather than
+  // asserted. Exactly: A_max*ProfitMax(psi) == Sperry(psi; this lambda) -
+  // A_max*thermal_cost_at(Tleaf(psi)), to ~4e-15 (#114).
+  //
+  // ⚠️ SO IT IS THE LAMBDA THAT MAKES optimise_psi_stem_Sperry FIND THE SAME POINT
+  // ONLY WHERE THE THERMAL COST IS CONSTANT IN psi -- i.e. thermal cost off (TC is
+  // exactly 0), or energy balance off (Tleaf is the driver, so TC is an additive
+  // constant and the argmax is unmoved). With BOTH gates on the extra term is
+  // genuinely psi-dependent and the two argmaxes differ, by up to 1.1 MPa at
+  // Tair 40. Do not substitute one entry point for the other on that arm.
   lambda_ = profitmax_A_max_ / profitmax_k_span_;
 
   // ⚠️ GRID FIRST, THEN REFINE, AND A BARE BRENT SEARCH IS WRONG HERE.
