@@ -813,6 +813,18 @@ Leaf__g1_eff__get <- function(obj_) {
     .Call('_phylloptim_Leaf__g1_eff__get', PACKAGE = 'phylloptim', obj_)
 }
 
+Leaf__gs_H2O__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__gs_H2O__get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__H2O_CO2_stom_diff_ratio___get <- function(obj_) {
+    .Call('_phylloptim_Leaf__H2O_CO2_stom_diff_ratio___get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__H2O_CO2_stom_diff_ratio___set <- function(obj_, value) {
+    invisible(.Call('_phylloptim_Leaf__H2O_CO2_stom_diff_ratio___set', PACKAGE = 'phylloptim', obj_, value))
+}
+
 #' The differentiable parameters, in the order C++ indexes them
 #'
 #' The fourteen [leaf_traits()] in `set_traits()`'s argument order, then

@@ -66,6 +66,59 @@ test_that("every trait can be read back from the object (#95)", {
   expect_identical(l$stem_b, 3.9)
 })
 
+test_that("conductance is reported to water as well as to CO2 (#56)", {
+  # Every data source records gs to WATER, as does the g1 literature; the model
+  # solves for gs to CO2. Leaving the conversion in user code makes a wrong factor a
+  # constant multiplicative bias on one response — which a fit launders into kmax
+  # rather than revealing.
+  l <- leaf_model()
+  set_drivers(l, psi_soil = 2.0, PPFD = 900)
+  l$find_root_collar_psi()
+
+  # Exactly the ratio, bit for bit: one multiply on the solved value, not a second
+  # derivation that could drift from it.
+  expect_identical(l$gs_H2O, l$stom_cond_CO2_ * l$H2O_CO2_stom_diff_ratio_)
+  expect_gt(l$gs_H2O, l$stom_cond_CO2_)   # water diffuses faster than CO2
+
+  # Read-only: it is an accessor over solved state, so a write would be the stale-
+  # state trap hazard 8 describes.
+  expect_error(l$gs_H2O <- 1, "read-only")
+})
+
+test_that("the H2O:CO2 diffusion ratio is settable, and 1.67 changes nothing (#50)", {
+  # The point of #50 is that the ratio encodes a CONVENTION — 1.67 here, 1.6 in
+  # Medlyn (2011) and the g1 literature — and was a compile-time constant, so a user
+  # who knew their comparison wanted 1.6 could not say so.
+  expect_identical(leaf_model()$H2O_CO2_stom_diff_ratio_, 1.67)
+
+  solve_at <- function(ratio) {
+    l <- leaf_model()
+    l$H2O_CO2_stom_diff_ratio_ <- ratio
+    set_drivers(l, psi_soil = 2.0, PPFD = 900)
+    l$find_root_collar_psi()
+    l
+  }
+
+  # The default is bit-identical to not touching it at all -- which is the promise
+  # that lets this land without moving results.
+  base <- leaf_model()
+  set_drivers(base, psi_soil = 2.0, PPFD = 900)
+  base$find_root_collar_psi()
+  expect_identical(solve_at(1.67)$profit_, base$profit_)
+  expect_identical(solve_at(1.67)$stom_cond_CO2_, base$stom_cond_CO2_)
+
+  # ⚠️ AND IT REACHES THE SOLVE, which is the half #50 understates. `g1_eff` does not
+  # contain the ratio at all -- it is chi*sqrt(D)/(1-chi) -- so the whole effect comes
+  # through ci moving. Measured at these drivers, 1.67 -> 1.60: the ratio changes by
+  # 4.19%, g1_eff by 3.67%, gc by 6.20%, A by 5.19%. The issue says "~2.2%"; it is
+  # 3.67%, and it is not a direct unit factor.
+  at_16 <- solve_at(1.60)
+  expect_false(isTRUE(all.equal(at_16$profit_, base$profit_)))
+  expect_gt(at_16$g1_eff, base$g1_eff)
+  expect_equal(abs(at_16$g1_eff - base$g1_eff) / base$g1_eff, 0.0367,
+               tolerance = 0.02)
+})
+
 test_that("leaf_model() and the raw Leaf() constructor agree", {
   # The reason leaf_model() exists is that mapping 13 traits and 4 tolerances
   # onto 17 positional slots is exactly the kind of thing that goes wrong once

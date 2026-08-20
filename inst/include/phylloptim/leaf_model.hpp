@@ -388,6 +388,23 @@ public:
   // set from the default soil-moisture members in set_physiology.
   double g0 = 0.022;        // residual stomatal conductance (umol m^-2 s^-1)
   double g1 = 2.57;         // sensitivity to vpd (kPa^0.5)
+
+  // The H2O:CO2 stomatal diffusion ratio, SETTABLE (#50), defaulting to the
+  // compile-time `H2O_CO2_stom_diff_ratio` so nothing moves unless a caller asks.
+  //
+  // It is settable because it encodes a CONVENTION rather than a measured quantity of
+  // this leaf, and the convention is not settled: this package uses 1.67, while
+  // Medlyn et al. (2011) and the `g1` literature built on it use 1.6, from the
+  // binary diffusivities (D_H2O/D_CO2 ~= 2.42e-5/1.51e-5 ~= 1.60 at 25 C). A user who
+  // knows their comparison wants 1.6 could not previously say so -- it was a
+  // `constexpr` -- which is the whole of #50.
+  //
+  // ⚠️ IT REACHES THE SOLVE, not just a reported output: it is in the conductance
+  // conversion AND in `dprofit`'s `gc_const`. So changing it changes the operating
+  // point, and a solved leaf must be re-solved afterwards. Same contract as g0/g1
+  // and the drivers -- there is no cache keyed on it, because nothing caches a
+  // conductance.
+  double H2O_CO2_stom_diff_ratio_ = phylloptim::H2O_CO2_stom_diff_ratio;
   double medlyn_model_gs_;  // mol CO2 m^-2 s^-1
   double theta_w_;          // current soil water content at wilting point (m^3 m^-3)
   double theta_fc_;         // current soil water content at field capacity (m^3 m^-3)
@@ -978,6 +995,23 @@ public:
   // Reconciling it against the theoretical sqrt(3*Gstar*P/(1.6*lambda)) is the
   // companion manuscript's job, not this header's.
   double g1_eff() const;
+
+  // Stomatal conductance to WATER VAPOUR, mol H2O m^-2 s^-1 (#56).
+  //
+  // The model solves and reports `stom_cond_CO2_`, and **every data source records
+  // conductance to water**, as does the g1 literature. So a caller comparing against
+  // measurements had to multiply by the diffusion ratio outside the package — and as
+  // the calibration study put it, if that factor is wrong then `gs` is biased by a
+  // constant and the fit launders it into `kmax`. That is the worst kind of error to
+  // leave in user code: a constant multiplicative bias on one response, which a fit
+  // absorbs rather than reveals.
+  //
+  // An ACCESSOR, not a member, per hazard 5: `find_root_collar_psi` runs ~10^3 inner
+  // evaluations per solve and nothing in the solve reads this, so it does not earn
+  // storage. One multiply on a value already computed.
+  double stom_cond_H2O() const {
+    return stom_cond_CO2_ * H2O_CO2_stom_diff_ratio_;
+  }
 
   // Every reported output of a solved point, in one call.
   //
@@ -2307,7 +2341,7 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
       // gc = gc_const * E, so dE/dpsi comes from the same spline derivatives the
       // main branch uses; recomputed here because the main branch's locals are
       // below this early return.
-      const double gc_c = atm_kpa_ * kg_to_mol_h2o / atm_vpd_ / H2O_CO2_stom_diff_ratio;
+      const double gc_c = atm_kpa_ * kg_to_mol_h2o / atm_vpd_ / H2O_CO2_stom_diff_ratio_;
       const double dgc_ps = gc_c * leaf_specific_conductance_max_ *
                             stem_curve_integral_deriv(psi_stem);
       const double dgc_p = gc_c * leaf_specific_conductance_max_ *
@@ -2337,7 +2371,7 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
   // (transp_from_psi(psi_stem) - transp_from_psi(psi)), so the partials use the
   // analytic spline derivative.
   const double gc_const =
-      atm_kpa_ * kg_to_mol_h2o / atm_vpd_ / H2O_CO2_stom_diff_ratio;
+      atm_kpa_ * kg_to_mol_h2o / atm_vpd_ / H2O_CO2_stom_diff_ratio_;
   const double gc = gc_const * transpiration(psi_stem, psi);
   const double dgc_dpsistem =
       gc_const * leaf_specific_conductance_max_ * stem_curve_integral_deriv(psi_stem);
@@ -2809,7 +2843,7 @@ inline double Leaf::transpiration_to_psi_stem(double transpiration_, double psi_
 // returns stomatal conductance to CO2, mol C m^-2 LA s^-1
 inline double Leaf:: stom_cond_CO2(double psi_stem, double psi_upstream) {
   double transpiration_ = transpiration(psi_stem, psi_upstream);
-  return atm_kpa_ * transpiration_ * kg_to_mol_h2o / atm_vpd_ / H2O_CO2_stom_diff_ratio;
+  return atm_kpa_ * transpiration_ * kg_to_mol_h2o / atm_vpd_ / H2O_CO2_stom_diff_ratio_;
 }
 
 
@@ -3019,7 +3053,7 @@ inline void Leaf::set_leaf_states_rates_from_psi_stem(double psi_stem, double ps
         update_temperature_dependent_params(leaf_temp_from_E(transpiration_));
       }
       ci_ = psi_stem_to_ci(psi_stem, psi_upstream);
-      stom_cond_CO2_ = atm_kpa_ * transpiration_ * kg_to_mol_h2o / atm_vpd_ / H2O_CO2_stom_diff_ratio;
+      stom_cond_CO2_ = atm_kpa_ * transpiration_ * kg_to_mol_h2o / atm_vpd_ / H2O_CO2_stom_diff_ratio_;
       }
     }
   assim_colimited_ = assim_colimited(ci_);

@@ -67,19 +67,19 @@ namespace closed_form {
 //
 // The 1.67e-3 is the H2O:CO2 diffusion ratio carrying the same 1e-3 scale factor
 // that appears in the E-from-A relation below; it is kept in this one place rather
-// than spread through the expressions. NOTE that H2O_CO2_stom_diff_ratio is 1.67
-// here while the g1 literature uses 1.6 -- see PLAN.md item 8 -- so a g1 compared
-// against fitted values carries that 2.2% offset.
+// than spread through the expressions. The ratio is `l.H2O_CO2_stom_diff_ratio_`, a
+// SETTABLE field since #50 -- 1.67 by default where the g1 literature uses 1.6, so a
+// caller comparing against fitted g1 values may want to set it.
 inline double uso_group(const Leaf &l) {
   const double gstar_Pa = l.gamma_ * l.umol_per_mol_to_Pa_;
-  return 3.0 * gstar_Pa * kg_to_mol_h2o / (H2O_CO2_stom_diff_ratio * 1e-3);
+  return 3.0 * gstar_Pa * kg_to_mol_h2o / (l.H2O_CO2_stom_diff_ratio_ * 1e-3);
 }
 
 // Transpiration implied by assimilation on the DEMAND side, kg H2O m-2 s-1.
 // The supply-side counterpart is Leaf::transpiration; the closed form works by
 // driving their difference to zero.
 inline double transpiration_from_assim(const Leaf &l, double assim, double ci) {
-  return H2O_CO2_stom_diff_ratio * 1e-3 * assim * l.atm_vpd_ /
+  return l.H2O_CO2_stom_diff_ratio_ * 1e-3 * assim * l.atm_vpd_ /
          ((l.ca_ - ci) * kg_to_mol_h2o);
 }
 
@@ -135,7 +135,7 @@ inline Solution evaluate_at(Leaf &l, double psi, double Q, double sqrt_D) {
   const double E = transpiration_from_assim(l, assim, ci);
   return Solution{psi, ci, assim, E,
                   l.atm_kpa_ * E * kg_to_mol_h2o / l.atm_vpd_ /
-                      H2O_CO2_stom_diff_ratio,
+                      l.H2O_CO2_stom_diff_ratio_,
                   xi};
 }
 
@@ -153,7 +153,7 @@ inline Solution solve(Leaf &l, int newton_steps = 1) {
 
   // Leading order, taking kappa from the wet-end limit A(ci -> ca).
   const double assim_wet = l.assim_colimited(l.ca_ * (1.0 - 1e-9));
-  const double kappa = H2O_CO2_stom_diff_ratio * 1e-3 * assim_wet /
+  const double kappa = l.H2O_CO2_stom_diff_ratio_ * 1e-3 * assim_wet /
                        (l.ca_ * kg_to_mol_h2o);
   double p = std::pow(kappa * sqrt_D * Xi / (kmax * l.stem_b), 2.0 / (n + 2.0));
 
@@ -169,7 +169,7 @@ inline Solution solve(Leaf &l, int newton_steps = 1) {
     const double dassim = dassim_dci(l, ci, electron_transport);
     const double u = l.ca_ - ci;
     const double E = transpiration_from_assim(l, assim, ci);
-    const double dE_dci = H2O_CO2_stom_diff_ratio * 1e-3 * l.atm_vpd_ /
+    const double dE_dci = l.H2O_CO2_stom_diff_ratio_ * 1e-3 * l.atm_vpd_ /
                           kg_to_mol_h2o * (dassim * u + assim) / (u * u);
     const double dci_dxi = l.ca_ * sqrt_D / ((xi + sqrt_D) * (xi + sqrt_D));
     const double dxi_dpsi = -0.5 * xi / lambda * dlambda_TF24(l, psi);
@@ -201,7 +201,7 @@ inline Solution solve_exact_beta2(Leaf &l) {
   const double E = transpiration_from_assim(l, assim, ci);
   return Solution{std::nan(""), ci, assim, E,
                   l.atm_kpa_ * E * kg_to_mol_h2o / l.atm_vpd_ /
-                      H2O_CO2_stom_diff_ratio,
+                      l.H2O_CO2_stom_diff_ratio_,
                   xi};
 }
 

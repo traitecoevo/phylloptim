@@ -1,5 +1,47 @@
 # phylloptim 0.4.0
 
+## Conductance to water, and a settable diffusion ratio (#50, #56)
+
+`gs_H2O` reports stomatal conductance to **water vapour**, alongside the `stom_cond_CO2_`
+the model solves for. Every data source records conductance to water, as does the g1
+literature, so the conversion was being left to user code — where, as the calibration
+study put it, a wrong factor biases `gs` by a constant and the fit launders it into
+`kmax` rather than revealing it. An accessor, not stored state (hazard 5).
+
+`H2O_CO2_stom_diff_ratio_` is now a settable field, **defaulting to 1.67 so nothing
+moves**: the golden file is bit-identical. It encodes a convention rather than a
+measured property of this leaf — Medlyn et al. (2011) and the `g1` literature use 1.6,
+from the binary diffusivities — and it was a compile-time constant, so a caller who knew
+their comparison wanted 1.6 could not say so.
+
+⚠️ **#50's "~2.2% offset in every reported g1_eff" is wrong, and the correction matters
+in both directions.** `g1_eff` does not contain the ratio at all — it is
+`chi*sqrt(D)/(1-chi)` — so the effect arrives entirely through `ci` moving in the solve.
+Measured at `psi_soil = 2, PPFD = 900`, taking 1.67 to 1.60 (a 4.19% change in the
+ratio):
+
+| quantity | 1.67 | 1.60 | rel diff |
+|---|---|---|---|
+| `g1_eff` | 0.502639 | 0.521100 | **3.67%** |
+| `gc` | 0.0192260 | 0.0204187 | 6.20% |
+| `gs_H2O` | 0.0321075 | 0.0326700 | 1.75% |
+| `A` | 5.60102 | 5.89174 | 5.19% |
+
+So the offset is **1.7x larger than the issue states**, and it is not a unit factor that
+could be corrected outside the package — which strengthens the case for exposing it. Note
+`gs_H2O` moves *least*, because the ratio partly cancels there.
+
+⚠️ It reaches the solve, not only a reported output (the conductance conversion and
+`dprofit`'s `gc_const`), so a solved leaf must be re-solved after changing it.
+
+**#56's second half is documented rather than fixed**, which is what that issue asks for
+regardless: `?leaf_supply_single` now states that `leaf_specific_conductance_max` is
+kg-based while `series_resistance()`'s resistance is mol-based, so a caller
+parameterising the whole path carries a `molar_mass_h2o` factor between two quantities
+presented as two ends of one series. The calibration study recorded dropping that 0.018
+as its original error, worth three orders of magnitude. Unifying the bases would move
+results *and* change a published argument's units, so it stays a decision.
+
 ## The gas constant is the SI value (#51 audit) — MOVES RESULTS, AT 40 C ONLY
 
 `gas_constant` was `8.314`. Since the 2019 SI redefinition R = N_A k_B is **exact**, at

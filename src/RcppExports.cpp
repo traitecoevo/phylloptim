@@ -2320,6 +2320,39 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// Leaf__gs_H2O__get
+double Leaf__gs_H2O__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__gs_H2O__get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__gs_H2O__get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__H2O_CO2_stom_diff_ratio___get
+double Leaf__H2O_CO2_stom_diff_ratio___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__H2O_CO2_stom_diff_ratio___get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__H2O_CO2_stom_diff_ratio___get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__H2O_CO2_stom_diff_ratio___set
+void Leaf__H2O_CO2_stom_diff_ratio___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value);
+RcppExport SEXP _phylloptim_Leaf__H2O_CO2_stom_diff_ratio___set(SEXP obj_SEXP, SEXP valueSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    Rcpp::traits::input_parameter< double >::type value(valueSEXP);
+    Leaf__H2O_CO2_stom_diff_ratio___set(obj_, value);
+    return R_NilValue;
+END_RCPP
+}
 // gradient_par_names
 std::vector<std::string> gradient_par_names();
 RcppExport SEXP _phylloptim_gradient_par_names() {
@@ -2608,6 +2641,9 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__lambda_molar__get", (DL_FUNC) &_phylloptim_Leaf__lambda_molar__get, 1},
     {"_phylloptim_Leaf__lambda_multilayer__get", (DL_FUNC) &_phylloptim_Leaf__lambda_multilayer__get, 1},
     {"_phylloptim_Leaf__g1_eff__get", (DL_FUNC) &_phylloptim_Leaf__g1_eff__get, 1},
+    {"_phylloptim_Leaf__gs_H2O__get", (DL_FUNC) &_phylloptim_Leaf__gs_H2O__get, 1},
+    {"_phylloptim_Leaf__H2O_CO2_stom_diff_ratio___get", (DL_FUNC) &_phylloptim_Leaf__H2O_CO2_stom_diff_ratio___get, 1},
+    {"_phylloptim_Leaf__H2O_CO2_stom_diff_ratio___set", (DL_FUNC) &_phylloptim_Leaf__H2O_CO2_stom_diff_ratio___set, 2},
     {"_phylloptim_gradient_par_names", (DL_FUNC) &_phylloptim_gradient_par_names, 0},
     {"_phylloptim_gradient_output_names", (DL_FUNC) &_phylloptim_gradient_output_names, 0},
     {"_phylloptim_gradient_batch_prepare", (DL_FUNC) &_phylloptim_gradient_batch_prepare, 9},
