@@ -1,3 +1,48 @@
+# phylloptim 0.5.5
+
+## The closed form is confined to the prescribed-temperature path (#116)
+
+**No numbers move.** `closed_form.hpp` divided by `atm_vpd_` at four sites where #93
+moved the live model to `vpd_leaf_`, the leaf-to-air deficit. All four now read
+`vpd_leaf_`, which off the energy-balance path *is* `atm_vpd_` exactly —
+`set_leaf_vpd` returns it unchanged there — so this is a bit-identical substitution
+that removes the drift by construction rather than by comment.
+
+⚠️ **On the energy-balance path both entry points now REFUSE**, and the measurement
+is why. Against a 4000-point argmax of the exact TF24 objective, gate on:
+
+| Tair | A exact | A closed form | error | `within_guard` |
+|---|---|---|---|---|
+| 25 | 14.83 | 17.05 | **+15%** | pass |
+| 30 | 10.71 | 14.71 | **+37%** | pass |
+| 35 | 3.79 | 9.18 | **+142%** | pass |
+| 40 | −3.76 | 2.65 | **+171%** | pass |
+
+Off the gate the same comparison is 0–4% in assimilation, which is the accuracy the
+header claims. The issue framed this as drift; it is a wrong answer, and **the guard
+the header points at as its accuracy mechanism does not detect it** — `within_guard`
+tests `ci/ca > 0.5`, a wet-end-expansion diagnostic, which is blind to the deficit
+being wrong by a factor of three.
+
+**Why a refusal rather than a repair.** The substitution is not a rename on that
+path: the USO relation needs `D` *before* it can produce `ci`, and `vpd_leaf_` is a
+function of Tleaf, Tleaf of E, and E is what these expressions solve for. So with
+`D = D(E)` a scalar fixed point in `ci` is left over — and at `beta2 = 1/stem_c`,
+the 47× case whose whole claim is that the leaf solve has "essentially vanished",
+there would suddenly be something to solve again. Issue #116's options 1 (one Picard
+pass over `D`, roughly halving the speedup) and 2 (linearising `esat(Tleaf)`, which
+makes `E` explicit again but leaves the fixed point in `ci`) are recorded in the
+header and not taken. This is its option 3, done with the numbers rather than on the
+assumption that the drift was harmless.
+
+A hard `util::stop`, not a NaN: a NaN would propagate into `within_guard`, which
+would report `false`, which a caller reads as "outside the expansion, fall back to
+the exact solve" — the same silent behaviour as before, one step further from the
+cause.
+
+The header is dormant and nothing calls it by default, so this changes no production
+path. Both golden files are bit-identical.
+
 # phylloptim 0.5.2
 
 ## `lambda_analytical_` is deleted (#113)
