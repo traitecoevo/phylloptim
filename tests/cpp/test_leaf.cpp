@@ -3774,6 +3774,147 @@ void test_profitmax_finds_a_closed_optimum() {
      "at no lower profit than the grid's best");
 }
 
+// The longwave half of the energy balance (#97 / #28): an isothermal net radiation
+// from a temperature- and humidity-dependent atmospheric emissivity, plus a
+// radiative conductance for the leaf's own departure from air temperature.
+//
+// ⚠️ THE CONTRACT THAT MATTERS IS THAT THE BALANCE STAYS EXPLICIT. A leaf's own
+// emission goes as Tleaf^4, so a faithful longwave would make Rn a function of the
+// temperature the balance solves for -- an inner iteration, and no analytic
+// dTleaf/dE for the collar solve's implicit-function theorem to stand on.
+// Linearising the leaf's emission about Tair moves that dependence into the
+// DENOMINATOR, so Tleaf stays affine in E. The first block below is what asserts
+// that, and it is the assertion to keep if any of the rest is ever rewritten.
+void test_longwave_and_radiative_conductance() {
+  printf("longwave: isothermal Rn and the radiative conductance\n");
+  Drivers d;
+  d.PPFD = 900.0;
+  d.atm_vpd = 2.0;
+
+  // 1. STILL AFFINE IN E, with the slope the model reports. Three transpirations,
+  //    all inside the clamp: the second difference of an affine function is zero.
+  {
+    d.leaf_temp = 30.0;
+    phylloptim::Leaf l = make_pm_leaf(d, {1.0}, {1.0}, true);
+    const double E0 = 0.0, E1 = 1e-5, E2 = 2e-5;
+    const double t0 = l.leaf_temp_from_E(E0), t1 = l.leaf_temp_from_E(E1),
+                 t2 = l.leaf_temp_from_E(E2);
+    ok(t0 > phylloptim::leaf_temp_min && t2 > phylloptim::leaf_temp_min,
+       "the three test points are inside the clamp");
+    near((t2 - t1) - (t1 - t0), 0.0, 1e-9,
+         "leaf temperature is still AFFINE in transpiration");
+    double dT_dE = 0.0;
+    l.leaf_temp_from_E(E1, &dT_dE);
+    near(dT_dE, (t2 - t0) / (E2 - E0), 1e-6,
+         "and the reported slope is that line's");
+
+    // The slope's closed form, which is the whole point: one conductance, made of
+    // the sensible and the radiative parts.
+    const double g_total = phylloptim::vol_heat_cap_air / l.ra_ + l.g_rad_;
+    near(dT_dE, -phylloptim::latent_heat_vap / g_total, 1e-9,
+         "dTleaf/dE is -lambda / (g_sensible + g_radiative)");
+  }
+
+  // 2. The radiative conductance is the linearisation it claims to be, and it is
+  //    NOT negligible -- an assertion, because a term worth 13% is exactly the
+  //    size that gets dropped in a rewrite and not noticed.
+  {
+    d.leaf_temp = 25.0;
+    phylloptim::Leaf l = make_pm_leaf(d, {1.0}, {1.0}, true);
+    const double Tair_K = l.Tair_ + phylloptim::zero_celsius_in_kelvin;
+    ok(l.g_rad_ == 4.0 * phylloptim::leaf_emissivity *
+                       phylloptim::stefan_boltzmann * Tair_K * Tair_K * Tair_K,
+       "g_rad is 4*eps*sigma*Tair^3, bit-for-bit");
+    const double g_sens = phylloptim::vol_heat_cap_air / l.ra_;
+    ok(l.g_rad_ / (l.g_rad_ + g_sens) > 0.05,
+       "and it is more than 5% of the total conductance -- not negligible");
+
+    // Radiative coupling pulls the leaf TOWARD air temperature: the same Rn over a
+    // larger conductance is a smaller departure.
+    const double with_rad = l.leaf_temp_from_E(0.0);
+    const double without_rad = l.Tair_ + l.Rn_ / g_sens;
+    ok(std::abs(with_rad - l.Tair_) < std::abs(without_rad - l.Tair_),
+       "a radiatively coupled leaf sits closer to air temperature");
+  }
+
+  // 3. The atmospheric emissivity, against the form it is usually quoted in.
+  //    ⚠️ THIS IS THE UNIT TRAP: `0.642*(ea/T)^(1/7)` needs ea in PASCALS, and the
+  //    same relation is more often written `1.24*(ea/T)^(1/7)` with ea in hPa.
+  //    Using 0.642 with kPa gives ~0.31 where the answer is ~0.82 -- finite,
+  //    plausible, and it triples the longwave loss.
+  {
+    d.leaf_temp = 25.0;
+    d.atm_vpd = 1.0;
+    phylloptim::Leaf l = make_pm_leaf(d, {1.0}, {1.0}, true);
+    const double Tair_K = l.Tair_ + phylloptim::zero_celsius_in_kelvin;
+    const double ea_Pa =
+        1000.0 * (l.saturation_vapour_pressure(l.Tair_) - l.atm_vpd_);
+    const double ema_ours =
+        phylloptim::atmos_emissivity_coef *
+        std::pow(ea_Pa / Tair_K, phylloptim::atmos_emissivity_exponent);
+    // The hPa form, independently written out.
+    const double ema_hPa = 1.2395 * std::pow((ea_Pa / 100.0) / Tair_K,
+                                             1.0 / 7.0);
+    near(ema_ours, ema_hPa, 1e-4, "the Pa and hPa forms of Brutsaert agree");
+    ok(ema_ours > 0.7 && ema_ours < 0.95,
+       "and a clear-sky emissivity lands in 0.7-0.95, not 0.3");
+
+    // Rn_ is the ISOTHERMAL net radiation: absorbed shortwave minus that term.
+    const double sw = phylloptim::sw_abs_per_par * l.PPFD_ /
+                      phylloptim::umol_par_per_joule;
+    near(l.Rn_,
+         sw - (1.0 - ema_ours) * phylloptim::stefan_boltzmann * Tair_K * Tair_K *
+                  Tair_K * Tair_K,
+         1e-9, "Rn_ is the isothermal net radiation");
+    ok(l.Rn_ - sw < -40.0,
+       "and at 25 C the net longwave is stronger than the -40 it replaced");
+  }
+
+  // 4. THE CLAMP, which is a physical bound and not padding. Brutsaert's fit runs
+  //    past emissivity 1 at high air temperature, which would make the sky heat
+  //    the leaf. At the bound the isothermal term is exactly zero.
+  {
+    d.leaf_temp = 60.0;
+    d.atm_vpd = 2.0;
+    phylloptim::Leaf hot = make_pm_leaf(d, {1.0}, {1.0}, true);
+    const double Tair_K = hot.Tair_ + phylloptim::zero_celsius_in_kelvin;
+    const double ea_Pa =
+        1000.0 * (hot.saturation_vapour_pressure(hot.Tair_) - hot.atm_vpd_);
+    const double unclamped =
+        phylloptim::atmos_emissivity_coef *
+        std::pow(ea_Pa / Tair_K, phylloptim::atmos_emissivity_exponent);
+    ok(unclamped > 1.0,
+       "the premise: the fit really does exceed 1 here, so the clamp is live");
+    const double sw = phylloptim::sw_abs_per_par * hot.PPFD_ /
+                      phylloptim::umol_par_per_joule;
+    ok(hot.Rn_ == sw,
+       "clamped, the isothermal longwave is EXACTLY zero, not positive");
+    ok(hot.Rn_ - sw <= 0.0, "so the sky never heats the leaf");
+  }
+
+  // 5. A deficit larger than saturation is not a physical atmosphere but is
+  //    reachable from a driver sweep, and pow() of a negative base is NaN.
+  {
+    d.leaf_temp = 5.0;      // esat ~ 0.87 kPa
+    d.atm_vpd = 5.0;        // deficit far beyond it
+    phylloptim::Leaf l = make_pm_leaf(d, {1.0}, {1.0}, true);
+    ok(std::isfinite(l.Rn_) && std::isfinite(l.g_rad_),
+       "an impossible deficit still gives finite radiation terms");
+    ok(std::isfinite(l.leaf_temp_from_E(0.0)),
+       "and a finite leaf temperature");
+  }
+
+  // 6. Gate off, nothing reads any of it: Tleaf is the driver. This is the arm the
+  //    golden file covers.
+  {
+    d.leaf_temp = 25.0;
+    d.atm_vpd = 2.0;
+    phylloptim::Leaf off = make_pm_leaf(d, {1.0}, {1.0}, false);
+    off.find_root_collar_psi();
+    ok(off.Tleaf_ == off.leaf_temp_, "gate off: Tleaf is still the driver");
+  }
+}
+
 void benchmark() {
   printf("\ntiming\n");
   Drivers d;
@@ -3830,6 +3971,7 @@ int main() {
   test_shutdown_reports_one_temperature();
   test_zero_E_branch_derives_its_own_block();
   test_energy_balance_path_runs();
+  test_longwave_and_radiative_conductance();
   test_pm_wind_speed_validation();
   test_pm_leaf_temperature_response();
   test_energy_balance_collar_solve_is_measured();

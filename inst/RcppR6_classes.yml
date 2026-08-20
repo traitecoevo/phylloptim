@@ -299,6 +299,7 @@ Leaf:
     wind_speed_: {type: double, access: field}
     Tair_: {type: double, access: field}
     Rn_: {type: double, access: field}
+    g_rad_: {type: double, access: field}
     ra_: {type: double, access: field}
 
     # --- Medlyn stomatal-conductance model (plant develop #450) --------------
