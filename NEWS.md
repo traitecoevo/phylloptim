@@ -1,5 +1,28 @@
 # phylloptim 0.5.0
 
+## Documentation: claims that #55 and #93 outlived
+
+No behaviour change. Four places still described the model as it was before two
+merged fixes, and one of them was user-facing advice:
+
+- `vignettes/fitting.Rmd` told readers that a bare `l$vcmax_25 <- x` followed by
+  re-driving takes a temperature-cache **hit** and silently reports numbers from the
+  first `vcmax` it ever saw. #55 widened the cache key to every input of the
+  temperature block, so that is no longer true. The advice — use `set_traits()` — is
+  unchanged; the reasons are now the splines, the solved operating point and the #25
+  checks, which no re-driving repairs.
+- `inst/RcppR6_classes.yml` carried the same claim, contradicting the correct
+  statement 150 lines above it in the same file.
+- `tests/cpp/test_leaf.cpp` claimed a sub-assertion isolated `set_traits`' cache
+  invalidation. It cannot any more: with `vcmax_25` in the key the cache misses
+  regardless, so the trap is closed twice over and the test cannot say which
+  mechanism carried it. The two halves are covered separately, and it now says so.
+- `inst/include/phylloptim/closed_form.hpp` divides by `atm_vpd_` throughout, which
+  #93 replaced with the leaf-to-air `vpd_leaf_` in the live model. Recorded rather
+  than repaired: it is dormant, PM-untested code, and the substitution may not be a
+  rename — `vpd_leaf_` depends on Tleaf, which depends on the E these expressions
+  solve for.
+
 ## `lambda_` is a caller input, so nothing resets it (#96)
 
 `setup_clean_leaf()` cleared `lambda_`, so whether a prescribed Sperry marginal water

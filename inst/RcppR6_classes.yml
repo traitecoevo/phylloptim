@@ -380,9 +380,18 @@ Leaf:
     # A METHOD, NOT FIFTEEN SETTABLE FIELDS. The traits are public doubles, so
     # `access: field` entries would have worked and would have been wrong: a bare
     # field write bypasses the #25 invariant checks, leaves the two pre-integrated
-    # vulnerability splines describing the previous curve, and -- worst -- leaves
-    # vcmax_/jmax_/R_d_ stale, because set_physiology derives them behind a cache
-    # keyed on (leaf_temp, atm_o2_kpa) alone and so takes the hit on the next call.
+    # vulnerability splines describing the previous curve, and leaves the solved
+    # operating point describing the old traits (hazard 8).
+    #
+    # This used to carry a third reason -- that vcmax_/jmax_/R_d_ would go stale
+    # behind a temperature cache keyed on (leaf_temp, atm_o2_kpa) alone, so that
+    # re-supplying the drivers took a cache HIT and never recomputed. **#55 closed
+    # that**: the key is every scalar `update_temperature_dependent_params()`
+    # reads, `vcmax_25` and `jmax_25` among them, exactly as the temperature-response
+    # block above already says. The two reasons that remain are enough, and this
+    # comment contradicting that one for two releases is why the claim is stated in
+    # one place now.
+    #
     # The leaf_model.hpp declaration has the full reasoning; it is the same
     # judgement as supply_kind above, reached from a different direction.
     #
