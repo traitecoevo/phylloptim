@@ -1,5 +1,169 @@
 # phylloptim 0.4.0
 
+## Infeasibility is a condition class, not a message to match on (#57)
+
+A failed solve can now be caught by class:
+
+```r
+tryCatch(leaf_solve(...), phylloptim_infeasible = function(e) e$code)
+```
+
+`leaf_infeasible_codes()` documents the seven codes and what each means.
+`leaf_solve()` and `leaf_gradient_batch()` classify without the caller doing
+anything; `with_phylloptim_conditions()` is for the caller driving a `Leaf` directly,
+since `$find_root_collar_psi()` is generated glue that cannot signal on its own.
+
+**Why not message text.** That was the only option before, and it was never stable:
+#65 and #79 each rewrote the out-of-domain wording and #92 added a third variant, so
+any caller matching on prose was silently broken by an improvement to an error
+message.
+
+**Two layers, because it cannot be one.** C++ tags the exit with a stable token —
+`[phylloptim:infeasible:collar_bracket] …`, via a new `util::stop_infeasible` and an
+`infeasible_error` type — and hand-written R reads the token and re-signals. The join
+could not live at the boundary: that is RcppR6-generated and must not be hand-edited,
+and `util.hpp` must not reach for Rcpp. A C++ consumer such as plant catches the type
+directly.
+
+⚠️ **Seventeen of about fifty `stop` sites are classified, and the conservative
+direction was taken everywhere it was arguable.** Every input-validation failure stays
+an ordinary error, because classifying one as infeasible would let it be swallowed by
+the very `tryCatch` this enables — a fit would then report a plausible likelihood over
+whichever rows survived, which is exactly what #39 rejected silent NA rows to prevent.
+`?leaf_infeasible_codes` lists the three genuinely arguable sites left ordinary
+(`psi_crit` past P99, an explicit `method = "ift"` at a point where the IFT does not
+hold, and the trait sign checks) with the reasoning, so the calls can be overruled
+deliberately.
+
+⚠️ **The classification cannot drift from its documentation**: a test scans the
+*installed* headers for `stop_infeasible("…")` and requires the set to equal
+`names(leaf_infeasible_codes())` exactly.
+
+**Still not done, deliberately: `on_error = "na"` with a per-row status column.** The
+issue is explicit that it must not be built before the classification is reviewed, or
+the opt-in returns `NA` for programming errors too. `leaf_gradient_batch()` already
+reports per-row `status`, which is that idea where it was already safe.
+
+⚠️ **`leaf_gradient()` is not routed through the wrapper** — it depends on `missing()`
+for two arguments, so delegating to an inner implementation would change argument
+matching. Wrap the call, or use `leaf_gradient_batch()`, which a fit should be on
+anyway. The gap is documented at `?with_phylloptim_conditions`.
+
+The wrapper is **one `tryCatch` per call, outside the row loop**, so per-row cost is
+unchanged.
+
+## A primitive-level baseline, and three dead harnesses removed (#64)
+
+`tests/cpp/golden/primitives.tsv` records **544 values from the functions the solve
+calls**, in five call-tree tiers — arithmetic, vulnerability, assimilation, spline,
+iterative — read by `tests/cpp/test_primitives.cpp`. Bit-exact on macOS/arm64, with
+per-**tier** tolerances elsewhere.
+
+**Why a second baseline.** `operating_points.tsv` detects a difference and cannot
+attribute one: the nested solvers amplify a last-bit change up to the loosest
+tolerance, so by the time it reaches a reported output it points nowhere. #92 proved
+that twice over — the knot grid had dropped its last knot for years and the golden
+file recorded the consequences as *correct*, and then the fix's 3496 moved cells could
+not be split into "knot displacement" versus "added knot" without a standalone
+primitive program, written in a scratch directory and thrown away. Both times.
+
+Demonstrated rather than asserted: a 1e-12 perturbation to
+`proportion_of_conductivity` leaves the arithmetic and assimilation tiers at
+**exactly 0**, moves vulnerability at 1e-12 and spline at 4.2e-12. **The lowest tier
+that moved is the cause.**
+
+The knot grid is now pinned per (b, c) pair — `knot_grid_last_psi` sits beside
+`vulnerability_psi_max` for nine pairs, so #92's defect is a row in a file rather
+than a test nobody thought to write.
+
+**Deleted:** `tests/validate/compare_with_plant.R`, `compare_primitives.R` and
+`primitives.cpp`. The first two compared against plant's own `Leaf`, and plant has no
+independent copy of this model any more — it consumes these headers — so that
+comparison had become this package against itself. What they established is PLAN
+decision 1. `scm_regression.R`, `scm_compare.R` and `tsv_to_hex.c` are kept; the last
+is live, in `test-golden.R`'s regeneration recipe.
+
+⚠️ **The enforcement is the deliverable.** Those files rotted through two interface
+changes because **no build touched them**, so a revived harness in no build would be
+the same defect with a newer date. `test_primitives` is named in `tests/cpp/Makefile`,
+`CMakeLists.txt` (as the `leaf_primitives` ctest), `tests/cpp.R` and `.Rbuildignore`,
+and CI reaches it through `make` on all three platforms. Adding a program under
+`tests/cpp/` now means editing four files, and each of them says so.
+
+⚠️ **The cross-platform tolerances are mechanism-derived ceilings, not measured worst
+cases**, and they are labelled as such — the guide's cross-platform table has been
+wrong three times from a reading written down as a fact. The real figures come from
+the summary line the tolerant mode prints on every run, pass or fail.
+
+## The leaf's own temperature is an output
+
+`Tleaf` joins the reported operating point, as a thirteenth column on
+`leaf_solve()` / `operating_point()` and as a `$Tleaf_` field.
+
+**On the energy-balance path it was unreachable.** Leaf temperature is solved there
+per operating point, used to re-derive the whole Farquhar block, and was then
+discarded — and `leaf_temp` is no substitute, because `set_physiology` reinterprets
+that driver as **air** temperature on that path. So the one quantity the
+Penman-Monteith path exists to produce was the one thing a caller could not read;
+`test_energy_balance_path_runs` had to derive it again from an output to say anything
+about it. Measured at `PPFD = 900`, `atm_vpd = 2`, air 30 °C, the leaf runs 8.4–9.3 K
+hotter than the air and warms by ~1 K along a drydown as the stomata close.
+
+Off that path `Tleaf` equals the `leaf_temp` driver, deliberately rather than being
+NA: a column that is sometimes a temperature and sometimes missing cannot be plotted
+against anything.
+
+**Appended, not inserted.** These names are positions, so `profit` stays at index 7
+and a saved output does not shift.
+
+⚠️ **Written by every exit from the solve, which is hazard 8 and is the part with
+teeth.** The two shut-down exits do not go through
+`set_leaf_states_rates_from_psi_stem`, and a leaf that transpires nothing is the
+*hottest* one — so leaving them to inherit would have reported the previous
+individual's leaf temperature at exactly the operating points where the answer is
+most extreme. plant drives every individual in a patch through one persistent `Leaf`.
+
+⚠️ **Exposing it revealed an inconsistency, filed as #105 rather than fixed here.** At
+a PM shut-down the reported `A = -R_d` is still computed at *air* temperature while
+`Tleaf` is 39.3 °C: respiration 35.8% low, profit −8.93 against −10.04. This release
+reports the physically correct E = 0 temperature and leaves the arithmetic alone —
+reporting air temperature instead would have made the pair agree by reporting a
+temperature the leaf is not at, which is what kept it invisible.
+
+## The `stem_b` shortcut keeps its saving through the batch (#74)
+
+`perturb_stem_b()` exists so that a gradient in `stem_b` needs no vulnerability-spline
+rebuild — 24.5× on that perturbation. Through `leaf_gradient_batch()` it was worth
+3.4× less than that, because the shortcut leaves `stem_b` displaced from
+`stem_b_spline_` and the restore at the end of each observation goes through
+`set_traits()`, whose third rebuild clause exists precisely to catch that state. So
+every observation paid for one rebuild that no perturbation had asked for.
+
+`gradient::apply()` now undoes the displacement with the shortcut before restoring,
+after which `set_traits()` has nothing to rebuild. Measured per observation, three
+observations of `d/dstem_b`, interleaved:
+
+| | µs/observation | stem-curve rebuilds/observation |
+|---|---:|---:|
+| before | 26.5 | 1.00 |
+| after | 7.8 | **0.00** |
+| `vcmax_25`, the no-spline floor | 7.9 | 0.00 |
+
+**Bit-identical, and now measured rather than argued.** `gradient_golden.tsv` compares
+at a worst relative difference of exactly 0, and the C++ golden grid is unmoved. The
+reason is that `perturb_stem_b()` writes `stem_b` and nothing else — the splines are
+the ones built at `stem_b_spline_`, not a rescaled copy, so putting `stem_b` back
+returns the object a rebuild would have produced.
+
+⚠️ **`stem_c` is unchanged and deliberately so.** It has no homogeneity identity, its
+3.00 rebuilds per observation are genuine, and only the restore is removable there.
+
+⚠️ **The two figures are different measurements**, which is why this was quoted wrong:
+24.5× is per *perturbation* in C++, and what a fit pays is per *observation*. Both are
+now printed side by side by `bench_gradient`, and `Leaf::stem_curve_builds_` — a
+counter, not state — makes "no rebuild" an integer the test suite asserts rather than
+a stopwatch reading.
+
 ## Conductance to water, and a settable diffusion ratio (#50, #56)
 
 `gs_H2O` reports stomatal conductance to **water vapour**, alongside the `stom_cond_CO2_`

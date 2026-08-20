@@ -298,6 +298,89 @@ int main(int argc, char **argv) {
   printf("\n  stem_b, IFT: rebuild %8.3f us   rescaled %8.3f us   %.2fx\n",
          reb, resc, reb / resc);
 
+  // --- and the same identity per OBSERVATION, which is the number to quote ----
+  //
+  // ⚠️ THE TWO FIGURES ARE NOT THE SAME MEASUREMENT, and #74 exists because one
+  // was quoted for the other. Above is per PERTURBATION: two of them, and nothing
+  // else. Here is per observation through `gradient::batch`, which is what a
+  // calibration actually pays -- the perturbations plus one solve, one restore and
+  // the fixed cost of the composite. Say which one you mean.
+  {
+    const double kmax = kKs * kTheta / kH;
+    double theta[phylloptim::gradient::n_pars] = {
+        kBase.v[0], kBase.v[1], kBase.v[2],  kBase.v[3], kBase.v[4],
+        kBase.v[5], kBase.v[6], kBase.v[7],  kBase.v[8], kBase.v[9],
+        kBase.v[10], kBase.v[11], kBase.v[12], 1.44,     kmax,      0.0};
+
+    std::vector<double> root{1.0 / kAreaLeaf}, psi_soil{2.0}, depth{1.0};
+    phylloptim::gradient::Drivers gd;
+    gd.root_network = fixture::root_network(root, depth);
+    gd.PPFD = 900.0;
+    gd.psi_soil = psi_soil;
+    gd.soil_depth = depth;
+    gd.atm_vpd = 2.0;
+    gd.ca = 40.0;
+    gd.leaf_temp = 25.0;
+    gd.atm_o2_kpa = 21.0;
+    gd.atm_kpa = 101.3;
+    const std::size_t n_obs = 20;
+    const std::vector<phylloptim::gradient::Drivers> obs(n_obs, gd);
+
+    struct Arm {
+      const char *label;
+      int par;
+      bool fast;
+    };
+    const Arm arms[] = {
+        {"vcmax_25 (no spline anywhere)", 0, true},
+        {"stem_b, fast_stem_curve on", phylloptim::gradient::par_stem_b, true},
+        {"stem_b, fast_stem_curve off", phylloptim::gradient::par_stem_b, false},
+        {"stem_c (no identity to use)", phylloptim::gradient::par_stem_c, true}};
+
+    printf("\n%-32s %10s %12s\n", "pars", "us/obs", "rebuilds/obs");
+    const long batch_reps = std::max(1L, per_round / 20);
+    for (const Arm &arm : arms) {
+      phylloptim::gradient::Settings s;
+      s.fast_stem_curve = arm.fast;
+      const int pars[1] = {arm.par};
+      double best = 1e300;
+      long builds = 0;
+      for (int round = 0; round < 3; ++round) {
+        apply_traits(l, kBase);
+        set_drivers(l);
+        l.find_root_collar_psi();
+        const long before = l.stem_curve_builds_;
+        const auto t0 = clock_type::now();
+        for (long r = 0; r < batch_reps; ++r) {
+          // Vary theta per rep for the reason `perturbed()` documents -- but in
+          // `beta2`, NOT in the parameter being differentiated. Moving the base
+          // `stem_b` per rep moves it off `stem_b_spline_`, which is a rebuild the
+          // model genuinely owes and which showed up as 0.05 rebuilds/obs (one per
+          // rep over 20 observations) while reading like a leftover of the bug
+          // this arm exists to measure. `beta2` owns no spline.
+          theta[phylloptim::gradient::par_beta2] =
+              kBase.v[7] * (1.0 + double(r) * 1e-12);
+          const std::vector<phylloptim::gradient::Result> g =
+              phylloptim::gradient::batch(l, theta, 1, obs, false, pars, 1, s);
+          sink += g[0].grad[0];
+        }
+        const double us =
+            us_per(t0, clock_type::now(), long(n_obs) * batch_reps);
+        best = std::min(best, us);
+        builds = l.stem_curve_builds_ - before;
+      }
+      printf("%-32s %10.2f %12.2f\n", arm.label, best,
+             double(builds) / double(long(n_obs) * batch_reps));
+    }
+    printf(
+        "\nstem_b's per-observation cost used to carry one rebuild that no\n"
+        "perturbation asked for: the end-of-observation restore went through\n"
+        "set_traits while the shortcut still had stem_b displaced, and that is\n"
+        "exactly the case set_traits is required to rebuild for. `apply()` now\n"
+        "undoes the displacement with the shortcut first, so the restore has\n"
+        "nothing to rebuild -- rebuilds/obs above is the assertion. #74.\n");
+  }
+
   printf(
       "\nThe four that rebuild a spline are stem_b, stem_c, root_b and root_c --\n"
       "and they are exactly the traits for which the argmax-mediated term is\n"

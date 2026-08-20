@@ -72,8 +72,16 @@ tests/cpp/                     plain-C++ suite, no R, no framework
 tests/cpp/root_network.hpp     the suite's root-architecture fixture: the two
                                ex-Leaf-default beta_R_* constants, in ONE place
                                because the golden file's bit-exactness depends on them
-tests/cpp/golden/              bit-exact regression baseline, 576 operating points
-                               -- one 288-point state grid at 25 and 40 C
+tests/cpp/golden/              two bit-exact regression baselines.
+                               operating_points.tsv: 576 solved points -- one
+                               288-point state grid at 25 and 40 C. Says WHETHER
+                               anything moved.
+                               primitives.tsv: 544 values from the functions the
+                               solve calls, in five call-tree TIERS. Says WHICH
+                               ONE moved -- the lowest tier that changed is the
+                               cause. #64
+tests/cpp/test_primitives.cpp  the reader for the second of those. ⚠️ Read its
+                               per-tier table before anything else on a failure
 tests/cpp/bench_solve.cpp      timing harness for the collar solve (hazard 5)
 tests/cpp/bench_gradient.cpp   timing harness for a TRAIT GRADIENT: the IFT
                                composite against differencing the solve, with
@@ -94,7 +102,12 @@ tests/testthat/gradient_golden.tsv
                                divides the solver floor by the step, `R_d_25`'s
                                step is the smallest here, and `profit` is the
                                smallest magnitude carrying that same floor
-tests/validate/                R scripts comparing against plant (needs R)
+tests/validate/                the SCM regression pair (needs R and a plant
+                               build), plus tsv_to_hex.c, which test-golden.R's
+                               regeneration recipe pipes through. The two
+                               compare-against-plant harnesses are GONE (#64):
+                               plant consumes these headers, so there is no
+                               independent implementation left to compare with
 CMakeLists.txt                 the no-R build: C++ and Python consumers, and the
                                thing that makes "does not need R" runnable
 ```
@@ -102,8 +115,9 @@ CMakeLists.txt                 the no-R build: C++ and Python consumers, and the
 ## Build and test
 
 ```sh
-make -C tests/cpp            # builds and runs both suites
-make -C tests/cpp golden     # regenerate the golden file -- see the warning below
+make -C tests/cpp            # builds and runs all three suites
+make -C tests/cpp golden             # regenerate operating_points.tsv -- see below
+make -C tests/cpp primitives-golden  # regenerate primitives.tsv -- same warning
 make -C tests/cpp bench      # time the solve AND a trait gradient (not in `make all`)
 
 # compare the golden file with a tolerance instead of bit-exactly. Correct on a
@@ -837,10 +851,29 @@ the per-cause split and the tolerance bands go in the first PR comment — see
 
 ## Validating against plant
 
-`tests/validate/` holds the harnesses. Read the header of
-`compare_with_plant.R` before using them — it records what has been ruled out.
+⚠️ **There is no longer a harness that compares against plant, and there cannot be
+one.** plant has no independent copy of this model — it consumes these headers — so
+"compare against plant" is this package compared with itself. `compare_with_plant.R`
+and `compare_primitives.R` are **deleted** (#64); what they established is PLAN
+decision 1, and it cannot be re-run. If you find yourself wanting them, what you
+actually want is one of:
 
-Three things that will waste your time otherwise:
+- **`tests/cpp/test_primitives.cpp`** for *where* a difference comes from. 544
+  primitive values in five tiers, in call-tree order, against
+  `tests/cpp/golden/primitives.tsv`. **The lowest tier that moved is the cause and the
+  tiers above it are consequences** — that is the whole point of it, and it is what
+  `operating_points.tsv` cannot tell you. Read its tier table before anything else.
+  Regenerate with `make -C tests/cpp primitives-golden`, on macOS/arm64, deliberately.
+- **`tests/cpp/golden/operating_points.tsv`** for *whether* anything moved.
+- **`tests/validate/scm_regression.R` + `scm_compare.R`** for the SCM half, which is
+  the one comparison a bit-identical leaf solve does not settle.
+
+⚠️ **`tsv_to_hex.c` is live, not leftover.** `test-golden.R`'s regeneration recipe
+pipes through it, because R's decimal parser is not correctly rounded — see PLAN
+decision 1 before writing any R-side expected value.
+
+Three things that will waste your time otherwise, if you do run anything against a
+plant build:
 
 - **Build the reference plant from the commit this package was extracted from**, not
   whatever is installed. The installed plant may be a different branch; during this

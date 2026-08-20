@@ -542,6 +542,53 @@ an established external implementation to check against — and #3 needs it
 first-class. `plantecophys` also solves the coupled system analytically rather than
 by root-finding, which is worth considering on its own merits. Found doing #6.
 
+## 64. `tests/validate/` — DONE, split between two of its three options
+
+Three files were dead: `primitives.cpp` did not compile (two interface changes
+behind), and the two `compare_*.R` scripts built a `Leaf` with constructor arguments
+#33 removed. Nothing built any of them — not the Makefile, which names its sources
+explicitly, not CMake, not `R CMD check`, not CI — which is why they rotted in
+silence, and which is the part of the issue that generalises.
+
+**The issue's three options were not a choice between wholes.** It split:
+
+- **Option 2 for `primitives.cpp`**, revived as `tests/cpp/test_primitives.cpp`
+  against a checked-in `golden/primitives.tsv` — 544 values in five tiers, in
+  call-tree order, bit-exact on macOS/arm64 and per-**tier** tolerances elsewhere.
+- **Option 1 for the two `compare_*.R` scripts**: deleted. Their reference build no
+  longer exists — plant has no independent copy of this model, it consumes these
+  headers, so "compare against plant" had become comparing this package with itself.
+  What they established is in decision 1 above and cannot be re-run.
+
+**What the tiers buy, which is the whole justification.** `operating_points.tsv`
+detects a difference; it cannot attribute one. #92 proved that twice — the knot grid
+had dropped its last knot for years and the golden file recorded the consequences as
+correct, and then the fix's 3496 moved cells could not be split into "knot
+displacement" versus "added knot" without a standalone primitive program, written in a
+scratch directory and thrown away, twice. Demonstrated on the revived harness: a
+1e-12 perturbation to `proportion_of_conductivity` leaves the arithmetic and
+assimilation tiers at **exactly 0**, moves vulnerability at 1e-12 and spline at
+4.2e-12. The lowest tier that moved is the cause.
+
+**The knot grid is now pinned per (b, c) pair** — `knot_grid_last_psi` sits beside
+`vulnerability_psi_max` for nine pairs, so #92's defect is a row in a file rather
+than a test nobody thought to write.
+
+⚠️ **One simplification worth not undoing.** The original emitted every value twice,
+decimal and C99 hex, because its counterpart read the file into **R**, whose decimal
+parser is not correctly rounded (decision 1). Both sides are C++ now and the reader is
+`strtod`, so `%.17g` round-trips exactly and the hex column is redundant.
+
+⚠️ **The enforcement is the deliverable, not the harness.** A revived file in no build
+is the same defect with a newer date on it, so `test_primitives` is named in
+`tests/cpp/Makefile` (`all` and `build`), in `CMakeLists.txt` as the `leaf_primitives`
+ctest, and reached by `cpp-tests.yml` through `make` on all three platforms. Adding a
+program under `tests/cpp/` means editing all three.
+
+**Kept:** `scm_regression.R`, `scm_compare.R` and `tsv_to_hex.c`. The first two are
+the SCM half of decision 1 and are still runnable in principle; `tsv_to_hex.c` is
+live — `test-golden.R`'s regeneration recipe pipes through it.
+
 ## 41. `R_d` — DONE, and the shape mattered more than the scale
 
 The original complaint: `rd_to_vcmax_ratio_` was a fixed 0.015 and unreachable from
@@ -586,11 +633,13 @@ happened here and produced a plausible file describing the wrong package.
 ⚠️ **The golden file was blind to all of this** — 288 points at one temperature, where
 every reference value is defined. It now carries a 40 °C block as well.
 
-**Still open:** `compare_with_plant.R`, against plant's own independent `Leaf`, does
-not run — item 64. The obstacle is not the constructor signature its header blames:
-against plant at 76df7169 both `Leaf()` and `set_physiology()` work, and what stops it
-is `root_collar_psi_` versus `opt_root_psi_` (the #25 rename, which flipped the sign)
-on top of results deliberately moved by #15, 11a, 11b, #25, #77 and #84.
+**Closed, by deletion — see item 64.** `compare_with_plant.R` never ran again, and
+the reason it could not be repaired is worth keeping: the obstacle was never the
+constructor signature its header blamed. Against plant at 76df7169 both `Leaf()` and
+`set_physiology()` work; what stopped it was `root_collar_psi_` versus
+`opt_root_psi_` (the #25 rename, which flipped the sign) on top of results
+deliberately moved by #15, 11a, 11b, #25, #77 and #84. A harness whose reference
+build has moved six times is not a harness.
 
 ## 14. Naming, home, publication
 
@@ -640,7 +689,9 @@ ULP off for about **18% of inputs** — `"26.550866314209998"` parses to
 file is written by C++ at `%.17g` and read into R; plant's values are computed
 in-process and never touch a string, so the parser perturbed one side only. Reading
 through `tests/validate/tsv_to_hex.c` gives bit-identity across all **2352** finite
-values, and `compare_primitives.R` confirms it independently on **329**.
+values, and `compare_primitives.R` confirmed it independently on **329**. That
+script is deleted (item 64); the method it encoded is `tests/cpp/test_primitives.cpp`,
+which compares against a checked-in table instead of against plant.
 
 ⚠️ **Consequence for any new R-side expected value: use C99 hex floats.** Decimal
 `%.17g` would fail for ~18% of them against a model that is exactly right.
@@ -669,9 +720,9 @@ carried at least one stale layer, and 25.73% carried three of five.** Reverting 
 one word reports **1.31e-04 and 4.75e-05** kg H₂O m⁻² s⁻¹ of phantom uptake in
 layers 2 and 3.
 
-⚠️ Several comments still describe this leak in the present tense
-(`tests/validate/compare_with_plant.R`, `tests/cpp/test_golden.cpp`). The 48 × 5
-blast radius they cite is right; the tense is not.
+⚠️ Comments in `tests/cpp/test_golden.cpp` still describe this leak in the present
+tense. The 48 × 5 blast radius they cite is right; the tense is not.
+(`compare_with_plant.R` carried the same stale tense and is deleted — item 64.)
 
 ## 3. plant consumes this package
 

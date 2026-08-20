@@ -84,14 +84,18 @@ jobs:
             echo "inc=/usr/include" >> "$GITHUB_OUTPUT"
           fi
 
-      # The golden file is compared bit-exactly on the platform that generated it
-      # (macOS/arm64) and with per-field tolerances everywhere else. This is not a
+      # BOTH golden files are compared bit-exactly on the platform that generated
+      # them (macOS/arm64) and with tolerances everywhere else. This is not a
       # loosening: libm's exp/pow are not bit-reproducible between glibc on
       # x86-64 and Apple's libm on arm64, so bit-exactness across platforms was
-      # never achievable. Measured, the fields split into two classes -- profit
-      # (the maximum) at 1.85e-6, and everything derived from the argmax at
-      # 5.53e-4, because the profit maximum is flat and displacing it goes as
-      # sqrt. See the comment above main() in tests/cpp/test_golden.cpp.
+      # never achievable. Measured, the operating-point fields split into two
+      # classes -- profit (the maximum) at 1.85e-6, and everything derived from the
+      # argmax at 5.53e-4, because the profit maximum is flat and displacing it goes
+      # as sqrt. See the comment above main() in tests/cpp/test_golden.cpp.
+      #
+      # test_primitives takes the same flag and splits per TIER instead, which is
+      # what makes it the instrument for attributing a difference rather than
+      # detecting one (#64).
       - name: Resolve golden comparison mode
         id: golden
         run: |
@@ -255,6 +259,11 @@ jobs:
       - name: Note on failure
         if: failure()
         run: |
+          echo "If test_primitives ALSO failed, read ITS tier table first: the"
+          echo "lowest tier that moved is the cause and the tiers above it are"
+          echo "consequences. arithmetic moving means libm or a temperature curve;"
+          echo "iterative moving alone means an iteration count differs."
+          echo
           echo "If only the golden test failed, read the worst-relative-difference"
           echo "line it printed before doing anything else."
           echo

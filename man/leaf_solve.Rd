@@ -83,6 +83,20 @@ the package: `gc` here is not from a fitted conductance model, it is what
 falls out of maximising profit over an explicit hydraulic path, and `g1_eff`
 reports the Medlyn `g1` that would have been needed to reproduce it.
 }
+\section{`leaf_temp` is a driver, `Tleaf` is an output}{
+
+Two temperature columns come back and they are not the same thing.
+`leaf_temp` is the driver you supplied. `Tleaf` is the temperature the
+reported fluxes were computed at.
+
+By default they are equal, because the default path takes leaf temperature as
+prescribed. With the Penman-Monteith energy balance on
+(`$use_energy_balance_ <- TRUE`) they are not: `leaf_temp` is then **air**
+temperature, and `Tleaf` is solved per operating point from the leaf's own
+transpiration — so it rises as the stomata close, and it is the column to plot
+assimilation against.
+}
+
 \section{Performance, and what the lever actually is}{
 
 About **20 µs per row**, of which the model is **2.8 µs**. The rest is the R

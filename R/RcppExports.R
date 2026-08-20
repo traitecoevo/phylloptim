@@ -397,6 +397,14 @@ Leaf__count__set <- function(obj_, value) {
     invisible(.Call('_phylloptim_Leaf__count__set', PACKAGE = 'phylloptim', obj_, value))
 }
 
+Leaf__Tleaf___get <- function(obj_) {
+    .Call('_phylloptim_Leaf__Tleaf___get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__Tleaf___set <- function(obj_, value) {
+    invisible(.Call('_phylloptim_Leaf__Tleaf___set', PACKAGE = 'phylloptim', obj_, value))
+}
+
 Leaf__electron_transport___get <- function(obj_) {
     .Call('_phylloptim_Leaf__electron_transport___get', PACKAGE = 'phylloptim', obj_)
 }
