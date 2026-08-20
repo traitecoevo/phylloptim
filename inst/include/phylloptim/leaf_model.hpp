@@ -3353,10 +3353,27 @@ inline void Leaf::set_leaf_states_rates_from_psi_stem(double psi_stem, double ps
   // this on all THREE branches it found; deleting the `assim_max_ < 0` exit
   // leaves two.)
   if (psi_upstream >= psi_stem){
+    // ⚠️ THE TEMPERATURE BLOCK MUST BE SEATED BEFORE ANYTHING BELOW READS IT, so
+    // these three lines stay above the assignments and in this order. `ci_` reads
+    // `gamma_`, `assim_colimited_` at the bottom of this function reads the whole
+    // block, and `set_leaf_vpd` writes a field that is both reported and read by
+    // `g1_eff()`. This branch transpires nothing, so its temperature is the E = 0
+    // one -- on the PM path the HOTTEST the leaf gets, since nothing is cooling it.
+    //
+    // ⚠️ THE BLOCK ARRIVES HOLDING THE PREVIOUS CANDIDATE'S TEMPERATURE, not the
+    // baseline: the transpiring branch below re-derives it per candidate by design.
+    // So a read here without a preceding write is order-dependent, not merely
+    // offset, and hazard 3 (the argmax must vary smoothly with inputs) is what
+    // that costs. Anything added to this branch that reads the block must sit
+    // below these lines.
+    Tleaf_ = use_energy_balance_ ? leaf_temp_from_E(0.0) : leaf_temp_;
+    if (use_energy_balance_) {
+      update_temperature_dependent_params(Tleaf_);
+      set_leaf_vpd(Tleaf_);
+    }
     ci_ = gamma_*umol_per_mol_to_Pa_;
     transpiration_ = 0;
     stom_cond_CO2_ = 0;
-    Tleaf_ = use_energy_balance_ ? leaf_temp_from_E(0.0) : leaf_temp_;
     } else{
       {
       // Transpiration is the hydraulic supply, independent of ci; compute it
