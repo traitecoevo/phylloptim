@@ -2332,6 +2332,133 @@ void test_perturb_stem_b_matches_a_rebuild() {
   }
 }
 
+// The other half of the shortcut: what it costs to STOP using it (#74).
+//
+// `set_traits()` is the way back, and it gets there by rebuilding -- which is
+// correct and, on the gradient's restore path, unnecessary. So a gradient
+// differentiating stem_b paid for a rebuild once per observation and the 24.5x
+// per-perturbation identity was worth 2.4x through the batch. `apply()` now undoes
+// the displacement with the shortcut first.
+//
+// ⚠️ COUNTED, NOT TIMED, and that is the whole design of this test. A rebuild at
+// an unchanged (stem_b, stem_c) is bit-identical to not rebuilding -- it is a pure
+// 11.9 us, invisible to the golden file, to this suite's value assertions and to
+// anything the R layer can see. `stem_curve_builds_` exists so the claim is an
+// integer instead of a stopwatch reading on a shared runner.
+void test_stem_b_shortcut_needs_no_rebuild() {
+  printf("undoing the stem_b shortcut costs no rebuild\n");
+  Drivers d;
+  std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
+  const double b0 = 3.898245;
+
+  // --- the identity itself, without the gradient in the way ------------------
+  //
+  // Bit-identity here is what makes the change free, and it is a property of
+  // `perturb_stem_b()` writing `stem_b` and nothing else: these splines ARE the
+  // ones built at the defaults, so putting stem_b back gives the object a
+  // rebuild would have produced, not an approximation to it.
+  {
+    phylloptim::Leaf undone = make_leaf(d, {2.0}, {1.0});
+    undone.find_root_collar_psi();
+    const long builds = undone.stem_curve_builds_;
+
+    undone.perturb_stem_b(b0 * 1.001);
+    undone.perturb_stem_b(b0);  // the way back, WITH the shortcut
+    undone.set_traits(96.0, 2.680147, b0, 5.870283, 2.680147, b0, 5.870283, 1.5,
+                      157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
+    ok(undone.stem_curve_builds_ == builds,
+       "set_traits after an undone displacement rebuilds nothing");
+    undone.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil,
+                          depth, d.K_s * d.theta / d.h, d.atm_vpd, d.ca,
+                          d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+    undone.find_root_collar_psi();
+
+    phylloptim::Leaf fresh = make_leaf(d, {2.0}, {1.0});
+    fresh.find_root_collar_psi();
+    ok(undone.opt_root_psi_ == fresh.opt_root_psi_,
+       "the collar is bit-identical to a rebuilt leaf");
+    ok(undone.opt_psi_stem_ == fresh.opt_psi_stem_,
+       "psi_stem is bit-identical to a rebuilt leaf");
+    ok(undone.assim_colimited_ == fresh.assim_colimited_,
+       "assimilation is bit-identical to a rebuilt leaf");
+    ok(undone.transpiration_ == fresh.transpiration_,
+       "transpiration is bit-identical to a rebuilt leaf");
+    ok(undone.profit_ == fresh.profit_,
+       "profit is bit-identical to a rebuilt leaf");
+  }
+
+  // --- and through the batch, which is where the cost was being paid ---------
+  const double kmax = d.K_s * d.theta / d.h;
+  double theta[phylloptim::gradient::n_pars] = {
+      96.0, 2.680147, b0,   5.870283, 2.680147, b0,   5.870283, 1.5,
+      157.44, 0.30,   0.7,  0.99,     7.5,      kRd25, kmax,    0.0};
+
+  phylloptim::gradient::Drivers gd;
+  gd.root_network = fixture::root_network(mrp, depth);
+  gd.PPFD = d.PPFD;
+  gd.psi_soil = psi_soil;
+  gd.soil_depth = depth;
+  gd.atm_vpd = d.atm_vpd;
+  gd.ca = d.ca;
+  gd.leaf_temp = d.leaf_temp;
+  gd.atm_o2_kpa = d.atm_o2_kpa;
+  gd.atm_kpa = d.atm_kpa;
+  const std::vector<phylloptim::gradient::Drivers> obs{gd, gd, gd};
+
+  // Three parameter sets, and the middle one is the one that would have been
+  // missed by a fix written only for the end-of-loop restore: `stem_b` FOLLOWED by
+  // a parameter that owns no vulnerability curve leaves the displacement to be
+  // undone by that parameter's own first perturbation instead.
+  struct Case {
+    const char *name;
+    std::vector<int> pars;
+  };
+  const Case cases[] = {
+      {"stem_b", {phylloptim::gradient::par_stem_b}},
+      {"stem_b then vcmax_25",
+       {phylloptim::gradient::par_stem_b, phylloptim::gradient::par_vcmax_25}},
+      {"vcmax_25 then stem_b",
+       {phylloptim::gradient::par_vcmax_25, phylloptim::gradient::par_stem_b}}};
+
+  for (const Case &c : cases) {
+    phylloptim::gradient::Settings s;  // fast_stem_curve defaults true
+    phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
+    l.find_root_collar_psi();
+    const long builds = l.stem_curve_builds_;
+    const std::vector<phylloptim::gradient::Result> g =
+        phylloptim::gradient::batch(l, theta, 1, obs, false, c.pars.data(),
+                                    c.pars.size(), s);
+    const std::string what = std::string(" for pars = ") + c.name;
+    ok(g.size() == 3 &&
+           g[0].status == phylloptim::gradient::Status::Interior,
+       "the batch solved three interior observations" + what);
+    ok(l.stem_curve_builds_ == builds,
+       "three observations rebuild the stem curve zero times" + what);
+    // Hazard 8, at the one place a shortcut could leave it violated: the batch
+    // must not hand back a leaf quietly running on a rescaled curve.
+    ok(l.stem_b == l.stem_b_spline_,
+       "the batch leaves the leaf undisplaced" + what);
+  }
+
+  // The control, which is what stops the three counts above from being zero
+  // because nothing ran: with the shortcut off, the same work rebuilds. Two
+  // rebuilds per side per observation, plus the restore's own.
+  {
+    phylloptim::gradient::Settings s;
+    s.fast_stem_curve = false;
+    const int pars[1] = {phylloptim::gradient::par_stem_b};
+    phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
+    l.find_root_collar_psi();
+    const long builds = l.stem_curve_builds_;
+    phylloptim::gradient::batch(l, theta, 1, obs, false, pars, 1, s);
+    ok(l.stem_curve_builds_ > builds,
+       "with fast_stem_curve off, the same batch does rebuild");
+    printf("  stem curve builds over 3 observations of d/dstem_b:"
+           " fast 0, slow %ld\n",
+           l.stem_curve_builds_ - builds);
+  }
+}
+
 void test_set_traits_matches_a_fresh_leaf() {
   printf("set_traits is indistinguishable from constructing afresh\n");
   Drivers d;
@@ -2811,6 +2938,7 @@ int main() {
   test_rd_temperature_response();
   test_set_traits_matches_a_fresh_leaf();
   test_perturb_stem_b_matches_a_rebuild();
+  test_stem_b_shortcut_needs_no_rebuild();
   test_water_mass_conversions_are_reciprocal();
   test_gas_constant_and_arrhenius_reference_point();
   test_knot_grid_reaches_its_intended_domain();

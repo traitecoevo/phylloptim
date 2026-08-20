@@ -1,5 +1,39 @@
 # phylloptim 0.4.0
 
+## The `stem_b` shortcut keeps its saving through the batch (#74)
+
+`perturb_stem_b()` exists so that a gradient in `stem_b` needs no vulnerability-spline
+rebuild — 24.5× on that perturbation. Through `leaf_gradient_batch()` it was worth
+3.4× less than that, because the shortcut leaves `stem_b` displaced from
+`stem_b_spline_` and the restore at the end of each observation goes through
+`set_traits()`, whose third rebuild clause exists precisely to catch that state. So
+every observation paid for one rebuild that no perturbation had asked for.
+
+`gradient::apply()` now undoes the displacement with the shortcut before restoring,
+after which `set_traits()` has nothing to rebuild. Measured per observation, three
+observations of `d/dstem_b`, interleaved:
+
+| | µs/observation | stem-curve rebuilds/observation |
+|---|---:|---:|
+| before | 26.5 | 1.00 |
+| after | 7.8 | **0.00** |
+| `vcmax_25`, the no-spline floor | 7.9 | 0.00 |
+
+**Bit-identical, and now measured rather than argued.** `gradient_golden.tsv` compares
+at a worst relative difference of exactly 0, and the C++ golden grid is unmoved. The
+reason is that `perturb_stem_b()` writes `stem_b` and nothing else — the splines are
+the ones built at `stem_b_spline_`, not a rescaled copy, so putting `stem_b` back
+returns the object a rebuild would have produced.
+
+⚠️ **`stem_c` is unchanged and deliberately so.** It has no homogeneity identity, its
+3.00 rebuilds per observation are genuine, and only the restore is removable there.
+
+⚠️ **The two figures are different measurements**, which is why this was quoted wrong:
+24.5× is per *perturbation* in C++, and what a fit pays is per *observation*. Both are
+now printed side by side by `bench_gradient`, and `Leaf::stem_curve_builds_` — a
+counter, not state — makes "no rebuild" an integer the test suite asserts rather than
+a stopwatch reading.
+
 ## Conductance to water, and a settable diffusion ratio (#50, #56)
 
 `gs_H2O` reports stomatal conductance to **water vapour**, alongside the `stom_cond_CO2_`
