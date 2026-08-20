@@ -1701,7 +1701,8 @@ inline double Leaf::find_root_psi(double wettest_soil_layer, const std::vector<d
       // magnitudes the wettest layer is the smallest suction (#25).
       return util::uniroot_smooth(target, wettest_soil_layer, psi_crit, 1e-4, ci_niter);
     } catch (const std::exception& e) {
-      util::stop("find_root_psi(find_root_crit=1) failed: " + std::string(e.what()) +
+      util::stop_infeasible("collar_bracket",
+                 "find_root_psi(find_root_crit=1) failed: " + std::string(e.what()) +
                  "; min=" + util::to_string(wettest_soil_layer) +
                  "; max=" + util::to_string(psi_crit));
     }
@@ -1713,7 +1714,8 @@ inline double Leaf::find_root_psi(double wettest_soil_layer, const std::vector<d
   try {
     return util::uniroot_smooth(target, wettest_soil_layer, psi_crit, 1e-4, ci_niter);
   } catch (const std::exception& e) {
-    util::stop("find_root_psi(find_root_crit=0) failed: " + std::string(e.what()) +
+    util::stop_infeasible("collar_bracket",
+               "find_root_psi(find_root_crit=0) failed: " + std::string(e.what()) +
                "; min=" + util::to_string(wettest_soil_layer) +
                "; max=" + util::to_string(psi_crit));
   }
@@ -1892,7 +1894,8 @@ if(assim_max_ < 0){
     Tleaf_ = use_energy_balance_ ? leaf_temp_from_E(0.0) : leaf_temp_;
 
         if(std::isnan(profit_)){
-          util::stop("Error: profit nan");
+          util::stop_infeasible("collar_solve", "profit is not finite at the shade-death "
+                                                "exit");
     }
 
     return false;
@@ -1946,7 +1949,8 @@ if(assim_max_ < 0){
       const double psi_stem_single = find_psi_stem_from_psi_root(opt_root_psi, supply_psi_soil());
 
       if (!std::isfinite(psi_stem_single)) {
-        util::stop("Error: non-finite psi_stem_single in collapsed-root interval; "
+        util::stop_infeasible("collar_solve",
+                   "non-finite psi_stem_single in collapsed-root interval; "
                    "opt_root_psi=" + util::to_string(opt_root_psi) +
                    "; bound_a=" + util::to_string(bound_a) +
                    "; bound_b=" + util::to_string(bound_b) +
@@ -1963,7 +1967,8 @@ if(assim_max_ < 0){
       operating_point_kind_ = OperatingPointKind::Determined;
 
       if (!std::isfinite(profit_)) {
-        util::stop("Error: non-finite profit in collapsed-root interval; "
+        util::stop_infeasible("collar_solve",
+                   "non-finite profit in collapsed-root interval; "
                    "opt_psi_stem_=" + util::to_string(opt_psi_stem_) +
                    "; opt_root_psi_=" + util::to_string(opt_root_psi_) +
                    "; bound_a=" + util::to_string(bound_a) +
@@ -2170,7 +2175,7 @@ inline void Leaf::find_root_collar_psi(){
     profit_ = profit_psi_stem_TF(opt_psi_stem_, opt_root_psi);
 
     if(!std::isfinite(profit_)){
-        util::stop("Error: non-finite profit; opt_psi_stem_=" + util::to_string(opt_psi_stem_) +
+        util::stop_infeasible("collar_solve", "non-finite profit; opt_psi_stem_=" + util::to_string(opt_psi_stem_) +
              "; opt_root_psi_=" + util::to_string(opt_root_psi_) +
              "; bound_a=" + util::to_string(bound_a) +
              "; bound_b=" + util::to_string(bound_b) +
@@ -2216,7 +2221,8 @@ inline double Leaf::profit_at_collar_psi(double target_opt_root_psi,
     operating_point_kind_ = OperatingPointKind::Prescribed;
 
     if(!std::isfinite(profit_)){
-        util::stop("Error: non-finite profit in evaluate_root_collar_psi; "
+        util::stop_infeasible("collar_solve",
+             "non-finite profit in evaluate_root_collar_psi; "
              "target=" + util::to_string(target_opt_root_psi) +
              "; opt_root_psi=" + util::to_string(opt_root_psi) +
              "; bound_a=" + util::to_string(bound_a) +
@@ -2753,7 +2759,8 @@ inline void stem_curve_out_of_domain(
     const bool below = v < spline.min();
     const double lo = scale * spline.min();
     const double hi = scale * spline.max();
-    util::stop(std::string("Leaf hydraulics: ") + spline_name +
+    util::stop_infeasible("stem_curve_domain",
+               std::string("Leaf hydraulics: ") + spline_name +
                " evaluated outside its domain: " + arg_name + " = " +
                util::format_double(u) + " lies " +
                util::format_double(below ? lo - u : u - hi) + " beyond the " +
@@ -3064,7 +3071,7 @@ inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
       ci_at_compensation_point_ = true;
       return ci_ = lo;
     }
-    util::stop("psi_stem_to_ci failed: " + std::string(e.what()) +
+    util::stop_infeasible("ci_solve", "psi_stem_to_ci failed: " + std::string(e.what()) +
                "; min=" + util::to_string(gamma_ * umol_per_mol_to_Pa_) +
                "; max=" + util::to_string(ca_) +
                "; psi_stem=" + util::to_string(psi_stem) +
@@ -3356,7 +3363,7 @@ inline void Leaf::solve_medlyn_ci_numerical(){
     try {
       ci_ = util::uniroot(target, ci_peak, hi, ci_abs_tol, ci_niter);
     } catch (const std::exception& e) {
-      util::stop("solve_medlyn_ci_numerical failed: " + std::string(e.what()) +
+      util::stop_infeasible("ci_solve", "solve_medlyn_ci_numerical failed: " + std::string(e.what()) +
                  "; ci_peak=" + util::to_string(ci_peak) +
                  "; max=" + util::to_string(hi));
     }

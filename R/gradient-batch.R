@@ -332,10 +332,13 @@ leaf_gradient_batch <- function(batch,
   dpsi_dtheta <- .gradient_dpsi_dtheta_batch(dpsi_dtheta, pars, batch$n,
                                              !is.null(psi))
 
-  res <- gradient_batch_run(batch$leaf, batch$drivers, theta,
+  # The classification (#57). One crossing, so one wrapper -- and the batch already
+  # reports per-row `status` for the failures it isolates itself, so this catches
+  # only what takes the whole call down.
+  res <- with_phylloptim_conditions(gradient_batch_run(batch$leaf, batch$drivers, theta,
                             match(pars, par_names) - 1L, step,
                             stationarity_tol, method, fast_stem_curve,
-                            psi, dpsi_dtheta)
+                            psi, dpsi_dtheta))
 
   dimnames(res$gradient) <- list(NULL, pars, .gradient_output_names())
   dimnames(res$value) <- list(NULL, .gradient_output_names())

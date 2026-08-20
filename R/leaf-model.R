@@ -928,6 +928,13 @@ leaf_solve <- function(psi_soil,
   outputs <- matrix(NA_real_, nrow = n, ncol = length(.operating_point_names),
                     dimnames = list(NULL, .operating_point_names))
 
+  # ⚠️ ONE tryCatch PER CALL, OUTSIDE THE LOOP, not one per row. The classification
+  # (#57) has to reach the caller, and the per-row cost of reaching it has to stay
+  # zero: `test-cost.R` guards what this function spends per row, and the issue's own
+  # measurement of a caller's per-row tryCatch was ~2 us. This still fails on the
+  # first infeasible row -- per-row isolation is the other half of #57 and is not
+  # built; see with_phylloptim_conditions() for why not yet.
+  with_phylloptim_conditions(
   for (i in seq_len(n)) {
     l <- if (reuse) shared else leaf_model(traits, control, supply)
     set_drivers(l,
@@ -945,7 +952,7 @@ leaf_solve <- function(psi_soil,
                 atm_kpa = scalars$atm_kpa[[i]])
     l$find_root_collar_psi()
     outputs[i, ] <- l$operating_point_values()
-  }
+  })
 
   # The drivers, then the outputs. psi_soil is reported as the wettest layer
   # when there are several, with the layer count alongside, so the column stays

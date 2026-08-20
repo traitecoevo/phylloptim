@@ -139,7 +139,7 @@ public:
   void uptake_from(double T_collar, double T_soil,
                    std::vector<double>& soil_consumption, double& E_up) const {
     if (!std::isfinite(T_collar)) {
-      util::stop("SinglePotential::uptake invalid input; T_collar=" +
+      util::stop_infeasible("uptake", "SinglePotential::uptake invalid input; T_collar=" +
                  util::to_string(T_collar));
     }
     if (!(resistance_ > 0.0)) {
@@ -152,7 +152,8 @@ public:
     }
     E_up = E_i * kg_per_mol_h2o;
     if (!std::isfinite(E_up)) {
-      util::stop("SinglePotential::uptake non-finite E_up; T_collar=" +
+      util::stop_infeasible("uptake",
+          "SinglePotential::uptake non-finite E_up; T_collar=" +
                  util::to_string(T_collar));
     }
   }
