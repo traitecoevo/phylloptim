@@ -460,6 +460,505 @@ int compare(Tolerance tol) {
   return 1;
 }
 
+// ===========================================================================
+// The psi_stem optimiser fixture (golden/psi_stem_optima.tsv)
+// ---------------------------------------------------------------------------
+// WHY A SECOND FILE. `operating_points.tsv` above solves with
+// `find_root_collar_psi()` and nothing else, so it is blind BY CONSTRUCTION to
+// the three `optimise_psi_stem_*` entry points -- and so is the R suite, whose
+// 112 test_that blocks call none of them. Every existing C++ test that touches
+// them asserts a RELATION (a first-order condition, a monotonicity, a thrown
+// message) at spot-checked settings; not one records a number. So today it is
+// possible to detect that a refactor broke a relation, and impossible to say
+// what it changed.
+//
+// ⚠️ THIS FILE RECORDS TODAY'S BEHAVIOUR, INCLUDING ITS KNOWN DEFECTS, ON
+// PURPOSE. Do not read a row as a statement about what the model SHOULD do.
+// Specifically recorded here as-is:
+//   * three different degenerate conventions -- `optimise_psi_stem_Sperry`
+//     writes profit_ = 0 and leaves ci_/assim_/hydraulic_cost_ stale,
+//     `_TF` evaluates the real objective at the closed point, `_ProfitMax`
+//     zeroes seven fields;
+//   * `hydraulic_cost_` in CARBON units after `_TF` and CONDUCTANCE units after
+//     `_Sperry`, and STALE after `_ProfitMax`, which does not write it;
+//   * `lambda_` as an input to `_Sperry` and an output of `_ProfitMax` (#114).
+//
+// TWO PASSES, and the second is the one the file exists for. Pass "fresh"
+// constructs a Leaf per row, which makes it reproducible and blind to stale
+// state -- the same trade the grid above makes. Pass "reuse" drives ONE Leaf
+// through a fixed sequence of rows, poisoning every stale-prone output first, so
+// a value that survives is provably not written by the path under test. Four of
+// the divergences above are stale-state bugs that pass "fresh" cannot see.
+//
+// The two axes that make a different MODEL rather than a different driver:
+//   solver    which objective, and which variable it optimises. `collar`
+//             optimises the COLLAR potential with the root path in series;
+//             the other three optimise psi_stem with upstream pinned at
+//             psi_soil, ignoring that path -- which is what their own refusal
+//             message means by "non-root-based". Measured 2026-08-22: these are
+//             different problems, and the gap does not close as the root
+//             resistance goes to zero.
+//   topology  single-potential supply, or a multi-layer profile at 1 or 3
+//             layers. The three psi_stem solvers refuse 3 layers; the refusal
+//             is RECORDED rather than skipped, so a change that lifts it shows
+//             up as a row that stopped throwing.
+
+const char *kOptimaPath = "golden/psi_stem_optima.tsv";
+
+// A value no solve should ever produce, written into every stale-prone output
+// before each solve in the reuse pass. If it comes back, the path under test did
+// not write that field.
+const double kPoison = -12345.0;
+
+// Sperry's prescribed marginal water cost. Fixed rather than taken from a prior
+// ProfitMax solve: an ordering dependence is exactly what this file is for
+// detecting, not something to bake into it.
+const double kLambdaPrescribed = 30.0;
+
+enum class Solver { TF, Sperry, ProfitMax, Collar };
+enum class Topology { Single, Multi1, Multi3 };
+
+const char *solver_name(Solver s) {
+  switch (s) {
+    case Solver::TF:        return "TF";
+    case Solver::Sperry:    return "Sperry";
+    case Solver::ProfitMax: return "ProfitMax";
+    case Solver::Collar:    return "collar";
+  }
+  return "unknown";
+}
+
+const char *topology_name(Topology t) {
+  switch (t) {
+    case Topology::Single: return "single";
+    case Topology::Multi1: return "multi1";
+    case Topology::Multi3: return "multi3";
+  }
+  return "unknown";
+}
+
+int topology_layers(Topology t) {
+  switch (t) {
+    case Topology::Single: return 1;
+    case Topology::Multi1: return 1;
+    case Topology::Multi3: return 3;
+  }
+  return 0;
+}
+
+struct OptRow {
+  // inputs
+  Solver solver;
+  Topology topology;
+  double psi_soil, ppfd, leaf_temp;
+  bool energy_balance, thermal_cost;
+  bool reuse_pass;
+  // what happened
+  const char *status; // "ok" or "threw"
+  const char *kind;   // operating_point_kind_name
+  // outputs
+  double opt_psi_stem, opt_root_psi, profit, ci, assim, transpiration, gc,
+      hydraulic_cost, lambda, tleaf, carbon_gain, hydraulic_cost_norm,
+      thermal_cost_out;
+};
+
+// The single-potential path's series resistance. Positive and finite is a
+// requirement of that path, so there is no r = 0 arm to compare against.
+const double kSeriesResistance = 1.0e3;
+
+void configure_supply(phylloptim::Leaf &l, Topology t, double psi_soil,
+                      double ppfd, double leaf_temp) {
+  const int layers = topology_layers(t);
+  if (t == Topology::Single) {
+    l.set_supply_single(0.0);
+    phylloptim::RootNetwork rn;
+    rn.r_R_V_sum = std::vector<double>{kSeriesResistance};
+    rn.r_R_H_min = std::vector<double>{0.0};
+    rn.r_R_V = std::vector<double>{kSeriesResistance};
+    rn.c_r_V = std::vector<double>{0.0};
+    rn.c_r_H = std::vector<double>{0.0};
+    l.set_physiology(rn, ppfd, {psi_soil}, {1.0}, kKs * kTheta / kH, 2.0, kCa,
+                     leaf_temp, kO2, kPatm);
+    return;
+  }
+  l.set_supply_multilayer();
+  std::vector<double> ps(layers), depth(layers), root(layers);
+  for (int i = 0; i < layers; ++i) {
+    ps[i] = psi_soil + 0.25 * i;
+    depth[i] = 1.0 * (i + 1);
+    root[i] = 1.0 / layers / kAreaLeaf;
+  }
+  l.set_physiology(fixture::root_network(root, depth), ppfd, ps, depth,
+                   kKs * kTheta / kH, 2.0, kCa, leaf_temp, kO2, kPatm);
+}
+
+void poison(phylloptim::Leaf &l) {
+  l.ci_ = kPoison;
+  l.assim_colimited_ = kPoison;
+  l.transpiration_ = kPoison;
+  l.stom_cond_CO2_ = kPoison;
+  l.hydraulic_cost_ = kPoison;
+  l.opt_psi_stem_ = kPoison;
+  l.profit_ = kPoison;
+  l.carbon_gain_ = kPoison;
+  l.hydraulic_cost_norm_ = kPoison;
+  l.thermal_cost_ = kPoison;
+}
+
+void read_outputs(const phylloptim::Leaf &l, OptRow &r) {
+  r.kind = phylloptim::Leaf::operating_point_kind_name(l.operating_point_kind());
+  r.opt_psi_stem = l.opt_psi_stem_;
+  r.opt_root_psi = l.opt_root_psi_;
+  r.profit = l.profit_;
+  r.ci = l.ci_;
+  r.assim = l.assim_colimited_;
+  r.transpiration = l.transpiration_;
+  r.gc = l.stom_cond_CO2_;
+  r.hydraulic_cost = l.hydraulic_cost_;
+  r.lambda = l.lambda_;
+  r.tleaf = l.Tleaf_;
+  r.carbon_gain = l.carbon_gain_;
+  r.hydraulic_cost_norm = l.hydraulic_cost_norm_;
+  r.thermal_cost_out = l.thermal_cost_;
+}
+
+void blank_outputs(OptRow &r) {
+  const double n = std::numeric_limits<double>::quiet_NaN();
+  r.kind = "-";
+  r.opt_psi_stem = r.opt_root_psi = r.profit = r.ci = r.assim = n;
+  r.transpiration = r.gc = r.hydraulic_cost = r.lambda = r.tleaf = n;
+  r.carbon_gain = r.hydraulic_cost_norm = r.thermal_cost_out = n;
+}
+
+// Run one solver on an already-configured leaf. Separated from configuration so
+// the reuse pass can drive one Leaf through many rows.
+void dispatch(phylloptim::Leaf &l, Solver s) {
+  switch (s) {
+    case Solver::TF:        l.optimise_psi_stem_TF();        break;
+    case Solver::Sperry:    l.lambda_ = kLambdaPrescribed;
+                            l.optimise_psi_stem_Sperry();    break;
+    case Solver::ProfitMax: l.optimise_psi_stem_ProfitMax(); break;
+    case Solver::Collar:    l.find_root_collar_psi();        break;
+  }
+}
+
+OptRow solve_one(Solver s, Topology t, double psi_soil, double ppfd,
+                 double leaf_temp, bool eb, bool tc) {
+  OptRow r{s, t, psi_soil, ppfd, leaf_temp, eb, tc, false, "ok", "-",
+           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+  phylloptim::Leaf l;
+  l.setup_transpiration(100);
+  l.setup_root_vulnerability(100);
+  l.use_energy_balance_ = eb;
+  l.use_thermal_cost_ = tc;
+  try {
+    configure_supply(l, t, psi_soil, ppfd, leaf_temp);
+    dispatch(l, s);
+  } catch (...) {
+    r.status = "threw";
+    blank_outputs(r);
+    return r;
+  }
+  read_outputs(l, r);
+  return r;
+}
+
+const double kOptPsiSoils[] = {0.5, 1.0, 2.0, 3.0, 4.0, 6.0};
+const double kOptTemps[] = {25.0, 40.0, 50.0};
+const double kOptPPFDs[] = {0.0, 1500.0};
+const Solver kSolvers[] = {Solver::TF, Solver::Sperry, Solver::ProfitMax,
+                           Solver::Collar};
+const Topology kTopologies[] = {Topology::Single, Topology::Multi1,
+                                Topology::Multi3};
+
+// Pass "reuse" drives ONE Leaf per (topology, gates) through a reduced driver
+// set, in a FIXED order, poisoning the outputs before each solve. The driver set
+// is reduced because staleness does not need the full cross -- it needs a wet
+// row, a dry row, a shut row and a hot row, which is what these three potentials
+// and two temperatures give.
+const double kReusePsiSoils[] = {0.5, 3.0, 6.0};
+const double kReuseTemps[] = {25.0, 50.0};
+
+std::vector<OptRow> run_optima_grid() {
+  std::vector<OptRow> rows;
+
+  // --- pass "fresh": a new Leaf per row -----------------------------------
+  for (Topology t : kTopologies)
+    for (bool eb : {false, true})
+      for (bool tc : {false, true})
+        for (double ps : kOptPsiSoils)
+          for (double T : kOptTemps)
+            for (double ppfd : kOptPPFDs)
+              for (Solver s : kSolvers) {
+                rows.push_back(solve_one(s, t, ps, ppfd, T, eb, tc));
+              }
+
+  // --- pass "reuse": one Leaf, poisoned between solves ---------------------
+  for (Topology t : kTopologies)
+    for (bool eb : {false, true})
+      for (bool tc : {false, true}) {
+        phylloptim::Leaf l;
+        l.setup_transpiration(100);
+        l.setup_root_vulnerability(100);
+        l.use_energy_balance_ = eb;
+        l.use_thermal_cost_ = tc;
+        for (double ps : kReusePsiSoils)
+          for (double T : kReuseTemps)
+            for (double ppfd : kOptPPFDs)
+              for (Solver s : kSolvers) {
+                OptRow r{s,  t,  ps, ppfd, T, eb, tc, true, "ok", "-",
+                         0,  0,  0,  0,    0, 0,  0,  0,    0,    0, 0, 0, 0};
+                try {
+                  configure_supply(l, t, ps, ppfd, T);
+                  poison(l);
+                  dispatch(l, s);
+                } catch (...) {
+                  r.status = "threw";
+                  blank_outputs(r);
+                  rows.push_back(r);
+                  continue;
+                }
+                read_outputs(l, r);
+                rows.push_back(r);
+              }
+      }
+  return rows;
+}
+
+const char *kOptimaHeader =
+    "pass\tsolver\ttopology\tpsi_soil\tppfd\tleaf_temp\teb\ttc\tstatus\tkind\t"
+    "opt_psi_stem\topt_root_psi\tprofit\tci\tassim\ttranspiration\tgc\t"
+    "hydraulic_cost\tlambda\ttleaf\tcarbon_gain\thydraulic_cost_norm\t"
+    "thermal_cost\n";
+
+void write_opt_row(FILE *f, const OptRow &r) {
+  fprintf(f, "%s\t%s\t%s\t%.17g\t%.17g\t%.17g\t%d\t%d\t%s\t%s",
+          r.reuse_pass ? "reuse" : "fresh", solver_name(r.solver),
+          topology_name(r.topology), r.psi_soil, r.ppfd, r.leaf_temp,
+          r.energy_balance ? 1 : 0, r.thermal_cost ? 1 : 0, r.status, r.kind);
+  for (double v : {r.opt_psi_stem, r.opt_root_psi, r.profit, r.ci, r.assim,
+                   r.transpiration, r.gc, r.hydraulic_cost, r.lambda, r.tleaf,
+                   r.carbon_gain, r.hydraulic_cost_norm, r.thermal_cost_out}) {
+    fprintf(f, "\t%.17g", v);
+  }
+  fprintf(f, "\n");
+}
+
+int generate_optima() {
+  const std::vector<OptRow> rows = run_optima_grid();
+  FILE *f = fopen(kOptimaPath, "w");
+  if (f == nullptr) {
+    fprintf(stderr, "cannot write %s (run from tests/cpp/)\n", kOptimaPath);
+    return 1;
+  }
+  fputs(kOptimaHeader, f);
+  for (const OptRow &r : rows) {
+    write_opt_row(f, r);
+  }
+  fclose(f);
+  printf("wrote %zu optimiser rows to %s\n", rows.size(), kOptimaPath);
+  return 0;
+}
+
+// The thirteen numeric outputs, in the order write_opt_row emits them.
+const char *kOptFieldNames[] = {
+    "opt_psi_stem", "opt_root_psi", "profit", "ci", "assim", "transpiration",
+    "gc", "hydraulic_cost", "lambda", "tleaf", "carbon_gain",
+    "hydraulic_cost_norm", "thermal_cost"};
+
+void opt_row_values(const OptRow &r, double *out) {
+  out[0] = r.opt_psi_stem;   out[1] = r.opt_root_psi;
+  out[2] = r.profit;         out[3] = r.ci;
+  out[4] = r.assim;          out[5] = r.transpiration;
+  out[6] = r.gc;             out[7] = r.hydraulic_cost;
+  out[8] = r.lambda;         out[9] = r.tleaf;
+  out[10] = r.carbon_gain;   out[11] = r.hydraulic_cost_norm;
+  out[12] = r.thermal_cost_out;
+}
+
+// ⚠️ THE CROSS-PLATFORM TOLERANCES HERE ARE INHERITED, NOT MEASURED. `kExact` is
+// right on the generating platform and needs no justification. The `--cross-platform`
+// arm reuses the collar grid's per-field pair, which was measured for THAT grid's
+// nine fields; this file has thirteen, three of which (`lambda`, `carbon_gain`,
+// `thermal_cost`) have no counterpart there and so no measured magnitude at all.
+// The pair is therefore a starting guess. Two things follow:
+//
+//   * the two NON-numeric columns -- `status` and `kind` -- are compared exactly
+//     in every mode, because a refusal that stopped refusing or a branch that
+//     changed is never a rounding difference, and those are the changes this file
+//     most needs to catch;
+//   * the worst observed relative difference is printed even when the comparison
+//     PASSES, so the real magnitude can be read off the first non-macOS CI run
+//     rather than bisected out of a red one.
+//
+// Replace the inherited pair with what that run reports, and say in the commit
+// which platform it came from.
+int compare_optima(Tolerance tol) {
+  FILE *f = fopen(kOptimaPath, "r");
+  if (f == nullptr) {
+    fprintf(stderr,
+            "FAIL: %s is missing. Generate it with `make psi-stem-golden` and "
+            "commit it.\n",
+            kOptimaPath);
+    return 1;
+  }
+  char line[8192];
+  if (fgets(line, sizeof line, f) == nullptr) {
+    fprintf(stderr, "FAIL: %s is empty\n", kOptimaPath);
+    fclose(f);
+    return 1;
+  }
+
+  const std::vector<OptRow> rows = run_optima_grid();
+  const bool exact_mode = tol.maximum < 0.0;
+  int failures = 0;
+  double worst_rel = 0.0;
+  std::string worst_desc;
+
+  size_t i = 0;
+  for (; i < rows.size(); ++i) {
+    if (fgets(line, sizeof line, f) == nullptr) {
+      fprintf(stderr, "FAIL: %s has only %zu rows, grid has %zu\n", kOptimaPath,
+              i, rows.size());
+      ++failures;
+      break;
+    }
+    char pass[16], solver[24], topo[16], status[16], kind[32];
+    double psi_soil, ppfd, leaf_temp;
+    int eb, tc;
+    double want[13];
+    const int n = sscanf(line,
+                         "%15s %23s %15s %lf %lf %lf %d %d %15s %31s"
+                         " %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf",
+                         pass, solver, topo, &psi_soil, &ppfd, &leaf_temp, &eb,
+                         &tc, status, kind, &want[0], &want[1], &want[2],
+                         &want[3], &want[4], &want[5], &want[6], &want[7],
+                         &want[8], &want[9], &want[10], &want[11], &want[12]);
+    if (n != 23) {
+      fprintf(stderr, "FAIL: %s line %zu has %d fields, expected 23\n",
+              kOptimaPath, i + 2, n);
+      ++failures;
+      continue;
+    }
+
+    const OptRow &r = rows[i];
+    char tag[192];
+    snprintf(tag, sizeof tag, "%s/%s/%s psi_soil=%g ppfd=%g T=%g eb=%d tc=%d",
+             r.reuse_pass ? "reuse" : "fresh", solver_name(r.solver),
+             topology_name(r.topology), r.psi_soil, r.ppfd, r.leaf_temp,
+             r.energy_balance ? 1 : 0, r.thermal_cost ? 1 : 0);
+
+    // The three non-numeric columns are compared exactly in every mode: a
+    // status or classification change is never a rounding difference.
+    if (std::strcmp(status, r.status) != 0) {
+      fprintf(stderr, "FAIL %s: status %s, expected %s\n", tag, r.status,
+              status);
+      ++failures;
+    }
+    if (std::strcmp(kind, r.kind) != 0) {
+      fprintf(stderr, "FAIL %s: kind %s, expected %s\n", tag, r.kind, kind);
+      ++failures;
+    }
+
+    double got[13];
+    opt_row_values(r, got);
+    for (int j = 0; j < 13; ++j) {
+      if (same(got[j], want[j])) {
+        continue;
+      }
+      const double rel = rel_diff(got[j], want[j]);
+      const double limit =
+          is_maximum_field(kOptFieldNames[j]) ? tol.maximum : tol.argmax;
+      if (!exact_mode && rel <= limit) {
+        if (rel > worst_rel) {
+          worst_rel = rel;
+          worst_desc = std::string(tag) + " " + kOptFieldNames[j];
+        }
+        continue;
+      }
+      if (rel > worst_rel) {
+        worst_rel = rel;
+        worst_desc = std::string(tag) + " " + kOptFieldNames[j];
+      }
+      if (failures < 20) {
+        fprintf(stderr, "FAIL %s: %s got %.17g, expected %.17g (rel %.3g)\n",
+                tag, kOptFieldNames[j], got[j], want[j], rel);
+      }
+      ++failures;
+    }
+  }
+  if (failures == 0 && fgets(line, sizeof line, f) != nullptr) {
+    fprintf(stderr, "FAIL: %s has more rows than the grid (%zu)\n", kOptimaPath,
+            rows.size());
+    ++failures;
+  }
+  fclose(f);
+
+  if (failures == 0) {
+    printf("psi_stem optima: %zu rows, all %s\n", rows.size(),
+           exact_mode ? "bit-identical"
+                      : "within cross-platform tolerance");
+    // ⚠️ PRINTED ON SUCCESS TOO, AND ON PURPOSE. The tolerances this file is
+    // compared with off the generating platform are INHERITED from the collar
+    // grid, not measured here -- see the note above `compare_optima`. Until
+    // someone reads a real number off a non-macOS/arm64 run, this line is the
+    // only place that number exists, and a summary that only appears on failure
+    // cannot supply it. Reading it off a green run is the cheap way; bisecting a
+    // red one is not.
+    if (!exact_mode && !worst_desc.empty()) {
+      printf("  worst relative difference %.3g at %s (tolerances %.1g maximum,"
+             " %.1g argmax -- INHERITED, not measured for this file)\n",
+             worst_rel, worst_desc.c_str(), tol.maximum, tol.argmax);
+    }
+    return 0;
+  }
+  fprintf(stderr, "\npsi_stem optima: %d mismatches over %zu rows.\n",
+          failures, rows.size());
+  if (!worst_desc.empty()) {
+    fprintf(stderr, "  worst relative difference %.3g at %s\n", worst_rel,
+            worst_desc.c_str());
+  }
+  if (exact_mode) {
+    fprintf(stderr,
+            "If this change was intended, regenerate with `make psi-stem-golden` "
+            "and say what moved in the commit message.\n");
+  }
+  return 1;
+}
+
+// A standing summary of what the fixture contains, printed on every run. It is
+// not an assertion -- the counts are recorded in the file itself -- but a
+// refusal count that moves is the fastest signal that a supply restriction was
+// lifted or added, and it costs nothing to look at.
+void report_optima_shape(const std::vector<OptRow> &rows) {
+  int threw = 0;
+  int by_solver_threw[4] = {0, 0, 0, 0};
+  int poisoned = 0;
+  for (const OptRow &r : rows) {
+    if (std::strcmp(r.status, "threw") == 0) {
+      ++threw;
+      by_solver_threw[static_cast<int>(r.solver)]++;
+      continue;
+    }
+    double v[13];
+    opt_row_values(r, v);
+    for (int j = 0; j < 13; ++j) {
+      if (v[j] == kPoison) {
+        ++poisoned;
+        break;
+      }
+    }
+  }
+  printf("  %zu rows: %d refused", rows.size(), threw);
+  for (int s = 0; s < 4; ++s) {
+    if (by_solver_threw[s] != 0) {
+      printf(" (%s %d)", solver_name(static_cast<Solver>(s)),
+             by_solver_threw[s]);
+    }
+  }
+  printf(", %d rows carry an unwritten field into their output\n", poisoned);
+}
+
 } // namespace
 
 // Usage:
@@ -528,6 +1027,9 @@ int main(int argc, char **argv) {
   if (argc > 1 && std::strcmp(argv[1], "--generate") == 0) {
     return generate();
   }
+  if (argc > 1 && std::strcmp(argv[1], "--generate-optima") == 0) {
+    return generate_optima();
+  }
   Tolerance tol = kExact;
   if (argc > 1) {
     if (std::strcmp(argv[1], "--cross-platform") == 0) {
@@ -535,7 +1037,8 @@ int main(int argc, char **argv) {
     } else {
       fprintf(stderr,
               "unknown argument '%s'\n"
-              "usage: test_golden [--cross-platform | --generate]\n",
+              "usage: test_golden [--cross-platform | --generate"
+              " | --generate-optima]\n",
               argv[1]);
       return 2;
     }
@@ -548,5 +1051,11 @@ int main(int argc, char **argv) {
   // which costs ~4 ms.
   const int golden_status = compare(tol);
   const int kind_status = check_operating_kinds(run_grid());
-  return (golden_status != 0 || kind_status != 0) ? 1 : 0;
+  // The psi_stem optimiser fixture is a third INDEPENDENT check, and it runs
+  // even when the two above fail: the collar grid and the optimiser grid have
+  // disjoint causes, so seeing only one of them is how a mixed diff gets
+  // misread. See the block above kOptimaPath for what this file is and is not.
+  const int optima_status = compare_optima(tol);
+  report_optima_shape(run_optima_grid());
+  return (golden_status != 0 || kind_status != 0 || optima_status != 0) ? 1 : 0;
 }
