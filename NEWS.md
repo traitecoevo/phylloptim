@@ -55,6 +55,25 @@ The equivalence the deleted entry point used to demonstrate is now asserted
 directly as an identity, which holds to 9.5e-16 rather than the 5e-3 two argmaxes
 could agree to.
 
+## `plot_model_overview()`: the whole model in one figure
+
+New exported function, and the opening figure of `vignette("the-models")`, which
+it replaces the bare profit curve with. Four zones: the profit trade-off and the
+supply-equals-demand root-find computed from a live `Leaf`, then a schematic of
+how the parts are wired and of the soil-to-leaf path they describe.
+
+The wiring panel is what it exists for. One decision variable feeds two branches
+that meet again at the objective; the two gates are drawn dashed because both
+default off; and the arrows crossing between the columns are the interactions that
+are otherwise only stated in prose — the energy balance as the cycle it is, and
+the thermal cost reaching past it into the *benefit* column, which is the one gate
+that moves both sides of the ledger.
+
+Base graphics on a vector device, so the vignette embeds it as SVG and `pdf()`
+gives a manuscript figure whose every line and label stays a separate object.
+Shapes are aspect-corrected and box labels shrink to fit, so it holds together at
+figure sizes other than the default. No model code is touched and no number moves.
+
 # phylloptim 0.5.3
 
 ## The single-layer optimisers reach a maximum at a bound (#94)

@@ -36,44 +36,38 @@ sit, and that place is what these models compute.
 
 Put the two effects on the same axis. Take the stem water potential as the dial —
 more tension to the right, wider open — and plot what the leaf gains and what it
-gives up:
+gives up. That is panel (a) below; the other three panels are the rest of this
+document in one frame.
 
-```{r fig.height = 4.2}
+```{r fig-overview, fig.width = 11, fig.height = 6.6, out.width = "100%", dev = "svg"}
 l0 <- leaf_model()
 set_drivers(l0, psi_soil = 1.0, PPFD = 1500)
-psi0 <- seq(1.0, l0$psi_crit, length.out = 300)
-
-benefit <- vapply(psi0, function(p) {           # carbon taken up
-  l0$profit_psi_stem_TF(p, 1.0)
-  l0$assim_colimited_
-}, numeric(1))
-cost <- vapply(psi0, l0$hydraulic_cost_TF, numeric(1))  # what tension costs
-profit <- benefit - cost
+plot_model_overview(l0)
 
 l0$optimise_psi_stem_TF()
-star <- l0$opt_psi_stem_
-
-plot(psi0, benefit, type = "l", lwd = 2, col = "forestgreen",
-     ylim = range(c(benefit, cost, profit)),
-     xlab = "stem water potential (MPa)",
-     ylab = expression(mu * "mol C m"^-2 * " s"^-1), las = 1)
-lines(psi0, cost,   lwd = 2, col = "firebrick")
-lines(psi0, profit, lwd = 3, col = "black")
-abline(v = star, lty = 3)
-legend("bottomright", bty = "n", lwd = c(2, 2, 3), cex = 0.9,
-       col = c("forestgreen", "firebrick", "black"),
-       legend = c("benefit: carbon gained", "cost of the tension", "profit"))
-cat(sprintf("best operating point: %.3f MPa, profit %.3f\n", star, l0$profit_))
+cat(sprintf("best operating point: %.3f MPa, profit %.3f\n",
+            l0$opt_psi_stem_, l0$profit_))
 ```
 
-The benefit rises and then flattens — pulling harder recruits progressively less
-conductance, so the carbon return diminishes. The cost keeps climbing. Their
-difference therefore has an interior maximum, and the dotted line is where the
-solver puts it.
+Read it in four moves.
+
+- **(a) the trade-off.** The benefit rises and then flattens — pulling harder recruits progressively less conductance, so the carbon return diminishes — while the cost keeps climbing. Their difference therefore has an interior maximum, and the dotted line is where the solver puts it.
+- **(b) the root-find inside the benefit.** `c_i` is not free: it sits where diffusive supply meets biochemical demand, and that intersection is recomputed at every candidate ψ.
+- **(c) the wiring.** One dial feeds two branches, which meet again at the objective. The two gates are dashed because both default off, and the arrows crossing the gutter are the interactions worth knowing: the energy balance is a *cycle*, and the thermal cost reaches past it into the benefit column.
+- **(d) the physical path** all of that describes, with the modelling choices separated from the physics.
 
 **Everything else in this document is a variation on that picture.** The models
 differ in the red curve; the supply topologies differ in what the dial is
 physically connected to; the two gates change both curves at once.
+
+The figure is `plot_model_overview()`, so it can be regenerated to a vector file
+for use outside this vignette:
+
+```{r eval = FALSE}
+pdf("overview.pdf", width = 11, height = 6.6)
+plot_model_overview()
+dev.off()
+```
 
 ## The problem, stated
 
@@ -297,6 +291,40 @@ cat(sprintf(paste0("TF24 optimum %.6f MPa; Cowan-Farquhar at its implied ",
             ref$opt_psi_stem_, cf$opt_psi_stem_,
             abs(cf$opt_psi_stem_ - ref$opt_psi_stem_)))
 ```
+
+### λ is not water use efficiency
+
+The two are easy to conflate: same units, both "carbon per water". They are
+different quantities, and the difference is marginal against average.
+
+$$\text{WUE}=\frac{A}{E}\quad\text{(an average)},
+\qquad
+\lambda=\frac{dA}{dE}\quad\text{(a marginal rate)}$$
+
+WUE is the slope of the chord from the origin to the operating point; λ is the
+slope of the tangent there. On a saturating `A(E)` those differ, and the gap is
+not a fixed factor:
+
+```{r}
+cat(" psi_soil   lambda      A/E (WUE)   lambda/WUE\n")
+for (ps in c(0.5, 1, 2, 3)) {
+  lw <- leaf_model()
+  set_drivers(lw, psi_soil = ps, PPFD = 1500)
+  lw$optimise_psi_stem_TF()
+  cat(sprintf(" %7.1f  %10.4g  %10.4g  %9.3f\n", ps, lw$lambda_emergent,
+              lw$assim_colimited_ / lw$transpiration_,
+              lw$lambda_emergent / (lw$assim_colimited_ / lw$transpiration_)))
+}
+```
+
+So λ runs a third to three-quarters of WUE here, and the ratio **rises as the soil
+dries** — you cannot infer one from the other, in either direction.
+
+⚠️ **What is true is narrower, and only at the optimum.** The first-order
+condition is `dA/dE = λ`, so at the operating point λ *is* the marginal water use
+efficiency. Off the optimum it is not even that. And "WUE" unqualified almost
+always means the average `A/E`, or intrinsic WUE `A/g_s` — so a λ from this model
+is not comparable with a WUE from the literature without checking which was meant.
 
 ## The two gates
 
@@ -613,10 +641,25 @@ cat(sprintf("defaults: P50 = %.6f MPa, c = %.6f, so P88 = %.6f, P95 = %.6f\n",
             P50, tr$stem_c, P88, p_at(P50, tr$stem_c, 0.05)))
 cat(sprintf("recovered from (P50, P88): c = %.6f, P50 = %.6f  (errors %.1e, %.1e)\n",
             c_hat, P50_hat, abs(c_hat - tr$stem_c), abs(P50_hat - P50)))
-cat(sprintf("psi_crit is P95: %.6f vs the trait %.6f\n",
-            p_at(P50, tr$stem_c, 0.05), tr$psi_crit))
 cat(sprintf("S50 at the defaults: %.1f %%/MPa\n", s50_from(P50, tr$stem_c)))
+
+# psi_crit against P95 -- at FULL precision, which is the point
+cat(sprintf("psi_crit trait  = %.17g\n", tr$psi_crit))
+cat(sprintf("P95 from (b, c) = %.17g   relative gap %.2e\n",
+            p_at(P50, tr$stem_c, 0.05),
+            abs(p_at(P50, tr$stem_c, 0.05) / tr$psi_crit - 1)))
+cat(sprintf("and P50 itself  = %.17g  (not exactly 3.4)\n", P50))
 ```
+
+⚠️ **Read those at full precision, not rounded.** `psi_crit` and `P95` agree to
+seven significant figures and no further, and the derived `P50` is not exactly
+3.4. The defaults were chosen as round values of `stem_b` and `psi_crit`, so
+`psi_crit` is `P95` *rounded*, not `P95`. Printed to six decimals the two look
+identical, which is exactly the trap this document's preamble warns about.
+
+That matters for anyone adopting the derived form: making `psi_crit` a quantile of
+the curve **moves it**, by the relative gap above. It is a small number but it is
+far above the floor at which this model calls a difference real, so it propagates.
 
 ## `psi_crit` is a quantile, not a parameter
 
