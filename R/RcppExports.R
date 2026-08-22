@@ -5,8 +5,8 @@ RootNetwork__ctor <- function() {
     .Call('_phylloptim_RootNetwork__ctor', PACKAGE = 'phylloptim')
 }
 
-Leaf__ctor <- function(vcmax_25, stem_c, stem_b, psi_crit, root_c, root_b, root_psi_crit, beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, GSS_tol_abs, vulnerability_curve_ncontrol, ci_abs_tol, ci_niter, cost_scale_TF24) {
-    .Call('_phylloptim_Leaf__ctor', PACKAGE = 'phylloptim', vcmax_25, stem_c, stem_b, psi_crit, root_c, root_b, root_psi_crit, beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, GSS_tol_abs, vulnerability_curve_ncontrol, ci_abs_tol, ci_niter, cost_scale_TF24)
+Leaf__ctor <- function(vcmax_25, stem_c, stem_P50, root_c, root_P50, beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, GSS_tol_abs, vulnerability_curve_ncontrol, ci_abs_tol, ci_niter, cost_scale_TF24) {
+    .Call('_phylloptim_Leaf__ctor', PACKAGE = 'phylloptim', vcmax_25, stem_c, stem_P50, root_c, root_P50, beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, GSS_tol_abs, vulnerability_curve_ncontrol, ci_abs_tol, ci_niter, cost_scale_TF24)
 }
 
 Leaf__operating_point_values <- function(obj_) {
@@ -21,12 +21,12 @@ Leaf__set_physiology <- function(obj_, root_network, PPFD, psi_soil, soil_depth,
     invisible(.Call('_phylloptim_Leaf__set_physiology', PACKAGE = 'phylloptim', obj_, root_network, PPFD, psi_soil, soil_depth, leaf_specific_conductance_max, atm_vpd, ca, leaf_temp, atm_o2_kpa, atm_kpa))
 }
 
-Leaf__perturb_stem_b <- function(obj_, stem_b) {
-    invisible(.Call('_phylloptim_Leaf__perturb_stem_b', PACKAGE = 'phylloptim', obj_, stem_b))
+Leaf__perturb_stem_P50 <- function(obj_, stem_P50) {
+    invisible(.Call('_phylloptim_Leaf__perturb_stem_P50', PACKAGE = 'phylloptim', obj_, stem_P50))
 }
 
-Leaf__set_traits <- function(obj_, vcmax_25, stem_c, stem_b, psi_crit, root_c, root_b, root_psi_crit, beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, cost_scale_TF24, R_d_25) {
-    invisible(.Call('_phylloptim_Leaf__set_traits', PACKAGE = 'phylloptim', obj_, vcmax_25, stem_c, stem_b, psi_crit, root_c, root_b, root_psi_crit, beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, cost_scale_TF24, R_d_25))
+Leaf__set_traits <- function(obj_, vcmax_25, stem_c, stem_P50, root_c, root_P50, beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, cost_scale_TF24, R_d_25) {
+    invisible(.Call('_phylloptim_Leaf__set_traits', PACKAGE = 'phylloptim', obj_, vcmax_25, stem_c, stem_P50, root_c, root_P50, beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, cost_scale_TF24, R_d_25))
 }
 
 Leaf__proportion_of_conductivity <- function(obj_, psi) {
@@ -205,16 +205,24 @@ Leaf__stem_c__get <- function(obj_) {
     .Call('_phylloptim_Leaf__stem_c__get', PACKAGE = 'phylloptim', obj_)
 }
 
+Leaf__stem_P50__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__stem_P50__get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__root_c__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__root_c__get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__root_P50__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__root_P50__get', PACKAGE = 'phylloptim', obj_)
+}
+
 Leaf__stem_b__get <- function(obj_) {
     .Call('_phylloptim_Leaf__stem_b__get', PACKAGE = 'phylloptim', obj_)
 }
 
 Leaf__psi_crit__get <- function(obj_) {
     .Call('_phylloptim_Leaf__psi_crit__get', PACKAGE = 'phylloptim', obj_)
-}
-
-Leaf__root_c__get <- function(obj_) {
-    .Call('_phylloptim_Leaf__root_c__get', PACKAGE = 'phylloptim', obj_)
 }
 
 Leaf__root_b__get <- function(obj_) {

@@ -856,8 +856,8 @@ void test_operating_point_kind_is_written_by_every_path() {
 
   // set_traits returns the object to its just-constructed state, and the
   // classification is part of that state (hazard 10 / setup_clean_leaf).
-  l.set_traits(l.vcmax_25, l.stem_c, l.stem_b, l.psi_crit, l.roots_.root_c,
-               l.roots_.root_b, l.roots_.root_psi_crit, l.beta2, l.jmax_25, l.a,
+  l.set_traits(l.vcmax_25, l.stem_c, l.stem_P50, l.roots_.root_c,
+               l.roots_.root_P50, l.beta2, l.jmax_25, l.a,
                l.curv_fact_elec_trans, l.curv_fact_colim, l.cost_scale_TF24,
                l.R_d_25);
   ok(l.operating_point_kind() == Kind::Unsolved,
@@ -1143,7 +1143,7 @@ void test_signed_potentials_are_rejected() {
   // The constructor's half of the invariant.
   threw = false;
   try {
-    phylloptim::Leaf bad(100, 2.04, -3.0, 5.0, 2.65, 1.29, 1.9, 1, 167 * 100, 0.3,
+    phylloptim::Leaf bad(100, 2.04, -3.0, 2.65, 1.29, 1, 167 * 100, 0.3,
                    0.7, 0.99, 1e-8, 100, 1e-6, 1000, 46.32995);
     static_cast<void>(bad);
   } catch (const std::exception &) {
@@ -2507,8 +2507,7 @@ void test_closed_form() {
      "and it is rejected because the error really is large there");
 
   // The beta2 = 1/c leaf, where xi is constant and nothing needs solving.
-  phylloptim::Leaf exact_leaf(96.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
-                        5.870283, 1.0 / 2.680147, 157.44, 0.30, 0.7, 0.99, 1e-3,
+  phylloptim::Leaf exact_leaf(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.0 / 2.680147, 157.44, 0.30, 0.7, 0.99, 1e-3,
                         100, 1e-3, 1000, 7.5);
   ok(phylloptim::closed_form::beta2_is_exact(exact_leaf),
      "beta2_is_exact recognises beta2 = 1/stem_c");
@@ -3041,33 +3040,33 @@ void test_rd_temperature_response() {
 // G(psi; s*b, c) = s * G(psi/s; b, c), because G(psi; b, c) = b * g(psi/b; c) --
 // stem_b enters only as a scale on both axes, and the knot grid scales with it,
 // so the identity holds for the SPLINE and not merely for the integral it
-// approximates. perturb_stem_b() exploits that instead of reseeding 101
-// incomplete gammas, which is 21.8 us against 0.001.
+// approximates. perturb_stem_P50() exploits that instead of reseeding 101
+// incomplete gammas, which is 21.8 us against 0.001. It moves the TRAIT, and
+// stem_b is a fixed multiple of it at fixed stem_c, so the same identity applies.
 //
 // ⚠️ This is checked against a REBUILD and not against a formula, because what
 // has to be true is that the rescaled curve is the one a rebuild would have
 // produced. It is not asserted bit-identical: the two differ by the rounding of
 // one multiply and one divide per evaluation, which the nested solvers amplify to
 // the ~1e-9 floor this project's guide records.
-void test_perturb_stem_b_matches_a_rebuild() {
-  printf("perturb_stem_b reproduces a rebuilt stem curve\n");
+void test_perturb_stem_P50_matches_a_rebuild() {
+  printf("perturb_stem_P50 reproduces a rebuilt stem curve\n");
   Drivers d;
   std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
 
-  // ⚠️ The downward range stops at 0.98, and that is issue #38 rather than a
-  // limitation of the rescale: the curve's domain is [0, b*log(100)^(1/c)], which
-  // at the default traits is 6.05 MPa against a psi_crit of 5.87. Shrink stem_b
-  // by more than ~3% and psi_crit falls outside the curve, so the collar solve
-  // asks for a potential the spline refuses to extrapolate to -- and a REBUILT
-  // spline refuses identically. A gradient perturbs by ~1e-6.
-  for (double factor : {0.98, 0.999, 1.000001, 1.05, 1.3}) {
-    const double b_new = 3.898245 * factor;
+  // The range runs well below 1 on purpose. It used to stop at 0.98 because
+  // psi_crit was an independent trait: the curve's domain is [0, b*log(100)^(1/c)]
+  // and shrinking stem_b pushed a fixed psi_crit off the end of it. psi_crit is
+  // now a quantile of the same curve, so it scales with stem_b and the domain
+  // cannot bind however far the trait moves. A gradient perturbs by ~1e-6; the
+  // wide factors are here to hold that property.
+  for (double factor : {0.5, 0.98, 0.999, 1.000001, 1.05, 1.3, 2.0}) {
+    const double P50_new = 3.4 * factor;
 
     // The reference: stem_b through set_traits, which rebuilds the spline.
     phylloptim::Leaf rebuilt = make_leaf(d, {2.0}, {1.0});
     rebuilt.find_root_collar_psi();
-    rebuilt.set_traits(96.0, 2.680147, b_new, 5.870283, 2.680147, 3.898245,
-                       5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
+    rebuilt.set_traits(96.0, 2.680147, P50_new, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
     rebuilt.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                            d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa,
                            d.atm_kpa);
@@ -3077,10 +3076,10 @@ void test_perturb_stem_b_matches_a_rebuild() {
     // derives depends on stem_b, which is half of why this is cheap.
     phylloptim::Leaf rescaled = make_leaf(d, {2.0}, {1.0});
     rescaled.find_root_collar_psi();
-    rescaled.perturb_stem_b(b_new);
+    rescaled.perturb_stem_P50(P50_new);
     rescaled.find_root_collar_psi();
 
-    const std::string what = " at stem_b x " + std::to_string(factor);
+    const std::string what = " at stem_P50 x " + std::to_string(factor);
     const double tol = 1e-8;
     near(rescaled.opt_root_psi_, rebuilt.opt_root_psi_, tol,
          "the collar matches a rebuild" + what);
@@ -3099,8 +3098,7 @@ void test_perturb_stem_b_matches_a_rebuild() {
     // which is only true if the rebuild is forced.
     phylloptim::Leaf fresh = make_leaf(d, {2.0}, {1.0});
     fresh.find_root_collar_psi();
-    rescaled.set_traits(96.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
-                        5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
+    rescaled.set_traits(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
     rescaled.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                             d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa,
                             d.atm_kpa);
@@ -3125,26 +3123,27 @@ void test_perturb_stem_b_matches_a_rebuild() {
 // 11.9 us, invisible to the golden file, to this suite's value assertions and to
 // anything the R layer can see. `stem_curve_builds_` exists so the claim is an
 // integer instead of a stopwatch reading on a shared runner.
-void test_stem_b_shortcut_needs_no_rebuild() {
-  printf("undoing the stem_b shortcut costs no rebuild\n");
+void test_stem_curve_shortcut_needs_no_rebuild() {
+  printf("undoing the stem-curve shortcut costs no rebuild\n");
   Drivers d;
   std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
-  const double b0 = 3.898245;
+  const double P50_0 = 3.4;
 
   // --- the identity itself, without the gradient in the way ------------------
   //
   // Bit-identity here is what makes the change free, and it is a property of
-  // `perturb_stem_b()` writing `stem_b` and nothing else: these splines ARE the
-  // ones built at the defaults, so putting stem_b back gives the object a
+  // everything `perturb_stem_P50()` writes being a pure function of the trait,
+  // computed by the same expression `set_traits()` uses: these splines ARE the
+  // ones built at the defaults, so putting the trait back gives the object a
   // rebuild would have produced, not an approximation to it.
   {
     phylloptim::Leaf undone = make_leaf(d, {2.0}, {1.0});
     undone.find_root_collar_psi();
     const long builds = undone.stem_curve_builds_;
 
-    undone.perturb_stem_b(b0 * 1.001);
-    undone.perturb_stem_b(b0);  // the way back, WITH the shortcut
-    undone.set_traits(96.0, 2.680147, b0, 5.870283, 2.680147, b0, 5.870283, 1.5,
+    undone.perturb_stem_P50(P50_0 * 1.001);
+    undone.perturb_stem_P50(P50_0);  // the way back, WITH the shortcut
+    undone.set_traits(96.0, 2.680147, P50_0, 2.680147, P50_0, 1.5,
                       157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
     ok(undone.stem_curve_builds_ == builds,
        "set_traits after an undone displacement rebuilds nothing");
@@ -3170,8 +3169,8 @@ void test_stem_b_shortcut_needs_no_rebuild() {
   // --- and through the batch, which is where the cost was being paid ---------
   const double kmax = d.K_s * d.theta / d.h;
   double theta[phylloptim::gradient::n_pars] = {
-      96.0, 2.680147, b0,   5.870283, 2.680147, b0,   5.870283, 1.5,
-      157.44, 0.30,   0.7,  0.99,     7.5,      kRd25, kmax,    0.0};
+      96.0,   2.680147, P50_0, 2.680147, P50_0, 1.5,
+      157.44, 0.30,     0.7,   0.99,     7.5,   kRd25, kmax, 0.0};
 
   phylloptim::gradient::Drivers gd;
   gd.root_network = fixture::root_network(mrp, depth);
@@ -3186,7 +3185,7 @@ void test_stem_b_shortcut_needs_no_rebuild() {
   const std::vector<phylloptim::gradient::Drivers> obs{gd, gd, gd};
 
   // Three parameter sets, and the middle one is the one that would have been
-  // missed by a fix written only for the end-of-loop restore: `stem_b` FOLLOWED by
+  // missed by a fix written only for the end-of-loop restore: `stem_P50` FOLLOWED by
   // a parameter that owns no vulnerability curve leaves the displacement to be
   // undone by that parameter's own first perturbation instead.
   struct Case {
@@ -3194,11 +3193,11 @@ void test_stem_b_shortcut_needs_no_rebuild() {
     std::vector<int> pars;
   };
   const Case cases[] = {
-      {"stem_b", {phylloptim::gradient::par_stem_b}},
-      {"stem_b then vcmax_25",
-       {phylloptim::gradient::par_stem_b, phylloptim::gradient::par_vcmax_25}},
-      {"vcmax_25 then stem_b",
-       {phylloptim::gradient::par_vcmax_25, phylloptim::gradient::par_stem_b}}};
+      {"stem_P50", {phylloptim::gradient::par_stem_P50}},
+      {"stem_P50 then vcmax_25",
+       {phylloptim::gradient::par_stem_P50, phylloptim::gradient::par_vcmax_25}},
+      {"vcmax_25 then stem_P50",
+       {phylloptim::gradient::par_vcmax_25, phylloptim::gradient::par_stem_P50}}};
 
   for (const Case &c : cases) {
     phylloptim::gradient::Settings s;  // fast_stem_curve defaults true
@@ -3226,14 +3225,14 @@ void test_stem_b_shortcut_needs_no_rebuild() {
   {
     phylloptim::gradient::Settings s;
     s.fast_stem_curve = false;
-    const int pars[1] = {phylloptim::gradient::par_stem_b};
+    const int pars[1] = {phylloptim::gradient::par_stem_P50};
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     l.find_root_collar_psi();
     const long builds = l.stem_curve_builds_;
     phylloptim::gradient::batch(l, theta, 1, obs, false, pars, 1, s);
     ok(l.stem_curve_builds_ > builds,
        "with fast_stem_curve off, the same batch does rebuild");
-    printf("  stem curve builds over 3 observations of d/dstem_b:"
+    printf("  stem curve builds over 3 observations of d/dstem_P50:"
            " fast 0, slow %ld\n",
            l.stem_curve_builds_ - builds);
   }
@@ -3248,22 +3247,22 @@ void test_set_traits_matches_a_fresh_leaf() {
   // and a cost parameter that is read directly and so should need no rebuild.
   struct Case { const char *name; int which; double value; };
   const Case cases[] = {{"vcmax_25", 0, 96.0 * 1.05},
-                        {"stem_b", 2, 3.898245 * 1.05},
-                        {"root_b", 5, 3.898245 * 1.05},
-                        {"cost_scale_TF24", 12, 7.5 * 1.05},
+                        {"stem_P50", 2, 3.4 * 1.05},
+                        {"root_P50", 4, 3.4 * 1.05},
+                        {"cost_scale_TF24", 10, 7.5 * 1.05},
                         {"stem_c", 1, 2.680147 * 1.05},
-                        {"root_c", 4, 2.680147 * 1.05}};
+                        {"root_c", 3, 2.680147 * 1.05}};
 
   for (const Case &c : cases) {
-    // The default trait vector, in set_traits' own argument order.
-    double t[13] = {96.0,     2.680147, 3.898245, 5.870283, 2.680147,
-                    3.898245, 5.870283, 1.5,      157.44,   0.30,
-                    0.7,      0.99,     7.5};
+    // The default trait vector, in set_traits' own argument order (R_d_25 apart,
+    // which the constructor does not take).
+    double t[11] = {96.0, 2.680147, 3.4,  2.680147, 3.4, 1.5,
+                    157.44, 0.30,   0.7,  0.99,     7.5};
     t[c.which] = c.value;
 
     // Fresh: the traits go through the constructor.
-    phylloptim::Leaf fresh(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9],
-                     t[10], t[11], 1e-3, 100, 1e-3, 1000, t[12]);
+    phylloptim::Leaf fresh(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7],
+                     t[8], t[9], 1e-3, 100, 1e-3, 1000, t[10]);
     std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
     fresh.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                          d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
@@ -3275,8 +3274,8 @@ void test_set_traits_matches_a_fresh_leaf() {
     // temperature cache would miss anyway and the trap would not fire.
     phylloptim::Leaf reused = make_leaf(d, {2.0}, {1.0});
     reused.find_root_collar_psi();
-    reused.set_traits(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9],
-                      t[10], t[11], t[12], kRd25);
+    reused.set_traits(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7],
+                      t[8], t[9], t[10], kRd25);
     reused.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                           d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
     reused.find_root_collar_psi();
@@ -3318,8 +3317,7 @@ void test_set_traits_matches_a_fresh_leaf() {
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     const double vcmax_before = l.vcmax_;
-    l.set_traits(96.0 * 2.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
-                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
+    l.set_traits(96.0 * 2.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
     std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
     // The same leaf_temp and atm_o2_kpa -- which used to be the whole key, and so
     // used to be what ARMED the trap. It no longer is: `vcmax_25` has moved, so the
@@ -3337,8 +3335,7 @@ void test_set_traits_matches_a_fresh_leaf() {
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     const double E_before = l.transpiration(3.0, 1.0);
-    l.set_traits(96.0, 2.680147, 3.898245 * 1.5, 5.870283, 2.680147, 3.898245,
-                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
+    l.set_traits(96.0, 2.680147, 3.4 * 1.5, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
     std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
     l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                      d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
@@ -3352,21 +3349,22 @@ void test_set_traits_matches_a_fresh_leaf() {
   // which is the fourth reason these are not settable fields.
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
-    const double good[13] = {96.0,     2.680147, 3.898245, 5.870283, 2.680147,
-                             3.898245, 5.870283, 1.5,      157.44,   0.30,
-                             0.7,      0.99,     7.5};
-    const int signed_positions[] = {3, 2, 5, 6};  // psi_crit, stem_b, root_b, root_psi_crit
-    const char *labels[] = {"psi_crit", "stem_b", "root_b", "root_psi_crit"};
-    for (int k = 0; k < 4; ++k) {
-      double t[13];
-      for (int i = 0; i < 13; ++i) {
+    const double good[11] = {96.0, 2.680147, 3.4,  2.680147, 3.4, 1.5,
+                             157.44, 0.30,   0.7,  0.99,     7.5};
+    // Only two potentials are settable now -- the derived scales and critical
+    // potentials take their sign from these, so there is nothing else to reject.
+    const int signed_positions[] = {2, 4};
+    const char *labels[] = {"stem_P50", "root_P50"};
+    for (int k = 0; k < 2; ++k) {
+      double t[11];
+      for (int i = 0; i < 11; ++i) {
         t[i] = good[i];
       }
       t[signed_positions[k]] = -t[signed_positions[k]];  // the pre-#25 sign
       bool threw = false;
       try {
-        l.set_traits(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9],
-                     t[10], t[11], t[12], kRd25);
+        l.set_traits(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7],
+                     t[8], t[9], t[10], kRd25);
       } catch (const std::runtime_error &) {
         threw = true;
       }
@@ -3411,8 +3409,7 @@ void test_prescribed_lambda_survives_redriving() {
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     l.lambda_ = prescribed;
-    l.set_traits(96.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
-                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
+    l.set_traits(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
     ok(l.lambda_ == prescribed, "set_traits leaves a prescribed lambda_ alone");
   }
 
@@ -3422,8 +3419,7 @@ void test_prescribed_lambda_survives_redriving() {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     l.lambda_ = prescribed;
     l.find_root_collar_psi();
-    l.set_traits(96.0 * 1.05, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
-                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
+    l.set_traits(96.0 * 1.05, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
     l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth,
                      d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
                      d.atm_o2_kpa, d.atm_kpa);
@@ -3439,8 +3435,7 @@ void test_prescribed_lambda_survives_redriving() {
     l.lambda_ = prescribed;
     l.find_root_collar_psi();
     ok(!std::isnan(l.opt_psi_stem_), "the solve seated an operating point");
-    l.set_traits(96.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
-                 5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
+    l.set_traits(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
     ok(std::isnan(l.opt_psi_stem_),
        "set_traits still clears the solved operating point");
     ok(std::isnan(l.profit_), "set_traits still clears profit_");
@@ -3580,73 +3575,77 @@ void test_knot_grid_reaches_its_intended_domain() {
   ok(mentions(msg, "resolution"), "resolution < 1 is refused by name");
 }
 
-// psi_crit against the domain stem_b/stem_c set (#38). The trait LOOKS
-// independent of the curve and is not: the knot grid stops at P99 and every solve
-// evaluates the stem curve at psi_crit, so the combination used to fail from
-// inside the interpolator in a message naming neither trait.
-void test_psi_crit_must_lie_on_the_stem_curve() {
-  printf("psi_crit against the curve's domain\n");
-  // Sabot et al. (2022) P50/P88 territory, which is where this was found: far from
-  // the defaults, and psi_crit picked as though it were free.
-  const std::string msg = message_of(
-      [] { phylloptim::Leaf l(96, 3.5463, 7.6291, 14.145, 2.680147, 3.898245,
-                              5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 1e-3, 100,
-                              1e-3, 1000, 7.5); });
-  ok(!msg.empty(), "a psi_crit past the stem curve's domain is refused");
-  ok(mentions(msg, "psi_crit"), "the message names psi_crit");
-  ok(mentions(msg, "stem_b"), "the message names the trait that sets the domain");
-  ok(mentions(msg, "P95"), "the message quotes a psi_crit that would work");
+// psi_crit against the domain stem_P50/stem_c set. This USED to be a validation
+// problem: psi_crit was a free trait, the stem curve's knot grid stops at P99, and
+// every solve evaluates that curve AT psi_crit -- so an inconsistent pair failed
+// from inside the interpolator in a message naming neither trait.
+//
+// It is now a structural guarantee. psi_crit is the 5%-conductivity quantile of
+// the same curve, so containment reduces to log(20) < log(100) and holds for every
+// c > 0. What is asserted here is that the code realises that algebra: the
+// combination the old check refused now constructs, and the derived value is the
+// quantile it claims to be.
+void test_psi_crit_lies_inside_the_stem_curve_domain() {
+  printf("psi_crit inside the curve's domain, by construction\n");
 
-  // And the value it quotes really does work, which is what makes the message
-  // actionable rather than merely informative.
-  const double b = 7.6291, c = 3.5463;
-  const double p95 = b * std::pow(std::log(1.0 / 0.05), 1.0 / c);
-  ok(message_of([&] { phylloptim::Leaf l(96, c, b, p95, 2.680147, 3.898245,
-                                         5.870283, 1.5, 157.44, 0.30, 0.7, 0.99,
-                                         1e-3, 100, 1e-3, 1000, 7.5); }).empty(),
-     "the P95 the message quotes constructs");
+  // The containment, over a grid far wider than any plausible trait.
+  int cases = 0, outside = 0;
+  double worst_ratio = 0.0;
+  for (double P50 : {0.4, 1.0, 3.4, 7.6291, 20.0}) {
+    for (double c : {0.5, 1.0, 2.0, 2.680147, 3.5463, 8.0}) {
+      ++cases;
+      const double b = P50 / std::pow(std::log(2.0), 1.0 / c);
+      const double psi_crit = b * std::pow(std::log(1.0 / 0.05), 1.0 / c);
+      const double p99 = phylloptim::vulnerability_psi_max(b, c);
+      if (!(psi_crit < p99)) ++outside;
+      worst_ratio = std::max(worst_ratio, psi_crit / p99);
+    }
+  }
+  ok(cases == 30, "the containment sweep ran the grid it meant to");
+  ok(outside == 0,
+     "the derived psi_crit is inside the derived domain for every (P50, c) (" +
+         std::to_string(outside) + " of " + std::to_string(cases) + " were not)");
+  // Ratio-of-quantiles, so it is the same number at every c: it is what the
+  // margin IS, not a sampled worst case.
+  printf("  worst psi_crit / P99 over the grid: %.6f\n", worst_ratio);
 
-  // The boundary itself is REACHABLE, which is what makes `>` the right comparison
-  // in the check rather than a nervous `>=`. ⚠️ It is #92 that makes this a
-  // guarantee rather than a coincidence: under the accumulating knot loop the last
-  // knot sat anywhere from one ULP to one full step short of
-  // vulnerability_psi_max, so whether psi_crit == P99 was inside the spline
-  // depended on stem_b and stem_c. This pair happened to land on the good side,
-  // which is precisely why the knot-count sweep above is the test with teeth here
-  // and this one is a statement of the contract.
-  const double p99 = phylloptim::vulnerability_psi_max(b, c);
-  ok(message_of([&] { phylloptim::Leaf l(96, c, b, p99, 2.680147, 3.898245,
-                                         5.870283, 1.5, 157.44, 0.30, 0.7, 0.99,
-                                         1e-3, 100, 1e-3, 1000, 7.5); }).empty(),
-     "psi_crit exactly at P99 is inside the domain, not a rounding away from it");
-
-  // The defaults have headroom, and the relationship the message asserts is the
-  // one they encode: psi_crit IS P95 of the default curve, to six decimals.
-  phylloptim::Leaf def;
-  near(def.psi_crit,
-       def.stem_b * std::pow(std::log(1.0 / 0.05), 1.0 / def.stem_c), 1e-6,
-       "the default psi_crit is P95 of the default stem curve");
-  ok(def.psi_crit < phylloptim::vulnerability_psi_max(def.stem_b, def.stem_c),
-     "the default psi_crit is inside the default domain");
-
-  // set_traits shares the check, so the object cannot be walked into the state the
-  // constructor refuses.
-  phylloptim::Leaf l;
-  ok(!message_of([&] {
-       l.set_traits(96, c, b, 14.145, 2.680147, 3.898245, 5.870283, 1.5, 157.44,
-                    0.30, 0.7, 0.99, 7.5, kRd25);
+  // Sabot et al. (2022) P50/P88 territory -- the pair the old check refused,
+  // because a psi_crit chosen as though it were free landed past this curve's
+  // domain. There is nothing left to get wrong, so it constructs.
+  ok(message_of([] {
+       phylloptim::Leaf l(96, 3.5463, 7.6291, 2.680147, 3.4, 1.5, 157.44, 0.30,
+                          0.7, 0.99, 1e-3, 100, 1e-3, 1000, 7.5);
      }).empty(),
-     "set_traits refuses the same combination");
-  near(l.psi_crit, def.psi_crit, 0.0,
-       "the refused set_traits left psi_crit alone");
+     "a brittle stem curve constructs without a psi_crit to reconcile");
 
-  // perturb_stem_b is the third route, and the only one where the DOMAIN moves
-  // rather than psi_crit: shrinking stem_b shrinks P99 under a fixed psi_crit.
-  phylloptim::Leaf p;
-  ok(!message_of([&] { p.perturb_stem_b(p.stem_b * 0.5); }).empty(),
-     "perturb_stem_b refuses a stem_b that takes psi_crit off the curve");
-  ok(message_of([&] { p.perturb_stem_b(p.stem_b * 1.05); }).empty(),
-     "a perturbation that keeps psi_crit on the curve is still allowed");
+  // The derived values ARE the quantiles claimed, bit-exactly -- the same
+  // expression, so a tolerance here would pass on a different derivation.
+  phylloptim::Leaf def;
+  ok(def.stem_b == def.stem_P50 / std::pow(std::log(2.0), 1.0 / def.stem_c),
+     "stem_b is the scale that stem_P50 implies");
+  ok(def.psi_crit ==
+         def.stem_b * std::pow(std::log(1.0 / 0.05), 1.0 / def.stem_c),
+     "psi_crit is P95 of the stem curve");
+  ok(def.roots_.root_b ==
+         def.roots_.root_P50 / std::pow(std::log(2.0), 1.0 / def.roots_.root_c),
+     "root_b is the scale that root_P50 implies");
+  ok(def.roots_.root_psi_crit ==
+         def.roots_.root_b *
+             std::pow(std::log(1.0 / 0.05), 1.0 / def.roots_.root_c),
+     "root_psi_crit is P95 of the root curve");
+
+  // perturb_stem_P50 is the third route in, and the one where the domain used to
+  // be able to walk out from under a fixed psi_crit. Both now scale together, so
+  // an arbitrarily large move is safe and psi_crit follows it.
+  phylloptim::Leaf pl;
+  const double psi_crit_0 = pl.psi_crit;
+  ok(message_of([&] { pl.perturb_stem_P50(pl.stem_P50 * 0.25); }).empty(),
+     "a large downward perturbation is no longer a domain error");
+  ok(pl.psi_crit < psi_crit_0,
+     "psi_crit moved with the curve rather than staying put");
+  ok(pl.psi_crit ==
+         pl.stem_b * std::pow(std::log(1.0 / 0.05), 1.0 / pl.stem_c),
+     "and it is still P95 of the perturbed curve");
 }
 
 void test_bad_input_throws() {
@@ -3793,7 +3792,7 @@ void test_out_of_domain_names_the_spline() {
 }
 
 // The rescaled path reports the domain in the CALLER's units, not the spline's.
-// Under perturb_stem_b the value handed to the spline is psi/s, so quoting the
+// Under perturb_stem_P50 the value handed to the spline is psi/s, so quoting the
 // spline's own endpoints would send the reader after a discrepancy that is not
 // there.
 void test_out_of_domain_under_rescale() {
@@ -3802,7 +3801,7 @@ void test_out_of_domain_under_rescale() {
   const std::string before = message_of([&] { wide.transpiration(50.0, 0.0); });
 
   phylloptim::Leaf rescaled = make_leaf(d, {2.0}, {1.0});
-  rescaled.perturb_stem_b(rescaled.stem_b * 2.0);
+  rescaled.perturb_stem_P50(rescaled.stem_P50 * 2.0);
   const std::string after =
       message_of([&] { rescaled.transpiration(50.0, 0.0); });
 
@@ -4144,8 +4143,7 @@ void test_transpiration_survives_negative_assim() {
   // of exactly zero.
   Drivers dg = d;
   phylloptim::Leaf gross = make_single_leaf(dg, 0.5);
-  gross.set_traits(96, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
-                   5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, /*R_d_25=*/0.0);
+  gross.set_traits(96, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, /*R_d_25=*/0.0);
   phylloptim::RootNetwork rn;
   rn.r_R_V_sum = std::vector<double>{1.0e3};
   rn.r_R_H_min = std::vector<double>{0.0};
@@ -4470,12 +4468,12 @@ int main() {
   test_profitmax_reports_an_emergent_lambda();
   test_every_curve_reports_an_emergent_lambda();
   test_profitmax_emergent_lambda_matches_a_finite_difference();
-  test_perturb_stem_b_matches_a_rebuild();
-  test_stem_b_shortcut_needs_no_rebuild();
+  test_perturb_stem_P50_matches_a_rebuild();
+  test_stem_curve_shortcut_needs_no_rebuild();
   test_water_mass_conversions_are_reciprocal();
   test_gas_constant_and_arrhenius_reference_point();
   test_knot_grid_reaches_its_intended_domain();
-  test_psi_crit_must_lie_on_the_stem_curve();
+  test_psi_crit_lies_inside_the_stem_curve_domain();
   test_bad_input_throws();
   test_infeasible_is_a_distinct_failure();
   test_out_of_domain_names_the_spline();

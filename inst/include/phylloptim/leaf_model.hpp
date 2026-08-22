@@ -30,11 +30,9 @@ public:
   
   Leaf(double vcmax_25, 
        double stem_c, 
-       double stem_b, 
-       double psi_crit,
+       double stem_P50, 
        double root_c,
-       double root_b,
-       double root_psi_crit,
+       double root_P50,
        double beta2, 
        double jmax_25, 
        double a, 
@@ -242,8 +240,21 @@ public:
   // manuscript draft where it should have been psi^0.64. Never leave an unmarked
   // default for a parameter that exists in two versions.
   double stem_c;
+  // THE SCALE PARAMETER IS P50, the potential at 50% loss of conductivity, and it
+  // is the trait. Written this way the curve is `2^-(psi/P50)^c`, the same
+  // function as `exp(-(psi/b)^c)` but with scale and shape cleanly separated --
+  // P50 is measured and reported, `b` (the 63% point) is not.
+  //
+  // ⚠️ Do not add `stem_b` back as a settable parameter alongside it. Both are
+  // scale parameters in the same units, so specifying both means specifying two
+  // points on one curve and recovering the shape from their ratio,
+  // `c = ln(ln 2)/ln(P50/b)`, which diverges as P50 -> b. That is also why
+  // vulnerability curves are fitted on a Px and the slope at Px rather than (b, c).
+  double stem_P50;
+  // DERIVED, and read-only from R. Kept as members because every internal use is
+  // in terms of them: the splines, the brackets, the cost kernels.
   double stem_b;
-  double psi_crit;  // derived from b and c
+  double psi_crit;
   double beta2;
   double jmax_25;
   double a;
@@ -668,17 +679,48 @@ public:
   // resets both caches and requires set_physiology() before the next solve, exactly
   // as a fresh Leaf would. That last part is not conservatism: the derived
   // photosynthetic parameters really are unknown until the drivers are re-supplied.
-  void set_traits(double vcmax_25, double stem_c, double stem_b, double psi_crit,
-                  double root_c, double root_b, double root_psi_crit,
+  void set_traits(double vcmax_25, double stem_c, double stem_P50,
+                  double root_c, double root_P50,
                   double beta2, double jmax_25, double a,
                   double curv_fact_elec_trans, double curv_fact_colim,
                   double cost_scale_TF24, double R_d_25);
 
-  // The #25 boundary: the four potentials that must be positive magnitudes. One
-  // copy, called from both the constructor and set_traits -- the alternative is
-  // two copies that agree until one of them is edited.
-  static void check_psi_magnitudes(double psi_crit, double stem_b, double root_b,
-                                   double root_psi_crit);
+  // THE CRITICAL POINT IS A QUANTILE OF THE CURVE, not a parameter: the fraction
+  // of maximum conductivity remaining there. 0.05 gives P95. Sperry's reference
+  // conductance `k_crit = f * kmax` reads the same constant, so the two cannot
+  // disagree -- held as a free trait plus a hard-coded 0.05 they needed a
+  // consistency check to police them.
+  //
+  // A convention rather than a knob: 0.05 everywhere it appears across this
+  // family, and `sicangco-2026` parameterises it only to mirror the paper's own
+  // `calc_Pcrit(b, c, ratiocrit = 0.05)` signature.
+  static constexpr double k_crit_fraction = 0.05;
+
+  // The two derivations, one place each, so a caller cannot get them
+  // inconsistent. `f` is the remaining-conductivity fraction.
+  static double weibull_b_from_P50(double P50, double c) {
+    return P50 / std::pow(std::log(2.0), 1.0 / c);
+  }
+  static double weibull_psi_at_fraction(double b, double c, double f) {
+    return b * std::pow(std::log(1.0 / f), 1.0 / c);
+  }
+
+  // Seats both curves' derived scale and critical potential from the traits
+  // already in place. For the CONSTRUCTORS only: set_traits has to compute the
+  // same four values BEFORE it assigns anything, because it decides which
+  // splines to rebuild by comparing them against the ones standing.
+  void derive_vulnerability_curves_from_P50() {
+    stem_b = weibull_b_from_P50(stem_P50, stem_c);
+    psi_crit = weibull_psi_at_fraction(stem_b, stem_c, k_crit_fraction);
+    roots_.root_b = weibull_b_from_P50(roots_.root_P50, roots_.root_c);
+    roots_.root_psi_crit =
+        weibull_psi_at_fraction(roots_.root_b, roots_.root_c, k_crit_fraction);
+  }
+
+  // The #25 boundary: the potentials that must be positive magnitudes. One copy,
+  // called from both the constructor and set_traits.
+  static void check_psi_magnitudes(double stem_P50, double stem_c,
+                                   double root_P50, double root_c);
 
   // The #38 boundary, and the STRONGER of the two: `psi_crit` must lie inside the
   // stem vulnerability spline's domain, which `stem_b`/`stem_c` set and `psi_crit`
@@ -712,8 +754,7 @@ public:
   // `root_psi_crit` past the root P99 silently reports the floor conductivity
   // rather than failing, which is a different defect and is #85's question, not
   // this check's.
-  static void check_psi_crit_domain(double psi_crit, double stem_b,
-                                    double stem_c);
+
 
   void setup_transpiration(double resolution);
 
@@ -766,7 +807,7 @@ public:
   // re-seating the physiology is exactly the cost being avoided -- so whatever
   // reads the outputs afterwards must write them first. `set_traits()` is the
   // way back, and forces a rebuild.
-  void perturb_stem_b(double stem_b_new);
+  void perturb_stem_P50(double stem_P50_new);
   // Forwards to roots_.setup_vulnerability. Kept on Leaf because it is part of
   // the published construction sequence (see the umbrella header) and plant's
   // bindings name it.
@@ -1415,8 +1456,7 @@ inline Leaf::Leaf()
     :
     vcmax_25(96), // umol m^-2 s^-1 
     stem_c(2.680147), //unitless
-    stem_b(3.898245), //-MPa
-    psi_crit(5.870283), //-MPa
+    stem_P50(3.4), // MPa, positive magnitude -- THE trait; stem_b/psi_crit derive
     beta2(1.5), //exponent for effect of hydraulic risk (unitless)
     jmax_25(157.44), // maximum electron transport rate umol m^-2 s^-1
     a(0.30), //quantum yield of photosynthetic electron transport (mol mol^-1)
@@ -1428,20 +1468,20 @@ inline Leaf::Leaf()
     ci_niter(1000),
     cost_scale_TF24(7.5) //cost parameter for TF24 profit model umol m^-2 s^-1
    {
-      // The root traits (root_c/root_b/root_psi_crit) and the two beta_R_*
-      // resistance constants keep their defaults in MultiLayerRoots, which owns
-      // them. Deliberately not restated here: a second copy of the root Weibull
-      // pair is the exact shape of hazard 1 in the developer guide.
+      // The root traits (root_c/root_P50) and the two beta_R_* resistance
+      // constants keep their defaults in MultiLayerRoots, which owns them --
+      // including the root's own derived root_b/root_psi_crit. Deliberately not
+      // restated here: a second copy of the root Weibull pair is the exact shape
+      // of hazard 1 in the developer guide.
+      derive_vulnerability_curves_from_P50();
       setup_transpiration(100); // arg: num control points for integration
       setup_root_vulnerability(100);
       setup_clean_leaf();
 }
 
-inline Leaf::Leaf(double vcmax_25, double stem_c, double stem_b,
-           double psi_crit, // derived from b and c,
+inline Leaf::Leaf(double vcmax_25, double stem_c, double stem_P50,
            double root_c,
-           double root_b,
-           double root_psi_crit,
+           double root_P50,
            double beta2, double jmax_25,
            double a, double curv_fact_elec_trans, double curv_fact_colim, 
            double GSS_tol_abs,
@@ -1451,8 +1491,7 @@ inline Leaf::Leaf(double vcmax_25, double stem_c, double stem_b,
            double cost_scale_TF24)
     : vcmax_25(vcmax_25), // umol m^-2 s^-1 
     stem_c(stem_c), //unitless
-    stem_b(stem_b), //-MPa
-    psi_crit(psi_crit), //-MPa
+    stem_P50(stem_P50), // MPa, positive magnitude
     beta2(beta2), //exponent for effect of hydraulic risk (unitless)
     jmax_25(jmax_25), // maximum electron transport rate umol m^-2 s^-1
     a(a), //quantum yield of photosynthetic electron transport (mol mol^-1)
@@ -1469,69 +1508,61 @@ inline Leaf::Leaf(double vcmax_25, double stem_c, double stem_b,
       // >= 0, psi_soil_inverted_ was <= 0, psi_crit was >= 0 and the collar was
       // <= 0 -- which is precisely why the convention had to live in comments.
       // Now it is checkable, so it is checked. set_traits shares this check.
-      check_psi_magnitudes(psi_crit, stem_b, root_b, root_psi_crit);
-      check_psi_crit_domain(psi_crit, stem_b, stem_c);
+      check_psi_magnitudes(stem_P50, stem_c, root_P50, root_c);
 
       // The root traits belong to the supply path, so hand them over before its
-      // vulnerability curve is built.
-      roots_.root_c = root_c;          //unitless
-      roots_.root_b = root_b;          // MPa, positive magnitude
-      roots_.root_psi_crit = root_psi_crit; // MPa, positive magnitude
+      // vulnerability curve is built. Its root_b and root_psi_crit are DERIVED
+      // from the pair below, in the one place that derivation lives.
+      roots_.root_c = root_c;      //unitless
+      roots_.root_P50 = root_P50;  // MPa, positive magnitude
+      derive_vulnerability_curves_from_P50();
 
       setup_transpiration(vulnerability_curve_ncontrol); // arg: num control points for integration
       setup_root_vulnerability(vulnerability_curve_ncontrol);
       setup_clean_leaf();
 }
 
-inline void Leaf::check_psi_magnitudes(double psi_crit, double stem_b,
-                                      double root_b, double root_psi_crit) {
-  if (!(psi_crit > 0.0)) {
-    util::stop("psi_crit must be a positive magnitude in MPa (#25); got " +
-               util::to_string(psi_crit));
+inline void Leaf::check_psi_magnitudes(double stem_P50, double stem_c,
+                                      double root_P50, double root_c) {
+  // Every psi here is a POSITIVE magnitude in MPa. There is one representation, so
+  // this can be asserted globally rather than described in comments.
+  if (!(stem_P50 > 0.0)) {
+    util::stop("stem_P50 must be a positive magnitude in MPa; got " +
+               util::to_string(stem_P50));
   }
-  if (!(stem_b > 0.0)) {
-    util::stop("stem_b must be a positive magnitude in MPa (#25); got " +
-               util::to_string(stem_b));
+  if (!(root_P50 > 0.0)) {
+    util::stop("root_P50 must be a positive magnitude in MPa; got " +
+               util::to_string(root_P50));
   }
-  if (!(root_b > 0.0)) {
-    util::stop("root_b must be a positive magnitude in MPa (#25); got " +
-               util::to_string(root_b));
+  // The shape parameters set how steeply conductivity is lost. Below about 1 there
+  // is no safe plateau at all, which usually flags a measurement artefact rather
+  // than a species trait -- but it is representable, so only the sign is refused.
+  if (!(stem_c > 0.0)) {
+    util::stop("stem_c must be positive; got " + util::to_string(stem_c));
   }
-  if (!(root_psi_crit > 0.0)) {
-    util::stop("root_psi_crit must be a positive magnitude in MPa (#25); got " +
-               util::to_string(root_psi_crit));
+  if (!(root_c > 0.0)) {
+    util::stop("root_c must be positive; got " + util::to_string(root_c));
   }
 }
 
-// See the header for why psi_crit is not the free trait it looks like.
-inline void Leaf::check_psi_crit_domain(double psi_crit, double stem_b,
-                                       double stem_c) {
-  const double psi_max = vulnerability_psi_max(stem_b, stem_c);
-  if (psi_crit > psi_max) {
-    // P95 from the same curve, which is what the package defaults use and so the
-    // value a caller who has fitted stem_b/stem_c most likely wants.
-    const double p95 = stem_b * pow(log(1.0 / 0.05), 1.0 / stem_c);
-    util::stop("psi_crit (" + util::to_string(psi_crit) +
-               " MPa) is past the stem vulnerability curve's domain, which ends "
-               "at P99 = " + util::to_string(psi_max) +
-               " MPa and is set by stem_b = " + util::to_string(stem_b) +
-               " / stem_c = " + util::to_string(stem_c) +
-               ", not by psi_crit itself (#38). The package defaults take psi_crit "
-               "to be P95 of the same curve, which here is " +
-               util::to_string(p95) + " MPa.");
-  }
-}
 
 // See the header for why this exists rather than fourteen settable fields.
-inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
-                             double psi_crit_, double root_c_, double root_b_,
-                             double root_psi_crit_, double beta2_,
+inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_P50_,
+                             double root_c_, double root_P50_, double beta2_,
                              double jmax_25_, double a_,
                              double curv_fact_elec_trans_,
                              double curv_fact_colim_,
                              double cost_scale_TF24_, double R_d_25_) {
-  check_psi_magnitudes(psi_crit_, stem_b_, root_b_, root_psi_crit_);
-  check_psi_crit_domain(psi_crit_, stem_b_, stem_c_);
+  check_psi_magnitudes(stem_P50_, stem_c_, root_P50_, root_c_);
+
+  // Both scale parameters and both critical potentials fall out of the traits, so
+  // there is nothing left for a consistency check to police.
+  const double stem_b_ = weibull_b_from_P50(stem_P50_, stem_c_);
+  const double root_b_ = weibull_b_from_P50(root_P50_, root_c_);
+  const double psi_crit_ =
+      weibull_psi_at_fraction(stem_b_, stem_c_, k_crit_fraction);
+  const double root_psi_crit_ =
+      weibull_psi_at_fraction(root_b_, root_c_, k_crit_fraction);
 
   // Which splines have to be rebuilt, decided BEFORE the assignment. Exact
   // equality is the right test and not a sloppy one: the spline is a pure
@@ -1540,7 +1571,7 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
   // gradient loop does -- compares unequal and rebuilds, which is the case that
   // must not be missed.
   // ⚠️ The third clause is what makes set_traits the way back from
-  // perturb_stem_b. While the splines are built at a different stem_b, "the
+  // perturb_stem_P50. While the splines are built at a different stem_b, "the
   // parameters did not move" is not a reason to keep them -- it is exactly the
   // case where the equality test would conclude there is nothing to do and leave
   // the object rescaling forever.
@@ -1551,6 +1582,7 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
 
   vcmax_25 = vcmax_25_;
   stem_c = stem_c_;
+  stem_P50 = stem_P50_;
   stem_b = stem_b_;
   psi_crit = psi_crit_;
   beta2 = beta2_;
@@ -1562,6 +1594,7 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
   R_d_25 = R_d_25_;
 
   roots_.root_c = root_c_;
+  roots_.root_P50 = root_P50_;
   roots_.root_b = root_b_;
   roots_.root_psi_crit = root_psi_crit_;
 
@@ -3292,15 +3325,17 @@ inline double Leaf::stem_curve_integral_inverse_deriv(double w) const {
   return psi_from_transpiration.deriv(w / (stem_b / stem_b_spline_));
 }
 
-inline void Leaf::perturb_stem_b(double stem_b_new) {
-  check_psi_magnitudes(psi_crit, stem_b_new, roots_.root_b, roots_.root_psi_crit);
-  // ⚠️ The perturbed stem_b carries a perturbed domain with it, and this is the
-  // one caller where that can newly bind: lowering stem_b lowers P99 while
-  // psi_crit stays put, so a gradient step in stem_b at a psi_crit already near
-  // P99 can walk off the end of the curve it is rescaling. Checked against
-  // stem_b_new, not stem_b.
-  check_psi_crit_domain(psi_crit, stem_b_new, stem_c);
-  stem_b = stem_b_new;
+inline void Leaf::perturb_stem_P50(double stem_P50_new) {
+  check_psi_magnitudes(stem_P50_new, stem_c, roots_.root_P50, roots_.root_c);
+  // psi_crit is a quantile of the same curve, so it is a fixed multiple of
+  // stem_b at fixed stem_c: the ratio psi_crit/stem_b depends only on stem_c.
+  // Both therefore scale by the same factor here, the rescaled spline evaluated
+  // at the rescaled bound returns the same conductivity fraction, and the
+  // domain cannot newly bind -- so the rescaling shortcut below stays exact and
+  // no curve is rebuilt.
+  stem_P50 = stem_P50_new;
+  stem_b = weibull_b_from_P50(stem_P50_new, stem_c);
+  psi_crit = weibull_psi_at_fraction(stem_b, stem_c, k_crit_fraction);
   // ⚠️ The transpiration memo is keyed on (psi_stem, psi_upstream) and NOT on the
   // curve, so a perturbation that leaves the potentials alone -- which is every
   // perturbation a gradient makes -- would hit an entry computed from the old

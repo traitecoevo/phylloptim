@@ -7,11 +7,9 @@
 leaf_traits(
   vcmax_25 = 96,
   stem_c = 2.680147,
-  stem_b = 3.898245,
-  psi_crit = 5.870283,
+  stem_P50 = 3.4,
   root_c = 2.680147,
-  root_b = 3.898245,
-  root_psi_crit = 5.870283,
+  root_P50 = 3.4,
   beta2 = 1.5,
   jmax_25 = 157.44,
   a = 0.3,
@@ -26,15 +24,7 @@ leaf_traits(
 
 \item{stem_c}{shape parameter of the stem vulnerability curve (unitless)}
 
-\item{stem_b}{sensitivity parameter of the stem vulnerability curve (MPa)}
-
-\item{psi_crit}{critical stem water potential (MPa, positive magnitude)}
-
 \item{root_c}{shape parameter of the root vulnerability curve (unitless)}
-
-\item{root_b}{sensitivity parameter of the root vulnerability curve (MPa)}
-
-\item{root_psi_crit}{critical root water potential (MPa, positive magnitude)}
 
 \item{beta2}{exponent for the effect of hydraulic risk (unitless)}
 
@@ -51,6 +41,14 @@ leaf_traits(
 
 \item{R_d_25}{dark respiration at 25 C (umol m^-2 s^-1). It is the value at
 25 C only: respiration rises from there on Tjoelker's declining-Q10 curve.}
+
+\item{stem_b}{sensitivity parameter of the stem vulnerability curve (MPa)}
+
+\item{psi_crit}{critical stem water potential (MPa, positive magnitude)}
+
+\item{root_b}{sensitivity parameter of the root vulnerability curve (MPa)}
+
+\item{root_psi_crit}{critical root water potential (MPa, positive magnitude)}
 }
 \value{
 A `leaf_traits` object; a named list.
@@ -108,10 +106,10 @@ derivative of a solved output still needs two solves either side.
 
 \examples{
 leaf_traits()
-# A more brittle stem: psi_crit moves with the curve, not independently of it.
-# (stem_b = 2.5 puts P99 at 4.42, so the default psi_crit of 5.87 is off the
-# end of it; 3.76 is the P95 that stem_b implies.)
-leaf_traits(vcmax_25 = 120, stem_b = 2.5, psi_crit = 3.76)
+# A more brittle stem. Only the curve's own two parameters are set: the scale
+# `stem_b` and the critical potential `psi_crit` are quantiles of that curve
+# and are derived from them, so they cannot be set inconsistently.
+leaf_traits(vcmax_25 = 120, stem_P50 = 2.2)
 }
 \seealso{
 [leaf_control()], [leaf_model()], [leaf_solve()]

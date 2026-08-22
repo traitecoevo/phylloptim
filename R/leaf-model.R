@@ -35,11 +35,9 @@
 .leaf_trait_defaults <- list(
   vcmax_25 = 96,
   stem_c = 2.680147,
-  stem_b = 3.898245,
-  psi_crit = 5.870283,
+  stem_P50 = 3.4,
   root_c = 2.680147,
-  root_b = 3.898245,
-  root_psi_crit = 5.870283,
+  root_P50 = 3.4,
   beta2 = 1.5,
   jmax_25 = 157.44,
   a = 0.30,
@@ -124,18 +122,16 @@
 ##' @seealso [leaf_control()], [leaf_model()], [leaf_solve()]
 ##' @examples
 ##' leaf_traits()
-##' # A more brittle stem: psi_crit moves with the curve, not independently of it.
-##' # (stem_b = 2.5 puts P99 at 4.42, so the default psi_crit of 5.87 is off the
-##' # end of it; 3.76 is the P95 that stem_b implies.)
-##' leaf_traits(vcmax_25 = 120, stem_b = 2.5, psi_crit = 3.76)
+##' # A more brittle stem. Only the curve's own two parameters are set: the scale
+##' # `stem_b` and the critical potential `psi_crit` are quantiles of that curve
+##' # and are derived from them, so they cannot be set inconsistently.
+##' leaf_traits(vcmax_25 = 120, stem_P50 = 2.2)
 ##' @export
 leaf_traits <- function(vcmax_25 = 96,
                         stem_c = 2.680147,
-                        stem_b = 3.898245,
-                        psi_crit = 5.870283,
+                        stem_P50 = 3.4,
                         root_c = 2.680147,
-                        root_b = 3.898245,
-                        root_psi_crit = 5.870283,
+                        root_P50 = 3.4,
                         beta2 = 1.5,
                         jmax_25 = 157.44,
                         a = 0.30,
@@ -143,9 +139,8 @@ leaf_traits <- function(vcmax_25 = 96,
                         curv_fact_colim = 0.99,
                         cost_scale_TF24 = 7.5,
                         R_d_25 = 1.44) {
-  out <- list(vcmax_25 = vcmax_25, stem_c = stem_c, stem_b = stem_b,
-              psi_crit = psi_crit, root_c = root_c, root_b = root_b,
-              root_psi_crit = root_psi_crit, beta2 = beta2,
+  out <- list(vcmax_25 = vcmax_25, stem_c = stem_c, stem_P50 = stem_P50,
+              root_c = root_c, root_P50 = root_P50, beta2 = beta2,
               jmax_25 = jmax_25, a = a,
               curv_fact_elec_trans = curv_fact_elec_trans,
               curv_fact_colim = curv_fact_colim,
@@ -398,11 +393,9 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
   l <- Leaf(
     vcmax_25 = traits$vcmax_25,
     stem_c = traits$stem_c,
-    stem_b = traits$stem_b,
-    psi_crit = traits$psi_crit,
+    stem_P50 = traits$stem_P50,
     root_c = traits$root_c,
-    root_b = traits$root_b,
-    root_psi_crit = traits$root_psi_crit,
+    root_P50 = traits$root_P50,
     beta2 = traits$beta2,
     jmax_25 = traits$jmax_25,
     a = traits$a,

@@ -528,29 +528,35 @@ the per-cause split and the tolerance bands go in the first PR comment — see
 
 ## Hazards, each of which has cost someone real numbers
 
-1. **There are TWO Weibull vulnerability curves.** Stem (`stem_b`, `stem_c`) drives
-   `hydraulic_cost_TF`; root (`root_b`, `root_c`) drives uptake. They used to be the
-   unmarked `b`/`c` plus `root_b`/`root_c`, and the companion analysis used the root
-   parameters for the stem cost and carried λ ∝ ψ^3.02 into a manuscript draft where
-   it should have been ψ^0.64. Never leave an unmarked default for a parameter that
-   exists in two versions.
+1. **There are TWO Weibull vulnerability curves.** Stem (`stem_P50`, `stem_c`)
+   drives `hydraulic_cost_TF`; root (`root_P50`, `root_c`) drives uptake. They used
+   to be the unmarked `b`/`c` plus `root_b`/`root_c`, and the companion analysis
+   used the root parameters for the stem cost and carried λ ∝ ψ^3.02 into a
+   manuscript draft where it should have been ψ^0.64. Never leave an unmarked
+   default for a parameter that exists in two versions.
 
-   ⚠️ **And `psi_crit` is not a free trait — it belongs to the stem curve (#38).**
-   The spline is pre-integrated over `[0, P99]` with `P99 = stem_b *
-   log(100)^(1/stem_c)`, `psi_crit` never enters that bound, and every solve
-   evaluates the curve *at* `psi_crit`. What the defaults say is that `psi_crit` is
-   **P95** of the same curve — `3.898245 * log(1/0.05)^(1/2.680147) = 5.870283`, to
-   six decimal places, against a P99 of 6.891842. That was written down nowhere, so
-   anyone fitting a measured vulnerability curve picked something plausible and got
-   a domain error naming only the interpolator. **Move the pair together.** The
-   constructor, `set_traits` and `perturb_stem_b` all check it now, and
-   `?leaf_traits` has the relationship. This repo's own suite had one inconsistent
-   pair in it when the check went in.
+   ⚠️ **Each curve has exactly TWO settable numbers, and everything else about it
+   is derived.** `stem_b = P50/(ln 2)^(1/c)` and `psi_crit = b·ln(1/0.05)^(1/c)`,
+   i.e. P95 of the same curve — and Sperry's `k_crit = 0.05·kmax` reads that same
+   0.05 from `Leaf::k_crit_fraction`. All four are readable and none is settable.
 
-   The root curve is the exception, and knowing why saves re-deriving it:
-   `root_psi_crit` past the root P99 does **not** throw, because #77 made
-   `root_vuln_at` clamp to the last knot instead. A layer silently reporting the
-   floor conductivity is #85's question, not this one.
+   This is worth defending, because the failure it removes was expensive and quiet.
+   `psi_crit` used to be a free trait describing a curve it was not derived from:
+   the spline is pre-integrated over `[0, P99]`, `psi_crit` never entered that
+   bound, and every solve evaluates the curve *at* `psi_crit` — so anyone fitting a
+   measured vulnerability curve picked a plausible number and got a domain error
+   naming only the interpolator. It needed a consistency check and a domain check
+   to police it. **Both are now deleted rather than maintained**: the domain check
+   is provably vacuous (a derived P95 is inside P99 for every `c > 0`, since
+   `ln 20 < ln 100`), and there is nothing left for a consistency check to compare.
+
+   Do not reintroduce `stem_b` as settable. Solving `c = ln(ln 2)/ln(P50/b)`
+   diverges as `P50 → b`, so a (b, c) interface has a singularity that a (P50, c)
+   one does not.
+
+   The root curve's clamp is still worth knowing: `root_vuln_at` clamps to the
+   last knot rather than throwing (#77). A layer silently reporting the floor
+   conductivity is #85's question, not this one.
 
    ⚠️ **The domain edge itself was unstable until #92.** The knot grid accumulated
    `psi += step`, so it produced `resolution` *or* `resolution - 1` knots depending

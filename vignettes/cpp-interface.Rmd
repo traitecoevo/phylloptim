@@ -180,7 +180,7 @@ The ingredients are still public, if you want to compose something else:
 | piece | what it is |
 |---|---|
 | `set_traits(...)` | replace all fourteen traits, refreshing splines and the temperature cache |
-| `perturb_stem_b(b)` | move `stem_b` by rescaling the curve instead of rebuilding it |
+| `perturb_stem_P50(P50)` | move the stem curve by rescaling it instead of rebuilding it |
 | `dprofit_droot_collar_psi(psi, &feasible)` | dprofit/dψ at a given collar potential |
 | `dprofit_droot_collar_psi_checked(psi)` | the same as `{dprofit, feasible}`, for R — RcppR6 has no form for a `bool*`, so the generated binding drops the flag |
 | `evaluate_root_collar_psi(psi)` | solve the inner problem at a fixed collar |

@@ -133,7 +133,7 @@ test_that("leaf_gradient_batch() crosses the boundary once, whatever N is", {
   # the count went back to being per-row on a fast day.
   b1 <- leaf_batch(psi_soil = rep(1.5, 4), PPFD = 900)
   b2 <- leaf_batch(psi_soil = rep(1.5, 64), PPFD = 900)
-  pars <- c("vcmax_25", "stem_b", "cost_scale_TF24", "beta2")
+  pars <- c("vcmax_25", "stem_P50", "cost_scale_TF24", "beta2")
   leaf_gradient_batch(b1, pars = pars)                       # warm anything lazy
 
   n1 <- count_calls("gradient_batch_run", leaf_gradient_batch(b1, pars = pars))
@@ -150,7 +150,7 @@ test_that("leaf_gradient_batch() crosses the boundary once, whatever N is", {
   for (sym in c("Leaf__set_traits", "Leaf__set_physiology",
                 "Leaf__find_root_collar_psi", "Leaf__evaluate_root_collar_psi",
                 "Leaf__dprofit_droot_collar_psi", "Leaf__operating_point_values",
-                "Leaf__perturb_stem_b", "Leaf__ctor", "RootNetwork__ctor",
+                "Leaf__perturb_stem_P50", "Leaf__ctor", "RootNetwork__ctor",
                 "root_network_from_carbon")) {
     expect_identical(count_calls(sym, leaf_gradient_batch(b2, pars = pars)), 0L,
                      label = sym)

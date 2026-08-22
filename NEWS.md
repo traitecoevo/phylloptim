@@ -1,5 +1,44 @@
 # phylloptim 0.5.4
 
+## Both vulnerability curves are parameterised on (P50, c)
+
+**BREAKING.** The stem curve's traits are now `stem_P50` and `stem_c`, and the
+root curve's `root_P50` and `root_c`. `stem_b`, `psi_crit`, `root_b` and
+`root_psi_crit` are **derived**: still readable on a `Leaf`, no longer settable
+and no longer arguments to `leaf_traits()`, `set_traits()` or the constructor.
+
+    b        = P50 / (ln 2)^(1/c)
+    psi_crit = b * ln(1/0.05)^(1/c)          i.e. P95 of the same curve
+
+The trait vector goes 14 to 12 and `gradient_par_names()` 16 to 14. Because C++
+and R bind traits positionally, callers that pass them by position must be updated
+together with this release. `perturb_stem_b()` becomes `perturb_stem_P50()`.
+
+Why: `psi_crit` was a free trait describing a curve it was not derived from, and
+Sperry's reference conductivity `k_crit = 0.05 * kmax` used the same 0.05 from a
+separate hard-coded constant. The three could disagree, and a consistency check
+existed to police them. They are now one number, so the check is gone -- along
+with the domain check, which becomes vacuous (a derived P95 is inside P99 for
+every c > 0).
+
+**The reference values moved**, and were regenerated. The defaults were round in
+`stem_b` and `psi_crit` rather than in `P50`, so `psi_crit` was P95 rounded to
+seven figures and `f(psi_crit)` was 0.049999968739194864 rather than 0.05.
+Adopting a round `P50 = 3.4` shifts `stem_b` by 3.1e-08 and `psi_crit` by 4.7e-08,
+which propagates to a worst 4.4e-05 on assimilation over the 576-point grid and
+2.2e-05 on profit over the 2304-row optimiser grid -- below the 1e-4 at which this
+project calls a difference real. No operating point changed branch. The lowest
+primitive tier to move is the vulnerability curve itself, at 3.1e-08; the
+arithmetic tier is unchanged.
+
+Two behavioural consequences, both asserted:
+
+* A shut-down leaf's hydraulic cost no longer depends on the curve's scale. It
+  sits at `psi_crit`, where remaining conductivity is exactly 0.05 whatever `P50`
+  is, so `dprofit/dstem_P50` there is exactly zero rather than negative.
+* Stem gradients carry a term through the moving `psi_crit`. It is exactly zero at
+  an interior optimum and order 1 at a pinned one, where it is 29% of the total.
+
 ## The prescribed-lambda optimiser is removed
 
 **BREAKING.** `optimise_psi_stem_Sperry()`, `profit_psi_stem_Sperry()` and

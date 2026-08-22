@@ -8,8 +8,8 @@ SEXP RootNetwork__ctor() {
 
 
 // [[Rcpp::export]]
-phylloptim::Leaf Leaf__ctor(double vcmax_25, double stem_c, double stem_b, double psi_crit, double root_c, double root_b, double root_psi_crit, double beta2, double jmax_25, double a, double curv_fact_elec_trans, double curv_fact_colim, double GSS_tol_abs, double vulnerability_curve_ncontrol, double ci_abs_tol, double ci_niter, double cost_scale_TF24) {
-  return phylloptim::Leaf(vcmax_25, stem_c, stem_b, psi_crit, root_c, root_b, root_psi_crit, beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, GSS_tol_abs, vulnerability_curve_ncontrol, ci_abs_tol, ci_niter, cost_scale_TF24);
+phylloptim::Leaf Leaf__ctor(double vcmax_25, double stem_c, double stem_P50, double root_c, double root_P50, double beta2, double jmax_25, double a, double curv_fact_elec_trans, double curv_fact_colim, double GSS_tol_abs, double vulnerability_curve_ncontrol, double ci_abs_tol, double ci_niter, double cost_scale_TF24) {
+  return phylloptim::Leaf(vcmax_25, stem_c, stem_P50, root_c, root_P50, beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, GSS_tol_abs, vulnerability_curve_ncontrol, ci_abs_tol, ci_niter, cost_scale_TF24);
 }
 // [[Rcpp::export]]
 std::vector<double> Leaf__operating_point_values(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
@@ -24,12 +24,12 @@ void Leaf__set_physiology(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, con
   obj_->set_physiology(root_network, PPFD, psi_soil, soil_depth, leaf_specific_conductance_max, atm_vpd, ca, leaf_temp, atm_o2_kpa, atm_kpa);
 }
 // [[Rcpp::export]]
-void Leaf__perturb_stem_b(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double stem_b) {
-  obj_->perturb_stem_b(stem_b);
+void Leaf__perturb_stem_P50(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double stem_P50) {
+  obj_->perturb_stem_P50(stem_P50);
 }
 // [[Rcpp::export]]
-void Leaf__set_traits(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double vcmax_25, double stem_c, double stem_b, double psi_crit, double root_c, double root_b, double root_psi_crit, double beta2, double jmax_25, double a, double curv_fact_elec_trans, double curv_fact_colim, double cost_scale_TF24, double R_d_25) {
-  obj_->set_traits(vcmax_25, stem_c, stem_b, psi_crit, root_c, root_b, root_psi_crit, beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, cost_scale_TF24, R_d_25);
+void Leaf__set_traits(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double vcmax_25, double stem_c, double stem_P50, double root_c, double root_P50, double beta2, double jmax_25, double a, double curv_fact_elec_trans, double curv_fact_colim, double cost_scale_TF24, double R_d_25) {
+  obj_->set_traits(vcmax_25, stem_c, stem_P50, root_c, root_P50, beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, cost_scale_TF24, R_d_25);
 }
 // [[Rcpp::export]]
 double Leaf__proportion_of_conductivity(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi) {
@@ -211,6 +211,21 @@ double Leaf__stem_c__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
 }
 
 // [[Rcpp::export]]
+double Leaf__stem_P50__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->stem_P50;
+}
+
+// [[Rcpp::export]]
+double Leaf__root_c__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->roots_.root_c;
+}
+
+// [[Rcpp::export]]
+double Leaf__root_P50__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->roots_.root_P50;
+}
+
+// [[Rcpp::export]]
 double Leaf__stem_b__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
   return obj_->stem_b;
 }
@@ -218,11 +233,6 @@ double Leaf__stem_b__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
 // [[Rcpp::export]]
 double Leaf__psi_crit__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
   return obj_->psi_crit;
-}
-
-// [[Rcpp::export]]
-double Leaf__root_c__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
-  return obj_->roots_.root_c;
 }
 
 // [[Rcpp::export]]

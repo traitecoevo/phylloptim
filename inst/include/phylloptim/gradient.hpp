@@ -70,36 +70,33 @@ namespace gradient {
 // ⚠️ R INDEXES THESE POSITIONS, so a reordering silently differentiates the wrong
 // parameter. `test-gradient-batch.R` reads the names back out of C++ and compares
 // them with R's, so the two cannot drift apart without a failure.
-inline constexpr int n_traits = 14;
-inline constexpr int n_pars = 16;
+inline constexpr int n_traits = 12;
+inline constexpr int n_pars = 14;
 
 // Every index by name, so nothing below indexes `theta` with a bare integer.
 // The first `n_traits` are `set_traits`' arguments in its order, which is also
 // `leaf_traits()`'; the two non-traits follow and take a relative step.
 inline constexpr int par_vcmax_25 = 0;
 inline constexpr int par_stem_c = 1;
-inline constexpr int par_stem_b = 2;
-inline constexpr int par_psi_crit = 3;
-inline constexpr int par_root_c = 4;
-inline constexpr int par_root_b = 5;
-inline constexpr int par_root_psi_crit = 6;
-inline constexpr int par_beta2 = 7;
-inline constexpr int par_jmax_25 = 8;
-inline constexpr int par_a = 9;
-inline constexpr int par_curv_fact_elec_trans = 10;
-inline constexpr int par_curv_fact_colim = 11;
-inline constexpr int par_cost_scale_TF24 = 12;
-inline constexpr int par_R_d_25 = 13;
-inline constexpr int par_kmax = 14;
-inline constexpr int par_resistance = 15;
+inline constexpr int par_stem_P50 = 2;
+inline constexpr int par_root_c = 3;
+inline constexpr int par_root_P50 = 4;
+inline constexpr int par_beta2 = 5;
+inline constexpr int par_jmax_25 = 6;
+inline constexpr int par_a = 7;
+inline constexpr int par_curv_fact_elec_trans = 8;
+inline constexpr int par_curv_fact_colim = 9;
+inline constexpr int par_cost_scale_TF24 = 10;
+inline constexpr int par_R_d_25 = 11;
+inline constexpr int par_kmax = 12;
+inline constexpr int par_resistance = 13;
 
 inline const std::vector<std::string>& par_names() {
   static const std::vector<std::string> names{
-      "vcmax_25",  "stem_c",              "stem_b",
-      "psi_crit",  "root_c",              "root_b",
-      "root_psi_crit", "beta2",           "jmax_25",
-      "a",         "curv_fact_elec_trans", "curv_fact_colim",
-      "cost_scale_TF24", "R_d_25",
+      "vcmax_25",  "stem_c",              "stem_P50",
+      "root_c",    "root_P50",            "beta2",
+      "jmax_25",   "a",                   "curv_fact_elec_trans",
+      "curv_fact_colim", "cost_scale_TF24", "R_d_25",
       "leaf_specific_conductance_max",
       "resistance"};
   return names;
@@ -331,40 +328,46 @@ inline void apply(Leaf& l, const double* theta, const Drivers& d, bool single,
   // guessing. `stem_c` is deliberately not here: it has no such identity, and
   // reading the curve from its closed form instead differentiates a slightly
   // different model and disagrees by 3e-4 (PLAN 11f).
-  if (fast_stem_curve && only == par_stem_b) {
-    l.perturb_stem_b(theta[par_stem_b]);
+  if (fast_stem_curve && only == par_stem_P50) {
+    l.perturb_stem_P50(theta[par_stem_P50]);
     return;
   }
   // AND THE WAY BACK OUT OF IT (#74), which is what makes the shortcut worth its
   // 24.5x through a batch instead of 2.4x. `set_traits()` below rebuilds the stem
   // curve whenever `stem_b != stem_b_spline_`, and that third clause is what
   // returns a shortcut-displaced leaf to a rebuilt one -- so a restore that
-  // followed a `perturb_stem_b()` always paid for a rebuild, once per observation,
+  // followed a `perturb_stem_P50()` always paid for a rebuild, once per observation,
   // whatever `pars` contained. Undoing the displacement WITH the shortcut leaves
   // the clause false and the splines alone.
   //
-  // Bit-identical by construction rather than by measurement, and the reason is
-  // that `perturb_stem_b()` writes `stem_b` and nothing else: the splines here ARE
-  // the ones built at `stem_b_spline_`, not a rescaled copy of them, and at
-  // `stem_b == stem_b_spline_` all four `stem_curve_*` accessors take their
-  // scale == 1 branch and read them directly.
+  // Bit-identical by construction rather than by measurement. Everything
+  // `perturb_stem_P50()` writes -- `stem_P50`, and `stem_b`/`psi_crit` derived
+  // from it -- is a pure function of `(stem_P50, stem_c)` computed by the same
+  // expression `set_traits()` uses, so restoring the base P50 restores all three
+  // to the base bit pattern. The splines here ARE the ones built at
+  // `stem_b_spline_`, not a rescaled copy, and at `stem_b == stem_b_spline_` all
+  // four `stem_curve_*` accessors take their scale == 1 branch and read them
+  // directly.
   //
   // ⚠️ The two guards are both load-bearing, and neither is an optimisation.
-  // Displacement can only be created by `perturb_stem_b()`, which is sound only
+  // Displacement can only be created by `perturb_stem_P50()`, which is sound only
   // when everything else is already at base -- so a displaced leaf is one whose
-  // psi_crit/stem_c/root_* are the values `stem_b_spline_` was validated against,
-  // and `perturb_stem_b()`'s own domain checks cannot fire on the way back.
-  // Without the equality test that argument is gone: in a batch with a theta
-  // MATRIX the next row's restore moves stem_b somewhere new, and pushing it
-  // through `perturb_stem_b()` would check it against the previous row's psi_crit
-  // and could throw where `set_traits()` succeeds.
+  // stem_c/root_* are the values `stem_b_spline_` was validated against. Without
+  // the equality test that argument is gone: in a batch with a theta MATRIX the
+  // next row's restore moves stem_b somewhere new, and pushing it through the
+  // shortcut would rescale off a spline built for a different curve.
+  //
+  // The equality is on the DERIVED scale, not on the trait, because
+  // `stem_b_spline_` records a `b`. Same expression as the one inside
+  // `perturb_stem_P50()`, so a genuine round trip compares exactly equal.
   if (fast_stem_curve && l.stem_b != l.stem_b_spline_ &&
-      theta[par_stem_b] == l.stem_b_spline_) {
-    l.perturb_stem_b(theta[par_stem_b]);
+      Leaf::weibull_b_from_P50(theta[par_stem_P50], l.stem_c) ==
+          l.stem_b_spline_) {
+    l.perturb_stem_P50(theta[par_stem_P50]);
   }
-  l.set_traits(theta[par_vcmax_25], theta[par_stem_c], theta[par_stem_b],
-               theta[par_psi_crit], theta[par_root_c], theta[par_root_b],
-               theta[par_root_psi_crit], theta[par_beta2], theta[par_jmax_25],
+  l.set_traits(theta[par_vcmax_25], theta[par_stem_c], theta[par_stem_P50],
+               theta[par_root_c], theta[par_root_P50],
+               theta[par_beta2], theta[par_jmax_25],
                theta[par_a], theta[par_curv_fact_elec_trans],
                theta[par_curv_fact_colim], theta[par_cost_scale_TF24],
                theta[par_R_d_25]);
@@ -393,7 +396,7 @@ inline void apply(Leaf& l, const double* theta, const Drivers& d, bool single,
 // The loops restore base once at the END, not between parameters, because every
 // parameter's setter normally goes through the full `set_traits()` +
 // `set_physiology()` path and restores everything on the way. The `stem_b`
-// shortcut is the one that does not: `perturb_stem_b()` rescales the stem spline
+// shortcut is the one that does not: `perturb_stem_P50()` rescales the stem spline
 // and touches nothing else, which is sound only if the rest of the object is
 // already at base. So a `stem_b` that is not the FIRST entry of `pars` was
 // differentiated at a point displaced by one step in whichever parameter
@@ -410,7 +413,7 @@ inline void apply(Leaf& l, const double* theta, const Drivers& d, bool single,
 // stem_b". `root_b` obeys the same homogeneity identity and would get the same
 // treatment, at which point a name-based test would silently stop covering it.
 inline bool takes_shortcut(int par, const Settings& s) {
-  return s.fast_stem_curve && par == par_stem_b;
+  return s.fast_stem_curve && par == par_stem_P50;
 }
 
 // The implicit-function composite. Two perturbed evaluations per parameter,
@@ -797,7 +800,7 @@ inline std::vector<Result> batch(Leaf& l, const double* theta,
       out[i].grad.assign(npars * n_outputs, util::na_value);
       // Put the leaf back at this row's base parameters before the next one.
       // The next row's own `apply(only = -1)` would do it -- `set_traits` forces
-      // the vulnerability rebuild that `perturb_stem_b` displaced -- but the
+      // the vulnerability rebuild that `perturb_stem_P50` displaced -- but the
       // LAST row has no next one, and a batch that ended on the fast path would
       // hand back a leaf quietly running on a rescaled stem curve (hazard 8).
       try {

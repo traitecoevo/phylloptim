@@ -633,49 +633,69 @@ s50_from <- function(P50, c) 50 * c * log(2) / P50
 
 # round-trip: the package defaults, recovered from a (P50, P88) pair
 tr <- leaf_traits()
-P50 <- tr$stem_b * log(2)^(1 / tr$stem_c)
-P88 <- p_at(P50, tr$stem_c, 0.12)
-c_hat <- c_from_two(P50, 0.50, P88, 0.12)
+l  <- leaf_model()
+P88 <- p_at(tr$stem_P50, tr$stem_c, 0.12)
+c_hat <- c_from_two(tr$stem_P50, 0.50, P88, 0.12)
 P50_hat <- P88 * L(0.12)^(-1 / c_hat)
 cat(sprintf("defaults: P50 = %.6f MPa, c = %.6f, so P88 = %.6f, P95 = %.6f\n",
-            P50, tr$stem_c, P88, p_at(P50, tr$stem_c, 0.05)))
+            tr$stem_P50, tr$stem_c, P88, p_at(tr$stem_P50, tr$stem_c, 0.05)))
 cat(sprintf("recovered from (P50, P88): c = %.6f, P50 = %.6f  (errors %.1e, %.1e)\n",
-            c_hat, P50_hat, abs(c_hat - tr$stem_c), abs(P50_hat - P50)))
-cat(sprintf("S50 at the defaults: %.1f %%/MPa\n", s50_from(P50, tr$stem_c)))
+            c_hat, P50_hat, abs(c_hat - tr$stem_c), abs(P50_hat - tr$stem_P50)))
+cat(sprintf("S50 at the defaults: %.1f %%/MPa\n", s50_from(tr$stem_P50, tr$stem_c)))
 
-# psi_crit against P95 -- at FULL precision, which is the point
-cat(sprintf("psi_crit trait  = %.17g\n", tr$psi_crit))
-cat(sprintf("P95 from (b, c) = %.17g   relative gap %.2e\n",
-            p_at(P50, tr$stem_c, 0.05),
-            abs(p_at(P50, tr$stem_c, 0.05) / tr$psi_crit - 1)))
-cat(sprintf("and P50 itself  = %.17g  (not exactly 3.4)\n", P50))
+# the derived pair, at FULL precision -- b and psi_crit are read off the model,
+# the right-hand sides are this appendix's own formulae
+cat(sprintf("stem_b   = %.17g  vs  P50/(ln2)^(1/c) = %.17g\n",
+            l$stem_b, tr$stem_P50 / log(2)^(1 / tr$stem_c)))
+cat(sprintf("psi_crit = %.17g  vs  P95            = %.17g\n",
+            l$psi_crit, p_at(tr$stem_P50, tr$stem_c, 0.05)))
+cat(sprintf("f(psi_crit) = %.17g   (the critical fraction, exactly)\n",
+            l$proportion_of_conductivity(l$psi_crit)))
 ```
 
-⚠️ **Read those at full precision, not rounded.** `psi_crit` and `P95` agree to
-seven significant figures and no further, and the derived `P50` is not exactly
-3.4. The defaults were chosen as round values of `stem_b` and `psi_crit`, so
-`psi_crit` is `P95` *rounded*, not `P95`. Printed to six decimals the two look
-identical, which is exactly the trap this document's preamble warns about.
+Those are equalities, not agreements: `stem_b` and `psi_crit` are computed from
+`(P50, c)` by the expressions printed beside them, so there is no gap to quote.
 
-That matters for anyone adopting the derived form: making `psi_crit` a quantile of
-the curve **moves it**, by the relative gap above. It is a small number but it is
-far above the floor at which this model calls a difference real, so it propagates.
+⚠️ **It was not always so, and the difference is worth recording.** The defaults
+used to be round values of `stem_b` and `psi_crit` rather than of `P50`, with
+`psi_crit` set to `P95` *rounded to seven figures* — so `f(psi_crit)` was
+`0.049999968739194864` rather than `0.05`, and the header claiming it was "0.0500
+exactly" was true only to four decimal places. Adopting a round `P50 = 3.4` with
+both derived moved `stem_b` by 3.1e-08 and `psi_crit` by 4.7e-08. That propagated
+to a worst 4.4e-05 on assimilation across the 576-point reference grid — a
+thousandfold amplification of a rounding-level input change, and still below the
+1e-4 at which this project calls a difference real.
 
 ## `psi_crit` is a quantile, not a parameter
 
 `psi_crit` is `P_f` at `f = 0.05`, i.e. `P95` — and **Sperry's reference
 conductivity `k_crit = f·kmax` uses the same `f`**. So `psi_crit`, `P95` and
 `k_crit` are one number wearing three names. Derived from a single named constant
-they cannot disagree; held as a free trait plus a hard-coded `0.05`, they need a
+they cannot disagree; held as a free trait plus a hard-coded `0.05`, they needed a
 consistency check to police them. `f = 0.05` is a convention, not a knob — it is
 0.05 everywhere it appears across this family.
 
-## Two consequences for gradients, and a third
+Two things follow that are easy to miss:
 
-1. **The `stem_b` homogeneity shortcut survives.** At fixed `c`, `b` is a constant
+- The **domain check disappears**, because it becomes vacuous. It enforced
+  `psi_crit ≤ P99`, and a derived `psi_crit = P95` satisfies that for every `c > 0`
+  since `ln 20 < ln 100`. There is nothing left to validate.
+- A **shut-down leaf's hydraulic cost stops depending on the curve's scale.** It
+  sits at `psi_crit`, where the remaining conductivity is exactly `f` whatever
+  `P50` is — so the cost is the same number for every `P50`, and
+  `dprofit/dP50` at a shut-down point is exactly zero rather than merely small.
+
+## Three consequences for gradients
+
+All three are asserted in the suite rather than described here, and the numbers
+below are what those assertions compare against.
+
+1. **The homogeneity shortcut survives.** At fixed `c`, `b` is a constant
    multiple of `P50`, so the cumulative-vulnerability integral stays homogeneous of
-   degree 1 and `d/dP50 = (ln 2)^{-1/c} · d/db`. Reuse the existing fast path with
-   a scalar factor rather than writing a new one.
+   degree 1 and `d/dP50 = (ln 2)^{-1/c} · d/db` — a factor of 1.1465 at the
+   defaults. The existing fast path is reused with that scalar rather than
+   rewritten. `psi_crit` scales by the same factor, which is why moving the trait
+   can never walk the solve off the end of its own curve.
 2. **The `c` gradient splits.** Once `P50` is the scale parameter, `b` depends on
    `c` too:
    $$\frac{d}{dc}\bigg|_{P_{50}}=\frac{d}{dc}\bigg|_{b}+\frac{db}{dc}\frac{d}{db},
@@ -685,13 +705,18 @@ consistency check to police them. `f = 0.05` is a convention, not a knob — it 
    like a plausible-but-wrong gradient rather than an error.
 3. ⚠️ **A derived `psi_crit` adds a term.** Moving `P50` moves the threshold, so
    `d/dP50` picks up `dpsi_crit/dP50 · d/dpsi_crit`, with `dpsi_crit/dP50 =
-   (log₂(1/f))^{1/c}`, a constant at fixed `c`. That term is **exactly zero at an
-   interior optimum and order 1 at a pinned one**, so the clean identity in (1)
-   holds *only where the optimum is interior*. Assert it with that qualifier.
+   (log₂(1/f))^{1/c}` — 1.7266 at the defaults, a constant at fixed `c`. That term
+   is **exactly zero at an interior optimum and order 1 at a pinned one**, so the
+   clean identity in (1) holds *only where the optimum is interior*.
 
-The root curve obeys the identical homogeneity identity, so it takes the same
-treatment — `(root_P50, root_c)` — or the two curves end up on different
-conventions.
+   The size of it is the reason to care. At a dry-pinned point the two halves are
+   `1.1465 × 4.6991` from the curve and `1.7266 × 1.2605` through the bound, so
+   dropping the second gives 5.39 where the answer is 7.56 — a 29% error with
+   nothing about it that looks wrong.
+
+The root curve obeys the identical homogeneity identity and takes the same
+treatment — `(root_P50, root_c)` — because two curves on different conventions is
+the shape of the mistake that once carried a root parameter into a stem cost.
 
 # Appendix B — gradients
 

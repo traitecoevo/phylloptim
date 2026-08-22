@@ -63,30 +63,29 @@ namespace {
 // where the network is built, exactly, because root_network_from_carbon is
 // homogeneous of degree 1 in each.
 struct Traits {
-  double v[13];
+  double v[11];
 };
 
-const Traits kBase{{96.0, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245,
-                    5.870283, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5}};
+const Traits kBase{{96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5,
+                    157.44, 0.30, 0.7, 0.99, 7.5}};
 
-const char *kNames[13] = {"vcmax_25",  "stem_c",     "stem_b",
-                          "psi_crit",  "root_c",     "root_b",
-                          "root_psi_crit", "beta2",  "jmax_25",
-                          "a",         "curv_elec",  "curv_colim",
-                          "cost_scale"};
+const char *kNames[11] = {"vcmax_25",  "stem_c",     "stem_P50",
+                          "root_c",    "root_P50",   "beta2",
+                          "jmax_25",   "a",          "curv_elec",
+                          "curv_colim", "cost_scale"};
 
 // Whether perturbing this trait forces a vulnerability spline to be rebuilt:
-// stem_c/stem_b own the transpiration pair, root_c/root_b own the root curve.
+// stem_c/stem_P50 own the transpiration pair, root_c/root_P50 own the root curve.
 // This turns out to be the single most important fact about the results.
 bool rebuilds_a_spline(int i) {
-  return i == 1 || i == 2 || i == 4 || i == 5;
+  return i == 1 || i == 2 || i == 3 || i == 4;
 }
 
 void apply_traits(phylloptim::Leaf &l, const Traits &t) {
   // R_d_25 last, at the class default, so the benchmark measures the default
   // configuration.
-  l.set_traits(t.v[0], t.v[1], t.v[2], t.v[3], t.v[4], t.v[5], t.v[6], t.v[7],
-               t.v[8], t.v[9], t.v[10], t.v[11], t.v[12], 1.44);
+  l.set_traits(t.v[0], t.v[1], t.v[2], t.v[3], t.v[4], t.v[5],
+               t.v[6], t.v[7], t.v[8], t.v[9], t.v[10], 1.44);
 }
 
 // One interior operating point. Drivers from plant's tests/testthat/test-leaf.r,
@@ -146,15 +145,15 @@ double ift_arm(phylloptim::Leaf &l, int idx, double psi_star, long reps,
   return us_per(t0, clock_type::now(), reps);
 }
 
-// The same composite, but moving stem_b by the homogeneity rescale instead of
-// through set_traits -- so no spline is rebuilt and set_physiology is not needed
-// either, since nothing it derives depends on stem_b. PLAN 11f.
-double ift_arm_rescaled_stem_b(phylloptim::Leaf &l, double psi_star, long reps,
-                               double &sink) {
+// The same composite, but moving the stem curve by the homogeneity rescale
+// instead of through set_traits -- so no spline is rebuilt and set_physiology is
+// not needed either, since nothing it derives depends on stem_b. PLAN 11f.
+double ift_arm_rescaled_stem_curve(phylloptim::Leaf &l, double psi_star,
+                                   long reps, double &sink) {
   const auto t0 = clock_type::now();
   for (long r = 0; r < reps; ++r) {
     for (int sign = -1; sign <= 1; sign += 2) {
-      l.perturb_stem_b(perturbed(kBase, 2, sign, r));
+      l.perturb_stem_P50(perturbed(kBase, 2, sign, r));
       sink += l.dprofit_droot_collar_psi(psi_star);
       sink += l.evaluate_root_collar_psi(psi_star);
       sink += l.assim_colimited_;
@@ -227,15 +226,15 @@ int main(int argc, char **argv) {
     printf("  set_traits, spline rebuild %8.3f us   <-- the finding\n",
            us_per(t0, clock_type::now(), reps));
 
-    // And the way round it, for stem_b only: the curve is homogeneous of degree
-    // 1 in stem_b, so the spline for a perturbed stem_b is this one with its
-    // argument rescaled. PLAN 11f.
+    // And the way round it, for the stem curve only: it is homogeneous of degree
+    // 1 in stem_b, which is a fixed multiple of stem_P50, so the spline for a
+    // perturbed trait is this one with its argument rescaled. PLAN 11f.
     t0 = clock_type::now();
     for (long r = 0; r < reps; ++r) {
-      l.perturb_stem_b(kBase.v[2] + double(r) * 1e-9);
+      l.perturb_stem_P50(kBase.v[2] + double(r) * 1e-9);
       sink += l.stem_b;
     }
-    printf("  perturb_stem_b, no rebuild %8.3f us   <-- and the way round it\n",
+    printf("  perturb_stem_P50, no rebuild %8.3f us  <-- and the way round it\n",
            us_per(t0, clock_type::now(), reps));
     apply_traits(l, kBase);
     set_drivers(l);
@@ -291,7 +290,7 @@ int main(int argc, char **argv) {
   double reb = 0.0, resc = 0.0;
   for (int round = 0; round < 3; ++round) {
     const double a = ift_arm(l, 2, psi_star, per_round, sink);
-    const double b = ift_arm_rescaled_stem_b(l, psi_star, per_round, sink);
+    const double b = ift_arm_rescaled_stem_curve(l, psi_star, per_round, sink);
     reb = round == 0 ? a : std::min(reb, a);
     resc = round == 0 ? b : std::min(resc, b);
   }
@@ -310,7 +309,7 @@ int main(int argc, char **argv) {
     double theta[phylloptim::gradient::n_pars] = {
         kBase.v[0], kBase.v[1], kBase.v[2],  kBase.v[3], kBase.v[4],
         kBase.v[5], kBase.v[6], kBase.v[7],  kBase.v[8], kBase.v[9],
-        kBase.v[10], kBase.v[11], kBase.v[12], 1.44,     kmax,      0.0};
+        kBase.v[10], 1.44,      kmax,        0.0};
 
     std::vector<double> root{1.0 / kAreaLeaf}, psi_soil{2.0}, depth{1.0};
     phylloptim::gradient::Drivers gd;
@@ -333,8 +332,8 @@ int main(int argc, char **argv) {
     };
     const Arm arms[] = {
         {"vcmax_25 (no spline anywhere)", 0, true},
-        {"stem_b, fast_stem_curve on", phylloptim::gradient::par_stem_b, true},
-        {"stem_b, fast_stem_curve off", phylloptim::gradient::par_stem_b, false},
+        {"stem_P50, fast_stem_curve on", phylloptim::gradient::par_stem_P50, true},
+        {"stem_P50, fast_stem_curve off", phylloptim::gradient::par_stem_P50, false},
         {"stem_c (no identity to use)", phylloptim::gradient::par_stem_c, true}};
 
     printf("\n%-32s %10s %12s\n", "pars", "us/obs", "rebuilds/obs");

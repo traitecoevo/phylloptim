@@ -90,16 +90,14 @@ Leaf:
 
       All water potentials are **positive magnitudes in MPa**. There is one
       representation throughout and it is asserted, not documented: a negative
-      `psi_crit`, `stem_b`, `root_b` or `root_psi_crit` is an error here, and a
-      negative `psi_soil` is an error in `set_physiology`.
+      `stem_P50` or `root_P50` is an error here, and a negative `psi_soil` is an
+      error in `set_physiology`.
 
       @param vcmax_25 maximum carboxylation rate at 25 C (umol m^-2 s^-1)
       @param stem_c shape parameter of the STEM hydraulic vulnerability curve (unitless)
-      @param stem_b sensitivity parameter of the STEM hydraulic vulnerability curve (MPa)
-      @param psi_crit critical stem water potential (MPa, positive magnitude)
+      @param stem_P50 STEM potential at 50% loss of hydraulic conductivity (MPa, positive magnitude)
       @param root_c shape parameter of the ROOT hydraulic vulnerability curve (unitless)
-      @param root_b sensitivity parameter of the ROOT hydraulic vulnerability curve (MPa)
-      @param root_psi_crit critical root water potential (MPa, positive magnitude)
+      @param root_P50 ROOT potential at 50% loss of hydraulic conductivity (MPa, positive magnitude)
       @param beta2 exponent for the effect of hydraulic risk (unitless)
       @param jmax_25 maximum rate of electron transport at 25 C (umol m^-2 s^-1)
       @param a quantum yield of photosynthetic electron transport (mol mol^-1)
@@ -115,11 +113,9 @@ Leaf:
     args:
       - vcmax_25: double
       - stem_c: double
-      - stem_b: double
-      - psi_crit: double
+      - stem_P50: double
       - root_c: double
-      - root_b: double
-      - root_psi_crit: double
+      - root_P50: double
       - beta2: double
       - jmax_25: double
       - a: double
@@ -156,9 +152,14 @@ Leaf:
     vcmax_25: {type: double, access: field, readonly: true}
     jmax_25: {type: double, access: field, readonly: true}
     stem_c: {type: double, access: field, readonly: true}
+    stem_P50: {type: double, access: field, readonly: true}
+    root_c: {type: double, access: field, readonly: true, name_cpp: "roots_.root_c"}
+    root_P50: {type: double, access: field, readonly: true, name_cpp: "roots_.root_P50"}
+    # DERIVED from the (P50, c) pair above, and bound because callers need to read
+    # them: `stem_b` is the curve's scale and `psi_crit` its 5%-conductivity
+    # quantile, which is also Sperry's reference potential.
     stem_b: {type: double, access: field, readonly: true}
     psi_crit: {type: double, access: field, readonly: true}
-    root_c: {type: double, access: field, readonly: true, name_cpp: "roots_.root_c"}
     root_b: {type: double, access: field, readonly: true, name_cpp: "roots_.root_b"}
     root_psi_crit: {type: double, access: field, readonly: true, name_cpp: "roots_.root_psi_crit"}
     beta2: {type: double, access: field, readonly: true}
@@ -426,12 +427,12 @@ Leaf:
     # clear the solved outputs; set_traits() is the way back. Bound because
     # leaf_gradient() is in R -- not because a user should reach for it, which is
     # why its documentation is on leaf_gradient() rather than here.
-    perturb_stem_b:
+    perturb_stem_P50:
       return_type: void
-      args: [stem_b: double]
+      args: [stem_P50: double]
     set_traits:
       return_type: void
-      args: [vcmax_25: double, stem_c: double, stem_b: double, psi_crit: double, root_c: double, root_b: double, root_psi_crit: double, beta2: double, jmax_25: double, a: double, curv_fact_elec_trans: double, curv_fact_colim: double, cost_scale_TF24: double, R_d_25: double]
+      args: [vcmax_25: double, stem_c: double, stem_P50: double, root_c: double, root_P50: double, beta2: double, jmax_25: double, a: double, curv_fact_elec_trans: double, curv_fact_colim: double, cost_scale_TF24: double, R_d_25: double]
 
     # --- transpiration and conductance ---------------------------------------
     proportion_of_conductivity:

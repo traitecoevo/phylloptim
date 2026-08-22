@@ -87,8 +87,8 @@ set_traits <- function(x, traits) {
   }
   # Positional, in the C++ argument order, for the same reason leaf_model() is:
   # the ordering is written down once rather than at every call site.
-  x$set_traits(traits$vcmax_25, traits$stem_c, traits$stem_b, traits$psi_crit,
-               traits$root_c, traits$root_b, traits$root_psi_crit, traits$beta2,
+  x$set_traits(traits$vcmax_25, traits$stem_c, traits$stem_P50,
+               traits$root_c, traits$root_P50, traits$beta2,
                traits$jmax_25, traits$a, traits$curv_fact_elec_trans,
                traits$curv_fact_colim, traits$cost_scale_TF24, traits$R_d_25)
   invisible(x)
@@ -999,8 +999,8 @@ leaf_gradient <- function(psi_soil,
     # guessing: .gradient_ift and .gradient_fd perturb exactly one parameter at a
     # time, and the next parameter's first call goes through the full path below,
     # rebuilding the spline on its way.
-    if (fast_stem_curve && identical(only, "stem_b")) {
-      l$perturb_stem_b(theta[["stem_b"]])
+    if (fast_stem_curve && identical(only, "stem_P50")) {
+      l$perturb_stem_P50(theta[["stem_P50"]])
       return(invisible(l))
     }
     # Positional, straight onto the object, rather than through `set_traits()` and
@@ -1015,14 +1015,13 @@ leaf_gradient <- function(psi_soil,
     # the #25 positive-magnitude invariants itself. Do not copy this pattern anywhere
     # the values are not already known-good.
     # ⚠️ POSITIONAL, so the count is load-bearing. `set_traits()`'s C++ signature and
-    # `leaf_traits()` must agree on FOURTEEN, and adding a trait breaks here and
+    # `leaf_traits()` must agree on TWELVE, and adding a trait breaks here and
     # nowhere else -- at run time, with "argument <name> is missing" raised inside
     # the generated binding, which names neither this line nor the count. That is
     # how #41 broke; test-gradient.R asserts the arity so the next one is caught.
     tv <- theta[trait_names]
     apply_traits(tv[[1L]], tv[[2L]], tv[[3L]], tv[[4L]], tv[[5L]], tv[[6L]],
-                 tv[[7L]], tv[[8L]], tv[[9L]], tv[[10L]], tv[[11L]], tv[[12L]],
-                 tv[[13L]], tv[[14L]])
+                 tv[[7L]], tv[[8L]], tv[[9L]], tv[[10L]], tv[[11L]], tv[[12L]])
     # `resistance` is a driver, so it goes in with the others rather than through
     # $set_supply_single(). That removes the second object-resetting call this
     # function used to make -- and with it the reason the ordering note above had to
@@ -1064,17 +1063,17 @@ leaf_gradient <- function(psi_soil,
 # alone, and which therefore require the object to be at the base point before
 # they run. See `.gradient_reseat_base()`.
 .gradient_shortcut_pars <- function(fast_stem_curve) {
-  if (fast_stem_curve) "stem_b" else character(0)
+  if (fast_stem_curve) "stem_P50" else character(0)
 }
 
 # ⚠️ THE FIX FOR #72, AND THE INVARIANT IT RESTORES: every parameter's gradient
 # is taken from the BASE point.
 #
-# `perturb_stem_b()` rescales the stem vulnerability spline and touches nothing
+# `perturb_stem_P50()` rescales the stem vulnerability spline and touches nothing
 # else, which is sound only if everything else on the object is already at base.
 # The loops below restore base once at the END, not between parameters, because
 # every other parameter's setter goes through the full `set_traits()` +
-# `set_physiology()` path and restores it on the way. `stem_b` on the fast path
+# `set_physiology()` path and restores it on the way. `stem_P50` on the fast path
 # is the one that does not -- so a `stem_b` that is not the first entry of `pars`
 # was differentiated at a point displaced by one step in whichever parameter
 # preceded it. Measured up to **3.4e-5 relative**, four orders above the ~1e-9
