@@ -208,6 +208,10 @@ void Leaf__optimise_psi_stem_JW26(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> o
   obj_->optimise_psi_stem_JW26();
 }
 // [[Rcpp::export]]
+void Leaf__prepare_profitmax_at(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double A_max) {
+  obj_->prepare_profitmax_at(A_max);
+}
+// [[Rcpp::export]]
 void Leaf__optimise_psi_stem_by(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int curve) {
   obj_->optimise_psi_stem_by(curve);
 }

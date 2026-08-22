@@ -101,15 +101,34 @@ So ProfitMax and the product objectives stop being special cases: they are two m
 
 ⚠️ **`Scaled` treats `|A|max` as constant**, making ProfitMax's trait gradients partials at fixed normaliser. That is deliberate: `|A|max` comes from a scan, so its argmax is piecewise constant in the traits and its derivative is zeros and jumps.
 
-### What is verified, and what is not
+### What is verified
 
-`leaf_gradient(model = )` is the single access point for all eight routes. **Seven are verified and offered; one refuses.**
+`leaf_gradient(model = )` is the single access point, and **all eight routes work**. Each differentiated with respect to a parameter it owns, at ψ_soil 1.5 / PPFD 1500:
 
-| route | state |
-|---|---|
-| `collar`, `TF24`, `CF77`, `JS22`, `CMax` | ✅ agree with differencing the solve |
-| `SOX`, `JW26` | ✅ agree once the step is swept — see below |
-| `ProfitMax` | ⚠️ NaN: `\|A\|max` is 16.757 after its own optimiser and NaN after the `set_traits` + `set_physiology` a perturbation performs, so the `Scaled` link reads state the perturbation clears. Pinning it at the base point while `k_soil`/`k_span` follow the traits is what makes it the intended partial |
+| route | parameter | composite | differenced solve | rel diff |
+|---|---|---|---|---|
+| `collar` | `TF24_cost_scale` | −0.35062 | −0.35062 | 2.1e-11 |
+| `TF24` | `TF24_cost_scale` | −0.26620 | −0.26620 | 2.2e-05 |
+| `CF77` | `CF77_lambda_` | −3.6358e-05 | −3.6355e-05 | 8.8e-05 |
+| `JS22` | `JS22_gamma` | −2.0880 | −2.0848 | 1.5e-03 |
+| `CMax` | `CMax_a` | −2.8376 | −2.8376 | 1.6e-05 |
+| `SOX` | `vcmax_25` | 0.055075 | 0.055203 | 2.3e-03 |
+| `JW26` | `vcmax_25` | 0.060466 | 0.060466 | 8.9e-06 |
+| `ProfitMax` | `vcmax_25` | 0.076557 | 0.057885 | **3.2e-01 — partial vs total, by design** |
+
+### ⚠️ ProfitMax's two methods answer different questions
+
+Its `Scaled` link divides by `|A|max`, which comes from a scan. The composite holds it **fixed**, so `method = "ift"` returns the **partial** at fixed normaliser; differencing the solve lets the scan re-run, so `"fd"` returns the **total**. Measured for `vcmax_25`: partial 0.0766, total 0.0579, `d|A|max/dvcmax_25` = 0.0768 — the omitted chain term is **32% of the partial**, not a tolerance question.
+
+**A fit needs the total**, because the model re-scans `|A|max` at every parameter vector: an optimiser fed the partial stops where the partial vanishes rather than where the objective does. So `method = "auto"` differences the solve for this curve alone, and `"ift"` stays available for anyone wanting the partial deliberately. No other curve has this split — TF24's two methods agree to 0.0%.
+
+The fix that made it work at all: `prepare_profitmax_at(A_max)` refreshes `k_soil`/`k_span` — analytic in the traits, so they must follow — while pinning only `|A|max`, which a perturbation's `set_traits` + `set_physiology` would otherwise clear from 16.757 to NaN.
+
+### ⚠️ The finite-difference step must match the solver, not the package default
+
+`step`'s 1e-06 default was measured on the **collar** route, which root-finds `dprofit == 0` to ~1e-15. The stem routes **scan** and refine, resolving ψ* to ~1e-06 of the bracket — ~4e-06 MPa on a 4.4 MPa one — while a 1e-06 relative trait perturbation moves ψ* by only ~3e-06. So differencing a stem solve at the package default returns quantisation, not a derivative.
+
+Each route now carries its own `fd_step`, used *only* by the finite-difference arm: 1e-06 for the collar, 1e-03 for the stem routes, the latter on the measured floor of the V. The composite is unaffected — it perturbs at fixed ψ and never re-solves, so it keeps the fine step.
 
 ### ⚠️ Sweep the step, or invent a bug
 

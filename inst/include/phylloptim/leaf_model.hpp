@@ -1492,6 +1492,27 @@ public:
   // -- see optimise_psi_stem_ProfitMax for what that buys over the lambda form.
   // Seeds |A|max and the conductance span; the two below read what it seeds.
   void prepare_profitmax();
+
+  // The conductance normalisers alone: `k(psi_soil)` and the span down to
+  // `k_crit`. Both are analytic in the traits, so they are differentiable and must
+  // be refreshed whenever the traits move.
+  void prepare_profitmax_norms();
+
+  // ⚠️ THE SAME PREPARATION WITH `|A|max` SUPPLIED RATHER THAN SCANNED, and the
+  // reason it exists is a gradient.
+  //
+  // `prepare_profitmax()` finds `|A|max` by scanning the supply stream, so its
+  // argmax is piecewise constant in the traits: the derivative is a sequence of
+  // zeros and jumps, and a total derivative through it is not a quantity worth
+  // computing. What IS well defined is the PARTIAL at fixed normaliser, which is
+  // what this package reports and what the code already computes elsewhere.
+  //
+  // A gradient's perturbation loop calls `set_traits` + `set_physiology`, which
+  // clears the whole profitmax block -- measured, `|A|max` goes from 16.757 to
+  // NaN. So a perturbation must refresh the analytic normalisers and HOLD `|A|max`
+  // at the base point. Passing it in makes that pinning visible in the signature
+  // instead of a field write somebody has to notice.
+  void prepare_profitmax_at(double A_max);
   double profit_psi_stem_ProfitMax(double psi_stem, double psi_upstream);
 
   // The whole cost/gain/profit curve over [psi_soil, psi_crit] in ONE crossing of
@@ -4349,7 +4370,7 @@ inline void Leaf::clear_collar_solve_state() {
 // has rather than a new one. Sperry, Sabot et al. (2020) and Sicangco all set
 // kcrit = 0.05*kmax, i.e. psi_crit is P95; at this package's defaults
 // f(psi_crit) = 0.0500 exactly, so nothing has to be reconciled.
-inline void Leaf::prepare_profitmax() {
+inline void Leaf::prepare_profitmax_norms() {
   if (!supply_is_single_layer()) {
     util::stop("psi soil must have only one value to use non-root-based profit "
                "optimisation methods");
@@ -4360,6 +4381,28 @@ inline void Leaf::prepare_profitmax() {
   profitmax_k_span_ =
       profitmax_k_soil_ -
       leaf_specific_conductance_max_ * proportion_of_conductivity(psi_crit);
+}
+
+
+inline void Leaf::prepare_profitmax_at(double A_max) {
+  prepare_profitmax_norms();
+  if (!(std::isfinite(A_max) && A_max > 0.0)) {
+    util::stop("prepare_profitmax_at needs a finite positive |A|max -- it is the "
+               "normaliser held fixed across a perturbation, so an unset one "
+               "means the base point was never solved; got " +
+               util::to_string(A_max));
+  }
+  profitmax_A_max_ = A_max;
+}
+
+
+inline void Leaf::prepare_profitmax() {
+  if (!supply_is_single_layer()) {
+    util::stop("psi soil must have only one value to use non-root-based profit "
+               "optimisation methods");
+  }
+  const double psi_soil = supply_psi_soil_scalar();
+  prepare_profitmax_norms();
 
   // |A|max over the transpiration supply stream (Sperry Eqn 4; Sicangco use
   // max|Anet| because CG_net can be negative). A scan rather than "A at psi_crit"

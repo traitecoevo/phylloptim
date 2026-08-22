@@ -669,6 +669,17 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// Leaf__prepare_profitmax_at
+void Leaf__prepare_profitmax_at(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double A_max);
+RcppExport SEXP _phylloptim_Leaf__prepare_profitmax_at(SEXP obj_SEXP, SEXP A_maxSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    Rcpp::traits::input_parameter< double >::type A_max(A_maxSEXP);
+    Leaf__prepare_profitmax_at(obj_, A_max);
+    return R_NilValue;
+END_RCPP
+}
 // Leaf__optimise_psi_stem_by
 void Leaf__optimise_psi_stem_by(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int curve);
 RcppExport SEXP _phylloptim_Leaf__optimise_psi_stem_by(SEXP obj_SEXP, SEXP curveSEXP) {
@@ -3127,6 +3138,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__optimise_psi_stem_CMax", (DL_FUNC) &_phylloptim_Leaf__optimise_psi_stem_CMax, 1},
     {"_phylloptim_Leaf__optimise_psi_stem_SOX", (DL_FUNC) &_phylloptim_Leaf__optimise_psi_stem_SOX, 1},
     {"_phylloptim_Leaf__optimise_psi_stem_JW26", (DL_FUNC) &_phylloptim_Leaf__optimise_psi_stem_JW26, 1},
+    {"_phylloptim_Leaf__prepare_profitmax_at", (DL_FUNC) &_phylloptim_Leaf__prepare_profitmax_at, 2},
     {"_phylloptim_Leaf__optimise_psi_stem_by", (DL_FUNC) &_phylloptim_Leaf__optimise_psi_stem_by, 2},
     {"_phylloptim_Leaf__evaluate_psi_stem_by", (DL_FUNC) &_phylloptim_Leaf__evaluate_psi_stem_by, 3},
     {"_phylloptim_Leaf__dprofit_dpsi_stem_by", (DL_FUNC) &_phylloptim_Leaf__dprofit_dpsi_stem_by, 3},

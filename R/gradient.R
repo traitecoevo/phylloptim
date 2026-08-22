@@ -511,6 +511,11 @@ leaf_gradient <- function(psi_soil,
   if (!(is.numeric(step) && length(step) == 1L && step > 0)) {
     stop("`step` must be a single positive number", call. = FALSE)
   }
+  # A caller who names `step` means it; otherwise the finite-difference arm picks
+  # one matched to the solver whose argmax it is differencing.
+  if (!missing(step)) {
+    attr(step, "user_set") <- TRUE
+  }
   # ⚠️ THE RETURN IS THE POINT, NOT JUST THE CHECK. `psi` is compared against
   # `opt_root_psi_` to detect the clamp, and a caller writing `psi = 3L` -- or the
   # entirely ordinary `for (p in 2:5)`, since `2:5` is integer -- would otherwise
@@ -704,8 +709,23 @@ leaf_gradient <- function(psi_soil,
 
   # `status` describes the POINT and is reported whichever route runs; `use_ift`
   # is the route. They differ only when the caller has forced one.
+  # ⚠️ ProfitMax's TWO METHODS ANSWER DIFFERENT QUESTIONS, and `auto` picks the one
+  # a caller almost always wants. Its `Scaled` link divides by `|A|max`, which the
+  # composite holds FIXED across a perturbation -- so `"ift"` returns the PARTIAL at
+  # fixed normaliser. Differencing the solve lets the scan re-run, so `"fd"` returns
+  # the TOTAL. Measured at psi_soil 1.5, PPFD 1500, for `vcmax_25`: partial 0.0766,
+  # total 0.0579, and `d|A|max/dvcmax_25` = 0.0768 -- the omitted chain term is 32%
+  # of the partial, not a rounding difference.
+  #
+  # A FIT needs the total: the model re-scans `|A|max` at every parameter vector, so
+  # an optimiser fed the partial stops where the partial vanishes rather than where
+  # the objective does. Hence `auto` differences the solve here, and `"ift"` remains
+  # available for anyone who wants the partial deliberately.
+  #
+  # No other curve has this split -- for TF24 the two agree to 0.0%.
+  auto_ift <- identical(status, "interior") && !identical(model, "ProfitMax")
   use_ift <- if (prescribed) !clamped && feasible else switch(method,
-                    auto = identical(status, "interior"),
+                    auto = auto_ift,
                     ift = TRUE,
                     fd = FALSE)
   if (use_ift && !prescribed && !usable) {
@@ -878,7 +898,7 @@ leaf_gradient <- function(psi_soil,
 # those are different questions: C++ has a derivative for all seven, and this is
 # about whether the composite around it has been checked.
 .GRADIENT_VERIFIED_LINKS <- c("collar", "TF24", "CF77", "JS22", "CMax",
-                              "SOX", "JW26")
+                              "SOX", "JW26", "ProfitMax")
 
 .gradient_link_verified <- function(model) {
   model %in% .GRADIENT_VERIFIED_LINKS
@@ -889,6 +909,9 @@ leaf_gradient <- function(psi_soil,
     return(list(
       model = model,
       decision = "collar",
+      # A root-find on `dprofit == 0`, stationary to ~1e-15, so a 1e-06 trait step
+      # is resolvable: psi* moves far more than the solve's own precision.
+      fd_step = 1e-6,
       solve = function() l$find_root_collar_psi(),
       psi_star = function() l$opt_root_psi_,
       checked = function(psi) l$dprofit_droot_collar_psi_checked(psi),
@@ -927,14 +950,61 @@ leaf_gradient <- function(psi_soil,
          call. = FALSE)
   }
   code <- k - 1L
+
+  # ⚠️ ProfitMax NEEDS ITS NORMALISER PINNED, and this is the only route that
+  # carries state a perturbation destroys. `|A|max` comes from a scan over the
+  # supply stream; `set_traits` + `set_physiology` clears it (measured: 16.757 ->
+  # NaN), so without this every ProfitMax gradient is NaN.
+  #
+  # Captured at the base solve and re-seeded before every later read, so the
+  # gradient is the PARTIAL at fixed normaliser -- which is the right quantity
+  # rather than a convenient one, because a scan's argmax is piecewise constant in
+  # the traits and a total derivative through it is zeros and jumps.
+  #
+  # ⚠️ `prepare_profitmax_at()` refreshes `k_soil`/`k_span` while pinning only
+  # `|A|max`. Those two ARE analytic in the traits, so freezing them as well would
+  # drop real terms from the gradient.
+  pinned <- if (identical(model, "ProfitMax")) {
+    A_base <- NULL
+    list(
+      capture = function() A_base <<- l$profitmax_A_max,
+      reseat = function() if (!is.null(A_base)) l$prepare_profitmax_at(A_base)
+    )
+  } else {
+    list(capture = function() invisible(NULL), reseat = function() invisible(NULL))
+  }
+
   list(
     model = model,
     decision = "psi_stem",
-    solve = function() l$optimise_psi_stem_by(code),
+    # ⚠️ A COARSER STEP, AND IT IS MEASURED. The stem entry points SCAN and refine,
+    # resolving psi* to ~1e-06 of the bracket -- ~4e-06 MPa on a 4.4 MPa one. A
+    # 1e-06 relative trait perturbation moves psi* by ~3e-06 MPa, i.e. BELOW that,
+    # so differencing the solve there returns quantisation rather than a
+    # derivative: measured for SOX's `vcmax_25`, 0.1855 at 1e-06 against a
+    # converged 0.0551, and the wrong SIGN for JW26.
+    #
+    # 1e-03 sits on the floor of the V -- the FD is flat from there to 1e-02 -- and
+    # is used ONLY by the finite-difference arm. The composite perturbs at fixed
+    # psi and never re-solves, so it keeps the fine step.
+    fd_step = 1e-3,
+    solve = function() {
+      l$optimise_psi_stem_by(code)
+      pinned$capture()
+    },
     psi_star = function() l$opt_psi_stem_,
-    checked = function(psi) l$dprofit_dpsi_stem_by(code, psi),
-    dprofit = function(psi) l$dprofit_dpsi_stem_by(code, psi)[[1L]],
-    evaluate = function(psi) l$evaluate_psi_stem_by(code, psi)
+    checked = function(psi) {
+      pinned$reseat()
+      l$dprofit_dpsi_stem_by(code, psi)
+    },
+    dprofit = function(psi) {
+      pinned$reseat()
+      l$dprofit_dpsi_stem_by(code, psi)[[1L]]
+    },
+    evaluate = function(psi) {
+      pinned$reseat()
+      l$evaluate_psi_stem_by(code, psi)
+    }
   )
 }
 
@@ -1472,6 +1542,12 @@ leaf_gradient <- function(psi_soil,
 # composite cannot do.
 .gradient_fd <- function(l, reset, theta, pars, step, fast_stem_curve = TRUE,
                          route) {
+  # ⚠️ THE ROUTE'S STEP, not the caller's, unless the caller asked for one. This arm
+  # differences the SOLVE, so its step has to clear the solver's own resolution --
+  # see `fd_step`. The composite's step is a different quantity and stays as given.
+  if (is.null(attr(step, "user_set"))) {
+    step <- route$fd_step
+  }
   seat <- .gradient_reseat_base(reset, theta, pars, fast_stem_curve)
   out <- t(vapply(seq_along(pars), function(k) {
     p <- pars[[k]]

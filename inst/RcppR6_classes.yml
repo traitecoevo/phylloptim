@@ -615,6 +615,12 @@ Leaf:
     # ⚠️ `curve` is the CostCurve enum's VALUE. R sends positions into it, so
     # appending is safe and reordering would silently solve a different model;
     # `curve_name()` is bound so R can compare the mapping rather than trust it.
+    # Refresh the analytic normalisers and PIN |A|max, which is what a
+    # perturbation needs: the scan-derived normaliser is held at the base point so
+    # the gradient is the partial this package reports.
+    prepare_profitmax_at:
+      return_type: void
+      args: [A_max: double]
     optimise_psi_stem_by:
       return_type: void
       args: [curve: int]

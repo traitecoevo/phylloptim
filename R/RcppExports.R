@@ -205,6 +205,10 @@ Leaf__optimise_psi_stem_JW26 <- function(obj_) {
     invisible(.Call('_phylloptim_Leaf__optimise_psi_stem_JW26', PACKAGE = 'phylloptim', obj_))
 }
 
+Leaf__prepare_profitmax_at <- function(obj_, A_max) {
+    invisible(.Call('_phylloptim_Leaf__prepare_profitmax_at', PACKAGE = 'phylloptim', obj_, A_max))
+}
+
 Leaf__optimise_psi_stem_by <- function(obj_, curve) {
     invisible(.Call('_phylloptim_Leaf__optimise_psi_stem_by', PACKAGE = 'phylloptim', obj_, curve))
 }

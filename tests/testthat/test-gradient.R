@@ -1093,7 +1093,6 @@ test_that("the curve registry is read from C++, not restated in R", {
   # ⚠️ Having a derivative and having a VERIFIED GRADIENT are different claims,
   # and only the second gates `leaf_gradient()`. The two non-identity links are
   # implemented and not yet checked on every parameter, so they refuse there.
-  expect_false(phylloptim:::.gradient_link_verified("ProfitMax"))
   for (m in c("collar", "TF24", "CF77", "JS22", "CMax", "SOX", "JW26")) {
     expect_true(phylloptim:::.gradient_link_verified(m))
   }
@@ -1216,28 +1215,6 @@ test_that("a product objective's gradient survives an h-sweep", {
   expect_identical(n_checked, 4L)
 })
 
-test_that("ProfitMax refuses, because its normaliser does not survive a reset", {
-  tr <- leaf_traits()
-  l <- leaf_model(tr, leaf_control(), leaf_supply_single())
-  expect_error(
-    leaf_gradient(psi_soil = 1.5, PPFD = 1500,
-                  root_network = series_resistance(1e4), x = l, traits = tr,
-                  pars = "vcmax_25", model = "ProfitMax"),
-    "no verified gradient")
-
-  # The cause, pinned as a measurement: |A|max is seeded by the optimiser and
-  # cleared by the set_traits + set_physiology a perturbation performs. Until it is
-  # held at the base point, every ProfitMax gradient is NaN.
-  set_drivers(l, psi_soil = 1.5, PPFD = 1500,
-              root_network = series_resistance(1e4))
-  l$optimise_psi_stem_ProfitMax()
-  expect_true(is.finite(l$profitmax_A_max))
-  set_traits(l, tr)
-  set_drivers(l, psi_soil = 1.5, PPFD = 1500,
-              root_network = series_resistance(1e4))
-  expect_false(is.finite(l$profitmax_A_max))
-})
-
 test_that("the remaining route restrictions are the topological ones", {
   tr <- leaf_traits()
   # A stem route needs the single-potential path, and says so rather than
@@ -1248,4 +1225,49 @@ test_that("the remaining route restrictions are the topological ones", {
   expect_error(leaf_gradient(psi_soil = 1.5, PPFD = 1500,
                              pars = "TF24_cost_scale", model = "Medlyn"),
                "no gradient route")
+})
+
+test_that("ProfitMax's normaliser is pinned, and auto returns the total", {
+  net <- series_resistance(1e4)
+  mkv <- function(v) {
+    l <- leaf_model(leaf_traits(vcmax_25 = v), leaf_control(),
+                    leaf_supply_single())
+    set_drivers(l, psi_soil = 1.5, PPFD = 1500, root_network = net)
+    l
+  }
+  g <- function(meth) {
+    leaf_gradient(psi_soil = 1.5, PPFD = 1500, root_network = net, x = mkv(96),
+                  traits = leaf_traits(), pars = "vcmax_25", model = "ProfitMax",
+                  method = meth)$gradient[1, "A"]
+  }
+  # It used to be NaN: |A|max is seeded by the optimiser and cleared by the
+  # set_traits + set_physiology a perturbation performs. Pinning it fixed that.
+  expect_true(is.finite(g("ift")))
+
+  # ⚠️ THE TWO METHODS ANSWER DIFFERENT QUESTIONS HERE, and only here. "ift" holds
+  # |A|max fixed and so returns the PARTIAL; "fd" lets the scan re-run and returns
+  # the TOTAL. The gap is the deferred chain rule through the normaliser, and it is
+  # large -- not a tolerance question.
+  expect_false(isTRUE(all.equal(g("ift"), g("fd"), tolerance = 1e-2)))
+
+  # And the total is what a step-swept finite difference of the solve gives, which
+  # is what a fit needs: the model re-scans |A|max at every parameter vector.
+  h <- 96 * 1e-2
+  solve_A <- function(v) {
+    l <- mkv(v)
+    l$optimise_psi_stem_ProfitMax()
+    l$assim_colimited_
+  }
+  swept <- (solve_A(96 + h) - solve_A(96 - h)) / (2 * h)
+  expect_equal(g("fd"), swept, tolerance = 5e-2)
+
+  # ⚠️ So `auto` must NOT choose the composite for this curve, or a fit silently
+  # optimises the wrong objective. Every other curve keeps the composite.
+  expect_equal(g("auto"), g("fd"))
+  tf <- function(meth) {
+    leaf_gradient(psi_soil = 1.5, PPFD = 1500, root_network = net, x = mkv(96),
+                  traits = leaf_traits(), pars = "vcmax_25", model = "TF24",
+                  method = meth)$gradient[1, "A"]
+  }
+  expect_equal(tf("ift"), tf("fd"), tolerance = 1e-4)
 })
