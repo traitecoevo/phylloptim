@@ -4406,29 +4406,35 @@ void test_single_layer_optimisers_reach_a_bound() {
 // than as a residual at one argmax, because the residual-at-the-argmax version
 // passes on any derivative that merely happens to vanish near there:
 //
-//     (log P)' * P == P',    P = A*g       <=>    A'/A + g'/g == (A'g + Ag')/(A*g)
+//     (log P)' * P == P',   P = A*g      <=>   (A'/A + g'/g) * A*g == A'g + A*g'
 //
 // i.e. the framework's first-order condition is the product rule divided through by
-// the strictly positive `A*g`, so the two have identical roots and the link on the
-// benefit alone drops nothing.
+// the strictly positive `A*g`, so the two have identical roots and putting the link
+// on the benefit alone drops nothing.
 //
-// ⚠️ THE TOLERANCE IS A MEASUREMENT, NOT A PREFERENCE, and the step is chosen off a
-// sweep because differencing `P` runs through psi_stem_to_ci's root-find (hazard
-// 15). Measured worst relative departure over these rows: 5.09e-02 at h=1e-2,
-// 4.85e-04 at 1e-3, 2.52e-05 at 1e-4, **1.08e-05 at 1e-5**, then back up to
-// 2.52e-03 at 1e-6. That is a V whose floor is the root-find tolerance divided by
-// the step (1e-10/1e-5), so 1.08e-05 is what the MEASUREMENT can resolve and not a
-// defect in the identity. h=1e-5 with a 1e-4 bound keeps ~9x margin over the floor;
-// tightening the bound without re-sweeping the step will fail on a correct model.
+// ⚠️ NO FINITE DIFFERENCE HERE, AND THAT IS THE POINT. The first version of this
+// test differenced `P` and compared. It passed on macOS at 1.08e-05 and FAILED on
+// both Linux compilers at 2.51e-04, because differencing through psi_stem_to_ci's
+// root-find has a noise floor of tol/h (hazard 15) and `tol` is set by libm -- so
+// the floor is PLATFORM-DEPENDENT and a tolerance measured on one platform does not
+// transfer. Every term below is analytic instead: `A'` is a zero-cost JS22
+// derivative, `g` and `g'` are the reduction factor and its slope, and the test is
+// then pure arithmetic on quantities both sides already computed.
+//
+// ⚠️ NORMALISED BY THE TERM SCALE, NOT BY THE RESULT. `A'g + A*g'` is a difference
+// of two similar magnitudes that cancels to exactly zero at the argmax, so a
+// relative error against the result diverges there for a CORRECT implementation.
+// Dividing by max(|A'g|, |A*g'|) asks the question that has an answer: are the two
+// ways of combining the same terms the same number, to roundoff.
 void test_product_link_is_the_product_rule() {
   printf("the product curves' log link is the product rule over A*g\n");
 
   struct Row { double psi_soil, PPFD, atm_vpd; };
   const Row rows[] = {{0.5, 1500.0, 2.0}, {1.0, 900.0, 2.0},
                       {2.0, 900.0, 4.0}, {1.0, 300.0, 1.0}};
+  const int kJS22 = static_cast<int>(phylloptim::Leaf::CostCurve::JS22);
   const int curves[] = {static_cast<int>(phylloptim::Leaf::CostCurve::SOX),
                         static_cast<int>(phylloptim::Leaf::CostCurve::JW26)};
-  const double h = 1e-5;
 
   double worst = 0.0;
   int checked = 0;
@@ -4439,30 +4445,36 @@ void test_product_link_is_the_product_rule() {
       d.PPFD = r.PPFD;
       d.atm_vpd = r.atm_vpd;
       phylloptim::Leaf l = make_single_leaf(d, r.psi_soil);
+      // A zero unit cost makes the JS22 arm's C' exactly 0, so under the identity
+      // link its derivative IS dA/dpsi. Safe as a bare write: JS22_gamma enters
+      // one cost expression and no derived state (unlike the curve or capacity
+      // traits, which hazard 10 covers).
+      l.JS22_gamma = 0.0;
       const double lo = r.psi_soil, hi = l.psi_crit;
       for (int k = 1; k <= 9; ++k) {
         const double psi = lo + (hi - lo) * (0.1 * double(k));
-        if (psi - h <= lo || psi + h >= hi) {
+        // P and A first: the derivative calls below re-seat the leaf's state.
+        const double P = is_sox ? l.profit_psi_stem_SOX(psi, r.psi_soil)
+                                : l.profit_psi_stem_JW26(psi, r.psi_soil);
+        const double A = l.assim_colimited_;
+        const double g = is_sox ? l.sox_reduction(psi) : l.jw26_reduction(psi);
+        const double gp =
+            is_sox ? l.sox_reduction_deriv(psi) : l.jw26_reduction_deriv(psi);
+        // The premise of the log form. Where it fails nothing is claimed: at full
+        // closure A = -R_d < 0 and log A does not exist, which is precisely why the
+        // OPTIMISER searches the product instead of its logarithm.
+        if (!(P > 0.0) || !(g > 0.0)) {
           continue;
         }
-        const auto P = [&](double q) {
-          return is_sox ? l.profit_psi_stem_SOX(q, r.psi_soil)
-                        : l.profit_psi_stem_JW26(q, r.psi_soil);
-        };
-        const double p0 = P(psi);
-        // The premise of the log form. Where it fails the identity is not claimed:
-        // at full closure A = -R_d < 0 and log A does not exist, which is exactly
-        // why the OPTIMISER searches the product instead.
-        if (!(p0 > 0.0)) {
-          continue;
-        }
-        const double fd = (P(psi + h) - P(psi - h)) / (2.0 * h);
         const std::vector<double> dlog = l.dprofit_dpsi_stem_by(curve, psi);
-        if (!std::isfinite(dlog[0])) {
+        const std::vector<double> dA = l.dprofit_dpsi_stem_by(kJS22, psi);
+        if (!std::isfinite(dlog[0]) || !std::isfinite(dA[0])) {
           continue;
         }
-        const double rel =
-            std::fabs(dlog[0] * p0 - fd) / std::max(std::fabs(fd), 1e-30);
+        const double lhs = dlog[0] * P;          // (log P)' * P
+        const double rhs = dA[0] * g + A * gp;   // the product rule
+        const double scale = std::max(std::fabs(dA[0] * g), std::fabs(A * gp));
+        const double rel = std::fabs(lhs - rhs) / std::max(scale, 1e-30);
         if (rel > worst) {
           worst = rel;
         }
@@ -4471,12 +4483,135 @@ void test_product_link_is_the_product_rule() {
     }
   }
   // ⚠️ The count is asserted because the two `continue`s above can empty this test
-  // silently -- a curve that returned NaN everywhere would leave `worst` at 0 and
-  // pass (hazard 16).
-  printf("    %d interior points | worst departure from (logP)'*P == P': %.3e\n",
-         checked, worst);
+  // silently -- a curve returning NaN everywhere would leave `worst` at 0 and pass
+  // (hazard 16).
+  printf("    %d interior points | worst departure from (logP)'*P == A'g + Ag': "
+         "%.3e\n", checked, worst);
   ok(checked >= 40, "the identity was actually evaluated, on both curves");
-  ok(worst < 1e-4, "the log-link derivative IS the product rule divided by A*g");
+  ok(worst < 1e-12, "the log-link derivative IS the product rule divided by A*g");
+}
+
+// EVERY curve's returned point is the actual maximum of ITS OWN objective, checked
+// against a derivative-free scan of that objective. This is the optimality test the
+// suite was missing for four of the seven: before it, `TF24`, `CF77` and `ProfitMax`
+// had scan oracles and `JS22`, `CMax`, `SOX` and `JW26` had only
+// `psi_stem_optima.tsv` -- which is a REGRESSION baseline and would freeze a wrong
+// optimum exactly as happily as a right one.
+//
+// A scan is the right oracle rather than a first-order check, because a maximum here
+// is often at a bound: `dJ/dpsi != 0` at a pinned optimum, so an FOC test would
+// report a correct answer as wrong (hazard 11). Comparing OBJECTIVE VALUES asks the
+// question that is true in both regimes -- is there any feasible point that beats
+// the one returned.
+//
+// ⚠️ THE SCAN CAN ONLY EVER TIE OR LOSE, which is what makes the direction of the
+// assertion meaningful: the solver includes both endpoints and refines within a
+// cell, so it should never come back below a grid it contains. A scan that WINS is
+// the failure -- it means the search missed a basin.
+void test_every_curve_returns_its_own_maximum() {
+  printf("every cost curve's optimum beats a scan of its own objective\n");
+
+  // ⚠️ THE HOT ROWS ARE NOT PADDING. A boundary optimum is where a scan oracle
+  // earns its keep: an optimiser that steps in from the bounds reports an open
+  // stoma where the objective says shut, and only a comparison of VALUES over a
+  // closed interval catches it (hazard 11). Without rows hot enough to make
+  // assimilation negative across the supply stream, this test would exercise the
+  // interior branch alone -- which is the half that was never in doubt.
+  struct Row { double psi_soil, PPFD, atm_vpd, leaf_temp; };
+  const Row rows[] = {
+      {0.5, 1500.0, 2.0, 25.0},
+      {1.0, 900.0, 2.0, 25.0},
+      {2.0, 900.0, 4.0, 30.0},
+      {3.0, 1500.0, 2.0, 25.0},
+      {1.0, 300.0, 1.0, 25.0},
+      {0.5, 1500.0, 2.0, 50.0},   // shut
+      {1.0, 1500.0, 3.0, 45.0},   // shut
+      {2.0, 1200.0, 4.0, 48.0},   // shut
+  };
+  const int n_curves = phylloptim::Leaf::n_cost_curves;
+  const int N = 20000;
+
+  int total_interior = 0, total_pinned = 0, total_rows = 0;
+  int min_rows_per_curve = std::numeric_limits<int>::max();
+  double worst_shortfall = 0.0;
+  std::string worst_where;
+  for (int curve = 0; curve < n_curves; ++curve) {
+    double curve_worst = 0.0;
+    int interior = 0, pinned = 0, curve_rows = 0;
+    for (const Row &r : rows) {
+      Drivers d;
+      d.PPFD = r.PPFD;
+      d.atm_vpd = r.atm_vpd;
+      d.leaf_temp = r.leaf_temp;
+
+      phylloptim::Leaf l = make_single_leaf(d, r.psi_soil);
+      // The one curve with no default: prescribed, not derived, and unset is NA.
+      l.CF77_lambda_ = 1.5e5;
+      l.optimise_psi_stem_by(curve);
+      const double psi = l.opt_psi_stem_, got = l.profit_;
+      if (!std::isfinite(got)) {
+        continue;   // a refused row; psi_stem_optima.tsv covers the refusals
+      }
+
+      // Fresh leaf, so the solve's own state cannot influence the oracle.
+      phylloptim::Leaf m = make_single_leaf(d, r.psi_soil);
+      m.CF77_lambda_ = 1.5e5;
+      // ⚠️ ProfitMax's objective is UNDEFINED on a leaf that has not scanned for
+      // |A|max, so a fresh oracle leaf returns NaN at every point and the curve
+      // silently contributes nothing -- which is how this test first passed while
+      // testing six curves and reporting seven. Seed it with the SAME normaliser
+      // the solver used: a different |A|max is a different objective, so comparing
+      // against one would not be comparing against this curve at all.
+      if (curve == static_cast<int>(phylloptim::Leaf::CostCurve::ProfitMax)) {
+        m.prepare_profitmax_at(l.profitmax_A_max_);
+      }
+      const double lo = r.psi_soil, hi = m.psi_crit;
+      double best = -std::numeric_limits<double>::infinity(), best_psi = lo;
+      for (int i = 0; i <= N; ++i) {
+        const double q = lo + (hi - lo) * (double(i) / double(N));
+        const double v = m.evaluate_psi_stem_by(curve, q);
+        if (std::isfinite(v) && v > best) { best = v; best_psi = q; }
+      }
+      if (!std::isfinite(best)) {
+        continue;
+      }
+      ++total_rows;
+      ++curve_rows;
+      // Relative slack, because the seven objectives differ in units and by orders
+      // of magnitude -- ProfitMax is dimensionless and O(1), TF24 is carbon.
+      const double shortfall =
+          (best - got) / std::max(std::fabs(best), 1.0);
+      if (shortfall > curve_worst) {
+        curve_worst = shortfall;
+        if (shortfall > worst_shortfall) {
+          worst_shortfall = shortfall;
+          worst_where = phylloptim::Leaf::curve_name(curve) + " psi_soil=" +
+                        std::to_string(r.psi_soil);
+        }
+      }
+      const double edge = (hi - lo) * 1e-3;
+      if (best_psi <= lo + edge || best_psi >= hi - edge) { ++pinned; } else { ++interior; }
+    }
+    printf("    %-10s %d rows | worst shortfall %.3e | %d interior, %d pinned\n",
+           phylloptim::Leaf::curve_name(curve).c_str(), curve_rows, curve_worst,
+           interior, pinned);
+    if (curve_rows < min_rows_per_curve) { min_rows_per_curve = curve_rows; }
+    total_interior += interior;
+    total_pinned += pinned;
+  }
+
+  // The premise, asserted so the block cannot pass by covering one regime or by
+  // quietly evaluating nothing (hazard 16).
+  printf("    %d rows | %d interior, %d pinned | worst %.3e at %s\n", total_rows,
+         total_interior, total_pinned, worst_shortfall, worst_where.c_str());
+  // ⚠️ PER CURVE, not in total. A total is satisfied by the other six while one
+  // contributes nothing, which is exactly what happened here before the ProfitMax
+  // seeding above: 30 rows from six curves passed a `>= 30` check.
+  ok(min_rows_per_curve > 0, "EVERY curve contributed solved rows, not just six");
+  ok(total_interior > 0 && total_pinned > 0,
+     "and the rows span both the interior and the pinned regime");
+  ok(worst_shortfall < 1e-6,
+     "no curve's solver is beaten by a 20001-point scan of its own objective");
 }
 
 void benchmark() {
@@ -4579,6 +4714,7 @@ int main() {
   test_maximise_over_closed_interval();
   test_single_layer_optimisers_reach_a_bound();
   test_product_link_is_the_product_rule();
+  test_every_curve_returns_its_own_maximum();
   benchmark();
 
   printf("\n%d checks, %d failures\n", checks, failures);
