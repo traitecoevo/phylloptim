@@ -1025,6 +1025,16 @@ public:
   //                                                   an argmax)
   //     Scaled    h(A) = A/|A|max     h' = 1/|A|max   ProfitMax
   //
+  // ⚠️ THE LINK IS NOT ONLY ON THE BENEFIT, AND READING IT THAT WAY IS THE NATURAL
+  // MISTAKE. For the two product curves the COST is stored in log form as well --
+  // `C = -log g` -- so `h(A) - C` is `log(A*g)`, the transform of the whole
+  // objective rather than of half of it. That asymmetry in the NAMING is real
+  // though: `C` is a function of psi alone, so its transform is just another cost
+  // curve and needs no declaration, while `A` comes out of the `ci` root-find and
+  // cannot be reparameterised that way. See `optimise_psi_stem_SOX` for the two
+  // lines of algebra showing the resulting first-order condition is the product
+  // rule divided by `A*g`, and so has identical roots.
+  //
   // ⚠️ `Scaled` treats `|A|max` as CONSTANT, which makes ProfitMax's trait
   // gradients PARTIALS at fixed normaliser rather than total derivatives. That is
   // deliberate and it is what the code computes: `|A|max` comes from a scan over
@@ -4989,15 +4999,26 @@ inline void Leaf::optimise_psi_stem_CMax() {
 // ⚠️ NO PARAMETER TO VALIDATE, which is the whole appeal of this curve: `g` is built
 // from `proportion_of_conductivity` and `k_crit_fraction`. Nothing here can be unset.
 //
-// ⚠️ THIS CURVE HAS A BENEFIT LINK, AND IT IS CURRENTLY IMPLICIT. Taking logs turns
-// the product into the same additive skeleton as every other curve here:
+// ⚠️ THE BENEFIT LINK IS WHAT MAKES THIS A ROW OF THE COST TABLE RATHER THAN AN
+// EXCEPTION TO IT, and the equivalence is exact rather than approximate. Write
+// `C(psi) = -log g(psi)` and take `h = log`; then the framework's objective IS the
+// logarithm of the product, and its derivative is the product rule divided through
+// by a strictly positive number:
 //
-//     log(A*g) = log A + log g,    so   C(psi) = -log g(psi),  dC/dpsi = -g'/g
+//     h(A) - C          = log A + log g = log(A*g)
+//     d/dpsi[h(A) - C]  = A'/A + g'/g   = (A'*g + A*g') / (A*g) = P' / (A*g)
 //
-// which is a row of the cost table rather than an exception to it, and is the form
-// `lambda_SOX` below already uses -- it is `(dC/dpsi)/(dE/dpsi)` for that `C`, times
-// `A` to return from log-carbon to carbon. The link is exactly the machinery this
-// needs: a per-curve transform of the BENEFIT, identity everywhere else.
+// So the two first-order conditions have IDENTICAL roots -- nothing is dropped by
+// the link sitting on the benefit alone. It can sit there because `C` is a function
+// of psi ONLY, so `-log g` is itself just another cost curve; transforming the cost
+// buys no generality, it only relabels which row you are on. `A` is not free that
+// way -- it comes out of the `ci` root-find -- so its transform has to be declared,
+// and `h'` is the whole of what the derivative needs from it.
+//
+// Verified numerically over six driver rows on both product curves: the log-form
+// derivative at a 400k-point scan argmax of the PRODUCT is 1.6e-07 to 4.0e-06, which
+// is that scan's own resolution times the curvature, and the solver lands within
+// 3.2e-06 MPa of it.
 //
 // ⚠️ THE OPTIMISER STILL MAXIMISES THE PRODUCT, and that is deliberate, not a
 // shortcut. `log` is monotone so the argmax is identical, and the product avoids the
@@ -5005,24 +5026,13 @@ inline void Leaf::optimise_psi_stem_CMax() {
 // exist, which is exactly the endpoint hazard 11 requires to be a candidate. So the
 // link is the right way to STATE this cost and the wrong way to SEARCH for it.
 //
-// ⚠️ SOX IS NOT A `CostCurve` MEMBER YET, and the obstacle is smaller than this
-// comment first claimed. With the link above, `dprofit_dpsi_stem<K>` needs
-// `A_prime*dci_dpsistem / A` in place of `A_prime*dci_dpsistem`, plus the same
-// factor on the energy-balance term -- a per-curve factor on the benefit term, which
-// is a shape the existing expression already supports. What it does NOT need is the
-// whole expression replaced. That is the route in; it is unbuilt because nothing in
-// production calls that function (grep: only `test_leaf.cpp`) and no consumer needs
-// a prescribed-point evaluation here. A caller wanting one calls
-// `profit_psi_stem_SOX` directly.
-//
-// ⚠️ WHAT IS **NOT** A REASON, because it is already true: that this writes a
-// non-carbon number into `profit_`. `optimise_psi_stem_ProfitMax` already puts a
-// DIMENSIONLESS normalised profit in the same field TF24 fills with carbon, so a
-// caller comparing `profit_` across optimisers is exposed whether or not SOX exists
-// -- this makes it a third kind rather than a second. The guide's rule for
-// `hydraulic_cost_` ("a third meaning behind the same name is how a reader quotes
-// the wrong number") applies to `profit_` too and is not enforced there. Worth a
-// separate field per objective kind; not worth pretending this curve introduced it.
+// ⚠️ `profit_` CARRIES A THIRD KIND OF NUMBER because of this curve, and that is not
+// enforced anywhere. TF24 puts carbon in it, `optimise_psi_stem_ProfitMax` puts a
+// dimensionless normalised profit in it, and this puts a product of carbon and a
+// dimensionless factor. A caller comparing `profit_` across optimisers is exposed.
+// The guide's rule for `hydraulic_cost_` ("a third meaning behind the same name is
+// how a reader quotes the wrong number") applies here and would be worth a separate
+// field per objective kind.
 inline void Leaf::optimise_psi_stem_SOX() {
   optimise_psi_stem_single<CostCurve::SOX>();
 }

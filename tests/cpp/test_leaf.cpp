@@ -4400,6 +4400,85 @@ void test_single_layer_optimisers_reach_a_bound() {
   ok(pinned_CF > 0, "and Cowan-Farquhar reaches the pinned one too");
 }
 
+// The two PRODUCT objectives go through the same additive machinery as everything
+// else, by storing their cost in log form: `C = -log g`, so `h(A) - C` is
+// `log(A*g)`. This asserts the consequence as an IDENTITY at interior points rather
+// than as a residual at one argmax, because the residual-at-the-argmax version
+// passes on any derivative that merely happens to vanish near there:
+//
+//     (log P)' * P == P',    P = A*g       <=>    A'/A + g'/g == (A'g + Ag')/(A*g)
+//
+// i.e. the framework's first-order condition is the product rule divided through by
+// the strictly positive `A*g`, so the two have identical roots and the link on the
+// benefit alone drops nothing.
+//
+// ⚠️ THE TOLERANCE IS A MEASUREMENT, NOT A PREFERENCE, and the step is chosen off a
+// sweep because differencing `P` runs through psi_stem_to_ci's root-find (hazard
+// 15). Measured worst relative departure over these rows: 5.09e-02 at h=1e-2,
+// 4.85e-04 at 1e-3, 2.52e-05 at 1e-4, **1.08e-05 at 1e-5**, then back up to
+// 2.52e-03 at 1e-6. That is a V whose floor is the root-find tolerance divided by
+// the step (1e-10/1e-5), so 1.08e-05 is what the MEASUREMENT can resolve and not a
+// defect in the identity. h=1e-5 with a 1e-4 bound keeps ~9x margin over the floor;
+// tightening the bound without re-sweeping the step will fail on a correct model.
+void test_product_link_is_the_product_rule() {
+  printf("the product curves' log link is the product rule over A*g\n");
+
+  struct Row { double psi_soil, PPFD, atm_vpd; };
+  const Row rows[] = {{0.5, 1500.0, 2.0}, {1.0, 900.0, 2.0},
+                      {2.0, 900.0, 4.0}, {1.0, 300.0, 1.0}};
+  const int curves[] = {static_cast<int>(phylloptim::Leaf::CostCurve::SOX),
+                        static_cast<int>(phylloptim::Leaf::CostCurve::JW26)};
+  const double h = 1e-5;
+
+  double worst = 0.0;
+  int checked = 0;
+  for (const int curve : curves) {
+    const bool is_sox = curve == static_cast<int>(phylloptim::Leaf::CostCurve::SOX);
+    for (const Row &r : rows) {
+      Drivers d;
+      d.PPFD = r.PPFD;
+      d.atm_vpd = r.atm_vpd;
+      phylloptim::Leaf l = make_single_leaf(d, r.psi_soil);
+      const double lo = r.psi_soil, hi = l.psi_crit;
+      for (int k = 1; k <= 9; ++k) {
+        const double psi = lo + (hi - lo) * (0.1 * double(k));
+        if (psi - h <= lo || psi + h >= hi) {
+          continue;
+        }
+        const auto P = [&](double q) {
+          return is_sox ? l.profit_psi_stem_SOX(q, r.psi_soil)
+                        : l.profit_psi_stem_JW26(q, r.psi_soil);
+        };
+        const double p0 = P(psi);
+        // The premise of the log form. Where it fails the identity is not claimed:
+        // at full closure A = -R_d < 0 and log A does not exist, which is exactly
+        // why the OPTIMISER searches the product instead.
+        if (!(p0 > 0.0)) {
+          continue;
+        }
+        const double fd = (P(psi + h) - P(psi - h)) / (2.0 * h);
+        const std::vector<double> dlog = l.dprofit_dpsi_stem_by(curve, psi);
+        if (!std::isfinite(dlog[0])) {
+          continue;
+        }
+        const double rel =
+            std::fabs(dlog[0] * p0 - fd) / std::max(std::fabs(fd), 1e-30);
+        if (rel > worst) {
+          worst = rel;
+        }
+        ++checked;
+      }
+    }
+  }
+  // ⚠️ The count is asserted because the two `continue`s above can empty this test
+  // silently -- a curve that returned NaN everywhere would leave `worst` at 0 and
+  // pass (hazard 16).
+  printf("    %d interior points | worst departure from (logP)'*P == P': %.3e\n",
+         checked, worst);
+  ok(checked >= 40, "the identity was actually evaluated, on both curves");
+  ok(worst < 1e-4, "the log-link derivative IS the product rule divided by A*g");
+}
+
 void benchmark() {
   printf("\ntiming\n");
   Drivers d;
@@ -4499,6 +4578,7 @@ int main() {
   test_profitmax_finds_a_closed_optimum();
   test_maximise_over_closed_interval();
   test_single_layer_optimisers_reach_a_bound();
+  test_product_link_is_the_product_rule();
   benchmark();
 
   printf("\n%d checks, %d failures\n", checks, failures);
