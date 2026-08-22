@@ -8,6 +8,9 @@ Read alongside:
 
 - **[README.md](../README.md)** — what it is and how to use it
 - **[PLAN.md](../PLAN.md)** — status table, then the reasoning behind every open issue
+- **[notes/unify-stomatal-optimisers.md](../notes/unify-stomatal-optimisers.md)** — the plan for the
+  current branch: the model space, what has landed, and the three open items. Read
+  it before picking up work on `refactor/unified-psi-stem-solver`
 - **[`vignettes/fitting.Rmd`](../vignettes/fitting.Rmd)** — ⚠️ read *"Fitting a
   different collection of parameters"* before answering anything about `pars`:
   what a different collection costs, which parameters return exactly zero and
