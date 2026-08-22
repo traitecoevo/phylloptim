@@ -1548,7 +1548,7 @@ inline void Leaf::check_psi_magnitudes(double stem_P50, double stem_c,
 
 // See the header for why this exists rather than fourteen settable fields.
 inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_P50_,
-                             double root_c_, double root_P50_, double beta2_,
+                             double root_c_, double root_P50_, double TF24_beta2_,
                              double jmax_25_, double a_,
                              double curv_fact_elec_trans_,
                              double curv_fact_colim_,
@@ -1585,7 +1585,7 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_P50_,
   stem_P50 = stem_P50_;
   stem_b = stem_b_;
   psi_crit = psi_crit_;
-  TF24_beta2 = beta2_;
+  TF24_beta2 = TF24_beta2_;
   jmax_25 = jmax_25_;
   a = a_;
   curv_fact_elec_trans = curv_fact_elec_trans_;
