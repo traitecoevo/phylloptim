@@ -72,17 +72,35 @@ tests/cpp/                     plain-C++ suite, no R, no framework
 tests/cpp/root_network.hpp     the suite's root-architecture fixture: the two
                                ex-Leaf-default beta_R_* constants, in ONE place
                                because the golden file's bit-exactness depends on them
-tests/cpp/golden/              two bit-exact regression baselines.
+tests/cpp/golden/              THREE bit-exact regression baselines.
                                operating_points.tsv: 576 solved points -- one
                                288-point state grid at 25 and 40 C. Says WHETHER
-                               anything moved.
+                               anything moved. Solves with find_root_collar_psi
+                               ONLY, so it is blind to the three
+                               optimise_psi_stem_* entry points by construction
                                primitives.tsv: 544 values from the functions the
                                solve calls, in five call-tree TIERS. Says WHICH
                                ONE moved -- the lowest tier that changed is the
                                cause. #64
+                               psi_stem_optima.tsv: 2304 rows covering what the
+                               other two cannot -- the three optimise_psi_stem_*
+                               solvers across solver x topology x energy balance
+                               x thermal cost, in two passes, the second of which
+                               reuses one Leaf with the outputs POISONED so stale
+                               state is visible. ⚠️ It records today's known
+                               defects on purpose; read its header before reading
+                               a row as intended behaviour. ⚠️ Its cross-platform
+                               tolerances are INHERITED from operating_points.tsv
+                               and unmeasured -- it prints the worst observed
+                               difference even when it passes, so read that off
+                               the first non-macOS run
 tests/cpp/test_primitives.cpp  the reader for the second of those. ⚠️ Read its
                                per-tier table before anything else on a failure
-tests/cpp/bench_solve.cpp      timing harness for the collar solve (hazard 5)
+tests/cpp/bench_solve.cpp      timing harness for the collar solve AND the three
+                               single-layer optimisers, on the 1-layer subset
+                               (hazard 5). ⚠️ The new arms print us/call, not
+                               us/solve, because bench_history.sh greps every
+                               occurrence of the latter into one TSV field
 tests/cpp/bench_gradient.cpp   timing harness for a TRAIT GRADIENT: the IFT
                                composite against differencing the solve, with
                                no R in the way. PLAN 11e
@@ -117,6 +135,7 @@ CMakeLists.txt                 the no-R build: C++ and Python consumers, and the
 ```sh
 make -C tests/cpp            # builds and runs all three suites
 make -C tests/cpp golden             # regenerate operating_points.tsv -- see below
+make -C tests/cpp psi-stem-golden    # regenerate psi_stem_optima.tsv -- same warning
 make -C tests/cpp primitives-golden  # regenerate primitives.tsv -- same warning
 make -C tests/cpp bench      # time the solve AND a trait gradient (not in `make all`)
 
@@ -839,15 +858,42 @@ the per-cause split and the tolerance bands go in the first PR comment — see
    only when it is interior. No extra model evaluations: `A` and `Tleaf` are
    stored per grid point and `HC`/`TC` are analytic.
 
-   ⚠️ **`optimise_psi_stem_TF` and `optimise_psi_stem_Sperry` still have it**, and
-   are documented rather than fixed because neither has a scan to reuse. The
-   collar solve is unaffected — `maximise_profit_over_collar` handles a pinned
+   ⚠️ **~~`optimise_psi_stem_TF` and `optimise_psi_stem_Sperry` still have it~~ —
+   FIXED in #119, and this entry said otherwise for two days.** All three now go
+   through `util::maximise_over_closed_interval`: endpoints included, a
+   `boundary_scan_n_` = 64 scan for the basin, and a refine whose tolerance scales
+   with the CELL rather than the interval. Measured against a 20001-point reference
+   over 30 single-potential rows, `optimise_psi_stem_TF` is now short on **0 of
+   30**. TF costs +150% for it (measured here at 9.45 µs/call against the collar
+   solve's 3.20; `bench_solve` has all four arms).
+
+   The collar solve is unaffected — `maximise_profit_over_collar` handles a pinned
    optimum explicitly, which is why 42 of 240 feasible golden rows are pinned and
    correct.
+
+   ⚠️ **And these two solvers are NOT the collar solve with a restriction — they
+   are a different model.** `optimise_psi_stem_*` optimise ψ_stem with upstream
+   pinned at ψ_soil, ignoring the soil→collar path entirely, which is what their
+   own refusal message means by "non-**root-based**". Measured: the two disagree on
+   20 of 30 rows, and the gap does **not** close as the root resistance goes to
+   zero (1.67 MPa at r = 1e-2) — because as that resistance vanishes the collar
+   loses its freedom, `[root_zero_E, root_crit]` collapses, and the collar solve
+   correctly reports `determined` rather than optimising. So do not reach for one
+   as a check on the other.
 
    The general form: **a bracketing optimiser answers "where is the interior
    maximum", and that is not the same question as "where is the maximum".** If an
    objective can be maximised at a constraint, the search has to be told.
+
+   ⚠️ **Endpoints alone are a HALF-fix, and the row count hides it.** Adding the
+   two bounds removes every boundary row, and #119 measured that it still left
+   Sperry short by 3.05e-01 on a genuine interior second hump — worse in the worst
+   case than the 4.71e-01 it fixed. **Read the worst shortfall, not the number of
+   rows.** This matters for any move back to a derivative-only route: a root-find
+   between the two ends is exactly the half-fix, and the shape that keeps both
+   properties is multi-start (several sub-brackets, each an exact stationary point,
+   compared on profit) rather than a grid — because a grid argmax is piecewise
+   constant in the traits and so cannot feed a gradient (hazard 3).
 
 ## Validating against plant
 
