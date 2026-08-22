@@ -20,9 +20,9 @@ Also measured: **#119 made the single-layer solvers exact** (0 of 30 rows short 
 | Stem curve parameterisation | **(P50, c)** | ✅ landed |
 | `psi_crit` | **Derived, not a parameter** — for every model, from one named critical-fraction constant that Sperry's `k_crit` also reads | ✅ landed |
 | Model-scoped parameter names | **Prefixed with the model's code name**, initials-plus-year where the paper has no name: `TF24_*`, `CF77_*`, `JS22_*`, `CMax_*` | ✅ landed |
-| λ in the gradient enumeration | **Append one slot.** Appending is declared safe; `theta` stays one fixed width | ❌ open (item 4) |
-| A parameter absent from the active model | **Refuse, naming the model**, as `resistance` already does on the wrong supply path. Distinguishes "structurally not in this objective" (refuse) from "in the objective but inactive at this operating point" (zero + `status`) | ❌ open (item 4) |
-| ProfitMax's derived λ | **Not an available parameter** for it. `vcmax_25` and `jmax_25` stay partials at fixed λ, which is what the code computes. Its normaliser comes from a scan whose argmax is not differentiable | ❌ open (item 4) |
+| λ in the gradient enumeration | **Appended one slot**, as `CF77_lambda_` rather than the `par_lambda` the original plan named -- the rename landed first | ✅ landed |
+| A parameter absent from the active model | **Refuses, naming the model** and which of the two axes -- supply path or active model -- ruled it out. Distinguishes "structurally not in this objective" (refuse) from "in the objective but inactive at this operating point" (zero + `status`) | ✅ landed |
+| ProfitMax's derived λ | **Not an available parameter** for it, and it has no gradient route at all: its normaliser comes from a scan whose argmax is not differentiable. `vcmax_25` and `jmax_25` stay partials at fixed λ | ✅ landed |
 
 ## The model space, as it now stands
 
@@ -38,7 +38,7 @@ Seven single-layer entry points plus the collar solve. Five subtract a cost; two
 | `SOX` | Eller (2018, 2020) | product: `A·g`, `g = (f−0.05)/0.95` | none |
 | `JW26` | Jones et al. (2026) | product: `A·g`, `g = 1−ψ/ψ_crit` | none |
 
-The last four were added after the original plan was written, so every count in it is stale: the trait vector is **15**, `gradient_par_names()` is **17**, and appending λ makes it 18 rather than the 15 the old plan projected.
+The last four were added after the original plan was written, so every count in it was stale. The trait vector is **15** and `gradient_par_names()` is **18** -- twelve traits, the three the new curves brought, and three non-traits (`leaf_specific_conductance_max`, `resistance`, `CF77_lambda_`) -- against the 15 the old plan projected.
 
 ⚠️ **`JS22`, `CMax` and `JW26` are the objectives, not the models.** `JS22` omits Joshi's `α·J_max` capacity term and the joint optimisation over `J_max` that goes with it. `JW26` uses a derived `psi_crit` and our saturating supply where the paper supplies its own `Pcrit` and a supply linear in the potential. Deriving `psi_crit` is deliberate — it is what puts `JW26` and `SOX` on the same two anchors, so the comparison between them is structural rather than a fitted match — but it means neither reproduces its paper's numbers.
 
