@@ -166,7 +166,7 @@ configurable choice: the solve is called internally, so the cost curve is
 fixed no matter which optimiser you called on the leaf beforehand.
 
 ⚠️ **So a gradient requested for a leaf you set up for another cost curve is
-the TF24 gradient, silently.** `$optimise_psi_stem_CowanFarquhar()` and
+the TF24 gradient, silently.** `$optimise_psi_stem_CF77()` and
 `$optimise_psi_stem_ProfitMax()` maximise different objectives over `psi_stem`
 rather than the collar, and neither is what this function differentiates.
 There is no warning, because the numbers that come back are perfectly good
@@ -195,7 +195,7 @@ is exact in `psi` and smooth in the traits -- `psi` is one of its arguments, so
 no argmax is involved and `M` is a first difference of an exact quantity. It is
 stable to seven significant figures across five decades of step size.
 
-The second term is not a correction. For `cost_scale_TF24`, `beta2`, `stem_b`
+The second term is not a correction. For `TF24_cost_scale`, `TF24_beta2`, `stem_b`
 and `stem_c` it is 100% of the answer, and for `vcmax_25` 52%.
 }
 

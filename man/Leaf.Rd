@@ -10,7 +10,7 @@ Leaf(
   stem_P50,
   root_c,
   root_P50,
-  beta2,
+  TF24_beta2,
   jmax_25,
   a,
   curv_fact_elec_trans,
@@ -19,7 +19,7 @@ Leaf(
   vulnerability_curve_ncontrol,
   ci_abs_tol,
   ci_niter,
-  cost_scale_TF24
+  TF24_cost_scale
 )
 }
 \arguments{
@@ -33,7 +33,7 @@ Leaf(
 
 \item{root_P50}{ROOT potential at 50% loss of hydraulic conductivity (MPa, positive magnitude)}
 
-\item{beta2}{exponent for the effect of hydraulic risk (unitless)}
+\item{TF24_beta2}{exponent for the effect of hydraulic risk (unitless)}
 
 \item{jmax_25}{maximum rate of electron transport at 25 C (umol m^-2 s^-1)}
 
@@ -51,7 +51,7 @@ Leaf(
 
 \item{ci_niter}{maximum number of iterations for root-solving ci}
 
-\item{cost_scale_TF24}{cost parameter for the TF24 profit model (umol m^-2 s^-1)}
+\item{TF24_cost_scale}{cost parameter for the TF24 profit model (umol m^-2 s^-1)}
 }
 \description{
 Stomatal behaviour emerges from a gain-risk profit maximisation over the
