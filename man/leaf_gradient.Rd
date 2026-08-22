@@ -174,6 +174,21 @@ TF24 derivatives.
 
 Differentiating the others needs `dprofit` for each curve, which does not
 exist yet. Until it does, treat this as TF24-only.
+
+⚠️ **A zero column for another curve's parameter means two different things,
+and they are not distinguishable from the number.** `JS22_gamma`, `CMax_a`,
+`CMax_b` and the rest come back exactly zero here, and read one way that is
+correct: those parameters do not enter the TF24 cost, so their derivative is
+genuinely zero. Read the other way it is a trap: if you are *fitting* one of
+those curves, the zero is telling you this function differentiated a
+different model, not that the parameter does nothing. Measured on the
+single-potential path at `psi_soil` 1.5, the TF24 collar optimum sits at
+2.09 MPa and the JS22 optimum at 3.15.
+
+So an optimiser handed these columns will conclude the parameter is inert and
+leave it at its starting value, which looks like convergence. There is no
+exact gradient for any cost curve but TF24; use finite differences of the
+matching `optimise_psi_stem_*` until PLAN 7a's production-path dispatch lands.
 }
 
 \section{The maths, and why it is not just a finite difference}{
