@@ -27,18 +27,64 @@ Every number quoted in prose here is produced by the chunk beside it. That is
 deliberate: a formula written next to code it no longer matches is the failure
 mode this document is most exposed to.
 
-## The problem
+## A leaf choosing where to operate
 
-Every model in this package maximises a **profit** — a carbon gain minus a cost
-of the water used to get it — over a single water potential:
+A leaf with open stomata takes up CO₂ and loses water. Opening further buys more
+carbon, but the water has to be pulled through the plant at greater tension, and
+tension is not free. Somewhere between shut and wide open there is a best place to
+sit, and that place is what these models compute.
+
+Put the two effects on the same axis. Take the stem water potential as the dial —
+more tension to the right, wider open — and plot what the leaf gains and what it
+gives up:
+
+```{r fig.height = 4.2}
+l0 <- leaf_model()
+set_drivers(l0, psi_soil = 1.0, PPFD = 1500)
+psi0 <- seq(1.0, l0$psi_crit, length.out = 300)
+
+benefit <- vapply(psi0, function(p) {           # carbon taken up
+  l0$profit_psi_stem_TF(p, 1.0)
+  l0$assim_colimited_
+}, numeric(1))
+cost <- vapply(psi0, l0$hydraulic_cost_TF, numeric(1))  # what tension costs
+profit <- benefit - cost
+
+l0$optimise_psi_stem_TF()
+star <- l0$opt_psi_stem_
+
+plot(psi0, benefit, type = "l", lwd = 2, col = "forestgreen",
+     ylim = range(c(benefit, cost, profit)),
+     xlab = "stem water potential (MPa)",
+     ylab = expression(mu * "mol C m"^-2 * " s"^-1), las = 1)
+lines(psi0, cost,   lwd = 2, col = "firebrick")
+lines(psi0, profit, lwd = 3, col = "black")
+abline(v = star, lty = 3)
+legend("bottomright", bty = "n", lwd = c(2, 2, 3), cex = 0.9,
+       col = c("forestgreen", "firebrick", "black"),
+       legend = c("benefit: carbon gained", "cost of the tension", "profit"))
+cat(sprintf("best operating point: %.3f MPa, profit %.3f\n", star, l0$profit_))
+```
+
+The benefit rises and then flattens — pulling harder recruits progressively less
+conductance, so the carbon return diminishes. The cost keeps climbing. Their
+difference therefore has an interior maximum, and the dotted line is where the
+solver puts it.
+
+**Everything else in this document is a variation on that picture.** The models
+differ in the red curve; the supply topologies differ in what the dial is
+physically connected to; the two gates change both curves at once.
+
+## The problem, stated
 
 $$\psi^{*}=\arg\max_{\psi\in[\psi_{\rm soil},\,\psi_{\rm crit}]} J(\psi),
 \qquad J(\psi)=B(\psi)-C(\psi)$$
 
-What varies between models is `C`. What varies between *supply topologies* is
-which ψ is the decision variable — and that is a bigger difference than it looks.
+`B` is net assimilation and `C` the cost of the water used to get it. What varies
+between models is `C`; what varies between supply topologies is which ψ the
+argmax is taken over.
 
-### Two decision variables, not one
+### The two supply paths
 
 - **Non-root-based.** Optimise the stem potential `ψ_stem` with the upstream
   potential held at `ψ_soil`. The soil-to-collar path is ignored entirely. This is
@@ -54,26 +100,40 @@ vanishes the collar loses its freedom, its feasible interval collapses, and the
 root-based solve correctly reports that feasibility *determined* the answer rather
 than optimisation.
 
-### One problem, four coordinates
+### One problem, several coordinates
 
-`ψ`, `E`, `g_c`, `c_i` and `A` are not five independent quantities. Given the
-drivers they are linked by a chain of **monotone** maps:
+Reading across this literature you will have noticed that different papers
+optimise with respect to different things. @cowan1977 solve for stomatal
+conductance. @sperry2017 solves for water potential. Others work in terms of
+transpiration, or of internal CO₂. It is easy to read that as a substantive
+disagreement about what the plant controls.
+
+For the class of models here, it is not. **These variables are interchangeable,
+and any of the models could be solved in any of them.** The choice is one of
+convenience, not of biology.
+
+The reason is that, given the drivers, the quantities are not independent — they
+are linked by a chain of **monotone** maps:
 
 $$\psi \;\xrightarrow{\;\text{supply}\;}\; E \;\xrightarrow{\;\text{diffusion}\;}\; g_c
 \;\xrightarrow{\;\text{supply}=\text{demand}\;}\; c_i \;\xrightarrow{\;A(\cdot)\;}\; A$$
 
-Fix any one and the rest follow. So "optimise over stem potential", "optimise over
-stomatal conductance" and "optimise over `c_i`" are **the same problem written in
-different coordinates**, and a model's argmax does not depend on which is chosen.
+Fix any one and the rest follow. Because each map is monotone, it carries the
+maximum to the maximum: an optimum located in one coordinate *is* the optimum in
+all of them. So "optimise over stem potential", "optimise over stomatal
+conductance" and "optimise over `c_i`" name one problem written three ways, and a
+model's operating point does not depend on which was chosen.
 
-That is what makes the literature comparable at all. @cowan1977 write the
-problem over conductance; @sperry2017 writes it over potential; this package solves it
-over potential because that is where the supply constraint is simplest. None of
-that is a modelling difference — only the cost function is.
+This package solves in water potential, because that is the coordinate in which
+the hydraulic supply constraint is simplest to state. That is an implementation
+choice and nothing more — what actually distinguishes the models is the cost
+function, which is the next section.
 
-⚠️ **Monotone, not linear.** A derivative *does* depend on the coordinate: `dA/dE`
-and `dA/dψ` are different numbers, related by `dE/dψ`. So a marginal cost is only
-meaningful once you say what it is per unit of. `marginal_cost_water()` is per unit
+⚠️ **Monotone, not linear** — and that limits how far the equivalence goes. A
+*derivative* does depend on the coordinate: `dA/dE` and `dA/dψ` are different
+numbers, related by `dE/dψ`. So a marginal cost is only meaningful once you say
+what it is per unit of, and comparing a λ from one paper with a λ from another
+means checking they share a denominator. `marginal_cost_water()` reports per unit
 `E`, which is the convention the λ literature uses.
 
 ### Solving for the optimum by its first-order condition
@@ -255,6 +315,25 @@ without the energy balance, because with a prescribed leaf temperature the penal
 is an additive constant in ψ: it changes the value of the objective and not its
 argmax.
 
+## When the leaf cannot transpire
+
+Where the soil is drier than the stem's critical potential there is no flow, and
+the operating point is the no-flow one. The answer is to **evaluate the objective
+there** rather than to zero the reported fields, so that every output describes one
+consistent state. For Cowan-Farquhar this is exactly predictable: `E` is zero, so
+the cost is zero, so profit is `−R_d` whatever λ is.
+
+```{r}
+d <- leaf_model()                       # psi_soil drier than psi_crit
+set_drivers(d, psi_soil = 6.0, PPFD = 1500)
+d$lambda_ <- 1.5e5
+d$optimise_psi_stem_CowanFarquhar()
+cat(sprintf("E = %.1e, cost = %.1e, profit = %.6f, -R_d = %.6f\n",
+            d$transpiration_, d$hydraulic_cost_, d$profit_, -d$R_d_))
+```
+
+---
+
 ## The variants, under one roof
 
 Four axes, chosen independently. A "model" in the literature is a point in this
@@ -289,37 +368,140 @@ enforced rather than allowed to become `NaN`.
 
 ## The biological components
 
-The optimality argument above is indifferent to what `A` and `E` are. What makes
-this a plant model rather than a calculus exercise is the four blocks underneath.
+The optimality argument above is indifferent to what `A` and `E` actually are.
+What makes this a plant model rather than a calculus exercise is the five blocks
+underneath, given here in the forms the code evaluates.
 
-**Photosynthetic demand.** Farquhar-type colimited assimilation [@farquhar1980]: a
-Rubisco-limited rate from `Vcmax`, an electron-transport-limited rate from `Jmax`
-and incident light, smoothly colimited, minus dark respiration `R_d`. All three
-capacities are defined at 25 °C and moved by temperature-response functions, which
-is why a grid at 25 °C is blind to every one of them by construction.
+### 1. Photosynthetic demand
 
-**Diffusive supply.** CO₂ enters and water leaves through the same stomata, so one
-conductance sets both, related by the ratio of diffusivities. Fixing `E` therefore
-fixes `g_c`, hence `c_i`, hence `A` — the chain in "One problem, four coordinates".
+Farquhar-type assimilation [@farquhar1980]. A Rubisco-limited rate and an
+electron-transport-limited rate, each a saturating function of `c_i`:
 
-**Hydraulic supply.** Water reaches the leaf through a path whose conductivity
-*falls* as tension rises, described by the Weibull vulnerability curve of
-Appendix A. Transpiration at a given stem potential is the integral of that curve
-between the upstream potential and the stem, which is why `E` saturates: pulling
-harder recruits progressively less conductance. This saturation is what makes the
-optimisation non-trivial — without it, more tension would always buy more carbon.
+$$A_c=\frac{V_{c\max}\,(c_i-\Gamma^{*})}{c_i+K_m},
+\qquad
+A_j=\frac{J}{4}\cdot\frac{c_i-\Gamma^{*}}{c_i+2\Gamma^{*}}$$
 
-**The cost of that tension.** The three curves in the table above are three
-answers to "what does the plant lose by pulling harder": a carbon penalty
-increasing with the fraction of conductivity lost (TF24), the water itself priced
-at a constant marginal rate (Cowan-Farquhar), or the normalised loss of remaining
-conductance (Sperry). They are not refinements of one another — they disagree about
-what is being spent.
+Electron transport itself is a smooth minimum of light supply and capacity:
 
-**And optionally, energy balance and thermal damage.** A transpiring leaf is
-cooler than the air, so `E` feeds back on temperature and hence on every capacity
-above. Add a temperature-dependent damage term and the leaf has a reason to
-transpire that is not photosynthetic at all.
+$$J=\frac{aQ+J_{\max}-\sqrt{(aQ+J_{\max})^{2}-4\,\theta_J\,aQ\,J_{\max}}}{2\theta_J}$$
+
+and the two rates are colimited by the *same* smooth-minimum form before
+respiration is subtracted:
+
+$$A=\frac{A_c+A_j-\sqrt{(A_c+A_j)^{2}-4\,\theta_c A_c A_j}}{2\theta_c}-R_d$$
+
+`θ_J` and `θ_c` are curvature factors — at 1 the expression is an exact minimum,
+below 1 it rounds the corner. The Michaelis-Menten composite carries the
+competitive inhibition by oxygen:
+
+$$K_m=K_c\Big(1+\frac{O_2}{K_o}\Big)$$
+
+⚠️ **`A` here is NET assimilation.** `R_d` is inside it, which is why the
+closed-stomata profit is `−R_d` rather than zero, and why `A` can be negative.
+
+### 2. Temperature responses
+
+`V_cmax`, `J_max`, `Γ*`, `K_c`, `K_o` and `R_d` are all defined at 25 °C and moved
+from there. The first two get a **peaked** Arrhenius — rising, then falling as
+denaturation takes over:
+
+$$X(T)=X_{25}\exp\!\Big[\frac{E_a\,(T-T_{25})}{T_{25}\,R\,T}\Big]
+\cdot\frac{1+\exp\!\big[(\Delta S\,T_{25}-H_d)/(R\,T_{25})\big]}
+          {1+\exp\!\big[(\Delta S\,T-H_d)/(R\,T)\big]}$$
+
+with `T` in kelvin. `Γ*`, `K_c` and `K_o` take the first factor alone. Respiration
+is different again — a Q₁₀ whose own value declines with temperature:
+
+$$R_d=R_{d,25}\;q^{(T-25)/10},\qquad q=q_0-q_1\frac{T+25}{2}$$
+
+⚠️ **This is why a grid at 25 °C is blind to every one of these by construction**:
+each response is *defined* to be 1 at its reference, so a change to any of them is
+inert there. Any test of a temperature response needs a second temperature.
+
+⚠️ **And the thermal-cost gate reaches into this block**: when it is on,
+`J_max` is multiplied by `(1 − TC)`. That is why it moves the benefit and not only
+the cost.
+
+### 3. Diffusive supply
+
+CO₂ in and water out share the stomata, so one conductance sets both. Converting
+the mass flux `E` to a molar CO₂ conductance:
+
+$$g_c=\frac{P\,E\,M_{\rm H_2O}}{1.6\;D_{\rm leaf}}$$
+
+where 1.6 is the ratio of diffusivities of water vapour and CO₂, `P` is
+atmospheric pressure and `D_leaf` the leaf-to-air vapour pressure deficit. Fixing
+`E` fixes `g_c`, which is the first link of the coordinate chain above.
+
+### 4. Closing the loop: supply equals demand
+
+`c_i` is not free. Diffusive supply must equal biochemical demand, which is a
+scalar root-find at every candidate ψ:
+
+$$g(c_i)\;=\;A(c_i)\;-\;\frac{g_c\,(c_a-c_i)}{P}\;=\;0$$
+
+solved over `[Γ*, c_a]` by a bracketing method. This is the innermost loop of the
+whole model — it runs at every objective evaluation, and its tolerance sets what
+every reported output *means*.
+
+```{r}
+# The residual really is zero at the solved ci -- the statement above, checked.
+l2 <- leaf_model()
+set_drivers(l2, psi_soil = 1.0, PPFD = 1500)
+l2$optimise_psi_stem_TF()
+ci <- l2$ci_
+gc <- l2$stom_cond_CO2_
+resid <- l2$assim_colimited(ci) * 1e-6 - gc * (l2$ca_ - ci) / (l2$atm_kpa_ * 1000)
+cat(sprintf("ci = %.4f Pa, supply-demand residual = %.2e mol m-2 s-1\n",
+            ci, resid))
+```
+
+### 5. Hydraulic supply, and why the problem is non-trivial
+
+Water arrives through a path whose conductivity *falls* as tension rises — the
+Weibull vulnerability curve of Appendix A. Transpiration at a given stem potential
+is that curve integrated along the path:
+
+$$E(\psi_{\rm stem};\psi_{\rm up})=k_{\max}\int_{\psi_{\rm up}}^{\psi_{\rm stem}}\! f(u)\,du$$
+
+**This integral is what makes the optimisation non-trivial.** Because `f` falls,
+`E` *saturates*: pulling harder recruits progressively less conductance, so the
+carbon return on further tension diminishes. Without that saturation more tension
+would always buy more carbon and there would be no interior optimum to find.
+
+### 6. Optionally, energy balance and thermal damage
+
+A transpiring leaf is cooler than the air. Linearised, the leaf temperature is
+
+$$T_{\rm leaf}=T_{\rm air}+\frac{(R_n-\lambda_v E)\,r_a}{\rho c_p}$$
+
+clamped to a physical range — so `dT/dE = −λ_v r_a/(\rho c_p)` inside the range and
+exactly zero where the clamp binds, which is a real kink every derivative has to
+respect. Warming the leaf also raises its own vapour pressure, so the deficit that
+drives diffusion is not the atmospheric one:
+
+$$D_{\rm leaf}=\max\!\big(D_{\rm air}+e_s(T_{\rm leaf})-e_s(T_{\rm air}),\;D_{\min}\big)$$
+
+That closes a **feedback**: `E` sets `T_leaf`, which sets `D_leaf`, which sets
+`g_c`, which sets `E`. It is why the energy-balance path is solved rather than
+evaluated, and why every derivative on it carries a `dT/dE` term.
+
+Finally, the thermal cost — a sigmoid in leaf temperature between a critical and a
+half-lethal value [@sicangco2026]:
+
+$$TC(T)=\frac{1}{1+\exp\!\big[-r\,(T-T_{50})\big]},\qquad r=\frac{2}{T_{50}-T_{\rm crit}}$$
+
+With this on, a leaf has a reason to transpire that is not photosynthetic at all:
+evaporative cooling becomes a benefit in its own right.
+
+### What the models disagree about
+
+Blocks 1–5 are shared. Every published model in the table above accepts them and
+differs only in block 6's cost: a carbon penalty rising with the fraction of
+conductivity lost [@towers2024], the water itself priced at a constant marginal
+rate [@cowan1977], or the normalised loss of remaining conductance [@sperry2017].
+They are **not refinements of one another** — they disagree about what is being
+spent.
 
 ### Further reading
 
@@ -327,25 +509,6 @@ transpire that is not photosynthetic at all.
 published analogue to the framing used here. @medlyn2011 give the empirical
 conductance model this package can report an equivalent slope for. Full citations
 are in the reference list at the end.
-
-## When the leaf cannot transpire
-
-Where the soil is drier than the stem's critical potential there is no flow, and
-the operating point is the no-flow one. The answer is to **evaluate the objective
-there** rather than to zero the reported fields, so that every output describes one
-consistent state. For Cowan-Farquhar this is exactly predictable: `E` is zero, so
-the cost is zero, so profit is `−R_d` whatever λ is.
-
-```{r}
-d <- leaf_model()                       # psi_soil drier than psi_crit
-set_drivers(d, psi_soil = 6.0, PPFD = 1500)
-d$lambda_ <- 1.5e5
-d$optimise_psi_stem_CowanFarquhar()
-cat(sprintf("E = %.1e, cost = %.1e, profit = %.6f, -R_d = %.6f\n",
-            d$transpiration_, d$hydraulic_cost_, d$profit_, -d$R_d_))
-```
-
----
 
 # Appendix A — the (P50, c) parameterisation
 
