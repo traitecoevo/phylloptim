@@ -56,23 +56,48 @@ namespace {
 
 // The default trait vector, in set_traits' argument order.
 //
-// Thirteen of the fourteen traits: `R_d_25` is left at its default because it needs
-// no spline rebuild and so lands in the cheap bucket, which the split below already
-// has twelve examples of. `beta_R_H` and `beta_R_V` are not here at all -- they left
+// Eleven of the fifteen traits. `R_d_25`, `JS22_gamma`, `CMax_a` and `CMax_b` are
+// left at their defaults because none needs a spline rebuild, so all four land in
+// the cheap bucket this table already has examples of -- adding them would lengthen
+// the output without changing the finding. `beta_R_H` and `beta_R_V` are not here at all -- they left
 // with the root-architecture model in #33, and a gradient in either is now taken
 // where the network is built, exactly, because root_network_from_carbon is
 // homogeneous of degree 1 in each.
+//
+// ⚠️ ONE COUNT FOR ALL THREE USERS OF IT, and that is the fix for a real bug
+// rather than a tidy-up. `Traits::v`, `kNames` and the timing loop each carried
+// the number separately, and the loop's copy was a literal `13` against an
+// 11-element array. So it read `kBase.v[11..12]` and `kNames[11..12]` out of
+// bounds and handed the latter to `printf("%s")`.
+//
+// It survived every trait-count change since -- the vector has been 14, then 12,
+// now 15 -- because nothing compared the three numbers. And it was invisible in
+// the ordinary way: the read is only fatal when the address space happens to put
+// something unmapped after the globals, so it ran clean under `lldb` (which
+// disables ASLR) and segfaulted when run directly. It also *looked* like a crash
+// during initialisation, because a piped stdout is block-buffered and the whole
+// report was still sitting in the buffer when the process died.
+//
+// `-fsanitize=address` names it in one line: "global-buffer-overflow ... 0 bytes
+// after global variable 'kBase'". Reach for that before reading a stack trace.
+constexpr int kNTraits = 11;
+
 struct Traits {
-  double v[11];
+  double v[kNTraits];
 };
 
 const Traits kBase{{96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5,
                     157.44, 0.30, 0.7, 0.99, 7.5}};
 
-const char *kNames[11] = {"vcmax_25",  "stem_c",     "stem_P50",
+const char *kNames[kNTraits] = {"vcmax_25",  "stem_c",     "stem_P50",
                           "root_c",    "root_P50",   "TF24_beta2",
                           "jmax_25",   "a",          "curv_elec",
                           "curv_colim", "cost_scale"};
+
+static_assert(sizeof(kBase.v) / sizeof(kBase.v[0]) == kNTraits,
+              "kBase must have exactly kNTraits entries");
+static_assert(sizeof(kNames) / sizeof(kNames[0]) == kNTraits,
+              "kNames must have exactly kNTraits entries");
 
 // Whether perturbing this trait forces a vulnerability spline to be rebuilt:
 // stem_c/stem_P50 own the transpiration pair, root_c/root_P50 own the root curve.
@@ -246,7 +271,7 @@ int main(int argc, char **argv) {
          "rebuilds a spline");
   double fd_all = 0.0, ift_all = 0.0, fd_cheap = 0.0, ift_cheap = 0.0;
   int n_cheap = 0;
-  for (int i = 0; i < 13; ++i) {
+  for (int i = 0; i < kNTraits; ++i) {
     double fd = 1e300, ift = 1e300;
     for (int round = 0; round < 3; ++round) {
       // Reset to the base state before each arm so neither inherits the other's
@@ -278,7 +303,8 @@ int main(int argc, char **argv) {
     }
   }
 
-  printf("\n  13 of the 14 traits  FD %8.1f us   IFT %8.1f us   %.2fx\n",
+  printf("\n  %d of the %d traits  FD %8.1f us   IFT %8.1f us   %.2fx\n",
+         kNTraits, phylloptim::gradient::n_traits,
          fd_all, ift_all, fd_all / ift_all);
   printf("  the %2d with no rebuild  FD %8.1f us   IFT %8.1f us   %.2fx\n",
          n_cheap, fd_cheap, ift_cheap, fd_cheap / ift_cheap);
