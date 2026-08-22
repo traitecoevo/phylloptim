@@ -162,7 +162,16 @@ make -C tests/cpp && make -C tests/cpp bench
 `cpp-tests.yml`'s "Consume the installed package" step writes a `consumer/main.cpp`
 inline, in a heredoc, and builds it against the *installed* package through
 `find_package`. It calls `set_physiology`, so **any signature change breaks it, and
-neither `make` nor `cmake` locally covers it.** #33 hit this: 359 checks passing, a
+neither `make` nor `cmake` locally covers it.**
+
+⚠️ **It also fills a `theta[gradient::n_pars]` by hand, so a change to the PARAMETER
+SET breaks it too — and that break is silent rather than a compile error.** When the
+trait vector went 14 → 15 with four names replaced, its 16-entry list under-filled an
+18-element array *and* put `kmax` in a trait's slot; the consumer built, ran, and
+printed `dA/dvcmax = nan  status = error`. `git grep n_pars` over `R/` and `src/`
+does not find it, because it is not in the source tree. **Grep `.github/` too
+whenever the parameter set changes**, and note that this program is the only place
+that exercises the gradient through a `find_package` consumer. #33 hit this: 359 checks passing, a
 bit-identical golden file, `ctest` 2/2, and three red jobs on
 `cannot convert '<brace-enclosed initializer list>' to 'const RootNetwork&'`.
 
