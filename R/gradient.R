@@ -863,12 +863,22 @@ leaf_gradient <- function(psi_soil,
 # truthful answer rather than a gap.
 .GRADIENT_COLLAR_ROUTE <- "collar"
 
-# Which routes reproduce a finite difference of their own solve on every parameter
-# tested. The identity link does; the two non-identity ones do not yet. Kept as a
-# list rather than derived from `cost_curve_has_derivative()`, because those are
-# different questions: C++ has a derivative for all seven, and this is about
-# whether the composite AROUND it has been checked.
-.GRADIENT_VERIFIED_LINKS <- c("collar", "TF24", "CF77", "JS22", "CMax")
+# Which routes reproduce a finite difference of their own solve, checked by
+# SWEEPING the step and reading the floor of the V rather than trusting one step.
+#
+# ⚠️ THE SWEEP IS THE WHOLE METHOD, and skipping it cost a false bug report. At a
+# relative step of 1e-06 the FD of a SCAN-resolved argmax is pure quantisation:
+# psi* moves ~3e-06 MPa while the scan resolves it to ~4e-06 over a 4.4 MPa
+# bracket. Measured for SOX's `vcmax_25`, the FD reads 0.1855, 0.0552, 0.0551 at
+# steps of 1e-06, 1e-03, 1e-02 while the composite returns a flat 0.0551 -- and for
+# JW26 the 1e-06 step gets the SIGN wrong. The composite was right in every case
+# and the verification was what was broken.
+#
+# Kept as a list rather than derived from `cost_curve_has_derivative()`, because
+# those are different questions: C++ has a derivative for all seven, and this is
+# about whether the composite around it has been checked.
+.GRADIENT_VERIFIED_LINKS <- c("collar", "TF24", "CF77", "JS22", "CMax",
+                              "SOX", "JW26")
 
 .gradient_link_verified <- function(model) {
   model %in% .GRADIENT_VERIFIED_LINKS
@@ -893,23 +903,13 @@ leaf_gradient <- function(psi_soil,
          paste(c(.GRADIENT_COLLAR_ROUTE, curves), collapse = ", "), ".",
          call. = FALSE)
   }
-  # ⚠️ THE NON-IDENTITY LINKS ARE BUILT BUT NOT VERIFIED, so they refuse rather
-  # than return a number. `Leaf` computes `h'(A) * dA/dpsi - dC/dpsi` for every
-  # curve, and for the two product curves that derivative is demonstrably right:
-  # `stem_P50` on SOX agrees with differencing the solve to 4.1e-04. But
-  # `vcmax_25` on the same curve is 70% out, and the cause is not yet isolated --
-  # it is not the stem-curve shortcut (vcmax_25 owns no spline) and it is not the
-  # net-versus-gross `A` fed to the link (the kernel subtracts R_d, so it is the
-  # objective's own A). Something in the composite is still link-dependent.
-  #
-  # ProfitMax fails differently and the cause IS known: its `Scaled` link divides
-  # by `|A|max`, which `prepare_profitmax()` seeds and which a perturbation's
-  # `set_traits` + `set_physiology` clears -- measured 16.757 before, NaN after.
-  # Pinning it at the base point is what makes the gradient the PARTIAL at fixed
-  # normaliser that this package intends, and that is not wired up.
-  #
-  # Refusing beats returning: an optimiser handed a 70%-wrong gradient converges
-  # somewhere plausible, and a NaN one poisons a whole likelihood.
+  # ⚠️ ONLY ProfitMax REFUSES NOW, and for a reason that is not about the link.
+  # Its `Scaled` link divides by `|A|max`, which `prepare_profitmax()` seeds and
+  # which a perturbation's `set_traits` + `set_physiology` clears -- measured
+  # 16.757 before, NaN after. So the gradient is NaN rather than wrong, which is
+  # the safe failure, but it is still a failure. Pinning `|A|max` at the base point
+  # while letting `k_soil`/`k_span` follow the traits is what makes it the PARTIAL
+  # at fixed normaliser this package intends.
   if (!identical(.gradient_link_verified(model), TRUE)) {
     stop("no verified gradient for the ", model, " curve yet. Its derivative is ",
          "implemented -- every model here is `h(A) - C(psi)` and this one's ",

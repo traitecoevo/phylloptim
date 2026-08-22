@@ -103,19 +103,32 @@ So ProfitMax and the product objectives stop being special cases: they are two m
 
 ### What is verified, and what is not
 
-`leaf_gradient(model = )` is the single access point for all eight routes. Five are checked against differencing their own solve and are offered; three are implemented and refuse.
+`leaf_gradient(model = )` is the single access point for all eight routes. **Seven are verified and offered; one refuses.**
 
 | route | state |
 |---|---|
-| `collar`, `TF24`, `CF77`, `JS22`, `CMax` | ✅ agree with differencing the solve, 2e-11 to 2e-03 |
-| `SOX`, `JW26` | ⚠️ derivative right, composite not. `stem_P50` agrees to **4.1e-04**; `vcmax_25` is **70%** out |
-| `ProfitMax` | ⚠️ `|A|max` is 16.757 after its own optimiser and **NaN** after the `set_traits` + `set_physiology` a perturbation performs |
+| `collar`, `TF24`, `CF77`, `JS22`, `CMax` | ✅ agree with differencing the solve |
+| `SOX`, `JW26` | ✅ agree once the step is swept — see below |
+| `ProfitMax` | ⚠️ NaN: `\|A\|max` is 16.757 after its own optimiser and NaN after the `set_traits` + `set_physiology` a perturbation performs, so the `Scaled` link reads state the perturbation clears. Pinning it at the base point while `k_soil`/`k_span` follow the traits is what makes it the intended partial |
 
-⚠️ **Two false leads on the `vcmax_25` failure, both eliminated**: it is not the `fast_stem_curve` shortcut (`vcmax_25` owns no spline, and the failure persists with the shortcut off), and it is not a net-versus-gross `A` fed to the link (`assim_colimited_kernel` subtracts `R_d_`, so it *is* the objective's own `A`). Something in the composite is still link-dependent and is not yet isolated.
+### ⚠️ Sweep the step, or invent a bug
 
-⚠️ **The fast-stem-curve shortcut IS wrong for SOX, separately.** With it on, differencing the solve gives −0.033 against a correct 3.31; with it off, 3.3102 against the composite's 3.3088. So `perturb_stem_P50` leaves something `sox_reduction` reads stale. That is a live bug in the FD arm, not in the link.
+The two product routes were reported here as broken — `vcmax_25` "70% out" on SOX — and they were not. The verification was.
 
-**Refusing beats returning.** An optimiser handed a 70%-wrong gradient converges somewhere plausible; a NaN one poisons a whole likelihood. `.GRADIENT_VERIFIED_LINKS` is the gate, kept separate from `cost_curve_has_derivative()` because those are different claims — C++ has a derivative for all seven; the list is about whether the composite around it has been checked.
+A finite difference of a **scan-resolved** argmax is quantisation noise at a small step: a 1e-06 relative perturbation moves `psi*` by ~3e-06 MPa while the scan-and-refine resolves it to ~4e-06 over a 4.4 MPa bracket. Measured for SOX's `vcmax_25`:
+
+| rel `h` | `dψ*/dθ` FD | `dA/dθ` FD | `−M/H` |
+|---|---|---|---|
+| 1e-06 | 0.0280 | 0.1855 | 0.0016617 |
+| 1e-03 | 0.00169 | 0.0552 | 0.0016619 |
+| 1e-02 | 0.00166206 | 0.0550731 | 0.00166177 |
+
+The FD **converges onto the composite** and `−M/H` is flat across six decades. At 1e-06 the FD gets the **sign** wrong for JW26 on both parameters. Two claims that followed from that single bad step are retracted:
+
+- "the composite is still link-dependent somewhere" — no, all four (curve × parameter) cases converge on the composite's value;
+- "`fast_stem_curve` is wrong for SOX" — no, that was two code paths landing on opposite sides of the same quantisation, both noise.
+
+The plan already said this: *when finite-differencing anything computed through a root-find, sweep `h` and take the floor of the V*. A scan is worse than a root-find, so the rule binds harder, and the test now sweeps rather than trusting one step.
 
 ## Open work
 

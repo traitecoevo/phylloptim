@@ -1093,10 +1093,8 @@ test_that("the curve registry is read from C++, not restated in R", {
   # ⚠️ Having a derivative and having a VERIFIED GRADIENT are different claims,
   # and only the second gates `leaf_gradient()`. The two non-identity links are
   # implemented and not yet checked on every parameter, so they refuse there.
-  for (m in c("SOX", "JW26", "ProfitMax")) {
-    expect_false(phylloptim:::.gradient_link_verified(m))
-  }
-  for (m in c("collar", "TF24", "CF77", "JS22", "CMax")) {
+  expect_false(phylloptim:::.gradient_link_verified("ProfitMax"))
+  for (m in c("collar", "TF24", "CF77", "JS22", "CMax", "SOX", "JW26")) {
     expect_true(phylloptim:::.gradient_link_verified(m))
   }
 
@@ -1181,16 +1179,67 @@ test_that("the decision variable follows the route", {
   expect_false(isTRUE(all.equal(collar$psi, stem$psi)))
 })
 
-test_that("a product objective is refused with its reason", {
+test_that("a product objective's gradient survives an h-sweep", {
+  # ⚠️ THE SWEEP IS THE TEST, not a single step. A finite difference of a
+  # SCAN-resolved argmax is quantisation noise at a small step: psi* moves ~3e-06
+  # MPa under a 1e-06 relative perturbation while the scan resolves it to ~4e-06
+  # over a 4.4 MPa bracket. At that step the FD reported 0.1855 against a true
+  # 0.0551 for SOX, and got the SIGN wrong for JW26 -- which is what a false bug
+  # report is made of. The composite is flat across six decades; the FD is not.
+  tr <- leaf_traits()
+  net <- series_resistance(1e4)
+  mk <- function(v, p50) {
+    l <- leaf_model(leaf_traits(vcmax_25 = v, stem_P50 = p50), leaf_control(),
+                    leaf_supply_single())
+    set_drivers(l, psi_soil = 1.5, PPFD = 1500, root_network = net)
+    l
+  }
+  n_checked <- 0L
+  for (m in c("SOX", "JW26")) {
+    for (par in c("vcmax_25", "stem_P50")) {
+      base <- if (par == "vcmax_25") 96 else 3.4
+      solve_at <- function(x) {
+        l <- if (par == "vcmax_25") mk(x, 3.4) else mk(96, x)
+        l[[paste0("optimise_psi_stem_", m)]]()
+        l$assim_colimited_
+      }
+      h <- base * 1e-2               # the floor of the V, not the toe
+      fd <- (solve_at(base + h) - solve_at(base - h)) / (2 * h)
+      g <- leaf_gradient(psi_soil = 1.5, PPFD = 1500, root_network = net,
+                         x = mk(96, 3.4), traits = tr, pars = par, model = m,
+                         method = "ift")
+      expect_equal(g$gradient[par, "A"], fd, tolerance = 1e-2,
+                   label = paste(m, par))
+      n_checked <- n_checked + 1L
+    }
+  }
+  expect_identical(n_checked, 4L)
+})
+
+test_that("ProfitMax refuses, because its normaliser does not survive a reset", {
   tr <- leaf_traits()
   l <- leaf_model(tr, leaf_control(), leaf_supply_single())
-  for (m in c("SOX", "JW26")) {
-    expect_error(
-      leaf_gradient(psi_soil = 1.5, PPFD = 1500,
-                    root_network = series_resistance(1e4), x = l, traits = tr,
-                    pars = "JS22_gamma", model = m),
-      "no verified gradient")
-  }
+  expect_error(
+    leaf_gradient(psi_soil = 1.5, PPFD = 1500,
+                  root_network = series_resistance(1e4), x = l, traits = tr,
+                  pars = "vcmax_25", model = "ProfitMax"),
+    "no verified gradient")
+
+  # The cause, pinned as a measurement: |A|max is seeded by the optimiser and
+  # cleared by the set_traits + set_physiology a perturbation performs. Until it is
+  # held at the base point, every ProfitMax gradient is NaN.
+  set_drivers(l, psi_soil = 1.5, PPFD = 1500,
+              root_network = series_resistance(1e4))
+  l$optimise_psi_stem_ProfitMax()
+  expect_true(is.finite(l$profitmax_A_max))
+  set_traits(l, tr)
+  set_drivers(l, psi_soil = 1.5, PPFD = 1500,
+              root_network = series_resistance(1e4))
+  expect_false(is.finite(l$profitmax_A_max))
+})
+
+test_that("the remaining route restrictions are the topological ones", {
+  tr <- leaf_traits()
   # A stem route needs the single-potential path, and says so rather than
   # returning a number from the wrong topology.
   expect_error(leaf_gradient(psi_soil = 1.5, PPFD = 1500,
