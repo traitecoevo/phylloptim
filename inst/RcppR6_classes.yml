@@ -179,7 +179,7 @@ Leaf:
     soil_consumption_: {type: "std::vector<double>", access: field}
     profit_: {type: double, access: field}
     psi_stem: {type: double, access: field}
-    lambda_: {type: double, access: field}
+    CF77_lambda_: {type: double, access: field}
     # --- Sperry (2017) ProfitMax, all unitless -------------------------------
     # Written ONLY by the ProfitMax path. `hydraulic_cost_` is deliberately NOT
     # reused: it holds carbon units on the TF24 path and conductance units on the
@@ -348,7 +348,7 @@ Leaf:
     lambda_multilayer: {type: double, access: member, name_cpp: marginal_cost_water_multilayer}
     # THE MARGINAL COST OF WATER THE OPERATING POINT IMPLIES, `(dC/dpsi)/(dE/dpsi)`
     # in umol C (kg H2O)^-1 -- the one output every cost curve reports on the same
-    # axis, and in the same units as the `$lambda_` INPUT so the two are directly
+    # axis, and in the same units as the `$CF77_lambda_` INPUT so the two are directly
     # comparable. Cowan-Farquhar prices water at a constant, so its emergent lambda
     # IS that constant; every other curve's moves with the drivers.
     #
@@ -522,17 +522,17 @@ Leaf:
     hydraulic_cost_TF:
       return_type: double
       args: [psi_stem: double]
-    # Cowan & Farquhar (1977): `lambda * E`, a carbon flux, because `$lambda_` is
-    # umol C per kg of water. This is the cost curve `$lambda_`'s units belong to,
+    # Cowan & Farquhar (1977): `lambda * E`, a carbon flux, because `$CF77_lambda_` is
+    # umol C per kg of water. This is the cost curve `$CF77_lambda_`'s units belong to,
     # and the one whose first-order condition is the dA/dE == lambda that the
     # optimality literature is written in.
-    hydraulic_cost_CowanFarquhar:
+    hydraulic_cost_CF77:
       return_type: double
       args: [psi_stem: double, psi_upstream: double]
     profit_psi_stem_TF:
       return_type: double
       args: [psi_stem: double, psi_upstream: double]
-    profit_psi_stem_CowanFarquhar:
+    profit_psi_stem_CF77:
       return_type: double
       args: [psi_stem: double, psi_upstream: double]
     lambda_TF24:
@@ -544,14 +544,14 @@ Leaf:
     # Cowan & Farquhar (1977), the model the whole optimality family is measured
     # against: maximise `A - lambda*E`, so the optimum satisfies dA/dE == lambda.
     #
-    # ⚠️ `$lambda_` IS A REQUIRED INPUT and has no default -- it is the marginal
+    # ⚠️ `$CF77_lambda_` IS A REQUIRED INPUT and has no default -- it is the marginal
     # value of water in umol C (kg H2O)^-1, and this refuses rather than optimise
     # a NaN objective. Its SCALE is set by the leaf, not chosen freely: at the
     # package defaults the leaf's own marginal cost of water runs 9e4 to 3e5, and
     # a lambda far outside that band pins the optimum shut or wide open.
     # `$lambda` (that is, `marginal_cost_water()`) reports the same quantity for
     # the other cost curves, so it is how you find a value that means something.
-    optimise_psi_stem_CowanFarquhar:
+    optimise_psi_stem_CF77:
       return_type: void
       args: []
 

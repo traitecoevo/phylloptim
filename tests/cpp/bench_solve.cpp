@@ -144,13 +144,13 @@ double pass(std::vector<phylloptim::Leaf> &leaves, const std::vector<Point> &pts
 // history file it is building. Hence `us/call` here, and hence this comment
 // rather than a tidier-looking unit.
 
-enum class Arm { TF, ProfitMax, CowanFarquhar };
+enum class Arm { TF, ProfitMax, CF77 };
 
 const char *arm_label(Arm a) {
   switch (a) {
     case Arm::TF:            return "psi_stem:TF";
     case Arm::ProfitMax:     return "psi_stem:ProfitMax";
-    case Arm::CowanFarquhar: return "psi_stem:CowanFarquhar";
+    case Arm::CF77: return "psi_stem:CF77";
   }
   return "psi_stem:?";
 }
@@ -158,7 +158,7 @@ const char *arm_label(Arm a) {
 // Cowan-Farquhar consumes a PRESCRIBED lambda and throws without one. Fixed here
 // rather than taken from a preceding solve, which would time two solves and call
 // it one.
-const double kLambdaCowanFarquhar = 1.5e5;
+const double kLambdaCF77 = 1.5e5;
 
 double pass_optimiser(Arm arm, std::vector<phylloptim::Leaf> &leaves,
                       const std::vector<Point> &pts) {
@@ -175,9 +175,9 @@ double pass_optimiser(Arm arm, std::vector<phylloptim::Leaf> &leaves,
     switch (arm) {
       case Arm::TF:        l.optimise_psi_stem_TF();        break;
       case Arm::ProfitMax: l.optimise_psi_stem_ProfitMax(); break;
-      case Arm::CowanFarquhar:
-                           l.lambda_ = kLambdaCowanFarquhar;
-                           l.optimise_psi_stem_CowanFarquhar(); break;
+      case Arm::CF77:
+                           l.CF77_lambda_ = kLambdaCF77;
+                           l.optimise_psi_stem_CF77(); break;
     }
     for (double v : {l.opt_psi_stem_, l.ci_, l.assim_colimited_,
                      l.transpiration_, l.stom_cond_CO2_, l.profit_}) {
@@ -225,7 +225,7 @@ int main(int argc, char **argv) {
     l.setup_transpiration(100);
     l.setup_root_vulnerability(100);
   }
-  for (Arm arm : {Arm::TF, Arm::ProfitMax, Arm::CowanFarquhar}) {
+  for (Arm arm : {Arm::TF, Arm::ProfitMax, Arm::CF77}) {
     double arm_checksum = 0.0;
     double arm_best = 1e300;
     for (int r = 0; r < reps; ++r) {

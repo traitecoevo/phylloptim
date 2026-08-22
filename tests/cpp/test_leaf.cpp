@@ -1268,8 +1268,8 @@ void test_cowan_farquhar_equates_dA_dE_to_lambda() {
   for (double lambda : {8.0e4, 1.5e5, 3.0e5}) {
     for (double psi_soil : {0.5, 1.0, 2.0}) {
       phylloptim::Leaf l = make_leaf(d, {psi_soil}, {1.0});
-      l.lambda_ = lambda;
-      l.optimise_psi_stem_CowanFarquhar();
+      l.CF77_lambda_ = lambda;
+      l.optimise_psi_stem_CF77();
       const double psi = l.opt_psi_stem_;
 
       // An interior optimum is where the condition applies. At a bound the
@@ -1331,8 +1331,8 @@ void test_cowan_farquhar_reproduces_the_TF_optimum() {
     const double lambda_implied = ref.marginal_cost_water();
 
     phylloptim::Leaf cf = make_leaf(d, {psi_soil}, {1.0});
-    cf.lambda_ = lambda_implied;
-    cf.optimise_psi_stem_CowanFarquhar();
+    cf.CF77_lambda_ = lambda_implied;
+    cf.optimise_psi_stem_CF77();
 
     worst = std::max(worst, std::abs(cf.opt_psi_stem_ - psi_tf));
     // Measured 1.2e-05 MPa on the generating platform. The tolerance is 5e-4
@@ -1353,8 +1353,8 @@ void test_cowan_farquhar_closed_state() {
   printf("Cowan-Farquhar: the closed-stomata profit is -R_d, for any lambda\n");
   Drivers d;
   phylloptim::Leaf l = make_leaf(d, {6.0}, {1.0}); // drier than psi_crit
-  l.lambda_ = 800.0;
-  l.optimise_psi_stem_CowanFarquhar();
+  l.CF77_lambda_ = 800.0;
+  l.optimise_psi_stem_CF77();
   near(l.opt_psi_stem_, 6.0, 1e-12, "the stem is held at the soil potential");
   near(l.transpiration_, 0.0, 1e-300, "transpiration is exactly zero");
   near(l.hydraulic_cost_, 0.0, 1e-300, "so the cost is exactly zero");
@@ -1369,17 +1369,17 @@ void test_cowan_farquhar_refuses_an_unset_lambda() {
   printf("Cowan-Farquhar refuses an unset lambda\n");
   Drivers d;
   phylloptim::Leaf l = make_leaf(d, {1.0}, {1.0});
-  ok(!std::isfinite(l.lambda_), "lambda_ starts unset");
+  ok(!std::isfinite(l.CF77_lambda_), "CF77_lambda_ starts unset");
   bool threw = false;
   std::string what;
   try {
-    l.optimise_psi_stem_CowanFarquhar();
+    l.optimise_psi_stem_CF77();
   } catch (const std::exception &e) {
     threw = true;
     what = e.what();
   }
   ok(threw, "it refuses rather than maximising a NaN objective");
-  ok(what.find("lambda_") != std::string::npos, "and the message names lambda_");
+  ok(what.find("CF77_lambda_") != std::string::npos, "and the message names CF77_lambda_");
 }
 
 // dprofit_dpsi_stem against a central difference of the objective it claims to
@@ -1432,12 +1432,12 @@ void test_dprofit_dpsi_stem_matches_a_finite_difference() {
                  " psi_soil=" + std::to_string(psi_soil));
       }
 
-      l.lambda_ = 1.5e5;
+      l.CF77_lambda_ = 1.5e5;
       const double an_cf =
-          l.dprofit_dpsi_stem<phylloptim::Leaf::CostCurve::CowanFarquhar>(
+          l.dprofit_dpsi_stem<phylloptim::Leaf::CostCurve::CF77>(
               psi, psi_soil, &feasible);
-      const double up_cf = l.profit_psi_stem_CowanFarquhar(psi + h, psi_soil);
-      const double dn_cf = l.profit_psi_stem_CowanFarquhar(psi - h, psi_soil);
+      const double up_cf = l.profit_psi_stem_CF77(psi + h, psi_soil);
+      const double dn_cf = l.profit_psi_stem_CF77(psi - h, psi_soil);
       const double fd_cf = (up_cf - dn_cf) / (2.0 * h);
       if (feasible) {
         worst_cf = std::max(worst_cf, std::abs(an_cf / fd_cf - 1.0));
@@ -1466,22 +1466,22 @@ void test_dprofit_dpsi_stem_vanishes_at_the_optimum() {
   d.PPFD = 1500.0;
   for (double psi_soil : {0.5, 1.0, 2.0}) {
     phylloptim::Leaf l = make_leaf(d, {psi_soil}, {1.0});
-    l.lambda_ = 1.5e5;
-    l.optimise_psi_stem_CowanFarquhar();
+    l.CF77_lambda_ = 1.5e5;
+    l.optimise_psi_stem_CF77();
     const double psi = l.opt_psi_stem_;
     if (psi <= psi_soil + 1e-6 || psi >= l.psi_crit - 1e-6) {
       continue; // pinned: the gradient is genuinely non-zero there
     }
     bool feasible = false;
     const double at =
-        l.dprofit_dpsi_stem<phylloptim::Leaf::CostCurve::CowanFarquhar>(
+        l.dprofit_dpsi_stem<phylloptim::Leaf::CostCurve::CF77>(
             psi, psi_soil, &feasible);
     ok(feasible, "the optimum admits an informative gradient");
     // Scaled by the derivative's own magnitude a little away from the optimum,
     // so the bound means "small compared with what this function returns here"
     // rather than "small in absolute carbon units".
     const double away =
-        l.dprofit_dpsi_stem<phylloptim::Leaf::CostCurve::CowanFarquhar>(
+        l.dprofit_dpsi_stem<phylloptim::Leaf::CostCurve::CF77>(
             psi_soil + 0.2 * (l.psi_crit - psi_soil), psi_soil, &feasible);
     ok(std::abs(at) < 1e-3 * std::abs(away),
        "dprofit at the optimum is negligible against its scale, psi_soil=" +
@@ -1501,15 +1501,15 @@ void test_evaluate_psi_stem_prescribes_rather_than_optimises() {
   const double psi_soil = 1.0;
 
   phylloptim::Leaf l = make_leaf(d, {psi_soil}, {1.0});
-  l.lambda_ = 1.5e5;
-  l.optimise_psi_stem_CowanFarquhar();
+  l.CF77_lambda_ = 1.5e5;
+  l.optimise_psi_stem_CF77();
   const double psi_opt = l.opt_psi_stem_, profit_opt = l.profit_;
 
   // A point deliberately away from the optimum is NOT stationary, and is worth
   // strictly less. Both halves matter: the first says the function honoured the
   // request, the second says the optimiser was actually finding a maximum.
   const double psi_off = psi_soil + 0.25 * (l.psi_crit - psi_soil);
-  const double p_off = l.evaluate_psi_stem<CC::CowanFarquhar>(psi_off);
+  const double p_off = l.evaluate_psi_stem<CC::CF77>(psi_off);
   near(l.opt_psi_stem_, psi_off, 1e-12, "it sits exactly where it was told to");
   ok(l.operating_point_kind() == phylloptim::Leaf::OperatingPointKind::Prescribed,
      "and reports itself as prescribed rather than solved");
@@ -1517,21 +1517,21 @@ void test_evaluate_psi_stem_prescribes_rather_than_optimises() {
 
   bool feasible = false;
   const double slope =
-      l.dprofit_dpsi_stem<CC::CowanFarquhar>(psi_off, psi_soil, &feasible);
+      l.dprofit_dpsi_stem<CC::CF77>(psi_off, psi_soil, &feasible);
   ok(feasible && std::abs(slope) > 1e-6,
      "dprofit is genuinely non-zero there, unlike at the optimum");
 
   // Asking for the optimum back reproduces it, which is what makes the two entry
   // points comparable at all.
-  const double p_at = l.evaluate_psi_stem<CC::CowanFarquhar>(psi_opt);
+  const double p_at = l.evaluate_psi_stem<CC::CF77>(psi_opt);
   near(p_at, profit_opt, 1e-12, "prescribing the optimum reproduces its profit");
 
   // Outside the interval the target is clamped, not refused -- and the clamp is
   // where a prescribed gradient stops being a pure partial, because the bound
   // moves with the traits.
-  l.evaluate_psi_stem<CC::CowanFarquhar>(l.psi_crit + 5.0);
+  l.evaluate_psi_stem<CC::CF77>(l.psi_crit + 5.0);
   near(l.opt_psi_stem_, l.psi_crit, 1e-12, "a target past psi_crit clamps to it");
-  l.evaluate_psi_stem<CC::CowanFarquhar>(0.0);
+  l.evaluate_psi_stem<CC::CF77>(0.0);
   near(l.opt_psi_stem_, psi_soil, 1e-12, "and one below psi_soil clamps up to it");
 
   // The TF24 curve takes the same route and needs no lambda.
@@ -1607,9 +1607,9 @@ void test_every_curve_reports_an_emergent_lambda() {
     // --- Cowan-Farquhar: exact ---------------------------------------------
     {
       phylloptim::Leaf l = make_leaf(d, {psi_soil}, {1.0});
-      l.lambda_ = 1.5e5;
-      l.optimise_psi_stem_CowanFarquhar();
-      ok(l.lambda_emergent() == l.lambda_,
+      l.CF77_lambda_ = 1.5e5;
+      l.optimise_psi_stem_CF77();
+      ok(l.lambda_emergent() == l.CF77_lambda_,
          "Cowan-Farquhar's emergent lambda is its prescribed one, exactly");
     }
     // --- TF24: against a finite difference of dC/dE -------------------------
@@ -3373,7 +3373,7 @@ void test_set_traits_matches_a_fresh_leaf() {
   }
 }
 
-// A prescribed `lambda_` survives everything that is not a caller writing to it.
+// A prescribed `CF77_lambda_` survives everything that is not a caller writing to it.
 // It is the Cowan-Farquhar marginal value of water, an INPUT, so a re-driving call
 // that cleared it would make whether a sweep kept its price depend on which of two
 // interchangeable-looking calls came next.
@@ -3382,7 +3382,7 @@ void test_set_traits_matches_a_fresh_leaf() {
 // kept the value and `set_traits` always lost it; asserting only one arm passes
 // on the code this test exists to reject.
 void test_prescribed_lambda_survives_redriving() {
-  printf("a prescribed lambda_ survives set_traits and set_drivers\n");
+  printf("a prescribed CF77_lambda_ survives set_traits and set_drivers\n");
   Drivers d;
   std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
 
@@ -3390,7 +3390,7 @@ void test_prescribed_lambda_survives_redriving() {
   // "never initialised", which is the one way this change could go wrong quietly.
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
-    ok(std::isnan(l.lambda_), "lambda_ is NA on a freshly constructed leaf");
+    ok(std::isnan(l.CF77_lambda_), "CF77_lambda_ is NA on a freshly constructed leaf");
   }
 
   const double prescribed = 30.0;
@@ -3398,41 +3398,41 @@ void test_prescribed_lambda_survives_redriving() {
   // Arm 1: re-drive. This arm passed before the fix too.
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
-    l.lambda_ = prescribed;
+    l.CF77_lambda_ = prescribed;
     l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth,
                      d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
                      d.atm_o2_kpa, d.atm_kpa);
-    ok(l.lambda_ == prescribed, "set_physiology leaves a prescribed lambda_ alone");
+    ok(l.CF77_lambda_ == prescribed, "set_physiology leaves a prescribed CF77_lambda_ alone");
   }
 
   // Arm 2: re-trait. This is the arm that lost the value.
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
-    l.lambda_ = prescribed;
+    l.CF77_lambda_ = prescribed;
     l.set_traits(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
-    ok(l.lambda_ == prescribed, "set_traits leaves a prescribed lambda_ alone");
+    ok(l.CF77_lambda_ == prescribed, "set_traits leaves a prescribed CF77_lambda_ alone");
   }
 
   // And it survives a SOLVE, which is the case a sweep actually runs: solve at
   // the defaults, re-trait, solve again, all on one object.
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
-    l.lambda_ = prescribed;
+    l.CF77_lambda_ = prescribed;
     l.find_root_collar_psi();
     l.set_traits(96.0 * 1.05, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
     l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth,
                      d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
                      d.atm_o2_kpa, d.atm_kpa);
     l.find_root_collar_psi();
-    ok(l.lambda_ == prescribed,
-       "lambda_ survives a solve, a re-trait and a second solve");
+    ok(l.CF77_lambda_ == prescribed,
+       "CF77_lambda_ survives a solve, a re-trait and a second solve");
   }
 
   // The derived state around it is still wiped -- the fix removed two lines from
   // setup_clean_leaf(), and taking any more would reopen hazard 8.
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
-    l.lambda_ = prescribed;
+    l.CF77_lambda_ = prescribed;
     l.find_root_collar_psi();
     ok(!std::isnan(l.opt_psi_stem_), "the solve seated an operating point");
     l.set_traits(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25);
@@ -4071,7 +4071,7 @@ void test_single_layer_optimisers_clear_collar_state() {
      "while still writing its own transpiration");
 }
 
-// `lambda_` is a caller INPUT -- the Cowan-Farquhar marginal value of water -- and
+// `CF77_lambda_` is a caller INPUT -- the Cowan-Farquhar marginal value of water -- and
 // nothing in the model writes it. ProfitMax reports the marginal cost its own
 // normalisation implies in a SEPARATE field, because the two are not the same
 // quantity: one is carbon per unit transpiration, the other per unit conductance.
@@ -4086,10 +4086,10 @@ void test_profitmax_reports_an_emergent_lambda() {
   const double prescribed = 1.5e5;
 
   phylloptim::Leaf l = make_single_leaf(d, 0.5);
-  l.lambda_ = prescribed;
+  l.CF77_lambda_ = prescribed;
   l.optimise_psi_stem_ProfitMax();
 
-  ok(l.lambda_ == prescribed, "the prescribed lambda_ survives untouched");
+  ok(l.CF77_lambda_ == prescribed, "the prescribed CF77_lambda_ survives untouched");
   ok(std::isfinite(l.lambda_emergent()) && l.lambda_emergent() > 0.0,
      "and ProfitMax reports the marginal cost its point implies");
   ok(l.lambda_emergent() != prescribed,
@@ -4097,10 +4097,10 @@ void test_profitmax_reports_an_emergent_lambda() {
 
   // The hazard the split exists to remove: solving one and then the other now
   // prices water at the caller's value, not at ProfitMax's.
-  const double p_after = l.profit_psi_stem_CowanFarquhar(2.0, 0.5);
+  const double p_after = l.profit_psi_stem_CF77(2.0, 0.5);
   phylloptim::Leaf fresh = make_single_leaf(d, 0.5);
-  fresh.lambda_ = prescribed;
-  const double p_clean = fresh.profit_psi_stem_CowanFarquhar(2.0, 0.5);
+  fresh.CF77_lambda_ = prescribed;
+  const double p_clean = fresh.profit_psi_stem_CF77(2.0, 0.5);
   ok(p_after == p_clean,
      "a Cowan-Farquhar solve after ProfitMax is bit-identical to a clean one");
 }
@@ -4360,21 +4360,21 @@ void test_single_layer_optimisers_reach_a_bound() {
       if (!(std::isfinite(lambda) && lambda > 0.0)) continue;
 
       phylloptim::Leaf l = make_single_leaf(d, r.psi_soil);
-      l.lambda_ = lambda;
-      l.optimise_psi_stem_CowanFarquhar();
+      l.CF77_lambda_ = lambda;
+      l.optimise_psi_stem_CF77();
       const double psi = l.opt_psi_stem_, p = l.profit_;
 
       phylloptim::Leaf m = make_single_leaf(d, r.psi_soil);
-      m.lambda_ = lambda;
+      m.CF77_lambda_ = lambda;
       double best = -std::numeric_limits<double>::infinity(), best_psi = r.psi_soil;
       for (int i = 0; i <= 1000; ++i) {
         const double q = r.psi_soil + (m.psi_crit - r.psi_soil) * double(i) / 1000.0;
-        const double v = m.profit_psi_stem_CowanFarquhar(q, r.psi_soil);
+        const double v = m.profit_psi_stem_CF77(q, r.psi_soil);
         if (std::isfinite(v) && v > best) { best = v; best_psi = q; }
       }
       ok(p >= best - 1e-9,
          "Cowan-Farquhar is at no lower profit than a 1001-point scan");
-      ok(l.profit_ == m.profit_psi_stem_CowanFarquhar(psi, r.psi_soil),
+      ok(l.profit_ == m.profit_psi_stem_CF77(psi, r.psi_soil),
          "and its profit is that point's, bit-for-bit");
       if (best_psi <= r.psi_soil + (m.psi_crit - r.psi_soil) * 1e-3) ++pinned_CF;
     }

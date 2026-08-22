@@ -292,7 +292,7 @@ public:
   // here rather than in setup_clean_leaf(). Everything around them is derived
   // state or a solved output, which setup_clean_leaf() exists to wipe; these are
   // the Cowan-Farquhar marginal value of water, supplied by the CALLER and read
-  // by profit_psi_stem_CowanFarquhar. Wiping an input on the caller's behalf
+  // by profit_psi_stem_CF77. Wiping an input on the caller's behalf
   // makes whether a prescribed value survives depend on which of two
   // interchangeable-looking re-driving calls comes next, so neither clears it.
   //
@@ -303,7 +303,7 @@ public:
   // carbon per unit TRANSPIRATION, which is the Cowan-Farquhar marginal value of
   // water and the convention the lambda literature uses -- NOT the same quantity
   // as ProfitMax's normaliser ratio, which is per unit CONDUCTANCE.
-  double lambda_ = util::na_value;         // umol C (kg H2O)^-1
+  double CF77_lambda_ = util::na_value;         // umol C (kg H2O)^-1
   double hydraulic_cost_;
   
   double electron_transport_;
@@ -508,7 +508,7 @@ public:
   //
   //     lambda_emergent = (dC/dpsi) / (dE/dpsi)      umol C (kg H2O)^-1
   //
-  // Same units as the `lambda_` INPUT, and directly comparable with it -- that is
+  // Same units as the `CF77_lambda_` INPUT, and directly comparable with it -- that is
   // the point. Cowan-Farquhar prices water at a constant, so its emergent lambda
   // IS that constant; every other curve has one that moves with the drivers, and
   // this is where you read it. Written by whichever optimiser ran; NA before one
@@ -965,7 +965,7 @@ public:
   // Which cost curve a psi_stem derivative differentiates. The cost enters the
   // chain through exactly ONE quantity -- dC/dpsi_stem -- so this selects that
   // and nothing else.
-  enum class CostCurve { TF24, CowanFarquhar };
+  enum class CostCurve { TF24, CF77 };
 
   // dprofit/dpsi_stem for the solvers that optimise psi_stem directly with the
   // upstream potential held fixed.
@@ -1161,7 +1161,7 @@ public:
 // set_leaf_states_rates_from_psi_stem would put a pow() on a path that runs
 // ~10^3 times per solve.
 //
-// NOTE the distinction to be careful of: the member `lambda_` is an *input*, the
+// NOTE the distinction to be careful of: the member `CF77_lambda_` is an *input*, the
 // Cowan-Farquhar marginal value of water, never set by set_physiology. The lambda
 // here is an *emergent output* -- the marginal cost the operating point implies.
 
@@ -1295,18 +1295,18 @@ public:
   double hydraulic_cost_TF(double psi_stem);
 
   // Cowan & Farquhar (1977): the cost of water is the water itself, priced at a
-  // constant marginal value. `lambda_ * E`, in umol C m^-2 s^-1 -- a carbon flux,
-  // because `lambda_` is carbon per unit transpiration and E is a mass flux.
+  // constant marginal value. `CF77_lambda_ * E`, in umol C m^-2 s^-1 -- a carbon flux,
+  // because `CF77_lambda_` is carbon per unit transpiration and E is a mass flux.
   //
-  // This is the model `lambda_`'s units belong to, and the reason its first-order
+  // This is the model `CF77_lambda_`'s units belong to, and the reason its first-order
   // condition is the one the whole optimality literature is written in:
   // maximising `A - lambda*E` over psi_stem gives dA/dE == lambda at the optimum.
   // `marginal_cost_water()` reports the same quantity for the OTHER cost curves,
   // which is what puts them all on one axis.
-  double hydraulic_cost_CowanFarquhar(double psi_stem, double psi_upstream);
+  double hydraulic_cost_CF77(double psi_stem, double psi_upstream);
 
   double profit_psi_stem_TF(double psi_stem, double psi_upstream);
-  double profit_psi_stem_CowanFarquhar(double psi_stem, double psi_upstream);
+  double profit_psi_stem_CF77(double psi_stem, double psi_upstream);
 
   // The instantaneous thermal cost at a leaf temperature, in [0,1]. Zero when the
   // gate is off, so callers need not branch.
@@ -1327,7 +1327,7 @@ public:
 // optimiser functions
   void optimise_psi_stem_TF();
   void optimise_psi_stem_ProfitMax();
-  void optimise_psi_stem_CowanFarquhar();
+  void optimise_psi_stem_CF77();
 
   // Clear the outputs a single-layer optimiser does NOT write. Hazard 8: these
   // three describe a ROOT-COLLAR solve, and optimise_psi_stem_* never runs one,
@@ -1612,7 +1612,7 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_P50_,
   // that would otherwise hand back the old vcmax_.
   //
   // "The just-constructed state" is exact for the derived state and the outputs,
-  // which is all of it bar `lambda_` -- a caller input, left standing on purpose
+  // which is all of it bar `CF77_lambda_` -- a caller input, left standing on purpose
   // (#96, see its declaration).
   setup_clean_leaf();
 }
@@ -1625,7 +1625,7 @@ inline void Leaf::setup_clean_leaf() {
   assim_colimited_= util::na_value; // umol C m^-2 s^-1 
   transpiration_= util::na_value; // kg m^-2 s^-1 
   profit_= util::na_value; // umol C m^-2 s^-1
-  // lambda_ is deliberately NOT here: it is the caller's input, not derived
+  // CF77_lambda_ is deliberately NOT here: it is the caller's input, not derived
   // state, and carries its NA default at the declaration instead (#96). Adding
   // it back makes a prescribed lambda survive set_drivers() and vanish on
   // set_traits().
@@ -2803,7 +2803,7 @@ inline double Leaf::dprofit_dpsi_stem(double psi_stem, double psi_upstream,
     // lambda * E. E is kmax times the integral of the conductivity fraction over
     // [psi_upstream, psi_stem], so its derivative in psi_stem is kmax times that
     // fraction, which is what stem_curve_integral_deriv returns. No AD needed.
-    C_prime = lambda_ * leaf_specific_conductance_max_ *
+    C_prime = CF77_lambda_ * leaf_specific_conductance_max_ *
               stem_curve_integral_deriv(psi_stem);
   }
 
@@ -2870,9 +2870,9 @@ inline double Leaf::evaluate_psi_stem(double target_psi_stem) {
   if (!supply_is_single_layer()) {
     util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
   }
-  if constexpr (K == CostCurve::CowanFarquhar) {
-    if (!std::isfinite(lambda_)) {
-      util::stop("evaluate_psi_stem needs lambda_ set for the Cowan-Farquhar "
+  if constexpr (K == CostCurve::CF77) {
+    if (!std::isfinite(CF77_lambda_)) {
+      util::stop("evaluate_psi_stem needs CF77_lambda_ set for the Cowan-Farquhar "
                  "cost: it is the PRESCRIBED marginal value of water in "
                  "umol C (kg H2O)^-1 and is NA until you assign one.");
     }
@@ -2886,7 +2886,7 @@ inline double Leaf::evaluate_psi_stem(double target_psi_stem) {
     opt_psi_stem_ = psi_soil;
     profit_ = (K == CostCurve::TF24)
                   ? profit_psi_stem_TF(psi_soil, psi_soil)
-                  : profit_psi_stem_CowanFarquhar(psi_soil, psi_soil);
+                  : profit_psi_stem_CF77(psi_soil, psi_soil);
     operating_point_kind_ = OperatingPointKind::Prescribed;
     return profit_;
   }
@@ -2900,7 +2900,7 @@ inline double Leaf::evaluate_psi_stem(double target_psi_stem) {
 
   opt_psi_stem_ = psi;
   profit_ = (K == CostCurve::TF24) ? profit_psi_stem_TF(psi, psi_soil)
-                                   : profit_psi_stem_CowanFarquhar(psi, psi_soil);
+                                   : profit_psi_stem_CF77(psi, psi_soil);
   operating_point_kind_ = OperatingPointKind::Prescribed;
   return profit_;
 }
@@ -3819,8 +3819,8 @@ double benefit_ = assim_colimited_;
 }
 
 
-// `lambda_ * E`. Written into `hydraulic_cost_` like the TF24 cost and unlike the
-// Sperry one, because this product IS a carbon flux: `lambda_` is umol C per kg of
+// `CF77_lambda_ * E`. Written into `hydraulic_cost_` like the TF24 cost and unlike the
+// Sperry one, because this product IS a carbon flux: `CF77_lambda_` is umol C per kg of
 // water and E is kg m^-2 s^-1.
 //
 // `transpiration()` is memoised on (psi_stem, psi_upstream), so calling it here
@@ -3828,19 +3828,19 @@ double benefit_ = assim_colimited_;
 // exactly the E of the operating point that call established -- including the
 // no-flow case, where the two potentials are equal and the integral difference is
 // exactly zero.
-inline double Leaf::hydraulic_cost_CowanFarquhar(double psi_stem,
+inline double Leaf::hydraulic_cost_CF77(double psi_stem,
                                                 double psi_upstream) {
-  hydraulic_cost_ = lambda_ * transpiration(psi_stem, psi_upstream);
+  hydraulic_cost_ = CF77_lambda_ * transpiration(psi_stem, psi_upstream);
   return hydraulic_cost_;
 }
 
 
-inline double Leaf::profit_psi_stem_CowanFarquhar(double psi_stem,
+inline double Leaf::profit_psi_stem_CF77(double psi_stem,
                                                  double psi_upstream) {
   set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
 
   double benefit_ = assim_colimited_;
-  double cost = hydraulic_cost_CowanFarquhar(psi_stem, psi_upstream);
+  double cost = hydraulic_cost_CF77(psi_stem, psi_upstream);
 
   return benefit_ - cost;
 }
@@ -4176,7 +4176,7 @@ inline void Leaf::optimise_psi_stem_TF() {
 // psi_crit the objective is EVALUATED at the no-flow point rather than zeroed, so
 // every reported field describes that point. Profit there is `-R_d`, since E is
 // exactly zero and so is the cost.
-inline void Leaf::optimise_psi_stem_CowanFarquhar() {
+inline void Leaf::optimise_psi_stem_CF77() {
 
   clear_collar_solve_state();
 
@@ -4184,13 +4184,13 @@ inline void Leaf::optimise_psi_stem_CowanFarquhar() {
     util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
   }
 
-  // ⚠️ lambda_ IS AN INPUT HERE AND HAS NO DEFAULT. It is the marginal value of
+  // ⚠️ CF77_lambda_ IS AN INPUT HERE AND HAS NO DEFAULT. It is the marginal value of
   // water -- the one parameter this model is defined by -- and no model code
   // supplies one, so a caller who has not set it is maximising a NaN objective.
   // The potential that comes back from that is a property of the bracket rather
   // than of the leaf, and it looks entirely plausible. Refuse instead.
-  if (!std::isfinite(lambda_)) {
-    util::stop("optimise_psi_stem_CowanFarquhar needs lambda_ set: it is the "
+  if (!std::isfinite(CF77_lambda_)) {
+    util::stop("optimise_psi_stem_CF77 needs CF77_lambda_ set: it is the "
                "PRESCRIBED marginal value of water in umol C (kg H2O)^-1, NA until "
                "you assign one, and never set by set_physiology or set_traits.");
   }
@@ -4198,23 +4198,23 @@ inline void Leaf::optimise_psi_stem_CowanFarquhar() {
   opt_psi_stem_ = supply_psi_soil_scalar();
 
   if (supply_psi_soil_scalar() > psi_crit) {
-    profit_ = profit_psi_stem_CowanFarquhar(supply_psi_soil_scalar(),
+    profit_ = profit_psi_stem_CF77(supply_psi_soil_scalar(),
                                             supply_psi_soil_scalar());
-    lambda_emergent_ = lambda_;
+    lambda_emergent_ = CF77_lambda_;
     return;
   }
 
   double profit_opt = 0.0;
   opt_psi_stem_ = util::maximise_over_closed_interval(
       [&](double psi_stem) {
-        return profit_psi_stem_CowanFarquhar(psi_stem, supply_psi_soil_scalar());
+        return profit_psi_stem_CF77(psi_stem, supply_psi_soil_scalar());
       },
       supply_psi_soil_scalar(), psi_crit, boundary_scan_n_, &profit_opt);
-  profit_ = profit_psi_stem_CowanFarquhar(opt_psi_stem_, supply_psi_soil_scalar());
-  // Exact by construction: the cost is lambda_*E, so dC/dpsi = lambda_*(dE/dpsi)
-  // and the ratio is lambda_ identically. Reported anyway, so a caller reading
+  profit_ = profit_psi_stem_CF77(opt_psi_stem_, supply_psi_soil_scalar());
+  // Exact by construction: the cost is CF77_lambda_*E, so dC/dpsi = CF77_lambda_*(dE/dpsi)
+  // and the ratio is CF77_lambda_ identically. Reported anyway, so a caller reading
   // this field does not have to know which curve produced the point.
-  lambda_emergent_ = lambda_;
+  lambda_emergent_ = CF77_lambda_;
   (void)profit_opt;
 
     return;

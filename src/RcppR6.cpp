@@ -124,24 +124,24 @@ double Leaf__hydraulic_cost_TF(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_
   return obj_->hydraulic_cost_TF(psi_stem);
 }
 // [[Rcpp::export]]
-double Leaf__hydraulic_cost_CowanFarquhar(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem, double psi_upstream) {
-  return obj_->hydraulic_cost_CowanFarquhar(psi_stem, psi_upstream);
+double Leaf__hydraulic_cost_CF77(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem, double psi_upstream) {
+  return obj_->hydraulic_cost_CF77(psi_stem, psi_upstream);
 }
 // [[Rcpp::export]]
 double Leaf__profit_psi_stem_TF(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem, double psi_upstream) {
   return obj_->profit_psi_stem_TF(psi_stem, psi_upstream);
 }
 // [[Rcpp::export]]
-double Leaf__profit_psi_stem_CowanFarquhar(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem, double psi_upstream) {
-  return obj_->profit_psi_stem_CowanFarquhar(psi_stem, psi_upstream);
+double Leaf__profit_psi_stem_CF77(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem, double psi_upstream) {
+  return obj_->profit_psi_stem_CF77(psi_stem, psi_upstream);
 }
 // [[Rcpp::export]]
 double Leaf__lambda_TF24(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem) {
   return obj_->lambda_TF24(psi_stem);
 }
 // [[Rcpp::export]]
-void Leaf__optimise_psi_stem_CowanFarquhar(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
-  obj_->optimise_psi_stem_CowanFarquhar();
+void Leaf__optimise_psi_stem_CF77(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  obj_->optimise_psi_stem_CF77();
 }
 // [[Rcpp::export]]
 double Leaf__thermal_cost_at(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double leaf_temp) {
@@ -334,12 +334,12 @@ void Leaf__psi_stem__set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, doub
 }
 
 // [[Rcpp::export]]
-double Leaf__lambda___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
-  return obj_->lambda_;
+double Leaf__CF77_lambda___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->CF77_lambda_;
 }
 // [[Rcpp::export]]
-void Leaf__lambda___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
-  obj_->lambda_ = value;
+void Leaf__CF77_lambda___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
+  obj_->CF77_lambda_ = value;
 }
 
 // [[Rcpp::export]]

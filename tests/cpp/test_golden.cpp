@@ -475,19 +475,19 @@ int compare(Tolerance tol) {
 // ⚠️ THIS FILE RECORDS TODAY'S BEHAVIOUR, INCLUDING ITS KNOWN DEFECTS, ON
 // PURPOSE. Do not read a row as a statement about what the model SHOULD do.
 // Specifically recorded here as-is:
-//   * two different degenerate conventions -- `_TF` and `_CowanFarquhar`
+//   * two different degenerate conventions -- `_TF` and `_CF77`
 //     evaluate the real objective at the closed point, `_ProfitMax` zeroes seven
 //     fields instead;
-//   * `hydraulic_cost_` written in carbon units by `_TF` and `_CowanFarquhar`
+//   * `hydraulic_cost_` written in carbon units by `_TF` and `_CF77`
 //     and left STALE by `_ProfitMax`, which does not write it;
-//   * `lambda_` as a caller input that `_ProfitMax` overwrites.
+//   * `CF77_lambda_` as a caller input that `_ProfitMax` overwrites.
 //
 // ⚠️ ADDING A SOLVER IS AN ADDITION IN THE "fresh" PASS AND NOT IN THE "reuse"
 // ONE, so check the two separately when regenerating. The reuse pass drives one
 // Leaf through a fixed SEQUENCE, so inserting a solver changes what every solver
 // after it inherits. Adding Cowan-Farquhar moved 232 reuse rows and zero fresh
 // rows, and every one of those 232 moved in the `lambda` column alone: it writes
-// `lambda_`, so the solvers that follow it and do not write one report its value
+// `CF77_lambda_`, so the solvers that follow it and do not write one report its value
 // instead of the previous solver's. That is the leak this pass exists to catch,
 // not a defect in the new model -- but it means "regenerated and the diff is
 // pure addition" is the wrong check here. The right one is: the fresh pass is
@@ -529,16 +529,16 @@ const double kPoison = -12345.0;
 // water, and at these drivers the leaf's own marginal cost of water runs 9e4 to
 // 3e5. A value far outside that band pins the optimum against a bound, where the
 // row records the bracket rather than the model.
-const double kLambdaCowanFarquhar = 1.5e5;
+const double kLambdaCF77 = 1.5e5;
 
-enum class Solver { TF, ProfitMax, CowanFarquhar, Collar };
+enum class Solver { TF, ProfitMax, CF77, Collar };
 enum class Topology { Single, Multi1, Multi3 };
 
 const char *solver_name(Solver s) {
   switch (s) {
     case Solver::TF:            return "TF";
     case Solver::ProfitMax:     return "ProfitMax";
-    case Solver::CowanFarquhar: return "CowanFarquhar";
+    case Solver::CF77: return "CF77";
     case Solver::Collar:        return "collar";
   }
   return "unknown";
@@ -631,7 +631,7 @@ void read_outputs(const phylloptim::Leaf &l, OptRow &r) {
   r.transpiration = l.transpiration_;
   r.gc = l.stom_cond_CO2_;
   r.hydraulic_cost = l.hydraulic_cost_;
-  r.lambda = l.lambda_;
+  r.lambda = l.CF77_lambda_;
   r.lambda_emergent = l.lambda_emergent();
   r.tleaf = l.Tleaf_;
   r.carbon_gain = l.carbon_gain_;
@@ -654,9 +654,9 @@ void dispatch(phylloptim::Leaf &l, Solver s) {
   switch (s) {
     case Solver::TF:        l.optimise_psi_stem_TF();        break;
     case Solver::ProfitMax: l.optimise_psi_stem_ProfitMax(); break;
-    case Solver::CowanFarquhar:
-                            l.lambda_ = kLambdaCowanFarquhar;
-                            l.optimise_psi_stem_CowanFarquhar(); break;
+    case Solver::CF77:
+                            l.CF77_lambda_ = kLambdaCF77;
+                            l.optimise_psi_stem_CF77(); break;
     case Solver::Collar:    l.find_root_collar_psi();        break;
   }
 }
@@ -686,7 +686,7 @@ const double kOptPsiSoils[] = {0.5, 1.0, 2.0, 3.0, 4.0, 6.0};
 const double kOptTemps[] = {25.0, 40.0, 50.0};
 const double kOptPPFDs[] = {0.0, 1500.0};
 const Solver kSolvers[] = {Solver::TF, Solver::ProfitMax,
-                           Solver::CowanFarquhar, Solver::Collar};
+                           Solver::CF77, Solver::Collar};
 const Topology kTopologies[] = {Topology::Single, Topology::Multi1,
                                 Topology::Multi3};
 

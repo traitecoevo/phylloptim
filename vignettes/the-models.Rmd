@@ -283,8 +283,8 @@ ref$optimise_psi_stem_TF()
 
 cf <- leaf_model()
 set_drivers(cf, psi_soil = 1.0, PPFD = 1500)
-cf$lambda_ <- ref$lambda
-cf$optimise_psi_stem_CowanFarquhar()
+cf$CF77_lambda_ <- ref$lambda
+cf$optimise_psi_stem_CF77()
 
 cat(sprintf(paste0("TF24 optimum %.6f MPa; Cowan-Farquhar at its implied ",
                    "lambda %.6f MPa (gap %.2e)\n"),
@@ -377,8 +377,8 @@ the cost is zero, so profit is `−R_d` whatever λ is.
 ```{r}
 d <- leaf_model()                       # psi_soil drier than psi_crit
 set_drivers(d, psi_soil = 6.0, PPFD = 1500)
-d$lambda_ <- 1.5e5
-d$optimise_psi_stem_CowanFarquhar()
+d$CF77_lambda_ <- 1.5e5
+d$optimise_psi_stem_CF77()
 cat(sprintf("E = %.1e, cost = %.1e, profit = %.6f, -R_d = %.6f\n",
             d$transpiration_, d$hydraulic_cost_, d$profit_, -d$R_d_))
 ```

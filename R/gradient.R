@@ -107,7 +107,7 @@ set_traits <- function(x, traits) {
 ##' fixed no matter which optimiser you called on the leaf beforehand.
 ##'
 ##' ⚠️ **So a gradient requested for a leaf you set up for another cost curve is
-##' the TF24 gradient, silently.** `$optimise_psi_stem_CowanFarquhar()` and
+##' the TF24 gradient, silently.** `$optimise_psi_stem_CF77()` and
 ##' `$optimise_psi_stem_ProfitMax()` maximise different objectives over `psi_stem`
 ##' rather than the collar, and neither is what this function differentiates.
 ##' There is no warning, because the numbers that come back are perfectly good

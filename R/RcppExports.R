@@ -121,24 +121,24 @@ Leaf__hydraulic_cost_TF <- function(obj_, psi_stem) {
     .Call('_phylloptim_Leaf__hydraulic_cost_TF', PACKAGE = 'phylloptim', obj_, psi_stem)
 }
 
-Leaf__hydraulic_cost_CowanFarquhar <- function(obj_, psi_stem, psi_upstream) {
-    .Call('_phylloptim_Leaf__hydraulic_cost_CowanFarquhar', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
+Leaf__hydraulic_cost_CF77 <- function(obj_, psi_stem, psi_upstream) {
+    .Call('_phylloptim_Leaf__hydraulic_cost_CF77', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
 }
 
 Leaf__profit_psi_stem_TF <- function(obj_, psi_stem, psi_upstream) {
     .Call('_phylloptim_Leaf__profit_psi_stem_TF', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
 }
 
-Leaf__profit_psi_stem_CowanFarquhar <- function(obj_, psi_stem, psi_upstream) {
-    .Call('_phylloptim_Leaf__profit_psi_stem_CowanFarquhar', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
+Leaf__profit_psi_stem_CF77 <- function(obj_, psi_stem, psi_upstream) {
+    .Call('_phylloptim_Leaf__profit_psi_stem_CF77', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
 }
 
 Leaf__lambda_TF24 <- function(obj_, psi_stem) {
     .Call('_phylloptim_Leaf__lambda_TF24', PACKAGE = 'phylloptim', obj_, psi_stem)
 }
 
-Leaf__optimise_psi_stem_CowanFarquhar <- function(obj_) {
-    invisible(.Call('_phylloptim_Leaf__optimise_psi_stem_CowanFarquhar', PACKAGE = 'phylloptim', obj_))
+Leaf__optimise_psi_stem_CF77 <- function(obj_) {
+    invisible(.Call('_phylloptim_Leaf__optimise_psi_stem_CF77', PACKAGE = 'phylloptim', obj_))
 }
 
 Leaf__thermal_cost_at <- function(obj_, leaf_temp) {
@@ -309,12 +309,12 @@ Leaf__psi_stem__set <- function(obj_, value) {
     invisible(.Call('_phylloptim_Leaf__psi_stem__set', PACKAGE = 'phylloptim', obj_, value))
 }
 
-Leaf__lambda___get <- function(obj_) {
-    .Call('_phylloptim_Leaf__lambda___get', PACKAGE = 'phylloptim', obj_)
+Leaf__CF77_lambda___get <- function(obj_) {
+    .Call('_phylloptim_Leaf__CF77_lambda___get', PACKAGE = 'phylloptim', obj_)
 }
 
-Leaf__lambda___set <- function(obj_, value) {
-    invisible(.Call('_phylloptim_Leaf__lambda___set', PACKAGE = 'phylloptim', obj_, value))
+Leaf__CF77_lambda___set <- function(obj_, value) {
+    invisible(.Call('_phylloptim_Leaf__CF77_lambda___set', PACKAGE = 'phylloptim', obj_, value))
 }
 
 Leaf__carbon_gain___get <- function(obj_) {
