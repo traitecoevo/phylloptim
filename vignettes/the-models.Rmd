@@ -136,32 +136,34 @@ There are two ways to find `ψ*`: search `J` for its maximum, or solve
 
 $$\frac{dJ}{d\psi}=0$$
 
-for a stationary point. This package does both, in different places, and the
-difference matters more than it looks.
+for a stationary point. Both are in the package, and which lives where is worth naming rather than leaving as "in different places": the **collar solve** — the multi-layer supply path, and the one plant calls — solves the first-order condition. The four single-layer `optimise_psi_stem_*` entry points still **scan** the interval on a 64-point grid and refine the best cell. That difference is historical rather than principled, and the reasons for closing it are the rest of this section.
 
-Solving the first-order condition is better where it applies. It locates the
-optimum to solver precision rather than to the width of a search bracket, and —
-decisively — it gives an argmax that varies *smoothly* with the parameters. A
-search that terminates on bracket width returns an argmax that is piecewise
-constant at fine scales, so differentiating it with respect to a trait yields
-noise: measured on this model, a trait derivative obtained that way came back
-smooth, plausible and **sign-inverted**. Anything that feeds a gradient must
-therefore come from the first-order condition, not from a search.
+**The first-order condition wins on every axis that can be measured**, which is unusual enough to be worth setting out.
 
-⚠️ **But a stationary point is not always the answer.** Where profit is still
-climbing as it reaches the end of the feasible interval, `dJ/dψ` never crosses zero
-inside it and the optimum is that endpoint — a *constrained* optimum. This is not
-a corner case: it is 42 of 240 feasible rows on the reference grid. A solver has to
-test the derivative's sign at each end and report the pin explicitly, because a
-bracketing root-find handed no sign change cannot distinguish "pinned" from
-"failed". The reported operating-point kind is what carries that distinction.
+**Precision.** A bracketing search terminates on the *width* of an interval, so it never locates the argmax better than its own tolerance. Golden section run to a 1e-3 bracket left `|dJ/dψ|` at a median of **7.8e-04** at the point it returned; the root-find leaves **5.6e-15**. That is eleven orders, and it is not a matter of tightening a tolerance — the two solvers are answering different questions. One says "the maximum is somewhere in here"; the other says "the derivative is zero at this point".
 
-⚠️ **And a stationary point need not be unique.** Where the marginal cost is
-peaked (see the cost curves below) the condition can have two roots, and a
-bracketing solve finds one of them. Searching the objective over a grid finds the
-taller hump but cannot feed a gradient; solving the condition feeds a gradient but
-can land on the wrong hump. The two properties are in tension, and which solver a
-given entry point uses reflects which property it needs.
+**Smoothness, which is what a gradient actually needs.** An argmax determined only to a bracket width is piecewise constant at fine scales, so differentiating it with respect to a trait yields noise dressed as a derivative. Measured over eleven steps in a trait, golden section returned **6 distinct argmax values out of 11** and second differences of 3.9e-04 — the step size itself, i.e. nothing. The root-find returns **11 of 11**, with second differences of 3.4e-07. Worse than noise, the noisy version was not obviously broken: one trait derivative taken that way came back smooth, plausible and **sign-inverted** (−2.6e-03 against a true +2.6e-04).
+
+**Speed, and this is the part that surprises people.** Golden section shrinks its bracket by a constant factor per evaluation — linear convergence, about 0.62 per step, with no way to do better because it uses only comparisons. A Brent-class root-finder interpolates through the points it has and converges *superlinearly*. Measured on the collar solve when it switched, both binaries built from one tree and interleaved: **3.51 → 2.65 µs/solve**. Faster *and* eleven orders more accurate, from the same model.
+
+⚠️ **Having the derivative in hand is what makes that trade one-sided.** `dJ/dψ` is not a second model to evaluate — it comes out of the same forward pass as `J`, so one iteration of the root-find costs about what one iteration of the search costs, and superlinear convergence is pure gain. Take the derivative away and the comparison closes right up: you would pay two objective evaluations per iteration to difference it, and inherit a step-size problem of your own on top (a difference through a nested root-find has a noise floor of tolerance/h, so the "obvious" small step is the wrong one). **The efficiency argument here is not really about Brent versus golden section — it is about what a cheap exact derivative buys you**, which is the same reason the trait gradients in Appendix B are worth their complexity.
+
+The other side of the ledger is what the scanning entry points pay: 64 objective evaluations to pick the basin, unconditionally, on every call, before any refinement begins. Measured per call on the single-layer subset (`bench_solve`, best of 2000):
+
+| entry point | route | µs/call |
+|---|---|---|
+| `find_root_collar_psi` | first-order condition | **3.01** |
+| `optimise_psi_stem_CF77` | scan + refine | 7.58 |
+| `optimise_psi_stem_TF` | scan + refine | 8.69 |
+| `optimise_psi_stem_ProfitMax` | scan + refine | 53.70 |
+
+⚠️ Read that table for its order of magnitude and not as a controlled comparison: the first row is a different model on a different supply path, so the whole gap is not the scan. ProfitMax's 54 µs is the honest outlier — it needs a sweep for its own `|A|max` normaliser regardless, so it is the one entry point for which the scan is not purely a cost.
+
+⚠️ **But a stationary point is not always the answer.** Where profit is still climbing as it reaches the end of the feasible interval, `dJ/dψ` never crosses zero inside it and the optimum is that endpoint — a *constrained* optimum. This is not a corner case: it is 42 of 240 feasible rows on the reference grid. A solver has to test the derivative's sign at each end and report the pin explicitly, because a bracketing root-find handed no sign change cannot distinguish "pinned" from "failed". The reported operating-point kind is what carries that distinction.
+
+⚠️ **And a stationary point need not be unique.** Where the marginal cost is peaked (see the cost curves below) the condition can have two roots, and a bracketing solve finds one of them. This is the one real argument for the scan, and it is why the scan is still there: searching the objective over a grid finds the taller hump but cannot feed a gradient, while solving the condition feeds a gradient but can land on the wrong one.
+
+The two properties are not actually in conflict, which is the point worth carrying away. What reconciles them is **multi-start on the first-order condition** — several sub-brackets, each yielding an exact stationary point, compared on profit — rather than a grid. Every candidate is then a genuine stationary point, so each is smooth in the traits and the comparison between them is a comparison of maxima, which is the well-conditioned quantity. A grid argmax can be neither.
 
 ### The benefit, and the root-find inside it
 
