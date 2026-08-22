@@ -73,7 +73,7 @@ It could not be bit-identical, and not for the reason assumed: the defaults were
 
 **The three chain rules are asserted** (`test-gradient.R:82`): `d/dP50` at fixed `c` equals `(ln 2)^{-1/c}` times the b-gradient — on interior rows only, because a derived `psi_crit` adds a term that is exactly zero at an interior optimum and order 1 at a pinned one; and `d/dc` at fixed `P50` equals `d/dc|_b + (db/dc)·d/db` with `db/dc = −0.36651·b/c²`.
 
-**`dprofit_dpsi_stem<CostCurve>`** exists for the additive curves, verified against a central difference of the objective itself. ⚠️ It refuses the two product curves at compile time: it computes `dA/dψ − dC/dψ`, and a product's derivative is `(dA/dψ)·g + A·g'`.
+**`dprofit_dpsi_stem<CostCurve>`** covers **all seven** curves through the benefit link — see the framework section — verified against a central difference of each objective.
 
 **A maths vignette**, `vignettes/the-models.Rmd`, covering the objective, the cost table, λ as the common currency, the gates, the degenerate states, and appendices on (P50, c), gradients and numerical practice. Every number in prose is produced by the chunk beside it.
 
@@ -167,7 +167,7 @@ Append `par_lambda` (17 → 18). Extend `.gradient_available_pars(single)` → `
 
 **So the deferred FOC item is now load-bearing rather than optional.** A first-order-condition polish inside the winning cell would make the stem optima stationary and let `"auto"` use the composite. That is the same multi-start-FOC work the last section defers, and this is the concrete reason to do it. The test asserts today's classification, so the polish will fail it and say so.
 
-⚠️ **What remains for the calibration**: `leaf_gradient_batch()` — the C++ composite in `gradient.hpp` — still hardwires `find_root_collar_psi()`. The R route is done and the batch route is not, and the batch route is the one a fit uses. It must stay bit-identical with R, which is what makes it the larger half.
+**The batch route is done too, which is what a fit uses.** `leaf_gradient_batch(model = )` takes the same route, built from the same `.gradient_route()` so the two entry points cannot disagree about which model a name selects. Verified where it counts: the batch reproduces `leaf_gradient()` **bit-for-bit** on all eight models over three observations each — worst difference 0.0e+00 — which is the standing R-versus-C++ contract holding through the new route rather than a tolerance. The collar arms of the six route helpers are textually unchanged, which is why the golden files did not move.
 
 ⚠️ **`SOX` and `JW26` have no route.** They maximise `A * g(psi)`, so the derivative is `(dA/dpsi)*g + A*g'` rather than `dA/dpsi - dC/dpsi`. Refused by name. The plan's warning about the log link putting the residual in log units is still ahead, not behind: the first thing to bite was the *solver*, not the units.
 

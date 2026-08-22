@@ -693,9 +693,80 @@ The root curve obeys the identical homogeneity identity and takes the same treat
 
 # Appendix B — gradients
 
-*Placeholder: the implicit-function-theorem composite, `dψ*/dθ = −M/H`, the envelope theorem and its stationarity condition, and the prescribed-versus-optimum distinction.*
+`leaf_gradient()` and `leaf_gradient_batch()` return exact derivatives of a solved operating point with respect to the parameters. `model` selects which model's optimum is differentiated; every curve in the table above is available, and the batch reproduces the one-observation route bit-for-bit.
+
+## The composite
+
+The reported outputs are evaluated *at* the optimum ψ*, so a parameter moves them two ways: directly, and by moving ψ* itself. At an interior optimum `dJ/dψ = 0`, and differentiating that condition gives ψ*'s response without re-solving:
+
+$$\frac{d\psi^*}{d\theta}=-\frac{M}{H},\qquad
+M=\frac{\partial^2 J}{\partial\psi\,\partial\theta},\qquad
+H=\frac{\partial^2 J}{\partial\psi^2}$$
+
+$$\frac{dY}{d\theta}=\left.\frac{\partial Y}{\partial\theta}\right|_{\psi}
++\frac{\partial Y}{\partial\psi}\,\frac{d\psi^*}{d\theta}$$
+
+The second term is not a correction. For the cost parameters it is the whole answer.
+
+## The link makes one derivative serve every model
+
+`M` and `H` are second derivatives of `J = h(A) − C`, so both need `dJ/dψ`, and that is where the benefit link earns its place:
+
+$$\frac{dJ}{d\psi}=h'(A)\,\frac{dA}{d\psi}-\frac{dC}{d\psi}$$
+
+One expression, with `h'` the only per-model term — `1`, `1/A`, or `1/|A|max`. So a product objective is not a special case needing its own derivative, and neither is ProfitMax.
+
+## The envelope theorem, and where it stops
+
+At a stationary point `dJ/dψ = 0` identically, so the objective's own indirect term vanishes and `dJ/dθ` is the direct partial alone. That column is *assigned* rather than computed through the composite, because `J` is flat at its maximum: a central difference of it divides the solve's ~1e-09 floor by a ~1e-06 step.
+
+The envelope does not survive the active set. At a pinned optimum ψ* is a parameter-dependent *bound*, `dJ/dψ` is not zero there, and `−M/H` is not the bound's derivative — so the composite's premise is tested rather than assumed, by an implied Newton step `|dJ/dψ ÷ H|` in MPa. Where it fails, the gradient falls back to differencing the whole solve, which respects the constraint by construction.
+
+⚠️ **A stem route reports `pinned` at a perfectly interior optimum, and that is about the solver rather than the point.** The collar solve root-finds `dJ/dψ = 0` and leaves a residual of ~1e-15; the `optimise_psi_stem_*` entry points scan and refine, leaving 2e-08 to 1e-06. The stationarity tolerance was measured in the empty band between the collar route's own two populations, so it reads a stem solver's residual as a bound. Read it as "the premise is untested here", not "the premise fails".
+
+## Prescribed versus optimised
+
+Pass `psi` and the outputs are evaluated at that potential instead of the argmax — for a caller whose model *tracks* the optimum rather than finding it. There ψ does not move with θ, so there is no indirect term for any output and no envelope identity to invoke: the answer is the direct partial. Except where the clamp binds, because a bound *is* a function of the parameters; the returned tag distinguishes the two and the value cannot.
+
+## A partial is not always a total
+
+⚠️ ProfitMax normalises by `|A|max`, which comes from a **scan** over the supply stream. Its argmax is piecewise constant in the parameters, so `d|A|max/dθ` is a sequence of zeros and jumps and a total derivative through it is not a quantity worth computing. The composite therefore holds `|A|max` fixed and returns the **partial**, while differencing the solve lets the scan re-run and returns the **total**. Measured for `vcmax_25` at ψ_soil 1.5: partial 0.0766, total 0.0579, `d|A|max/dvcmax_25` = 0.0768 — the omitted term is 32% of the partial.
+
+**A fit needs the total**, because the model re-scans `|A|max` at every parameter vector: an optimiser fed the partial stops where the partial vanishes rather than where the objective does. So `method = "auto"` differences the solve for this one curve. No other model has this split.
 
 # Appendix C — numerical practice
 
-*Placeholder: why the argmax is the badly-conditioned quantity and the maximum the well-conditioned one, the sqrt amplification, the finite-difference step and its `tol/h` noise floor, and why a scan argmax cannot feed a trait gradient.*
+Four facts about this model that decide whether a number you compute from it means anything.
+
+## The maximum is well conditioned; the argmax is not
+
+`J` is flat at its optimum, with curvature `k ≈ 1` in `J ≈ J* − k(ψ − ψ*)²`. So an error `dJ` in the *value* displaces its *location* by `√(dJ/k)`: a 2e-09 disagreement in profit becomes ~1e-04 in the potential at which it occurs. Across platforms the profit agrees to 2.1e-09 while every argmax-evaluated output disagrees by 1.4e-04, three orders worse, for exactly this reason.
+
+**So check `profit` for a portable comparison, and check the residual `|dJ/dψ|` — not the profit — when judging a change to a solver.** Profit is the wrong instrument there: when the collar solve moved to a first-order condition, two of 288 rows came out ~6e-07 *lower* in profit while their residual improved by ten orders of magnitude.
+
+## A finite difference through a solve has a noise floor, so sweep the step
+
+Differencing anything computed by a solver divides that solver's tolerance by the step, so the relative error goes as `1/h` until truncation takes over. The error-versus-`h` curve is a **V**, and only its floor is a derivative. Measured through the collar solve: 1.3e-01 at `h = 1e-08`, falling to 1.9e-07 at 1e-03, then rising to 1.3e-04 at 1e-02.
+
+⚠️ **A "small" step is the wrong instinct.** `h = 1e-06` sits three orders up the noise side of that V and reads as a wrong derivative.
+
+## …and the floor depends on which solver you differenced
+
+The V's position moves with the solver, which is sharper than the rule above and easier to miss. The collar solve root-finds `dJ/dψ = 0` and locates ψ* to ~1e-15. The `optimise_psi_stem_*` entry points scan a 64-point grid and refine, locating it to ~1e-06 of the bracket — about 4e-06 MPa on a 4.4 MPa one. A relative parameter step of 1e-06 moves ψ* by ~3e-06 MPa, which is **below that resolution**, so the difference returns quantisation.
+
+Measured on `SOX` for `vcmax_25`, against a composite that is flat at 0.0551 across six decades:
+
+| relative step | differenced solve |
+|---|---|
+| 1e-06 | 0.1855 |
+| 1e-03 | 0.0552 |
+| 1e-02 | 0.0551 |
+
+At 1e-06 the same difference gets the **sign** wrong for `JW26`. Two bugs were reported against the composite on the strength of a single 1e-06 step, and neither existed. Each gradient route therefore carries its own finite-difference step, matched to the solver whose argmax it is differencing.
+
+## A scan's argmax cannot feed a parameter gradient
+
+A grid argmax is piecewise constant in the parameters: it sits at one grid point until the winner changes cells, so its derivative is zeros interrupted by jumps. That is why a bracketing search cannot support a trait gradient however tight its tolerance, and why the collar solve moved to a first-order condition — over eleven parameter steps golden section returned 6 distinct argmax values where the root-find returns 11, and the second differences fell from 3.9e-04 (the step size, i.e. noise) to 3.4e-07.
+
+It is also why ProfitMax's `|A|max` normaliser is held fixed rather than differentiated: it comes from a scan, so the same objection applies to it directly. Appendix B has what that costs.
 # References
