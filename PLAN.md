@@ -25,6 +25,10 @@ the user-visible history.
 | issue | item | what | note |
 |---|---|---|---|
 | [#3](https://github.com/traitecoevo/phylloptim/issues/3) | 7a | Make λ(state) pluggable | **unblocked** — #2 is done. ⚠️ Measure the dispatch separately: the cost core is fully inlined where the supply path was not, so 7b's "dispatch is free" does **not** transfer |
+| — *file it* | 7a-i | Model-scoped parameters take a model-name prefix | **Stage 1 of CMax, and a pure rename.** ⚠️ A plant API break (hazard 7), so land the two together. All three golden files must come out **bit-identical** — that is the entire check, and it is only available if the rename lands alone |
+| — *file it* | 7a-ii | CMax (Wolf et al. 2016) as a fourth cost curve | Two traits, taking the vector 12 → 14 and `gradient_par_names()` 14 → 16. Reference implementation *and* testbed are both already in `leaf_calibration_test`. Joshi (2022) is nested in it as a restriction, not a second curve |
+| — *file it* | 7a-iii | Joshi (2022)'s hydraulic term as a fifth curve | **What `leaf_calibration_test` is waiting on.** ONE trait, `Joshi_gamma`; no sign trap, no ridge, and no wet-pinned optima. Cheaper than 7a-ii and independent of it |
+| — *file it* | 7c | Jones (2026): flat vulnerability curve **and** their objective | One constant in the Weibull exponent, default 1; 0 recovers `E = kmax(ψ − ψ_s)`. ⚠️ **The supply half does not stand up alone** — a flat curve sends the derived `psi_crit` to infinity and deletes the cost, so their independent `Pcrit` and log objective come with it. First change to the BENEFIT side, and its λ carries a factor of `A` |
 | [#4](https://github.com/traitecoevo/phylloptim/issues/4) | 11f | Trait gradients — `stem_c`'s rebuild | Stages 1, 2 and 3 landed ([#42](https://github.com/traitecoevo/phylloptim/pull/42), #73, [#46](https://github.com/traitecoevo/phylloptim/pull/46)). ⚠️ Read 11e before quoting any speedup, and 11g for which side of the boundary a figure belongs to. `stem_c` is **unmotivated** until something frees a vulnerability curve |
 | [#74](https://github.com/traitecoevo/phylloptim/issues/74) | 11f, 11g | The `stem_b` shortcut is undone by a rebuild once per observation | 11f's 24.5× is **2.4×** through `leaf_gradient_batch()`. Unmotivated until something frees a vulnerability curve; filed so the wrong figure is not quoted meanwhile |
 | [#6](https://github.com/traitecoevo/phylloptim/issues/6) | 12 | Real-data calibration, then inversion | **The one with the most downstream** — it specifies what is left of #4, and doing it found #38, #40, #41 and #52. ⚠️ The *synthetic* vignette is done ([#53](https://github.com/traitecoevo/phylloptim/pull/53)) and **AD lost**: read 12a before repeating the comparison |
@@ -146,6 +150,56 @@ SOX, ProfitMax and ProfitMax2 in one place — essentially this item's whole fam
 against which our λ(state) formulations can be checked rather than merely derived.
 That is a stronger check than #40's `plantecophys` comparison, which reaches only the
 Medlyn path, and it makes "apples-to-apples by construction" testable.
+
+### 7a-i. Model-scoped parameters take the model's name as a prefix
+
+The trait vector partitions three ways, and only the model-scoped group is inconsistent — it uses both a bare name and a suffix:
+
+| scope | parameters | prefix |
+|---|---|---|
+| shared physiology (6) | `vcmax_25`, `jmax_25`, `a`, `curv_fact_elec_trans`, `curv_fact_colim`, `R_d_25` | none |
+| curve-scoped (4) | `stem_c`, `stem_P50`, `root_c`, `root_P50` | `stem_` / `root_` |
+| model-scoped (2) | `beta2`, `cost_scale_TF24` | **inconsistent** |
+
+So `cost_scale_TF24` → `TF24_cost_scale` and `beta2` → `TF24_beta2`, with the prefix being the model name as it already appears in `CostCurve` and in `optimise_psi_stem_*` — the same token in both places, which is what makes it greppable rather than merely tidy. The Cowan-Farquhar *input* `lambda_` goes the same way, to `CowanFarquhar_lambda_`; the emergent `lambda`, which every curve now reports, keeps its name. That split already had to be made once, and the prefix is what makes which-is-which legible.
+
+`beta2` keeps its `2` even though there is no `beta1` anywhere in the package: it is Towers & Falster's own symbol and plant's, and traceability to the paper outweighs the tidier `TF24_beta`.
+
+The payoff is not tidiness. It is that a model-scoped parameter returns **exactly zero** on every other cost curve (see 7a-ii), and a prefixed name is what turns a silent rank-deficient column into one a reader expects.
+
+**Do this first and alone.** A rename moves no numbers, so all three golden files must come out bit-identical — and that is a claim only available if nothing else lands with it. ⚠️ `tests/testthat/gradient_golden.tsv` carries trait names in its `par` column: **edit that column, never regenerate the file.** Regenerating is what rubber-stamps a value change nobody intended.
+
+⚠️ **It is a plant API break** — hazard 7, since RcppR6 binds these by name. They reach `inst/RcppR6_classes.yml`, `src/tf24_strategy.cpp`, `RcppR6_post.hpp`, both TF24 strategy test files and a `_snaps/model-version.md` snapshot. Land the two together.
+
+### 7a-ii. CMax — Wolf et al. (2016), and the best-behaved curve in the family
+
+Read the form off `TractLSM`'s `SPAC/fregulate.py`, not the paper: Wolf et al. argued Θ should be concave-up without specifying it, and Sabot implements Anderegg et al. (2018)'s `dC/dψ = α|ψ| + β`, so `C(ψ) = ½αψ² + βψ`. TractLSM's `|P|` is this package's positive-magnitude convention exactly, so there is no sign work in the potential itself.
+
+It is worth adding for a better reason than being easy. TF24's and ProfitMax's marginal costs are both `∝ |f'|`, which vanishes at each end of the bracket — that is the shape whose first-order condition can cross zero twice, and the whole reason hazard 11's closed-interval scan exists. CMax's marginal cost rises monotonically from `β`, so it crosses once and the second hump cannot arise. Its λ, `(αψ + β)/(kmax·f(ψ))`, is monotone increasing.
+
+`CMax_a` and `CMax_b` are traits rather than settable fields, because `TF24_cost_scale` and `TF24_beta2` already are and a CMax pair is not a new kind of thing. Both are O(1), so `.gradient_step`'s floor-at-1 needs no exception; neither owns a vulnerability spline, so both sit in the cheap gradient class.
+
+⚠️ **`CMax_b` is negative and must be exempt from the positivity invariants.** TractLSM stores it sign-inverted — its docstring says so, and says to report `-Beta` — so pin the sign by reproducing a TractLSM number, not by reading the formula. That docstring is the only statement of the convention anywhere.
+
+⚠️ **Nothing in the gradient loop scales with the enumeration length**, so 14 → 16 costs almost nothing: C++ sizes `grad`, `M` and the loop by `npars` (asked for), not `n_pars` (enumerated). What does cost is that on any other curve both columns return exactly `0.0` after a full two-sided perturbation each. `?leaf_gradient`'s "always pass `pars`" gets one notch more load-bearing, and scoping the *default* `pars` to the active cost curve is worth considering.
+
+### 7a-iii. Joshi (2022)'s hydraulic term — one parameter, and the cheapest of the three
+
+Their objective is `F(χ, Δψ) = A − α·J_max − γ(Δψ)²`, with Δψ the soil-to-leaf drop and α, γ the two "unit costs". Dropping the capacity term and holding `jmax_25` fixed — which is what this package does anyway — leaves a coherent instantaneous model: maximise `A(ψ) − γ(ψ − ψ_soil)²` over ψ.
+
+**It is nested in 7a-ii, and that is why it needs no new machinery.** `dC/dψ = 2γ(ψ − ψ_soil)` is `CMax_a·ψ + CMax_b` with `CMax_a = 2γ` and `CMax_b = −CMax_a·ψ_soil`. So one `linear_marginal_cost(psi, a, b)` kernel serves both curves, with the two `CostCurve` members supplying `b` differently.
+
+Three ways it is *easier* than CMax, all of which matter for the calibration waiting on it:
+
+- **One free parameter.** The Sabot fit found `cost_scale` and `beta2` correlate 0.99 along a ridge of slope 4.4, which needed the `PLC_REF` reparameterisation to pool at all. A one-parameter cost has no such ridge; it is identifiable by construction.
+- **No sign trap.** γ > 0, so the ordinary positivity invariant applies.
+- **No wet-pinned optima.** `dC/dψ → 0` as ψ → ψ_soil while `dA/dψ > 0` there, so `dprofit/dψ` is strictly positive at the wet bound and the optimum is always interior on that side. Wet-pinning is the dominant pinned class in the golden grid (24 → 80 rows as the leaf warms), so a Joshi run should route to `"ift"` far more often than TF24 does — more exact gradients, fewer finite-difference fallbacks.
+
+The marginal cost still rises monotonically without bound, so it is single-crossing like CMax. The second hump needs a marginal cost that *falls* at the dry end, which a quadratic does not.
+
+⚠️ **It is not "Joshi (2022)" and must not be named as though it were.** The paper's contribution is the *joint* optimisation over χ and Δψ with `J_max` a decision variable; the hydraulic term alone is a strawman of it in exactly the comparison this item is for. Name the curve for what it is — `JoshiHydraulic`, trait `Joshi_gamma` — and say in one line what is missing. The full model waits on a capacity-acclimation module, which is also what `leaf_calibration_test`'s `joshi-2022` is blocked on, and what Flo et al. (2024) compares with and without.
+
+⚠️ **Do not implement it as a *mode* on CMax that derives `CMax_b` from ψ_soil.** A flag would make `dY/dCMax_a` a partial in one mode and a total derivative in the other, silently — the "freeing a derived parameter splits a gradient" failure. As its own `CostCurve` member with γ the only parameter there is nothing to be ambiguous about: `dC/dγ = (ψ − ψ_soil)²` directly.
 
 ## #4 — trait gradients: what is left
 
@@ -925,6 +979,85 @@ disappears entirely.
 The surviving argument for `std::variant` is that it makes an invalid state
 unrepresentable. Worth 1.0% only if that risk is real; revisit at three or four
 supply paths.
+
+## 7c. The product-objective family: SOX-OPT and Jones
+
+**Jones et al. (2026) is not a new objective class, and finding that out is what makes this item cheap.** Their `A·(1 − ψ/ψ_crit)` is Eller's SOX form with a different reduction factor, and `TractLSM` already carries both — `SOX.py` maximises `cost * A` and `fregulate.py` defines the two `g`:
+
+```python
+kcost(p, P)      = (f(P, b, c) - p.ratiocrit) / (1. - p.ratiocrit)   # Eller 2018 — SOX
+phiLWP(P, Pcrit) = max(0., min(1., 1. - P / Pcrit))                  # Dewar 2017 — Jones' g
+```
+
+So one family, `max A·g(ψ)`, two members, and **one piece of machinery serves both**: a per-curve benefit link, identity by default. Everything in 7a shares `A` and differs only in `C`; this is the first change to the benefit side, and it is the honest cost of the item — paid once for two models rather than once for Jones.
+
+### SOX-OPT costs no new parameters, and should go first
+
+`ratiocrit` is this package's `k_crit_fraction = 0.05`, and `f` is `proportion_of_conductivity`. So Eller's `g` is
+
+```
+g_SOX(ψ) = (f(ψ) − 0.05) / (1 − 0.05)
+```
+
+built entirely from quantities already on the object. **SOX-OPT is a zero-parameter cost curve** — no trait-vector change, no rename dependency, no touching `psi_crit`'s derivation. It is by a wide margin the cheapest model discussed here, it exercises the benefit link on its own, and Sabot's sixteen species are already pinned in `leaf_calibration_test` with `TractLSM` as the oracle. Do it before Jones and before 7a-ii.
+
+Note `g_SOX(psi_crit) = 0` by construction, since `f(psi_crit) = 0.05 = ratiocrit`. So the product vanishes at the dry bound and a SOX optimum can never be dry-pinned — the same property Jones has, from the same place.
+
+### What Jones needs that SOX does not
+
+Two things, and they are why Jones is the second member rather than the first.
+
+**A linear supply.** Their eq 19 is `Ψleaf = Ψpd − rp·E` — constant `rp`. Ours is a Weibull integral that saturates, and that difference is what `jones-2026` keeps arriving at: their conductance rises above the thermal optimum and ours does not. The switch is one constant in the exponent — write `f(ψ) = 2^{−s(ψ/P50)^c}` with `s = 1` the default, and at `s = 0` `f ≡ 1`, so `F(ψ) = ψ` and `E = kmax(ψ − ψ_s)`, exactly theirs.
+
+That is better than what the example does today, which is to *widen* `stem_b` until the supply is nearly linear. `R/11-jones-figures.R`'s own header records why that fails: here the supply curve and the cost curve are the **same Weibull**, so widening `b` drives `(1 − f)` to zero and deletes the cost — hence decoupling appearing only in a *window* of `stem_b` rather than above a threshold.
+
+⚠️ **So `s` must apply to the curve used for the transpiration integral and not the one used for the cost**, which means splitting a curve this package deliberately shares. That is the design decision here; the constant is not.
+
+#### ⚠️ And the supply half does not stand up alone
+
+Jones keep supply and cost independent — a linear supply through `rp`, and a separate cost with **its own `Pcrit`**. Here `psi_crit` is *derived* as the curve's P95 (hazard 1), so a flat curve has none: `psi_crit → ∞`, and the cost term `(1 − ψ/ψ_crit) → 1`. Setting `s = 0` therefore reproduces their supply and **deletes the cost** — the same failure as the `stem_b` workaround, reached faster and by a different route.
+
+So `s = 0` requires `psi_crit` supplied as an independent cost parameter, reintroducing exactly what the (P50, c) change removed as a settable trait. That is faithful to Jones rather than a regression, but the invariant "psi_crit is a quantile of the curve" becomes **conditional on `s`** and has to be stated rather than discovered.
+
+And once `psi_crit` is an independent parameter, their objective is nearly free — which is why these are one item and not two.
+
+### Their objective, and the first benefit-side change
+
+`J = A·(1 − ψ_leaf/ψ_crit)` is a product, not a difference. Taking logs gives the same additive skeleton with a log benefit link, and the argmax is unchanged because `log` is monotone:
+
+```
+log J = log A + log(1 − ψ/ψ_crit),   cost C(ψ) = −log(1 − ψ/ψ_crit),   dC/dψ = 1/(ψ_crit − ψ)
+```
+
+**The log route is theirs, not ours** — their eq 34 is `(1/A)(∂A/∂gsc) + (1/f_ψ)(∂f_ψ/∂gsc) = 0`, which is the log-differentiated product. So the first-order condition to solve is the paper's own.
+
+⚠️ **This is the first change to the BENEFIT side.** Every curve in 7a shares `A` and differs only in `C`; Jones needs a per-curve benefit transform, identity by default. That is a bigger structural move than a cost curve, and it is the honest cost of this item.
+
+⚠️ **Jones' λ carries a factor of `A`, so it is a different kind of λ.** At the optimum `A'/A = 1/(ψ_crit − ψ)`, so
+
+```
+λ_Jones = A / [(ψ_crit − ψ)·kmax·f(ψ)]
+```
+
+Every other model in this family prices water in absolute carbon; Jones prices it **relative to current assimilation**. That is a genuine extension of the λ(state) story rather than a seventh row in the same table, and the companion manuscript (item 14) should hear about it.
+
+**That factor is not incidental to their particular `g` — it is what a product objective is.** For a difference, `A − C(ψ)`, the first-order condition is `A' = C'` and so `λ = C'/E'`, in which `A` does not appear. For a product, `A·g(ψ)`, it is `A'g + Ag' = 0`, so `A' = −A(g'/g)` and `λ = −A(g'/g)/E'`. One line of algebra, and it holds for any `g`.
+
+**The dual statement is the one to test, because it needs no reference implementation.** A product objective's argmax is invariant to a uniform rescaling of assimilation and a difference objective's is not: replacing `A` by `κA` leaves `A'g + Ag' = 0` unchanged, while `κA' = C'` moves. So `assert(psi_star(κ) == psi_star(1))` for a Jones curve and `assert(psi_star(κ) != psi_star(1))` for TF24 is a two-line test that pins the structural difference exactly, with no `TractLSM` number and no tolerance.
+
+⚠️ **And it predicts that `jones-2026` may have been attributing to the supply what belongs to the objective.** Their title claim is that stomata decouple from photosynthesis at high temperature. Under a product, λ ∝ A, so as warming drives `A` down water gets *cheaper in proportion* and the stomata do not shut — decoupling for free, from the objective alone. Under a difference, `C'` is unchanged while `A'` falls, the FOC `A' = C'` is met at lower ψ, and the leaf closes. To the extent the thermal decline acts as a scale reduction in `A` this is first-order rather than exact, so it is a prediction and not a measurement — but it is a cheap one to settle: **implement the objective, leave `s = 1` and the Weibull supply alone, and see whether decoupling appears without touching `stem_b` at all.** If it does, the `stem_b` window that example has been chasing was never the mechanism.
+
+Two constraints have to be enforced rather than allowed to become `NaN`, both already named in `vignettes/the-models.Rmd`:
+
+- `log A` requires `A > 0`, which fails exactly in the closed-stomata state where `A = −R_d`.
+- The cost diverges at `psi_crit`, so a Jones-type model can **never** be pinned dry.
+
+Two smaller consequences of a flat curve:
+
+- ⚠️ **ProfitMax's normaliser breaks.** `k_crit = 0.05·kmax` comes off the same curve and `k` never reaches it, so `s = 0` should be **refused** on that arm rather than returning a plausible number.
+- The pre-integrated spline is unnecessary at `s = 0` — `F(ψ) = ψ` exactly — so bypass it rather than interpolating a straight line, which also sidesteps `vulnerability_psi_max`'s domain question.
+
+`s = 1` should be bit-identical, but a multiply inside the exponent can change FMA contraction, so expect a few ULP and check rather than assume.
 
 ## 8. Report λ and g1_eff as first-class outputs — #50
 

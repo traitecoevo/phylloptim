@@ -326,6 +326,29 @@ efficiency. Off the optimum it is not even that. And "WUE" unqualified almost
 always means the average `A/E`, or intrinsic WUE `A/g_s` — so a λ from this model
 is not comparable with a WUE from the literature without checking which was meant.
 
+### ⚠️ λ is a common currency only across *difference* objectives
+
+The claim above needs one qualification, and it is structural rather than a detail. Every model in the cost table maximises a **difference**, `A(ψ) − C(ψ)`. Its first-order condition is `A' = C'`, so
+
+$$\lambda=\frac{dA}{dE}=\frac{C'(\psi)}{E'(\psi)}$$
+
+in which `A` does not appear at all. *That* is what makes λ comparable across those models: each prices water in absolute carbon, at a price set by the cost curve and the supply curve alone.
+
+A **product** objective, `A(ψ)·g(ψ)`, does not behave that way. Its first-order condition is `A'g + Ag' = 0`, so `A' = -A(g'/g)` and
+
+$$\lambda=-\,\frac{A\,g'(\psi)}{g(\psi)\,E'(\psi)}$$
+
+which is proportional to `A`. A model of that kind prices water **relative to current assimilation** rather than in absolute carbon. It is one line of algebra and it holds for any `g`.
+
+Jones et al. [@jones2026] is of this kind, with `g = 1 - ψ/ψ_crit`, giving `λ = A / [(ψ_crit - ψ)·k_max·f(ψ)]`.
+
+Two consequences are worth carrying out of this document:
+
+- **A product objective's optimum is invariant to a uniform rescaling of assimilation; a difference objective's is not.** Replacing `A` by `κA` leaves `A'g + Ag' = 0` unchanged, while `κA' = C'` moves. That is the same statement as `λ ∝ A`, in a form that can be tested directly rather than derived.
+- **So a product objective decouples stomatal behaviour from assimilation for free.** As `A` falls — under warming, say — λ falls in proportion, water gets cheaper, and the stomata do not close. Under a difference, `C'` is unchanged while `A'` falls, so `A' = C'` is met at lower tension and they do. To the extent that a thermal decline acts as a scale reduction in `A`, this is a first-order argument rather than an exact one.
+
+⚠️ **No product objective is implemented here yet**, so unlike everything else in this document these paragraphs are algebra with no chunk beside them to check them. The scale-invariance statement is the test to add when one lands.
+
 ## The two gates
 
 Both default off, and both change more than their name suggests.
