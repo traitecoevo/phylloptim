@@ -433,22 +433,30 @@ leaf_gradient_batch <- function(batch,
 .gradient_theta_matrix <- function(batch, traits) {
   nr <- batch$theta_nrow
   par_names <- .gradient_par_names()
-  m <- matrix(NA_real_, nrow = nr, ncol = length(par_names))
-  # By NAME, not by position. `leaf_traits()` is in `set_traits()`'s order and
-  # test-gradient.R asserts it, but this is the one place a silent reordering
-  # would produce plausible numbers for the wrong parameters.
-  trait_names <- par_names[seq_len(length(par_names) - 2L)]
+  m <- matrix(NA_real_, nrow = nr, ncol = length(par_names),
+              dimnames = list(NULL, par_names))
+  # ⚠️ EVERY COLUMN IS ADDRESSED BY NAME, including the two non-traits. The traits
+  # always were; the tail two were written as `length(par_names)` and
+  # `length(par_names) - 1L`, which is correct only while they are the last two
+  # columns in that order. Appending a parameter -- which the enumeration is
+  # explicitly designed to allow -- silently wrote `kmax` into the new slot and
+  # `resistance` into `kmax`'s, with no length change to notice. Naming them
+  # removes the class rather than the instance.
+  trait_names <- setdiff(par_names,
+                         c("leaf_specific_conductance_max", "resistance"))
   tv <- unlist(traits)[trait_names]
   if (anyNA(tv)) {
     stop("`traits` is missing: ",
          paste(trait_names[is.na(tv)], collapse = ", "), call. = FALSE)
   }
-  m[, seq_along(tv)] <- rep(tv, each = nr)
-  m[, length(par_names) - 1L] <- batch$kmax
+  m[, trait_names] <- rep(tv, each = nr)
+  m[, "leaf_specific_conductance_max"] <- batch$kmax
   # NA on the multi-layer path, where there is no such parameter and C++ never
   # reads the column.
-  m[, length(par_names)] <- batch$resistance
-  m
+  m[, "resistance"] <- batch$resistance
+  # Handed over WITHOUT names, as `leaf_gradient_batch()` documents: C++ indexes by
+  # position, and the check there rejects any colnames that are not this order.
+  unname(m)
 }
 
 .gradient_check_theta <- function(theta, batch, par_names) {
