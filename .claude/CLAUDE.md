@@ -377,9 +377,13 @@ now back. Two things follow:
   the same order as the effect being measured. **Hazard 5 says interleave; this adds
   that building the two arms in different trees is its own bias**, and a
   seven-point sweep is not seven controlled A/Bs.
-- **It is not the settable `ci_abs_tol`** (default 1e-3), which reaches only the
-  off-path `optimise_psi_stem_*` solvers. Tightening that one buys no precision on
-  the production path, which is a wart worth knowing before someone tries it.
+- **It is not the settable `ci_abs_tol`** (default 1e-3). ⚠️ This entry used to say
+  that one reached "the off-path `optimise_psi_stem_*` solvers"; it does not. Grep
+  says `ci_abs_tol` is read in exactly one place, `solve_medlyn_ci_numerical` --
+  the empirical Medlyn-conductance route. **Both** families of optimality solver
+  reach `ci` through `psi_stem_to_ci`, so both get the 1e-10 and neither is
+  reachable by the settable control. Tightening it buys no precision anywhere in
+  the optimality model, which is a wart worth knowing before someone tries it.
 
 **It is bit-exact only on the platform that generated it — macOS/arm64.** libm's
 `exp`/`pow` are not bit-reproducible between glibc on x86-64 and Apple's libm on
@@ -858,7 +862,7 @@ the per-cause split and the tolerance bands go in the first PR comment — see
    and −1.5459 at 1.88, so a search that steps in from the bounds reports an open
    stoma where the objective says shut.
 
-   So all three `optimise_psi_stem_*` maximise over a CLOSED interval: endpoints
+   So all six `optimise_psi_stem_*` maximise over a CLOSED interval: endpoints
    included, a `boundary_scan_n_` = 64 scan to pick the basin, and a refine whose
    tolerance scales with the **cell** rather than the interval. Against a
    20001-point reference over 30 single-potential rows they are exact. The scan is
