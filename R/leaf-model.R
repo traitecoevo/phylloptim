@@ -38,12 +38,12 @@
   stem_P50 = 3.4,
   root_c = 2.680147,
   root_P50 = 3.4,
-  beta2 = 1.5,
+  TF24_beta2 = 1.5,
   jmax_25 = 157.44,
   a = 0.30,
   curv_fact_elec_trans = 0.7,
   curv_fact_colim = 0.99,
-  cost_scale_TF24 = 7.5,
+  TF24_cost_scale = 7.5,
   R_d_25 = 1.44
 )
 
@@ -98,12 +98,12 @@
 ##' @param root_c shape parameter of the root vulnerability curve (unitless)
 ##' @param root_b sensitivity parameter of the root vulnerability curve (MPa)
 ##' @param root_psi_crit critical root water potential (MPa, positive magnitude)
-##' @param beta2 exponent for the effect of hydraulic risk (unitless)
+##' @param TF24_beta2 exponent for the effect of hydraulic risk (unitless)
 ##' @param jmax_25 maximum electron transport rate at 25 C (umol m^-2 s^-1)
 ##' @param a quantum yield of photosynthetic electron transport (mol mol^-1)
 ##' @param curv_fact_elec_trans curvature of the light response curve (unitless)
 ##' @param curv_fact_colim curvature of the colimited photosynthesis equation
-##' @param cost_scale_TF24 cost parameter for the TF24 profit model
+##' @param TF24_cost_scale cost parameter for the TF24 profit model
 ##'   (umol m^-2 s^-1)
 ##' @param R_d_25 dark respiration at 25 C (umol m^-2 s^-1). It is the value at
 ##'   25 C only: respiration rises from there on Tjoelker's declining-Q10 curve.
@@ -132,19 +132,19 @@ leaf_traits <- function(vcmax_25 = 96,
                         stem_P50 = 3.4,
                         root_c = 2.680147,
                         root_P50 = 3.4,
-                        beta2 = 1.5,
+                        TF24_beta2 = 1.5,
                         jmax_25 = 157.44,
                         a = 0.30,
                         curv_fact_elec_trans = 0.7,
                         curv_fact_colim = 0.99,
-                        cost_scale_TF24 = 7.5,
+                        TF24_cost_scale = 7.5,
                         R_d_25 = 1.44) {
   out <- list(vcmax_25 = vcmax_25, stem_c = stem_c, stem_P50 = stem_P50,
-              root_c = root_c, root_P50 = root_P50, beta2 = beta2,
+              root_c = root_c, root_P50 = root_P50, TF24_beta2 = TF24_beta2,
               jmax_25 = jmax_25, a = a,
               curv_fact_elec_trans = curv_fact_elec_trans,
               curv_fact_colim = curv_fact_colim,
-              cost_scale_TF24 = cost_scale_TF24,
+              TF24_cost_scale = TF24_cost_scale,
               R_d_25 = R_d_25)
   .check_scalars(out, "leaf_traits")
   if (R_d_25 < 0) {
@@ -396,7 +396,7 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
     stem_P50 = traits$stem_P50,
     root_c = traits$root_c,
     root_P50 = traits$root_P50,
-    beta2 = traits$beta2,
+    TF24_beta2 = traits$TF24_beta2,
     jmax_25 = traits$jmax_25,
     a = traits$a,
     curv_fact_elec_trans = traits$curv_fact_elec_trans,
@@ -405,7 +405,7 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
     vulnerability_curve_ncontrol = control$vulnerability_curve_ncontrol,
     ci_abs_tol = control$ci_abs_tol,
     ci_niter = control$ci_niter,
-    cost_scale_TF24 = traits$cost_scale_TF24
+    TF24_cost_scale = traits$TF24_cost_scale
   )
   # ⚠️ AFTER construction, because plant's RcppR6 bindings pin the generated
   # constructor by arity so R_d_25 cannot be an argument to it. Without this line

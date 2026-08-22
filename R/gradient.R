@@ -88,9 +88,9 @@ set_traits <- function(x, traits) {
   # Positional, in the C++ argument order, for the same reason leaf_model() is:
   # the ordering is written down once rather than at every call site.
   x$set_traits(traits$vcmax_25, traits$stem_c, traits$stem_P50,
-               traits$root_c, traits$root_P50, traits$beta2,
+               traits$root_c, traits$root_P50, traits$TF24_beta2,
                traits$jmax_25, traits$a, traits$curv_fact_elec_trans,
-               traits$curv_fact_colim, traits$cost_scale_TF24, traits$R_d_25)
+               traits$curv_fact_colim, traits$TF24_cost_scale, traits$R_d_25)
   invisible(x)
 }
 
@@ -134,7 +134,7 @@ set_traits <- function(x, traits) {
 ##' no argmax is involved and `M` is a first difference of an exact quantity. It is
 ##' stable to seven significant figures across five decades of step size.
 ##'
-##' The second term is not a correction. For `cost_scale_TF24`, `beta2`, `stem_b`
+##' The second term is not a correction. For `TF24_cost_scale`, `TF24_beta2`, `stem_b`
 ##' and `stem_c` it is 100% of the answer, and for `vcmax_25` 52%.
 ##'
 ##' @section profit, which is the one output the envelope theorem reaches:

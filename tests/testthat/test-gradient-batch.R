@@ -102,7 +102,7 @@ test_that("the batch reproduces leaf_gradient() bit-for-bit across the grid", {
   # `stem_P50` beside it takes the rescale. Having both means a transcription that
   # dropped the explicit `collar` assignment, or differenced two identical numbers
   # instead, shows up on a column whose neighbour is computed another way.
-  pars <- c("vcmax_25", "stem_P50", "cost_scale_TF24", "stem_c")
+  pars <- c("vcmax_25", "stem_P50", "TF24_cost_scale", "stem_c")
   rows <- expand.grid(layers = c(1L, 3L, 5L), psi_soil = c(0.5, 2.0, 3.0, 4.0,
                                                           6.0),
                       KEEP.OUT.ATTRS = FALSE)
@@ -406,7 +406,7 @@ test_that("the result is shaped and named for a caller applying a Jacobian", {
   # The layering: C++ returns dY/dtheta for the model parameters and R applies the
   # parameterisation chain rule, vectorised over observations. That only works if
   # the array's dimensions are labelled, so it is asserted rather than assumed.
-  pars <- c("vcmax_25", "stem_P50", "cost_scale_TF24")
+  pars <- c("vcmax_25", "stem_P50", "TF24_cost_scale")
   b <- leaf_batch(psi_soil = c(1.0, 1.5, 2.0, 2.5), PPFD = 900)
   g <- leaf_gradient_batch(b, pars = pars)
   expect_identical(dim(g$gradient), c(4L, 3L, 5L))
@@ -448,7 +448,7 @@ test_that("`pars` order does not change any gradient (#72)", {
   # homogeneity identity and would get the same shortcut, and a stem_b-shaped
   # test would silently stop covering the case it was written for.
   b <- leaf_batch(psi_soil = 1.5, PPFD = 900)
-  pars <- c("vcmax_25", "stem_c", "a", "stem_P50", "cost_scale_TF24", "root_P50")
+  pars <- c("vcmax_25", "stem_c", "a", "stem_P50", "TF24_cost_scale", "root_P50")
 
   for (method in c("auto", "fd")) {
     for (fast in c(TRUE, FALSE)) {
@@ -481,8 +481,8 @@ test_that("`pars` order does not change any gradient (#72)", {
   # which is the point of fixing them together in one change rather than letting
   # them drift.
   r_ref <- leaf_gradient(psi_soil = 1.5, PPFD = 900,
-                         pars = c("cost_scale_TF24", "stem_P50"))
-  batch <- leaf_gradient_batch(b, pars = c("cost_scale_TF24", "stem_P50"))
+                         pars = c("TF24_cost_scale", "stem_P50"))
+  batch <- leaf_gradient_batch(b, pars = c("TF24_cost_scale", "stem_P50"))
   expect_identical(as.vector(batch$gradient[1, , ]), as.vector(r_ref$gradient))
 })
 
@@ -575,7 +575,7 @@ test_that("the batch's prescribed psi agrees with leaf_gradient(), bit-for-bit",
   # to a tolerance. Both routes of the new path are covered -- the collar it
   # solved for handed back (which must reproduce the solve), and a collar
   # deliberately off it.
-  pars <- c("vcmax_25", "stem_P50", "cost_scale_TF24")
+  pars <- c("vcmax_25", "stem_P50", "TF24_cost_scale")
   soils <- c(1.0, 2.0, 3.0)
   b <- leaf_batch(psi_soil = soils, PPFD = 900)
   a <- leaf_gradient_batch(b, pars = pars)

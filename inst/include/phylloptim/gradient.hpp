@@ -81,12 +81,12 @@ inline constexpr int par_stem_c = 1;
 inline constexpr int par_stem_P50 = 2;
 inline constexpr int par_root_c = 3;
 inline constexpr int par_root_P50 = 4;
-inline constexpr int par_beta2 = 5;
+inline constexpr int par_TF24_beta2 = 5;
 inline constexpr int par_jmax_25 = 6;
 inline constexpr int par_a = 7;
 inline constexpr int par_curv_fact_elec_trans = 8;
 inline constexpr int par_curv_fact_colim = 9;
-inline constexpr int par_cost_scale_TF24 = 10;
+inline constexpr int par_TF24_cost_scale = 10;
 inline constexpr int par_R_d_25 = 11;
 inline constexpr int par_kmax = 12;
 inline constexpr int par_resistance = 13;
@@ -94,9 +94,9 @@ inline constexpr int par_resistance = 13;
 inline const std::vector<std::string>& par_names() {
   static const std::vector<std::string> names{
       "vcmax_25",  "stem_c",              "stem_P50",
-      "root_c",    "root_P50",            "beta2",
+      "root_c",    "root_P50",            "TF24_beta2",
       "jmax_25",   "a",                   "curv_fact_elec_trans",
-      "curv_fact_colim", "cost_scale_TF24", "R_d_25",
+      "curv_fact_colim", "TF24_cost_scale", "R_d_25",
       "leaf_specific_conductance_max",
       "resistance"};
   return names;
@@ -367,9 +367,9 @@ inline void apply(Leaf& l, const double* theta, const Drivers& d, bool single,
   }
   l.set_traits(theta[par_vcmax_25], theta[par_stem_c], theta[par_stem_P50],
                theta[par_root_c], theta[par_root_P50],
-               theta[par_beta2], theta[par_jmax_25],
+               theta[par_TF24_beta2], theta[par_jmax_25],
                theta[par_a], theta[par_curv_fact_elec_trans],
-               theta[par_curv_fact_colim], theta[par_cost_scale_TF24],
+               theta[par_curv_fact_colim], theta[par_TF24_cost_scale],
                theta[par_R_d_25]);
   if (single) {
     // R's `series_resistance()`: a default-constructed network carrying one

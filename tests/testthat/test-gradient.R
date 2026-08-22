@@ -25,7 +25,7 @@ test_that("set_traits() on a used leaf equals a leaf built with those traits", {
   # -- the two vulnerability splines, or vcmax_/jmax_/R_d_ behind
   # set_physiology's temperature cache -- shows up as a difference.
   traits <- leaf_traits(vcmax_25 = 110, stem_P50 = 4.2, root_P50 = 3.5,
-                        cost_scale_TF24 = 8.0)
+                        TF24_cost_scale = 8.0)
   d <- grid_drivers(2.0)
 
   fresh <- leaf_model(traits)
@@ -97,8 +97,8 @@ test_that("the composite reproduces the arbitrated reference gradients", {
   ref <- rbind(
     vcmax_25        = c(collar =  1.7459e-03, A =  1.7209e-02),
     jmax_25         = c(collar =  1.0862e-04, A =  9.1320e-04),
-    cost_scale_TF24 = c(collar = -7.6704e-02, A = -3.9520e-01),
-    beta2           = c(collar = -4.2610e-02, A = -2.1954e-01),
+    TF24_cost_scale = c(collar = -7.6704e-02, A = -3.9520e-01),
+    TF24_beta2           = c(collar = -4.2610e-02, A = -2.1954e-01),
     stem_P50        = d_dP50 * b_stem,
     stem_c          = c(collar = -1.6390e-01, A = -8.4448e-01) + d_dc * b_stem,
     root_P50        = (log(2)^(-1 / tr$root_c)) * b_root)
@@ -122,7 +122,7 @@ test_that("the composite and the finite difference agree at interior points", {
   # The cross-check that needs no external reference: two routes to the same
   # derivative, sharing only the model. They are checked across soil moisture
   # because the indirect term's share of the answer varies with it.
-  pars <- c("vcmax_25", "jmax_25", "stem_P50", "cost_scale_TF24", "root_P50")
+  pars <- c("vcmax_25", "jmax_25", "stem_P50", "TF24_cost_scale", "root_P50")
   for (psi_soil in c(0.5, 1.0, 2.0, 3.0)) {
     ift <- grid_gradient(psi_soil, pars = pars, method = "ift")
     fd <- grid_gradient(psi_soil, pars = pars, method = "fd")
@@ -140,7 +140,7 @@ test_that("dcollar/dtheta is dpsi*/dtheta, computed two ways", {
   # The `collar` column is psi* itself, so the composite reports -M/H there while
   # the fallback differences the solved argmax. They are different computations of
   # the same quantity, which is why the column is worth reporting at all.
-  pars <- c("vcmax_25", "stem_P50", "beta2")
+  pars <- c("vcmax_25", "stem_P50", "TF24_beta2")
   ift <- grid_gradient(2.0, pars = pars, method = "ift")
   fd <- grid_gradient(2.0, pars = pars, method = "fd")
   expect_equal(ift$gradient[, "collar"], fd$gradient[, "collar"],
@@ -721,7 +721,7 @@ test_that("leaf_gradient(x =) matches building a leaf per call", {
   # dies naming neither. stem_b = 3.1 does exactly that; 4.2 gives a domain of 7.4.
   tr <- leaf_traits(vcmax_25 = 105, stem_P50 = 4.2)
   args <- list(psi_soil = 2.0, PPFD = 900, atm_vpd = 1.5, traits = tr,
-               pars = c("vcmax_25", "stem_P50", "cost_scale_TF24"))
+               pars = c("vcmax_25", "stem_P50", "TF24_cost_scale"))
   fresh <- do.call(leaf_gradient, args)
 
   l <- leaf_model(traits = tr)
@@ -824,7 +824,7 @@ test_that("a prescribed psi at psi* reproduces the solving path bit-for-bit", {
   # a tolerance. Anything that made the prescribed path a second implementation
   # would show up here as a last-bit difference rather than as a design note.
   d <- grid_drivers(2.0)
-  pars <- c("vcmax_25", "stem_P50", "cost_scale_TF24")
+  pars <- c("vcmax_25", "stem_P50", "TF24_cost_scale")
   a <- do.call(leaf_gradient, c(d, list(pars = pars)))
   expect_identical(a$status, "interior")
 

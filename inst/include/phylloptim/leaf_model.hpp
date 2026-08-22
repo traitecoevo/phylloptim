@@ -33,7 +33,7 @@ public:
        double stem_P50, 
        double root_c,
        double root_P50,
-       double beta2, 
+       double TF24_beta2, 
        double jmax_25, 
        double a, 
        double curv_fact_elec_trans, 
@@ -42,7 +42,7 @@ public:
        double vulnerability_curve_ncontrol,
        double ci_abs_tol,
        double ci_niter,
-      double cost_scale_TF24);
+      double TF24_cost_scale);
 
   odelia::interpolator::Interpolator transpiration_from_psi;
   odelia::interpolator::Interpolator psi_from_transpiration;
@@ -255,7 +255,7 @@ public:
   // in terms of them: the splines, the brackets, the cost kernels.
   double stem_b;
   double psi_crit;
-  double beta2;
+  double TF24_beta2;
   double jmax_25;
   double a;
   double curv_fact_elec_trans; // unitless - obtained from Smith and Keenan (2020)
@@ -270,7 +270,7 @@ public:
   double vulnerability_curve_ncontrol;
   double ci_abs_tol;
   double ci_niter;
-  double cost_scale_TF24;
+  double TF24_cost_scale;
 
   // Tolerance on the collar potential for the profit-maximising root-find (PLAN
   // 11a). Hard-coded rather than a control field, for the same reason
@@ -681,9 +681,9 @@ public:
   // photosynthetic parameters really are unknown until the drivers are re-supplied.
   void set_traits(double vcmax_25, double stem_c, double stem_P50,
                   double root_c, double root_P50,
-                  double beta2, double jmax_25, double a,
+                  double TF24_beta2, double jmax_25, double a,
                   double curv_fact_elec_trans, double curv_fact_colim,
-                  double cost_scale_TF24, double R_d_25);
+                  double TF24_cost_scale, double R_d_25);
 
   // THE CRITICAL POINT IS A QUANTILE OF THE CURVE, not a parameter: the fraction
   // of maximum conductivity remaining there. 0.05 gives P95. Sperry's reference
@@ -1168,8 +1168,8 @@ public:
   // lambda at an arbitrary stem water potential (positive magnitude, MPa), in
   // umol CO2 (kg H2O)^-1. Analytic, from the TF24 cost function:
   //
-  //   C(psi)   = cost_scale_TF24 * (1 - f)^beta2,   f(psi) = exp(-(psi/stem_b)^stem_c)
-  //   dC/dpsi  = cost_scale_TF24 * beta2 * (1-f)^(beta2-1) *
+  //   C(psi)   = TF24_cost_scale * (1 - f)^TF24_beta2,   f(psi) = exp(-(psi/stem_b)^stem_c)
+  //   dC/dpsi  = TF24_cost_scale * TF24_beta2 * (1-f)^(TF24_beta2-1) *
   //              (stem_c/stem_b)(psi/stem_b)^(stem_c-1) * f
   //   E(psi)     = kmax * integral of f,  so  dE/dpsi = kmax * f
   //   lambda     = (dC/dpsi) / (dE/dpsi)
@@ -1177,7 +1177,7 @@ public:
   // The f cancels exactly; it is cancelled here rather than divided out, so the
   // expression stays finite as psi -> psi_crit where f -> 0.
   //
-  // Caveat: with beta2 < 1 the (1-f)^(beta2-1) factor diverges as psi -> 0
+  // Caveat: with TF24_beta2 < 1 the (1-f)^(TF24_beta2-1) factor diverges as psi -> 0
   // (f -> 1), which is a property of the cost function, not of this code.
   double lambda_TF24(double psi_stem) const;
 
@@ -1457,7 +1457,7 @@ inline Leaf::Leaf()
     vcmax_25(96), // umol m^-2 s^-1 
     stem_c(2.680147), //unitless
     stem_P50(3.4), // MPa, positive magnitude -- THE trait; stem_b/psi_crit derive
-    beta2(1.5), //exponent for effect of hydraulic risk (unitless)
+    TF24_beta2(1.5), //exponent for effect of hydraulic risk (unitless)
     jmax_25(157.44), // maximum electron transport rate umol m^-2 s^-1
     a(0.30), //quantum yield of photosynthetic electron transport (mol mol^-1)
     curv_fact_elec_trans(0.7), //curvature factor for the light response curve (unitless)
@@ -1466,7 +1466,7 @@ inline Leaf::Leaf()
     vulnerability_curve_ncontrol(100),
     ci_abs_tol(1e-3),
     ci_niter(1000),
-    cost_scale_TF24(7.5) //cost parameter for TF24 profit model umol m^-2 s^-1
+    TF24_cost_scale(7.5) //cost parameter for TF24 profit model umol m^-2 s^-1
    {
       // The root traits (root_c/root_P50) and the two beta_R_* resistance
       // constants keep their defaults in MultiLayerRoots, which owns them --
@@ -1482,17 +1482,17 @@ inline Leaf::Leaf()
 inline Leaf::Leaf(double vcmax_25, double stem_c, double stem_P50,
            double root_c,
            double root_P50,
-           double beta2, double jmax_25,
+           double TF24_beta2, double jmax_25,
            double a, double curv_fact_elec_trans, double curv_fact_colim, 
            double GSS_tol_abs,
            double vulnerability_curve_ncontrol,
            double ci_abs_tol,
            double ci_niter,
-           double cost_scale_TF24)
+           double TF24_cost_scale)
     : vcmax_25(vcmax_25), // umol m^-2 s^-1 
     stem_c(stem_c), //unitless
     stem_P50(stem_P50), // MPa, positive magnitude
-    beta2(beta2), //exponent for effect of hydraulic risk (unitless)
+    TF24_beta2(TF24_beta2), //exponent for effect of hydraulic risk (unitless)
     jmax_25(jmax_25), // maximum electron transport rate umol m^-2 s^-1
     a(a), //quantum yield of photosynthetic electron transport (mol mol^-1)
     curv_fact_elec_trans(curv_fact_elec_trans), //curvature factor for the light response curve (unitless)
@@ -1501,7 +1501,7 @@ inline Leaf::Leaf(double vcmax_25, double stem_c, double stem_P50,
     vulnerability_curve_ncontrol(vulnerability_curve_ncontrol),
     ci_abs_tol(ci_abs_tol),
     ci_niter(ci_niter),
-    cost_scale_TF24(cost_scale_TF24) //cost parameter for TF24 profit model umol m^-2 s^-1
+    TF24_cost_scale(TF24_cost_scale) //cost parameter for TF24 profit model umol m^-2 s^-1
    {
       // The single convention, asserted at the one place it enters (#25). Before
       // there was no global statement about psi's sign to assert -- psi_soil_ was
@@ -1552,7 +1552,7 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_P50_,
                              double jmax_25_, double a_,
                              double curv_fact_elec_trans_,
                              double curv_fact_colim_,
-                             double cost_scale_TF24_, double R_d_25_) {
+                             double TF24_cost_scale_, double R_d_25_) {
   check_psi_magnitudes(stem_P50_, stem_c_, root_P50_, root_c_);
 
   // Both scale parameters and both critical potentials fall out of the traits, so
@@ -1585,12 +1585,12 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_P50_,
   stem_P50 = stem_P50_;
   stem_b = stem_b_;
   psi_crit = psi_crit_;
-  beta2 = beta2_;
+  TF24_beta2 = beta2_;
   jmax_25 = jmax_25_;
   a = a_;
   curv_fact_elec_trans = curv_fact_elec_trans_;
   curv_fact_colim = curv_fact_colim_;
-  cost_scale_TF24 = cost_scale_TF24_;
+  TF24_cost_scale = TF24_cost_scale_;
   R_d_25 = R_d_25_;
 
   roots_.root_c = root_c_;
@@ -3699,8 +3699,8 @@ inline void Leaf::set_leaf_states_rates_from_psi_stem(double psi_stem, double ps
 
 inline double Leaf::lambda_TF24(double psi_stem) const {
   const double f = proportion_of_conductivity(psi_stem);
-  return cost_scale_TF24 * beta2 * (stem_c / stem_b) * pow(psi_stem / stem_b, stem_c - 1.0) *
-         pow(1.0 - f, beta2 - 1.0) / leaf_specific_conductance_max_;
+  return TF24_cost_scale * TF24_beta2 * (stem_c / stem_b) * pow(psi_stem / stem_b, stem_c - 1.0) *
+         pow(1.0 - f, TF24_beta2 - 1.0) / leaf_specific_conductance_max_;
 }
 
 
@@ -3779,7 +3779,7 @@ inline double Leaf::g1_eff() const {
 // while probing. The caching is the double entry point's job.
 template <typename T>
 inline T Leaf::hydraulic_cost_TF_kernel(T psi_stem) const {
-  return cost_scale_TF24 * pow((1 - proportion_of_conductivity_kernel(psi_stem)), beta2);
+  return TF24_cost_scale * pow((1 - proportion_of_conductivity_kernel(psi_stem)), TF24_beta2);
 }
 
 inline double Leaf::hydraulic_cost_TF(double psi_stem) {
@@ -3897,7 +3897,7 @@ inline void Leaf::clear_collar_solve_state() {
 // become numerically negligible the way the TF24 cost does as stem_b widens
 // (measured at 1.3e-5 at stem_b = 200). Both terms are scale-free, which also
 // means the plant's willingness to spend water does not depend on how much carbon
-// is at stake in absolute terms. That is exactly what cost_scale_TF24 decides on
+// is at stake in absolute terms. That is exactly what TF24_cost_scale decides on
 // the TF24 path, and it is the parameter a calibration cannot identify without
 // leaf water potential.
 //

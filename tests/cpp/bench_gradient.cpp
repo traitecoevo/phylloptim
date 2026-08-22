@@ -70,7 +70,7 @@ const Traits kBase{{96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5,
                     157.44, 0.30, 0.7, 0.99, 7.5}};
 
 const char *kNames[11] = {"vcmax_25",  "stem_c",     "stem_P50",
-                          "root_c",    "root_P50",   "beta2",
+                          "root_c",    "root_P50",   "TF24_beta2",
                           "jmax_25",   "a",          "curv_elec",
                           "curv_colim", "cost_scale"};
 
@@ -352,12 +352,12 @@ int main(int argc, char **argv) {
         const auto t0 = clock_type::now();
         for (long r = 0; r < batch_reps; ++r) {
           // Vary theta per rep for the reason `perturbed()` documents -- but in
-          // `beta2`, NOT in the parameter being differentiated. Moving the base
+          // `TF24_beta2`, NOT in the parameter being differentiated. Moving the base
           // `stem_b` per rep moves it off `stem_b_spline_`, which is a rebuild the
           // model genuinely owes and which showed up as 0.05 rebuilds/obs (one per
           // rep over 20 observations) while reading like a leftover of the bug
-          // this arm exists to measure. `beta2` owns no spline.
-          theta[phylloptim::gradient::par_beta2] =
+          // this arm exists to measure. `TF24_beta2` owns no spline.
+          theta[phylloptim::gradient::par_TF24_beta2] =
               kBase.v[7] * (1.0 + double(r) * 1e-12);
           const std::vector<phylloptim::gradient::Result> g =
               phylloptim::gradient::batch(l, theta, 1, obs, false, pars, 1, s);

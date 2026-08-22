@@ -857,8 +857,8 @@ void test_operating_point_kind_is_written_by_every_path() {
   // set_traits returns the object to its just-constructed state, and the
   // classification is part of that state (hazard 10 / setup_clean_leaf).
   l.set_traits(l.vcmax_25, l.stem_c, l.stem_P50, l.roots_.root_c,
-               l.roots_.root_P50, l.beta2, l.jmax_25, l.a,
-               l.curv_fact_elec_trans, l.curv_fact_colim, l.cost_scale_TF24,
+               l.roots_.root_P50, l.TF24_beta2, l.jmax_25, l.a,
+               l.curv_fact_elec_trans, l.curv_fact_colim, l.TF24_cost_scale,
                l.R_d_25);
   ok(l.operating_point_kind() == Kind::Unsolved,
      "set_traits clears the classification with the rest of the solved state");
@@ -2506,12 +2506,12 @@ void test_closed_form() {
   ok(std::abs(tall.assim / A_tall - 1.0) > 3e-2,
      "and it is rejected because the error really is large there");
 
-  // The beta2 = 1/c leaf, where xi is constant and nothing needs solving.
+  // The TF24_beta2 = 1/c leaf, where xi is constant and nothing needs solving.
   phylloptim::Leaf exact_leaf(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.0 / 2.680147, 157.44, 0.30, 0.7, 0.99, 1e-3,
                         100, 1e-3, 1000, 7.5);
   ok(phylloptim::closed_form::beta2_is_exact(exact_leaf),
-     "beta2_is_exact recognises beta2 = 1/stem_c");
-  ok(!phylloptim::closed_form::beta2_is_exact(l), "and rejects the default beta2 = 1.5");
+     "beta2_is_exact recognises TF24_beta2 = 1/stem_c");
+  ok(!phylloptim::closed_form::beta2_is_exact(l), "and rejects the default TF24_beta2 = 1.5");
   setp(exact_leaf, 5.0, 1.5);
   exact_leaf.optimise_psi_stem_TF();
   const double A_ref = exact_leaf.assim_colimited_;
@@ -3249,7 +3249,7 @@ void test_set_traits_matches_a_fresh_leaf() {
   const Case cases[] = {{"vcmax_25", 0, 96.0 * 1.05},
                         {"stem_P50", 2, 3.4 * 1.05},
                         {"root_P50", 4, 3.4 * 1.05},
-                        {"cost_scale_TF24", 10, 7.5 * 1.05},
+                        {"TF24_cost_scale", 10, 7.5 * 1.05},
                         {"stem_c", 1, 2.680147 * 1.05},
                         {"root_c", 3, 2.680147 * 1.05}};
 

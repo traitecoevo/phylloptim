@@ -42,7 +42,7 @@ test_that("every trait can be read back from the object (#95)", {
   # whole trait list rather than naming four fields, so a trait added to
   # leaf_traits() without a binding fails here instead of being noticed by the next
   # caller who needs it.
-  traits <- leaf_traits(vcmax_25 = 111, stem_P50 = 3.1, beta2 = 1.7,
+  traits <- leaf_traits(vcmax_25 = 111, stem_P50 = 3.1, TF24_beta2 = 1.7,
                         root_P50 = 3.3, a = 0.28)
   l <- leaf_model(traits)
   for (nm in names(traits)) {

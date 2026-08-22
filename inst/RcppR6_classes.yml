@@ -13,7 +13,7 @@
 #   * `name_cpp: phylloptim::Leaf`, not `plant::Leaf`.
 #   * The constructor's R-side argument names are the real C++ ones. plant still
 #     says `c`, `b` and `g1_TF24` positionally; #15 renamed those to `stem_c`,
-#     `stem_b` and `cost_scale_TF24`, and the whole reason 10a had to land before
+#     `stem_b` and `TF24_cost_scale`, and the whole reason 10a had to land before
 #     this item is that an R name is much harder to change than a C++ one. `c` is
 #     also the name of a base R function, which is its own small argument.
 #   * The four fields #15 deleted are gone: `rho_`, `a_bio_`, `area_leaf_` and
@@ -98,7 +98,7 @@ Leaf:
       @param stem_P50 STEM potential at 50% loss of hydraulic conductivity (MPa, positive magnitude)
       @param root_c shape parameter of the ROOT hydraulic vulnerability curve (unitless)
       @param root_P50 ROOT potential at 50% loss of hydraulic conductivity (MPa, positive magnitude)
-      @param beta2 exponent for the effect of hydraulic risk (unitless)
+      @param TF24_beta2 exponent for the effect of hydraulic risk (unitless)
       @param jmax_25 maximum rate of electron transport at 25 C (umol m^-2 s^-1)
       @param a quantum yield of photosynthetic electron transport (mol mol^-1)
       @param curv_fact_elec_trans curvature factor for the light response curve (unitless)
@@ -107,7 +107,7 @@ Leaf:
       @param vulnerability_curve_ncontrol number of control points for the pre-computed vulnerability curves
       @param ci_abs_tol absolute tolerance for root-solving ci
       @param ci_niter maximum number of iterations for root-solving ci
-      @param cost_scale_TF24 cost parameter for the TF24 profit model (umol m^-2 s^-1)
+      @param TF24_cost_scale cost parameter for the TF24 profit model (umol m^-2 s^-1)
 
       @export
     args:
@@ -116,7 +116,7 @@ Leaf:
       - stem_P50: double
       - root_c: double
       - root_P50: double
-      - beta2: double
+      - TF24_beta2: double
       - jmax_25: double
       - a: double
       - curv_fact_elec_trans: double
@@ -125,7 +125,7 @@ Leaf:
       - vulnerability_curve_ncontrol: double
       - ci_abs_tol: double
       - ci_niter: double
-      - cost_scale_TF24: double
+      - TF24_cost_scale: double
 
   active:
     # --- the traits, READ-ONLY (#95) ------------------------------------------
@@ -162,14 +162,14 @@ Leaf:
     psi_crit: {type: double, access: field, readonly: true}
     root_b: {type: double, access: field, readonly: true, name_cpp: "roots_.root_b"}
     root_psi_crit: {type: double, access: field, readonly: true, name_cpp: "roots_.root_psi_crit"}
-    beta2: {type: double, access: field, readonly: true}
+    TF24_beta2: {type: double, access: field, readonly: true}
     # `a` reads badly as a field name and stays `a` anyway: it is what `set_traits()`
     # and `leaf_traits()` call the quantum yield, and a read whose name differs from
     # the write's cannot be round-tripped by a caller iterating over trait names.
     a: {type: double, access: field, readonly: true}
     curv_fact_elec_trans: {type: double, access: field, readonly: true}
     curv_fact_colim: {type: double, access: field, readonly: true}
-    cost_scale_TF24: {type: double, access: field, readonly: true}
+    TF24_cost_scale: {type: double, access: field, readonly: true}
 
     # --- solved operating point ----------------------------------------------
     ci_: {type: double, access: field}
@@ -432,7 +432,7 @@ Leaf:
       args: [stem_P50: double]
     set_traits:
       return_type: void
-      args: [vcmax_25: double, stem_c: double, stem_P50: double, root_c: double, root_P50: double, beta2: double, jmax_25: double, a: double, curv_fact_elec_trans: double, curv_fact_colim: double, cost_scale_TF24: double, R_d_25: double]
+      args: [vcmax_25: double, stem_c: double, stem_P50: double, root_c: double, root_P50: double, TF24_beta2: double, jmax_25: double, a: double, curv_fact_elec_trans: double, curv_fact_colim: double, TF24_cost_scale: double, R_d_25: double]
 
     # --- transpiration and conductance ---------------------------------------
     proportion_of_conductivity:

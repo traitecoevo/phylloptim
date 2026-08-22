@@ -133,7 +133,7 @@ test_that("leaf_gradient_batch() crosses the boundary once, whatever N is", {
   # the count went back to being per-row on a fast day.
   b1 <- leaf_batch(psi_soil = rep(1.5, 4), PPFD = 900)
   b2 <- leaf_batch(psi_soil = rep(1.5, 64), PPFD = 900)
-  pars <- c("vcmax_25", "stem_P50", "cost_scale_TF24", "beta2")
+  pars <- c("vcmax_25", "stem_P50", "TF24_cost_scale", "TF24_beta2")
   leaf_gradient_batch(b1, pars = pars)                       # warm anything lazy
 
   n1 <- count_calls("gradient_batch_run", leaf_gradient_batch(b1, pars = pars))

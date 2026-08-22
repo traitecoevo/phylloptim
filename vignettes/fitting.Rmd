@@ -28,7 +28,7 @@ converged" from "the model works". Real data cannot supply it, so start here.
 ```{r}
 set.seed(sum(utf8ToInt("phylloptim-fitting")))
 
-truth <- leaf_traits(vcmax_25 = 85, jmax_25 = 140, cost_scale_TF24 = 40)
+truth <- leaf_traits(vcmax_25 = 85, jmax_25 = 140, TF24_cost_scale = 40)
 
 drivers <- expand.grid(
   psi_soil = seq(0.4, 3.2, length.out = 12),
@@ -54,7 +54,7 @@ leaves the two trading off against each other.
 ## The objective, and the loop that makes it affordable
 
 ```{r}
-FIT <- c("vcmax_25", "jmax_25", "cost_scale_TF24")
+FIT <- c("vcmax_25", "jmax_25", "TF24_cost_scale")
 
 predict_at <- function(theta, l) {
   set_traits(l, do.call(leaf_traits, as.list(exp(theta))))
@@ -101,7 +101,7 @@ reason for it is narrower.
 
 ```{r}
 l <- leaf_model(truth)
-start <- log(c(vcmax_25 = 60, jmax_25 = 100, cost_scale_TF24 = 15))
+start <- log(c(vcmax_25 = 60, jmax_25 = 100, TF24_cost_scale = 15))
 fit <- optim(start, ssq, l = l, method = "Nelder-Mead",
              control = list(maxit = 2000, reltol = 1e-10))
 
@@ -157,8 +157,8 @@ does to any quasi-Newton method started cold. Bounds are the one-line fix, and a
 what you would want on a real fit anyway.
 
 ```{r}
-lower <- log(c(vcmax_25 = 10, jmax_25 = 20, cost_scale_TF24 = 2))
-upper <- log(c(vcmax_25 = 400, jmax_25 = 700, cost_scale_TF24 = 400))
+lower <- log(c(vcmax_25 = 10, jmax_25 = 20, TF24_cost_scale = 2))
+upper <- log(c(vcmax_25 = 400, jmax_25 = 700, TF24_cost_scale = 400))
 
 fit_g <- optim(start, ssq, gr = ssq_grad, l = l, method = "L-BFGS-B",
                lower = lower, upper = upper, control = list(maxit = 500))
@@ -208,7 +208,7 @@ tm <- function(f) {
   t0 <- Sys.time(); f(); 1000 * as.numeric(difftime(Sys.time(), t0, units = "secs"))
 }
 
-CAND <- c("vcmax_25", "jmax_25", "cost_scale_TF24", "beta2", "a",
+CAND <- c("vcmax_25", "jmax_25", "TF24_cost_scale", "TF24_beta2", "a",
           "curv_fact_elec_trans", "curv_fact_colim",
           "stem_P50", "stem_c", "root_P50", "root_c")
 
@@ -419,7 +419,7 @@ b <- leaf_batch(psi_soil = seq(0.6, 3.0, length.out = 40), PPFD = 900,
 
 studies <- list(
   "demand only"      = c("vcmax_25", "jmax_25"),
-  "the cost model"   = c("cost_scale_TF24", "beta2"),
+  "the cost model"   = c("TF24_cost_scale", "TF24_beta2"),
   "hydraulic supply" = c("leaf_specific_conductance_max", "stem_P50", "stem_c"),
   "adds both curves" = c("vcmax_25", "stem_P50", "root_P50")
 )

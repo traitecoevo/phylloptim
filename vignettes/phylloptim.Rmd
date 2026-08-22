@@ -323,7 +323,7 @@ each trait:
 
 ```{r}
 g <- leaf_gradient(psi_soil = 2.0, PPFD = 900,
-                   pars = c("vcmax_25", "jmax_25", "stem_P50", "cost_scale_TF24"))
+                   pars = c("vcmax_25", "jmax_25", "stem_P50", "TF24_cost_scale"))
 round(g$gradient, 5)
 ```
 
@@ -364,7 +364,7 @@ tibble::tibble(
               "4 parameters", "1 parameter"),
   `ms per call` = round(c(bench(NULL),
                           bench(c("vcmax_25", "jmax_25", "stem_P50",
-                                  "cost_scale_TF24")),
+                                  "TF24_cost_scale")),
                           bench("vcmax_25")), 2)
 ) |>
   knitr::kable()
@@ -428,7 +428,7 @@ These are not finite differences of the solve. The outputs are read at the
 profit-maximising collar potential, so a trait moves them twice over — directly,
 and by moving the optimum itself. Differentiating the optimality condition
 `dprofit/dψ = 0` rather than the solved output captures both terms, and for
-`cost_scale_TF24`, `beta2`, `stem_P50` and `stem_c` the second one is **the entire
+`TF24_cost_scale`, `TF24_beta2`, `stem_P50` and `stem_c` the second one is **the entire
 answer**: change them and assimilation moves *only* because the leaf chooses a
 different operating point.
 
