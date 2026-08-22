@@ -136,7 +136,7 @@ There are two ways to find `ψ*`: search `J` for its maximum, or solve
 
 $$\frac{dJ}{d\psi}=0$$
 
-for a stationary point. Both are in the package, and which lives where is worth naming rather than leaving as "in different places": the **collar solve** — the multi-layer supply path, and the one plant calls — solves the first-order condition. The four single-layer `optimise_psi_stem_*` entry points still **scan** the interval on a 64-point grid and refine the best cell. That difference is historical rather than principled, and the reasons for closing it are the rest of this section.
+for a stationary point. Both are in the package, and which lives where is worth naming rather than leaving as "in different places": the **collar solve** — the multi-layer supply path, and the one plant calls — solves the first-order condition. The six single-layer `optimise_psi_stem_*` entry points still **scan** the interval on a 64-point grid and refine the best cell. That difference is historical rather than principled, and the reasons for closing it are the rest of this section.
 
 **The first-order condition wins on every axis that can be measured**, which is unusual enough to be worth setting out.
 
@@ -145,6 +145,29 @@ for a stationary point. Both are in the package, and which lives where is worth 
 **Smoothness, which is what a gradient actually needs.** An argmax determined only to a bracket width is piecewise constant at fine scales, so differentiating it with respect to a trait yields noise dressed as a derivative. Measured over eleven steps in a trait, golden section returned **6 distinct argmax values out of 11** and second differences of 3.9e-04 — the step size itself, i.e. nothing. The root-find returns **11 of 11**, with second differences of 3.4e-07. Worse than noise, the noisy version was not obviously broken: one trait derivative taken that way came back smooth, plausible and **sign-inverted** (−2.6e-03 against a true +2.6e-04).
 
 **Speed, and this is the part that surprises people.** Golden section shrinks its bracket by a constant factor per evaluation — linear convergence, about 0.62 per step, with no way to do better because it uses only comparisons. A Brent-class root-finder interpolates through the points it has and converges *superlinearly*. Measured on the collar solve when it switched, both binaries built from one tree and interleaved: **3.51 → 2.65 µs/solve**. Faster *and* eleven orders more accurate, from the same model.
+
+The three claims are one picture. Both solvers below are given the *same* sign-changing bracket, which flatters the search — it is handed the basin rather than having to find it, and finding the basin is what the 64-point scan exists for.
+
+```{r fig-solver, fig.width = 9, fig.height = 4.2, out.width = "100%", dev = "svg"}
+sc <- plot_solver_convergence()
+
+e_search <- abs(sc$search$x - sc$star)
+e_root <- abs(sc$rootfind$x - sc$star)
+reach <- function(e, tol) if (any(e < tol)) which(e < tol)[1] else NA_integer_
+for (tol in c(1e-4, 1e-8, 1e-12)) {
+  cat(sprintf("to reach %5.0e MPa:  root-find %2s evaluations, search %s\n", tol,
+              reach(e_root, tol),
+              ifelse(is.na(reach(e_search, tol)), "never", reach(e_search, tol))))
+}
+cat(sprintf("search stalls at %.2e MPa; sqrt(4.eps.|J|/k) predicts %.2e\n",
+            min(e_search), sc$search_floor))
+```
+
+The search does not merely converge more slowly — it **stops**. After about thirty evaluations it stops improving at all, and no further spending moves it. That floor is not a tolerance anyone chose: it is where comparing values of `J` runs out of information. Near its maximum `J` is flat, so `ψ` can move while `J` changes by less than a rounding error, and the comparison driving the search becomes noise. The limit is `sqrt(4ε|J|/k)` for curvature `k`, drawn as the dashed line, and the observed stall sits within a factor of two of it — close enough to identify the mechanism, and the factor is the constant in that expression rather than anything about the model.
+
+A root-find has no such floor, because it is looking for a *zero* of a function that is steep exactly where `J` is flat. The quantity it tests still carries information at 1e-15, which is why panel (b) keeps descending.
+
+This is the same flat maximum that makes the argmax the badly-conditioned quantity across platforms, seen from the inside.
 
 ⚠️ **Having the derivative in hand is what makes that trade one-sided.** `dJ/dψ` is not a second model to evaluate — it comes out of the same forward pass as `J`, so one iteration of the root-find costs about what one iteration of the search costs, and superlinear convergence is pure gain. Take the derivative away and the comparison closes right up: you would pay two objective evaluations per iteration to difference it, and inherit a step-size problem of your own on top (a difference through a nested root-find has a noise floor of tolerance/h, so the "obvious" small step is the wrong one). **The efficiency argument here is not really about Brent versus golden section — it is about what a cheap exact derivative buys you**, which is the same reason the trait gradients in Appendix B are worth their complexity.
 
@@ -167,19 +190,29 @@ The two properties are not actually in conflict, which is the point worth carryi
 
 ### The benefit, and the root-find inside it
 
-`B(ψ) = A(c_i)` is colimited assimilation, and `c_i` is not free: it is fixed by
-supply meeting demand, which is a root-find at every candidate ψ. Two consequences
-run through everything below.
+`B(ψ) = A(c_i)` is colimited assimilation, and `c_i` is not free: it is fixed by supply meeting demand, which is a root-find at every candidate ψ. So there is a solver inside the solver, and both its cost and its precision multiply through everything above.
 
-First, `dA/dψ` needs the implicit function theorem rather than a direct
-derivative — the chain runs `A'(c_i) · dc_i/dψ`.
+**Differentiate the condition, not the search — the same move, one level down.** `dA/dψ` cannot be taken directly, because `c_i` is implicit. The chain runs `A'(c_i) · dc_i/dψ`, and `dc_i/dψ` comes from the implicit function theorem applied to the supply-equals-demand *residual* — so the derivative never passes through the iteration that located `c_i`. That is worth two things. Differencing the inner solve would multiply its iteration count into every outer step; and it would inherit a noise floor of (inner tolerance)/h, which is precisely what makes an apparently sensible finite-difference step return an apparently sensible wrong derivative. Differentiating the residual is exact, and costs one solve.
 
-Second, there is a regime where that theorem does not hold. When the leaf is hot
-enough that assimilation is negative across the whole `[Γ*, c_a]` bracket there is
-no supply==demand root, `c_i` is pinned at the compensation point, and **the
-residual is no longer zero**. Derivatives on that branch drop the assimilation
-term rather than approximating it, and report themselves as not feasible. A
-gradient that ignored the flag would get a plausible number there.
+**The inner tolerance sets what every reported output of this model means**, so it was chosen by measurement rather than taste. Perturbing the model identically at each tolerance and reading the reference grid:
+
+| `c_i` tolerance | worst difference from a converged (1e-15) solve |
+|---|---|
+| 1e-7 | 1.82e-07 |
+| 1e-8 | 3.15e-08 |
+| **1e-10** | **5.41e-10** ← here |
+| 1e-11 | 5.41e-10 |
+| 1e-13 | 7.48e-13 |
+
+1e-10 is the knee: **335× closer to a converged solve** than the 1e-7 this model used to run at, for a measured **+3.4%** in time (2.65 → 2.75 µs/solve, both binaries built from one tree and interleaved). Going on to 1e-13 buys roughly 700× more for about three times that again. Note the plateaus — 1e-10 and 1e-11 return the same number, because they are the same count of TOMS748 iterations — so tightening *between* plateaus costs and buys nothing.
+
+⚠️ **This tolerance was invisible until the outer search was replaced**, and that is the generalisable part: a nested solver's precision is only as visible as the loosest tolerance above it. While the outer golden-section search terminated on a 1e-3 bracket, the inner root-find could have been anything. Removing the outer search promoted it to the model's dominant amplifier overnight — which is why the two sections belong together.
+
+⚠️ **And the tolerance you can set is not this one.** `ci_abs_tol` in `leaf_control()` reaches only the `optimise_psi_stem_*` entry points; the collar solve's inner root-find is fixed at 1e-10. Tightening the settable one buys no precision on the multi-layer path, which is worth knowing before anyone tries.
+
+**Finally, a regime where the theorem does not hold.** When the leaf is hot enough that assimilation is negative across the whole `[Γ*, c_a]` bracket there is no supply-equals-demand root, `c_i` is pinned at the compensation point, and **the residual is no longer zero** — so the implicit function theorem has nothing to stand on. Derivatives on that branch drop the assimilation term rather than approximating it, and report themselves as not feasible. A gradient that ignored the flag would get a plausible number there.
+
+### 
 
 ## The cost curves
 
@@ -200,6 +233,34 @@ so `f` is the fraction of maximum conductivity remaining, `k` the conductance an
 | **Cowan & Farquhar** [@cowan1977] | `CF77` | $\lambda\,E$ | $\lambda\,k_{\max}f$ | carbon |
 | **Sperry et al.** [@sperry2017] | `ProfitMax` | $\dfrac{k(\psi_s)-k(\psi)}{k(\psi_s)-k_{\rm crit}}$ | $\dfrac{k_{\max}\lvert f'\rvert}{k(\psi_s)-k_{\rm crit}}$ | dimensionless |
 | **Joshi & Stocker** [@joshi2022] | `JS22` | $\gamma_{J}\,(\Delta\psi)^{2}$ | $2\gamma_{J}\,\Delta\psi$ | carbon |
+| **Wolf et al.** [@wolf2016] | `CMax` | $\tfrac{a}{2}(\psi^{2}-\psi_s^{2})+b(\psi-\psi_s)$ | $a\,\psi+b$ | carbon |
+
+| **Eller** [@eller2020] | `SOX` | $-\log g(\psi)$ | $-g'/g$ | log carbon |
+
+The last row is in the table because of a **benefit link**, and it is worth being
+explicit about how it got there. `SOX` does not subtract a cost at all — it
+maximises the *product* `A · g(ψ)`, with `g = (f − 0.05)/(1 − 0.05)`, the
+conductivity fraction rescaled to reach exactly zero at `psi_crit`. Taking logs
+turns that into the same additive skeleton as every other row:
+
+$$\log\big(A\,g\big) = \log A + \log g \quad\Longrightarrow\quad C(\psi)=-\log g(\psi)$$
+
+So a product objective is a difference objective *with a transformed benefit*, and
+the link — `log` here, identity everywhere else — is the only new machinery the
+family needs. Two consequences follow, and both are real rather than bookkeeping:
+
+- **Its λ carries a factor of `A`**, because the cost is levied on *proportional*
+  rather than absolute carbon. The section on λ derives this in one line and shows
+  it is a property of the product form, not of this particular `g`.
+- **It can never be dry-pinned.** `g(psi_crit)` is exactly zero, so `C` diverges
+  there — water becomes infinitely expensive before the bound is reached. It takes
+  no parameter of its own to achieve that; the 0.05 is the same constant `psi_crit`
+  is derived from.
+
+⚠️ **The link states the cost; it is not how the optimum is found.** At full closure
+`A = −R_d < 0`, so `log A` does not exist — and that endpoint has to be a candidate.
+`optimise_psi_stem_SOX()` therefore maximises the product directly, which is exact
+because `log` is monotone.
 
 The code names are the prefix on every parameter belonging to that model —
 `TF24_cost_scale`, `CF77_lambda_`, `JS22_gamma` — so a parameter says which curve

@@ -1231,6 +1231,20 @@ public:
   // the COST here is a function of the absolute potential, unlike JS22's.
   double lambda_CMax(double psi_stem, double psi_upstream) const;
 
+  // --- the product-objective family (PLAN 7c) --------------------------------
+  //
+  // Eller (2018, 2020)'s SOX maximises `A * g(psi)` rather than `A - C(psi)`, with
+  // `g` the conductivity fraction rescaled onto [0, 1]. Sabot's `TractLSM` calls it
+  // `kcost` and Jones et al. (2026) is the same objective with a different `g`.
+  //
+  // ⚠️ IT TAKES NO NEW PARAMETER. `g` is built from `proportion_of_conductivity`
+  // and `k_crit_fraction`, both of which the object already has, which is why this
+  // curve is cheaper than every subtracted one.
+  double sox_reduction(double psi_stem) const;
+  double sox_reduction_deriv(double psi_stem) const;
+  double profit_psi_stem_SOX(double psi_stem, double psi_upstream);
+  double lambda_SOX(double psi_stem, double psi_upstream) const;
+
   // The marginal cost of water the ProfitMax cost implies at `psi_stem`, in the
   // same umol C (kg H2O)^-1 as lambda_TF24 -- so the two are comparable.
   //
@@ -1391,6 +1405,7 @@ public:
   void optimise_psi_stem_CF77();
   void optimise_psi_stem_JS22();
   void optimise_psi_stem_CMax();
+  void optimise_psi_stem_SOX();
 
   // Clear the outputs a single-layer optimiser does NOT write. Hazard 8: these
   // three describe a ROOT-COLLAR solve, and optimise_psi_stem_* never runs one,
@@ -3660,9 +3675,12 @@ inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
   // without re-reading the guide's rounding-versus-bug magnitudes, which this
   // figure sets.
   //
-  // Not the same knob as `ci_abs_tol` (the settable control, default 1e-3), which
-  // reaches only the off-path optimise_psi_stem_* solvers. A caller tightening
-  // that one gets no extra precision here.
+  // ⚠️ Not the same knob as `ci_abs_tol` (the settable control, default 1e-3), and
+  // this comment used to misplace it: `ci_abs_tol` is read in exactly one place,
+  // solve_medlyn_ci_numerical, i.e. the empirical Medlyn-conductance route. It
+  // reaches NEITHER family of optimality solver -- both go through this function
+  // and so through the 1e-10 above. A caller tightening it gets no extra precision
+  // anywhere in the optimality model.
   ci_at_compensation_point_ = false;
   try {
     return ci_ = util::uniroot_smooth(target, gamma_ * umol_per_mol_to_Pa_, ca_, 1e-10, ci_niter);
@@ -3835,6 +3853,29 @@ inline double Leaf::lambda_CMax(double psi_stem, double psi_upstream) const {
   const double f = proportion_of_conductivity(psi_stem);
   return (CMax_a * psi_stem + CMax_b) /
          (leaf_specific_conductance_max_ * f);
+}
+
+
+// And for SOX, where the objective is a PRODUCT. At its optimum `A'g + Ag' = 0`, so
+// `A' = -A(g'/g)` and
+//
+//     lambda = A'/E' = -A*(g'/g) / (kmax*f)
+//
+// ⚠️ IT CARRIES A FACTOR OF `A`, and that is what a product objective means rather
+// than an artefact of this `g`: a difference objective prices water in absolute
+// carbon, a product prices it as a share of current assimilation. `the-models.Rmd`
+// derives it in one line and gives the scale-invariance test that pins it.
+//
+// ⚠️ It DIVERGES at `psi_crit`, where `g` is exactly zero. That is the mechanism by
+// which a product objective can never be dry-pinned -- water becomes infinitely
+// expensive before the bound is reached -- and it means this is not a number to
+// evaluate at the dry end of the bracket.
+inline double Leaf::lambda_SOX(double psi_stem, double psi_upstream) const {
+  (void)psi_upstream;
+  const double g = sox_reduction(psi_stem);
+  const double gp = sox_reduction_deriv(psi_stem);
+  const double f = proportion_of_conductivity(psi_stem);
+  return -assim_colimited_ * (gp / g) / (leaf_specific_conductance_max_ * f);
 }
 
 
@@ -4039,6 +4080,49 @@ inline double Leaf::profit_psi_stem_CMax(double psi_stem,
   double cost = hydraulic_cost_CMax(psi_stem, psi_upstream);
 
   return benefit_ - cost;
+}
+
+
+// --- the product-objective family --------------------------------------------
+//
+// Eller's reduction factor: the conductivity fraction rescaled so it is 1 at zero
+// tension and exactly 0 at `psi_crit`, where `f` reaches `k_crit_fraction` by
+// construction. That last equality is why this needs no parameter of its own -- the
+// 0.05 is the same one `psi_crit` is derived from and the same one Sperry's
+// `k_crit` reads, so the three cannot disagree.
+inline double Leaf::sox_reduction(double psi_stem) const {
+  return (proportion_of_conductivity(psi_stem) - k_crit_fraction) /
+         (1.0 - k_crit_fraction);
+}
+
+
+// Its slope. `|f'| = f*(c/b)*(psi/b)^(c-1)` is the same analytic form `lambda_TF24`
+// uses, so this needs neither AD nor a spline derivative; `f` decreases, so this is
+// negative.
+inline double Leaf::sox_reduction_deriv(double psi_stem) const {
+  const double f = proportion_of_conductivity(psi_stem);
+  const double abs_fprime =
+      f * (stem_c / stem_b) * pow(psi_stem / stem_b, stem_c - 1.0);
+  return -abs_fprime / (1.0 - k_crit_fraction);
+}
+
+
+// ⚠️ A PRODUCT, so what comes back is NOT in carbon units, unlike every other
+// `profit_psi_stem_*` here. The argmax is unaffected -- `A*g` and `log A + log g`
+// share it because `log` is monotone, and the paper's own first-order condition is
+// the log-differentiated form -- but the VALUE is a different kind of number and
+// must not be compared with a TF24 profit.
+//
+// ⚠️ `hydraulic_cost_` IS EXPLICITLY POISONED, which is hazard 8 rather than
+// tidiness. There is no subtracted cost on this curve, so leaving the field alone
+// would report whichever curve ran last -- and on one reused `Leaf` that is exactly
+// the stale-state leak the `psi_stem_optima` golden file's second pass exists to
+// catch.
+inline double Leaf::profit_psi_stem_SOX(double psi_stem,
+                                        double psi_upstream) {
+  set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
+  hydraulic_cost_ = util::na_value;
+  return assim_colimited_ * sox_reduction(psi_stem);
 }
 
 
@@ -4539,6 +4623,87 @@ inline void Leaf::optimise_psi_stem_CMax() {
       supply_psi_soil_scalar(), psi_crit, boundary_scan_n_, &profit_opt);
   profit_ = profit_psi_stem_CMax(opt_psi_stem_, supply_psi_soil_scalar());
   lambda_emergent_ = lambda_CMax(opt_psi_stem_, supply_psi_soil_scalar());
+  (void)profit_opt;
+
+    return;
+  }
+
+
+// Eller's SOX, the first PRODUCT objective here. Same closed-interval maximisation
+// as the other three, and correct for the same reason: `A*g` and `log A + log g`
+// share an argmax, so maximising the product directly needs no logarithm and so
+// meets none of the `A > 0` trouble the log form has at full closure.
+//
+// ⚠️ NEVER DRY-PINNED, and by construction rather than by luck: `g(psi_crit)` is
+// exactly zero, so the objective is zero at the dry bound while any interior point
+// with positive `A` beats it. The wet bound is reachable, though -- at full closure
+// `A = -R_d` and the product is `-R_d * g(psi_soil)`, which can be the maximum when
+// assimilation is negative throughout, so the endpoints still have to be candidates
+// (hazard 11).
+//
+// ⚠️ NO PARAMETER TO VALIDATE, which is the whole appeal of this curve: `g` is built
+// from `proportion_of_conductivity` and `k_crit_fraction`. Nothing here can be unset.
+//
+// ⚠️ THIS CURVE HAS A BENEFIT LINK, AND IT IS CURRENTLY IMPLICIT. Taking logs turns
+// the product into the same additive skeleton as every other curve here:
+//
+//     log(A*g) = log A + log g,    so   C(psi) = -log g(psi),  dC/dpsi = -g'/g
+//
+// which is a row of the cost table rather than an exception to it, and is the form
+// `lambda_SOX` below already uses -- it is `(dC/dpsi)/(dE/dpsi)` for that `C`, times
+// `A` to return from log-carbon to carbon. The link is the machinery PLAN 7c asked
+// for: a per-curve transform of the BENEFIT, identity everywhere else.
+//
+// ⚠️ THE OPTIMISER STILL MAXIMISES THE PRODUCT, and that is deliberate, not a
+// shortcut. `log` is monotone so the argmax is identical, and the product avoids the
+// one place the log form breaks: at full closure `A = -R_d < 0` and `log A` does not
+// exist, which is exactly the endpoint hazard 11 requires to be a candidate. So the
+// link is the right way to STATE this cost and the wrong way to SEARCH for it.
+//
+// ⚠️ SOX IS NOT A `CostCurve` MEMBER YET, and the obstacle is smaller than this
+// comment first claimed. With the link above, `dprofit_dpsi_stem<K>` needs
+// `A_prime*dci_dpsistem / A` in place of `A_prime*dci_dpsistem`, plus the same
+// factor on the energy-balance term -- a per-curve factor on the benefit term, which
+// is a shape the existing expression already supports. What it does NOT need is the
+// whole expression replaced. That is the route in; it is unbuilt because nothing in
+// production calls that function (grep: only `test_leaf.cpp`) and no consumer needs
+// a prescribed-point evaluation here. A caller wanting one calls
+// `profit_psi_stem_SOX` directly.
+//
+// ⚠️ WHAT IS **NOT** A REASON, because it is already true: that this writes a
+// non-carbon number into `profit_`. `optimise_psi_stem_ProfitMax` already puts a
+// DIMENSIONLESS normalised profit in the same field TF24 fills with carbon, so a
+// caller comparing `profit_` across optimisers is exposed whether or not SOX exists
+// -- this makes it a third kind rather than a second. The guide's rule for
+// `hydraulic_cost_` ("a third meaning behind the same name is how a reader quotes
+// the wrong number") applies to `profit_` too and is not enforced there. Worth a
+// separate field per objective kind; not worth pretending this curve introduced it.
+inline void Leaf::optimise_psi_stem_SOX() {
+
+  clear_collar_solve_state();
+
+  if (!supply_is_single_layer()) {
+    util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
+  }
+
+  opt_psi_stem_ = supply_psi_soil_scalar();
+
+  if (supply_psi_soil_scalar() > psi_crit) {
+    profit_ = profit_psi_stem_SOX(supply_psi_soil_scalar(),
+                                  supply_psi_soil_scalar());
+    lambda_emergent_ = lambda_SOX(supply_psi_soil_scalar(),
+                                  supply_psi_soil_scalar());
+    return;
+  }
+
+  double profit_opt = 0.0;
+  opt_psi_stem_ = util::maximise_over_closed_interval(
+      [&](double psi_stem) {
+        return profit_psi_stem_SOX(psi_stem, supply_psi_soil_scalar());
+      },
+      supply_psi_soil_scalar(), psi_crit, boundary_scan_n_, &profit_opt);
+  profit_ = profit_psi_stem_SOX(opt_psi_stem_, supply_psi_soil_scalar());
+  lambda_emergent_ = lambda_SOX(opt_psi_stem_, supply_psi_soil_scalar());
   (void)profit_opt;
 
     return;

@@ -560,6 +560,17 @@ Leaf:
     lambda_CMax:
       return_type: double
       args: [psi_stem: double, psi_upstream: double]
+    # --- the product-objective family (PLAN 7c) ------------------------------
+    # ⚠️ profit_psi_stem_SOX returns a PRODUCT, not a carbon profit.
+    sox_reduction:
+      return_type: double
+      args: [psi_stem: double]
+    profit_psi_stem_SOX:
+      return_type: double
+      args: [psi_stem: double, psi_upstream: double]
+    lambda_SOX:
+      return_type: double
+      args: [psi_stem: double, psi_upstream: double]
     lambda_TF24:
       return_type: double
       args: [psi_stem: double]
@@ -583,6 +594,9 @@ Leaf:
       return_type: void
       args: []
     optimise_psi_stem_CMax:
+      return_type: void
+      args: []
+    optimise_psi_stem_SOX:
       return_type: void
       args: []
 
