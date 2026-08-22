@@ -1007,7 +1007,7 @@ public:
   // Which cost curve a psi_stem derivative differentiates. The cost enters the
   // chain through exactly ONE quantity -- dC/dpsi_stem -- so this selects that
   // and nothing else.
-  enum class CostCurve { TF24, CF77, JS22, CMax };
+  enum class CostCurve { TF24, CF77, JS22, CMax, SOX, JW26 };
 
   // dprofit/dpsi_stem for the solvers that optimise psi_stem directly with the
   // upstream potential held fixed.
@@ -1044,6 +1044,31 @@ public:
   // the bound is itself a function of the traits (`psi_crit` is one), so
   // dpsi/dtheta is NOT zero there and the indirect term comes back. The returned
   // tag is what distinguishes the two cases; do not infer it from the value.
+  // --- ONE optimiser for every single-layer cost curve ----------------------
+  //
+  // These six differ in exactly three things: what they validate first, which
+  // profit function they evaluate, and which lambda they report. Everything else
+  // -- clearing the collar state, refusing a multi-layer supply, the no-flow
+  // branch, the closed-interval maximisation, writing profit_ and
+  // lambda_emergent_ -- is identical.
+  //
+  // ⚠️ THEY USED TO BE SIX NEAR-COPIES, 61-67% line-identical, and adding a curve
+  // meant pasting a seventh. The three varying pieces are `if constexpr` chains
+  // below, each written ONCE, and the body is written once. A new curve is now a
+  // `CostCurve` member plus one arm in each chain.
+  //
+  // ⚠️ ProfitMax is deliberately NOT one of them. It seeds |A|max and the
+  // conductance span before searching and writes its own normalised members, so
+  // its body is genuinely a different shape rather than a differently
+  // parameterised one. Forcing it in here would mean a fourth chain whose arms
+  // are empty for six of the seven.
+  template <CostCurve K> void optimise_psi_stem_single();
+  template <CostCurve K> void check_cost_parameters();
+  template <CostCurve K> double profit_psi_stem_for(double psi_stem,
+                                                    double psi_upstream);
+  template <CostCurve K> double lambda_for(double psi_stem,
+                                           double psi_upstream);
+
   template <CostCurve K>
   double evaluate_psi_stem(double target_psi_stem);
   // The energy-balance correction to the above, zero when the gate is off. Kept
@@ -2867,6 +2892,14 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
 template <Leaf::CostCurve K>
 inline double Leaf::dprofit_dpsi_stem(double psi_stem, double psi_upstream,
                                       bool* feasible) {
+  // ⚠️ ADDITIVE CURVES ONLY, and refused at COMPILE time rather than returning a
+  // number of the wrong kind. This returns dA/dpsi - dC/dpsi. A product objective's
+  // derivative is (dA/dpsi)*g + A*g' -- reachable, and PLAN 7c records that with the
+  // log link it is this same expression with the benefit term divided by A, but it is
+  // not what the body below computes and nothing consumes it yet.
+  static_assert(K != CostCurve::SOX && K != CostCurve::JW26,
+                "dprofit_dpsi_stem is written for A - C(psi); the product "
+                "objectives need (dA/dpsi)*g + A*g' -- see PLAN 7c");
   using AD = xad::fwd<double>::active_type;
   if (feasible != nullptr) {
     *feasible = false;
@@ -2982,41 +3015,16 @@ inline double Leaf::evaluate_psi_stem(double target_psi_stem) {
   if (!supply_is_single_layer()) {
     util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
   }
-  if constexpr (K == CostCurve::CF77) {
-    if (!std::isfinite(CF77_lambda_)) {
-      util::stop("evaluate_psi_stem needs CF77_lambda_ set for the Cowan-Farquhar "
-                 "cost: it is the PRESCRIBED marginal value of water in "
-                 "umol C (kg H2O)^-1 and is NA until you assign one.");
-    }
-  } else if constexpr (K == CostCurve::JS22) {
-    if (!std::isfinite(JS22_gamma) || JS22_gamma < 0.0) {
-      util::stop("evaluate_psi_stem needs a finite, non-negative JS22_gamma; got " +
-                 util::to_string(JS22_gamma));
-    }
-  } else if constexpr (K == CostCurve::CMax) {
-    if (!std::isfinite(CMax_a) || CMax_a < 0.0 || !std::isfinite(CMax_b)) {
-      util::stop("evaluate_psi_stem needs a finite, non-negative CMax_a and a "
-                 "finite CMax_b (which is SIGNED); got " +
-                 util::to_string(CMax_a) + ", " + util::to_string(CMax_b));
-    }
-  }
-
+  // Same three chains the optimiser uses, so a prescribed point and a solved one
+  // cannot disagree about what a curve requires or which objective it is.
+  check_cost_parameters<K>();
   const double psi_soil = supply_psi_soil_scalar();
 
   // Drier soil than the stem can reach is the no-flow case, and the target is
   // irrelevant to it: there is one feasible potential and this is it.
   if (psi_soil > psi_crit) {
     opt_psi_stem_ = psi_soil;
-    if constexpr (K == CostCurve::TF24) {
-      profit_ = profit_psi_stem_TF(psi_soil, psi_soil);
-    } else if constexpr (K == CostCurve::CF77) {
-      profit_ = profit_psi_stem_CF77(psi_soil, psi_soil);
-    } else if constexpr (K == CostCurve::JS22) {
-      profit_ = profit_psi_stem_JS22(psi_soil, psi_soil);
-    } else {
-      static_assert(K == CostCurve::CMax, "unhandled CostCurve");
-      profit_ = profit_psi_stem_CMax(psi_soil, psi_soil);
-    }
+    profit_ = profit_psi_stem_for<K>(psi_soil, psi_soil);
     operating_point_kind_ = OperatingPointKind::Prescribed;
     return profit_;
   }
@@ -3029,16 +3037,7 @@ inline double Leaf::evaluate_psi_stem(double target_psi_stem) {
   const double psi = std::min(std::max(target_psi_stem, psi_soil), psi_crit);
 
   opt_psi_stem_ = psi;
-  if constexpr (K == CostCurve::TF24) {
-    profit_ = profit_psi_stem_TF(psi, psi_soil);
-  } else if constexpr (K == CostCurve::CF77) {
-    profit_ = profit_psi_stem_CF77(psi, psi_soil);
-  } else if constexpr (K == CostCurve::JS22) {
-    profit_ = profit_psi_stem_JS22(psi, psi_soil);
-  } else {
-    static_assert(K == CostCurve::CMax, "unhandled CostCurve");
-    profit_ = profit_psi_stem_CMax(psi, psi_soil);
-  }
+  profit_ = profit_psi_stem_for<K>(psi, psi_soil);
   operating_point_kind_ = OperatingPointKind::Prescribed;
   return profit_;
 }
@@ -4482,40 +4481,144 @@ inline void Leaf::optimise_psi_stem_ProfitMax() {
   lambda_emergent_ = lambda_ProfitMax(opt_psi_stem_);
 }
 
-inline void Leaf::optimise_psi_stem_TF() {
+// --- the three things that vary, each in ONE place ---------------------------
+//
+// A new single-layer cost curve is a `CostCurve` member plus one arm in each of
+// these three, and nothing else. Every arm is explicit and the last asserts, so a
+// curve added to the enum and forgotten here is a compile error rather than a
+// silent fall-through to whichever arm happened to be the `else`.
 
-  // No root-collar operating point on this path.
+// What must be set before the search. TF24, SOX and JW26 have nothing: TF24's
+// parameters are traits with defaults, and the two product curves take no
+// parameter at all -- their `g` is built from the vulnerability curve and
+// `k_crit_fraction`.
+template <Leaf::CostCurve K>
+inline void Leaf::check_cost_parameters() {
+  if constexpr (K == CostCurve::CF77) {
+    // ⚠️ CF77_lambda_ IS AN INPUT AND HAS NO DEFAULT. It is the marginal value of
+    // water -- the one parameter this model is defined by -- and no model code
+    // supplies one, so a caller who has not set it is maximising a NaN objective.
+    // The potential that comes back from that is a property of the bracket rather
+    // than of the leaf, and it looks entirely plausible. Refuse instead.
+    if (!std::isfinite(CF77_lambda_)) {
+      util::stop("optimise_psi_stem_CF77 needs CF77_lambda_ set: it is the "
+                 "PRESCRIBED marginal value of water in umol C (kg H2O)^-1, NA "
+                 "until you assign one, and never set by set_physiology or "
+                 "set_traits.");
+    }
+  } else if constexpr (K == CostCurve::JS22) {
+    // A trait with a default, so an unset one is a programming error rather than
+    // a caller omission -- but still checked, because a NaN here maximises a NaN
+    // objective and returns a bracket property that looks like an operating point.
+    if (!std::isfinite(JS22_gamma) || JS22_gamma < 0.0) {
+      util::stop("JS22_gamma must be a finite, non-negative hydraulic unit cost "
+                 "in umol C m^-2 s^-1 MPa^-2; got " + util::to_string(JS22_gamma));
+    }
+  } else if constexpr (K == CostCurve::CMax) {
+    // ⚠️ CMax_a only gets the sign check. CMax_b is SIGNED -- negative in the
+    // paper's own convention, see the member -- so rejecting a negative would
+    // reject the literature.
+    if (!std::isfinite(CMax_a) || CMax_a < 0.0) {
+      util::stop("CMax_a must be a finite, non-negative slope for the CMax "
+                 "marginal cost in umol C m^-2 s^-1 MPa^-2; got " +
+                 util::to_string(CMax_a));
+    }
+    if (!std::isfinite(CMax_b)) {
+      util::stop("CMax_b must be finite; got " + util::to_string(CMax_b));
+    }
+  } else {
+    static_assert(K == CostCurve::TF24 || K == CostCurve::SOX ||
+                  K == CostCurve::JW26, "unhandled CostCurve");
+  }
+}
+
+
+// Which objective. ⚠️ These are NOT all the same kind of number: the first four
+// are carbon and the last two are products (see `profit_psi_stem_SOX`). That is
+// already true of `profit_` across the optimisers and is not introduced here.
+template <Leaf::CostCurve K>
+inline double Leaf::profit_psi_stem_for(double psi_stem, double psi_upstream) {
+  if constexpr (K == CostCurve::TF24) {
+    return profit_psi_stem_TF(psi_stem, psi_upstream);
+  } else if constexpr (K == CostCurve::CF77) {
+    return profit_psi_stem_CF77(psi_stem, psi_upstream);
+  } else if constexpr (K == CostCurve::JS22) {
+    return profit_psi_stem_JS22(psi_stem, psi_upstream);
+  } else if constexpr (K == CostCurve::CMax) {
+    return profit_psi_stem_CMax(psi_stem, psi_upstream);
+  } else if constexpr (K == CostCurve::SOX) {
+    return profit_psi_stem_SOX(psi_stem, psi_upstream);
+  } else {
+    static_assert(K == CostCurve::JW26, "unhandled CostCurve");
+    return profit_psi_stem_JW26(psi_stem, psi_upstream);
+  }
+}
+
+
+// Which lambda to report. ⚠️ TF24's reads psi_stem ALONE where the rest need both
+// potentials -- JS22 because its cost is a function of the drop, the others
+// because E is measured from the upstream one. Normalised to two arguments here so
+// the body below never has to know which. CF77's is exact by construction rather
+// than derived: its cost is lambda*E, so dC/dpsi over dE/dpsi is lambda
+// identically.
+template <Leaf::CostCurve K>
+inline double Leaf::lambda_for(double psi_stem, double psi_upstream) {
+  if constexpr (K == CostCurve::TF24) {
+    (void)psi_upstream;
+    return lambda_TF24(psi_stem);
+  } else if constexpr (K == CostCurve::CF77) {
+    (void)psi_stem;
+    (void)psi_upstream;
+    return CF77_lambda_;
+  } else if constexpr (K == CostCurve::JS22) {
+    return lambda_JS22(psi_stem, psi_upstream);
+  } else if constexpr (K == CostCurve::CMax) {
+    return lambda_CMax(psi_stem, psi_upstream);
+  } else if constexpr (K == CostCurve::SOX) {
+    return lambda_SOX(psi_stem, psi_upstream);
+  } else {
+    static_assert(K == CostCurve::JW26, "unhandled CostCurve");
+    return lambda_JW26(psi_stem, psi_upstream);
+  }
+}
+
+
+// And the body, written once. Maximises over the CLOSED interval for the reason
+// hazard 11 gives: the objective is highest at full closure whenever water is
+// priced above what the carbon is worth, and a bracketing search that steps in
+// from the bounds can never return one.
+template <Leaf::CostCurve K>
+inline void Leaf::optimise_psi_stem_single() {
   clear_collar_solve_state();
 
   if (!supply_is_single_layer()) {
     util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
   }
+  check_cost_parameters<K>();
 
-  opt_psi_stem_ = supply_psi_soil_scalar();
+  const double psi_soil = supply_psi_soil_scalar();
+  opt_psi_stem_ = psi_soil;
 
-  if (supply_psi_soil_scalar() > psi_crit){
-    profit_ = profit_psi_stem_TF(supply_psi_soil_scalar(), supply_psi_soil_scalar());
-    lambda_emergent_ = lambda_TF24(supply_psi_soil_scalar());
+  // Drier soil than the stem can reach: one feasible potential, and this is it.
+  if (psi_soil > psi_crit) {
+    profit_ = profit_psi_stem_for<K>(psi_soil, psi_soil);
+    lambda_emergent_ = lambda_for<K>(psi_soil, psi_soil);
     return;
   }
 
-  // Maximise carbon profit over the CLOSED interval [psi_soil, psi_crit]. The
-  // TF24 objective is maximised at full closure wherever the leaf should be
-  // shut, so the endpoints have to be candidates; see
-  // maximise_over_closed_interval. The multi-layer solver reaches the same
-  // conclusion by a different route -- maximise_profit_over_collar tests for a
-  // pinned optimum explicitly.
-    double profit_opt = 0.0;
-    opt_psi_stem_ = util::maximise_over_closed_interval(
-        [&](double psi_stem) { return profit_psi_stem_TF(psi_stem, supply_psi_soil_scalar()); },
-        supply_psi_soil_scalar(), psi_crit, boundary_scan_n_, &profit_opt);
-    // Re-evaluate so the reported fields and the returned potential are one
-    // operating point.
-    profit_ = profit_psi_stem_TF(opt_psi_stem_, supply_psi_soil_scalar());
-    lambda_emergent_ = lambda_TF24(opt_psi_stem_);
-    (void)profit_opt;
-    return;
-  }
+  double profit_opt = 0.0;
+  opt_psi_stem_ = util::maximise_over_closed_interval(
+      [&](double psi_stem) { return profit_psi_stem_for<K>(psi_stem, psi_soil); },
+      psi_soil, psi_crit, boundary_scan_n_, &profit_opt);
+  profit_ = profit_psi_stem_for<K>(opt_psi_stem_, psi_soil);
+  lambda_emergent_ = lambda_for<K>(opt_psi_stem_, psi_soil);
+  (void)profit_opt;
+}
+
+
+inline void Leaf::optimise_psi_stem_TF() {
+  optimise_psi_stem_single<CostCurve::TF24>();
+}
 
 
 // Cowan & Farquhar (1977). Same shape as optimise_psi_stem_TF -- the objective is
@@ -4525,48 +4628,8 @@ inline void Leaf::optimise_psi_stem_TF() {
 // every reported field describes that point. Profit there is `-R_d`, since E is
 // exactly zero and so is the cost.
 inline void Leaf::optimise_psi_stem_CF77() {
-
-  clear_collar_solve_state();
-
-  if (!supply_is_single_layer()) {
-    util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
-  }
-
-  // ⚠️ CF77_lambda_ IS AN INPUT HERE AND HAS NO DEFAULT. It is the marginal value of
-  // water -- the one parameter this model is defined by -- and no model code
-  // supplies one, so a caller who has not set it is maximising a NaN objective.
-  // The potential that comes back from that is a property of the bracket rather
-  // than of the leaf, and it looks entirely plausible. Refuse instead.
-  if (!std::isfinite(CF77_lambda_)) {
-    util::stop("optimise_psi_stem_CF77 needs CF77_lambda_ set: it is the "
-               "PRESCRIBED marginal value of water in umol C (kg H2O)^-1, NA until "
-               "you assign one, and never set by set_physiology or set_traits.");
-  }
-
-  opt_psi_stem_ = supply_psi_soil_scalar();
-
-  if (supply_psi_soil_scalar() > psi_crit) {
-    profit_ = profit_psi_stem_CF77(supply_psi_soil_scalar(),
-                                            supply_psi_soil_scalar());
-    lambda_emergent_ = CF77_lambda_;
-    return;
-  }
-
-  double profit_opt = 0.0;
-  opt_psi_stem_ = util::maximise_over_closed_interval(
-      [&](double psi_stem) {
-        return profit_psi_stem_CF77(psi_stem, supply_psi_soil_scalar());
-      },
-      supply_psi_soil_scalar(), psi_crit, boundary_scan_n_, &profit_opt);
-  profit_ = profit_psi_stem_CF77(opt_psi_stem_, supply_psi_soil_scalar());
-  // Exact by construction: the cost is CF77_lambda_*E, so dC/dpsi = CF77_lambda_*(dE/dpsi)
-  // and the ratio is CF77_lambda_ identically. Reported anyway, so a caller reading
-  // this field does not have to know which curve produced the point.
-  lambda_emergent_ = CF77_lambda_;
-  (void)profit_opt;
-
-    return;
-  }
+  optimise_psi_stem_single<CostCurve::CF77>();
+}
 
 
 // Joshi & Stocker (2022)'s hydraulic term. The same closed-interval maximisation as
@@ -4597,46 +4660,8 @@ inline void Leaf::optimise_psi_stem_CF77() {
 // the dominant pinned class (24 rows at 25 C, 80 at 40 C over the golden grid), so
 // a fit on this curve should reach the exact-gradient route more often.
 inline void Leaf::optimise_psi_stem_JS22() {
-
-  clear_collar_solve_state();
-
-  if (!supply_is_single_layer()) {
-    util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
-  }
-
-  // Unlike CF77_lambda_, this is a TRAIT with a default, so an unset one is a
-  // programming error rather than a caller omission -- but it is still checked,
-  // because a NaN here maximises a NaN objective and returns a bracket property
-  // that looks like an operating point. Same reasoning as R_d_25's check.
-  if (!std::isfinite(JS22_gamma) || JS22_gamma < 0.0) {
-    util::stop("JS22_gamma must be a finite, non-negative hydraulic unit cost in "
-               "umol C m^-2 s^-1 MPa^-2; got " + util::to_string(JS22_gamma));
-  }
-
-  opt_psi_stem_ = supply_psi_soil_scalar();
-
-  if (supply_psi_soil_scalar() > psi_crit) {
-    profit_ = profit_psi_stem_JS22(supply_psi_soil_scalar(),
-                                   supply_psi_soil_scalar());
-    // Zero by construction rather than by convention: the drop is zero, so the
-    // marginal cost is too.
-    lambda_emergent_ = lambda_JS22(supply_psi_soil_scalar(),
-                                   supply_psi_soil_scalar());
-    return;
-  }
-
-  double profit_opt = 0.0;
-  opt_psi_stem_ = util::maximise_over_closed_interval(
-      [&](double psi_stem) {
-        return profit_psi_stem_JS22(psi_stem, supply_psi_soil_scalar());
-      },
-      supply_psi_soil_scalar(), psi_crit, boundary_scan_n_, &profit_opt);
-  profit_ = profit_psi_stem_JS22(opt_psi_stem_, supply_psi_soil_scalar());
-  lambda_emergent_ = lambda_JS22(opt_psi_stem_, supply_psi_soil_scalar());
-  (void)profit_opt;
-
-    return;
-  }
+  optimise_psi_stem_single<CostCurve::JS22>();
+}
 
 
 // Wolf/Anderegg CMax. Same closed-interval maximisation as the other three.
@@ -4656,45 +4681,8 @@ inline void Leaf::optimise_psi_stem_JS22() {
 // never pins. Compare against the bound with the step-in tolerance, or read the
 // gradient's sign at the bound.
 inline void Leaf::optimise_psi_stem_CMax() {
-
-  clear_collar_solve_state();
-
-  if (!supply_is_single_layer()) {
-    util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
-  }
-
-  // ⚠️ `CMax_a` only. `CMax_b` is SIGNED -- negative in the paper's own convention,
-  // see the member -- so a sign check on it would reject the literature.
-  if (!std::isfinite(CMax_a) || CMax_a < 0.0) {
-    util::stop("CMax_a must be a finite, non-negative slope for the CMax marginal "
-               "cost in umol C m^-2 s^-1 MPa^-2; got " + util::to_string(CMax_a));
-  }
-  if (!std::isfinite(CMax_b)) {
-    util::stop("CMax_b must be finite; got " + util::to_string(CMax_b));
-  }
-
-  opt_psi_stem_ = supply_psi_soil_scalar();
-
-  if (supply_psi_soil_scalar() > psi_crit) {
-    profit_ = profit_psi_stem_CMax(supply_psi_soil_scalar(),
-                                   supply_psi_soil_scalar());
-    lambda_emergent_ = lambda_CMax(supply_psi_soil_scalar(),
-                                   supply_psi_soil_scalar());
-    return;
-  }
-
-  double profit_opt = 0.0;
-  opt_psi_stem_ = util::maximise_over_closed_interval(
-      [&](double psi_stem) {
-        return profit_psi_stem_CMax(psi_stem, supply_psi_soil_scalar());
-      },
-      supply_psi_soil_scalar(), psi_crit, boundary_scan_n_, &profit_opt);
-  profit_ = profit_psi_stem_CMax(opt_psi_stem_, supply_psi_soil_scalar());
-  lambda_emergent_ = lambda_CMax(opt_psi_stem_, supply_psi_soil_scalar());
-  (void)profit_opt;
-
-    return;
-  }
+  optimise_psi_stem_single<CostCurve::CMax>();
+}
 
 
 // Eller's SOX, the first PRODUCT objective here. Same closed-interval maximisation
@@ -4747,35 +4735,8 @@ inline void Leaf::optimise_psi_stem_CMax() {
 // the wrong number") applies to `profit_` too and is not enforced there. Worth a
 // separate field per objective kind; not worth pretending this curve introduced it.
 inline void Leaf::optimise_psi_stem_SOX() {
-
-  clear_collar_solve_state();
-
-  if (!supply_is_single_layer()) {
-    util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
-  }
-
-  opt_psi_stem_ = supply_psi_soil_scalar();
-
-  if (supply_psi_soil_scalar() > psi_crit) {
-    profit_ = profit_psi_stem_SOX(supply_psi_soil_scalar(),
-                                  supply_psi_soil_scalar());
-    lambda_emergent_ = lambda_SOX(supply_psi_soil_scalar(),
-                                  supply_psi_soil_scalar());
-    return;
-  }
-
-  double profit_opt = 0.0;
-  opt_psi_stem_ = util::maximise_over_closed_interval(
-      [&](double psi_stem) {
-        return profit_psi_stem_SOX(psi_stem, supply_psi_soil_scalar());
-      },
-      supply_psi_soil_scalar(), psi_crit, boundary_scan_n_, &profit_opt);
-  profit_ = profit_psi_stem_SOX(opt_psi_stem_, supply_psi_soil_scalar());
-  lambda_emergent_ = lambda_SOX(opt_psi_stem_, supply_psi_soil_scalar());
-  (void)profit_opt;
-
-    return;
-  }
+  optimise_psi_stem_single<CostCurve::SOX>();
+}
 
 
 // Jones et al. (2026), the same product objective with a LINEAR reduction factor.
@@ -4789,35 +4750,8 @@ inline void Leaf::optimise_psi_stem_SOX() {
 // is what makes it comparable with SOX -- the two g are interpolations between the
 // same two anchors -- and is NOT a reproduction of the paper.
 inline void Leaf::optimise_psi_stem_JW26() {
-
-  clear_collar_solve_state();
-
-  if (!supply_is_single_layer()) {
-    util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
-  }
-
-  opt_psi_stem_ = supply_psi_soil_scalar();
-
-  if (supply_psi_soil_scalar() > psi_crit) {
-    profit_ = profit_psi_stem_JW26(supply_psi_soil_scalar(),
-                                   supply_psi_soil_scalar());
-    lambda_emergent_ = lambda_JW26(supply_psi_soil_scalar(),
-                                   supply_psi_soil_scalar());
-    return;
-  }
-
-  double profit_opt = 0.0;
-  opt_psi_stem_ = util::maximise_over_closed_interval(
-      [&](double psi_stem) {
-        return profit_psi_stem_JW26(psi_stem, supply_psi_soil_scalar());
-      },
-      supply_psi_soil_scalar(), psi_crit, boundary_scan_n_, &profit_opt);
-  profit_ = profit_psi_stem_JW26(opt_psi_stem_, supply_psi_soil_scalar());
-  lambda_emergent_ = lambda_JW26(opt_psi_stem_, supply_psi_soil_scalar());
-  (void)profit_opt;
-
-    return;
-  }
+  optimise_psi_stem_single<CostCurve::JW26>();
+}
 
 // ===========================================================================
 // MEDLYN STOMATAL-CONDUCTANCE MODEL (from develop #450)

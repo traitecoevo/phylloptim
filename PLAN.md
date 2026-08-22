@@ -153,6 +153,16 @@ against which our λ(state) formulations can be checked rather than merely deriv
 That is a stronger check than #40's `plantecophys` comparison, which reaches only the
 Medlyn path, and it makes "apples-to-apples by construction" testable.
 
+### 7a-0. One optimiser body for every single-layer curve — LANDED
+
+The six single-layer entry points were six near-copies, 61-67% line-identical, and adding a curve meant pasting a seventh. That is what this item was supposed to prevent and it is what the first five commits of it did anyway.
+
+They are now one templated body over three `if constexpr` dispatch tables — `check_cost_parameters`, `profit_psi_stem_for`, `lambda_for` — each written once, each with every arm explicit and the last asserting, so a curve added to `CostCurve` and forgotten in a table is a compile error rather than a silent fall-through. `util::maximise_over_closed_interval` is called from ONE place where it was called from six. `evaluate_psi_stem` shares the same tables, so a prescribed point and a solved one cannot disagree about what a curve requires. Net −66 lines with more comment than before, and all 4608 golden optimiser rows **bit-identical** — which is the whole check for a refactor.
+
+⚠️ **ProfitMax is deliberately outside it.** It seeds |A|max and the conductance span before searching and writes its own normalised members, so its body is a different shape rather than a differently parameterised one. Forcing it in would mean a fourth table whose arms are empty for six of seven.
+
+⚠️ **This is not yet the unification this item actually asks for.** 7a's design is that **λ** is the pluggable thing, not the cost function — and `λ(state)` now exists for all seven curves while `dlambda_dpsi` exists for none. That derivative is exactly what the collar solve needs, so it is the same missing piece as the BLOCKER row above: the production path. Unifying the off-path optimisers was worth doing and does not substitute for it.
+
 ### 7a-i. Model-scoped parameters take the model's name as a prefix
 
 The trait vector partitions three ways, and only the model-scoped group is inconsistent — it uses both a bare name and a suffix:
