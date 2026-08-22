@@ -39,7 +39,7 @@ Also measured: **#119 made the single-layer solvers exact** (0 of 30 rows short 
 | Model-scoped parameter names | **Prefixed with the model's code name**, initials-plus-year where the paper has no name: `TF24_*`, `CF77_*`, `JS22_*`, `CMax_*` | ✅ landed |
 | λ in the gradient enumeration | **Appended one slot**, as `CF77_lambda_` rather than the `par_lambda` the original plan named -- the rename landed first | ✅ landed |
 | A parameter absent from the active model | **Refuses, naming the model** and which of the two axes -- supply path or active model -- ruled it out. Distinguishes "structurally not in this objective" (refuse) from "in the objective but inactive at this operating point" (zero + `status`) | ✅ landed |
-| ProfitMax's derived λ | **Not an available parameter** for it, and it has no gradient route at all: its normaliser comes from a scan whose argmax is not differentiable. `vcmax_25` and `jmax_25` stay partials at fixed λ | ✅ landed |
+| ProfitMax's derived λ | **Not an available parameter** for it: its normaliser comes from a scan whose argmax is not differentiable, so trait gradients are partials at fixed `\|A\|max`. It does have a gradient route — see the framework section — and `auto` differences the solve there | ✅ landed |
 
 ## The model space, as it now stands
 
@@ -149,51 +149,33 @@ The FD **converges onto the composite** and `−M/H` is flat across six decades.
 
 The plan already said this: *when finite-differencing anything computed through a root-find, sweep `h` and take the floor of the V*. A scan is worse than a root-find, so the rule binds harder, and the test now sweeps rather than trusting one step.
 
+## What else landed, in the order the plan listed it
+
+**λ into the gradient, and per-model availability.** `CF77_lambda_` appended, `gradient_par_names()` 17 → 18. `.gradient_available_pars()` takes `(single, model)` and refuses on either axis, naming which one ruled a parameter out. Two things this surfaced: the default `pars` was every slot in `theta` rather than every *available* one, so it offered a parameter it then refused; and the non-trait set is named once now, where three places had spelled it "the last two". Those positional tail writes were correct only while `kmax` and `resistance` were the final two columns in that order — appending λ would have written `kmax` into the new slot and `resistance` into `kmax`'s, with no length change to notice.
+
+**A gradient for every model, through one access point.** `leaf_gradient(model = )` and `leaf_gradient_batch(model = )` cover all eight routes, and the batch reproduces the single route **bit-for-bit** on every one. Both build the same `.gradient_route()` object, so they cannot disagree about which model a name selects or which step differencing its solve needs.
+
+**The (P50, c) converter, and the downstream duplicate retired.** `psi_at_plc()`, `weibull_s50()`, `weibull_p50_c()` and `weibull_p50_from_b()` are exported and round-tripped through every admissible pair, with `psi_at_plc` asserted against the model's own derived `psi_crit` and `stem_b` rather than a second copy of the formula.
+
+`leaf_calibration_test` moved onto them in the same pass (its `LEAF_PIN_REF` now names this branch): the four hand-written `psi_at_plc` copies are gone, and so is what they existed for — the `stop()` refusing to free `log_stem_b` and `log_stem_c` separately, and the two hand-written Jacobian rows through `psi_crit`. All three existed because `psi_crit` was a trait that project derived locally; the model derives it now, so keeping them would double-count a chain rule.
+
+⚠️ **The one trap in that migration**: their data carry Sabot's Weibull `b` and the model wants `P50`, which is *smaller* by `(ln 2)^(1/c)` — 0.87 at `c = 2.68`. A missed conversion is a plausible number ~15% out, and no function can detect it because both arguments are positive potentials in MPa. Every crossing goes through `weibull_p50_from_b()` for that reason.
+
+⚠️ **`S50` paired with a quantile other than P50 does not determine the curve.** `S50(c) = K·c·L^(1/c)/ψ_f` has an analytic minimum at `c = ln L`, so it is U-shaped and any slope above that minimum is matched by **two** curves. Found by the round trip failing with "no root in (0, 20]" — both bracket ends were positive because the root sat in a dip. Each branch is searched from the analytic turning point; the upper one is returned, because measured angiosperm stems sit at `c = 1.8–2.6` while the lower root lands at 0.57–0.88, and the other solution is reported rather than discarded.
+
 ## Open work
 
-Items 4, 5 and 6 have landed. What is left is the batch gradient route, the comment sweep, and the deferred first-order-condition polish -- which item 5 promoted from optional to load-bearing.
+Three things, and none of them is in the gradient.
 
-### Item 4 — λ into the gradient, and per-model availability — LANDED
+### The first-order-condition polish — promoted from optional to load-bearing
 
-Append `par_lambda` (17 → 18). Extend `.gradient_available_pars(single)` → `(single, model)` at `R/gradient.R:903`, which is already the single home for this rule and is consumed by both entry points and `print.leaf_batch`. Absent slots carry `NA` and are never read, exactly as `resistance` does today.
+⚠️ **A stem route reports `status == "pinned"` at a perfectly interior optimum, so `method = "auto"` differences the solve there.** Measured: the collar solve root-finds `dprofit == 0` and leaves stationarity at **1.15e-15**; the stem entry points scan a 64-point grid and refine the winning cell, leaving **2.2e-08 to 1.2e-06**. `stationarity_tol`'s 1e-08 default was measured in the empty band between the *collar* route's own two populations and does not transfer. The premise is untested on a stem route rather than failing there.
 
-**Partly landed**: the two positional tail writes in `.gradient_theta_matrix` are now name-based. They were `length(par_names)` and `length(par_names) - 1L`, correct only while `kmax` and `resistance` are the last two columns in that order — so appending λ would have written `kmax` into the new slot and `resistance` into `kmax`'s, with no length change to notice.
+A first-order-condition polish inside the winning cell would make the stem optima stationary, let `"auto"` use the composite, and — because it would also let the finite-difference arm use a fine step again — remove the need for the per-route `fd_step`. That is the same multi-start-FOC work the next section defers, and this is the concrete reason to do it. The test asserts today's classification, so the polish will fail it and say so.
 
-### Item 5 — differentiate any additive curve's optimum — LANDED, with one measured limitation
+### The comment sweep
 
-`leaf_gradient()` gains `model`. `"collar"` (the default, bit-identical) is the TF24 cost over the root-collar potential; `"TF24"`, `"CF77"`, `"JS22"` and `"CMax"` differentiate the corresponding **stem** optimum. Checked against differencing the solve on all four: agreement 5e-05 to 2e-03, which bounds the finite difference's error rather than the composite's. `CF77_lambda_` is differentiable, which is what item 4 appended it for.
-
-⚠️ **A stem route reports `status == "pinned"` at a perfectly interior optimum, so `method = "auto"` differences the solve.** Measured: the collar solve root-finds `dprofit == 0` and leaves stationarity at **1.15e-15**; the stem entry points scan a 64-point grid and refine the winning cell, leaving **2.2e-08 to 1.2e-06**. `stationarity_tol`'s 1e-08 default was measured in the empty band between the *collar* route's own two populations and does not transfer. The premise is untested on a stem route rather than failing there — `method = "ift"` gives numbers that agree with differencing the solve.
-
-**So the deferred FOC item is now load-bearing rather than optional.** A first-order-condition polish inside the winning cell would make the stem optima stationary and let `"auto"` use the composite. That is the same multi-start-FOC work the last section defers, and this is the concrete reason to do it. The test asserts today's classification, so the polish will fail it and say so.
-
-**The batch route is done too, which is what a fit uses.** `leaf_gradient_batch(model = )` takes the same route, built from the same `.gradient_route()` so the two entry points cannot disagree about which model a name selects. Verified where it counts: the batch reproduces `leaf_gradient()` **bit-for-bit** on all eight models over three observations each — worst difference 0.0e+00 — which is the standing R-versus-C++ contract holding through the new route rather than a tolerance. The collar arms of the six route helpers are textually unchanged, which is why the golden files did not move.
-
-⚠️ **`SOX` and `JW26` have no route.** They maximise `A * g(psi)`, so the derivative is `(dA/dpsi)*g + A*g'` rather than `dA/dpsi - dC/dpsi`. Refused by name. The plan's warning about the log link putting the residual in log units is still ahead, not behind: the first thing to bite was the *solver*, not the units.
-
-Keep the active-set classification and the envelope theorem untouched: they depend only on stationarity, which is the payoff of the FOC route.
-
-### Item 6 — the (P50, c) converter — LANDED; the downstream copies are not retired
-
-`psi_at_plc()`, `weibull_s50()` and `weibull_p50_c()` are exported, round-tripped through every admissible pair, and `psi_at_plc` is asserted against the model's own derived `psi_crit` and `stem_b`.
-
-⚠️ **`S50` paired with a quantile other than P50 does not determine the curve.** `S50(c) = K*c*L^(1/c)/psi_f` has an analytic minimum at `c = ln L`, so it is U-shaped and any slope above that minimum is matched by **two** curves. Found by the round trip failing with "no root in (0, 20]" — both bracket ends were positive because the root sat in a dip. Each branch is searched from the analytic turning point; the upper one is returned because measured angiosperm stems sit at `c = 1.8-2.6` while the lower root lands at 0.57-0.88, and the other solution is reported rather than discarded.
-
-⚠️ **The downstream copies are NOT retired, so the derivation still exists twice.** Published curves arrive as almost anything except `(P50, c)` — a `P88`, a `P95`, a `P50` plus a slope — and all of it inverts in closed form. For a remaining conductivity fraction `f`:
-
-$$P_f = P_{50}\big(\log_2(1/f)\big)^{1/c} \quad\Longleftrightarrow\quad P_{50} = P_f\big(\log_2(1/f)\big)^{-1/c}$$
-
-with `log₂(1/f)` = 1, 3.0589, 4.3219, 6.6439 for `f` = 0.50, 0.12, 0.05, 0.01. From any two quantiles both parameters follow, `c = ln(L₂/L₁)/ln(P_{f₂}/P_{f₁})`. And the slope at P50, the other commonly published form, is `S50 = 34.657·c/|P50|`.
-
-Ship one exported function taking any two of `{P50, P88, P95, P99, Px at a given x, S50, c}` and returning `(P50, c)`, plus the forward `psi_at_plc()`. Do **not** make S50 internal — it has P50 built into it by construction. Defaults and guards: `c = 2.0` for angiosperm stems, guard `c > 0`, warn below ~1 (usually a measurement artefact rather than a trait).
-
-⚠️ **The derivation currently exists twice.** `leaf_calibration_test` has four hand-written `psi_at_plc` copies (`01-leaf-predict.R:62` and `:154`, `03-analysis-steps.R:221`, `05-exact-gradient.R:99`, `08-unmeasured-traits.R:286`) plus its Jacobian rows and a `stop()` refusing to free `stem_b` and `stem_c` separately *because* `psi_crit` depended on both. Item 3 said to retire them in the same change and that did not happen. Retiring them is part of this item, or the model and its consumer disagree the first time either is edited.
-
-⚠️ **Sign convention.** Published `P50` is negative (−3.95 MPa); this package is positive magnitudes throughout, so `P50` here means `|P50|`.
-
-### Item 7 — the comment sweep
-
-Code, `README.md`, `.claude/CLAUDE.md`. A separate code-free change. `leaf_model.hpp` is now ~4400 lines of which over half are comments.
+Code, `README.md`, `.claude/CLAUDE.md`. A separate code-free change. `leaf_model.hpp` is now ~4500 lines of which over half are comments, and this branch added to that.
 
 **The test**: would this help a reader who never saw the previous version? If it only makes sense as a diff against something gone, it goes.
 
@@ -201,7 +183,11 @@ Code, `README.md`, `.claude/CLAUDE.md`. A separate code-free change. `leaf_model
 
 **Keep, rewritten in the present tense as a rule rather than a story** — contracts; hazards as standing rules rather than incident reports; measurements that inform a present decision (keep the number, drop the campaign); the reason for a non-obvious choice where it constrains future edits.
 
-⚠️ **Over-deletion is the risk.** Much of that mass is load-bearing hazard documentation with measurements attached — the two Weibull curves, the accumulator-width trap, the argmax-smoothness constraint. Those survive; only their history goes. Where a comment's only content is history, check first: if "X used to be Y and that broke Z" is the only record of Z, the replacement is "X must be Y because Z", not silence.
+⚠️ **Over-deletion is the risk.** Much of that mass is load-bearing hazard documentation with measurements attached — the two Weibull curves, the accumulator-width trap, the argmax-smoothness constraint, and now the fixed-size-array and swept-step traps below. Those survive; only their history goes. Where a comment's only content is history, check first: if "X used to be Y and that broke Z" is the only record of Z, the replacement is "X must be Y because Z", not silence.
+
+### plant
+
+Hazard 6 below. Four parameter names moved and one field is deleted; plant tracks this package's master, so the two have to land together.
 
 ## Deferred, with a number attached
 
