@@ -150,3 +150,19 @@ test_that("the result splices into leaf_traits() and reaches the model", {
   expect_equal(l$psi_crit, psi_at_plc(pars$P50, pars$c, 0.95))
   expect_equal(l$stem_b, pars$P50 / log(2)^(1 / pars$c))
 })
+
+test_that("b <-> P50 round-trips against the model's own derived stem_b", {
+  tr <- leaf_traits()
+  l <- leaf_model(tr)
+  # The model derives stem_b from stem_P50; this inverts it. Asserted against the
+  # object rather than against the formula, so the two cannot drift.
+  expect_equal(weibull_p50_from_b(l$stem_b, tr$stem_c), tr$stem_P50)
+  expect_equal(weibull_p50_from_b(l$root_b, tr$root_c), tr$root_P50)
+
+  # ⚠️ P50 < b always, so a swapped argument is plausible rather than an error.
+  # Pinned as a number so the size of that mistake is on record.
+  expect_lt(weibull_p50_from_b(3.898245, 2.680147), 3.898245)
+  expect_equal(weibull_p50_from_b(3.898245, 2.680147) / 3.898245,
+               log(2)^(1 / 2.680147))
+  expect_error(weibull_p50_from_b(-3.9, 2.68), "positive magnitude")
+})

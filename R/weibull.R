@@ -70,6 +70,36 @@ weibull_s50 <- function(P50, c) {
   .WEIBULL_S50_K * c / P50
 }
 
+##' Convert a Weibull scale parameter to P50
+##'
+##' `b` is the scale of the conventional form `exp(-(psi/b)^c)`; this package is
+##' parameterised on `P50` instead. The two are one substitution apart,
+##' `b = P50 / (ln 2)^(1/c)`, so
+##'
+##' \deqn{P_{50} = b\,(\ln 2)^{1/c}}
+##'
+##' Exported because published fits and older datasets carry `b`, and the
+##' alternative is that conversion being pasted at each call site. `Leaf` reports
+##' `stem_b` and `root_b` as derived read-only accessors, which is the forward
+##' direction of the same identity.
+##'
+##' ⚠️ **`P50` is always SMALLER than `b`**, by a factor of `(ln 2)^(1/c)` — 0.87
+##' at `c = 2.68`. So passing a `b` where a `P50` is wanted, or the reverse, gives
+##' a plausible number roughly 15% out rather than an error. Neither function can
+##' detect it: both arguments are positive potentials in MPa.
+##'
+##' @param b scale parameter of the Weibull curve, MPa as a positive magnitude
+##' @inheritParams psi_at_plc
+##' @return `P50`, MPa as a positive magnitude.
+##' @seealso [weibull_p50_c()], [psi_at_plc()]
+##' @examples
+##' weibull_p50_from_b(3.898245, 2.680147)   # the package default, 3.4
+##' @export
+weibull_p50_from_b <- function(b, c) {
+  .weibull_check_p50_c(b, c)
+  b * log(2)^(1 / c)
+}
+
 ##' Recover (P50, c) from any two published quantities
 ##'
 ##' A vulnerability curve has two parameters, so **any two** of the quantities
