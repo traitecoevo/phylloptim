@@ -475,13 +475,12 @@ int compare(Tolerance tol) {
 // ⚠️ THIS FILE RECORDS TODAY'S BEHAVIOUR, INCLUDING ITS KNOWN DEFECTS, ON
 // PURPOSE. Do not read a row as a statement about what the model SHOULD do.
 // Specifically recorded here as-is:
-//   * three different degenerate conventions -- `optimise_psi_stem_Sperry`
-//     writes profit_ = 0 and leaves ci_/assim_/hydraulic_cost_ stale,
-//     `_TF` evaluates the real objective at the closed point, `_ProfitMax`
-//     zeroes seven fields;
-//   * `hydraulic_cost_` in CARBON units after `_TF` and CONDUCTANCE units after
-//     `_Sperry`, and STALE after `_ProfitMax`, which does not write it;
-//   * `lambda_` as an input to `_Sperry` and an output of `_ProfitMax`.
+//   * two different degenerate conventions -- `_TF` and `_CowanFarquhar`
+//     evaluate the real objective at the closed point, `_ProfitMax` zeroes seven
+//     fields instead;
+//   * `hydraulic_cost_` written in carbon units by `_TF` and `_CowanFarquhar`
+//     and left STALE by `_ProfitMax`, which does not write it;
+//   * `lambda_` as a caller input that `_ProfitMax` overwrites.
 //
 // ⚠️ ADDING A SOLVER IS AN ADDITION IN THE "fresh" PASS AND NOT IN THE "reuse"
 // ONE, so check the two separately when regenerating. The reuse pass drives one
@@ -526,22 +525,18 @@ const double kPoison = -12345.0;
 // Fixed rather than taken from a prior ProfitMax solve: an ordering dependence is
 // exactly what this file is for detecting, not something to bake into it.
 //
-// ⚠️ TWO VALUES, BECAUSE THEY ARE DIFFERENT QUANTITIES. The Sperry curve's cost
-// is a CONDUCTANCE loss, so its multiplier is umol C MPa (kg H2O)^-1; the
-// Cowan-Farquhar cost is transpiration, so its multiplier is umol C (kg H2O)^-1.
-// Feeding one curve the other's number is dimensionally wrong, and at these
-// drivers it also pins the optimum against a bound, where the row records the
-// bracket rather than the model.
-const double kLambdaPrescribed = 30.0;
+// ⚠️ ITS SCALE IS SET BY THE LEAF, not chosen freely: lambda is umol C per kg of
+// water, and at these drivers the leaf's own marginal cost of water runs 9e4 to
+// 3e5. A value far outside that band pins the optimum against a bound, where the
+// row records the bracket rather than the model.
 const double kLambdaCowanFarquhar = 1.5e5;
 
-enum class Solver { TF, Sperry, ProfitMax, CowanFarquhar, Collar };
+enum class Solver { TF, ProfitMax, CowanFarquhar, Collar };
 enum class Topology { Single, Multi1, Multi3 };
 
 const char *solver_name(Solver s) {
   switch (s) {
     case Solver::TF:            return "TF";
-    case Solver::Sperry:        return "Sperry";
     case Solver::ProfitMax:     return "ProfitMax";
     case Solver::CowanFarquhar: return "CowanFarquhar";
     case Solver::Collar:        return "collar";
@@ -656,8 +651,6 @@ void blank_outputs(OptRow &r) {
 void dispatch(phylloptim::Leaf &l, Solver s) {
   switch (s) {
     case Solver::TF:        l.optimise_psi_stem_TF();        break;
-    case Solver::Sperry:    l.lambda_ = kLambdaPrescribed;
-                            l.optimise_psi_stem_Sperry();    break;
     case Solver::ProfitMax: l.optimise_psi_stem_ProfitMax(); break;
     case Solver::CowanFarquhar:
                             l.lambda_ = kLambdaCowanFarquhar;
@@ -690,7 +683,7 @@ OptRow solve_one(Solver s, Topology t, double psi_soil, double ppfd,
 const double kOptPsiSoils[] = {0.5, 1.0, 2.0, 3.0, 4.0, 6.0};
 const double kOptTemps[] = {25.0, 40.0, 50.0};
 const double kOptPPFDs[] = {0.0, 1500.0};
-const Solver kSolvers[] = {Solver::TF, Solver::Sperry, Solver::ProfitMax,
+const Solver kSolvers[] = {Solver::TF, Solver::ProfitMax,
                            Solver::CowanFarquhar, Solver::Collar};
 const Topology kTopologies[] = {Topology::Single, Topology::Multi1,
                                 Topology::Multi3};
@@ -956,7 +949,7 @@ int compare_optima(Tolerance tol) {
 // lifted or added, and it costs nothing to look at.
 void report_optima_shape(const std::vector<OptRow> &rows) {
   int threw = 0;
-  int by_solver_threw[5] = {0, 0, 0, 0, 0};
+  int by_solver_threw[4] = {0, 0, 0, 0};
   int poisoned = 0;
   for (const OptRow &r : rows) {
     if (std::strcmp(r.status, "threw") == 0) {
@@ -974,7 +967,7 @@ void report_optima_shape(const std::vector<OptRow> &rows) {
     }
   }
   printf("  %zu rows: %d refused", rows.size(), threw);
-  for (int s = 0; s < 5; ++s) {
+  for (int s = 0; s < 4; ++s) {
     if (by_solver_threw[s] != 0) {
       printf(" (%s %d)", solver_name(static_cast<Solver>(s)),
              by_solver_threw[s]);

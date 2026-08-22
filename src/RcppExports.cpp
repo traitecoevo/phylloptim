@@ -403,19 +403,6 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// Leaf__hydraulic_cost_Sperry
-double Leaf__hydraulic_cost_Sperry(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem, double psi_upstream);
-RcppExport SEXP _phylloptim_Leaf__hydraulic_cost_Sperry(SEXP obj_SEXP, SEXP psi_stemSEXP, SEXP psi_upstreamSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
-    Rcpp::traits::input_parameter< double >::type psi_stem(psi_stemSEXP);
-    Rcpp::traits::input_parameter< double >::type psi_upstream(psi_upstreamSEXP);
-    rcpp_result_gen = Rcpp::wrap(Leaf__hydraulic_cost_Sperry(obj_, psi_stem, psi_upstream));
-    return rcpp_result_gen;
-END_RCPP
-}
 // Leaf__hydraulic_cost_TF
 double Leaf__hydraulic_cost_TF(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem);
 RcppExport SEXP _phylloptim_Leaf__hydraulic_cost_TF(SEXP obj_SEXP, SEXP psi_stemSEXP) {
@@ -438,19 +425,6 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type psi_stem(psi_stemSEXP);
     Rcpp::traits::input_parameter< double >::type psi_upstream(psi_upstreamSEXP);
     rcpp_result_gen = Rcpp::wrap(Leaf__hydraulic_cost_CowanFarquhar(obj_, psi_stem, psi_upstream));
-    return rcpp_result_gen;
-END_RCPP
-}
-// Leaf__profit_psi_stem_Sperry
-double Leaf__profit_psi_stem_Sperry(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem, double psi_upstream);
-RcppExport SEXP _phylloptim_Leaf__profit_psi_stem_Sperry(SEXP obj_SEXP, SEXP psi_stemSEXP, SEXP psi_upstreamSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
-    Rcpp::traits::input_parameter< double >::type psi_stem(psi_stemSEXP);
-    Rcpp::traits::input_parameter< double >::type psi_upstream(psi_upstreamSEXP);
-    rcpp_result_gen = Rcpp::wrap(Leaf__profit_psi_stem_Sperry(obj_, psi_stem, psi_upstream));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -490,16 +464,6 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type psi_stem(psi_stemSEXP);
     rcpp_result_gen = Rcpp::wrap(Leaf__lambda_TF24(obj_, psi_stem));
     return rcpp_result_gen;
-END_RCPP
-}
-// Leaf__optimise_psi_stem_Sperry
-void Leaf__optimise_psi_stem_Sperry(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
-RcppExport SEXP _phylloptim_Leaf__optimise_psi_stem_Sperry(SEXP obj_SEXP) {
-BEGIN_RCPP
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
-    Leaf__optimise_psi_stem_Sperry(obj_);
-    return R_NilValue;
 END_RCPP
 }
 // Leaf__optimise_psi_stem_CowanFarquhar
@@ -2770,14 +2734,11 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__dprofit_droot_collar_psi", (DL_FUNC) &_phylloptim_Leaf__dprofit_droot_collar_psi, 2},
     {"_phylloptim_Leaf__dprofit_droot_collar_psi_checked", (DL_FUNC) &_phylloptim_Leaf__dprofit_droot_collar_psi_checked, 2},
     {"_phylloptim_Leaf__psi_stem_to_ci", (DL_FUNC) &_phylloptim_Leaf__psi_stem_to_ci, 3},
-    {"_phylloptim_Leaf__hydraulic_cost_Sperry", (DL_FUNC) &_phylloptim_Leaf__hydraulic_cost_Sperry, 3},
     {"_phylloptim_Leaf__hydraulic_cost_TF", (DL_FUNC) &_phylloptim_Leaf__hydraulic_cost_TF, 2},
     {"_phylloptim_Leaf__hydraulic_cost_CowanFarquhar", (DL_FUNC) &_phylloptim_Leaf__hydraulic_cost_CowanFarquhar, 3},
-    {"_phylloptim_Leaf__profit_psi_stem_Sperry", (DL_FUNC) &_phylloptim_Leaf__profit_psi_stem_Sperry, 3},
     {"_phylloptim_Leaf__profit_psi_stem_TF", (DL_FUNC) &_phylloptim_Leaf__profit_psi_stem_TF, 3},
     {"_phylloptim_Leaf__profit_psi_stem_CowanFarquhar", (DL_FUNC) &_phylloptim_Leaf__profit_psi_stem_CowanFarquhar, 3},
     {"_phylloptim_Leaf__lambda_TF24", (DL_FUNC) &_phylloptim_Leaf__lambda_TF24, 2},
-    {"_phylloptim_Leaf__optimise_psi_stem_Sperry", (DL_FUNC) &_phylloptim_Leaf__optimise_psi_stem_Sperry, 1},
     {"_phylloptim_Leaf__optimise_psi_stem_CowanFarquhar", (DL_FUNC) &_phylloptim_Leaf__optimise_psi_stem_CowanFarquhar, 1},
     {"_phylloptim_Leaf__thermal_cost_at", (DL_FUNC) &_phylloptim_Leaf__thermal_cost_at, 2},
     {"_phylloptim_Leaf__prepare_profitmax", (DL_FUNC) &_phylloptim_Leaf__prepare_profitmax, 1},

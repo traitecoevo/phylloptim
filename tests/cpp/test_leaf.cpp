@@ -3283,10 +3283,10 @@ void test_set_traits_matches_a_fresh_leaf() {
   }
 }
 
-// A prescribed `lambda_` survives everything that is not a caller writing to it
-// (#96). It is Sperry's marginal water cost, an INPUT, and it used to be cleared
-// by setup_clean_leaf() -- so whether a sweep kept it depended on which of two
-// interchangeable-looking calls came next, and neither warned.
+// A prescribed `lambda_` survives everything that is not a caller writing to it.
+// It is the Cowan-Farquhar marginal value of water, an INPUT, so a re-driving call
+// that cleared it would make whether a sweep kept its price depend on which of two
+// interchangeable-looking calls came next.
 //
 // ⚠️ The two arms are the point, not the pair of assertions. `set_drivers` always
 // kept the value and `set_traits` always lost it; asserting only one arm passes
@@ -3792,31 +3792,61 @@ phylloptim::Leaf make_single_leaf(const Drivers &d, double psi_soil,
 // older `A - lambda*cost` form are the same function up to a positive scale, so
 // they share an argmax when lambda = |A|max/(k_soil - kcrit). Everything the
 // Sicangco et al. (2026) replication does rests on it.
-void test_profitmax_matches_the_lambda_form() {
-  printf("ProfitMax: the normalised objective and the lambda form agree\n");
+// The normalised objective IS a constant-lambda objective, up to a positive
+// scale. Asserted as the pointwise identity
+//
+//   A_max * ProfitMax(psi) + A_max * TC  ==  A(psi) - lambda* (k(psi_s) - k(psi))
+//
+// rather than by comparing two argmaxes. That is both tighter -- the identity
+// holds to rounding, where two searches agree only to their bracket width -- and
+// stronger, since a positive affine map preserves the argmax, so the identity
+// implies the argmax claim while the converse does not.
+//
+// The right-hand side is built from `assim_colimited_` and
+// `proportion_of_conductivity`, not from the normalisers ProfitMax cached, so the
+// two sides do not share their arithmetic.
+void test_profitmax_is_a_constant_lambda_objective() {
+  printf("ProfitMax is the constant-lambda objective, up to a positive scale\n");
   Drivers d;
   d.PPFD = 1500.0;
+  double worst = 0.0;
+  int points = 0;
 
   for (double psi_soil : {0.5, 2.0}) {
     for (double t : {25.0, 40.0}) {
       d.leaf_temp = t;
       phylloptim::Leaf l = make_single_leaf(d, psi_soil);
+      l.prepare_profitmax();
+      const double A_max = l.profitmax_A_max_, k_span = l.profitmax_k_span_;
+      if (!(A_max > 0.0) || !(k_span > 0.0)) continue;
+      const double lambda_star = A_max / k_span;
+      const double k_soil =
+          l.leaf_specific_conductance_max_ *
+          l.proportion_of_conductivity(psi_soil);
 
-      l.optimise_psi_stem_ProfitMax();
-      const double psi_pm = l.opt_psi_stem_;
-      const double lambda_star = l.lambda_;
+      for (double frac : {0.2, 0.4, 0.6, 0.8}) {
+        const double psi = psi_soil + frac * (l.psi_crit - psi_soil);
+        const double lhs_norm = l.profit_psi_stem_ProfitMax(psi, psi_soil);
+        // Read AFTER the call: these describe the point just evaluated.
+        const double A = l.assim_colimited_, TC = l.thermal_cost_;
+        const double k =
+            l.leaf_specific_conductance_max_ * l.proportion_of_conductivity(psi);
+
+        const double lhs = A_max * lhs_norm + A_max * TC;
+        const double rhs = A - lambda_star * (k_soil - k);
+        const double scale = std::max(std::abs(lhs), 1.0);
+        worst = std::max(worst, std::abs(lhs - rhs) / scale);
+        ++points;
+        near(lhs / scale, rhs / scale, 1e-12,
+             "the identity holds at frac=" + std::to_string(frac) +
+                 " psi_soil=" + std::to_string(psi_soil));
+      }
       ok(std::isfinite(lambda_star) && lambda_star > 0.0,
-         "ProfitMax reports the equivalent lambda");
-
-      l.lambda_ = lambda_star;
-      l.optimise_psi_stem_Sperry();
-
-      // Both are Brent searches terminating on bracket width GSS_tol_abs, so
-      // agreement to that scale is the most that can be asked of them.
-      near(psi_pm, l.opt_psi_stem_, 5.0e-3,
-           "the two objectives find the same collar potential");
+         "and the reported lambda is finite and positive");
     }
   }
+  printf("    %d points | worst relative departure from the identity: %.3e\n",
+         points, worst);
 }
 
 void test_profitmax_normalisation() {
@@ -3950,37 +3980,22 @@ void test_single_layer_optimisers_clear_collar_state() {
      "while still writing its own transpiration");
 }
 
-void test_sperry_refuses_an_unset_lambda() {
-  printf("optimise_psi_stem_Sperry refuses an unset lambda\n");
+// `lambda_` is a caller INPUT -- the Cowan-Farquhar marginal value of water --
+// and ProfitMax OVERWRITES it with the value its own normalisation implies. So a
+// ProfitMax solve followed by a Cowan-Farquhar one prices water at ProfitMax's
+// number rather than the caller's, silently, because both are finite and
+// plausible. Asserted rather than left as a comment at the field, so that
+// splitting the field has to update this deliberately.
+void test_profitmax_overwrites_the_prescribed_lambda() {
+  printf("ProfitMax overwrites lambda_, which Cowan-Farquhar consumes\n");
   Drivers d;
-  phylloptim::Leaf l = make_single_leaf(d, 0.5);
-  ok(!std::isfinite(l.lambda_), "lambda_ starts unset");
-  bool threw = false;
-  try {
-    l.optimise_psi_stem_Sperry();
-  } catch (const std::exception &e) {
-    threw = true;
-    ok(std::string(e.what()).find("lambda_") != std::string::npos,
-       "and the message names lambda_");
-  }
-  ok(threw, "rather than searching a NaN objective");
-}
-
-// `lambda_` is an input to optimise_psi_stem_Sperry and an OUTPUT of
-// optimise_psi_stem_ProfitMax, which #93 introduced. Asserted rather than left as a
-// comment at the field, so that #114's eventual resolution has to update this
-// deliberately -- and so the ⚠️ in the Sperry guard about silently inheriting
-// ProfitMax's number is a checked statement rather than a plausible one.
-void test_profitmax_reports_its_own_lambda() {
-  printf("ProfitMax reports a lambda where Sperry consumes one\n");
-  Drivers d;
-  const double prescribed = 30.0;
+  const double prescribed = 1.5e5;
   phylloptim::Leaf l = make_single_leaf(d, 0.5);
   l.lambda_ = prescribed;
   l.optimise_psi_stem_ProfitMax();
   ok(std::isfinite(l.lambda_), "ProfitMax leaves a finite lambda_ behind");
   ok(l.lambda_ != prescribed,
-     "and it is ITS number, not the one the caller prescribed (#114)");
+     "and it is ITS number, not the one the caller prescribed");
 }
 
 // ⚠️ THE TEST THE GOLDEN FILE CANNOT BE. `set_leaf_states_rates_from_psi_stem`
@@ -4173,8 +4188,8 @@ void test_maximise_over_closed_interval() {
 void test_single_layer_optimisers_reach_a_bound() {
   printf("single-layer optimisers reach a maximum at a bound\n");
 
-  // Rows chosen so both regimes are present: hot-and-bright, where the TF24 and
-  // Sperry objectives are maximised at full closure, and mild, where the optimum
+  // Rows chosen so both regimes are present: hot-and-bright, where the objective
+  // is maximised at full closure, and mild, where the optimum
   // is interior. A test with only the first would pass on an optimiser that
   // always returned the wet bound.
   struct Row { double PPFD, leaf_temp, psi_soil, atm_vpd; };
@@ -4186,7 +4201,7 @@ void test_single_layer_optimisers_reach_a_bound() {
       {200.0, 35.0, 3.0, 0.5},
   };
 
-  int pinned_TF = 0, pinned_Sperry = 0, interior_TF = 0;
+  int pinned_TF = 0, pinned_CF = 0, interior_TF = 0;
   for (const Row &r : rows) {
     Drivers d;
     d.PPFD = r.PPFD;
@@ -4225,43 +4240,46 @@ void test_single_layer_optimisers_reach_a_bound() {
       }
     }
 
-    // --- Sperry, at the lambda ProfitMax derives ---------------------------
+    // --- Cowan-Farquhar, deliberately overpriced ---------------------------
+    //
+    // The prescribed lambda is what can push this model's optimum to a bound: at
+    // several times the price the leaf's own operating point implies, water is
+    // not worth taking and full closure wins. Derived per row from
+    // marginal_cost_water() rather than fixed, because the implied price moves
+    // 3.4x across a drydown and a fixed number would leave some rows unpriced.
     {
       phylloptim::Leaf ref = make_single_leaf(d, r.psi_soil);
-      ref.use_thermal_cost_ = true;
-      ref.prepare_profitmax();
-      if (!(ref.profitmax_A_max_ > 0.0) || !(ref.profitmax_k_span_ > 0.0)) continue;
-      const double lambda = ref.profitmax_A_max_ / ref.profitmax_k_span_;
+      ref.optimise_psi_stem_TF();
+      const double lambda = 5.0 * ref.marginal_cost_water();
+      if (!(std::isfinite(lambda) && lambda > 0.0)) continue;
 
       phylloptim::Leaf l = make_single_leaf(d, r.psi_soil);
-      l.use_thermal_cost_ = true;
       l.lambda_ = lambda;
-      l.optimise_psi_stem_Sperry();
+      l.optimise_psi_stem_CowanFarquhar();
       const double psi = l.opt_psi_stem_, p = l.profit_;
 
       phylloptim::Leaf m = make_single_leaf(d, r.psi_soil);
-      m.use_thermal_cost_ = true;
       m.lambda_ = lambda;
       double best = -std::numeric_limits<double>::infinity(), best_psi = r.psi_soil;
       for (int i = 0; i <= 1000; ++i) {
         const double q = r.psi_soil + (m.psi_crit - r.psi_soil) * double(i) / 1000.0;
-        const double v = m.profit_psi_stem_Sperry(q, r.psi_soil);
+        const double v = m.profit_psi_stem_CowanFarquhar(q, r.psi_soil);
         if (std::isfinite(v) && v > best) { best = v; best_psi = q; }
       }
       ok(p >= best - 1e-9,
-         "optimise_psi_stem_Sperry is at no lower profit than a 1001-point scan");
-      ok(l.profit_ == m.profit_psi_stem_Sperry(psi, r.psi_soil),
+         "Cowan-Farquhar is at no lower profit than a 1001-point scan");
+      ok(l.profit_ == m.profit_psi_stem_CowanFarquhar(psi, r.psi_soil),
          "and its profit is that point's, bit-for-bit");
-      if (best_psi <= r.psi_soil + (m.psi_crit - r.psi_soil) * 1e-3) ++pinned_Sperry;
+      if (best_psi <= r.psi_soil + (m.psi_crit - r.psi_soil) * 1e-3) ++pinned_CF;
     }
   }
 
   // The premise, so the block above cannot pass by covering only one regime.
-  printf("    TF24: %d rows shut, %d interior; Sperry: %d rows shut\n",
-         pinned_TF, interior_TF, pinned_Sperry);
+  printf("    TF24: %d rows shut, %d interior; Cowan-Farquhar: %d rows shut\n",
+         pinned_TF, interior_TF, pinned_CF);
   ok(pinned_TF > 0 && interior_TF > 0,
      "the rows really span both the pinned and the interior regime");
-  ok(pinned_Sperry > 0, "and Sperry reaches the pinned one too");
+  ok(pinned_CF > 0, "and Cowan-Farquhar reaches the pinned one too");
 }
 
 void benchmark() {
@@ -4341,7 +4359,7 @@ int main() {
   test_rd_temperature_response();
   test_set_traits_matches_a_fresh_leaf();
   test_prescribed_lambda_survives_redriving();
-  test_profitmax_reports_its_own_lambda();
+  test_profitmax_overwrites_the_prescribed_lambda();
   test_perturb_stem_b_matches_a_rebuild();
   test_stem_b_shortcut_needs_no_rebuild();
   test_water_mass_conversions_are_reciprocal();
@@ -4353,11 +4371,10 @@ int main() {
   test_out_of_domain_names_the_spline();
   test_out_of_domain_under_rescale();
   test_leaf_to_air_vpd();
-  test_profitmax_matches_the_lambda_form();
+  test_profitmax_is_a_constant_lambda_objective();
   test_profitmax_normalisation();
   test_profitmax_thermal_cost();
   test_single_layer_optimisers_clear_collar_state();
-  test_sperry_refuses_an_unset_lambda();
   test_transpiration_survives_negative_assim();
   test_profitmax_finds_a_closed_optimum();
   test_maximise_over_closed_interval();

@@ -1,3 +1,35 @@
+# phylloptim 0.5.4
+
+## The prescribed-lambda optimiser is removed
+
+**BREAKING.** `optimise_psi_stem_Sperry()`, `profit_psi_stem_Sperry()` and
+`hydraulic_cost_Sperry()` are deleted, with no deprecated alias. Nothing in the
+plant-family tree called them.
+
+They maximised `A - lambda*(k(psi_soil) - k(psi))` with lambda a prescribed
+constant, under Sperry's name. `optimise_psi_stem_ProfitMax()` is Sperry's model,
+and the point of it is that the cost scaling is **emergent**: multiplying the
+normalised objective by |A|max gives exactly that constant-lambda form with
+`lambda = |A|max / (k_soil - k_crit)`, a quantity that moves with the drivers.
+Measured here, the implied lambda runs 9.19e4 to 3.15e5 over psi_soil 0.5 to
+3 MPa, a 3.4x range. So a fixed lambda is not a variant of the model, and the two
+entry points were not two models.
+
+`$lambda_` now has one meaning: the Cowan-Farquhar marginal value of water, in
+umol C (kg H2O)^-1, supplied by the caller.
+
+⚠️ `optimise_psi_stem_ProfitMax()` still **overwrites** `$lambda_` with the value
+its normalisation implies, so solving it and then Cowan-Farquhar on the same leaf
+prices water at ProfitMax's number rather than yours. Asserted in the C++ suite;
+the field wants splitting.
+
+No numbers move on any surviving path: `operating_points.tsv` and
+`primitives.tsv` are bit-identical, the behaviour fingerprint is unchanged, and
+`psi_stem_optima.tsv` loses its 576 Sperry rows with no surviving row altered.
+The equivalence the deleted entry point used to demonstrate is now asserted
+directly as an identity, which holds to 9.5e-16 rather than the 5e-3 two argmaxes
+could agree to.
+
 # phylloptim 0.5.3
 
 ## The single-layer optimisers reach a maximum at a bound (#94)

@@ -295,7 +295,7 @@ Leaf:
     Tcrit_: {type: double, access: field}
     # Points used to scan the supply stream for |A|max. Sicangco use 500-600.
     profitmax_scan_n_: {type: int, access: field}
-    # Cells optimise_psi_stem_TF/_Sperry scan before refining, so a maximum at
+    # Cells the single-layer optimisers scan before refining, so a maximum at
     # full closure or past a second hump is reachable. 64 matches a 2001-point
     # reference over a 1728-row driver sweep; lower it only with a measurement.
     boundary_scan_n_: {type: int, access: field}
@@ -504,9 +504,6 @@ Leaf:
       args: [psi_stem: double, psi_upstream: double]
 
     # --- leaf economics -------------------------------------------------------
-    hydraulic_cost_Sperry:
-      return_type: double
-      args: [psi_stem: double, psi_upstream: double]
     hydraulic_cost_TF:
       return_type: double
       args: [psi_stem: double]
@@ -515,9 +512,6 @@ Leaf:
     # and the one whose first-order condition is the dA/dE == lambda that the
     # optimality literature is written in.
     hydraulic_cost_CowanFarquhar:
-      return_type: double
-      args: [psi_stem: double, psi_upstream: double]
-    profit_psi_stem_Sperry:
       return_type: double
       args: [psi_stem: double, psi_upstream: double]
     profit_psi_stem_TF:
@@ -531,9 +525,6 @@ Leaf:
       args: [psi_stem: double]
 
     # --- optimisers -----------------------------------------------------------
-    optimise_psi_stem_Sperry:
-      return_type: void
-      args: []
 
     # Cowan & Farquhar (1977), the model the whole optimality family is measured
     # against: maximise `A - lambda*E`, so the optimum satisfies dA/dE == lambda.
@@ -551,14 +542,13 @@ Leaf:
 
     # --- Sperry (2017) ProfitMax with BOTH terms normalised -------------------
     #
-    # `optimise_psi_stem_Sperry` maximises `A - lambda*cost` with lambda a
-    # PRESCRIBED input; these maximise `CG - (HC + TC)` with CG and HC normalised
-    # as Sperry defines them. The two share an argmax exactly when
-    # lambda = |A|max/(k_soil - kcrit), and `optimise_psi_stem_ProfitMax` reports
-    # that lambda in `$lambda_` so the equivalence can be checked rather than
-    # believed. Use these unless you have a lambda of your own: |A|max is a
-    # property of the drivers, so the equivalent lambda has to be recomputed at
-    # every observation and doing that from R costs more than the model does.
+    # Maximises `CG - (HC + TC)` with CG and HC normalised as Sperry defines them.
+    # Multiplying that objective by |A|max gives the constant-lambda form
+    # `A - lambda*(k_soil - k(psi))` with lambda = |A|max/(k_soil - kcrit), so the
+    # two share an argmax -- and `$lambda` reports that value, so the relation is
+    # inspectable. There is deliberately no prescribed-lambda entry point: |A|max
+    # is a property of the drivers, so the equivalent lambda is not a constant, and
+    # fixing one contradicts the model rather than configuring it.
     #
     # Single soil layer only, like the other two -- which is not a restriction for
     # this model, whose supply is the integral of one vulnerability curve with no

@@ -144,23 +144,20 @@ double pass(std::vector<phylloptim::Leaf> &leaves, const std::vector<Point> &pts
 // history file it is building. Hence `us/call` here, and hence this comment
 // rather than a tidier-looking unit.
 
-enum class Arm { TF, Sperry, ProfitMax, CowanFarquhar };
+enum class Arm { TF, ProfitMax, CowanFarquhar };
 
 const char *arm_label(Arm a) {
   switch (a) {
     case Arm::TF:            return "psi_stem:TF";
-    case Arm::Sperry:        return "psi_stem:Sperry";
     case Arm::ProfitMax:     return "psi_stem:ProfitMax";
     case Arm::CowanFarquhar: return "psi_stem:CowanFarquhar";
   }
   return "psi_stem:?";
 }
 
-// The two curves that consume a PRESCRIBED lambda throw without one. Fixed here
-// rather than taken from a preceding ProfitMax solve, which would time two solves
-// and call it one. The two values differ because the quantities do: the Sperry
-// cost is a conductance loss, the Cowan-Farquhar cost is transpiration.
-const double kLambdaPrescribed = 30.0;
+// Cowan-Farquhar consumes a PRESCRIBED lambda and throws without one. Fixed here
+// rather than taken from a preceding solve, which would time two solves and call
+// it one.
 const double kLambdaCowanFarquhar = 1.5e5;
 
 double pass_optimiser(Arm arm, std::vector<phylloptim::Leaf> &leaves,
@@ -177,8 +174,6 @@ double pass_optimiser(Arm arm, std::vector<phylloptim::Leaf> &leaves,
                      pt.vpd, kCa, kTleaf, kO2, kPatm);
     switch (arm) {
       case Arm::TF:        l.optimise_psi_stem_TF();        break;
-      case Arm::Sperry:    l.lambda_ = kLambdaPrescribed;
-                           l.optimise_psi_stem_Sperry();    break;
       case Arm::ProfitMax: l.optimise_psi_stem_ProfitMax(); break;
       case Arm::CowanFarquhar:
                            l.lambda_ = kLambdaCowanFarquhar;
@@ -230,8 +225,7 @@ int main(int argc, char **argv) {
     l.setup_transpiration(100);
     l.setup_root_vulnerability(100);
   }
-  for (Arm arm : {Arm::TF, Arm::Sperry, Arm::ProfitMax,
-                  Arm::CowanFarquhar}) {
+  for (Arm arm : {Arm::TF, Arm::ProfitMax, Arm::CowanFarquhar}) {
     double arm_checksum = 0.0;
     double arm_best = 1e300;
     for (int r = 0; r < reps; ++r) {

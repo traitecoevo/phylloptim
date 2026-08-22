@@ -117,20 +117,12 @@ Leaf__psi_stem_to_ci <- function(obj_, psi_stem, psi_upstream) {
     .Call('_phylloptim_Leaf__psi_stem_to_ci', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
 }
 
-Leaf__hydraulic_cost_Sperry <- function(obj_, psi_stem, psi_upstream) {
-    .Call('_phylloptim_Leaf__hydraulic_cost_Sperry', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
-}
-
 Leaf__hydraulic_cost_TF <- function(obj_, psi_stem) {
     .Call('_phylloptim_Leaf__hydraulic_cost_TF', PACKAGE = 'phylloptim', obj_, psi_stem)
 }
 
 Leaf__hydraulic_cost_CowanFarquhar <- function(obj_, psi_stem, psi_upstream) {
     .Call('_phylloptim_Leaf__hydraulic_cost_CowanFarquhar', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
-}
-
-Leaf__profit_psi_stem_Sperry <- function(obj_, psi_stem, psi_upstream) {
-    .Call('_phylloptim_Leaf__profit_psi_stem_Sperry', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
 }
 
 Leaf__profit_psi_stem_TF <- function(obj_, psi_stem, psi_upstream) {
@@ -143,10 +135,6 @@ Leaf__profit_psi_stem_CowanFarquhar <- function(obj_, psi_stem, psi_upstream) {
 
 Leaf__lambda_TF24 <- function(obj_, psi_stem) {
     .Call('_phylloptim_Leaf__lambda_TF24', PACKAGE = 'phylloptim', obj_, psi_stem)
-}
-
-Leaf__optimise_psi_stem_Sperry <- function(obj_) {
-    invisible(.Call('_phylloptim_Leaf__optimise_psi_stem_Sperry', PACKAGE = 'phylloptim', obj_))
 }
 
 Leaf__optimise_psi_stem_CowanFarquhar <- function(obj_) {

@@ -280,11 +280,10 @@ public:
   // ⚠️ THE ONLY TWO INPUTS IN THIS BLOCK, and the reason they carry their default
   // here rather than in setup_clean_leaf(). Everything around them is derived
   // state or a solved output, which setup_clean_leaf() exists to wipe; these are
-  // Sperry's prescribed marginal water cost, supplied by the CALLER and read by
-  // profit_psi_stem_Sperry. Wiping an input on the caller's behalf made whether a
-  // prescribed value survived depend on which of two interchangeable-looking
-  // re-driving calls came next -- `l$lambda_ <- 30; set_drivers(...)` kept it,
-  // `l$lambda_ <- 30; l$set_traits(...)` did not, and neither warned (#96).
+  // the Cowan-Farquhar marginal value of water, supplied by the CALLER and read
+  // by profit_psi_stem_CowanFarquhar. Wiping an input on the caller's behalf
+  // makes whether a prescribed value survives depend on which of two
+  // interchangeable-looking re-driving calls comes next, so neither clears it.
   //
   // An in-class initialiser, not a line in setup_clean_leaf(), so a fresh Leaf
   // still reads the NA sentinel: the member is otherwise uninitialised, and
@@ -1107,9 +1106,9 @@ public:
 // set_leaf_states_rates_from_psi_stem would put a pow() on a path that runs
 // ~10^3 times per solve.
 //
-// NOTE the name clash to be careful of: the member `lambda_` is an *input* to
-// profit_psi_stem_Sperry (Sperry's prescribed marginal water cost, never set by
-// set_physiology). The lambda here is an *emergent output*. See PLAN.md 10a.
+// NOTE the distinction to be careful of: the member `lambda_` is an *input*, the
+// Cowan-Farquhar marginal value of water, never set by set_physiology. The lambda
+// here is an *emergent output* -- the marginal cost the operating point implies.
 
   // lambda at an arbitrary stem water potential (positive magnitude, MPa), in
   // umol CO2 (kg H2O)^-1. Analytic, from the TF24 cost function:
@@ -1221,7 +1220,6 @@ public:
   }
 
 // leaf economics functions
-  double hydraulic_cost_Sperry(double psi_stem, double psi_upstream);
   double hydraulic_cost_TF(double psi_stem);
 
   // Cowan & Farquhar (1977): the cost of water is the water itself, priced at a
@@ -1235,7 +1233,6 @@ public:
   // which is what puts them all on one axis.
   double hydraulic_cost_CowanFarquhar(double psi_stem, double psi_upstream);
 
-  double profit_psi_stem_Sperry(double psi_stem, double psi_upstream);
   double profit_psi_stem_TF(double psi_stem, double psi_upstream);
   double profit_psi_stem_CowanFarquhar(double psi_stem, double psi_upstream);
 
@@ -1256,7 +1253,6 @@ public:
   std::vector<double> profitmax_curve(int n);
 
 // optimiser functions
-  void optimise_psi_stem_Sperry();
   void optimise_psi_stem_TF();
   void optimise_psi_stem_ProfitMax();
   void optimise_psi_stem_CowanFarquhar();
@@ -3625,24 +3621,6 @@ inline void Leaf::set_leaf_states_rates_from_psi_stem(double psi_stem, double ps
 
 // Hydraulic cost equations
 
-// Sperry et al. 2017; Sabot et al. 2020 implementation
-
-inline double Leaf::hydraulic_cost_Sperry(double psi_stem, double psi_upstream) {
-  // Cost is definitionally zero when the potentials are equal. Returning it
-  // explicitly avoids a tiny non-zero residual from FMA contraction of the
-  // k_l_soil_ - k_l_stem_ subtraction (arch-dependent; see arm64 build, #468).
-  if (psi_stem == psi_upstream) {
-    hydraulic_cost_ = 0.0;
-    return hydraulic_cost_;
-  }
-  double k_l_soil_ = leaf_specific_conductance_max_ * proportion_of_conductivity(psi_upstream);
-  double k_l_stem_ = leaf_specific_conductance_max_ * proportion_of_conductivity(psi_stem);
-  
-  hydraulic_cost_ = k_l_soil_ - k_l_stem_;
-  
-  return hydraulic_cost_;
-}
-
 // --- Marginal cost of water -------------------------------------------------
 
 inline double Leaf::lambda_TF24(double psi_stem) const {
@@ -3721,17 +3699,6 @@ inline double Leaf::thermal_cost_at(double leaf_temp) const {
 
 // Profit functions
 
-inline double Leaf::profit_psi_stem_Sperry(double psi_stem, double psi_upstream) {
-
-set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
-
-  double benefit_ = assim_colimited_;
-  double cost = hydraulic_cost_Sperry(psi_stem, psi_upstream);
-
-  return benefit_ - lambda_ * cost;
-}
-
-
 inline double Leaf::profit_psi_stem_TF(double psi_stem, double psi_upstream) {
 set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
 
@@ -3780,88 +3747,26 @@ inline void Leaf::clear_collar_solve_state() {
   soil_consumption_.assign(soil_consumption_.size(), util::na_value);
 }
 
-// ⚠️ THE TWO OPTIMISERS BELOW USE A BARE BRENT SEARCH AND SHARE A HAZARD.
-// Brent is a LOCAL optimiser that steps in from the bounds, so it cannot return
-// an endpoint and it cannot see past a local maximum. `optimise_psi_stem_TF` is
-// therefore wrong wherever the TF24 profit is maximised at full closure, and
-// `optimise_psi_stem_Sperry` wherever the caller's lambda makes it so.
-// `optimise_psi_stem_ProfitMax` scans a grid first for exactly this reason -- see
-// the note there, with the measured case that motivated it. These two are left
-// alone because neither has a scan to reuse, so fixing them costs 500 model
-// evaluations per solve rather than nothing; the collar solve is unaffected,
-// since maximise_profit_over_collar handles a pinned optimum explicitly.
-
-// need docs on Golden Section Search.
-inline void Leaf::optimise_psi_stem_Sperry() {
-
-    clear_collar_solve_state();
-
-    if (!supply_is_single_layer()) {
-    util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
-  }
-
-  // ⚠️ lambda_ IS AN INPUT HERE AND HAS NO DEFAULT. It is NA until the caller sets
-  // it, and no model code on this path assigns one, so a caller who drives the leaf
-  // and calls this without setting it is optimising a NaN objective -- and
-  // brent_fmin does not report that. It returns a plausible-looking potential
-  // (2.551266 MPa at the package defaults) with profit_ = NaN beside it, and the
-  // potential is a property of the bracket rather than of the model. Refuse.
-  //
-  // This guard used to describe the #96 asymmetry it was working around --
-  // set_traits() cleared lambda_ and set_drivers() did not, so whether a
-  // prescribed value survived depended on the order of two interchangeable-looking
-  // calls. That is fixed: NEITHER clears it now. The guard stands on its own,
-  // because "the caller never set one" is still reachable.
-  //
-  // ⚠️ WHAT IT DOES NOT CATCH, and cannot: optimise_psi_stem_ProfitMax *writes*
-  // lambda_ as a report, so calling that and then this one silently optimises
-  // ProfitMax's derived lambda rather than a prescribed one. Finite, plausible, and
-  // not the caller's number. That the same field is an input here and an output
-  // there is the design question in #114.
-  if (!std::isfinite(lambda_)) {
-    util::stop("optimise_psi_stem_Sperry needs lambda_ set: it is a PRESCRIBED "
-               "marginal water cost, NA until you assign one, and never set by "
-               "set_physiology or set_traits. For Sperry (2017)'s own normalised "
-               "profit use optimise_psi_stem_ProfitMax, which computes its own.");
-  }
-
-  opt_psi_stem_ = supply_psi_soil_scalar();
-
-
-  if ((PPFD_ < 1.5e-8 )| (supply_psi_soil_scalar() > psi_crit)){
-    profit_ = 0;
-    transpiration_ = 0;
-    stom_cond_CO2_ = 0;
-    return;
-  }
-
-  // Maximise carbon profit over the CLOSED interval [psi_soil, psi_crit]. The
-  // objective is maximised at full closure whenever the caller's lambda prices
-  // water above what the carbon is worth, and it carries a second interior hump
-  // at high leaf temperature -- so a bare bracketing search is the wrong
-  // instrument here. See maximise_over_closed_interval.
-    double profit_opt = 0.0;
-    opt_psi_stem_ = util::maximise_over_closed_interval(
-        [&](double psi_stem) { return profit_psi_stem_Sperry(psi_stem, supply_psi_soil_scalar()); },
-        supply_psi_soil_scalar(), psi_crit, boundary_scan_n_, &profit_opt);
-    // Re-evaluated rather than taken from the search, so every reported field
-    // describes the returned operating point (hazard 8, in the form where the
-    // fields are individually plausible).
-    profit_ = profit_psi_stem_Sperry(opt_psi_stem_, supply_psi_soil_scalar());
-    (void)profit_opt;
-
-  }
-  
+// A single-layer optimiser maximises over the CLOSED interval
+// [psi_soil, psi_crit]. The endpoints have to be candidates: the objective is
+// maximised at full closure whenever water is priced above what the carbon is
+// worth, and a bracketing search steps in from the bounds and so can never
+// return one. Some cost curves also carry a second interior hump, which the same
+// search cannot see past. See maximise_over_closed_interval.
+//
+// The root-based solve reaches the same conclusion by a different route:
+// maximise_profit_over_collar tests the gradient's sign at each end and reports a
+// pinned optimum explicitly.
 
 // ===========================================================================
 // Sperry et al. (2017) ProfitMax, as Sicangco et al. (2026) implement it
 // ---------------------------------------------------------------------------
-// WHY THIS EXISTS ALONGSIDE optimise_psi_stem_Sperry, WHICH IS THE SAME MODEL.
-// Sperry maximises `Profit = CG - HC` with both terms normalised, where this
-// package's older entry point maximises `A - lambda*(k(psi_soil)-k(psi))`.
-// Multiplying Sperry's objective by |A|max shows the two are the same function up
-// to a positive scale factor, so they share an argmax EXACTLY when lambda takes
-// the value below:
+// Sperry maximises `Profit = CG - HC` with both terms normalised. Multiplying
+// that objective by |A|max turns it into `A - lambda*(k(psi_soil)-k(psi))`, the
+// same function up to a positive scale factor and so the same argmax, with lambda
+// taking the value below. That is a property worth knowing rather than a second
+// entry point: the lambda is not a constant, so prescribing one is not this
+// model.
 //
 //     CG      = A(psi)/|A|max
 //     HC      = [k(psi_soil)-k(psi)] / [k(psi_soil)-kcrit]
@@ -4020,16 +3925,22 @@ inline void Leaf::optimise_psi_stem_ProfitMax() {
     return;
   }
 
-  // Reported so the relation to the lambda form is inspectable rather than
-  // asserted. Exactly: A_max*ProfitMax(psi) == Sperry(psi; this lambda) -
-  // A_max*thermal_cost_at(Tleaf(psi)), to ~4e-15 (#114).
+  // The marginal cost of water this operating point implies, reported so the
+  // relation to the lambda form is inspectable rather than asserted. Exactly:
   //
-  // ⚠️ SO IT IS THE LAMBDA THAT MAKES optimise_psi_stem_Sperry FIND THE SAME POINT
-  // ONLY WHERE THE THERMAL COST IS CONSTANT IN psi -- i.e. thermal cost off (TC is
-  // exactly 0), or energy balance off (Tleaf is the driver, so TC is an additive
-  // constant and the argmax is unmoved). With BOTH gates on the extra term is
-  // genuinely psi-dependent and the two argmaxes differ, by up to 1.1 MPa at
-  // Tair 40. Do not substitute one entry point for the other on that arm.
+  //   A_max*ProfitMax(psi) == [A(psi) - lambda*(k(psi_soil)-k(psi))]
+  //                           - A_max*thermal_cost_at(Tleaf(psi))
+  //
+  // to ~4e-15. The bracketed term is a constant-lambda objective, so the two share
+  // an argmax only where the thermal cost is CONSTANT in psi -- thermal cost off
+  // (TC is exactly 0), or energy balance off (Tleaf is a driver, so TC is an
+  // additive constant that cannot move the argmax). With BOTH gates on the extra
+  // term is genuinely psi-dependent, and the argmaxes differ by up to 1.1 MPa at
+  // Tair 40. A prescribed lambda is therefore not a substitute for this model.
+  //
+  // ⚠️ THIS WRITES `lambda_`, WHICH IS A CALLER INPUT for the Cowan-Farquhar cost.
+  // Solving ProfitMax and then Cowan-Farquhar on the same leaf prices water at
+  // this derived value rather than at the caller's. The field wants splitting.
   lambda_ = profitmax_A_max_ / profitmax_k_span_;
 
   // ⚠️ GRID FIRST, THEN REFINE, AND A BARE BRENT SEARCH IS WRONG HERE.
@@ -4117,7 +4028,7 @@ inline void Leaf::optimise_psi_stem_ProfitMax() {
 
 inline void Leaf::optimise_psi_stem_TF() {
 
-  // See optimise_psi_stem_Sperry: no root-collar operating point.
+  // No root-collar operating point on this path.
   clear_collar_solve_state();
 
   if (!supply_is_single_layer()) {
@@ -4141,8 +4052,8 @@ inline void Leaf::optimise_psi_stem_TF() {
     opt_psi_stem_ = util::maximise_over_closed_interval(
         [&](double psi_stem) { return profit_psi_stem_TF(psi_stem, supply_psi_soil_scalar()); },
         supply_psi_soil_scalar(), psi_crit, boundary_scan_n_, &profit_opt);
-    // As in optimise_psi_stem_Sperry: re-evaluate so the reported fields and the
-    // returned potential are one operating point.
+    // Re-evaluate so the reported fields and the returned potential are one
+    // operating point.
     profit_ = profit_psi_stem_TF(opt_psi_stem_, supply_psi_soil_scalar());
     (void)profit_opt;
     return;
