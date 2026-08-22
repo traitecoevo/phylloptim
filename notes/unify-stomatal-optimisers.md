@@ -68,27 +68,35 @@ The product objectives reported a shut-down leaf as profitable. Past `psi_crit` 
 
 ## Open work
 
-### Item 4 — λ into the gradient, and per-model availability
+Items 4, 5 and 6 have landed. What is left is the batch gradient route, the comment sweep, and the deferred first-order-condition polish -- which item 5 promoted from optional to load-bearing.
+
+### Item 4 — λ into the gradient, and per-model availability — LANDED
 
 Append `par_lambda` (17 → 18). Extend `.gradient_available_pars(single)` → `(single, model)` at `R/gradient.R:903`, which is already the single home for this rule and is consumed by both entry points and `print.leaf_batch`. Absent slots carry `NA` and are never read, exactly as `resistance` does today.
 
 **Partly landed**: the two positional tail writes in `.gradient_theta_matrix` are now name-based. They were `length(par_names)` and `length(par_names) - 1L`, correct only while `kmax` and `resistance` are the last two columns in that order — so appending λ would have written `kmax` into the new slot and `resistance` into `kmax`'s, with no length change to notice.
 
-### Item 5 — wire `dprofit_dpsi_stem` into the gradient. This is the blocker.
+### Item 5 — differentiate any additive curve's optimum — LANDED, with one measured limitation
 
-**None of the seven curves except TF24 is calibratable**, and that is the gap between "landed" and "usable". `find_root_collar_psi()` — the production solve, and the one *both* gradient paths call — is TF24-only. Measured on the single-potential path at ψ_soil 1.5: the gradient differentiates the TF24 collar optimum at **2.09 MPa** while the JS22 optimum is at **3.15 MPa**, and the `JS22_gamma`/`CMax_a` columns come back identically zero.
+`leaf_gradient()` gains `model`. `"collar"` (the default, bit-identical) is the TF24 cost over the root-collar potential; `"TF24"`, `"CF77"`, `"JS22"` and `"CMax"` differentiate the corresponding **stem** optimum. Checked against differencing the solve on all four: agreement 5e-05 to 2e-03, which bounds the finite difference's error rather than the composite's. `CF77_lambda_` is differentiable, which is what item 4 appended it for.
 
-⚠️ **That zero means two opposite things and the number cannot distinguish them.** For a TF24 fit it is correct — the parameter does not enter that cost. For a JS22 fit it means the gradient is for a different model, and an optimiser reads it as "inert", leaves the parameter at its start, and converges. `?leaf_gradient` now says so and says to use finite differences meanwhile.
+⚠️ **A stem route reports `status == "pinned"` at a perfectly interior optimum, so `method = "auto"` differences the solve.** Measured: the collar solve root-finds `dprofit == 0` and leaves stationarity at **1.15e-15**; the stem entry points scan a 64-point grid and refine the winning cell, leaving **2.2e-08 to 1.2e-06**. `stationarity_tol`'s 1e-08 default was measured in the empty band between the *collar* route's own two populations and does not transfer. The premise is untested on a stem route rather than failing there — `method = "ift"` gives numbers that agree with differencing the solve.
 
-Scope is **all seven curves** (decided 2026-08-22, because four were added after the plan was written). `JS22` and `CMax` come nearly free — their marginal costs are `2γΔψ` and `aψ+b`, both analytic, and their `dprofit_dpsi_stem` arms exist. `SOX` and `JW26` need the product derivative.
+**So the deferred FOC item is now load-bearing rather than optional.** A first-order-condition polish inside the winning cell would make the stem optima stationary and let `"auto"` use the composite. That is the same multi-start-FOC work the last section defers, and this is the concrete reason to do it. The test asserts today's classification, so the polish will fail it and say so.
 
-⚠️ **The log link is no longer hypothetical, and `stationarity_tol` must be re-measured rather than inherited.** Its 1e-08 default sits in an empty band four orders from either measured population — but that band was measured on carbon-unit residuals. A log-linked objective puts the Hessian and the stationarity residual in log units, so the band has to be re-established for the product curves, not assumed to carry over.
+⚠️ **What remains for the calibration**: `leaf_gradient_batch()` — the C++ composite in `gradient.hpp` — still hardwires `find_root_collar_psi()`. The R route is done and the batch route is not, and the batch route is the one a fit uses. It must stay bit-identical with R, which is what makes it the larger half.
+
+⚠️ **`SOX` and `JW26` have no route.** They maximise `A * g(psi)`, so the derivative is `(dA/dpsi)*g + A*g'` rather than `dA/dpsi - dC/dpsi`. Refused by name. The plan's warning about the log link putting the residual in log units is still ahead, not behind: the first thing to bite was the *solver*, not the units.
 
 Keep the active-set classification and the envelope theorem untouched: they depend only on stationarity, which is the payoff of the FOC route.
 
-### Item 6 — the (P50, c) converter, and retiring the downstream copies
+### Item 6 — the (P50, c) converter — LANDED; the downstream copies are not retired
 
-**Not done, and it is half of why item 3 was worth doing.** Published curves arrive as almost anything except `(P50, c)` — a `P88`, a `P95`, a `P50` plus a slope — and all of it inverts in closed form. For a remaining conductivity fraction `f`:
+`psi_at_plc()`, `weibull_s50()` and `weibull_p50_c()` are exported, round-tripped through every admissible pair, and `psi_at_plc` is asserted against the model's own derived `psi_crit` and `stem_b`.
+
+⚠️ **`S50` paired with a quantile other than P50 does not determine the curve.** `S50(c) = K*c*L^(1/c)/psi_f` has an analytic minimum at `c = ln L`, so it is U-shaped and any slope above that minimum is matched by **two** curves. Found by the round trip failing with "no root in (0, 20]" — both bracket ends were positive because the root sat in a dip. Each branch is searched from the analytic turning point; the upper one is returned because measured angiosperm stems sit at `c = 1.8-2.6` while the lower root lands at 0.57-0.88, and the other solution is reported rather than discarded.
+
+⚠️ **The downstream copies are NOT retired, so the derivation still exists twice.** Published curves arrive as almost anything except `(P50, c)` — a `P88`, a `P95`, a `P50` plus a slope — and all of it inverts in closed form. For a remaining conductivity fraction `f`:
 
 $$P_f = P_{50}\big(\log_2(1/f)\big)^{1/c} \quad\Longleftrightarrow\quad P_{50} = P_f\big(\log_2(1/f)\big)^{-1/c}$$
 
