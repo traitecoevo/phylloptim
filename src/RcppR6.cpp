@@ -128,6 +128,10 @@ double Leaf__hydraulic_cost_TF(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_
   return obj_->hydraulic_cost_TF(psi_stem);
 }
 // [[Rcpp::export]]
+double Leaf__hydraulic_cost_CowanFarquhar(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem, double psi_upstream) {
+  return obj_->hydraulic_cost_CowanFarquhar(psi_stem, psi_upstream);
+}
+// [[Rcpp::export]]
 double Leaf__profit_psi_stem_Sperry(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem, double psi_upstream) {
   return obj_->profit_psi_stem_Sperry(psi_stem, psi_upstream);
 }
@@ -136,12 +140,20 @@ double Leaf__profit_psi_stem_TF(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj
   return obj_->profit_psi_stem_TF(psi_stem, psi_upstream);
 }
 // [[Rcpp::export]]
+double Leaf__profit_psi_stem_CowanFarquhar(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem, double psi_upstream) {
+  return obj_->profit_psi_stem_CowanFarquhar(psi_stem, psi_upstream);
+}
+// [[Rcpp::export]]
 double Leaf__lambda_TF24(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem) {
   return obj_->lambda_TF24(psi_stem);
 }
 // [[Rcpp::export]]
 void Leaf__optimise_psi_stem_Sperry(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
   obj_->optimise_psi_stem_Sperry();
+}
+// [[Rcpp::export]]
+void Leaf__optimise_psi_stem_CowanFarquhar(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  obj_->optimise_psi_stem_CowanFarquhar();
 }
 // [[Rcpp::export]]
 double Leaf__thermal_cost_at(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double leaf_temp) {

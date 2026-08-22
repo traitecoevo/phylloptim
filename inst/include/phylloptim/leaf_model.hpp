@@ -1181,8 +1181,20 @@ public:
   double hydraulic_cost_Sperry(double psi_stem, double psi_upstream);
   double hydraulic_cost_TF(double psi_stem);
 
+  // Cowan & Farquhar (1977): the cost of water is the water itself, priced at a
+  // constant marginal value. `lambda_ * E`, in umol C m^-2 s^-1 -- a carbon flux,
+  // because `lambda_` is carbon per unit transpiration and E is a mass flux.
+  //
+  // This is the model `lambda_`'s units belong to, and the reason its first-order
+  // condition is the one the whole optimality literature is written in:
+  // maximising `A - lambda*E` over psi_stem gives dA/dE == lambda at the optimum.
+  // `marginal_cost_water()` reports the same quantity for the OTHER cost curves,
+  // which is what puts them all on one axis.
+  double hydraulic_cost_CowanFarquhar(double psi_stem, double psi_upstream);
+
   double profit_psi_stem_Sperry(double psi_stem, double psi_upstream);
   double profit_psi_stem_TF(double psi_stem, double psi_upstream);
+  double profit_psi_stem_CowanFarquhar(double psi_stem, double psi_upstream);
 
   // The instantaneous thermal cost at a leaf temperature, in [0,1]. Zero when the
   // gate is off, so callers need not branch.
@@ -1204,6 +1216,7 @@ public:
   void optimise_psi_stem_Sperry();
   void optimise_psi_stem_TF();
   void optimise_psi_stem_ProfitMax();
+  void optimise_psi_stem_CowanFarquhar();
 
   // Clear the outputs a single-layer optimiser does NOT write. Hazard 8: these
   // three describe a ROOT-COLLAR solve, and optimise_psi_stem_* never runs one,
@@ -3536,6 +3549,33 @@ double benefit_ = assim_colimited_;
 }
 
 
+// `lambda_ * E`. Written into `hydraulic_cost_` like the TF24 cost and unlike the
+// Sperry one, because this product IS a carbon flux: `lambda_` is umol C per kg of
+// water and E is kg m^-2 s^-1.
+//
+// `transpiration()` is memoised on (psi_stem, psi_upstream), so calling it here
+// straight after set_leaf_states_rates_from_psi_stem costs nothing and returns
+// exactly the E of the operating point that call established -- including the
+// no-flow case, where the two potentials are equal and the integral difference is
+// exactly zero.
+inline double Leaf::hydraulic_cost_CowanFarquhar(double psi_stem,
+                                                double psi_upstream) {
+  hydraulic_cost_ = lambda_ * transpiration(psi_stem, psi_upstream);
+  return hydraulic_cost_;
+}
+
+
+inline double Leaf::profit_psi_stem_CowanFarquhar(double psi_stem,
+                                                 double psi_upstream) {
+  set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
+
+  double benefit_ = assim_colimited_;
+  double cost = hydraulic_cost_CowanFarquhar(psi_stem, psi_upstream);
+
+  return benefit_ - cost;
+}
+
+
 //optimisation functions
 
 // Everything a single-layer optimiser leaves untouched, cleared rather than
@@ -3912,6 +3952,51 @@ inline void Leaf::optimise_psi_stem_TF() {
     // returned potential are one operating point.
     profit_ = profit_psi_stem_TF(opt_psi_stem_, supply_psi_soil_scalar());
     (void)profit_opt;
+    return;
+  }
+
+
+// Cowan & Farquhar (1977). Same shape as optimise_psi_stem_TF -- the objective is
+// the only difference, and the closed interval is needed for the same reason -- so
+// the two carry the same degenerate convention: at a soil potential drier than
+// psi_crit the objective is EVALUATED at the no-flow point rather than zeroed, so
+// every reported field describes that point. Profit there is `-R_d`, since E is
+// exactly zero and so is the cost.
+inline void Leaf::optimise_psi_stem_CowanFarquhar() {
+
+  clear_collar_solve_state();
+
+  if (!supply_is_single_layer()) {
+    util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
+  }
+
+  // ⚠️ lambda_ IS AN INPUT HERE AND HAS NO DEFAULT. It is the marginal value of
+  // water -- the one parameter this model is defined by -- and no model code
+  // supplies one, so a caller who has not set it is maximising a NaN objective.
+  // The potential that comes back from that is a property of the bracket rather
+  // than of the leaf, and it looks entirely plausible. Refuse instead.
+  if (!std::isfinite(lambda_)) {
+    util::stop("optimise_psi_stem_CowanFarquhar needs lambda_ set: it is the "
+               "PRESCRIBED marginal value of water in umol C (kg H2O)^-1, NA until "
+               "you assign one, and never set by set_physiology or set_traits.");
+  }
+
+  opt_psi_stem_ = supply_psi_soil_scalar();
+
+  if (supply_psi_soil_scalar() > psi_crit) {
+    profit_ = profit_psi_stem_CowanFarquhar(supply_psi_soil_scalar(),
+                                            supply_psi_soil_scalar());
+    return;
+  }
+
+  double profit_opt = 0.0;
+  opt_psi_stem_ = util::maximise_over_closed_interval(
+      [&](double psi_stem) {
+        return profit_psi_stem_CowanFarquhar(psi_stem, supply_psi_soil_scalar());
+      },
+      supply_psi_soil_scalar(), psi_crit, boundary_scan_n_, &profit_opt);
+  profit_ = profit_psi_stem_CowanFarquhar(opt_psi_stem_, supply_psi_soil_scalar());
+  (void)profit_opt;
 
     return;
   }

@@ -1239,6 +1239,149 @@ void test_lambda_equals_dA_dE_single_layer() {
   }
 }
 
+// Cowan & Farquhar (1977): the objective is `A - lambda*E`, so its first-order
+// condition in psi_stem is dA/dE == lambda EXACTLY -- not approximately, and not
+// mediated by a vulnerability curve. That identity IS the model, so this is its
+// defining assertion rather than a consistency check on it.
+//
+// Contrast test_lambda_equals_dA_dE_single_layer above, which asks the same
+// question of the TF24 cost and has to go through `marginal_cost_water()` to get
+// an answer: there lambda is a DERIVED property of the operating point, here it
+// is the prescribed input. The two tests look alike and are asking opposite
+// questions.
+void test_cowan_farquhar_equates_dA_dE_to_lambda() {
+  printf("Cowan-Farquhar: dA/dE == the prescribed lambda at the optimum\n");
+  Drivers d;
+  d.PPFD = 1500.0;
+  // Reported so the tolerance below can be set from the measurement rather than
+  // guessed, and so a solver change that loosens the condition shows up as a
+  // number moving rather than only as a pass/fail.
+  double worst = 0.0;
+  int interior_rows = 0, bound_rows = 0;
+  // ⚠️ lambda's SCALE is set by the model, not chosen freely: it is umol C per kg
+  // of water, and at these drivers the leaf's own marginal cost of water runs
+  // 9e4 to 3e5 (see `marginal_cost_water()`). A lambda far below that band makes
+  // water free and every optimum pins wide open at psi_crit; far above it and
+  // they all pin shut. Either way the identity below is never exercised, and the
+  // test passes while asserting nothing -- so keep these values inside the band
+  // and keep the interior-row count in the printed line.
+  for (double lambda : {8.0e4, 1.5e5, 3.0e5}) {
+    for (double psi_soil : {0.5, 1.0, 2.0}) {
+      phylloptim::Leaf l = make_leaf(d, {psi_soil}, {1.0});
+      l.lambda_ = lambda;
+      l.optimise_psi_stem_CowanFarquhar();
+      const double psi = l.opt_psi_stem_;
+
+      // An interior optimum is where the condition applies. At a bound the
+      // gradient is genuinely non-zero and dA/dE != lambda is the right answer,
+      // so assert the bound instead of loosening the tolerance.
+      const bool interior = psi > psi_soil + 1e-6 && psi < l.psi_crit - 1e-6;
+      if (!interior) {
+        ++bound_rows;
+        ok(psi == psi_soil || psi == l.psi_crit,
+           "a non-interior optimum sits exactly on a bound, lambda=" +
+               std::to_string(lambda));
+        continue;
+      }
+      ++interior_rows;
+
+      const double eps = 1e-6;
+      l.set_leaf_states_rates_from_psi_stem(psi + eps, psi_soil);
+      const double A1 = l.assim_colimited_, E1 = l.transpiration_;
+      l.set_leaf_states_rates_from_psi_stem(psi - eps, psi_soil);
+      const double A0 = l.assim_colimited_, E0 = l.transpiration_;
+      const double fd = (A1 - A0) / (E1 - E0);
+
+      worst = std::max(worst, std::abs(fd / lambda - 1.0));
+      // Measured 2.3e-06 on the generating platform. The tolerance is set well
+      // above that but far below the 1e-3 an argmax-resolution argument would
+      // give, because the condition is STATIONARY: a displaced argmax changes
+      // dA/dE only to second order, so this ratio is much better conditioned
+      // than the potential it is evaluated at.
+      near(fd / lambda, 1.0, 1e-4,
+           "dA/dE == lambda at lambda=" + std::to_string(lambda) +
+               " psi_soil=" + std::to_string(psi_soil));
+    }
+  }
+  printf("    %d interior rows, %d on a bound | worst |dA/dE / lambda - 1|: %.3e\n",
+         interior_rows, bound_rows, worst);
+  ok(interior_rows > 0,
+     "at least one row has an interior optimum, so the identity was exercised");
+}
+
+// THE STRONGER FORM OF THE SAME CLAIM, and the one that makes lambda a common
+// currency rather than a per-model parameter: the TF24 cost and the
+// Cowan-Farquhar cost are different functions of psi, but both optima satisfy
+// dA/dE == lambda. So handing Cowan-Farquhar the lambda that TF24 IMPLIES at its
+// own optimum must land it on that same optimum.
+//
+// This is a much sharper instrument than a finite-difference ratio: it compares
+// two argmaxes computed by two objectives, with no derivative approximation in
+// between, and it fails if `marginal_cost_water()` reports the wrong quantity for
+// either curve.
+void test_cowan_farquhar_reproduces_the_TF_optimum() {
+  printf("Cowan-Farquhar at TF24's implied lambda finds TF24's optimum\n");
+  Drivers d;
+  d.PPFD = 1500.0;
+  double worst = 0.0;
+  for (double psi_soil : {0.5, 1.0, 2.0, 3.0}) {
+    phylloptim::Leaf ref = make_leaf(d, {psi_soil}, {1.0});
+    ref.optimise_psi_stem_TF();
+    const double psi_tf = ref.opt_psi_stem_;
+    const double lambda_implied = ref.marginal_cost_water();
+
+    phylloptim::Leaf cf = make_leaf(d, {psi_soil}, {1.0});
+    cf.lambda_ = lambda_implied;
+    cf.optimise_psi_stem_CowanFarquhar();
+
+    worst = std::max(worst, std::abs(cf.opt_psi_stem_ - psi_tf));
+    // Measured 1.2e-05 MPa on the generating platform. The tolerance is 5e-4
+    // rather than that, because this is an ARGMAX difference and argmax-derived
+    // quantities are the sqrt-amplified class: they disagree across platforms by
+    // up to 1.4e-04. Tightening to the local measurement would make this fail off
+    // macOS/arm64 for a reason that is not a regression.
+    near(cf.opt_psi_stem_, psi_tf, 5e-4,
+         "the two optima coincide at psi_soil=" + std::to_string(psi_soil));
+  }
+  printf("    worst |psi_CF - psi_TF| at TF24's implied lambda: %.3e MPa\n", worst);
+}
+
+// The cost is lambda*E and E is exactly zero when the two potentials coincide, so
+// the no-flow profit is exactly -R_d whatever lambda is. That makes this the one
+// degenerate branch in the file whose value can be predicted rather than recorded.
+void test_cowan_farquhar_closed_state() {
+  printf("Cowan-Farquhar: the closed-stomata profit is -R_d, for any lambda\n");
+  Drivers d;
+  phylloptim::Leaf l = make_leaf(d, {6.0}, {1.0}); // drier than psi_crit
+  l.lambda_ = 800.0;
+  l.optimise_psi_stem_CowanFarquhar();
+  near(l.opt_psi_stem_, 6.0, 1e-12, "the stem is held at the soil potential");
+  near(l.transpiration_, 0.0, 1e-300, "transpiration is exactly zero");
+  near(l.hydraulic_cost_, 0.0, 1e-300, "so the cost is exactly zero");
+  near(l.profit_, -l.R_d_, 1e-12, "and profit is -R_d");
+  // Every reported field describes that point rather than a search probe -- the
+  // property the evaluate-at-the-closed-point convention exists to give.
+  near(l.profit_, l.assim_colimited_ - l.hydraulic_cost_, 1e-12,
+       "profit == assim - cost holds in the degenerate branch too");
+}
+
+void test_cowan_farquhar_refuses_an_unset_lambda() {
+  printf("Cowan-Farquhar refuses an unset lambda\n");
+  Drivers d;
+  phylloptim::Leaf l = make_leaf(d, {1.0}, {1.0});
+  ok(!std::isfinite(l.lambda_), "lambda_ starts unset");
+  bool threw = false;
+  std::string what;
+  try {
+    l.optimise_psi_stem_CowanFarquhar();
+  } catch (const std::exception &e) {
+    threw = true;
+    what = e.what();
+  }
+  ok(threw, "it refuses rather than maximising a NaN objective");
+  ok(what.find("lambda_") != std::string::npos, "and the message names lambda_");
+}
+
 // The multi-layer identity from the companion manuscript:
 //   lambda_multi = lambda_single * [1 + kmax*f(psi_r)/S],   S = dE_up/dpsi_r
 // find_root_collar_psi optimises the COLLAR, so lambda_multi is what it
@@ -4012,6 +4155,10 @@ int main() {
   test_root_psi_crit_clamp_binds();
   test_signed_potentials_are_rejected();
   test_lambda_equals_dA_dE_single_layer();
+  test_cowan_farquhar_equates_dA_dE_to_lambda();
+  test_cowan_farquhar_reproduces_the_TF_optimum();
+  test_cowan_farquhar_closed_state();
+  test_cowan_farquhar_refuses_an_unset_lambda();
   test_multilayer_lambda_identity();
   test_g1_eff();
   test_leaf_temperature_is_reported();

@@ -510,10 +510,20 @@ Leaf:
     hydraulic_cost_TF:
       return_type: double
       args: [psi_stem: double]
+    # Cowan & Farquhar (1977): `lambda * E`, a carbon flux, because `$lambda_` is
+    # umol C per kg of water. This is the cost curve `$lambda_`'s units belong to,
+    # and the one whose first-order condition is the dA/dE == lambda that the
+    # optimality literature is written in.
+    hydraulic_cost_CowanFarquhar:
+      return_type: double
+      args: [psi_stem: double, psi_upstream: double]
     profit_psi_stem_Sperry:
       return_type: double
       args: [psi_stem: double, psi_upstream: double]
     profit_psi_stem_TF:
+      return_type: double
+      args: [psi_stem: double, psi_upstream: double]
+    profit_psi_stem_CowanFarquhar:
       return_type: double
       args: [psi_stem: double, psi_upstream: double]
     lambda_TF24:
@@ -522,6 +532,20 @@ Leaf:
 
     # --- optimisers -----------------------------------------------------------
     optimise_psi_stem_Sperry:
+      return_type: void
+      args: []
+
+    # Cowan & Farquhar (1977), the model the whole optimality family is measured
+    # against: maximise `A - lambda*E`, so the optimum satisfies dA/dE == lambda.
+    #
+    # ⚠️ `$lambda_` IS A REQUIRED INPUT and has no default -- it is the marginal
+    # value of water in umol C (kg H2O)^-1, and this refuses rather than optimise
+    # a NaN objective. Its SCALE is set by the leaf, not chosen freely: at the
+    # package defaults the leaf's own marginal cost of water runs 9e4 to 3e5, and
+    # a lambda far outside that band pins the optimum shut or wide open.
+    # `$lambda` (that is, `marginal_cost_water()`) reports the same quantity for
+    # the other cost curves, so it is how you find a value that means something.
+    optimise_psi_stem_CowanFarquhar:
       return_type: void
       args: []
 
