@@ -288,12 +288,11 @@ public:
   // An in-class initialiser, not a line in setup_clean_leaf(), so a fresh Leaf
   // still reads the NA sentinel: the member is otherwise uninitialised, and
   // "never reset" must not become "never initialised".
-  // ⚠️ AND `lambda_` IS ALSO AN OUTPUT, of one caller: since #93
-  // optimise_psi_stem_ProfitMax assigns the lambda its normalisation implies, so
-  // the same field is prescribed on one path and reported on another. That is the
-  // dual role #114 is about; it does not change the argument above, because a
-  // field that is an input on ANY path must not be wiped on the caller's behalf.
-  double lambda_ = util::na_value;         // umol C m^-2 s^-1 kg^-1 m^2 s^1
+  // ⚠️ IT IS AN INPUT AND NOTHING ELSE. No model code assigns it. The units are
+  // carbon per unit TRANSPIRATION, which is the Cowan-Farquhar marginal value of
+  // water and the convention the lambda literature uses -- NOT the same quantity
+  // as `profitmax_lambda_`, which is per unit CONDUCTANCE.
+  double lambda_ = util::na_value;         // umol C (kg H2O)^-1
   double hydraulic_cost_;
   
   double electron_transport_;
@@ -483,6 +482,15 @@ public:
   double profitmax_A_max_;   // |A|max over the supply stream, umol m^-2 s^-1
   double profitmax_k_soil_;  // k(psi_soil), kg m^-2 s^-1 MPa^-1
   double profitmax_k_span_;  // k(psi_soil) - k_crit, the HC denominator
+  // The marginal cost the normalisation implies, |A|max / k_span. An OUTPUT --
+  // read-only from R -- so that the relation to a constant-lambda objective is
+  // reportable without overwriting a caller's input.
+  //
+  // ⚠️ NOT THE SAME QUANTITY AS `lambda_`, and the units say so: this is carbon
+  // per unit CONDUCTANCE lost, umol C MPa (kg H2O)^-1, because it multiplies
+  // `k(psi_soil) - k(psi)`. `lambda_` is carbon per unit TRANSPIRATION,
+  // umol C (kg H2O)^-1. Substituting one for the other is dimensionally wrong.
+  double profitmax_lambda_ = util::na_value;
   // The scan prepare_profitmax() already runs, kept so the objective can be
   // rebuilt on it without evaluating the model a second time. See
   // optimise_psi_stem_ProfitMax for why a grid is needed at all.
@@ -1172,6 +1180,10 @@ public:
   double stom_cond_H2O() const {
     return stom_cond_CO2_ * H2O_CO2_stom_diff_ratio_;
   }
+
+  // Read-only on purpose: a settable one would be a way to disagree with the
+  // normalisers it is derived from.
+  double profitmax_lambda() const { return profitmax_lambda_; }
 
   // Every reported output of a solved point, in one call.
   //
@@ -3907,7 +3919,7 @@ inline void Leaf::optimise_psi_stem_ProfitMax() {
     carbon_gain_ = 0;
     hydraulic_cost_norm_ = 0;
     thermal_cost_ = 0;
-    lambda_ = util::na_value;
+    profitmax_lambda_ = util::na_value;
     return;
   }
 
@@ -3921,7 +3933,7 @@ inline void Leaf::optimise_psi_stem_ProfitMax() {
     carbon_gain_ = 0;
     hydraulic_cost_norm_ = 0;
     thermal_cost_ = 0;
-    lambda_ = util::na_value;
+    profitmax_lambda_ = util::na_value;
     return;
   }
 
@@ -3938,10 +3950,7 @@ inline void Leaf::optimise_psi_stem_ProfitMax() {
   // term is genuinely psi-dependent, and the argmaxes differ by up to 1.1 MPa at
   // Tair 40. A prescribed lambda is therefore not a substitute for this model.
   //
-  // ⚠️ THIS WRITES `lambda_`, WHICH IS A CALLER INPUT for the Cowan-Farquhar cost.
-  // Solving ProfitMax and then Cowan-Farquhar on the same leaf prices water at
-  // this derived value rather than at the caller's. The field wants splitting.
-  lambda_ = profitmax_A_max_ / profitmax_k_span_;
+  profitmax_lambda_ = profitmax_A_max_ / profitmax_k_span_;
 
   // ⚠️ GRID FIRST, THEN REFINE, AND A BARE BRENT SEARCH IS WRONG HERE.
   //

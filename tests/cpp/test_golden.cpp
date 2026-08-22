@@ -574,8 +574,8 @@ struct OptRow {
   const char *kind;   // operating_point_kind_name
   // outputs
   double opt_psi_stem, opt_root_psi, profit, ci, assim, transpiration, gc,
-      hydraulic_cost, lambda, tleaf, carbon_gain, hydraulic_cost_norm,
-      thermal_cost_out;
+      hydraulic_cost, lambda, profitmax_lambda, tleaf, carbon_gain,
+      hydraulic_cost_norm, thermal_cost_out;
 };
 
 // The single-potential path's series resistance. Positive and finite is a
@@ -632,6 +632,7 @@ void read_outputs(const phylloptim::Leaf &l, OptRow &r) {
   r.gc = l.stom_cond_CO2_;
   r.hydraulic_cost = l.hydraulic_cost_;
   r.lambda = l.lambda_;
+  r.profitmax_lambda = l.profitmax_lambda();
   r.tleaf = l.Tleaf_;
   r.carbon_gain = l.carbon_gain_;
   r.hydraulic_cost_norm = l.hydraulic_cost_norm_;
@@ -642,7 +643,8 @@ void blank_outputs(OptRow &r) {
   const double n = std::numeric_limits<double>::quiet_NaN();
   r.kind = "-";
   r.opt_psi_stem = r.opt_root_psi = r.profit = r.ci = r.assim = n;
-  r.transpiration = r.gc = r.hydraulic_cost = r.lambda = r.tleaf = n;
+  r.transpiration = r.gc = r.hydraulic_cost = r.lambda = n;
+  r.profitmax_lambda = r.tleaf = n;
   r.carbon_gain = r.hydraulic_cost_norm = r.thermal_cost_out = n;
 }
 
@@ -662,7 +664,7 @@ void dispatch(phylloptim::Leaf &l, Solver s) {
 OptRow solve_one(Solver s, Topology t, double psi_soil, double ppfd,
                  double leaf_temp, bool eb, bool tc) {
   OptRow r{s, t, psi_soil, ppfd, leaf_temp, eb, tc, false, "ok", "-",
-           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
   phylloptim::Leaf l;
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
@@ -724,7 +726,8 @@ std::vector<OptRow> run_optima_grid() {
             for (double ppfd : kOptPPFDs)
               for (Solver s : kSolvers) {
                 OptRow r{s,  t,  ps, ppfd, T, eb, tc, true, "ok", "-",
-                         0,  0,  0,  0,    0, 0,  0,  0,    0,    0, 0, 0, 0};
+                         0,  0,  0,  0,    0, 0,  0,  0,    0,    0, 0, 0, 0,
+                         0};
                 try {
                   configure_supply(l, t, ps, ppfd, T);
                   poison(l);
@@ -745,8 +748,8 @@ std::vector<OptRow> run_optima_grid() {
 const char *kOptimaHeader =
     "pass\tsolver\ttopology\tpsi_soil\tppfd\tleaf_temp\teb\ttc\tstatus\tkind\t"
     "opt_psi_stem\topt_root_psi\tprofit\tci\tassim\ttranspiration\tgc\t"
-    "hydraulic_cost\tlambda\ttleaf\tcarbon_gain\thydraulic_cost_norm\t"
-    "thermal_cost\n";
+    "hydraulic_cost\tlambda\tprofitmax_lambda\ttleaf\tcarbon_gain\t"
+    "hydraulic_cost_norm\tthermal_cost\n";
 
 void write_opt_row(FILE *f, const OptRow &r) {
   fprintf(f, "%s\t%s\t%s\t%.17g\t%.17g\t%.17g\t%d\t%d\t%s\t%s",
@@ -754,8 +757,9 @@ void write_opt_row(FILE *f, const OptRow &r) {
           topology_name(r.topology), r.psi_soil, r.ppfd, r.leaf_temp,
           r.energy_balance ? 1 : 0, r.thermal_cost ? 1 : 0, r.status, r.kind);
   for (double v : {r.opt_psi_stem, r.opt_root_psi, r.profit, r.ci, r.assim,
-                   r.transpiration, r.gc, r.hydraulic_cost, r.lambda, r.tleaf,
-                   r.carbon_gain, r.hydraulic_cost_norm, r.thermal_cost_out}) {
+                   r.transpiration, r.gc, r.hydraulic_cost, r.lambda,
+                   r.profitmax_lambda, r.tleaf, r.carbon_gain,
+                   r.hydraulic_cost_norm, r.thermal_cost_out}) {
     fprintf(f, "\t%.17g", v);
   }
   fprintf(f, "\n");
@@ -780,17 +784,18 @@ int generate_optima() {
 // The thirteen numeric outputs, in the order write_opt_row emits them.
 const char *kOptFieldNames[] = {
     "opt_psi_stem", "opt_root_psi", "profit", "ci", "assim", "transpiration",
-    "gc", "hydraulic_cost", "lambda", "tleaf", "carbon_gain",
-    "hydraulic_cost_norm", "thermal_cost"};
+    "gc", "hydraulic_cost", "lambda", "profitmax_lambda", "tleaf",
+    "carbon_gain", "hydraulic_cost_norm", "thermal_cost"};
 
 void opt_row_values(const OptRow &r, double *out) {
   out[0] = r.opt_psi_stem;   out[1] = r.opt_root_psi;
   out[2] = r.profit;         out[3] = r.ci;
   out[4] = r.assim;          out[5] = r.transpiration;
   out[6] = r.gc;             out[7] = r.hydraulic_cost;
-  out[8] = r.lambda;         out[9] = r.tleaf;
-  out[10] = r.carbon_gain;   out[11] = r.hydraulic_cost_norm;
-  out[12] = r.thermal_cost_out;
+  out[8] = r.lambda;         out[9] = r.profitmax_lambda;
+  out[10] = r.tleaf;         out[11] = r.carbon_gain;
+  out[12] = r.hydraulic_cost_norm;
+  out[13] = r.thermal_cost_out;
 }
 
 // ⚠️ THE CROSS-PLATFORM TOLERANCES HERE ARE INHERITED, NOT MEASURED. `kExact` is
@@ -843,16 +848,17 @@ int compare_optima(Tolerance tol) {
     char pass[16], solver[24], topo[16], status[16], kind[32];
     double psi_soil, ppfd, leaf_temp;
     int eb, tc;
-    double want[13];
+    double want[14];
     const int n = sscanf(line,
                          "%15s %23s %15s %lf %lf %lf %d %d %15s %31s"
-                         " %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf",
+                         " %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf",
                          pass, solver, topo, &psi_soil, &ppfd, &leaf_temp, &eb,
                          &tc, status, kind, &want[0], &want[1], &want[2],
                          &want[3], &want[4], &want[5], &want[6], &want[7],
-                         &want[8], &want[9], &want[10], &want[11], &want[12]);
-    if (n != 23) {
-      fprintf(stderr, "FAIL: %s line %zu has %d fields, expected 23\n",
+                         &want[8], &want[9], &want[10], &want[11], &want[12],
+                         &want[13]);
+    if (n != 24) {
+      fprintf(stderr, "FAIL: %s line %zu has %d fields, expected 24\n",
               kOptimaPath, i + 2, n);
       ++failures;
       continue;
@@ -877,9 +883,9 @@ int compare_optima(Tolerance tol) {
       ++failures;
     }
 
-    double got[13];
+    double got[14];
     opt_row_values(r, got);
-    for (int j = 0; j < 13; ++j) {
+    for (int j = 0; j < 14; ++j) {
       if (same(got[j], want[j])) {
         continue;
       }
@@ -957,9 +963,9 @@ void report_optima_shape(const std::vector<OptRow> &rows) {
       by_solver_threw[static_cast<int>(r.solver)]++;
       continue;
     }
-    double v[13];
+    double v[14];
     opt_row_values(r, v);
-    for (int j = 0; j < 13; ++j) {
+    for (int j = 0; j < 14; ++j) {
       if (v[j] == kPoison) {
         ++poisoned;
         break;

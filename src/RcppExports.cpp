@@ -2576,6 +2576,17 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// Leaf__profitmax_lambda__get
+double Leaf__profitmax_lambda__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__profitmax_lambda__get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__profitmax_lambda__get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
 // Leaf__g1_eff__get
 double Leaf__g1_eff__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
 RcppExport SEXP _phylloptim_Leaf__g1_eff__get(SEXP obj_SEXP) {
@@ -2931,6 +2942,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__lambda__get", (DL_FUNC) &_phylloptim_Leaf__lambda__get, 1},
     {"_phylloptim_Leaf__lambda_molar__get", (DL_FUNC) &_phylloptim_Leaf__lambda_molar__get, 1},
     {"_phylloptim_Leaf__lambda_multilayer__get", (DL_FUNC) &_phylloptim_Leaf__lambda_multilayer__get, 1},
+    {"_phylloptim_Leaf__profitmax_lambda__get", (DL_FUNC) &_phylloptim_Leaf__profitmax_lambda__get, 1},
     {"_phylloptim_Leaf__g1_eff__get", (DL_FUNC) &_phylloptim_Leaf__g1_eff__get, 1},
     {"_phylloptim_Leaf__gs_H2O__get", (DL_FUNC) &_phylloptim_Leaf__gs_H2O__get, 1},
     {"_phylloptim_Leaf__H2O_CO2_stom_diff_ratio___get", (DL_FUNC) &_phylloptim_Leaf__H2O_CO2_stom_diff_ratio___get, 1},

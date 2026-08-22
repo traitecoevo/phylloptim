@@ -3980,22 +3980,38 @@ void test_single_layer_optimisers_clear_collar_state() {
      "while still writing its own transpiration");
 }
 
-// `lambda_` is a caller INPUT -- the Cowan-Farquhar marginal value of water --
-// and ProfitMax OVERWRITES it with the value its own normalisation implies. So a
-// ProfitMax solve followed by a Cowan-Farquhar one prices water at ProfitMax's
-// number rather than the caller's, silently, because both are finite and
-// plausible. Asserted rather than left as a comment at the field, so that
-// splitting the field has to update this deliberately.
-void test_profitmax_overwrites_the_prescribed_lambda() {
-  printf("ProfitMax overwrites lambda_, which Cowan-Farquhar consumes\n");
+// `lambda_` is a caller INPUT -- the Cowan-Farquhar marginal value of water -- and
+// nothing in the model writes it. ProfitMax reports the marginal cost its own
+// normalisation implies in a SEPARATE field, because the two are not the same
+// quantity: one is carbon per unit transpiration, the other per unit conductance.
+//
+// The load-bearing assertion is the third: a ProfitMax solve followed by a
+// Cowan-Farquhar one must price water at the CALLER's number. Before the split it
+// priced it at ProfitMax's, silently, because both are finite and plausible.
+void test_profitmax_reports_its_lambda_without_taking_the_input() {
+  printf("ProfitMax reports its own lambda and leaves the input alone\n");
   Drivers d;
+  d.PPFD = 1500.0;
   const double prescribed = 1.5e5;
+
   phylloptim::Leaf l = make_single_leaf(d, 0.5);
   l.lambda_ = prescribed;
   l.optimise_psi_stem_ProfitMax();
-  ok(std::isfinite(l.lambda_), "ProfitMax leaves a finite lambda_ behind");
-  ok(l.lambda_ != prescribed,
-     "and it is ITS number, not the one the caller prescribed");
+
+  ok(l.lambda_ == prescribed, "the prescribed lambda_ survives untouched");
+  ok(std::isfinite(l.profitmax_lambda()) && l.profitmax_lambda() > 0.0,
+     "and ProfitMax reports its own, in its own field");
+  ok(l.profitmax_lambda() != prescribed,
+     "which is a different number, as it must be -- different units");
+
+  // The hazard the split exists to remove: solving one and then the other now
+  // prices water at the caller's value, not at ProfitMax's.
+  const double p_after = l.profit_psi_stem_CowanFarquhar(2.0, 0.5);
+  phylloptim::Leaf fresh = make_single_leaf(d, 0.5);
+  fresh.lambda_ = prescribed;
+  const double p_clean = fresh.profit_psi_stem_CowanFarquhar(2.0, 0.5);
+  ok(p_after == p_clean,
+     "a Cowan-Farquhar solve after ProfitMax is bit-identical to a clean one");
 }
 
 // ⚠️ THE TEST THE GOLDEN FILE CANNOT BE. `set_leaf_states_rates_from_psi_stem`
@@ -4359,7 +4375,7 @@ int main() {
   test_rd_temperature_response();
   test_set_traits_matches_a_fresh_leaf();
   test_prescribed_lambda_survives_redriving();
-  test_profitmax_overwrites_the_prescribed_lambda();
+  test_profitmax_reports_its_lambda_without_taking_the_input();
   test_perturb_stem_b_matches_a_rebuild();
   test_stem_b_shortcut_needs_no_rebuild();
   test_water_mass_conversions_are_reciprocal();

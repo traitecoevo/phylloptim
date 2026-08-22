@@ -18,10 +18,26 @@ entry points were not two models.
 `$lambda_` now has one meaning: the Cowan-Farquhar marginal value of water, in
 umol C (kg H2O)^-1, supplied by the caller.
 
-⚠️ `optimise_psi_stem_ProfitMax()` still **overwrites** `$lambda_` with the value
-its normalisation implies, so solving it and then Cowan-Farquhar on the same leaf
-prices water at ProfitMax's number rather than yours. Asserted in the C++ suite;
-the field wants splitting.
+## `$lambda_` is an input; ProfitMax reports its own in `$profitmax_lambda`
+
+**BREAKING for anyone reading `$lambda_` after a ProfitMax solve.**
+`optimise_psi_stem_ProfitMax()` used to overwrite `$lambda_` with the marginal
+cost its normalisation implies, so solving it and then Cowan-Farquhar on the same
+leaf priced water at ProfitMax's number rather than the caller's — silently, since
+both are finite and plausible. It now writes the new read-only
+`$profitmax_lambda`, and `$lambda_` is an input that no model code touches.
+
+They were never the same quantity, and the units say so: `$profitmax_lambda` is
+carbon per unit **conductance** lost, umol C MPa (kg H2O)^-1, because it
+multiplies `k(psi_soil) - k(psi)`. `$lambda_` and `$lambda` are per unit
+**transpiration**, umol C (kg H2O)^-1.
+
+`$profitmax_lambda` is read-only: a settable one would be a way to disagree with
+the normalisers it is derived from.
+
+Both older golden files stay bit-identical and the fingerprint is unchanged. In
+the optimiser fixture 236 rows move, all ProfitMax and all in the `lambda` column,
+and a `profitmax_lambda` column is added so the derived value stays recorded.
 
 No numbers move on any surviving path: `operating_points.tsv` and
 `primitives.tsv` are bit-identical, the behaviour fingerprint is unchanged, and
