@@ -623,7 +623,7 @@ Leaf:
       args: [curve: int, target_psi_stem: double]
     dprofit_dpsi_stem_by:
       return_type: "std::vector<double>"
-      args: [curve: int, psi_stem: double, psi_upstream: double]
+      args: [curve: int, psi_stem: double]
 
     # --- Sperry (2017) ProfitMax with BOTH terms normalised -------------------
     #

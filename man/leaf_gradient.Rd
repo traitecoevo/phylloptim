@@ -25,7 +25,8 @@ leaf_gradient(
   step = 1e-06,
   stationarity_tol = 1e-08,
   method = c("auto", "ift", "fd"),
-  fast_stem_curve = TRUE
+  fast_stem_curve = TRUE,
+  model = "collar"
 )
 }
 \arguments{
@@ -171,9 +172,40 @@ the TF24 gradient, silently.** `$optimise_psi_stem_CF77()` and
 rather than the collar, and neither is what this function differentiates.
 There is no warning, because the numbers that come back are perfectly good
 TF24 derivatives.
+}
 
-Differentiating the others needs `dprofit` for each curve, which does not
-exist yet. Until it does, treat this as TF24-only.
+\section{Choosing which model to differentiate}{
+
+`model` selects it. `"collar"`, the default, is the TF24 cost maximised over
+the root-collar potential -- the production path, and what this function used
+to do unconditionally. `"TF24"`, `"CF77"`, `"JS22"` and `"CMax"` differentiate
+the corresponding **stem** optimum instead: `psi_stem` with the upstream
+potential pinned at `psi_soil`, which needs the single-potential supply path.
+
+⚠️ **`"collar"` and `"TF24"` are different models, not two ways of asking one
+question**, even though both use the TF24 cost. They optimise different
+variables over different supply topologies, disagree on 20 of 30 driver rows,
+and the gap does not close as the root resistance goes to zero.
+
+⚠️ **On a stem route the decision variable is `psi_stem`, so `collar` comes
+back non-finite.** The collar is not solved for at all there, and an absent
+number is the truthful answer rather than a gap -- reading one would be reading
+state from whichever solve ran last.
+
+⚠️ **A stem route reports `status == "pinned"` at a perfectly interior
+optimum, and `method = "auto"` therefore differences the solve.** This is a
+property of the optimisers rather than of the points: the stem entry points
+scan a 64-point grid and refine the winning cell, so they leave `dprofit` at
+2e-08 to 1e-06, where the collar solve root-finds `dprofit == 0` and leaves
+1e-15. `stationarity_tol`'s default was measured in the empty band between the
+collar route's own two populations and does not transfer. Pass
+`method = "ift"` to force the composite -- its numbers agree with differencing
+the solve -- and read the caveat as "the premise is untested here", not
+"the premise fails".
+
+The two PRODUCT objectives, `SOX` and `JW26`, have no route: they maximise
+`A * g(psi)`, so the derivative is `(dA/dpsi) * g + A * g'` rather than the
+`dA/dpsi - dC/dpsi` this is built on. Asking is refused by name.
 
 ⚠️ **A zero column for another curve's parameter means two different things,
 and they are not distinguishable from the number.** `JS22_gamma`, `CMax_a`,

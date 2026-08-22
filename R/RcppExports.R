@@ -213,8 +213,8 @@ Leaf__evaluate_psi_stem_by <- function(obj_, curve, target_psi_stem) {
     .Call('_phylloptim_Leaf__evaluate_psi_stem_by', PACKAGE = 'phylloptim', obj_, curve, target_psi_stem)
 }
 
-Leaf__dprofit_dpsi_stem_by <- function(obj_, curve, psi_stem, psi_upstream) {
-    .Call('_phylloptim_Leaf__dprofit_dpsi_stem_by', PACKAGE = 'phylloptim', obj_, curve, psi_stem, psi_upstream)
+Leaf__dprofit_dpsi_stem_by <- function(obj_, curve, psi_stem) {
+    .Call('_phylloptim_Leaf__dprofit_dpsi_stem_by', PACKAGE = 'phylloptim', obj_, curve, psi_stem)
 }
 
 Leaf__thermal_cost_at <- function(obj_, leaf_temp) {

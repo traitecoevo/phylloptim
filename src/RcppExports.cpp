@@ -694,16 +694,15 @@ BEGIN_RCPP
 END_RCPP
 }
 // Leaf__dprofit_dpsi_stem_by
-std::vector<double> Leaf__dprofit_dpsi_stem_by(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int curve, double psi_stem, double psi_upstream);
-RcppExport SEXP _phylloptim_Leaf__dprofit_dpsi_stem_by(SEXP obj_SEXP, SEXP curveSEXP, SEXP psi_stemSEXP, SEXP psi_upstreamSEXP) {
+std::vector<double> Leaf__dprofit_dpsi_stem_by(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int curve, double psi_stem);
+RcppExport SEXP _phylloptim_Leaf__dprofit_dpsi_stem_by(SEXP obj_SEXP, SEXP curveSEXP, SEXP psi_stemSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
     Rcpp::traits::input_parameter< int >::type curve(curveSEXP);
     Rcpp::traits::input_parameter< double >::type psi_stem(psi_stemSEXP);
-    Rcpp::traits::input_parameter< double >::type psi_upstream(psi_upstreamSEXP);
-    rcpp_result_gen = Rcpp::wrap(Leaf__dprofit_dpsi_stem_by(obj_, curve, psi_stem, psi_upstream));
+    rcpp_result_gen = Rcpp::wrap(Leaf__dprofit_dpsi_stem_by(obj_, curve, psi_stem));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -3130,7 +3129,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__optimise_psi_stem_JW26", (DL_FUNC) &_phylloptim_Leaf__optimise_psi_stem_JW26, 1},
     {"_phylloptim_Leaf__optimise_psi_stem_by", (DL_FUNC) &_phylloptim_Leaf__optimise_psi_stem_by, 2},
     {"_phylloptim_Leaf__evaluate_psi_stem_by", (DL_FUNC) &_phylloptim_Leaf__evaluate_psi_stem_by, 3},
-    {"_phylloptim_Leaf__dprofit_dpsi_stem_by", (DL_FUNC) &_phylloptim_Leaf__dprofit_dpsi_stem_by, 4},
+    {"_phylloptim_Leaf__dprofit_dpsi_stem_by", (DL_FUNC) &_phylloptim_Leaf__dprofit_dpsi_stem_by, 3},
     {"_phylloptim_Leaf__thermal_cost_at", (DL_FUNC) &_phylloptim_Leaf__thermal_cost_at, 2},
     {"_phylloptim_Leaf__prepare_profitmax", (DL_FUNC) &_phylloptim_Leaf__prepare_profitmax, 1},
     {"_phylloptim_Leaf__profit_psi_stem_ProfitMax", (DL_FUNC) &_phylloptim_Leaf__profit_psi_stem_ProfitMax, 3},

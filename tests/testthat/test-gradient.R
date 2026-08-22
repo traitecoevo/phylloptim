@@ -1093,6 +1093,97 @@ test_that("the curve registry is read from C++, not restated in R", {
   # the wrong kind.
   l <- leaf_model(supply = leaf_supply_single())
   set_drivers(l, psi_soil = 1.5, PPFD = 900)
-  expect_error(l$dprofit_dpsi_stem_by(which(nms == "SOX") - 1L, 2.0, 1.5),
+  expect_error(l$dprofit_dpsi_stem_by(which(nms == "SOX") - 1L, 2.0),
                "maximises a PRODUCT")
+})
+
+# --- differentiating a stem model's optimum (plan item 5) --------------------
+
+test_that("every additive curve's IFT gradient matches differencing its solve", {
+  # ⚠️ The IFT is the EXACT one and the finite difference is the noisy one -- a
+  # difference of a solve divides that solve's ~1e-09 floor by the step -- so this
+  # bounds the FD's error rather than the composite's. What it establishes is that
+  # the composite is differentiating the same model the optimiser solved.
+  tr <- leaf_traits()
+  net <- series_resistance(1e4)
+  mk <- function() {
+    l <- leaf_model(tr, leaf_control(), leaf_supply_single())
+    l$CF77_lambda_ <- 1.5e5   # in band: marginal_cost_water runs 9e4-3e5
+    l
+  }
+  cases <- list(c("TF24", "TF24_cost_scale"), c("CF77", "CF77_lambda_"),
+                c("JS22", "JS22_gamma"), c("CMax", "CMax_a"))
+  n_checked <- 0L
+  for (case in cases) {
+    m <- case[[1]]
+    p <- case[[2]]
+    g <- function(meth) {
+      leaf_gradient(psi_soil = 1.5, PPFD = 1500, root_network = net, x = mk(),
+                    traits = tr, pars = p, model = m, method = meth)
+    }
+    ift <- g("ift")
+    fd <- g("fd")
+    expect_identical(ift$model, m)
+    # ⚠️ `status` IS "pinned" HERE AND THE POINT IS NOT PINNED. The stem
+    # optimisers SCAN a 64-point grid and refine the winning cell, so they leave
+    # dprofit at 2e-08 to 1e-06 where the collar solve -- which root-finds
+    # dprofit == 0 -- leaves 1e-15. `stationarity_tol`'s 1e-08 was measured in the
+    # empty band between the COLLAR route's two populations, so on a stem route it
+    # classifies the solver's own residual as a bound. Asserted as measured so the
+    # day a stem route gains a first-order-condition polish, this fails and says so.
+    expect_identical(ift$status, "pinned")
+    expect_lt(ift$stationarity, 1e-5)
+    expect_gt(ift$stationarity, 1e-9)
+    # Forced, therefore: `method = "auto"` would fall back to differencing the
+    # solve on every stem row until that is fixed.
+    expect_identical(ift$method, "ift")
+    for (out in c("A", "gc", "psi_stem")) {
+      expect_equal(ift$gradient[p, out], fd$gradient[p, out],
+                   tolerance = 5e-3, label = paste(m, out))
+    }
+    n_checked <- n_checked + 1L
+  }
+  expect_identical(n_checked, 4L)
+})
+
+test_that("the decision variable follows the route", {
+  tr <- leaf_traits()
+  net <- series_resistance(1e4)
+  l <- leaf_model(tr, leaf_control(), leaf_supply_single())
+
+  collar <- leaf_gradient(psi_soil = 1.5, PPFD = 1500, pars = "TF24_cost_scale")
+  stem <- leaf_gradient(psi_soil = 1.5, PPFD = 1500, root_network = net, x = l,
+                        traits = tr, pars = "TF24_cost_scale", model = "TF24")
+
+  # On the collar route `collar` IS psi*, so its derivative is assigned.
+  expect_identical(collar$model, "collar")
+  expect_true(is.finite(collar$gradient[1, "collar"]))
+  # On a stem route the collar is never solved for, so NOT finite is the truthful
+  # answer -- reading a number there would be reading stale or absent state.
+  expect_false(is.finite(stem$gradient[1, "collar"]))
+  expect_true(is.finite(stem$gradient[1, "psi_stem"]))
+
+  # ⚠️ And they are DIFFERENT MODELS, not one restricted to the other: same
+  # drivers, same cost curve, different optimum.
+  expect_false(isTRUE(all.equal(collar$psi, stem$psi)))
+})
+
+test_that("a product objective is refused with its reason", {
+  tr <- leaf_traits()
+  l <- leaf_model(tr, leaf_control(), leaf_supply_single())
+  for (m in c("SOX", "JW26")) {
+    expect_error(
+      leaf_gradient(psi_soil = 1.5, PPFD = 1500,
+                    root_network = series_resistance(1e4), x = l, traits = tr,
+                    pars = "JS22_gamma", model = m),
+      "maximises a PRODUCT")
+  }
+  # A stem route needs the single-potential path, and says so rather than
+  # returning a number from the wrong topology.
+  expect_error(leaf_gradient(psi_soil = 1.5, PPFD = 1500,
+                             pars = "TF24_cost_scale", model = "TF24"),
+               "single-potential supply path")
+  expect_error(leaf_gradient(psi_soil = 1.5, PPFD = 1500,
+                             pars = "TF24_cost_scale", model = "Medlyn"),
+               "no gradient route")
 })

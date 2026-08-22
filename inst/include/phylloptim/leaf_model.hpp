@@ -1082,8 +1082,13 @@ public:
   static std::string curve_name(int curve);
   void optimise_psi_stem_by(int curve);
   double evaluate_psi_stem_by(int curve, double target_psi_stem);
-  std::vector<double> dprofit_dpsi_stem_by(int curve, double psi_stem,
-                                           double psi_upstream);
+  // ⚠️ NO `psi_upstream` ARGUMENT, deliberately. On a stem route the upstream
+  // potential is ALWAYS psi_soil -- that is what "non-root-based" means -- so it is
+  // read here through the same accessor `optimise_psi_stem_single` uses. Taking it
+  // from the caller invited a mismatch, and the first caller got it wrong: R read
+  // `psi_soil_`, which is the MULTI-LAYER roots' vector and is empty on the single
+  // path, so the subscript was out of bounds rather than merely inconsistent.
+  std::vector<double> dprofit_dpsi_stem_by(int curve, double psi_stem);
 
   template <CostCurve K> void optimise_psi_stem_single();
   template <CostCurve K> void check_cost_parameters();
@@ -4566,14 +4571,18 @@ inline double Leaf::evaluate_psi_stem_by(int curve, double target_psi_stem) {
 // `dprofit` hands back a hard 0.0 SENTINEL on its shut-down and reversed-gradient
 // exits, and a bare zero is indistinguishable from a stationary point. A composite
 // that reads the value without the flag inherits that bug.
-inline std::vector<double> Leaf::dprofit_dpsi_stem_by(int curve, double psi_stem,
-                                                      double psi_upstream) {
+inline std::vector<double> Leaf::dprofit_dpsi_stem_by(int curve,
+                                                      double psi_stem) {
   if (!curve_has_derivative(curve)) {
     util::stop("no dprofit/dpsi_stem for the " + curve_name(curve) +
                " curve: it maximises a PRODUCT, A*g(psi), so its derivative is "
                "(dA/dpsi)*g + A*g' rather than dA/dpsi - dC/dpsi. Use its "
                "optimiser directly, or finite-difference the objective.");
   }
+  if (!supply_is_single_layer()) {
+    util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
+  }
+  const double psi_upstream = supply_psi_soil_scalar();
   bool feasible = false;
   double v = util::na_value;
   switch (static_cast<CostCurve>(curve)) {
