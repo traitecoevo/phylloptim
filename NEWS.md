@@ -18,26 +18,35 @@ entry points were not two models.
 `$lambda_` now has one meaning: the Cowan-Farquhar marginal value of water, in
 umol C (kg H2O)^-1, supplied by the caller.
 
-## `$lambda_` is an input; ProfitMax reports its own in `$profitmax_lambda`
+## `$lambda_` is an input; every curve reports an emergent lambda
 
 **BREAKING for anyone reading `$lambda_` after a ProfitMax solve.**
-`optimise_psi_stem_ProfitMax()` used to overwrite `$lambda_` with the marginal
-cost its normalisation implies, so solving it and then Cowan-Farquhar on the same
-leaf priced water at ProfitMax's number rather than the caller's — silently, since
-both are finite and plausible. It now writes the new read-only
-`$profitmax_lambda`, and `$lambda_` is an input that no model code touches.
+`optimise_psi_stem_ProfitMax()` used to overwrite `$lambda_`, so solving it and
+then Cowan-Farquhar on the same leaf priced water at ProfitMax's number rather
+than the caller's — silently, since both are finite and plausible. `$lambda_` is
+now an input that no model code touches.
 
-They were never the same quantity, and the units say so: `$profitmax_lambda` is
-carbon per unit **conductance** lost, umol C MPa (kg H2O)^-1, because it
-multiplies `k(psi_soil) - k(psi)`. `$lambda_` and `$lambda` are per unit
-**transpiration**, umol C (kg H2O)^-1.
+In its place, **every** cost curve now reports the marginal cost of water its
+operating point implies, on one shared axis:
 
-`$profitmax_lambda` is read-only: a settable one would be a way to disagree with
-the normalisers it is derived from.
+    $lambda_emergent = (dC/dpsi) / (dE/dpsi)      umol C (kg H2O)^-1
 
-Both older golden files stay bit-identical and the fingerprint is unchanged. In
-the optimiser fixture 236 rows move, all ProfitMax and all in the `lambda` column,
-and a `profitmax_lambda` column is added so the derived value stays recorded.
+Same units as the `$lambda_` input, so the two are directly comparable — which is
+the point. Cowan-Farquhar prices water at a constant, so its emergent lambda IS
+that constant, exactly. TF24's is `lambda_TF24` at the operating point, the collar
+solve's carries the series-resistance correction, and ProfitMax's is derived from
+its normalised cost and scaled by |A|max to restore carbon units. Verified against
+finite differences of each curve's own dC/dE: worst relative error 4.9e-07.
+
+`$lambda_emergent` is read-only, and NA until an optimiser has run.
+
+⚠️ ProfitMax's `|A|max / k_span` is **not** a lambda, whatever it has been called:
+its units are carbon per unit CONDUCTANCE lost, because it multiplies
+`k(psi_soil) - k(psi)`. It is a normaliser. `$profitmax_A_max` and
+`$profitmax_k_span` are now exposed read-only so that ratio is one division away.
+
+Both older golden files stay bit-identical and the fingerprint is unchanged. The
+optimiser fixture gains a `lambda_emergent` column; no other column moves.
 
 No numbers move on any surviving path: `operating_points.tsv` and
 `primitives.tsv` are bit-identical, the behaviour fingerprint is unchanged, and

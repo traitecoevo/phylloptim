@@ -574,7 +574,7 @@ struct OptRow {
   const char *kind;   // operating_point_kind_name
   // outputs
   double opt_psi_stem, opt_root_psi, profit, ci, assim, transpiration, gc,
-      hydraulic_cost, lambda, profitmax_lambda, tleaf, carbon_gain,
+      hydraulic_cost, lambda, lambda_emergent, tleaf, carbon_gain,
       hydraulic_cost_norm, thermal_cost_out;
 };
 
@@ -632,7 +632,7 @@ void read_outputs(const phylloptim::Leaf &l, OptRow &r) {
   r.gc = l.stom_cond_CO2_;
   r.hydraulic_cost = l.hydraulic_cost_;
   r.lambda = l.lambda_;
-  r.profitmax_lambda = l.profitmax_lambda();
+  r.lambda_emergent = l.lambda_emergent();
   r.tleaf = l.Tleaf_;
   r.carbon_gain = l.carbon_gain_;
   r.hydraulic_cost_norm = l.hydraulic_cost_norm_;
@@ -644,7 +644,7 @@ void blank_outputs(OptRow &r) {
   r.kind = "-";
   r.opt_psi_stem = r.opt_root_psi = r.profit = r.ci = r.assim = n;
   r.transpiration = r.gc = r.hydraulic_cost = r.lambda = n;
-  r.profitmax_lambda = r.tleaf = n;
+  r.lambda_emergent = r.tleaf = n;
   r.carbon_gain = r.hydraulic_cost_norm = r.thermal_cost_out = n;
 }
 
@@ -748,7 +748,7 @@ std::vector<OptRow> run_optima_grid() {
 const char *kOptimaHeader =
     "pass\tsolver\ttopology\tpsi_soil\tppfd\tleaf_temp\teb\ttc\tstatus\tkind\t"
     "opt_psi_stem\topt_root_psi\tprofit\tci\tassim\ttranspiration\tgc\t"
-    "hydraulic_cost\tlambda\tprofitmax_lambda\ttleaf\tcarbon_gain\t"
+    "hydraulic_cost\tlambda\tlambda_emergent\ttleaf\tcarbon_gain\t"
     "hydraulic_cost_norm\tthermal_cost\n";
 
 void write_opt_row(FILE *f, const OptRow &r) {
@@ -758,7 +758,7 @@ void write_opt_row(FILE *f, const OptRow &r) {
           r.energy_balance ? 1 : 0, r.thermal_cost ? 1 : 0, r.status, r.kind);
   for (double v : {r.opt_psi_stem, r.opt_root_psi, r.profit, r.ci, r.assim,
                    r.transpiration, r.gc, r.hydraulic_cost, r.lambda,
-                   r.profitmax_lambda, r.tleaf, r.carbon_gain,
+                   r.lambda_emergent, r.tleaf, r.carbon_gain,
                    r.hydraulic_cost_norm, r.thermal_cost_out}) {
     fprintf(f, "\t%.17g", v);
   }
@@ -784,7 +784,7 @@ int generate_optima() {
 // The thirteen numeric outputs, in the order write_opt_row emits them.
 const char *kOptFieldNames[] = {
     "opt_psi_stem", "opt_root_psi", "profit", "ci", "assim", "transpiration",
-    "gc", "hydraulic_cost", "lambda", "profitmax_lambda", "tleaf",
+    "gc", "hydraulic_cost", "lambda", "lambda_emergent", "tleaf",
     "carbon_gain", "hydraulic_cost_norm", "thermal_cost"};
 
 void opt_row_values(const OptRow &r, double *out) {
@@ -792,7 +792,7 @@ void opt_row_values(const OptRow &r, double *out) {
   out[2] = r.profit;         out[3] = r.ci;
   out[4] = r.assim;          out[5] = r.transpiration;
   out[6] = r.gc;             out[7] = r.hydraulic_cost;
-  out[8] = r.lambda;         out[9] = r.profitmax_lambda;
+  out[8] = r.lambda;         out[9] = r.lambda_emergent;
   out[10] = r.tleaf;         out[11] = r.carbon_gain;
   out[12] = r.hydraulic_cost_norm;
   out[13] = r.thermal_cost_out;

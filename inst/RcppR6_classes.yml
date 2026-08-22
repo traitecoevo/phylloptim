@@ -345,14 +345,20 @@ Leaf:
     lambda: {type: double, access: member, name_cpp: marginal_cost_water}
     lambda_molar: {type: double, access: member, name_cpp: marginal_cost_water_molar}
     lambda_multilayer: {type: double, access: member, name_cpp: marginal_cost_water_multilayer}
-    # The marginal cost ProfitMax's normalisation implies, |A|max / k_span, and an
-    # OUTPUT -- read-only, because a settable one would be a way to disagree with
-    # the normalisers it comes from.
+    # THE MARGINAL COST OF WATER THE OPERATING POINT IMPLIES, `(dC/dpsi)/(dE/dpsi)`
+    # in umol C (kg H2O)^-1 -- the one output every cost curve reports on the same
+    # axis, and in the same units as the `$lambda_` INPUT so the two are directly
+    # comparable. Cowan-Farquhar prices water at a constant, so its emergent lambda
+    # IS that constant; every other curve's moves with the drivers.
     #
-    # ⚠️ NOT `$lambda_`, and not comparable with it: this is carbon per unit
-    # CONDUCTANCE lost, umol C MPa (kg H2O)^-1, since it multiplies
-    # `k(psi_soil) - k(psi)`. `$lambda_` and `$lambda` are per unit TRANSPIRATION.
-    profitmax_lambda: {type: double, access: member, name_cpp: profitmax_lambda}
+    # Read-only: a settable one would be a way to disagree with the operating point
+    # it comes from. NA until an optimiser has run.
+    lambda_emergent: {type: double, access: member, name_cpp: lambda_emergent}
+    # ProfitMax's normalisers, so its equivalence ratio |A|max/k_span is one
+    # division away. ⚠️ That ratio is NOT a lambda -- it is carbon per unit
+    # CONDUCTANCE lost, because it multiplies `k(psi_soil) - k(psi)`.
+    profitmax_A_max: {type: double, access: member, name_cpp: profitmax_A_max}
+    profitmax_k_span: {type: double, access: member, name_cpp: profitmax_k_span}
     g1_eff: {type: double, access: member, name_cpp: g1_eff}
     # Conductance to WATER, mol H2O m^-2 s^-1 (#56). Every data source and the g1
     # literature record gs to water; the model solves for gs to CO2. An accessor, not

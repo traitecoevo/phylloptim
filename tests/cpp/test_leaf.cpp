@@ -1541,6 +1541,98 @@ void test_evaluate_psi_stem_prescribes_rather_than_optimises() {
        "the TF24 arm agrees with its own objective at that point");
 }
 
+// EVERY cost curve reports its emergent lambda on the same axis, which is what
+// makes `lambda_emergent_` a shared output rather than three fields wearing one
+// name. Two independent checks, one per curve:
+//
+//   * Cowan-Farquhar prices water at a constant, so its emergent lambda IS the
+//     prescribed one -- exactly, since dC/dpsi = lambda*(dE/dpsi) identically;
+//   * TF24's must equal a finite difference of its own cost over its own E.
+//
+// The ProfitMax case is checked the same way in
+// test_profitmax_emergent_lambda_matches_a_finite_difference.
+// ProfitMax's emergent lambda has a derivation rather than a closed form lying
+// around, so it gets its own check: against a finite difference of its OWN cost
+// over its own transpiration, scaled by |A|max to restore carbon units. Run with
+// both gates on, which is the arm where the thermal term is not zero.
+void test_profitmax_emergent_lambda_matches_a_finite_difference() {
+  printf("ProfitMax's emergent lambda against a finite difference of dC/dE\n");
+  Drivers d;
+  d.PPFD = 1500.0;
+  const double h = 1e-3;
+  double worst = 0.0;
+  int rows = 0;
+
+  for (double t : {25.0, 40.0}) {
+    for (bool eb : {false, true}) {
+      d.leaf_temp = t;
+      phylloptim::Leaf l = make_leaf(d, {1.0}, {1.0});
+      l.use_energy_balance_ = eb;
+      l.use_thermal_cost_ = true;
+      if (eb) { l.Rn_ = 300.0; l.d_ = 0.05; l.wind_speed_ = 2.0; }
+      l.optimise_psi_stem_ProfitMax();
+      const double psi = l.opt_psi_stem_;
+      if (psi <= 1.0 + h || psi >= l.psi_crit - h) continue;
+
+      // dC/dpsi of the NORMALISED cost, and dE/dpsi, both by difference.
+      auto cost_and_E = [&](double p) {
+        l.profit_psi_stem_ProfitMax(p, 1.0);
+        return std::pair<double, double>(l.hydraulic_cost_norm_ + l.thermal_cost_,
+                                        l.transpiration_);
+      };
+      const auto up = cost_and_E(psi + h);
+      const auto dn = cost_and_E(psi - h);
+      const double fd = l.profitmax_A_max() *
+                        ((up.first - dn.first) / (up.second - dn.second));
+
+      l.optimise_psi_stem_ProfitMax();
+      ++rows;
+      worst = std::max(worst, std::abs(l.lambda_emergent() / fd - 1.0));
+      near(l.lambda_emergent() / fd, 1.0, 5e-3,
+           "ProfitMax emergent lambda at T=" + std::to_string(t) +
+               " eb=" + std::to_string(int(eb)));
+    }
+  }
+  printf("    %d rows | worst relative error: %.3e\n", rows, worst);
+  ok(rows > 0, "at least one row had an interior optimum to check");
+}
+
+void test_every_curve_reports_an_emergent_lambda() {
+  printf("every cost curve reports its emergent lambda on one axis\n");
+  Drivers d;
+  d.PPFD = 1500.0;
+  const double h = 1e-3;   // measured step; see the dprofit test for why
+
+  for (double psi_soil : {0.5, 1.0, 2.0}) {
+    // --- Cowan-Farquhar: exact ---------------------------------------------
+    {
+      phylloptim::Leaf l = make_leaf(d, {psi_soil}, {1.0});
+      l.lambda_ = 1.5e5;
+      l.optimise_psi_stem_CowanFarquhar();
+      ok(l.lambda_emergent() == l.lambda_,
+         "Cowan-Farquhar's emergent lambda is its prescribed one, exactly");
+    }
+    // --- TF24: against a finite difference of dC/dE -------------------------
+    {
+      phylloptim::Leaf l = make_leaf(d, {psi_soil}, {1.0});
+      l.optimise_psi_stem_TF();
+      const double psi = l.opt_psi_stem_;
+      if (psi <= psi_soil + h || psi >= l.psi_crit - h) continue;
+      const double dC =
+          (l.hydraulic_cost_TF(psi + h) - l.hydraulic_cost_TF(psi - h)) / (2 * h);
+      l.profit_psi_stem_TF(psi + h, psi_soil);
+      const double E1 = l.transpiration_;
+      l.profit_psi_stem_TF(psi - h, psi_soil);
+      const double E0 = l.transpiration_;
+      const double fd = dC / ((E1 - E0) / (2 * h));
+      l.optimise_psi_stem_TF();
+      near(l.lambda_emergent() / fd, 1.0, 1e-4,
+           "TF24's emergent lambda is dC/dE at psi_soil=" +
+               std::to_string(psi_soil));
+    }
+  }
+}
+
 // The multi-layer identity from the companion manuscript:
 //   lambda_multi = lambda_single * [1 + kmax*f(psi_r)/S],   S = dE_up/dpsi_r
 // find_root_collar_psi optimises the COLLAR, so lambda_multi is what it
@@ -3988,8 +4080,8 @@ void test_single_layer_optimisers_clear_collar_state() {
 // The load-bearing assertion is the third: a ProfitMax solve followed by a
 // Cowan-Farquhar one must price water at the CALLER's number. Before the split it
 // priced it at ProfitMax's, silently, because both are finite and plausible.
-void test_profitmax_reports_its_lambda_without_taking_the_input() {
-  printf("ProfitMax reports its own lambda and leaves the input alone\n");
+void test_profitmax_reports_an_emergent_lambda() {
+  printf("ProfitMax reports an emergent lambda and leaves the input alone\n");
   Drivers d;
   d.PPFD = 1500.0;
   const double prescribed = 1.5e5;
@@ -3999,10 +4091,10 @@ void test_profitmax_reports_its_lambda_without_taking_the_input() {
   l.optimise_psi_stem_ProfitMax();
 
   ok(l.lambda_ == prescribed, "the prescribed lambda_ survives untouched");
-  ok(std::isfinite(l.profitmax_lambda()) && l.profitmax_lambda() > 0.0,
-     "and ProfitMax reports its own, in its own field");
-  ok(l.profitmax_lambda() != prescribed,
-     "which is a different number, as it must be -- different units");
+  ok(std::isfinite(l.lambda_emergent()) && l.lambda_emergent() > 0.0,
+     "and ProfitMax reports the marginal cost its point implies");
+  ok(l.lambda_emergent() != prescribed,
+     "which is its own number, not the caller's");
 
   // The hazard the split exists to remove: solving one and then the other now
   // prices water at the caller's value, not at ProfitMax's.
@@ -4375,7 +4467,9 @@ int main() {
   test_rd_temperature_response();
   test_set_traits_matches_a_fresh_leaf();
   test_prescribed_lambda_survives_redriving();
-  test_profitmax_reports_its_lambda_without_taking_the_input();
+  test_profitmax_reports_an_emergent_lambda();
+  test_every_curve_reports_an_emergent_lambda();
+  test_profitmax_emergent_lambda_matches_a_finite_difference();
   test_perturb_stem_b_matches_a_rebuild();
   test_stem_b_shortcut_needs_no_rebuild();
   test_water_mass_conversions_are_reciprocal();

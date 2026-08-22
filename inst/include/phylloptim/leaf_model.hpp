@@ -291,7 +291,7 @@ public:
   // ⚠️ IT IS AN INPUT AND NOTHING ELSE. No model code assigns it. The units are
   // carbon per unit TRANSPIRATION, which is the Cowan-Farquhar marginal value of
   // water and the convention the lambda literature uses -- NOT the same quantity
-  // as `profitmax_lambda_`, which is per unit CONDUCTANCE.
+  // as ProfitMax's normaliser ratio, which is per unit CONDUCTANCE.
   double lambda_ = util::na_value;         // umol C (kg H2O)^-1
   double hydraulic_cost_;
   
@@ -482,21 +482,27 @@ public:
   double profitmax_A_max_;   // |A|max over the supply stream, umol m^-2 s^-1
   double profitmax_k_soil_;  // k(psi_soil), kg m^-2 s^-1 MPa^-1
   double profitmax_k_span_;  // k(psi_soil) - k_crit, the HC denominator
-  // The marginal cost the normalisation implies, |A|max / k_span. An OUTPUT --
-  // read-only from R -- so that the relation to a constant-lambda objective is
-  // reportable without overwriting a caller's input.
-  //
-  // ⚠️ NOT THE SAME QUANTITY AS `lambda_`, and the units say so: this is carbon
-  // per unit CONDUCTANCE lost, umol C MPa (kg H2O)^-1, because it multiplies
-  // `k(psi_soil) - k(psi)`. `lambda_` is carbon per unit TRANSPIRATION,
-  // umol C (kg H2O)^-1. Substituting one for the other is dimensionally wrong.
-  double profitmax_lambda_ = util::na_value;
+  // ⚠️ profitmax_A_max_ / profitmax_k_span_ is NOT a lambda, whatever it gets
+  // called: its units are carbon per unit CONDUCTANCE lost, umol C MPa (kg H2O)^-1,
+  // because it multiplies `k(psi_soil) - k(psi)`. It is ProfitMax's normaliser and
+  // nothing more. The comparable quantity is `lambda_emergent_` below.
   // The scan prepare_profitmax() already runs, kept so the objective can be
   // rebuilt on it without evaluating the model a second time. See
   // optimise_psi_stem_ProfitMax for why a grid is needed at all.
   std::vector<double> profitmax_scan_psi_;
   std::vector<double> profitmax_scan_A_;
   std::vector<double> profitmax_scan_Tleaf_;
+  // THE MARGINAL COST OF WATER THE OPERATING POINT IMPLIES, and the one output
+  // every cost curve can report on the same axis:
+  //
+  //     lambda_emergent = (dC/dpsi) / (dE/dpsi)      umol C (kg H2O)^-1
+  //
+  // Same units as the `lambda_` INPUT, and directly comparable with it -- that is
+  // the point. Cowan-Farquhar prices water at a constant, so its emergent lambda
+  // IS that constant; every other curve has one that moves with the drivers, and
+  // this is where you read it. Written by whichever optimiser ran; NA before one
+  // has.
+  double lambda_emergent_ = util::na_value;
   double carbon_gain_;         // CG = A/|A|max over the supply stream
   double hydraulic_cost_norm_; // HC = [k(psi_soil)-k(psi)]/[k(psi_soil)-k_crit]
   double thermal_cost_;        // TC, zero unless use_thermal_cost_
@@ -1134,6 +1140,15 @@ public:
   // (f -> 1), which is a property of the cost function, not of this code.
   double lambda_TF24(double psi_stem) const;
 
+  // The marginal cost of water the ProfitMax cost implies at `psi_stem`, in the
+  // same umol C (kg H2O)^-1 as lambda_TF24 -- so the two are comparable.
+  //
+  // The normalised objective is dimensionless, so its own dC/dE is not in carbon
+  // units; multiplying by |A|max restores them, which is the same scaling that
+  // makes the objective a constant-lambda one. Requires prepare_profitmax() to
+  // have seeded the normalisers.
+  double lambda_ProfitMax(double psi_stem);
+
   // lambda at the current operating point. This is the single-layer value: it is
   // the marginal cost seen by the stem, and equals dA/dE only when the collar
   // potential is fixed (i.e. for the optimise_psi_stem_* solvers).
@@ -1182,8 +1197,12 @@ public:
   }
 
   // Read-only on purpose: a settable one would be a way to disagree with the
-  // normalisers it is derived from.
-  double profitmax_lambda() const { return profitmax_lambda_; }
+  // operating point it is derived from.
+  double lambda_emergent() const { return lambda_emergent_; }
+  // ProfitMax's normalisers, so a caller can form its equivalence ratio without
+  // this class pretending that ratio is a lambda.
+  double profitmax_A_max() const { return profitmax_A_max_; }
+  double profitmax_k_span() const { return profitmax_k_span_; }
 
   // Every reported output of a solved point, in one call.
   //
@@ -2408,6 +2427,11 @@ inline void Leaf::find_root_collar_psi(){
 
     opt_root_psi_ = opt_root_psi;
     profit_ = profit_psi_stem_TF(opt_psi_stem_, opt_root_psi);
+    // Reported on the same axis as the single-layer solvers, using the MULTI-LAYER
+    // lambda: the collar is the free variable here, so the marginal cost carries
+    // the series-resistance correction for the soil-to-collar path that the
+    // single-layer form has no term for.
+    lambda_emergent_ = marginal_cost_water_multilayer();
 
     if(!std::isfinite(profit_)){
         util::stop_infeasible("collar_solve", "non-finite profit; opt_psi_stem_=" + util::to_string(opt_psi_stem_) +
@@ -2450,6 +2474,9 @@ inline double Leaf::profit_at_collar_psi(double target_opt_root_psi,
     opt_psi_stem_ = find_psi_stem_from_psi_root(opt_root_psi, supply_psi_soil());
     opt_root_psi_ = opt_root_psi;
     profit_ = profit_psi_stem_TF(opt_psi_stem_, opt_root_psi);
+    // Well defined off the optimum too: dC/dE is a property of the point, not of
+    // its being stationary. At a prescribed point it simply is not equal to dA/dE.
+    lambda_emergent_ = marginal_cost_water_multilayer();
     // Not an optimum of any kind: the collar potential came from the caller. On
     // this path a non-zero dprofit is the answer (TF24f's acclimation rate), not
     // a residual to be checked against zero.
@@ -3641,6 +3668,42 @@ inline double Leaf::lambda_TF24(double psi_stem) const {
          pow(1.0 - f, beta2 - 1.0) / leaf_specific_conductance_max_;
 }
 
+
+// The same quantity for the normalised ProfitMax cost. Writing `f` for the
+// conductivity fraction and `f'` for its slope, the cost is
+// `HC + TC = (k_soil - kmax*f)/k_span + TC(Tleaf)`, so
+//
+//   dC/dpsi = kmax*|f'|/k_span + (dTC/dT)(dT/dE)(dE/dpsi),   dE/dpsi = kmax*f
+//
+// and dividing through, then restoring carbon units with |A|max:
+//
+//   lambda = |A|max * [ |f'|/(f*k_span) + (dTC/dT)(dT/dE) ]
+//
+// The thermal term vanishes with either gate off -- with no energy balance
+// dT/dE is zero, and with no thermal cost dTC/dT is.
+inline double Leaf::lambda_ProfitMax(double psi_stem) {
+  const double f = proportion_of_conductivity(psi_stem);
+  if (!(f > 0.0) || !(profitmax_k_span_ > 0.0) || !(profitmax_A_max_ > 0.0)) {
+    return util::na_value;
+  }
+  // |f'| = (c/b)(psi/b)^(c-1) f, positive because f is decreasing.
+  const double abs_fprime =
+      (stem_c / stem_b) * pow(psi_stem / stem_b, stem_c - 1.0) * f;
+
+  double thermal = 0.0;
+  if (use_thermal_cost_ && use_energy_balance_) {
+    const double E = transpiration(psi_stem, supply_psi_soil_scalar());
+    double dT_dE = 0.0;
+    const double Tleaf = leaf_temp_from_E(E, &dT_dE);
+    const double span = T50_ - Tcrit_;
+    const double TC = thermal_cost_at(Tleaf);
+    // Sigmoid derivative: dTC/dT = r*TC*(1-TC), r = 2/(T50 - Tcrit).
+    thermal = (2.0 / span) * TC * (1.0 - TC) * dT_dE;
+  }
+  return profitmax_A_max_ *
+         (abs_fprime / (f * profitmax_k_span_) + thermal);
+}
+
 inline double Leaf::marginal_cost_water() const {
   return lambda_TF24(opt_psi_stem_);
 }
@@ -3919,7 +3982,7 @@ inline void Leaf::optimise_psi_stem_ProfitMax() {
     carbon_gain_ = 0;
     hydraulic_cost_norm_ = 0;
     thermal_cost_ = 0;
-    profitmax_lambda_ = util::na_value;
+    lambda_emergent_ = util::na_value;
     return;
   }
 
@@ -3933,7 +3996,7 @@ inline void Leaf::optimise_psi_stem_ProfitMax() {
     carbon_gain_ = 0;
     hydraulic_cost_norm_ = 0;
     thermal_cost_ = 0;
-    profitmax_lambda_ = util::na_value;
+    lambda_emergent_ = util::na_value;
     return;
   }
 
@@ -3950,7 +4013,6 @@ inline void Leaf::optimise_psi_stem_ProfitMax() {
   // term is genuinely psi-dependent, and the argmaxes differ by up to 1.1 MPa at
   // Tair 40. A prescribed lambda is therefore not a substitute for this model.
   //
-  profitmax_lambda_ = profitmax_A_max_ / profitmax_k_span_;
 
   // ⚠️ GRID FIRST, THEN REFINE, AND A BARE BRENT SEARCH IS WRONG HERE.
   //
@@ -4005,6 +4067,7 @@ inline void Leaf::optimise_psi_stem_ProfitMax() {
     // field describes the returned point rather than the grid's reconstruction.
     opt_psi_stem_ = profitmax_scan_psi_[best];
     profit_ = profit_psi_stem_ProfitMax(opt_psi_stem_, psi_soil);
+    lambda_emergent_ = lambda_ProfitMax(opt_psi_stem_);
     return;
   }
 
@@ -4033,6 +4096,7 @@ inline void Leaf::optimise_psi_stem_ProfitMax() {
   // re-evaluate to leave every reported field describing ONE operating point.
   // Hazard 8, in the form where the fields are individually plausible.
   profit_ = profit_psi_stem_ProfitMax(opt_psi_stem_, psi_soil);
+  lambda_emergent_ = lambda_ProfitMax(opt_psi_stem_);
 }
 
 inline void Leaf::optimise_psi_stem_TF() {
@@ -4048,6 +4112,7 @@ inline void Leaf::optimise_psi_stem_TF() {
 
   if (supply_psi_soil_scalar() > psi_crit){
     profit_ = profit_psi_stem_TF(supply_psi_soil_scalar(), supply_psi_soil_scalar());
+    lambda_emergent_ = lambda_TF24(supply_psi_soil_scalar());
     return;
   }
 
@@ -4064,6 +4129,7 @@ inline void Leaf::optimise_psi_stem_TF() {
     // Re-evaluate so the reported fields and the returned potential are one
     // operating point.
     profit_ = profit_psi_stem_TF(opt_psi_stem_, supply_psi_soil_scalar());
+    lambda_emergent_ = lambda_TF24(opt_psi_stem_);
     (void)profit_opt;
     return;
   }
@@ -4099,6 +4165,7 @@ inline void Leaf::optimise_psi_stem_CowanFarquhar() {
   if (supply_psi_soil_scalar() > psi_crit) {
     profit_ = profit_psi_stem_CowanFarquhar(supply_psi_soil_scalar(),
                                             supply_psi_soil_scalar());
+    lambda_emergent_ = lambda_;
     return;
   }
 
@@ -4109,6 +4176,10 @@ inline void Leaf::optimise_psi_stem_CowanFarquhar() {
       },
       supply_psi_soil_scalar(), psi_crit, boundary_scan_n_, &profit_opt);
   profit_ = profit_psi_stem_CowanFarquhar(opt_psi_stem_, supply_psi_soil_scalar());
+  // Exact by construction: the cost is lambda_*E, so dC/dpsi = lambda_*(dE/dpsi)
+  // and the ratio is lambda_ identically. Reported anyway, so a caller reading
+  // this field does not have to know which curve produced the point.
+  lambda_emergent_ = lambda_;
   (void)profit_opt;
 
     return;

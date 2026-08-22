@@ -1007,8 +1007,18 @@ double Leaf__lambda_multilayer__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf>
 }
 
 // [[Rcpp::export]]
-double Leaf__profitmax_lambda__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
-  return obj_->profitmax_lambda();
+double Leaf__lambda_emergent__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->lambda_emergent();
+}
+
+// [[Rcpp::export]]
+double Leaf__profitmax_A_max__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->profitmax_A_max();
+}
+
+// [[Rcpp::export]]
+double Leaf__profitmax_k_span__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->profitmax_k_span();
 }
 
 // [[Rcpp::export]]

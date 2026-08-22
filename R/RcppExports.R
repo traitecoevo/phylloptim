@@ -905,8 +905,16 @@ Leaf__lambda_multilayer__get <- function(obj_) {
     .Call('_phylloptim_Leaf__lambda_multilayer__get', PACKAGE = 'phylloptim', obj_)
 }
 
-Leaf__profitmax_lambda__get <- function(obj_) {
-    .Call('_phylloptim_Leaf__profitmax_lambda__get', PACKAGE = 'phylloptim', obj_)
+Leaf__lambda_emergent__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__lambda_emergent__get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__profitmax_A_max__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__profitmax_A_max__get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__profitmax_k_span__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__profitmax_k_span__get', PACKAGE = 'phylloptim', obj_)
 }
 
 Leaf__g1_eff__get <- function(obj_) {
