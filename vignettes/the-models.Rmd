@@ -5,6 +5,8 @@ vignette: >
   %\VignetteIndexEntry{The models, and the maths behind them}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
+bibliography: references.bib
+link-citations: true
 ---
 
 ```{r, include = FALSE}
@@ -52,6 +54,61 @@ vanishes the collar loses its freedom, its feasible interval collapses, and the
 root-based solve correctly reports that feasibility *determined* the answer rather
 than optimisation.
 
+### One problem, four coordinates
+
+`ψ`, `E`, `g_c`, `c_i` and `A` are not five independent quantities. Given the
+drivers they are linked by a chain of **monotone** maps:
+
+$$\psi \;\xrightarrow{\;\text{supply}\;}\; E \;\xrightarrow{\;\text{diffusion}\;}\; g_c
+\;\xrightarrow{\;\text{supply}=\text{demand}\;}\; c_i \;\xrightarrow{\;A(\cdot)\;}\; A$$
+
+Fix any one and the rest follow. So "optimise over stem potential", "optimise over
+stomatal conductance" and "optimise over `c_i`" are **the same problem written in
+different coordinates**, and a model's argmax does not depend on which is chosen.
+
+That is what makes the literature comparable at all. @cowan1977 write the
+problem over conductance; @sperry2017 writes it over potential; this package solves it
+over potential because that is where the supply constraint is simplest. None of
+that is a modelling difference — only the cost function is.
+
+⚠️ **Monotone, not linear.** A derivative *does* depend on the coordinate: `dA/dE`
+and `dA/dψ` are different numbers, related by `dE/dψ`. So a marginal cost is only
+meaningful once you say what it is per unit of. `marginal_cost_water()` is per unit
+`E`, which is the convention the λ literature uses.
+
+### Solving for the optimum by its first-order condition
+
+There are two ways to find `ψ*`: search `J` for its maximum, or solve
+
+$$\frac{dJ}{d\psi}=0$$
+
+for a stationary point. This package does both, in different places, and the
+difference matters more than it looks.
+
+Solving the first-order condition is better where it applies. It locates the
+optimum to solver precision rather than to the width of a search bracket, and —
+decisively — it gives an argmax that varies *smoothly* with the parameters. A
+search that terminates on bracket width returns an argmax that is piecewise
+constant at fine scales, so differentiating it with respect to a trait yields
+noise: measured on this model, a trait derivative obtained that way came back
+smooth, plausible and **sign-inverted**. Anything that feeds a gradient must
+therefore come from the first-order condition, not from a search.
+
+⚠️ **But a stationary point is not always the answer.** Where profit is still
+climbing as it reaches the end of the feasible interval, `dJ/dψ` never crosses zero
+inside it and the optimum is that endpoint — a *constrained* optimum. This is not
+a corner case: it is 42 of 240 feasible rows on the reference grid. A solver has to
+test the derivative's sign at each end and report the pin explicitly, because a
+bracketing root-find handed no sign change cannot distinguish "pinned" from
+"failed". The reported operating-point kind is what carries that distinction.
+
+⚠️ **And a stationary point need not be unique.** Where the marginal cost is
+peaked (see the cost curves below) the condition can have two roots, and a
+bracketing solve finds one of them. Searching the objective over a grid finds the
+taller hump but cannot feed a gradient; solving the condition feeds a gradient but
+can land on the wrong hump. The two properties are in tension, and which solver a
+given entry point uses reflects which property it needs.
+
 ### The benefit, and the root-find inside it
 
 `B(ψ) = A(c_i)` is colimited assimilation, and `c_i` is not free: it is fixed by
@@ -83,9 +140,9 @@ so `f` is the fraction of maximum conductivity remaining, `k` the conductance an
 
 | model | cost `C(ψ)` | marginal cost `dC/dψ` | units of `C` |
 |---|---|---|---|
-| **TF24** | $\gamma\,(1-f)^{\beta}$ | $\gamma\beta(1-f)^{\beta-1}\lvert f'\rvert$ | carbon |
-| **Cowan & Farquhar (1977)** | $\lambda\,E$ | $\lambda\,k_{\max}f$ | carbon |
-| **Sperry (2017) ProfitMax** | $\dfrac{k(\psi_s)-k(\psi)}{k(\psi_s)-k_{\rm crit}}$ | $\dfrac{k_{\max}\lvert f'\rvert}{k(\psi_s)-k_{\rm crit}}$ | dimensionless |
+| **TF24** [@towers2024] | $\gamma\,(1-f)^{\beta}$ | $\gamma\beta(1-f)^{\beta-1}\lvert f'\rvert$ | carbon |
+| **Cowan-Farquhar** [@cowan1977] | $\lambda\,E$ | $\lambda\,k_{\max}f$ | carbon |
+| **ProfitMax** [@sperry2017] | $\dfrac{k(\psi_s)-k(\psi)}{k(\psi_s)-k_{\rm crit}}$ | $\dfrac{k_{\max}\lvert f'\rvert}{k(\psi_s)-k_{\rm crit}}$ | dimensionless |
 
 The marginal costs are where the models actually differ, and the difference is
 one of **shape**:
@@ -198,6 +255,79 @@ without the energy balance, because with a prescribed leaf temperature the penal
 is an additive constant in ψ: it changes the value of the objective and not its
 argmax.
 
+## The variants, under one roof
+
+Four axes, chosen independently. A "model" in the literature is a point in this
+space, not a separate program.
+
+| axis | options | what it changes |
+|---|---|---|
+| **cost curve** | TF24 / Cowan-Farquhar / ProfitMax | `C(ψ)`, and its units |
+| **supply topology** | single soil potential / multi-layer root network | the decision variable, and the feasible bracket |
+| **leaf temperature** | prescribed / energy balance | whether `Tleaf` responds to `E`, and so whether temperature responses are active at all |
+| **thermal cost** | off / on | adds a temperature penalty **and** scales `Jmax` — the only axis that moves both sides |
+
+So the published models map on as follows:
+
+- **Cowan & Farquhar** [@cowan1977] — the `λE` cost, prescribed λ. Any topology.
+- **Sperry et al.** [@sperry2017] — ProfitMax cost with the normalisation, λ
+  derived per operating point. Their own formulation is single-supply.
+- **Towers et al.** [@towers2024] ("TF24") — the TF24 carbon cost, solved over the
+  collar potential with a multi-layer root network. This is the production path
+  here, and the one `plant` consumes.
+- **Sicangco et al.** [@sicangco2026] — ProfitMax with the thermal cost on.
+- **Jones et al.** [@jones2026] — a multiplicative objective; see the note below.
+
+⚠️ **Jones et al. is not yet in this list as an implemented cost curve.** Its
+objective is a **product**, `A · (1 − ψ_leaf/ψ_crit)`, not a difference. Taking
+logs turns it into one — `log J = log A + log(1 − ψ/ψ_crit)` — which is the same
+additive skeleton with a `log` benefit link, and the argmax is unchanged because
+`log` is monotone. Two constraints come with it: `log A` requires `A > 0`, which
+fails exactly in the closed-stomata state where `A = −R_d`; and the cost diverges
+at `ψ_crit`, so a Jones-type model can never be pinned dry. Both have to be
+enforced rather than allowed to become `NaN`.
+
+## The biological components
+
+The optimality argument above is indifferent to what `A` and `E` are. What makes
+this a plant model rather than a calculus exercise is the four blocks underneath.
+
+**Photosynthetic demand.** Farquhar-type colimited assimilation [@farquhar1980]: a
+Rubisco-limited rate from `Vcmax`, an electron-transport-limited rate from `Jmax`
+and incident light, smoothly colimited, minus dark respiration `R_d`. All three
+capacities are defined at 25 °C and moved by temperature-response functions, which
+is why a grid at 25 °C is blind to every one of them by construction.
+
+**Diffusive supply.** CO₂ enters and water leaves through the same stomata, so one
+conductance sets both, related by the ratio of diffusivities. Fixing `E` therefore
+fixes `g_c`, hence `c_i`, hence `A` — the chain in "One problem, four coordinates".
+
+**Hydraulic supply.** Water reaches the leaf through a path whose conductivity
+*falls* as tension rises, described by the Weibull vulnerability curve of
+Appendix A. Transpiration at a given stem potential is the integral of that curve
+between the upstream potential and the stem, which is why `E` saturates: pulling
+harder recruits progressively less conductance. This saturation is what makes the
+optimisation non-trivial — without it, more tension would always buy more carbon.
+
+**The cost of that tension.** The three curves in the table above are three
+answers to "what does the plant lose by pulling harder": a carbon penalty
+increasing with the fraction of conductivity lost (TF24), the water itself priced
+at a constant marginal rate (Cowan-Farquhar), or the normalised loss of remaining
+conductance (Sperry). They are not refinements of one another — they disagree about
+what is being spent.
+
+**And optionally, energy balance and thermal damage.** A transpiring leaf is
+cooler than the air, so `E` feeds back on temperature and hence on every capacity
+above. Add a temperature-dependent damage term and the leaf has a reason to
+transpire that is not photosynthetic at all.
+
+### Further reading
+
+@sabot2022 compare several of these models in one notation, and are the closest
+published analogue to the framing used here. @medlyn2011 give the empirical
+conductance model this package can report an equivalent slope for. Full citations
+are in the reference list at the end.
+
 ## When the leaf cannot transpire
 
 Where the soil is drier than the stem's critical potential there is no flow, and
@@ -219,10 +349,136 @@ cat(sprintf("E = %.1e, cost = %.1e, profit = %.6f, -R_d = %.6f\n",
 
 # Appendix A — the (P50, c) parameterisation
 
-*Placeholder: the material from `RECOMMENDATION-p50-parameterisation.md` lands
-here — the substitution of `b`, why not `(P50, b)`, why `c` is not a constant, the
-fitted-species table with its Choat-2003 caveat, the quantile converter, and the
-sign convention.*
+The Weibull vulnerability curve is conventionally written `exp(-(ψ/b)^c)`. Substituting
+`b = P50 / (ln 2)^(1/c)` gives the algebraically identical
+
+$$f(\psi)=2^{-(\psi/P_{50})^{c}}$$
+
+in which **scale and shape are cleanly separated**: `P50` is the potential at 50%
+loss, in MPa, and `c` is the steepness. `b` remains available as a derived
+read-only quantity, but it is not a parameter anyone should set.
+
+⚠️ **Sign convention.** Published `P50` values are negative (−3.95 MPa). This
+package uses positive magnitudes throughout, so `P50` here means `|P50|`.
+
+## Why not `(P50, b)`
+
+`b` *is* a scale parameter — it is the 63% loss point, in the same units and the
+same role as `P50`. Specifying both means specifying two points on one curve and
+recovering the shape from their ratio:
+
+$$c=\frac{\ln(\ln 2)}{\ln(P_{50}/b)}$$
+
+which diverges as `P50 → b` and is undefined at `P50 = b`, so small errors in
+either input make the shape explode. It is also a badly correlated estimation
+pair — which is why `fitplc` [@duursma2017] fits `Px` and the *slope* at `Px`
+rather than `b` and `c`. `c` is the only genuinely independent second axis.
+
+## Why `c` is not a constant
+
+It carries real biology: `c ≈ 1` is exponential, conductivity bleeding away from
+`ψ = 0`; `c > 2` is sigmoid, a safe plateau then rapid failure. Conifers are much
+steeper than angiosperms, and leaves and roots are flatter than stems in the same
+plant.
+
+Fitted directly in `(P50, c)` from raw PLC curves for eight species:
+
+| species | source / method | \|P50\| (MPa) | c | S50 (%/MPa) |
+|---|---|---|---|---|
+| *Eucalyptus sideroxylon* | Blackman 2019, bench | 3.95 | 1.99 | 17 |
+| *Eucalyptus tereticornis* | Blackman 2019, bench | 4.31 | 2.59 | 21 |
+| *Casuarina cunninghamiana* | Blackman 2019, bench | 2.91 | 1.81 | 22 |
+| *Pinus radiata* | Blackman 2019, cavitron | 4.09 | 13.0 | 110 |
+| *Gossia bidwillii* | Choat 2003 | 5.25 | 0.52 | 3 |
+| *Brachychiton australis* | Choat 2003 | 3.49 | 1.21 | 12 |
+| *Alphitonia excelsa* | Choat 2003 | 5.69 | 1.70 | 10 |
+| *Cochlospermum gillivraei* | Choat 2003 | 1.42 | 5.15 | 126 |
+
+⚠️ **The four Choat 2003 curves are not trustworthy for `c`.** They are 13–14
+points each and already sit at 25–30% PLC by 0.8 MPa, which is a native-embolism
+or open-vessel artefact rather than a trait. The defensible comparison is the
+three Blackman angiosperms measured the same way: **`c` = 1.8–2.6 while `|P50|`
+spans 2.9–4.3 MPa** — shape roughly conserved, scale free. That is the evidence
+for treating `c` as a parameter with a stable default rather than a constant.
+
+Default `c = 2.0` for angiosperm stems. Conifers need substantially higher; the
+13.0 fitted above is inflated by the cavitron technique, and ~4–5 is the safer
+literature-style default. Guard `c > 0`, and warn below ~1 — that means no safe
+plateau at all, and in practice usually flags a measurement artefact.
+
+## Converting from published numbers
+
+Curves arrive as almost anything except `(P50, c)`. Everything inverts in closed
+form. For a remaining conductivity fraction `f` (so `PLC = 1 − f`):
+
+$$P_f = P_{50}\big(\log_2(1/f)\big)^{1/c}
+\qquad\Longleftrightarrow\qquad
+P_{50} = P_f\big(\log_2(1/f)\big)^{-1/c}$$
+
+From **any two** quantiles, both parameters follow:
+
+$$c=\frac{\ln(L_2/L_1)}{\ln(P_{f_2}/P_{f_1})},\qquad L_i=\log_2(1/f_i)$$
+
+And from `P50` plus the slope at `P50` in % MPa⁻¹, the other commonly published
+form:
+
+$$S_{50}=\frac{50\,c\ln 2}{|P_{50}|}=\frac{34.657\,c}{|P_{50}|}$$
+
+Do **not** treat `S50` as the internal parameter — it has `P50` built into it by
+construction.
+
+```{r}
+L <- function(f) log2(1 / f)                    # f = fraction REMAINING
+p_at <- function(P50, c, f) P50 * L(f)^(1 / c)  # any quantile from (P50, c)
+c_from_two <- function(P1, f1, P2, f2) log(L(f2) / L(f1)) / log(P2 / P1)
+s50_from <- function(P50, c) 50 * c * log(2) / P50
+
+# round-trip: the package defaults, recovered from a (P50, P88) pair
+tr <- leaf_traits()
+P50 <- tr$stem_b * log(2)^(1 / tr$stem_c)
+P88 <- p_at(P50, tr$stem_c, 0.12)
+c_hat <- c_from_two(P50, 0.50, P88, 0.12)
+P50_hat <- P88 * L(0.12)^(-1 / c_hat)
+cat(sprintf("defaults: P50 = %.6f MPa, c = %.6f, so P88 = %.6f, P95 = %.6f\n",
+            P50, tr$stem_c, P88, p_at(P50, tr$stem_c, 0.05)))
+cat(sprintf("recovered from (P50, P88): c = %.6f, P50 = %.6f  (errors %.1e, %.1e)\n",
+            c_hat, P50_hat, abs(c_hat - tr$stem_c), abs(P50_hat - P50)))
+cat(sprintf("psi_crit is P95: %.6f vs the trait %.6f\n",
+            p_at(P50, tr$stem_c, 0.05), tr$psi_crit))
+cat(sprintf("S50 at the defaults: %.1f %%/MPa\n", s50_from(P50, tr$stem_c)))
+```
+
+## `psi_crit` is a quantile, not a parameter
+
+`psi_crit` is `P_f` at `f = 0.05`, i.e. `P95` — and **Sperry's reference
+conductivity `k_crit = f·kmax` uses the same `f`**. So `psi_crit`, `P95` and
+`k_crit` are one number wearing three names. Derived from a single named constant
+they cannot disagree; held as a free trait plus a hard-coded `0.05`, they need a
+consistency check to police them. `f = 0.05` is a convention, not a knob — it is
+0.05 everywhere it appears across this family.
+
+## Two consequences for gradients, and a third
+
+1. **The `stem_b` homogeneity shortcut survives.** At fixed `c`, `b` is a constant
+   multiple of `P50`, so the cumulative-vulnerability integral stays homogeneous of
+   degree 1 and `d/dP50 = (ln 2)^{-1/c} · d/db`. Reuse the existing fast path with
+   a scalar factor rather than writing a new one.
+2. **The `c` gradient splits.** Once `P50` is the scale parameter, `b` depends on
+   `c` too:
+   $$\frac{d}{dc}\bigg|_{P_{50}}=\frac{d}{dc}\bigg|_{b}+\frac{db}{dc}\frac{d}{db},
+   \qquad \frac{db}{dc}=\frac{b\ln(\ln 2)}{c^{2}}$$
+   The second term is nearly free — it reuses the cheap `b`-derivative — but
+   omitting it silently converts a total derivative into a partial, which looks
+   like a plausible-but-wrong gradient rather than an error.
+3. ⚠️ **A derived `psi_crit` adds a term.** Moving `P50` moves the threshold, so
+   `d/dP50` picks up `dpsi_crit/dP50 · d/dpsi_crit`, with `dpsi_crit/dP50 =
+   (log₂(1/f))^{1/c}`, a constant at fixed `c`. That term is **exactly zero at an
+   interior optimum and order 1 at a pinned one**, so the clean identity in (1)
+   holds *only where the optimum is interior*. Assert it with that qualifier.
+
+The root curve obeys the identical homogeneity identity, so it takes the same
+treatment — `(root_P50, root_c)` — or the two curves end up on different
+conventions.
 
 # Appendix B — gradients
 
@@ -235,3 +491,4 @@ distinction.*
 *Placeholder: why the argmax is the badly-conditioned quantity and the maximum the
 well-conditioned one, the sqrt amplification, the finite-difference step and its
 `tol/h` noise floor, and why a scan argmax cannot feed a trait gradient.*
+# References
