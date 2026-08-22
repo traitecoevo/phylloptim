@@ -535,13 +535,13 @@ const double kLambdaCF77 = 1.5e5;
 // inserting a solver changes what every solver after it inherits -- see the header.
 // Appending leaves every existing row byte-identical, which is the check when this
 // file is regenerated.
-enum class Solver { TF, ProfitMax, CF77, Collar, JS22, CMax, SOX };
+enum class Solver { TF, ProfitMax, CF77, Collar, JS22, CMax, SOX, JW26 };
 
 // ⚠️ EVERY PER-SOLVER ARRAY IS SIZED FROM THIS, never from a literal. Those arrays
 // are indexed by the enum VALUE, so a hardcoded bound is an out-of-bounds write the
 // moment a solver is appended -- which is exactly the bug bench_gradient carried
 // through three trait-count changes before ASan named it. Keep it last-member + 1.
-constexpr int kNSolvers = static_cast<int>(Solver::SOX) + 1;
+constexpr int kNSolvers = static_cast<int>(Solver::JW26) + 1;
 enum class Topology { Single, Multi1, Multi3 };
 
 const char *solver_name(Solver s) {
@@ -553,6 +553,7 @@ const char *solver_name(Solver s) {
     case Solver::JS22:          return "JS22";
     case Solver::CMax:          return "CMax";
     case Solver::SOX:           return "SOX";
+    case Solver::JW26:          return "JW26";
   }
   return "unknown";
 }
@@ -676,6 +677,7 @@ void dispatch(phylloptim::Leaf &l, Solver s) {
     case Solver::JS22:      l.optimise_psi_stem_JS22();      break;
     case Solver::CMax:      l.optimise_psi_stem_CMax();      break;
     case Solver::SOX:       l.optimise_psi_stem_SOX();       break;
+    case Solver::JW26:      l.optimise_psi_stem_JW26();      break;
   }
 }
 
@@ -705,7 +707,8 @@ const double kOptTemps[] = {25.0, 40.0, 50.0};
 const double kOptPPFDs[] = {0.0, 1500.0};
 const Solver kSolvers[] = {Solver::TF, Solver::ProfitMax,
                            Solver::CF77, Solver::Collar,
-                           Solver::JS22, Solver::CMax, Solver::SOX};
+                           Solver::JS22, Solver::CMax, Solver::SOX,
+                           Solver::JW26};
 static_assert(sizeof(kSolvers) / sizeof(kSolvers[0]) == kNSolvers,
               "kSolvers must list every Solver exactly once");
 const Topology kTopologies[] = {Topology::Single, Topology::Multi1,

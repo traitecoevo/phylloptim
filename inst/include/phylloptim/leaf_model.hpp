@@ -1245,6 +1245,20 @@ public:
   double profit_psi_stem_SOX(double psi_stem, double psi_upstream);
   double lambda_SOX(double psi_stem, double psi_upstream) const;
 
+  // Jones et al. (2026): the same product objective with a LINEAR reduction factor,
+  // `1 - psi/psi_crit`, where SOX's follows the vulnerability curve. Sabot's
+  // `TractLSM` has this one too, as `phiLWP`, crediting Dewar.
+  //
+  // ⚠️ ALSO TAKES NO PARAMETER, because `psi_crit` is DERIVED here -- the 95%
+  // quantile of the stem curve, from `stem_P50` and `stem_c`. The paper supplies its
+  // own `Pcrit`; deriving it instead is what makes this and SOX two interpolations
+  // between the SAME two anchors (1 at zero tension, 0 at `psi_crit`) and so
+  // comparable by construction rather than by matching a parameter.
+  double jw26_reduction(double psi_stem) const;
+  double jw26_reduction_deriv(double psi_stem) const;
+  double profit_psi_stem_JW26(double psi_stem, double psi_upstream);
+  double lambda_JW26(double psi_stem, double psi_upstream) const;
+
   // The marginal cost of water the ProfitMax cost implies at `psi_stem`, in the
   // same umol C (kg H2O)^-1 as lambda_TF24 -- so the two are comparable.
   //
@@ -1406,6 +1420,7 @@ public:
   void optimise_psi_stem_JS22();
   void optimise_psi_stem_CMax();
   void optimise_psi_stem_SOX();
+  void optimise_psi_stem_JW26();
 
   // Clear the outputs a single-layer optimiser does NOT write. Hazard 8: these
   // three describe a ROOT-COLLAR solve, and optimise_psi_stem_* never runs one,
@@ -3879,6 +3894,21 @@ inline double Leaf::lambda_SOX(double psi_stem, double psi_upstream) const {
 }
 
 
+// The same expression for Jones, where `-g'/g` collapses: with `g = 1 - psi/psi_crit`
+// it is `1/(psi_crit - psi)`, so
+//
+//     lambda = A / [(psi_crit - psi) * kmax * f(psi)]
+//
+// which is the form `the-models.Rmd` quotes. It carries a factor of `A` and diverges
+// at `psi_crit`, both for the product-objective reasons `lambda_SOX` records.
+inline double Leaf::lambda_JW26(double psi_stem, double psi_upstream) const {
+  (void)psi_upstream;
+  const double f = proportion_of_conductivity(psi_stem);
+  return assim_colimited_ /
+         ((psi_crit - psi_stem) * leaf_specific_conductance_max_ * f);
+}
+
+
 // The same quantity for the normalised ProfitMax cost. Writing `f` for the
 // conductivity fraction and `f'` for its slope, the cost is
 // `HC + TC = (k_soil - kmax*f)/k_span + TC(Tleaf)`, so
@@ -4090,9 +4120,21 @@ inline double Leaf::profit_psi_stem_CMax(double psi_stem,
 // construction. That last equality is why this needs no parameter of its own -- the
 // 0.05 is the same one `psi_crit` is derived from and the same one Sperry's
 // `k_crit` reads, so the three cannot disagree.
+// ⚠️ CLAMPED AT ZERO, and that is not defensive padding -- without it this curve
+// reports a shut-down leaf as PROFITABLE. Past `psi_crit` the conductivity fraction
+// falls below `k_crit_fraction`, so `g` goes negative; the objective is `A*g` and a
+// shut-down leaf has `A = -R_d < 0`, so the product of two negatives came back
+// POSITIVE and grew as the soil dried. Measured before the clamp, at PPFD 1500:
+// psi_soil 6.0 gave +0.0125 and 7.0 gave +0.0633, against TF24's -8.48 and -8.85.
+// Sabot's `phiLWP` clamps for the same reason; her `kcost` does not, because
+// `TractLSM` never evaluates outside `[Ps, Pcrit]` and the no-flow branch here does.
+//
+// Written as `g < 0` rather than `std::max(0.0, g)` so a NaN propagates instead of
+// being silently turned into a zero: `NaN < 0.0` is false, so the NaN is returned.
 inline double Leaf::sox_reduction(double psi_stem) const {
-  return (proportion_of_conductivity(psi_stem) - k_crit_fraction) /
-         (1.0 - k_crit_fraction);
+  const double g = (proportion_of_conductivity(psi_stem) - k_crit_fraction) /
+                   (1.0 - k_crit_fraction);
+  return g < 0.0 ? 0.0 : g;
 }
 
 
@@ -4123,6 +4165,32 @@ inline double Leaf::profit_psi_stem_SOX(double psi_stem,
   set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
   hydraulic_cost_ = util::na_value;
   return assim_colimited_ * sox_reduction(psi_stem);
+}
+
+
+// Jones' linear reduction factor, on the DERIVED `psi_crit`. Clamped at zero for
+// exactly the reason `sox_reduction` is, and the NaN-propagating form for the same
+// reason; here the clamp binds for every `psi > psi_crit` rather than only past the
+// point where `f` drops under `k_crit_fraction`.
+inline double Leaf::jw26_reduction(double psi_stem) const {
+  const double g = 1.0 - psi_stem / psi_crit;
+  return g < 0.0 ? 0.0 : g;
+}
+
+
+// Constant, which is the whole difference from SOX: a linear `g` prices each further
+// MPa of tension identically, where SOX's follows the vulnerability curve and so
+// charges little until the curve turns over. Zero once the clamp binds.
+inline double Leaf::jw26_reduction_deriv(double psi_stem) const {
+  return psi_stem > psi_crit ? 0.0 : -1.0 / psi_crit;
+}
+
+
+inline double Leaf::profit_psi_stem_JW26(double psi_stem,
+                                         double psi_upstream) {
+  set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
+  hydraulic_cost_ = util::na_value;
+  return assim_colimited_ * jw26_reduction(psi_stem);
 }
 
 
@@ -4704,6 +4772,48 @@ inline void Leaf::optimise_psi_stem_SOX() {
       supply_psi_soil_scalar(), psi_crit, boundary_scan_n_, &profit_opt);
   profit_ = profit_psi_stem_SOX(opt_psi_stem_, supply_psi_soil_scalar());
   lambda_emergent_ = lambda_SOX(opt_psi_stem_, supply_psi_soil_scalar());
+  (void)profit_opt;
+
+    return;
+  }
+
+
+// Jones et al. (2026), the same product objective with a LINEAR reduction factor.
+// Everything optimise_psi_stem_SOX documents applies unchanged: the product is
+// maximised directly rather than its logarithm, the dry bound cannot win because g is
+// zero there, and the wet bound must stay a candidate.
+//
+// ⚠️ NOT THEIR FULL MODEL. Their psi_crit is a free parameter and their supply is
+// linear in the potential; here psi_crit is DERIVED from the stem curve and the
+// supply is that curve integral. So this is their objective on our hydraulics, which
+// is what makes it comparable with SOX -- the two g are interpolations between the
+// same two anchors -- and is NOT a reproduction of the paper.
+inline void Leaf::optimise_psi_stem_JW26() {
+
+  clear_collar_solve_state();
+
+  if (!supply_is_single_layer()) {
+    util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
+  }
+
+  opt_psi_stem_ = supply_psi_soil_scalar();
+
+  if (supply_psi_soil_scalar() > psi_crit) {
+    profit_ = profit_psi_stem_JW26(supply_psi_soil_scalar(),
+                                   supply_psi_soil_scalar());
+    lambda_emergent_ = lambda_JW26(supply_psi_soil_scalar(),
+                                   supply_psi_soil_scalar());
+    return;
+  }
+
+  double profit_opt = 0.0;
+  opt_psi_stem_ = util::maximise_over_closed_interval(
+      [&](double psi_stem) {
+        return profit_psi_stem_JW26(psi_stem, supply_psi_soil_scalar());
+      },
+      supply_psi_soil_scalar(), psi_crit, boundary_scan_n_, &profit_opt);
+  profit_ = profit_psi_stem_JW26(opt_psi_stem_, supply_psi_soil_scalar());
+  lambda_emergent_ = lambda_JW26(opt_psi_stem_, supply_psi_soil_scalar());
   (void)profit_opt;
 
     return;

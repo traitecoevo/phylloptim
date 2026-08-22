@@ -172,6 +172,18 @@ double Leaf__lambda_SOX(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, doubl
   return obj_->lambda_SOX(psi_stem, psi_upstream);
 }
 // [[Rcpp::export]]
+double Leaf__jw26_reduction(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem) {
+  return obj_->jw26_reduction(psi_stem);
+}
+// [[Rcpp::export]]
+double Leaf__profit_psi_stem_JW26(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem, double psi_upstream) {
+  return obj_->profit_psi_stem_JW26(psi_stem, psi_upstream);
+}
+// [[Rcpp::export]]
+double Leaf__lambda_JW26(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem, double psi_upstream) {
+  return obj_->lambda_JW26(psi_stem, psi_upstream);
+}
+// [[Rcpp::export]]
 double Leaf__lambda_TF24(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem) {
   return obj_->lambda_TF24(psi_stem);
 }
@@ -190,6 +202,10 @@ void Leaf__optimise_psi_stem_CMax(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> o
 // [[Rcpp::export]]
 void Leaf__optimise_psi_stem_SOX(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
   obj_->optimise_psi_stem_SOX();
+}
+// [[Rcpp::export]]
+void Leaf__optimise_psi_stem_JW26(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  obj_->optimise_psi_stem_JW26();
 }
 // [[Rcpp::export]]
 double Leaf__thermal_cost_at(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double leaf_temp) {

@@ -169,6 +169,18 @@ Leaf__lambda_SOX <- function(obj_, psi_stem, psi_upstream) {
     .Call('_phylloptim_Leaf__lambda_SOX', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
 }
 
+Leaf__jw26_reduction <- function(obj_, psi_stem) {
+    .Call('_phylloptim_Leaf__jw26_reduction', PACKAGE = 'phylloptim', obj_, psi_stem)
+}
+
+Leaf__profit_psi_stem_JW26 <- function(obj_, psi_stem, psi_upstream) {
+    .Call('_phylloptim_Leaf__profit_psi_stem_JW26', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
+}
+
+Leaf__lambda_JW26 <- function(obj_, psi_stem, psi_upstream) {
+    .Call('_phylloptim_Leaf__lambda_JW26', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
+}
+
 Leaf__lambda_TF24 <- function(obj_, psi_stem) {
     .Call('_phylloptim_Leaf__lambda_TF24', PACKAGE = 'phylloptim', obj_, psi_stem)
 }
@@ -187,6 +199,10 @@ Leaf__optimise_psi_stem_CMax <- function(obj_) {
 
 Leaf__optimise_psi_stem_SOX <- function(obj_) {
     invisible(.Call('_phylloptim_Leaf__optimise_psi_stem_SOX', PACKAGE = 'phylloptim', obj_))
+}
+
+Leaf__optimise_psi_stem_JW26 <- function(obj_) {
+    invisible(.Call('_phylloptim_Leaf__optimise_psi_stem_JW26', PACKAGE = 'phylloptim', obj_))
 }
 
 Leaf__thermal_cost_at <- function(obj_, leaf_temp) {
