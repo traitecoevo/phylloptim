@@ -470,6 +470,29 @@ public:
   // one tracks the DROP -- and across a drydown those move in opposite directions.
   // That spread is the models' structural difference, not a fitting problem.
   double JS22_gamma = 1.0;             // umol C m^-2 s^-1 MPa^-2
+  // Wolf, Anderegg & Pacala (2016) carbon maximisation, in the form Anderegg et al.
+  // (2018) gave it and Sabot's `TractLSM` implements (`SPAC/fregulate.py`,
+  // `dcost_dpsi = Alpha*|P| + Beta`): a marginal cost LINEAR in the absolute leaf
+  // water potential,
+  //
+  //     dC/dpsi = CMax_a*psi + CMax_b
+  //
+  // Wolf et al. argued the cost should be concave-up without specifying it; the
+  // linear marginal form is Anderegg's. Read the form off TractLSM rather than the
+  // 2016 paper.
+  //
+  // ⚠️ CMax_b IS SIGNED, and negative in the paper's own convention. TractLSM's
+  // docstring says it stores Beta with the sign inverted "so as to get a positive
+  // parameter value" and that a reported value should carry the minus sign, so the
+  // sign here has to be pinned by reproducing a TractLSM number and not by reading
+  // the formula. It is therefore NOT range-checked the way JS22_gamma is.
+  //
+  // ⚠️ NEITHER DEFAULT IS A LITERATURE VALUE. Measured: with CMax_b = 0 the CMax_a
+  // reproducing TF24's cost at TF24's own optimum runs 0.406 (psi_soil 0.5 MPa) to
+  // 0.807 (3.0 MPa) -- a 2.0x range, against JS22's 6.1x, which is the absolute-
+  // versus-drop distinction showing up as a number. 0.6 is mid-range of that band.
+  double CMax_a = 0.6;                 // umol C m^-2 s^-1 MPa^-2
+  double CMax_b = 0.0;                 // umol C m^-2 s^-1 MPa^-1
   // Dark respiration's temperature response, Tjoelker et al. (2001):
   //
   //     R_d(T) = R_d_25 * Q10(T)^((T - 25) / 10)
@@ -701,7 +724,8 @@ public:
                   double root_c, double root_P50,
                   double TF24_beta2, double jmax_25, double a,
                   double curv_fact_elec_trans, double curv_fact_colim,
-                  double TF24_cost_scale, double R_d_25, double JS22_gamma);
+                  double TF24_cost_scale, double R_d_25, double JS22_gamma,
+                  double CMax_a, double CMax_b);
 
   // THE CRITICAL POINT IS A QUANTILE OF THE CURVE, not a parameter: the fraction
   // of maximum conductivity remaining there. 0.05 gives P95. Sperry's reference
@@ -983,7 +1007,7 @@ public:
   // Which cost curve a psi_stem derivative differentiates. The cost enters the
   // chain through exactly ONE quantity -- dC/dpsi_stem -- so this selects that
   // and nothing else.
-  enum class CostCurve { TF24, CF77, JS22 };
+  enum class CostCurve { TF24, CF77, JS22, CMax };
 
   // dprofit/dpsi_stem for the solvers that optimise psi_stem directly with the
   // upstream potential held fixed.
@@ -1203,6 +1227,9 @@ public:
   // genuinely depends on the upstream potential, and no `f` cancels out of the
   // ratio the way it does for TF24.
   double lambda_JS22(double psi_stem, double psi_upstream) const;
+  // Also both potentials, but only because `E` is measured from the upstream one --
+  // the COST here is a function of the absolute potential, unlike JS22's.
+  double lambda_CMax(double psi_stem, double psi_upstream) const;
 
   // The marginal cost of water the ProfitMax cost implies at `psi_stem`, in the
   // same umol C (kg H2O)^-1 as lambda_TF24 -- so the two are comparable.
@@ -1337,6 +1364,11 @@ public:
   double profit_psi_stem_CF77(double psi_stem, double psi_upstream);
   double profit_psi_stem_JS22(double psi_stem, double psi_upstream);
 
+  // Wolf/Anderegg CMax: the antiderivative of `CMax_a*psi + CMax_b` taken from the
+  // upstream potential, so the cost of moving no water is zero.
+  double hydraulic_cost_CMax(double psi_stem, double psi_upstream);
+  double profit_psi_stem_CMax(double psi_stem, double psi_upstream);
+
   // The instantaneous thermal cost at a leaf temperature, in [0,1]. Zero when the
   // gate is off, so callers need not branch.
   double thermal_cost_at(double leaf_temp) const;
@@ -1358,6 +1390,7 @@ public:
   void optimise_psi_stem_ProfitMax();
   void optimise_psi_stem_CF77();
   void optimise_psi_stem_JS22();
+  void optimise_psi_stem_CMax();
 
   // Clear the outputs a single-layer optimiser does NOT write. Hazard 8: these
   // three describe a ROOT-COLLAR solve, and optimise_psi_stem_* never runs one,
@@ -1583,7 +1616,8 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_P50_,
                              double curv_fact_elec_trans_,
                              double curv_fact_colim_,
                              double TF24_cost_scale_, double R_d_25_,
-                             double JS22_gamma_) {
+                             double JS22_gamma_, double CMax_a_,
+                             double CMax_b_) {
   check_psi_magnitudes(stem_P50_, stem_c_, root_P50_, root_c_);
 
   // Both scale parameters and both critical potentials fall out of the traits, so
@@ -1624,6 +1658,8 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_P50_,
   TF24_cost_scale = TF24_cost_scale_;
   R_d_25 = R_d_25_;
   JS22_gamma = JS22_gamma_;
+  CMax_a = CMax_a_;
+  CMax_b = CMax_b_;
 
   roots_.root_c = root_c_;
   roots_.root_P50 = root_P50_;
@@ -2837,16 +2873,20 @@ inline double Leaf::dprofit_dpsi_stem(double psi_stem, double psi_upstream,
     // fraction, which is what stem_curve_integral_deriv returns. No AD needed.
     C_prime = CF77_lambda_ * leaf_specific_conductance_max_ *
               stem_curve_integral_deriv(psi_stem);
+  } else if constexpr (K == CostCurve::JS22) {
+    // C = gamma*(psi - psi_up)^2, so dC/dpsi = 2*gamma*(psi - psi_up). Analytic,
+    // no AD and no spline -- the simplest derivative of the four.
+    C_prime = 2.0 * JS22_gamma * (psi_stem - psi_upstream);
   } else {
-    // ⚠️ EVERY ARM IS EXPLICIT AND THIS ONE ASSERTS. This used to be a two-way
+    // ⚠️ EVERY ARM IS EXPLICIT AND THE LAST ONE ASSERTS. This used to be a two-way
     // `if constexpr (TF24) {...} else {CF77}`, which would have routed a third cost
     // curve into the CF77 branch silently -- and `-Werror=switch` cannot see it,
-    // because this is not a switch. The static_assert is what makes a fourth curve
-    // a compile error instead of a plausible number.
-    static_assert(K == CostCurve::JS22, "unhandled CostCurve in dprofit_dpsi_stem");
-    // C = gamma*(psi - psi_up)^2, so dC/dpsi = 2*gamma*(psi - psi_up). Analytic,
-    // no AD and no spline -- the simplest derivative of the three.
-    C_prime = 2.0 * JS22_gamma * (psi_stem - psi_upstream);
+    // because this is not a switch. The static_assert is what makes a FIFTH curve a
+    // compile error instead of a plausible number.
+    static_assert(K == CostCurve::CMax, "unhandled CostCurve in dprofit_dpsi_stem");
+    // Linear in the ABSOLUTE potential by definition -- this IS the form Anderegg
+    // et al. state, so no antiderivative and no cancellation is involved here.
+    C_prime = CMax_a * psi_stem + CMax_b;
   }
 
   // ci pinned at the compensation point: the supply==demand residual is not zero
@@ -2923,6 +2963,12 @@ inline double Leaf::evaluate_psi_stem(double target_psi_stem) {
       util::stop("evaluate_psi_stem needs a finite, non-negative JS22_gamma; got " +
                  util::to_string(JS22_gamma));
     }
+  } else if constexpr (K == CostCurve::CMax) {
+    if (!std::isfinite(CMax_a) || CMax_a < 0.0 || !std::isfinite(CMax_b)) {
+      util::stop("evaluate_psi_stem needs a finite, non-negative CMax_a and a "
+                 "finite CMax_b (which is SIGNED); got " +
+                 util::to_string(CMax_a) + ", " + util::to_string(CMax_b));
+    }
   }
 
   const double psi_soil = supply_psi_soil_scalar();
@@ -2935,9 +2981,11 @@ inline double Leaf::evaluate_psi_stem(double target_psi_stem) {
       profit_ = profit_psi_stem_TF(psi_soil, psi_soil);
     } else if constexpr (K == CostCurve::CF77) {
       profit_ = profit_psi_stem_CF77(psi_soil, psi_soil);
-    } else {
-      static_assert(K == CostCurve::JS22, "unhandled CostCurve");
+    } else if constexpr (K == CostCurve::JS22) {
       profit_ = profit_psi_stem_JS22(psi_soil, psi_soil);
+    } else {
+      static_assert(K == CostCurve::CMax, "unhandled CostCurve");
+      profit_ = profit_psi_stem_CMax(psi_soil, psi_soil);
     }
     operating_point_kind_ = OperatingPointKind::Prescribed;
     return profit_;
@@ -2955,9 +3003,11 @@ inline double Leaf::evaluate_psi_stem(double target_psi_stem) {
     profit_ = profit_psi_stem_TF(psi, psi_soil);
   } else if constexpr (K == CostCurve::CF77) {
     profit_ = profit_psi_stem_CF77(psi, psi_soil);
-  } else {
-    static_assert(K == CostCurve::JS22, "unhandled CostCurve");
+  } else if constexpr (K == CostCurve::JS22) {
     profit_ = profit_psi_stem_JS22(psi, psi_soil);
+  } else {
+    static_assert(K == CostCurve::CMax, "unhandled CostCurve");
+    profit_ = profit_psi_stem_CMax(psi, psi_soil);
   }
   operating_point_kind_ = OperatingPointKind::Prescribed;
   return profit_;
@@ -3777,6 +3827,17 @@ inline double Leaf::lambda_JS22(double psi_stem, double psi_upstream) const {
 }
 
 
+// And for CMax, whose marginal cost does not vanish at the wet end unless CMax_b is
+// zero -- which is what makes it the one curve here that CAN be wet-pinned with a
+// non-zero cost at the bound. `psi_upstream` enters only through dE/dpsi.
+inline double Leaf::lambda_CMax(double psi_stem, double psi_upstream) const {
+  (void)psi_upstream;
+  const double f = proportion_of_conductivity(psi_stem);
+  return (CMax_a * psi_stem + CMax_b) /
+         (leaf_specific_conductance_max_ * f);
+}
+
+
 // The same quantity for the normalised ProfitMax cost. Writing `f` for the
 // conductivity fraction and `f'` for its slope, the cost is
 // `HC + TC = (k_soil - kmax*f)/k_span + TC(Tleaf)`, so
@@ -3939,6 +4000,43 @@ inline double Leaf::profit_psi_stem_JS22(double psi_stem,
 
   double benefit_ = assim_colimited_;
   double cost = hydraulic_cost_JS22(psi_stem, psi_upstream);
+
+  return benefit_ - cost;
+}
+
+
+// The integral of `CMax_a*psi + CMax_b` from psi_upstream to psi_stem, so no flow
+// costs nothing:
+//
+//     C = (psi - psi_up) * [ CMax_a*(psi + psi_up)/2 + CMax_b ]
+//
+// ⚠️ FACTORED, NOT `a*(psi^2 - psi_up^2)/2 + b*(psi - psi_up)`, and that is a
+// measured requirement rather than tidiness. The difference-of-squares form
+// subtracts two nearly equal numbers as the potentials converge: against the
+// factored value it is wrong by 1.6e-08 at a 1e-08 drop and 1.2e-04 at 1e-12,
+// the latter being what this guide calls a real difference rather than rounding.
+// A gradient perturbs by a relative 1e-06, so an operating point near no flow
+// reaches that regime.
+//
+// ⚠️ THIS IS ALSO WHY IT DOES NOT SHARE A KERNEL WITH JS22, which PLAN 7a-iii
+// proposed. JS22 is this family's `(a, b) = (2*gamma, -2*gamma*psi_up)` member, and
+// putting it through the form above computes `gamma*(psi + psi_up) - 2*gamma*psi_up`
+// -- reintroducing exactly the cancellation that `gamma*dpsi*dpsi` does not have.
+// The two share a family, not an implementation.
+inline double Leaf::hydraulic_cost_CMax(double psi_stem,
+                                        double psi_upstream) {
+  hydraulic_cost_ = (psi_stem - psi_upstream) *
+                    (0.5 * CMax_a * (psi_stem + psi_upstream) + CMax_b);
+  return hydraulic_cost_;
+}
+
+
+inline double Leaf::profit_psi_stem_CMax(double psi_stem,
+                                         double psi_upstream) {
+  set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
+
+  double benefit_ = assim_colimited_;
+  double cost = hydraulic_cost_CMax(psi_stem, psi_upstream);
 
   return benefit_ - cost;
 }
@@ -4383,6 +4481,64 @@ inline void Leaf::optimise_psi_stem_JS22() {
       supply_psi_soil_scalar(), psi_crit, boundary_scan_n_, &profit_opt);
   profit_ = profit_psi_stem_JS22(opt_psi_stem_, supply_psi_soil_scalar());
   lambda_emergent_ = lambda_JS22(opt_psi_stem_, supply_psi_soil_scalar());
+  (void)profit_opt;
+
+    return;
+  }
+
+
+// Wolf/Anderegg CMax. Same closed-interval maximisation as the other three.
+//
+// ⚠️ UNLIKE JS22, THIS ONE CAN BE WET-PINNED, and the reason is `CMax_b`. JS22's
+// marginal cost vanishes as the drop closes, so the wet bound is never the answer;
+// this one approaches `CMax_a*psi_soil + CMax_b`, which is non-zero. So a closed
+// interval is doing real work here rather than guarding a case that cannot arise,
+// and `CMax_b` is what decides it.
+//
+// ⚠️ AND A WET-PINNED ANSWER IS NOT `psi_soil` EXACTLY. Measured at psi_soil 3,
+// PPFD 200, VPD 4: `psi* - psi_soil` is 5.930e-06 at CMax_b = 6 and **the same
+// 5.930e-06** at 8, 12 and 20. A value that does not move with the parameter is
+// the tell -- it is the bracket's step-in fraction (~1e-06 of a 2.870 MPa width),
+// so the answer is determined by the bound rather than by the objective. A caller
+// testing `psi* == psi_soil` to detect closure will therefore conclude this curve
+// never pins. Compare against the bound with the step-in tolerance, or read the
+// gradient's sign at the bound.
+inline void Leaf::optimise_psi_stem_CMax() {
+
+  clear_collar_solve_state();
+
+  if (!supply_is_single_layer()) {
+    util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
+  }
+
+  // ⚠️ `CMax_a` only. `CMax_b` is SIGNED -- negative in the paper's own convention,
+  // see the member -- so a sign check on it would reject the literature.
+  if (!std::isfinite(CMax_a) || CMax_a < 0.0) {
+    util::stop("CMax_a must be a finite, non-negative slope for the CMax marginal "
+               "cost in umol C m^-2 s^-1 MPa^-2; got " + util::to_string(CMax_a));
+  }
+  if (!std::isfinite(CMax_b)) {
+    util::stop("CMax_b must be finite; got " + util::to_string(CMax_b));
+  }
+
+  opt_psi_stem_ = supply_psi_soil_scalar();
+
+  if (supply_psi_soil_scalar() > psi_crit) {
+    profit_ = profit_psi_stem_CMax(supply_psi_soil_scalar(),
+                                   supply_psi_soil_scalar());
+    lambda_emergent_ = lambda_CMax(supply_psi_soil_scalar(),
+                                   supply_psi_soil_scalar());
+    return;
+  }
+
+  double profit_opt = 0.0;
+  opt_psi_stem_ = util::maximise_over_closed_interval(
+      [&](double psi_stem) {
+        return profit_psi_stem_CMax(psi_stem, supply_psi_soil_scalar());
+      },
+      supply_psi_soil_scalar(), psi_crit, boundary_scan_n_, &profit_opt);
+  profit_ = profit_psi_stem_CMax(opt_psi_stem_, supply_psi_soil_scalar());
+  lambda_emergent_ = lambda_CMax(opt_psi_stem_, supply_psi_soil_scalar());
   (void)profit_opt;
 
     return;

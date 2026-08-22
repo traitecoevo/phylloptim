@@ -45,7 +45,9 @@
   curv_fact_colim = 0.99,
   TF24_cost_scale = 7.5,
   R_d_25 = 1.44,
-  JS22_gamma = 1.0
+  JS22_gamma = 1.0,
+  CMax_a = 0.6,
+  CMax_b = 0.0
 )
 
 .leaf_control_defaults <- list(
@@ -118,6 +120,19 @@
 ##'   optimum runs 0.287 at `psi_soil` 0.5 MPa to 1.761 at 3.0 MPa. TF24's cost
 ##'   tracks the absolute potential and this one tracks the drop, and across a
 ##'   drydown those move in opposite directions.
+##' @param CMax_a,CMax_b slope and intercept of the `CMax` marginal cost,
+##'   `dC/dpsi = CMax_a * psi + CMax_b`, following Wolf et al. (2016) as
+##'   Anderegg et al. (2018) parameterised it. Read only by the `CMax` curve.
+##'
+##'   ⚠️ **`CMax_b` is signed, and negative in the source convention.** Sabot's
+##'   `TractLSM` stores it with the sign inverted "so as to get a positive
+##'   parameter value", so a value taken from that code or from a calibration
+##'   against it must have its sign checked rather than assumed.
+##'
+##'   ⚠️ **Neither default is a literature value.** With `CMax_b = 0` the `CMax_a`
+##'   reproducing TF24's cost at its own optimum runs 0.406 at `psi_soil` 0.5 MPa
+##'   to 0.807 at 3.0 MPa — a 2.0x range against `JS22_gamma`'s 6.1x, which is the
+##'   absolute-versus-drop distinction as a number.
 ##'
 ##' @section Where the two root-resistance constants went:
 ##' `beta_R_H` and `beta_R_V` were traits here until #33. They parameterise the
@@ -150,14 +165,17 @@ leaf_traits <- function(vcmax_25 = 96,
                         curv_fact_colim = 0.99,
                         TF24_cost_scale = 7.5,
                         R_d_25 = 1.44,
-                        JS22_gamma = 1.0) {
+                        JS22_gamma = 1.0,
+                        CMax_a = 0.6,
+                        CMax_b = 0.0) {
   out <- list(vcmax_25 = vcmax_25, stem_c = stem_c, stem_P50 = stem_P50,
               root_c = root_c, root_P50 = root_P50, TF24_beta2 = TF24_beta2,
               jmax_25 = jmax_25, a = a,
               curv_fact_elec_trans = curv_fact_elec_trans,
               curv_fact_colim = curv_fact_colim,
               TF24_cost_scale = TF24_cost_scale,
-              R_d_25 = R_d_25, JS22_gamma = JS22_gamma)
+              R_d_25 = R_d_25, JS22_gamma = JS22_gamma,
+              CMax_a = CMax_a, CMax_b = CMax_b)
   .check_scalars(out, "leaf_traits")
   if (R_d_25 < 0) {
     stop("leaf_traits(): R_d_25 must be non-negative", call. = FALSE)
@@ -426,6 +444,8 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
   # Same reason, same trap: a trait the constructor does not take must be
   # assigned here or leaf_traits(JS22_gamma = ) is silently ignored.
   l$JS22_gamma <- traits$JS22_gamma
+  l$CMax_a <- traits$CMax_a
+  l$CMax_b <- traits$CMax_b
   l$initialize_integrator(control$integration_rule, control$integration_tol)
   # After the integrator, because set_supply_single clears the solved state --
   # not the integrator tolerance, but relying on that ordering would be a

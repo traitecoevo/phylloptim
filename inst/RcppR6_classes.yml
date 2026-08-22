@@ -253,6 +253,9 @@ Leaf:
     # R_d_25 is one: the constructor is pinned by arity, so leaf_model() assigns it
     # after construction. ⚠️ The default is NOT a literature value -- see the member.
     JS22_gamma: {type: double, access: field}
+    # Wolf/Anderegg CMax. Fields for the same reason. ⚠️ CMax_b is SIGNED.
+    CMax_a: {type: double, access: field}
+    CMax_b: {type: double, access: field}
     # The Tjoelker (2001) declining-Q10 coefficients:
     #   Q10(T) = rd_q10_intercept_ - rd_q10_slope_ * (T + 25) / 2
     # Set the slope to zero and the intercept IS a constant Q10.
@@ -436,7 +439,7 @@ Leaf:
       args: [stem_P50: double]
     set_traits:
       return_type: void
-      args: [vcmax_25: double, stem_c: double, stem_P50: double, root_c: double, root_P50: double, TF24_beta2: double, jmax_25: double, a: double, curv_fact_elec_trans: double, curv_fact_colim: double, TF24_cost_scale: double, R_d_25: double, JS22_gamma: double]
+      args: [vcmax_25: double, stem_c: double, stem_P50: double, root_c: double, root_P50: double, TF24_beta2: double, jmax_25: double, a: double, curv_fact_elec_trans: double, curv_fact_colim: double, TF24_cost_scale: double, R_d_25: double, JS22_gamma: double, CMax_a: double, CMax_b: double]
 
     # --- transpiration and conductance ---------------------------------------
     proportion_of_conductivity:
@@ -536,6 +539,9 @@ Leaf:
     hydraulic_cost_JS22:
       return_type: double
       args: [psi_stem: double, psi_upstream: double]
+    hydraulic_cost_CMax:
+      return_type: double
+      args: [psi_stem: double, psi_upstream: double]
     profit_psi_stem_TF:
       return_type: double
       args: [psi_stem: double, psi_upstream: double]
@@ -545,7 +551,13 @@ Leaf:
     profit_psi_stem_JS22:
       return_type: double
       args: [psi_stem: double, psi_upstream: double]
+    profit_psi_stem_CMax:
+      return_type: double
+      args: [psi_stem: double, psi_upstream: double]
     lambda_JS22:
+      return_type: double
+      args: [psi_stem: double, psi_upstream: double]
+    lambda_CMax:
       return_type: double
       args: [psi_stem: double, psi_upstream: double]
     lambda_TF24:
@@ -568,6 +580,9 @@ Leaf:
       return_type: void
       args: []
     optimise_psi_stem_JS22:
+      return_type: void
+      args: []
+    optimise_psi_stem_CMax:
       return_type: void
       args: []
 

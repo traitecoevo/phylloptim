@@ -21,8 +21,8 @@ test_that("leaf_traits() and leaf_control() partition the C++ constructor", {
   # RcppR6 bindings pin this constructor by arity, so `leaf_model()` assigns the
   # fields afterwards. The test below checks those assignments really happen.
   expect_setequal(setdiff(covered, ctor_args),
-                  c("R_d_25", "JS22_gamma", "integration_rule",
-                    "integration_tol"))
+                  c("R_d_25", "JS22_gamma", "CMax_a", "CMax_b",
+                    "integration_rule", "integration_tol"))
   expect_length(intersect(names(leaf_traits()), names(leaf_control())), 0)
 
   # And the split is the one the issue asked for: tolerances on the control
@@ -63,7 +63,7 @@ test_that("every trait can be read back from the object (#95)", {
   # temperature cache, no precomputation -- so a bare write cannot leave the object
   # describing two different models the way a bare `stem_P50` write would. Do not
   # read this exemption as permission for the next trait.
-  for (nm in setdiff(names(traits), c("R_d_25", "JS22_gamma"))) {
+  for (nm in setdiff(names(traits), c("R_d_25", "JS22_gamma", "CMax_a", "CMax_b"))) {
     expect_error(l[[nm]] <- 1, "read-only", label = paste(nm, "rejects a write"))
   }
 

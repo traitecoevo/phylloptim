@@ -809,8 +809,8 @@ test_that("the setter's positional trait call cannot drift in arity", {
   # fails to compile -- it would silently pass the wrong value for every argument
   # after the new one. So the arity is asserted here rather than trusted.
   #
-  expect_length(leaf_traits(), 13L)
-  expect_length(formals(leaf_model()$set_traits), 13L)
+  expect_length(leaf_traits(), 15L)
+  expect_length(formals(leaf_model()$set_traits), 15L)
   expect_identical(names(leaf_traits()), names(formals(leaf_model()$set_traits)))
 })
 

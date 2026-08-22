@@ -68,6 +68,8 @@ const double kRd25 = 1.44;
 // read only by the JS22 arm -- but set_traits is positional, so it is named here
 // rather than repeated as a literal at a dozen call sites.
 const double kGammaJS22 = 1.0;
+const double kCMaxA = 0.6;
+const double kCMaxB = 0.0;
 
 phylloptim::Leaf make_leaf(const Drivers &d, std::vector<double> psi_soil,
                      std::vector<double> soil_depth) {
@@ -863,7 +865,7 @@ void test_operating_point_kind_is_written_by_every_path() {
   l.set_traits(l.vcmax_25, l.stem_c, l.stem_P50, l.roots_.root_c,
                l.roots_.root_P50, l.TF24_beta2, l.jmax_25, l.a,
                l.curv_fact_elec_trans, l.curv_fact_colim, l.TF24_cost_scale,
-               l.R_d_25, l.JS22_gamma);
+               l.R_d_25, l.JS22_gamma, l.CMax_a, l.CMax_b);
   ok(l.operating_point_kind() == Kind::Unsolved,
      "set_traits clears the classification with the rest of the solved state");
 
@@ -3070,7 +3072,7 @@ void test_perturb_stem_P50_matches_a_rebuild() {
     // The reference: stem_b through set_traits, which rebuilds the spline.
     phylloptim::Leaf rebuilt = make_leaf(d, {2.0}, {1.0});
     rebuilt.find_root_collar_psi();
-    rebuilt.set_traits(96.0, 2.680147, P50_new, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22);
+    rebuilt.set_traits(96.0, 2.680147, P50_new, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     rebuilt.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                            d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa,
                            d.atm_kpa);
@@ -3102,7 +3104,7 @@ void test_perturb_stem_P50_matches_a_rebuild() {
     // which is only true if the rebuild is forced.
     phylloptim::Leaf fresh = make_leaf(d, {2.0}, {1.0});
     fresh.find_root_collar_psi();
-    rescaled.set_traits(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22);
+    rescaled.set_traits(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     rescaled.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                             d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa,
                             d.atm_kpa);
@@ -3148,7 +3150,7 @@ void test_stem_curve_shortcut_needs_no_rebuild() {
     undone.perturb_stem_P50(P50_0 * 1.001);
     undone.perturb_stem_P50(P50_0);  // the way back, WITH the shortcut
     undone.set_traits(96.0, 2.680147, P50_0, 2.680147, P50_0, 1.5,
-                      157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22);
+                      157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     ok(undone.stem_curve_builds_ == builds,
        "set_traits after an undone displacement rebuilds nothing");
     undone.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil,
@@ -3182,7 +3184,7 @@ void test_stem_curve_shortcut_needs_no_rebuild() {
   double theta[phylloptim::gradient::n_pars] = {
       96.0,   2.680147, P50_0, 2.680147, P50_0, 1.5,
       157.44, 0.30,     0.7,   0.99,     7.5,   kRd25, kGammaJS22,
-      kmax,   0.0};
+      kCMaxA, kCMaxB,  kmax,      0.0};
 
   phylloptim::gradient::Drivers gd;
   gd.root_network = fixture::root_network(mrp, depth);
@@ -3287,7 +3289,7 @@ void test_set_traits_matches_a_fresh_leaf() {
     phylloptim::Leaf reused = make_leaf(d, {2.0}, {1.0});
     reused.find_root_collar_psi();
     reused.set_traits(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7],
-                      t[8], t[9], t[10], kRd25, kGammaJS22);
+                      t[8], t[9], t[10], kRd25, kGammaJS22, kCMaxA, kCMaxB);
     reused.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                           d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
     reused.find_root_collar_psi();
@@ -3329,7 +3331,7 @@ void test_set_traits_matches_a_fresh_leaf() {
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     const double vcmax_before = l.vcmax_;
-    l.set_traits(96.0 * 2.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22);
+    l.set_traits(96.0 * 2.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
     // The same leaf_temp and atm_o2_kpa -- which used to be the whole key, and so
     // used to be what ARMED the trap. It no longer is: `vcmax_25` has moved, so the
@@ -3347,7 +3349,7 @@ void test_set_traits_matches_a_fresh_leaf() {
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     const double E_before = l.transpiration(3.0, 1.0);
-    l.set_traits(96.0, 2.680147, 3.4 * 1.5, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22);
+    l.set_traits(96.0, 2.680147, 3.4 * 1.5, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
     l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                      d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
@@ -3376,7 +3378,7 @@ void test_set_traits_matches_a_fresh_leaf() {
       bool threw = false;
       try {
         l.set_traits(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7],
-                     t[8], t[9], t[10], kRd25, kGammaJS22);
+                     t[8], t[9], t[10], kRd25, kGammaJS22, kCMaxA, kCMaxB);
       } catch (const std::runtime_error &) {
         threw = true;
       }
@@ -3421,7 +3423,7 @@ void test_prescribed_lambda_survives_redriving() {
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     l.CF77_lambda_ = prescribed;
-    l.set_traits(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22);
+    l.set_traits(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     ok(l.CF77_lambda_ == prescribed, "set_traits leaves a prescribed CF77_lambda_ alone");
   }
 
@@ -3431,7 +3433,7 @@ void test_prescribed_lambda_survives_redriving() {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     l.CF77_lambda_ = prescribed;
     l.find_root_collar_psi();
-    l.set_traits(96.0 * 1.05, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22);
+    l.set_traits(96.0 * 1.05, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth,
                      d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
                      d.atm_o2_kpa, d.atm_kpa);
@@ -3447,7 +3449,7 @@ void test_prescribed_lambda_survives_redriving() {
     l.CF77_lambda_ = prescribed;
     l.find_root_collar_psi();
     ok(!std::isnan(l.opt_psi_stem_), "the solve seated an operating point");
-    l.set_traits(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22);
+    l.set_traits(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     ok(std::isnan(l.opt_psi_stem_),
        "set_traits still clears the solved operating point");
     ok(std::isnan(l.profit_), "set_traits still clears profit_");
@@ -4155,7 +4157,7 @@ void test_transpiration_survives_negative_assim() {
   // of exactly zero.
   Drivers dg = d;
   phylloptim::Leaf gross = make_single_leaf(dg, 0.5);
-  gross.set_traits(96, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, /*R_d_25=*/0.0, kGammaJS22);
+  gross.set_traits(96, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, /*R_d_25=*/0.0, kGammaJS22, kCMaxA, kCMaxB);
   phylloptim::RootNetwork rn;
   rn.r_R_V_sum = std::vector<double>{1.0e3};
   rn.r_R_H_min = std::vector<double>{0.0};

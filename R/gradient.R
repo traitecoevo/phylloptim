@@ -91,7 +91,7 @@ set_traits <- function(x, traits) {
                traits$root_c, traits$root_P50, traits$TF24_beta2,
                traits$jmax_25, traits$a, traits$curv_fact_elec_trans,
                traits$curv_fact_colim, traits$TF24_cost_scale, traits$R_d_25,
-               traits$JS22_gamma)
+               traits$JS22_gamma, traits$CMax_a, traits$CMax_b)
   invisible(x)
 }
 
@@ -1023,7 +1023,7 @@ leaf_gradient <- function(psi_soil,
     tv <- theta[trait_names]
     apply_traits(tv[[1L]], tv[[2L]], tv[[3L]], tv[[4L]], tv[[5L]], tv[[6L]],
                  tv[[7L]], tv[[8L]], tv[[9L]], tv[[10L]], tv[[11L]], tv[[12L]],
-                 tv[[13L]])
+                 tv[[13L]], tv[[14L]], tv[[15L]])
     # `resistance` is a driver, so it goes in with the others rather than through
     # $set_supply_single(). That removes the second object-resetting call this
     # function used to make -- and with it the reason the ordering note above had to

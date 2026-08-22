@@ -86,7 +86,7 @@ void apply_traits(phylloptim::Leaf &l, const Traits &t) {
   // configuration.
   l.set_traits(t.v[0], t.v[1], t.v[2], t.v[3], t.v[4], t.v[5],
                t.v[6], t.v[7], t.v[8], t.v[9], t.v[10], 1.44,
-               /*JS22_gamma=*/1.0);
+               /*JS22_gamma=*/1.0, /*CMax_a=*/0.6, /*CMax_b=*/0.0);
 }
 
 // One interior operating point. Drivers from plant's tests/testthat/test-leaf.r,
@@ -312,7 +312,8 @@ int main(int argc, char **argv) {
         kBase.v[5], kBase.v[6], kBase.v[7],  kBase.v[8], kBase.v[9],
         // ⚠️ POSITIONAL and silently short-fillable -- see test_leaf.cpp's copy of
         // this array for what adding a trait did to it. Count against `n_pars`.
-        kBase.v[10], 1.44,      /*JS22_gamma=*/1.0, kmax, 0.0};
+        kBase.v[10], 1.44,      /*JS22_gamma=*/1.0,
+        /*CMax_a=*/0.6, /*CMax_b=*/0.0, kmax, 0.0};
 
     std::vector<double> root{1.0 / kAreaLeaf}, psi_soil{2.0}, depth{1.0};
     phylloptim::gradient::Drivers gd;
