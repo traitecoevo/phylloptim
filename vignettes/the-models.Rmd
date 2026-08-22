@@ -433,6 +433,13 @@ where 1.6 is the ratio of diffusivities of water vapour and CO₂, `P` is
 atmospheric pressure and `D_leaf` the leaf-to-air vapour pressure deficit. Fixing
 `E` fixes `g_c`, which is the first link of the coordinate chain above.
 
+⚠️ **`$stom_cond_CO2_` is a TOTAL leaf-to-air conductance, not a stomatal one.**
+There is no separate boundary-layer term: the relation above is the whole path from
+leaf interior to bulk air, in one conductance, paired with a leaf-to-bulk-air
+deficit. That is internally consistent, and it is the right quantity for the `c_i`
+solve below. But a measured `g_s` has a boundary layer removed from it, so the two
+are not the same number and should not be compared directly.
+
 ### 4. Closing the loop: supply equals demand
 
 `c_i` is not free. Diffusive supply must equal biochemical demand, which is a
