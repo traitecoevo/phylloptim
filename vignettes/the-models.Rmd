@@ -28,7 +28,7 @@ A leaf with open stomata takes up CO₂ and loses water. Opening further buys mo
 
 Put the two effects on the same axis. Take the stem water potential as the dial — more tension to the right, wider open — and plot what the leaf gains and what it gives up. That is panel (a) below; the other three panels are the rest of this document in one frame.
 
-```{r fig-overview, fig.width = 11, fig.height = 6.6, out.width = "100%", dev = "svg"}
+```{r fig-overview, fig.width = 11, fig.height = 6.6, out.width = "100%", dpi = 150}
 l0 <- leaf_model()
 set_drivers(l0, psi_soil = 1.0, PPFD = 1500)
 plot_model_overview(l0)
@@ -106,7 +106,7 @@ for a stationary point. Both are in the package, and which lives where is worth 
 
 The three claims are one picture. Both solvers below are given the *same* sign-changing bracket, which flatters the search — it is handed the basin rather than having to find it, and finding the basin is what the 64-point scan exists for.
 
-```{r fig-solver, fig.width = 9, fig.height = 4.2, out.width = "100%", dev = "svg"}
+```{r fig-solver, fig.width = 9, fig.height = 4.2, out.width = "100%", dpi = 150}
 sc <- plot_solver_convergence()
 
 e_search <- abs(sc$search$x - sc$star)

@@ -205,7 +205,7 @@ inline double route_dprofit_checked(Leaf& l, int curve, double psi,
 }
 
 // ⚠️ WHICH OUTPUT IS THE DECISION VARIABLE MOVES WITH THE ROUTE. On the collar
-// route `collar` IS psi*, so `dcollar/dtheta` is `dpsi*/dtheta` and is assigned
+// route `collar` IS psi*, so `dcollar/dtheta` is `dpsi* / dtheta` and assigned
 // rather than differenced. On a stem route `psi_stem` plays that part and the
 // collar is never solved for.
 inline int route_decision(int curve) { return curve < 0 ? out_collar : 2; }

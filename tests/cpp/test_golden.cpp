@@ -272,6 +272,11 @@ bool same(double got, double want) {
 // Relative difference, used both to decide the tolerant comparison and to report
 // how far apart the two builds actually are. Returns 0 for the NaN/NaN and
 // exactly-equal cases, and infinity when one side is NaN and the other is not.
+// Below this, a value in psi_stem_optima.tsv is zero in every sense that
+// matters and a relative comparison against it is meaningless. Justified by a
+// measured empty band -- see the use site in compare_optima.
+constexpr double kOptNegligible = 1e-12;
+
 double rel_diff(double a, double b) {
   if (std::isnan(a) && std::isnan(b)) {
     return 0.0;
@@ -857,6 +862,7 @@ int compare_optima(Tolerance tol) {
   const std::vector<OptRow> rows = run_optima_grid();
   const bool exact_mode = tol.maximum < 0.0;
   int failures = 0;
+  size_t negligible = 0;
   double worst_rel = 0.0;
   std::string worst_desc;
 
@@ -912,6 +918,23 @@ int compare_optima(Tolerance tol) {
       if (same(got[j], want[j])) {
         continue;
       }
+      // ⚠️ A RELATIVE TOLERANCE IS UNDEFINED WHERE THE TRUTH IS ZERO, and two
+      // columns here are analytically zero on some rows: `hydraulic_cost_norm`
+      // at a wet-pinned ProfitMax optimum, and `profit` likewise. One platform
+      // then computes rounding noise where another computes exactly 0.0, and
+      // rel_diff correctly reports 1 for a difference of 1e-16.
+      //
+      // The threshold sits in an EMPTY BAND, which is what makes it safe rather
+      // than convenient. Measured over the whole file: the noise cluster tops
+      // out at 1.13e-16 (76 values) and the smallest genuine magnitude in either
+      // column is >= 1e-4 (796 values) -- NOTHING lies between 1e-12 and 1e-4.
+      // So this cannot mask a real difference; it can only stop a zero being
+      // compared as though it had a scale. Re-measure the band before moving it.
+      if (!exact_mode && std::fabs(got[j]) < kOptNegligible &&
+          std::fabs(want[j]) < kOptNegligible) {
+        ++negligible;
+        continue;
+      }
       const double rel = rel_diff(got[j], want[j]);
       const double limit =
           is_maximum_field(kOptFieldNames[j]) ? tol.maximum : tol.argmax;
@@ -955,6 +978,11 @@ int compare_optima(Tolerance tol) {
       printf("  worst relative difference %.3g at %s (tolerances %.1g maximum,"
              " %.1g argmax -- INHERITED, not measured for this file)\n",
              worst_rel, worst_desc.c_str(), tol.maximum, tol.argmax);
+    }
+    // Never silent: an exempted cell is a cell nothing checked.
+    if (!exact_mode && negligible > 0) {
+      printf("  %zu values compared as zero (both sides below %.1g)\n",
+             negligible, kOptNegligible);
     }
     return 0;
   }

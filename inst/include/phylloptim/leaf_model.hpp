@@ -1014,17 +1014,16 @@ public:
   //
   // All seven maximise `h(A(psi)) - C(psi)`: a BENEFIT LINK `h` composed with
   // assimilation, minus a cost curve. That is not a convenience -- it is why the
-  // derivative below is one expression rather than three, because
+  // derivative below is one expression rather than three, and `h'` is the only
+  // thing that varies:
   //
   //     d/dpsi [ h(A) - C ] = h'(A) * dA/dpsi - dC/dpsi
-  //
-  // and `h'` is the only thing that varies:
-  //
-  //   Identity  h(A) = A            h' = 1           TF24, CF77, JS22, CMax
-  //   Log       h(A) = log A        h' = 1/A         SOX, JW26   (products:
-  //                                                  A*g and log A + log g share
-  //                                                  an argmax)
-  //   Scaled    h(A) = A/|A|max     h' = 1/|A|max    ProfitMax
+  //     ----------------------------------------------------------------------
+  //     Identity  h(A) = A            h' = 1          TF24, CF77, JS22, CMax
+  //     Log       h(A) = log A        h' = 1/A        SOX, JW26  (products: A*g
+  //                                                   and log A + log g share
+  //                                                   an argmax)
+  //     Scaled    h(A) = A/|A|max     h' = 1/|A|max   ProfitMax
   //
   // ⚠️ `Scaled` treats `|A|max` as CONSTANT, which makes ProfitMax's trait
   // gradients PARTIALS at fixed normaliser rather than total derivatives. That is
@@ -4025,13 +4024,11 @@ inline double Leaf::lambda_JW26(double psi_stem, double psi_upstream) const {
 
 // The same quantity for the normalised ProfitMax cost. Writing `f` for the
 // conductivity fraction and `f'` for its slope, the cost is
-// `HC + TC = (k_soil - kmax*f)/k_span + TC(Tleaf)`, so
+// `HC + TC = (k_soil - kmax*f)/k_span + TC(Tleaf)`, so -- dividing through and
+// restoring carbon units with |A|max:
 //
-//   dC/dpsi = kmax*|f'|/k_span + (dTC/dT)(dT/dE)(dE/dpsi),   dE/dpsi = kmax*f
-//
-// and dividing through, then restoring carbon units with |A|max:
-//
-//   lambda = |A|max * [ |f'|/(f*k_span) + (dTC/dT)(dT/dE) ]
+//     dC/dpsi = kmax*|f'|/k_span + (dTC/dT)(dT/dE)(dE/dpsi),  dE/dpsi = kmax*f
+//     lambda  = |A|max * [ |f'|/(f*k_span) + (dTC/dT)(dT/dE) ]
 //
 // The thermal term vanishes with either gate off -- with no energy balance
 // dT/dE is zero, and with no thermal cost dTC/dT is.
