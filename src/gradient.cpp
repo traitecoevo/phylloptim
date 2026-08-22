@@ -195,7 +195,8 @@ Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_,
                               Rcpp::IntegerVector pars, double step,
                               double stationarity_tol, std::string method,
                               bool fast_stem_curve, SEXP psi,
-                              SEXP dpsi_dtheta) {
+                              SEXP dpsi_dtheta, int curve, double fd_step,
+                              double pinned_A_max) {
   DriverBatch* batch_drivers = checked(drivers);
   const std::size_t n = batch_drivers->size();
   const std::size_t npars = static_cast<std::size_t>(pars.size());
@@ -219,6 +220,9 @@ Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_,
   settings.step = step;
   settings.stationarity_tol = stationarity_tol;
   settings.fast_stem_curve = fast_stem_curve;
+  settings.curve = curve;
+  settings.fd_step = fd_step;
+  settings.pinned_A_max = pinned_A_max;
   if (method == "auto") {
     settings.method = phylloptim::gradient::Method::Auto;
   } else if (method == "ift") {

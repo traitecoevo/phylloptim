@@ -14,7 +14,8 @@ leaf_gradient_batch(
   step = 1e-06,
   stationarity_tol = 1e-08,
   method = c("auto", "ift", "fd"),
-  fast_stem_curve = TRUE
+  fast_stem_curve = TRUE,
+  model = "collar"
 )
 }
 \arguments{

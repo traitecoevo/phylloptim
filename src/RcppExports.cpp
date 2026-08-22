@@ -3052,8 +3052,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // gradient_batch_run
-Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, SEXP drivers, Rcpp::NumericMatrix theta, Rcpp::IntegerVector pars, double step, double stationarity_tol, std::string method, bool fast_stem_curve, SEXP psi, SEXP dpsi_dtheta);
-RcppExport SEXP _phylloptim_gradient_batch_run(SEXP obj_SEXP, SEXP driversSEXP, SEXP thetaSEXP, SEXP parsSEXP, SEXP stepSEXP, SEXP stationarity_tolSEXP, SEXP methodSEXP, SEXP fast_stem_curveSEXP, SEXP psiSEXP, SEXP dpsi_dthetaSEXP) {
+Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, SEXP drivers, Rcpp::NumericMatrix theta, Rcpp::IntegerVector pars, double step, double stationarity_tol, std::string method, bool fast_stem_curve, SEXP psi, SEXP dpsi_dtheta, int curve, double fd_step, double pinned_A_max);
+RcppExport SEXP _phylloptim_gradient_batch_run(SEXP obj_SEXP, SEXP driversSEXP, SEXP thetaSEXP, SEXP parsSEXP, SEXP stepSEXP, SEXP stationarity_tolSEXP, SEXP methodSEXP, SEXP fast_stem_curveSEXP, SEXP psiSEXP, SEXP dpsi_dthetaSEXP, SEXP curveSEXP, SEXP fd_stepSEXP, SEXP pinned_A_maxSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -3067,7 +3067,10 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< bool >::type fast_stem_curve(fast_stem_curveSEXP);
     Rcpp::traits::input_parameter< SEXP >::type psi(psiSEXP);
     Rcpp::traits::input_parameter< SEXP >::type dpsi_dtheta(dpsi_dthetaSEXP);
-    rcpp_result_gen = Rcpp::wrap(gradient_batch_run(obj_, drivers, theta, pars, step, stationarity_tol, method, fast_stem_curve, psi, dpsi_dtheta));
+    Rcpp::traits::input_parameter< int >::type curve(curveSEXP);
+    Rcpp::traits::input_parameter< double >::type fd_step(fd_stepSEXP);
+    Rcpp::traits::input_parameter< double >::type pinned_A_max(pinned_A_maxSEXP);
+    rcpp_result_gen = Rcpp::wrap(gradient_batch_run(obj_, drivers, theta, pars, step, stationarity_tol, method, fast_stem_curve, psi, dpsi_dtheta, curve, fd_step, pinned_A_max));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -3354,7 +3357,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_gradient_output_names", (DL_FUNC) &_phylloptim_gradient_output_names, 0},
     {"_phylloptim_gradient_batch_prepare", (DL_FUNC) &_phylloptim_gradient_batch_prepare, 9},
     {"_phylloptim_gradient_batch_check", (DL_FUNC) &_phylloptim_gradient_batch_check, 1},
-    {"_phylloptim_gradient_batch_run", (DL_FUNC) &_phylloptim_gradient_batch_run, 10},
+    {"_phylloptim_gradient_batch_run", (DL_FUNC) &_phylloptim_gradient_batch_run, 13},
     {"_phylloptim_root_network_from_carbon", (DL_FUNC) &_phylloptim_root_network_from_carbon, 4},
     {NULL, NULL, 0}
 };

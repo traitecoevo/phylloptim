@@ -662,3 +662,31 @@ test_that("the batch validates psi and dpsi_dtheta by shape", {
   expect_identical(unname(shared$gradient[, , "collar"]),
                    matrix(c(0.1, 0.1, 0.1, 0.2, 0.2, 0.2), 3, 2))
 })
+
+test_that("the batch reproduces leaf_gradient() on every model, bit-for-bit", {
+  # ⚠️ BIT-FOR-BIT, not close, and for the reason this file's header gives: the
+  # two reach the same C++ model by different routes -- one `leaf_gradient()` per
+  # observation against one `gradient_batch_run()` for all of them -- so they share
+  # no code between the entry point and the residuals. A tolerance would let a
+  # transcription slip hide inside the solver's own ~1e-09 floor.
+  tr <- leaf_traits()
+  net <- series_resistance(1e4)
+  psv <- c(1.0, 1.5, 2.0)
+  own <- c(collar = "TF24_cost_scale", TF24 = "TF24_cost_scale",
+           CF77 = "CF77_lambda_", JS22 = "JS22_gamma", CMax = "CMax_a",
+           SOX = "vcmax_25", JW26 = "vcmax_25", ProfitMax = "vcmax_25")
+  for (m in names(own)) {
+    p <- own[[m]]
+    b <- leaf_batch(psi_soil = psv, PPFD = 1500, root_network = net,
+                    supply = leaf_supply_single(), traits = tr,
+                    CF77_lambda = 1.5e5)
+    gb <- leaf_gradient_batch(b, pars = p, model = m)
+    one <- vapply(psv, function(ps) {
+      l <- leaf_model(tr, leaf_control(), leaf_supply_single())
+      l$CF77_lambda_ <- 1.5e5
+      leaf_gradient(psi_soil = ps, PPFD = 1500, root_network = net, x = l,
+                    traits = tr, pars = p, model = m)$gradient[1, "A"]
+    }, numeric(1))
+    expect_identical(unname(gb$gradient[, 1, "A"]), unname(one), label = m)
+  }
+})

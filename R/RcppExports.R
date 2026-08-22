@@ -1125,8 +1125,8 @@ gradient_batch_check <- function(drivers) {
     invisible(.Call('_phylloptim_gradient_batch_check', PACKAGE = 'phylloptim', drivers))
 }
 
-gradient_batch_run <- function(obj_, drivers, theta, pars, step, stationarity_tol, method, fast_stem_curve, psi, dpsi_dtheta) {
-    .Call('_phylloptim_gradient_batch_run', PACKAGE = 'phylloptim', obj_, drivers, theta, pars, step, stationarity_tol, method, fast_stem_curve, psi, dpsi_dtheta)
+gradient_batch_run <- function(obj_, drivers, theta, pars, step, stationarity_tol, method, fast_stem_curve, psi, dpsi_dtheta, curve, fd_step, pinned_A_max) {
+    .Call('_phylloptim_gradient_batch_run', PACKAGE = 'phylloptim', obj_, drivers, theta, pars, step, stationarity_tol, method, fast_stem_curve, psi, dpsi_dtheta, curve, fd_step, pinned_A_max)
 }
 
 #' Root resistances from a root carbon profile

@@ -284,7 +284,8 @@ leaf_gradient_batch <- function(batch,
                                 step = 1e-6,
                                 stationarity_tol = 1e-8,
                                 method = c("auto", "ift", "fd"),
-                                fast_stem_curve = TRUE) {
+                                fast_stem_curve = TRUE,
+                                model = "collar") {
   if (!inherits(batch, "leaf_batch")) {
     stop("`batch` must come from leaf_batch(); got ", class(batch)[[1]],
          call. = FALSE)
@@ -312,7 +313,31 @@ leaf_gradient_batch <- function(batch,
   if (is.null(pars)) {
     pars <- .gradient_available_pars(single)
   }
-  .gradient_check_pars(pars, single)
+  .gradient_check_pars(pars, single, model)
+
+  # ⚠️ THE SAME ROUTE OBJECT `leaf_gradient()` USES, on the batch's own leaf, so the
+  # two entry points cannot disagree about which model a name selects or which
+  # step differencing its solve needs. It is built for its side effects on the
+  # settings below rather than to be called: the loop lives in C++.
+  route <- .gradient_route(batch$leaf, model, list(kind = batch$supply_kind))
+  curve <- if (identical(model, .GRADIENT_COLLAR_ROUTE)) {
+    -1L
+  } else {
+    as.integer(match(model, cost_curve_names()) - 1L)
+  }
+  # ProfitMax's normaliser is scanned, and `apply()` clears it at every
+  # perturbation. Seed it from a base solve so C++ can hold it fixed -- the same
+  # partial-at-fixed-normaliser the one-observation route reports.
+  pinned <- 0
+  if (identical(model, "ProfitMax")) {
+    route$solve()
+    pinned <- batch$leaf$profitmax_A_max
+  }
+  # ⚠️ `auto` differences the solve for ProfitMax, for the reason ?leaf_gradient
+  # gives: its two methods answer different questions and a fit needs the total.
+  if (identical(method, "auto") && identical(model, "ProfitMax")) {
+    method <- "fd"
+  }
 
   if (is.null(theta)) {
     if (is.null(traits)) {
@@ -340,7 +365,7 @@ leaf_gradient_batch <- function(batch,
   res <- with_phylloptim_conditions(gradient_batch_run(batch$leaf, batch$drivers, theta,
                             match(pars, par_names) - 1L, step,
                             stationarity_tol, method, fast_stem_curve,
-                            psi, dpsi_dtheta))
+                            psi, dpsi_dtheta, curve, route$fd_step, pinned))
 
   dimnames(res$gradient) <- list(NULL, pars, .gradient_output_names())
   dimnames(res$value) <- list(NULL, .gradient_output_names())

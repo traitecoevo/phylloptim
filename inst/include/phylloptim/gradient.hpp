@@ -154,6 +154,62 @@ inline const std::vector<std::string>& output_names() {
 // output in this list has to be a field R COPIES; `uptake` is one R sums over
 // the finite soil layers, so adding it means reproducing that summation -- and
 // its order -- on this side too.
+// --- which model's optimum is being differentiated ---------------------------
+//
+// `kCollar` is the production path: the TF24 cost maximised over the root-collar
+// potential, which is what this file did unconditionally. Anything >= 0 is a
+// `Leaf::CostCurve` value and selects a STEM route -- psi_stem with the upstream
+// potential pinned at psi_soil.
+//
+// ⚠️ THE COLLAR BRANCH IS TEXTUALLY WHAT IT ALWAYS WAS. These wrappers exist so
+// the six call sites below stop naming a solver, not to change one: the collar
+// arms call exactly the same functions in the same order, which is what keeps the
+// R-versus-C++ bit-for-bit contract and the golden files intact.
+inline constexpr int kCollar = -1;
+
+inline void route_solve(Leaf& l, int curve) {
+  if (curve < 0) {
+    l.find_root_collar_psi();
+  } else {
+    l.optimise_psi_stem_by(curve);
+  }
+}
+
+inline double route_psi(const Leaf& l, int curve) {
+  return curve < 0 ? l.opt_root_psi_ : l.opt_psi_stem_;
+}
+
+inline void route_evaluate(Leaf& l, int curve, double psi) {
+  if (curve < 0) {
+    l.evaluate_root_collar_psi(psi);
+  } else {
+    l.evaluate_psi_stem_by(curve, psi);
+  }
+}
+
+inline double route_dprofit(Leaf& l, int curve, double psi) {
+  return curve < 0 ? l.dprofit_droot_collar_psi(psi)
+                   : l.dprofit_dpsi_stem_by(curve, psi)[0];
+}
+
+inline double route_dprofit_checked(Leaf& l, int curve, double psi,
+                                    bool* feasible) {
+  if (curve < 0) {
+    return l.dprofit_droot_collar_psi(psi, feasible);
+  }
+  const std::vector<double> r = l.dprofit_dpsi_stem_by(curve, psi);
+  if (feasible != nullptr) {
+    *feasible = r[1] != 0.0;
+  }
+  return r[0];
+}
+
+// ⚠️ WHICH OUTPUT IS THE DECISION VARIABLE MOVES WITH THE ROUTE. On the collar
+// route `collar` IS psi*, so `dcollar/dtheta` is `dpsi*/dtheta` and is assigned
+// rather than differenced. On a stem route `psi_stem` plays that part and the
+// collar is never solved for.
+inline int route_decision(int curve) { return curve < 0 ? out_collar : 2; }
+
 inline void outputs(const Leaf& l, double* y) {
   y[0] = l.assim_colimited_;
   y[1] = l.stom_cond_CO2_;
@@ -172,9 +228,9 @@ inline void outputs(const Leaf& l, double* y) {
 // -- the same class of error as differentiating at a pinned optimum, and just as
 // plausible-looking. The clamp is a min/max, so an unclamped target comes back
 // bit-identical and a tolerance would only blur the detector.
-inline bool outputs_at(Leaf& l, double psi, double* y) {
-  l.evaluate_root_collar_psi(psi);
-  if (!util::identical(l.opt_root_psi_, psi)) {
+inline bool outputs_at(Leaf& l, double psi, double* y, int curve = kCollar) {
+  route_evaluate(l, curve, psi);
+  if (!util::identical(route_psi(l, curve), psi)) {
     return false;
   }
   outputs(l, y);
@@ -271,6 +327,19 @@ struct Settings {
   double stationarity_tol = 1e-8;
   Method method = Method::Auto;
   bool fast_stem_curve = true;
+  // Which model's optimum to differentiate. `kCollar` is the production path and
+  // the default, so an existing caller is unaffected.
+  int curve = kCollar;
+  // ⚠️ THE STEP THE FINITE-DIFFERENCE ARM USES, separately from `step`. That arm
+  // differences the SOLVE, so it has to clear the solver's own resolution: the
+  // collar route root-finds `dprofit == 0` to ~1e-15, while the stem routes scan
+  // and refine to ~1e-06 of the bracket. Differencing a stem solve at 1e-06
+  // returns quantisation -- measured, the wrong SIGN for JW26. `step` still drives
+  // the composite, which perturbs at fixed psi and never re-solves.
+  double fd_step = 1e-6;
+  // |A|max held fixed across perturbations, for ProfitMax's `Scaled` link. Zero
+  // means "not pinned"; the caller seeds it from the base solve.
+  double pinned_A_max = 0.0;
 };
 
 // A collar potential the caller imposes, in place of the one `at` would solve
@@ -474,7 +543,14 @@ inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
       double* dst = side == 0 ? up : dn;
       // Evaluate first, then read dprofit at the same fixed collar -- R's order,
       // and `evaluate_root_collar_psi` is what seats the state `dprofit` reads.
-      if (!outputs_at(l, psi_star, dst + 1)) {
+      if (s.pinned_A_max > 0.0) {
+        // ProfitMax's normaliser comes from a scan, so `apply()` above cleared it.
+        // Re-seat the analytic parts and hold |A|max at the base point: that is
+        // what makes this the PARTIAL at fixed normaliser rather than a total
+        // derivative through a piecewise-constant argmax.
+        l.prepare_profitmax_at(s.pinned_A_max);
+      }
+      if (!outputs_at(l, psi_star, dst + 1, s.curve)) {
         util::stop_infeasible(
             "gradient_active_set",
             "leaf_gradient(): perturbing `" + par_names()[std::size_t(p)] +
@@ -483,7 +559,7 @@ inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
                    "on an active-set boundary; lower `stationarity_tol` or "
                    "difference the solve directly.");
       }
-      dst[0] = l.dprofit_droot_collar_psi(psi_star);
+      dst[0] = route_dprofit(l, s.curve, psi_star);
     }
     // M = d2profit/dpsi dtheta, with psi held FIXED at psi*.
     const double M = (up[0] - dn[0]) / (2.0 * h);
@@ -497,7 +573,7 @@ inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
     // its direct term is zero by construction and the composite reduces to
     // dpsi*/dtheta. Set explicitly rather than left as the difference of two
     // identical numbers.
-    out[k * n_outputs + out_collar] = d_psi;
+    out[k * n_outputs + route_decision(s.curve)] = d_psi;
     // The envelope theorem, ASSIGNED for the same reason `collar` is: profit's
     // indirect term is identically zero at a stationary point, so stating that
     // beats multiplying a measured near-zero by dpsi/dtheta. It is also immune
@@ -528,12 +604,12 @@ inline void gradient_fd(Leaf& l, const double* theta, const Drivers& d,
       apply(l, theta, d, single, -1, s.fast_stem_curve);
     }
     at_base = false;
-    const double h = step_for(p, theta[p], s.step);
+    const double h = step_for(p, theta[p], s.fd_step);
     for (int side = 0; side < 2; ++side) {
       std::copy(theta, theta + n_pars, th);
       th[p] = side == 0 ? theta[p] + h : theta[p] - h;
       apply(l, th, d, single, p, s.fast_stem_curve);
-      l.find_root_collar_psi();
+      route_solve(l, s.curve);
       outputs(l, side == 0 ? up : dn);
     }
     for (int j = 0; j < n_outputs; ++j) {
@@ -564,13 +640,13 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
   // every use of it below actually means.
   bool clamped = false;
   if (prescribed != nullptr) {
-    l.evaluate_root_collar_psi(prescribed->psi);
+    route_evaluate(l, s.curve, prescribed->psi);
     // Exact equality, for the reason `outputs_at` documents above.
-    clamped = !util::identical(l.opt_root_psi_, prescribed->psi);
+    clamped = !util::identical(route_psi(l, s.curve), prescribed->psi);
   } else {
-    l.find_root_collar_psi();
+    route_solve(l, s.curve);
   }
-  const double psi_star = l.opt_root_psi_;
+  const double psi_star = route_psi(l, s.curve);
   out.psi = psi_star;
   outputs(l, out.value);
 
@@ -593,11 +669,12 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
   // the prescribed path does not divide by `H`, so it would adopt the sentinel as
   // if it were dprofit/dpsi.
   bool resid_feasible = false;
-  const double resid = l.dprofit_droot_collar_psi(psi_star, &resid_feasible);
+  const double resid =
+      route_dprofit_checked(l, s.curve, psi_star, &resid_feasible);
   // Named halves: `f(a) - f(b)` has unspecified operand order in C++ and
   // left-to-right order in R, and `dprofit_droot_collar_psi` mutates the leaf.
-  const double d_hi = l.dprofit_droot_collar_psi(psi_star + h_psi);
-  const double d_lo = l.dprofit_droot_collar_psi(psi_star - h_psi);
+  const double d_hi = route_dprofit(l, s.curve, psi_star + h_psi);
+  const double d_lo = route_dprofit(l, s.curve, psi_star - h_psi);
   const double H = (d_hi - d_lo) / (2.0 * h_psi);
   // H == 0 with resid == 0 is the shut-down signature: dprofit returns a
   // sentinel zero there rather than a derivative, so the ratio would be 0/0.
@@ -664,8 +741,8 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
     // Both, unconditionally, before the test -- R computes `hi` and `lo` on
     // consecutive lines and only then checks either, and each call moves the
     // leaf.
-    const bool hi_ok = outputs_at(l, psi_star + h_psi, hi);
-    const bool lo_ok = outputs_at(l, psi_star - h_psi, lo);
+    const bool hi_ok = outputs_at(l, psi_star + h_psi, hi, s.curve);
+    const bool lo_ok = outputs_at(l, psi_star - h_psi, lo, s.curve);
     if (!hi_ok || !lo_ok) {
       if (prescribed != nullptr) {
         // The same reasoning as the clamp on psi itself, one step out: a psi
