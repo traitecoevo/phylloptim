@@ -481,7 +481,7 @@ int compare(Tolerance tol) {
 //     zeroes seven fields;
 //   * `hydraulic_cost_` in CARBON units after `_TF` and CONDUCTANCE units after
 //     `_Sperry`, and STALE after `_ProfitMax`, which does not write it;
-//   * `lambda_` as an input to `_Sperry` and an output of `_ProfitMax` (#114).
+//   * `lambda_` as an input to `_Sperry` and an output of `_ProfitMax`.
 //
 // TWO PASSES, and the second is the one the file exists for. Pass "fresh"
 // constructs a Leaf per row, which makes it reproducible and blind to stale
@@ -495,9 +495,10 @@ int compare(Tolerance tol) {
 //             optimises the COLLAR potential with the root path in series;
 //             the other three optimise psi_stem with upstream pinned at
 //             psi_soil, ignoring that path -- which is what their own refusal
-//             message means by "non-root-based". Measured 2026-08-22: these are
-//             different problems, and the gap does not close as the root
-//             resistance goes to zero.
+//             message means by "non-root-based". These are different problems,
+//             and the gap does not close as the root resistance goes to zero --
+//             the collar loses its freedom there and reports `determined`
+//             instead of optimising. Neither arm is a check on the other.
 //   topology  single-potential supply, or a multi-layer profile at 1 or 3
 //             layers. The three psi_stem solvers refuse 3 layers; the refusal
 //             is RECORDED rather than skipped, so a change that lifts it shows
