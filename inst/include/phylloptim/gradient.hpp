@@ -63,15 +63,15 @@ namespace gradient {
 
 // --- the parameter enumeration, which R indexes into --------------------------
 //
-// The fourteen traits in `Leaf::set_traits`' argument order, then the two
+// The thirteen traits in `Leaf::set_traits`' argument order, then the two
 // quantities a calibration fits that are not traits: the conductance driver and
 // the single-potential path's series resistance.
 //
 // ⚠️ R INDEXES THESE POSITIONS, so a reordering silently differentiates the wrong
 // parameter. `test-gradient-batch.R` reads the names back out of C++ and compares
 // them with R's, so the two cannot drift apart without a failure.
-inline constexpr int n_traits = 12;
-inline constexpr int n_pars = 14;
+inline constexpr int n_traits = 13;
+inline constexpr int n_pars = 15;
 
 // Every index by name, so nothing below indexes `theta` with a bare integer.
 // The first `n_traits` are `set_traits`' arguments in its order, which is also
@@ -88,8 +88,14 @@ inline constexpr int par_curv_fact_elec_trans = 8;
 inline constexpr int par_curv_fact_colim = 9;
 inline constexpr int par_TF24_cost_scale = 10;
 inline constexpr int par_R_d_25 = 11;
-inline constexpr int par_kmax = 12;
-inline constexpr int par_resistance = 13;
+inline constexpr int par_JS22_gamma = 12;
+// ⚠️ THESE TWO MOVE WHENEVER A TRAIT IS ADDED. They are the non-traits, and they
+// sit AFTER the contiguous trait block -- R's `.gradient_theta_matrix()` takes the
+// traits as "everything but the last two", so a trait has to be appended here
+// rather than after them. Bumping both is the whole cost of that, and
+// `test-gradient-batch.R` compares this enumeration against R's copy.
+inline constexpr int par_kmax = 13;
+inline constexpr int par_resistance = 14;
 
 inline const std::vector<std::string>& par_names() {
   static const std::vector<std::string> names{
@@ -97,6 +103,7 @@ inline const std::vector<std::string>& par_names() {
       "root_c",    "root_P50",            "TF24_beta2",
       "jmax_25",   "a",                   "curv_fact_elec_trans",
       "curv_fact_colim", "TF24_cost_scale", "R_d_25",
+      "JS22_gamma",
       "leaf_specific_conductance_max",
       "resistance"};
   return names;
@@ -370,7 +377,7 @@ inline void apply(Leaf& l, const double* theta, const Drivers& d, bool single,
                theta[par_TF24_beta2], theta[par_jmax_25],
                theta[par_a], theta[par_curv_fact_elec_trans],
                theta[par_curv_fact_colim], theta[par_TF24_cost_scale],
-               theta[par_R_d_25]);
+               theta[par_R_d_25], theta[par_JS22_gamma]);
   if (single) {
     // R's `series_resistance()`: a default-constructed network carrying one
     // series resistance in `r_R_V_sum`, which is that field's own meaning with

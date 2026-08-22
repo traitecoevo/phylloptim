@@ -85,9 +85,9 @@ test_that("the parameter enumeration is the same order in R and in C++", {
               "resistance")
   expect_identical(gradient_par_names(), r_side)
   # And the count, which is what a positional trait call would silently break:
-  # twelve traits then the two that are not traits.
-  expect_length(gradient_par_names(), 14L)
-  expect_identical(gradient_par_names()[1:12], names(leaf_traits()))
+  # thirteen traits then the two that are not traits.
+  expect_length(gradient_par_names(), 15L)
+  expect_identical(gradient_par_names()[1:13], names(leaf_traits()))
 })
 
 test_that("the batch reproduces leaf_gradient() bit-for-bit across the grid", {
@@ -350,8 +350,8 @@ test_that("per-observation theta differentiates each row at its own parameters",
 
   b <- leaf_batch(psi_soil = psv, PPFD = 900)
   theta <- t(vapply(traits, function(tr) {
-    unname(c(unlist(tr)[gradient_par_names()[1:12]], 3.14e-5, NA_real_))
-  }, numeric(14)))
+    unname(c(unlist(tr)[gradient_par_names()[1:13]], 3.14e-5, NA_real_))
+  }, numeric(15)))
   g <- leaf_gradient_batch(b, theta = theta, pars = pars)
 
   for (i in seq_along(psv)) {
@@ -528,11 +528,11 @@ test_that("leaf_gradient_batch() rejects what it cannot do", {
 
   # `traits` and `theta` both say where the gradient is taken, so passing both is
   # refused rather than resolved in favour of one of them.
-  th <- matrix(1, nrow = 1, ncol = 14)
+  th <- matrix(1, nrow = 1, ncol = 15)
   expect_error(leaf_gradient_batch(b, traits = leaf_traits(), theta = th),
                "pass one")
-  expect_error(leaf_gradient_batch(b, theta = matrix(1, 1, 13)), "14 columns")
-  expect_error(leaf_gradient_batch(b, theta = matrix(1, 3, 14)),
+  expect_error(leaf_gradient_batch(b, theta = matrix(1, 1, 13)), "15 columns")
+  expect_error(leaf_gradient_batch(b, theta = matrix(1, 3, 15)),
                "1 row or one per observation")
   expect_error(leaf_gradient_batch(b, theta = as.data.frame(th)),
                "numeric matrix")

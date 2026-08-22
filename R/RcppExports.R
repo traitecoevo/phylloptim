@@ -25,8 +25,8 @@ Leaf__perturb_stem_P50 <- function(obj_, stem_P50) {
     invisible(.Call('_phylloptim_Leaf__perturb_stem_P50', PACKAGE = 'phylloptim', obj_, stem_P50))
 }
 
-Leaf__set_traits <- function(obj_, vcmax_25, stem_c, stem_P50, root_c, root_P50, TF24_beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, TF24_cost_scale, R_d_25) {
-    invisible(.Call('_phylloptim_Leaf__set_traits', PACKAGE = 'phylloptim', obj_, vcmax_25, stem_c, stem_P50, root_c, root_P50, TF24_beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, TF24_cost_scale, R_d_25))
+Leaf__set_traits <- function(obj_, vcmax_25, stem_c, stem_P50, root_c, root_P50, TF24_beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, TF24_cost_scale, R_d_25, JS22_gamma) {
+    invisible(.Call('_phylloptim_Leaf__set_traits', PACKAGE = 'phylloptim', obj_, vcmax_25, stem_c, stem_P50, root_c, root_P50, TF24_beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, TF24_cost_scale, R_d_25, JS22_gamma))
 }
 
 Leaf__proportion_of_conductivity <- function(obj_, psi) {
@@ -125,6 +125,10 @@ Leaf__hydraulic_cost_CF77 <- function(obj_, psi_stem, psi_upstream) {
     .Call('_phylloptim_Leaf__hydraulic_cost_CF77', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
 }
 
+Leaf__hydraulic_cost_JS22 <- function(obj_, psi_stem, psi_upstream) {
+    .Call('_phylloptim_Leaf__hydraulic_cost_JS22', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
+}
+
 Leaf__profit_psi_stem_TF <- function(obj_, psi_stem, psi_upstream) {
     .Call('_phylloptim_Leaf__profit_psi_stem_TF', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
 }
@@ -133,12 +137,24 @@ Leaf__profit_psi_stem_CF77 <- function(obj_, psi_stem, psi_upstream) {
     .Call('_phylloptim_Leaf__profit_psi_stem_CF77', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
 }
 
+Leaf__profit_psi_stem_JS22 <- function(obj_, psi_stem, psi_upstream) {
+    .Call('_phylloptim_Leaf__profit_psi_stem_JS22', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
+}
+
+Leaf__lambda_JS22 <- function(obj_, psi_stem, psi_upstream) {
+    .Call('_phylloptim_Leaf__lambda_JS22', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
+}
+
 Leaf__lambda_TF24 <- function(obj_, psi_stem) {
     .Call('_phylloptim_Leaf__lambda_TF24', PACKAGE = 'phylloptim', obj_, psi_stem)
 }
 
 Leaf__optimise_psi_stem_CF77 <- function(obj_) {
     invisible(.Call('_phylloptim_Leaf__optimise_psi_stem_CF77', PACKAGE = 'phylloptim', obj_))
+}
+
+Leaf__optimise_psi_stem_JS22 <- function(obj_) {
+    invisible(.Call('_phylloptim_Leaf__optimise_psi_stem_JS22', PACKAGE = 'phylloptim', obj_))
 }
 
 Leaf__thermal_cost_at <- function(obj_, leaf_temp) {
@@ -571,6 +587,14 @@ Leaf__R_d_25__get <- function(obj_) {
 
 Leaf__R_d_25__set <- function(obj_, value) {
     invisible(.Call('_phylloptim_Leaf__R_d_25__set', PACKAGE = 'phylloptim', obj_, value))
+}
+
+Leaf__JS22_gamma__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__JS22_gamma__get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__JS22_gamma__set <- function(obj_, value) {
+    invisible(.Call('_phylloptim_Leaf__JS22_gamma__set', PACKAGE = 'phylloptim', obj_, value))
 }
 
 Leaf__rd_q10_intercept___get <- function(obj_) {

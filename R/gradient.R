@@ -90,7 +90,8 @@ set_traits <- function(x, traits) {
   x$set_traits(traits$vcmax_25, traits$stem_c, traits$stem_P50,
                traits$root_c, traits$root_P50, traits$TF24_beta2,
                traits$jmax_25, traits$a, traits$curv_fact_elec_trans,
-               traits$curv_fact_colim, traits$TF24_cost_scale, traits$R_d_25)
+               traits$curv_fact_colim, traits$TF24_cost_scale, traits$R_d_25,
+               traits$JS22_gamma)
   invisible(x)
 }
 
@@ -1015,13 +1016,14 @@ leaf_gradient <- function(psi_soil,
     # the #25 positive-magnitude invariants itself. Do not copy this pattern anywhere
     # the values are not already known-good.
     # ⚠️ POSITIONAL, so the count is load-bearing. `set_traits()`'s C++ signature and
-    # `leaf_traits()` must agree on TWELVE, and adding a trait breaks here and
+    # `leaf_traits()` must agree on THIRTEEN, and adding a trait breaks here and
     # nowhere else -- at run time, with "argument <name> is missing" raised inside
     # the generated binding, which names neither this line nor the count. That is
     # how #41 broke; test-gradient.R asserts the arity so the next one is caught.
     tv <- theta[trait_names]
     apply_traits(tv[[1L]], tv[[2L]], tv[[3L]], tv[[4L]], tv[[5L]], tv[[6L]],
-                 tv[[7L]], tv[[8L]], tv[[9L]], tv[[10L]], tv[[11L]], tv[[12L]])
+                 tv[[7L]], tv[[8L]], tv[[9L]], tv[[10L]], tv[[11L]], tv[[12L]],
+                 tv[[13L]])
     # `resistance` is a driver, so it goes in with the others rather than through
     # $set_supply_single(). That removes the second object-resetting call this
     # function used to make -- and with it the reason the ordering note above had to

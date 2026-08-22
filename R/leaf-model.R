@@ -44,7 +44,8 @@
   curv_fact_elec_trans = 0.7,
   curv_fact_colim = 0.99,
   TF24_cost_scale = 7.5,
-  R_d_25 = 1.44
+  R_d_25 = 1.44,
+  JS22_gamma = 1.0
 )
 
 .leaf_control_defaults <- list(
@@ -107,6 +108,16 @@
 ##'   (umol m^-2 s^-1)
 ##' @param R_d_25 dark respiration at 25 C (umol m^-2 s^-1). It is the value at
 ##'   25 C only: respiration rises from there on Tjoelker's declining-Q10 curve.
+##' @param JS22_gamma Joshi & Stocker (2022)'s hydraulic unit cost
+##'   (umol C m^-2 s^-1 MPa^-2), read only by the `JS22` cost curve and returning
+##'   an exactly zero gradient on every other one.
+##'
+##'   ⚠️ **The default is not a literature value.** It is order-of-magnitude
+##'   matched to TF24 at this package's defaults, and no single value matches more
+##'   than one soil potential: the `JS22_gamma` reproducing TF24's cost at its own
+##'   optimum runs 0.287 at `psi_soil` 0.5 MPa to 1.761 at 3.0 MPa. TF24's cost
+##'   tracks the absolute potential and this one tracks the drop, and across a
+##'   drydown those move in opposite directions.
 ##'
 ##' @section Where the two root-resistance constants went:
 ##' `beta_R_H` and `beta_R_V` were traits here until #33. They parameterise the
@@ -138,14 +149,15 @@ leaf_traits <- function(vcmax_25 = 96,
                         curv_fact_elec_trans = 0.7,
                         curv_fact_colim = 0.99,
                         TF24_cost_scale = 7.5,
-                        R_d_25 = 1.44) {
+                        R_d_25 = 1.44,
+                        JS22_gamma = 1.0) {
   out <- list(vcmax_25 = vcmax_25, stem_c = stem_c, stem_P50 = stem_P50,
               root_c = root_c, root_P50 = root_P50, TF24_beta2 = TF24_beta2,
               jmax_25 = jmax_25, a = a,
               curv_fact_elec_trans = curv_fact_elec_trans,
               curv_fact_colim = curv_fact_colim,
               TF24_cost_scale = TF24_cost_scale,
-              R_d_25 = R_d_25)
+              R_d_25 = R_d_25, JS22_gamma = JS22_gamma)
   .check_scalars(out, "leaf_traits")
   if (R_d_25 < 0) {
     stop("leaf_traits(): R_d_25 must be non-negative", call. = FALSE)
@@ -411,6 +423,9 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
   # constructor by arity so R_d_25 cannot be an argument to it. Without this line
   # `leaf_traits(R_d_25 = )` would be accepted and silently ignored.
   l$R_d_25 <- traits$R_d_25
+  # Same reason, same trap: a trait the constructor does not take must be
+  # assigned here or leaf_traits(JS22_gamma = ) is silently ignored.
+  l$JS22_gamma <- traits$JS22_gamma
   l$initialize_integrator(control$integration_rule, control$integration_tol)
   # After the integrator, because set_supply_single clears the solved state --
   # not the integrator tolerance, but relying on that ordering would be a

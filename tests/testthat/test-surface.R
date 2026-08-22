@@ -17,11 +17,12 @@ test_that("leaf_traits() and leaf_control() partition the C++ constructor", {
   covered <- c(names(leaf_traits()), names(leaf_control()))
 
   expect_setequal(setdiff(ctor_args, covered), character(0))
-  # `R_d_25` is a trait the constructor does not take: plant's own RcppR6 bindings
-  # pin this constructor by arity, so `leaf_model()` assigns the field afterwards.
-  # The test below checks that assignment really happens.
+  # `R_d_25` and `JS22_gamma` are traits the constructor does not take: plant's own
+  # RcppR6 bindings pin this constructor by arity, so `leaf_model()` assigns the
+  # fields afterwards. The test below checks those assignments really happen.
   expect_setequal(setdiff(covered, ctor_args),
-                  c("R_d_25", "integration_rule", "integration_tol"))
+                  c("R_d_25", "JS22_gamma", "integration_rule",
+                    "integration_tol"))
   expect_length(intersect(names(leaf_traits()), names(leaf_control())), 0)
 
   # And the split is the one the issue asked for: tolerances on the control
@@ -53,9 +54,16 @@ test_that("every trait can be read back from the object (#95)", {
   # ⚠️ Read-only, and that is hazard 10 rather than tidiness: changing a trait means
   # rebuilding up to two vulnerability splines and clearing the solved operating
   # point, so a bare write would leave the object describing two different curves.
-  # `R_d_25` is the documented exception -- it is settable because plant's bindings
-  # pin the generated constructor by arity, so `leaf_model()` applies it afterwards.
-  for (nm in setdiff(names(traits), "R_d_25")) {
+  # `R_d_25` and `JS22_gamma` are the documented exceptions -- both are settable
+  # because plant's bindings pin the generated constructor by arity, so
+  # `leaf_model()` applies them afterwards.
+  #
+  # ⚠️ Settable is only SAFE for these two because nothing is derived from either.
+  # `JS22_gamma` is read at call time by `hydraulic_cost_JS22` -- no spline, no
+  # temperature cache, no precomputation -- so a bare write cannot leave the object
+  # describing two different models the way a bare `stem_P50` write would. Do not
+  # read this exemption as permission for the next trait.
+  for (nm in setdiff(names(traits), c("R_d_25", "JS22_gamma"))) {
     expect_error(l[[nm]] <- 1, "read-only", label = paste(nm, "rejects a write"))
   }
 

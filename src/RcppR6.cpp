@@ -28,8 +28,8 @@ void Leaf__perturb_stem_P50(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, d
   obj_->perturb_stem_P50(stem_P50);
 }
 // [[Rcpp::export]]
-void Leaf__set_traits(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double vcmax_25, double stem_c, double stem_P50, double root_c, double root_P50, double TF24_beta2, double jmax_25, double a, double curv_fact_elec_trans, double curv_fact_colim, double TF24_cost_scale, double R_d_25) {
-  obj_->set_traits(vcmax_25, stem_c, stem_P50, root_c, root_P50, TF24_beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, TF24_cost_scale, R_d_25);
+void Leaf__set_traits(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double vcmax_25, double stem_c, double stem_P50, double root_c, double root_P50, double TF24_beta2, double jmax_25, double a, double curv_fact_elec_trans, double curv_fact_colim, double TF24_cost_scale, double R_d_25, double JS22_gamma) {
+  obj_->set_traits(vcmax_25, stem_c, stem_P50, root_c, root_P50, TF24_beta2, jmax_25, a, curv_fact_elec_trans, curv_fact_colim, TF24_cost_scale, R_d_25, JS22_gamma);
 }
 // [[Rcpp::export]]
 double Leaf__proportion_of_conductivity(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi) {
@@ -128,6 +128,10 @@ double Leaf__hydraulic_cost_CF77(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> ob
   return obj_->hydraulic_cost_CF77(psi_stem, psi_upstream);
 }
 // [[Rcpp::export]]
+double Leaf__hydraulic_cost_JS22(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem, double psi_upstream) {
+  return obj_->hydraulic_cost_JS22(psi_stem, psi_upstream);
+}
+// [[Rcpp::export]]
 double Leaf__profit_psi_stem_TF(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem, double psi_upstream) {
   return obj_->profit_psi_stem_TF(psi_stem, psi_upstream);
 }
@@ -136,12 +140,24 @@ double Leaf__profit_psi_stem_CF77(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> o
   return obj_->profit_psi_stem_CF77(psi_stem, psi_upstream);
 }
 // [[Rcpp::export]]
+double Leaf__profit_psi_stem_JS22(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem, double psi_upstream) {
+  return obj_->profit_psi_stem_JS22(psi_stem, psi_upstream);
+}
+// [[Rcpp::export]]
+double Leaf__lambda_JS22(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem, double psi_upstream) {
+  return obj_->lambda_JS22(psi_stem, psi_upstream);
+}
+// [[Rcpp::export]]
 double Leaf__lambda_TF24(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem) {
   return obj_->lambda_TF24(psi_stem);
 }
 // [[Rcpp::export]]
 void Leaf__optimise_psi_stem_CF77(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
   obj_->optimise_psi_stem_CF77();
+}
+// [[Rcpp::export]]
+void Leaf__optimise_psi_stem_JS22(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  obj_->optimise_psi_stem_JS22();
 }
 // [[Rcpp::export]]
 double Leaf__thermal_cost_at(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double leaf_temp) {
@@ -628,6 +644,15 @@ double Leaf__R_d_25__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
 // [[Rcpp::export]]
 void Leaf__R_d_25__set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
   obj_->R_d_25 = value;
+}
+
+// [[Rcpp::export]]
+double Leaf__JS22_gamma__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->JS22_gamma;
+}
+// [[Rcpp::export]]
+void Leaf__JS22_gamma__set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
+  obj_->JS22_gamma = value;
 }
 
 // [[Rcpp::export]]
