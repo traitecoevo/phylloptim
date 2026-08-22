@@ -100,6 +100,22 @@ set_traits <- function(x, traits) {
 ##' `dA/dtheta`, `dgc/dtheta`, `dpsi_stem/dtheta`, `dcollar/dtheta` and
 ##' `dprofit/dtheta`, at one operating point.
 ##'
+##' @section It differentiates ONE cost curve, whichever you last solved with:
+##' The operating point here is always the one `find_root_collar_psi()` produces --
+##' the TF24 cost, maximised over the root-collar potential. That is not a
+##' configurable choice: the solve is called internally, so the cost curve is
+##' fixed no matter which optimiser you called on the leaf beforehand.
+##'
+##' ⚠️ **So a gradient requested for a leaf you set up for another cost curve is
+##' the TF24 gradient, silently.** `$optimise_psi_stem_CowanFarquhar()`,
+##' `$optimise_psi_stem_Sperry()` and `$optimise_psi_stem_ProfitMax()` maximise
+##' different objectives over `psi_stem` rather than the collar, and none of them
+##' is what this function differentiates. There is no warning, because the numbers
+##' that come back are perfectly good TF24 derivatives.
+##'
+##' Differentiating the others needs `dprofit` for each curve, which does not
+##' exist yet. Until it does, treat this as TF24-only.
+##'
 ##' @section The maths, and why it is not just a finite difference:
 ##' The reported outputs are evaluated at the profit-maximising collar potential
 ##' `psi*`, so a trait moves them two ways: directly, and by moving `psi*`. At an
