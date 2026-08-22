@@ -4,9 +4,9 @@
 // The trait values and drivers below are lifted from plant's
 // tests/testthat/test-leaf.r so the two suites exercise the same operating
 // point. The expected values here were produced BY this implementation and are
-// regression guards rather than independent references -- but PLAN.md item 1 has
-// since cross-checked the implementation against plant's compiled build and found
-// it bit-identical, so they are guarding a verified model.
+// regression guards rather than independent references -- but the implementation
+// has been cross-checked against plant's compiled build and found bit-identical,
+// so they are guarding a verified model.
 
 #include <phylloptim.hpp>
 
@@ -564,7 +564,7 @@ void test_gradient_is_zero_in_reversed_gradient_state() {
   }
 }
 
-// The 0.0 the two exits above return is a SENTINEL, and PLAN 11a is what makes
+// The 0.0 the two exits above return is a SENTINEL, and the collar root-find is what makes
 // telling it apart from a genuine stationary point load bearing: it proposes
 // root-finding on dprofit == 0, and the sentinel fires at the WET END of the very
 // bracket such a solve would search. At bound_a = root_zero_E uptake is zero by
@@ -633,7 +633,7 @@ void test_gradient_reports_feasibility() {
      "and the sentinel is still 0.0 for a caller that does not ask");
 }
 
-// PLAN 11b: the AD derivative and the forward model are now instantiations of ONE
+// The AD derivative and the forward model are instantiations of ONE
 // body, so they cannot be derivatives of different functions. That was not true
 // before: `detail::assim_colimited_ad` associated the electron-limited term
 // left-to-right where `assim_electron_limited` divides the bracket first, and used
@@ -701,7 +701,7 @@ void test_ad_kernels_are_the_model_not_a_mirror() {
      "an AD probe of the cost kernel leaves hydraulic_cost_ untouched");
 }
 
-// PLAN 11a: the collar solve now solves its own first-order condition, so the
+// The collar solve solves its own first-order condition, so the
 // check that bites is the RESIDUAL at the returned point, not the returned value.
 // Measured over the golden grid: 240 of 240 feasible rows improved their residual
 // and none got worse, interior rows landing at a median |dprofit| of 5.6e-15
@@ -714,7 +714,7 @@ void test_ad_kernels_are_the_model_not_a_mirror() {
 // residual improves by ten orders of magnitude -- that is the floor, not a
 // regression, and a test asserting "profit never decreases" would encode the noise.
 void test_collar_solve_satisfies_its_own_first_order_condition() {
-  printf("the collar solve lands where dprofit == 0 (PLAN 11a)\n");
+  printf("the collar solve lands where dprofit == 0\n");
   Drivers d;
   // An interior optimum: the gradient at the answer should be at solver precision.
   phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
@@ -745,7 +745,7 @@ void test_collar_solve_satisfies_its_own_first_order_condition() {
 // zero inside it. The residual is then NOT small, and that is correct rather than a
 // convergence failure -- so this pins the property that actually holds there.
 void test_collar_solve_handles_a_pinned_optimum() {
-  printf("a collar optimum pinned to its constraint (PLAN 11a)\n");
+  printf("a collar optimum pinned to its constraint\n");
   Drivers d;
   // psi_soil 4.0 over 5 layers at vpd 2.0 -- one of the measured pinned rows.
   phylloptim::Leaf l = make_leaf(d, {4.0, 4.25, 4.5, 4.75, 5.0},
@@ -2081,11 +2081,10 @@ void test_energy_balance_path_runs() {
   // actually ran at rather than a plausible recomputation.
   ok(eb.Tleaf_ == Tleaf, "the reported Tleaf is the solve's own");
 
-  // The wind model really is what set ra_, rather than the fixed fallback. This
-  // used to be untested: the previous version of this test set wind_speed_/d_ and
-  // then immediately reassigned the leaf, discarding them, and its comment
-  // described re-running set_physiology with the gate on, which it did not do. It
-  // passed only because 2.0 / 0.05 are also the defaults.
+  // The wind model really is what set ra_, rather than the fixed fallback.
+  // ⚠️ Assert that rather than assuming it: setting wind_speed_/d_ and then
+  // reassigning the leaf discards them, and the assertion still passes because
+  // 2.0 / 0.05 are also the defaults.
   ok(std::isfinite(eb.ra_) && eb.ra_ > 0.0, "ra is finite and positive");
   near(eb.ra_, phylloptim::aerodynamic_resistance_coef * std::sqrt(0.05 / 2.0), 1e-12,
        "ra comes from the wind model, not the fixed fallback");
@@ -2203,8 +2202,8 @@ void test_pm_leaf_temperature_response() {
 // currently-observed values; the fix tightens them. They are asserted loosely on
 // purpose so this lands green and the numbers are in the history.
 //
-// The oracle is a derivative-free scan of profit itself -- the method PLAN 11a
-// used to arbitrate the last collar-solver change. It cannot inherit the
+// The oracle is a derivative-free scan of profit itself -- the method that
+// arbitrated the last collar-solver change. It cannot inherit the
 // derivative's defect, because it never evaluates a derivative.
 // ============================================================================
 void test_energy_balance_collar_solve_is_measured() {
@@ -2225,7 +2224,7 @@ void test_energy_balance_collar_solve_is_measured() {
         const double profit_solver = eb.profit_;
 
         // The residual the solver believes it drove to zero. On the non-EB path
-        // this is ~5.6e-15 (PLAN 11a); here it is whatever staleness leaves.
+        // this is ~5.6e-15; here it is whatever staleness leaves.
         bool feasible = true;
         const double resid = eb.dprofit_droot_collar_psi(psi_solver, &feasible);
         if (!feasible) continue;
@@ -2331,11 +2330,10 @@ void test_energy_balance_gate_off_is_inert() {
 // the same drivers. Without the contrast the test could pass on the Arrhenius
 // optimum alone, which has nothing to do with energy balance.
 //
-// ⚠️ THE SIGNATURE IS IN TRANSPIRATION, NOT IN CONDUCTANCE, AND THAT CHANGED HERE.
-// This test used to assert that CONDUCTANCE rises where assimilation falls. It
-// did, and the reason was a bug: stom_cond_CO2 divided by the prescribed AIR
-// deficit however hot the leaf got, so gs was simply E rescaled by a constant and
-// inherited E's shape exactly. With the leaf-to-air deficit wired in (PLAN 13.1)
+// ⚠️ THE SIGNATURE IS IN TRANSPIRATION, NOT IN CONDUCTANCE. Conductance rising
+// where assimilation falls is what you see when stom_cond_CO2 divides by the
+// prescribed AIR deficit however hot the leaf gets: gs is then E rescaled by a
+// constant and inherits E's shape exactly. With the leaf-to-air deficit wired in
 // the two come apart, because
 //
 //     gs = P*E / (1.6 * D_leaf),      D_leaf = atm_vpd + esat(Tleaf) - esat(Tair)
@@ -3041,7 +3039,7 @@ void test_rd_temperature_response() {
 //
 // A `l.vcmax_25 = x` written by hand passes none of this, which is why the traits
 // are not bound as settable fields.
-// The homogeneity identity that makes a gradient in stem_b free (PLAN 11f).
+// The homogeneity identity that makes a gradient in stem_b free.
 //
 // G(psi; s*b, c) = s * G(psi/s; b, c), because G(psi; b, c) = b * g(psi/b; c) --
 // stem_b enters only as a scale on both axes, and the knot grid scales with it,
@@ -3826,7 +3824,7 @@ void test_out_of_domain_under_rescale() {
 }
 
 // ===========================================================================
-// Leaf-to-air VPD (PLAN 13.1, #7)
+// Leaf-to-air VPD (#7)
 // ---------------------------------------------------------------------------
 void test_leaf_to_air_vpd() {
   printf("leaf-to-air VPD: the deficit Fick's law divides by\n");

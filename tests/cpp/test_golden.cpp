@@ -3,13 +3,12 @@
 //   make -C tests/cpp golden        # regenerate golden/operating_points.tsv
 //   make -C tests/cpp && ./test_golden
 //
-// Why this exists. The refactors in PLAN.md items 7-11 are meant to be
-// behaviour-preserving, and the only way to know is to pin the behaviour first.
-// PLAN.md item 1 -- cross-checking against plant's compiled build -- is the real
-// validation, and it is DONE: the swap was bit-identical, including 78 of 78 SCM
-// nodes. This file is the cheaper, always-available version: it freezes what THIS
-// implementation produces so that a
-// refactor which changes any of it fails loudly.
+// Why this exists. A behaviour-preserving refactor can only be checked against
+// behaviour that was pinned first. Cross-checking against plant's compiled build
+// is the real validation, and it is DONE: the swap was bit-identical, including
+// 78 of 78 SCM nodes. This file is the cheaper, always-available version -- it
+// freezes what THIS implementation produces so that a refactor which changes any
+// of it fails loudly.
 //
 // Comparison is bit-exact by default. Values are written with %.17g, which
 // round-trips an IEEE double exactly, so a passing run means the refactor did not
@@ -20,7 +19,7 @@
 // cannot hold on any other -- `--rtol` is for those. See the comment above main().
 //
 // Note: a fresh Leaf is constructed for every grid point. That is not for tidiness
-// -- it WAS required, because the shutdown-state leak (PLAN.md item 2) made a
+// -- it WAS required, because the shutdown-state leak made a
 // reused Leaf order-dependent, which would have made this file ill-defined. That
 // leak is fixed, so the construction is now belt-and-braces rather than load
 // bearing -- and it is kept, because a fresh Leaf per point is also what makes
@@ -262,7 +261,7 @@ int generate() {
 }
 
 // Exact equality, with NaN treated as equal to NaN -- some grid points shut down
-// and legitimately produce the NA sentinel (see PLAN.md item 2).
+// and legitimately produce the NA sentinel.
 bool same(double got, double want) {
   if (std::isnan(got) && std::isnan(want)) {
     return true;
@@ -302,8 +301,8 @@ const Tolerance kExact{-1.0, -1.0};
 // 1.85e-6, argmax-derived 5.53e-4. That leaves 5.4x and 9.0x headroom.
 //
 // The profit tolerance is deliberately not loosened further despite the modest
-// headroom: 1e-4 is the scale at which a real behavioural change shows (PLAN.md
-// item 1), so a profit tolerance approaching it would gate nothing. If a future
+// headroom: 1e-4 is the scale at which a real behavioural change shows, so a
+// profit tolerance approaching it would gate nothing. If a future
 // toolchain pushes profit past 1e-5, that is worth looking at rather than
 // auto-passing.
 const Tolerance kCrossPlatform{1e-5, 5e-3};
@@ -1067,7 +1066,7 @@ void report_optima_shape(const std::vector<OptRow> &rows) {
 //
 // So the tolerances below are per class, with the measured worst case and
 // headroom noted at their definition. Both are far below the ~1e-4-and-up scale
-// at which a real behavioural change shows (PLAN.md item 1), except that for the
+// at which a real behavioural change shows, except that for the
 // argmax fields the noise floor IS that scale -- which is exactly why the mode
 // reports the worst value per class on every run rather than only on failure.
 int main(int argc, char **argv) {

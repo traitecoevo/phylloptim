@@ -1,4 +1,4 @@
-# Trait gradients: set_traits() and leaf_gradient() (issue #4, PLAN 11d stage 1).
+# Trait gradients: set_traits() and leaf_gradient() (#4).
 #
 # Two things are being pinned here, and they are not equally hard.
 #
@@ -397,7 +397,7 @@ test_that("leaf_gradient() leaves the traits it was given", {
 
 test_that("GSS_tol_abs does not reach the production path", {
   # Not a gradient test, but it belongs with the ones above: it is the claim that
-  # makes them possible. Since PLAN 11a the collar solve solves dprofit == 0 at
+  # makes them possible. The collar solve solves dprofit == 0 at
   # 1e-12 instead of searching profit to GSS_tol_abs, so this control has no
   # effect on the answer -- and an argmax determined only to 1e-3 could not be
   # differentiated at all.
@@ -516,7 +516,7 @@ test_that("the active-set guard covers the non-trait parameters too", {
 })
 
 test_that("perturbing stem_b by rescaling equals perturbing it by a rebuild", {
-  # PLAN 11f. The stem cumulative-vulnerability integral is homogeneous of degree
+  # The stem cumulative-vulnerability integral is homogeneous of degree
   # 1 in stem_b -- G(psi; s*b, c) = s*G(psi/s; b, c) -- so the spline for a
   # perturbed stem_b is the existing one with its argument rescaled, and the
   # 11.9 us of incomplete gammas a rebuild spends is unnecessary. Worth 24x on

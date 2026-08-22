@@ -4,7 +4,7 @@
 //
 // Written to settle issue #2's open question -- whether the soil/root supply
 // path has to be a *template* policy so its calls inline, or whether a plain
-// composed class is fine. The answer is recorded in PLAN.md 7b; the harness is
+// composed class is fine. A plain composed class is; the harness is
 // kept because the question recurs (issue #3 asks the same thing about lambda,
 // and gets a different answer).
 //
@@ -88,7 +88,7 @@ std::vector<Point> grid() {
 }
 
 // One pass over the grid. A separate Leaf per point, as test_golden.cpp does --
-// the shutdown-state leak (PLAN.md item 2) makes a reused Leaf order-dependent,
+// the shutdown-state leak makes a reused Leaf order-dependent,
 // and this harness should measure what the golden file pins.
 //
 // Spline setup is hoisted out of the timed region: setup_transpiration and

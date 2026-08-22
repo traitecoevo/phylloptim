@@ -64,12 +64,12 @@ public:
   // So moving stem_b needs no rebuild at all -- just the existing spline
   // evaluated at a rescaled argument. That matters because a rebuild is 11.9 us
   // of incomplete gammas plus 3.1 us per interpolator, which is the entire cost
-  // of a gradient in stem_b (PLAN 11f).
+  // of a gradient in stem_b.
   //
   // ⚠️ There is NO SUCH IDENTITY FOR stem_c, and the obvious substitute -- read
   // G from its closed form instead of the spline -- was built, measured and
   // rejected: it differentiates a slightly different model and disagrees with the
-  // spline's own derivative by 3e-4. See PLAN 11f. stem_c rebuilds.
+  // spline's own derivative by 3e-4. stem_c rebuilds.
   //
   // Two rules keep this from becoming a stale-state bug of the kind hazard 8
   // records: ONLY the four stem_curve_* accessors may read the splines, so one
@@ -98,14 +98,15 @@ public:
   // holds a Leaf member.
   //
   // Public because plant's RcppR6 bindings reach the moved fields by name; they
-  // now spell them `roots_.psi_soil_` etc. (see PLAN 7b-iii stage 4).
+  // now spell them `roots_.psi_soil_` etc.
   MultiLayerRoots roots_;
 
   // The alternative supply path (issue #2 stage 2/3). Both alternatives are held
   // as members and selected by `supply_kind_` -- measured free, where
-  // std::variant costs +1.0%; see PLAN 7b-iii stage 2 for the numbers and for why
-  // a predictable branch in front of an already-out-of-line call disappears into
-  // it. SinglePotential is four doubles plus a one-element vector, so carrying it
+  // std::variant costs +1.0%, because a predictable branch in front of an
+  // already-out-of-line call disappears into it. ⚠️ Re-measure before "tidying"
+  // this into a variant, and beware that a compile-time-known tag folds the
+  // branch away and reports a false zero. SinglePotential is four doubles plus a one-element vector, so carrying it
   // unused costs tens of bytes per Leaf.
   SinglePotential single_;
   enum class SupplyKind { MultiLayer, SinglePotential };
@@ -118,7 +119,7 @@ public:
   // TWO ENTRY POINTS, NOT A SETTABLE TAG, and the difference matters. Assigning
   // supply_kind_ on its own leaves the other path's state configured and
   // silently ignored; assign it back and that state is now stale rather than
-  // absent. PLAN 7b-iii flagged this as the footgun to design around before
+  // absent. This is the footgun to design around before
   // exposing any of it to R, where a settable field is the obvious thing to
   // reach for. Each of these leaves the object in a state where the tag and the
   // supply agree, and there is no intermediate state in which they do not.
@@ -133,8 +134,8 @@ public:
     setup_clean_leaf();
   }
 
-  // ⚠️ THIS TAKES NO RESISTANCE, and that is the point of the change that
-  // introduced this comment. The soil-to-collar resistance is a per-call DRIVER on
+  // ⚠️ THIS TAKES NO RESISTANCE, and that is deliberate. The soil-to-collar
+  // resistance is a per-call DRIVER on
   // both supply paths now: it arrives through `set_physiology`, out of the same
   // `RootNetwork` the multi-layer path is given (see
   // SinglePotential::set_supply_resistances). Before, the multi-layer path took its
@@ -260,7 +261,7 @@ public:
   double a;
   double curv_fact_elec_trans; // unitless - obtained from Smith and Keenan (2020)
   double curv_fact_colim;
-  // Still a settable control, and it still has two jobs after PLAN 11a replaced
+  // Still a settable control, and it still has two jobs after the root-find replaced
   // the collar golden-section search: prepare_collar_solve's "this interval is too
   // narrow to solve over" threshold, and the single-layer optimisers
   // (optimise_psi_stem_TF / _Sperry), which are off the production path and keep
@@ -272,8 +273,8 @@ public:
   double ci_niter;
   double TF24_cost_scale;
 
-  // Tolerance on the collar potential for the profit-maximising root-find (PLAN
-  // 11a). Hard-coded rather than a control field, for the same reason
+  // Tolerance on the collar potential for the profit-maximising root-find.
+  // Hard-coded rather than a control field, for the same reason
   // find_root_psi's 1e-4 and psi_stem_to_ci's 1e-7 are: it is a property of the
   // solve, not a knob. 1e-12 sits ~8 orders below the 1e-4 at which this package
   // calls a difference real, and the cost of going there from GSS_tol_abs's 1e-3
@@ -412,7 +413,7 @@ public:
   double atm_vpd_;
   // The vapour pressure deficit the DIFFUSION equations use, kPa. Off the
   // energy-balance path it is exactly `atm_vpd_`; on it, the leaf-to-air deficit
-  // at the operating-point leaf temperature (PLAN 13.1, #7). See set_leaf_vpd.
+  // at the operating-point leaf temperature (#7). See set_leaf_vpd.
   double vpd_leaf_;
   double atm_o2_kpa_;
 
@@ -923,7 +924,7 @@ public:
   // Uptake at a collar suction against an arbitrary vector of layer suctions.
   // Thin forwarder to roots_.uptake_at; the E_up_ / soil_consumption_ buffers
   // stay on Leaf and are handed over by reference, because plant writes back
-  // into them by name after crown integration (PLAN 7b-ii trap 1).
+  // into them by name after crown integration.
   void E_from_Soil_to_Root_Collar(double T_collar, const std::vector<double>& psi_soil) {
     require_suction_vector(psi_soil, "E_from_Soil_to_Root_Collar");
     switch (supply_kind_) {
@@ -968,7 +969,7 @@ public:
   //
   // ⚠️ **The 0.0 returned on the shut-down / reversed-gradient exits is a
   // SENTINEL, not a stationary point**, and the distinction only became load
-  // bearing when PLAN 11a proposed root-finding on `dprofit == 0`. It matters
+  // bearing because the collar solve root-finds on `dprofit == 0`. It matters
   // because the sentinel fires at `prepare_collar_solve`'s WET bracket endpoint
   // -- at `root_zero_E` uptake is zero by construction, so `psi >= psi_stem` --
   // which is the first point a bracketing solver evaluates when it checks that
@@ -1142,7 +1143,7 @@ public:
                                      double dgc_dpsi, double dpsistem_dpsi,
                                      double dT_dE, double Tleaf);
   // The profit-maximising collar potential within [bound_a, bound_b], by a
-  // safeguarded root-find on dprofit == 0 (PLAN 11a). Returns a bound when the
+  // safeguarded root-find on dprofit == 0. Returns a bound when the
   // optimum is pinned to it, which is the case on 42 of the 240 feasible
   // golden-grid rows and so is a branch that has to be written rather than a
   // corner. Falls back to golden section if either endpoint has no usable
@@ -1255,7 +1256,7 @@ public:
   // reassociation, so the two functions were mathematically identical and
   // numerically not: the AD derivative was the derivative of a *slightly
   // different function* than the model evaluated. Harmless while the gradient only
-  // set TF24f's acclimation rate; load-bearing once PLAN 11a made the collar solve
+  // set TF24f's acclimation rate; load-bearing because the collar solve
   // root-find on it. Measured cost of the fix: 4.98e-07 on the golden grid.
   //
   // Why members templated on the scalar type, rather than free functions taking
@@ -1318,7 +1319,7 @@ public:
   // the COST here is a function of the absolute potential, unlike JS22's.
   double lambda_CMax(double psi_stem, double psi_upstream) const;
 
-  // --- the product-objective family (PLAN 7c) --------------------------------
+  // --- the product-objective family --------------------------------
   //
   // Eller (2018, 2020)'s SOX maximises `A * g(psi)` rather than `A - C(psi)`, with
   // `g` the conductivity fraction rescaled onto [0, 1]. Sabot's `TractLSM` calls it
@@ -2479,11 +2480,11 @@ if(assim_max_ < 0){
 }
 
 // The profit-maximising collar potential, by solving the first-order condition
-// dprofit/dpsi == 0 instead of searching profit itself (PLAN 11a). Assumes
+// dprofit/dpsi == 0 instead of searching profit itself. Assumes
 // prepare_collar_solve has run, so the soil-side caches are seated and every
 // gradient evaluation below can go straight to dprofit_at_collar_psi.
 //
-// WHY this replaced golden section, in one line each -- PLAN 11a has the numbers:
+// WHY this replaced golden section, in one line each:
 //
 //  * Golden section resolves the argmax only to GSS_tol_abs (1e-3), leaving the
 //    returned collar ~1e-4 MPa from the true stationary point with an offset that
@@ -2659,7 +2660,7 @@ inline void Leaf::find_root_collar_psi(){
 
     // Maximise carbon profit over the feasible collar-potential interval by
     // solving its first-order condition, dprofit/dpsi == 0, rather than by
-    // searching the objective. PLAN 11a has the reasoning and the measurements.
+    // searching the objective.
     const double opt_root_psi = maximise_profit_over_collar(bound_a, bound_b);
 
     opt_psi_stem_ = find_psi_stem_from_psi_root(opt_root_psi, supply_psi_soil());
@@ -2817,12 +2818,10 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
   // dpsi_stem/dpsi. Computed HERE, before the compensation-point branch, so both
   // branches share ONE evaluation.
   //
-  // ⚠️ It was briefly a separate member function, and this comment claimed that
-  // cost 1.4% because the compiler stopped inlining it. THAT WAS WRONG, and
-  // measuring it properly is what showed so: with both binaries interleaved,
-  // the factored and inlined versions are indistinguishable. Kept inline anyway
-  // because sharing one evaluation between the two branches is less work
-  // regardless -- but not for the reason first given.
+  // ⚠️ Do not argue from inlining here. Factored into a separate member function
+  // and inlined measure indistinguishably, with both binaries interleaved. Inline
+  // is kept because sharing one evaluation between the two branches is less work
+  // regardless, not because the compiler stops inlining a factored version.
   //
   // ⚠️ AND THE GATE-OFF COST OF THIS WHOLE CHANGE IS 3.1%, NOT THE ~1% FIRST
   // REPORTED. The first figure was taken at load average 8.9 with another
@@ -3200,13 +3199,12 @@ inline double Leaf::evaluate_psi_stem(double target_psi_stem) {
 //    cooling back toward the optimum. That is the decoupling mechanism, and its
 //    sign is the sharpest available test that this term is right.
 //
-// ⚠️ `dgc_dT` IS NOW NON-ZERO, and the placeholder algebra that stood here while
-// it was zero did NOT generalise. This block used to carry a named
-// `const double dgc_dT = 0.0` with a note promising that PLAN 13.1 would make it
-// "a one-line change instead of a re-derivation". The note was wrong: the
-// damping factor it multiplied, `(gc*inv_atm - dgc_dT*(ca-ci)*inv_atm)/g_ci`,
-// puts the new term under `A_T` where the derivation puts it under `A_prime`.
-// The two agree only at dgc_dT = 0, which is why nothing caught it. Derived
+// ⚠️ `dgc_dT` IS NON-ZERO, and placeholder algebra written while it was zero does
+// NOT generalise -- switching the term on is a re-derivation, not a one-line
+// change. A damping factor of the form `(gc*inv_atm - dgc_dT*(ca-ci)*inv_atm)/g_ci`
+// puts the new term under `A_T` where the derivation puts it under `A_prime`. The
+// two agree only at dgc_dT = 0, so such a form passes every test until the term
+// becomes non-zero. Derived
 // again, in full, below.
 //
 // g(ci; psi_stem, psi, T) = A(ci,T)*umol_to_mol - gc(T)*(ca-ci)*inv_atm = 0, so
@@ -3235,7 +3233,7 @@ inline double Leaf::dprofit_energy_balance_term(
   // reason is the golden file rather than accuracy. Re-expressing
   // update_temperature_dependent_params as the T=double instantiation of a
   // templated kernel changes which expressions share an inlined body, and
-  // PLAN 11b measured that exact move changing results even where the algebra
+  // That exact move was measured changing results even where the algebra
   // was identical. That risks the gate-off path to buy precision nobody can
   // observe: at h = 1e-3 K the truncation error is ~2e-9 relative against a
   // model whose own floor (psi_stem_to_ci at 1e-10) is ~1e-9.
@@ -3381,7 +3379,7 @@ inline double Leaf::saturation_vapour_pressure_slope(double temp) const {
   return 4098.0 * saturation_vapour_pressure(temp) / ((temp + 237.3) * (temp + 237.3));
 }
 
-// The deficit that drives diffusion out of the leaf (PLAN 13.1, issue #7).
+// The deficit that drives diffusion out of the leaf (#7).
 //
 // Fick's law needs the deficit between the SUB-STOMATAL cavity, saturated at the
 // LEAF temperature, and the air. The driver `atm_vpd_` is the deficit at AIR
@@ -3723,8 +3721,7 @@ inline double Leaf::assim_electron_limited(double ci_) {
 }
 
 // returns co-limited assimilation umol m^-2 s^-1, NET of dark respiration (the
-// trailing `- R_d_`), so gross assimilation is this value + R_d_. The comment
-// that used to sit on the return statement said the opposite.
+// trailing `- R_d_`), so gross assimilation is this value + R_d_.
 inline double Leaf::assim_colimited(double ci_) {
   return assim_colimited_kernel(ci_);
 }
@@ -3775,11 +3772,11 @@ inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
   // ⚠️ **The 1e-10 is load-bearing and was chosen by measurement, not taste. It
   // sets the floor of what every reported output of this model MEANS.** It used to
   // be 1e-7, which was invisible while golden section's GSS_tol_abs (1e-3)
-  // dominated; once PLAN 11a removed that, this became the model's dominant
+  // dominated; with that gone, this became the model's dominant
   // amplifier -- a last-bit change anywhere upstream shifts which point TOMS748
   // lands on inside its tolerance band, and that surfaces in ci, assim, gc and
   // profit. Measured by perturbing the model identically at each tolerance and
-  // reading the golden grid (PLAN 11b):
+  // reading the golden grid:
   //
   //   ci tol   worst diff vs a converged (1e-15) solve   us/solve (indicative)
   //   1e-7                       1.82e-07                      2.655
@@ -3799,7 +3796,7 @@ inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
   // scratch tree, and code-layout luck moves this benchmark by ~2%. The controlled
   // figure for the step actually taken -- both binaries built from the same tree,
   // interleaved x5 -- is **+3.4%** (2.65 -> 2.75 us/solve), against the +1.5% the
-  // table implies. Still a good trade next to the 24.5% PLAN 11a bought, and still
+  // table implies. Still a good trade next to the root-find's 24.5%, and still
   // 21.7% faster than the 3.51 us this package ran at before 11a. If you re-derive
   // the curve, build every point from one tree.
   //
@@ -3807,8 +3804,8 @@ inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
   // without re-reading the guide's rounding-versus-bug magnitudes, which this
   // figure sets.
   //
-  // ⚠️ Not the same knob as `ci_abs_tol` (the settable control, default 1e-3), and
-  // this comment used to misplace it: `ci_abs_tol` is read in exactly one place,
+  // ⚠️ Not the same knob as `ci_abs_tol` (the settable control, default 1e-3).
+  // `ci_abs_tol` is read in exactly one place,
   // solve_medlyn_ci_numerical, i.e. the empirical Medlyn-conductance route. It
   // reaches NEITHER family of optimality solver -- both go through this function
   // and so through the 1e-10 above. A caller tightening it gets no extra precision
@@ -4206,8 +4203,8 @@ inline double Leaf::profit_psi_stem_JS22(double psi_stem,
 // A gradient perturbs by a relative 1e-06, so an operating point near no flow
 // reaches that regime.
 //
-// ⚠️ THIS IS ALSO WHY IT DOES NOT SHARE A KERNEL WITH JS22, which PLAN 7a-iii
-// proposed. JS22 is this family's `(a, b) = (2*gamma, -2*gamma*psi_up)` member, and
+// ⚠️ THIS IS ALSO WHY IT DOES NOT SHARE A KERNEL WITH JS22, tempting as that is.
+// JS22 is this family's `(a, b) = (2*gamma, -2*gamma*psi_up)` member, and
 // putting it through the form above computes `gamma*(psi + psi_up) - 2*gamma*psi_up`
 // -- reintroducing exactly the cancellation that `gamma*dpsi*dpsi` does not have.
 // The two share a family, not an implementation.
@@ -4944,8 +4941,8 @@ inline void Leaf::optimise_psi_stem_CF77() {
 // 200 and VPD 4 -- a regime built to make closure attractive -- psi* still clears
 // psi_soil by 1.8e-02 at psi_soil 5.5 and 1.1e-02 at 5.84.
 //
-// ⚠️ It is stated that way rather than as "can never be wet-pinned", which is what
-// this comment first said and which the same measurement falsified: at psi_soil
+// ⚠️ It is stated that way rather than as "can never be wet-pinned", which the
+// same measurement falsifies: at psi_soil
 // 6.0, above the default psi_crit of 5.870, psi* comes back EXACTLY psi_soil. That
 // is the no-flow branch above -- there is no feasible interval to be interior in --
 // and not a pinned optimum. Do not read a psi* == psi_soil here as the optimiser
@@ -5002,8 +4999,8 @@ inline void Leaf::optimise_psi_stem_CMax() {
 //
 // which is a row of the cost table rather than an exception to it, and is the form
 // `lambda_SOX` below already uses -- it is `(dC/dpsi)/(dE/dpsi)` for that `C`, times
-// `A` to return from log-carbon to carbon. The link is the machinery PLAN 7c asked
-// for: a per-curve transform of the BENEFIT, identity everywhere else.
+// `A` to return from log-carbon to carbon. The link is exactly the machinery this
+// needs: a per-curve transform of the BENEFIT, identity everywhere else.
 //
 // ⚠️ THE OPTIMISER STILL MAXIMISES THE PRODUCT, and that is deliberate, not a
 // shortcut. `log` is monotone so the argmax is identical, and the product avoids the

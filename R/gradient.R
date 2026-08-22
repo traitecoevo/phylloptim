@@ -1,4 +1,4 @@
-# Trait gradients (issue #4, PLAN 11d stage 1).
+# Trait gradients (#4).
 #
 # dA/dtheta, dgs/dtheta and dpsi_leaf/dtheta at a solved operating point, for the
 # traits. The customer is `leaf-calibration`, whose hierarchical fit spent 97.6%
@@ -14,8 +14,7 @@
 # 0.26 us gradient evaluation saves almost nothing measurable from R. What DOES
 # dominate is that perturbing a trait used to mean constructing a new Leaf, which
 # costs ~204 us -- 55 solves. `set_traits()` removed that, and it is where the
-# speedup actually came from. See PLAN 11d for the numbers and for what stage 2
-# has to do instead.
+# speedup actually came from.
 #
 # ⚠️ THAT PARAGRAPH IS TRUE AND IT WAS OVER-GENERALISED, INCLUDING HERE. "The
 # value of this file is exactness, not speed" held for the case measured -- a fit
@@ -115,11 +114,17 @@ set_traits <- function(x, traits) {
 ##' TF24 derivatives.
 ##'
 ##' @section Choosing which model to differentiate:
-##' `model` selects it. `"collar"`, the default, is the TF24 cost maximised over
-##' the root-collar potential -- the production path, and what this function used
-##' to do unconditionally. `"TF24"`, `"CF77"`, `"JS22"` and `"CMax"` differentiate
-##' the corresponding **stem** optimum instead: `psi_stem` with the upstream
-##' potential pinned at `psi_soil`, which needs the single-potential supply path.
+##' `model` selects it, and every model in the package has a route. `"collar"`,
+##' the default, is the TF24 cost maximised over the root-collar potential -- the
+##' production path. Naming any of the seven cost curves
+##' (`cost_curve_names()`) differentiates the corresponding **stem** optimum
+##' instead: `psi_stem` with the upstream potential pinned at `psi_soil`, which
+##' needs the single-potential supply path.
+##'
+##' The product objectives, `SOX` and `JW26`, need no special case. They maximise
+##' `A * g(psi)`, which is the `Log` benefit link applied to the same
+##' difference form everything else uses: `d/dpsi[h(A) - C] =
+##' h'(A) * dA/dpsi - dC/dpsi` with `h' = 1/A`. One derivative serves all seven.
 ##'
 ##' ⚠️ **`"collar"` and `"TF24"` are different models, not two ways of asking one
 ##' question**, even though both use the TF24 cost. They optimise different
@@ -142,24 +147,20 @@ set_traits <- function(x, traits) {
 ##' the solve -- and read the caveat as "the premise is untested here", not
 ##' "the premise fails".
 ##'
-##' The two PRODUCT objectives, `SOX` and `JW26`, have no route: they maximise
-##' `A * g(psi)`, so the derivative is `(dA/dpsi) * g + A * g'` rather than the
-##' `dA/dpsi - dC/dpsi` this is built on. Asking is refused by name.
-##'
 ##' ⚠️ **A zero column for another curve's parameter means two different things,
-##' and they are not distinguishable from the number.** `JS22_gamma`, `CMax_a`,
-##' `CMax_b` and the rest come back exactly zero here, and read one way that is
-##' correct: those parameters do not enter the TF24 cost, so their derivative is
-##' genuinely zero. Read the other way it is a trap: if you are *fitting* one of
-##' those curves, the zero is telling you this function differentiated a
-##' different model, not that the parameter does nothing. Measured on the
-##' single-potential path at `psi_soil` 1.5, the TF24 collar optimum sits at
-##' 2.09 MPa and the JS22 optimum at 3.15.
+##' and they are not distinguishable from the number.** On a `collar` or `TF24`
+##' route, `JS22_gamma`, `CMax_a`, `CMax_b` and the rest come back exactly zero,
+##' and read one way that is correct: those parameters do not enter the TF24
+##' cost, so their derivative is genuinely zero. Read the other way it is a trap:
+##' if you are *fitting* one of those curves, the zero is telling you this
+##' differentiated a different model, not that the parameter does nothing.
+##' Measured on the single-potential path at `psi_soil` 1.5, the TF24 collar
+##' optimum sits at 2.09 MPa and the JS22 optimum at 3.15.
 ##'
-##' So an optimiser handed these columns will conclude the parameter is inert and
-##' leave it at its starting value, which looks like convergence. There is no
-##' exact gradient for any cost curve but TF24; use finite differences of the
-##' matching `optimise_psi_stem_*` until PLAN 7a's production-path dispatch lands.
+##' An optimiser handed such a column concludes the parameter is inert and leaves
+##' it at its starting value, which looks like convergence. **Name the curve you
+##' are fitting in `model`**; `.gradient_available_pars()` reports which
+##' parameters a given route can move.
 ##'
 ##' @section The maths, and why it is not just a finite difference:
 ##' The reported outputs are evaluated at the profit-maximising collar potential
@@ -180,7 +181,7 @@ set_traits <- function(x, traits) {
 ##' stable to seven significant figures across five decades of step size.
 ##'
 ##' The second term is not a correction. For `TF24_cost_scale`, `TF24_beta2`, `stem_b`
-##' and `stem_c` it is 100% of the answer, and for `vcmax_25` 52%.
+##' and `stem_c` it is 100\% of the answer, and for `vcmax_25` 52\%.
 ##'
 ##' @section profit, which is the one output the envelope theorem reaches:
 ##' The first four outputs are what a gas-exchange calibration observes. `profit`
@@ -355,7 +356,7 @@ set_traits <- function(x, traits) {
 ##' that reads four of them pays for eleven it discards.
 ##'
 ##' The intercept is a fresh `Leaf` per call, which there is currently no way to
-##' avoid (see phylloptim#52); it is 29% of the exact gradient in the study above.
+##' avoid (see phylloptim#52); it is 29\% of the exact gradient in the study above.
 ##'
 ##' @section Precision:
 ##' Do not ask for more than about `1e-09` from any of this. That is the
@@ -364,7 +365,7 @@ set_traits <- function(x, traits) {
 ##'
 ##' @section Reusing a leaf across gradients:
 ##' Constructing a `Leaf` costs ~155 µs and this function does it once per call, which
-##' is **about 40% of a one-parameter gradient** — the largest single term on this
+##' is **about 40\% of a one-parameter gradient** — the largest single term on this
 ##' surface, and paid once per observation by a fit that differentiates per
 ##' observation. Pass `x` to reuse one:
 ##'
@@ -395,6 +396,10 @@ set_traits <- function(x, traits) {
 ##' @param control a [leaf_control()] object
 ##' @param supply how water reaches the root collar: [leaf_supply_multilayer()]
 ##'   (the default) or [leaf_supply_single()]
+##' @param model which optimality model to differentiate: `"collar"` (the
+##'   default, the production path) or any name from [cost_curve_names()], which
+##'   differentiates that curve's stem optimum instead. See *Choosing which model
+##'   to differentiate*.
 ##' @param pars what to differentiate with respect to. Any of the fourteen
 ##'   [leaf_traits()] names, plus `"leaf_specific_conductance_max"` and — on the
 ##'   single-potential path only — `"resistance"`. Defaults to all of them.
@@ -473,7 +478,7 @@ set_traits <- function(x, traits) {
 ##' @examples
 ##' g <- leaf_gradient(psi_soil = 2.0, PPFD = 900)
 ##' g$method
-##' g$gradient[c("vcmax_25", "stem_b"), ]
+##' g$gradient[c("vcmax_25", "stem_P50"), ]
 ##'
 ##' # In dry soil at high VPD the optimum pins against the edge of the feasible
 ##' # range, the composite's premise fails, and the fallback is used instead.
@@ -603,7 +608,7 @@ leaf_gradient <- function(psi_soil,
   dpsi_dtheta <- .gradient_dpsi_dtheta(dpsi_dtheta, pars, !is.null(psi))
 
   # ONE leaf for the whole gradient, re-traited rather than reconstructed. This is
-  # the measurement that reordered PLAN 11d: a fresh Leaf costs ~155 us against
+  # the measurement that decided it: a fresh Leaf costs ~155 us against
   # ~14 us to re-trait and re-drive this one, so reconstructing per perturbation
   # would swamp any difference between the two gradient routes below.
   #
@@ -1254,7 +1259,7 @@ leaf_gradient <- function(psi_soil,
   apply_drivers <- l$set_physiology
 
   function(theta, only = NULL) {
-    # THE FAST PATH FOR stem_b, and it is the whole of PLAN 11f.
+    # THE FAST PATH FOR stem_b.
     #
     # stem_b owns the pre-integrated stem vulnerability spline, so moving it
     # through set_traits() rebuilds it -- 11.9 us of incomplete gammas plus two
@@ -1266,7 +1271,7 @@ leaf_gradient <- function(psi_soil,
     # ⚠️ stem_c is NOT here, and that is a measured decision rather than an
     # omission: it has no such identity, and reading the curve from its closed
     # form instead -- the obvious alternative -- differentiates a slightly
-    # different model and disagrees by 3e-4. PLAN 11f has the numbers.
+    # different model and disagrees by 3e-4.
     #
     # ⚠️ Sound only because `only` names a SINGLE parameter, so everything else in
     # `theta` is still what the object was last set to. That is true here and
@@ -1299,9 +1304,7 @@ leaf_gradient <- function(psi_soil,
                  tv[[7L]], tv[[8L]], tv[[9L]], tv[[10L]], tv[[11L]], tv[[12L]],
                  tv[[13L]], tv[[14L]], tv[[15L]])
     # `resistance` is a driver, so it goes in with the others rather than through
-    # $set_supply_single(). That removes the second object-resetting call this
-    # function used to make -- and with it the reason the ordering note above had to
-    # mention two setters instead of one.
+    # $set_supply_single() -- which keeps this to ONE object-resetting call.
     net <- if (single) {
       series_resistance(theta[["resistance"]])
     } else {

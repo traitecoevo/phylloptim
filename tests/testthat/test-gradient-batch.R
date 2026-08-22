@@ -1,4 +1,4 @@
-# The batched trait gradient (issue #4, PLAN 11d stage 2).
+# The batched trait gradient (#4).
 #
 # WHAT IS BEING PINNED HERE, in order of how much it matters.
 #
@@ -159,7 +159,7 @@ test_that("the batch matches leaf_gradient() on the single-potential path", {
 
 test_that("the batch matches leaf_gradient() with the stem curve rebuilt", {
   # `fast_stem_curve = FALSE` rebuilds the vulnerability spline instead of
-  # rescaling it (PLAN 11f), so it is a different code path through `apply()` and
+  # rescaling it, so it is a different code path through `apply()` and
   # not merely a slower one. It has to be transcribed too.
   for (psi_soil in c(1.5, 2.0, 4.0)) {
     for (method in c("auto", "fd")) {

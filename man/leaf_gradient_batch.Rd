@@ -69,6 +69,9 @@ one with its argument rescaled — which makes the rebuild, otherwise most of
 the cost of that gradient, unnecessary. `FALSE` rebuilds, and exists so the
 equivalence is checkable rather than assumed; the package's tests require
 the two routes to agree. `stem_c` has no such identity and always rebuilds.}
+
+\item{model}{which optimality model to differentiate, as in
+[leaf_gradient()]: `"collar"` by default, or any [cost_curve_names()] entry.}
 }
 \value{
 A list with
@@ -106,7 +109,7 @@ transcription, and it is required to agree with the R version bit-for-bit.
 \section{Speed, and which side of the boundary the figure belongs to}{
 
 A four-parameter gradient costs ~237 µs per observation through
-[leaf_gradient()], of which the model work — two solves — is 6 µs, or 1.5%.
+[leaf_gradient()], of which the model work — two solves — is 6 µs, or 1.5\%.
 Everything else is dispatch and the R interpreter. The C++ composite runs at
 ~1.8 µs per trait, so the same gradient is order 10 µs here.
 
@@ -142,7 +145,7 @@ there.
 
 \examples{
 b <- leaf_batch(psi_soil = seq(0.5, 4, length.out = 6), PPFD = 900)
-g <- leaf_gradient_batch(b, pars = c("vcmax_25", "stem_b"))
+g <- leaf_gradient_batch(b, pars = c("vcmax_25", "stem_P50"))
 g$status
 g$gradient[, "vcmax_25", "A"]
 }

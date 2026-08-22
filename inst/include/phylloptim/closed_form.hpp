@@ -29,7 +29,7 @@
 //
 // STATUS: this is NOT wired into Leaf, and nothing calls it by default. It is a
 // selectable alternative whose accuracy has to be established per use (see
-// within_guard below and PLAN.md item 9) before it can replace the exact solve on
+// within_guard below) before it can replace the exact solve on
 // a production path.
 //
 // ⚠️ AND IT HAS DRIFTED FROM THE SOLVE IT APPROXIMATES. Every `D` below is
@@ -64,7 +64,7 @@
 // LIMITATION: single-layer only, with the collar held at zero
 // (`l.transpiration(psi, 0.0)`), matching the reference. The multi-layer case is a
 // three-level nest, so the prize there is larger -- but the closed form for it does
-// not exist yet. See PLAN.md item 7b.
+// not exist yet.
 
 #include <phylloptim/constants.hpp>
 #include <phylloptim/leaf_model.hpp>

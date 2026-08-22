@@ -18,8 +18,7 @@ weibull_p50_from_b(b, c)
 `b` is the scale of the conventional form `exp(-(psi/b)^c)`; this package is
 parameterised on `P50` instead. The two are one substitution apart,
 `b = P50 / (ln 2)^(1/c)`, so
-}
-\details{
+
 \deqn{P_{50} = b\,(\ln 2)^{1/c}}
 
 Exported because published fits and older datasets carry `b`, and the
@@ -29,7 +28,7 @@ direction of the same identity.
 
 ⚠️ **`P50` is always SMALLER than `b`**, by a factor of `(ln 2)^(1/c)` — 0.87
 at `c = 2.68`. So passing a `b` where a `P50` is wanted, or the reverse, gives
-a plausible number roughly 15% out rather than an error. Neither function can
+a plausible number roughly 15\% out rather than an error. Neither function can
 detect it: both arguments are positive potentials in MPa.
 }
 \examples{

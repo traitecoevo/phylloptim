@@ -104,7 +104,7 @@ boundary: each call into C++ costs ~1.1 µs and a solved row needs several.
 
 Two consequences, both the opposite of what you might expect:
 
-* **This is the fast path, not the convenient-but-slow one.** It is within 6%
+* **This is the fast path, not the convenient-but-slow one.** It is within 6\%
   of building a `Leaf` yourself and looping `set_drivers()` +
   `$find_root_collar_psi()` + [operating_point()]. Reaching into the object
   saves about 1 µs a row and is worth doing for access to intermediate state,

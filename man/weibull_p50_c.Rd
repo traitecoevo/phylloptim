@@ -16,14 +16,14 @@ weibull_p50_c(
 )
 }
 \arguments{
-\item{P50, P88, P95, P99}{potentials at 50%, 88%, 95% and 99% loss of
+\item{P50, P88, P95, P99}{potentials at 50\%, 88\%, 95\% and 99\% loss of
 conductivity, MPa as positive magnitudes}
 
 \item{px, plc}{an arbitrary quantile: the potential `px` at which the
 proportion `plc` of conductivity is lost. Supply both or neither; the pair
 counts as ONE of the two quantities.}
 
-\item{S50}{slope at P50, % PLC per MPa. See [weibull_s50()].}
+\item{S50}{slope at P50, \% PLC per MPa. See [weibull_s50()].}
 
 \item{c}{shape parameter, if you already have it.}
 }

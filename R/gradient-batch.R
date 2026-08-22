@@ -1,4 +1,4 @@
-# Trait gradients over many observations at once (issue #4, PLAN 11d stage 2).
+# Trait gradients over many observations at once (#4).
 #
 # WHAT THIS FILE IS FOR. `leaf_gradient()` in `gradient.R` computes one
 # observation's gradient in R, over primitives that are already C++. Measured
@@ -59,12 +59,16 @@
 ##'
 ##' @inheritParams leaf_solve
 ##'
+##' @param CF77_lambda Cowan-Farquhar's prescribed marginal value of water, in
+##'   umol C (kg H2O)^-1, one per observation. Only `model = "CF77"` reads it;
+##'   `NA_real_` (the default) leaves it unset, which every other model wants.
+##'
 ##' @return A `leaf_batch` object.
 ##' @seealso [leaf_gradient_batch()], [leaf_gradient()] for one observation.
 ##' @examples
 ##' b <- leaf_batch(psi_soil = c(1.0, 1.5, 2.0), PPFD = 900)
 ##' b
-##' leaf_gradient_batch(b, pars = c("vcmax_25", "stem_b"))$gradient[, , "A"]
+##' leaf_gradient_batch(b, pars = c("vcmax_25", "stem_P50"))$gradient[, , "A"]
 ##' @export
 leaf_batch <- function(psi_soil,
                        PPFD = 900,
@@ -210,7 +214,7 @@ print.leaf_batch <- function(x, ...) {
 ##'
 ##' @section Speed, and which side of the boundary the figure belongs to:
 ##' A four-parameter gradient costs ~237 µs per observation through
-##' [leaf_gradient()], of which the model work — two solves — is 6 µs, or 1.5%.
+##' [leaf_gradient()], of which the model work — two solves — is 6 µs, or 1.5\%.
 ##' Everything else is dispatch and the R interpreter. The C++ composite runs at
 ##' ~1.8 µs per trait, so the same gradient is order 10 µs here.
 ##'
@@ -243,6 +247,8 @@ print.leaf_batch <- function(x, ...) {
 ##' @param traits a [leaf_traits()] object: the point in trait space to
 ##'   differentiate at. Defaults to the one `batch` was built with. Ignored when
 ##'   `theta` is given.
+##' @param model which optimality model to differentiate, as in
+##'   [leaf_gradient()]: `"collar"` by default, or any [cost_curve_names()] entry.
 ##' @param pars what to differentiate with respect to, as in [leaf_gradient()].
 ##'   ⚠️ **Always pass it.** It is `P_model`, so the default — all of them — is
 ##'   the most expensive thing you can ask for.
@@ -271,7 +277,7 @@ print.leaf_batch <- function(x, ...) {
 ##'   derivation.
 ##' @examples
 ##' b <- leaf_batch(psi_soil = seq(0.5, 4, length.out = 6), PPFD = 900)
-##' g <- leaf_gradient_batch(b, pars = c("vcmax_25", "stem_b"))
+##' g <- leaf_gradient_batch(b, pars = c("vcmax_25", "stem_P50"))
 ##' g$status
 ##' g$gradient[, "vcmax_25", "A"]
 ##' @export

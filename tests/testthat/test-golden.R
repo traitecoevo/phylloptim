@@ -31,9 +31,8 @@
 # correctly rounded, and prints %a.
 #
 # ⚠️ The `$4==25` is not decoration. The golden file's columns are psi_soil, ppfd,
-# vpd, LEAF_TEMP, layers, and the second temperature was added after this recipe
-# was first written -- so the tab-anchored `grep` this comment used to give
-# matched leaf_temp where it meant layers and pulled the wrong row. Select on the
+# vpd, LEAF_TEMP, layers -- two temperatures, so a tab-anchored `grep` on position
+# matches leaf_temp where it means layers and pulls the wrong row. Select on the
 # named column, not on position in a remembered layout.
 #
 # Last regenerated for the (P50, c) reparameterisation, which moved 30 of these 36
@@ -42,8 +41,8 @@
 # nothing it reports depends on the vulnerability curve -- except psi_stem, which
 # IS psi_crit and moves with it. That split is why the row is here.
 #
-# Before that, #92 (the indexed knot grid) moved 27, PLAN 11b 18, and 11a (the
-# collar root-find) 27.
+# Before that, #92 (the indexed knot grid) moved 27, the psi_stem_to_ci tolerance
+# 18, and the collar root-find 27.
 
 # Four points, chosen to exercise different parts of the model rather than to
 # sample the grid evenly:

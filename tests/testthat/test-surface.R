@@ -502,7 +502,7 @@ test_that("the supply path can be chosen, and reports which is in force", {
 })
 
 test_that("there is no state in which the tag and the supply disagree", {
-  # The footgun PLAN 7b-iii flagged, and the reason this is two entry points
+  # The footgun to design around, and the reason this is two entry points
   # rather than a settable field: assigning the tag alone would leave the other
   # path's state configured and silently ignored. So the tag must not be
   # assignable at all, and the resistance must not be settable behind the tag's

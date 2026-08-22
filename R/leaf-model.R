@@ -96,11 +96,12 @@
 ##'
 ##' @param vcmax_25 maximum carboxylation rate at 25 C (umol m^-2 s^-1)
 ##' @param stem_c shape parameter of the stem vulnerability curve (unitless)
-##' @param stem_b sensitivity parameter of the stem vulnerability curve (MPa)
-##' @param psi_crit critical stem water potential (MPa, positive magnitude)
+##' @param stem_P50 stem potential at 50\% loss of conductivity (MPa, positive
+##'   magnitude). `stem_b` and `psi_crit` are derived from this pair and are
+##'   readable but not settable on the resulting `Leaf`.
 ##' @param root_c shape parameter of the root vulnerability curve (unitless)
-##' @param root_b sensitivity parameter of the root vulnerability curve (MPa)
-##' @param root_psi_crit critical root water potential (MPa, positive magnitude)
+##' @param root_P50 root potential at 50\% loss of conductivity (MPa, positive
+##'   magnitude), with `root_b` and `root_psi_crit` derived from it.
 ##' @param TF24_beta2 exponent for the effect of hydraulic risk (unitless)
 ##' @param jmax_25 maximum electron transport rate at 25 C (umol m^-2 s^-1)
 ##' @param a quantum yield of photosynthetic electron transport (mol mol^-1)
@@ -198,8 +199,8 @@ leaf_traits <- function(vcmax_25 = 96,
 ##' indication of why.
 ##'
 ##' @param GSS_tol_abs absolute tolerance for the golden-section search over
-##'   stem water potential. ⚠️ **This no longer sets how well the operating point
-##'   is determined**, and this text used to say that it did. The collar solve now
+##'   stem water potential. ⚠️ **This does not set how well the operating point is
+##'   determined.** The collar solve
 ##'   solves its own first-order condition to about `1e-12` instead of searching
 ##'   profit to `GSS_tol_abs`, so changing this leaves the answer bit-identical on
 ##'   the production path. What it still does: it is the width below which the
@@ -636,7 +637,7 @@ set_drivers <- function(x,
 # perturbation -- eleven times for a four-parameter gradient -- and all of this
 # validation and defaulting produces the same answer every time bar the one
 # parameter being moved. Resolving once and applying many times is worth ~12% of a
-# gradient (see PLAN), but only if there is ONE definition of the rules: the
+# gradient, but only if there is ONE definition of the rules: the
 # defaults here are load-bearing (1 m layers, the nominal networks, the
 # single-path placeholder depth) and a second copy in the gradient code would be
 # free to drift from this one silently. So the gradient calls this, not a
@@ -836,7 +837,7 @@ operating_point <- function(x) {
 ##'
 ##' Two consequences, both the opposite of what you might expect:
 ##'
-##' * **This is the fast path, not the convenient-but-slow one.** It is within 6%
+##' * **This is the fast path, not the convenient-but-slow one.** It is within 6\%
 ##'   of building a `Leaf` yourself and looping `set_drivers()` +
 ##'   `$find_root_collar_psi()` + [operating_point()]. Reaching into the object
 ##'   saves about 1 µs a row and is worth doing for access to intermediate state,

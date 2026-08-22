@@ -7,16 +7,17 @@ hydraulics. Extracted from the TF24 strategy in
 Read alongside:
 
 - **[README.md](../README.md)** — what it is and how to use it
-- **[PLAN.md](../PLAN.md)** — status table, then the reasoning behind every open issue
-- **[notes/unify-stomatal-optimisers.md](../notes/unify-stomatal-optimisers.md)** — the plan for the
-  current branch: the model space, what has landed, and the three open items. Read
-  it before picking up work on `refactor/unified-psi-stem-solver`
+- **[NEWS.md](../NEWS.md)** — what changed in each release, and what it broke
+- **[`vignettes/the-models.Rmd`](../vignettes/the-models.Rmd)** — the seven
+  optimality models, the cost/link framework that unifies them, and two
+  appendices: **B** derives the gradients, **C** is the numerical practice
+  (finite-difference steps, golden files, cross-platform magnitudes)
 - **[`vignettes/fitting.Rmd`](../vignettes/fitting.Rmd)** — ⚠️ read *"Fitting a
   different collection of parameters"* before answering anything about `pars`:
   what a different collection costs, which parameters return exactly zero and
   why, which are unreachable, and what a new study has to write itself
 - **[COMPARISON.md](../COMPARISON.md)** — how this differs from `plantecophys`, `tealeaves`, `bigleaf`
-- **[issues](https://github.com/traitecoevo/phylloptim/issues)** — the work queue; PLAN.md is the *why* behind each
+- **[issues](https://github.com/traitecoevo/phylloptim/issues)** — the work queue, and the *why* behind each open item
 
 Family context lives in [`plant-meta`](https://github.com/traitecoevo/plant-meta).
 
@@ -70,7 +71,7 @@ R/gradient.R                   set_traits() and leaf_gradient() -- trait
                                order is load-bearing
 R/gradient-batch.R             leaf_batch() and leaf_gradient_batch() -- the same
                                gradient over N observations in ONE crossing.
-                               22x/observation; PLAN 11g
+                               22x/observation
 tests/cpp/                     plain-C++ suite, no R, no framework
 tests/cpp/root_network.hpp     the suite's root-architecture fixture: the two
                                ex-Leaf-default beta_R_* constants, in ONE place
@@ -106,7 +107,7 @@ tests/cpp/bench_solve.cpp      timing harness for the collar solve AND the three
                                occurrence of the latter into one TSV field
 tests/cpp/bench_gradient.cpp   timing harness for a TRAIT GRADIENT: the IFT
                                composite against differencing the solve, with
-                               no R in the way. PLAN 11e
+                               no R in the way
 tests/testthat/                the R layer's tie-back to the golden points
 tests/testthat/gradient_golden.tsv
                                recorded trait gradients, five rows, hex floats.
@@ -212,7 +213,7 @@ facts are held apart by one rule — **`src/` and `R/` include downward into
 `.github/workflows/cpp-tests.yml` building the whole suite on runners with **no R
 installed**. Do not add an R step to that workflow; R work goes in
 `R-CMD-check.yml`. A job with R present compiles the same headers and cannot tell
-the difference. PLAN item 6a has the decision.
+the difference.
 
 ```sh
 cmake -B build -DPHYLLOPTIM_ODELIA_INCLUDE_DIR=../odelia/inst/include
@@ -242,7 +243,7 @@ doxygen                      # renders the C++ API to docs/html/index.html
 ⚠️ **R does not track header dependencies, so `R CMD INSTALL` after editing
 `inst/include/` reuses a stale `src/RcppR6.o` and the R layer goes on running the
 OLD model.** Nothing warns you, and the numbers stay plausible: two rounds of
-R-side diagnostics were taken against the previous solver during PLAN 11a before
+R-side diagnostics were taken against the previous solver before
 this was noticed. **`rm -f src/*.o src/*.so` before reinstalling**, then check one
 value against the C++ suite, which does track headers.
 
@@ -289,7 +290,7 @@ now asserts the shape and names the block, so it fails legibly.
 **`tools/bench_user_cost.R` covers the R side** — one solve, N solves, and a
 gradient — and `tools/bench_history.sh` runs all of them against a list of commits.
 `tests/testthat/test-cost.R` is the guard, and `tools/cost-baseline.tsv` the recorded
-table. PLAN has the numbers.
+table.
 
 Three rules, each of which was learned by getting it wrong:
 
@@ -358,9 +359,9 @@ perturbation** (unifying the AD replica with the function it mirrors) at each st
 
 | amplifier in play | that perturbation shows up as |
 |---|---|
-| golden section, `GSS_tol_abs` 1e-3 | **5.53e-04** — pre-11a, #4 comment 2 |
-| `psi_stem_to_ci` at 1e-7 | **4.98e-07** — after 11a removed golden section |
-| `psi_stem_to_ci` at **1e-10 — where we are now** | **~1e-09** (PLAN 11b) |
+| golden section, `GSS_tol_abs` 1e-3 | **5.53e-04** — the old collar solve |
+| `psi_stem_to_ci` at 1e-7 | **4.98e-07** — golden section gone |
+| `psi_stem_to_ci` at **1e-10 — where we are now** | **~1e-09** |
 | `psi_stem_to_ci` at 1e-13, not taken | 7.16e-13 |
 
 The old four-order gap between rounding and bug briefly collapsed to one, and is
@@ -408,7 +409,7 @@ silently** — it has been wrong three times. Read the summary line, never the F
 lines, which are truncated at 20 and biased toward whichever rows come first.
 
 gcc and clang report *identical* figures. They used to differ by 2–3×, and what
-differed was which way a golden-section comparison fell; since PLAN 11a removed that
+differed was which way a golden-section comparison fell; with that
 search, what is left is libm's `exp`/`pow` — a property of the platform, not the
 compiler. If a compiler-dependent column reappears, something has reintroduced a
 discrete decision into the solve.
@@ -424,9 +425,8 @@ Two things follow that matter beyond this file:
 
 - **`profit` is the only reported field that is well-conditioned across platforms.**
   If you need a portable check of the solve, check `profit`, not `opt_psi_stem_`.
-- **~~Eight of the nine fields are pinned to 17 digits but only *determined* to
-  about `GSS_tol_abs` (1e-3).~~ No longer true, and the fix is PLAN 11a.** The
-  collar solve now solves `dprofit == 0` rather than searching profit, so on the
+- **The eight argmax-evaluated fields are determined, not just pinned.** The
+  collar solve solves `dprofit == 0` rather than searching profit, so on the
   198 interior rows the argmax is determined to solver precision — `|dprofit|` at
   the returned collar has a median of **5.6e-15**, against golden section's 7.8e-4.
   The remaining 42 rows have a **constrained** optimum pinned to a bracket bound,
@@ -439,7 +439,7 @@ Two things follow that matter beyond this file:
 
 ⚠️ **Profit is the wrong instrument for checking a collar-solve change, and this
 cost real time.** It is the maximum, so it is flat, and its own numerical floor is
-set by the nested `ci` root-find's 1e-7 tolerance. When 11a landed, two of 288 rows
+set by the nested `ci` root-find's 1e-7 tolerance. When the root-find landed, two of 288 rows
 came out ~6e-7 *lower* in profit while their residual improved by ten orders of
 magnitude. **Check the residual `|dprofit|` at the returned point instead** — it
 improved on 240 of 240 feasible rows with none worse, which is a statement profit
@@ -519,7 +519,7 @@ to quarantine results changes onto.
   2364 when first recorded, 2431 on a rerun with `NOT_CRAN` unset, on both arms of a
   control. Compare against a control run, never against a remembered number.)
   ⚠️ **#15 deliberately changed results**, so that validation now needs redoing
-  against plant — see hazard 7 and PLAN item 9.
+  against plant — see hazard 7.
 
 What replaces the old rule: **a change that moves results lands on `master` through
 a PR that states its measured blast radius against the golden file.** #15 is the
@@ -637,8 +637,8 @@ the per-cause split and the tolerance bands go in the first PR comment — see
 
    What changed is the conclusion. This entry used to say plant chose
    golden-section over Brent for that reason, and read as a warning against
-   touching the collar solve. **PLAN 11a replaced golden section with a
-   safeguarded root-find on `dprofit == 0`, and smoothness improved.** Measured:
+   touching the collar solve. **A safeguarded root-find on `dprofit == 0`
+   replaced golden section, and smoothness improved.** Measured:
 
    | | golden section | root-find |
    |---|---|---|
@@ -653,7 +653,7 @@ the per-cause split and the tolerance bands go in the first PR comment — see
    the comparison sequence flipped. That made the argmax piecewise constant at fine
    scales, so trait derivatives came back exactly zero — or, for traits in the
    hydraulic path, **smooth, plausible and sign-inverted** (`root_b`: −2.6e-03
-   against a true +2.6e-04). See PLAN 11a for the arbitration.
+   against a true +2.6e-04).
 
    ⚠️ **The re-measurement above is in a TRAIT, and the hazard's concern is plant
    state.** Smoothness in height and light, feeding the demographic gradient,
@@ -703,8 +703,7 @@ the per-cause split and the tolerance bands go in the first PR comment — see
    (default) and `SinglePotential`. Both are held as members and selected by an
    enum, which measured **free** where `std::variant` cost +1.0% — a predictable
    branch in front of an already-out-of-line call disappears into it. Don't
-   "tidy" this into a variant without re-measuring; PLAN 7b-iii stage 2 has the
-   numbers and the reproduction recipe, including the trap that a
+   "tidy" this into a variant without re-measuring, and note the trap: a
    compile-time-known tag folds the branch away and reports a false zero.
 
    When adding a third path, the contract is five methods — `begin_solve`,
@@ -851,8 +850,8 @@ the per-cause split and the tolerance bands go in the first PR comment — see
      reconstruction, and no amount of cleverness in the derivative touches it.
 
    `make -C tests/cpp bench_gradient` measures both arms. ⚠️ **Do not carry the R
-   conclusion into C++**: PLAN 11e retracted a projected speedup on an R
-   measurement and then had to un-retract half of it, because with the boundary
+   conclusion into C++**: a projected speedup was retracted on an R
+   measurement and half of it then reinstated, because with the boundary
    removed the same composite wins 4.4× on the eleven traits that touch no spline.
 
 
@@ -902,13 +901,64 @@ the per-cause split and the tolerance bands go in the first PR comment — see
    collar loses its freedom, `[root_zero_E, root_crit]` collapses, and the collar
    solve correctly reports `determined` rather than optimising.
 
+12. **`n_pars` is a compile-time constant, and a short aggregate initialiser is
+   legal C++.** Several places fill `theta` with a literal list sized by
+   `gradient::n_pars`. An initialiser shorter than the array zero-fills the rest,
+   so adding a parameter shifts `kmax` and `resistance` down a slot and drops
+   `resistance` off the end **with no diagnostic at all**.
+
+   This has bitten twice. `test_leaf.cpp`'s batch `theta` put `kmax` into a new
+   trait's slot and left `kmax` itself `0.0`; the only symptom was three
+   observations failing to solve. `test_golden.cpp`'s `by_solver_threw[4]` was
+   indexed by a `Solver` enum that grew to eight, writing past the end.
+
+   Both now derive their size from one named constant with a `static_assert`.
+   **Count the entries against `n_pars` whenever you touch either, and prefer a
+   named count to a literal** — `bench_gradient.cpp` carried a literal `13` over an
+   11-element array through three trait-count changes, and it only ever crashed
+   when the address layout happened to be unlucky.
+13. **The trait vector is bound POSITIONALLY in four places**: C++
+   `gradient::apply()`, R's `.gradient_setter`, the batch route's `theta` matrix,
+   and R's derived copy of the enumeration. Two of those fail loudly on a length
+   change. The others did not: the batch's non-trait columns were addressed as
+   `length(par_names)` and `length(par_names) - 1L`, correct only while `kmax` and
+   `resistance` were the final two in that order.
+
+   They are addressed by NAME now, and `.gradient_non_traits` names the non-trait
+   set once. Appending a parameter is safe; reordering the enumeration
+   differentiates the wrong thing and returns plausible numbers.
+14. **A derived `psi_crit` makes the P50 chain rule CONDITIONAL.** Since
+   `psi_crit` is the curve's 95% quantile rather than a trait, moving `stem_P50`
+   moves the threshold, and `d/dP50` picks up a term through it. That term is
+   **exactly zero at an interior optimum and order one at a pinned one**, so the
+   clean identity `d/dP50 = (ln 2)^{-1/c} · d/db` holds only where the optimum is
+   interior. Assert it keyed on `status`, never unconditionally: an unconditional
+   assertion fails on pinned rows for a *correct* implementation.
+15. **A finite difference through a solve has a noise floor, and the floor moves
+   with the solver.** The error-versus-step curve is a V and only its floor is a
+   derivative; a small step is the wrong instinct. Worse, the V's position depends
+   on which solver produced the argmax: the collar solve root-finds `dprofit == 0`
+   and locates psi* to ~1e-15, while `optimise_psi_stem_*` scans and refines to
+   ~1e-06 of the bracket. A relative parameter step of 1e-06 moves psi* by less
+   than a scan can resolve, so the difference returns quantisation — measured
+   0.1855 against a true 0.0551, and the wrong SIGN on another curve.
+
+   **Sweep the step and read the floor.** Two bugs were reported against a correct
+   composite on the strength of one 1e-06 step. Each gradient route carries its own
+   `fd_step` for this reason. `vignette("the-models")` Appendix C has the numbers.
+16. **Check that an assertion was actually exercised.** A first-order-condition
+   test whose λ was 100× off-scale put all nine rows on a bound, so the identity
+   was never evaluated and the test passed. Print the count of rows that reached
+   the assertion. λ's scale is set by the leaf — `marginal_cost_water()` runs
+   9e4–3e5 at the defaults.
+
 ## Validating against plant
 
 ⚠️ **There is no longer a harness that compares against plant, and there cannot be
 one.** plant has no independent copy of this model — it consumes these headers — so
 "compare against plant" is this package compared with itself. `compare_with_plant.R`
-and `compare_primitives.R` are **deleted** (#64); what they established is PLAN
-decision 1, and it cannot be re-run. If you find yourself wanting them, what you
+and `compare_primitives.R` are **deleted** (#64); what they established —
+bit-identical, including 78 of 78 SCM nodes — cannot be re-run. If you find yourself wanting them, what you
 actually want is one of:
 
 - **`tests/cpp/test_primitives.cpp`** for *where* a difference comes from. 544
@@ -922,8 +972,8 @@ actually want is one of:
   the one comparison a bit-identical leaf solve does not settle.
 
 ⚠️ **`tsv_to_hex.c` is live, not leftover.** `test-golden.R`'s regeneration recipe
-pipes through it, because R's decimal parser is not correctly rounded — see PLAN
-decision 1 before writing any R-side expected value.
+pipes through it, because R's decimal parser is not correctly rounded. ⚠️ Never
+write an R-side expected value by pasting a decimal from the golden file.
 
 Three things that will waste your time otherwise, if you do run anything against a
 plant build:

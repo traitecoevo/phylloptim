@@ -496,6 +496,8 @@
 ##' growth rate, stem persistence and maximum height among plant species in a
 ##' post-fire succession. *Journal of Theoretical Biology*.
 ##'
+##' @importFrom graphics arrows layout lines mtext par plot.new plot.window
+##'   points polygon rect segments strwidth text
 ##' @export
 plot_model_overview <- function(model = NULL, cex = 1) {
   if (is.null(model)) {

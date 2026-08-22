@@ -27,7 +27,14 @@ leaf_traits(
 
 \item{stem_c}{shape parameter of the stem vulnerability curve (unitless)}
 
+\item{stem_P50}{stem potential at 50\% loss of conductivity (MPa, positive
+magnitude). `stem_b` and `psi_crit` are derived from this pair and are
+readable but not settable on the resulting `Leaf`.}
+
 \item{root_c}{shape parameter of the root vulnerability curve (unitless)}
+
+\item{root_P50}{root potential at 50\% loss of conductivity (MPa, positive
+magnitude), with `root_b` and `root_psi_crit` derived from it.}
 
 \item{TF24_beta2}{exponent for the effect of hydraulic risk (unitless)}
 
@@ -69,14 +76,6 @@ leaf_traits(
   reproducing TF24's cost at its own optimum runs 0.406 at `psi_soil` 0.5 MPa
   to 0.807 at 3.0 MPa — a 2.0x range against `JS22_gamma`'s 6.1x, which is the
   absolute-versus-drop distinction as a number.}
-
-\item{stem_b}{sensitivity parameter of the stem vulnerability curve (MPa)}
-
-\item{psi_crit}{critical stem water potential (MPa, positive magnitude)}
-
-\item{root_b}{sensitivity parameter of the root vulnerability curve (MPa)}
-
-\item{root_psi_crit}{critical root water potential (MPa, positive magnitude)}
 }
 \value{
 A `leaf_traits` object; a named list.

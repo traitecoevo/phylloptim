@@ -54,7 +54,7 @@
 ##' than rediscovered:
 ##'
 ##' * ~~**`psi_crit` past the stem curve's P99.**~~ No longer reachable, and so no
-##'   longer a decision: `psi_crit` is the 5%-conductivity quantile of the stem
+##'   longer a decision: `psi_crit` is the 5\%-conductivity quantile of the stem
 ##'   curve rather than a trait beside it, so it scales with the curve and lands
 ##'   inside the domain for every shape parameter. An optimiser moving `stem_P50`
 ##'   cannot walk out of it.

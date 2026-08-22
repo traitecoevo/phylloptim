@@ -106,9 +106,7 @@ the model quietly accepts.
 
 ## Trait gradients from C++
 
-⚠️ **This section said "not available from C++ yet" until PLAN item 11 stage 2.**
-It is available now: `<phylloptim/gradient.hpp>`, reached from the umbrella
-header, composes the implicit function theorem and the active-set guard with no R
+`<phylloptim/gradient.hpp>`, reached from the umbrella header, composes the implicit function theorem and the active-set guard with no R
 anywhere, and batches the result over observations.
 
 ```cpp

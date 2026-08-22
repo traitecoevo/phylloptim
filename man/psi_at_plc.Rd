@@ -7,7 +7,7 @@
 psi_at_plc(P50, c, plc)
 }
 \arguments{
-\item{P50}{potential at 50% loss, MPa as a positive magnitude}
+\item{P50}{potential at 50\% loss, MPa as a positive magnitude}
 
 \item{c}{shape parameter of the Weibull curve (unitless)}
 

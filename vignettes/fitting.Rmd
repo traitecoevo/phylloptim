@@ -80,8 +80,8 @@ on an existing object; constructing a fresh one costs ~204 µs against ~4 µs to
 re-trait, which is 73 solves thrown away per evaluation. In a fit that dominates
 everything else.
 
-⚠️ **And do not write `l$vcmax_25 <- x` instead.** It compiles and is wrong, though
-not for the reason this vignette used to give. Two pieces of derived state describe
+⚠️ **And do not write `l$vcmax_25 <- x` instead.** It compiles and is wrong. Two
+pieces of derived state describe
 the old trait afterwards and no re-driving repairs either: the **pre-integrated
 vulnerability splines** (`stem_P50`/`stem_c` and `root_P50`/`root_c` each own
 one), and the **solved operating point**, which no code path rewrites — so it goes
@@ -91,13 +91,10 @@ positive-magnitude checks on the two `P50` parameters, and cannot reach `stem_b`
 
 `set_traits()` clears all of it, and is the only route bound to R.
 
-*Corrected in 0.5.0:* this warning used to say the derived `vcmax_`, `jmax_` and
-`R_d_` sat behind a temperature cache keyed on `(leaf_temp, atm_o2_kpa)` and
-*nothing else*, so that re-supplying the drivers took a cache **hit** and silently
-kept the old response. That was true and is not: since the cache key became every
-input of the temperature block — `vcmax_25` and `jmax_25` among them — re-driving
-after a bare trait write *does* recompute those three. The advice is unchanged; the
-reason for it is narrower.
+The temperature-dependent `vcmax_`, `jmax_` and `R_d_` are **not** part of the
+problem: their cache is keyed on every input of the temperature block, `vcmax_25`
+and `jmax_25` included, so re-driving after a bare trait write does recompute
+them. It is the splines and the operating point that no re-driving repairs.
 
 ```{r}
 l <- leaf_model(truth)

@@ -7,18 +7,17 @@
 weibull_s50(P50, c)
 }
 \arguments{
-\item{P50}{potential at 50% loss, MPa as a positive magnitude}
+\item{P50}{potential at 50\% loss, MPa as a positive magnitude}
 
 \item{c}{shape parameter of the Weibull curve (unitless)}
 }
 \value{
-The slope at P50, % PLC per MPa.
+The slope at P50, \% PLC per MPa.
 }
 \description{
-`S50 = 50*c*ln(2)/|P50|`, in % PLC per MPa, which is the other form
+`S50 = 50*c*ln(2)/|P50|`, in \% PLC per MPa, which is the other form
 vulnerability curves are commonly published in.
-}
-\details{
+
 ⚠️ **`S50` is not an independent shape parameter** — it has `P50` built into it
 by construction, so a curve is not determined by `S50` alone. It is exported
 rather than kept internal for exactly that reason: a caller reading a published

@@ -25,10 +25,11 @@
 
 ##' The water potential at a given loss of conductivity
 ##'
+##' @description
 ##' Inverts `f(psi) = 2^-(psi/P50)^c` for the potential at which a given fraction
 ##' of conductivity has been lost.
 ##'
-##' @param P50 potential at 50% loss, MPa as a positive magnitude
+##' @param P50 potential at 50\% loss, MPa as a positive magnitude
 ##' @param c shape parameter of the Weibull curve (unitless)
 ##' @param plc proportion of conductivity LOST, in `(0, 1)`. `plc = 0.5` returns
 ##'   `P50` by construction; `0.88`, `0.95` and `0.99` return P88, P95 and P99.
@@ -51,7 +52,8 @@ psi_at_plc <- function(P50, c, plc) {
 
 ##' The slope of the vulnerability curve at P50
 ##'
-##' `S50 = 50*c*ln(2)/|P50|`, in % PLC per MPa, which is the other form
+##' @description
+##' `S50 = 50*c*ln(2)/|P50|`, in \% PLC per MPa, which is the other form
 ##' vulnerability curves are commonly published in.
 ##'
 ##' ⚠️ **`S50` is not an independent shape parameter** — it has `P50` built into it
@@ -60,7 +62,7 @@ psi_at_plc <- function(P50, c, plc) {
 ##' `S50` needs to see what it depends on.
 ##'
 ##' @inheritParams psi_at_plc
-##' @return The slope at P50, % PLC per MPa.
+##' @return The slope at P50, \% PLC per MPa.
 ##' @seealso [weibull_p50_c()], which accepts `S50` as one of its two inputs.
 ##' @examples
 ##' weibull_s50(3.4, 2.680147)
@@ -72,6 +74,7 @@ weibull_s50 <- function(P50, c) {
 
 ##' Convert a Weibull scale parameter to P50
 ##'
+##' @description
 ##' `b` is the scale of the conventional form `exp(-(psi/b)^c)`; this package is
 ##' parameterised on `P50` instead. The two are one substitution apart,
 ##' `b = P50 / (ln 2)^(1/c)`, so
@@ -85,7 +88,7 @@ weibull_s50 <- function(P50, c) {
 ##'
 ##' ⚠️ **`P50` is always SMALLER than `b`**, by a factor of `(ln 2)^(1/c)` — 0.87
 ##' at `c = 2.68`. So passing a `b` where a `P50` is wanted, or the reverse, gives
-##' a plausible number roughly 15% out rather than an error. Neither function can
+##' a plausible number roughly 15\% out rather than an error. Neither function can
 ##' detect it: both arguments are positive potentials in MPa.
 ##'
 ##' @param b scale parameter of the Weibull curve, MPa as a positive magnitude
@@ -102,6 +105,7 @@ weibull_p50_from_b <- function(b, c) {
 
 ##' Recover (P50, c) from any two published quantities
 ##'
+##' @description
 ##' A vulnerability curve has two parameters, so **any two** of the quantities
 ##' below determine it. This solves for `(P50, c)` from whichever pair you have.
 ##'
@@ -124,12 +128,12 @@ weibull_p50_from_b <- function(b, c) {
 ##' default for angiosperm stems, measured 1.8–2.6 across three species whose P50
 ##' spanned 2.9–4.3 MPa, i.e. shape roughly conserved while scale varied freely.
 ##'
-##' @param P50,P88,P95,P99 potentials at 50%, 88%, 95% and 99% loss of
+##' @param P50,P88,P95,P99 potentials at 50\%, 88\%, 95\% and 99\% loss of
 ##'   conductivity, MPa as positive magnitudes
 ##' @param px,plc an arbitrary quantile: the potential `px` at which the
 ##'   proportion `plc` of conductivity is lost. Supply both or neither; the pair
 ##'   counts as ONE of the two quantities.
-##' @param S50 slope at P50, % PLC per MPa. See [weibull_s50()].
+##' @param S50 slope at P50, \% PLC per MPa. See [weibull_s50()].
 ##' @param c shape parameter, if you already have it.
 ##'
 ##' @return A list with `P50` and `c`, suitable for splicing into

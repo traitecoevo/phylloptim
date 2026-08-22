@@ -158,13 +158,11 @@ tibble(
 )
 ```
 
-Those are **identical**, and this passage used to say they differed in the fourth
-decimal. They did, until the collar solve stopped searching profit and started
-solving its own first-order condition instead: the operating point is now
-determined to about `1e-12` rather than to `GSS_tol_abs`, which no longer reaches
-the production path at all. It survives as the threshold below which the feasible
-interval is treated as a single point, and for two single-layer optimisers that
-are off this path.
+Those are **identical**, because the collar solve solves its own first-order
+condition rather than searching profit: the operating point is determined to about
+`1e-12`. `GSS_tol_abs` does not reach the production path at all — it survives as
+the threshold below which the feasible interval is treated as a single point, and
+for two single-layer optimisers that are off this path.
 
 That is not only a precision story — it is what makes the next section possible.
 An argmax resolved only to `1e-3` moves in discontinuous jumps as a trait varies,

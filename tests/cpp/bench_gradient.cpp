@@ -2,18 +2,18 @@
 //
 //   make -C tests/cpp bench_gradient && ./bench_gradient [reps]
 //
-// Written to settle a question PLAN 11d asserted and 11e half-answered. 11d
-// projected 12x for computing dA/dtheta by the implicit function theorem -- one
-// solve plus 2N cheap gradient evaluations -- instead of 2N re-solves. 11e then
-// measured the composite in the R layer and found it 6% SLOWER, because an R
-// call costs ~1.8 us against the 0.26 us of C++ work it wraps.
+// Written because a projection and a measurement disagreed. Computing dA/dtheta
+// by the implicit function theorem -- one solve plus 2N cheap gradient
+// evaluations instead of 2N re-solves -- projects 12x. Measured in the R layer
+// the composite came out 6% SLOWER, because an R call costs ~1.8 us against the
+// 0.26 us of C++ work it wraps.
 //
 // That is a statement about the R boundary and NOT about the composite, and the
 // distinction matters because **plant links these headers directly**. So the
 // arithmetic has to be done again with the boundary removed, which is what this
-// measures. PLAN 11e records the answer; the short version is that the composite
-// does win here, by rather less than 12x, and for four of the traits by almost
-// nothing at all -- for a reason neither 11d nor 11e anticipated.
+// measures. The composite does win here, by rather less than 12x, and for four
+// of the traits by almost nothing at all -- for a reason neither the projection
+// nor the R measurement anticipated.
 //
 // WHAT THE TWO ARMS ARE. Both perturb one trait by a relative 1e-6 either side
 // and both pay set_traits + set_physiology per perturbation, because a trait
@@ -173,7 +173,7 @@ double ift_arm(phylloptim::Leaf &l, int idx, double psi_star, long reps,
 
 // The same composite, but moving the stem curve by the homogeneity rescale
 // instead of through set_traits -- so no spline is rebuilt and set_physiology is
-// not needed either, since nothing it derives depends on stem_b. PLAN 11f.
+// not needed either, since nothing it derives depends on stem_b.
 double ift_arm_rescaled_stem_curve(phylloptim::Leaf &l, double psi_star,
                                    long reps, double &sink) {
   const auto t0 = clock_type::now();
@@ -254,7 +254,7 @@ int main(int argc, char **argv) {
 
     // And the way round it, for the stem curve only: it is homogeneous of degree
     // 1 in stem_b, which is a fixed multiple of stem_P50, so the spline for a
-    // perturbed trait is this one with its argument rescaled. PLAN 11f.
+    // perturbed trait is this one with its argument rescaled.
     t0 = clock_type::now();
     for (long r = 0; r < reps; ++r) {
       l.perturb_stem_P50(kBase.v[2] + double(r) * 1e-9);
@@ -414,10 +414,10 @@ int main(int argc, char **argv) {
       "\nThe four that rebuild a spline are stem_b, stem_c, root_b and root_c --\n"
       "and they are exactly the traits for which the argmax-mediated term is\n"
       "100%% of the gradient. So the composite's advantage is smallest precisely\n"
-      "where the composite is most necessary. PLAN 11e has what follows from that.\n"
+      "where the composite is most necessary.\n"
       "\nstem_b escapes it: G is homogeneous of degree 1 in stem_b, so the spline\n"
       "for a perturbed stem_b is this one with its argument rescaled and no\n"
-      "rebuild is needed. stem_c has no such identity. PLAN 11f.\n");
+      "rebuild is needed. stem_c has no such identity.\n");
   printf("\nchecksum %.6f\n", sink);
   return 0;
 }

@@ -2,7 +2,7 @@
 #ifndef PHYLLOPTIM_GRADIENT_HPP_
 #define PHYLLOPTIM_GRADIENT_HPP_
 
-// Trait gradients, composed here rather than in R (issue #4, PLAN 11d stage 2).
+// Trait gradients, composed here rather than in R (#4).
 //
 // WHAT THIS IS. A transcription of R/gradient.R's `.gradient_ift()` and
 // `.gradient_fd()` into C++, plus a loop over observations. It computes exactly
@@ -100,8 +100,8 @@ inline constexpr int par_kmax = 15;
 inline constexpr int par_resistance = 16;
 // Cowan-Farquhar's prescribed marginal value of water. A pure APPEND after the two
 // existing non-traits, which is only safe because R addresses theta's non-trait
-// columns by NAME -- it used to take the traits as "everything but the last two"
-// and would have read this as `resistance`.
+// columns by NAME rather than by position -- a positional rule ("everything but
+// the last two") reads this as `resistance`.
 //
 // ⚠️ AVAILABLE FOR ONE MODEL. It is CF77's only parameter and every other curve's
 // lambda is EMERGENT, derived from that curve's own parameters rather than set. So
@@ -405,7 +405,7 @@ struct Result {
 // `only` names the single parameter that has moved, or -1 for "all of them".
 inline void apply(Leaf& l, const double* theta, const Drivers& d, bool single,
                   int only, bool fast_stem_curve) {
-  // THE FAST PATH FOR stem_b, which is the whole of PLAN 11f. The stem
+  // THE FAST PATH FOR stem_b. The stem
   // cumulative-vulnerability integral is homogeneous of degree 1 in stem_b, so
   // the spline for a perturbed stem_b is the existing one with its argument
   // rescaled and the 11.9 us of incomplete gammas a rebuild spends is
@@ -416,7 +416,7 @@ inline void apply(Leaf& l, const double* theta, const Drivers& d, bool single,
   // nowhere else, which is why the argument exists rather than the function
   // guessing. `stem_c` is deliberately not here: it has no such identity, and
   // reading the curve from its closed form instead differentiates a slightly
-  // different model and disagrees by 3e-4 (PLAN 11f).
+  // different model and disagrees by 3e-4.
   if (fast_stem_curve && only == par_stem_P50) {
     l.perturb_stem_P50(theta[par_stem_P50]);
     return;

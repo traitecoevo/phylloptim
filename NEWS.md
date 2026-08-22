@@ -1,3 +1,86 @@
+# phylloptim 0.6.0
+
+## Seven optimality models, one optimiser
+
+The package now solves seven stomatal optimality models, and they share a single
+templated body rather than one function each. Two things specify a model: a **cost
+curve** and a **benefit link**.
+
+| `CostCurve` | objective | link |
+|---|---|---|
+| `TF24` | `A - C(psi)` | identity |
+| `CF77` | `A - lambda*E` | identity |
+| `JS22` | `A - gamma*dpsi^2` | identity |
+| `CMax` | `A - (a*psibar + b)*dpsi` | identity |
+| `ProfitMax` | normalised gain-risk | scaled by `|A|max` |
+| `SOX` | `A * g(psi)` | log |
+| `JW26` | `A * (1 - psi/psi_crit)` | log |
+
+`JS22`, `CMax`, `SOX` and `JW26` are new. The unification is what makes the
+product objectives fit: maximising `A*g` and maximising `log A + log g` share an
+argmax, so every model is `max h(A(psi)) - C(psi)` and one derivative serves all
+seven --
+
+    d/dpsi [h(A) - C] = h'(A) * dA/dpsi - dC/dpsi
+
+with `h' = 1`, `1/A` or `1/|A|max`. Adding a curve is a row in three dispatch
+tables, not a new solver. Energy balance with a non-identity link is refused
+rather than approximated.
+
+All 4608 rows of `psi_stem_optima.tsv` are bit-identical across the unification:
+the identity arm's derivative is textually unchanged.
+
+## Model-scoped parameter names
+
+**BREAKING.** A parameter that belongs to one model now carries that model's name.
+
+| was | is |
+|---|---|
+| `beta2` | `TF24_beta2` |
+| `cost_scale_TF24` | `TF24_cost_scale` |
+| `lambda_` | `CF77_lambda_` |
+
+New parameters follow the same rule: `JS22_gamma`, `CMax_a`, `CMax_b`. Models
+without a published name take initials-plus-year.
+
+The trait vector goes 12 to 15 and `gradient_par_names()` 14 to 18. Traits are
+bound **positionally** across the R/C++ boundary, so a caller passing them by
+position must be updated with this release. Appending is safe; reordering
+differentiates the wrong thing and returns plausible numbers.
+
+## Gradients for every model, through one entry point
+
+**BREAKING (signature).** `leaf_gradient()` and `leaf_gradient_batch()` take
+`model =`, defaulting to `"collar"` -- the production path, unchanged. Naming any
+of the seven curves differentiates that model's **stem** optimum instead. All
+eight routes are verified; none is refused.
+
+`leaf_gradient_batch()` remains bit-for-bit identical to the R route on every
+route, which is what makes a fit free to choose its model.
+
+⚠️ **Each route carries its own finite-difference step.** A difference through a
+solve has a noise floor set by the solver being differenced: the collar route
+root-finds to ~1e-15 and takes 1e-6, while the stem optimisers scan and refine to
+~1e-6 of the bracket and take 1e-3. A 1e-6 step on a stem route returns
+quantisation -- measured 0.1855 against a true 0.0551, and the wrong sign on one
+curve. Sweep the step and read the floor of the V; do not trust a single step.
+
+New: `cost_curve_names()` and `cost_curve_has_derivative()`.
+
+## Published vulnerability curves convert to (P50, c)
+
+`weibull_p50_c()` takes any two of `P50`, `P88`, `P95`, `P99`, `(px, plc)`, `S50`
+and `c`, and returns the pair `leaf_traits()` wants. Also exported:
+`psi_at_plc()`, `weibull_s50()` and `weibull_p50_from_b()`.
+
+⚠️ `S50` with a non-P50 quantile has **two** solutions -- `S50(c)` has an analytic
+minimum at `c = ln L`, so it is U-shaped. The upper branch is returned, with a
+message; the lower branch lands below `c = 1`, where measured angiosperm stems sit
+at 1.8-2.6.
+
+Published P50 is negative and is **refused** rather than silently negated: every
+potential in this package is a positive magnitude.
+
 # phylloptim 0.5.4
 
 ## Both vulnerability curves are parameterised on (P50, c)

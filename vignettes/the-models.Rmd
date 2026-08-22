@@ -170,7 +170,6 @@ The two properties are not actually in conflict, which is the point worth carryi
 
 **Finally, a regime where the theorem does not hold.** When the leaf is hot enough that assimilation is negative across the whole `[Γ*, c_a]` bracket there is no supply-equals-demand root, `c_i` is pinned at the compensation point, and **the residual is no longer zero** — so the implicit function theorem has nothing to stand on. Derivatives on that branch drop the assimilation term rather than approximating it, and report themselves as not feasible. A gradient that ignored the flag would get a plausible number there.
 
-### 
 
 ## The cost curves
 
@@ -769,4 +768,5 @@ At 1e-06 the same difference gets the **sign** wrong for `JW26`. Two bugs were r
 A grid argmax is piecewise constant in the parameters: it sits at one grid point until the winner changes cells, so its derivative is zeros interrupted by jumps. That is why a bracketing search cannot support a trait gradient however tight its tolerance, and why the collar solve moved to a first-order condition — over eleven parameter steps golden section returned 6 distinct argmax values where the root-find returns 11, and the second differences fell from 3.9e-04 (the step size, i.e. noise) to 3.4e-07.
 
 It is also why ProfitMax's `|A|max` normaliser is held fixed rather than differentiated: it comes from a scan, so the same objection applies to it directly. Appendix B has what that costs.
+
 # References

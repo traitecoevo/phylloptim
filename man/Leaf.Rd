@@ -27,11 +27,11 @@ Leaf(
 
 \item{stem_c}{shape parameter of the STEM hydraulic vulnerability curve (unitless)}
 
-\item{stem_P50}{STEM potential at 50% loss of hydraulic conductivity (MPa, positive magnitude)}
+\item{stem_P50}{STEM potential at 50\% loss of hydraulic conductivity (MPa, positive magnitude)}
 
 \item{root_c}{shape parameter of the ROOT hydraulic vulnerability curve (unitless)}
 
-\item{root_P50}{ROOT potential at 50% loss of hydraulic conductivity (MPa, positive magnitude)}
+\item{root_P50}{ROOT potential at 50\% loss of hydraulic conductivity (MPa, positive magnitude)}
 
 \item{TF24_beta2}{exponent for the effect of hydraulic risk (unitless)}
 

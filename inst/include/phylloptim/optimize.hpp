@@ -119,13 +119,12 @@ double brent_fmin(Function f, double ax, double bx, double tol,
 // the argmax does not feed a gradient (the single-layer leaf optimisers), prefer
 // brent_fmin, which was measured ~2.3-2.6x faster there.
 //
-// ⚠️ **The production collar solver no longer uses this** -- PLAN 11a replaced it
-// with a safeguarded root-find on the first-order condition
-// (Leaf::maximise_profit_over_collar), and this is now only that solver's fallback
-// for the case where neither bracket endpoint has a usable gradient. The reasoning
-// this comment used to give -- that the collar argmax feeds the demographic
-// growth-rate gradient and so must vary smoothly with plant state -- was right
-// about the requirement and wrong about which solver meets it best:
+// ⚠️ **This is NOT the production collar solver.** That is a safeguarded
+// root-find on the first-order condition (Leaf::maximise_profit_over_collar);
+// this is only its fallback, for the case where neither bracket endpoint has a
+// usable gradient. The collar argmax feeds the demographic growth-rate gradient
+// and so must vary smoothly with plant state -- and a comparison-based search is
+// not the way to get that:
 //
 //   * A fixed iteration COUNT is not smoothness. Golden section terminates on
 //     bracket WIDTH, so it resolves the argmax only to `tol` and the residual
@@ -138,9 +137,9 @@ double brent_fmin(Function f, double ax, double bx, double tol,
 //     measured ~1000x smoother second differences in a trait, and 24.5% faster
 //     (2.65 vs 3.51 us/solve, interleaved at reps=2000).
 //
-// So the constraint stands and the conclusion inverted. Keep the constraint in
-// mind before changing the collar solver again; do not read this function's
-// existence as evidence that a comparison-based search is the safe choice.
+// Keep that constraint in mind before changing the collar solver, and do not
+// read this function's existence as evidence that a comparison-based search is
+// the safe choice here.
 template <typename Function>
 double golden_section_max(Function f, double ax, double bx, double tol) {
   const double gr = (std::sqrt(5.0) + 1.0) / 2.0;  // ~1.6180339...
