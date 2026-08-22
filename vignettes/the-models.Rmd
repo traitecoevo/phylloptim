@@ -142,6 +142,20 @@ Read that table for its order of magnitude and not as a controlled comparison: t
 
 **But a stationary point is not always the answer.** Where profit is still climbing as it reaches the end of the feasible interval, `dJ/dψ` never crosses zero inside it and the optimum is that endpoint — a *constrained* optimum. This is not a corner case: it is 42 of 240 feasible rows on the reference grid. A solver has to test the derivative's sign at each end and report the pin explicitly, because a bracketing root-find handed no sign change cannot distinguish "pinned" from "failed". The reported operating-point kind is what carries that distinction.
 
+Those constrained answers are named for **the bound that binds**, because the alternative is read backwards. The feasible interval runs from `ψ_soil` — no tension gradient, hence no flow, hence closed stomata — to `ψ_crit`, the most tension the stem is allowed. So:
+
+| kind | where | what it means |
+|---|---|---|
+| `interior` | strictly inside | `dJ/dψ = 0`, the stationary case |
+| `boundary-soil` | `ψ_stem = ψ_soil` | no interior point earns its water; the leaf declines to open |
+| `boundary-crit` | `ψ_stem = ψ_crit` | still worth pulling harder; the hydraulic limit is what stops it |
+
+⚠️ **`boundary-soil` is the STRESSED case, despite sitting at the wet end of the interval.** That is why these are not called "wet-pinned" and "dry-pinned": `ψ_soil` is the least-tension end, so a name built on it reads as the comfortable one, while it is what a leaf does when carbon cannot pay for water. The reference grid makes the direction plain — warming the leaf from 25 °C to 40 °C takes `boundary-soil` from 24 rows to 80 and `boundary-crit` from 18 to none.
+
+**`boundary-crit` is rarer than it looks, and it is not reachable at all for some models.** Any product objective is immune by construction: `g(ψ_crit) = 0` makes the cost diverge before the bound, so water becomes infinitely expensive first. And a bound that binds is not the same as a bound that is *hit exactly* — the bracket steps in by around `1e-06` of its width, so testing `ψ* == ψ_soil` to detect closure is a test that never fires. Compare against the bound with a tolerance, or read the gradient's sign there.
+
+A third case is separate from both and worth not confusing with them: where the soil is drier than `ψ_crit` there is no feasible interval at all, so nothing is optimised — that is `hydraulic-shutdown`, 48 of the 576 reference points, and it is a statement about feasibility rather than about a choice.
+
 **And a stationary point need not be unique.** Where the marginal cost is peaked (see the cost curves below) the condition can have two roots, and a bracketing solve finds one of them. This is the one real argument for the scan, and it is why the scan is still there: searching the objective over a grid finds the taller hump but cannot feed a gradient, while solving the condition feeds a gradient but can land on the wrong one.
 
 The two properties are not actually in conflict, which is the point worth carrying away. What reconciles them is **multi-start on the first-order condition** — several sub-brackets, each yielding an exact stationary point, compared on profit — rather than a grid. Every candidate is then a genuine stationary point, so each is smooth in the traits and the comparison between them is a comparison of maxima, which is the well-conditioned quantity. A grid argmax can be neither.
@@ -202,7 +216,6 @@ so `f` is the fraction of maximum conductivity remaining, `k` the conductance an
 | **Sperry et al.** [@sperry2017] | `ProfitMax` | $\dfrac{k(\psi_s)-k(\psi)}{k(\psi_s)-k_{\rm crit}}$ | $\dfrac{k_{\max}\lvert f'\rvert}{k(\psi_s)-k_{\rm crit}}$ | dimensionless |
 | **Joshi & Stocker** [@joshi2022] | `JS22` | $\gamma_{J}\,(\Delta\psi)^{2}$ | $2\gamma_{J}\,\Delta\psi$ | carbon |
 | **Wolf et al.** [@wolf2016] | `CMax` | $\tfrac{a}{2}(\psi^{2}-\psi_s^{2})+b(\psi-\psi_s)$ | $a\,\psi+b$ | carbon |
-
 | **Eller** [@eller2020] | `SOX` | $-\log g_{\rm SOX}(\psi)$ | $-g'/g$ | log carbon |
 | **Jones et al.** [@jones2026] | `JW26` | $-\log g_{\rm JW}(\psi)$ | $1/(\psi_{\rm crit}-\psi)$ | log carbon |
 
@@ -271,6 +284,79 @@ cat(sprintf("|f'| peaks at %.2f MPa; %.1f%% of peak at the wet end, %.0f%% at ps
 That is still enough to matter: a marginal cost that starts at zero against a marginal benefit that also saturates is the shape whose first-order condition can cross zero twice, which is why the conductance forms are the ones needing a search able to see past a local maximum, and the monotone Cowan-Farquhar cost is not.
 
 `JS22` is monotone for the same reason and a different one: `2γ_J Δψ` rises linearly from zero at the wet end and never turns over, so its first-order condition crosses once. The two-humped case needs a marginal cost that *falls* at the dry end, and only the `|f'|` forms do that.
+
+### The benefit link, and the proof it costs nothing
+
+Two of those seven rows do not subtract a cost, so it is worth showing exactly how they belong in one table with the five that do — and that nothing is lost in getting them there.
+
+Write the objective as
+
+$$J(\psi)=h\big(A(\psi)\big)-C(\psi)$$
+
+with `h` a **benefit link**: a transform applied to assimilation before the cost is subtracted. Three links cover every model here.
+
+| link | `h(A)` | `h'(A)` | curves |
+|---|---|---|---|
+| identity | $A$ | $1$ | `TF24`, `CF77`, `JS22`, `CMax` |
+| log | $\log A$ | $1/A$ | `SOX`, `JW26` |
+| scaled | $A/\lvert A\rvert_{\max}$ | $1/\lvert A\rvert_{\max}$ | `ProfitMax` |
+
+For a product objective, take the cost to be the **logarithm** of the reduction factor,
+
+$$C(\psi):=-\log g(\psi)
+\qquad\Longrightarrow\qquad
+J=\log A+\log g=\log\big(A\,g\big)=\log P$$
+
+so the additive form is not an analogy: `J` *is* the logarithm of the product. The link therefore applies to the whole objective and not to half of it — the cost's share of the transform is simply absorbed into which cost curve you name, which is the `−log g` row of the table above.
+
+**Why the first-order condition is unchanged.** Differentiate both descriptions of the same maximum:
+
+$$\frac{dP}{d\psi}=A'g+Ag',
+\qquad
+\frac{dJ}{d\psi}=\frac{A'}{A}+\frac{g'}{g}=\frac{A'g+Ag'}{A\,g}=\frac{1}{A\,g}\frac{dP}{d\psi}$$
+
+The two differ by the factor `A·g`, which is **strictly positive** wherever the log form is defined. So they vanish at exactly the same potentials: the framework's stationary points *are* the product's stationary points, and putting the link on the benefit drops nothing. It is the product rule, divided through.
+
+That is checkable rather than decorative. Below, the left-hand side comes from the model's own `dJ/dψ` — the one expression it uses for all seven curves — and the right-hand side is `A'g + Ag'` assembled from parts: `A'` as the derivative of a **zero-cost** curve, and `g'` differentiated by hand from the closed form for `g` quoted above, so the check does not simply ask the implementation to agree with itself.
+
+```{r}
+#| label: link-identity
+curve_index <- function(nm) match(nm, cost_curve_names()) - 1L
+psi_soil <- 1.0
+tr <- leaf_traits(JS22_gamma = 0)          # a zero unit cost: dC/dpsi is exactly 0,
+l  <- leaf_model(tr, supply = leaf_supply_single())   # so JS22's derivative IS dA/dpsi
+set_drivers(l, psi_soil = psi_soil, PPFD = 900)
+
+f      <- function(p) 2^-((p / tr$stem_P50)^tr$stem_c)
+fprime <- function(p) -f(p) * log(2) * tr$stem_c * p^(tr$stem_c - 1) / tr$stem_P50^tr$stem_c
+model <- list(
+  SOX  = list(P  = function(p) l$profit_psi_stem_SOX(p, psi_soil),
+              g  = function(p) (f(p) - 0.05) / 0.95,
+              gp = function(p) fprime(p) / 0.95),
+  JW26 = list(P  = function(p) l$profit_psi_stem_JW26(p, psi_soil),
+              g  = function(p) 1 - p / l$psi_crit,
+              gp = function(p) -1 / l$psi_crit))
+
+cat(sprintf("%-5s %6s %14s %14s %9s\n", "curve", "psi", "(logP)'*P", "A'g + Ag'", "rel"))
+for (nm in names(model)) {
+  m <- model[[nm]]
+  for (q in c(1.5, 2.5, 3.5, 4.5)) {
+    P  <- m$P(q)                                   # the UNtransformed objective, A*g
+    A  <- l$assim_colimited_
+    lhs <- l$dprofit_dpsi_stem_by(curve_index(nm), q)[1] * P
+    Ap  <- l$dprofit_dpsi_stem_by(curve_index("JS22"), q)[1]
+    rhs <- Ap * m$g(q) + A * m$gp(q)
+    cat(sprintf("%-5s %6.1f %14.6f %14.6f %9.1e\n", nm, q, lhs, rhs,
+                abs(lhs - rhs) / max(abs(Ap * m$g(q)), abs(A * m$gp(q)))))
+  }
+}
+```
+
+Agreement is at the last bit, and the relative error is measured against the **scale of the two terms** rather than against their sum. That is deliberate: `A'g + Ag'` cancels to exactly zero at the optimum, so an error relative to the sum would diverge there for a perfectly correct implementation.
+
+⚠️ **The link is how to state this cost, not how to search for it.** `log A` needs `A > 0`, and that fails precisely in the closed-stomata state where `A = −R_d < 0` — which is a candidate the optimiser has to keep, since a hot leaf's best move is to shut. So the solvers maximise the **product** and report the product in `profit_`, while the derivative uses the log form. They share an argmax, so this is a free choice of representation rather than a compromise.
+
+One consequence to keep in view when reading `profit_` across models: it now carries three kinds of number — carbon for the four difference objectives, a dimensionless normalised profit for `ProfitMax`, and carbon times a dimensionless factor for the two products. Comparing it between curves is not meaningful; comparing each curve's argmax is.
 
 ### Pricing the drop is not pricing the potential
 
