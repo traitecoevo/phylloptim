@@ -531,7 +531,17 @@ const double kPoison = -12345.0;
 // row records the bracket rather than the model.
 const double kLambdaCF77 = 1.5e5;
 
-enum class Solver { TF, ProfitMax, CF77, Collar };
+// ⚠️ APPEND ONLY. The reuse pass drives ONE Leaf through kSolvers in order, so
+// inserting a solver changes what every solver after it inherits -- see the header.
+// Appending leaves every existing row byte-identical, which is the check when this
+// file is regenerated.
+enum class Solver { TF, ProfitMax, CF77, Collar, JS22, CMax, SOX };
+
+// ⚠️ EVERY PER-SOLVER ARRAY IS SIZED FROM THIS, never from a literal. Those arrays
+// are indexed by the enum VALUE, so a hardcoded bound is an out-of-bounds write the
+// moment a solver is appended -- which is exactly the bug bench_gradient carried
+// through three trait-count changes before ASan named it. Keep it last-member + 1.
+constexpr int kNSolvers = static_cast<int>(Solver::SOX) + 1;
 enum class Topology { Single, Multi1, Multi3 };
 
 const char *solver_name(Solver s) {
@@ -540,6 +550,9 @@ const char *solver_name(Solver s) {
     case Solver::ProfitMax:     return "ProfitMax";
     case Solver::CF77: return "CF77";
     case Solver::Collar:        return "collar";
+    case Solver::JS22:          return "JS22";
+    case Solver::CMax:          return "CMax";
+    case Solver::SOX:           return "SOX";
   }
   return "unknown";
 }
@@ -658,6 +671,11 @@ void dispatch(phylloptim::Leaf &l, Solver s) {
                             l.CF77_lambda_ = kLambdaCF77;
                             l.optimise_psi_stem_CF77(); break;
     case Solver::Collar:    l.find_root_collar_psi();        break;
+    // These three need nothing set first: their parameters are TRAITS with
+    // defaults, where CF77_lambda_ above is an input with none.
+    case Solver::JS22:      l.optimise_psi_stem_JS22();      break;
+    case Solver::CMax:      l.optimise_psi_stem_CMax();      break;
+    case Solver::SOX:       l.optimise_psi_stem_SOX();       break;
   }
 }
 
@@ -686,7 +704,10 @@ const double kOptPsiSoils[] = {0.5, 1.0, 2.0, 3.0, 4.0, 6.0};
 const double kOptTemps[] = {25.0, 40.0, 50.0};
 const double kOptPPFDs[] = {0.0, 1500.0};
 const Solver kSolvers[] = {Solver::TF, Solver::ProfitMax,
-                           Solver::CF77, Solver::Collar};
+                           Solver::CF77, Solver::Collar,
+                           Solver::JS22, Solver::CMax, Solver::SOX};
+static_assert(sizeof(kSolvers) / sizeof(kSolvers[0]) == kNSolvers,
+              "kSolvers must list every Solver exactly once");
 const Topology kTopologies[] = {Topology::Single, Topology::Multi1,
                                 Topology::Multi3};
 
@@ -955,7 +976,7 @@ int compare_optima(Tolerance tol) {
 // lifted or added, and it costs nothing to look at.
 void report_optima_shape(const std::vector<OptRow> &rows) {
   int threw = 0;
-  int by_solver_threw[4] = {0, 0, 0, 0};
+  int by_solver_threw[kNSolvers] = {0};
   int poisoned = 0;
   for (const OptRow &r : rows) {
     if (std::strcmp(r.status, "threw") == 0) {
@@ -973,7 +994,7 @@ void report_optima_shape(const std::vector<OptRow> &rows) {
     }
   }
   printf("  %zu rows: %d refused", rows.size(), threw);
-  for (int s = 0; s < 4; ++s) {
+  for (int s = 0; s < kNSolvers; ++s) {
     if (by_solver_threw[s] != 0) {
       printf(" (%s %d)", solver_name(static_cast<Solver>(s)),
              by_solver_threw[s]);
