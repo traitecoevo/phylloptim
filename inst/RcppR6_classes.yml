@@ -611,6 +611,19 @@ Leaf:
     optimise_psi_stem_JW26:
       return_type: void
       args: []
+    # --- runtime curve selection, for the gradient ----------------------------
+    # ⚠️ `curve` is the CostCurve enum's VALUE. R sends positions into it, so
+    # appending is safe and reordering would silently solve a different model;
+    # `curve_name()` is bound so R can compare the mapping rather than trust it.
+    optimise_psi_stem_by:
+      return_type: void
+      args: [curve: int]
+    evaluate_psi_stem_by:
+      return_type: double
+      args: [curve: int, target_psi_stem: double]
+    dprofit_dpsi_stem_by:
+      return_type: "std::vector<double>"
+      args: [curve: int, psi_stem: double, psi_upstream: double]
 
     # --- Sperry (2017) ProfitMax with BOTH terms normalised -------------------
     #

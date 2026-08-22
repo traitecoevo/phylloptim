@@ -71,7 +71,7 @@ namespace gradient {
 // parameter. `test-gradient-batch.R` reads the names back out of C++ and compares
 // them with R's, so the two cannot drift apart without a failure.
 inline constexpr int n_traits = 15;
-inline constexpr int n_pars = 17;
+inline constexpr int n_pars = 18;
 
 // Every index by name, so nothing below indexes `theta` with a bare integer.
 // The first `n_traits` are `set_traits`' arguments in its order, which is also
@@ -98,6 +98,16 @@ inline constexpr int par_CMax_b = 14;
 // `test-gradient-batch.R` compares this enumeration against R's copy.
 inline constexpr int par_kmax = 15;
 inline constexpr int par_resistance = 16;
+// Cowan-Farquhar's prescribed marginal value of water. A pure APPEND after the two
+// existing non-traits, which is only safe because R addresses theta's non-trait
+// columns by NAME -- it used to take the traits as "everything but the last two"
+// and would have read this as `resistance`.
+//
+// ⚠️ AVAILABLE FOR ONE MODEL. It is CF77's only parameter and every other curve's
+// lambda is EMERGENT, derived from that curve's own parameters rather than set. So
+// `.gradient_available_pars()` offers it only for CF77 and refuses it elsewhere,
+// naming the model -- the same treatment `resistance` gets on the wrong supply path.
+inline constexpr int par_CF77_lambda = 17;
 
 inline const std::vector<std::string>& par_names() {
   static const std::vector<std::string> names{
@@ -107,7 +117,8 @@ inline const std::vector<std::string>& par_names() {
       "curv_fact_colim", "TF24_cost_scale", "R_d_25",
       "JS22_gamma", "CMax_a", "CMax_b",
       "leaf_specific_conductance_max",
-      "resistance"};
+      "resistance",
+      "CF77_lambda_"};
   return names;
 }
 
@@ -381,6 +392,9 @@ inline void apply(Leaf& l, const double* theta, const Drivers& d, bool single,
                theta[par_curv_fact_colim], theta[par_TF24_cost_scale],
                theta[par_R_d_25], theta[par_JS22_gamma],
                theta[par_CMax_a], theta[par_CMax_b]);
+  // Not a trait, so it is set directly rather than through set_traits -- and
+  // nothing is derived from it, so a bare write leaves no stale state behind.
+  l.CF77_lambda_ = theta[par_CF77_lambda];
   if (single) {
     // R's `series_resistance()`: a default-constructed network carrying one
     // series resistance in `r_R_V_sum`, which is that field's own meaning with

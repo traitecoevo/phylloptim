@@ -78,7 +78,8 @@ leaf_batch <- function(psi_soil,
                        atm_kpa = 101.3,
                        traits = leaf_traits(),
                        control = leaf_control(),
-                       supply = leaf_supply_multilayer()) {
+                       supply = leaf_supply_multilayer(),
+                       CF77_lambda = NA_real_) {
   if (!inherits(traits, "leaf_traits")) {
     stop("`traits` must come from leaf_traits()", call. = FALSE)
   }
@@ -167,6 +168,7 @@ leaf_batch <- function(psi_soil,
          traits = traits,
          kmax = if (shared) kmax[[1L]] else kmax,
          resistance = if (shared) resistance[[1L]] else resistance,
+         CF77_lambda = CF77_lambda,
          theta_nrow = if (shared) 1L else n),
     class = "leaf_batch")
 }
@@ -442,8 +444,7 @@ leaf_gradient_batch <- function(batch,
   # explicitly designed to allow -- silently wrote `kmax` into the new slot and
   # `resistance` into `kmax`'s, with no length change to notice. Naming them
   # removes the class rather than the instance.
-  trait_names <- setdiff(par_names,
-                         c("leaf_specific_conductance_max", "resistance"))
+  trait_names <- setdiff(par_names, .gradient_non_traits)
   tv <- unlist(traits)[trait_names]
   if (anyNA(tv)) {
     stop("`traits` is missing: ",
@@ -454,6 +455,9 @@ leaf_gradient_batch <- function(batch,
   # NA on the multi-layer path, where there is no such parameter and C++ never
   # reads the column.
   m[, "resistance"] <- batch$resistance
+  # NA unless the batch was built for the CF77 route; C++ reads the slot
+  # unconditionally, so it must hold whatever the solve will actually use.
+  m[, "CF77_lambda_"] <- batch$CF77_lambda
   # Handed over WITHOUT names, as `leaf_gradient_batch()` documents: C++ indexes by
   # position, and the check there rejects any colnames that are not this order.
   unname(m)

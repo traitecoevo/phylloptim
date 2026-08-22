@@ -1062,6 +1062,29 @@ public:
   // its body is genuinely a different shape rather than a differently
   // parameterised one. Forcing it in here would mean a fourth chain whose arms
   // are empty for six of the seven.
+  // --- runtime curve selection, for the gradient (plan item 5) ---------------
+  //
+  // The three primitives a gradient needs -- solve, derivative, evaluate at a
+  // prescribed point -- for a curve chosen at RUN time. R has to pick the curve
+  // from an argument, and RcppR6 cannot bind a template, so these four dispatch a
+  // `CostCurve` from an integer once rather than needing twelve bound wrappers.
+  //
+  // ⚠️ The integer IS the enum's value and R sends positions into it, exactly as
+  // it already does for `gradient::par_names`. Appending a curve is safe;
+  // reordering `CostCurve` would silently solve a different model. `curve_name()`
+  // exists so R can read the mapping back out and compare rather than trust it.
+  //
+  // ⚠️ THE ADDITIVE CURVES ONLY. `dprofit_dpsi_stem` computes `dA/dpsi - dC/dpsi`
+  // and a product objective's derivative is `(dA/dpsi)*g + A*g'`, so `SOX` and
+  // `JW26` are refused here rather than returned wrong. They are still reachable
+  // through their own `optimise_psi_stem_*`.
+  static bool curve_has_derivative(int curve);
+  static std::string curve_name(int curve);
+  void optimise_psi_stem_by(int curve);
+  double evaluate_psi_stem_by(int curve, double target_psi_stem);
+  std::vector<double> dprofit_dpsi_stem_by(int curve, double psi_stem,
+                                           double psi_upstream);
+
   template <CostCurve K> void optimise_psi_stem_single();
   template <CostCurve K> void check_cost_parameters();
   template <CostCurve K> double profit_psi_stem_for(double psi_stem,
@@ -4480,6 +4503,99 @@ inline void Leaf::optimise_psi_stem_ProfitMax() {
   profit_ = profit_psi_stem_ProfitMax(opt_psi_stem_, psi_soil);
   lambda_emergent_ = lambda_ProfitMax(opt_psi_stem_);
 }
+
+// --- runtime curve selection --------------------------------------------------
+//
+// One switch, so the integer-to-curve mapping is written once. `-Werror=switch`
+// makes a curve added to the enum and forgotten here a build failure.
+namespace detail {
+inline const char* cost_curve_name(Leaf::CostCurve k) {
+  switch (k) {
+    case Leaf::CostCurve::TF24: return "TF24";
+    case Leaf::CostCurve::CF77: return "CF77";
+    case Leaf::CostCurve::JS22: return "JS22";
+    case Leaf::CostCurve::CMax: return "CMax";
+    case Leaf::CostCurve::SOX:  return "SOX";
+    case Leaf::CostCurve::JW26: return "JW26";
+  }
+  return "unknown";
+}
+}  // namespace detail
+
+inline std::string Leaf::curve_name(int curve) {
+  if (curve < 0 || curve > static_cast<int>(CostCurve::JW26)) {
+    return "unknown";
+  }
+  return detail::cost_curve_name(static_cast<CostCurve>(curve));
+}
+
+// Whether `dprofit_dpsi_stem_by` will accept this curve. Exposed so a caller can
+// ask before committing to a route, rather than discovering it through an error.
+inline bool Leaf::curve_has_derivative(int curve) {
+  if (curve < 0 || curve > static_cast<int>(CostCurve::JW26)) return false;
+  const CostCurve k = static_cast<CostCurve>(curve);
+  return k != CostCurve::SOX && k != CostCurve::JW26;
+}
+
+inline void Leaf::optimise_psi_stem_by(int curve) {
+  switch (static_cast<CostCurve>(curve)) {
+    case CostCurve::TF24: optimise_psi_stem_single<CostCurve::TF24>(); return;
+    case CostCurve::CF77: optimise_psi_stem_single<CostCurve::CF77>(); return;
+    case CostCurve::JS22: optimise_psi_stem_single<CostCurve::JS22>(); return;
+    case CostCurve::CMax: optimise_psi_stem_single<CostCurve::CMax>(); return;
+    case CostCurve::SOX:  optimise_psi_stem_single<CostCurve::SOX>();  return;
+    case CostCurve::JW26: optimise_psi_stem_single<CostCurve::JW26>(); return;
+  }
+  util::stop("unknown cost curve index " + util::to_string(curve));
+}
+
+inline double Leaf::evaluate_psi_stem_by(int curve, double target_psi_stem) {
+  switch (static_cast<CostCurve>(curve)) {
+    case CostCurve::TF24: return evaluate_psi_stem<CostCurve::TF24>(target_psi_stem);
+    case CostCurve::CF77: return evaluate_psi_stem<CostCurve::CF77>(target_psi_stem);
+    case CostCurve::JS22: return evaluate_psi_stem<CostCurve::JS22>(target_psi_stem);
+    case CostCurve::CMax: return evaluate_psi_stem<CostCurve::CMax>(target_psi_stem);
+    case CostCurve::SOX:  return evaluate_psi_stem<CostCurve::SOX>(target_psi_stem);
+    case CostCurve::JW26: return evaluate_psi_stem<CostCurve::JW26>(target_psi_stem);
+  }
+  util::stop("unknown cost curve index " + util::to_string(curve));
+  return util::na_value;
+}
+
+// ⚠️ RETURNS (value, feasible) LIKE THE COLLAR VERSION, and for the same reason:
+// `dprofit` hands back a hard 0.0 SENTINEL on its shut-down and reversed-gradient
+// exits, and a bare zero is indistinguishable from a stationary point. A composite
+// that reads the value without the flag inherits that bug.
+inline std::vector<double> Leaf::dprofit_dpsi_stem_by(int curve, double psi_stem,
+                                                      double psi_upstream) {
+  if (!curve_has_derivative(curve)) {
+    util::stop("no dprofit/dpsi_stem for the " + curve_name(curve) +
+               " curve: it maximises a PRODUCT, A*g(psi), so its derivative is "
+               "(dA/dpsi)*g + A*g' rather than dA/dpsi - dC/dpsi. Use its "
+               "optimiser directly, or finite-difference the objective.");
+  }
+  bool feasible = false;
+  double v = util::na_value;
+  switch (static_cast<CostCurve>(curve)) {
+    case CostCurve::TF24:
+      v = dprofit_dpsi_stem<CostCurve::TF24>(psi_stem, psi_upstream, &feasible);
+      break;
+    case CostCurve::CF77:
+      v = dprofit_dpsi_stem<CostCurve::CF77>(psi_stem, psi_upstream, &feasible);
+      break;
+    case CostCurve::JS22:
+      v = dprofit_dpsi_stem<CostCurve::JS22>(psi_stem, psi_upstream, &feasible);
+      break;
+    case CostCurve::CMax:
+      v = dprofit_dpsi_stem<CostCurve::CMax>(psi_stem, psi_upstream, &feasible);
+      break;
+    case CostCurve::SOX:
+    case CostCurve::JW26:
+      break;  // unreachable: refused above
+  }
+  return std::vector<double>{v, feasible ? 1.0 : 0.0};
+}
+
 
 // --- the three things that vary, each in ONE place ---------------------------
 //

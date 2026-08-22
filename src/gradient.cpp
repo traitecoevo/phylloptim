@@ -61,7 +61,7 @@ DriverBatch* checked(SEXP drivers) {
 //' positions into this enumeration, so appending to it is safe and reordering it
 //' would silently differentiate the wrong parameter.
 //'
-//' @return A character vector of sixteen names.
+//' @return A character vector, one entry per differentiable parameter.
 //' @seealso [leaf_gradient_batch()]
 //' @examples
 //' gradient_par_names()
@@ -69,6 +69,54 @@ DriverBatch* checked(SEXP drivers) {
 // [[Rcpp::export]]
 std::vector<std::string> gradient_par_names() {
   return phylloptim::gradient::par_names();
+}
+
+//' The cost curves, in the order C++ indexes them
+//'
+//' Every optimality model this package implements, as names, in the order of the
+//' `CostCurve` enumeration. R selects a curve by its POSITION in this vector, so
+//' the vector is read back out of C++ rather than restated in R: appending a curve
+//' is safe and reordering the enumeration would silently solve a different model.
+//'
+//' @return A character vector of curve names.
+//' @seealso [cost_curve_has_derivative()], [leaf_gradient()]
+//' @examples
+//' cost_curve_names()
+//' @export
+// [[Rcpp::export]]
+std::vector<std::string> cost_curve_names() {
+  std::vector<std::string> out;
+  for (int i = 0; ; ++i) {
+    const std::string nm = phylloptim::Leaf::curve_name(i);
+    if (nm == "unknown") break;
+    out.push_back(nm);
+  }
+  return out;
+}
+
+//' Which cost curves have an analytic first derivative
+//'
+//' `TRUE` where `dprofit/dpsi_stem` exists, which is what a gradient needs in
+//' order to test stationarity and to apply the implicit function theorem.
+//'
+//' It is `FALSE` for the **product** objectives. Those maximise `A * g(psi)`
+//' rather than `A - C(psi)`, so their derivative is `(dA/dpsi)*g + A*g'` and not
+//' the `dA/dpsi - dC/dpsi` the shared expression computes. They remain solvable
+//' through their own optimisers; only the exact gradient is unavailable.
+//'
+//' @return A logical vector parallel to [cost_curve_names()].
+//' @seealso [cost_curve_names()]
+//' @examples
+//' stats::setNames(cost_curve_has_derivative(), cost_curve_names())
+//' @export
+// [[Rcpp::export]]
+std::vector<bool> cost_curve_has_derivative() {
+  std::vector<bool> out;
+  for (int i = 0; ; ++i) {
+    if (phylloptim::Leaf::curve_name(i) == "unknown") break;
+    out.push_back(phylloptim::Leaf::curve_has_derivative(i));
+  }
+  return out;
 }
 
 //' The differentiated outputs, in the order C++ indexes them

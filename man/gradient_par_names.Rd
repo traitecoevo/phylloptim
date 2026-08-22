@@ -7,7 +7,7 @@
 gradient_par_names()
 }
 \value{
-A character vector of sixteen names.
+A character vector, one entry per differentiable parameter.
 }
 \description{
 The fourteen [leaf_traits()] in `set_traits()`'s argument order, then

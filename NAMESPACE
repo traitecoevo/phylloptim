@@ -3,6 +3,8 @@
 S3method(print,leaf_batch)
 export(Leaf)
 export(RootNetwork)
+export(cost_curve_has_derivative)
+export(cost_curve_names)
 export(gradient_output_names)
 export(gradient_par_names)
 export(leaf_batch)

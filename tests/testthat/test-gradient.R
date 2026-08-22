@@ -1037,3 +1037,62 @@ test_that("psi and dpsi_dtheta are validated together", {
                     c(d, list(pars = pars, psi = 3.0, dpsi_dtheta = c(1, 2))))
   expect_identical(by_name$gradient, by_pos$gradient)
 })
+
+# --- per-model parameter availability (plan item 4) --------------------------
+
+test_that("CF77_lambda_ is in the enumeration and refused by other models", {
+  # It is Cowan & Farquhar's only parameter. Every other curve's lambda is
+  # EMERGENT -- derived from that curve's own parameters rather than set -- so the
+  # slot exists once in the enumeration and is available for one model.
+  expect_true("CF77_lambda_" %in% gradient_par_names())
+  expect_identical(gradient_par_names()[[length(gradient_par_names())]],
+                   "CF77_lambda_")
+
+  # ⚠️ REFUSED, not returned as a zero. A zero means "in this objective but
+  # inactive at this operating point", which is the psi_crit case and is
+  # information. Structurally absent from the objective is a different statement,
+  # and an optimiser handed a zero would read the parameter as inert and converge.
+  expect_error(leaf_gradient(psi_soil = 2.0, PPFD = 900,
+                             pars = "CF77_lambda_"),
+               "not a parameter of the collar model")
+  # And the message names the axis that ruled it out, so a caller is not left
+  # looking at the supply path.
+  expect_error(leaf_gradient(psi_soil = 2.0, PPFD = 900,
+                             pars = "CF77_lambda_"),
+               "emergent")
+
+  # The default must not offer what it would then refuse.
+  expect_false("CF77_lambda_" %in%
+                 phylloptim:::.gradient_available_pars(TRUE, "collar"))
+  expect_true("CF77_lambda_" %in%
+                phylloptim:::.gradient_available_pars(TRUE, "CF77"))
+
+  # The two axes are independent: the supply path still rules out `resistance`.
+  multi <- phylloptim:::.gradient_available_pars(FALSE, "CF77")
+  expect_false("resistance" %in% multi)
+  expect_true("CF77_lambda_" %in% multi)
+
+  # An unknown model is refused rather than silently offering everything.
+  expect_error(phylloptim:::.gradient_available_pars(TRUE, "Medlyn"),
+               "no gradient route")
+})
+
+test_that("the curve registry is read from C++, not restated in R", {
+  # R selects a curve by POSITION in this vector, so it is compared rather than
+  # trusted -- the same discipline gradient_par_names() gets.
+  nms <- cost_curve_names()
+  expect_identical(nms, c("TF24", "CF77", "JS22", "CMax", "SOX", "JW26"))
+
+  # The product objectives have no analytic dprofit/dpsi_stem: their derivative is
+  # (dA/dpsi)*g + A*g', not dA/dpsi - dC/dpsi.
+  has <- stats::setNames(cost_curve_has_derivative(), nms)
+  expect_true(all(has[c("TF24", "CF77", "JS22", "CMax")]))
+  expect_false(any(has[c("SOX", "JW26")]))
+
+  # And asking for one anyway is refused by name rather than returning a number of
+  # the wrong kind.
+  l <- leaf_model(supply = leaf_supply_single())
+  set_drivers(l, psi_soil = 1.5, PPFD = 900)
+  expect_error(l$dprofit_dpsi_stem_by(which(nms == "SOX") - 1L, 2.0, 1.5),
+               "maximises a PRODUCT")
+})

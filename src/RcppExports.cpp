@@ -669,6 +669,44 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// Leaf__optimise_psi_stem_by
+void Leaf__optimise_psi_stem_by(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int curve);
+RcppExport SEXP _phylloptim_Leaf__optimise_psi_stem_by(SEXP obj_SEXP, SEXP curveSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    Rcpp::traits::input_parameter< int >::type curve(curveSEXP);
+    Leaf__optimise_psi_stem_by(obj_, curve);
+    return R_NilValue;
+END_RCPP
+}
+// Leaf__evaluate_psi_stem_by
+double Leaf__evaluate_psi_stem_by(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int curve, double target_psi_stem);
+RcppExport SEXP _phylloptim_Leaf__evaluate_psi_stem_by(SEXP obj_SEXP, SEXP curveSEXP, SEXP target_psi_stemSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    Rcpp::traits::input_parameter< int >::type curve(curveSEXP);
+    Rcpp::traits::input_parameter< double >::type target_psi_stem(target_psi_stemSEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__evaluate_psi_stem_by(obj_, curve, target_psi_stem));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__dprofit_dpsi_stem_by
+std::vector<double> Leaf__dprofit_dpsi_stem_by(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int curve, double psi_stem, double psi_upstream);
+RcppExport SEXP _phylloptim_Leaf__dprofit_dpsi_stem_by(SEXP obj_SEXP, SEXP curveSEXP, SEXP psi_stemSEXP, SEXP psi_upstreamSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    Rcpp::traits::input_parameter< int >::type curve(curveSEXP);
+    Rcpp::traits::input_parameter< double >::type psi_stem(psi_stemSEXP);
+    Rcpp::traits::input_parameter< double >::type psi_upstream(psi_upstreamSEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__dprofit_dpsi_stem_by(obj_, curve, psi_stem, psi_upstream));
+    return rcpp_result_gen;
+END_RCPP
+}
 // Leaf__thermal_cost_at
 double Leaf__thermal_cost_at(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double leaf_temp);
 RcppExport SEXP _phylloptim_Leaf__thermal_cost_at(SEXP obj_SEXP, SEXP leaf_tempSEXP) {
@@ -2944,6 +2982,26 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// cost_curve_names
+std::vector<std::string> cost_curve_names();
+RcppExport SEXP _phylloptim_cost_curve_names() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(cost_curve_names());
+    return rcpp_result_gen;
+END_RCPP
+}
+// cost_curve_has_derivative
+std::vector<bool> cost_curve_has_derivative();
+RcppExport SEXP _phylloptim_cost_curve_has_derivative() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(cost_curve_has_derivative());
+    return rcpp_result_gen;
+END_RCPP
+}
 // gradient_output_names
 std::vector<std::string> gradient_output_names();
 RcppExport SEXP _phylloptim_gradient_output_names() {
@@ -3070,6 +3128,9 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__optimise_psi_stem_CMax", (DL_FUNC) &_phylloptim_Leaf__optimise_psi_stem_CMax, 1},
     {"_phylloptim_Leaf__optimise_psi_stem_SOX", (DL_FUNC) &_phylloptim_Leaf__optimise_psi_stem_SOX, 1},
     {"_phylloptim_Leaf__optimise_psi_stem_JW26", (DL_FUNC) &_phylloptim_Leaf__optimise_psi_stem_JW26, 1},
+    {"_phylloptim_Leaf__optimise_psi_stem_by", (DL_FUNC) &_phylloptim_Leaf__optimise_psi_stem_by, 2},
+    {"_phylloptim_Leaf__evaluate_psi_stem_by", (DL_FUNC) &_phylloptim_Leaf__evaluate_psi_stem_by, 3},
+    {"_phylloptim_Leaf__dprofit_dpsi_stem_by", (DL_FUNC) &_phylloptim_Leaf__dprofit_dpsi_stem_by, 4},
     {"_phylloptim_Leaf__thermal_cost_at", (DL_FUNC) &_phylloptim_Leaf__thermal_cost_at, 2},
     {"_phylloptim_Leaf__prepare_profitmax", (DL_FUNC) &_phylloptim_Leaf__prepare_profitmax, 1},
     {"_phylloptim_Leaf__profit_psi_stem_ProfitMax", (DL_FUNC) &_phylloptim_Leaf__profit_psi_stem_ProfitMax, 3},
@@ -3277,6 +3338,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__H2O_CO2_stom_diff_ratio___get", (DL_FUNC) &_phylloptim_Leaf__H2O_CO2_stom_diff_ratio___get, 1},
     {"_phylloptim_Leaf__H2O_CO2_stom_diff_ratio___set", (DL_FUNC) &_phylloptim_Leaf__H2O_CO2_stom_diff_ratio___set, 2},
     {"_phylloptim_gradient_par_names", (DL_FUNC) &_phylloptim_gradient_par_names, 0},
+    {"_phylloptim_cost_curve_names", (DL_FUNC) &_phylloptim_cost_curve_names, 0},
+    {"_phylloptim_cost_curve_has_derivative", (DL_FUNC) &_phylloptim_cost_curve_has_derivative, 0},
     {"_phylloptim_gradient_output_names", (DL_FUNC) &_phylloptim_gradient_output_names, 0},
     {"_phylloptim_gradient_batch_prepare", (DL_FUNC) &_phylloptim_gradient_batch_prepare, 9},
     {"_phylloptim_gradient_batch_check", (DL_FUNC) &_phylloptim_gradient_batch_check, 1},

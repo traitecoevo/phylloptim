@@ -546,7 +546,11 @@ leaf_gradient <- function(psi_soil,
   theta <- .gradient_theta(traits, leaf_specific_conductance_max, supply,
                            root_network)
   if (is.null(pars)) {
-    pars <- names(theta)
+    # ⚠️ WHAT IS AVAILABLE, not every slot in `theta`. The enumeration now carries
+    # a parameter that belongs to one model, so "all of them" and "all of the ones
+    # this route can differentiate" have stopped being the same set -- and taking
+    # the former made the default refuse itself.
+    pars <- .gradient_available_pars(identical(supply$kind, "single"))
   }
   # Shared with leaf_gradient_batch(), so the two entry points cannot disagree
   # about which parameters exist or explain a rejection differently.
@@ -888,25 +892,57 @@ leaf_gradient <- function(psi_soil,
   nms <- NULL
   function() {
     if (is.null(nms)) {
-      nms <<- c(names(.leaf_trait_defaults), "leaf_specific_conductance_max",
-                "resistance")
+      nms <<- c(names(.leaf_trait_defaults), .gradient_non_traits)
     }
     nms
   }
 })
+
+# The differentiable parameters that are NOT traits, in enumeration order after the
+# traits. Named once because three places need to know which slots `leaf_traits()`
+# does not supply: the enumeration itself, `.gradient_theta_matrix()`'s trait
+# subset, and the batch's column fills. It used to be spelled as "everything but
+# the last two", which was correct only while there were exactly two.
+.gradient_non_traits <- c("leaf_specific_conductance_max", "resistance",
+                          "CF77_lambda_")
 
 # What `pars` may name, and the message when it names something else. One
 # definition, used by `leaf_gradient()` and by `leaf_gradient_batch()`: the
 # multi-layer case has to be named specially, because `resistance` is a real
 # parameter on the OTHER supply path and "not differentiable" would be misleading
 # rather than merely unhelpful.
-.gradient_available_pars <- function(single) {
+# ⚠️ TWO AXES, not one. A parameter can be unavailable because of the SUPPLY PATH
+# (`resistance` exists only on the single-potential one) or because of the ACTIVE
+# MODEL (`CF77_lambda_` is Cowan-Farquhar's only parameter, and every other curve's
+# lambda is emergent rather than set). Both refuse, and both name which axis ruled
+# the parameter out, because "not differentiable" alone sends a caller looking in
+# the wrong place.
+#
+# Refusing is deliberate and is NOT the same as returning a zero. A zero means "in
+# this objective but inactive at this operating point", which is the `psi_crit`
+# case and is information. Structurally absent from the objective is a different
+# statement and gets an error.
+.gradient_model_pars <- list(
+  collar = "CF77_lambda_",   # the collar solve is TF24; CF77's lambda is not in it
+  TF24   = "CF77_lambda_",
+  CF77   = character(0),     # the one model this parameter belongs to
+  JS22   = "CF77_lambda_",
+  CMax   = "CF77_lambda_"
+)
+
+.gradient_available_pars <- function(single, model = "collar") {
   nms <- .gradient_par_names()
-  if (single) nms else setdiff(nms, "resistance")
+  if (!single) nms <- setdiff(nms, "resistance")
+  excluded <- .gradient_model_pars[[model]]
+  if (is.null(excluded)) {
+    stop("no gradient route for model \"", model, "\". Available: ",
+         paste(names(.gradient_model_pars), collapse = ", "), ".", call. = FALSE)
+  }
+  setdiff(nms, excluded)
 }
 
-.gradient_check_pars <- function(pars, single) {
-  unknown <- setdiff(pars, .gradient_available_pars(single))
+.gradient_check_pars <- function(pars, single, model = "collar") {
+  unknown <- setdiff(pars, .gradient_available_pars(single, model))
   if (length(unknown)) {
     why <- if (!single && "resistance" %in% unknown) {
       paste(" `resistance` is a parameter of the single-potential path only;",
@@ -914,6 +950,13 @@ leaf_gradient <- function(psi_soil,
             "from root carbon.")
     } else {
       ""
+    }
+    if ("CF77_lambda_" %in% unknown) {
+      stop("`pars` names `CF77_lambda_`, which is not a parameter of the ", model,
+           " model: it is Cowan & Farquhar's PRESCRIBED marginal value of water, ",
+           "and every other cost curve's lambda is emergent -- derived from that ",
+           "curve's own parameters rather than set. Differentiate those instead, ",
+           "or pass model = \"CF77\".", call. = FALSE)
     }
     stop("`pars` names things this cannot differentiate: ",
          paste(unknown, collapse = ", "),
@@ -948,12 +991,17 @@ leaf_gradient <- function(psi_soil,
 # and `dY/dtheta = dY/dtheta|_psi + (dY/dpsi)(dpsi*/dtheta)` hold for any
 # parameter profit depends on. What differs per parameter is only which setter
 # applies it, which is .gradient_setter's job.
-.gradient_theta <- function(traits, kmax, supply, root_network) {
+.gradient_theta <- function(traits, kmax, supply, root_network,
+                            CF77_lambda = NA_real_) {
   theta <- c(unlist(traits), leaf_specific_conductance_max = kmax)
   if (identical(supply$kind, "single")) {
     theta <- c(theta, resistance = root_network$r_R_V_sum[[1]])
   }
-  theta
+  # ⚠️ NA unless the caller is on the CF77 route. C++ reads the slot
+  # unconditionally, so it must hold a number the solve will actually use -- and on
+  # every other route that number is never read, exactly as `resistance` is not
+  # read on the multi-layer path.
+  c(theta, CF77_lambda_ = CF77_lambda)
 }
 
 
@@ -1051,6 +1099,16 @@ leaf_gradient <- function(psi_soil,
     apply_drivers(net, base$PPFD, base$psi_soil, base$soil_depth,
                   theta[["leaf_specific_conductance_max"]], base$atm_vpd,
                   base$ca, base$leaf_temp, base$atm_o2_kpa, base$atm_kpa)
+    # ⚠️ ONLY WHEN IT IS IN PLAY, and the guard is about cost as much as
+    # correctness. This is a field write, so it costs a `.Call` per perturbation --
+    # and `test-cost.R` counts those. On every route but CF77 the slot is NA, so
+    # writing it unconditionally would both poison the leaf and add a crossing to
+    # every gradient that has nothing to do with this parameter. The `is.na` is
+    # pure R and free.
+    lam <- theta[["CF77_lambda_"]]
+    if (!is.na(lam)) {
+      l$CF77_lambda_ <- lam
+    }
     invisible(l)
   }
 }

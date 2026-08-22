@@ -17,7 +17,8 @@ leaf_batch(
   atm_kpa = 101.3,
   traits = leaf_traits(),
   control = leaf_control(),
-  supply = leaf_supply_multilayer()
+  supply = leaf_supply_multilayer(),
+  CF77_lambda = NA_real_
 )
 }
 \arguments{

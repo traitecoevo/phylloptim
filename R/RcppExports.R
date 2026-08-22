@@ -205,6 +205,18 @@ Leaf__optimise_psi_stem_JW26 <- function(obj_) {
     invisible(.Call('_phylloptim_Leaf__optimise_psi_stem_JW26', PACKAGE = 'phylloptim', obj_))
 }
 
+Leaf__optimise_psi_stem_by <- function(obj_, curve) {
+    invisible(.Call('_phylloptim_Leaf__optimise_psi_stem_by', PACKAGE = 'phylloptim', obj_, curve))
+}
+
+Leaf__evaluate_psi_stem_by <- function(obj_, curve, target_psi_stem) {
+    .Call('_phylloptim_Leaf__evaluate_psi_stem_by', PACKAGE = 'phylloptim', obj_, curve, target_psi_stem)
+}
+
+Leaf__dprofit_dpsi_stem_by <- function(obj_, curve, psi_stem, psi_upstream) {
+    .Call('_phylloptim_Leaf__dprofit_dpsi_stem_by', PACKAGE = 'phylloptim', obj_, curve, psi_stem, psi_upstream)
+}
+
 Leaf__thermal_cost_at <- function(obj_, leaf_temp) {
     .Call('_phylloptim_Leaf__thermal_cost_at', PACKAGE = 'phylloptim', obj_, leaf_temp)
 }
@@ -1037,13 +1049,48 @@ Leaf__H2O_CO2_stom_diff_ratio___set <- function(obj_, value) {
 #' positions into this enumeration, so appending to it is safe and reordering it
 #' would silently differentiate the wrong parameter.
 #'
-#' @return A character vector of sixteen names.
+#' @return A character vector, one entry per differentiable parameter.
 #' @seealso [leaf_gradient_batch()]
 #' @examples
 #' gradient_par_names()
 #' @export
 gradient_par_names <- function() {
     .Call('_phylloptim_gradient_par_names', PACKAGE = 'phylloptim')
+}
+
+#' The cost curves, in the order C++ indexes them
+#'
+#' Every optimality model this package implements, as names, in the order of the
+#' `CostCurve` enumeration. R selects a curve by its POSITION in this vector, so
+#' the vector is read back out of C++ rather than restated in R: appending a curve
+#' is safe and reordering the enumeration would silently solve a different model.
+#'
+#' @return A character vector of curve names.
+#' @seealso [cost_curve_has_derivative()], [leaf_gradient()]
+#' @examples
+#' cost_curve_names()
+#' @export
+cost_curve_names <- function() {
+    .Call('_phylloptim_cost_curve_names', PACKAGE = 'phylloptim')
+}
+
+#' Which cost curves have an analytic first derivative
+#'
+#' `TRUE` where `dprofit/dpsi_stem` exists, which is what a gradient needs in
+#' order to test stationarity and to apply the implicit function theorem.
+#'
+#' It is `FALSE` for the **product** objectives. Those maximise `A * g(psi)`
+#' rather than `A - C(psi)`, so their derivative is `(dA/dpsi)*g + A*g'` and not
+#' the `dA/dpsi - dC/dpsi` the shared expression computes. They remain solvable
+#' through their own optimisers; only the exact gradient is unavailable.
+#'
+#' @return A logical vector parallel to [cost_curve_names()].
+#' @seealso [cost_curve_names()]
+#' @examples
+#' stats::setNames(cost_curve_has_derivative(), cost_curve_names())
+#' @export
+cost_curve_has_derivative <- function() {
+    .Call('_phylloptim_cost_curve_has_derivative', PACKAGE = 'phylloptim')
 }
 
 #' The differentiated outputs, in the order C++ indexes them
