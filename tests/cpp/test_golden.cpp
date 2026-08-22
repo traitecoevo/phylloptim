@@ -168,7 +168,7 @@ struct KindCount {
 // One row per entry of kLeafTemps, in that order.
 struct TempKinds {
   double leaf_temp;
-  int interior, pinned_wet, pinned_dry, shutdown;
+  int interior, boundary_soil, boundary_crit, shutdown;
 };
 //
 // The split MOVES with temperature, in a direction that is physical: a hot leaf
@@ -188,8 +188,8 @@ int check_operating_kinds(const std::vector<Row> &rows) {
   for (const TempKinds &e : kExpectedKinds) {
     const KindCount expected[] = {
         {Kind::Interior, e.interior},
-        {Kind::PinnedWet, e.pinned_wet},
-        {Kind::PinnedDry, e.pinned_dry},
+        {Kind::BoundarySoil, e.boundary_soil},
+        {Kind::BoundaryCrit, e.boundary_crit},
         {Kind::HydraulicShutdown, e.shutdown},
         {Kind::Determined, 0},        {Kind::ShadeDeath, 0},
         {Kind::Prescribed, 0},        {Kind::SolverRefused, 0},
@@ -221,10 +221,10 @@ int check_operating_kinds(const std::vector<Row> &rows) {
     printf("kinds: %zu points at %zu leaf temperatures\n", rows.size(),
            sizeof kExpectedKinds / sizeof kExpectedKinds[0]);
     for (const TempKinds &e : kExpectedKinds) {
-      printf("  T = %4.1f C  %3d interior, %2d pinned (%2d wet, %2d dry), "
+      printf("  T = %4.1f C  %3d interior, %2d at a bound (%2d soil, %2d crit), "
              "%2d shutdown\n",
-             e.leaf_temp, e.interior, e.pinned_wet + e.pinned_dry, e.pinned_wet,
-             e.pinned_dry, e.shutdown);
+             e.leaf_temp, e.interior, e.boundary_soil + e.boundary_crit,
+             e.boundary_soil, e.boundary_crit, e.shutdown);
     }
   }
   return failures == 0 ? 0 : 1;
@@ -920,7 +920,7 @@ int compare_optima(Tolerance tol) {
       }
       // ⚠️ A RELATIVE TOLERANCE IS UNDEFINED WHERE THE TRUTH IS ZERO, and two
       // columns here are analytically zero on some rows: `hydraulic_cost_norm`
-      // at a wet-pinned ProfitMax optimum, and `profit` likewise. One platform
+      // at a boundary-soil ProfitMax optimum, and `profit` likewise. One platform
       // then computes rounding noise where another computes exactly 0.0, and
       // rel_diff correctly reports 1 for a difference of 1e-16.
       //

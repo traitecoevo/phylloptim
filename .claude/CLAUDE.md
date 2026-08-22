@@ -348,7 +348,7 @@ exactly 48 rows × 5 fields, and showed the `area_leaf` change was 2 ULP.
 model**, because every reference value is *defined* at 25 °C and a change to any
 response curve is inert there **by construction**. Hence the second temperature, and
 hence the classification being printed per temperature: points move between branches
-as the leaf warms (dry-pinned 18 → 0, wet-pinned 24 → 80). Temperature is the
+as the leaf warms (boundary-crit 18 → 0, boundary-soil 24 → 80). Temperature is the
 OUTERMOST loop, which is what lets a regeneration that adds one be checked as an
 addition — the 25 °C block must come out byte-identical.
 

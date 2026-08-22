@@ -7,7 +7,7 @@
 #      a least-squares slope of the solved output over a +-2% trait span at
 #      n = 41, and the composite agrees to about four digits.
 #   2. That it is NOT used where its premise fails. This is the half that took
-#      the work. At a wet-pinned optimum the bare composite returns O(1) where
+#      the work. At a boundary-soil optimum the bare composite returns O(1) where
 #      the truth is ~1e-08 -- plausible-looking and wrong by seven orders of
 #      magnitude -- so the test that matters is the one asserting the guard
 #      fires. `method = "ift"` exists so that failure can be provoked on demand
@@ -149,9 +149,9 @@ test_that("dcollar/dtheta is dpsi*/dtheta, computed two ways", {
 
 test_that("a pinned optimum takes the fallback, and the composite would be wrong", {
   # The hazard, pinned to specific operating points. These three are rows of the
-  # golden grid; the wet-pinned pair are where the bare composite is worst.
+  # golden grid; the boundary-soil pair are where the bare composite is worst.
   #
-  # ⚠️ The truth at a wet-pinned point is ~1e-07 or smaller -- the leaf is stuck
+  # ⚠️ The truth at a boundary-soil point is ~1e-07 or smaller -- the leaf is stuck
   # at the wettest feasible collar and barely responds -- so the ASSERTION IS
   # ABSOLUTE, not relative. A ratio test here would be meaningless in both
   # directions: the fallback's relative error is large and does not matter, and
@@ -188,7 +188,7 @@ test_that("a pinned optimum takes the fallback, and the composite would be wrong
                        pars = c("stem_P50", "vcmax_25", "R_d_25"))
   expect_identical(dry$status, "pinned")
   expect_equal(dry$gradient["vcmax_25", "A"], 0.017548, tolerance = 1e-3)
-  # ⚠️ NOT the interior identity. At a dry-pinned optimum the derived psi_crit is
+  # ⚠️ NOT the interior identity. At a boundary-crit optimum the derived psi_crit is
   # the binding constraint, so dA/dstem_P50 picks up a second term through it --
   # and both halves are independently arbitrated numbers from before the
   # reparameterisation (4.6991 for d/dstem_b, 1.2605 for d/dpsi_crit):

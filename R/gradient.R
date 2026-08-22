@@ -273,7 +273,7 @@ set_traits <- function(x, traits) {
 ##' Stationarity is the premise of the whole derivation, and it fails when the
 ##' optimum is pinned to an end of the feasible collar interval. There `psi*` is a
 ##' bound, `dprofit` is not zero at the answer, and `-M/H` is not the bound's
-##' derivative. The formula does not fail loudly: measured at a wet-pinned point
+##' derivative. The formula does not fail loudly: measured at a boundary-soil point
 ##' the true gradient is about `1e-08` and the bare composite returns `O(1)` --
 ##' plausible-looking and wrong by seven orders of magnitude. About one operating
 ##' point in six is pinned across this package's test grid, all at soil suctions of
@@ -294,7 +294,7 @@ set_traits <- function(x, traits) {
 ##' It is better in a second way, which is sharper than accuracy. `psi_crit` does
 ##' not appear in the profit function at all -- it only sets the dry end of the
 ##' feasible collar interval -- so the composite necessarily returns **exactly
-##' zero** for it. At an interior optimum that is correct. At a dry-pinned optimum
+##' zero** for it. At an interior optimum that is correct. At a boundary-crit optimum
 ##' `psi_crit` *is* the binding constraint, the true `dA/dθ` is about `1.26`, and a
 ##' zero is arguably a worse answer than a wildly wrong one: it tells an optimiser
 ##' the parameter does nothing, and nothing about it looks suspicious. The

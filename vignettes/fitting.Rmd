@@ -465,7 +465,7 @@ profit function nowhere else. It is not a parameter you can ask for — it is th
 5%-conductivity quantile of the stem curve — so its effect arrives as a **term
 inside `d/dstem_P50`**, and that term behaves completely differently on the two
 sides of a pin. At an interior optimum it is exactly zero, and the gradient is the
-curve's own effect scaled by `(ln 2)^{-1/c}`. **At a dry-pinned optimum the bound
+curve's own effect scaled by `(ln 2)^{-1/c}`. **At a boundary-crit optimum the bound
 is binding**, the term is order 1, and at the default traits it is 29% of the
 total. `leaf_gradient()` differences the solve there precisely so that half is not
 lost.
@@ -532,7 +532,7 @@ Because a fit that straddles the boundary has three problems:
   the stem curve, so it moves with `stem_P50` — but it bounds the feasible range
   rather than entering the profit function, so the composite cannot see that
   movement and returns only the curve's own term. At an interior optimum that is
-  the whole answer. At a dry-pinned optimum it is 29% short, and nothing about the
+  the whole answer. At a boundary-crit optimum it is 29% short, and nothing about the
   number looks wrong. The fallback exists for exactly this and is not a degraded
   path.
 

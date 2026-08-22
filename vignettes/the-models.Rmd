@@ -235,7 +235,7 @@ $$\log\big(A\,g\big) = \log A + \log g \quad\Longrightarrow\quad C(\psi)=-\log g
 So a product objective is a difference objective *with a transformed benefit*, and the link — `log` here, identity everywhere else — is the only new machinery the family needs. Two consequences follow, and both are real rather than bookkeeping:
 
 - **Its λ carries a factor of `A`**, because the cost is levied on *proportional* rather than absolute carbon. The section on λ derives this in one line and shows it is a property of the product form, not of this particular `g`.
-- **It can never be dry-pinned.** `g(psi_crit)` is exactly zero, so `C` diverges there — water becomes infinitely expensive before the bound is reached. It takes no parameter of its own to achieve that; the 0.05 is the same constant `psi_crit` is derived from.
+- **It can never be boundary-crit.** `g(psi_crit)` is exactly zero, so `C` diverges there — water becomes infinitely expensive before the bound is reached. It takes no parameter of its own to achieve that; the 0.05 is the same constant `psi_crit` is derived from.
 
 **The link states the cost; it is not how the optimum is found.** At full closure `A = −R_d < 0`, so `log A` does not exist — and that endpoint has to be a candidate. `optimise_psi_stem_SOX()` therefore maximises the product directly, which is exact because `log` is monotone.
 
@@ -686,7 +686,7 @@ All three are asserted in the suite rather than described here, and the numbers 
    \qquad \frac{db}{dc}=\frac{b\ln(\ln 2)}{c^{2}}$$ The second term is nearly free — it reuses the cheap `b`-derivative — but omitting it silently converts a total derivative into a partial, which looks like a plausible-but-wrong gradient rather than an error.
 3. **A derived `psi_crit` adds a term.** Moving `P50` moves the threshold, so `d/dP50` picks up `dpsi_crit/dP50 · d/dpsi_crit`, with `dpsi_crit/dP50 = (log₂(1/f))^{1/c}` — 1.7266 at the defaults, a constant at fixed `c`. That term is **exactly zero at an interior optimum and order 1 at a pinned one**, so the clean identity in (1) holds *only where the optimum is interior*.
 
-   The size of it is the reason to care. At a dry-pinned point the two halves are `1.1465 × 4.6991` from the curve and `1.7266 × 1.2605` through the bound, so dropping the second gives 5.39 where the answer is 7.56 — a 29% error with nothing about it that looks wrong.
+   The size of it is the reason to care. At a boundary-crit point the two halves are `1.1465 × 4.6991` from the curve and `1.7266 × 1.2605` through the bound, so dropping the second gives 5.39 where the answer is 7.56 — a 29% error with nothing about it that looks wrong.
 
 The root curve obeys the identical homogeneity identity and takes the same treatment — `(root_P50, root_c)` — because two curves on different conventions is the shape of the mistake that once carried a root parameter into a stem cost.
 

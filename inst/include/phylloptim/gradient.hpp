@@ -653,7 +653,7 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
   // Is the composite's premise true HERE? Stationarity is what the whole
   // derivation rests on and it fails at a pinned optimum, where psi* is a bound,
   // dprofit is not zero at the answer, and -M/H is not the bound's derivative.
-  // The formula does not fail loudly: at a wet-pinned point the true gradient is
+  // The formula does not fail loudly: at a boundary-soil point the true gradient is
   // ~1e-08 and the bare composite returns O(1).
   //
   // So the premise is TESTED. The test is the implied Newton step

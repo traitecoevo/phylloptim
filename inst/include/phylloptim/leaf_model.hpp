@@ -1576,14 +1576,27 @@ public:
     // feasible collar interval. 198 of the 288 golden grid points at 25 C -- 160 of
     // them at 40 C, where the optimum presses against the WET bound instead.
     Interior,
-    // Constrained optimum pinned at the WET end of the feasible interval, just
-    // inside root_zero_E (the collar at which uptake is exactly zero). profit is
-    // still climbing toward the wet bound, so the bound is the answer. 24 golden
-    // points. The gradient here is genuinely non-zero.
-    PinnedWet,
-    // Constrained optimum pinned at the DRY end, min(root_crit,
-    // supply_psi_crit()). 18 golden points. Gradient genuinely non-zero.
-    PinnedDry,
+    // Constrained optimum at the psi_soil end of the feasible interval, just
+    // inside root_zero_E (the collar at which uptake is exactly zero). The
+    // objective is still climbing toward that bound, so the bound is the answer:
+    // the leaf declines to open. 24 golden points at 25 C. The gradient here is
+    // genuinely non-zero.
+    //
+    // ⚠️ THESE TWO ARE NAMED FOR THE BOUND THAT BINDS, NOT FOR THE CONDITIONS,
+    // and an earlier `PinnedWet`/`PinnedDry` pair got read backwards for exactly
+    // that reason. `psi_stem == psi_soil` is the least-tension end of the
+    // bracket, so it reads as the comfortable case -- but it is what a leaf does
+    // under STRESS, when no interior point earns its water. The golden grid says
+    // so: 24 -> 80 rows as the leaf goes 25 -> 40 C, while the psi_crit end goes
+    // 18 -> 0. Warming drives this one and removes the other. Do not reintroduce
+    // a name whose reading inverts with temperature.
+    BoundarySoil,
+    // Constrained optimum at the psi_crit end, min(root_crit,
+    // supply_psi_crit()) -- the most tension the stem is allowed. Worth pulling
+    // that hard only when water is cheap relative to carbon, so this is the
+    // UNstressed pin. 18 golden points at 25 C, none at 40 C. Gradient genuinely
+    // non-zero.
+    BoundaryCrit,
     // The feasible interval collapsed to a point (width <= GSS_tol_abs), so
     // feasibility DETERMINED the collar potential and nothing was optimised.
     // There is no free variable left to differentiate.
@@ -1644,8 +1657,8 @@ inline const char* Leaf::operating_point_kind_name(OperatingPointKind kind) {
   switch (kind) {
     case OperatingPointKind::Unsolved:          return "unsolved";
     case OperatingPointKind::Interior:          return "interior";
-    case OperatingPointKind::PinnedWet:         return "pinned-wet";
-    case OperatingPointKind::PinnedDry:         return "pinned-dry";
+    case OperatingPointKind::BoundarySoil:      return "boundary-soil";
+    case OperatingPointKind::BoundaryCrit:      return "boundary-crit";
     case OperatingPointKind::Determined:        return "determined";
     case OperatingPointKind::HydraulicShutdown: return "hydraulic-shutdown";
     case OperatingPointKind::ShadeDeath:        return "shade-death";
@@ -2602,7 +2615,7 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
   // #31 region is the reason the wet endpoint has to be stepped over rather than
   // evaluated, and the same reason it must not be returned.
   //
-  // What lo buys, stated honestly: on a wet-pinned row the true argmax sits
+  // What lo buys, stated honestly: on a boundary-soil row the true argmax sits
   // essentially ON the feasibility boundary -- a fine scan puts it at 6.4e-07 and
   // 3.2e-09 of the bracket width from bound_a on the two worst rows -- so lo
   // resolves it to the step-in scale (~1e-6 of the width), not to
@@ -2643,11 +2656,11 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
     return p_hi > p_lo ? hi : lo;
   }
   if (f_lo <= 0.0) {
-    operating_point_kind_ = OperatingPointKind::PinnedWet;
+    operating_point_kind_ = OperatingPointKind::BoundarySoil;
     return lo;
   }
   if (f_hi >= 0.0) {
-    operating_point_kind_ = OperatingPointKind::PinnedDry;
+    operating_point_kind_ = OperatingPointKind::BoundaryCrit;
     return hi;
   }
 
@@ -3984,7 +3997,7 @@ inline double Leaf::lambda_JS22(double psi_stem, double psi_upstream) const {
 
 
 // And for CMax, whose marginal cost does not vanish at the wet end unless CMax_b is
-// zero -- which is what makes it the one curve here that CAN be wet-pinned with a
+// zero -- which is what makes it the one curve here that CAN be boundary-soil with a
 // non-zero cost at the bound. `psi_upstream` enters only through dE/dpsi.
 inline double Leaf::lambda_CMax(double psi_stem, double psi_upstream) const {
   (void)psi_upstream;
@@ -4005,7 +4018,7 @@ inline double Leaf::lambda_CMax(double psi_stem, double psi_upstream) const {
 // derives it in one line and gives the scale-invariance test that pins it.
 //
 // ⚠️ It DIVERGES at `psi_crit`, where `g` is exactly zero. That is the mechanism by
-// which a product objective can never be dry-pinned -- water becomes infinitely
+// which a product objective can never be boundary-crit -- water becomes infinitely
 // expensive before the bound is reached -- and it means this is not a number to
 // evaluate at the dry end of the bracket.
 inline double Leaf::lambda_SOX(double psi_stem, double psi_upstream) const {
@@ -4948,7 +4961,7 @@ inline void Leaf::optimise_psi_stem_CF77() {
 // 200 and VPD 4 -- a regime built to make closure attractive -- psi* still clears
 // psi_soil by 1.8e-02 at psi_soil 5.5 and 1.1e-02 at 5.84.
 //
-// ⚠️ It is stated that way rather than as "can never be wet-pinned", which the
+// ⚠️ It is stated that way rather than as "can never be boundary-soil", which the
 // same measurement falsifies: at psi_soil
 // 6.0, above the default psi_crit of 5.870, psi* comes back EXACTLY psi_soil. That
 // is the no-flow branch above -- there is no feasible interval to be interior in --

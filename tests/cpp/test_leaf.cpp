@@ -768,8 +768,8 @@ void test_collar_solve_handles_a_pinned_optimum() {
   ok(l.dprofit_droot_collar_psi(l.opt_root_psi_) < 0.0,
      "profit is decreasing at the pinned answer, so the bound is what binds");
   ok(l.operating_point_kind() ==
-         phylloptim::Leaf::OperatingPointKind::PinnedWet,
-     "and the leaf says so: the point is tagged pinned-wet");
+         phylloptim::Leaf::OperatingPointKind::BoundarySoil,
+     "and the leaf says so: the point is tagged boundary-soil");
 }
 
 // The operating-point classification, on ONE REUSED LEAF -- which is the only way
@@ -839,7 +839,7 @@ void test_operating_point_kind_is_written_by_every_path() {
 
   // A constrained optimum, then the same leaf asked to EVALUATE a prescribed
   // collar potential rather than optimise one. The prescribed point is not an
-  // optimum of any kind, and would read `pinned-wet` if that path did not write.
+  // optimum of any kind, and would read `boundary-soil` if that path did not write.
   const std::vector<double> psi5{4.0, 4.25, 4.5, 4.75, 5.0};
   const std::vector<double> depth5{1.0, 2.0, 3.0, 4.0, 5.0};
   const std::vector<double> root5(5, 1.0 / 5.0 / d.area_leaf);
@@ -847,7 +847,7 @@ void test_operating_point_kind_is_written_by_every_path() {
                    d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
                    d.atm_o2_kpa, d.atm_kpa);
   l.find_root_collar_psi();
-  ok(l.operating_point_kind() == Kind::PinnedWet,
+  ok(l.operating_point_kind() == Kind::BoundarySoil,
      "psi_soil 4.0 over 5 layers is pinned to the wet bound");
   const double pinned_collar = l.opt_root_psi_;
 
@@ -857,7 +857,7 @@ void test_operating_point_kind_is_written_by_every_path() {
 
   // ...and the optimising path takes it back, so `prescribed` is not sticky.
   l.find_root_collar_psi();
-  ok(l.operating_point_kind() == Kind::PinnedWet,
+  ok(l.operating_point_kind() == Kind::BoundarySoil,
      "and optimising again restores the pin");
 
   // set_traits returns the object to its just-constructed state, and the
@@ -918,8 +918,8 @@ void test_collar_solve_refuses_rather_than_guessing() {
   const double refused = m.maximise_profit_over_collar(dry_end, wet_end);
   ok(m.operating_point_kind() == Kind::SolverRefused,
      "the solve reports that it could not resolve the bracket");
-  ok(m.operating_point_kind() != Kind::PinnedWet &&
-         m.operating_point_kind() != Kind::PinnedDry,
+  ok(m.operating_point_kind() != Kind::BoundarySoil &&
+         m.operating_point_kind() != Kind::BoundaryCrit,
      "and does not pass it off as a constrained optimum");
   // The endpoint the solve returns is stepped a fraction of the width inside the
   // bound it came from, so compare against the bound rather than for equality.
