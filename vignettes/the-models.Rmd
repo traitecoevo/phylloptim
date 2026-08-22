@@ -67,7 +67,9 @@ $$\psi^{*}=\arg\max_{\psi\in[\psi_{\rm soil},\,\psi_{\rm crit}]} J(\psi),
 - **Non-root-based.** Optimise the stem potential `ψ_stem` with the upstream potential held at `ψ_soil`. The soil-to-collar path is ignored entirely. This is what `optimise_psi_stem_*` do, and what their refusal message means by "non-root-based".
 - **Root-based.** Optimise the **collar** potential with the root path in series, then map it to a stem potential. This is `find_root_collar_psi()`.
 
-These are **different models, not one restricted to the other**, and neither is a check on the other. Measured over 30 driver rows they disagree on 20, and the gap does not close as the root resistance goes to zero — because as that resistance vanishes the collar loses its freedom, its feasible interval collapses, and the root-based solve correctly reports that feasibility *determined* the answer rather than optimisation.
+These are the **same optimality problem in two coordinates**, over different supply. Neither is a check on the other, and over 30 driver rows they disagree on 20 — but the disagreement is the soil-to-collar drop, which only the root-based route charges for. Remove it and they converge: sweeping the series resistance down through three decades closes the gap ~10× per decade, to 4.0e-04 MPa.
+
+⚠️ **One point in that sweep looks like a structural gap and is not.** At a resistance small enough that `[root_zero_E, root_crit]` collapses, the root-based solve reports that feasibility *determined* the answer rather than optimising it — so comparing it with an optimum compares two different things. Read the trend, not the endpoint.
 
 ### One problem, several coordinates
 
@@ -172,12 +174,27 @@ The two properties are not actually in conflict, which is the point worth carryi
 
 ## The cost curves
 
-Write the conductivity fraction and its integral as
+The vulnerability curve is the familiar Weibull, and this package writes it in the equivalent form that names `P50` instead of `b`:
 
-$$f(\psi)=2^{-(\psi/P_{50})^{c}},\qquad
-F(\psi)=\int_0^{\psi}\!f,\qquad k(\psi)=k_{\max}f(\psi),\qquad E(\psi;\psi_s)=k_{\max}\big[F(\psi)-F(\psi_s)\big]$$
+$$f(\psi)=\exp\!\big[-(\psi/b)^{c}\big]
+\;=\;2^{-(\psi/P_{50})^{c}},
+\qquad b=\frac{P_{50}}{(\ln 2)^{1/c}}$$
 
-so `f` is the fraction of maximum conductivity remaining, `k` the conductance and `E` the transpiration. Appendix A derives this parameterisation and why it is `(P50, c)` rather than `(b, c)`.
+**These are the same curve, not an approximation of one.** Substituting that `b` into the left-hand form gives the right-hand one identically, and `b` is still available on a `Leaf` as a derived read-only accessor — so nothing is lost by reading the conventional form if that is what you have.
+
+⚠️ **It is a reparameterisation for interpretability, not an implementation shortcut.** Both forms cost the same to evaluate. What changes is which parameter is named: `P50` is a measured, reported, comparable quantity, while `b` is neither — it is the potential at which `f = 1/e ≈ 0.37`, which nobody measures. In base 2 the scale parameter *is* the 50% point, because `log₂(1/f) = 1` exactly at `f = 0.5`; in base *e* that factor is `ln 2 ≈ 0.693`, which is the whole reason `b` sits above P50.
+
+That is not only tidiness. Every quantile follows from `(P50, c)` in closed form,
+
+$$P_f = P_{50}\big(\log_2(1/f)\big)^{1/c}$$
+
+which is why `psi_crit` stopped being a free trait: it *is* `P_f` at `f = 0.05`, and Sperry's reference conductance reads the same 0.05. Three numbers that used to be held separately and reconciled by a check are now one. `weibull_p50_c()` converts from whatever form a published curve arrives in; Appendix A has the derivation and the caveats.
+
+With that settled, write the integral and the fluxes as
+
+$$F(\psi)=\int_0^{\psi}\!f,\qquad k(\psi)=k_{\max}f(\psi),\qquad E(\psi;\psi_s)=k_{\max}\big[F(\psi)-F(\psi_s)\big]$$
+
+so `f` is the fraction of maximum conductivity remaining, `k` the conductance and `E` the transpiration.
 
 | model | code name | cost `C(ψ)` | marginal cost `dC/dψ` | units of `C` |
 |---|---|---|---|---|
@@ -565,7 +582,7 @@ The second is whether the cost is subtracted or the objective is a product. Five
 
 # Appendix A — the (P50, c) parameterisation
 
-The Weibull vulnerability curve is conventionally written `exp(-(ψ/b)^c)`. Substituting `b = P50 / (ln 2)^(1/c)` gives the algebraically identical
+The Weibull vulnerability curve is conventionally written `exp(-(ψ/b)^c)`, and most published fits report `b` and `c`. Substituting `b = P50 / (ln 2)^(1/c)` gives the algebraically identical
 
 $$f(\psi)=2^{-(\psi/P_{50})^{c}}$$
 

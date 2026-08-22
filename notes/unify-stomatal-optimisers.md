@@ -6,7 +6,24 @@
 
 The original question was whether `optimise_psi_stem_Sperry` / `_TF` / `_ProfitMax` could collapse into one function differing only in cost and benefit.
 
-**Refuted, measured.** `optimise_psi_stem_TF` and `find_root_collar_psi` are *not* two implementations of one model: they optimise different variables over different supply topologies, disagree on 20 of 30 driver rows, and the gap does **not** close as the root resistance → 0 (1.67 MPa at r = 1e-2). The code always said so — "non-**root-based** profit optimisation methods". As that resistance vanishes the collar loses its freedom, `[root_zero_E, root_crit]` collapses, and the collar solve correctly reports `determined` rather than optimising. So the decision variable is a structural axis in its own right, and the entry points cannot collapse across it.
+**The refutation was itself wrong, and re-measuring it changed the plan.** It said `optimise_psi_stem_TF` and `find_root_collar_psi` are not two implementations of one model, because they disagree on 20 of 30 driver rows and the gap does **not** close as the root resistance → 0 — citing 1.67 MPa at `r = 1e-2`.
+
+Measured again over a sweep rather than at one point (ψ_soil 1.5, PPFD 1500, single-potential path):
+
+| resistance | collar ψ_stem | stem ψ_stem | gap (MPa) |
+|---|---|---|---|
+| 1e+04 | 2.09088 | 3.55362 | −1.46e+00 |
+| 1e+03 | 3.50115 | 3.55362 | −5.25e-02 |
+| 1e+02 | 3.58295 | 3.55362 | +2.93e-02 |
+| 1e+01 | 3.55749 | 3.55362 | +3.87e-03 |
+| 1e+00 | 3.55402 | 3.55362 | **+3.98e-04** |
+| 1e−02 | 2.05607 | 3.55362 | −1.50e+00 |
+
+**The gap closes cleanly, ~10× per decade, exactly as an O(r) drop must.** The `r = 1e-2` row the old claim rested on is the collar bracket degenerating: `[root_zero_E, root_crit]` collapses and the solve reports `determined` rather than optimising, so that row compares an optimum against a non-optimum. Reading one point as a limit was the error.
+
+So they are the **same optimality problem in different coordinates** — which is what this document's own "one problem, several coordinates" argument says, and what the monotone-maps chain in the vignette proves. The stem route is the collar route with the soil→collar path removed, so it does not charge for that drop; where the root path is substantial the two genuinely differ, and that is the point of having both. It is a difference of problem *specification*, not of model family.
+
+⚠️ **The consequence is the opposite of what was recorded**: the decision variable is not a structural axis that forbids unification. It is a coordinate choice, and unifying across it is better justified than the old text allowed. What cannot be shared is the *supply* the two charge for.
 
 What *could* collapse, and now has, is everything on one side of that axis: the single-layer optimisers share one body.
 
