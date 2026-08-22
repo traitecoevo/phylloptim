@@ -18,6 +18,52 @@ magnitudes and the build discipline — where the two overlapped the guide was
 consistently the *more current*, so the duplicate is gone from here. `NEWS.md` holds
 the user-visible history.
 
+## The psi* solver work — shared state, 2026-08-22
+
+⚠️ **Written here because part of this ran off a session plan OUTSIDE the repo,
+which meant a second agent working the same branch could not see any of it.**
+Anything that constrains someone else's work belongs in this file. A plan in
+`~/.claude/plans/` is invisible to the repo, is not versioned, and does not
+squash-merge with anything.
+
+**Landed.** Cowan-Farquhar (`CF77`, `cost = λE`) plus JS22, CMax and SOX, with
+model-scoped parameter names. `dprofit_dpsi_stem<CostCurve>` and
+`evaluate_psi_stem<CostCurve>` — the first-order-condition derivative and a
+prescribed-point evaluator, each verified against a central difference of its own
+objective. The prescribed-λ "Sperry" arm is deleted: `ProfitMax` *is* Sperry, and
+the point of that model is that λ is emergent (`lambda_emergent`). Both
+vulnerability curves are on **(P50, c)**, which closes #38. A third golden file,
+`psi_stem_optima.tsv`, 2304 rows over solver × topology × gates in two passes. The
+maths vignette, `vignettes/the-models.Rmd`.
+
+**Open, roughly in the order they unblock each other.**
+
+1. λ into the gradient enumeration, with per-model availability.
+2. Wire `dprofit_dpsi_stem` into `gradient.hpp`, so the ψ_stem models take the
+   first-order-condition route.
+3. Gradients at a *prescribed* ψ: no indirect term for any output, because ψ does
+   not move with θ — except where the clamp binds, since a bound is itself a
+   function of the traits.
+4. Vignette appendices B (gradients) and C (numerical practice), and a review pass
+   over `fitting.Rmd`, whose `pars` discussion predates the reparameterisation.
+5. The comment sweep.
+
+**Four decisions that would otherwise get re-litigated.**
+
+- ⚠️ **The `optimise_psi_stem_*` entry points still scan** 64 points and refine;
+  the collar solve does not. Moving them to the first-order condition is item 2
+  above and is *required* rather than tidying: `gradient.hpp` rests on stationarity
+  in three places, and a scan argmax is piecewise constant in the traits, so it
+  cannot feed a trait gradient at all.
+- ⚠️ **What replaces the scan is multi-start on the condition, not a finer grid.**
+  Several sub-brackets, each yielding an exact stationary point, compared on
+  profit. A grid argmax cannot be differentiated however fine the grid.
+- ⚠️ **The trait vector is bound POSITIONALLY in four places** across C++ and R, so
+  its width changes atomically or nothing runs. 15 traits and 17 pars as of SOX.
+- **`optimise_psi_stem_*` is not the collar solve restricted**, and neither checks
+  the other — see hazard 11 in the guide. They disagree on 20 of 30 driver rows and
+  the gap does not close as root resistance → 0.
+
 ## Status, 2026-08-05
 
 ### Remaining
@@ -596,14 +642,19 @@ solve, which is why it survived — and the first thing an R user does is plot t
 profit function. Found writing the stage 2 vignette. 11a's "do not return the raw
 bracket bound" finding is the same discontinuity seen from the solver's side.
 
-## 38. `psi_crit` above the curve's domain fails without naming either
+## 38. `psi_crit` above the curve's domain — DONE, by deleting the parameter
 
-The vulnerability curve is built over `[0, b·log(100)^(1/c)]` — 6.05 MPa at the
-defaults, against a `psi_crit` of 5.87. Set `psi_crit` beyond that, or shrink
-`stem_b` by more than ~3%, and the solve dies with *"Extrapolation disabled and
-evaluation point outside of interpolated domain"*, which names neither `psi_crit`
-nor the curve. Nothing validates the relationship. This is also what bounds how far
-either gradient route can move `stem_b` in one step (11f).
+`psi_crit` was a free trait describing a curve it was not derived from, so it could
+be set past the curve's own domain and the solve died naming neither it nor the
+curve. It is now the 5%-conductivity quantile of that curve, derived from
+`(stem_P50, stem_c)` and read-only, and Sperry's `k_crit` reads the same constant.
+
+⚠️ **The two checks that policed it are deleted, not kept.** The domain check is
+provably vacuous once `psi_crit` is P95 — it is inside P99 for every `c > 0`,
+since `ln 20 < ln 100` — and there is nothing left for a consistency check to
+compare. The bound this used to place on a gradient step in `stem_b` (11f) is gone
+with it: `psi_crit` scales with the curve, so no perturbation of the trait can walk
+the solve off the end of its own domain.
 
 ## 40. Cross-validate the Medlyn path against `plantecophys`
 
