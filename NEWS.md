@@ -30,6 +30,45 @@ rather than approximated.
 All 4608 rows of `psi_stem_optima.tsv` are bit-identical across the unification:
 the identity arm's derivative is textually unchanged.
 
+## Both vulnerability curves are parameterised on (P50, c)
+
+**BREAKING.** The stem curve's traits are now `stem_P50` and `stem_c`, and the
+root curve's `root_P50` and `root_c`. `stem_b`, `psi_crit`, `root_b` and
+`root_psi_crit` are **derived**: still readable on a `Leaf`, no longer settable
+and no longer arguments to `leaf_traits()`, `set_traits()` or the constructor.
+
+    b        = P50 / (ln 2)^(1/c)
+    psi_crit = b * ln(1/0.05)^(1/c)          i.e. P95 of the same curve
+
+`perturb_stem_b()` becomes `perturb_stem_P50()`. See *Model-scoped parameter
+names* below for the parameter set as a whole.
+
+Why: `psi_crit` was a free trait describing a curve it was not derived from, and
+Sperry's reference conductivity `k_crit = 0.05 * kmax` used the same 0.05 from a
+separate hard-coded constant. The three could disagree, and a consistency check
+existed to police them. They are now one number, so the check is gone -- along
+with the domain check, which becomes vacuous (a derived P95 is inside P99 for
+every c > 0).
+
+**The reference values moved**, and were regenerated. The defaults were round in
+`stem_b` and `psi_crit` rather than in `P50`, so `psi_crit` was P95 rounded to
+seven figures and `f(psi_crit)` was 0.049999968739194864 rather than 0.05.
+Adopting a round `P50 = 3.4` shifts `stem_b` by 3.1e-08 and `psi_crit` by 4.7e-08,
+which propagates to a worst 4.4e-05 on assimilation over the 576-point grid and
+2.2e-05 on profit over the optimiser grid (2304 rows when this was measured; the
+grid ships at 4608) -- below the 1e-4 at which this
+project calls a difference real. No operating point changed branch. The lowest
+primitive tier to move is the vulnerability curve itself, at 3.1e-08; the
+arithmetic tier is unchanged.
+
+Two behavioural consequences, both asserted:
+
+* A shut-down leaf's hydraulic cost no longer depends on the curve's scale. It
+  sits at `psi_crit`, where remaining conductivity is exactly 0.05 whatever `P50`
+  is, so `dprofit/dstem_P50` there is exactly zero rather than negative.
+* Stem gradients carry a term through the moving `psi_crit`. It is exactly zero at
+  an interior optimum and order 1 at a pinned one, where it is 29% of the total.
+
 ## Model-scoped parameter names
 
 **BREAKING.** A parameter that belongs to one model now carries that model's name.
@@ -43,10 +82,39 @@ the identity arm's derivative is textually unchanged.
 New parameters follow the same rule: `JS22_gamma`, `CMax_a`, `CMax_b`. Models
 without a published name take initials-plus-year.
 
-The trait vector goes 12 to 15 and `gradient_par_names()` 14 to 18. Traits are
-bound **positionally** across the R/C++ boundary, so a caller passing them by
-position must be updated with this release. Appending is safe; reordering
+### What the parameter set looks like against 0.5.2
+
+Everything below landed in one release, so the deltas that matter to a caller are
+against **0.5.2**, the last version published:
+
+* the trait vector goes **14 to 15** and `gradient_par_names()` **16 to 18**
+* four traits are gone, being derived now: `stem_b`, `psi_crit`, `root_b`,
+  `root_psi_crit`
+* five are new: `stem_P50`, `root_P50`, `JS22_gamma`, `CMax_a`, `CMax_b`
+* two are renamed: `beta2` and `cost_scale_TF24`
+* `CF77_lambda_` is differentiable, which is the 18th parameter
+
+Traits are bound **positionally** across the R/C++ boundary, so a caller passing
+them by position must be updated with this release. Appending is safe; reordering
 differentiates the wrong thing and returns plausible numbers.
+
+## The prescribed-lambda optimiser is removed
+
+**BREAKING.** `optimise_psi_stem_Sperry()`, `profit_psi_stem_Sperry()` and
+`hydraulic_cost_Sperry()` are deleted, with no deprecated alias. Nothing in the
+plant-family tree called them.
+
+They maximised `A - lambda*(k(psi_soil) - k(psi))` with lambda a prescribed
+constant, under Sperry's name. `optimise_psi_stem_ProfitMax()` is Sperry's model,
+and the point of it is that the cost scaling is **emergent**: multiplying the
+normalised objective by |A|max gives exactly that constant-lambda form with
+`lambda = |A|max / (k_soil - k_crit)`, a quantity that moves with the drivers.
+Measured here, the implied lambda runs 9.19e4 to 3.15e5 over psi_soil 0.5 to
+3 MPa, a 3.4x range. So a fixed lambda is not a variant of the model, and the two
+entry points were not two models.
+
+`$lambda_` now has one meaning: the Cowan-Farquhar marginal value of water, in
+umol C (kg H2O)^-1, supplied by the caller.
 
 ## Gradients for every model, through one entry point
 
@@ -66,79 +134,6 @@ quantisation -- measured 0.1855 against a true 0.0551, and the wrong sign on one
 curve. Sweep the step and read the floor of the V; do not trust a single step.
 
 New: `cost_curve_names()` and `cost_curve_has_derivative()`.
-
-## Published vulnerability curves convert to (P50, c)
-
-`weibull_p50_c()` takes any two of `P50`, `P88`, `P95`, `P99`, `(px, plc)`, `S50`
-and `c`, and returns the pair `leaf_traits()` wants. Also exported:
-`psi_at_plc()`, `weibull_s50()` and `weibull_p50_from_b()`.
-
-⚠️ `S50` with a non-P50 quantile has **two** solutions -- `S50(c)` has an analytic
-minimum at `c = ln L`, so it is U-shaped. The upper branch is returned, with a
-message; the lower branch lands below `c = 1`, where measured angiosperm stems sit
-at 1.8-2.6.
-
-Published P50 is negative and is **refused** rather than silently negated: every
-potential in this package is a positive magnitude.
-
-# phylloptim 0.5.4
-
-## Both vulnerability curves are parameterised on (P50, c)
-
-**BREAKING.** The stem curve's traits are now `stem_P50` and `stem_c`, and the
-root curve's `root_P50` and `root_c`. `stem_b`, `psi_crit`, `root_b` and
-`root_psi_crit` are **derived**: still readable on a `Leaf`, no longer settable
-and no longer arguments to `leaf_traits()`, `set_traits()` or the constructor.
-
-    b        = P50 / (ln 2)^(1/c)
-    psi_crit = b * ln(1/0.05)^(1/c)          i.e. P95 of the same curve
-
-The trait vector goes 14 to 12 and `gradient_par_names()` 16 to 14. Because C++
-and R bind traits positionally, callers that pass them by position must be updated
-together with this release. `perturb_stem_b()` becomes `perturb_stem_P50()`.
-
-Why: `psi_crit` was a free trait describing a curve it was not derived from, and
-Sperry's reference conductivity `k_crit = 0.05 * kmax` used the same 0.05 from a
-separate hard-coded constant. The three could disagree, and a consistency check
-existed to police them. They are now one number, so the check is gone -- along
-with the domain check, which becomes vacuous (a derived P95 is inside P99 for
-every c > 0).
-
-**The reference values moved**, and were regenerated. The defaults were round in
-`stem_b` and `psi_crit` rather than in `P50`, so `psi_crit` was P95 rounded to
-seven figures and `f(psi_crit)` was 0.049999968739194864 rather than 0.05.
-Adopting a round `P50 = 3.4` shifts `stem_b` by 3.1e-08 and `psi_crit` by 4.7e-08,
-which propagates to a worst 4.4e-05 on assimilation over the 576-point grid and
-2.2e-05 on profit over the 2304-row optimiser grid -- below the 1e-4 at which this
-project calls a difference real. No operating point changed branch. The lowest
-primitive tier to move is the vulnerability curve itself, at 3.1e-08; the
-arithmetic tier is unchanged.
-
-Two behavioural consequences, both asserted:
-
-* A shut-down leaf's hydraulic cost no longer depends on the curve's scale. It
-  sits at `psi_crit`, where remaining conductivity is exactly 0.05 whatever `P50`
-  is, so `dprofit/dstem_P50` there is exactly zero rather than negative.
-* Stem gradients carry a term through the moving `psi_crit`. It is exactly zero at
-  an interior optimum and order 1 at a pinned one, where it is 29% of the total.
-
-## The prescribed-lambda optimiser is removed
-
-**BREAKING.** `optimise_psi_stem_Sperry()`, `profit_psi_stem_Sperry()` and
-`hydraulic_cost_Sperry()` are deleted, with no deprecated alias. Nothing in the
-plant-family tree called them.
-
-They maximised `A - lambda*(k(psi_soil) - k(psi))` with lambda a prescribed
-constant, under Sperry's name. `optimise_psi_stem_ProfitMax()` is Sperry's model,
-and the point of it is that the cost scaling is **emergent**: multiplying the
-normalised objective by |A|max gives exactly that constant-lambda form with
-`lambda = |A|max / (k_soil - k_crit)`, a quantity that moves with the drivers.
-Measured here, the implied lambda runs 9.19e4 to 3.15e5 over psi_soil 0.5 to
-3 MPa, a 3.4x range. So a fixed lambda is not a variant of the model, and the two
-entry points were not two models.
-
-`$lambda_` now has one meaning: the Cowan-Farquhar marginal value of water, in
-umol C (kg H2O)^-1, supplied by the caller.
 
 ## `$lambda_` is an input; every curve reports an emergent lambda
 
@@ -177,26 +172,23 @@ The equivalence the deleted entry point used to demonstrate is now asserted
 directly as an identity, which holds to 9.5e-16 rather than the 5e-3 two argmaxes
 could agree to.
 
-## `plot_model_overview()`: the whole model in one figure
+## Constrained optima are named for the bound that binds
 
-New exported function, and the opening figure of `vignette("the-models")`, which
-it replaces the bare profit curve with. Four zones: the profit trade-off and the
-supply-equals-demand root-find computed from a live `Leaf`, then a schematic of
-how the parts are wired and of the soil-to-leaf path they describe.
+**BREAKING for C++ consumers.** `OperatingPointKind::PinnedWet` and `PinnedDry`
+are now `BoundarySoil` and `BoundaryCrit`, and `operating_point_kind_name()`
+returns `"boundary-soil"` and `"boundary-crit"`. No R surface: the accessor is C++
+only.
 
-The wiring panel is what it exists for. One decision variable feeds two branches
-that meet again at the objective; the two gates are drawn dashed because both
-default off; and the arrows crossing between the columns are the interactions that
-are otherwise only stated in prose — the energy balance as the cycle it is, and
-the thermal cost reaching past it into the *benefit* column, which is the one gate
-that moves both sides of the ledger.
+The old names read backwards. `psi_stem == psi_soil` is the least-tension end of
+the feasible interval, so "wet" sounds like the comfortable case -- but it is what
+a leaf does under stress, when no interior point earns its water. Warming the
+reference grid from 25 to 40 C takes that kind from **24 rows to 80** while the
+`psi_crit` end goes from **18 to none**, so the reading inverted with temperature.
+Naming each for the bound it sits on cannot invert.
 
-Base graphics on a vector device, so the vignette embeds it as SVG and `pdf()`
-gives a manuscript figure whose every line and label stays a separate object.
-Shapes are aspect-corrected and box labels shrink to fit, so it holds together at
-figure sizes other than the default. No model code is touched and no number moves.
-
-# phylloptim 0.5.3
+`psi_stem_optima.tsv`'s `kind` column was patched in place rather than
+regenerated, so the bit-exact comparison itself proves that the other thirteen columns
+did not move: 32 cells, columns 1-9 and 11+ byte-identical.
 
 ## The single-layer optimisers reach a maximum at a bound (#94)
 
@@ -246,6 +238,39 @@ boundary half still works and the second-hump half stops being reliable.
 
 Both golden files are bit-identical — the grid uses the collar solve, so it never
 touched any of this, which is why the defect survived to be measured here.
+
+## Published vulnerability curves convert to (P50, c)
+
+`weibull_p50_c()` takes any two of `P50`, `P88`, `P95`, `P99`, `(px, plc)`, `S50`
+and `c`, and returns the pair `leaf_traits()` wants. Also exported:
+`psi_at_plc()`, `weibull_s50()` and `weibull_p50_from_b()`.
+
+⚠️ `S50` with a non-P50 quantile has **two** solutions -- `S50(c)` has an analytic
+minimum at `c = ln L`, so it is U-shaped. The upper branch is returned, with a
+message; the lower branch lands below `c = 1`, where measured angiosperm stems sit
+at 1.8-2.6.
+
+Published P50 is negative and is **refused** rather than silently negated: every
+potential in this package is a positive magnitude.
+
+## `plot_model_overview()`: the whole model in one figure
+
+New exported function, and the opening figure of `vignette("the-models")`, which
+it replaces the bare profit curve with. Four zones: the profit trade-off and the
+supply-equals-demand root-find computed from a live `Leaf`, then a schematic of
+how the parts are wired and of the soil-to-leaf path they describe.
+
+The wiring panel is what it exists for. One decision variable feeds two branches
+that meet again at the objective; the two gates are drawn dashed because both
+default off; and the arrows crossing between the columns are the interactions that
+are otherwise only stated in prose — the energy balance as the cycle it is, and
+the thermal cost reaching past it into the *benefit* column, which is the one gate
+that moves both sides of the ledger.
+
+Base graphics on a vector device, so the vignette embeds it as SVG and `pdf()`
+gives a manuscript figure whose every line and label stays a separate object.
+Shapes are aspect-corrected and box labels shrink to fit, so it holds together at
+figure sizes other than the default. No model code is touched and no number moves.
 
 # phylloptim 0.5.2
 
