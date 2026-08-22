@@ -907,6 +907,49 @@ public:
   // made for the finite-difference path, and it matters here because
   // begin_solve() is a spline evaluation per soil layer.
   double dprofit_at_collar_psi(double opt_root_psi, bool* feasible = nullptr);
+
+  // Which cost curve a psi_stem derivative differentiates. The cost enters the
+  // chain through exactly ONE quantity -- dC/dpsi_stem -- so this selects that
+  // and nothing else.
+  enum class CostCurve { TF24, CowanFarquhar };
+
+  // dprofit/dpsi_stem for the solvers that optimise psi_stem directly with the
+  // upstream potential held fixed.
+  //
+  // The same chain as dprofit_at_collar_psi, and strictly simpler: there is no
+  // collar-to-stem map, so dpsi_stem/dx is 1 and every term in the upstream
+  // potential drops out. A template rather than a runtime switch because it is
+  // called inside a root-find, and because a compile-time choice cannot disagree
+  // with the objective the caller is maximising.
+  //
+  // ⚠️ `feasible` carries the same contract as the collar version: false means
+  // "no informative gradient here", and the 0.0 returned alongside it is a
+  // SENTINEL rather than a stationary point. A caller that ignores it and hands
+  // the zero to a root-find gets the shut-down state reported as the optimum.
+  template <CostCurve K>
+  double dprofit_dpsi_stem(double psi_stem, double psi_upstream,
+                           bool* feasible = nullptr);
+
+  // Evaluate the operating point at a PRESCRIBED psi_stem instead of optimising
+  // one, the psi_stem counterpart of evaluate_root_collar_psi. Clamps the target
+  // into [psi_soil, psi_crit] so a tracked state that has drifted outside still
+  // yields a finite point, and tags the result `Prescribed`.
+  //
+  // ⚠️ WHY THIS EXISTS SEPARATELY, and it is not a convenience: a gradient at a
+  // prescribed point is a DIFFERENT derivative from a gradient at an optimum.
+  // At an optimum psi* moves with the traits, so every output picks up an
+  // indirect term through dpsi*/dtheta, and profit's own indirect term vanishes
+  // by the envelope theorem. At a prescribed point psi does not move at all, so
+  // there is no indirect term for any output and no envelope identity to invoke
+  // -- the answer is the direct partial at fixed psi, which is a strictly simpler
+  // computation and a different number.
+  //
+  // ⚠️ EXCEPT WHERE THE CLAMP BINDS. A clamped target is pinned to a bound, and
+  // the bound is itself a function of the traits (`psi_crit` is one), so
+  // dpsi/dtheta is NOT zero there and the indirect term comes back. The returned
+  // tag is what distinguishes the two cases; do not infer it from the value.
+  template <CostCurve K>
+  double evaluate_psi_stem(double target_psi_stem);
   // The energy-balance correction to the above, zero when the gate is off. Kept
   // out of line so that adding it cannot change FMA contraction in the inlined
   // gate-off path; the derivation and the two sign checks are at the definition.
@@ -2642,6 +2685,156 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
   return base + dprofit_energy_balance_term(ci, gc, g_ci, inv_atm, gc_const,
                                             A_prime, dgc_dpsistem, dgc_dpsi,
                                             dpsistem_dpsi, dT_dE, Tleaf_here);
+}
+
+
+// dprofit/dpsi_stem, with the upstream potential held fixed.
+//
+// The same chain as above, with two simplifications that both follow from the
+// decision variable being psi_stem itself rather than a collar potential mapped
+// onto it: dpsi_stem/dx is 1, and every term carrying the upstream potential's
+// motion is zero. What is left is
+//
+//     dprofit/dpsi_stem = A'(ci) dci/dpsi_stem - C'(psi_stem)
+//
+// and the cost curve enters through C' alone.
+template <Leaf::CostCurve K>
+inline double Leaf::dprofit_dpsi_stem(double psi_stem, double psi_upstream,
+                                      bool* feasible) {
+  using AD = xad::fwd<double>::active_type;
+  if (feasible != nullptr) {
+    *feasible = false;
+  }
+  // No flow, so no informative gradient -- the same sentinel and the same
+  // contract as the collar version. These are magnitudes, so upstream >= stem is
+  // the reversed case.
+  if (!std::isfinite(psi_stem) || psi_upstream >= psi_stem) {
+    return 0.0;
+  }
+
+  double dT_dE = 0.0;
+  double Tleaf_here = leaf_temp_;
+  if (use_energy_balance_) {
+    Tleaf_here = leaf_temp_from_E(transpiration(psi_stem, psi_upstream), &dT_dE);
+    update_temperature_dependent_params(Tleaf_here);
+    set_leaf_vpd(Tleaf_here);
+  }
+
+  const double ci = psi_stem_to_ci(psi_stem, psi_upstream);
+  if (!std::isfinite(ci)) {
+    return 0.0;
+  }
+
+  // THE ONLY PLACE THE COST CURVE ENTERS.
+  double C_prime;
+  if constexpr (K == CostCurve::TF24) {
+    AD ps_ad = psi_stem;
+    xad::derivative(ps_ad) = 1.0;
+    C_prime = xad::derivative(hydraulic_cost_TF_kernel(ps_ad));
+  } else {
+    // lambda * E. E is kmax times the integral of the conductivity fraction over
+    // [psi_upstream, psi_stem], so its derivative in psi_stem is kmax times that
+    // fraction, which is what stem_curve_integral_deriv returns. No AD needed.
+    C_prime = lambda_ * leaf_specific_conductance_max_ *
+              stem_curve_integral_deriv(psi_stem);
+  }
+
+  // ci pinned at the compensation point: the supply==demand residual is not zero
+  // there, so the implicit function theorem below does not hold and the
+  // assimilation term is dropped rather than approximated. `feasible` stays
+  // false, which is what tells a caller the difference.
+  if (ci_at_compensation_point_) {
+    double dprofit = -C_prime;
+    if (use_energy_balance_ && dT_dE != 0.0) {
+      const double h = 1e-3;
+      const double vc0 = vcmax_, jm0 = jmax_, ga0 = gamma_, ko0 = ko_,
+                   kc0 = kc_, rd0 = R_d_, km0 = km_, J0 = electron_transport_;
+      update_temperature_dependent_params(Tleaf_here + h);
+      const double Rd_up = R_d_;
+      update_temperature_dependent_params(Tleaf_here - h);
+      const double Rd_dn = R_d_;
+      vcmax_ = vc0; jmax_ = jm0; gamma_ = ga0; ko_ = ko0; kc_ = kc0;
+      R_d_ = rd0; km_ = km0; electron_transport_ = J0;
+      const double Rd_T = (Rd_up - Rd_dn) / (2.0 * h);
+      const double dE_dpsi =
+          leaf_specific_conductance_max_ * stem_curve_integral_deriv(psi_stem);
+      dprofit += -Rd_T * dT_dE * dE_dpsi;
+    }
+    return std::isfinite(dprofit) ? dprofit : 0.0;
+  }
+
+  if (feasible != nullptr) {
+    *feasible = true;
+  }
+
+  AD ci_ad = ci;
+  xad::derivative(ci_ad) = 1.0;
+  const double A_prime = xad::derivative(assim_colimited_kernel(ci_ad));
+
+  const double gc_const =
+      atm_kpa_ * kg_to_mol_h2o / vpd_leaf_ / H2O_CO2_stom_diff_ratio_;
+  const double gc = gc_const * transpiration(psi_stem, psi_upstream);
+  const double dgc_dpsistem =
+      gc_const * leaf_specific_conductance_max_ *
+      stem_curve_integral_deriv(psi_stem);
+  const double inv_atm = 1.0 / (atm_kpa_ * kPa_to_Pa);
+  const double g_ci = A_prime * umol_to_mol + gc * inv_atm;
+  const double dci_dpsistem = -(-dgc_dpsistem * (ca_ - ci) * inv_atm) / g_ci;
+
+  const double base = A_prime * dci_dpsistem - C_prime;
+  if (!use_energy_balance_) {
+    return base;
+  }
+  // dgc_dpsi = 0 and dpsistem_dpsi = 1: the term derives dE/dpsi from those two,
+  // and with the upstream potential fixed that reduces to kmax * f(psi_stem).
+  return base + dprofit_energy_balance_term(ci, gc, g_ci, inv_atm, gc_const,
+                                            A_prime, dgc_dpsistem, 0.0, 1.0,
+                                            dT_dE, Tleaf_here);
+}
+
+// Evaluate at a prescribed psi_stem rather than optimising one. See the
+// declaration for why a gradient here is a different derivative from a gradient
+// at an optimum.
+template <Leaf::CostCurve K>
+inline double Leaf::evaluate_psi_stem(double target_psi_stem) {
+  clear_collar_solve_state();
+
+  if (!supply_is_single_layer()) {
+    util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
+  }
+  if constexpr (K == CostCurve::CowanFarquhar) {
+    if (!std::isfinite(lambda_)) {
+      util::stop("evaluate_psi_stem needs lambda_ set for the Cowan-Farquhar "
+                 "cost: it is the PRESCRIBED marginal value of water in "
+                 "umol C (kg H2O)^-1 and is NA until you assign one.");
+    }
+  }
+
+  const double psi_soil = supply_psi_soil_scalar();
+
+  // Drier soil than the stem can reach is the no-flow case, and the target is
+  // irrelevant to it: there is one feasible potential and this is it.
+  if (psi_soil > psi_crit) {
+    opt_psi_stem_ = psi_soil;
+    profit_ = (K == CostCurve::TF24)
+                  ? profit_psi_stem_TF(psi_soil, psi_soil)
+                  : profit_psi_stem_CowanFarquhar(psi_soil, psi_soil);
+    operating_point_kind_ = OperatingPointKind::Prescribed;
+    return profit_;
+  }
+
+  // Clamp, rather than refuse: a caller carrying psi_stem as a tracked state can
+  // arrive here just outside the interval, and a finite operating point plus a
+  // gradient that points back inside is more useful than an exception. The tag
+  // does not distinguish a clamped target from an interior one -- compare the
+  // returned opt_psi_stem_ with what you asked for if you need to know.
+  const double psi = std::min(std::max(target_psi_stem, psi_soil), psi_crit);
+
+  opt_psi_stem_ = psi;
+  profit_ = (K == CostCurve::TF24) ? profit_psi_stem_TF(psi, psi_soil)
+                                   : profit_psi_stem_CowanFarquhar(psi, psi_soil);
+  operating_point_kind_ = OperatingPointKind::Prescribed;
+  return profit_;
 }
 
 // The energy-balance correction to dprofit/dpsi, and zero when the gate is off.

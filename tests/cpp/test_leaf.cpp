@@ -1382,6 +1382,165 @@ void test_cowan_farquhar_refuses_an_unset_lambda() {
   ok(what.find("lambda_") != std::string::npos, "and the message names lambda_");
 }
 
+// dprofit_dpsi_stem against a central difference of the objective it claims to
+// differentiate, for both cost curves.
+//
+// THE POINT OF THE TEST is that the two halves come from different places: the
+// derivative is analytic (forward AD for the TF24 curve, a closed form for
+// Cowan-Farquhar, and the implicit function theorem through the ci root-find for
+// the assimilation term in both), while the reference differences
+// `profit_psi_stem_*` itself. So this checks the derivative against the model
+// rather than against another derivative -- which is the failure that matters:
+// a derivative of a nearby function is smooth, plausible and wrong.
+void test_dprofit_dpsi_stem_matches_a_finite_difference() {
+  printf("dprofit/dpsi_stem: analytic vs a central difference, both curves\n");
+  Drivers d;
+  d.PPFD = 1500.0;
+  // ⚠️ THE STEP IS MEASURED, NOT PICKED. The differenced quantity is computed
+  // through the ci root-find, so it carries that solver's tolerance as a fixed
+  // absolute noise floor, and a central difference divides it by h. The relative
+  // error is therefore ~1/h until truncation takes over: measured at one of the
+  // rows below it runs 1.3e-01, 1.1e-02, 1.1e-03, 1.1e-04, 1.1e-05, 1.9e-07 for
+  // h from 1e-8 to 1e-3, then back up to 1.3e-04 at 1e-2. So 1e-3 is the floor of
+  // that V, and a "small" step like 1e-6 sits three orders up the noise side of
+  // it -- which reads as a wrong derivative and is not one.
+  const double h = 1e-3;
+  double worst_tf = 0.0, worst_cf = 0.0;
+  int rows = 0;
+
+  for (double psi_soil : {0.5, 1.0, 2.0, 3.0}) {
+    // Sample the interior of [psi_soil, psi_crit] rather than only the optimum:
+    // away from the optimum dprofit is LARGE, so a wrong chain rule shows up as a
+    // relative error instead of hiding under a near-zero value.
+    phylloptim::Leaf l = make_leaf(d, {psi_soil}, {1.0});
+    const double lo = psi_soil, hi = l.psi_crit;
+    for (double frac : {0.15, 0.35, 0.55, 0.75}) {
+      const double psi = lo + frac * (hi - lo);
+      ++rows;
+
+      bool feasible = false;
+      const double an_tf =
+          l.dprofit_dpsi_stem<phylloptim::Leaf::CostCurve::TF24>(psi, psi_soil,
+                                                                 &feasible);
+      const double up_tf = l.profit_psi_stem_TF(psi + h, psi_soil);
+      const double dn_tf = l.profit_psi_stem_TF(psi - h, psi_soil);
+      const double fd_tf = (up_tf - dn_tf) / (2.0 * h);
+      if (feasible) {
+        worst_tf = std::max(worst_tf, std::abs(an_tf / fd_tf - 1.0));
+        near(an_tf / fd_tf, 1.0, 5e-5,
+             "TF24 dprofit at frac=" + std::to_string(frac) +
+                 " psi_soil=" + std::to_string(psi_soil));
+      }
+
+      l.lambda_ = 1.5e5;
+      const double an_cf =
+          l.dprofit_dpsi_stem<phylloptim::Leaf::CostCurve::CowanFarquhar>(
+              psi, psi_soil, &feasible);
+      const double up_cf = l.profit_psi_stem_CowanFarquhar(psi + h, psi_soil);
+      const double dn_cf = l.profit_psi_stem_CowanFarquhar(psi - h, psi_soil);
+      const double fd_cf = (up_cf - dn_cf) / (2.0 * h);
+      if (feasible) {
+        worst_cf = std::max(worst_cf, std::abs(an_cf / fd_cf - 1.0));
+        near(an_cf / fd_cf, 1.0, 5e-5,
+             "Cowan-Farquhar dprofit at frac=" + std::to_string(frac) +
+                 " psi_soil=" + std::to_string(psi_soil));
+      }
+    }
+  }
+  // Measured 8.9e-07 (TF24) and 4.1e-06 (Cowan-Farquhar). The bound is 5e-05
+  // rather than either: the residual is the ci solver's noise floor divided by h,
+  // and that floor is libm-dependent, so it moves across platforms. Nothing is
+  // lost by the slack -- a missing or mis-signed chain-rule term is an O(1)
+  // relative error, not an O(1e-5) one.
+  printf("    %d points | worst relative error: TF24 %.3e, Cowan-Farquhar %.3e\n",
+         rows, worst_tf, worst_cf);
+}
+
+// The derivative and the optimiser have to agree about where the optimum is: the
+// solver returns an argmax, so dprofit there must be ~zero, and AWAY from it must
+// not be. The second half is what makes this more than a tautology -- a
+// derivative that returned zero everywhere would pass the first half alone.
+void test_dprofit_dpsi_stem_vanishes_at_the_optimum() {
+  printf("dprofit/dpsi_stem is ~0 at the optimum and not away from it\n");
+  Drivers d;
+  d.PPFD = 1500.0;
+  for (double psi_soil : {0.5, 1.0, 2.0}) {
+    phylloptim::Leaf l = make_leaf(d, {psi_soil}, {1.0});
+    l.lambda_ = 1.5e5;
+    l.optimise_psi_stem_CowanFarquhar();
+    const double psi = l.opt_psi_stem_;
+    if (psi <= psi_soil + 1e-6 || psi >= l.psi_crit - 1e-6) {
+      continue; // pinned: the gradient is genuinely non-zero there
+    }
+    bool feasible = false;
+    const double at =
+        l.dprofit_dpsi_stem<phylloptim::Leaf::CostCurve::CowanFarquhar>(
+            psi, psi_soil, &feasible);
+    ok(feasible, "the optimum admits an informative gradient");
+    // Scaled by the derivative's own magnitude a little away from the optimum,
+    // so the bound means "small compared with what this function returns here"
+    // rather than "small in absolute carbon units".
+    const double away =
+        l.dprofit_dpsi_stem<phylloptim::Leaf::CostCurve::CowanFarquhar>(
+            psi_soil + 0.2 * (l.psi_crit - psi_soil), psi_soil, &feasible);
+    ok(std::abs(at) < 1e-3 * std::abs(away),
+       "dprofit at the optimum is negligible against its scale, psi_soil=" +
+           std::to_string(psi_soil));
+    ok(std::abs(away) > 0.0, "and the scale itself is non-zero");
+  }
+}
+
+// evaluate_psi_stem: the prescribed-point counterpart of the optimisers, and the
+// case where a gradient is a partial at fixed psi rather than a total through a
+// moving argmax.
+void test_evaluate_psi_stem_prescribes_rather_than_optimises() {
+  printf("evaluate_psi_stem: a prescribed operating point, clamped and tagged\n");
+  using CC = phylloptim::Leaf::CostCurve;
+  Drivers d;
+  d.PPFD = 1500.0;
+  const double psi_soil = 1.0;
+
+  phylloptim::Leaf l = make_leaf(d, {psi_soil}, {1.0});
+  l.lambda_ = 1.5e5;
+  l.optimise_psi_stem_CowanFarquhar();
+  const double psi_opt = l.opt_psi_stem_, profit_opt = l.profit_;
+
+  // A point deliberately away from the optimum is NOT stationary, and is worth
+  // strictly less. Both halves matter: the first says the function honoured the
+  // request, the second says the optimiser was actually finding a maximum.
+  const double psi_off = psi_soil + 0.25 * (l.psi_crit - psi_soil);
+  const double p_off = l.evaluate_psi_stem<CC::CowanFarquhar>(psi_off);
+  near(l.opt_psi_stem_, psi_off, 1e-12, "it sits exactly where it was told to");
+  ok(l.operating_point_kind() == phylloptim::Leaf::OperatingPointKind::Prescribed,
+     "and reports itself as prescribed rather than solved");
+  ok(p_off < profit_opt, "a prescribed point off the optimum is worth less");
+
+  bool feasible = false;
+  const double slope =
+      l.dprofit_dpsi_stem<CC::CowanFarquhar>(psi_off, psi_soil, &feasible);
+  ok(feasible && std::abs(slope) > 1e-6,
+     "dprofit is genuinely non-zero there, unlike at the optimum");
+
+  // Asking for the optimum back reproduces it, which is what makes the two entry
+  // points comparable at all.
+  const double p_at = l.evaluate_psi_stem<CC::CowanFarquhar>(psi_opt);
+  near(p_at, profit_opt, 1e-12, "prescribing the optimum reproduces its profit");
+
+  // Outside the interval the target is clamped, not refused -- and the clamp is
+  // where a prescribed gradient stops being a pure partial, because the bound
+  // moves with the traits.
+  l.evaluate_psi_stem<CC::CowanFarquhar>(l.psi_crit + 5.0);
+  near(l.opt_psi_stem_, l.psi_crit, 1e-12, "a target past psi_crit clamps to it");
+  l.evaluate_psi_stem<CC::CowanFarquhar>(0.0);
+  near(l.opt_psi_stem_, psi_soil, 1e-12, "and one below psi_soil clamps up to it");
+
+  // The TF24 curve takes the same route and needs no lambda.
+  phylloptim::Leaf t = make_leaf(d, {psi_soil}, {1.0});
+  const double p_tf = t.evaluate_psi_stem<CC::TF24>(psi_off);
+  near(p_tf, t.profit_psi_stem_TF(psi_off, psi_soil), 1e-12,
+       "the TF24 arm agrees with its own objective at that point");
+}
+
 // The multi-layer identity from the companion manuscript:
 //   lambda_multi = lambda_single * [1 + kmax*f(psi_r)/S],   S = dE_up/dpsi_r
 // find_root_collar_psi optimises the COLLAR, so lambda_multi is what it
@@ -4159,6 +4318,9 @@ int main() {
   test_cowan_farquhar_reproduces_the_TF_optimum();
   test_cowan_farquhar_closed_state();
   test_cowan_farquhar_refuses_an_unset_lambda();
+  test_dprofit_dpsi_stem_matches_a_finite_difference();
+  test_dprofit_dpsi_stem_vanishes_at_the_optimum();
+  test_evaluate_psi_stem_prescribes_rather_than_optimises();
   test_multilayer_lambda_identity();
   test_g1_eff();
   test_leaf_temperature_is_reported();
