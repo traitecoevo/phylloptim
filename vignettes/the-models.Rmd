@@ -123,7 +123,7 @@ the hydraulic supply constraint is simplest to state. That is an implementation
 choice and nothing more — what actually distinguishes the models is the cost
 function, which is the next section.
 
-⚠️ **Monotone, not linear** — and that limits how far the equivalence goes. A
+**Monotone, not linear** — and that limits how far the equivalence goes. A
 *derivative* does depend on the coordinate: `dA/dE` and `dA/dψ` are different
 numbers, related by `dE/dψ`. So a marginal cost is only meaningful once you say
 what it is per unit of, and comparing a λ from one paper with a λ from another
@@ -169,7 +169,7 @@ A root-find has no such floor, because it is looking for a *zero* of a function 
 
 This is the same flat maximum that makes the argmax the badly-conditioned quantity across platforms, seen from the inside.
 
-⚠️ **Having the derivative in hand is what makes that trade one-sided.** `dJ/dψ` is not a second model to evaluate — it comes out of the same forward pass as `J`, so one iteration of the root-find costs about what one iteration of the search costs, and superlinear convergence is pure gain. Take the derivative away and the comparison closes right up: you would pay two objective evaluations per iteration to difference it, and inherit a step-size problem of your own on top (a difference through a nested root-find has a noise floor of tolerance/h, so the "obvious" small step is the wrong one). **The efficiency argument here is not really about Brent versus golden section — it is about what a cheap exact derivative buys you**, which is the same reason the trait gradients in Appendix B are worth their complexity.
+**Having the derivative in hand is what makes that trade one-sided.** `dJ/dψ` is not a second model to evaluate — it comes out of the same forward pass as `J`, so one iteration of the root-find costs about what one iteration of the search costs, and superlinear convergence is pure gain. Take the derivative away and the comparison closes right up: you would pay two objective evaluations per iteration to difference it, and inherit a step-size problem of your own on top (a difference through a nested root-find has a noise floor of tolerance/h, so the "obvious" small step is the wrong one). **The efficiency argument here is not really about Brent versus golden section — it is about what a cheap exact derivative buys you**, which is the same reason the trait gradients in Appendix B are worth their complexity.
 
 The other side of the ledger is what the scanning entry points pay: 64 objective evaluations to pick the basin, unconditionally, on every call, before any refinement begins. Measured per call on the single-layer subset (`bench_solve`, best of 2000):
 
@@ -180,11 +180,11 @@ The other side of the ledger is what the scanning entry points pay: 64 objective
 | `optimise_psi_stem_TF` | scan + refine | 8.69 |
 | `optimise_psi_stem_ProfitMax` | scan + refine | 53.70 |
 
-⚠️ Read that table for its order of magnitude and not as a controlled comparison: the first row is a different model on a different supply path, so the whole gap is not the scan. ProfitMax's 54 µs is the honest outlier — it needs a sweep for its own `|A|max` normaliser regardless, so it is the one entry point for which the scan is not purely a cost.
+Read that table for its order of magnitude and not as a controlled comparison: the first row is a different model on a different supply path, so the whole gap is not the scan. ProfitMax's 54 µs is the honest outlier — it needs a sweep for its own `|A|max` normaliser regardless, so it is the one entry point for which the scan is not purely a cost.
 
-⚠️ **But a stationary point is not always the answer.** Where profit is still climbing as it reaches the end of the feasible interval, `dJ/dψ` never crosses zero inside it and the optimum is that endpoint — a *constrained* optimum. This is not a corner case: it is 42 of 240 feasible rows on the reference grid. A solver has to test the derivative's sign at each end and report the pin explicitly, because a bracketing root-find handed no sign change cannot distinguish "pinned" from "failed". The reported operating-point kind is what carries that distinction.
+**But a stationary point is not always the answer.** Where profit is still climbing as it reaches the end of the feasible interval, `dJ/dψ` never crosses zero inside it and the optimum is that endpoint — a *constrained* optimum. This is not a corner case: it is 42 of 240 feasible rows on the reference grid. A solver has to test the derivative's sign at each end and report the pin explicitly, because a bracketing root-find handed no sign change cannot distinguish "pinned" from "failed". The reported operating-point kind is what carries that distinction.
 
-⚠️ **And a stationary point need not be unique.** Where the marginal cost is peaked (see the cost curves below) the condition can have two roots, and a bracketing solve finds one of them. This is the one real argument for the scan, and it is why the scan is still there: searching the objective over a grid finds the taller hump but cannot feed a gradient, while solving the condition feeds a gradient but can land on the wrong one.
+**And a stationary point need not be unique.** Where the marginal cost is peaked (see the cost curves below) the condition can have two roots, and a bracketing solve finds one of them. This is the one real argument for the scan, and it is why the scan is still there: searching the objective over a grid finds the taller hump but cannot feed a gradient, while solving the condition feeds a gradient but can land on the wrong one.
 
 The two properties are not actually in conflict, which is the point worth carrying away. What reconciles them is **multi-start on the first-order condition** — several sub-brackets, each yielding an exact stationary point, compared on profit — rather than a grid. Every candidate is then a genuine stationary point, so each is smooth in the traits and the comparison between them is a comparison of maxima, which is the well-conditioned quantity. A grid argmax can be neither.
 
@@ -206,9 +206,9 @@ The two properties are not actually in conflict, which is the point worth carryi
 
 1e-10 is the knee: **335× closer to a converged solve** than the 1e-7 this model used to run at, for a measured **+3.4%** in time (2.65 → 2.75 µs/solve, both binaries built from one tree and interleaved). Going on to 1e-13 buys roughly 700× more for about three times that again. Note the plateaus — 1e-10 and 1e-11 return the same number, because they are the same count of TOMS748 iterations — so tightening *between* plateaus costs and buys nothing.
 
-⚠️ **This tolerance was invisible until the outer search was replaced**, and that is the generalisable part: a nested solver's precision is only as visible as the loosest tolerance above it. While the outer golden-section search terminated on a 1e-3 bracket, the inner root-find could have been anything. Removing the outer search promoted it to the model's dominant amplifier overnight — which is why the two sections belong together.
+**This tolerance was invisible until the outer search was replaced**, and that is the generalisable part: a nested solver's precision is only as visible as the loosest tolerance above it. While the outer golden-section search terminated on a 1e-3 bracket, the inner root-find could have been anything. Removing the outer search promoted it to the model's dominant amplifier overnight — which is why the two sections belong together.
 
-⚠️ **And the tolerance you can set is not this one.** `ci_abs_tol` in `leaf_control()` reaches only the `optimise_psi_stem_*` entry points; the collar solve's inner root-find is fixed at 1e-10. Tightening the settable one buys no precision on the multi-layer path, which is worth knowing before anyone tries.
+**And the tolerance you can set is not this one.** `ci_abs_tol` in `leaf_control()` reaches only the `optimise_psi_stem_*` entry points; the collar solve's inner root-find is fixed at 1e-10. Tightening the settable one buys no precision on the multi-layer path, which is worth knowing before anyone tries.
 
 **Finally, a regime where the theorem does not hold.** When the leaf is hot enough that assimilation is negative across the whole `[Γ*, c_a]` bracket there is no supply-equals-demand root, `c_i` is pinned at the compensation point, and **the residual is no longer zero** — so the implicit function theorem has nothing to stand on. Derivatives on that branch drop the assimilation term rather than approximating it, and report themselves as not feasible. A gradient that ignored the flag would get a plausible number there.
 
@@ -257,7 +257,7 @@ family needs. Two consequences follow, and both are real rather than bookkeeping
   no parameter of its own to achieve that; the 0.05 is the same constant `psi_crit`
   is derived from.
 
-⚠️ **The link states the cost; it is not how the optimum is found.** At full closure
+**The link states the cost; it is not how the optimum is found.** At full closure
 `A = −R_d < 0`, so `log A` does not exist — and that endpoint has to be a candidate.
 `optimise_psi_stem_SOX()` therefore maximises the product directly, which is exact
 because `log` is monotone.
@@ -266,14 +266,14 @@ The code names are the prefix on every parameter belonging to that model —
 `TF24_cost_scale`, `CF77_lambda_`, `JS22_gamma` — so a parameter says which curve
 reads it, and returns an exactly zero gradient on the others.
 
-⚠️ **`JS22` is Joshi & Stocker's hydraulic term and not their model.** Theirs is
+**`JS22` is Joshi & Stocker's hydraulic term and not their model.** Theirs is
 $A-\alpha J_{\max}-\gamma_{J}(\Delta\psi)^{2}$, jointly optimised over $J_{\max}$
 as well as $\psi$; the capacity term is not implemented here, so a run of this
 curve should not be described as Joshi & Stocker (2022). $\gamma_J$ is written
 distinctly from TF24's $\gamma$ because they are different parameters in different
 units.
 
-⚠️ **`JS22` is also the one cost above that is a function of the DROP**
+**`JS22` is also the one cost above that is a function of the DROP**
 $\Delta\psi=\psi-\psi_s$ rather than of the absolute potential. That is not a
 detail of parameterisation, and the next chunk measures what it costs.
 
@@ -302,7 +302,7 @@ cat(sprintf("|f'| peaks at %.2f MPa; %.1f%% of peak at the wet end, %.0f%% at ps
             100 * fp[length(fp)] / max(fp)))
 ```
 
-⚠️ **Read that dry-end figure before generalising.** `|f'|` is asymptotically zero
+**Read that dry-end figure before generalising.** `|f'|` is asymptotically zero
 at both ends, but the bracket stops at `psi_crit`, and there it is still a sizeable
 fraction of its peak. So *within the operating range* the shape is "rises from
 nothing, then falls somewhat" — the vanishing that matters in practice is at the
@@ -436,13 +436,13 @@ for (ps in c(0.5, 1, 2, 3)) {
 So λ runs a third to three-quarters of WUE here, and the ratio **rises as the soil
 dries** — you cannot infer one from the other, in either direction.
 
-⚠️ **What is true is narrower, and only at the optimum.** The first-order
+**What is true is narrower, and only at the optimum.** The first-order
 condition is `dA/dE = λ`, so at the operating point λ *is* the marginal water use
 efficiency. Off the optimum it is not even that. And "WUE" unqualified almost
 always means the average `A/E`, or intrinsic WUE `A/g_s` — so a λ from this model
 is not comparable with a WUE from the literature without checking which was meant.
 
-### ⚠️ λ is a common currency only across *difference* objectives
+### λ is a common currency only across *difference* objectives
 
 The claim above needs one qualification, and it is structural rather than a detail. Every model in the cost table maximises a **difference**, `A(ψ) − C(ψ)`. Its first-order condition is `A' = C'`, so
 
@@ -463,7 +463,7 @@ Two consequences are worth carrying out of this document:
 - **A product objective's optimum is invariant to a uniform rescaling of assimilation; a difference objective's is not.** Replacing `A` by `κA` leaves `A'g + Ag' = 0` unchanged, while `κA' = C'` moves. That is the same statement as `λ ∝ A`, in a form that can be tested directly rather than derived.
 - **So a product objective decouples stomatal behaviour from assimilation for free.** As `A` falls — under warming, say — λ falls in proportion, water gets cheaper, and the stomata do not close. Under a difference, `C'` is unchanged while `A'` falls, so `A' = C'` is met at lower tension and they do. To the extent that a thermal decline acts as a scale reduction in `A`, this is a first-order argument rather than an exact one.
 
-⚠️ **No product objective is implemented here yet**, so unlike everything else in this document these paragraphs are algebra with no chunk beside them to check them. The scale-invariance statement is the test to add when one lands.
+**No product objective is implemented here yet**, so unlike everything else in this document these paragraphs are algebra with no chunk beside them to check them. The scale-invariance statement is the test to add when one lands.
 
 ## The two gates
 
@@ -522,13 +522,13 @@ So the published models map on as follows:
   collar potential with a multi-layer root network. This is the production path
   here, and the one `plant` consumes.
 - **Joshi & Stocker** [@joshi2022] — the `γ_J(Δψ)²` cost, the only one priced on
-  the drop. ⚠️ Their **capacity** term `αJ_max`, and the joint optimisation over
+  the drop. Their **capacity** term `αJ_max`, and the joint optimisation over
   `J_max` that goes with it, are not implemented — so this is their hydraulic term
   and not their model.
 - **Sicangco et al.** [@sicangco2026] — ProfitMax with the thermal cost on.
 - **Jones et al.** [@jones2026] — a multiplicative objective; see the note below.
 
-⚠️ **Jones et al. is not yet in this list as an implemented cost curve.** Its
+**Jones et al. is not yet in this list as an implemented cost curve.** Its
 objective is a **product**, `A · (1 − ψ_leaf/ψ_crit)`, not a difference. Taking
 logs turns it into one — `log J = log A + log(1 − ψ/ψ_crit)` — which is the same
 additive skeleton with a `log` benefit link, and the argmax is unchanged because
@@ -567,7 +567,7 @@ competitive inhibition by oxygen:
 
 $$K_m=K_c\Big(1+\frac{O_2}{K_o}\Big)$$
 
-⚠️ **`A` here is NET assimilation.** `R_d` is inside it, which is why the
+**`A` here is NET assimilation.** `R_d` is inside it, which is why the
 closed-stomata profit is `−R_d` rather than zero, and why `A` can be negative.
 
 ### 2. Temperature responses
@@ -585,11 +585,11 @@ is different again — a Q₁₀ whose own value declines with temperature:
 
 $$R_d=R_{d,25}\;q^{(T-25)/10},\qquad q=q_0-q_1\frac{T+25}{2}$$
 
-⚠️ **This is why a grid at 25 °C is blind to every one of these by construction**:
+**This is why a grid at 25 °C is blind to every one of these by construction**:
 each response is *defined* to be 1 at its reference, so a change to any of them is
 inert there. Any test of a temperature response needs a second temperature.
 
-⚠️ **And the thermal-cost gate reaches into this block**: when it is on,
+**And the thermal-cost gate reaches into this block**: when it is on,
 `J_max` is multiplied by `(1 − TC)`. That is why it moves the benefit and not only
 the cost.
 
@@ -604,7 +604,7 @@ where 1.6 is the ratio of diffusivities of water vapour and CO₂, `P` is
 atmospheric pressure and `D_leaf` the leaf-to-air vapour pressure deficit. Fixing
 `E` fixes `g_c`, which is the first link of the coordinate chain above.
 
-⚠️ **`$stom_cond_CO2_` is a TOTAL leaf-to-air conductance, not a stomatal one.**
+**`$stom_cond_CO2_` is a TOTAL leaf-to-air conductance, not a stomatal one.**
 There is no separate boundary-layer term: the relation above is the whole path from
 leaf interior to bulk air, in one conductance, paired with a leaf-to-bulk-air
 deficit. That is internally consistent, and it is the right quantity for the `c_i`
@@ -704,7 +704,7 @@ in which **scale and shape are cleanly separated**: `P50` is the potential at 50
 loss, in MPa, and `c` is the steepness. `b` remains available as a derived
 read-only quantity, but it is not a parameter anyone should set.
 
-⚠️ **Sign convention.** Published `P50` values are negative (−3.95 MPa). This
+**Sign convention.** Published `P50` values are negative (−3.95 MPa). This
 package uses positive magnitudes throughout, so `P50` here means `|P50|`.
 
 ## Why not `(P50, b)`
@@ -740,7 +740,7 @@ Fitted directly in `(P50, c)` from raw PLC curves for eight species:
 | *Alphitonia excelsa* | Choat 2003 | 5.69 | 1.70 | 10 |
 | *Cochlospermum gillivraei* | Choat 2003 | 1.42 | 5.15 | 126 |
 
-⚠️ **The four Choat 2003 curves are not trustworthy for `c`.** They are 13–14
+**The four Choat 2003 curves are not trustworthy for `c`.** They are 13–14
 points each and already sit at 25–30% PLC by 0.8 MPa, which is a native-embolism
 or open-vessel artefact rather than a trait. The defensible comparison is the
 three Blackman angiosperms measured the same way: **`c` = 1.8–2.6 while `|P50|`
@@ -804,7 +804,7 @@ cat(sprintf("f(psi_crit) = %.17g   (the critical fraction, exactly)\n",
 Those are equalities, not agreements: `stem_b` and `psi_crit` are computed from
 `(P50, c)` by the expressions printed beside them, so there is no gap to quote.
 
-⚠️ **It was not always so, and the difference is worth recording.** The defaults
+**It was not always so, and the difference is worth recording.** The defaults
 used to be round values of `stem_b` and `psi_crit` rather than of `P50`, with
 `psi_crit` set to `P95` *rounded to seven figures* — so `f(psi_crit)` was
 `0.049999968739194864` rather than `0.05`, and the header claiming it was "0.0500
@@ -851,7 +851,7 @@ below are what those assertions compare against.
    The second term is nearly free — it reuses the cheap `b`-derivative — but
    omitting it silently converts a total derivative into a partial, which looks
    like a plausible-but-wrong gradient rather than an error.
-3. ⚠️ **A derived `psi_crit` adds a term.** Moving `P50` moves the threshold, so
+3. **A derived `psi_crit` adds a term.** Moving `P50` moves the threshold, so
    `d/dP50` picks up `dpsi_crit/dP50 · d/dpsi_crit`, with `dpsi_crit/dP50 =
    (log₂(1/f))^{1/c}` — 1.7266 at the defaults, a constant at fixed `c`. That term
    is **exactly zero at an interior optimum and order 1 at a pinned one**, so the
