@@ -29,7 +29,7 @@ the user-visible history.
 | ✅ landed | 7a-iii | `JS22`, Joshi & Stocker's hydraulic term | Landed FIRST, as the calibration was waiting on it. One trait, `JS22_gamma`; vector 12 → 13, `gradient_par_names()` 14 → 15 |
 | ✅ landed | 7a-ii | `CMax`, Wolf et al. (2016) as Anderegg et al. (2018) parameterised it | Two traits, `CMax_a`/`CMax_b`; vector 13 → 15, `gradient_par_names()` 15 → 17. ⚠️ Shares a FAMILY with `JS22` but not an implementation — see the item |
 | ✅ fixed | — | `bench_gradient` segfaulted, so `make bench` could not pass | An out-of-bounds read: the timing loop ran to a literal `13` over an 11-element `kBase`/`kNames`, handing a garbage pointer to `printf("%s")`. One `kNTraits` now feeds all three, with static_asserts. ⚠️ **Two things hid it, and both are general.** It is only fatal at some address layouts, so it ran clean under `lldb` (ASLR disabled) and crashed when run directly. And a piped or redirected stdout is block-buffered, so the whole report died in the buffer — which made it look like a crash during *initialisation*, a diagnosis this row carried until `-fsanitize=address` named the real thing in one line. Reach for ASan first |
-| ⏳ SOX-OPT landed | 7c | Jones (2026): flat vulnerability curve **and** their objective | One constant in the Weibull exponent, default 1; 0 recovers `E = kmax(ψ − ψ_s)`. ⚠️ **The supply half does not stand up alone** — a flat curve sends the derived `psi_crit` to infinity and deletes the cost, so their independent `Pcrit` and log objective come with it. First change to the BENEFIT side, and its λ carries a factor of `A` |
+| ✅ objective landed | 7c | The product-objective family: `SOX` and `JW26` | Both landed, neither taking a parameter: `g` runs from 1 to 0 between zero tension and the DERIVED `psi_crit`. ⚠️ What is left is optional and is about reproducing Jones NUMBERS, not having the model: their free `Pcrit` plus their linear supply, which are coupled to each other |
 | [#4](https://github.com/traitecoevo/phylloptim/issues/4) | 11f | Trait gradients — `stem_c`'s rebuild | Stages 1, 2 and 3 landed ([#42](https://github.com/traitecoevo/phylloptim/pull/42), #73, [#46](https://github.com/traitecoevo/phylloptim/pull/46)). ⚠️ Read 11e before quoting any speedup, and 11g for which side of the boundary a figure belongs to. `stem_c` is **unmotivated** until something frees a vulnerability curve |
 | [#74](https://github.com/traitecoevo/phylloptim/issues/74) | 11f, 11g | The `stem_b` shortcut is undone by a rebuild once per observation | 11f's 24.5× is **2.4×** through `leaf_gradient_batch()`. Unmotivated until something frees a vulnerability curve; filed so the wrong figure is not quoted meanwhile |
 | [#6](https://github.com/traitecoevo/phylloptim/issues/6) | 12 | Real-data calibration, then inversion | **The one with the most downstream** — it specifies what is left of #4, and doing it found #38, #40, #41 and #52. ⚠️ The *synthetic* vignette is done ([#53](https://github.com/traitecoevo/phylloptim/pull/53)) and **AD lost**: read 12a before repeating the comparison |
@@ -996,9 +996,11 @@ phiLWP(P, Pcrit) = max(0., min(1., 1. - P / Pcrit))                  # Dewar 201
 
 So one family, `max A·g(ψ)`, two members, and **one piece of machinery serves both**: a per-curve benefit link, identity by default. Everything in 7a shares `A` and differs only in `C`; this is the first change to the benefit side, and it is the honest cost of the item — paid once for two models rather than once for Jones.
 
-### SOX-OPT costs no new parameters — LANDED
+### The two product curves — LANDED, neither taking a parameter
 
 ⚠️ **`profit_` now holds three kinds of number**, and SOX is the third rather than the second: `TF24`/`CF77`/`JS22`/`CMax` write carbon, `ProfitMax` writes a DIMENSIONLESS normalised profit, and `SOX` writes a product. The guide states the rule for `hydraulic_cost_` -- "a third meaning behind the same name is how a reader quotes the wrong number" -- and nothing enforces it for `profit_`. A field per objective kind is the fix; filing it rather than fixing it inside this item.
+
+⚠️ **Both product factors are CLAMPED at zero, and SOX shipped without it.** Past `psi_crit` the reduction factor goes negative, and the objective is `A*g` with `A = -R_d < 0` at closure -- so a shut-down leaf reported a POSITIVE profit that grew as the soil dried: +0.0125 at `psi_soil` 6.0 and +0.0633 at 7.0, against TF24's -8.48 and -8.85. Sabot's `phiLWP` clamps; her `kcost` does not, because TractLSM never evaluates outside `[Ps, Pcrit]` and the no-flow branch here does. Fixed in both, and it moved 80 of 576 SOX golden rows.
 
 ⚠️ **`SOX` is not a `CostCurve` member**, so `evaluate_psi_stem` and `dprofit_dpsi_stem` do not reach it. The enum is one switch driving both, and the second computes `A_prime*dci_dpsistem - C_prime` with only `C_prime` per-curve plus an energy-balance term on that shape -- a product needs the whole expression replaced. Nothing in production calls it (only `test_leaf.cpp`), so the boundary is deliberate.
 
@@ -1022,13 +1024,13 @@ That is better than what the example does today, which is to *widen* `stem_b` un
 
 ⚠️ **So `s` must apply to the curve used for the transpiration integral and not the one used for the cost**, which means splitting a curve this package deliberately shares. That is the design decision here; the constant is not.
 
-#### ⚠️ And the supply half does not stand up alone
+#### ⚠️ The supply half does not stand up alone — but the OBJECTIVE does
 
-Jones keep supply and cost independent — a linear supply through `rp`, and a separate cost with **its own `Pcrit`**. Here `psi_crit` is *derived* as the curve's P95 (hazard 1), so a flat curve has none: `psi_crit → ∞`, and the cost term `(1 − ψ/ψ_crit) → 1`. Setting `s = 0` therefore reproduces their supply and **deletes the cost** — the same failure as the `stem_b` workaround, reached faster and by a different route.
+Correction to what this item first claimed, and it changes the staging. The reasoning was: Jones supply their own `Pcrit`, so reproducing them needs `psi_crit` freed, and a flat curve sends a derived `psi_crit` to infinity — therefore supply and objective are one item.
 
-So `s = 0` requires `psi_crit` supplied as an independent cost parameter, reintroducing exactly what the (P50, c) change removed as a settable trait. That is faithful to Jones rather than a regression, but the invariant "psi_crit is a quantile of the curve" becomes **conditional on `s`** and has to be stated rather than discovered.
+The second half of that does not follow. **Derive `psi_crit` as everywhere else and the objective needs no parameter at all**, exactly like SOX: `g = 1 − ψ/psi_crit` is fully determined by `stem_P50` and `stem_c`. That is what `JW26` is, and it landed on its own. Better than freeing the parameter, too — a derived `psi_crit` puts `JW26` and `SOX` on the *same two anchors*, so the two `g` are interpolations between identical endpoints and the comparison is structural rather than a fitted match.
 
-And once `psi_crit` is an independent parameter, their objective is nearly free — which is why these are one item and not two.
+What remains coupled is only the paper-reproduction question: their free `Pcrit` **and** their linear supply, together, because flattening the curve to get the second destroys the first. That is now an optional item about matching published numbers, not a prerequisite for having the model.
 
 ### Their objective, and the first benefit-side change
 

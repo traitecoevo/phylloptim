@@ -92,7 +92,7 @@ There are two ways to find `ψ*`: search `J` for its maximum, or solve
 
 $$\frac{dJ}{d\psi}=0$$
 
-for a stationary point. Both are in the package, and which lives where is worth naming rather than leaving as "in different places": the **collar solve** — the multi-layer supply path, and the one plant calls — solves the first-order condition. The six single-layer `optimise_psi_stem_*` entry points still **scan** the interval on a 64-point grid and refine the best cell. That difference is historical rather than principled, and the reasons for closing it are the rest of this section.
+for a stationary point. Both are in the package, and which lives where is worth naming rather than leaving as "in different places": the **collar solve** — the multi-layer supply path, and the one plant calls — solves the first-order condition. The seven single-layer `optimise_psi_stem_*` entry points still **scan** the interval on a 64-point grid and refine the best cell. That difference is historical rather than principled, and the reasons for closing it are the rest of this section.
 
 **The first-order condition wins on every axis that can be measured**, which is unusual enough to be worth setting out.
 
@@ -187,9 +187,32 @@ so `f` is the fraction of maximum conductivity remaining, `k` the conductance an
 | **Joshi & Stocker** [@joshi2022] | `JS22` | $\gamma_{J}\,(\Delta\psi)^{2}$ | $2\gamma_{J}\,\Delta\psi$ | carbon |
 | **Wolf et al.** [@wolf2016] | `CMax` | $\tfrac{a}{2}(\psi^{2}-\psi_s^{2})+b(\psi-\psi_s)$ | $a\,\psi+b$ | carbon |
 
-| **Eller** [@eller2020] | `SOX` | $-\log g(\psi)$ | $-g'/g$ | log carbon |
+| **Eller** [@eller2020] | `SOX` | $-\log g_{\rm SOX}(\psi)$ | $-g'/g$ | log carbon |
+| **Jones et al.** [@jones2026] | `JW26` | $-\log g_{\rm JW}(\psi)$ | $1/(\psi_{\rm crit}-\psi)$ | log carbon |
 
-The last row is in the table because of a **benefit link**, and it is worth being explicit about how it got there. `SOX` does not subtract a cost at all — it maximises the *product* `A · g(ψ)`, with `g = (f − 0.05)/(1 − 0.05)`, the conductivity fraction rescaled to reach exactly zero at `psi_crit`. Taking logs turns that into the same additive skeleton as every other row:
+The last two rows are in the table because of a **benefit link**, and it is worth being explicit about how they got there. Neither subtracts a cost — both maximise the *product* `A · g(ψ)`, and they differ only in `g`:
+
+$$g_{\rm SOX}(\psi)=\frac{f(\psi)-0.05}{1-0.05},
+\qquad g_{\rm JW}(\psi)=1-\frac{\psi}{\psi_{\rm crit}}$$
+
+Both run from 1 at zero tension to exactly 0 at `psi_crit`, so they are two *interpolations between the same two anchors* — one following the vulnerability curve, one straight. That is what makes them comparable without matching a parameter, and neither needs one: `psi_crit` is derived from `stem_P50` and `stem_c` as everywhere else, and SOX's 0.05 is the same constant `psi_crit` is itself derived from.
+
+They cross, which is the whole of the difference between them:
+
+```{r}
+#| label: product-g
+l <- leaf_model()
+psi <- c(1, 2, 3, 4, 5)
+cat(sprintf("%7s %9s %9s\n", "psi", "g_SOX", "g_JW"))
+for (p in psi) {
+  cat(sprintf("%7.1f %9.4f %9.4f\n", p,
+              l$sox_reduction(p), l$jw26_reduction(p)))
+}
+```
+
+`SOX` sits above the straight line while the vulnerability curve is still flat, and below it once the curve turns over — so it charges less for early tension and more for late. `JW26` therefore operates at slightly *higher* tension in dry soil, which is the opposite of what "a linear cost is harsher" would suggest.
+
+Taking logs turns either into the same additive skeleton as every other row:
 
 $$\log\big(A\,g\big) = \log A + \log g \quad\Longrightarrow\quad C(\psi)=-\log g(\psi)$$
 
@@ -408,7 +431,7 @@ Four axes, chosen independently. A "model" in the literature is a point in this 
 
 | axis | options | what it changes |
 |---|---|---|
-| **cost curve** | `TF24` / `CF77` / `ProfitMax` / `JS22` / `CMax` / `SOX` | `C(ψ)`, and its units — and for `SOX`, whether the objective is a difference at all |
+| **cost curve** | `TF24` / `CF77` / `ProfitMax` / `JS22` / `CMax` / `SOX` / `JW26` | `C(ψ)`, and its units — and for `SOX`, whether the objective is a difference at all |
 | **supply topology** | single soil potential / multi-layer root network | the decision variable, and the feasible bracket |
 | **leaf temperature** | prescribed / energy balance | whether `Tleaf` responds to `E`, and so whether temperature responses are active at all |
 | **thermal cost** | off / on | adds a temperature penalty **and** scales `Jmax` — the only axis that moves both sides |
@@ -422,11 +445,11 @@ So the published models map on as follows:
 - **Wolf et al.** [@wolf2016] — a marginal cost linear in the absolute potential, `CMax_a·ψ + CMax_b`, in the form Anderegg et al. (2018) gave it. Of the difference objectives this is the one nearest `TF24`, for the reason the `gamma-match` chunk measures: both price the absolute potential.
 - **Eller** [@eller2020] — `SOX`, the product objective. Takes no parameter of its own.
 - **Sicangco et al.** [@sicangco2026] — ProfitMax with the thermal cost on.
-- **Jones et al.** [@jones2026] — the same product form as `SOX` with a different `g`; see the note below.
+- **Jones et al.** [@jones2026] — `JW26`, the same product form as `SOX` with a linear `g`. Takes no parameter of its own; see the note below for what separates it from the paper.
 
-**Jones et al.'s objective FORM is implemented and their particular model is not.** Theirs is a product, `A · (1 − ψ_leaf/ψ_crit)`, and `SOX` is the same product with `g` taken from the vulnerability curve instead — so the benefit link, the product optimiser, and the λ that carries a factor of `A` are all in place and shared. What is missing is specific to Jones, and it is two things rather than one.
+**`JW26` is Jones et al.'s objective and not their model**, and the gap is worth stating precisely because it is smaller than it was. Their objective is implemented exactly: a product, with `g` linear in the potential and zero at `ψ_crit`. What differs is the hydraulics underneath it.
 
-Their `g` is linear in the potential and reaches zero at a `ψ_crit` **they supply independently**. Here `psi_crit` is derived as the 95% quantile of the stem curve, so it is not free — and their supply is linear too, `Ψleaf = Ψpd − r_p E`, where ours is a Weibull integral that saturates. Those two are coupled: flattening the vulnerability curve to recover their supply sends the derived `psi_crit` to infinity and so deletes the cost, which is why the pair has to land together rather than one at a time.
+They supply `ψ_crit` as a free parameter and their supply is linear in the potential, `Ψleaf = Ψpd − r_p E`. Here `psi_crit` is derived from the stem curve like everything else, and the supply is that curve's integral, which saturates. Deriving `psi_crit` is the deliberate choice: it costs a parameter of theirs but it is what puts `JW26` and `SOX` on the same two anchors, so the comparison between them is structural rather than a fitted match. Reproducing the paper's own numbers would need the free `ψ_crit` and the linear supply together — and those two are coupled, because flattening the vulnerability curve to recover their supply sends a derived `psi_crit` to infinity and deletes the cost.
 
 The constraints on the log form are worth keeping in view either way. `log A` requires `A > 0`, which fails exactly in the closed-stomata state where `A = −R_d`, so the optimiser maximises the product directly rather than its logarithm. And the cost diverges where `g` reaches zero, which is the mechanism by which no product objective can be pinned dry.
 
@@ -528,13 +551,13 @@ With this on, a leaf has a reason to transpire that is not photosynthetic at all
 
 ### What the models disagree about
 
-Blocks 1–5 are shared. Every published model in the table above accepts them and differs only in block 6's cost: a carbon penalty rising with the fraction of conductivity lost [@towers2024], the water itself priced at a constant marginal rate [@cowan1977], the normalised loss of remaining conductance [@sperry2017], the square of the water-potential drop [@joshi2022], a rate rising linearly with the potential [@wolf2016], or the log of the conductance remaining [@eller2020]. They are **not refinements of one another** — they disagree about what is being spent.
+Blocks 1–5 are shared. Every published model in the table above accepts them and differs only in block 6's cost: a carbon penalty rising with the fraction of conductivity lost [@towers2024], the water itself priced at a constant marginal rate [@cowan1977], the normalised loss of remaining conductance [@sperry2017], the square of the water-potential drop [@joshi2022], a rate rising linearly with the potential [@wolf2016], or the log of the conductance remaining -- following the vulnerability curve [@eller2020] or a straight line [@jones2026]. They are **not refinements of one another** — they disagree about what is being spent.
 
 Two divisions cut across that list and are sharper than any of the individual formulae.
 
 The first is what the **marginal** cost reads — the third column of the table, and the quantity that actually locates the optimum. For five of the six it is a function of `ψ` alone. `JS22` is the exception: `2γ_J Δψ` reads the *drop*, and that is the one difference no parameter can absorb, because as the soil dries the drop shrinks while every absolute-potential cost rises. The `gamma-match` chunk measures what it costs — both spreads, side by side.
 
-The second is whether the cost is subtracted or the objective is a product. Five subtract; `SOX` multiplies. That is what decides whether λ carries a factor of `A`, and so whether water is priced in absolute carbon or as a share of what the leaf is currently earning.
+The second is whether the cost is subtracted or the objective is a product. Five subtract; `SOX` and `JW26` multiply. That is what decides whether λ carries a factor of `A`, and so whether water is priced in absolute carbon or as a share of what the leaf is currently earning.
 
 ### Further reading
 

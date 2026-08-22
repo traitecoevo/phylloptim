@@ -862,7 +862,7 @@ the per-cause split and the tolerance bands go in the first PR comment — see
    and −1.5459 at 1.88, so a search that steps in from the bounds reports an open
    stoma where the objective says shut.
 
-   So all six `optimise_psi_stem_*` maximise over a CLOSED interval: endpoints
+   So all seven `optimise_psi_stem_*` maximise over a CLOSED interval: endpoints
    included, a `boundary_scan_n_` = 64 scan to pick the basin, and a refine whose
    tolerance scales with the **cell** rather than the interval. Against a
    20001-point reference over 30 single-potential rows they are exact. The scan is
