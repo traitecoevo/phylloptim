@@ -843,57 +843,51 @@ the per-cause split and the tolerance bands go in the first PR comment — see
    removed the same composite wins 4.4× on the eleven traits that touch no spline.
 
 
-11. **The single-layer optimisers search a LOCAL maximum, and the profit is
-   neither unimodal nor interior.** `brent_fmin` steps in from the bounds, so it
-   can return neither an endpoint nor the global maximum of a multi-modal
-   objective. Both happen: at a leaf hot enough that net assimilation is negative
-   across the whole supply stream, the ProfitMax profit is highest at **full
-   closure** and carries a local maximum out in the interior. Measured at Tair
-   50 °C with the thermal cost on — profit −1.5314 at `psi_soil`, −1.5510 at 1.19,
-   −1.5459 at 1.88 — and the solver returned **1.643**, reporting an open stoma
-   where the objective says shut.
+11. **A bracketing optimiser answers "where is the interior maximum", and that is
+   not the same question as "where is the maximum".** The single-layer profit is
+   neither unimodal nor always interior: at a leaf hot enough that net assimilation
+   is negative across the whole supply stream, the ProfitMax profit is highest at
+   **full closure** and carries a second maximum out in the interior. At Tair 50 °C
+   with the thermal cost on the profit runs −1.5314 at `psi_soil`, −1.5510 at 1.19
+   and −1.5459 at 1.88, so a search that steps in from the bounds reports an open
+   stoma where the objective says shut.
 
-   `optimise_psi_stem_ProfitMax` now evaluates the objective on the scan
-   `prepare_profitmax` already runs, takes the grid argmax, and refines with Brent
-   only when it is interior. No extra model evaluations: `A` and `Tleaf` are
-   stored per grid point and `HC`/`TC` are analytic.
+   So all three `optimise_psi_stem_*` maximise over a CLOSED interval: endpoints
+   included, a `boundary_scan_n_` = 64 scan to pick the basin, and a refine whose
+   tolerance scales with the **cell** rather than the interval. Against a
+   20001-point reference over 30 single-potential rows they are exact. The scan is
+   free for ProfitMax, which needs it for |A|max anyway; the other two pay for it,
+   and `bench_solve` prices all four arms (collar 3.20, TF 9.45, Sperry 8.40,
+   ProfitMax 58.5 µs/call).
 
-   ⚠️ **~~`optimise_psi_stem_TF` and `optimise_psi_stem_Sperry` still have it~~ —
-   FIXED in #119, and this entry said otherwise for two days.** All three now go
-   through `util::maximise_over_closed_interval`: endpoints included, a
-   `boundary_scan_n_` = 64 scan for the basin, and a refine whose tolerance scales
-   with the CELL rather than the interval. Measured against a 20001-point reference
-   over 30 single-potential rows, `optimise_psi_stem_TF` is now short on **0 of
-   30**. TF costs +150% for it (measured here at 9.45 µs/call against the collar
-   solve's 3.20; `bench_solve` has all four arms).
+   ⚠️ **The refine tolerance must scale with the CELL, or a finer grid is WORSE.**
+   Brent terminates on bracket width, so a fixed tolerance comparable to a cell
+   leaves the answer at the grid point — and adding grid points then makes it worse,
+   because cells narrow while the tolerance does not. A shortfall count that *rises*
+   as the grid gets finer is the signature.
 
-   The collar solve is unaffected — `maximise_profit_over_collar` handles a pinned
-   optimum explicitly, which is why 42 of 240 feasible golden rows are pinned and
-   correct.
+   ⚠️ **Endpoints alone are a half-fix, and the row count hides it.** Adding the two
+   bounds removes every boundary row while still leaving a worst-case shortfall of
+   3.05e-01 on a genuine interior second hump — worse than the 4.71e-01 it fixes.
+   **Read the worst shortfall, not the number of rows short.** This is the standing
+   objection to any derivative-only route: a root-find between the two ends is
+   exactly the half-fix. What keeps both properties is multi-start — several
+   sub-brackets, each yielding an exact stationary point, compared on profit —
+   because a grid argmax is piecewise constant in the traits and so cannot feed a
+   gradient (hazard 3).
 
-   ⚠️ **And these two solvers are NOT the collar solve with a restriction — they
-   are a different model.** `optimise_psi_stem_*` optimise ψ_stem with upstream
-   pinned at ψ_soil, ignoring the soil→collar path entirely, which is what their
-   own refusal message means by "non-**root-based**". Measured: the two disagree on
-   20 of 30 rows, and the gap does **not** close as the root resistance goes to
-   zero (1.67 MPa at r = 1e-2) — because as that resistance vanishes the collar
-   loses its freedom, `[root_zero_E, root_crit]` collapses, and the collar solve
-   correctly reports `determined` rather than optimising. So do not reach for one
-   as a check on the other.
+   The collar solve needs none of this: `maximise_profit_over_collar` tests the
+   gradient's sign at each end and reports a pinned optimum explicitly, which is why
+   42 of 240 feasible golden rows are pinned and correct.
 
-   The general form: **a bracketing optimiser answers "where is the interior
-   maximum", and that is not the same question as "where is the maximum".** If an
-   objective can be maximised at a constraint, the search has to be told.
-
-   ⚠️ **Endpoints alone are a HALF-fix, and the row count hides it.** Adding the
-   two bounds removes every boundary row, and #119 measured that it still left
-   Sperry short by 3.05e-01 on a genuine interior second hump — worse in the worst
-   case than the 4.71e-01 it fixed. **Read the worst shortfall, not the number of
-   rows.** This matters for any move back to a derivative-only route: a root-find
-   between the two ends is exactly the half-fix, and the shape that keeps both
-   properties is multi-start (several sub-brackets, each an exact stationary point,
-   compared on profit) rather than a grid — because a grid argmax is piecewise
-   constant in the traits and so cannot feed a gradient (hazard 3).
+   ⚠️ **`optimise_psi_stem_*` is NOT the collar solve with a restriction — it is a
+   different model, and neither is a check on the other.** These optimise ψ_stem with
+   upstream pinned at ψ_soil, ignoring the soil→collar path entirely, which is what
+   their refusal message means by "non-**root-based**". They disagree with the collar
+   solve on 20 of 30 driver rows, and the gap does **not** close as the root
+   resistance goes to zero (1.67 MPa at r = 1e-2): as that resistance vanishes the
+   collar loses its freedom, `[root_zero_E, root_crit]` collapses, and the collar
+   solve correctly reports `determined` rather than optimising.
 
 ## Validating against plant
 
