@@ -1,0 +1,237 @@
+---
+title: "The models, and the maths behind them"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{The models, and the maths behind them}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7,
+                      fig.height = 4, dpi = 120, fig.align = "center")
+```
+
+```{r setup, message = FALSE}
+library(phylloptim)
+```
+
+`vignette("phylloptim")` shows the model running; `vignette("fitting")` fits it to
+data. This one is the reference for *what is being solved* — the objective, the
+cost curves that distinguish one published model from another, the first-order
+conditions, and the two gates that change both sides of the ledger.
+
+Every number quoted in prose here is produced by the chunk beside it. That is
+deliberate: a formula written next to code it no longer matches is the failure
+mode this document is most exposed to.
+
+## The problem
+
+Every model in this package maximises a **profit** — a carbon gain minus a cost
+of the water used to get it — over a single water potential:
+
+$$\psi^{*}=\arg\max_{\psi\in[\psi_{\rm soil},\,\psi_{\rm crit}]} J(\psi),
+\qquad J(\psi)=B(\psi)-C(\psi)$$
+
+What varies between models is `C`. What varies between *supply topologies* is
+which ψ is the decision variable — and that is a bigger difference than it looks.
+
+### Two decision variables, not one
+
+- **Non-root-based.** Optimise the stem potential `ψ_stem` with the upstream
+  potential held at `ψ_soil`. The soil-to-collar path is ignored entirely. This is
+  what `optimise_psi_stem_*` do, and what their refusal message means by
+  "non-root-based".
+- **Root-based.** Optimise the **collar** potential with the root path in series,
+  then map it to a stem potential. This is `find_root_collar_psi()`.
+
+These are **different models, not one restricted to the other**, and neither is a
+check on the other. Measured over 30 driver rows they disagree on 20, and the gap
+does not close as the root resistance goes to zero — because as that resistance
+vanishes the collar loses its freedom, its feasible interval collapses, and the
+root-based solve correctly reports that feasibility *determined* the answer rather
+than optimisation.
+
+### The benefit, and the root-find inside it
+
+`B(ψ) = A(c_i)` is colimited assimilation, and `c_i` is not free: it is fixed by
+supply meeting demand, which is a root-find at every candidate ψ. Two consequences
+run through everything below.
+
+First, `dA/dψ` needs the implicit function theorem rather than a direct
+derivative — the chain runs `A'(c_i) · dc_i/dψ`.
+
+Second, there is a regime where that theorem does not hold. When the leaf is hot
+enough that assimilation is negative across the whole `[Γ*, c_a]` bracket there is
+no supply==demand root, `c_i` is pinned at the compensation point, and **the
+residual is no longer zero**. Derivatives on that branch drop the assimilation
+term rather than approximating it, and report themselves as not feasible. A
+gradient that ignored the flag would get a plausible number there.
+
+## The cost curves
+
+Write the conductivity fraction and its integral as
+
+$$f(\psi)=2^{-(\psi/P_{50})^{c}},\qquad
+F(\psi)=\int_0^{\psi}\!f,\qquad
+k(\psi)=k_{\max}f(\psi),\qquad
+E(\psi;\psi_s)=k_{\max}\big[F(\psi)-F(\psi_s)\big]$$
+
+so `f` is the fraction of maximum conductivity remaining, `k` the conductance and
+`E` the transpiration. Appendix A derives this parameterisation and why it is
+`(P50, c)` rather than `(b, c)`.
+
+| model | cost `C(ψ)` | marginal cost `dC/dψ` | units of `C` |
+|---|---|---|---|
+| **TF24** | $\gamma\,(1-f)^{\beta}$ | $\gamma\beta(1-f)^{\beta-1}\lvert f'\rvert$ | carbon |
+| **Cowan & Farquhar (1977)** | $\lambda\,E$ | $\lambda\,k_{\max}f$ | carbon |
+| **Sperry (2017) ProfitMax** | $\dfrac{k(\psi_s)-k(\psi)}{k(\psi_s)-k_{\rm crit}}$ | $\dfrac{k_{\max}\lvert f'\rvert}{k(\psi_s)-k_{\rm crit}}$ | dimensionless |
+
+The marginal costs are where the models actually differ, and the difference is
+one of **shape**:
+
+$$\lvert f'\rvert=\frac{c}{P_{50}}\Big(\frac{\psi}{P_{50}}\Big)^{c-1}f\ln 2$$
+
+which for `c > 1` vanishes as `ψ → 0` and again as `ψ → ∞` — it is peaked. So
+Cowan-Farquhar prices water at a marginal rate `∝ f`, falling monotonically as the
+leaf dries, while the conductance-based costs price it at `∝ |f'|`, which *rises*
+from zero before it falls.
+
+```{r}
+l <- leaf_model()
+psi <- seq(0.02, l$psi_crit, length.out = 600)
+f <- vapply(psi, l$proportion_of_conductivity, numeric(1))
+h <- 1e-4
+fp <- abs(vapply(psi, function(p) {
+  (l$proportion_of_conductivity(p + h) - l$proportion_of_conductivity(p - h)) / (2 * h)
+}, numeric(1)))
+cat(sprintf("f  is monotone decreasing over the bracket: %s\n",
+            all(diff(f) < 0)))
+cat(sprintf("|f'| peaks at %.2f MPa; %.1f%% of peak at the wet end, %.0f%% at psi_crit\n",
+            psi[which.max(fp)], 100 * fp[1] / max(fp),
+            100 * fp[length(fp)] / max(fp)))
+```
+
+⚠️ **Read that dry-end figure before generalising.** `|f'|` is asymptotically zero
+at both ends, but the bracket stops at `psi_crit`, and there it is still a sizeable
+fraction of its peak. So *within the operating range* the shape is "rises from
+nothing, then falls somewhat" — the vanishing that matters in practice is at the
+**wet** end, which is where pinned optima actually accumulate.
+
+That is still enough to matter: a marginal cost that starts at zero against a
+marginal benefit that also saturates is the shape whose first-order condition can
+cross zero twice, which is why the conductance forms are the ones needing a search
+able to see past a local maximum, and the monotone Cowan-Farquhar cost is not.
+
+## λ is the common currency
+
+Divide any model's marginal cost by the marginal water use and you get the same
+kind of quantity: carbon given up per unit of water. That is the **marginal cost
+of water**,
+
+$$\lambda(\psi)=\frac{dC/d\psi}{dE/d\psi},$$
+
+and `marginal_cost_water()` reports it for whichever curve is in force. It is the
+axis on which otherwise incomparable models can be compared, and the whole content
+of the family resemblance between them.
+
+For Cowan-Farquhar it is *by construction* the prescribed constant — that model's
+first-order condition is exactly the classical `dA/dE = λ`. For ProfitMax it is
+derived, `λ* = |A|max / [k(ψ_s) − k_crit]`, and it is a function of the drivers:
+as the soil dries `k(ψ_s)` falls, the denominator shrinks, and water automatically
+gets dearer.
+
+**That contrast is the difference between the two models.** A prescribed constant
+and a driver-dependent price agree at one operating point and diverge across any
+drydown:
+
+```{r}
+implied <- vapply(c(0.5, 1, 2, 3), function(ps) {
+  x <- leaf_model()
+  set_drivers(x, psi_soil = ps, PPFD = 1500)
+  x$optimise_psi_stem_TF()
+  x$lambda
+}, numeric(1))
+cat(sprintf(paste0("implied lambda over psi_soil 0.5-3 MPa: ",
+                   "%.3g to %.3g umol C / kg, a %.1fx range\n"),
+            min(implied), max(implied), max(implied) / min(implied)))
+```
+
+So a Cowan-Farquhar λ has to be chosen on the leaf's own scale. A value far below
+that band makes water free and pins the optimum wide open; far above it and the
+stomata pin shut. Either way the model is not being exercised.
+
+And because both optima satisfy `dA/dE = λ`, handing Cowan-Farquhar the λ that
+TF24 *implies* at its own optimum must land it on that same optimum — a check that
+needs no derivative approximation anywhere in it:
+
+```{r}
+ref <- leaf_model()
+set_drivers(ref, psi_soil = 1.0, PPFD = 1500)
+ref$optimise_psi_stem_TF()
+
+cf <- leaf_model()
+set_drivers(cf, psi_soil = 1.0, PPFD = 1500)
+cf$lambda_ <- ref$lambda
+cf$optimise_psi_stem_CowanFarquhar()
+
+cat(sprintf(paste0("TF24 optimum %.6f MPa; Cowan-Farquhar at its implied ",
+                   "lambda %.6f MPa (gap %.2e)\n"),
+            ref$opt_psi_stem_, cf$opt_psi_stem_,
+            abs(cf$opt_psi_stem_ - ref$opt_psi_stem_)))
+```
+
+## The two gates
+
+Both default off, and both change more than their name suggests.
+
+**Energy balance** (`use_energy_balance_`) makes leaf temperature a function of
+transpiration rather than a driver. With it off, a change to any temperature
+response is inert at the reference temperature by construction. With it on, `Tleaf`
+feeds `vcmax`, `jmax`, `R_d` and the leaf-to-air deficit, and every derivative
+picks up a `dT/dE` term.
+
+**Thermal cost** (`use_thermal_cost_`) adds a sigmoid penalty in leaf temperature
+— and *also* scales `Jmax` by `(1 − TC)`. So it moves the **benefit** as well as
+the cost, which makes it the only gate that changes both sides. It is also inert
+without the energy balance, because with a prescribed leaf temperature the penalty
+is an additive constant in ψ: it changes the value of the objective and not its
+argmax.
+
+## When the leaf cannot transpire
+
+Where the soil is drier than the stem's critical potential there is no flow, and
+the operating point is the no-flow one. The answer is to **evaluate the objective
+there** rather than to zero the reported fields, so that every output describes one
+consistent state. For Cowan-Farquhar this is exactly predictable: `E` is zero, so
+the cost is zero, so profit is `−R_d` whatever λ is.
+
+```{r}
+d <- leaf_model()                       # psi_soil drier than psi_crit
+set_drivers(d, psi_soil = 6.0, PPFD = 1500)
+d$lambda_ <- 1.5e5
+d$optimise_psi_stem_CowanFarquhar()
+cat(sprintf("E = %.1e, cost = %.1e, profit = %.6f, -R_d = %.6f\n",
+            d$transpiration_, d$hydraulic_cost_, d$profit_, -d$R_d_))
+```
+
+---
+
+# Appendix A — the (P50, c) parameterisation
+
+*Placeholder: the material from `RECOMMENDATION-p50-parameterisation.md` lands
+here — the substitution of `b`, why not `(P50, b)`, why `c` is not a constant, the
+fitted-species table with its Choat-2003 caveat, the quantile converter, and the
+sign convention.*
+
+# Appendix B — gradients
+
+*Placeholder: the implicit-function-theorem composite, `dψ*/dθ = −M/H`, the
+envelope theorem and its stationarity condition, and the prescribed-versus-optimum
+distinction.*
+
+# Appendix C — numerical practice
+
+*Placeholder: why the argmax is the badly-conditioned quantity and the maximum the
+well-conditioned one, the sqrt amplification, the finite-difference step and its
+`tol/h` noise floor, and why a scan argmax cannot feed a trait gradient.*
