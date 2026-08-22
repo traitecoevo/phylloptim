@@ -1007,7 +1007,39 @@ public:
   // Which cost curve a psi_stem derivative differentiates. The cost enters the
   // chain through exactly ONE quantity -- dC/dpsi_stem -- so this selects that
   // and nothing else.
-  enum class CostCurve { TF24, CF77, JS22, CMax, SOX, JW26 };
+  enum class CostCurve { TF24, CF77, JS22, CMax, SOX, JW26, ProfitMax };
+
+  // ⚠️ THE ONE ABSTRACTION THAT MAKES EVERY MODEL THE SAME MODEL.
+  //
+  // All seven maximise `h(A(psi)) - C(psi)`: a BENEFIT LINK `h` composed with
+  // assimilation, minus a cost curve. That is not a convenience -- it is why the
+  // derivative below is one expression rather than three, because
+  //
+  //     d/dpsi [ h(A) - C ] = h'(A) * dA/dpsi - dC/dpsi
+  //
+  // and `h'` is the only thing that varies:
+  //
+  //   Identity  h(A) = A            h' = 1           TF24, CF77, JS22, CMax
+  //   Log       h(A) = log A        h' = 1/A         SOX, JW26   (products:
+  //                                                  A*g and log A + log g share
+  //                                                  an argmax)
+  //   Scaled    h(A) = A/|A|max     h' = 1/|A|max    ProfitMax
+  //
+  // ⚠️ `Scaled` treats `|A|max` as CONSTANT, which makes ProfitMax's trait
+  // gradients PARTIALS at fixed normaliser rather than total derivatives. That is
+  // deliberate and it is what the code computes: `|A|max` comes from a scan over
+  // the supply stream, so its argmax is piecewise constant in the traits and its
+  // derivative is a sequence of zeros and jumps. A total derivative would need
+  // that chain rule; a partial at fixed |A|max is well defined and is the honest
+  // thing to report until someone needs the other.
+  enum class BenefitLink { Identity, Log, Scaled };
+
+  // ⚠️ ONE BOUND, derived from the enum's last member rather than named. The
+  // bounds checks below were written as `> CostCurve::JW26` and went stale the
+  // moment ProfitMax was appended -- the curve existed, had a link and a
+  // derivative, and was simply invisible to R because `curve_name()` called it
+  // unknown. Keep this the last member.
+  static constexpr int n_cost_curves = static_cast<int>(CostCurve::ProfitMax) + 1;
 
   // dprofit/dpsi_stem for the solvers that optimise psi_stem directly with the
   // upstream potential held fixed.
@@ -1090,6 +1122,8 @@ public:
   // path, so the subscript was out of bounds rather than merely inconsistent.
   std::vector<double> dprofit_dpsi_stem_by(int curve, double psi_stem);
 
+  template <CostCurve K> static constexpr BenefitLink benefit_link();
+  template <CostCurve K> double benefit_link_deriv(double A) const;
   template <CostCurve K> void optimise_psi_stem_single();
   template <CostCurve K> void check_cost_parameters();
   template <CostCurve K> double profit_psi_stem_for(double psi_stem,
@@ -2920,14 +2954,10 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
 template <Leaf::CostCurve K>
 inline double Leaf::dprofit_dpsi_stem(double psi_stem, double psi_upstream,
                                       bool* feasible) {
-  // ⚠️ ADDITIVE CURVES ONLY, and refused at COMPILE time rather than returning a
-  // number of the wrong kind. This returns dA/dpsi - dC/dpsi. A product objective's
-  // derivative is (dA/dpsi)*g + A*g' -- reachable, and PLAN 7c records that with the
-  // log link it is this same expression with the benefit term divided by A, but it is
-  // not what the body below computes and nothing consumes it yet.
-  static_assert(K != CostCurve::SOX && K != CostCurve::JW26,
-                "dprofit_dpsi_stem is written for A - C(psi); the product "
-                "objectives need (dA/dpsi)*g + A*g' -- see PLAN 7c");
+  // ⚠️ EVERY CURVE, through the benefit link. This returns
+  // `h'(A)*dA/dpsi - dC/dpsi` for whichever `h` the curve composes with
+  // assimilation, so a product objective is not a special case -- it is the `Log`
+  // link, and ProfitMax is the `Scaled` one. See `BenefitLink`.
   using AD = xad::fwd<double>::active_type;
   if (feasible != nullptr) {
     *feasible = false;
@@ -2968,6 +2998,23 @@ inline double Leaf::dprofit_dpsi_stem(double psi_stem, double psi_upstream,
     // C = gamma*(psi - psi_up)^2, so dC/dpsi = 2*gamma*(psi - psi_up). Analytic,
     // no AD and no spline -- the simplest derivative of the four.
     C_prime = 2.0 * JS22_gamma * (psi_stem - psi_upstream);
+  } else if constexpr (K == CostCurve::SOX) {
+    // Under the log link the cost is `-log g`, so dC/dpsi is `-g'/g`. Both are
+    // analytic; `g` is bounded below by zero only AT psi_crit, where the objective
+    // is zero anyway and no optimiser returns it.
+    C_prime = -sox_reduction_deriv(psi_stem) / sox_reduction(psi_stem);
+  } else if constexpr (K == CostCurve::JW26) {
+    // The same, and here `-g'/g` collapses: with `g = 1 - psi/psi_crit` it is
+    // exactly `1/(psi_crit - psi)`.
+    C_prime = 1.0 / (psi_crit - psi_stem);
+  } else if constexpr (K == CostCurve::ProfitMax) {
+    // C = [k(psi_s) - k(psi)]/k_span, so dC/dpsi = kmax*|f'|/k_span. The thermal
+    // term is constant in psi with the energy balance off, and the guard below
+    // refuses the case where it is not.
+    const double f = proportion_of_conductivity(psi_stem);
+    const double abs_fprime =
+        f * (stem_c / stem_b) * pow(psi_stem / stem_b, stem_c - 1.0);
+    C_prime = leaf_specific_conductance_max_ * abs_fprime / profitmax_k_span_;
   } else {
     // ⚠️ EVERY ARM IS EXPLICIT AND THE LAST ONE ASSERTS. This used to be a two-way
     // `if constexpr (TF24) {...} else {CF77}`, which would have routed a third cost
@@ -3022,9 +3069,31 @@ inline double Leaf::dprofit_dpsi_stem(double psi_stem, double psi_upstream,
   const double g_ci = A_prime * umol_to_mol + gc * inv_atm;
   const double dci_dpsistem = -(-dgc_dpsistem * (ca_ - ci) * inv_atm) / g_ci;
 
-  const double base = A_prime * dci_dpsistem - C_prime;
+  // ⚠️ THE IDENTITY ARM IS WRITTEN OUT SEPARATELY AND THAT IS DELIBERATE. It is
+  // textually what this line always was, so the four additive curves stay
+  // bit-identical -- multiplying by a literal 1.0 would be exact but could still
+  // change FMA contraction, and the golden files compare at the last bit.
+  double base;
+  if constexpr (benefit_link<K>() == BenefitLink::Identity) {
+    base = A_prime * dci_dpsistem - C_prime;
+  } else {
+    const double A = assim_colimited_kernel(ci);
+    base = benefit_link_deriv<K>(A) * (A_prime * dci_dpsistem) - C_prime;
+  }
   if (!use_energy_balance_) {
     return base;
+  }
+  if constexpr (benefit_link<K>() != BenefitLink::Identity) {
+    // ⚠️ REFUSED RATHER THAN APPROXIMATED. The energy-balance term below is a
+    // further contribution to dA/dpsi through Tleaf(E), so under a non-identity
+    // link it needs the same `h'` factor -- and it also carries cost-side pieces
+    // (ProfitMax's thermal term moves with Tleaf) that are not separated in it.
+    // Returning it unscaled would be plausible and wrong.
+    util::stop("dprofit/dpsi_stem with a non-identity benefit link and the "
+               "energy balance ON is not implemented: the temperature term needs "
+               "the same h'(A) factor and, for ProfitMax, its thermal cost term "
+               "separated out. Solve with the optimiser, or run with the energy "
+               "balance off.");
   }
   // dgc_dpsi = 0 and dpsistem_dpsi = 1: the term derives dE/dpsi from those two,
   // and with the upstream potential fixed that reduces to kmax * f(psi_stem).
@@ -4522,13 +4591,14 @@ inline const char* cost_curve_name(Leaf::CostCurve k) {
     case Leaf::CostCurve::CMax: return "CMax";
     case Leaf::CostCurve::SOX:  return "SOX";
     case Leaf::CostCurve::JW26: return "JW26";
+    case Leaf::CostCurve::ProfitMax: return "ProfitMax";
   }
   return "unknown";
 }
 }  // namespace detail
 
 inline std::string Leaf::curve_name(int curve) {
-  if (curve < 0 || curve > static_cast<int>(CostCurve::JW26)) {
+  if (curve < 0 || curve >= n_cost_curves) {
     return "unknown";
   }
   return detail::cost_curve_name(static_cast<CostCurve>(curve));
@@ -4537,9 +4607,12 @@ inline std::string Leaf::curve_name(int curve) {
 // Whether `dprofit_dpsi_stem_by` will accept this curve. Exposed so a caller can
 // ask before committing to a route, rather than discovering it through an error.
 inline bool Leaf::curve_has_derivative(int curve) {
-  if (curve < 0 || curve > static_cast<int>(CostCurve::JW26)) return false;
-  const CostCurve k = static_cast<CostCurve>(curve);
-  return k != CostCurve::SOX && k != CostCurve::JW26;
+  if (curve < 0 || curve >= n_cost_curves) return false;
+  // Every curve has one now, through its benefit link. Kept as a function rather
+  // than deleted because R reads it to build the route table, and because the
+  // energy-balance guard means a curve can still refuse at run time.
+  (void)curve;
+  return true;
 }
 
 inline void Leaf::optimise_psi_stem_by(int curve) {
@@ -4550,6 +4623,10 @@ inline void Leaf::optimise_psi_stem_by(int curve) {
     case CostCurve::CMax: optimise_psi_stem_single<CostCurve::CMax>(); return;
     case CostCurve::SOX:  optimise_psi_stem_single<CostCurve::SOX>();  return;
     case CostCurve::JW26: optimise_psi_stem_single<CostCurve::JW26>(); return;
+    // ⚠️ NOT the shared body. ProfitMax seeds |A|max and the conductance span
+    // before searching, so it keeps its own optimiser -- the LINK is what it
+    // shares with the others, not the search.
+    case CostCurve::ProfitMax: optimise_psi_stem_ProfitMax(); return;
   }
   util::stop("unknown cost curve index " + util::to_string(curve));
 }
@@ -4562,6 +4639,8 @@ inline double Leaf::evaluate_psi_stem_by(int curve, double target_psi_stem) {
     case CostCurve::CMax: return evaluate_psi_stem<CostCurve::CMax>(target_psi_stem);
     case CostCurve::SOX:  return evaluate_psi_stem<CostCurve::SOX>(target_psi_stem);
     case CostCurve::JW26: return evaluate_psi_stem<CostCurve::JW26>(target_psi_stem);
+    case CostCurve::ProfitMax:
+      return evaluate_psi_stem<CostCurve::ProfitMax>(target_psi_stem);
   }
   util::stop("unknown cost curve index " + util::to_string(curve));
   return util::na_value;
@@ -4573,12 +4652,6 @@ inline double Leaf::evaluate_psi_stem_by(int curve, double target_psi_stem) {
 // that reads the value without the flag inherits that bug.
 inline std::vector<double> Leaf::dprofit_dpsi_stem_by(int curve,
                                                       double psi_stem) {
-  if (!curve_has_derivative(curve)) {
-    util::stop("no dprofit/dpsi_stem for the " + curve_name(curve) +
-               " curve: it maximises a PRODUCT, A*g(psi), so its derivative is "
-               "(dA/dpsi)*g + A*g' rather than dA/dpsi - dC/dpsi. Use its "
-               "optimiser directly, or finite-difference the objective.");
-  }
   if (!supply_is_single_layer()) {
     util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
   }
@@ -4599,10 +4672,58 @@ inline std::vector<double> Leaf::dprofit_dpsi_stem_by(int curve,
       v = dprofit_dpsi_stem<CostCurve::CMax>(psi_stem, psi_upstream, &feasible);
       break;
     case CostCurve::SOX:
+      v = dprofit_dpsi_stem<CostCurve::SOX>(psi_stem, psi_upstream, &feasible);
+      break;
     case CostCurve::JW26:
-      break;  // unreachable: refused above
+      v = dprofit_dpsi_stem<CostCurve::JW26>(psi_stem, psi_upstream, &feasible);
+      break;
+    case CostCurve::ProfitMax:
+      v = dprofit_dpsi_stem<CostCurve::ProfitMax>(psi_stem, psi_upstream,
+                                                  &feasible);
+      break;
   }
   return std::vector<double>{v, feasible ? 1.0 : 0.0};
+}
+
+
+// Which link each curve composes with assimilation. One table, and the last arm
+// asserts, so a curve added to the enum without a link is a build failure.
+template <Leaf::CostCurve K>
+constexpr Leaf::BenefitLink Leaf::benefit_link() {
+  if constexpr (K == CostCurve::SOX || K == CostCurve::JW26) {
+    return BenefitLink::Log;
+  } else if constexpr (K == CostCurve::ProfitMax) {
+    return BenefitLink::Scaled;
+  } else {
+    static_assert(K == CostCurve::TF24 || K == CostCurve::CF77 ||
+                  K == CostCurve::JS22 || K == CostCurve::CMax,
+                  "unhandled CostCurve in benefit_link");
+    return BenefitLink::Identity;
+  }
+}
+
+// `h'(A)`, the only thing the derivative below needs from the link.
+//
+// ⚠️ The Log arm is why a product objective's gradient exists at all: `A*g` and
+// `log A + log g` share an argmax, and differentiating the second is the same
+// additive shape as every other curve with `1/A` on the benefit term.
+//
+// ⚠️ It is also where a product curve's ONE genuine hazard lives. `log A` needs
+// `A > 0`, and at full closure `A = -R_d < 0`. The optimiser sidesteps this by
+// maximising the product directly; a DERIVATIVE cannot, so a non-positive `A`
+// returns NaN rather than a number, and the caller's feasibility flag is what
+// carries that outward.
+template <Leaf::CostCurve K>
+inline double Leaf::benefit_link_deriv(double A) const {
+  if constexpr (benefit_link<K>() == BenefitLink::Log) {
+    return A > 0.0 ? 1.0 / A : util::na_value;
+  } else if constexpr (benefit_link<K>() == BenefitLink::Scaled) {
+    return profitmax_A_max_ > 0.0 ? 1.0 / profitmax_A_max_
+                                   : util::na_value;
+  } else {
+    (void)A;
+    return 1.0;
+  }
 }
 
 
@@ -4653,7 +4774,8 @@ inline void Leaf::check_cost_parameters() {
     }
   } else {
     static_assert(K == CostCurve::TF24 || K == CostCurve::SOX ||
-                  K == CostCurve::JW26, "unhandled CostCurve");
+                  K == CostCurve::JW26 || K == CostCurve::ProfitMax,
+                  "unhandled CostCurve");
   }
 }
 
@@ -4673,9 +4795,11 @@ inline double Leaf::profit_psi_stem_for(double psi_stem, double psi_upstream) {
     return profit_psi_stem_CMax(psi_stem, psi_upstream);
   } else if constexpr (K == CostCurve::SOX) {
     return profit_psi_stem_SOX(psi_stem, psi_upstream);
-  } else {
-    static_assert(K == CostCurve::JW26, "unhandled CostCurve");
+  } else if constexpr (K == CostCurve::JW26) {
     return profit_psi_stem_JW26(psi_stem, psi_upstream);
+  } else {
+    static_assert(K == CostCurve::ProfitMax, "unhandled CostCurve");
+    return profit_psi_stem_ProfitMax(psi_stem, psi_upstream);
   }
 }
 
@@ -4701,9 +4825,12 @@ inline double Leaf::lambda_for(double psi_stem, double psi_upstream) {
     return lambda_CMax(psi_stem, psi_upstream);
   } else if constexpr (K == CostCurve::SOX) {
     return lambda_SOX(psi_stem, psi_upstream);
-  } else {
-    static_assert(K == CostCurve::JW26, "unhandled CostCurve");
+  } else if constexpr (K == CostCurve::JW26) {
     return lambda_JW26(psi_stem, psi_upstream);
+  } else {
+    static_assert(K == CostCurve::ProfitMax, "unhandled CostCurve");
+    (void)psi_upstream;
+    return lambda_ProfitMax(psi_stem);
   }
 }
 

@@ -863,6 +863,17 @@ leaf_gradient <- function(psi_soil,
 # truthful answer rather than a gap.
 .GRADIENT_COLLAR_ROUTE <- "collar"
 
+# Which routes reproduce a finite difference of their own solve on every parameter
+# tested. The identity link does; the two non-identity ones do not yet. Kept as a
+# list rather than derived from `cost_curve_has_derivative()`, because those are
+# different questions: C++ has a derivative for all seven, and this is about
+# whether the composite AROUND it has been checked.
+.GRADIENT_VERIFIED_LINKS <- c("collar", "TF24", "CF77", "JS22", "CMax")
+
+.gradient_link_verified <- function(model) {
+  model %in% .GRADIENT_VERIFIED_LINKS
+}
+
 .gradient_route <- function(l, model, supply) {
   if (identical(model, .GRADIENT_COLLAR_ROUTE)) {
     return(list(
@@ -882,12 +893,32 @@ leaf_gradient <- function(psi_soil,
          paste(c(.GRADIENT_COLLAR_ROUTE, curves), collapse = ", "), ".",
          call. = FALSE)
   }
-  if (!cost_curve_has_derivative()[[k]]) {
-    stop("the ", model, " curve maximises a PRODUCT, `A * g(psi)`, so its ",
-         "derivative is `(dA/dpsi) * g + A * g'` rather than the ",
-         "`dA/dpsi - dC/dpsi` this gradient is built on. There is no exact ",
-         "gradient for it yet; solve it with $optimise_psi_stem_", model,
-         "() and finite-difference the objective.", call. = FALSE)
+  # ⚠️ THE NON-IDENTITY LINKS ARE BUILT BUT NOT VERIFIED, so they refuse rather
+  # than return a number. `Leaf` computes `h'(A) * dA/dpsi - dC/dpsi` for every
+  # curve, and for the two product curves that derivative is demonstrably right:
+  # `stem_P50` on SOX agrees with differencing the solve to 4.1e-04. But
+  # `vcmax_25` on the same curve is 70% out, and the cause is not yet isolated --
+  # it is not the stem-curve shortcut (vcmax_25 owns no spline) and it is not the
+  # net-versus-gross `A` fed to the link (the kernel subtracts R_d, so it is the
+  # objective's own A). Something in the composite is still link-dependent.
+  #
+  # ProfitMax fails differently and the cause IS known: its `Scaled` link divides
+  # by `|A|max`, which `prepare_profitmax()` seeds and which a perturbation's
+  # `set_traits` + `set_physiology` clears -- measured 16.757 before, NaN after.
+  # Pinning it at the base point is what makes the gradient the PARTIAL at fixed
+  # normaliser that this package intends, and that is not wired up.
+  #
+  # Refusing beats returning: an optimiser handed a 70%-wrong gradient converges
+  # somewhere plausible, and a NaN one poisons a whole likelihood.
+  if (!identical(.gradient_link_verified(model), TRUE)) {
+    stop("no verified gradient for the ", model, " curve yet. Its derivative is ",
+         "implemented -- every model here is `h(A) - C(psi)` and this one's ",
+         "benefit link is ",
+         if (model == "ProfitMax") "`A/|A|max`" else "`log A`",
+         " -- but the composite around it does not yet reproduce a finite ",
+         "difference of the solve on every parameter, so it is not offered. ",
+         "Solve with $optimise_psi_stem_", model,
+         "() and difference the objective meanwhile.", call. = FALSE)
   }
   if (!identical(supply$kind, "single")) {
     stop("the stem routes optimise `psi_stem` with the upstream potential ",
@@ -1030,13 +1061,14 @@ leaf_gradient <- function(psi_soil,
   collar = "CF77_lambda_",   # the collar solve is TF24; CF77's lambda is not in it
   TF24   = "CF77_lambda_",
   CF77   = character(0),     # the one model this parameter belongs to
-  JS22   = "CF77_lambda_",
-  CMax   = "CF77_lambda_",
+  JS22      = "CF77_lambda_",
+  CMax      = "CF77_lambda_",
+  ProfitMax = "CF77_lambda_",
   # ⚠️ Listed so that asking for one reaches `.gradient_route()`'s explanation --
   # that a product objective's derivative is a different expression -- rather than
   # dying here on "no gradient route", which is true but says nothing useful.
-  SOX    = "CF77_lambda_",
-  JW26   = "CF77_lambda_"
+  SOX       = "CF77_lambda_",
+  JW26      = "CF77_lambda_"
 )
 
 .gradient_available_pars <- function(single, model = "collar") {

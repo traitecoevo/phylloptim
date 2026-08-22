@@ -1081,20 +1081,33 @@ test_that("the curve registry is read from C++, not restated in R", {
   # R selects a curve by POSITION in this vector, so it is compared rather than
   # trusted -- the same discipline gradient_par_names() gets.
   nms <- cost_curve_names()
-  expect_identical(nms, c("TF24", "CF77", "JS22", "CMax", "SOX", "JW26"))
+  expect_identical(nms, c("TF24", "CF77", "JS22", "CMax", "SOX", "JW26",
+                          "ProfitMax"))
 
-  # The product objectives have no analytic dprofit/dpsi_stem: their derivative is
-  # (dA/dpsi)*g + A*g', not dA/dpsi - dC/dpsi.
-  has <- stats::setNames(cost_curve_has_derivative(), nms)
-  expect_true(all(has[c("TF24", "CF77", "JS22", "CMax")]))
-  expect_false(any(has[c("SOX", "JW26")]))
+  # ⚠️ EVERY curve has a derivative now, because every one is `h(A) - C(psi)` and
+  # the derivative is `h'(A)*dA/dpsi - dC/dpsi` -- one expression with a per-model
+  # factor on the benefit term. Product objectives are the `log` link and
+  # ProfitMax the `A/|A|max` one; neither is a special case any more.
+  expect_true(all(cost_curve_has_derivative()))
 
-  # And asking for one anyway is refused by name rather than returning a number of
-  # the wrong kind.
+  # ⚠️ Having a derivative and having a VERIFIED GRADIENT are different claims,
+  # and only the second gates `leaf_gradient()`. The two non-identity links are
+  # implemented and not yet checked on every parameter, so they refuse there.
+  for (m in c("SOX", "JW26", "ProfitMax")) {
+    expect_false(phylloptim:::.gradient_link_verified(m))
+  }
+  for (m in c("collar", "TF24", "CF77", "JS22", "CMax")) {
+    expect_true(phylloptim:::.gradient_link_verified(m))
+  }
+
+  # The C++ derivative itself answers for a product curve rather than refusing --
+  # that is the point of the link.
   l <- leaf_model(supply = leaf_supply_single())
   set_drivers(l, psi_soil = 1.5, PPFD = 900)
-  expect_error(l$dprofit_dpsi_stem_by(which(nms == "SOX") - 1L, 2.0),
-               "maximises a PRODUCT")
+  l$optimise_psi_stem_SOX()
+  d <- l$dprofit_dpsi_stem_by(which(nms == "SOX") - 1L, l$opt_psi_stem_)
+  expect_length(d, 2L)
+  expect_true(is.finite(d[[1]]))
 })
 
 # --- differentiating a stem model's optimum (plan item 5) --------------------
@@ -1176,7 +1189,7 @@ test_that("a product objective is refused with its reason", {
       leaf_gradient(psi_soil = 1.5, PPFD = 1500,
                     root_network = series_resistance(1e4), x = l, traits = tr,
                     pars = "JS22_gamma", model = m),
-      "maximises a PRODUCT")
+      "no verified gradient")
   }
   # A stem route needs the single-potential path, and says so rather than
   # returning a number from the wrong topology.

@@ -83,6 +83,40 @@ It could not be bit-identical, and not for the reason assumed: the defaults were
 
 The product objectives reported a shut-down leaf as profitable. Past `psi_crit` the reduction factor goes negative, and the objective is `A·g` with `A = −R_d < 0` at closure — so two negatives gave **+0.0125 at ψ_soil 6.0 and +0.0633 at 7.0**, against TF24's −8.48 and −8.85, growing as the soil dried. Both factors now clamp at zero in the NaN-propagating form (`g < 0 ? 0 : g`, so a NaN is returned rather than silently zeroed).
 
+## The common framework
+
+**Every model here is `maximise h(A(ψ)) − C(ψ)`** — a benefit *link* `h` composed with assimilation, minus a cost curve. That is the unification, and it is what makes one derivative serve all seven:
+
+$$\frac{d}{d\psi}\big[h(A) - C\big] = h'(A)\,\frac{dA}{d\psi} - \frac{dC}{d\psi}$$
+
+`h'` is the only thing that varies.
+
+| link | `h(A)` | `h'(A)` | curves |
+|---|---|---|---|
+| Identity | `A` | `1` | `TF24`, `CF77`, `JS22`, `CMax` |
+| Log | `log A` | `1/A` | `SOX`, `JW26` — products, since `A·g` and `log A + log g` share an argmax |
+| Scaled | `A/\|A\|max` | `1/\|A\|max` | `ProfitMax` |
+
+So ProfitMax and the product objectives stop being special cases: they are two more rows in a table. `CostCurve` now has all seven, `benefit_link<K>()` and `benefit_link_deriv<K>()` are the table, and `dprofit_dpsi_stem<K>` is one expression. `-Werror=switch` caught all four dispatchers when ProfitMax was appended, which is what that flag is for. The `Identity` arm is written out textually unchanged, which is why all four golden files stayed bit-identical.
+
+⚠️ **`Scaled` treats `|A|max` as constant**, making ProfitMax's trait gradients partials at fixed normaliser. That is deliberate: `|A|max` comes from a scan, so its argmax is piecewise constant in the traits and its derivative is zeros and jumps.
+
+### What is verified, and what is not
+
+`leaf_gradient(model = )` is the single access point for all eight routes. Five are checked against differencing their own solve and are offered; three are implemented and refuse.
+
+| route | state |
+|---|---|
+| `collar`, `TF24`, `CF77`, `JS22`, `CMax` | ✅ agree with differencing the solve, 2e-11 to 2e-03 |
+| `SOX`, `JW26` | ⚠️ derivative right, composite not. `stem_P50` agrees to **4.1e-04**; `vcmax_25` is **70%** out |
+| `ProfitMax` | ⚠️ `|A|max` is 16.757 after its own optimiser and **NaN** after the `set_traits` + `set_physiology` a perturbation performs |
+
+⚠️ **Two false leads on the `vcmax_25` failure, both eliminated**: it is not the `fast_stem_curve` shortcut (`vcmax_25` owns no spline, and the failure persists with the shortcut off), and it is not a net-versus-gross `A` fed to the link (`assim_colimited_kernel` subtracts `R_d_`, so it *is* the objective's own `A`). Something in the composite is still link-dependent and is not yet isolated.
+
+⚠️ **The fast-stem-curve shortcut IS wrong for SOX, separately.** With it on, differencing the solve gives −0.033 against a correct 3.31; with it off, 3.3102 against the composite's 3.3088. So `perturb_stem_P50` leaves something `sox_reduction` reads stale. That is a live bug in the FD arm, not in the link.
+
+**Refusing beats returning.** An optimiser handed a 70%-wrong gradient converges somewhere plausible; a NaN one poisons a whole likelihood. `.GRADIENT_VERIFIED_LINKS` is the gate, kept separate from `cost_curve_has_derivative()` because those are different claims — C++ has a derivative for all seven; the list is about whether the composite around it has been checked.
+
 ## Open work
 
 Items 4, 5 and 6 have landed. What is left is the batch gradient route, the comment sweep, and the deferred first-order-condition polish -- which item 5 promoted from optional to load-bearing.
