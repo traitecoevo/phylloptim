@@ -17,7 +17,8 @@ leaf_batch(
   atm_kpa = 101.3,
   traits = leaf_traits(),
   control = leaf_control(),
-  supply = leaf_supply_multilayer()
+  supply = leaf_supply_multilayer(),
+  CF77_lambda = NA_real_
 )
 }
 \arguments{
@@ -60,6 +61,10 @@ assimilation by percent, not by rounding.}
 (the default) or [leaf_supply_single()]. On the single-potential path
 `soil_depth` and `root_network` must be omitted, and each `psi_soil` is one
 value rather than a profile.}
+
+\item{CF77_lambda}{Cowan-Farquhar's prescribed marginal value of water, in
+umol C (kg H2O)^-1, one per observation. Only `model = "CF77"` reads it;
+`NA_real_` (the default) leaves it unset, which every other model wants.}
 }
 \value{
 A `leaf_batch` object.
@@ -97,7 +102,7 @@ is either one [RootNetwork()] used for every observation, or a list of them.
 \examples{
 b <- leaf_batch(psi_soil = c(1.0, 1.5, 2.0), PPFD = 900)
 b
-leaf_gradient_batch(b, pars = c("vcmax_25", "stem_b"))$gradient[, , "A"]
+leaf_gradient_batch(b, pars = c("vcmax_25", "stem_P50"))$gradient[, , "A"]
 }
 \seealso{
 [leaf_gradient_batch()], [leaf_gradient()] for one observation.

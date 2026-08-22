@@ -17,11 +17,12 @@ test_that("leaf_traits() and leaf_control() partition the C++ constructor", {
   covered <- c(names(leaf_traits()), names(leaf_control()))
 
   expect_setequal(setdiff(ctor_args, covered), character(0))
-  # `R_d_25` is a trait the constructor does not take: plant's own RcppR6 bindings
-  # pin this constructor by arity, so `leaf_model()` assigns the field afterwards.
-  # The test below checks that assignment really happens.
+  # `R_d_25` and `JS22_gamma` are traits the constructor does not take: plant's own
+  # RcppR6 bindings pin this constructor by arity, so `leaf_model()` assigns the
+  # fields afterwards. The test below checks those assignments really happen.
   expect_setequal(setdiff(covered, ctor_args),
-                  c("R_d_25", "integration_rule", "integration_tol"))
+                  c("R_d_25", "JS22_gamma", "CMax_a", "CMax_b",
+                    "integration_rule", "integration_tol"))
   expect_length(intersect(names(leaf_traits()), names(leaf_control())), 0)
 
   # And the split is the one the issue asked for: tolerances on the control
@@ -42,8 +43,8 @@ test_that("every trait can be read back from the object (#95)", {
   # whole trait list rather than naming four fields, so a trait added to
   # leaf_traits() without a binding fails here instead of being noticed by the next
   # caller who needs it.
-  traits <- leaf_traits(vcmax_25 = 111, stem_b = 3.1, psi_crit = 4.4, beta2 = 1.7,
-                        root_b = 3.3, root_psi_crit = 4.9, a = 0.28)
+  traits <- leaf_traits(vcmax_25 = 111, stem_P50 = 3.1, TF24_beta2 = 1.7,
+                        root_P50 = 3.3, a = 0.28)
   l <- leaf_model(traits)
   for (nm in names(traits)) {
     expect_true(nm %in% names(l), label = paste("Leaf binds", nm))
@@ -53,17 +54,28 @@ test_that("every trait can be read back from the object (#95)", {
   # ⚠️ Read-only, and that is hazard 10 rather than tidiness: changing a trait means
   # rebuilding up to two vulnerability splines and clearing the solved operating
   # point, so a bare write would leave the object describing two different curves.
-  # `R_d_25` is the documented exception -- it is settable because plant's bindings
-  # pin the generated constructor by arity, so `leaf_model()` applies it afterwards.
-  for (nm in setdiff(names(traits), "R_d_25")) {
+  # `R_d_25` and `JS22_gamma` are the documented exceptions -- both are settable
+  # because plant's bindings pin the generated constructor by arity, so
+  # `leaf_model()` applies them afterwards.
+  #
+  # ⚠️ Settable is only SAFE for these two because nothing is derived from either.
+  # `JS22_gamma` is read at call time by `hydraulic_cost_JS22` -- no spline, no
+  # temperature cache, no precomputation -- so a bare write cannot leave the object
+  # describing two different models the way a bare `stem_P50` write would. Do not
+  # read this exemption as permission for the next trait.
+  for (nm in setdiff(names(traits), c("R_d_25", "JS22_gamma", "CMax_a", "CMax_b"))) {
     expect_error(l[[nm]] <- 1, "read-only", label = paste(nm, "rejects a write"))
   }
 
   # And the read tracks set_traits(), which is what makes it a read-back rather
   # than a second copy of the constructor arguments.
-  set_traits(l, leaf_traits(psi_crit = 5.0, stem_b = 3.9))
-  expect_identical(l$psi_crit, 5.0)
-  expect_identical(l$stem_b, 3.9)
+  set_traits(l, leaf_traits(stem_P50 = 3.9))
+  expect_identical(l$stem_P50, 3.9)
+
+  # The DERIVED pair is bound too, and moves with the trait rather than being
+  # settable beside it -- which is the whole reason they are no longer traits.
+  expect_identical(l$stem_b, 3.9 / log(2)^(1 / l$stem_c))
+  expect_identical(l$psi_crit, l$stem_b * log(1 / 0.05)^(1 / l$stem_c))
 })
 
 test_that("conductance is reported to water as well as to CO2 (#56)", {
@@ -110,11 +122,11 @@ test_that("the H2O:CO2 diffusion ratio is settable, and 1.67 changes nothing (#5
 })
 
 test_that("leaf_model() and the raw Leaf() constructor agree", {
-  # The reason leaf_model() exists is that mapping 13 traits and 4 tolerances
-  # onto 17 positional slots is exactly the kind of thing that goes wrong once
+  # The reason leaf_model() exists is that mapping 11 traits and 4 tolerances
+  # onto 15 positional slots is exactly the kind of thing that goes wrong once
   # and is never noticed. So check it against a hand-written positional call
   # with the same values, on a full solve rather than on the arguments.
-  raw <- Leaf(96, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245, 5.870283,
+  raw <- Leaf(96, 2.680147, 3.4, 2.680147, 3.4,
               1.5, 157.44, 0.30, 0.7, 0.99, 1e-3, 100, 1e-3, 1000, 7.5)
   raw$initialize_integrator(21, 1e-8)
   friendly <- leaf_model()
@@ -131,16 +143,16 @@ test_that("a non-default trait reaches the model through leaf_model()", {
   # The previous test would pass even if leaf_model() ignored `traits` entirely
   # and always used the defaults, because the defaults are what it compares. So
   # move one and check it lands in the right slot -- vcmax_25, which raises
-  # assimilation, against stem_b, which moves the vulnerability curve.
+  # assimilation, against stem_P50, which moves the vulnerability curve.
   base <- leaf_solve(psi_soil = 2.0, PPFD = 900)
   hi_vcmax <- leaf_solve(psi_soil = 2.0, PPFD = 900,
                          traits = leaf_traits(vcmax_25 = 150))
   expect_gt(hi_vcmax$A, base$A)
 
-  # ⚠️ `psi_crit` MOVES WITH `stem_b`, and it has to: at stem_b = 2.0 the curve's P99
-  # is 3.5359, so the default psi_crit of 5.870283 is off the end of it and #38's
-  # check refuses the pair. 3.0 is roughly the P95 that stem_b implies (3.0118).
-  brittle <- leaf_model(leaf_traits(stem_b = 2.0, psi_crit = 3.0))
+  # One trait moves the whole curve: `stem_b` and `psi_crit` are quantiles of it
+  # and follow, so a brittle stem is stated once rather than as a pair that has to
+  # be kept consistent by hand.
+  brittle <- leaf_model(leaf_traits(stem_P50 = 2.0))
   expect_lt(brittle$proportion_of_conductivity(2.0),
             leaf_model()$proportion_of_conductivity(2.0))
 
@@ -490,7 +502,7 @@ test_that("the supply path can be chosen, and reports which is in force", {
 })
 
 test_that("there is no state in which the tag and the supply disagree", {
-  # The footgun PLAN 7b-iii flagged, and the reason this is two entry points
+  # The footgun to design around, and the reason this is two entry points
   # rather than a settable field: assigning the tag alone would leave the other
   # path's state configured and silently ignored. So the tag must not be
   # assignable at all, and the resistance must not be settable behind the tag's
@@ -736,34 +748,34 @@ test_that("series_resistance() copies its prototype rather than mutating it", {
   expect_identical(operating_point(by_helper), operating_point(by_ctor))
 })
 
-test_that("a prescribed lambda_ survives both re-driving calls (#96)", {
+test_that("a prescribed CF77_lambda_ survives both re-driving calls (#96)", {
   # The issue's own reproduction, from R, which is where it was found: two calls
   # that look interchangeable in a sweep disagreed about whether the caller's
-  # `lambda_` survived. `lambda_` is Sperry's prescribed marginal water cost --
+  # `CF77_lambda_` survived. `CF77_lambda_` is Sperry's prescribed marginal water cost --
   # an input -- so the answer is that neither call touches it.
   #
   # Both arms matter. `set_drivers` always kept it; asserting only that one
   # passes on the code this test exists to reject.
   l <- leaf_model(supply = leaf_supply_single())
-  expect_true(is.na(l$lambda_))          # not "never initialised"
+  expect_true(is.na(l$CF77_lambda_))          # not "never initialised"
 
-  l$lambda_ <- 30
+  l$CF77_lambda_ <- 30
   set_drivers(l, psi_soil = 1.5, root_network = series_resistance(1500))
-  expect_identical(l$lambda_, 30)
+  expect_identical(l$CF77_lambda_, 30)
 
   set_traits(l, leaf_traits(vcmax_25 = 120))
-  expect_identical(l$lambda_, 30)
+  expect_identical(l$CF77_lambda_, 30)
 
   # And it is still there after a solve on the re-traited object, which is the
   # sequence a sweep actually runs.
   set_drivers(l, psi_soil = 1.5, root_network = series_resistance(1500))
   l$find_root_collar_psi()
-  expect_identical(l$lambda_, 30)
+  expect_identical(l$CF77_lambda_, 30)
 
   # The derived state around it is still cleared, so the fix did not widen into
   # hazard 8: set_traits must leave nothing describing the old traits.
   set_traits(l, leaf_traits(vcmax_25 = 96))
   expect_true(is.na(l$profit_))
   expect_true(is.na(l$opt_psi_stem_))
-  expect_identical(l$lambda_, 30)
+  expect_identical(l$CF77_lambda_, 30)
 })

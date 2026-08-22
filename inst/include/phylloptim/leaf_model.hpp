@@ -30,12 +30,10 @@ public:
   
   Leaf(double vcmax_25, 
        double stem_c, 
-       double stem_b, 
-       double psi_crit,
+       double stem_P50, 
        double root_c,
-       double root_b,
-       double root_psi_crit,
-       double beta2, 
+       double root_P50,
+       double TF24_beta2, 
        double jmax_25, 
        double a, 
        double curv_fact_elec_trans, 
@@ -44,7 +42,7 @@ public:
        double vulnerability_curve_ncontrol,
        double ci_abs_tol,
        double ci_niter,
-      double cost_scale_TF24);
+      double TF24_cost_scale);
 
   odelia::interpolator::Interpolator transpiration_from_psi;
   odelia::interpolator::Interpolator psi_from_transpiration;
@@ -66,12 +64,12 @@ public:
   // So moving stem_b needs no rebuild at all -- just the existing spline
   // evaluated at a rescaled argument. That matters because a rebuild is 11.9 us
   // of incomplete gammas plus 3.1 us per interpolator, which is the entire cost
-  // of a gradient in stem_b (PLAN 11f).
+  // of a gradient in stem_b.
   //
   // ⚠️ There is NO SUCH IDENTITY FOR stem_c, and the obvious substitute -- read
   // G from its closed form instead of the spline -- was built, measured and
   // rejected: it differentiates a slightly different model and disagrees with the
-  // spline's own derivative by 3e-4. See PLAN 11f. stem_c rebuilds.
+  // spline's own derivative by 3e-4. stem_c rebuilds.
   //
   // Two rules keep this from becoming a stale-state bug of the kind hazard 8
   // records: ONLY the four stem_curve_* accessors may read the splines, so one
@@ -100,14 +98,15 @@ public:
   // holds a Leaf member.
   //
   // Public because plant's RcppR6 bindings reach the moved fields by name; they
-  // now spell them `roots_.psi_soil_` etc. (see PLAN 7b-iii stage 4).
+  // now spell them `roots_.psi_soil_` etc.
   MultiLayerRoots roots_;
 
   // The alternative supply path (issue #2 stage 2/3). Both alternatives are held
   // as members and selected by `supply_kind_` -- measured free, where
-  // std::variant costs +1.0%; see PLAN 7b-iii stage 2 for the numbers and for why
-  // a predictable branch in front of an already-out-of-line call disappears into
-  // it. SinglePotential is four doubles plus a one-element vector, so carrying it
+  // std::variant costs +1.0%, because a predictable branch in front of an
+  // already-out-of-line call disappears into it. ⚠️ Re-measure before "tidying"
+  // this into a variant, and beware that a compile-time-known tag folds the
+  // branch away and reports a false zero. SinglePotential is four doubles plus a one-element vector, so carrying it
   // unused costs tens of bytes per Leaf.
   SinglePotential single_;
   enum class SupplyKind { MultiLayer, SinglePotential };
@@ -120,7 +119,7 @@ public:
   // TWO ENTRY POINTS, NOT A SETTABLE TAG, and the difference matters. Assigning
   // supply_kind_ on its own leaves the other path's state configured and
   // silently ignored; assign it back and that state is now stale rather than
-  // absent. PLAN 7b-iii flagged this as the footgun to design around before
+  // absent. This is the footgun to design around before
   // exposing any of it to R, where a settable field is the obvious thing to
   // reach for. Each of these leaves the object in a state where the tag and the
   // supply agree, and there is no intermediate state in which they do not.
@@ -135,8 +134,8 @@ public:
     setup_clean_leaf();
   }
 
-  // ⚠️ THIS TAKES NO RESISTANCE, and that is the point of the change that
-  // introduced this comment. The soil-to-collar resistance is a per-call DRIVER on
+  // ⚠️ THIS TAKES NO RESISTANCE, and that is deliberate. The soil-to-collar
+  // resistance is a per-call DRIVER on
   // both supply paths now: it arrives through `set_physiology`, out of the same
   // `RootNetwork` the multi-layer path is given (see
   // SinglePotential::set_supply_resistances). Before, the multi-layer path took its
@@ -242,14 +241,27 @@ public:
   // manuscript draft where it should have been psi^0.64. Never leave an unmarked
   // default for a parameter that exists in two versions.
   double stem_c;
+  // THE SCALE PARAMETER IS P50, the potential at 50% loss of conductivity, and it
+  // is the trait. Written this way the curve is `2^-(psi/P50)^c`, the same
+  // function as `exp(-(psi/b)^c)` but with scale and shape cleanly separated --
+  // P50 is measured and reported, `b` (the 63% point) is not.
+  //
+  // ⚠️ Do not add `stem_b` back as a settable parameter alongside it. Both are
+  // scale parameters in the same units, so specifying both means specifying two
+  // points on one curve and recovering the shape from their ratio,
+  // `c = ln(ln 2)/ln(P50/b)`, which diverges as P50 -> b. That is also why
+  // vulnerability curves are fitted on a Px and the slope at Px rather than (b, c).
+  double stem_P50;
+  // DERIVED, and read-only from R. Kept as members because every internal use is
+  // in terms of them: the splines, the brackets, the cost kernels.
   double stem_b;
-  double psi_crit;  // derived from b and c
-  double beta2;
+  double psi_crit;
+  double TF24_beta2;
   double jmax_25;
   double a;
   double curv_fact_elec_trans; // unitless - obtained from Smith and Keenan (2020)
   double curv_fact_colim;
-  // Still a settable control, and it still has two jobs after PLAN 11a replaced
+  // Still a settable control, and it still has two jobs after the root-find replaced
   // the collar golden-section search: prepare_collar_solve's "this interval is too
   // narrow to solve over" threshold, and the single-layer optimisers
   // (optimise_psi_stem_TF / _Sperry), which are off the production path and keep
@@ -259,10 +271,10 @@ public:
   double vulnerability_curve_ncontrol;
   double ci_abs_tol;
   double ci_niter;
-  double cost_scale_TF24;
+  double TF24_cost_scale;
 
-  // Tolerance on the collar potential for the profit-maximising root-find (PLAN
-  // 11a). Hard-coded rather than a control field, for the same reason
+  // Tolerance on the collar potential for the profit-maximising root-find.
+  // Hard-coded rather than a control field, for the same reason
   // find_root_psi's 1e-4 and psi_stem_to_ci's 1e-7 are: it is a property of the
   // solve, not a knob. 1e-12 sits ~8 orders below the 1e-4 at which this package
   // calls a difference real, and the cost of going there from GSS_tol_abs's 1e-3
@@ -280,21 +292,19 @@ public:
   // ⚠️ THE ONLY TWO INPUTS IN THIS BLOCK, and the reason they carry their default
   // here rather than in setup_clean_leaf(). Everything around them is derived
   // state or a solved output, which setup_clean_leaf() exists to wipe; these are
-  // Sperry's prescribed marginal water cost, supplied by the CALLER and read by
-  // profit_psi_stem_Sperry. Wiping an input on the caller's behalf made whether a
-  // prescribed value survived depend on which of two interchangeable-looking
-  // re-driving calls came next -- `l$lambda_ <- 30; set_drivers(...)` kept it,
-  // `l$lambda_ <- 30; l$set_traits(...)` did not, and neither warned (#96).
+  // the Cowan-Farquhar marginal value of water, supplied by the CALLER and read
+  // by profit_psi_stem_CF77. Wiping an input on the caller's behalf
+  // makes whether a prescribed value survives depend on which of two
+  // interchangeable-looking re-driving calls comes next, so neither clears it.
   //
   // An in-class initialiser, not a line in setup_clean_leaf(), so a fresh Leaf
   // still reads the NA sentinel: the member is otherwise uninitialised, and
   // "never reset" must not become "never initialised".
-  // ⚠️ AND `lambda_` IS ALSO AN OUTPUT, of one caller: since #93
-  // optimise_psi_stem_ProfitMax assigns the lambda its normalisation implies, so
-  // the same field is prescribed on one path and reported on another. That is the
-  // dual role #114 is about; it does not change the argument above, because a
-  // field that is an input on ANY path must not be wiped on the caller's behalf.
-  double lambda_ = util::na_value;         // umol C m^-2 s^-1 kg^-1 m^2 s^1
+  // ⚠️ IT IS AN INPUT AND NOTHING ELSE. No model code assigns it. The units are
+  // carbon per unit TRANSPIRATION, which is the Cowan-Farquhar marginal value of
+  // water and the convention the lambda literature uses -- NOT the same quantity
+  // as ProfitMax's normaliser ratio, which is per unit CONDUCTANCE.
+  double CF77_lambda_ = util::na_value;         // umol C (kg H2O)^-1
   double hydraulic_cost_;
   
   double electron_transport_;
@@ -403,7 +413,7 @@ public:
   double atm_vpd_;
   // The vapour pressure deficit the DIFFUSION equations use, kPa. Off the
   // energy-balance path it is exactly `atm_vpd_`; on it, the leaf-to-air deficit
-  // at the operating-point leaf temperature (PLAN 13.1, #7). See set_leaf_vpd.
+  // at the operating-point leaf temperature (#7). See set_leaf_vpd.
   double vpd_leaf_;
   double atm_o2_kpa_;
 
@@ -443,6 +453,47 @@ public:
   // because plant's RcppR6 bindings pin the 17-argument constructor by arity, so
   // this cannot become an 18th argument without breaking plant's generated glue.
   double R_d_25 = 1.44;
+  // Joshi & Stocker (2022)'s hydraulic unit cost, `gamma` in
+  // `F = A - alpha*Jmax - gamma*(dpsi)^2`. A TRAIT, initialised here rather than
+  // in the constructors' init lists for exactly the reason R_d_25 is: RcppR6 pins
+  // the constructor by arity.
+  //
+  // ⚠️ THE CAPACITY TERM IS NOT IMPLEMENTED, so this is Joshi's HYDRAULIC cost
+  // and not their model -- theirs optimises Jmax jointly, and dropping that term
+  // is a real omission rather than a simplification. Do not describe a run of this
+  // curve as "Joshi et al. (2022)".
+  //
+  // ⚠️ THE DEFAULT IS NOT A LITERATURE VALUE. It is order-of-magnitude matched to
+  // TF24 at this package's defaults, and there is no single value that matches
+  // more than one soil potential: the gamma reproducing TF24's cost at its own
+  // optimum runs 0.287 (psi_soil 0.5 MPa) to 1.761 (3.0 MPa), a 6.1x range,
+  // because TF24's cost tracks the ABSOLUTE potential through (1 - f) while this
+  // one tracks the DROP -- and across a drydown those move in opposite directions.
+  // That spread is the models' structural difference, not a fitting problem.
+  double JS22_gamma = 1.0;             // umol C m^-2 s^-1 MPa^-2
+  // Wolf, Anderegg & Pacala (2016) carbon maximisation, in the form Anderegg et al.
+  // (2018) gave it and Sabot's `TractLSM` implements (`SPAC/fregulate.py`,
+  // `dcost_dpsi = Alpha*|P| + Beta`): a marginal cost LINEAR in the absolute leaf
+  // water potential,
+  //
+  //     dC/dpsi = CMax_a*psi + CMax_b
+  //
+  // Wolf et al. argued the cost should be concave-up without specifying it; the
+  // linear marginal form is Anderegg's. Read the form off TractLSM rather than the
+  // 2016 paper.
+  //
+  // ⚠️ CMax_b IS SIGNED, and negative in the paper's own convention. TractLSM's
+  // docstring says it stores Beta with the sign inverted "so as to get a positive
+  // parameter value" and that a reported value should carry the minus sign, so the
+  // sign here has to be pinned by reproducing a TractLSM number and not by reading
+  // the formula. It is therefore NOT range-checked the way JS22_gamma is.
+  //
+  // ⚠️ NEITHER DEFAULT IS A LITERATURE VALUE. Measured: with CMax_b = 0 the CMax_a
+  // reproducing TF24's cost at TF24's own optimum runs 0.406 (psi_soil 0.5 MPa) to
+  // 0.807 (3.0 MPa) -- a 2.0x range, against JS22's 6.1x, which is the absolute-
+  // versus-drop distinction showing up as a number. 0.6 is mid-range of that band.
+  double CMax_a = 0.6;                 // umol C m^-2 s^-1 MPa^-2
+  double CMax_b = 0.0;                 // umol C m^-2 s^-1 MPa^-1
   // Dark respiration's temperature response, Tjoelker et al. (2001):
   //
   //     R_d(T) = R_d_25 * Q10(T)^((T - 25) / 10)
@@ -484,12 +535,27 @@ public:
   double profitmax_A_max_;   // |A|max over the supply stream, umol m^-2 s^-1
   double profitmax_k_soil_;  // k(psi_soil), kg m^-2 s^-1 MPa^-1
   double profitmax_k_span_;  // k(psi_soil) - k_crit, the HC denominator
+  // ⚠️ profitmax_A_max_ / profitmax_k_span_ is NOT a lambda, whatever it gets
+  // called: its units are carbon per unit CONDUCTANCE lost, umol C MPa (kg H2O)^-1,
+  // because it multiplies `k(psi_soil) - k(psi)`. It is ProfitMax's normaliser and
+  // nothing more. The comparable quantity is `lambda_emergent_` below.
   // The scan prepare_profitmax() already runs, kept so the objective can be
   // rebuilt on it without evaluating the model a second time. See
   // optimise_psi_stem_ProfitMax for why a grid is needed at all.
   std::vector<double> profitmax_scan_psi_;
   std::vector<double> profitmax_scan_A_;
   std::vector<double> profitmax_scan_Tleaf_;
+  // THE MARGINAL COST OF WATER THE OPERATING POINT IMPLIES, and the one output
+  // every cost curve can report on the same axis:
+  //
+  //     lambda_emergent = (dC/dpsi) / (dE/dpsi)      umol C (kg H2O)^-1
+  //
+  // Same units as the `CF77_lambda_` INPUT, and directly comparable with it -- that is
+  // the point. Cowan-Farquhar prices water at a constant, so its emergent lambda
+  // IS that constant; every other curve has one that moves with the drivers, and
+  // this is where you read it. Written by whichever optimiser ran; NA before one
+  // has.
+  double lambda_emergent_ = util::na_value;
   double carbon_gain_;         // CG = A/|A|max over the supply stream
   double hydraulic_cost_norm_; // HC = [k(psi_soil)-k(psi)]/[k(psi_soil)-k_crit]
   double thermal_cost_;        // TC, zero unless use_thermal_cost_
@@ -655,17 +721,72 @@ public:
   // resets both caches and requires set_physiology() before the next solve, exactly
   // as a fresh Leaf would. That last part is not conservatism: the derived
   // photosynthetic parameters really are unknown until the drivers are re-supplied.
-  void set_traits(double vcmax_25, double stem_c, double stem_b, double psi_crit,
-                  double root_c, double root_b, double root_psi_crit,
-                  double beta2, double jmax_25, double a,
+  void set_traits(double vcmax_25, double stem_c, double stem_P50,
+                  double root_c, double root_P50,
+                  double TF24_beta2, double jmax_25, double a,
                   double curv_fact_elec_trans, double curv_fact_colim,
-                  double cost_scale_TF24, double R_d_25);
+                  double TF24_cost_scale, double R_d_25, double JS22_gamma,
+                  double CMax_a, double CMax_b);
 
-  // The #25 boundary: the four potentials that must be positive magnitudes. One
-  // copy, called from both the constructor and set_traits -- the alternative is
-  // two copies that agree until one of them is edited.
-  static void check_psi_magnitudes(double psi_crit, double stem_b, double root_b,
-                                   double root_psi_crit);
+  // THE CRITICAL POINT IS A QUANTILE OF THE CURVE, not a parameter: the fraction
+  // of maximum conductivity remaining there. 0.05 gives P95. Sperry's reference
+  // conductance `k_crit = f * kmax` reads the same constant, so the two cannot
+  // disagree -- held as a free trait plus a hard-coded 0.05 they needed a
+  // consistency check to police them.
+  //
+  // A convention rather than a knob: 0.05 everywhere it appears across this
+  // family, and `sicangco-2026` parameterises it only to mirror the paper's own
+  // `calc_Pcrit(b, c, ratiocrit = 0.05)` signature.
+  //
+  // ⚠️ MOVING IT IS NOT A LOCAL CHANGE, and the tempting argument for moving it is
+  // that the bound it sets rarely binds -- measured, 18 of 240 feasible reference
+  // rows at 25 C and NONE at 40 C, since heat drives leaves to the other bound.
+  // That is true and it is only an argument about the BRACKET. The same 0.05 also
+  // sets, at every operating point rather than at the rare ones:
+  //
+  //   * SOX's cost, `g = (f - 0.05)/(1 - 0.05)`
+  //   * JW26's cost, `g = 1 - psi/psi_crit`
+  //   * ProfitMax's normaliser, `k_span = k(psi_soil) - 0.05*kmax`, so its lambda
+  //   * the P50 chain rule, through `dpsi_crit/dP50`
+  //
+  // So three of the seven cost curves change shape, not just a bound that seldom
+  // binds. And there is a ceiling: the vulnerability splines are built out to P99
+  // (`vulnerability_conductivity_floor`), and the collar path recovers psi_stem by
+  // INVERTING the stem integral, whose range ends there -- measured, asking 0.03%
+  // past it throws `stem_curve_domain`. A threshold at P99 leaves that inversion no
+  // headroom, and past P99 the spline domain has to move too, which redistributes
+  // every knot and therefore every number the model reports.
+  //
+  // Smoothness is the wrong reason to reach for this in any case: moving a bound
+  // moves the kink rather than removing it. What removes it is a cost that DIVERGES
+  // at the bound, which is exactly why no product objective can be boundary-crit.
+  static constexpr double k_crit_fraction = 0.05;
+
+  // The two derivations, one place each, so a caller cannot get them
+  // inconsistent. `f` is the remaining-conductivity fraction.
+  static double weibull_b_from_P50(double P50, double c) {
+    return P50 / std::pow(std::log(2.0), 1.0 / c);
+  }
+  static double weibull_psi_at_fraction(double b, double c, double f) {
+    return b * std::pow(std::log(1.0 / f), 1.0 / c);
+  }
+
+  // Seats both curves' derived scale and critical potential from the traits
+  // already in place. For the CONSTRUCTORS only: set_traits has to compute the
+  // same four values BEFORE it assigns anything, because it decides which
+  // splines to rebuild by comparing them against the ones standing.
+  void derive_vulnerability_curves_from_P50() {
+    stem_b = weibull_b_from_P50(stem_P50, stem_c);
+    psi_crit = weibull_psi_at_fraction(stem_b, stem_c, k_crit_fraction);
+    roots_.root_b = weibull_b_from_P50(roots_.root_P50, roots_.root_c);
+    roots_.root_psi_crit =
+        weibull_psi_at_fraction(roots_.root_b, roots_.root_c, k_crit_fraction);
+  }
+
+  // The #25 boundary: the potentials that must be positive magnitudes. One copy,
+  // called from both the constructor and set_traits.
+  static void check_psi_magnitudes(double stem_P50, double stem_c,
+                                   double root_P50, double root_c);
 
   // The #38 boundary, and the STRONGER of the two: `psi_crit` must lie inside the
   // stem vulnerability spline's domain, which `stem_b`/`stem_c` set and `psi_crit`
@@ -699,8 +820,7 @@ public:
   // `root_psi_crit` past the root P99 silently reports the floor conductivity
   // rather than failing, which is a different defect and is #85's question, not
   // this check's.
-  static void check_psi_crit_domain(double psi_crit, double stem_b,
-                                    double stem_c);
+
 
   void setup_transpiration(double resolution);
 
@@ -753,7 +873,7 @@ public:
   // re-seating the physiology is exactly the cost being avoided -- so whatever
   // reads the outputs afterwards must write them first. `set_traits()` is the
   // way back, and forces a rebuild.
-  void perturb_stem_b(double stem_b_new);
+  void perturb_stem_P50(double stem_P50_new);
   // Forwards to roots_.setup_vulnerability. Kept on Leaf because it is part of
   // the published construction sequence (see the umbrella header) and plant's
   // bindings name it.
@@ -827,7 +947,7 @@ public:
   // Uptake at a collar suction against an arbitrary vector of layer suctions.
   // Thin forwarder to roots_.uptake_at; the E_up_ / soil_consumption_ buffers
   // stay on Leaf and are handed over by reference, because plant writes back
-  // into them by name after crown integration (PLAN 7b-ii trap 1).
+  // into them by name after crown integration.
   void E_from_Soil_to_Root_Collar(double T_collar, const std::vector<double>& psi_soil) {
     require_suction_vector(psi_soil, "E_from_Soil_to_Root_Collar");
     switch (supply_kind_) {
@@ -872,7 +992,7 @@ public:
   //
   // ⚠️ **The 0.0 returned on the shut-down / reversed-gradient exits is a
   // SENTINEL, not a stationary point**, and the distinction only became load
-  // bearing when PLAN 11a proposed root-finding on `dprofit == 0`. It matters
+  // bearing because the collar solve root-finds on `dprofit == 0`. It matters
   // because the sentinel fires at `prepare_collar_solve`'s WET bracket endpoint
   // -- at `root_zero_E` uptake is zero by construction, so `psi >= psi_stem` --
   // which is the first point a bracketing solver evaluates when it checks that
@@ -907,6 +1027,145 @@ public:
   // made for the finite-difference path, and it matters here because
   // begin_solve() is a spline evaluation per soil layer.
   double dprofit_at_collar_psi(double opt_root_psi, bool* feasible = nullptr);
+
+  // Which cost curve a psi_stem derivative differentiates. The cost enters the
+  // chain through exactly ONE quantity -- dC/dpsi_stem -- so this selects that
+  // and nothing else.
+  enum class CostCurve { TF24, CF77, JS22, CMax, SOX, JW26, ProfitMax };
+
+  // ⚠️ THE ONE ABSTRACTION THAT MAKES EVERY MODEL THE SAME MODEL.
+  //
+  // All seven maximise `h(A(psi)) - C(psi)`: a BENEFIT LINK `h` composed with
+  // assimilation, minus a cost curve. That is not a convenience -- it is why the
+  // derivative below is one expression rather than three, and `h'` is the only
+  // thing that varies:
+  //
+  //     d/dpsi [ h(A) - C ] = h'(A) * dA/dpsi - dC/dpsi
+  //     ----------------------------------------------------------------------
+  //     Identity  h(A) = A            h' = 1          TF24, CF77, JS22, CMax
+  //     Log       h(A) = log A        h' = 1/A        SOX, JW26  (products: A*g
+  //                                                   and log A + log g share
+  //                                                   an argmax)
+  //     Scaled    h(A) = A/|A|max     h' = 1/|A|max   ProfitMax
+  //
+  // ⚠️ THE LINK IS NOT ONLY ON THE BENEFIT, AND READING IT THAT WAY IS THE NATURAL
+  // MISTAKE. For the two product curves the COST is stored in log form as well --
+  // `C = -log g` -- so `h(A) - C` is `log(A*g)`, the transform of the whole
+  // objective rather than of half of it. That asymmetry in the NAMING is real
+  // though: `C` is a function of psi alone, so its transform is just another cost
+  // curve and needs no declaration, while `A` comes out of the `ci` root-find and
+  // cannot be reparameterised that way. See `optimise_psi_stem_SOX` for the two
+  // lines of algebra showing the resulting first-order condition is the product
+  // rule divided by `A*g`, and so has identical roots.
+  //
+  // ⚠️ `Scaled` treats `|A|max` as CONSTANT, which makes ProfitMax's trait
+  // gradients PARTIALS at fixed normaliser rather than total derivatives. That is
+  // deliberate and it is what the code computes: `|A|max` comes from a scan over
+  // the supply stream, so its argmax is piecewise constant in the traits and its
+  // derivative is a sequence of zeros and jumps. A total derivative would need
+  // that chain rule; a partial at fixed |A|max is well defined and is the honest
+  // thing to report until someone needs the other.
+  enum class BenefitLink { Identity, Log, Scaled };
+
+  // ⚠️ ONE BOUND, derived from the enum's last member rather than named. The
+  // bounds checks below were written as `> CostCurve::JW26` and went stale the
+  // moment ProfitMax was appended -- the curve existed, had a link and a
+  // derivative, and was simply invisible to R because `curve_name()` called it
+  // unknown. Keep this the last member.
+  static constexpr int n_cost_curves = static_cast<int>(CostCurve::ProfitMax) + 1;
+
+  // dprofit/dpsi_stem for the solvers that optimise psi_stem directly with the
+  // upstream potential held fixed.
+  //
+  // The same chain as dprofit_at_collar_psi, and strictly simpler: there is no
+  // collar-to-stem map, so dpsi_stem/dx is 1 and every term in the upstream
+  // potential drops out. A template rather than a runtime switch because it is
+  // called inside a root-find, and because a compile-time choice cannot disagree
+  // with the objective the caller is maximising.
+  //
+  // ⚠️ `feasible` carries the same contract as the collar version: false means
+  // "no informative gradient here", and the 0.0 returned alongside it is a
+  // SENTINEL rather than a stationary point. A caller that ignores it and hands
+  // the zero to a root-find gets the shut-down state reported as the optimum.
+  template <CostCurve K>
+  double dprofit_dpsi_stem(double psi_stem, double psi_upstream,
+                           bool* feasible = nullptr);
+
+  // Evaluate the operating point at a PRESCRIBED psi_stem instead of optimising
+  // one, the psi_stem counterpart of evaluate_root_collar_psi. Clamps the target
+  // into [psi_soil, psi_crit] so a tracked state that has drifted outside still
+  // yields a finite point, and tags the result `Prescribed`.
+  //
+  // ⚠️ WHY THIS EXISTS SEPARATELY, and it is not a convenience: a gradient at a
+  // prescribed point is a DIFFERENT derivative from a gradient at an optimum.
+  // At an optimum psi* moves with the traits, so every output picks up an
+  // indirect term through dpsi*/dtheta, and profit's own indirect term vanishes
+  // by the envelope theorem. At a prescribed point psi does not move at all, so
+  // there is no indirect term for any output and no envelope identity to invoke
+  // -- the answer is the direct partial at fixed psi, which is a strictly simpler
+  // computation and a different number.
+  //
+  // ⚠️ EXCEPT WHERE THE CLAMP BINDS. A clamped target is pinned to a bound, and
+  // the bound is itself a function of the traits (`psi_crit` is one), so
+  // dpsi/dtheta is NOT zero there and the indirect term comes back. The returned
+  // tag is what distinguishes the two cases; do not infer it from the value.
+  // --- ONE optimiser for every single-layer cost curve ----------------------
+  //
+  // These six differ in exactly three things: what they validate first, which
+  // profit function they evaluate, and which lambda they report. Everything else
+  // -- clearing the collar state, refusing a multi-layer supply, the no-flow
+  // branch, the closed-interval maximisation, writing profit_ and
+  // lambda_emergent_ -- is identical.
+  //
+  // ⚠️ THEY USED TO BE SIX NEAR-COPIES, 61-67% line-identical, and adding a curve
+  // meant pasting a seventh. The three varying pieces are `if constexpr` chains
+  // below, each written ONCE, and the body is written once. A new curve is now a
+  // `CostCurve` member plus one arm in each chain.
+  //
+  // ⚠️ ProfitMax is deliberately NOT one of them. It seeds |A|max and the
+  // conductance span before searching and writes its own normalised members, so
+  // its body is genuinely a different shape rather than a differently
+  // parameterised one. Forcing it in here would mean a fourth chain whose arms
+  // are empty for six of the seven.
+  // --- runtime curve selection, for the gradient (plan item 5) ---------------
+  //
+  // The three primitives a gradient needs -- solve, derivative, evaluate at a
+  // prescribed point -- for a curve chosen at RUN time. R has to pick the curve
+  // from an argument, and RcppR6 cannot bind a template, so these four dispatch a
+  // `CostCurve` from an integer once rather than needing twelve bound wrappers.
+  //
+  // ⚠️ The integer IS the enum's value and R sends positions into it, exactly as
+  // it already does for `gradient::par_names`. Appending a curve is safe;
+  // reordering `CostCurve` would silently solve a different model. `curve_name()`
+  // exists so R can read the mapping back out and compare rather than trust it.
+  //
+  // ⚠️ THE ADDITIVE CURVES ONLY. `dprofit_dpsi_stem` computes `dA/dpsi - dC/dpsi`
+  // and a product objective's derivative is `(dA/dpsi)*g + A*g'`, so `SOX` and
+  // `JW26` are refused here rather than returned wrong. They are still reachable
+  // through their own `optimise_psi_stem_*`.
+  static bool curve_has_derivative(int curve);
+  static std::string curve_name(int curve);
+  void optimise_psi_stem_by(int curve);
+  double evaluate_psi_stem_by(int curve, double target_psi_stem);
+  // ⚠️ NO `psi_upstream` ARGUMENT, deliberately. On a stem route the upstream
+  // potential is ALWAYS psi_soil -- that is what "non-root-based" means -- so it is
+  // read here through the same accessor `optimise_psi_stem_single` uses. Taking it
+  // from the caller invited a mismatch, and the first caller got it wrong: R read
+  // `psi_soil_`, which is the MULTI-LAYER roots' vector and is empty on the single
+  // path, so the subscript was out of bounds rather than merely inconsistent.
+  std::vector<double> dprofit_dpsi_stem_by(int curve, double psi_stem);
+
+  template <CostCurve K> static constexpr BenefitLink benefit_link();
+  template <CostCurve K> double benefit_link_deriv(double A) const;
+  template <CostCurve K> void optimise_psi_stem_single();
+  template <CostCurve K> void check_cost_parameters();
+  template <CostCurve K> double profit_psi_stem_for(double psi_stem,
+                                                    double psi_upstream);
+  template <CostCurve K> double lambda_for(double psi_stem,
+                                           double psi_upstream);
+
+  template <CostCurve K>
+  double evaluate_psi_stem(double target_psi_stem);
   // The energy-balance correction to the above, zero when the gate is off. Kept
   // out of line so that adding it cannot change FMA contraction in the inlined
   // gate-off path; the derivation and the two sign checks are at the definition.
@@ -916,7 +1175,7 @@ public:
                                      double dgc_dpsi, double dpsistem_dpsi,
                                      double dT_dE, double Tleaf);
   // The profit-maximising collar potential within [bound_a, bound_b], by a
-  // safeguarded root-find on dprofit == 0 (PLAN 11a). Returns a bound when the
+  // safeguarded root-find on dprofit == 0. Returns a bound when the
   // optimum is pinned to it, which is the case on 42 of the 240 feasible
   // golden-grid rows and so is a branch that has to be written rather than a
   // corner. Falls back to golden section if either endpoint has no usable
@@ -1029,7 +1288,7 @@ public:
   // reassociation, so the two functions were mathematically identical and
   // numerically not: the AD derivative was the derivative of a *slightly
   // different function* than the model evaluated. Harmless while the gradient only
-  // set TF24f's acclimation rate; load-bearing once PLAN 11a made the collar solve
+  // set TF24f's acclimation rate; load-bearing because the collar solve
   // root-find on it. Measured cost of the fix: 4.98e-07 on the golden grid.
   //
   // Why members templated on the scalar type, rather than free functions taking
@@ -1064,15 +1323,15 @@ public:
 // set_leaf_states_rates_from_psi_stem would put a pow() on a path that runs
 // ~10^3 times per solve.
 //
-// NOTE the name clash to be careful of: the member `lambda_` is an *input* to
-// profit_psi_stem_Sperry (Sperry's prescribed marginal water cost, never set by
-// set_physiology). The lambda here is an *emergent output*. See PLAN.md 10a.
+// NOTE the distinction to be careful of: the member `CF77_lambda_` is an *input*, the
+// Cowan-Farquhar marginal value of water, never set by set_physiology. The lambda
+// here is an *emergent output* -- the marginal cost the operating point implies.
 
   // lambda at an arbitrary stem water potential (positive magnitude, MPa), in
   // umol CO2 (kg H2O)^-1. Analytic, from the TF24 cost function:
   //
-  //   C(psi)   = cost_scale_TF24 * (1 - f)^beta2,   f(psi) = exp(-(psi/stem_b)^stem_c)
-  //   dC/dpsi  = cost_scale_TF24 * beta2 * (1-f)^(beta2-1) *
+  //   C(psi)   = TF24_cost_scale * (1 - f)^TF24_beta2,   f(psi) = exp(-(psi/stem_b)^stem_c)
+  //   dC/dpsi  = TF24_cost_scale * TF24_beta2 * (1-f)^(TF24_beta2-1) *
   //              (stem_c/stem_b)(psi/stem_b)^(stem_c-1) * f
   //   E(psi)     = kmax * integral of f,  so  dE/dpsi = kmax * f
   //   lambda     = (dC/dpsi) / (dE/dpsi)
@@ -1080,9 +1339,54 @@ public:
   // The f cancels exactly; it is cancelled here rather than divided out, so the
   // expression stays finite as psi -> psi_crit where f -> 0.
   //
-  // Caveat: with beta2 < 1 the (1-f)^(beta2-1) factor diverges as psi -> 0
+  // Caveat: with TF24_beta2 < 1 the (1-f)^(TF24_beta2-1) factor diverges as psi -> 0
   // (f -> 1), which is a property of the cost function, not of this code.
   double lambda_TF24(double psi_stem) const;
+  // ⚠️ TAKES BOTH POTENTIALS, where lambda_TF24 takes one. That is not a
+  // convenience: JS22's cost is a function of the DROP, so its marginal cost
+  // genuinely depends on the upstream potential, and no `f` cancels out of the
+  // ratio the way it does for TF24.
+  double lambda_JS22(double psi_stem, double psi_upstream) const;
+  // Also both potentials, but only because `E` is measured from the upstream one --
+  // the COST here is a function of the absolute potential, unlike JS22's.
+  double lambda_CMax(double psi_stem, double psi_upstream) const;
+
+  // --- the product-objective family --------------------------------
+  //
+  // Eller (2018, 2020)'s SOX maximises `A * g(psi)` rather than `A - C(psi)`, with
+  // `g` the conductivity fraction rescaled onto [0, 1]. Sabot's `TractLSM` calls it
+  // `kcost` and Jones et al. (2026) is the same objective with a different `g`.
+  //
+  // ⚠️ IT TAKES NO NEW PARAMETER. `g` is built from `proportion_of_conductivity`
+  // and `k_crit_fraction`, both of which the object already has, which is why this
+  // curve is cheaper than every subtracted one.
+  double sox_reduction(double psi_stem) const;
+  double sox_reduction_deriv(double psi_stem) const;
+  double profit_psi_stem_SOX(double psi_stem, double psi_upstream);
+  double lambda_SOX(double psi_stem, double psi_upstream) const;
+
+  // Jones et al. (2026): the same product objective with a LINEAR reduction factor,
+  // `1 - psi/psi_crit`, where SOX's follows the vulnerability curve. Sabot's
+  // `TractLSM` has this one too, as `phiLWP`, crediting Dewar.
+  //
+  // ⚠️ ALSO TAKES NO PARAMETER, because `psi_crit` is DERIVED here -- the 95%
+  // quantile of the stem curve, from `stem_P50` and `stem_c`. The paper supplies its
+  // own `Pcrit`; deriving it instead is what makes this and SOX two interpolations
+  // between the SAME two anchors (1 at zero tension, 0 at `psi_crit`) and so
+  // comparable by construction rather than by matching a parameter.
+  double jw26_reduction(double psi_stem) const;
+  double jw26_reduction_deriv(double psi_stem) const;
+  double profit_psi_stem_JW26(double psi_stem, double psi_upstream);
+  double lambda_JW26(double psi_stem, double psi_upstream) const;
+
+  // The marginal cost of water the ProfitMax cost implies at `psi_stem`, in the
+  // same umol C (kg H2O)^-1 as lambda_TF24 -- so the two are comparable.
+  //
+  // The normalised objective is dimensionless, so its own dC/dE is not in carbon
+  // units; multiplying by |A|max restores them, which is the same scaling that
+  // makes the objective a constant-lambda one. Requires prepare_profitmax() to
+  // have seeded the normalisers.
+  double lambda_ProfitMax(double psi_stem);
 
   // lambda at the current operating point. This is the single-layer value: it is
   // the marginal cost seen by the stem, and equals dA/dE only when the collar
@@ -1131,6 +1435,14 @@ public:
     return stom_cond_CO2_ * H2O_CO2_stom_diff_ratio_;
   }
 
+  // Read-only on purpose: a settable one would be a way to disagree with the
+  // operating point it is derived from.
+  double lambda_emergent() const { return lambda_emergent_; }
+  // ProfitMax's normalisers, so a caller can form its equivalence ratio without
+  // this class pretending that ratio is a lambda.
+  double profitmax_A_max() const { return profitmax_A_max_; }
+  double profitmax_k_span() const { return profitmax_k_span_; }
+
   // Every reported output of a solved point, in one call.
   //
   // ⚠️ THIS EXISTS FOR THE R BOUNDARY AND FOR NOTHING ELSE. A C++ caller should
@@ -1178,11 +1490,32 @@ public:
   }
 
 // leaf economics functions
-  double hydraulic_cost_Sperry(double psi_stem, double psi_upstream);
   double hydraulic_cost_TF(double psi_stem);
 
-  double profit_psi_stem_Sperry(double psi_stem, double psi_upstream);
+  // Cowan & Farquhar (1977): the cost of water is the water itself, priced at a
+  // constant marginal value. `CF77_lambda_ * E`, in umol C m^-2 s^-1 -- a carbon flux,
+  // because `CF77_lambda_` is carbon per unit transpiration and E is a mass flux.
+  //
+  // This is the model `CF77_lambda_`'s units belong to, and the reason its first-order
+  // condition is the one the whole optimality literature is written in:
+  // maximising `A - lambda*E` over psi_stem gives dA/dE == lambda at the optimum.
+  // `marginal_cost_water()` reports the same quantity for the OTHER cost curves,
+  // which is what puts them all on one axis.
+  double hydraulic_cost_CF77(double psi_stem, double psi_upstream);
+
+  // Joshi & Stocker (2022)'s hydraulic term, `gamma*(dpsi)^2`, quadratic in the
+  // soil-to-leaf DROP where the other two curves are functions of the absolute
+  // potential. See `JS22_gamma` for what is missing from it.
+  double hydraulic_cost_JS22(double psi_stem, double psi_upstream);
+
   double profit_psi_stem_TF(double psi_stem, double psi_upstream);
+  double profit_psi_stem_CF77(double psi_stem, double psi_upstream);
+  double profit_psi_stem_JS22(double psi_stem, double psi_upstream);
+
+  // Wolf/Anderegg CMax: the antiderivative of `CMax_a*psi + CMax_b` taken from the
+  // upstream potential, so the cost of moving no water is zero.
+  double hydraulic_cost_CMax(double psi_stem, double psi_upstream);
+  double profit_psi_stem_CMax(double psi_stem, double psi_upstream);
 
   // The instantaneous thermal cost at a leaf temperature, in [0,1]. Zero when the
   // gate is off, so callers need not branch.
@@ -1192,6 +1525,27 @@ public:
   // -- see optimise_psi_stem_ProfitMax for what that buys over the lambda form.
   // Seeds |A|max and the conductance span; the two below read what it seeds.
   void prepare_profitmax();
+
+  // The conductance normalisers alone: `k(psi_soil)` and the span down to
+  // `k_crit`. Both are analytic in the traits, so they are differentiable and must
+  // be refreshed whenever the traits move.
+  void prepare_profitmax_norms();
+
+  // ⚠️ THE SAME PREPARATION WITH `|A|max` SUPPLIED RATHER THAN SCANNED, and the
+  // reason it exists is a gradient.
+  //
+  // `prepare_profitmax()` finds `|A|max` by scanning the supply stream, so its
+  // argmax is piecewise constant in the traits: the derivative is a sequence of
+  // zeros and jumps, and a total derivative through it is not a quantity worth
+  // computing. What IS well defined is the PARTIAL at fixed normaliser, which is
+  // what this package reports and what the code already computes elsewhere.
+  //
+  // A gradient's perturbation loop calls `set_traits` + `set_physiology`, which
+  // clears the whole profitmax block -- measured, `|A|max` goes from 16.757 to
+  // NaN. So a perturbation must refresh the analytic normalisers and HOLD `|A|max`
+  // at the base point. Passing it in makes that pinning visible in the signature
+  // instead of a field write somebody has to notice.
+  void prepare_profitmax_at(double A_max);
   double profit_psi_stem_ProfitMax(double psi_stem, double psi_upstream);
 
   // The whole cost/gain/profit curve over [psi_soil, psi_crit] in ONE crossing of
@@ -1201,9 +1555,13 @@ public:
   std::vector<double> profitmax_curve(int n);
 
 // optimiser functions
-  void optimise_psi_stem_Sperry();
   void optimise_psi_stem_TF();
   void optimise_psi_stem_ProfitMax();
+  void optimise_psi_stem_CF77();
+  void optimise_psi_stem_JS22();
+  void optimise_psi_stem_CMax();
+  void optimise_psi_stem_SOX();
+  void optimise_psi_stem_JW26();
 
   // Clear the outputs a single-layer optimiser does NOT write. Hazard 8: these
   // three describe a ROOT-COLLAR solve, and optimise_psi_stem_* never runs one,
@@ -1241,14 +1599,27 @@ public:
     // feasible collar interval. 198 of the 288 golden grid points at 25 C -- 160 of
     // them at 40 C, where the optimum presses against the WET bound instead.
     Interior,
-    // Constrained optimum pinned at the WET end of the feasible interval, just
-    // inside root_zero_E (the collar at which uptake is exactly zero). profit is
-    // still climbing toward the wet bound, so the bound is the answer. 24 golden
-    // points. The gradient here is genuinely non-zero.
-    PinnedWet,
-    // Constrained optimum pinned at the DRY end, min(root_crit,
-    // supply_psi_crit()). 18 golden points. Gradient genuinely non-zero.
-    PinnedDry,
+    // Constrained optimum at the psi_soil end of the feasible interval, just
+    // inside root_zero_E (the collar at which uptake is exactly zero). The
+    // objective is still climbing toward that bound, so the bound is the answer:
+    // the leaf declines to open. 24 golden points at 25 C. The gradient here is
+    // genuinely non-zero.
+    //
+    // ⚠️ THESE TWO ARE NAMED FOR THE BOUND THAT BINDS, NOT FOR THE CONDITIONS,
+    // and an earlier `PinnedWet`/`PinnedDry` pair got read backwards for exactly
+    // that reason. `psi_stem == psi_soil` is the least-tension end of the
+    // bracket, so it reads as the comfortable case -- but it is what a leaf does
+    // under STRESS, when no interior point earns its water. The golden grid says
+    // so: 24 -> 80 rows as the leaf goes 25 -> 40 C, while the psi_crit end goes
+    // 18 -> 0. Warming drives this one and removes the other. Do not reintroduce
+    // a name whose reading inverts with temperature.
+    BoundarySoil,
+    // Constrained optimum at the psi_crit end, min(root_crit,
+    // supply_psi_crit()) -- the most tension the stem is allowed. Worth pulling
+    // that hard only when water is cheap relative to carbon, so this is the
+    // UNstressed pin. 18 golden points at 25 C, none at 40 C. Gradient genuinely
+    // non-zero.
+    BoundaryCrit,
     // The feasible interval collapsed to a point (width <= GSS_tol_abs), so
     // feasibility DETERMINED the collar potential and nothing was optimised.
     // There is no free variable left to differentiate.
@@ -1309,8 +1680,8 @@ inline const char* Leaf::operating_point_kind_name(OperatingPointKind kind) {
   switch (kind) {
     case OperatingPointKind::Unsolved:          return "unsolved";
     case OperatingPointKind::Interior:          return "interior";
-    case OperatingPointKind::PinnedWet:         return "pinned-wet";
-    case OperatingPointKind::PinnedDry:         return "pinned-dry";
+    case OperatingPointKind::BoundarySoil:      return "boundary-soil";
+    case OperatingPointKind::BoundaryCrit:      return "boundary-crit";
     case OperatingPointKind::Determined:        return "determined";
     case OperatingPointKind::HydraulicShutdown: return "hydraulic-shutdown";
     case OperatingPointKind::ShadeDeath:        return "shade-death";
@@ -1332,9 +1703,8 @@ inline Leaf::Leaf()
     :
     vcmax_25(96), // umol m^-2 s^-1 
     stem_c(2.680147), //unitless
-    stem_b(3.898245), //-MPa
-    psi_crit(5.870283), //-MPa
-    beta2(1.5), //exponent for effect of hydraulic risk (unitless)
+    stem_P50(3.4), // MPa, positive magnitude -- THE trait; stem_b/psi_crit derive
+    TF24_beta2(1.5), //exponent for effect of hydraulic risk (unitless)
     jmax_25(157.44), // maximum electron transport rate umol m^-2 s^-1
     a(0.30), //quantum yield of photosynthetic electron transport (mol mol^-1)
     curv_fact_elec_trans(0.7), //curvature factor for the light response curve (unitless)
@@ -1343,34 +1713,33 @@ inline Leaf::Leaf()
     vulnerability_curve_ncontrol(100),
     ci_abs_tol(1e-3),
     ci_niter(1000),
-    cost_scale_TF24(7.5) //cost parameter for TF24 profit model umol m^-2 s^-1
+    TF24_cost_scale(7.5) //cost parameter for TF24 profit model umol m^-2 s^-1
    {
-      // The root traits (root_c/root_b/root_psi_crit) and the two beta_R_*
-      // resistance constants keep their defaults in MultiLayerRoots, which owns
-      // them. Deliberately not restated here: a second copy of the root Weibull
-      // pair is the exact shape of hazard 1 in the developer guide.
+      // The root traits (root_c/root_P50) and the two beta_R_* resistance
+      // constants keep their defaults in MultiLayerRoots, which owns them --
+      // including the root's own derived root_b/root_psi_crit. Deliberately not
+      // restated here: a second copy of the root Weibull pair is the exact shape
+      // of hazard 1 in the developer guide.
+      derive_vulnerability_curves_from_P50();
       setup_transpiration(100); // arg: num control points for integration
       setup_root_vulnerability(100);
       setup_clean_leaf();
 }
 
-inline Leaf::Leaf(double vcmax_25, double stem_c, double stem_b,
-           double psi_crit, // derived from b and c,
+inline Leaf::Leaf(double vcmax_25, double stem_c, double stem_P50,
            double root_c,
-           double root_b,
-           double root_psi_crit,
-           double beta2, double jmax_25,
+           double root_P50,
+           double TF24_beta2, double jmax_25,
            double a, double curv_fact_elec_trans, double curv_fact_colim, 
            double GSS_tol_abs,
            double vulnerability_curve_ncontrol,
            double ci_abs_tol,
            double ci_niter,
-           double cost_scale_TF24)
+           double TF24_cost_scale)
     : vcmax_25(vcmax_25), // umol m^-2 s^-1 
     stem_c(stem_c), //unitless
-    stem_b(stem_b), //-MPa
-    psi_crit(psi_crit), //-MPa
-    beta2(beta2), //exponent for effect of hydraulic risk (unitless)
+    stem_P50(stem_P50), // MPa, positive magnitude
+    TF24_beta2(TF24_beta2), //exponent for effect of hydraulic risk (unitless)
     jmax_25(jmax_25), // maximum electron transport rate umol m^-2 s^-1
     a(a), //quantum yield of photosynthetic electron transport (mol mol^-1)
     curv_fact_elec_trans(curv_fact_elec_trans), //curvature factor for the light response curve (unitless)
@@ -1379,76 +1748,70 @@ inline Leaf::Leaf(double vcmax_25, double stem_c, double stem_b,
     vulnerability_curve_ncontrol(vulnerability_curve_ncontrol),
     ci_abs_tol(ci_abs_tol),
     ci_niter(ci_niter),
-    cost_scale_TF24(cost_scale_TF24) //cost parameter for TF24 profit model umol m^-2 s^-1
+    TF24_cost_scale(TF24_cost_scale) //cost parameter for TF24 profit model umol m^-2 s^-1
    {
       // The single convention, asserted at the one place it enters (#25). Before
       // there was no global statement about psi's sign to assert -- psi_soil_ was
       // >= 0, psi_soil_inverted_ was <= 0, psi_crit was >= 0 and the collar was
       // <= 0 -- which is precisely why the convention had to live in comments.
       // Now it is checkable, so it is checked. set_traits shares this check.
-      check_psi_magnitudes(psi_crit, stem_b, root_b, root_psi_crit);
-      check_psi_crit_domain(psi_crit, stem_b, stem_c);
+      check_psi_magnitudes(stem_P50, stem_c, root_P50, root_c);
 
       // The root traits belong to the supply path, so hand them over before its
-      // vulnerability curve is built.
-      roots_.root_c = root_c;          //unitless
-      roots_.root_b = root_b;          // MPa, positive magnitude
-      roots_.root_psi_crit = root_psi_crit; // MPa, positive magnitude
+      // vulnerability curve is built. Its root_b and root_psi_crit are DERIVED
+      // from the pair below, in the one place that derivation lives.
+      roots_.root_c = root_c;      //unitless
+      roots_.root_P50 = root_P50;  // MPa, positive magnitude
+      derive_vulnerability_curves_from_P50();
 
       setup_transpiration(vulnerability_curve_ncontrol); // arg: num control points for integration
       setup_root_vulnerability(vulnerability_curve_ncontrol);
       setup_clean_leaf();
 }
 
-inline void Leaf::check_psi_magnitudes(double psi_crit, double stem_b,
-                                      double root_b, double root_psi_crit) {
-  if (!(psi_crit > 0.0)) {
-    util::stop("psi_crit must be a positive magnitude in MPa (#25); got " +
-               util::to_string(psi_crit));
+inline void Leaf::check_psi_magnitudes(double stem_P50, double stem_c,
+                                      double root_P50, double root_c) {
+  // Every psi here is a POSITIVE magnitude in MPa. There is one representation, so
+  // this can be asserted globally rather than described in comments.
+  if (!(stem_P50 > 0.0)) {
+    util::stop("stem_P50 must be a positive magnitude in MPa; got " +
+               util::to_string(stem_P50));
   }
-  if (!(stem_b > 0.0)) {
-    util::stop("stem_b must be a positive magnitude in MPa (#25); got " +
-               util::to_string(stem_b));
+  if (!(root_P50 > 0.0)) {
+    util::stop("root_P50 must be a positive magnitude in MPa; got " +
+               util::to_string(root_P50));
   }
-  if (!(root_b > 0.0)) {
-    util::stop("root_b must be a positive magnitude in MPa (#25); got " +
-               util::to_string(root_b));
+  // The shape parameters set how steeply conductivity is lost. Below about 1 there
+  // is no safe plateau at all, which usually flags a measurement artefact rather
+  // than a species trait -- but it is representable, so only the sign is refused.
+  if (!(stem_c > 0.0)) {
+    util::stop("stem_c must be positive; got " + util::to_string(stem_c));
   }
-  if (!(root_psi_crit > 0.0)) {
-    util::stop("root_psi_crit must be a positive magnitude in MPa (#25); got " +
-               util::to_string(root_psi_crit));
+  if (!(root_c > 0.0)) {
+    util::stop("root_c must be positive; got " + util::to_string(root_c));
   }
 }
 
-// See the header for why psi_crit is not the free trait it looks like.
-inline void Leaf::check_psi_crit_domain(double psi_crit, double stem_b,
-                                       double stem_c) {
-  const double psi_max = vulnerability_psi_max(stem_b, stem_c);
-  if (psi_crit > psi_max) {
-    // P95 from the same curve, which is what the package defaults use and so the
-    // value a caller who has fitted stem_b/stem_c most likely wants.
-    const double p95 = stem_b * pow(log(1.0 / 0.05), 1.0 / stem_c);
-    util::stop("psi_crit (" + util::to_string(psi_crit) +
-               " MPa) is past the stem vulnerability curve's domain, which ends "
-               "at P99 = " + util::to_string(psi_max) +
-               " MPa and is set by stem_b = " + util::to_string(stem_b) +
-               " / stem_c = " + util::to_string(stem_c) +
-               ", not by psi_crit itself (#38). The package defaults take psi_crit "
-               "to be P95 of the same curve, which here is " +
-               util::to_string(p95) + " MPa.");
-  }
-}
 
 // See the header for why this exists rather than fourteen settable fields.
-inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
-                             double psi_crit_, double root_c_, double root_b_,
-                             double root_psi_crit_, double beta2_,
+inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_P50_,
+                             double root_c_, double root_P50_, double TF24_beta2_,
                              double jmax_25_, double a_,
                              double curv_fact_elec_trans_,
                              double curv_fact_colim_,
-                             double cost_scale_TF24_, double R_d_25_) {
-  check_psi_magnitudes(psi_crit_, stem_b_, root_b_, root_psi_crit_);
-  check_psi_crit_domain(psi_crit_, stem_b_, stem_c_);
+                             double TF24_cost_scale_, double R_d_25_,
+                             double JS22_gamma_, double CMax_a_,
+                             double CMax_b_) {
+  check_psi_magnitudes(stem_P50_, stem_c_, root_P50_, root_c_);
+
+  // Both scale parameters and both critical potentials fall out of the traits, so
+  // there is nothing left for a consistency check to police.
+  const double stem_b_ = weibull_b_from_P50(stem_P50_, stem_c_);
+  const double root_b_ = weibull_b_from_P50(root_P50_, root_c_);
+  const double psi_crit_ =
+      weibull_psi_at_fraction(stem_b_, stem_c_, k_crit_fraction);
+  const double root_psi_crit_ =
+      weibull_psi_at_fraction(root_b_, root_c_, k_crit_fraction);
 
   // Which splines have to be rebuilt, decided BEFORE the assignment. Exact
   // equality is the right test and not a sloppy one: the spline is a pure
@@ -1457,7 +1820,7 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
   // gradient loop does -- compares unequal and rebuilds, which is the case that
   // must not be missed.
   // ⚠️ The third clause is what makes set_traits the way back from
-  // perturb_stem_b. While the splines are built at a different stem_b, "the
+  // perturb_stem_P50. While the splines are built at a different stem_b, "the
   // parameters did not move" is not a reason to keep them -- it is exactly the
   // case where the equality test would conclude there is nothing to do and leave
   // the object rescaling forever.
@@ -1468,17 +1831,22 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
 
   vcmax_25 = vcmax_25_;
   stem_c = stem_c_;
+  stem_P50 = stem_P50_;
   stem_b = stem_b_;
   psi_crit = psi_crit_;
-  beta2 = beta2_;
+  TF24_beta2 = TF24_beta2_;
   jmax_25 = jmax_25_;
   a = a_;
   curv_fact_elec_trans = curv_fact_elec_trans_;
   curv_fact_colim = curv_fact_colim_;
-  cost_scale_TF24 = cost_scale_TF24_;
+  TF24_cost_scale = TF24_cost_scale_;
   R_d_25 = R_d_25_;
+  JS22_gamma = JS22_gamma_;
+  CMax_a = CMax_a_;
+  CMax_b = CMax_b_;
 
   roots_.root_c = root_c_;
+  roots_.root_P50 = root_P50_;
   roots_.root_b = root_b_;
   roots_.root_psi_crit = root_psi_crit_;
 
@@ -1496,7 +1864,7 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_b_,
   // that would otherwise hand back the old vcmax_.
   //
   // "The just-constructed state" is exact for the derived state and the outputs,
-  // which is all of it bar `lambda_` -- a caller input, left standing on purpose
+  // which is all of it bar `CF77_lambda_` -- a caller input, left standing on purpose
   // (#96, see its declaration).
   setup_clean_leaf();
 }
@@ -1509,7 +1877,7 @@ inline void Leaf::setup_clean_leaf() {
   assim_colimited_= util::na_value; // umol C m^-2 s^-1 
   transpiration_= util::na_value; // kg m^-2 s^-1 
   profit_= util::na_value; // umol C m^-2 s^-1
-  // lambda_ is deliberately NOT here: it is the caller's input, not derived
+  // CF77_lambda_ is deliberately NOT here: it is the caller's input, not derived
   // state, and carries its NA default at the declaration instead (#96). Adding
   // it back makes a prescribed lambda survive set_drivers() and vanish on
   // set_traits().
@@ -2157,11 +2525,11 @@ if(assim_max_ < 0){
 }
 
 // The profit-maximising collar potential, by solving the first-order condition
-// dprofit/dpsi == 0 instead of searching profit itself (PLAN 11a). Assumes
+// dprofit/dpsi == 0 instead of searching profit itself. Assumes
 // prepare_collar_solve has run, so the soil-side caches are seated and every
 // gradient evaluation below can go straight to dprofit_at_collar_psi.
 //
-// WHY this replaced golden section, in one line each -- PLAN 11a has the numbers:
+// WHY this replaced golden section, in one line each:
 //
 //  * Golden section resolves the argmax only to GSS_tol_abs (1e-3), leaving the
 //    returned collar ~1e-4 MPa from the true stationary point with an offset that
@@ -2270,7 +2638,7 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
   // #31 region is the reason the wet endpoint has to be stepped over rather than
   // evaluated, and the same reason it must not be returned.
   //
-  // What lo buys, stated honestly: on a wet-pinned row the true argmax sits
+  // What lo buys, stated honestly: on a boundary-soil row the true argmax sits
   // essentially ON the feasibility boundary -- a fine scan puts it at 6.4e-07 and
   // 3.2e-09 of the bracket width from bound_a on the two worst rows -- so lo
   // resolves it to the step-in scale (~1e-6 of the width), not to
@@ -2311,11 +2679,11 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
     return p_hi > p_lo ? hi : lo;
   }
   if (f_lo <= 0.0) {
-    operating_point_kind_ = OperatingPointKind::PinnedWet;
+    operating_point_kind_ = OperatingPointKind::BoundarySoil;
     return lo;
   }
   if (f_hi >= 0.0) {
-    operating_point_kind_ = OperatingPointKind::PinnedDry;
+    operating_point_kind_ = OperatingPointKind::BoundaryCrit;
     return hi;
   }
 
@@ -2337,13 +2705,18 @@ inline void Leaf::find_root_collar_psi(){
 
     // Maximise carbon profit over the feasible collar-potential interval by
     // solving its first-order condition, dprofit/dpsi == 0, rather than by
-    // searching the objective. PLAN 11a has the reasoning and the measurements.
+    // searching the objective.
     const double opt_root_psi = maximise_profit_over_collar(bound_a, bound_b);
 
     opt_psi_stem_ = find_psi_stem_from_psi_root(opt_root_psi, supply_psi_soil());
 
     opt_root_psi_ = opt_root_psi;
     profit_ = profit_psi_stem_TF(opt_psi_stem_, opt_root_psi);
+    // Reported on the same axis as the single-layer solvers, using the MULTI-LAYER
+    // lambda: the collar is the free variable here, so the marginal cost carries
+    // the series-resistance correction for the soil-to-collar path that the
+    // single-layer form has no term for.
+    lambda_emergent_ = marginal_cost_water_multilayer();
 
     if(!std::isfinite(profit_)){
         util::stop_infeasible("collar_solve", "non-finite profit; opt_psi_stem_=" + util::to_string(opt_psi_stem_) +
@@ -2386,6 +2759,9 @@ inline double Leaf::profit_at_collar_psi(double target_opt_root_psi,
     opt_psi_stem_ = find_psi_stem_from_psi_root(opt_root_psi, supply_psi_soil());
     opt_root_psi_ = opt_root_psi;
     profit_ = profit_psi_stem_TF(opt_psi_stem_, opt_root_psi);
+    // Well defined off the optimum too: dC/dE is a property of the point, not of
+    // its being stationary. At a prescribed point it simply is not equal to dA/dE.
+    lambda_emergent_ = marginal_cost_water_multilayer();
     // Not an optimum of any kind: the collar potential came from the caller. On
     // this path a non-zero dprofit is the answer (TF24f's acclimation rate), not
     // a residual to be checked against zero.
@@ -2487,12 +2863,10 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
   // dpsi_stem/dpsi. Computed HERE, before the compensation-point branch, so both
   // branches share ONE evaluation.
   //
-  // ⚠️ It was briefly a separate member function, and this comment claimed that
-  // cost 1.4% because the compiler stopped inlining it. THAT WAS WRONG, and
-  // measuring it properly is what showed so: with both binaries interleaved,
-  // the factored and inlined versions are indistinguishable. Kept inline anyway
-  // because sharing one evaluation between the two branches is less work
-  // regardless -- but not for the reason first given.
+  // ⚠️ Do not argue from inlining here. Factored into a separate member function
+  // and inlined measure indistinguishably, with both binaries interleaved. Inline
+  // is kept because sharing one evaluation between the two branches is less work
+  // regardless, not because the compiler stops inlining a factored version.
   //
   // ⚠️ AND THE GATE-OFF COST OF THIS WHOLE CHANGE IS 3.1%, NOT THE ~1% FIRST
   // REPORTED. The first figure was taken at load average 8.9 with another
@@ -2631,6 +3005,205 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
                                             dpsistem_dpsi, dT_dE, Tleaf_here);
 }
 
+
+// dprofit/dpsi_stem, with the upstream potential held fixed.
+//
+// The same chain as above, with two simplifications that both follow from the
+// decision variable being psi_stem itself rather than a collar potential mapped
+// onto it: dpsi_stem/dx is 1, and every term carrying the upstream potential's
+// motion is zero. What is left is
+//
+//     dprofit/dpsi_stem = A'(ci) dci/dpsi_stem - C'(psi_stem)
+//
+// and the cost curve enters through C' alone.
+template <Leaf::CostCurve K>
+inline double Leaf::dprofit_dpsi_stem(double psi_stem, double psi_upstream,
+                                      bool* feasible) {
+  // ⚠️ EVERY CURVE, through the benefit link. This returns
+  // `h'(A)*dA/dpsi - dC/dpsi` for whichever `h` the curve composes with
+  // assimilation, so a product objective is not a special case -- it is the `Log`
+  // link, and ProfitMax is the `Scaled` one. See `BenefitLink`.
+  using AD = xad::fwd<double>::active_type;
+  if (feasible != nullptr) {
+    *feasible = false;
+  }
+  // No flow, so no informative gradient -- the same sentinel and the same
+  // contract as the collar version. These are magnitudes, so upstream >= stem is
+  // the reversed case.
+  if (!std::isfinite(psi_stem) || psi_upstream >= psi_stem) {
+    return 0.0;
+  }
+
+  double dT_dE = 0.0;
+  double Tleaf_here = leaf_temp_;
+  if (use_energy_balance_) {
+    Tleaf_here = leaf_temp_from_E(transpiration(psi_stem, psi_upstream), &dT_dE);
+    update_temperature_dependent_params(Tleaf_here);
+    set_leaf_vpd(Tleaf_here);
+  }
+
+  const double ci = psi_stem_to_ci(psi_stem, psi_upstream);
+  if (!std::isfinite(ci)) {
+    return 0.0;
+  }
+
+  // THE ONLY PLACE THE COST CURVE ENTERS.
+  double C_prime;
+  if constexpr (K == CostCurve::TF24) {
+    AD ps_ad = psi_stem;
+    xad::derivative(ps_ad) = 1.0;
+    C_prime = xad::derivative(hydraulic_cost_TF_kernel(ps_ad));
+  } else if constexpr (K == CostCurve::CF77) {
+    // lambda * E. E is kmax times the integral of the conductivity fraction over
+    // [psi_upstream, psi_stem], so its derivative in psi_stem is kmax times that
+    // fraction, which is what stem_curve_integral_deriv returns. No AD needed.
+    C_prime = CF77_lambda_ * leaf_specific_conductance_max_ *
+              stem_curve_integral_deriv(psi_stem);
+  } else if constexpr (K == CostCurve::JS22) {
+    // C = gamma*(psi - psi_up)^2, so dC/dpsi = 2*gamma*(psi - psi_up). Analytic,
+    // no AD and no spline -- the simplest derivative of the four.
+    C_prime = 2.0 * JS22_gamma * (psi_stem - psi_upstream);
+  } else if constexpr (K == CostCurve::SOX) {
+    // Under the log link the cost is `-log g`, so dC/dpsi is `-g'/g`. Both are
+    // analytic; `g` is bounded below by zero only AT psi_crit, where the objective
+    // is zero anyway and no optimiser returns it.
+    C_prime = -sox_reduction_deriv(psi_stem) / sox_reduction(psi_stem);
+  } else if constexpr (K == CostCurve::JW26) {
+    // The same, and here `-g'/g` collapses: with `g = 1 - psi/psi_crit` it is
+    // exactly `1/(psi_crit - psi)`.
+    C_prime = 1.0 / (psi_crit - psi_stem);
+  } else if constexpr (K == CostCurve::ProfitMax) {
+    // C = [k(psi_s) - k(psi)]/k_span, so dC/dpsi = kmax*|f'|/k_span. The thermal
+    // term is constant in psi with the energy balance off, and the guard below
+    // refuses the case where it is not.
+    const double f = proportion_of_conductivity(psi_stem);
+    const double abs_fprime =
+        f * (stem_c / stem_b) * pow(psi_stem / stem_b, stem_c - 1.0);
+    C_prime = leaf_specific_conductance_max_ * abs_fprime / profitmax_k_span_;
+  } else {
+    // ⚠️ EVERY ARM IS EXPLICIT AND THE LAST ONE ASSERTS. This used to be a two-way
+    // `if constexpr (TF24) {...} else {CF77}`, which would have routed a third cost
+    // curve into the CF77 branch silently -- and `-Werror=switch` cannot see it,
+    // because this is not a switch. The static_assert is what makes a FIFTH curve a
+    // compile error instead of a plausible number.
+    static_assert(K == CostCurve::CMax, "unhandled CostCurve in dprofit_dpsi_stem");
+    // Linear in the ABSOLUTE potential by definition -- this IS the form Anderegg
+    // et al. state, so no antiderivative and no cancellation is involved here.
+    C_prime = CMax_a * psi_stem + CMax_b;
+  }
+
+  // ci pinned at the compensation point: the supply==demand residual is not zero
+  // there, so the implicit function theorem below does not hold and the
+  // assimilation term is dropped rather than approximated. `feasible` stays
+  // false, which is what tells a caller the difference.
+  if (ci_at_compensation_point_) {
+    double dprofit = -C_prime;
+    if (use_energy_balance_ && dT_dE != 0.0) {
+      const double h = 1e-3;
+      const double vc0 = vcmax_, jm0 = jmax_, ga0 = gamma_, ko0 = ko_,
+                   kc0 = kc_, rd0 = R_d_, km0 = km_, J0 = electron_transport_;
+      update_temperature_dependent_params(Tleaf_here + h);
+      const double Rd_up = R_d_;
+      update_temperature_dependent_params(Tleaf_here - h);
+      const double Rd_dn = R_d_;
+      vcmax_ = vc0; jmax_ = jm0; gamma_ = ga0; ko_ = ko0; kc_ = kc0;
+      R_d_ = rd0; km_ = km0; electron_transport_ = J0;
+      const double Rd_T = (Rd_up - Rd_dn) / (2.0 * h);
+      const double dE_dpsi =
+          leaf_specific_conductance_max_ * stem_curve_integral_deriv(psi_stem);
+      dprofit += -Rd_T * dT_dE * dE_dpsi;
+    }
+    return std::isfinite(dprofit) ? dprofit : 0.0;
+  }
+
+  if (feasible != nullptr) {
+    *feasible = true;
+  }
+
+  AD ci_ad = ci;
+  xad::derivative(ci_ad) = 1.0;
+  const double A_prime = xad::derivative(assim_colimited_kernel(ci_ad));
+
+  const double gc_const =
+      atm_kpa_ * kg_to_mol_h2o / vpd_leaf_ / H2O_CO2_stom_diff_ratio_;
+  const double gc = gc_const * transpiration(psi_stem, psi_upstream);
+  const double dgc_dpsistem =
+      gc_const * leaf_specific_conductance_max_ *
+      stem_curve_integral_deriv(psi_stem);
+  const double inv_atm = 1.0 / (atm_kpa_ * kPa_to_Pa);
+  const double g_ci = A_prime * umol_to_mol + gc * inv_atm;
+  const double dci_dpsistem = -(-dgc_dpsistem * (ca_ - ci) * inv_atm) / g_ci;
+
+  // ⚠️ THE IDENTITY ARM IS WRITTEN OUT SEPARATELY AND THAT IS DELIBERATE. It is
+  // textually what this line always was, so the four additive curves stay
+  // bit-identical -- multiplying by a literal 1.0 would be exact but could still
+  // change FMA contraction, and the golden files compare at the last bit.
+  double base;
+  if constexpr (benefit_link<K>() == BenefitLink::Identity) {
+    base = A_prime * dci_dpsistem - C_prime;
+  } else {
+    const double A = assim_colimited_kernel(ci);
+    base = benefit_link_deriv<K>(A) * (A_prime * dci_dpsistem) - C_prime;
+  }
+  if (!use_energy_balance_) {
+    return base;
+  }
+  if constexpr (benefit_link<K>() != BenefitLink::Identity) {
+    // ⚠️ REFUSED RATHER THAN APPROXIMATED. The energy-balance term below is a
+    // further contribution to dA/dpsi through Tleaf(E), so under a non-identity
+    // link it needs the same `h'` factor -- and it also carries cost-side pieces
+    // (ProfitMax's thermal term moves with Tleaf) that are not separated in it.
+    // Returning it unscaled would be plausible and wrong.
+    util::stop("dprofit/dpsi_stem with a non-identity benefit link and the "
+               "energy balance ON is not implemented: the temperature term needs "
+               "the same h'(A) factor and, for ProfitMax, its thermal cost term "
+               "separated out. Solve with the optimiser, or run with the energy "
+               "balance off.");
+  }
+  // dgc_dpsi = 0 and dpsistem_dpsi = 1: the term derives dE/dpsi from those two,
+  // and with the upstream potential fixed that reduces to kmax * f(psi_stem).
+  return base + dprofit_energy_balance_term(ci, gc, g_ci, inv_atm, gc_const,
+                                            A_prime, dgc_dpsistem, 0.0, 1.0,
+                                            dT_dE, Tleaf_here);
+}
+
+// Evaluate at a prescribed psi_stem rather than optimising one. See the
+// declaration for why a gradient here is a different derivative from a gradient
+// at an optimum.
+template <Leaf::CostCurve K>
+inline double Leaf::evaluate_psi_stem(double target_psi_stem) {
+  clear_collar_solve_state();
+
+  if (!supply_is_single_layer()) {
+    util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
+  }
+  // Same three chains the optimiser uses, so a prescribed point and a solved one
+  // cannot disagree about what a curve requires or which objective it is.
+  check_cost_parameters<K>();
+  const double psi_soil = supply_psi_soil_scalar();
+
+  // Drier soil than the stem can reach is the no-flow case, and the target is
+  // irrelevant to it: there is one feasible potential and this is it.
+  if (psi_soil > psi_crit) {
+    opt_psi_stem_ = psi_soil;
+    profit_ = profit_psi_stem_for<K>(psi_soil, psi_soil);
+    operating_point_kind_ = OperatingPointKind::Prescribed;
+    return profit_;
+  }
+
+  // Clamp, rather than refuse: a caller carrying psi_stem as a tracked state can
+  // arrive here just outside the interval, and a finite operating point plus a
+  // gradient that points back inside is more useful than an exception. The tag
+  // does not distinguish a clamped target from an interior one -- compare the
+  // returned opt_psi_stem_ with what you asked for if you need to know.
+  const double psi = std::min(std::max(target_psi_stem, psi_soil), psi_crit);
+
+  opt_psi_stem_ = psi;
+  profit_ = profit_psi_stem_for<K>(psi, psi_soil);
+  operating_point_kind_ = OperatingPointKind::Prescribed;
+  return profit_;
+}
+
 // The energy-balance correction to dprofit/dpsi, and zero when the gate is off.
 //
 // ⚠️ OUT OF LINE ON PURPOSE. Everything around it -- profit_psi_stem_TF,
@@ -2671,13 +3244,12 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
 //    cooling back toward the optimum. That is the decoupling mechanism, and its
 //    sign is the sharpest available test that this term is right.
 //
-// ⚠️ `dgc_dT` IS NOW NON-ZERO, and the placeholder algebra that stood here while
-// it was zero did NOT generalise. This block used to carry a named
-// `const double dgc_dT = 0.0` with a note promising that PLAN 13.1 would make it
-// "a one-line change instead of a re-derivation". The note was wrong: the
-// damping factor it multiplied, `(gc*inv_atm - dgc_dT*(ca-ci)*inv_atm)/g_ci`,
-// puts the new term under `A_T` where the derivation puts it under `A_prime`.
-// The two agree only at dgc_dT = 0, which is why nothing caught it. Derived
+// ⚠️ `dgc_dT` IS NON-ZERO, and placeholder algebra written while it was zero does
+// NOT generalise -- switching the term on is a re-derivation, not a one-line
+// change. A damping factor of the form `(gc*inv_atm - dgc_dT*(ca-ci)*inv_atm)/g_ci`
+// puts the new term under `A_T` where the derivation puts it under `A_prime`. The
+// two agree only at dgc_dT = 0, so such a form passes every test until the term
+// becomes non-zero. Derived
 // again, in full, below.
 //
 // g(ci; psi_stem, psi, T) = A(ci,T)*umol_to_mol - gc(T)*(ca-ci)*inv_atm = 0, so
@@ -2706,7 +3278,7 @@ inline double Leaf::dprofit_energy_balance_term(
   // reason is the golden file rather than accuracy. Re-expressing
   // update_temperature_dependent_params as the T=double instantiation of a
   // templated kernel changes which expressions share an inlined body, and
-  // PLAN 11b measured that exact move changing results even where the algebra
+  // That exact move was measured changing results even where the algebra
   // was identical. That risks the gate-off path to buy precision nobody can
   // observe: at h = 1e-3 K the truncation error is ~2e-9 relative against a
   // model whose own floor (psi_stem_to_ci at 1e-10) is ~1e-9.
@@ -2852,7 +3424,7 @@ inline double Leaf::saturation_vapour_pressure_slope(double temp) const {
   return 4098.0 * saturation_vapour_pressure(temp) / ((temp + 237.3) * (temp + 237.3));
 }
 
-// The deficit that drives diffusion out of the leaf (PLAN 13.1, issue #7).
+// The deficit that drives diffusion out of the leaf (#7).
 //
 // Fick's law needs the deficit between the SUB-STOMATAL cavity, saturated at the
 // LEAF temperature, and the air. The driver `atm_vpd_` is the deficit at AIR
@@ -3051,15 +3623,17 @@ inline double Leaf::stem_curve_integral_inverse_deriv(double w) const {
   return psi_from_transpiration.deriv(w / (stem_b / stem_b_spline_));
 }
 
-inline void Leaf::perturb_stem_b(double stem_b_new) {
-  check_psi_magnitudes(psi_crit, stem_b_new, roots_.root_b, roots_.root_psi_crit);
-  // ⚠️ The perturbed stem_b carries a perturbed domain with it, and this is the
-  // one caller where that can newly bind: lowering stem_b lowers P99 while
-  // psi_crit stays put, so a gradient step in stem_b at a psi_crit already near
-  // P99 can walk off the end of the curve it is rescaling. Checked against
-  // stem_b_new, not stem_b.
-  check_psi_crit_domain(psi_crit, stem_b_new, stem_c);
-  stem_b = stem_b_new;
+inline void Leaf::perturb_stem_P50(double stem_P50_new) {
+  check_psi_magnitudes(stem_P50_new, stem_c, roots_.root_P50, roots_.root_c);
+  // psi_crit is a quantile of the same curve, so it is a fixed multiple of
+  // stem_b at fixed stem_c: the ratio psi_crit/stem_b depends only on stem_c.
+  // Both therefore scale by the same factor here, the rescaled spline evaluated
+  // at the rescaled bound returns the same conductivity fraction, and the
+  // domain cannot newly bind -- so the rescaling shortcut below stays exact and
+  // no curve is rebuilt.
+  stem_P50 = stem_P50_new;
+  stem_b = weibull_b_from_P50(stem_P50_new, stem_c);
+  psi_crit = weibull_psi_at_fraction(stem_b, stem_c, k_crit_fraction);
   // ⚠️ The transpiration memo is keyed on (psi_stem, psi_upstream) and NOT on the
   // curve, so a perturbation that leaves the potentials alone -- which is every
   // perturbation a gradient makes -- would hit an entry computed from the old
@@ -3192,8 +3766,7 @@ inline double Leaf::assim_electron_limited(double ci_) {
 }
 
 // returns co-limited assimilation umol m^-2 s^-1, NET of dark respiration (the
-// trailing `- R_d_`), so gross assimilation is this value + R_d_. The comment
-// that used to sit on the return statement said the opposite.
+// trailing `- R_d_`), so gross assimilation is this value + R_d_.
 inline double Leaf::assim_colimited(double ci_) {
   return assim_colimited_kernel(ci_);
 }
@@ -3244,11 +3817,11 @@ inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
   // ⚠️ **The 1e-10 is load-bearing and was chosen by measurement, not taste. It
   // sets the floor of what every reported output of this model MEANS.** It used to
   // be 1e-7, which was invisible while golden section's GSS_tol_abs (1e-3)
-  // dominated; once PLAN 11a removed that, this became the model's dominant
+  // dominated; with that gone, this became the model's dominant
   // amplifier -- a last-bit change anywhere upstream shifts which point TOMS748
   // lands on inside its tolerance band, and that surfaces in ci, assim, gc and
   // profit. Measured by perturbing the model identically at each tolerance and
-  // reading the golden grid (PLAN 11b):
+  // reading the golden grid:
   //
   //   ci tol   worst diff vs a converged (1e-15) solve   us/solve (indicative)
   //   1e-7                       1.82e-07                      2.655
@@ -3268,7 +3841,7 @@ inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
   // scratch tree, and code-layout luck moves this benchmark by ~2%. The controlled
   // figure for the step actually taken -- both binaries built from the same tree,
   // interleaved x5 -- is **+3.4%** (2.65 -> 2.75 us/solve), against the +1.5% the
-  // table implies. Still a good trade next to the 24.5% PLAN 11a bought, and still
+  // table implies. Still a good trade next to the root-find's 24.5%, and still
   // 21.7% faster than the 3.51 us this package ran at before 11a. If you re-derive
   // the curve, build every point from one tree.
   //
@@ -3276,9 +3849,12 @@ inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
   // without re-reading the guide's rounding-versus-bug magnitudes, which this
   // figure sets.
   //
-  // Not the same knob as `ci_abs_tol` (the settable control, default 1e-3), which
-  // reaches only the off-path optimise_psi_stem_* solvers. A caller tightening
-  // that one gets no extra precision here.
+  // ⚠️ Not the same knob as `ci_abs_tol` (the settable control, default 1e-3).
+  // `ci_abs_tol` is read in exactly one place,
+  // solve_medlyn_ci_numerical, i.e. the empirical Medlyn-conductance route. It
+  // reaches NEITHER family of optimality solver -- both go through this function
+  // and so through the 1e-10 above. A caller tightening it gets no extra precision
+  // anywhere in the optimality model.
   ci_at_compensation_point_ = false;
   try {
     return ci_ = util::uniroot_smooth(target, gamma_ * umol_per_mol_to_Pa_, ca_, 1e-10, ci_niter);
@@ -3419,30 +3995,110 @@ inline void Leaf::set_leaf_states_rates_from_psi_stem(double psi_stem, double ps
 
 // Hydraulic cost equations
 
-// Sperry et al. 2017; Sabot et al. 2020 implementation
-
-inline double Leaf::hydraulic_cost_Sperry(double psi_stem, double psi_upstream) {
-  // Cost is definitionally zero when the potentials are equal. Returning it
-  // explicitly avoids a tiny non-zero residual from FMA contraction of the
-  // k_l_soil_ - k_l_stem_ subtraction (arch-dependent; see arm64 build, #468).
-  if (psi_stem == psi_upstream) {
-    hydraulic_cost_ = 0.0;
-    return hydraulic_cost_;
-  }
-  double k_l_soil_ = leaf_specific_conductance_max_ * proportion_of_conductivity(psi_upstream);
-  double k_l_stem_ = leaf_specific_conductance_max_ * proportion_of_conductivity(psi_stem);
-  
-  hydraulic_cost_ = k_l_soil_ - k_l_stem_;
-  
-  return hydraulic_cost_;
-}
-
 // --- Marginal cost of water -------------------------------------------------
 
 inline double Leaf::lambda_TF24(double psi_stem) const {
   const double f = proportion_of_conductivity(psi_stem);
-  return cost_scale_TF24 * beta2 * (stem_c / stem_b) * pow(psi_stem / stem_b, stem_c - 1.0) *
-         pow(1.0 - f, beta2 - 1.0) / leaf_specific_conductance_max_;
+  return TF24_cost_scale * TF24_beta2 * (stem_c / stem_b) * pow(psi_stem / stem_b, stem_c - 1.0) *
+         pow(1.0 - f, TF24_beta2 - 1.0) / leaf_specific_conductance_max_;
+}
+
+
+// The same quantity for JS22's quadratic-in-the-drop cost:
+//
+//   dC/dpsi = 2*gamma*(psi - psi_up),   dE/dpsi = kmax*f(psi)
+//
+// ⚠️ `f` does NOT cancel here, where it does for TF24 (whose |f'| carries a factor
+// of `f`). So this divides by the conductivity fraction. That is safe inside the
+// feasible bracket -- `f` runs 1 down to `k_crit_fraction` = 0.05 at psi_crit, and
+// never reaches zero -- but it is the reason this cannot be written in TF24's form.
+inline double Leaf::lambda_JS22(double psi_stem, double psi_upstream) const {
+  const double f = proportion_of_conductivity(psi_stem);
+  return 2.0 * JS22_gamma * (psi_stem - psi_upstream) /
+         (leaf_specific_conductance_max_ * f);
+}
+
+
+// And for CMax, whose marginal cost does not vanish at the wet end unless CMax_b is
+// zero -- which is what makes it the one curve here that CAN be boundary-soil with a
+// non-zero cost at the bound. `psi_upstream` enters only through dE/dpsi.
+inline double Leaf::lambda_CMax(double psi_stem, double psi_upstream) const {
+  (void)psi_upstream;
+  const double f = proportion_of_conductivity(psi_stem);
+  return (CMax_a * psi_stem + CMax_b) /
+         (leaf_specific_conductance_max_ * f);
+}
+
+
+// And for SOX, where the objective is a PRODUCT. At its optimum `A'g + Ag' = 0`, so
+// `A' = -A(g'/g)` and
+//
+//     lambda = A'/E' = -A*(g'/g) / (kmax*f)
+//
+// ⚠️ IT CARRIES A FACTOR OF `A`, and that is what a product objective means rather
+// than an artefact of this `g`: a difference objective prices water in absolute
+// carbon, a product prices it as a share of current assimilation. `the-models.Rmd`
+// derives it in one line and gives the scale-invariance test that pins it.
+//
+// ⚠️ It DIVERGES at `psi_crit`, where `g` is exactly zero. That is the mechanism by
+// which a product objective can never be boundary-crit -- water becomes infinitely
+// expensive before the bound is reached -- and it means this is not a number to
+// evaluate at the dry end of the bracket.
+inline double Leaf::lambda_SOX(double psi_stem, double psi_upstream) const {
+  (void)psi_upstream;
+  const double g = sox_reduction(psi_stem);
+  const double gp = sox_reduction_deriv(psi_stem);
+  const double f = proportion_of_conductivity(psi_stem);
+  return -assim_colimited_ * (gp / g) / (leaf_specific_conductance_max_ * f);
+}
+
+
+// The same expression for Jones, where `-g'/g` collapses: with `g = 1 - psi/psi_crit`
+// it is `1/(psi_crit - psi)`, so
+//
+//     lambda = A / [(psi_crit - psi) * kmax * f(psi)]
+//
+// which is the form `the-models.Rmd` quotes. It carries a factor of `A` and diverges
+// at `psi_crit`, both for the product-objective reasons `lambda_SOX` records.
+inline double Leaf::lambda_JW26(double psi_stem, double psi_upstream) const {
+  (void)psi_upstream;
+  const double f = proportion_of_conductivity(psi_stem);
+  return assim_colimited_ /
+         ((psi_crit - psi_stem) * leaf_specific_conductance_max_ * f);
+}
+
+
+// The same quantity for the normalised ProfitMax cost. Writing `f` for the
+// conductivity fraction and `f'` for its slope, the cost is
+// `HC + TC = (k_soil - kmax*f)/k_span + TC(Tleaf)`, so -- dividing through and
+// restoring carbon units with |A|max:
+//
+//     dC/dpsi = kmax*|f'|/k_span + (dTC/dT)(dT/dE)(dE/dpsi),  dE/dpsi = kmax*f
+//     lambda  = |A|max * [ |f'|/(f*k_span) + (dTC/dT)(dT/dE) ]
+//
+// The thermal term vanishes with either gate off -- with no energy balance
+// dT/dE is zero, and with no thermal cost dTC/dT is.
+inline double Leaf::lambda_ProfitMax(double psi_stem) {
+  const double f = proportion_of_conductivity(psi_stem);
+  if (!(f > 0.0) || !(profitmax_k_span_ > 0.0) || !(profitmax_A_max_ > 0.0)) {
+    return util::na_value;
+  }
+  // |f'| = (c/b)(psi/b)^(c-1) f, positive because f is decreasing.
+  const double abs_fprime =
+      (stem_c / stem_b) * pow(psi_stem / stem_b, stem_c - 1.0) * f;
+
+  double thermal = 0.0;
+  if (use_thermal_cost_ && use_energy_balance_) {
+    const double E = transpiration(psi_stem, supply_psi_soil_scalar());
+    double dT_dE = 0.0;
+    const double Tleaf = leaf_temp_from_E(E, &dT_dE);
+    const double span = T50_ - Tcrit_;
+    const double TC = thermal_cost_at(Tleaf);
+    // Sigmoid derivative: dTC/dT = r*TC*(1-TC), r = 2/(T50 - Tcrit).
+    thermal = (2.0 / span) * TC * (1.0 - TC) * dT_dE;
+  }
+  return profitmax_A_max_ *
+         (abs_fprime / (f * profitmax_k_span_) + thermal);
 }
 
 inline double Leaf::marginal_cost_water() const {
@@ -3485,7 +4141,7 @@ inline double Leaf::g1_eff() const {
 // while probing. The caching is the double entry point's job.
 template <typename T>
 inline T Leaf::hydraulic_cost_TF_kernel(T psi_stem) const {
-  return cost_scale_TF24 * pow((1 - proportion_of_conductivity_kernel(psi_stem)), beta2);
+  return TF24_cost_scale * pow((1 - proportion_of_conductivity_kernel(psi_stem)), TF24_beta2);
 }
 
 inline double Leaf::hydraulic_cost_TF(double psi_stem) {
@@ -3515,17 +4171,6 @@ inline double Leaf::thermal_cost_at(double leaf_temp) const {
 
 // Profit functions
 
-inline double Leaf::profit_psi_stem_Sperry(double psi_stem, double psi_upstream) {
-
-set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
-
-  double benefit_ = assim_colimited_;
-  double cost = hydraulic_cost_Sperry(psi_stem, psi_upstream);
-
-  return benefit_ - lambda_ * cost;
-}
-
-
 inline double Leaf::profit_psi_stem_TF(double psi_stem, double psi_upstream) {
 set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
 
@@ -3533,6 +4178,176 @@ double benefit_ = assim_colimited_;
   double cost = hydraulic_cost_TF(psi_stem);
 
   return benefit_ - cost;
+}
+
+
+// `CF77_lambda_ * E`. Written into `hydraulic_cost_` like the TF24 cost and unlike the
+// Sperry one, because this product IS a carbon flux: `CF77_lambda_` is umol C per kg of
+// water and E is kg m^-2 s^-1.
+//
+// `transpiration()` is memoised on (psi_stem, psi_upstream), so calling it here
+// straight after set_leaf_states_rates_from_psi_stem costs nothing and returns
+// exactly the E of the operating point that call established -- including the
+// no-flow case, where the two potentials are equal and the integral difference is
+// exactly zero.
+inline double Leaf::hydraulic_cost_CF77(double psi_stem,
+                                                double psi_upstream) {
+  hydraulic_cost_ = CF77_lambda_ * transpiration(psi_stem, psi_upstream);
+  return hydraulic_cost_;
+}
+
+
+inline double Leaf::profit_psi_stem_CF77(double psi_stem,
+                                                 double psi_upstream) {
+  set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
+
+  double benefit_ = assim_colimited_;
+  double cost = hydraulic_cost_CF77(psi_stem, psi_upstream);
+
+  return benefit_ - cost;
+}
+
+
+// gamma * (dpsi)^2, in carbon units like the TF24 and CF77 costs -- so it goes in
+// `hydraulic_cost_` on the same footing as those two and not in ProfitMax's
+// separate normalised members.
+//
+// `dpsi*dpsi` rather than `pow(dpsi, 2.0)`: this runs inside the optimiser's inner
+// loop, and hazard 5 is about exactly that.
+inline double Leaf::hydraulic_cost_JS22(double psi_stem,
+                                        double psi_upstream) {
+  const double dpsi = psi_stem - psi_upstream;
+  hydraulic_cost_ = JS22_gamma * dpsi * dpsi;
+  return hydraulic_cost_;
+}
+
+
+inline double Leaf::profit_psi_stem_JS22(double psi_stem,
+                                         double psi_upstream) {
+  set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
+
+  double benefit_ = assim_colimited_;
+  double cost = hydraulic_cost_JS22(psi_stem, psi_upstream);
+
+  return benefit_ - cost;
+}
+
+
+// The integral of `CMax_a*psi + CMax_b` from psi_upstream to psi_stem, so no flow
+// costs nothing:
+//
+//     C = (psi - psi_up) * [ CMax_a*(psi + psi_up)/2 + CMax_b ]
+//
+// ⚠️ FACTORED, NOT `a*(psi^2 - psi_up^2)/2 + b*(psi - psi_up)`, and that is a
+// measured requirement rather than tidiness. The difference-of-squares form
+// subtracts two nearly equal numbers as the potentials converge: against the
+// factored value it is wrong by 1.6e-08 at a 1e-08 drop and 1.2e-04 at 1e-12,
+// the latter being what this guide calls a real difference rather than rounding.
+// A gradient perturbs by a relative 1e-06, so an operating point near no flow
+// reaches that regime.
+//
+// ⚠️ THIS IS ALSO WHY IT DOES NOT SHARE A KERNEL WITH JS22, tempting as that is.
+// JS22 is this family's `(a, b) = (2*gamma, -2*gamma*psi_up)` member, and
+// putting it through the form above computes `gamma*(psi + psi_up) - 2*gamma*psi_up`
+// -- reintroducing exactly the cancellation that `gamma*dpsi*dpsi` does not have.
+// The two share a family, not an implementation.
+inline double Leaf::hydraulic_cost_CMax(double psi_stem,
+                                        double psi_upstream) {
+  hydraulic_cost_ = (psi_stem - psi_upstream) *
+                    (0.5 * CMax_a * (psi_stem + psi_upstream) + CMax_b);
+  return hydraulic_cost_;
+}
+
+
+inline double Leaf::profit_psi_stem_CMax(double psi_stem,
+                                         double psi_upstream) {
+  set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
+
+  double benefit_ = assim_colimited_;
+  double cost = hydraulic_cost_CMax(psi_stem, psi_upstream);
+
+  return benefit_ - cost;
+}
+
+
+// --- the product-objective family --------------------------------------------
+//
+// Eller's reduction factor: the conductivity fraction rescaled so it is 1 at zero
+// tension and exactly 0 at `psi_crit`, where `f` reaches `k_crit_fraction` by
+// construction. That last equality is why this needs no parameter of its own -- the
+// 0.05 is the same one `psi_crit` is derived from and the same one Sperry's
+// `k_crit` reads, so the three cannot disagree.
+// ⚠️ CLAMPED AT ZERO, and that is not defensive padding -- without it this curve
+// reports a shut-down leaf as PROFITABLE. Past `psi_crit` the conductivity fraction
+// falls below `k_crit_fraction`, so `g` goes negative; the objective is `A*g` and a
+// shut-down leaf has `A = -R_d < 0`, so the product of two negatives came back
+// POSITIVE and grew as the soil dried. Measured before the clamp, at PPFD 1500:
+// psi_soil 6.0 gave +0.0125 and 7.0 gave +0.0633, against TF24's -8.48 and -8.85.
+// Sabot's `phiLWP` clamps for the same reason; her `kcost` does not, because
+// `TractLSM` never evaluates outside `[Ps, Pcrit]` and the no-flow branch here does.
+//
+// Written as `g < 0` rather than `std::max(0.0, g)` so a NaN propagates instead of
+// being silently turned into a zero: `NaN < 0.0` is false, so the NaN is returned.
+inline double Leaf::sox_reduction(double psi_stem) const {
+  const double g = (proportion_of_conductivity(psi_stem) - k_crit_fraction) /
+                   (1.0 - k_crit_fraction);
+  return g < 0.0 ? 0.0 : g;
+}
+
+
+// Its slope. `|f'| = f*(c/b)*(psi/b)^(c-1)` is the same analytic form `lambda_TF24`
+// uses, so this needs neither AD nor a spline derivative; `f` decreases, so this is
+// negative.
+inline double Leaf::sox_reduction_deriv(double psi_stem) const {
+  const double f = proportion_of_conductivity(psi_stem);
+  const double abs_fprime =
+      f * (stem_c / stem_b) * pow(psi_stem / stem_b, stem_c - 1.0);
+  return -abs_fprime / (1.0 - k_crit_fraction);
+}
+
+
+// ⚠️ A PRODUCT, so what comes back is NOT in carbon units, unlike every other
+// `profit_psi_stem_*` here. The argmax is unaffected -- `A*g` and `log A + log g`
+// share it because `log` is monotone, and the paper's own first-order condition is
+// the log-differentiated form -- but the VALUE is a different kind of number and
+// must not be compared with a TF24 profit.
+//
+// ⚠️ `hydraulic_cost_` IS EXPLICITLY POISONED, which is hazard 8 rather than
+// tidiness. There is no subtracted cost on this curve, so leaving the field alone
+// would report whichever curve ran last -- and on one reused `Leaf` that is exactly
+// the stale-state leak the `psi_stem_optima` golden file's second pass exists to
+// catch.
+inline double Leaf::profit_psi_stem_SOX(double psi_stem,
+                                        double psi_upstream) {
+  set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
+  hydraulic_cost_ = util::na_value;
+  return assim_colimited_ * sox_reduction(psi_stem);
+}
+
+
+// Jones' linear reduction factor, on the DERIVED `psi_crit`. Clamped at zero for
+// exactly the reason `sox_reduction` is, and the NaN-propagating form for the same
+// reason; here the clamp binds for every `psi > psi_crit` rather than only past the
+// point where `f` drops under `k_crit_fraction`.
+inline double Leaf::jw26_reduction(double psi_stem) const {
+  const double g = 1.0 - psi_stem / psi_crit;
+  return g < 0.0 ? 0.0 : g;
+}
+
+
+// Constant, which is the whole difference from SOX: a linear `g` prices each further
+// MPa of tension identically, where SOX's follows the vulnerability curve and so
+// charges little until the curve turns over. Zero once the clamp binds.
+inline double Leaf::jw26_reduction_deriv(double psi_stem) const {
+  return psi_stem > psi_crit ? 0.0 : -1.0 / psi_crit;
+}
+
+
+inline double Leaf::profit_psi_stem_JW26(double psi_stem,
+                                         double psi_upstream) {
+  set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
+  hydraulic_cost_ = util::na_value;
+  return assim_colimited_ * jw26_reduction(psi_stem);
 }
 
 
@@ -3547,88 +4362,26 @@ inline void Leaf::clear_collar_solve_state() {
   soil_consumption_.assign(soil_consumption_.size(), util::na_value);
 }
 
-// ⚠️ THE TWO OPTIMISERS BELOW USE A BARE BRENT SEARCH AND SHARE A HAZARD.
-// Brent is a LOCAL optimiser that steps in from the bounds, so it cannot return
-// an endpoint and it cannot see past a local maximum. `optimise_psi_stem_TF` is
-// therefore wrong wherever the TF24 profit is maximised at full closure, and
-// `optimise_psi_stem_Sperry` wherever the caller's lambda makes it so.
-// `optimise_psi_stem_ProfitMax` scans a grid first for exactly this reason -- see
-// the note there, with the measured case that motivated it. These two are left
-// alone because neither has a scan to reuse, so fixing them costs 500 model
-// evaluations per solve rather than nothing; the collar solve is unaffected,
-// since maximise_profit_over_collar handles a pinned optimum explicitly.
-
-// need docs on Golden Section Search.
-inline void Leaf::optimise_psi_stem_Sperry() {
-
-    clear_collar_solve_state();
-
-    if (!supply_is_single_layer()) {
-    util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
-  }
-
-  // ⚠️ lambda_ IS AN INPUT HERE AND HAS NO DEFAULT. It is NA until the caller sets
-  // it, and no model code on this path assigns one, so a caller who drives the leaf
-  // and calls this without setting it is optimising a NaN objective -- and
-  // brent_fmin does not report that. It returns a plausible-looking potential
-  // (2.551266 MPa at the package defaults) with profit_ = NaN beside it, and the
-  // potential is a property of the bracket rather than of the model. Refuse.
-  //
-  // This guard used to describe the #96 asymmetry it was working around --
-  // set_traits() cleared lambda_ and set_drivers() did not, so whether a
-  // prescribed value survived depended on the order of two interchangeable-looking
-  // calls. That is fixed: NEITHER clears it now. The guard stands on its own,
-  // because "the caller never set one" is still reachable.
-  //
-  // ⚠️ WHAT IT DOES NOT CATCH, and cannot: optimise_psi_stem_ProfitMax *writes*
-  // lambda_ as a report, so calling that and then this one silently optimises
-  // ProfitMax's derived lambda rather than a prescribed one. Finite, plausible, and
-  // not the caller's number. That the same field is an input here and an output
-  // there is the design question in #114.
-  if (!std::isfinite(lambda_)) {
-    util::stop("optimise_psi_stem_Sperry needs lambda_ set: it is a PRESCRIBED "
-               "marginal water cost, NA until you assign one, and never set by "
-               "set_physiology or set_traits. For Sperry (2017)'s own normalised "
-               "profit use optimise_psi_stem_ProfitMax, which computes its own.");
-  }
-
-  opt_psi_stem_ = supply_psi_soil_scalar();
-
-
-  if ((PPFD_ < 1.5e-8 )| (supply_psi_soil_scalar() > psi_crit)){
-    profit_ = 0;
-    transpiration_ = 0;
-    stom_cond_CO2_ = 0;
-    return;
-  }
-
-  // Maximise carbon profit over the CLOSED interval [psi_soil, psi_crit]. The
-  // objective is maximised at full closure whenever the caller's lambda prices
-  // water above what the carbon is worth, and it carries a second interior hump
-  // at high leaf temperature -- so a bare bracketing search is the wrong
-  // instrument here. See maximise_over_closed_interval.
-    double profit_opt = 0.0;
-    opt_psi_stem_ = util::maximise_over_closed_interval(
-        [&](double psi_stem) { return profit_psi_stem_Sperry(psi_stem, supply_psi_soil_scalar()); },
-        supply_psi_soil_scalar(), psi_crit, boundary_scan_n_, &profit_opt);
-    // Re-evaluated rather than taken from the search, so every reported field
-    // describes the returned operating point (hazard 8, in the form where the
-    // fields are individually plausible).
-    profit_ = profit_psi_stem_Sperry(opt_psi_stem_, supply_psi_soil_scalar());
-    (void)profit_opt;
-
-  }
-  
+// A single-layer optimiser maximises over the CLOSED interval
+// [psi_soil, psi_crit]. The endpoints have to be candidates: the objective is
+// maximised at full closure whenever water is priced above what the carbon is
+// worth, and a bracketing search steps in from the bounds and so can never
+// return one. Some cost curves also carry a second interior hump, which the same
+// search cannot see past. See maximise_over_closed_interval.
+//
+// The root-based solve reaches the same conclusion by a different route:
+// maximise_profit_over_collar tests the gradient's sign at each end and reports a
+// pinned optimum explicitly.
 
 // ===========================================================================
 // Sperry et al. (2017) ProfitMax, as Sicangco et al. (2026) implement it
 // ---------------------------------------------------------------------------
-// WHY THIS EXISTS ALONGSIDE optimise_psi_stem_Sperry, WHICH IS THE SAME MODEL.
-// Sperry maximises `Profit = CG - HC` with both terms normalised, where this
-// package's older entry point maximises `A - lambda*(k(psi_soil)-k(psi))`.
-// Multiplying Sperry's objective by |A|max shows the two are the same function up
-// to a positive scale factor, so they share an argmax EXACTLY when lambda takes
-// the value below:
+// Sperry maximises `Profit = CG - HC` with both terms normalised. Multiplying
+// that objective by |A|max turns it into `A - lambda*(k(psi_soil)-k(psi))`, the
+// same function up to a positive scale factor and so the same argmax, with lambda
+// taking the value below. That is a property worth knowing rather than a second
+// entry point: the lambda is not a constant, so prescribing one is not this
+// model.
 //
 //     CG      = A(psi)/|A|max
 //     HC      = [k(psi_soil)-k(psi)] / [k(psi_soil)-kcrit]
@@ -3649,7 +4402,7 @@ inline void Leaf::optimise_psi_stem_Sperry() {
 // become numerically negligible the way the TF24 cost does as stem_b widens
 // (measured at 1.3e-5 at stem_b = 200). Both terms are scale-free, which also
 // means the plant's willingness to spend water does not depend on how much carbon
-// is at stake in absolute terms. That is exactly what cost_scale_TF24 decides on
+// is at stake in absolute terms. That is exactly what TF24_cost_scale decides on
 // the TF24 path, and it is the parameter a calibration cannot identify without
 // leaf water potential.
 //
@@ -3657,7 +4410,7 @@ inline void Leaf::optimise_psi_stem_Sperry() {
 // has rather than a new one. Sperry, Sabot et al. (2020) and Sicangco all set
 // kcrit = 0.05*kmax, i.e. psi_crit is P95; at this package's defaults
 // f(psi_crit) = 0.0500 exactly, so nothing has to be reconciled.
-inline void Leaf::prepare_profitmax() {
+inline void Leaf::prepare_profitmax_norms() {
   if (!supply_is_single_layer()) {
     util::stop("psi soil must have only one value to use non-root-based profit "
                "optimisation methods");
@@ -3668,6 +4421,28 @@ inline void Leaf::prepare_profitmax() {
   profitmax_k_span_ =
       profitmax_k_soil_ -
       leaf_specific_conductance_max_ * proportion_of_conductivity(psi_crit);
+}
+
+
+inline void Leaf::prepare_profitmax_at(double A_max) {
+  prepare_profitmax_norms();
+  if (!(std::isfinite(A_max) && A_max > 0.0)) {
+    util::stop("prepare_profitmax_at needs a finite positive |A|max -- it is the "
+               "normaliser held fixed across a perturbation, so an unset one "
+               "means the base point was never solved; got " +
+               util::to_string(A_max));
+  }
+  profitmax_A_max_ = A_max;
+}
+
+
+inline void Leaf::prepare_profitmax() {
+  if (!supply_is_single_layer()) {
+    util::stop("psi soil must have only one value to use non-root-based profit "
+               "optimisation methods");
+  }
+  const double psi_soil = supply_psi_soil_scalar();
+  prepare_profitmax_norms();
 
   // |A|max over the transpiration supply stream (Sperry Eqn 4; Sicangco use
   // max|Anet| because CG_net can be negative). A scan rather than "A at psi_crit"
@@ -3769,7 +4544,7 @@ inline void Leaf::optimise_psi_stem_ProfitMax() {
     carbon_gain_ = 0;
     hydraulic_cost_norm_ = 0;
     thermal_cost_ = 0;
-    lambda_ = util::na_value;
+    lambda_emergent_ = util::na_value;
     return;
   }
 
@@ -3783,21 +4558,23 @@ inline void Leaf::optimise_psi_stem_ProfitMax() {
     carbon_gain_ = 0;
     hydraulic_cost_norm_ = 0;
     thermal_cost_ = 0;
-    lambda_ = util::na_value;
+    lambda_emergent_ = util::na_value;
     return;
   }
 
-  // Reported so the relation to the lambda form is inspectable rather than
-  // asserted. Exactly: A_max*ProfitMax(psi) == Sperry(psi; this lambda) -
-  // A_max*thermal_cost_at(Tleaf(psi)), to ~4e-15 (#114).
+  // The marginal cost of water this operating point implies, reported so the
+  // relation to the lambda form is inspectable rather than asserted. Exactly:
   //
-  // ⚠️ SO IT IS THE LAMBDA THAT MAKES optimise_psi_stem_Sperry FIND THE SAME POINT
-  // ONLY WHERE THE THERMAL COST IS CONSTANT IN psi -- i.e. thermal cost off (TC is
-  // exactly 0), or energy balance off (Tleaf is the driver, so TC is an additive
-  // constant and the argmax is unmoved). With BOTH gates on the extra term is
-  // genuinely psi-dependent and the two argmaxes differ, by up to 1.1 MPa at
-  // Tair 40. Do not substitute one entry point for the other on that arm.
-  lambda_ = profitmax_A_max_ / profitmax_k_span_;
+  //   A_max*ProfitMax(psi) == [A(psi) - lambda*(k(psi_soil)-k(psi))]
+  //                           - A_max*thermal_cost_at(Tleaf(psi))
+  //
+  // to ~4e-15. The bracketed term is a constant-lambda objective, so the two share
+  // an argmax only where the thermal cost is CONSTANT in psi -- thermal cost off
+  // (TC is exactly 0), or energy balance off (Tleaf is a driver, so TC is an
+  // additive constant that cannot move the argmax). With BOTH gates on the extra
+  // term is genuinely psi-dependent, and the argmaxes differ by up to 1.1 MPa at
+  // Tair 40. A prescribed lambda is therefore not a substitute for this model.
+  //
 
   // ⚠️ GRID FIRST, THEN REFINE, AND A BARE BRENT SEARCH IS WRONG HERE.
   //
@@ -3852,6 +4629,7 @@ inline void Leaf::optimise_psi_stem_ProfitMax() {
     // field describes the returned point rather than the grid's reconstruction.
     opt_psi_stem_ = profitmax_scan_psi_[best];
     profit_ = profit_psi_stem_ProfitMax(opt_psi_stem_, psi_soil);
+    lambda_emergent_ = lambda_ProfitMax(opt_psi_stem_);
     return;
   }
 
@@ -3880,41 +4658,435 @@ inline void Leaf::optimise_psi_stem_ProfitMax() {
   // re-evaluate to leave every reported field describing ONE operating point.
   // Hazard 8, in the form where the fields are individually plausible.
   profit_ = profit_psi_stem_ProfitMax(opt_psi_stem_, psi_soil);
+  lambda_emergent_ = lambda_ProfitMax(opt_psi_stem_);
 }
 
-inline void Leaf::optimise_psi_stem_TF() {
+// --- runtime curve selection --------------------------------------------------
+//
+// One switch, so the integer-to-curve mapping is written once. `-Werror=switch`
+// makes a curve added to the enum and forgotten here a build failure.
+namespace detail {
+inline const char* cost_curve_name(Leaf::CostCurve k) {
+  switch (k) {
+    case Leaf::CostCurve::TF24: return "TF24";
+    case Leaf::CostCurve::CF77: return "CF77";
+    case Leaf::CostCurve::JS22: return "JS22";
+    case Leaf::CostCurve::CMax: return "CMax";
+    case Leaf::CostCurve::SOX:  return "SOX";
+    case Leaf::CostCurve::JW26: return "JW26";
+    case Leaf::CostCurve::ProfitMax: return "ProfitMax";
+  }
+  return "unknown";
+}
+}  // namespace detail
 
-  // See optimise_psi_stem_Sperry: no root-collar operating point.
+inline std::string Leaf::curve_name(int curve) {
+  if (curve < 0 || curve >= n_cost_curves) {
+    return "unknown";
+  }
+  return detail::cost_curve_name(static_cast<CostCurve>(curve));
+}
+
+// Whether `dprofit_dpsi_stem_by` will accept this curve. Exposed so a caller can
+// ask before committing to a route, rather than discovering it through an error.
+inline bool Leaf::curve_has_derivative(int curve) {
+  if (curve < 0 || curve >= n_cost_curves) return false;
+  // Every curve has one now, through its benefit link. Kept as a function rather
+  // than deleted because R reads it to build the route table, and because the
+  // energy-balance guard means a curve can still refuse at run time.
+  (void)curve;
+  return true;
+}
+
+inline void Leaf::optimise_psi_stem_by(int curve) {
+  switch (static_cast<CostCurve>(curve)) {
+    case CostCurve::TF24: optimise_psi_stem_single<CostCurve::TF24>(); return;
+    case CostCurve::CF77: optimise_psi_stem_single<CostCurve::CF77>(); return;
+    case CostCurve::JS22: optimise_psi_stem_single<CostCurve::JS22>(); return;
+    case CostCurve::CMax: optimise_psi_stem_single<CostCurve::CMax>(); return;
+    case CostCurve::SOX:  optimise_psi_stem_single<CostCurve::SOX>();  return;
+    case CostCurve::JW26: optimise_psi_stem_single<CostCurve::JW26>(); return;
+    // ⚠️ NOT the shared body. ProfitMax seeds |A|max and the conductance span
+    // before searching, so it keeps its own optimiser -- the LINK is what it
+    // shares with the others, not the search.
+    case CostCurve::ProfitMax: optimise_psi_stem_ProfitMax(); return;
+  }
+  util::stop("unknown cost curve index " + util::to_string(curve));
+}
+
+inline double Leaf::evaluate_psi_stem_by(int curve, double target_psi_stem) {
+  switch (static_cast<CostCurve>(curve)) {
+    case CostCurve::TF24: return evaluate_psi_stem<CostCurve::TF24>(target_psi_stem);
+    case CostCurve::CF77: return evaluate_psi_stem<CostCurve::CF77>(target_psi_stem);
+    case CostCurve::JS22: return evaluate_psi_stem<CostCurve::JS22>(target_psi_stem);
+    case CostCurve::CMax: return evaluate_psi_stem<CostCurve::CMax>(target_psi_stem);
+    case CostCurve::SOX:  return evaluate_psi_stem<CostCurve::SOX>(target_psi_stem);
+    case CostCurve::JW26: return evaluate_psi_stem<CostCurve::JW26>(target_psi_stem);
+    case CostCurve::ProfitMax:
+      return evaluate_psi_stem<CostCurve::ProfitMax>(target_psi_stem);
+  }
+  util::stop("unknown cost curve index " + util::to_string(curve));
+  return util::na_value;
+}
+
+// ⚠️ RETURNS (value, feasible) LIKE THE COLLAR VERSION, and for the same reason:
+// `dprofit` hands back a hard 0.0 SENTINEL on its shut-down and reversed-gradient
+// exits, and a bare zero is indistinguishable from a stationary point. A composite
+// that reads the value without the flag inherits that bug.
+inline std::vector<double> Leaf::dprofit_dpsi_stem_by(int curve,
+                                                      double psi_stem) {
+  if (!supply_is_single_layer()) {
+    util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
+  }
+  const double psi_upstream = supply_psi_soil_scalar();
+  bool feasible = false;
+  double v = util::na_value;
+  switch (static_cast<CostCurve>(curve)) {
+    case CostCurve::TF24:
+      v = dprofit_dpsi_stem<CostCurve::TF24>(psi_stem, psi_upstream, &feasible);
+      break;
+    case CostCurve::CF77:
+      v = dprofit_dpsi_stem<CostCurve::CF77>(psi_stem, psi_upstream, &feasible);
+      break;
+    case CostCurve::JS22:
+      v = dprofit_dpsi_stem<CostCurve::JS22>(psi_stem, psi_upstream, &feasible);
+      break;
+    case CostCurve::CMax:
+      v = dprofit_dpsi_stem<CostCurve::CMax>(psi_stem, psi_upstream, &feasible);
+      break;
+    case CostCurve::SOX:
+      v = dprofit_dpsi_stem<CostCurve::SOX>(psi_stem, psi_upstream, &feasible);
+      break;
+    case CostCurve::JW26:
+      v = dprofit_dpsi_stem<CostCurve::JW26>(psi_stem, psi_upstream, &feasible);
+      break;
+    case CostCurve::ProfitMax:
+      v = dprofit_dpsi_stem<CostCurve::ProfitMax>(psi_stem, psi_upstream,
+                                                  &feasible);
+      break;
+  }
+  return std::vector<double>{v, feasible ? 1.0 : 0.0};
+}
+
+
+// Which link each curve composes with assimilation. One table, and the last arm
+// asserts, so a curve added to the enum without a link is a build failure.
+template <Leaf::CostCurve K>
+constexpr Leaf::BenefitLink Leaf::benefit_link() {
+  if constexpr (K == CostCurve::SOX || K == CostCurve::JW26) {
+    return BenefitLink::Log;
+  } else if constexpr (K == CostCurve::ProfitMax) {
+    return BenefitLink::Scaled;
+  } else {
+    static_assert(K == CostCurve::TF24 || K == CostCurve::CF77 ||
+                  K == CostCurve::JS22 || K == CostCurve::CMax,
+                  "unhandled CostCurve in benefit_link");
+    return BenefitLink::Identity;
+  }
+}
+
+// `h'(A)`, the only thing the derivative below needs from the link.
+//
+// ⚠️ The Log arm is why a product objective's gradient exists at all: `A*g` and
+// `log A + log g` share an argmax, and differentiating the second is the same
+// additive shape as every other curve with `1/A` on the benefit term.
+//
+// ⚠️ It is also where a product curve's ONE genuine hazard lives. `log A` needs
+// `A > 0`, and at full closure `A = -R_d < 0`. The optimiser sidesteps this by
+// maximising the product directly; a DERIVATIVE cannot, so a non-positive `A`
+// returns NaN rather than a number, and the caller's feasibility flag is what
+// carries that outward.
+template <Leaf::CostCurve K>
+inline double Leaf::benefit_link_deriv(double A) const {
+  if constexpr (benefit_link<K>() == BenefitLink::Log) {
+    return A > 0.0 ? 1.0 / A : util::na_value;
+  } else if constexpr (benefit_link<K>() == BenefitLink::Scaled) {
+    return profitmax_A_max_ > 0.0 ? 1.0 / profitmax_A_max_
+                                   : util::na_value;
+  } else {
+    (void)A;
+    return 1.0;
+  }
+}
+
+
+// --- the three things that vary, each in ONE place ---------------------------
+//
+// A new single-layer cost curve is a `CostCurve` member plus one arm in each of
+// these three, and nothing else. Every arm is explicit and the last asserts, so a
+// curve added to the enum and forgotten here is a compile error rather than a
+// silent fall-through to whichever arm happened to be the `else`.
+
+// What must be set before the search. TF24, SOX and JW26 have nothing: TF24's
+// parameters are traits with defaults, and the two product curves take no
+// parameter at all -- their `g` is built from the vulnerability curve and
+// `k_crit_fraction`.
+template <Leaf::CostCurve K>
+inline void Leaf::check_cost_parameters() {
+  if constexpr (K == CostCurve::CF77) {
+    // ⚠️ CF77_lambda_ IS AN INPUT AND HAS NO DEFAULT. It is the marginal value of
+    // water -- the one parameter this model is defined by -- and no model code
+    // supplies one, so a caller who has not set it is maximising a NaN objective.
+    // The potential that comes back from that is a property of the bracket rather
+    // than of the leaf, and it looks entirely plausible. Refuse instead.
+    if (!std::isfinite(CF77_lambda_)) {
+      util::stop("optimise_psi_stem_CF77 needs CF77_lambda_ set: it is the "
+                 "PRESCRIBED marginal value of water in umol C (kg H2O)^-1, NA "
+                 "until you assign one, and never set by set_physiology or "
+                 "set_traits.");
+    }
+  } else if constexpr (K == CostCurve::JS22) {
+    // A trait with a default, so an unset one is a programming error rather than
+    // a caller omission -- but still checked, because a NaN here maximises a NaN
+    // objective and returns a bracket property that looks like an operating point.
+    if (!std::isfinite(JS22_gamma) || JS22_gamma < 0.0) {
+      util::stop("JS22_gamma must be a finite, non-negative hydraulic unit cost "
+                 "in umol C m^-2 s^-1 MPa^-2; got " + util::to_string(JS22_gamma));
+    }
+  } else if constexpr (K == CostCurve::CMax) {
+    // ⚠️ CMax_a only gets the sign check. CMax_b is SIGNED -- negative in the
+    // paper's own convention, see the member -- so rejecting a negative would
+    // reject the literature.
+    if (!std::isfinite(CMax_a) || CMax_a < 0.0) {
+      util::stop("CMax_a must be a finite, non-negative slope for the CMax "
+                 "marginal cost in umol C m^-2 s^-1 MPa^-2; got " +
+                 util::to_string(CMax_a));
+    }
+    if (!std::isfinite(CMax_b)) {
+      util::stop("CMax_b must be finite; got " + util::to_string(CMax_b));
+    }
+  } else {
+    static_assert(K == CostCurve::TF24 || K == CostCurve::SOX ||
+                  K == CostCurve::JW26 || K == CostCurve::ProfitMax,
+                  "unhandled CostCurve");
+  }
+}
+
+
+// Which objective. ⚠️ These are NOT all the same kind of number: the first four
+// are carbon and the last two are products (see `profit_psi_stem_SOX`). That is
+// already true of `profit_` across the optimisers and is not introduced here.
+template <Leaf::CostCurve K>
+inline double Leaf::profit_psi_stem_for(double psi_stem, double psi_upstream) {
+  if constexpr (K == CostCurve::TF24) {
+    return profit_psi_stem_TF(psi_stem, psi_upstream);
+  } else if constexpr (K == CostCurve::CF77) {
+    return profit_psi_stem_CF77(psi_stem, psi_upstream);
+  } else if constexpr (K == CostCurve::JS22) {
+    return profit_psi_stem_JS22(psi_stem, psi_upstream);
+  } else if constexpr (K == CostCurve::CMax) {
+    return profit_psi_stem_CMax(psi_stem, psi_upstream);
+  } else if constexpr (K == CostCurve::SOX) {
+    return profit_psi_stem_SOX(psi_stem, psi_upstream);
+  } else if constexpr (K == CostCurve::JW26) {
+    return profit_psi_stem_JW26(psi_stem, psi_upstream);
+  } else {
+    static_assert(K == CostCurve::ProfitMax, "unhandled CostCurve");
+    return profit_psi_stem_ProfitMax(psi_stem, psi_upstream);
+  }
+}
+
+
+// Which lambda to report. ⚠️ TF24's reads psi_stem ALONE where the rest need both
+// potentials -- JS22 because its cost is a function of the drop, the others
+// because E is measured from the upstream one. Normalised to two arguments here so
+// the body below never has to know which. CF77's is exact by construction rather
+// than derived: its cost is lambda*E, so dC/dpsi over dE/dpsi is lambda
+// identically.
+template <Leaf::CostCurve K>
+inline double Leaf::lambda_for(double psi_stem, double psi_upstream) {
+  if constexpr (K == CostCurve::TF24) {
+    (void)psi_upstream;
+    return lambda_TF24(psi_stem);
+  } else if constexpr (K == CostCurve::CF77) {
+    (void)psi_stem;
+    (void)psi_upstream;
+    return CF77_lambda_;
+  } else if constexpr (K == CostCurve::JS22) {
+    return lambda_JS22(psi_stem, psi_upstream);
+  } else if constexpr (K == CostCurve::CMax) {
+    return lambda_CMax(psi_stem, psi_upstream);
+  } else if constexpr (K == CostCurve::SOX) {
+    return lambda_SOX(psi_stem, psi_upstream);
+  } else if constexpr (K == CostCurve::JW26) {
+    return lambda_JW26(psi_stem, psi_upstream);
+  } else {
+    static_assert(K == CostCurve::ProfitMax, "unhandled CostCurve");
+    (void)psi_upstream;
+    return lambda_ProfitMax(psi_stem);
+  }
+}
+
+
+// And the body, written once. Maximises over the CLOSED interval for the reason
+// hazard 11 gives: the objective is highest at full closure whenever water is
+// priced above what the carbon is worth, and a bracketing search that steps in
+// from the bounds can never return one.
+template <Leaf::CostCurve K>
+inline void Leaf::optimise_psi_stem_single() {
   clear_collar_solve_state();
 
   if (!supply_is_single_layer()) {
     util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
   }
+  check_cost_parameters<K>();
 
-  opt_psi_stem_ = supply_psi_soil_scalar();
+  const double psi_soil = supply_psi_soil_scalar();
+  opt_psi_stem_ = psi_soil;
 
-  if (supply_psi_soil_scalar() > psi_crit){
-    profit_ = profit_psi_stem_TF(supply_psi_soil_scalar(), supply_psi_soil_scalar());
+  // Drier soil than the stem can reach: one feasible potential, and this is it.
+  if (psi_soil > psi_crit) {
+    profit_ = profit_psi_stem_for<K>(psi_soil, psi_soil);
+    lambda_emergent_ = lambda_for<K>(psi_soil, psi_soil);
     return;
   }
 
-  // Maximise carbon profit over the CLOSED interval [psi_soil, psi_crit]. The
-  // TF24 objective is maximised at full closure wherever the leaf should be
-  // shut, so the endpoints have to be candidates; see
-  // maximise_over_closed_interval. The multi-layer solver reaches the same
-  // conclusion by a different route -- maximise_profit_over_collar tests for a
-  // pinned optimum explicitly.
-    double profit_opt = 0.0;
-    opt_psi_stem_ = util::maximise_over_closed_interval(
-        [&](double psi_stem) { return profit_psi_stem_TF(psi_stem, supply_psi_soil_scalar()); },
-        supply_psi_soil_scalar(), psi_crit, boundary_scan_n_, &profit_opt);
-    // As in optimise_psi_stem_Sperry: re-evaluate so the reported fields and the
-    // returned potential are one operating point.
-    profit_ = profit_psi_stem_TF(opt_psi_stem_, supply_psi_soil_scalar());
-    (void)profit_opt;
+  double profit_opt = 0.0;
+  opt_psi_stem_ = util::maximise_over_closed_interval(
+      [&](double psi_stem) { return profit_psi_stem_for<K>(psi_stem, psi_soil); },
+      psi_soil, psi_crit, boundary_scan_n_, &profit_opt);
+  profit_ = profit_psi_stem_for<K>(opt_psi_stem_, psi_soil);
+  lambda_emergent_ = lambda_for<K>(opt_psi_stem_, psi_soil);
+  (void)profit_opt;
+}
 
-    return;
-  }
+
+inline void Leaf::optimise_psi_stem_TF() {
+  optimise_psi_stem_single<CostCurve::TF24>();
+}
+
+
+// Cowan & Farquhar (1977). Same shape as optimise_psi_stem_TF -- the objective is
+// the only difference, and the closed interval is needed for the same reason -- so
+// the two carry the same degenerate convention: at a soil potential drier than
+// psi_crit the objective is EVALUATED at the no-flow point rather than zeroed, so
+// every reported field describes that point. Profit there is `-R_d`, since E is
+// exactly zero and so is the cost.
+inline void Leaf::optimise_psi_stem_CF77() {
+  optimise_psi_stem_single<CostCurve::CF77>();
+}
+
+
+// Joshi & Stocker (2022)'s hydraulic term. The same closed-interval maximisation as
+// the other two single-layer optimisers, for the reason hazard 11 gives.
+//
+// ⚠️ NO SECOND HUMP HERE, and it is worth knowing why the scan is kept anyway. This
+// marginal cost rises monotonically from zero, so against a saturating marginal
+// benefit the first-order condition crosses exactly once -- the double crossing
+// hazard 11 describes needs a marginal cost that FALLS at the dry end, which
+// |f'| does and a quadratic does not. The endpoints still have to be candidates:
+// full closure is the answer whenever water is priced above what the carbon is
+// worth, and a bracketing search cannot return a bound.
+//
+// ⚠️ THE WET END IS INTERIOR WHENEVER THERE IS A BRACKET AT ALL. dC/dpsi -> 0 as
+// psi -> psi_soil while dA/dpsi > 0 there, so dprofit/dpsi is strictly positive at
+// the wet bound and the optimiser cannot return it. Measured at gamma = 20, PPFD
+// 200 and VPD 4 -- a regime built to make closure attractive -- psi* still clears
+// psi_soil by 1.8e-02 at psi_soil 5.5 and 1.1e-02 at 5.84.
+//
+// ⚠️ It is stated that way rather than as "can never be boundary-soil", which the
+// same measurement falsifies: at psi_soil
+// 6.0, above the default psi_crit of 5.870, psi* comes back EXACTLY psi_soil. That
+// is the no-flow branch above -- there is no feasible interval to be interior in --
+// and not a pinned optimum. Do not read a psi* == psi_soil here as the optimiser
+// choosing closure without checking psi_soil against psi_crit first.
+//
+// Either way it is a real behavioural difference from TF24, where wet-pinning is
+// the dominant pinned class (24 rows at 25 C, 80 at 40 C over the golden grid), so
+// a fit on this curve should reach the exact-gradient route more often.
+inline void Leaf::optimise_psi_stem_JS22() {
+  optimise_psi_stem_single<CostCurve::JS22>();
+}
+
+
+// Wolf/Anderegg CMax. Same closed-interval maximisation as the other three.
+//
+// ⚠️ UNLIKE JS22, THIS ONE CAN BE WET-PINNED, and the reason is `CMax_b`. JS22's
+// marginal cost vanishes as the drop closes, so the wet bound is never the answer;
+// this one approaches `CMax_a*psi_soil + CMax_b`, which is non-zero. So a closed
+// interval is doing real work here rather than guarding a case that cannot arise,
+// and `CMax_b` is what decides it.
+//
+// ⚠️ AND A WET-PINNED ANSWER IS NOT `psi_soil` EXACTLY. Measured at psi_soil 3,
+// PPFD 200, VPD 4: `psi* - psi_soil` is 5.930e-06 at CMax_b = 6 and **the same
+// 5.930e-06** at 8, 12 and 20. A value that does not move with the parameter is
+// the tell -- it is the bracket's step-in fraction (~1e-06 of a 2.870 MPa width),
+// so the answer is determined by the bound rather than by the objective. A caller
+// testing `psi* == psi_soil` to detect closure will therefore conclude this curve
+// never pins. Compare against the bound with the step-in tolerance, or read the
+// gradient's sign at the bound.
+inline void Leaf::optimise_psi_stem_CMax() {
+  optimise_psi_stem_single<CostCurve::CMax>();
+}
+
+
+// Eller's SOX, the first PRODUCT objective here. Same closed-interval maximisation
+// as the other three, and correct for the same reason: `A*g` and `log A + log g`
+// share an argmax, so maximising the product directly needs no logarithm and so
+// meets none of the `A > 0` trouble the log form has at full closure.
+//
+// ⚠️ NEVER DRY-PINNED, and by construction rather than by luck: `g(psi_crit)` is
+// exactly zero, so the objective is zero at the dry bound while any interior point
+// with positive `A` beats it. The wet bound is reachable, though -- at full closure
+// `A = -R_d` and the product is `-R_d * g(psi_soil)`, which can be the maximum when
+// assimilation is negative throughout, so the endpoints still have to be candidates
+// (hazard 11).
+//
+// ⚠️ NO PARAMETER TO VALIDATE, which is the whole appeal of this curve: `g` is built
+// from `proportion_of_conductivity` and `k_crit_fraction`. Nothing here can be unset.
+//
+// ⚠️ THE BENEFIT LINK IS WHAT MAKES THIS A ROW OF THE COST TABLE RATHER THAN AN
+// EXCEPTION TO IT, and the equivalence is exact rather than approximate. Write
+// `C(psi) = -log g(psi)` and take `h = log`; then the framework's objective IS the
+// logarithm of the product, and its derivative is the product rule divided through
+// by a strictly positive number:
+//
+//     h(A) - C          = log A + log g = log(A*g)
+//     d/dpsi[h(A) - C]  = A'/A + g'/g   = (A'*g + A*g') / (A*g) = P' / (A*g)
+//
+// So the two first-order conditions have IDENTICAL roots -- nothing is dropped by
+// the link sitting on the benefit alone. It can sit there because `C` is a function
+// of psi ONLY, so `-log g` is itself just another cost curve; transforming the cost
+// buys no generality, it only relabels which row you are on. `A` is not free that
+// way -- it comes out of the `ci` root-find -- so its transform has to be declared,
+// and `h'` is the whole of what the derivative needs from it.
+//
+// Verified numerically over six driver rows on both product curves: the log-form
+// derivative at a 400k-point scan argmax of the PRODUCT is 1.6e-07 to 4.0e-06, which
+// is that scan's own resolution times the curvature, and the solver lands within
+// 3.2e-06 MPa of it.
+//
+// ⚠️ THE OPTIMISER STILL MAXIMISES THE PRODUCT, and that is deliberate, not a
+// shortcut. `log` is monotone so the argmax is identical, and the product avoids the
+// one place the log form breaks: at full closure `A = -R_d < 0` and `log A` does not
+// exist, which is exactly the endpoint hazard 11 requires to be a candidate. So the
+// link is the right way to STATE this cost and the wrong way to SEARCH for it.
+//
+// ⚠️ `profit_` CARRIES A THIRD KIND OF NUMBER because of this curve, and that is not
+// enforced anywhere. TF24 puts carbon in it, `optimise_psi_stem_ProfitMax` puts a
+// dimensionless normalised profit in it, and this puts a product of carbon and a
+// dimensionless factor. A caller comparing `profit_` across optimisers is exposed.
+// The guide's rule for `hydraulic_cost_` ("a third meaning behind the same name is
+// how a reader quotes the wrong number") applies here and would be worth a separate
+// field per objective kind.
+inline void Leaf::optimise_psi_stem_SOX() {
+  optimise_psi_stem_single<CostCurve::SOX>();
+}
+
+
+// Jones et al. (2026), the same product objective with a LINEAR reduction factor.
+// Everything optimise_psi_stem_SOX documents applies unchanged: the product is
+// maximised directly rather than its logarithm, the dry bound cannot win because g is
+// zero there, and the wet bound must stay a candidate.
+//
+// ⚠️ NOT THEIR FULL MODEL. Their psi_crit is a free parameter and their supply is
+// linear in the potential; here psi_crit is DERIVED from the stem curve and the
+// supply is that curve integral. So this is their objective on our hydraulics, which
+// is what makes it comparable with SOX -- the two g are interpolations between the
+// same two anchors -- and is NOT a reproduction of the paper.
+inline void Leaf::optimise_psi_stem_JW26() {
+  optimise_psi_stem_single<CostCurve::JW26>();
+}
 
 // ===========================================================================
 // MEDLYN STOMATAL-CONDUCTANCE MODEL (from develop #450)

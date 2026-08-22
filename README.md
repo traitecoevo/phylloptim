@@ -21,39 +21,40 @@ This code was developed as the TF24 strategy inside
 so it can be tested, profiled, extended and embedded on its own.
 
 ## Why a separate package
+**A home for several stomatal models, not just ours.** The package solves **seven**
+optimality models through one optimiser, at identical drivers, behind one gradient
+entry point: our hydraulic gain-risk formulation (`TF24`), Sperry-style profit
+maximisation (`ProfitMax`), Cowan-Farquhar (`CF77`), Joshi & Stocker's quadratic
+cost (`JS22`), Wolf-Anderegg-Pacala carbon maximisation (`CMax`), and the two
+product objectives `SOX` and `JW26`. The Medlyn et al. (2011) empirical model is
+here too, bypassing the hydraulic solve. `vignette("the-models")` sets them side
+by side and derives each one.
 
-**A home for several stomatal models, not just ours.** The package carries our
-hydraulic gain-risk formulation, and it already contains two alternatives — the
-Sperry et al. (2017) cost formulation and the Medlyn et al. (2011) optimal
-stomatal model — inherited from plant. The Sperry side is now runnable as the paper
-defines it: `optimise_psi_stem_ProfitMax()` maximises `CG - HC` with both terms
-normalised, on the single-potential supply path, and `optimise_psi_stem_TF()` runs
-the TF24 cost through the same solver so the two can be compared at identical
-drivers. Both are still off the production collar solve, and the Medlyn path
-bypasses the hydraulic solve altogether. The goal is to make each one a
-**first-class member** there too,
-selectable and runnable against identical drivers, alongside Prentice et al. (2014)
-least-cost and Cowan-Farquhar.
+Making that comparison apples-to-apples needed one level more generality than
+swapping cost functions. Every one of these models maximises
 
-The right way to do that turns out to be one level deeper than swapping cost
-functions. Those models all maximise a profit, so they all satisfy the same
-first-order condition `dA/dE = λ` and differ **only** in the function λ(state) —
-the marginal cost of water. So what should be pluggable is λ. Six models become
-six small functions sharing one tested numerical core, which makes a comparison
-apples-to-apples by construction rather than by careful bookkeeping. This is the
-central result of a companion manuscript (see [PLAN.md](PLAN.md) item 14), and it
-is something none of the existing R packages can support, because each commits to
-a single hydraulically explicit scheme or to none. See [PLAN.md](PLAN.md) item 7a.
+    h(A(psi)) - C(psi)
 
-The same refactor applies from the other side, to the **water supply path**. The
-gas-exchange core is already entirely soil-agnostic — the multi-layer soil and
-root system enter the solve only as a single supply function `E_up = f(P_collar)`,
-so pulling them behind an interface would let the multi-layer root system be
-swapped for a single soil water potential. That both lowers the barrier for a
-bare-leaf user (no root-mass profile to construct) and is what makes comparison
-*fair*: the alternative formulations worth comparing against are all written for
-one ψ_soil, so you have to be able to hold the supply side fixed. [PLAN.md](PLAN.md)
-item 7b.
+so a model is fully specified by a **cost curve** `C` and a **benefit link** `h`,
+and one derivative serves all seven:
+
+    d/dpsi [h(A) - C] = h'(A) * dA/dpsi - dC/dpsi
+
+The marginal cost of water λ — the quantity that distinguishes these models in the
+literature — is a *consequence* of that pair rather than a primitive:
+λ = (dC/dψ)/(dE/dψ). That is what lets the product objectives (`A·g`) sit
+alongside the difference objectives at all: a log link turns one into the other
+without moving the argmax. This is the central result of a companion manuscript,
+and it is something none of the existing R packages can support, because each
+commits to a single hydraulically explicit scheme or to none.
+
+**Either supply path, so the comparison is fair.** The gas-exchange core is
+soil-agnostic: the multi-layer soil and root system enter the solve only as a
+supply function `E_up = f(P_collar)`. So the multi-layer root system can be
+swapped for a single soil water potential (`leaf_supply_single()`), which both
+lowers the barrier for a bare-leaf user — no root-mass profile to construct — and
+is what makes the comparison fair, because the alternative formulations worth
+comparing against are all written for one ψ_soil.
 
 **Fast and differentiable, so it is built for calibration.** A full hydraulic
 solve costs ~3 µs, and derivatives are analytic rather than finite differences:
@@ -63,28 +64,23 @@ calibration wants — gradient-based optimisers and Hamiltonian samplers need ma
 evaluations *and* clean gradients, and finite-differencing a nested root-find is
 exactly the case where numerical gradients are noisiest.
 
-One honest caveat, and one correction this paragraph used to get wrong. The caveat
-is that there is still no calibration vignette in the package ([PLAN.md](PLAN.md)
-item 12), though the fit that drove the gradient work exists outside it. The
-correction: trait gradients are **done**, and they did not need the templated
-`Leaf<T>` this paragraph pointed at — that item is closed unbuilt. What they
-needed was the implicit function theorem, which is cheaper and gives the
-active-set classification a drought calibration actually has to have. See
-[Trait gradients](#trait-gradients) below and [PLAN.md](PLAN.md) item 11e.
+One honest caveat: there is still no calibration vignette in the package, though
+the fit that drove the gradient work exists outside it in
+[leaf_calibration_test](https://github.com/traitecoevo/leaf_calibration_test).
 
 ## Status
 
-**v0.1.0 — early, but validated.** The model itself is mature and in production
-use inside plant. The *packaging* is what is new.
+**v0.6.0 — the model is mature and in production use inside plant; the
+*packaging* is what is new.**
 
 - **Cross-checked against plant's compiled build**, and the swap was bit-identical
   at the point it was made: plant's full suite 0 fail / 0 error on both builds,
   and the SCM regression identical across 78/78 nodes. The 1-ULP disagreement
   that held this up turned out to be R's decimal parser rather than either model.
 - **The shutdown defect is fixed.** On the hydraulic-shutdown path, transpiration,
-  assimilation and uptake used to be left holding the previous solve's values
-  (plant #578). That, and three further stale-state exits ported from plant #585,
-  are all fixed here.
+  assimilation and uptake were left holding the previous solve's values (plant
+  #578). That, and three further stale-state exits ported from plant #585, are all
+  fixed here.
 - **Results now differ from plant's own leaf, deliberately** — see
   [NEWS.md](NEWS.md). The most consequential single change is deriving the
   ppm→Pa conversion from the actual atmospheric pressure instead of a hard-coded
@@ -98,8 +94,8 @@ no R and no Rcpp, depend only on Boost and the header-only parts of odelia, and
 compile and run with no R installed — so the same model is available to a C++
 program, to a Python extension, and to R, with none of those paying for the
 others. The R layer (`src/`, `R/`) sits on top of those headers and is never
-included by them; the dependency runs one way only. See [PLAN.md](PLAN.md) item
-6a for the decision, and `.github/workflows/cpp-tests.yml` for what enforces it —
+included by them; the dependency runs one way only. See
+`.github/workflows/cpp-tests.yml` for what enforces it —
 it builds the whole C++ suite on a runner with no R on it.
 
 ## Use from C++
@@ -326,9 +322,13 @@ traits, which is what a gradient-based optimiser or a Hamiltonian sampler wants:
 
 ```r
 g <- leaf_gradient(psi_soil = 2.0, PPFD = 900,
-                   pars = c("vcmax_25", "stem_b", "cost_scale_TF24"))
+                   pars = c("vcmax_25", "stem_P50", "TF24_cost_scale"))
 g$gradient   # rows: parameters.  columns: A, gc, psi_stem, collar, profit
 g$method     # "ift" or "fd" -- see below
+
+# any of the seven models, same call
+leaf_gradient(psi_soil = 2.0, PPFD = 900, model = "JS22",
+              supply = leaf_supply_single(), pars = c("vcmax_25", "JS22_gamma"))
 ```
 
 The first four columns are what a gas-exchange calibration observes. `profit` is

@@ -28,7 +28,7 @@ converged" from "the model works". Real data cannot supply it, so start here.
 ```{r}
 set.seed(sum(utf8ToInt("phylloptim-fitting")))
 
-truth <- leaf_traits(vcmax_25 = 85, jmax_25 = 140, cost_scale_TF24 = 40)
+truth <- leaf_traits(vcmax_25 = 85, jmax_25 = 140, TF24_cost_scale = 40)
 
 drivers <- expand.grid(
   psi_soil = seq(0.4, 3.2, length.out = 12),
@@ -54,7 +54,7 @@ leaves the two trading off against each other.
 ## The objective, and the loop that makes it affordable
 
 ```{r}
-FIT <- c("vcmax_25", "jmax_25", "cost_scale_TF24")
+FIT <- c("vcmax_25", "jmax_25", "TF24_cost_scale")
 
 predict_at <- function(theta, l) {
   set_traits(l, do.call(leaf_traits, as.list(exp(theta))))
@@ -80,27 +80,25 @@ on an existing object; constructing a fresh one costs ~204 µs against ~4 µs to
 re-trait, which is 73 solves thrown away per evaluation. In a fit that dominates
 everything else.
 
-⚠️ **And do not write `l$vcmax_25 <- x` instead.** It compiles and is wrong, though
-not for the reason this vignette used to give. Two pieces of derived state describe
+⚠️ **And do not write `l$vcmax_25 <- x` instead.** It compiles and is wrong. Two
+pieces of derived state describe
 the old trait afterwards and no re-driving repairs either: the **pre-integrated
-vulnerability splines** (`stem_b`/`stem_c` and `root_b`/`root_c` each own one), and
-the **solved operating point**, which no code path rewrites — so it goes on reading
-as though it belonged to the new traits. A bare write also bypasses the
-positive-magnitude checks on `psi_crit` and the two `b` parameters.
+vulnerability splines** (`stem_P50`/`stem_c` and `root_P50`/`root_c` each own
+one), and the **solved operating point**, which no code path rewrites — so it goes
+on reading as though it belonged to the new traits. A bare write also bypasses the
+positive-magnitude checks on the two `P50` parameters, and cannot reach `stem_b` or
+`psi_crit` at all: those are derived and read-only.
 
 `set_traits()` clears all of it, and is the only route bound to R.
 
-*Corrected in 0.5.0:* this warning used to say the derived `vcmax_`, `jmax_` and
-`R_d_` sat behind a temperature cache keyed on `(leaf_temp, atm_o2_kpa)` and
-*nothing else*, so that re-supplying the drivers took a cache **hit** and silently
-kept the old response. That was true and is not: since the cache key became every
-input of the temperature block — `vcmax_25` and `jmax_25` among them — re-driving
-after a bare trait write *does* recompute those three. The advice is unchanged; the
-reason for it is narrower.
+The temperature-dependent `vcmax_`, `jmax_` and `R_d_` are **not** part of the
+problem: their cache is keyed on every input of the temperature block, `vcmax_25`
+and `jmax_25` included, so re-driving after a bare trait write does recompute
+them. It is the splines and the operating point that no re-driving repairs.
 
 ```{r}
 l <- leaf_model(truth)
-start <- log(c(vcmax_25 = 60, jmax_25 = 100, cost_scale_TF24 = 15))
+start <- log(c(vcmax_25 = 60, jmax_25 = 100, TF24_cost_scale = 15))
 fit <- optim(start, ssq, l = l, method = "Nelder-Mead",
              control = list(maxit = 2000, reltol = 1e-10))
 
@@ -156,8 +154,8 @@ does to any quasi-Newton method started cold. Bounds are the one-line fix, and a
 what you would want on a real fit anyway.
 
 ```{r}
-lower <- log(c(vcmax_25 = 10, jmax_25 = 20, cost_scale_TF24 = 2))
-upper <- log(c(vcmax_25 = 400, jmax_25 = 700, cost_scale_TF24 = 400))
+lower <- log(c(vcmax_25 = 10, jmax_25 = 20, TF24_cost_scale = 2))
+upper <- log(c(vcmax_25 = 400, jmax_25 = 700, TF24_cost_scale = 400))
 
 fit_g <- optim(start, ssq, gr = ssq_grad, l = l, method = "L-BFGS-B",
                lower = lower, upper = upper, control = list(maxit = 500))
@@ -207,9 +205,9 @@ tm <- function(f) {
   t0 <- Sys.time(); f(); 1000 * as.numeric(difftime(Sys.time(), t0, units = "secs"))
 }
 
-CAND <- c("vcmax_25", "jmax_25", "cost_scale_TF24", "beta2", "a",
-          "curv_fact_elec_trans", "curv_fact_colim", "psi_crit",
-          "root_psi_crit", "stem_b", "stem_c", "root_b", "root_c")
+CAND <- c("vcmax_25", "jmax_25", "TF24_cost_scale", "TF24_beta2", "a",
+          "curv_fact_elec_trans", "curv_fact_colim",
+          "stem_P50", "stem_c", "root_P50", "root_c")
 
 exact_n <- function(pars) {
   vapply(seq_len(nrow(obs)), function(i) {
@@ -241,7 +239,7 @@ fd_n <- function(pars, l) {
 
 for (k in 1:3) { invisible(exact_n(CAND[1:2])); fd_n(CAND[1:2], l) }  # warm both
 
-scaling <- do.call(rbind, lapply(c(1, 3, 5, 8, 13), function(n) {
+scaling <- do.call(rbind, lapply(c(1, 3, 5, 8, 11), function(n) {
   p <- CAND[seq_len(n)]
   r <- replicate(3, c(tm(function() exact_n(p)), tm(function() fd_n(p, l))))
   data.frame(n_par = n, exact_ms = round(min(r[1, ]), 1),
@@ -418,9 +416,9 @@ b <- leaf_batch(psi_soil = seq(0.6, 3.0, length.out = 40), PPFD = 900,
 
 studies <- list(
   "demand only"      = c("vcmax_25", "jmax_25"),
-  "the cost model"   = c("cost_scale_TF24", "beta2"),
-  "hydraulic supply" = c("leaf_specific_conductance_max", "stem_b", "stem_c"),
-  "adds thresholds"  = c("vcmax_25", "psi_crit", "root_psi_crit")
+  "the cost model"   = c("TF24_cost_scale", "TF24_beta2"),
+  "hydraulic supply" = c("leaf_specific_conductance_max", "stem_P50", "stem_c"),
+  "adds both curves" = c("vcmax_25", "stem_P50", "root_P50")
 )
 
 do.call(rbind, lapply(names(studies), function(nm) {
@@ -457,17 +455,20 @@ four hydraulic traits are also the ones whose gradient is *entirely*
 argmax-mediated, which is to say the ones you most need it for. Budget for it, and
 see `?leaf_gradient`'s `fast_stem_curve`.
 
-### ⚠️ `psi_crit` and `root_psi_crit` come back EXACTLY ZERO, and that is correct
+### ⚠️ A stem gradient means something different at a pinned optimum
 
 This is the sharpest trap on this surface, and the table above provokes it
 deliberately.
 
-Neither appears in the profit function. They set the dry end of the *feasible*
-collar interval and nothing else — so at an interior optimum, moving them moves
-nothing, and the composite reports exactly that. **At a pinned optimum the same
-parameter carries a real gradient of order 1**, because there it *is* the binding
-constraint, and `leaf_gradient()` differences the solve instead precisely so that
-case is not lost.
+`psi_crit` sets the dry end of the *feasible* collar interval and appears in the
+profit function nowhere else. It is not a parameter you can ask for — it is the
+5%-conductivity quantile of the stem curve — so its effect arrives as a **term
+inside `d/dstem_P50`**, and that term behaves completely differently on the two
+sides of a pin. At an interior optimum it is exactly zero, and the gradient is the
+curve's own effect scaled by `(ln 2)^{-1/c}`. **At a boundary-crit optimum the bound
+is binding**, the term is order 1, and at the default traits it is 29% of the
+total. `leaf_gradient()` differences the solve there precisely so that half is not
+lost.
 
 A silent zero is a worse failure than a wildly wrong number: it tells an optimiser
 the parameter does nothing, and nothing about it looks suspicious. If you fit a
@@ -527,12 +528,13 @@ Because a fit that straddles the boundary has three problems:
   optimising through a corner and may stall or oscillate;
 - `leaf_gradient()` falls back to differencing the solve at pinned points, which
   is correct but noisier;
-- ⚠️ **`psi_crit` is special.** It does not appear in the profit function at all
-  — it only bounds the feasible range — so the composite returns **exactly zero**
-  for it. At an interior optimum that is right. At a dry-pinned optimum it is
-  binding and the true derivative is not zero, so a silent zero would tell an
-  optimiser the parameter does nothing. The fallback exists for exactly this and
-  is not a degraded path.
+- ⚠️ **the stem traits are special.** The dry bound `psi_crit` is a quantile of
+  the stem curve, so it moves with `stem_P50` — but it bounds the feasible range
+  rather than entering the profit function, so the composite cannot see that
+  movement and returns only the curve's own term. At an interior optimum that is
+  the whole answer. At a boundary-crit optimum it is 29% short, and nothing about the
+  number looks wrong. The fallback exists for exactly this and is not a degraded
+  path.
 
 ## Fitting to real data
 
@@ -544,19 +546,18 @@ them independently produces respectable-looking estimates that mean nothing.
 Check with a profile, or a Hessian at the optimum, before reporting anything
 per-parameter.
 
-**Some traits are measured.** `P50` and `P88` determine the Weibull
-`stem_b`/`stem_c` analytically, so a species with a published vulnerability curve
-needs no hydraulic calibration at all:
+**Some traits are measured.** `stem_P50` *is* a published quantity, and a second
+quantile of the same curve fixes `stem_c`, so a species with a measured
+vulnerability curve needs no hydraulic calibration at all:
 
 ```{r}
-weibull_from_p50_p88 <- function(P50, P88) {
-  c_ <- log(log(1 / 0.12) / log(2)) / log(P88 / P50)
-  c(stem_b = P50 / log(2)^(1 / c_), stem_c = c_)
+shape_from_p50_p88 <- function(P50, P88) {
+  log(log(1 / 0.12) / log(2)) / log(P88 / P50)
 }
-w <- weibull_from_p50_p88(P50 = 6.88, P88 = 9.43)
+w <- c(stem_P50 = 6.88, stem_c = shape_from_p50_p88(P50 = 6.88, P88 = 9.43))
 round(w, 4)
 
-lw <- leaf_model(leaf_traits(stem_b = w[["stem_b"]], stem_c = w[["stem_c"]]))
+lw <- leaf_model(leaf_traits(stem_P50 = w[["stem_P50"]], stem_c = w[["stem_c"]]))
 round(c(PLC_at_P50 = 1 - lw$proportion_of_conductivity(6.88),
         PLC_at_P88 = 1 - lw$proportion_of_conductivity(9.43)), 4)
 ```

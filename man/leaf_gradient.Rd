@@ -25,7 +25,8 @@ leaf_gradient(
   step = 1e-06,
   stationarity_tol = 1e-08,
   method = c("auto", "ift", "fd"),
-  fast_stem_curve = TRUE
+  fast_stem_curve = TRUE,
+  model = "collar"
 )
 }
 \arguments{
@@ -125,6 +126,11 @@ one with its argument rescaled — which makes the rebuild, otherwise most of
 the cost of that gradient, unnecessary. `FALSE` rebuilds, and exists so the
 equivalence is checkable rather than assumed; the package's tests require
 the two routes to agree. `stem_c` has no such identity and always rebuilds.}
+
+\item{model}{which optimality model to differentiate: `"collar"` (the
+default, the production path) or any name from [cost_curve_names()], which
+differentiates that curve's stem optimum instead. See *Choosing which model
+to differentiate*.}
 }
 \value{
 A list with
@@ -158,6 +164,72 @@ The derivatives of the solved outputs with respect to the traits:
 `dA/dtheta`, `dgc/dtheta`, `dpsi_stem/dtheta`, `dcollar/dtheta` and
 `dprofit/dtheta`, at one operating point.
 }
+\section{It differentiates ONE cost curve, whichever you last solved with}{
+
+The operating point here is always the one `find_root_collar_psi()` produces --
+the TF24 cost, maximised over the root-collar potential. That is not a
+configurable choice: the solve is called internally, so the cost curve is
+fixed no matter which optimiser you called on the leaf beforehand.
+
+⚠️ **So a gradient requested for a leaf you set up for another cost curve is
+the TF24 gradient, silently.** `$optimise_psi_stem_CF77()` and
+`$optimise_psi_stem_ProfitMax()` maximise different objectives over `psi_stem`
+rather than the collar, and neither is what this function differentiates.
+There is no warning, because the numbers that come back are perfectly good
+TF24 derivatives.
+}
+
+\section{Choosing which model to differentiate}{
+
+`model` selects it, and every model in the package has a route. `"collar"`,
+the default, is the TF24 cost maximised over the root-collar potential -- the
+production path. Naming any of the seven cost curves
+(`cost_curve_names()`) differentiates the corresponding **stem** optimum
+instead: `psi_stem` with the upstream potential pinned at `psi_soil`, which
+needs the single-potential supply path.
+
+The product objectives, `SOX` and `JW26`, need no special case. They maximise
+`A * g(psi)`, which is the `Log` benefit link applied to the same
+difference form everything else uses: `d/dpsi[h(A) - C] =
+h'(A) * dA/dpsi - dC/dpsi` with `h' = 1/A`. One derivative serves all seven.
+
+⚠️ **`"collar"` and `"TF24"` are different models, not two ways of asking one
+question**, even though both use the TF24 cost. They optimise different
+variables over different supply topologies, disagree on 20 of 30 driver rows,
+and the gap does not close as the root resistance goes to zero.
+
+⚠️ **On a stem route the decision variable is `psi_stem`, so `collar` comes
+back non-finite.** The collar is not solved for at all there, and an absent
+number is the truthful answer rather than a gap -- reading one would be reading
+state from whichever solve ran last.
+
+⚠️ **A stem route reports `status == "pinned"` at a perfectly interior
+optimum, and `method = "auto"` therefore differences the solve.** This is a
+property of the optimisers rather than of the points: the stem entry points
+scan a 64-point grid and refine the winning cell, so they leave `dprofit` at
+2e-08 to 1e-06, where the collar solve root-finds `dprofit == 0` and leaves
+1e-15. `stationarity_tol`'s default was measured in the empty band between the
+collar route's own two populations and does not transfer. Pass
+`method = "ift"` to force the composite -- its numbers agree with differencing
+the solve -- and read the caveat as "the premise is untested here", not
+"the premise fails".
+
+⚠️ **A zero column for another curve's parameter means two different things,
+and they are not distinguishable from the number.** On a `collar` or `TF24`
+route, `JS22_gamma`, `CMax_a`, `CMax_b` and the rest come back exactly zero,
+and read one way that is correct: those parameters do not enter the TF24
+cost, so their derivative is genuinely zero. Read the other way it is a trap:
+if you are *fitting* one of those curves, the zero is telling you this
+differentiated a different model, not that the parameter does nothing.
+Measured on the single-potential path at `psi_soil` 1.5, the TF24 collar
+optimum sits at 2.09 MPa and the JS22 optimum at 3.15.
+
+An optimiser handed such a column concludes the parameter is inert and leaves
+it at its starting value, which looks like convergence. **Name the curve you
+are fitting in `model`**; `.gradient_available_pars()` reports which
+parameters a given route can move.
+}
+
 \section{The maths, and why it is not just a finite difference}{
 
 The reported outputs are evaluated at the profit-maximising collar potential
@@ -177,8 +249,8 @@ is exact in `psi` and smooth in the traits -- `psi` is one of its arguments, so
 no argmax is involved and `M` is a first difference of an exact quantity. It is
 stable to seven significant figures across five decades of step size.
 
-The second term is not a correction. For `cost_scale_TF24`, `beta2`, `stem_b`
-and `stem_c` it is 100% of the answer, and for `vcmax_25` 52%.
+The second term is not a correction. For `TF24_cost_scale`, `TF24_beta2`, `stem_b`
+and `stem_c` it is 100\% of the answer, and for `vcmax_25` 52\%.
 }
 
 \section{profit, which is the one output the envelope theorem reaches}{
@@ -363,7 +435,7 @@ the multi-layer path — is the most expensive thing you can ask for, and a fit
 that reads four of them pays for eleven it discards.
 
 The intercept is a fresh `Leaf` per call, which there is currently no way to
-avoid (see phylloptim#52); it is 29% of the exact gradient in the study above.
+avoid (see phylloptim#52); it is 29\% of the exact gradient in the study above.
 }
 
 \section{Precision}{
@@ -376,7 +448,7 @@ the intercellular-CO2 root-find.
 \section{Reusing a leaf across gradients}{
 
 Constructing a `Leaf` costs ~155 µs and this function does it once per call, which
-is **about 40% of a one-parameter gradient** — the largest single term on this
+is **about 40\% of a one-parameter gradient** — the largest single term on this
 surface, and paid once per observation by a fit that differentiates per
 observation. Pass `x` to reuse one:
 
@@ -402,7 +474,7 @@ The restore costs one re-trait and one solve, ~20 µs against the ~155 saved.
 \examples{
 g <- leaf_gradient(psi_soil = 2.0, PPFD = 900)
 g$method
-g$gradient[c("vcmax_25", "stem_b"), ]
+g$gradient[c("vcmax_25", "stem_P50"), ]
 
 # In dry soil at high VPD the optimum pins against the edge of the feasible
 # range, the composite's premise fails, and the fallback is used instead.

@@ -7,12 +7,10 @@
 Leaf(
   vcmax_25,
   stem_c,
-  stem_b,
-  psi_crit,
+  stem_P50,
   root_c,
-  root_b,
-  root_psi_crit,
-  beta2,
+  root_P50,
+  TF24_beta2,
   jmax_25,
   a,
   curv_fact_elec_trans,
@@ -21,7 +19,7 @@ Leaf(
   vulnerability_curve_ncontrol,
   ci_abs_tol,
   ci_niter,
-  cost_scale_TF24
+  TF24_cost_scale
 )
 }
 \arguments{
@@ -29,17 +27,13 @@ Leaf(
 
 \item{stem_c}{shape parameter of the STEM hydraulic vulnerability curve (unitless)}
 
-\item{stem_b}{sensitivity parameter of the STEM hydraulic vulnerability curve (MPa)}
-
-\item{psi_crit}{critical stem water potential (MPa, positive magnitude)}
+\item{stem_P50}{STEM potential at 50\% loss of hydraulic conductivity (MPa, positive magnitude)}
 
 \item{root_c}{shape parameter of the ROOT hydraulic vulnerability curve (unitless)}
 
-\item{root_b}{sensitivity parameter of the ROOT hydraulic vulnerability curve (MPa)}
+\item{root_P50}{ROOT potential at 50\% loss of hydraulic conductivity (MPa, positive magnitude)}
 
-\item{root_psi_crit}{critical root water potential (MPa, positive magnitude)}
-
-\item{beta2}{exponent for the effect of hydraulic risk (unitless)}
+\item{TF24_beta2}{exponent for the effect of hydraulic risk (unitless)}
 
 \item{jmax_25}{maximum rate of electron transport at 25 C (umol m^-2 s^-1)}
 
@@ -57,7 +51,7 @@ Leaf(
 
 \item{ci_niter}{maximum number of iterations for root-solving ci}
 
-\item{cost_scale_TF24}{cost parameter for the TF24 profit model (umol m^-2 s^-1)}
+\item{TF24_cost_scale}{cost parameter for the TF24 profit model (umol m^-2 s^-1)}
 }
 \description{
 Stomatal behaviour emerges from a gain-risk profit maximisation over the
@@ -83,6 +77,6 @@ which are unitless and are NOT the same quantities as `$hydraulic_cost_`.
 
 All water potentials are **positive magnitudes in MPa**. There is one
 representation throughout and it is asserted, not documented: a negative
-`psi_crit`, `stem_b`, `root_b` or `root_psi_crit` is an error here, and a
-negative `psi_soil` is an error in `set_physiology`.
+`stem_P50` or `root_P50` is an error here, and a negative `psi_soil` is an
+error in `set_physiology`.
 }

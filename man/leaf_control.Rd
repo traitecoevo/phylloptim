@@ -15,8 +15,8 @@ leaf_control(
 }
 \arguments{
 \item{GSS_tol_abs}{absolute tolerance for the golden-section search over
-stem water potential. ⚠️ **This no longer sets how well the operating point
-is determined**, and this text used to say that it did. The collar solve now
+stem water potential. ⚠️ **This does not set how well the operating point is
+determined.** The collar solve
 solves its own first-order condition to about `1e-12` instead of searching
 profit to `GSS_tol_abs`, so changing this leaves the answer bit-identical on
 the production path. What it still does: it is the width below which the

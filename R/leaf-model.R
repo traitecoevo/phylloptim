@@ -35,18 +35,19 @@
 .leaf_trait_defaults <- list(
   vcmax_25 = 96,
   stem_c = 2.680147,
-  stem_b = 3.898245,
-  psi_crit = 5.870283,
+  stem_P50 = 3.4,
   root_c = 2.680147,
-  root_b = 3.898245,
-  root_psi_crit = 5.870283,
-  beta2 = 1.5,
+  root_P50 = 3.4,
+  TF24_beta2 = 1.5,
   jmax_25 = 157.44,
   a = 0.30,
   curv_fact_elec_trans = 0.7,
   curv_fact_colim = 0.99,
-  cost_scale_TF24 = 7.5,
-  R_d_25 = 1.44
+  TF24_cost_scale = 7.5,
+  R_d_25 = 1.44,
+  JS22_gamma = 1.0,
+  CMax_a = 0.6,
+  CMax_b = 0.0
 )
 
 .leaf_control_defaults <- list(
@@ -95,20 +96,44 @@
 ##'
 ##' @param vcmax_25 maximum carboxylation rate at 25 C (umol m^-2 s^-1)
 ##' @param stem_c shape parameter of the stem vulnerability curve (unitless)
-##' @param stem_b sensitivity parameter of the stem vulnerability curve (MPa)
-##' @param psi_crit critical stem water potential (MPa, positive magnitude)
+##' @param stem_P50 stem potential at 50\% loss of conductivity (MPa, positive
+##'   magnitude). `stem_b` and `psi_crit` are derived from this pair and are
+##'   readable but not settable on the resulting `Leaf`.
 ##' @param root_c shape parameter of the root vulnerability curve (unitless)
-##' @param root_b sensitivity parameter of the root vulnerability curve (MPa)
-##' @param root_psi_crit critical root water potential (MPa, positive magnitude)
-##' @param beta2 exponent for the effect of hydraulic risk (unitless)
+##' @param root_P50 root potential at 50\% loss of conductivity (MPa, positive
+##'   magnitude), with `root_b` and `root_psi_crit` derived from it.
+##' @param TF24_beta2 exponent for the effect of hydraulic risk (unitless)
 ##' @param jmax_25 maximum electron transport rate at 25 C (umol m^-2 s^-1)
 ##' @param a quantum yield of photosynthetic electron transport (mol mol^-1)
 ##' @param curv_fact_elec_trans curvature of the light response curve (unitless)
 ##' @param curv_fact_colim curvature of the colimited photosynthesis equation
-##' @param cost_scale_TF24 cost parameter for the TF24 profit model
+##' @param TF24_cost_scale cost parameter for the TF24 profit model
 ##'   (umol m^-2 s^-1)
 ##' @param R_d_25 dark respiration at 25 C (umol m^-2 s^-1). It is the value at
 ##'   25 C only: respiration rises from there on Tjoelker's declining-Q10 curve.
+##' @param JS22_gamma Joshi & Stocker (2022)'s hydraulic unit cost
+##'   (umol C m^-2 s^-1 MPa^-2), read only by the `JS22` cost curve and returning
+##'   an exactly zero gradient on every other one.
+##'
+##'   ⚠️ **The default is not a literature value.** It is order-of-magnitude
+##'   matched to TF24 at this package's defaults, and no single value matches more
+##'   than one soil potential: the `JS22_gamma` reproducing TF24's cost at its own
+##'   optimum runs 0.287 at `psi_soil` 0.5 MPa to 1.761 at 3.0 MPa. TF24's cost
+##'   tracks the absolute potential and this one tracks the drop, and across a
+##'   drydown those move in opposite directions.
+##' @param CMax_a,CMax_b slope and intercept of the `CMax` marginal cost,
+##'   `dC/dpsi = CMax_a * psi + CMax_b`, following Wolf et al. (2016) as
+##'   Anderegg et al. (2018) parameterised it. Read only by the `CMax` curve.
+##'
+##'   ⚠️ **`CMax_b` is signed, and negative in the source convention.** Sabot's
+##'   `TractLSM` stores it with the sign inverted "so as to get a positive
+##'   parameter value", so a value taken from that code or from a calibration
+##'   against it must have its sign checked rather than assumed.
+##'
+##'   ⚠️ **Neither default is a literature value.** With `CMax_b = 0` the `CMax_a`
+##'   reproducing TF24's cost at its own optimum runs 0.406 at `psi_soil` 0.5 MPa
+##'   to 0.807 at 3.0 MPa — a 2.0x range against `JS22_gamma`'s 6.1x, which is the
+##'   absolute-versus-drop distinction as a number.
 ##'
 ##' @section Where the two root-resistance constants went:
 ##' `beta_R_H` and `beta_R_V` were traits here until #33. They parameterise the
@@ -124,33 +149,34 @@
 ##' @seealso [leaf_control()], [leaf_model()], [leaf_solve()]
 ##' @examples
 ##' leaf_traits()
-##' # A more brittle stem: psi_crit moves with the curve, not independently of it.
-##' # (stem_b = 2.5 puts P99 at 4.42, so the default psi_crit of 5.87 is off the
-##' # end of it; 3.76 is the P95 that stem_b implies.)
-##' leaf_traits(vcmax_25 = 120, stem_b = 2.5, psi_crit = 3.76)
+##' # A more brittle stem. Only the curve's own two parameters are set: the scale
+##' # `stem_b` and the critical potential `psi_crit` are quantiles of that curve
+##' # and are derived from them, so they cannot be set inconsistently.
+##' leaf_traits(vcmax_25 = 120, stem_P50 = 2.2)
 ##' @export
 leaf_traits <- function(vcmax_25 = 96,
                         stem_c = 2.680147,
-                        stem_b = 3.898245,
-                        psi_crit = 5.870283,
+                        stem_P50 = 3.4,
                         root_c = 2.680147,
-                        root_b = 3.898245,
-                        root_psi_crit = 5.870283,
-                        beta2 = 1.5,
+                        root_P50 = 3.4,
+                        TF24_beta2 = 1.5,
                         jmax_25 = 157.44,
                         a = 0.30,
                         curv_fact_elec_trans = 0.7,
                         curv_fact_colim = 0.99,
-                        cost_scale_TF24 = 7.5,
-                        R_d_25 = 1.44) {
-  out <- list(vcmax_25 = vcmax_25, stem_c = stem_c, stem_b = stem_b,
-              psi_crit = psi_crit, root_c = root_c, root_b = root_b,
-              root_psi_crit = root_psi_crit, beta2 = beta2,
+                        TF24_cost_scale = 7.5,
+                        R_d_25 = 1.44,
+                        JS22_gamma = 1.0,
+                        CMax_a = 0.6,
+                        CMax_b = 0.0) {
+  out <- list(vcmax_25 = vcmax_25, stem_c = stem_c, stem_P50 = stem_P50,
+              root_c = root_c, root_P50 = root_P50, TF24_beta2 = TF24_beta2,
               jmax_25 = jmax_25, a = a,
               curv_fact_elec_trans = curv_fact_elec_trans,
               curv_fact_colim = curv_fact_colim,
-              cost_scale_TF24 = cost_scale_TF24,
-              R_d_25 = R_d_25)
+              TF24_cost_scale = TF24_cost_scale,
+              R_d_25 = R_d_25, JS22_gamma = JS22_gamma,
+              CMax_a = CMax_a, CMax_b = CMax_b)
   .check_scalars(out, "leaf_traits")
   if (R_d_25 < 0) {
     stop("leaf_traits(): R_d_25 must be non-negative", call. = FALSE)
@@ -173,8 +199,8 @@ leaf_traits <- function(vcmax_25 = 96,
 ##' indication of why.
 ##'
 ##' @param GSS_tol_abs absolute tolerance for the golden-section search over
-##'   stem water potential. ⚠️ **This no longer sets how well the operating point
-##'   is determined**, and this text used to say that it did. The collar solve now
+##'   stem water potential. ⚠️ **This does not set how well the operating point is
+##'   determined.** The collar solve
 ##'   solves its own first-order condition to about `1e-12` instead of searching
 ##'   profit to `GSS_tol_abs`, so changing this leaves the answer bit-identical on
 ##'   the production path. What it still does: it is the width below which the
@@ -398,12 +424,10 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
   l <- Leaf(
     vcmax_25 = traits$vcmax_25,
     stem_c = traits$stem_c,
-    stem_b = traits$stem_b,
-    psi_crit = traits$psi_crit,
+    stem_P50 = traits$stem_P50,
     root_c = traits$root_c,
-    root_b = traits$root_b,
-    root_psi_crit = traits$root_psi_crit,
-    beta2 = traits$beta2,
+    root_P50 = traits$root_P50,
+    TF24_beta2 = traits$TF24_beta2,
     jmax_25 = traits$jmax_25,
     a = traits$a,
     curv_fact_elec_trans = traits$curv_fact_elec_trans,
@@ -412,12 +436,17 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
     vulnerability_curve_ncontrol = control$vulnerability_curve_ncontrol,
     ci_abs_tol = control$ci_abs_tol,
     ci_niter = control$ci_niter,
-    cost_scale_TF24 = traits$cost_scale_TF24
+    TF24_cost_scale = traits$TF24_cost_scale
   )
   # ⚠️ AFTER construction, because plant's RcppR6 bindings pin the generated
   # constructor by arity so R_d_25 cannot be an argument to it. Without this line
   # `leaf_traits(R_d_25 = )` would be accepted and silently ignored.
   l$R_d_25 <- traits$R_d_25
+  # Same reason, same trap: a trait the constructor does not take must be
+  # assigned here or leaf_traits(JS22_gamma = ) is silently ignored.
+  l$JS22_gamma <- traits$JS22_gamma
+  l$CMax_a <- traits$CMax_a
+  l$CMax_b <- traits$CMax_b
   l$initialize_integrator(control$integration_rule, control$integration_tol)
   # After the integrator, because set_supply_single clears the solved state --
   # not the integrator tolerance, but relying on that ordering would be a
@@ -608,7 +637,7 @@ set_drivers <- function(x,
 # perturbation -- eleven times for a four-parameter gradient -- and all of this
 # validation and defaulting produces the same answer every time bar the one
 # parameter being moved. Resolving once and applying many times is worth ~12% of a
-# gradient (see PLAN), but only if there is ONE definition of the rules: the
+# gradient, but only if there is ONE definition of the rules: the
 # defaults here are load-bearing (1 m layers, the nominal networks, the
 # single-path placeholder depth) and a second copy in the gradient code would be
 # free to drift from this one silently. So the gradient calls this, not a
@@ -808,7 +837,7 @@ operating_point <- function(x) {
 ##'
 ##' Two consequences, both the opposite of what you might expect:
 ##'
-##' * **This is the fast path, not the convenient-but-slow one.** It is within 6%
+##' * **This is the fast path, not the convenient-but-slow one.** It is within 6\%
 ##'   of building a `Leaf` yourself and looping `set_drivers()` +
 ##'   `$find_root_collar_psi()` + [operating_point()]. Reaching into the object
 ##'   saves about 1 µs a row and is worth doing for access to intermediate state,

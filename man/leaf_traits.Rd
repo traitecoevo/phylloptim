@@ -7,18 +7,19 @@
 leaf_traits(
   vcmax_25 = 96,
   stem_c = 2.680147,
-  stem_b = 3.898245,
-  psi_crit = 5.870283,
+  stem_P50 = 3.4,
   root_c = 2.680147,
-  root_b = 3.898245,
-  root_psi_crit = 5.870283,
-  beta2 = 1.5,
+  root_P50 = 3.4,
+  TF24_beta2 = 1.5,
   jmax_25 = 157.44,
   a = 0.3,
   curv_fact_elec_trans = 0.7,
   curv_fact_colim = 0.99,
-  cost_scale_TF24 = 7.5,
-  R_d_25 = 1.44
+  TF24_cost_scale = 7.5,
+  R_d_25 = 1.44,
+  JS22_gamma = 1,
+  CMax_a = 0.6,
+  CMax_b = 0
 )
 }
 \arguments{
@@ -26,17 +27,16 @@ leaf_traits(
 
 \item{stem_c}{shape parameter of the stem vulnerability curve (unitless)}
 
-\item{stem_b}{sensitivity parameter of the stem vulnerability curve (MPa)}
-
-\item{psi_crit}{critical stem water potential (MPa, positive magnitude)}
+\item{stem_P50}{stem potential at 50\% loss of conductivity (MPa, positive
+magnitude). `stem_b` and `psi_crit` are derived from this pair and are
+readable but not settable on the resulting `Leaf`.}
 
 \item{root_c}{shape parameter of the root vulnerability curve (unitless)}
 
-\item{root_b}{sensitivity parameter of the root vulnerability curve (MPa)}
+\item{root_P50}{root potential at 50\% loss of conductivity (MPa, positive
+magnitude), with `root_b` and `root_psi_crit` derived from it.}
 
-\item{root_psi_crit}{critical root water potential (MPa, positive magnitude)}
-
-\item{beta2}{exponent for the effect of hydraulic risk (unitless)}
+\item{TF24_beta2}{exponent for the effect of hydraulic risk (unitless)}
 
 \item{jmax_25}{maximum electron transport rate at 25 C (umol m^-2 s^-1)}
 
@@ -46,11 +46,36 @@ leaf_traits(
 
 \item{curv_fact_colim}{curvature of the colimited photosynthesis equation}
 
-\item{cost_scale_TF24}{cost parameter for the TF24 profit model
+\item{TF24_cost_scale}{cost parameter for the TF24 profit model
 (umol m^-2 s^-1)}
 
 \item{R_d_25}{dark respiration at 25 C (umol m^-2 s^-1). It is the value at
 25 C only: respiration rises from there on Tjoelker's declining-Q10 curve.}
+
+\item{JS22_gamma}{Joshi & Stocker (2022)'s hydraulic unit cost
+  (umol C m^-2 s^-1 MPa^-2), read only by the `JS22` cost curve and returning
+  an exactly zero gradient on every other one.
+
+  ⚠️ **The default is not a literature value.** It is order-of-magnitude
+  matched to TF24 at this package's defaults, and no single value matches more
+  than one soil potential: the `JS22_gamma` reproducing TF24's cost at its own
+  optimum runs 0.287 at `psi_soil` 0.5 MPa to 1.761 at 3.0 MPa. TF24's cost
+  tracks the absolute potential and this one tracks the drop, and across a
+  drydown those move in opposite directions.}
+
+\item{CMax_a, CMax_b}{slope and intercept of the `CMax` marginal cost,
+  `dC/dpsi = CMax_a * psi + CMax_b`, following Wolf et al. (2016) as
+  Anderegg et al. (2018) parameterised it. Read only by the `CMax` curve.
+
+  ⚠️ **`CMax_b` is signed, and negative in the source convention.** Sabot's
+  `TractLSM` stores it with the sign inverted "so as to get a positive
+  parameter value", so a value taken from that code or from a calibration
+  against it must have its sign checked rather than assumed.
+
+  ⚠️ **Neither default is a literature value.** With `CMax_b = 0` the `CMax_a`
+  reproducing TF24's cost at its own optimum runs 0.406 at `psi_soil` 0.5 MPa
+  to 0.807 at 3.0 MPa — a 2.0x range against `JS22_gamma`'s 6.1x, which is the
+  absolute-versus-drop distinction as a number.}
 }
 \value{
 A `leaf_traits` object; a named list.
@@ -108,10 +133,10 @@ derivative of a solved output still needs two solves either side.
 
 \examples{
 leaf_traits()
-# A more brittle stem: psi_crit moves with the curve, not independently of it.
-# (stem_b = 2.5 puts P99 at 4.42, so the default psi_crit of 5.87 is off the
-# end of it; 3.76 is the P95 that stem_b implies.)
-leaf_traits(vcmax_25 = 120, stem_b = 2.5, psi_crit = 3.76)
+# A more brittle stem. Only the curve's own two parameters are set: the scale
+# `stem_b` and the critical potential `psi_crit` are quantiles of that curve
+# and are derived from them, so they cannot be set inconsistently.
+leaf_traits(vcmax_25 = 120, stem_P50 = 2.2)
 }
 \seealso{
 [leaf_control()], [leaf_model()], [leaf_solve()]
