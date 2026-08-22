@@ -192,11 +192,27 @@ so `f` is the fraction of maximum conductivity remaining, `k` the conductance an
 `E` the transpiration. Appendix A derives this parameterisation and why it is
 `(P50, c)` rather than `(b, c)`.
 
-| model | cost `C(ψ)` | marginal cost `dC/dψ` | units of `C` |
-|---|---|---|---|
-| **TF24** [@towers2024] | $\gamma\,(1-f)^{\beta}$ | $\gamma\beta(1-f)^{\beta-1}\lvert f'\rvert$ | carbon |
-| **Cowan-Farquhar** [@cowan1977] | $\lambda\,E$ | $\lambda\,k_{\max}f$ | carbon |
-| **ProfitMax** [@sperry2017] | $\dfrac{k(\psi_s)-k(\psi)}{k(\psi_s)-k_{\rm crit}}$ | $\dfrac{k_{\max}\lvert f'\rvert}{k(\psi_s)-k_{\rm crit}}$ | dimensionless |
+| model | code name | cost `C(ψ)` | marginal cost `dC/dψ` | units of `C` |
+|---|---|---|---|---|
+| **Towers & Falster** [@towers2024] | `TF24` | $\gamma\,(1-f)^{\beta}$ | $\gamma\beta(1-f)^{\beta-1}\lvert f'\rvert$ | carbon |
+| **Cowan & Farquhar** [@cowan1977] | `CF77` | $\lambda\,E$ | $\lambda\,k_{\max}f$ | carbon |
+| **Sperry et al.** [@sperry2017] | `ProfitMax` | $\dfrac{k(\psi_s)-k(\psi)}{k(\psi_s)-k_{\rm crit}}$ | $\dfrac{k_{\max}\lvert f'\rvert}{k(\psi_s)-k_{\rm crit}}$ | dimensionless |
+| **Joshi & Stocker** [@joshi2022] | `JS22` | $\gamma_{J}\,(\Delta\psi)^{2}$ | $2\gamma_{J}\,\Delta\psi$ | carbon |
+
+The code names are the prefix on every parameter belonging to that model —
+`TF24_cost_scale`, `CF77_lambda_`, `JS22_gamma` — so a parameter says which curve
+reads it, and returns an exactly zero gradient on the others.
+
+⚠️ **`JS22` is Joshi & Stocker's hydraulic term and not their model.** Theirs is
+$A-\alpha J_{\max}-\gamma_{J}(\Delta\psi)^{2}$, jointly optimised over $J_{\max}$
+as well as $\psi$; the capacity term is not implemented here, so a run of this
+curve should not be described as Joshi & Stocker (2022). $\gamma_J$ is written
+distinctly from TF24's $\gamma$ because they are different parameters in different
+units.
+
+⚠️ **`JS22` is also the one cost above that is a function of the DROP**
+$\Delta\psi=\psi-\psi_s$ rather than of the absolute potential. That is not a
+detail of parameterisation, and the next chunk measures what it costs.
 
 The marginal costs are where the models actually differ, and the difference is
 one of **shape**:
@@ -233,6 +249,43 @@ That is still enough to matter: a marginal cost that starts at zero against a
 marginal benefit that also saturates is the shape whose first-order condition can
 cross zero twice, which is why the conductance forms are the ones needing a search
 able to see past a local maximum, and the monotone Cowan-Farquhar cost is not.
+
+`JS22` is monotone for the same reason and a different one: `2γ_J Δψ` rises
+linearly from zero at the wet end and never turns over, so its first-order
+condition crosses once. The two-humped case needs a marginal cost that *falls* at
+the dry end, and only the `|f'|` forms do that.
+
+### Pricing the drop is not pricing the potential
+
+`JS22` is the only cost here that reads `Δψ`, and the cleanest way to see what that
+changes is to ask which `γ_J` would reproduce TF24's cost at TF24's own optimum. If
+the two were reparameterisations of one another, it would be a constant.
+
+```{r}
+#| label: gamma-match
+out <- do.call(rbind, lapply(c(0.5, 1, 1.5, 2, 3), function(ps) {
+  l <- leaf_model()
+  set_drivers(l, psi_soil = ps, PPFD = 1500)
+  l$optimise_psi_stem_TF()
+  dpsi <- l$opt_psi_stem_ - ps
+  data.frame(psi_soil = ps, psi_stem = l$opt_psi_stem_, dpsi = dpsi,
+             cost_TF24 = l$hydraulic_cost_, gamma_J = l$hydraulic_cost_ / dpsi^2)
+}))
+print(out, row.names = FALSE, digits = 4)
+cat(sprintf("\ngamma_J spans %.3f to %.3f -- a %.1fx range\n",
+            min(out$gamma_J), max(out$gamma_J),
+            max(out$gamma_J) / min(out$gamma_J)))
+```
+
+It is not a constant, and the direction is the point. As the soil dries TF24's cost
+**rises** while `Δψ` **shrinks** — the leaf cannot pull as far, so the drop narrows
+even as the water gets dearer. A cost quadratic in the drop therefore has to be
+scaled up several-fold to keep pace, and no single `γ_J` fits more than one soil
+potential. The two are different models, not two parameterisations of one.
+
+That is also why `JS22_gamma`'s default carries a warning rather than a citation:
+it is order-of-magnitude matched to TF24 in the middle of this band, and there is
+no value that would be matched across it.
 
 ## λ is the common currency
 
@@ -392,7 +445,7 @@ space, not a separate program.
 
 | axis | options | what it changes |
 |---|---|---|
-| **cost curve** | TF24 / Cowan-Farquhar / ProfitMax | `C(ψ)`, and its units |
+| **cost curve** | `TF24` / `CF77` / `ProfitMax` / `JS22` | `C(ψ)`, and its units |
 | **supply topology** | single soil potential / multi-layer root network | the decision variable, and the feasible bracket |
 | **leaf temperature** | prescribed / energy balance | whether `Tleaf` responds to `E`, and so whether temperature responses are active at all |
 | **thermal cost** | off / on | adds a temperature penalty **and** scales `Jmax` — the only axis that moves both sides |
@@ -405,6 +458,10 @@ So the published models map on as follows:
 - **Towers et al.** [@towers2024] ("TF24") — the TF24 carbon cost, solved over the
   collar potential with a multi-layer root network. This is the production path
   here, and the one `plant` consumes.
+- **Joshi & Stocker** [@joshi2022] — the `γ_J(Δψ)²` cost, the only one priced on
+  the drop. ⚠️ Their **capacity** term `αJ_max`, and the joint optimisation over
+  `J_max` that goes with it, are not implemented — so this is their hydraulic term
+  and not their model.
 - **Sicangco et al.** [@sicangco2026] — ProfitMax with the thermal cost on.
 - **Jones et al.** [@jones2026] — a multiplicative objective; see the note below.
 
@@ -557,9 +614,14 @@ evaporative cooling becomes a benefit in its own right.
 Blocks 1–5 are shared. Every published model in the table above accepts them and
 differs only in block 6's cost: a carbon penalty rising with the fraction of
 conductivity lost [@towers2024], the water itself priced at a constant marginal
-rate [@cowan1977], or the normalised loss of remaining conductance [@sperry2017].
-They are **not refinements of one another** — they disagree about what is being
-spent.
+rate [@cowan1977], the normalised loss of remaining conductance [@sperry2017], or
+the square of the water-potential drop [@joshi2022]. They are **not refinements of
+one another** — they disagree about what is being spent.
+
+Three of those four price the **absolute** potential and the fourth prices the
+**drop**, which is the sharpest division in the list: it is the one that cannot be
+absorbed into a parameter, and the `gamma-match` chunk above measures the 6.1× it
+costs over a drydown.
 
 ### Further reading
 
