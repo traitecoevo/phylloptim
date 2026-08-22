@@ -737,6 +737,29 @@ public:
   // A convention rather than a knob: 0.05 everywhere it appears across this
   // family, and `sicangco-2026` parameterises it only to mirror the paper's own
   // `calc_Pcrit(b, c, ratiocrit = 0.05)` signature.
+  //
+  // ⚠️ MOVING IT IS NOT A LOCAL CHANGE, and the tempting argument for moving it is
+  // that the bound it sets rarely binds -- measured, 18 of 240 feasible reference
+  // rows at 25 C and NONE at 40 C, since heat drives leaves to the other bound.
+  // That is true and it is only an argument about the BRACKET. The same 0.05 also
+  // sets, at every operating point rather than at the rare ones:
+  //
+  //   * SOX's cost, `g = (f - 0.05)/(1 - 0.05)`
+  //   * JW26's cost, `g = 1 - psi/psi_crit`
+  //   * ProfitMax's normaliser, `k_span = k(psi_soil) - 0.05*kmax`, so its lambda
+  //   * the P50 chain rule, through `dpsi_crit/dP50`
+  //
+  // So three of the seven cost curves change shape, not just a bound that seldom
+  // binds. And there is a ceiling: the vulnerability splines are built out to P99
+  // (`vulnerability_conductivity_floor`), and the collar path recovers psi_stem by
+  // INVERTING the stem integral, whose range ends there -- measured, asking 0.03%
+  // past it throws `stem_curve_domain`. A threshold at P99 leaves that inversion no
+  // headroom, and past P99 the spline domain has to move too, which redistributes
+  // every knot and therefore every number the model reports.
+  //
+  // Smoothness is the wrong reason to reach for this in any case: moving a bound
+  // moves the kink rather than removing it. What removes it is a cost that DIVERGES
+  // at the bound, which is exactly why no product objective can be boundary-crit.
   static constexpr double k_crit_fraction = 0.05;
 
   // The two derivations, one place each, so a caller cannot get them
