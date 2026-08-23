@@ -890,7 +890,7 @@ void test_collar_solve_refuses_rather_than_guessing() {
   // A comfortably interior optimum, and the interval it was found in.
   phylloptim::Leaf l = make_leaf(d, psi, depth);
   double bound_a = 0.0, bound_b = 0.0;
-  ok(l.prepare_collar_solve(bound_a, bound_b),
+  ok(l.prepare_collar_solve<phylloptim::Leaf::CostCurve::TF24>(bound_a, bound_b),
      "the reference case has a feasible collar interval");
   l.find_root_collar_psi();
   ok(l.operating_point_kind() == Kind::Interior,
@@ -904,7 +904,7 @@ void test_collar_solve_refuses_rather_than_guessing() {
 
   phylloptim::Leaf p = make_leaf(d, psi, depth);
   double pa = 0.0, pb = 0.0;
-  p.prepare_collar_solve(pa, pb);
+  p.prepare_collar_solve<phylloptim::Leaf::CostCurve::TF24>(pa, pb);
   const double profit_dry = p.profit_psi_stem_TF(
       p.find_psi_stem_from_psi_root(dry_end, p.supply_psi_soil()), dry_end);
   const double profit_wet = p.profit_psi_stem_TF(
@@ -914,8 +914,8 @@ void test_collar_solve_refuses_rather_than_guessing() {
 
   phylloptim::Leaf m = make_leaf(d, psi, depth);
   double ma = 0.0, mb = 0.0;
-  m.prepare_collar_solve(ma, mb);
-  const double refused = m.maximise_profit_over_collar(dry_end, wet_end);
+  m.prepare_collar_solve<phylloptim::Leaf::CostCurve::TF24>(ma, mb);
+  const double refused = m.maximise_profit_over_collar<phylloptim::Leaf::CostCurve::TF24>(dry_end, wet_end);
   ok(m.operating_point_kind() == Kind::SolverRefused,
      "the solve reports that it could not resolve the bracket");
   ok(m.operating_point_kind() != Kind::BoundarySoil &&
@@ -933,12 +933,12 @@ void test_collar_solve_refuses_rather_than_guessing() {
   // is not covered.
   phylloptim::Leaf s = make_leaf(d, psi, depth);
   double sa = 0.0, sb = 0.0;
-  s.prepare_collar_solve(sa, sb);
+  s.prepare_collar_solve<phylloptim::Leaf::CostCurve::TF24>(sa, sb);
   const double sliver = 1e-9;
   bool feasible = true;
-  s.dprofit_at_collar_psi(sa + 1e-6 * sliver, &feasible);
+  s.dprofit_at_collar_psi<phylloptim::Leaf::CostCurve::TF24>(sa + 1e-6 * sliver, &feasible);
   ok(!feasible, "the wet bound admits no informative gradient");
-  const double fallen_back = s.maximise_profit_over_collar(sa, sa + sliver);
+  const double fallen_back = s.maximise_profit_over_collar<phylloptim::Leaf::CostCurve::TF24>(sa, sa + sliver);
   ok(s.operating_point_kind() == Kind::SolverRefused,
      "a bracket with no usable gradient at either end is refused too");
   ok(std::isfinite(fallen_back) && fallen_back >= sa &&
@@ -2234,12 +2234,12 @@ void test_energy_balance_collar_solve_is_measured() {
         // temperature parameters at yet another point.
         phylloptim::Leaf scan = make_pm_leaf(d, {2.0}, {1.0}, true);
         double lo = 0.0, hi = 0.0;
-        if (!scan.prepare_collar_solve(lo, hi)) continue;
+        if (!scan.prepare_collar_solve<phylloptim::Leaf::CostCurve::TF24>(lo, hi)) continue;
         const int N = 20001;
         double best_psi = lo, best_profit = -std::numeric_limits<double>::max();
         for (int i = 0; i < N; ++i) {
           const double psi = lo + (hi - lo) * double(i) / double(N - 1);
-          const double p = scan.profit_at_collar_psi(psi, lo, hi);
+          const double p = scan.profit_at_collar_psi<phylloptim::Leaf::CostCurve::TF24>(psi, lo, hi);
           if (p > best_profit) { best_profit = p; best_psi = psi; }
         }
 

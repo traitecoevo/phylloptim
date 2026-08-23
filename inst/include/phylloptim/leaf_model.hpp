@@ -965,75 +965,6 @@ public:
         break;
     }
   }
-  void find_root_collar_psi();
-  // Shared setup for the root-collar solve: builds the soil-side caches, handles
-  // every feasibility early-exit (shutdown / assim<0 / collapsed interval) by
-  // setting the final operating point itself, and otherwise returns the feasible
-  // collar-potential interval [bound_a, bound_b] (positive magnitudes). Returns
-  // false when the operating point is already fully determined (caller is done),
-  // true when there is a real interval to choose a collar potential within.
-  bool prepare_collar_solve(double& bound_a, double& bound_b);
-  // Evaluate the leaf at a *given* root-collar potential (positive magnitude)
-  // rather than optimising it: reuses prepare_collar_solve, clamps the target to
-  // the feasible interval, and evaluates there (no golden-section search). Leaves
-  // exactly the same outputs as find_root_collar_psi and returns profit_. Used by
-  // TF24f's gradient-ascent acclimation (#525).
-  double evaluate_root_collar_psi(double target_opt_root_psi);
-  // Evaluate profit at a given root-collar potential (positive magnitude)
-  // *assuming prepare_collar_solve has already run this step* (soil-side caches
-  // built, feasible interval [bound_a, bound_b] known). Clamps the target into
-  // the interval and sets the operating point (opt_psi_stem_, opt_root_psi_,
-  // profit_), returning profit_. This is the post-prepare body of
-  // evaluate_root_collar_psi, factored out so the centred finite-difference leaf
-  // solve can share one prepare_collar_solve across its three profit evals (#530).
-  double profit_at_collar_psi(double target_opt_root_psi,
-                              double bound_a, double bound_b);
-  // Exact d(profit)/d(opt_root_psi) at a given root-collar potential (positive
-  // magnitude), for TF24f's acclimation tracking (#525/#527). Combines
-  // forward-mode AD for the analytic photosynthesis/cost algebra, the
-  // implicit-function theorem at the psi_stem_to_ci root-find, and analytic
-  // spline derivatives (Interpolator::deriv) for the smooth transport. Replaces
-  // the noisy finite-difference gradient. Seats the soil-side caches itself, so a
-  // solve need not have run first.
-  //
-  // ⚠️ **The 0.0 returned on the shut-down / reversed-gradient exits is a
-  // SENTINEL, not a stationary point**, and the distinction only became load
-  // bearing because the collar solve root-finds on `dprofit == 0`. It matters
-  // because the sentinel fires at `prepare_collar_solve`'s WET bracket endpoint
-  // -- at `root_zero_E` uptake is zero by construction, so `psi >= psi_stem` --
-  // which is the first point a bracketing solver evaluates when it checks that
-  // its bracket brackets. Measured at the default operating point: profit there
-  // is -1.897 against 2.516 at the true optimum, so a solver that reads the
-  // sentinel as a root returns the zero-transpiration point as the answer. The
-  // region is narrow (at most 3.46e-07 MPa into the bracket over the golden grid,
-  // median 1.22e-08), which is exactly why it would survive casual testing.
-  //
-  // `feasible`, when non-null, reports whether the point admits an informative
-  // gradient at all, so a caller searching for a zero can tell the two kinds of
-  // 0.0 apart. The out-parameter rather than a NaN return is deliberate three
-  // ways: TF24f consumes the return value directly as an ODE rate
-  // (`dpsi/dt = k_acclim * dprofit`, plant/src/tf24f_strategy.cpp), so a NaN
-  // would propagate into plant's state vector where 0.0 correctly means "do not
-  // acclimate this step"; NaN already carries a *different* contract on the
-  // neighbouring derivative (hazard 6: `duptake_dpsi` returning NaN means "fall
-  // back to finite differences"), and overloading it would make the two
-  // indistinguishable; and defaulting to nullptr leaves every existing call site
-  // and the generated R binding untouched.
-  double dprofit_droot_collar_psi(double opt_root_psi, bool* feasible = nullptr);
-  // The same, with the flag as a return rather than an out-parameter, because
-  // R cannot reach a `bool*` -- RcppR6 has no form for one, so the generated
-  // binding drops it and every R-side composite silently gets the "a composite
-  // that ignores it inherits the bug" case this header warns about above.
-  // `{dprofit, feasible}`, in that order.
-  std::vector<double> dprofit_droot_collar_psi_checked(double opt_root_psi);
-  // Post-prepare body of dprofit_droot_collar_psi, with the same `feasible`
-  // contract. Assumes the supply path's per-solve caches are already seated, so
-  // the collar solve can share ONE supply_begin_solve across all ~10 of its
-  // gradient evaluations instead of re-seating per call -- the same saving #530
-  // made for the finite-difference path, and it matters here because
-  // begin_solve() is a spline evaluation per soil layer.
-  double dprofit_at_collar_psi(double opt_root_psi, bool* feasible = nullptr);
-
   // Which cost curve a psi_stem derivative differentiates. The cost enters the
   // chain through exactly ONE quantity -- dC/dpsi_stem -- so this selects that
   // and nothing else.
@@ -1079,6 +1010,89 @@ public:
   // derivative, and was simply invisible to R because `curve_name()` called it
   // unknown. Keep this the last member.
   static constexpr int n_cost_curves = static_cast<int>(CostCurve::ProfitMax) + 1;
+
+  void find_root_collar_psi();
+  // The same solve for ANY cost curve. `find_root_collar_psi()` is the TF24
+  // instantiation, kept under that name because plant's generated glue and the R
+  // bindings call it.
+  template <CostCurve K> void find_root_collar_psi_for();
+  void find_root_collar_psi_by(int curve);
+  // Shared setup for the root-collar solve: builds the soil-side caches, handles
+  // every feasibility early-exit (shutdown / assim<0 / collapsed interval) by
+  // setting the final operating point itself, and otherwise returns the feasible
+  // collar-potential interval [bound_a, bound_b] (positive magnitudes). Returns
+  // false when the operating point is already fully determined (caller is done),
+  // true when there is a real interval to choose a collar potential within.
+  template <CostCurve K>
+  bool prepare_collar_solve(double& bound_a, double& bound_b);
+  // Evaluate the leaf at a *given* root-collar potential (positive magnitude)
+  // rather than optimising it: reuses prepare_collar_solve, clamps the target to
+  // the feasible interval, and evaluates there (no golden-section search). Leaves
+  // exactly the same outputs as find_root_collar_psi and returns profit_. Used by
+  // TF24f's gradient-ascent acclimation (#525).
+  double evaluate_root_collar_psi(double target_opt_root_psi);
+  template <CostCurve K>
+  double evaluate_root_collar_psi_for(double target_opt_root_psi);
+  // Evaluate profit at a given root-collar potential (positive magnitude)
+  // *assuming prepare_collar_solve has already run this step* (soil-side caches
+  // built, feasible interval [bound_a, bound_b] known). Clamps the target into
+  // the interval and sets the operating point (opt_psi_stem_, opt_root_psi_,
+  // profit_), returning profit_. This is the post-prepare body of
+  // evaluate_root_collar_psi, factored out so the centred finite-difference leaf
+  // solve can share one prepare_collar_solve across its three profit evals (#530).
+  template <CostCurve K>
+  double profit_at_collar_psi(double target_opt_root_psi,
+                              double bound_a, double bound_b);
+  // Exact d(profit)/d(opt_root_psi) at a given root-collar potential (positive
+  // magnitude), for TF24f's acclimation tracking (#525/#527). Combines
+  // forward-mode AD for the analytic photosynthesis/cost algebra, the
+  // implicit-function theorem at the psi_stem_to_ci root-find, and analytic
+  // spline derivatives (Interpolator::deriv) for the smooth transport. Replaces
+  // the noisy finite-difference gradient. Seats the soil-side caches itself, so a
+  // solve need not have run first.
+  //
+  // ⚠️ **The 0.0 returned on the shut-down / reversed-gradient exits is a
+  // SENTINEL, not a stationary point**, and the distinction only became load
+  // bearing because the collar solve root-finds on `dprofit == 0`. It matters
+  // because the sentinel fires at `prepare_collar_solve`'s WET bracket endpoint
+  // -- at `root_zero_E` uptake is zero by construction, so `psi >= psi_stem` --
+  // which is the first point a bracketing solver evaluates when it checks that
+  // its bracket brackets. Measured at the default operating point: profit there
+  // is -1.897 against 2.516 at the true optimum, so a solver that reads the
+  // sentinel as a root returns the zero-transpiration point as the answer. The
+  // region is narrow (at most 3.46e-07 MPa into the bracket over the golden grid,
+  // median 1.22e-08), which is exactly why it would survive casual testing.
+  //
+  // `feasible`, when non-null, reports whether the point admits an informative
+  // gradient at all, so a caller searching for a zero can tell the two kinds of
+  // 0.0 apart. The out-parameter rather than a NaN return is deliberate three
+  // ways: TF24f consumes the return value directly as an ODE rate
+  // (`dpsi/dt = k_acclim * dprofit`, plant/src/tf24f_strategy.cpp), so a NaN
+  // would propagate into plant's state vector where 0.0 correctly means "do not
+  // acclimate this step"; NaN already carries a *different* contract on the
+  // neighbouring derivative (hazard 6: `duptake_dpsi` returning NaN means "fall
+  // back to finite differences"), and overloading it would make the two
+  // indistinguishable; and defaulting to nullptr leaves every existing call site
+  // and the generated R binding untouched.
+  double dprofit_droot_collar_psi(double opt_root_psi, bool* feasible = nullptr);
+  template <CostCurve K>
+  double dprofit_droot_collar_psi_for(double opt_root_psi,
+                                      bool* feasible = nullptr);
+  // The same, with the flag as a return rather than an out-parameter, because
+  // R cannot reach a `bool*` -- RcppR6 has no form for one, so the generated
+  // binding drops it and every R-side composite silently gets the "a composite
+  // that ignores it inherits the bug" case this header warns about above.
+  // `{dprofit, feasible}`, in that order.
+  std::vector<double> dprofit_droot_collar_psi_checked(double opt_root_psi);
+  // Post-prepare body of dprofit_droot_collar_psi, with the same `feasible`
+  // contract. Assumes the supply path's per-solve caches are already seated, so
+  // the collar solve can share ONE supply_begin_solve across all ~10 of its
+  // gradient evaluations instead of re-seating per call -- the same saving #530
+  // made for the finite-difference path, and it matters here because
+  // begin_solve() is a spline evaluation per soil layer.
+  template <CostCurve K>
+  double dprofit_at_collar_psi(double opt_root_psi, bool* feasible = nullptr);
+
 
   // dprofit/dpsi_stem for the solvers that optimise psi_stem directly with the
   // upstream potential held fixed.
@@ -1165,6 +1179,8 @@ public:
   template <CostCurve K> double benefit_link_deriv(double A) const;
   template <CostCurve K> void optimise_psi_stem_single();
   template <CostCurve K> void check_cost_parameters();
+  template <CostCurve K> double cost_deriv(double psi_stem,
+                                           double psi_upstream);
   template <CostCurve K> double profit_psi_stem_for(double psi_stem,
                                                     double psi_upstream);
   template <CostCurve K> double lambda_for(double psi_stem,
@@ -1186,7 +1202,10 @@ public:
   // golden-grid rows and so is a branch that has to be written rather than a
   // corner. Falls back to golden section if either endpoint has no usable
   // gradient -- see the definition for why that fallback should never fire.
+  template <CostCurve K>
   double maximise_profit_over_collar(double bound_a, double bound_b);
+  // The objective's value at a no-flow point, for the shut-down exits.
+  template <CostCurve K> double no_flow_profit(double psi_stem);
   // Analytic d(E_up_)/d(collar suction) -- a CONDUCTANCE, positive by
   // construction now that both sides are magnitudes (#25). Thin forwarder to
   // roots_.duptake_dpsi; see there for the derivation and for the NaN-at-a-kink
@@ -1205,7 +1224,7 @@ public:
   // held at psi_crit (no transpiration), paying only respiration + hydraulic
   // cost. Only opt_root_psi_ differs between the cases, so it is the argument
   // (a positive magnitude, like every other psi here).
-  void set_shutdown_state(double root_collar);
+  template <CostCurve K> void set_shutdown_state(double root_collar);
   double find_root_psi(double wettest_soil_layer, const std::vector<double>& psi_soil, int find_root_crit);
   double find_psi_stem_from_psi_root(double psi_root, const std::vector<double>& psi_soil);
   double E_column(double x, const std::vector<double>& psi_soil, double psi_leaf);
@@ -2279,6 +2298,7 @@ inline double Leaf::find_psi_stem_from_psi_root(double psi_root, const std::vect
 // stem is held at psi_crit (transpiration not possible), so the plant pays only
 // respiration (R_d_) plus the hydraulic cost at psi_crit. Only the recorded
 // root-collar potential differs between the calling cases.
+template <Leaf::CostCurve K>
 inline void Leaf::set_shutdown_state(double root_collar) {
   opt_root_psi_ = root_collar;
   opt_psi_stem_ = psi_crit;
@@ -2304,7 +2324,7 @@ inline void Leaf::set_shutdown_state(double root_collar) {
     // solve re-derives the baseline instead of taking a hit on stale members.
     update_temperature_dependent_params(Tleaf_);
   }
-  profit_ = -R_d_ - hydraulic_cost_TF(psi_crit);
+  profit_ = no_flow_profit<K>(psi_crit);
   // Tagged here rather than at the four call sites, so a fifth reason to shut
   // down cannot arrive without a classification. All four are the same
   // ecological statement -- the soil is too dry for any collar potential that
@@ -2345,6 +2365,7 @@ inline void Leaf::set_shutdown_state(double root_collar) {
 // already determined here (shutdown / assim<0 / collapsed interval) and the
 // caller should stop; returns true with [bound_a, bound_b] set to the feasible
 // collar-potential interval (positive magnitudes) otherwise.
+template <Leaf::CostCurve K>
 inline bool Leaf::prepare_collar_solve(double& bound_a, double& bound_b){
 
   // Clear the classification FIRST, so that a path which declines to write it
@@ -2361,12 +2382,12 @@ inline bool Leaf::prepare_collar_solve(double& bound_a, double& bound_b){
   // shut down
 
   if (wettest_soil_layer >= psi_crit){
-    set_shutdown_state(psi_crit);
+    set_shutdown_state<K>(psi_crit);
     return false;
   }
 
 if(E_column(psi_crit, supply_psi_soil(), psi_crit) < 0){
-      set_shutdown_state(supply_psi_crit());
+      set_shutdown_state<K>(supply_psi_crit());
       return false;
 }
 
@@ -2377,7 +2398,7 @@ double root_crit = find_root_psi(wettest_soil_layer, supply_psi_soil(), 1);
 // If root crit would have to be larger than psi crit, also avoid loop as above
 
     if (root_crit >= psi_crit){
-    set_shutdown_state(root_crit);
+    set_shutdown_state<K>(root_crit);
     return false;
   }
 
@@ -2412,7 +2433,7 @@ if(assim_max_ < 0){
       update_temperature_dependent_params(Tleaf_);
     }
 
-    profit_ = - R_d_ - hydraulic_cost_TF(opt_root_psi_);
+    profit_ = no_flow_profit<K>(opt_root_psi_);
     // As on the shut-down exits: transpiration is zero here, so gross
     // assimilation is zero and the reported net rate is -R_d_. Set it
     // explicitly -- this branch does not go through profit_psi_stem_TF, so
@@ -2483,7 +2504,7 @@ if(assim_max_ < 0){
     // a point between them -- past the limit the clamp exists to enforce, which is
     // the very failure #24 is about, reintroduced by its own fix.
     if (bound_b < bound_a) {
-      set_shutdown_state(supply_psi_crit());
+      set_shutdown_state<K>(supply_psi_crit());
       return false;
     }
 
@@ -2559,10 +2580,11 @@ if(assim_max_ < 0){
 // 240 feasible golden-grid rows, but that is a grid, not a theorem. This also
 // makes the collar the third leaf solver on this method -- see uniroot.hpp's
 // history note, which is about exactly this judgement call.
+template <Leaf::CostCurve K>
 inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) {
   const double width = bound_b - bound_a;
   const auto dprofit = [&](double psi, bool* feasible = nullptr) {
-    return dprofit_at_collar_psi(psi, feasible);
+    return dprofit_at_collar_psi<K>(psi, feasible);
   };
 
   // The WET endpoint is infeasible by construction: bound_a is root_zero_E, where
@@ -2624,7 +2646,7 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
         [&](double bound) {
           const double psi_stem =
               find_psi_stem_from_psi_root(bound, supply_psi_soil());
-          return profit_psi_stem_TF(psi_stem, bound);
+          return profit_psi_stem_for<K>(psi_stem, bound);
         },
         bound_a, bound_b, GSS_tol_abs);
   }
@@ -2672,9 +2694,9 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
   // since f_lo <= 0 makes lo a local maximum and f_hi >= 0 makes hi one.
   if (f_lo <= 0.0 && f_hi >= 0.0) {
     operating_point_kind_ = OperatingPointKind::SolverRefused;
-    const double p_lo = profit_psi_stem_TF(
+    const double p_lo = profit_psi_stem_for<K>(
         find_psi_stem_from_psi_root(lo, supply_psi_soil()), lo);
-    const double p_hi = profit_psi_stem_TF(
+    const double p_hi = profit_psi_stem_for<K>(
         find_psi_stem_from_psi_root(hi, supply_psi_soil()), hi);
     if (!std::isfinite(p_hi)) {
       return lo;
@@ -2701,9 +2723,30 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
                               static_cast<size_t>(ci_niter));
 }
 
-inline void Leaf::find_root_collar_psi(){
+template <Leaf::CostCurve K>
+inline void Leaf::find_root_collar_psi_for(){
+  // ⚠️ THE SAME PARAMETER CHECK THE STEM ROUTE MAKES. Without it, CF77 with an
+  // unset lambda maximises a NaN objective here and returns a bracket property
+  // that looks entirely like an operating point -- the exact failure
+  // check_cost_parameters exists to refuse.
+  check_cost_parameters<K>();
+  // ⚠️ ProfitMax's normaliser is not defined on this topology yet. |A|max comes
+  // from prepare_profitmax(), which scans the supply stream from a SCALAR
+  // psi_soil; a multi-layer collar route has no scalar to scan from, and the
+  // normalised cost is meaningless without one. Refused rather than approximated:
+  // without this the solve returns `non-finite-gradient` and a plausible-looking
+  // collar. Defining |A|max over the collar bracket is the remaining work.
+  if constexpr (K == CostCurve::ProfitMax) {
+    if (!supply_is_single_layer()) {
+      util::stop("find_root_collar_psi for ProfitMax needs a single soil "
+                 "potential: |A|max is defined by a scan of the supply stream "
+                 "from psi_soil, and the multi-layer collar route has no scalar "
+                 "psi_soil to scan from.");
+    }
+    prepare_profitmax();
+  }
     double bound_a, bound_b;
-    if (!prepare_collar_solve(bound_a, bound_b)) {
+    if (!prepare_collar_solve<K>(bound_a, bound_b)) {
       return;
     }
     // root_crit / root_zero_E were consumed inside prepare_collar_solve; recover
@@ -2712,7 +2755,7 @@ inline void Leaf::find_root_collar_psi(){
     // Maximise carbon profit over the feasible collar-potential interval by
     // solving its first-order condition, dprofit/dpsi == 0, rather than by
     // searching the objective.
-    const double opt_root_psi = maximise_profit_over_collar(bound_a, bound_b);
+    const double opt_root_psi = maximise_profit_over_collar<K>(bound_a, bound_b);
 
     opt_psi_stem_ = find_psi_stem_from_psi_root(opt_root_psi, supply_psi_soil());
 
@@ -2739,15 +2782,61 @@ inline void Leaf::find_root_collar_psi(){
 // optimising it (see header). Clamps the target into the feasible interval so a
 // tracked state that has drifted outside it still yields a finite operating
 // point; the gradient computed by the caller then pulls it back inside.
-inline double Leaf::evaluate_root_collar_psi(double target_opt_root_psi){
+// The objective's value where no water moves. The TF24 arm is spelled out because
+// these exits also hand-write their own rate fields (hazard 8) and the golden files
+// pin the result; every other curve goes through the shared evaluator, which is what
+// gets a product objective's `A*g` right rather than an `A - C` that does not apply.
+template <Leaf::CostCurve K>
+inline double Leaf::no_flow_profit(double psi_stem) {
+  if constexpr (K == CostCurve::TF24) {
+    return -R_d_ - hydraulic_cost_TF(psi_stem);
+  } else {
+    return profit_psi_stem_for<K>(psi_stem, psi_stem);
+  }
+}
+
+
+inline void Leaf::find_root_collar_psi() {
+  find_root_collar_psi_for<CostCurve::TF24>();
+}
+
+
+// Runtime dispatch, for R and for a caller holding a curve index.
+inline void Leaf::find_root_collar_psi_by(int curve) {
+  switch (static_cast<CostCurve>(curve)) {
+    case CostCurve::TF24: find_root_collar_psi_for<CostCurve::TF24>(); return;
+    case CostCurve::CF77: find_root_collar_psi_for<CostCurve::CF77>(); return;
+    case CostCurve::JS22: find_root_collar_psi_for<CostCurve::JS22>(); return;
+    case CostCurve::CMax: find_root_collar_psi_for<CostCurve::CMax>(); return;
+    case CostCurve::SOX:  find_root_collar_psi_for<CostCurve::SOX>();  return;
+    case CostCurve::JW26: find_root_collar_psi_for<CostCurve::JW26>(); return;
+    case CostCurve::ProfitMax:
+      find_root_collar_psi_for<CostCurve::ProfitMax>(); return;
+  }
+  util::stop("unknown cost curve index " + util::to_string(curve));
+}
+
+
+inline double Leaf::evaluate_root_collar_psi(double target_opt_root_psi) {
+  return evaluate_root_collar_psi_for<CostCurve::TF24>(target_opt_root_psi);
+}
+
+
+inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi, bool* feasible) {
+  return dprofit_droot_collar_psi_for<CostCurve::TF24>(opt_root_psi, feasible);
+}
+
+
+template <Leaf::CostCurve K>
+inline double Leaf::evaluate_root_collar_psi_for(double target_opt_root_psi){
     double bound_a, bound_b;
-    if (!prepare_collar_solve(bound_a, bound_b)) {
+    if (!prepare_collar_solve<K>(bound_a, bound_b)) {
       // Operating point fully determined by feasibility handling (shutdown /
       // assim<0 / collapsed interval); profit_ is already set.
       return profit_;
     }
 
-    return profit_at_collar_psi(target_opt_root_psi, bound_a, bound_b);
+    return profit_at_collar_psi<K>(target_opt_root_psi, bound_a, bound_b);
 }
 
 // Post-prepare body of evaluate_root_collar_psi (see header). Kept as a separate
@@ -2757,6 +2846,7 @@ inline double Leaf::evaluate_root_collar_psi(double target_opt_root_psi){
 // [bound_a, bound_b] is identical to evaluate_root_collar_psi's, so near a
 // boundary a perturbed potential collapses onto the boundary -- which is exactly
 // how the FD path degrades gracefully to a one-sided difference.
+template <Leaf::CostCurve K>
 inline double Leaf::profit_at_collar_psi(double target_opt_root_psi,
                                   double bound_a, double bound_b){
     const double opt_root_psi =
@@ -2764,7 +2854,7 @@ inline double Leaf::profit_at_collar_psi(double target_opt_root_psi,
 
     opt_psi_stem_ = find_psi_stem_from_psi_root(opt_root_psi, supply_psi_soil());
     opt_root_psi_ = opt_root_psi;
-    profit_ = profit_psi_stem_TF(opt_psi_stem_, opt_root_psi);
+    profit_ = profit_psi_stem_for<K>(opt_psi_stem_, opt_root_psi);
     // Well defined off the optimum too: dC/dE is a property of the point, not of
     // its being stationary. At a prescribed point it simply is not equal to dA/dE.
     lambda_emergent_ = marginal_cost_water_multilayer();
@@ -2795,13 +2885,14 @@ inline double Leaf::profit_at_collar_psi(double target_opt_root_psi,
 // with gc = const * transpiration(psi_stem,psi). A'/C' are obtained by forward
 // AD; the gc partials use the analytic spline derivative (transpiration_from_psi
 // .deriv); dpsi_stem/dpsi by a tight central difference on the smooth transport.
-inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi, bool* feasible) {
+template <Leaf::CostCurve K>
+inline double Leaf::dprofit_droot_collar_psi_for(double opt_root_psi, bool* feasible) {
   // Every transport evaluation below reads the supply path's per-solve caches, so
   // seat them on the current psi_soil_ here rather than depending on whatever the
   // caller's last solve left cached. Keeping this in the wrapper is what lets the
   // collar solve call the body directly and seat them once for the whole solve.
   supply_begin_solve();
-  return dprofit_at_collar_psi(opt_root_psi, feasible);
+  return dprofit_at_collar_psi<K>(opt_root_psi, feasible);
 }
 
 inline std::vector<double> Leaf::dprofit_droot_collar_psi_checked(
@@ -2811,6 +2902,7 @@ inline std::vector<double> Leaf::dprofit_droot_collar_psi_checked(
   return {d, feasible ? 1.0 : 0.0};
 }
 
+template <Leaf::CostCurve K>
 inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
   using AD = xad::fwd<double>::active_type;
   const double psi = opt_root_psi;
@@ -2928,7 +3020,7 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
   // temperature block, so the two cannot drift apart.
   if (ci_at_compensation_point_) {
     AD ps_ad0 = psi_stem;  xad::derivative(ps_ad0) = 1.0;
-    const double C_prime0 = xad::derivative(hydraulic_cost_TF_kernel(ps_ad0));
+    const double C_prime0 = cost_deriv<K>(psi_stem, psi);
     double dprofit = -C_prime0 * dpsistem_dpsi;
     if (use_energy_balance_ && dT_dE != 0.0) {
       const double h = 1e-3;
@@ -2966,8 +3058,7 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
   // hand-kept mirror of it.
   AD ci_ad = ci;            xad::derivative(ci_ad) = 1.0;
   const double A_prime = xad::derivative(assim_colimited_kernel(ci_ad));
-  AD ps_ad = psi_stem;      xad::derivative(ps_ad) = 1.0;
-  const double C_prime = xad::derivative(hydraulic_cost_TF_kernel(ps_ad));
+  const double C_prime = cost_deriv<K>(psi_stem, psi);
 
   // Stomatal-conductance supply coefficient gc and its partials. gc =
   // gc_const * transpiration(psi_stem, psi); transpiration is conductance_max *
@@ -2999,7 +3090,16 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
   // the transport.
 
   const double dci_dpsi = dci_dpsistem * dpsistem_dpsi + dci_dpsi_expl;
-  const double base = A_prime * dci_dpsi - C_prime * dpsistem_dpsi;
+  // ⚠️ THE IDENTITY ARM IS TEXTUALLY UNCHANGED, so every difference objective's
+  // arithmetic order survives operation for operation and the golden files stay
+  // bit-identical. Only a non-identity link takes the general path.
+  double base;
+  if constexpr (benefit_link<K>() == BenefitLink::Identity) {
+    base = A_prime * dci_dpsi - C_prime * dpsistem_dpsi;
+  } else {
+    const double A = assim_colimited_kernel(ci);
+    base = benefit_link_deriv<K>(A) * (A_prime * dci_dpsi) - C_prime * dpsistem_dpsi;
+  }
   // Gated at the CALL SITE, not just inside the callee: the block is out of line
   // (deliberately, so adding it cannot change FMA contraction in this inlined
   // body), and an out-of-line call costs even when it returns 0.0 immediately.
@@ -3022,38 +3122,15 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
 //     dprofit/dpsi_stem = A'(ci) dci/dpsi_stem - C'(psi_stem)
 //
 // and the cost curve enters through C' alone.
+// dC/dpsi_stem for one cost curve: THE ONLY PLACE THE COST CURVE ENTERS a
+// derivative, and shared by both routes. `dprofit_dpsi_stem` uses it directly;
+// `dprofit_at_collar_psi` multiplies it by dpsi_stem/dpsi_collar. Factored out so
+// there is one dispatch table rather than one per solver -- adding a curve must not
+// mean remembering a second place.
 template <Leaf::CostCurve K>
-inline double Leaf::dprofit_dpsi_stem(double psi_stem, double psi_upstream,
-                                      bool* feasible) {
-  // ⚠️ EVERY CURVE, through the benefit link. This returns
-  // `h'(A)*dA/dpsi - dC/dpsi` for whichever `h` the curve composes with
-  // assimilation, so a product objective is not a special case -- it is the `Log`
-  // link, and ProfitMax is the `Scaled` one. See `BenefitLink`.
+inline double Leaf::cost_deriv(double psi_stem, double psi_upstream) {
   using AD = xad::fwd<double>::active_type;
-  if (feasible != nullptr) {
-    *feasible = false;
-  }
-  // No flow, so no informative gradient -- the same sentinel and the same
-  // contract as the collar version. These are magnitudes, so upstream >= stem is
-  // the reversed case.
-  if (!std::isfinite(psi_stem) || psi_upstream >= psi_stem) {
-    return 0.0;
-  }
-
-  double dT_dE = 0.0;
-  double Tleaf_here = leaf_temp_;
-  if (use_energy_balance_) {
-    Tleaf_here = leaf_temp_from_E(transpiration(psi_stem, psi_upstream), &dT_dE);
-    update_temperature_dependent_params(Tleaf_here);
-    set_leaf_vpd(Tleaf_here);
-  }
-
-  const double ci = psi_stem_to_ci(psi_stem, psi_upstream);
-  if (!std::isfinite(ci)) {
-    return 0.0;
-  }
-
-  // THE ONLY PLACE THE COST CURVE ENTERS.
+  (void)psi_upstream;
   double C_prime;
   if constexpr (K == CostCurve::TF24) {
     AD ps_ad = psi_stem;
@@ -3092,11 +3169,46 @@ inline double Leaf::dprofit_dpsi_stem(double psi_stem, double psi_upstream,
     // curve into the CF77 branch silently -- and `-Werror=switch` cannot see it,
     // because this is not a switch. The static_assert is what makes a FIFTH curve a
     // compile error instead of a plausible number.
-    static_assert(K == CostCurve::CMax, "unhandled CostCurve in dprofit_dpsi_stem");
+    static_assert(K == CostCurve::CMax, "unhandled CostCurve in cost_deriv");
     // Linear in the ABSOLUTE potential by definition -- this IS the form Anderegg
     // et al. state, so no antiderivative and no cancellation is involved here.
     C_prime = CMax_a * psi_stem + CMax_b;
   }
+  return C_prime;
+}
+
+template <Leaf::CostCurve K>
+inline double Leaf::dprofit_dpsi_stem(double psi_stem, double psi_upstream,
+                                      bool* feasible) {
+  // ⚠️ EVERY CURVE, through the benefit link. This returns
+  // `h'(A)*dA/dpsi - dC/dpsi` for whichever `h` the curve composes with
+  // assimilation, so a product objective is not a special case -- it is the `Log`
+  // link, and ProfitMax is the `Scaled` one. See `BenefitLink`.
+  using AD = xad::fwd<double>::active_type;
+  if (feasible != nullptr) {
+    *feasible = false;
+  }
+  // No flow, so no informative gradient -- the same sentinel and the same
+  // contract as the collar version. These are magnitudes, so upstream >= stem is
+  // the reversed case.
+  if (!std::isfinite(psi_stem) || psi_upstream >= psi_stem) {
+    return 0.0;
+  }
+
+  double dT_dE = 0.0;
+  double Tleaf_here = leaf_temp_;
+  if (use_energy_balance_) {
+    Tleaf_here = leaf_temp_from_E(transpiration(psi_stem, psi_upstream), &dT_dE);
+    update_temperature_dependent_params(Tleaf_here);
+    set_leaf_vpd(Tleaf_here);
+  }
+
+  const double ci = psi_stem_to_ci(psi_stem, psi_upstream);
+  if (!std::isfinite(ci)) {
+    return 0.0;
+  }
+
+  const double C_prime = cost_deriv<K>(psi_stem, psi_upstream);
 
   // ci pinned at the compensation point: the supply==demand residual is not zero
   // there, so the implicit function theorem below does not hold and the
@@ -5186,3 +5298,4 @@ inline void Leaf::solve_medlyn_ci_analytical(){
 } // namespace phylloptim
 
 #endif
+
