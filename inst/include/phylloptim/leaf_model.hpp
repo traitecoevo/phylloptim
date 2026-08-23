@@ -1025,6 +1025,17 @@ public:
   // unknown. Keep this the last member.
   static constexpr int n_cost_curves = static_cast<int>(CostCurve::ProfitMax) + 1;
 
+  // ⚠️ THE MODEL IS CONFIGURATION, NOT A CALL ARGUMENT, and the reason is that its
+  // PARAMETERS already are. `CF77_lambda_` is a field; `JS22_gamma`, `CMax_a` and
+  // `CMax_b` are traits. Naming the curve at the call site while the constants it
+  // needs live on the object is incoherent -- you cannot configure half a model.
+  // So the curve is seated here, beside them, and `optimise()` takes nothing.
+  //
+  // Defaults to TF24 and the collar route, which is what plant runs, so an existing
+  // caller that never sets a model gets the production path unchanged.
+  CostCurve cost_curve_ = CostCurve::TF24;
+  bool route_is_collar_ = true;
+
   void find_root_collar_psi();
   // The same solve for ANY cost curve. `find_root_collar_psi()` is the TF24
   // instantiation, kept under that name because plant's generated glue and the R
@@ -1040,7 +1051,12 @@ public:
   // `route` is "collar" (the production formulation: the full soil-to-collar path,
   // any supply) or "stem" (psi_stem with the upstream potential pinned at psi_soil,
   // the form the literature is written in, single soil potential only).
-  void optimise(const std::string& curve, const std::string& route);
+  void set_model(const std::string& curve, const std::string& route);
+  // The curve and route currently seated, by name.
+  std::string model_curve() const { return curve_name(static_cast<int>(cost_curve_)); }
+  std::string model_route() const { return route_is_collar_ ? "collar" : "stem"; }
+  // Solve for the operating point under the seated model. THE entry point.
+  void optimise();
   // Shared setup for the root-collar solve: builds the soil-side caches, handles
   // every feasibility early-exit (shutdown / assim<0 / collapsed interval) by
   // setting the final operating point itself, and otherwise returns the feasible
@@ -2773,7 +2789,7 @@ inline void Leaf::find_root_collar_psi() {
 
 
 // Runtime dispatch, for R and for a caller holding a curve index.
-inline void Leaf::optimise(const std::string& curve,
+inline void Leaf::set_model(const std::string& curve,
                            const std::string& route) {
   int k = -1;
   for (int i = 0; i < n_cost_curves; ++i) {
@@ -2786,17 +2802,26 @@ inline void Leaf::optimise(const std::string& curve,
     }
     util::stop("unknown cost curve \"" + curve + "\". Available: " + names + ".");
   }
-  if (route == "collar") {
+  if (route != "collar" && route != "stem") {
+    util::stop("unknown route \"" + route + "\": use \"collar\" for the full "
+               "soil-to-collar path or \"stem\" for psi_stem with the upstream "
+               "potential pinned at psi_soil.");
+  }
+  cost_curve_ = static_cast<CostCurve>(k);
+  route_is_collar_ = route == "collar";
+  // ⚠️ THE CURVE'S OWN CONSTANTS ARE NOT CHECKED HERE, deliberately: a caller may
+  // reasonably seat the model and then set `CF77_lambda_`. They are checked at
+  // solve time, where the ordering cannot be got wrong.
+}
+
+
+inline void Leaf::optimise() {
+  const int k = static_cast<int>(cost_curve_);
+  if (route_is_collar_) {
     find_root_collar_psi_by(k);
-    return;
-  }
-  if (route == "stem") {
+  } else {
     optimise_psi_stem_by(k);
-    return;
   }
-  util::stop("unknown route \"" + route + "\": use \"collar\" for the full "
-             "soil-to-collar path or \"stem\" for psi_stem with the upstream "
-             "potential pinned at psi_soil.");
 }
 
 

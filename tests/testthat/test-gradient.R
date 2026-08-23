@@ -1103,7 +1103,7 @@ test_that("the curve registry is read from C++, not restated in R", {
   # that is the point of the link.
   l <- leaf_model(supply = leaf_supply_singlelayer())
   set_drivers(l, psi_soil = 1.5, PPFD = 900)
-  l$optimise("SOX", "stem")
+  l$set_model("SOX", "stem"); l$optimise()
   d <- l$dprofit_dpsi_stem_by(which(nms == "SOX") - 1L, l$opt_psi_stem_)
   expect_length(d, 2L)
   expect_true(is.finite(d[[1]]))
@@ -1200,7 +1200,8 @@ test_that("a product objective's gradient survives an h-sweep", {
       base <- if (par == "vcmax_25") 96 else 3.4
       solve_at <- function(x) {
         l <- if (par == "vcmax_25") mk(x, 3.4) else mk(96, x)
-        l$optimise(if (m == "TF") "TF24" else m, "stem")
+        l$set_model(if (m == "TF") "TF24" else m, "stem")
+        l$optimise()
         l$assim_colimited_
       }
       h <- base * 1e-2               # the floor of the V, not the toe
@@ -1261,7 +1262,7 @@ test_that("ProfitMax's normaliser follows the traits, so the composite is a tota
   h <- 96 * 1e-2
   solve_A <- function(v) {
     l <- mkv(v)
-    l$optimise("ProfitMax", "stem")
+    l$set_model("ProfitMax", "stem"); l$optimise()
     l$assim_colimited_
   }
   swept <- (solve_A(96 + h) - solve_A(96 - h)) / (2 * h)

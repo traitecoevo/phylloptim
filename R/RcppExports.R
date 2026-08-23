@@ -189,8 +189,20 @@ Leaf__prepare_profitmax_at <- function(obj_, A_max) {
     invisible(.Call('_phylloptim_Leaf__prepare_profitmax_at', PACKAGE = 'phylloptim', obj_, A_max))
 }
 
-Leaf__optimise <- function(obj_, curve, route) {
-    invisible(.Call('_phylloptim_Leaf__optimise', PACKAGE = 'phylloptim', obj_, curve, route))
+Leaf__set_model <- function(obj_, curve, route) {
+    invisible(.Call('_phylloptim_Leaf__set_model', PACKAGE = 'phylloptim', obj_, curve, route))
+}
+
+Leaf__model_curve <- function(obj_) {
+    .Call('_phylloptim_Leaf__model_curve', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__model_route <- function(obj_) {
+    .Call('_phylloptim_Leaf__model_route', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__optimise <- function(obj_) {
+    invisible(.Call('_phylloptim_Leaf__optimise', PACKAGE = 'phylloptim', obj_))
 }
 
 Leaf__evaluate_psi_stem_by <- function(obj_, curve, target_psi_stem) {

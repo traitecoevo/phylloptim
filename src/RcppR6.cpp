@@ -192,8 +192,20 @@ void Leaf__prepare_profitmax_at(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj
   obj_->prepare_profitmax_at(A_max);
 }
 // [[Rcpp::export]]
-void Leaf__optimise(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, std::string curve, std::string route) {
-  obj_->optimise(curve, route);
+void Leaf__set_model(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, std::string curve, std::string route) {
+  obj_->set_model(curve, route);
+}
+// [[Rcpp::export]]
+std::string Leaf__model_curve(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->model_curve();
+}
+// [[Rcpp::export]]
+std::string Leaf__model_route(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->model_route();
+}
+// [[Rcpp::export]]
+void Leaf__optimise(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  obj_->optimise();
 }
 // [[Rcpp::export]]
 double Leaf__evaluate_psi_stem_by(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int curve, double target_psi_stem) {

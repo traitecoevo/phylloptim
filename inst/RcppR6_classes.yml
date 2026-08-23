@@ -605,23 +605,40 @@ Leaf:
     prepare_profitmax_at:
       return_type: void
       args: [A_max: double]
-    optimise:
+    set_model:
       roxygen: |
-        Solve for the optimal operating point under one optimality model.
+        Choose the optimality model this leaf solves.
 
-        The single entry point: `curve` names a model from
-        \code{\link{cost_curve_names}} and `route` names the formulation.
+        The model is configuration rather than a call argument, because its
+        PARAMETERS already are: `CF77_lambda_` is a field, and `JS22_gamma`,
+        `CMax_a` and `CMax_b` are traits. Seat the model, set whatever constants it
+        needs, then call `optimise()`.
 
-        `route = "collar"` is the production formulation -- it solves the full
-        soil-to-collar-to-stem path and works with a root network or with a single
-        soil potential carrying a series resistance. `route = "stem"` optimises
-        `psi_stem` with the upstream potential pinned at `psi_soil`, which is the
-        form the published models are written in, and needs a single soil potential.
+        `route = "collar"` is the production formulation -- the full
+        soil-to-collar-to-stem path, with a root network or with a single soil
+        potential carrying a series resistance. `route = "stem"` optimises
+        `psi_stem` with the upstream potential pinned at `psi_soil`, the form the
+        published models are written in, and needs a single soil potential.
+
+        Defaults to `"TF24"` and `"collar"`, so a caller that never sets a model
+        gets the production path.
         @param curve cost curve name, from \code{\link{cost_curve_names}}
         @param route `"collar"` or `"stem"`
         @export
       return_type: void
       args: [curve: "std::string", route: "std::string"]
+    model_curve:
+      return_type: "std::string"
+    model_route:
+      return_type: "std::string"
+    optimise:
+      roxygen: |
+        Solve for the operating point under the model this leaf is set to.
+
+        Takes no arguments: the curve, the route, the supply path and the curve's
+        own constants are all already on the object. See `set_model()`.
+        @export
+      return_type: void
     evaluate_psi_stem_by:
       return_type: double
       args: [curve: int, target_psi_stem: double]
