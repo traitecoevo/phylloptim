@@ -1092,21 +1092,43 @@ test_that("the curve registry is read from C++, not restated in R", {
   expect_false(exists("cost_curve_has_derivative",
                       where = asNamespace("phylloptim"), inherits = FALSE))
 
-  # ⚠️ Having a derivative and having a VERIFIED GRADIENT are different claims,
-  # and only the second gates `leaf_gradient()`. The two non-identity links are
-  # implemented and not yet checked on every parameter, so they refuse there.
-  for (m in c("collar", "TF24", "CF77", "JS22", "CMax", "SOX", "JW26")) {
-    expect_true(phylloptim:::.gradient_link_verified(m))
+  # ⚠️ AND THERE IS NO SECOND LIST OF MODEL NAMES EITHER. `.gradient_link_verified`
+  # / `.GRADIENT_VERIFIED_LINKS` recorded which routes had been checked against a
+  # finite difference of their own solve; once every route was, the predicate was
+  # a constant and the `stop()` behind it unreachable -- and that dead branch still
+  # named `$optimise_psi_stem_<curve>()`, which no longer exists. Deleted. What
+  # replaces it is derived, so a curve added in C++ arrives here on its own.
+  expect_identical(phylloptim:::.gradient_models(), c("collar", nms))
+  expect_false(exists(".gradient_link_verified",
+                      where = asNamespace("phylloptim"), inherits = FALSE))
+
+  # Exactly one curve owns `CF77_lambda_`; every other model refuses it, and
+  # nothing else is refused on the single-potential path.
+  for (m in phylloptim:::.gradient_models()) {
+    got <- phylloptim:::.gradient_available_pars(TRUE, m)
+    expect_identical("CF77_lambda_" %in% got, identical(m, "CF77"),
+                     info = m)
   }
 
   # The C++ derivative itself answers for a product curve rather than refusing --
-  # that is the point of the link.
+  # that is the point of the link -- and it is reached by NAME, through the model
+  # the leaf is seated on, with no curve index anywhere.
   l <- leaf_model(supply = leaf_supply_singlelayer())
   set_drivers(l, psi_soil = 1.5, PPFD = 900)
   l$set_model("SOX", "stem"); l$optimise()
-  d <- l$dprofit_dpsi_stem_by(which(nms == "SOX") - 1L, l$opt_psi_stem_)
+  expect_identical(l$model_curve(), "SOX")
+  expect_identical(l$model_route(), "stem")
+  d <- l$dprofit_dpsi_stem_checked(l$opt_psi_stem_)
   expect_length(d, 2L)
   expect_true(is.finite(d[[1]]))
+
+  # ⚠️ AND A STEM METHOD REFUSES ON THE COLLAR ROUTE rather than answering about a
+  # model the leaf is not seated on. This is what the integer argument used to
+  # make unrepresentable-by-accident: an index said which curve, and nothing said
+  # which route.
+  l$set_model("SOX", "collar")
+  expect_error(l$dprofit_dpsi_stem_checked(l$opt_psi_stem_), "STEM-route")
+  expect_error(l$evaluate_psi_stem_at(2.0), "STEM-route")
 })
 
 # --- differentiating a stem model's optimum (plan item 5) --------------------

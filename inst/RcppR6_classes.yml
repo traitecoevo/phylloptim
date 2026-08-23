@@ -75,18 +75,37 @@ Leaf:
       for the model and for how it differs from `plantecophys`, `tealeaves` and
       `bigleaf`.
 
-      Set the drivers with `$set_physiology()`, solve with
-      `$find_root_collar_psi()`, then read the operating point off the object:
-      `$opt_psi_stem_`, `$profit_`, `$assim_colimited_`, `$transpiration_`,
-      `$lambda`, `$g1_eff`.
+      Set the drivers with `$set_physiology()`, solve with `$optimise()`, then
+      read the operating point off the object: `$opt_psi_stem_`, `$profit_`,
+      `$assim_colimited_`, `$transpiration_`, `$lambda`, `$g1_eff`.
+      `$find_root_collar_psi()` is the same solve under the default model, kept
+      because that is what `plant`'s own sources spell.
 
-      A second optimality formulation is available on the single-soil-layer
-      supply path: `$optimise_psi_stem_ProfitMax()` maximises Sperry (2017)'s
-      normalised profit, and `$profitmax_curve()` returns the whole cost, gain
-      and profit curve in one call. `$optimise_psi_stem_TF()` runs the TF24 cost
-      through the same solver, so the two can be compared at identical drivers.
-      These write `$carbon_gain_`, `$hydraulic_cost_norm_` and `$thermal_cost_`,
-      which are unitless and are NOT the same quantities as `$hydraulic_cost_`.
+      **Which model is configuration, not a call argument.** `$set_model(curve,
+      route)` seats it and `$optimise()` takes nothing, because the curves'
+      constants already live on the object -- `$CF77_lambda_` is a field, and
+      `JS22_gamma`, `CMax_a` and `CMax_b` are traits. `curve` is any name from
+      [cost_curve_names()]; `route` is `"collar"` (the full soil-to-collar path,
+      any supply) or `"stem"` (psi_stem with the upstream potential pinned at
+      `psi_soil`, single soil layer only). `$model_curve()` and `$model_route()`
+      report what is seated. The defaults are `"TF24"` and `"collar"`, which is
+      the production path.
+
+      ```r
+      l$set_model("ProfitMax", "stem")
+      l$optimise()
+      ```
+
+      `ProfitMax` writes `$carbon_gain_`, `$hydraulic_cost_norm_` and
+      `$thermal_cost_`, which are unitless and are NOT the same quantities as
+      `$hydraulic_cost_`; `$profitmax_curve()` returns its whole cost, gain and
+      profit curve in one call.
+
+      ⚠️ **`$profit_` carries three kinds of number across the seven curves** --
+      carbon for the four difference objectives, a dimensionless normalised
+      profit for `ProfitMax`, and carbon times a dimensionless factor for the two
+      products. Comparing it BETWEEN curves is not meaningful; comparing each
+      curve's argmax is.
 
       All water potentials are **positive magnitudes in MPa**. There is one
       representation throughout and it is asserted, not documented: a negative
@@ -95,15 +114,19 @@ Leaf:
 
       @param vcmax_25 maximum carboxylation rate at 25 C (umol m^-2 s^-1)
       @param stem_c shape parameter of the STEM hydraulic vulnerability curve (unitless)
-      @param stem_P50 STEM potential at 50\% loss of hydraulic conductivity (MPa, positive magnitude)
+      @param stem_P50 STEM potential at 50% loss of hydraulic conductivity (MPa, positive magnitude)
       @param root_c shape parameter of the ROOT hydraulic vulnerability curve (unitless)
-      @param root_P50 ROOT potential at 50\% loss of hydraulic conductivity (MPa, positive magnitude)
+      @param root_P50 ROOT potential at 50% loss of hydraulic conductivity (MPa, positive magnitude)
       @param TF24_beta2 exponent for the effect of hydraulic risk (unitless)
       @param jmax_25 maximum rate of electron transport at 25 C (umol m^-2 s^-1)
       @param a quantum yield of photosynthetic electron transport (mol mol^-1)
       @param curv_fact_elec_trans curvature factor for the light response curve (unitless)
       @param curv_fact_colim curvature factor for the colimited photosynthesis equation
-      @param GSS_tol_abs absolute tolerance for the golden-section search
+      @param GSS_tol_abs absolute tolerance for the collar route's golden-section
+        FALLBACK, and for the width below which it treats the feasible collar
+        interval as a single point. ⚠️ It does NOT set how well the operating
+        point is determined -- the collar solve root-finds its own first-order
+        condition -- and it does NOT reach the stem route at all.
       @param vulnerability_curve_ncontrol number of control points for the pre-computed vulnerability curves
       @param ci_abs_tol absolute tolerance for root-solving ci
       @param ci_niter maximum number of iterations for root-solving ci
@@ -383,7 +406,7 @@ Leaf:
     # All thirteen reported outputs in ONE call, for the R boundary's benefit.
     #
     # A method rather than an `active` entry because it does a little work (the
-    # uptake sum), and it is bound at all because reading the twelve outputs
+    # uptake sum), and it is bound at all because reading the thirteen outputs
     # through their individual active bindings costs ~15 us -- five times the ~3
     # us solve that produced them (#39). R's operating_point() and leaf_solve()
     # both read it, and test-surface.R asserts it agrees element-for-element
@@ -639,12 +662,37 @@ Leaf:
         own constants are all already on the object. See `set_model()`.
         @export
       return_type: void
-    evaluate_psi_stem_by:
+    # The stem route's two off-solve entry points. Neither names a curve: they
+    # read the one `set_model()` seated, exactly as `optimise()` does, so a
+    # caller never handles an index that means a different model when the
+    # enumeration grows. Both refuse on the collar route.
+    evaluate_psi_stem_at:
+      roxygen: |
+        Evaluate the leaf at a prescribed psi_stem, rather than optimising one.
+
+        Uses the model `set_model()` seated, so seat a STEM route first. Leaves
+        the same outputs a solve would and returns `profit_`.
+        @param target_psi_stem stem water potential to evaluate at, MPa as a
+          positive magnitude. Clamped into `[psi_soil, psi_crit]`; compare the
+          resulting `$opt_psi_stem_` with what you asked for to detect it.
+        @export
       return_type: double
-      args: [curve: int, target_psi_stem: double]
-    dprofit_dpsi_stem_by:
+      args: [target_psi_stem: double]
+    dprofit_dpsi_stem_checked:
+      roxygen: |
+        dprofit/dpsi_stem at a given stem potential, with its feasibility.
+
+        Uses the model `set_model()` seated, so seat a STEM route first.
+
+        ⚠️ **Returns `c(dprofit, feasible)`, and the second entry is not
+        optional.** The derivative is a hard `0.0` SENTINEL on the shut-down and
+        reversed-gradient exits, which is indistinguishable from a stationary
+        point; a composite that reads the value without the flag reports the
+        shut-down state as the optimum.
+        @param psi_stem stem water potential, MPa as a positive magnitude
+        @export
       return_type: "std::vector<double>"
-      args: [curve: int, psi_stem: double]
+      args: [psi_stem: double]
 
     # --- Sperry (2017) ProfitMax with BOTH terms normalised -------------------
     #

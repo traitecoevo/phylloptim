@@ -208,12 +208,12 @@ void Leaf__optimise(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
   obj_->optimise();
 }
 // [[Rcpp::export]]
-double Leaf__evaluate_psi_stem_by(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int curve, double target_psi_stem) {
-  return obj_->evaluate_psi_stem_by(curve, target_psi_stem);
+double Leaf__evaluate_psi_stem_at(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double target_psi_stem) {
+  return obj_->evaluate_psi_stem_at(target_psi_stem);
 }
 // [[Rcpp::export]]
-std::vector<double> Leaf__dprofit_dpsi_stem_by(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int curve, double psi_stem) {
-  return obj_->dprofit_dpsi_stem_by(curve, psi_stem);
+std::vector<double> Leaf__dprofit_dpsi_stem_checked(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem) {
+  return obj_->dprofit_dpsi_stem_checked(psi_stem);
 }
 // [[Rcpp::export]]
 double Leaf__thermal_cost_at(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double leaf_temp) {

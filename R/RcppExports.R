@@ -205,12 +205,12 @@ Leaf__optimise <- function(obj_) {
     invisible(.Call('_phylloptim_Leaf__optimise', PACKAGE = 'phylloptim', obj_))
 }
 
-Leaf__evaluate_psi_stem_by <- function(obj_, curve, target_psi_stem) {
-    .Call('_phylloptim_Leaf__evaluate_psi_stem_by', PACKAGE = 'phylloptim', obj_, curve, target_psi_stem)
+Leaf__evaluate_psi_stem_at <- function(obj_, target_psi_stem) {
+    .Call('_phylloptim_Leaf__evaluate_psi_stem_at', PACKAGE = 'phylloptim', obj_, target_psi_stem)
 }
 
-Leaf__dprofit_dpsi_stem_by <- function(obj_, curve, psi_stem) {
-    .Call('_phylloptim_Leaf__dprofit_dpsi_stem_by', PACKAGE = 'phylloptim', obj_, curve, psi_stem)
+Leaf__dprofit_dpsi_stem_checked <- function(obj_, psi_stem) {
+    .Call('_phylloptim_Leaf__dprofit_dpsi_stem_checked', PACKAGE = 'phylloptim', obj_, psi_stem)
 }
 
 Leaf__thermal_cost_at <- function(obj_, leaf_temp) {
@@ -1023,8 +1023,8 @@ Leaf__H2O_CO2_stom_diff_ratio___set <- function(obj_, value) {
 
 #' The differentiable parameters, in the order C++ indexes them
 #'
-#' The fourteen [leaf_traits()] in `set_traits()`'s argument order, then
-#' `leaf_specific_conductance_max` and `resistance`. Exported so that R's own
+#' The fifteen [leaf_traits()] in `set_traits()`'s argument order, then
+#' `leaf_specific_conductance_max`, `resistance` and `CF77_lambda_`. Exported so that R's own
 #' copy of this order can be compared against it in a test: R passes integer
 #' positions into this enumeration, so appending to it is safe and reordering it
 #' would silently differentiate the wrong parameter.
@@ -1046,7 +1046,7 @@ gradient_par_names <- function() {
 #' is safe and reordering the enumeration would silently solve a different model.
 #'
 #' @return A character vector of curve names.
-#' @seealso [cost_curve_has_derivative()], [leaf_gradient()]
+#' @seealso [leaf_gradient()], [leaf_gradient_batch()]
 #' @examples
 #' cost_curve_names()
 #' @export

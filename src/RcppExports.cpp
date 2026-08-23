@@ -674,29 +674,27 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
-// Leaf__evaluate_psi_stem_by
-double Leaf__evaluate_psi_stem_by(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int curve, double target_psi_stem);
-RcppExport SEXP _phylloptim_Leaf__evaluate_psi_stem_by(SEXP obj_SEXP, SEXP curveSEXP, SEXP target_psi_stemSEXP) {
+// Leaf__evaluate_psi_stem_at
+double Leaf__evaluate_psi_stem_at(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double target_psi_stem);
+RcppExport SEXP _phylloptim_Leaf__evaluate_psi_stem_at(SEXP obj_SEXP, SEXP target_psi_stemSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
-    Rcpp::traits::input_parameter< int >::type curve(curveSEXP);
     Rcpp::traits::input_parameter< double >::type target_psi_stem(target_psi_stemSEXP);
-    rcpp_result_gen = Rcpp::wrap(Leaf__evaluate_psi_stem_by(obj_, curve, target_psi_stem));
+    rcpp_result_gen = Rcpp::wrap(Leaf__evaluate_psi_stem_at(obj_, target_psi_stem));
     return rcpp_result_gen;
 END_RCPP
 }
-// Leaf__dprofit_dpsi_stem_by
-std::vector<double> Leaf__dprofit_dpsi_stem_by(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int curve, double psi_stem);
-RcppExport SEXP _phylloptim_Leaf__dprofit_dpsi_stem_by(SEXP obj_SEXP, SEXP curveSEXP, SEXP psi_stemSEXP) {
+// Leaf__dprofit_dpsi_stem_checked
+std::vector<double> Leaf__dprofit_dpsi_stem_checked(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem);
+RcppExport SEXP _phylloptim_Leaf__dprofit_dpsi_stem_checked(SEXP obj_SEXP, SEXP psi_stemSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
-    Rcpp::traits::input_parameter< int >::type curve(curveSEXP);
     Rcpp::traits::input_parameter< double >::type psi_stem(psi_stemSEXP);
-    rcpp_result_gen = Rcpp::wrap(Leaf__dprofit_dpsi_stem_by(obj_, curve, psi_stem));
+    rcpp_result_gen = Rcpp::wrap(Leaf__dprofit_dpsi_stem_checked(obj_, psi_stem));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -3072,8 +3070,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__model_curve", (DL_FUNC) &_phylloptim_Leaf__model_curve, 1},
     {"_phylloptim_Leaf__model_route", (DL_FUNC) &_phylloptim_Leaf__model_route, 1},
     {"_phylloptim_Leaf__optimise", (DL_FUNC) &_phylloptim_Leaf__optimise, 1},
-    {"_phylloptim_Leaf__evaluate_psi_stem_by", (DL_FUNC) &_phylloptim_Leaf__evaluate_psi_stem_by, 3},
-    {"_phylloptim_Leaf__dprofit_dpsi_stem_by", (DL_FUNC) &_phylloptim_Leaf__dprofit_dpsi_stem_by, 3},
+    {"_phylloptim_Leaf__evaluate_psi_stem_at", (DL_FUNC) &_phylloptim_Leaf__evaluate_psi_stem_at, 2},
+    {"_phylloptim_Leaf__dprofit_dpsi_stem_checked", (DL_FUNC) &_phylloptim_Leaf__dprofit_dpsi_stem_checked, 2},
     {"_phylloptim_Leaf__thermal_cost_at", (DL_FUNC) &_phylloptim_Leaf__thermal_cost_at, 2},
     {"_phylloptim_Leaf__prepare_profitmax", (DL_FUNC) &_phylloptim_Leaf__prepare_profitmax, 1},
     {"_phylloptim_Leaf__profit_psi_stem_ProfitMax", (DL_FUNC) &_phylloptim_Leaf__profit_psi_stem_ProfitMax, 3},

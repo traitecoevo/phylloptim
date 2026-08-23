@@ -7,11 +7,14 @@
 #
 # Two things it is for:
 #
-#   1. Separating traits from tolerances. The C++ constructor takes 17 positional
+#   1. Separating traits from tolerances. The C++ constructor takes 15 positional
 #      arguments and four of them -- GSS_tol_abs, ci_abs_tol, ci_niter,
 #      vulnerability_curve_ncontrol -- are numerical settings sitting among the
-#      physiology. A trait-calibration loop should not have to know which of 19
-#      arguments are not traits. `leaf_traits()` and `leaf_control()` split them.
+#      physiology. A trait-calibration loop should not have to know which four of
+#      the fifteen are not traits. `leaf_traits()` and `leaf_control()` split
+#      them -- and four more traits (R_d_25, JS22_gamma, CMax_a, CMax_b) are not
+#      constructor arguments at all and have to be assigned afterwards, which is
+#      the second thing a caller should not have to know.
 #   2. A one-call entry point. `leaf_solve()` takes drivers and returns a
 #      data.frame, which is the shape someone reaching for plantecophys expects.
 
@@ -68,39 +71,42 @@
 ##' `phylloptim::Leaf`'s default constructor uses.
 ##'
 ##' @section Two vulnerability curves, not one:
-##' `stem_b`/`stem_c` describe the STEM Weibull curve, which drives the
-##' hydraulic cost; `root_b`/`root_c` describe the ROOT curve, which drives
+##' `stem_P50`/`stem_c` describe the STEM Weibull curve, which drives the
+##' hydraulic cost; `root_P50`/`root_c` describe the ROOT curve, which drives
 ##' uptake. They are separate parameters with separate meanings and they are
 ##' named accordingly, because they were once an unmarked `b`/`c` pair alongside
 ##' `root_b`/`root_c` and an analysis used the root parameters for the stem cost.
 ##'
-##' @section psi_crit is not a free trait:
-##' `psi_crit` looks independent of `stem_b`/`stem_c` and is not. The stem
-##' vulnerability curve is pre-integrated over `[0, P99]`, where
-##' `P99 = stem_b * log(100)^(1/stem_c)` is derived from those two alone, and every
-##' solve evaluates the curve *at* `psi_crit` -- so a `psi_crit` past `P99` is not a
-##' configuration that sometimes works, and [leaf_model()] refuses it.
+##' Each curve has exactly TWO settable numbers. `stem_b`, `psi_crit`, `root_b`
+##' and `root_psi_crit` are quantiles of the curve those two define -- readable on
+##' the resulting `Leaf` and not settable anywhere. See [weibull_p50_c()].
 ##'
-##' What the defaults say is that `psi_crit` is **P95** of the same curve:
+##' @section psi_crit is not a free trait:
+##' `psi_crit` is the stem curve's **P95** and is derived from `stem_P50`/`stem_c`,
+##' not set. It used to be settable, describing a curve it was not derived from:
+##' the curve is pre-integrated over `[0, P99]`, `psi_crit` never entered that
+##' bound, and every solve evaluates the curve *at* `psi_crit` -- so anyone fitting
+##' a measured vulnerability curve picked a plausible number and got a domain error
+##' naming only the interpolator.
+##'
+##' At the defaults:
 ##'
 ##' ```
 ##' stem_b = 3.898245, stem_c = 2.680147
 ##' 3.898245 * log(1/0.05)^(1/2.680147) = 5.870283 = psi_crit
 ##' ```
 ##'
-##' to six decimal places, against `P99 = 6.891842`. So the two move together: a
-##' species whose measured vulnerability curve gives a different `stem_b`/`stem_c`
-##' needs a `psi_crit` derived from that curve, not one carried over from these
-##' defaults. `vignette("fitting")` derives `stem_b`/`stem_c` from a published
-##' P50/P88 pair, which is the right way round.
+##' to six decimal places, against `P99 = 6.891842`. Both move with the pair, so
+##' there is nothing left to set inconsistently. `vignette("fitting")` derives the
+##' pair from a published P50/P88 pair, which is the right way round.
 ##'
 ##' @param vcmax_25 maximum carboxylation rate at 25 C (umol m^-2 s^-1)
 ##' @param stem_c shape parameter of the stem vulnerability curve (unitless)
-##' @param stem_P50 stem potential at 50\% loss of conductivity (MPa, positive
+##' @param stem_P50 stem potential at 50% loss of conductivity (MPa, positive
 ##'   magnitude). `stem_b` and `psi_crit` are derived from this pair and are
 ##'   readable but not settable on the resulting `Leaf`.
 ##' @param root_c shape parameter of the root vulnerability curve (unitless)
-##' @param root_P50 root potential at 50\% loss of conductivity (MPa, positive
+##' @param root_P50 root potential at 50% loss of conductivity (MPa, positive
 ##'   magnitude), with `root_b` and `root_psi_crit` derived from it.
 ##' @param TF24_beta2 exponent for the effect of hydraulic risk (unitless)
 ##' @param jmax_25 maximum electron transport rate at 25 C (umol m^-2 s^-1)
@@ -198,21 +204,21 @@ leaf_traits <- function(vcmax_25 = 96,
 ##' caller produce non-finite photosynthetic parameters and get NaNs back with no
 ##' indication of why.
 ##'
-##' @param GSS_tol_abs absolute tolerance for the golden-section search over
-##'   stem water potential. ⚠️ **This does not set how well the operating point is
-##'   determined.** The collar solve
-##'   solves its own first-order condition to about `1e-12` instead of searching
-##'   profit to `GSS_tol_abs`, so changing this leaves the answer bit-identical on
-##'   the production path. What it still does, and it is less than the name
-##'   suggests: it is read in exactly two places, both on the collar path -- the
-##'   width below which the feasible collar interval is treated as a single point,
-##'   and the tolerance of the golden-section FALLBACK used when neither bracket
-##'   endpoint has a usable gradient.
+##' @param GSS_tol_abs absolute tolerance for a golden-section search over stem
+##'   water potential. ⚠️ **This does not set how well the operating point is
+##'   determined.** Every solver in the package now root-finds its own first-order
+##'   condition instead of searching the objective, so changing this leaves the
+##'   answer bit-identical on the production path. What it still does, and it is
+##'   less than the name suggests: it is read in exactly two places, both on the
+##'   COLLAR route -- the width below which the feasible collar interval is treated
+##'   as a single point, and the tolerance of the golden-section FALLBACK used when
+##'   neither bracket endpoint has a usable gradient (no driver sweep has reached
+##'   that fallback).
 ##'
-##'   ⚠️ **It does NOT reach the `optimise_psi_stem_*` optimisers.** They maximise
-##'   over a closed interval and refine within a scan cell to `(cell width) * 1e-4`,
-##'   which is hardcoded and not settable from here. Tightening this to sharpen a
-##'   stem-route argmax does nothing at all.
+##'   ⚠️ **It does not reach the stem route at all.** That refines by a root-find
+##'   on `dJ/dpsi == 0` at a hardcoded tolerance; the `(cell width) * 1e-4` figure
+##'   is its own golden-section fallback, not its normal path. Tightening this to
+##'   sharpen a stem-route argmax does nothing.
 ##' @param vulnerability_curve_ncontrol number of control points used to
 ##'   pre-integrate the two Weibull vulnerability curves into splines. Higher is
 ##'   more accurate and slower to construct; it does not affect solve speed.
@@ -389,13 +395,15 @@ leaf_supply_multilayer <- function() {
 ##' Build a leaf
 ##'
 ##' The recommended way to construct a leaf. [Leaf()] is the raw C++ constructor,
-##' with all seventeen arguments positional and no defaults; this splits them into
-##' traits and numerical settings, defaults both, and initialises the integrator.
+##' with all fifteen arguments positional and no defaults; this splits them into
+##' traits and numerical settings, defaults both, assigns the four traits the
+##' constructor does not take, and initialises the integrator.
 ##'
-##' The result is a stateful R6 object: set drivers with [set_drivers()], solve
-##' with `$find_root_collar_psi()`, then read the operating point off the object
-##' or with [operating_point()]. For a single solve you probably want
-##' [leaf_solve()] instead, which does all of that in one call.
+##' The result is a stateful R6 object: set drivers with [set_drivers()], choose a
+##' model with `$set_model()` if you want one other than the default, solve with
+##' `$optimise()`, then read the operating point off the object or with
+##' [operating_point()]. For a single solve you probably want [leaf_solve()]
+##' instead, which does all of that in one call.
 ##'
 ##' @param traits a [leaf_traits()] object
 ##' @param control a [leaf_control()] object
@@ -408,7 +416,7 @@ leaf_supply_multilayer <- function() {
 ##' @examples
 ##' l <- leaf_model()
 ##' set_drivers(l, psi_soil = 2.0, PPFD = 900)
-##' l$find_root_collar_psi()
+##' l$optimise()
 ##' operating_point(l)
 ##' @export
 leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
@@ -737,14 +745,14 @@ set_drivers <- function(x,
 
 ##' The solved operating point, as one row
 ##'
-##' Reads the outputs off a leaf that has been solved. Call after
-##' `$find_root_collar_psi()`; before that the values are the missing-value
-##' sentinels the object was constructed with.
+##' Reads the outputs off a leaf that has been solved. Call after `$optimise()`;
+##' before that the values are the missing-value sentinels the object was
+##' constructed with.
 ##'
 ##' Costs about 4 µs, so it is usable in a loop. It was 180 µs until it stopped
-##' reading the twelve outputs through twelve separate calls into C++ and stopped
-##' building its one row with `data.frame()` (#39) -- 45× more than the ~3 µs
-##' solve it was reporting on.
+##' reading the thirteen outputs through thirteen separate calls into C++ and
+##' stopped building its one row with `data.frame()` (#39) -- 45× more than the
+##' ~3 µs solve it was reporting on.
 ##'
 ##' @param x a solved `Leaf`
 ##' @return A one-row data.frame.
@@ -752,7 +760,7 @@ set_drivers <- function(x,
 ##' @examples
 ##' l <- leaf_model()
 ##' set_drivers(l, psi_soil = 2.0, PPFD = 900)
-##' l$find_root_collar_psi()
+##' l$optimise()
 ##' operating_point(l)
 ##' @export
 operating_point <- function(x) {
@@ -766,7 +774,7 @@ operating_point <- function(x) {
   # ⚠️ Built directly rather than through data.frame(), which costs 158 us
   # against 2 us for this -- on a function called once per solved point, to
   # report a 3 us solve. What data.frame() spends it on is checking and recycling
-  # twelve arguments that are already twelve length-1 doubles by construction.
+  # thirteen arguments that are already thirteen length-1 doubles by construction.
   # The result is `identical()` to what data.frame() returned, which
   # test-surface.R asserts rather than assumes; note row.names has to be the
   # integer 1L and not 1.0, or it would not be.
@@ -843,7 +851,7 @@ operating_point <- function(x) {
 ##'
 ##' Two consequences, both the opposite of what you might expect:
 ##'
-##' * **This is the fast path, not the convenient-but-slow one.** It is within 6\%
+##' * **This is the fast path, not the convenient-but-slow one.** It is within 6%
 ##'   of building a `Leaf` yourself and looping `set_drivers()` +
 ##'   `$find_root_collar_psi()` + [operating_point()]. Reaching into the object
 ##'   saves about 1 µs a row and is worth doing for access to intermediate state,
@@ -855,7 +863,8 @@ operating_point <- function(x) {
 ##'   itself, which means C++.
 ##'
 ##' `reuse = TRUE` is the default because constructing a `Leaf` from R costs
-##' ~204 µs, some 70 solves, and only ~32 µs of that is the two vulnerability
+##' about **180x a trivial `.Call`** (~230 µs where this was measured), or 45
+##' solves, and only ~32 µs of that is the two vulnerability
 ##' splines; the rest is R-side object construction. See [set_traits()] for
 ##' varying traits without reconstructing, and note it costs 21.8 µs rather than
 ##' 0.02 µs when the trait you change owns a vulnerability spline.
@@ -876,6 +885,24 @@ operating_point <- function(x) {
 ##'   (the default) or [leaf_supply_singlelayer()]. On the single-potential path
 ##'   `soil_depth` and `root_network` must be omitted, and each `psi_soil` is one
 ##'   value rather than a profile.
+##' @param model which optimality model to solve, as in [leaf_gradient()]:
+##'   `"collar"` (the default, the production path -- the TF24 cost maximised over
+##'   the root-collar potential) or any name from [cost_curve_names()], which
+##'   solves that curve's **stem** optimum instead: `psi_stem` with the upstream
+##'   potential pinned at `psi_soil`, which needs `leaf_supply_singlelayer()`.
+##'
+##'   ⚠️ **`"collar"` and `"TF24"` are different models, not two ways of asking
+##'   one question**, even though both use the TF24 cost. They optimise different
+##'   variables over different supply topologies and disagree on 20 of 30 driver
+##'   rows.
+##'
+##'   ⚠️ **On a stem route the `collar` column comes back non-finite**, because
+##'   the collar is not solved for at all. An absent number is the truthful answer
+##'   rather than a gap -- reading one would be reading whatever the last solve
+##'   left behind.
+##'
+##'   `CF77` needs `$CF77_lambda_`, which has no default and is not reachable
+##'   through this function; build the leaf with [leaf_model()] and set it.
 ##' @param reuse solve every row with one `Leaf` object (`TRUE`) or construct a
 ##'   fresh one per row (`FALSE`, the default). Reuse is faster because the two
 ##'   vulnerability splines are built once, and it is safe -- every exit from the
@@ -898,6 +925,10 @@ operating_point <- function(x) {
 ##'
 ##' # two three-layer profiles
 ##' leaf_solve(psi_soil = list(c(1, 1.5, 2), c(3, 3.5, 4)), PPFD = 900)
+##'
+##' # a different optimality model, on the single-potential path it needs
+##' leaf_solve(psi_soil = 1.5, PPFD = 900, model = "SOX",
+##'            supply = leaf_supply_singlelayer())
 ##' @export
 leaf_solve <- function(psi_soil,
                        PPFD = 900,
@@ -912,7 +943,9 @@ leaf_solve <- function(psi_soil,
                        traits = leaf_traits(),
                        control = leaf_control(),
                        supply = leaf_supply_multilayer(),
-                       reuse = TRUE) {
+                       reuse = TRUE,
+                       model = "collar") {
+  .check_model(model, supply)
   layered <- .as_layer_list(psi_soil, "psi_soil")
   scalars <- list(PPFD = PPFD, atm_vpd = atm_vpd, ca = ca,
                   leaf_temp = leaf_temp, atm_o2_kpa = atm_o2_kpa,
@@ -943,7 +976,8 @@ leaf_solve <- function(psi_soil,
     .recycle_to(root_network, n, "root_network")
   }
 
-  shared <- if (reuse) leaf_model(traits, control, supply) else NULL
+  shared <- if (reuse) .seat_model(leaf_model(traits, control, supply), model)
+            else NULL
 
   # ⚠️ COLUMNWISE, AND THAT IS MOST OF THE PERFORMANCE STORY OF THIS FUNCTION.
   # It used to build a one-row data.frame of drivers per row, cbind an
@@ -959,7 +993,7 @@ leaf_solve <- function(psi_soil,
   # vectors from the recycling above, the outputs go into one matrix, and there
   # is exactly one data.frame() call, at the end. Its ~105 us is a per-CALL cost
   # rather than a per-row one, which is why it is still data.frame(): at n = 1 it
-  # is invisible beside the 204 us of constructing the Leaf.
+  # is invisible beside the ~230 us of constructing the Leaf.
   outputs <- matrix(NA_real_, nrow = n, ncol = length(.operating_point_names),
                     dimnames = list(NULL, .operating_point_names))
 
@@ -971,7 +1005,8 @@ leaf_solve <- function(psi_soil,
   # built; see with_phylloptim_conditions() for why not yet.
   with_phylloptim_conditions(
   for (i in seq_len(n)) {
-    l <- if (reuse) shared else leaf_model(traits, control, supply)
+    l <- if (reuse) shared else .seat_model(leaf_model(traits, control, supply),
+                                            model)
     set_drivers(l,
                 psi_soil = layered[[i]],
                 PPFD = scalars$PPFD[[i]],
@@ -985,7 +1020,7 @@ leaf_solve <- function(psi_soil,
                 leaf_temp = scalars$leaf_temp[[i]],
                 atm_o2_kpa = scalars$atm_o2_kpa[[i]],
                 atm_kpa = scalars$atm_kpa[[i]])
-    l$find_root_collar_psi()
+    l$optimise()
     outputs[i, ] <- l$operating_point_values()
   })
 
@@ -1003,6 +1038,40 @@ leaf_solve <- function(psi_soil,
 }
 
 # --- internals ---------------------------------------------------------------
+
+# Validate a model name against the supply path, and seat it. Two functions
+# because the check has to run before anything is built -- an unknown name should
+# not cost a Leaf construction first -- while the seating needs the object.
+#
+# ⚠️ THE SAME REGISTRY `leaf_gradient()` USES, and deliberately not a second list.
+# `.gradient_models()` is derived from `cost_curve_names()`, so a curve added in
+# C++ becomes solvable here without an edit, and the two entry points cannot
+# disagree about which names exist or explain a rejection differently.
+.check_model <- function(model, supply) {
+  if (!(is.character(model) && length(model) == 1L)) {
+    stop("`model` must be a single model name; see cost_curve_names()",
+         call. = FALSE)
+  }
+  if (!(model %in% .gradient_models())) {
+    stop("unknown model \"", model, "\". Available: ",
+         paste(.gradient_models(), collapse = ", "), ".", call. = FALSE)
+  }
+  if (!identical(model, "collar") && !identical(supply$kind, "single")) {
+    stop("the stem routes optimise `psi_stem` with the upstream potential ",
+         "pinned at `psi_soil`, so they need the single-potential supply path; ",
+         "got the multi-layer one. Use model = \"collar\" for a root network.",
+         call. = FALSE)
+  }
+  invisible(model)
+}
+
+# `set_model()` is CONFIGURATION -- it survives set_drivers() and set_traits() --
+# so this runs once per Leaf rather than once per row.
+.seat_model <- function(x, model) {
+  x$set_model(if (identical(model, "collar")) "TF24" else model,
+              if (identical(model, "collar")) "collar" else "stem")
+  x
+}
 
 .check_scalars <- function(x, what) {
   bad <- names(x)[!vapply(x, function(v) {

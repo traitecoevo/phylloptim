@@ -42,8 +42,9 @@
 ##' because it is an `RcppR6` `list:` class and every crossing rebuilds a
 ##' five-element named list. Converting 1,327 of them per likelihood evaluation
 ##' would cost ~80 ms and swamp the ~13 ms of gradient it was carrying. The same
-##' argument applies to the `Leaf`: constructing one from R costs ~204 µs, about
-##' 70 solves, so a fit builds it once here rather than once per gradient (#52).
+##' argument applies to the `Leaf`: constructing one from R costs about **180x a
+##' trivial `.Call`**, or 45 solves, so a fit builds it once here rather than once
+##' per gradient (#52).
 ##'
 ##' ⚠️ **The result holds a C++ pointer, so it does not survive `saveRDS()` or a
 ##' new session.** Rebuild it rather than restoring it; [leaf_gradient_batch()]
@@ -214,7 +215,7 @@ print.leaf_batch <- function(x, ...) {
 ##'
 ##' @section Speed, and which side of the boundary the figure belongs to:
 ##' A four-parameter gradient costs ~237 µs per observation through
-##' [leaf_gradient()], of which the model work — two solves — is 6 µs, or 1.5\%.
+##' [leaf_gradient()], of which the model work — two solves — is 6 µs, or 1.5%.
 ##' Everything else is dispatch and the R interpreter. The C++ composite runs at
 ##' ~1.8 µs per trait, so the same gradient is order 10 µs here.
 ##'
@@ -321,11 +322,15 @@ leaf_gradient_batch <- function(batch,
   }
   .gradient_check_pars(pars, single, model)
 
-  # ⚠️ THE SAME ROUTE OBJECT `leaf_gradient()` USES, on the batch's own leaf, so the
-  # two entry points cannot disagree about which model a name selects or which
-  # step differencing its solve needs. It is built for its side effects on the
-  # settings below rather than to be called: the loop lives in C++.
+  # ⚠️ THE SAME ROUTE OBJECT `leaf_gradient()` USES, on the batch's own leaf, so
+  # the two entry points cannot disagree about which model a name selects, which
+  # step differencing its solve needs, or which supply path it requires. It is
+  # built for its VALIDATION and for `fd_step` rather than to be called: the loop
+  # lives in C++, and `gradient::route_seat` seats the model there.
   route <- .gradient_route(batch$leaf, model, list(kind = batch$supply_kind))
+  # The one place an integer curve index survives, and it does not cross the R
+  # surface: `gradient::Settings::curve` is C++-internal, with -1 for the collar
+  # route. R callers name a model; C++ turns the name back into a `CostCurve`.
   curve <- if (identical(model, .GRADIENT_COLLAR_ROUTE)) {
     -1L
   } else {
@@ -335,7 +340,7 @@ leaf_gradient_batch <- function(batch,
   # to put it back. The flag says RE-SOLVE it rather than hold it: `|A|max` is found
   # by a root-find now, so letting it follow the traits makes the composite a total
   # derivative. The name is a leftover; the value is a boolean in disguise.
-  pinned <- if (identical(model, "ProfitMax")) 1 else 0
+  reseat_profitmax <- if (identical(model, "ProfitMax")) 1 else 0
 
   if (is.null(theta)) {
     if (is.null(traits)) {
@@ -363,7 +368,8 @@ leaf_gradient_batch <- function(batch,
   res <- with_phylloptim_conditions(gradient_batch_run(batch$leaf, batch$drivers, theta,
                             match(pars, par_names) - 1L, step,
                             stationarity_tol, method, fast_stem_curve,
-                            psi, dpsi_dtheta, curve, route$fd_step, pinned))
+                            psi, dpsi_dtheta, curve, route$fd_step,
+                            reseat_profitmax))
 
   dimnames(res$gradient) <- list(NULL, pars, .gradient_output_names())
   dimnames(res$value) <- list(NULL, .gradient_output_names())
