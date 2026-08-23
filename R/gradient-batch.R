@@ -331,19 +331,11 @@ leaf_gradient_batch <- function(batch,
   } else {
     as.integer(match(model, cost_curve_names()) - 1L)
   }
-  # ProfitMax's normaliser is scanned, and `apply()` clears it at every
-  # perturbation. Seed it from a base solve so C++ can hold it fixed -- the same
-  # partial-at-fixed-normaliser the one-observation route reports.
-  pinned <- 0
-  if (identical(model, "ProfitMax")) {
-    route$solve()
-    pinned <- batch$leaf$profitmax_A_max
-  }
-  # ⚠️ `auto` differences the solve for ProfitMax, for the reason ?leaf_gradient
-  # gives: its two methods answer different questions and a fit needs the total.
-  if (identical(method, "auto") && identical(model, "ProfitMax")) {
-    method <- "fd"
-  }
+  # ProfitMax's normaliser is cleared by `apply()` at every perturbation, so C++ has
+  # to put it back. The flag says RE-SOLVE it rather than hold it: `|A|max` is found
+  # by a root-find now, so letting it follow the traits makes the composite a total
+  # derivative. The name is a leftover; the value is a boolean in disguise.
+  pinned <- if (identical(model, "ProfitMax")) 1 else 0
 
   if (is.null(theta)) {
     if (is.null(traits)) {

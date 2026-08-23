@@ -198,7 +198,7 @@ Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_,
   settings.fast_stem_curve = fast_stem_curve;
   settings.curve = curve;
   settings.fd_step = fd_step;
-  settings.pinned_A_max = pinned_A_max;
+  settings.resolve_profitmax = pinned_A_max > 0.0;
   if (method == "auto") {
     settings.method = phylloptim::gradient::Method::Auto;
   } else if (method == "ift") {

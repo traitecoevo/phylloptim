@@ -136,16 +136,14 @@ set_traits <- function(x, traits) {
 ##' number is the truthful answer rather than a gap -- reading one would be reading
 ##' state from whichever solve ran last.
 ##'
-##' ⚠️ **`ProfitMax` is the one route where `method = "auto"` differences the
-##' solve, and the reason is its normaliser.** Every other route now root-finds
-##' `dJ/dpsi == 0`, so an interior optimum is classified `interior` and the
-##' composite is used. ProfitMax normalises by `|A|max`, whose argmax comes from a
-##' 500-point scan of the supply stream and is therefore piecewise constant in the
-##' parameters -- the composite holds it fixed and returns a PARTIAL, while
-##' differencing the solve lets the scan re-run and returns the TOTAL. A fit needs
-##' the total, so `auto` picks it. It no longer needs a coarser step for this:
-##' `|A|max` is found by a root-find rather than a scan, so the difference is flat
-##' from 1e-02 to 1e-06 and every route uses 1e-06.
+##' **Every route reaches the composite under `method = "auto"`, and every route
+##' uses the same finite-difference step (1e-06).** Both were once untrue.
+##' `ProfitMax` normalises by `|A|max`, and while that came from a 500-point scan
+##' its argmax was piecewise constant in the parameters -- so the composite had to
+##' pin it and returned a PARTIAL (0.0766 against a true 0.0579), and differencing
+##' needed a step large enough to cross a scan cell. `|A|max` is found by a
+##' root-find now, so it is re-solved per perturbation, the composite returns the
+##' TOTAL, and no model carries that split.
 ##'
 ##' ⚠️ **A zero column for another curve's parameter means two different things,
 ##' and they are not distinguishable from the number.** On a `collar` or `TF24`
@@ -728,7 +726,7 @@ leaf_gradient <- function(psi_soil,
   # available for anyone who wants the partial deliberately.
   #
   # No other curve has this split -- for TF24 the two agree to 0.0%.
-  auto_ift <- identical(status, "interior") && !identical(model, "ProfitMax")
+  auto_ift <- identical(status, "interior")
   use_ift <- if (prescribed) !clamped && feasible else switch(method,
                     auto = auto_ift,
                     ift = TRUE,
@@ -956,25 +954,20 @@ leaf_gradient <- function(psi_soil,
   }
   code <- k - 1L
 
-  # ⚠️ ProfitMax NEEDS ITS NORMALISER PINNED, and this is the only route that
-  # carries state a perturbation destroys. `|A|max` comes from a scan over the
-  # supply stream; `set_traits` + `set_physiology` clears it (measured: 16.757 ->
-  # NaN), so without this every ProfitMax gradient is NaN.
+  # ⚠️ ProfitMax RE-SOLVES ITS NORMALISER RATHER THAN PINNING IT, and that is what
+  # makes the composite a TOTAL derivative. `|A|max` is state a perturbation
+  # destroys -- `set_traits` + `set_physiology` clears it, measured 16.757 -> NaN --
+  # so something has to put it back before every read.
   #
-  # Captured at the base solve and re-seeded before every later read, so the
-  # gradient is the PARTIAL at fixed normaliser -- which is the right quantity
-  # rather than a convenient one, because a scan's argmax is piecewise constant in
-  # the traits and a total derivative through it is zeros and jumps.
-  #
-  # ⚠️ `prepare_profitmax_at()` refreshes `k_soil`/`k_span` while pinning only
-  # `|A|max`. Those two ARE analytic in the traits, so freezing them as well would
-  # drop real terms from the gradient.
+  # It used to be PINNED at the base point, for a reason that has since been fixed:
+  # `|A|max` was the argmax of a 500-point scan, so it was piecewise constant in the
+  # traits and a total derivative through it was zeros and jumps. It is found by a
+  # root-find now, and cheaply (it sits at the dry bound on 1318 of 1320 driver
+  # rows), so re-solving it lets it follow the traits -- which is the quantity a fit
+  # needs, and removes the partial-versus-total split this route used to carry.
   pinned <- if (identical(model, "ProfitMax")) {
-    A_base <- NULL
-    list(
-      capture = function() A_base <<- l$profitmax_A_max,
-      reseat = function() if (!is.null(A_base)) l$prepare_profitmax_at(A_base)
-    )
+    list(capture = function() invisible(NULL),
+         reseat = function() l$prepare_profitmax())
   } else {
     list(capture = function() invisible(NULL), reseat = function() invisible(NULL))
   }

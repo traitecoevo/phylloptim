@@ -339,7 +339,10 @@ struct Settings {
   double fd_step = 1e-6;
   // |A|max held fixed across perturbations, for ProfitMax's `Scaled` link. Zero
   // means "not pinned"; the caller seeds it from the base solve.
-  double pinned_A_max = 0.0;
+  // ProfitMax only: re-solve `|A|max` after each perturbation, because `apply()`
+  // clears it. Named for what it does rather than for a value to hold, since
+  // holding one is exactly what made this a partial derivative.
+  bool resolve_profitmax = false;
 };
 
 // A collar potential the caller imposes, in place of the one `at` would solve
@@ -543,12 +546,14 @@ inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
       double* dst = side == 0 ? up : dn;
       // Evaluate first, then read dprofit at the same fixed collar -- R's order,
       // and `evaluate_root_collar_psi` is what seats the state `dprofit` reads.
-      if (s.pinned_A_max > 0.0) {
-        // ProfitMax's normaliser comes from a scan, so `apply()` above cleared it.
-        // Re-seat the analytic parts and hold |A|max at the base point: that is
-        // what makes this the PARTIAL at fixed normaliser rather than a total
-        // derivative through a piecewise-constant argmax.
-        l.prepare_profitmax_at(s.pinned_A_max);
+      if (s.resolve_profitmax) {
+        // `apply()` above cleared ProfitMax's normaliser, so it has to be put back
+        // before anything reads the objective. RE-SOLVED, not pinned at the base
+        // point: |A|max is found by a root-find now rather than by a scan, so it is
+        // differentiable in the traits and letting it follow them makes this the
+        // TOTAL derivative -- which is what a fit needs. Must match R/gradient.R's
+        // `pinned$reseat`, which calls the same thing.
+        l.prepare_profitmax();
       }
       if (!outputs_at(l, psi_star, dst + 1, s.curve)) {
         util::stop_infeasible(
@@ -558,6 +563,15 @@ inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
                    "operating point could not be evaluated there. This point is "
                    "on an active-set boundary; lower `stationarity_tol` or "
                    "difference the solve directly.");
+      }
+      // ⚠️ AGAIN BEFORE THE DERIVATIVE READ, because R re-seats inside EVERY
+      // accessor rather than once per perturbation, and `prepare_profitmax()`
+      // mutates the leaf's rate fields while it maximises. Once here and twice
+      // there leaves the two reading `dprofit` at different states: measured, the
+      // batch and the one-observation route then agreed only to 3e-05 where they
+      // are required to agree bit-for-bit.
+      if (s.resolve_profitmax) {
+        l.prepare_profitmax();
       }
       dst[0] = route_dprofit(l, s.curve, psi_star);
     }

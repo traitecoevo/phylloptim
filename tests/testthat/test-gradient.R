@@ -1228,7 +1228,7 @@ test_that("the remaining route restrictions are the topological ones", {
                "no gradient route")
 })
 
-test_that("ProfitMax's normaliser is pinned, and auto returns the total", {
+test_that("ProfitMax's normaliser follows the traits, so the composite is a total", {
   net <- series_resistance(1e4)
   mkv <- function(v) {
     l <- leaf_model(leaf_traits(vcmax_25 = v), leaf_control(),
@@ -1239,20 +1239,25 @@ test_that("ProfitMax's normaliser is pinned, and auto returns the total", {
   g <- function(meth) {
     leaf_gradient(psi_soil = 1.5, PPFD = 1500, root_network = net, x = mkv(96),
                   traits = leaf_traits(), pars = "vcmax_25", model = "ProfitMax",
-                  method = meth)$gradient[1, "A"]
+                  method = meth)
   }
-  # It used to be NaN: |A|max is seeded by the optimiser and cleared by the
-  # set_traits + set_physiology a perturbation performs. Pinning it fixed that.
-  expect_true(is.finite(g("ift")))
+  # ⚠️ IT USED TO BE NaN, THEN A PARTIAL, AND IS NOW A TOTAL -- three states, and
+  # the middle one is worth knowing about. `|A|max` is state a perturbation
+  # destroys (`set_traits` + `set_physiology` clears it: 16.757 -> NaN), so
+  # something must restore it. Pinning it at the base point fixed the NaN but froze
+  # the normaliser, which made the composite a PARTIAL: 0.0766 against a true
+  # 0.0579, the omitted term 32% of the answer. That was the right call only while
+  # `|A|max` was the argmax of a 500-point scan and so piecewise constant in the
+  # traits. It is a root-find now, so it is RE-SOLVED per perturbation and follows
+  # the traits.
+  expect_true(is.finite(g("ift")$gradient[1, "A"]))
 
-  # ⚠️ THE TWO METHODS ANSWER DIFFERENT QUESTIONS HERE, and only here. "ift" holds
-  # |A|max fixed and so returns the PARTIAL; "fd" lets the scan re-run and returns
-  # the TOTAL. The gap is the deferred chain rule through the normaliser, and it is
-  # large -- not a tolerance question.
-  expect_false(isTRUE(all.equal(g("ift"), g("fd"), tolerance = 1e-2)))
+  # The composite and a difference of the solve now agree, which is the statement
+  # that the split is gone. Loose because the FD is the noisy side.
+  expect_equal(g("ift")$gradient[1, "A"], g("fd")$gradient[1, "A"],
+               tolerance = 1e-3)
 
-  # And the total is what a step-swept finite difference of the solve gives, which
-  # is what a fit needs: the model re-scans |A|max at every parameter vector.
+  # And a step-swept difference of the solve, which is what a fit sees.
   h <- 96 * 1e-2
   solve_A <- function(v) {
     l <- mkv(v)
@@ -1260,15 +1265,11 @@ test_that("ProfitMax's normaliser is pinned, and auto returns the total", {
     l$assim_colimited_
   }
   swept <- (solve_A(96 + h) - solve_A(96 - h)) / (2 * h)
-  expect_equal(g("fd"), swept, tolerance = 5e-2)
+  expect_equal(g("ift")$gradient[1, "A"], swept, tolerance = 1e-3)
 
-  # ⚠️ So `auto` must NOT choose the composite for this curve, or a fit silently
-  # optimises the wrong objective. Every other curve keeps the composite.
-  expect_equal(g("auto"), g("fd"))
-  tf <- function(meth) {
-    leaf_gradient(psi_soil = 1.5, PPFD = 1500, root_network = net, x = mkv(96),
-                  traits = leaf_traits(), pars = "vcmax_25", model = "TF24",
-                  method = meth)$gradient[1, "A"]
-  }
-  expect_equal(tf("ift"), tf("fd"), tolerance = 1e-4)
+  # ⚠️ `auto` NO LONGER SPECIAL-CASES THIS CURVE. It used to be forced onto the
+  # finite difference because the composite returned the partial; now every route
+  # reaches the composite at an interior optimum.
+  expect_identical(g("auto")$method, "ift")
+  expect_identical(g("auto")$status, "interior")
 })
