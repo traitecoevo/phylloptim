@@ -209,6 +209,12 @@ public:
   // work against, positive magnitude. Those solvers already require exactly one
   // layer, so this is the same value either way -- it just stops them reaching
   // into MultiLayerRoots for it.
+  // ⚠️ THIS CHECKS NOTHING, AND A COMMENT ELSEWHERE USED TO CLAIM IT DID. On a
+  // multi-layer profile it returns LAYER ZERO's potential rather than refusing, so a
+  // caller that needs one soil potential must test `supply_is_single_layer()`
+  // itself. Relying on this to enforce the topology silently runs a single-potential
+  // model on layer 0 of a layered soil -- which is exactly what happened when a
+  // refusal was moved out of `prepare_profitmax`.
   double supply_psi_soil_scalar() const {
     switch (supply_kind_) {
       case SupplyKind::MultiLayer: return roots_.psi_soil_[0];
@@ -1509,6 +1515,7 @@ public:
   // The conductance normalisers alone: `k(psi_soil)` and the span down to
   // `k_crit`. Both are analytic in the traits, so they are differentiable and must
   // be refreshed whenever the traits move.
+  double profitmax_reference_psi();
   void prepare_profitmax_norms();
 
   // ⚠️ THE SAME PREPARATION WITH `|A|max` SUPPLIED RATHER THAN SCANNED, and the
@@ -2685,19 +2692,10 @@ inline void Leaf::find_root_collar_psi_for(){
   // that looks entirely like an operating point -- the exact failure
   // check_cost_parameters exists to refuse.
   check_cost_parameters<K>();
-  // ⚠️ ProfitMax's normaliser is not defined on this topology yet. |A|max comes
-  // from prepare_profitmax(), which scans the supply stream from a SCALAR
-  // psi_soil; a multi-layer collar route has no scalar to scan from, and the
-  // normalised cost is meaningless without one. Refused rather than approximated:
-  // without this the solve returns `non-finite-gradient` and a plausible-looking
-  // collar. Defining |A|max over the collar bracket is the remaining work.
+  // ProfitMax seeds its normalisers before searching, on either topology: the
+  // reference potential is psi_soil where there is one and the zero-flow collar
+  // where there is not (see profitmax_reference_psi).
   if constexpr (K == CostCurve::ProfitMax) {
-    if (!supply_is_single_layer()) {
-      util::stop("find_root_collar_psi for ProfitMax needs a single soil "
-                 "potential: |A|max is defined by a scan of the supply stream "
-                 "from psi_soil, and the multi-layer collar route has no scalar "
-                 "psi_soil to scan from.");
-    }
     prepare_profitmax();
   }
     double bound_a, bound_b;
@@ -4483,12 +4481,32 @@ inline void Leaf::clear_collar_solve_state() {
 // has rather than a new one. Sperry, Sabot et al. (2020) and Sicangco all set
 // kcrit = 0.05*kmax, i.e. psi_crit is P95; at this package's defaults
 // f(psi_crit) = 0.0500 exactly, so nothing has to be reconciled.
-inline void Leaf::prepare_profitmax_norms() {
-  if (!supply_is_single_layer()) {
-    util::stop("psi soil must have only one value to use non-root-based profit "
-               "optimisation methods");
+// The potential Sperry's normalisation measures conductance loss FROM. On one soil
+// potential that is psi_soil. On a layered profile there is no scalar psi_soil, and
+// the right generalisation is the collar potential at which uptake is exactly zero
+// (`root_zero_E`, which is prepare_collar_solve's wet bracket end): the potential at
+// which the soil delivers no water is what the plant experiences as "the soil".
+// Single-layer callers get psi_soil unchanged, so nothing there moves.
+inline double Leaf::profitmax_reference_psi() {
+  if (supply_is_single_layer()) {
+    return supply_psi_soil_scalar();
   }
-  const double psi_soil = supply_psi_soil_scalar();
+  double bound_a = 0.0, bound_b = 0.0;
+  if (!prepare_collar_solve<CostCurve::TF24>(bound_a, bound_b)) {
+    return util::na_value;
+  }
+  return bound_a;
+}
+
+
+inline void Leaf::prepare_profitmax_norms() {
+  // ⚠️ A NON-FINITE REFERENCE IS PROPAGATED, NOT REFUSED, and that is deliberate.
+  // This is called on leaves whose drivers are not seated yet -- the batch route
+  // seeds its |A|max capture before applying an observation -- and a hard error
+  // there breaks a path that has always worked. NaN norms flow into the optimiser's
+  // `!(profitmax_k_span_ > 0)` guard, which reports the degenerate shut state. That
+  // guard is the one place this is decided; do not add a second.
+  const double psi_soil = profitmax_reference_psi();
   profitmax_k_soil_ =
       leaf_specific_conductance_max_ * proportion_of_conductivity(psi_soil);
   profitmax_k_span_ =
@@ -4510,11 +4528,7 @@ inline void Leaf::prepare_profitmax_at(double A_max) {
 
 
 inline void Leaf::prepare_profitmax() {
-  if (!supply_is_single_layer()) {
-    util::stop("psi soil must have only one value to use non-root-based profit "
-               "optimisation methods");
-  }
-  const double psi_soil = supply_psi_soil_scalar();
+  const double psi_soil = profitmax_reference_psi();
   prepare_profitmax_norms();
 
   // |A|max BY OPTIMISATION, NOT BY A SCAN. Sperry's carbon gain is normalised by
@@ -4629,7 +4643,11 @@ inline std::vector<double> Leaf::profitmax_curve(int n) {
 inline void Leaf::optimise_psi_stem_ProfitMax() {
   clear_collar_solve_state();
 
-  const double psi_soil = supply_psi_soil_scalar();  // also checks single-layer
+  if (!supply_is_single_layer()) {
+    util::stop("psi soil must have only one value to use non-root-based profit "
+               "optimisation methods");
+  }
+  const double psi_soil = supply_psi_soil_scalar();
   opt_psi_stem_ = psi_soil;
 
   if ((PPFD_ < 1.5e-8) | (psi_soil > psi_crit)) {
