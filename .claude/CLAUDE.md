@@ -422,18 +422,35 @@ arm64, and FMA contraction differs too, so cross-platform bit-equality was never
 achievable. CI compares bit-exactly on macOS and with `--cross-platform` elsewhere.
 
 **The size of the cross-platform disagreement is the interesting part, and it is
-not one number.** The nine reported fields split into two classes three orders of
-magnitude apart:
+not one number.** The nine reported fields split into two classes, and the gap between
+them has narrowed sharply:
 
-| field | gcc | clang | why |
-|---|---|---|---|
-| `profit` | **2.14e-09** | **2.14e-09** | it is the maximum itself — well-conditioned |
-| the other eight | **1.4e-04** | **1.4e-04** | evaluated at the **argmax** — sqrt-amplified |
+| field | gcc | clang | was | why |
+|---|---|---|---|---|
+| `profit` | **1.86e-07** | **1.86e-07** | 2.14e-09 | it is the maximum itself |
+| the other eight | **9.02e-06** | **9.02e-06** | 1.4e-04 | evaluated at the **argmax** |
 
-Read off CI's summary line: 3757 of 5184 values differ, against tolerances of 1e-05
-and 5e-03. ⚠️ **This table is a CI reading and nothing asserts it, so it goes stale
-silently** — it has been wrong three times. Read the summary line, never the FAIL
-lines, which are truncated at 20 and biased toward whichever rows come first.
+Read off CI's summary line on 0.6.0: 3626 of 5184 values differ, against tolerances
+of 1e-05 and 5e-03. ⚠️ **This table is a CI reading and nothing asserts it, so it
+goes stale silently** — it has been wrong four times now, the fourth being the two
+"was" figures above, which stood through the solver merge that moved them. Read the
+summary line, never the FAIL lines, which are truncated at 20 and biased toward
+whichever rows come first.
+
+**What moved, and it is the interesting part.** The argmax class improved **15×**
+and `profit` got **87× worse**, so the two classes are now ~1.7 orders apart where
+they were five. The direction is what the solver merge predicts — every route
+root-finds `dJ/dpsi == 0` now, so the argmax is *determined* rather than inferred
+from comparisons of a flat objective, and it stops inheriting `sqrt` of the
+objective's error. `sqrt(1.86e-07)` = 4.3e-04 against 9.02e-06 observed: the argmax
+is now **two orders better than the sqrt mechanism predicts**, which is the tell
+that it is no longer produced by that mechanism.
+
+⚠️ **`psi_stem_optima.tsv`'s cross-platform tolerances were INHERITED and unmeasured,
+and this is the reading.** Worst relative difference **3.5e-08**, at
+`fresh/collar/multi3 psi_soil=4 ppfd=1500 T=25 eb=1 tc=1 assim`, against the same
+1e-05 / 5e-03 — roughly 285× of headroom, so the inherited tolerances are generous
+rather than wrong. 156 of its values compare as zero on both sides.
 
 gcc and clang report *identical* figures. They used to differ by 2–3×, and what
 differed was which way a golden-section comparison fell; with that
@@ -441,17 +458,22 @@ search, what is left is libm's `exp`/`pow` — a property of the platform, not t
 compiler. If a compiler-dependent column reappears, something has reintroduced a
 discrete decision into the solve.
 
-**Why the two classes are five orders apart:** the maximum is *flat*, with curvature
-k ≈ 1.0 measured directly at the worst points in `profit ≈ p* − k(psi_stem−x*)²`, so
-an error `dp` in the profit **value** displaces its **location** by `sqrt(dp/k)`.
-That is a mechanism, not an identity — `sqrt(2.14e-09)` ≈ 4.6e-05 against the 1.4e-04
-observed, because the two column maxima fall at *different* operating points. Do not
-expect `sqrt(worst profit)` to predict `worst argmax`.
+**Why the two classes were five orders apart:** the maximum is *flat*, with
+curvature k ≈ 1.0 measured directly at the worst points in
+`profit ≈ p* − k(psi_stem−x*)²`, so an error `dp` in the profit **value** displaces
+its **location** by `sqrt(dp/k)`. That was a mechanism rather than an identity —
+`sqrt(2.14e-09)` ≈ 4.6e-05 against the 1.4e-04 then observed, because the two column
+maxima fall at *different* operating points. Do not expect `sqrt(worst profit)` to
+predict `worst argmax`; since 0.6.0 it over-predicts it by two orders, because the
+argmax no longer comes from comparing values of a flat objective at all.
 
 Two things follow that matter beyond this file:
 
-- **`profit` is the only reported field that is well-conditioned across platforms.**
-  If you need a portable check of the solve, check `profit`, not `opt_psi_stem_`.
+- **`profit` is still the best-conditioned reported field, but no longer by orders
+  of magnitude** — 1.86e-07 against the argmax class's 9.02e-06, a factor of 48 where
+  it used to be five orders. A portable check of the solve should still prefer
+  `profit` over `opt_psi_stem_`, but the reason is now marginal rather than
+  structural, and it is worth re-reading the summary line before leaning on it.
 - **The eight argmax-evaluated fields are determined, not just pinned.** The
   collar solve solves `dprofit == 0` rather than searching profit, so on the
   198 interior rows the argmax is determined to solver precision — `|dprofit|` at
@@ -460,9 +482,13 @@ Two things follow that matter beyond this file:
   where the gradient is genuinely non-zero and the answer is determined to the
   step-in scale (~1e-6 of the bracket width) instead.
 
-  So bit-exactness is now a drift detector *and* the numbers are determined. What
-  has not changed: **cross-platform disagreement is still sqrt-amplified** at the
-  argmax, because that comes from the flat maximum rather than from the solver.
+  So bit-exactness is now a drift detector *and* the numbers are determined. ⚠️ And
+  **this entry's old closing claim is retracted**: it said cross-platform
+  disagreement "is still sqrt-amplified at the argmax, because that comes from the
+  flat maximum rather than from the solver". The 15× improvement in that class,
+  landing two orders below what `sqrt` predicts, says otherwise — a determined
+  argmax does not inherit the objective's conditioning. The amplification was a
+  property of the solver after all.
 
 ⚠️ **Profit is the wrong instrument for checking a collar-solve change, and this
 cost real time.** It is the maximum, so it is flat, and its own numerical floor is
