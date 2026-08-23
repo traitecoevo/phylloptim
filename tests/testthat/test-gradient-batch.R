@@ -336,7 +336,7 @@ test_that("a batch that failed on the fast stem_b path leaves a usable leaf", {
 })
 
 test_that("per-observation theta differentiates each row at its own parameters", {
-  # THE HIERARCHICAL CASE, which is what the batch is for: `leaf-calibration` maps
+  # THE HIERARCHICAL CASE, which is what the batch is for: a calibration study maps
   # 40 fitted parameters onto 4 model ones, so the model parameters differ per
   # observation and a shared `theta` would be the wrong shape entirely.
   pars <- c("vcmax_25", "stem_P50")

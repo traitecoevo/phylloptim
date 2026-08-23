@@ -36,7 +36,7 @@ test_that("every trait can be read back from the object (#95)", {
   # The traits were `set_traits()` arguments and nothing else, so from R they could
   # be written and not read. A caller who needed one to compute a derived quantity
   # -- Sperry's cost normalises by `k_crit = kmax * proportion_of_conductivity(psi_crit)`
-  # -- had to carry it themselves, and in leaf_calibration_test/sicangco-2026 that
+  # -- had to carry it themselves, and in one downstream study that
   # was a hard-coded 5.870283 in a probe script.
   #
   # This is a COVERAGE test on purpose: it asserts the readable set contains the

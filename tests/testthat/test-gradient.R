@@ -428,7 +428,7 @@ test_that("the documented examples classify the way their comments claim", {
 })
 
 test_that("the two non-trait parameters agree with a resolved reference", {
-  # #44. Half of leaf-calibration's free parameters are not traits: `K_total` and
+  # #44. Half of a companion study's free parameters are not traits: `K_total` and
   # `f_plant` reach the leaf as leaf_specific_conductance_max (a driver) and the
   # single-potential resistance. Nothing in the derivation cares -- the implicit
   # function theorem is applied to dprofit/dpsi = 0, and any parameter profit
@@ -577,7 +577,7 @@ test_that("leaf_gradient() rejects bad arguments", {
 })
 
 test_that("the gradient is reported for every output the fit needs", {
-  # leaf-calibration fits three responses -- A, gs and psi_leaf -- so all three
+  # a companion study fits three responses -- A, gs and psi_leaf -- so all three
   # are differentiated, not just A. `collar` comes along because it is psi*, and
   # `profit` because it is what a DEMOGRAPHIC consumer bills: plant's carbon is
   # `leaf.profit_`, not `assim_colimited_`, so without it the four columns above

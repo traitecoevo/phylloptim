@@ -17,7 +17,7 @@
 # parameterisation Jacobian. The likelihood is the CALLER's model -- sigma,
 # robustness, a hierarchy -- and putting one in C++ would commit this package to
 # it. The Jacobian belongs in R because that is where the win comes from:
-# `leaf-calibration` maps 40 fitted parameters onto 4 model ones, so C++ returns
+# a companion calibration study maps 40 fitted parameters onto 4 model ones, so C++ returns
 # dY/dtheta for the four and R applies a 40 x 4 chain rule, vectorised over
 # observations. That is exactly the `P_fit > P_model` structure
 # `vignette("fitting")` identified as where an exact gradient wins at all -- see

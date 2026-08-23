@@ -1,7 +1,7 @@
 # Trait gradients (#4).
 #
 # dA/dtheta, dgs/dtheta and dpsi_leaf/dtheta at a solved operating point, for the
-# traits. The customer is `leaf-calibration`, whose hierarchical fit spent 97.6%
+# traits. The customer is a companion calibration study, whose hierarchical fit spent 97.6%
 # of 10,045 model evaluations on finite-difference gradients.
 #
 # WHAT THIS FILE IS FOR, in one paragraph, because the arithmetic that motivated
@@ -33,7 +33,7 @@
 #
 # Measured both regimes: vignette("fitting")'s 72-observation trait fit has
 # P_fit == P_model and the composite loses at every count up to 13. The companion
-# study `leaf-calibration` has N = 1327, P_fit = 40, P_model = 4 and it wins 3.4x,
+# calibration study has N = 1327, P_fit = 40, P_model = 4 and it wins 3.4x,
 # converging to the same optimum -- and its 57-parameter variant costs the SAME as
 # its 40-parameter one, because P_model is 4 in both. One set of per-observation
 # coefficients fitted on the first design predicts the second to ~5%.
@@ -303,7 +303,7 @@ set_traits <- function(x, traits) {
 ##' @section Two of these are not traits:
 ##' `pars` also accepts `leaf_specific_conductance_max` and, on the
 ##' single-potential path, `resistance`. They are here because a calibration fits
-##' them: of `leaf-calibration`'s four free parameters two are traits and two are
+##' them: of a companion calibration study's four free parameters two are traits and two are
 ##' these, so restricting `pars` to [leaf_traits()] left half of that fit without
 ##' an exact gradient.
 ##'
@@ -337,7 +337,7 @@ set_traits <- function(x, traits) {
 ##' ⚠️ **So "is the exact gradient faster" has no answer independent of your
 ##' parameterisation, and both regimes are measured.** `vignette("fitting")` fits
 ##' 72 observations with `P_fit == P_model` and this loses at every count up to 13.
-##' The companion study `leaf-calibration` has `N = 1327`, `P_fit = 40`,
+##' A companion calibration study has `N = 1327`, `P_fit = 40`,
 ##' `P_model = 4`, wins 3.4x, and reaches the same optimum — with its
 ##' 57-parameter variant costing the same as its 40-parameter one, because
 ##' `P_model` is 4 in both.

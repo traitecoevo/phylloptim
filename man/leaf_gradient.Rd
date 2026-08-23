@@ -378,7 +378,7 @@ pinned optima in general.
 
 \code{pars} also accepts \code{leaf_specific_conductance_max} and, on the
 single-potential path, \code{resistance}. They are here because a calibration fits
-them: of \code{leaf-calibration}'s four free parameters two are traits and two are
+them: of a companion calibration study's four free parameters two are traits and two are
 these, so restricting \code{pars} to \code{\link[=leaf_traits]{leaf_traits()}} left half of that fit without
 an exact gradient.
 
@@ -414,7 +414,7 @@ dimension.
 ⚠️ \strong{So "is the exact gradient faster" has no answer independent of your
 parameterisation, and both regimes are measured.} \code{vignette("fitting")} fits
 72 observations with \code{P_fit == P_model} and this loses at every count up to 13.
-The companion study \code{leaf-calibration} has \code{N = 1327}, \code{P_fit = 40},
+A companion calibration study has \code{N = 1327}, \code{P_fit = 40},
 \code{P_model = 4}, wins 3.4x, and reaches the same optimum — with its
 57-parameter variant costing the same as its 40-parameter one, because
 \code{P_model} is 4 in both.

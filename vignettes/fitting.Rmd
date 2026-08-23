@@ -16,9 +16,45 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7,
 library(phylloptim)
 ```
 
-`vignette("phylloptim")` shows the model solving and differentiating. This one
-uses both to recover traits from data, and is honest about the three things that
-make it harder than it looks.
+Fitting an optimality model to gas-exchange data used to mean choosing between two
+bad options. Either accept a finite-difference gradient, which costs two full
+model solves per parameter per observation and returns a number whose accuracy
+depends on a step size you have to guess, or give up on gradients and use a
+derivative-free optimiser that scales badly past a handful of parameters.
+
+This package removes that choice. Two things make the difference.
+
+**The model itself is fast.** It is a set of header-only C++ routines with no R in
+the solve path, and one operating point costs about **3 µs**. A likelihood over a
+thousand observations is therefore milliseconds of model, which means the fit is
+no longer bounded by how long the biology takes to evaluate.
+
+**And it differentiates itself, exactly.** Forward-mode automatic differentiation
+supplies the derivatives of the photosynthesis and cost algebra, and the implicit
+function theorem carries them through the two nested solvers, so
+`leaf_gradient()` returns the exact derivative of every solved output with respect
+to every parameter — with no step size to choose and no truncation error. The
+composite is assembled in C++ and vectorised over observations, at **10.6 µs per
+observation** for four differentiated parameters.
+
+Put together, those change what is affordable. A finite-difference fit costs two
+solves for every parameter *the optimiser is moving*. The exact route costs a term
+in the number of parameters *the model has*, and those two counts are only equal
+in the simplest possible design. The moment you pool, add a hierarchy, or share a
+parameter across species — which is to say, the moment the fit becomes
+interesting — the first count grows and the second does not:
+
+| a fit with | finite differences | exact gradient |
+|---|---:|---:|
+| 3 parameters, 72 observations | fast enough not to care | fast enough not to care |
+| 40 parameters over 4 model parameters, 1,327 observations | 2.3 s | **0.67 s** |
+| 57 parameters over the same 4 | 3.3 s | **0.67 s**, unchanged |
+
+That last row is the point. Adding seventeen more fitted parameters costs the
+exact route nothing at all, because the model still has four.
+
+This vignette works through such a fit from the beginning, and is honest about the
+three things that make it harder than it looks.
 
 ## Simulated data, so the answer is known
 
@@ -288,9 +324,8 @@ T_\text{exact} = N\,(t_\text{construct} + t_\text{solve}) + 2\,P_\text{model}\,N
 non-centred population mean, SD and per-species deviation are three fitted
 parameters that reach the leaf as *one*.
 
-The companion study
-[`leaf-calibration`](https://github.com/traitecoevo/leaf_calibration_test) is that
-case, and it is worth quoting because it comes out the other way round. 1,327
+A companion calibration study is that case, and it is worth quoting because it
+comes out the other way round. 1,327
 observations, 16 species, **40 fitted parameters that map onto 4 model
 parameters**:
 
@@ -383,7 +418,7 @@ Four things follow:
   thing to show. Real fits are usually not that case.
 - **Reuse the model object.** `leaf_gradient(x = )` takes a `Leaf` you already
   have, which removes the construction cost from the intercept. In
-  `leaf-calibration` that was 29% of the exact gradient. It does not make the
+  that study, model construction was 29% of the exact gradient. It does not make the
   composite the faster arm in *this* design, because here the problem is the slope
   rather than the intercept.
 - **Use the batch entry point, which removes the slope.**
@@ -458,7 +493,7 @@ four hydraulic traits are also the ones whose gradient is *entirely*
 argmax-mediated, which is to say the ones you most need it for. Budget for it, and
 see `?leaf_gradient`'s `fast_stem_curve`.
 
-### A stem gradient means something different at a pinned optimum
+### A stem gradient means something different at a boundary
 
 This is the sharpest trap on this surface, and the table above provokes it
 deliberately.
@@ -493,7 +528,7 @@ costs two solves.
 Not the gradient, but the map from its own sampled parameters onto the model's, and
 that map's Jacobian. `pars` names four things; an optimiser moving forty needs a
 40 × 4 chain rule, and that is the caller's arithmetic because it encodes the
-caller's model. `vignette("phylloptim")` and the companion `leaf-calibration` study
+caller's model. `vignette("phylloptim")` and the companion calibration study
 both do this; the latter's `leaf_natural_jacobian()` is the worked example, including
 the case worth being careful about: **one sampled parameter that reaches two model
 quantities, in opposite directions**. Getting a sign wrong there does not fail. It
@@ -514,7 +549,7 @@ status <- vapply(seq_len(nrow(obs)), function(i) {
 table(status)
 ```
 
-**A third of the design is pinned**, and the fit above still recovered the traits
+**A third of the design sits on a boundary**, and the fit above still recovered the traits
 to a few percent, because `leaf_gradient()` detects those points and differences
 the solve there instead of applying a formula that would be wrong by orders of
 magnitude. That is the fallback doing its job on a perfectly ordinary drought
@@ -522,14 +557,14 @@ design, not an exotic case.
 
 Check this *before* trusting a fit rather than after. `status` is reported
 precisely so it can be checked, and a naive finite difference cannot tell you
-which points are which. Where the pinned fraction is large, expect a
+which points are which. Where that fraction is large, expect a
 gradient-based optimiser to behave less well than it does here.
 
 Because a fit that straddles the boundary has three problems:
 
 - **the objective is not differentiable there**, so a gradient method is
   optimising through a corner and may stall or oscillate;
-- `leaf_gradient()` falls back to differencing the solve at pinned points, which
+- `leaf_gradient()` falls back to differencing the solve at boundary points, which
   is correct but noisier;
 - **the stem traits are special.** The dry bound `psi_crit` is a quantile of
   the stem curve, so it moves with `stem_P50`. But it bounds the feasible range

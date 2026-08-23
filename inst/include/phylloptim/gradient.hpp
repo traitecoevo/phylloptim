@@ -21,7 +21,7 @@
 // ⚠️ WHAT IT DELIBERATELY IS NOT: a likelihood. The likelihood is the caller's
 // model -- sigma, robustness, hierarchy -- and baking one in would commit this
 // package to it. This returns dY/dtheta for the FOUR model parameters a leaf
-// has; the caller's parameterisation Jacobian (leaf-calibration maps 40 fitted
+// has; the caller's parameterisation Jacobian (one study maps 40 fitted
 // parameters onto 4 model ones) stays in R, vectorised over observations, where
 // it is cheap. That split is the `P_fit > P_model` structure
 // `vignette("fitting")` identified as where the exact gradient wins at all.

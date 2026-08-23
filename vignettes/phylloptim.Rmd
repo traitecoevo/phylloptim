@@ -457,8 +457,8 @@ the entire answer. Change any of them and assimilation moves only because the le
 chooses a different operating point.
 
 The interesting part is where the derivation stops being valid. It assumes the
-optimum is interior, and in dry soil it often is not: the leaf ends up pinned
-against the edge of the range of collar potentials it can physically occupy. There
+optimum is interior, and in dry soil it often is not: the leaf ends up at the very
+edge of the range of collar potentials it can physically occupy. There
 `dprofit/dψ` is not zero at the answer, and the formula is not merely imprecise
 but wrong by orders of magnitude, without failing loudly. The assumption is
 therefore tested at every point, and `leaf_gradient()` differences the solve
@@ -483,7 +483,7 @@ ggplot(sweep, aes(psi_soil, dA_dstem_P50)) +
 Read that left to right. In wet soil, a less vulnerable stem is worth about two
 units of assimilation per MPa of `stem_P50`. The sensitivity rises as the soil
 dries, because vulnerability matters more when water is scarce, peaks near 2.9 MPa,
-eases off, and then falls away sharply. Past about 3.9 MPa the optimum is pinned:
+eases off, and then falls away sharply. Past about 3.9 MPa the optimum is a bound:
 the leaf is stuck at the wettest collar potential it can physically reach, and a
 stem trait it has no freedom to exploit stops mattering at all.
 

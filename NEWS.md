@@ -1080,7 +1080,7 @@ The thirteen `set_traits()` traits were write-only from R: `psi_crit`, `stem_b`,
 `stem_c`, `beta2`, `root_*` and the rest could be set and not read. Anything that
 had to compute a quantity the model defines in terms of one had to carry it —
 Sperry's cost normalises by `k_crit = kmax * proportion_of_conductivity(psi_crit)`,
-and a probe script in `leaf_calibration_test/sicangco-2026` therefore held a
+and a downstream replication probe therefore held a
 hard-coded `5.870283`.
 
 All thirteen are now bound **read-only**. `set_traits()` is still the only way to
@@ -1293,7 +1293,7 @@ as the TF24 one is a units error the names are chosen to prevent.
 The normalised hydraulic cost is invariant to `kmax` by construction, and it is
 asserted rather than assumed: worst difference **1.1e-16** across a 3× change.
 
-Motivated by `leaf_calibration_test/sicangco-2026`, a replication of Sicangco et
+Motivated by a downstream replication of Sicangco et
 al. (2026), which needed ProfitMax measured against TF24 rather than described.
 
 ## ⚠️ Four fixes on the single-layer optimisers, and the fourth is a solver bug
@@ -1902,7 +1902,7 @@ observation. What reverses it is `P_fit` exceeding `P_model`.
 
 Both regimes are now measured. The vignette gains a scaling sweep that fits the two
 coefficients, and those coefficients — taken from 72 simulated observations —
-**predict** the companion study `leaf-calibration` (1,327 observations, 16 species,
+**predict** a companion calibration study (1,327 observations, 16 species,
 `P_fit = 40`, `P_model = 4`) to within a few percent: **638 ms predicted against
 679 measured**, break-even 12.3 fitted parameters against 13.1. There the composite
 wins **3.4×** and reaches the same optimum as the numerical gradient, and its
@@ -1959,7 +1959,7 @@ boundary you are.
 `pars` now accepts **`leaf_specific_conductance_max`** and — on the
 single-potential path — **`resistance`**, alongside the thirteen traits.
 
-They are here because a calibration fits them. Of `leaf-calibration`'s four free
+They are here because a calibration fits them. Of that study's four free
 parameters, two are traits (`cost_scale_TF24`, `beta2`) and two are these
 (`K_total` and `f_plant` reach the leaf as a conductance and a resistance), so
 restricting `pars` to `leaf_traits()` left half of that fit with no exact

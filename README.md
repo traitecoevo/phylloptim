@@ -75,7 +75,7 @@ exactly the case where numerical gradients are noisiest.
 
 One honest caveat: there is still no calibration vignette in the package, though
 the fit that drove the gradient work exists outside it in
-[leaf_calibration_test](https://github.com/traitecoevo/leaf_calibration_test).
+a companion calibration study.
 
 ## Status
 

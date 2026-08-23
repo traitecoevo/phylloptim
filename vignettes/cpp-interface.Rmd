@@ -166,7 +166,7 @@ an 18-element array put `kmax` in a trait's slot, and the only symptom was
 Three things the free function gives you that a hand-rolled loop would not:
 
 * **the active-set test**, which is the reason `leaf_gradient()` is careful. Where
-  the optimum is pinned against the feasible boundary the composite is wrong by
+  the optimum sits on a boundary of the feasible range, the composite is wrong by
   orders of magnitude and fails silently. The premise is therefore tested, using
   the implied Newton step `|dprofit(ψ*) / H|`, a distance in MPa that needs no
   scale of its own, and a central difference of the solve is used where the
@@ -223,7 +223,7 @@ for (int sign = -1; sign <= 1; sign += 2) {
 
 **A hand-rolled composite inherits none of the guards.** That snippet is a
 timing harness at one interior point, not a gradient you should ship: it has no
-stationarity test and no clamp detector, so at a pinned optimum it returns a
+stationarity test and no clamp detector, so at a boundary optimum it returns a
 plausible number that is wrong by up to 3.5e+07. `g::batch` above is the one to
 call. This is here to show what the primitives compose into, not as a template.
 

@@ -160,7 +160,7 @@ Leaf:
     # normalises by `k(psi_soil) - k_crit`, and `k_crit = kmax *
     # proportion_of_conductivity(psi_crit)` -- both of those are bound, so the only
     # missing piece was `psi_crit`, and a probe script in
-    # `leaf_calibration_test/sicangco-2026` carried a hard-coded 5.870283 for it.
+    # a downstream replication study carried a hard-coded 5.870283 for it.
     #
     # ⚠️ READ-ONLY, and that is hazard 10 rather than caution: changing a trait
     # means rebuilding up to two vulnerability splines and clearing the solved
