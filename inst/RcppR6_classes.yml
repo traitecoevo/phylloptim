@@ -623,6 +623,18 @@ Leaf:
     optimise_psi_stem_by:
       return_type: void
       args: [curve: int]
+    find_root_collar_psi_by:
+      roxygen: |
+        Solve the production collar optimum for any cost curve.
+
+        `find_root_collar_psi()` is the TF24 instantiation of this; `curve` indexes
+        \code{\link{cost_curve_names}}. Unlike the `optimise_psi_stem_*` routes this
+        keeps the full soil-to-collar path, so it works with a root network AND with
+        a single soil potential carrying a real series resistance.
+        @param curve cost curve index, 0-based, from \code{\link{cost_curve_names}}
+        @export
+      return_type: void
+      args: [curve: int]
     evaluate_psi_stem_by:
       return_type: double
       args: [curve: int, target_psi_stem: double]

@@ -213,6 +213,10 @@ Leaf__optimise_psi_stem_by <- function(obj_, curve) {
     invisible(.Call('_phylloptim_Leaf__optimise_psi_stem_by', PACKAGE = 'phylloptim', obj_, curve))
 }
 
+Leaf__find_root_collar_psi_by <- function(obj_, curve) {
+    invisible(.Call('_phylloptim_Leaf__find_root_collar_psi_by', PACKAGE = 'phylloptim', obj_, curve))
+}
+
 Leaf__evaluate_psi_stem_by <- function(obj_, curve, target_psi_stem) {
     .Call('_phylloptim_Leaf__evaluate_psi_stem_by', PACKAGE = 'phylloptim', obj_, curve, target_psi_stem)
 }

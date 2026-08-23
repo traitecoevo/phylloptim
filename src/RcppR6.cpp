@@ -216,6 +216,10 @@ void Leaf__optimise_psi_stem_by(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj
   obj_->optimise_psi_stem_by(curve);
 }
 // [[Rcpp::export]]
+void Leaf__find_root_collar_psi_by(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int curve) {
+  obj_->find_root_collar_psi_by(curve);
+}
+// [[Rcpp::export]]
 double Leaf__evaluate_psi_stem_by(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int curve, double target_psi_stem) {
   return obj_->evaluate_psi_stem_by(curve, target_psi_stem);
 }
