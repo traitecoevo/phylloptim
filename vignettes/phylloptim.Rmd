@@ -123,10 +123,11 @@ transpiration needed to support a given assimilation rises with VPD.
 
 ## Traits and numerical settings are separate
 
-The C++ constructor takes seventeen positional arguments, four of which are
-tolerances sitting among the physiology. `leaf_traits()` and `leaf_control()`
-split them, so a calibration loop varying traits never has to know which of the
-seventeen are not traits.
+The C++ constructor takes fifteen positional arguments, four of which are
+tolerances sitting among the physiology — and four more traits it does not take at
+all, which have to be assigned afterwards. `leaf_traits()` and `leaf_control()`
+split the first fifteen and supply the missing four, so a calibration loop varying
+traits never has to know either fact.
 
 ```{r}
 vulnerable <- leaf_traits(stem_P50 = 2.2, root_P50 = 2.2)
@@ -164,8 +165,8 @@ condition rather than searching profit: the operating point is determined to abo
 two places only, both on the collar route: the threshold below which the feasible
 interval is treated as a single point, and the tolerance of the golden-section
 fallback for a bracket with no usable gradient at either end. ⚠️ It does **not**
-reach the `optimise_psi_stem_*` optimisers, whose refinement tolerance is scaled to
-a scan cell and is not settable.
+reach the stem route, which root-finds its own first-order condition at a
+hardcoded tolerance. Tightening this to sharpen a stem-route argmax does nothing.
 
 That is not only a precision story — it is what makes the next section possible.
 An argmax resolved only to `1e-3` moves in discontinuous jumps as a trait varies,
@@ -338,13 +339,16 @@ dim(leaf_gradient(psi_soil = 2.0, PPFD = 900)$gradient)
 rownames(leaf_gradient(psi_soil = 2.0, PPFD = 900)$gradient)
 ```
 
-Fifteen on the multi-layer path — the fourteen traits from `leaf_traits()`, plus
-`leaf_specific_conductance_max`, which is not a trait but is fitted like one. The
-single-potential path adds `resistance`, making sixteen.
+`r length(leaf_traits())` traits from `leaf_traits()`, plus
+`leaf_specific_conductance_max`, which is not a trait but is fitted like one — so
+`r length(leaf_traits()) + 1L` on the multi-layer path. The single-potential path
+adds `resistance`, and `model = "CF77"` adds `CF77_lambda_`, that curve's
+prescribed marginal value of water. (Counted rather than written out, for the
+reason the hidden chunk below records.)
 
-`R_d_25`, dark respiration at 25 °C, is one of those fourteen and behaves like any
-other trait. So `dY/dvcmax_25` is a **partial** derivative at fixed respiration: a
-fit that wants respiration to follow Vcmax moves both and adds the two columns.
+`R_d_25`, dark respiration at 25 °C, is one of the traits and behaves like any
+other. So `dY/dvcmax_25` is a **partial** derivative at fixed respiration: a fit
+that wants respiration to follow Vcmax moves both and adds the two columns.
 
 **Selecting fewer genuinely costs less**: the work is one solve plus two cheap
 evaluations per parameter, so it scales with what you ask for.
@@ -358,8 +362,9 @@ bench <- function(pars) {
 }
 tibble::tibble(
   # Counted, not written down: this label said 16 for a while when the answer was
-  # 14, which is exactly the way a number beside a chunk rots (the chunk runs, the
-  # prose next to it is never asserted).
+  # 14, and the prose above it went on saying 14 after the answer became 16. That
+  # is exactly the way a number beside a chunk rots -- the chunk runs, the prose
+  # next to it is never asserted -- so the prose uses inline R now too.
   request = c(sprintf("`pars = NULL` (all %d)",
                       nrow(leaf_gradient(psi_soil = 2.0, PPFD = 900)$gradient)),
               "4 parameters", "1 parameter"),
@@ -371,8 +376,8 @@ tibble::tibble(
   knitr::kable()
 ```
 
-So in a calibration, name only the parameters you are fitting. Asking for all
-fourteen when you fit three is several times the work.
+So in a calibration, name only the parameters you are fitting. Asking for all of
+them when you fit three is several times the work.
 
 ⚠️ **The five outputs are not selectable** — every call returns the derivative of
 `A`, `gc`, `psi_stem`, `collar` and `profit` with respect to each requested

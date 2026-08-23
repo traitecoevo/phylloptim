@@ -76,7 +76,7 @@ ssq <- function(theta, l) {
 ```
 
 ⚠️ **Build the model once, outside the loop.** `set_traits()` replaces the traits
-on an existing object; constructing a fresh one costs ~204 µs against ~4 µs to
+on an existing object; constructing a fresh one costs about 45 solves against ~3.4 to
 re-trait, which is 73 solves thrown away per evaluation. In a fit that dominates
 everything else.
 
@@ -141,7 +141,7 @@ ssq_grad <- function(theta, l) {
 }
 ```
 
-Note `pars = FIT`. Requesting all fourteen parameters here would compute eleven
+Note `pars = FIT`. Requesting all sixteen parameters here would compute twelve
 gradients per observation that the optimiser never reads.
 
 ⚠️ **Bound the parameters, or the first step overflows.** The objective is scaled

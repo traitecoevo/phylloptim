@@ -4219,7 +4219,7 @@ void test_profitmax_finds_a_closed_optimum() {
 // was this one without the root-find and which these cases tested instead. It had
 // no caller left and is deleted; the cases moved here. Case 7 is what only this
 // one can pass, and is the reason the other went.
-void test_maximise_over_closed_interval() {
+void test_maximise_over_closed_interval_foc() {
   printf("maximise_over_closed_interval_foc\n");
   const int n = 64;
   const double tol = 1e-12;
@@ -4826,7 +4826,7 @@ int main() {
   test_single_layer_optimisers_clear_collar_state();
   test_transpiration_survives_negative_assim();
   test_profitmax_finds_a_closed_optimum();
-  test_maximise_over_closed_interval();
+  test_maximise_over_closed_interval_foc();
   test_single_layer_optimisers_reach_a_bound();
   test_product_link_is_the_product_rule();
   test_every_curve_returns_its_own_maximum();

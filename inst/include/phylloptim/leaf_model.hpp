@@ -401,20 +401,24 @@ public:
   double T50_ = 50.4;    // deg C; Sicangco Table 2, heatwave treatment
   double Tcrit_ = 46.5;  // deg C; Sicangco Table 2, heatwave treatment
 
-  // Cells the single-layer optimisers WITHOUT a scan of their own use to locate
-  // the basin before refining (see util::maximise_over_closed_interval). Six of
-  // the seven; ProfitMax scans profitmax_scan_n_ points for |A|max anyway.
+  // Cells a stem route scans to locate the basin before refining, WHERE ONE IS
+  // ASKED FOR -- see `basin_scan_cells()` below, which returns 0 with the energy
+  // balance off. This is only the size of the scan, not whether there is one.
   //
-  // ⚠️ THE REFINEMENT TOLERANCE IS NOT `GSS_tol_abs` AND IS NOT SETTABLE. It is
-  // `(cell width) * 1e-4`, inside maximise_over_closed_interval. `GSS_tol_abs`
-  // reaches only the collar route, so tightening it to sharpen a stem argmax is
-  // inert -- a downstream project has already tried exactly that.
-  // Costs n+1 objective evaluations per solve, so it is not free -- but these are
-  // off the production path, and 64 is where the answer stops moving: measured
-  // over a 1728-row driver sweep against a 2001-point reference, 64 matches it on
-  // every row of both objectives while 32 leaves 6 Sperry rows short by 3.9e-04.
-  // A member for the same reason as profitmax_scan_n_: the constructor's arity is
-  // pinned by plant's generated glue and by the CI consumer program.
+  // ⚠️ THE REFINEMENT TOLERANCE IS NOT `GSS_tol_abs` AND IS NOT SETTABLE. The
+  // winning cell is refined by a ROOT-FIND on dJ/dpsi == 0 at `collar_root_tol`;
+  // the `(cell width) * 1e-4` figure belongs to
+  // maximise_over_closed_interval_foc's golden-section FALLBACK, which fires only
+  // where neither cell end has a usable derivative. `GSS_tol_abs` reaches neither,
+  // so tightening it to sharpen a stem argmax is inert -- a downstream project has
+  // already tried exactly that.
+  //
+  // Costs n+1 objective evaluations per solve where it runs, so it is not free,
+  // and 64 is where the answer stops moving: measured over a 1728-row driver sweep
+  // against a 2001-point reference, 64 matches it on every row of both objectives
+  // while 32 leaves 6 rows short by 3.9e-04. A member rather than a constructor
+  // argument because that arity is pinned by plant's generated glue and by the CI
+  // consumer program.
   int boundary_scan_n_ = 64;
 
   // Cells to scan before refining. ZERO unless the energy balance is on, and that
@@ -1042,7 +1046,6 @@ public:
   // instantiation, kept under that name because plant's generated glue and the R
   // bindings call it.
   template <CostCurve K> void find_root_collar_psi_for();
-  void find_root_collar_psi_by(int curve);
   // ⚠️ THE ONE ENTRY POINT. Takes the curve BY NAME and the route by name, so a
   // caller never handles a curve index -- an integer that silently means a
   // different model when the enumeration grows is the kind of API this package has
@@ -1602,7 +1605,8 @@ public:
   double thermal_cost_at(double leaf_temp) const;
 
   // Sperry (2017) ProfitMax, with BOTH terms normalised as the paper defines them
-  // -- see optimise_psi_stem_ProfitMax for what that buys over the lambda form.
+  // -- see the ProfitMax notes above optimise_psi_stem_single for what that buys
+  // over the lambda form.
   // Seeds |A|max and the conductance span; the two below read what it seeds.
   void prepare_profitmax();
 
@@ -4623,7 +4627,8 @@ inline void Leaf::clear_collar_solve_state() {
 // maximised at full closure whenever water is priced above what the carbon is
 // worth, and a bracketing search steps in from the bounds and so can never
 // return one. Some cost curves also carry a second interior hump, which the same
-// search cannot see past. See maximise_over_closed_interval.
+// search cannot see past. See util::maximise_over_closed_interval_foc, which is
+// the one solver both routes reach.
 //
 // The root-based solve reaches the same conclusion by a different route:
 // maximise_profit_over_collar tests the gradient's sign at each end and reports a

@@ -269,12 +269,12 @@ the operating point, and `g1_eff` re-expresses the solved conductance as a Medly
 `g1`, which is a convenient common scale for comparison.
 
 Traits and numerical settings are separate, so a calibration loop varying traits
-never has to know which of the C++ constructor's seventeen arguments are
+never has to know which of the C++ constructor's fifteen arguments are
 tolerances:
 
 ```r
 leaf_solve(psi_soil = 3.0, PPFD = 900,
-           traits  = leaf_traits(vcmax_25 = 120, stem_b = 2.5),
+           traits  = leaf_traits(vcmax_25 = 120, stem_P50 = 2.5),
            control = leaf_control(GSS_tol_abs = 1e-5))
 ```
 
@@ -284,16 +284,32 @@ care about intermediate state:
 ```r
 l <- leaf_model()                          # or leaf_model(traits, control)
 set_drivers(l, psi_soil = 2.0, PPFD = 900)
-l$find_root_collar_psi()
+l$optimise()
 
 operating_point(l)   # the same one-row data.frame
 l$profit_            # or reach into the object directly
 l$lambda             # marginal cost of water, dA/dE
 ```
 
-`Leaf()` is also exported: it is the raw C++ constructor, seventeen positional
-arguments and no defaults. `leaf_model()` is that with the arguments named,
-defaulted and split into traits versus tolerances, and is what you should use.
+**Which model is configuration, not a call argument.** `$set_model()` seats a cost
+curve and a route; `$optimise()` takes nothing, because the curves' constants are
+already on the object. The defaults are `"TF24"` and `"collar"`, the production
+path, so an existing caller that never sets a model is unaffected —
+`$find_root_collar_psi()` is that solve under its own name, which is what plant's
+sources spell.
+
+```r
+l <- leaf_model(supply = leaf_supply_singlelayer())
+set_drivers(l, psi_soil = 1.5, PPFD = 900)
+l$set_model("SOX", "stem")     # any of cost_curve_names(); "collar" or "stem"
+l$optimise()
+l$model_curve(); l$model_route()
+```
+
+`Leaf()` is also exported: it is the raw C++ constructor, fifteen positional
+arguments and no defaults — and four traits it does not take at all.
+`leaf_model()` is that with the arguments named, defaulted, split into traits
+versus tolerances, and the missing four assigned, and is what you should use.
 
 **All water potentials are positive magnitudes in MPa.** One representation
 throughout, and it is asserted rather than documented — a negative `psi_soil` is
@@ -335,7 +351,7 @@ g <- leaf_gradient(psi_soil = 2.0, PPFD = 900,
 g$gradient   # rows: parameters.  columns: A, gc, psi_stem, collar, profit
 g$method     # "ift" or "fd" -- see below
 
-# any of the seven models, same call
+# any of the seven models, same call -- and `leaf_solve()` takes `model` too
 leaf_gradient(psi_soil = 2.0, PPFD = 900, model = "JS22",
               supply = leaf_supply_singlelayer(), pars = c("vcmax_25", "JS22_gamma"))
 ```
@@ -358,8 +374,8 @@ leaf_gradient(psi_soil = 1.5, PPFD = 900,
 
 These are not finite differences of the solve. The outputs are evaluated at the
 profit-maximising collar potential, so a trait moves them both directly and by
-moving that optimum — and for `cost_scale_TF24`, `beta2`, `stem_b` and `stem_c`
-the second route is **100%** of the answer. Differentiating the optimality
+moving that optimum — and for `TF24_cost_scale`, `TF24_beta2`, `stem_P50` and
+`stem_c` the second route is **100%** of the answer. Differentiating the optimality
 condition rather than the solved output gets both terms exactly.
 
 `profit` is the exception, and it is the cheapest column for the reason it is the
@@ -371,7 +387,7 @@ If your model **tracks** the optimum instead of finding it, pass the collar
 potential you are operating at and the derivation simplifies rather than breaks:
 
 ```r
-leaf_gradient(psi_soil = 2.0, PPFD = 900, pars = c("vcmax_25", "stem_b"),
+leaf_gradient(psi_soil = 2.0, PPFD = 900, pars = c("vcmax_25", "stem_P50"),
               psi = 2.7)                # evaluate here, do not solve
 ```
 
@@ -397,7 +413,7 @@ has** — `length(pars)`. They are equal only if you fit traits directly. Poolin
 hierarchy, or any derived parameter makes the first much larger than the second,
 which is where this route wins; `vignette("fitting")` measures both regimes and
 `?leaf_gradient` has the cost model. ⚠️ **Always pass `pars`** — the default is all
-fourteen, which is the most expensive request there is.
+sixteen on the multi-layer path, which is the most expensive request there is.
 
 **For a fit, use `leaf_gradient_batch()`.** It is the same gradient, composed in C++
 and vectorised over observations, so a likelihood evaluation crosses the R boundary
@@ -406,7 +422,7 @@ differentiated parameters (`length(pars)`), 22×.
 
 ```r
 b <- leaf_batch(psi_soil = obs$psi_soil, PPFD = obs$PPFD)   # once per fit
-g <- leaf_gradient_batch(b, traits, pars = c("vcmax_25", "stem_b"))
+g <- leaf_gradient_batch(b, traits, pars = c("vcmax_25", "stem_P50"))
 g$gradient   # [observation, parameter, output]
 g$status     # per observation: "interior", "pinned", "no-gradient" or "error"
 ```
@@ -425,7 +441,7 @@ change invalidates derived state that is not obvious from the outside:
 l <- leaf_model()
 set_traits(l, leaf_traits(vcmax_25 = 120))
 set_drivers(l, psi_soil = 2.0, PPFD = 900)   # required: the drivers must be re-set
-l$find_root_collar_psi()
+l$optimise()
 ```
 
 See `vignette("phylloptim")` for the whole tour.
@@ -441,7 +457,7 @@ supply:
 | | µs per row |
 |---|---:|
 | `leaf_solve()`, vectorised | **21.5** |
-| `leaf_model()` once, then `set_drivers()` + `$find_root_collar_psi()` + `operating_point()` per row | 20.3 |
+| `leaf_model()` once, then `set_drivers()` + `$optimise()` + `operating_point()` per row | 20.3 |
 | the same, reading one field instead of `operating_point()` | 17.1 |
 | the C++ solve inside all three | **2.8** |
 
@@ -462,18 +478,19 @@ imply:
 
 Two costs worth knowing because they surprise people:
 
-- **Constructing a `Leaf` from R costs ~204 µs** — 70 solves — and only ~32 µs of
+- **Constructing a `Leaf` from R costs about 180× a trivial `.Call`** — 45 solves — and only ~32 µs of
   that is the two vulnerability splines; the rest is R-side object construction
   over ~60 active bindings. So construct once and reuse. `leaf_solve(reuse = TRUE)`
   is the default for this reason, and [`set_traits()`](#trait-gradients) exists so
   that a trait sweep need not reconstruct either.
-- **`set_traits()` is ~0.02 µs unless you change `stem_b`, `stem_c`, `root_b` or
-  `root_c`, and 21.8 µs if you do**, because those four own the pre-integrated
+- **`set_traits()` is ~0.02 µs unless you change `stem_P50`, `stem_c`, `root_P50`
+  or `root_c`, and 21.8 µs if you do**, because those four own the pre-integrated
   vulnerability splines and it rebuilds one. That is 8× a solve, in C++, where
   batching cannot help — worth knowing before writing a sweep over a vulnerability
   curve. Most of it is the incomplete gamma function seeding 101 knots, not the
-  spline machinery. `leaf_gradient()` sidesteps it for `stem_b`, which is
-  homogeneous: see `fast_stem_curve` in `?leaf_gradient`.
+  spline machinery. `leaf_gradient()` sidesteps it for `stem_P50`, because the
+  curve is homogeneous of degree 1 in the scale that pair implies: see
+  `fast_stem_curve` in `?leaf_gradient`.
 
 ### As a dependency of another R package
 

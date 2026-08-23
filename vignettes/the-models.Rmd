@@ -64,8 +64,8 @@ $$\psi^{*}=\arg\max_{\psi\in[\psi_{\rm soil},\,\psi_{\rm crit}]} J(\psi),
 
 ### The two supply paths
 
-- **Non-root-based.** Optimise the stem potential `ψ_stem` with the upstream potential held at `ψ_soil`. The soil-to-collar path is ignored entirely. This is what `optimise_psi_stem_*` do, and what their refusal message means by "non-root-based".
-- **Root-based.** Optimise the **collar** potential with the root path in series, then map it to a stem potential. This is `find_root_collar_psi()`.
+- **Non-root-based.** Optimise the stem potential `ψ_stem` with the upstream potential held at `ψ_soil`. The soil-to-collar path is ignored entirely. This is `route = "stem"`, and what its refusal message means by "non-root-based".
+- **Root-based.** Optimise the **collar** potential with the root path in series, then map it to a stem potential. This is `route = "collar"`, the default, and what `find_root_collar_psi()` spells.
 
 These are the **same optimality problem in two coordinates**, over different supply. Neither is a check on the other, and over 30 driver rows they disagree on 20 — but the disagreement is the soil-to-collar drop, which only the root-based route charges for. Remove it and they converge: sweeping the series resistance down through three decades closes the gap ~10× per decade, to 4.0e-04 MPa.
 
@@ -94,7 +94,7 @@ There are two ways to find `ψ*`: search `J` for its maximum, or solve
 
 $$\frac{dJ}{d\psi}=0$$
 
-for a stationary point. Both are in the package, and which lives where is worth naming rather than leaving as "in different places": the **collar solve** — the multi-layer supply path, and the one plant calls — solves the first-order condition. The seven single-layer `optimise_psi_stem_*` entry points still **scan** the interval on a 64-point grid and refine the best cell. That difference is historical rather than principled, and the reasons for closing it are the rest of this section.
+for a stationary point. **Every solver in the package now takes the second route**, and it is worth saying that this was not always so: the collar solve moved first and the seven single-layer routes kept a 64-point scan for a while afterwards. The difference was historical rather than principled, and the rest of this section is why it was closed. What survives of the scan is a *basin locator*, switched on only where the objective is measurably multi-modal — see "the scan is an argument" below.
 
 **The first-order condition wins on every axis that can be measured**, which is unusual enough to be worth setting out.
 
@@ -129,16 +129,20 @@ This is the same flat maximum that makes the argmax the badly-conditioned quanti
 
 **Having the derivative in hand is what makes that trade one-sided.** `dJ/dψ` is not a second model to evaluate — it comes out of the same forward pass as `J`, so one iteration of the root-find costs about what one iteration of the search costs, and superlinear convergence is pure gain. Take the derivative away and the comparison closes right up: you would pay two objective evaluations per iteration to difference it, and inherit a step-size problem of your own on top (a difference through a nested root-find has a noise floor of tolerance/h, so the "obvious" small step is the wrong one). **The efficiency argument here is not really about Brent versus golden section — it is about what a cheap exact derivative buys you**, which is the same reason the trait gradients in Appendix B are worth their complexity.
 
-The other side of the ledger is what the scanning entry points pay: 64 objective evaluations to pick the basin, unconditionally, on every call, before any refinement begins. Measured per call on the single-layer subset (`bench_solve`, best of 2000):
+**The scan is an argument, not a policy, and that is what the other side of the ledger came to.** An unconditional 64-point scan costs 64 objective evaluations on every call before any refinement begins — on a package whose reason for existing is a ~3 µs solve that plant calls millions of times. So `n` is passed in: a configuration that needs a basin scan asks for one, and one that does not passes `0`, which makes the same function the endpoints-plus-root-find method. Which configurations need it was measured rather than guessed, over a 1728-row sweep (8 air temperatures × 4 gate combinations × 6 soil potentials × 3 deficits × 3 light levels): the only objectives carrying two prominent interior basins are `TF24` (21 rows) and `JS22` (66), and **every one of those rows has the energy balance on**. The collar objective has none in 432 rows over the same range. Hence the gate is the energy balance, and with it off the scan is skipped.
 
-| entry point | route | µs/call |
-|---|---|---|
-| `find_root_collar_psi` | first-order condition | **3.01** |
-| `optimise_psi_stem_CF77` | scan + refine | 7.58 |
-| `optimise_psi_stem_TF` | scan + refine | 8.69 |
-| `optimise_psi_stem_ProfitMax` | scan + refine | 53.70 |
+Do not widen that gate without re-measuring. The valleys involved are 7.0e-01 and 3.5e+00 deep, so a missed basin is a large error rather than a rounding one — but a scan added "to be safe" is a 3× cost on the hot path for nothing.
 
-Read that table for its order of magnitude and not as a controlled comparison: the first row is a different model on a different supply path, so the whole gap is not the scan. ProfitMax's 54 µs is the honest outlier — it needs a sweep for its own `|A|max` normaliser regardless, so it is the one entry point for which the scan is not purely a cost.
+What the change bought, measured per call on the single-layer subset (`bench_solve`, best of 2000, gate off):
+
+| entry point | µs/call, scan + refine | µs/call, now |
+|---|---:|---:|
+| `find_root_collar_psi` | — | **3.06** |
+| `TF24`, stem route | 8.69 | **2.66** |
+| `CF77`, stem route | 7.58 | **2.73** |
+| `ProfitMax`, stem route | 53.70 | **5.24** |
+
+Read the first row for its order of magnitude and not as a controlled comparison against the others: it is a different model on a different supply path. The last row is the one worth pausing on — ProfitMax needed a sweep for its own `|A|max` normaliser, so the scan was not purely a cost there; finding `|A|max` by a root-find as well took it from 54 µs to 5.2, a **10×**, which is the largest single speedup in this table and came from deleting code rather than adding any.
 
 **But a stationary point is not always the answer.** Where profit is still climbing as it reaches the end of the feasible interval, `dJ/dψ` never crosses zero inside it and the optimum is that endpoint — a *constrained* optimum. This is not a corner case: it is 42 of 240 feasible rows on the reference grid. A solver has to test the derivative's sign at each end and report the pin explicitly, because a bracketing root-find handed no sign change cannot distinguish "pinned" from "failed". The reported operating-point kind is what carries that distinction.
 
@@ -180,7 +184,7 @@ The two properties are not actually in conflict, which is the point worth carryi
 
 **This tolerance was invisible until the outer search was replaced**, and that is the generalisable part: a nested solver's precision is only as visible as the loosest tolerance above it. While the outer golden-section search terminated on a 1e-3 bracket, the inner root-find could have been anything. Removing the outer search promoted it to the model's dominant amplifier overnight — which is why the two sections belong together.
 
-**And the tolerance you can set is not this one.** `ci_abs_tol` in `leaf_control()` reaches only the `optimise_psi_stem_*` entry points; the collar solve's inner root-find is fixed at 1e-10. Tightening the settable one buys no precision on the multi-layer path, which is worth knowing before anyone tries.
+**And the tolerance you can set is not this one.** The inner `ci` root-find is fixed at 1e-10, on both routes. `ci_abs_tol` in `leaf_control()` is read in exactly one place — `solve_medlyn_ci_numerical`, the empirical Medlyn-conductance route — so it reaches *neither* family of optimality solver, and tightening it buys no precision anywhere in the optimality model. Worth knowing before anyone tries, because the name promises otherwise.
 
 **Finally, a regime where the theorem does not hold.** When the leaf is hot enough that assimilation is negative across the whole `[Γ*, c_a]` bracket there is no supply-equals-demand root, `c_i` is pinned at the compensation point, and **the residual is no longer zero** — so the implicit function theorem has nothing to stand on. Derivatives on that branch drop the assimilation term rather than approximating it, and report themselves as not feasible. A gradient that ignored the flag would get a plausible number there.
 
@@ -250,7 +254,7 @@ So a product objective is a difference objective *with a transformed benefit*, a
 - **Its λ carries a factor of `A`**, because the cost is levied on *proportional* rather than absolute carbon. The section on λ derives this in one line and shows it is a property of the product form, not of this particular `g`.
 - **It can never be boundary-crit.** `g(psi_crit)` is exactly zero, so `C` diverges there — water becomes infinitely expensive before the bound is reached. It takes no parameter of its own to achieve that; the 0.05 is the same constant `psi_crit` is derived from.
 
-**The link states the cost; it is not how the optimum is found.** At full closure `A = −R_d < 0`, so `log A` does not exist — and that endpoint has to be a candidate. `optimise_psi_stem_SOX()` therefore maximises the product directly, which is exact because `log` is monotone.
+**The link states the cost; it is not how the optimum is found.** At full closure `A = −R_d < 0`, so `log A` does not exist — and that endpoint has to be a candidate. The optimiser therefore maximises the product directly, which is exact because `log` is monotone, while the *derivative* uses the log form.
 
 The code names are the prefix on every parameter belonging to that model — `TF24_cost_scale`, `CF77_lambda_`, `JS22_gamma` — so a parameter says which curve reads it, and returns an exactly zero gradient on the others.
 
@@ -321,7 +325,6 @@ That is checkable rather than decorative. Below, the left-hand side comes from t
 
 ```{r}
 #| label: link-identity
-curve_index <- function(nm) match(nm, cost_curve_names()) - 1L
 psi_soil <- 1.0
 tr <- leaf_traits(JS22_gamma = 0)          # a zero unit cost: dC/dpsi is exactly 0,
 l  <- leaf_model(tr, supply = leaf_supply_singlelayer())   # so JS22's derivative IS dA/dpsi
@@ -343,8 +346,12 @@ for (nm in names(model)) {
   for (q in c(1.5, 2.5, 3.5, 4.5)) {
     P  <- m$P(q)                                   # the UNtransformed objective, A*g
     A  <- l$assim_colimited_
-    lhs <- l$dprofit_dpsi_stem_by(curve_index(nm), q)[1] * P
-    Ap  <- l$dprofit_dpsi_stem_by(curve_index("JS22"), q)[1]
+    # The derivative reads whichever model is seated, so the seat moves with the
+    # curve being checked. No index anywhere: a name in, a name out.
+    l$set_model(nm, "stem")
+    lhs <- l$dprofit_dpsi_stem_checked(q)[1] * P
+    l$set_model("JS22", "stem")
+    Ap  <- l$dprofit_dpsi_stem_checked(q)[1]
     rhs <- Ap * m$g(q) + A * m$gp(q)
     cat(sprintf("%-5s %6.1f %14.6f %14.6f %9.1e\n", nm, q, lhs, rhs,
                 abs(lhs - rhs) / max(abs(Ap * m$g(q)), abs(A * m$gp(q)))))
@@ -844,7 +851,7 @@ Differencing anything computed by a solver divides that solver's tolerance by th
 
 ## …and the floor depends on which solver you differenced
 
-The V's position moves with the solver, which is sharper than the rule above and easier to miss. The collar solve root-finds `dJ/dψ = 0` and locates ψ* to ~1e-15. The `optimise_psi_stem_*` entry points scan a 64-point grid and refine, locating it to ~1e-06 of the bracket — about 4e-06 MPa on a 4.4 MPa one. A relative parameter step of 1e-06 moves ψ* by ~3e-06 MPa, which is **below that resolution**, so the difference returns quantisation.
+The V's position moves with the solver, which is sharper than the rule above and easier to miss — and this is the measurement that closed the gap described earlier in this vignette. Both routes root-find `dJ/dψ = 0` now and locate ψ* to ~1e-15. While the stem routes scanned a 64-point grid and refined on bracket *width* they located it to ~1e-06 of the bracket — about 4e-06 MPa on a 4.4 MPa one — and a relative parameter step of 1e-06 moves ψ* by ~3e-06 MPa, which is **below that resolution**, so the difference returned quantisation. Measured for `SOX`'s `vcmax_25`: 0.1855 against a converged 0.0551, and the wrong **sign** for `JW26`. Every route now takes the same 1e-06 step, which is what that fix bought; re-sweep if a solver changes again.
 
 Measured on `SOX` for `vcmax_25`, against a composite that is flat at 0.0551 across six decades:
 

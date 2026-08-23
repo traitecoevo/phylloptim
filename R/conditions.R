@@ -47,14 +47,14 @@
 ##' should be loud.
 ##'
 ##' @section Three judgement calls left ordinary, and why:
-##' Of the roughly fifty `stop` sites in the headers, seventeen are classified. Three
+##' Of the 64 `stop` sites in the headers, nineteen are classified. Three
 ##' of the rest are genuinely arguable, and all three were left ordinary because that
 ##' is the direction whose failure mode is a loud error rather than a quiet wrong
 ##' answer. They are listed here so the decision can be overruled on purpose rather
 ##' than rediscovered:
 ##'
 ##' * ~~**`psi_crit` past the stem curve's P99.**~~ No longer reachable, and so no
-##'   longer a decision: `psi_crit` is the 5\%-conductivity quantile of the stem
+##'   longer a decision: `psi_crit` is the 5%-conductivity quantile of the stem
 ##'   curve rather than a trait beside it, so it scales with the curve and lands
 ##'   inside the domain for every shape parameter. An optimiser moving `stem_P50`
 ##'   cannot walk out of it.

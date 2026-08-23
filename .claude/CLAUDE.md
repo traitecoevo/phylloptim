@@ -80,15 +80,15 @@ tests/cpp/golden/              THREE bit-exact regression baselines.
                                operating_points.tsv: 576 solved points -- one
                                288-point state grid at 25 and 40 C. Says WHETHER
                                anything moved. Solves with find_root_collar_psi
-                               ONLY, so it is blind to the three
-                               optimise_psi_stem_* entry points by construction
+                               ONLY, so it is blind to every STEM route by
+                               construction
                                primitives.tsv: 544 values from the functions the
                                solve calls, in five call-tree TIERS. Says WHICH
                                ONE moved -- the lowest tier that changed is the
                                cause. #64
-                               psi_stem_optima.tsv: 2304 rows covering what the
-                               other two cannot -- the three optimise_psi_stem_*
-                               solvers across solver x topology x energy balance
+                               psi_stem_optima.tsv: 4608 rows covering what the
+                               other two cannot -- the seven STEM routes
+                               across solver x topology x energy balance
                                x thermal cost, in two passes, the second of which
                                reuses one Leaf with the outputs POISONED so stale
                                state is visible. ⚠️ It records today's known
@@ -273,7 +273,17 @@ make`, was tried and reverted — installing this package needs no make, and
 `LinkingTo: phylloptim` consumers would inherit a declaration that is false for them.
 
 Doxygen for the C++ API, roxygen for the R one — they document different things
-and both now have something to document. The roxygen blocks live in
+and both now have something to document.
+
+⚠️ **`DESCRIPTION` says `Roxygen: list(markdown = TRUE)`, and it did not until
+0.6.1.** Every roxygen block in this package is written in markdown — `[fn()]`
+links, `**bold**`, backticks, pipe tables — and without that line roxygen2 copied
+all of it into `man/*.Rd` as literal text: no `\code{}`, no `\link{}`, zero
+working cross-references in the whole help system. `man/leaf_gradient.Rd` contained
+0 of each. It went unnoticed because the Rd files are generated and nobody reads
+them, and because `R CMD check` does not object to a `[foo()]` that is just prose.
+**If you regenerate `man/` and the diff loses `\code{}` everywhere, that line has
+gone missing.** The roxygen blocks live in
 `inst/RcppR6_classes.yml` and reach `R/RcppR6.R` through the generator, so
 `man/` is generated from generated code: edit the YAML, run
 `Rscript -e 'RcppR6::RcppR6()'`, then `roxygen2::roxygenise()`.
@@ -294,6 +304,14 @@ equations in one display rather than one on each side of a paragraph; `docs.yml`
 now asserts the shape and names the block, so it fails legibly.
 
 ## Cost: the one thing the golden file cannot see
+
+⚠️ **And `README.md` is guarded by a test, because nothing else can see it.**
+Vignettes are knitted, so a stale example there fails a build; the README is plain
+markdown and its code is prose to every tool in the repo. When `stem_b` became
+`stem_P50` in #126, one README example was updated and two were not, and both
+errored. `tests/testthat/test-readme.R` now parses and evaluates every ```r block.
+It is a SYNTAX-AND-API guard only — it says nothing about whether the numbers in
+the surrounding prose are still right, and those rot the same way.
 
 `tests/cpp/bench_solve.cpp` and `bench_gradient.cpp` cover the C++ side.
 **`tools/bench_user_cost.R` covers the R side** — one solve, N solves, and a
@@ -391,7 +409,7 @@ now back. Two things follow:
   that building the two arms in different trees is its own bias**, and a
   seven-point sweep is not seven controlled A/Bs.
 - **It is not the settable `ci_abs_tol`** (default 1e-3). ⚠️ This entry used to say
-  that one reached "the off-path `optimise_psi_stem_*` solvers"; it does not. Grep
+  that one reached "the off-path stem-route solvers"; it does not. Grep
   says `ci_abs_tol` is read in exactly one place, `solve_medlyn_ci_numerical` --
   the empirical Medlyn-conductance route. **Both** families of optimality solver
   reach `ci` through `psi_stem_to_ci`, so both get the 1e-10 and neither is
@@ -600,7 +618,35 @@ is "none of them, my case is genuinely different", say so in the PR with the
 measurement that shows it — because the last three times that claim was made
 (`optimise_psi_stem_Sperry`, ProfitMax's grid walk, the collar solve's separate
 maximiser) it was wrong, and deleting each one made the code both smaller and
-faster.
+faster. A fourth has since joined them: `util::maximise_over_closed_interval`,
+which was the call above without the root-find and ended up called only by its own
+test.
+
+**Two things in the tree LOOK like a second solver and are not.** Both say so at
+the definition now, and both were re-proposed during review before they did:
+
+- **`Leaf::maximise_profit_over_collar`** is the call above at `n = 0` PLUS a
+  classification: every exit sets an `OperatingPointKind`, and 42 of 240 feasible
+  golden rows are pinned and read it. The shared maximiser returns an argmax and
+  nothing about how it got there, so folding them in means either an out-parameter
+  no other caller wants, or losing the tag.
+- **`dprofit_dpsi_stem` and `dprofit_at_collar_psi`** share ~90 lines of algebra.
+  The stem form IS the collar form at `dpsistem_dpsi = 1`, `dgc_dpsi = 0` --
+  mathematically, not TEXTUALLY, and the Identity arm's exact operation sequence is
+  what keeps all four golden baselines bit-identical. Everything carrying no such
+  constraint is already shared: `cost_deriv<K>`, `benefit_link_deriv<K>`,
+  `respiration_temp_deriv`, `dprofit_energy_balance_term`.
+
+So the shape to look for is not a function duplicating the solver's *algebra* --
+that can be load-bearing -- but one duplicating its *structure* with a piece
+missing. That is what the deleted maximiser was.
+
+**And the runtime curve dispatch is ONE switch.** There were four -- solve-collar,
+solve-stem, evaluate-stem, dprofit-stem -- all with the same seven arms; they are
+`Leaf::with_curve()`, a template taking a generic lambda, so a curve added to the
+enum touches an arm there, an arm in `curve_name()`, and the three `if constexpr`
+tables. Neither surviving switch has a `default:`, deliberately: a `default`
+satisfies `-Werror=switch` and so removes the check they exist for.
 
 ## Hazards, each of which has cost someone real numbers
 
@@ -909,13 +955,22 @@ faster.
    **And measure before optimising a trait loop, in the layer you actually care
    about.** Two costs dominate, and which one bites depends on where you are:
 
-   - **From R**, constructing a `Leaf` costs **204 µs** — 33 solves — of which only
-     ~32 µs is the two splines; the rest is R-side object construction over ~60
-     active bindings. That, not the choice of gradient formula, is what dominates a
-     finite-difference gradient in R. `set_traits` exists to avoid it.
+   - **From R**, constructing a `Leaf` costs **~180× a trivial `.Call`, or 45
+     solves** (230 µs re-measured, against 4.9 µs for `$optimise()` in the same
+     process), of which only ~32 µs is the two splines; the rest is R-side object
+     construction over ~60 active bindings. That, not the choice of gradient
+     formula, is what dominates a finite-difference gradient in R. `set_traits`
+     exists to avoid it — a re-trait plus a re-drive is 3.4 solves.
+
+     ⚠️ **Quote the RATIO, not the microseconds, and this file was part of the
+     problem.** Five places in this package quoted "204 µs" beside four different
+     solve counts — 33 here, 55, 70 and 73 elsewhere — because nobody re-derived
+     the divisor. And construction's share of a one-parameter gradient went 40% →
+     **61%** when the solvers got cheaper, with the 40% left standing everywhere.
+     Rule 1 of the cost section below applies to documentation too.
    - **In C++**, `set_traits` costs **0.02 µs** normally and **21.8 µs** when it
      rebuilds a vulnerability curve — **3.5× a whole solve**. So a gradient loop
-     over `stem_b`, `stem_c`, `root_b` or `root_c` is dominated by spline
+     over `stem_P50`, `stem_c`, `root_P50` or `root_c` is dominated by spline
      reconstruction, and no amount of cleverness in the derivative touches it.
 
    `make -C tests/cpp bench_gradient` measures both arms. ⚠️ **Do not carry the R
@@ -933,9 +988,10 @@ faster.
    and −1.5459 at 1.88, so a search that steps in from the bounds reports an open
    stoma where the objective says shut.
 
-   So all seven `optimise_psi_stem_*` maximise over a CLOSED interval: endpoints
-   included, a `boundary_scan_n_` = 64 scan to pick the basin, and a refine whose
-   tolerance scales with the **cell** rather than the interval. Against a
+   So all seven stem routes maximise over a CLOSED interval: endpoints
+   included, a `boundary_scan_n_` = 64 scan to pick the basin **where
+   `basin_scan_cells()` asks for one**, and a refine that root-finds the
+   first-order condition inside the winning cell. Against a
    20001-point reference over 30 single-potential rows they are exact. The scan is
    free for ProfitMax, which needs it for |A|max anyway; the other two pay for it,
    and `bench_solve` prices all four arms (collar 3.20, TF 9.45, Sperry 8.40,
@@ -961,7 +1017,7 @@ faster.
    gradient's sign at each end and reports a pinned optimum explicitly, which is why
    42 of 240 feasible golden rows are pinned and correct.
 
-   ⚠️ **`optimise_psi_stem_*` is NOT the collar solve with a restriction — it is a
+   ⚠️ **A STEM ROUTE IS NOT the collar solve with a restriction — it is a
    different model, and neither is a check on the other.** These optimise ψ_stem with
    upstream pinned at ψ_soil, ignoring the soil→collar path entirely, which is what
    their refusal message means by "non-**root-based**". They disagree with the collar
@@ -1007,10 +1063,12 @@ faster.
    with the solver.** The error-versus-step curve is a V and only its floor is a
    derivative; a small step is the wrong instinct. Worse, the V's position depends
    on which solver produced the argmax: the collar solve root-finds `dprofit == 0`
-   and locates psi* to ~1e-15, while `optimise_psi_stem_*` scans and refines to
-   ~1e-06 of the bracket. A relative parameter step of 1e-06 moves psi* by less
-   than a scan can resolve, so the difference returns quantisation — measured
-   0.1855 against a true 0.0551, and the wrong SIGN on another curve.
+   and locates psi* to ~1e-15. The stem routes do the same now; while they scanned
+   and refined on bracket WIDTH they resolved psi* only to ~1e-06 of the bracket, so
+   a relative parameter step of 1e-06 differenced quantisation — measured 0.1855
+   against a true 0.0551, and the wrong SIGN on another curve. ONE step (1e-06)
+   serves every route now, and the floor still moves with the solver, so re-sweep
+   if one changes again.
 
    **Sweep the step and read the floor.** Two bugs were reported against a correct
    composite on the strength of one 1e-06 step. Each gradient route carries its own

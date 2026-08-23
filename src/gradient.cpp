@@ -55,8 +55,8 @@ DriverBatch* checked(SEXP drivers) {
 
 //' The differentiable parameters, in the order C++ indexes them
 //'
-//' The fourteen [leaf_traits()] in `set_traits()`'s argument order, then
-//' `leaf_specific_conductance_max` and `resistance`. Exported so that R's own
+//' The fifteen [leaf_traits()] in `set_traits()`'s argument order, then
+//' `leaf_specific_conductance_max`, `resistance` and `CF77_lambda_`. Exported so that R's own
 //' copy of this order can be compared against it in a test: R passes integer
 //' positions into this enumeration, so appending to it is safe and reordering it
 //' would silently differentiate the wrong parameter.
@@ -79,7 +79,7 @@ std::vector<std::string> gradient_par_names() {
 //' is safe and reordering the enumeration would silently solve a different model.
 //'
 //' @return A character vector of curve names.
-//' @seealso [cost_curve_has_derivative()], [leaf_gradient()]
+//' @seealso [leaf_gradient()], [leaf_gradient_batch()]
 //' @examples
 //' cost_curve_names()
 //' @export

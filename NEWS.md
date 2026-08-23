@@ -49,15 +49,106 @@ configures half a model in each place. Unknown names are refused with the valid 
 listed, so no caller handles an index that silently means a different model when the
 enumeration grows.
 
-Removed from the R surface: `optimise_psi_stem_TF/CF77/JS22/CMax/SOX/JW26/ProfitMax`,
-`optimise_psi_stem_by()` and `find_root_collar_psi_by()`. They remain in C++ — plant
-calls two of them directly, and the compile-time form is what a hot path should use.
-`find_root_collar_psi()` is kept for now: it is `optimise()` under the default model,
-and it is what plant's own sources spell.
+Removed entirely: `optimise_psi_stem_TF/CF77/JS22/CMax/SOX/JW26/ProfitMax`,
+`optimise_psi_stem_by()` and `find_root_collar_psi_by()` — from the R surface first,
+and then from C++ too (see *One curve dispatcher* below). A C++ caller that wants
+the compile-time form calls `optimise_psi_stem_single<K>()` or
+`find_root_collar_psi_for<K>()` directly. `find_root_collar_psi()` is kept: it is
+`optimise()` under the default model, and it is what plant's own sources spell.
 
 Defaults are `"TF24"` and `"collar"`, so a caller that never sets a model gets the
 production path — and all four golden baselines are bit-identical, which is that
 statement checked rather than asserted.
+
+## One curve dispatcher, not five switches
+
+Adding a cost curve meant an arm in six places. Four of them were runtime `switch`es
+over `CostCurve` with the same seven arms each — solve-collar, solve-stem,
+evaluate-stem, dprofit-stem — and they are now one template, `Leaf::with_curve()`,
+which hands a body a compile-time curve tag. Adding a curve touches two places: an
+arm there and an arm in `curve_name()`. Neither has a `default:`, deliberately, so
+`-Werror=switch` still refuses a forgotten curve.
+
+Deleted with them: the seven `optimise_psi_stem_<curve>()` aliases, each a single
+call to `optimise_psi_stem_single<K>()`, none bound to R and none called by the
+model. Their per-curve documentation — JS22's always-interior wet end, CMax's
+`5.930e-06` step-in tell, SOX's product-versus-log derivation — is one table above
+`optimise_psi_stem_single` instead of one paragraph per alias.
+
+⚠️ **plant must move two lines when it bumps its `phylloptim` pin.** Its
+`inst/RcppR6_classes.yml` binds `optimise_psi_stem_TF` and `optimise_psi_stem_Sperry`;
+the second has not existed here for some time, so plant already cannot build against
+`master`, and the bump is already a coordinated edit. Both become `set_model` +
+`optimise`.
+
+**BREAKING: no method takes a curve index any more.** `evaluate_psi_stem_by(curve,
+psi)` and `dprofit_dpsi_stem_by(curve, psi)` are `evaluate_psi_stem_at(psi)` and
+`dprofit_dpsi_stem_checked(psi)`, reading the model `set_model()` seated — the same
+rule `optimise()` follows. `vignette("the-models")` had to define its own
+`curve_index()` helper to use the old pair, which is the tell that the index was
+still API. Both refuse on the collar route rather than answering about a model the
+leaf is not seated on, which is a distinction an index could not make.
+
+`leaf_solve()` takes `model =` now, so the one-call R surface reaches all seven
+curves rather than only TF24-collar. `leaf_gradient()` has taken it since 0.6.0.
+
+## util::maximise_over_closed_interval is gone
+
+It was `maximise_over_closed_interval_foc` without the root-find. Both routes moved
+onto the `_foc` form, leaving it called only by its own test — a second solver in the
+file whose guide says not to add one. Its test cases move onto `_foc`, plus one they
+could not make: that the returned interior point is *stationary* rather than merely
+inside a narrow bracket.
+
+`Leaf::maximise_profit_over_collar` and the two `dprofit` bodies stay as they are,
+and now say why at the definition: the first is this algorithm at `n = 0` plus a
+five-way `OperatingPointKind` classification that 42 of 240 golden rows read; the
+second pair's Identity arm is textually pinned because four golden baselines compare
+at the last bit. The compensation branch's `dR_d/dT` — genuinely identical in both —
+is now shared.
+
+## Documentation the 0.6.0 changes falsified
+
+`R CMD check` reports **Status: OK**, and `man/` is legible for the first time.
+
+- **`Roxygen: list(markdown = TRUE)` was missing from `DESCRIPTION`**, so every
+  `[fn()]` link, `**bold**` and backtick across all of `man/` rendered as literal
+  text — `man/leaf_gradient.Rd` contained zero `\code{}` and zero `\link{}`. Nothing
+  objected, because generated Rd files are not read and `R CMD check` does not mind a
+  `[foo()]` that is only prose. ⚠️ Turning it on means `\%` in a roxygen block
+  becomes a literal backslash-percent, which comments out the rest of the Rd line;
+  every `\%` is now a bare `%`.
+- **`man/Leaf.Rd` documented two R methods that do not exist**, `$optimise_psi_stem_
+  ProfitMax()` and `$optimise_psi_stem_TF()`, both removed from the R surface in
+  0.6.0. It documents `$set_model()` / `$optimise()` now.
+- **Two README examples errored**, both from the `stem_b` → `stem_P50` rename: one
+  passed `stem_b` to `leaf_traits()` and one named it in `pars`. `README.md` is plain
+  markdown, so nothing in the repo could see them —
+  `tests/testthat/test-readme.R` parses and evaluates every ```` ```r ```` block now,
+  and catching exactly that regression is what it was checked against.
+- **Counts, everywhere.** Fifteen traits, not fourteen; `n_pars` 18, not 16;
+  thirteen reported outputs, not twelve; a fifteen-argument constructor, not
+  seventeen. `vignette("cpp-interface")` told a C++ consumer to write 16 doubles into
+  an 18-element array — the exact under-fill that returns `nan` with no diagnostic.
+  `vignette("phylloptim")` computes its counts with inline R now.
+- **`vignette("the-models")` described the pre-merge solver**, arguing that the stem
+  routes "still scan" and that closing the gap was future work. 0.6.0 closed it. The
+  timing table it quoted was pre-merge too: `TF24` 8.69 → **2.66** µs/call, `CF77`
+  7.58 → **2.73**, `ProfitMax` 53.70 → **5.24**.
+- **`ci_abs_tol` reaches neither family of optimality solver.** The vignette said it
+  reached the stem routes; it is read in exactly one place, `solve_medlyn_ci_
+  numerical`.
+- **Leaf construction is quoted as a ratio now.** Five places said "204 µs" beside
+  four different solve counts (33, 55, 70, 73), and its share of a one-parameter
+  gradient had gone 40% → **61%** as the solvers got cheaper. Re-measured in one
+  process: **~180× a trivial `.Call`, or 45 solves**.
+- Dead references removed: `cost_curve_has_derivative()` (deleted in 0.6.0) from two
+  `@seealso`; `profitmax_scan_n_` (a member that no longer exists);
+  `find_root_collar_psi_by`, whose declaration outlived its definition.
+- **`R/gradient.R` had an unreachable error message** telling callers to
+  `$optimise_psi_stem_<curve>()`. `.GRADIENT_VERIFIED_LINKS` had come to list every
+  route, so the predicate behind it was a constant. Both gone; the model registry is
+  derived from `cost_curve_names()`, so it is one list rather than three.
 
 ## The collar route's zero-resistance limit converges
 

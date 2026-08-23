@@ -171,7 +171,7 @@ if (exists("leaf_gradient_batch")) {
 # recorded rather than fatal.
 g1 <- g3 <- greuse <- NA_real_
 if (exists("leaf_gradient")) {
-  gp <- c("vcmax_25", "stem_b", "TF24_cost_scale")
+  gp <- c("vcmax_25", "stem_P50", "TF24_cost_scale")
   grad_args <- c(list(psi_soil = 1.5, PPFD = 900, atm_vpd = 1.5, supply = supply,
                       pars = gp), extra)
   g3 <- timeit(function() do.call(leaf_gradient, grad_args), 30, reps)

@@ -3,13 +3,17 @@
 #define PHYLLOPTIM_CLOSED_FORM_HPP_
 
 // A fast approximate solver for the TF24 leaf optimum, as an alternative to the
-// exact golden-section search in Leaf::optimise_psi_stem_TF.
+// exact stem-route solve -- `set_model("TF24", "stem")` then `optimise()`.
 //
 // WHY. The exact solve is the model's whole cost. Measured in the companion
 // analysis (`Falster-stomatal_analytical_analysis`, notes/tf24_closed_form_bench.cpp,
-// benchmarked against the genuine plant::Leaf):
+// benchmarked against the genuine plant::Leaf). ⚠️ THESE FIGURES PREDATE THE
+// SOLVER MERGE, when that entry point was a golden-section search over the
+// objective; it root-finds its first-order condition now and `bench_solve` reports
+// 2.66 us/call, so the 1x baseline happens to be unchanged while the algorithm
+// under it is not. Re-measure before quoting a speedup from this table.
 //
-//     exact optimise_psi_stem_TF          2.611 us      1x
+//     exact TF24 stem solve               2.611 us      1x
 //     power law + 1 Newton step           0.241 us     10.8x
 //     explicit form at TF24_beta2 = 1/stem_c   0.056 us     47x
 //
