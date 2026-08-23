@@ -454,15 +454,47 @@ cross-platform figure is that `stem_b` and `psi_crit` are DERIVED now, through
 `pow`/`log` of `(P50, c)`, where master had them as decimal literals: the curve
 itself now carries a platform difference that master's could not.
 
-⚠️ **That last sentence is a hypothesis with the right shape and it is NOT
-confirmed.** Every local single-parameter perturbation tried — 1 ULP in `psi_soil`
-(2.75e-09), 1 ULP in `stem_P50` (7.67e-10), master's rounded-versus-exact
-`psi_crit` (6.14e-07, an 8× amplification of a 7.8e-08 input) — falls short of
-1.86e-07 from a last-bit cause by two to three orders. A libm difference perturbs
-every `exp`/`pow` in the solve independently, which no single-point perturbation
-reproduces, so the local instrument cannot settle it. The cross-platform test now
-**names the worst row and field in each class**, so the next non-macOS run says
-which operating point to go and look at.
+### ⚠️ AND BOTH CLASS FIGURES ARE CANCELLATION ARTEFACTS OF THE METRIC
+
+The test names the worst row per class now, and the answer disposes of most of what
+this section used to argue. **Both** worst rows are rows where the reported quantity
+is passing through zero:
+
+| class | worst row | the value there | grid median | amplification |
+|---|---|---|---|---|
+| `profit` 1.86e-07 | `psi_soil=0.5 ppfd=100 vpd=2 T=40 layers=5` | 1.05e-03 — the grid **minimum** | 2.47 | **2348×** |
+| argmax 9.02e-06 | `psi_soil=4 ppfd=100 vpd=4 T=25 layers=3`, `assim` | 4.05e-07 | 1.44 | **3.6e+06×** |
+
+A relative difference divides by the value, so wherever a reported quantity nearly
+cancels — a dim, hot leaf whose assimilation barely clears respiration — the metric
+is amplified by the cancellation and says nothing about the model. In absolute terms
+profit's worst disagreement is **1.96e-10 µmol C m⁻² s⁻¹**, which as a fraction of a
+typical profit is 7.9e-11.
+
+So **"profit is well-conditioned and the eight argmax fields are sqrt-amplified", as
+this file has said for a long time, is a statement about the metric at two singular
+rows rather than about the model at an operating point.** The `sqrt` mechanism is
+still real — a flat maximum does displace its argmax by `sqrt(dp/k)` — but these two
+numbers were never evidence for it, and the arithmetic never closing (5× out) was
+the tell.
+
+**What was done about it, and what was not.** The summary reports the worst
+**absolute** difference per class alongside the relative one, each naming its row, so
+a cancellation row is distinguishable from real drift. **The tolerance is unchanged**
+and still relative: a near-zero row is exactly where a genuinely broken value would
+also show up, so the check stays where it is and only the reporting improved. The
+sibling file `psi_stem_optima.tsv` handles the same problem the other way, with an
+absolute floor (`kOptNegligible`, 1e-12) below which it declines to compare — worth
+knowing that the two files answer this differently on purpose.
+
+⚠️ **The remaining hypothesis is NOT confirmed and probably does not matter.** That
+`stem_b`/`psi_crit` being derived through `pow`/`log` makes the curve itself
+platform-dependent has the right shape, but every local single-parameter
+perturbation falls two to three orders short of 1.86e-07 — 1 ULP in `psi_soil` gives
+2.75e-09, 1 ULP in `stem_P50` 7.67e-10, and master's rounded-versus-exact `psi_crit`
+6.14e-07 (an 8× amplification of a 7.8e-08 input). A libm difference perturbs every
+`exp`/`pow` independently, which no single-point perturbation reproduces. Given the
+row it lands on, chasing it further is chasing 2e-10 of a µmol.
 
 ⚠️ **`psi_stem_optima.tsv`'s cross-platform tolerances were INHERITED and unmeasured,
 and this is the reading.** Worst relative difference **3.5e-08**, at

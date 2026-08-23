@@ -260,14 +260,18 @@ int generate() {
   return 0;
 }
 
-// One row's identity, for a diagnostic. Two static buffers so the two class
-// summaries can be printed in ONE printf without the second overwriting the
-// first -- which is exactly what a single buffer did, and it reported the same
-// row twice.
+// One row's identity, for a diagnostic.
+//
+// ⚠️ ROTATING BUFFERS, AND THE COUNT IS LOAD-BEARING. The summary prints four of
+// these in ONE printf, and all four arguments are evaluated before it runs -- so
+// with fewer buffers than call sites the later calls overwrite the earlier ones and
+// the summary reports the same row two or four times. That is exactly what a single
+// buffer did. Keep kSlots >= the largest number of calls in any one printf.
 const char *where(const Row &r, const char *field) {
-  static char buf[2][160];
+  constexpr int kSlots = 4;
+  static char buf[kSlots][160];
   static int slot = 0;
-  slot = 1 - slot;
+  slot = (slot + 1) % kSlots;
   if (field[0] == '\0') {
     // No field in this class differed at all, so there is no row to name. On the
     // platform that generated the file that is every run, and printing a
@@ -370,6 +374,23 @@ int compare(Tolerance tol) {
   Row worst_max_row{}, worst_argmax_row{};
   const char *worst_max_field = "";
   const char *worst_argmax_field = "";
+  // ⚠️ AND THE ABSOLUTE DIFFERENCE, because the relative one alone has misled this
+  // project's own documentation for years. A relative metric divides by the value,
+  // so wherever a reported quantity passes through zero it is amplified by the
+  // cancellation -- and BOTH class figures turn out to land on such a row. profit's
+  // worst sits at the grid's MINIMUM |profit| (1.05e-03 against a median of 2.47,
+  // 2348x), and the argmax class's at an assimilation of 4.05e-07 against a median
+  // of 1.44. So "profit is well-conditioned and the argmax is sqrt-amplified", which
+  // this file's guide has said for a long time, is a statement about the metric at
+  // two singular rows rather than about the model at an operating point.
+  //
+  // Reporting both is the fix. It loosens nothing -- the tolerance is still the
+  // relative one -- and it makes a cancellation row distinguishable from real drift,
+  // which is what watching this number is supposed to be for.
+  double worst_max_abs = 0.0, worst_argmax_abs = 0.0;
+  Row worst_max_abs_row{}, worst_argmax_abs_row{};
+  const char *worst_max_abs_field = "";
+  const char *worst_argmax_abs_field = "";
   size_t i = 0;
   for (; i < rows.size(); ++i) {
     if (fgets(line, sizeof line, f) == nullptr) {
@@ -423,6 +444,20 @@ int compare(Tolerance tol) {
           worst_argmax_field = fd.name;
         }
       }
+      const double ad = (std::isnan(fd.got) || std::isnan(fd.want))
+                            ? 0.0
+                            : std::fabs(fd.got - fd.want);
+      double &worst_abs_in_class = is_max ? worst_max_abs : worst_argmax_abs;
+      if (ad > worst_abs_in_class) {
+        worst_abs_in_class = ad;
+        if (is_max) {
+          worst_max_abs_row = r;
+          worst_max_abs_field = fd.name;
+        } else {
+          worst_argmax_abs_row = r;
+          worst_argmax_abs_field = fd.name;
+        }
+      }
       if (rd > worst_rel) {
         worst_rel = rd;
         worst_desc = fd.name;
@@ -473,12 +508,19 @@ int compare(Tolerance tol) {
     } else {
       printf("golden: %zu operating points within cross-platform tolerance\n"
              "  %d of %zu values differ. Worst by class:\n"
-             "    profit  (the maximum)      %.3g   tolerance %.1g   at %s\n"
-             "    others  (from the argmax)  %.3g   tolerance %.1g   at %s\n",
+             "    profit  (the maximum)      rel %.3g  (tol %.1g)  at %s\n"
+             "                               abs %.3g              at %s\n"
+             "    others  (from the argmax)  rel %.3g  (tol %.1g)  at %s\n"
+             "                               abs %.3g              at %s\n"
+             "  ⚠️ a worst RELATIVE row with a near-zero value is the metric "
+             "cancelling, not drift -- compare the two lines in each class.\n",
              rows.size(), inexact, rows.size() * 9,
              worst_max_rel, tol.maximum, where(worst_max_row, worst_max_field),
+             worst_max_abs, where(worst_max_abs_row, worst_max_abs_field),
              worst_argmax_rel, tol.argmax,
-             where(worst_argmax_row, worst_argmax_field));
+             where(worst_argmax_row, worst_argmax_field),
+             worst_argmax_abs,
+             where(worst_argmax_abs_row, worst_argmax_abs_field));
     }
     return 0;
   }
