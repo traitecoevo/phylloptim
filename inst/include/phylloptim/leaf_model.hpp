@@ -3255,6 +3255,14 @@ inline double Leaf::evaluate_psi_stem(double target_psi_stem) {
   // Same three chains the optimiser uses, so a prescribed point and a solved one
   // cannot disagree about what a curve requires or which objective it is.
   check_cost_parameters<K>();
+  // ⚠️ INCLUDING ProfitMax's NORMALISERS. The optimisers seed these and this did
+  // not, so evaluating ProfitMax at a prescribed potential returned NaN while
+  // solving for one worked -- a prescribed point disagreeing with a solved point
+  // about whether the objective exists, which is exactly what the comment above
+  // promises cannot happen.
+  if constexpr (K == CostCurve::ProfitMax) {
+    prepare_profitmax();
+  }
   const double psi_soil = supply_psi_soil_scalar();
 
   // Drier soil than the stem can reach is the no-flow case, and the target is

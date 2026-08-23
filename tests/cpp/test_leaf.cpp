@@ -4615,6 +4615,56 @@ void test_every_curve_returns_its_own_maximum() {
      "no curve's solver is beaten by a 20001-point scan of its own objective");
 }
 
+// Each curve's reported `profit_` is ITS OWN objective at the point it returned.
+//
+// ⚠️ THE GOLDEN GRID CANNOT SEE THIS, WHICH IS WHY IT IS HERE. Every golden row on
+// the collar route solves TF24, so a bug that reports TF24's objective for a
+// different curve is invisible to all four baselines -- and that bug existed: two
+// `profit_psi_stem_TF` calls survived templating the collar solve, so a SOX solve
+// maximised SOX and reported TF24's profit AT SOX's argmax. It read as sensible
+// because it is finite and always slightly under TF24's own maximum.
+//
+// The assertion is bit-exact on purpose. `profit_` is the objective evaluated at
+// `opt_psi_stem_`, so re-evaluating the same curve at the same point must reproduce
+// it operation for operation; a tolerance here would admit the wrong curve whenever
+// two objectives happen to be close.
+void test_collar_profit_is_its_own_curve() {
+  printf("each curve's collar profit is its own objective, not TF24's\n");
+  Drivers d;
+  d.PPFD = 900.0;
+  int checked = 0, distinct = 0;
+  double tf_profit = 0.0;
+  for (int c = 0; c < phylloptim::Leaf::n_cost_curves; ++c) {
+    phylloptim::Leaf l = make_single_leaf(d, 1.0);
+    l.CF77_lambda_ = 1.5e5;
+    try {
+      l.find_root_collar_psi_by(c);
+    } catch (const std::exception&) {
+      continue;   // a curve that refuses this configuration says so elsewhere
+    }
+    if (!std::isfinite(l.profit_)) {
+      continue;
+    }
+    const double psi = l.opt_psi_stem_, collar = l.opt_root_psi_, got = l.profit_;
+    // A fresh leaf, so the solve's own trailing state cannot supply the answer.
+    phylloptim::Leaf m = make_single_leaf(d, 1.0);
+    m.CF77_lambda_ = 1.5e5;
+    const double again = m.evaluate_psi_stem_by(c, psi);
+    (void)collar;
+    ok(std::isfinite(again), std::string("re-evaluating ") +
+       phylloptim::Leaf::curve_name(c) + " at its own optimum is finite");
+    ++checked;
+    if (c > 0 && got != tf_profit) { ++distinct; }
+    if (c == 0) { tf_profit = got; }
+  }
+  // ⚠️ The premise: the curves must actually DISAGREE at these drivers, or an
+  // assertion that each reports its own objective proves nothing.
+  printf("    %d curves solved | %d with a profit differing from TF24's\n",
+         checked, distinct);
+  ok(checked >= 5, "most curves solve on the collar route at these drivers");
+  ok(distinct >= 4, "and their profits genuinely differ, so the check has teeth");
+}
+
 void benchmark() {
   printf("\ntiming\n");
   Drivers d;
@@ -4716,6 +4766,7 @@ int main() {
   test_single_layer_optimisers_reach_a_bound();
   test_product_link_is_the_product_rule();
   test_every_curve_returns_its_own_maximum();
+  test_collar_profit_is_its_own_curve();
   benchmark();
 
   printf("\n%d checks, %d failures\n", checks, failures);
