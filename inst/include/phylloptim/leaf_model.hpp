@@ -400,8 +400,14 @@ public:
   // constructor argument on purpose: the constructor's arity is pinned by plant's
   // generated RcppR6 glue and by the CI consumer program.
   int profitmax_scan_n_ = 500;
-  // Cells the two single-layer optimisers WITHOUT a scan of their own use to
-  // locate the basin before refining (see util::maximise_over_closed_interval).
+  // Cells the single-layer optimisers WITHOUT a scan of their own use to locate
+  // the basin before refining (see util::maximise_over_closed_interval). Six of
+  // the seven; ProfitMax scans profitmax_scan_n_ points for |A|max anyway.
+  //
+  // ⚠️ THE REFINEMENT TOLERANCE IS NOT `GSS_tol_abs` AND IS NOT SETTABLE. It is
+  // `(cell width) * 1e-4`, inside maximise_over_closed_interval. `GSS_tol_abs`
+  // reaches only the collar route, so tightening it to sharpen a stem argmax is
+  // inert -- a downstream project has already tried exactly that.
   // Costs n+1 objective evaluations per solve, so it is not free -- but these are
   // off the production path, and 64 is where the answer stops moving: measured
   // over a 1728-row driver sweep against a 2001-point reference, 64 matches it on
@@ -4968,7 +4974,7 @@ inline void Leaf::optimise_psi_stem_CF77() {
 
 
 // Joshi & Stocker (2022)'s hydraulic term. The same closed-interval maximisation as
-// the other two single-layer optimisers, for the reason hazard 11 gives.
+// the other single-layer optimisers, for the reason hazard 11 gives.
 //
 // ⚠️ NO SECOND HUMP HERE, and it is worth knowing why the scan is kept anyway. This
 // marginal cost rises monotonically from zero, so against a saturating marginal

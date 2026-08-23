@@ -160,9 +160,12 @@ tibble(
 
 Those are **identical**, because the collar solve solves its own first-order
 condition rather than searching profit: the operating point is determined to about
-`1e-12`. `GSS_tol_abs` does not reach the production path at all — it survives as
-the threshold below which the feasible interval is treated as a single point, and
-for two single-layer optimisers that are off this path.
+`1e-12`. `GSS_tol_abs` does not reach the production path at all — it survives in
+two places only, both on the collar route: the threshold below which the feasible
+interval is treated as a single point, and the tolerance of the golden-section
+fallback for a bracket with no usable gradient at either end. ⚠️ It does **not**
+reach the `optimise_psi_stem_*` optimisers, whose refinement tolerance is scaled to
+a scan cell and is not settable.
 
 That is not only a precision story — it is what makes the next section possible.
 An argmax resolved only to `1e-3` moves in discontinuous jumps as a trait varies,
