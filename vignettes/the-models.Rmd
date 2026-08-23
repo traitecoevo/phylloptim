@@ -20,7 +20,9 @@ library(phylloptim)
 
 `vignette("phylloptim")` shows the model running; `vignette("fitting")` fits it to data. This one is the reference for *what is being solved* — the objective, the cost curves that distinguish one published model from another, the first-order conditions, and the two gates that change both sides of the ledger.
 
-Every number quoted in prose here is produced by the chunk beside it. That is deliberate: a formula written next to code it no longer matches is the failure mode this document is most exposed to.
+Most numbers quoted in prose here are produced by the chunk beside it, and that is deliberate: a formula written next to code it no longer matches is the failure mode this document is most exposed to.
+
+⚠️ **The exceptions are worth knowing, because they are where it has actually rotted.** Timings, cross-platform magnitudes, row counts over the reference grid, and the fitted vulnerability curves in Appendix A all come from elsewhere — the benchmark harness, CI, the C++ suite, the literature — and nothing re-checks them when this document is rendered. A figure of that kind in this vignette stood for months at 15× its true value. Re-read them after a solver change; the chunks will not.
 
 ## A leaf choosing where to operate
 
@@ -94,15 +96,17 @@ There are two ways to find `ψ*`: search `J` for its maximum, or solve
 
 $$\frac{dJ}{d\psi}=0$$
 
-for a stationary point. **Every solver in the package now takes the second route**, and it is worth saying that this was not always so: the collar solve moved first and the seven single-layer routes kept a 64-point scan for a while afterwards. The difference was historical rather than principled, and the rest of this section is why it was closed. What survives of the scan is a *basin locator*, switched on only where the objective is measurably multi-modal — see "the scan is an argument" below.
+for a stationary point. **Every solver in the package takes the second route**, and what survives of the first is a *basin locator* — a scan switched on only where the objective is measurably multi-modal, which is the last subsection here.
 
-**The first-order condition wins on every axis that can be measured**, which is unusual enough to be worth setting out.
+**The first-order condition wins on every axis that can be measured**, which is unusual enough to be worth setting out. It is also the reason the rest of this document can promise exact gradients at all, so the argument is worth following even if you never touch a solver.
 
 **Precision.** A bracketing search terminates on the *width* of an interval, so it never locates the argmax better than its own tolerance. Golden section run to a 1e-3 bracket left `|dJ/dψ|` at a median of **7.8e-04** at the point it returned; the root-find leaves **5.6e-15**. That is eleven orders, and it is not a matter of tightening a tolerance — the two solvers are answering different questions. One says "the maximum is somewhere in here"; the other says "the derivative is zero at this point".
 
 **Smoothness, which is what a gradient actually needs.** An argmax determined only to a bracket width is piecewise constant at fine scales, so differentiating it with respect to a trait yields noise dressed as a derivative. Measured over eleven steps in a trait, golden section returned **6 distinct argmax values out of 11** and second differences of 3.9e-04 — the step size itself, i.e. nothing. The root-find returns **11 of 11**, with second differences of 3.4e-07. Worse than noise, the noisy version was not obviously broken: one trait derivative taken that way came back smooth, plausible and **sign-inverted** (−2.6e-03 against a true +2.6e-04).
 
-**Speed, and this is the part that surprises people.** Golden section shrinks its bracket by a constant factor per evaluation — linear convergence, about 0.62 per step, with no way to do better because it uses only comparisons. A Brent-class root-finder interpolates through the points it has and converges *superlinearly*. Measured on the collar solve when it switched, both binaries built from one tree and interleaved: **3.51 → 2.65 µs/solve**. Faster *and* eleven orders more accurate, from the same model.
+**Speed, and this is the part that surprises people.** Golden section shrinks its bracket by a constant factor per evaluation — linear convergence, about 0.62 per step, with no way to do better because it uses only comparisons. A Brent-class root-finder interpolates through the points it has and converges *superlinearly*. Measured on the collar solve when it switched, both binaries built from one tree and interleaved: **3.51 → 2.65 µs/solve**, a 24% saving. Faster *and* eleven orders more accurate, from the same model.
+
+⚠️ **That pair is a difference, not a level, and the table below is a level.** It reports 3.06 µs for the same solve — later, on a different machine, after other changes. Subtracting one from the other measures nothing: an absolute microsecond figure here moved 50% between machines, and the only timings worth comparing are two binaries interleaved in one session. Read the pair for its 24% and the table for its ratios.
 
 The three claims are one picture. Both solvers below are given the *same* sign-changing bracket, which flatters the search — it is handed the basin rather than having to find it, and finding the basin is what the 64-point scan exists for.
 
@@ -125,11 +129,13 @@ The search does not merely converge more slowly — it **stops**. After about th
 
 A root-find has no such floor, because it is looking for a *zero* of a function that is steep exactly where `J` is flat. The quantity it tests still carries information at 1e-15, which is why panel (b) keeps descending.
 
-This is the same flat maximum that makes the argmax the badly-conditioned quantity across platforms, seen from the inside.
+This is the same flat maximum that Appendix C is about, seen from the inside: there it decides what a difference of the model can mean, here it decides what a search can find.
 
 **Having the derivative in hand is what makes that trade one-sided.** `dJ/dψ` is not a second model to evaluate — it comes out of the same forward pass as `J`, so one iteration of the root-find costs about what one iteration of the search costs, and superlinear convergence is pure gain. Take the derivative away and the comparison closes right up: you would pay two objective evaluations per iteration to difference it, and inherit a step-size problem of your own on top (a difference through a nested root-find has a noise floor of tolerance/h, so the "obvious" small step is the wrong one). **The efficiency argument here is not really about Brent versus golden section — it is about what a cheap exact derivative buys you**, which is the same reason the trait gradients in Appendix B are worth their complexity.
 
-**The scan is an argument, not a policy, and that is what the other side of the ledger came to.** An unconditional 64-point scan costs 64 objective evaluations on every call before any refinement begins — on a package whose reason for existing is a ~3 µs solve that plant calls millions of times. So `n` is passed in: a configuration that needs a basin scan asks for one, and one that does not passes `0`, which makes the same function the endpoints-plus-root-find method. Which configurations need it was measured rather than guessed, over a 1728-row sweep (8 air temperatures × 4 gate combinations × 6 soil potentials × 3 deficits × 3 light levels): the only objectives carrying two prominent interior basins are `TF24` (21 rows) and `JS22` (66), and **every one of those rows has the energy balance on**. The collar objective has none in 432 rows over the same range. Hence the gate is the energy balance, and with it off the scan is skipped.
+### The scan is an argument, not a policy
+
+The other side of the ledger is that an unconditional 64-point scan costs 64 objective evaluations on every call before any refinement begins — on a package whose reason for existing is a ~3 µs solve that plant calls millions of times. So `n` is passed in: a configuration that needs a basin scan asks for one, and one that does not passes `0`, which makes the same function the endpoints-plus-root-find method. Which configurations need it was measured rather than guessed, over a 1728-row sweep (8 air temperatures × 4 gate combinations × 6 soil potentials × 3 deficits × 3 light levels): the only objectives carrying two prominent interior basins are `TF24` (21 rows) and `JS22` (66), and **every one of those rows has the energy balance on**. The collar objective has none in 432 rows over the same range. Hence the gate is the energy balance, and with it off the scan is skipped.
 
 Do not widen that gate without re-measuring. The valleys involved are 7.0e-01 and 3.5e+00 deep, so a missed basin is a large error rather than a rounding one — but a scan added "to be safe" is a 3× cost on the hot path for nothing.
 
@@ -144,7 +150,9 @@ What the change bought, measured per call on the single-layer subset (`bench_sol
 
 Read the first row for its order of magnitude and not as a controlled comparison against the others: it is a different model on a different supply path. The last row is the one worth pausing on — ProfitMax needed a sweep for its own `|A|max` normaliser, so the scan was not purely a cost there; finding `|A|max` by a root-find as well took it from 54 µs to 5.2, a **10×**, which is the largest single speedup in this table and came from deleting code rather than adding any.
 
-**But a stationary point is not always the answer.** Where profit is still climbing as it reaches the end of the feasible interval, `dJ/dψ` never crosses zero inside it and the optimum is that endpoint — a *constrained* optimum. This is not a corner case: it is 42 of 240 feasible rows on the reference grid. A solver has to test the derivative's sign at each end and report the pin explicitly, because a bracketing root-find handed no sign change cannot distinguish "pinned" from "failed". The reported operating-point kind is what carries that distinction.
+### When the answer is a bound, not a stationary point
+
+Where profit is still climbing as it reaches the end of the feasible interval, `dJ/dψ` never crosses zero inside it and the optimum is that endpoint — a *constrained* optimum. This is not a corner case: it is 42 of 240 feasible rows on the reference grid. A solver has to test the derivative's sign at each end and report the pin explicitly, because a bracketing root-find handed no sign change cannot distinguish "pinned" from "failed". The reported operating-point kind is what carries that distinction.
 
 Those constrained answers are named for **the bound that binds**, because the alternative is read backwards. The feasible interval runs from `ψ_soil` — no tension gradient, hence no flow, hence closed stomata — to `ψ_crit`, the most tension the stem is allowed. So:
 
@@ -182,7 +190,7 @@ The two properties are not actually in conflict, which is the point worth carryi
 
 1e-10 is the knee: **335× closer to a converged solve** than the 1e-7 this model used to run at, for a measured **+3.4%** in time (2.65 → 2.75 µs/solve, both binaries built from one tree and interleaved). Going on to 1e-13 buys roughly 700× more for about three times that again. Note the plateaus — 1e-10 and 1e-11 return the same number, because they are the same count of TOMS748 iterations — so tightening *between* plateaus costs and buys nothing.
 
-**This tolerance was invisible until the outer search was replaced**, and that is the generalisable part: a nested solver's precision is only as visible as the loosest tolerance above it. While the outer golden-section search terminated on a 1e-3 bracket, the inner root-find could have been anything. Removing the outer search promoted it to the model's dominant amplifier overnight — which is why the two sections belong together.
+**A nested solver's precision is only as visible as the loosest tolerance above it**, which is the generalisable part and the reason this subsection sits directly after the last one. While the outer search terminated on a 1e-3 bracket this inner tolerance could have been anything and nothing downstream would have shown it; solving the outer first-order condition instead promoted it to the model's dominant amplifier. If you tighten one tolerance in a stack, expect the next one down to become the answer.
 
 **And the tolerance you can set is not this one.** The inner `ci` root-find is fixed at 1e-10, on both routes. `ci_abs_tol` in `leaf_control()` is read in exactly one place — `solve_medlyn_ci_numerical`, the empirical Medlyn-conductance route — so it reaches *neither* family of optimality solver, and tightening it buys no precision anywhere in the optimality model. Worth knowing before anyone tries, because the name promises otherwise.
 
@@ -228,7 +236,7 @@ The last two rows are in the table because of a **benefit link**, and it is wort
 $$g_{\rm SOX}(\psi)=\frac{f(\psi)-0.05}{1-0.05},
 \qquad g_{\rm JW}(\psi)=1-\frac{\psi}{\psi_{\rm crit}}$$
 
-Both run from 1 at zero tension to exactly 0 at `psi_crit`, so they are two *interpolations between the same two anchors* — one following the vulnerability curve, one straight. That is what makes them comparable without matching a parameter, and neither needs one: `psi_crit` is derived from `stem_P50` and `stem_c` as everywhere else, and SOX's 0.05 is the same constant `psi_crit` is itself derived from.
+Both run from 1 at zero tension to exactly 0 at `psi_crit`, so they are two *interpolations between the same two anchors* — one following the vulnerability curve, one straight. That is what makes them comparable without matching a parameter, and neither needs one: SOX's 0.05 is the same constant `psi_crit` is derived from, so both curves inherit their anchors from the vulnerability curve rather than carrying parameters of their own.
 
 They cross, which is the whole of the difference between them:
 
@@ -252,7 +260,7 @@ $$\log\big(A\,g\big) = \log A + \log g \quad\Longrightarrow\quad C(\psi)=-\log g
 So a product objective is a difference objective *with a transformed benefit*, and the link — `log` here, identity everywhere else — is the only new machinery the family needs. Two consequences follow, and both are real rather than bookkeeping:
 
 - **Its λ carries a factor of `A`**, because the cost is levied on *proportional* rather than absolute carbon. The section on λ derives this in one line and shows it is a property of the product form, not of this particular `g`.
-- **It can never be boundary-crit.** `g(psi_crit)` is exactly zero, so `C` diverges there — water becomes infinitely expensive before the bound is reached. It takes no parameter of its own to achieve that; the 0.05 is the same constant `psi_crit` is derived from.
+- **It can never be boundary-crit.** `g(psi_crit)` is exactly zero, so `C` diverges there — water becomes infinitely expensive before the bound is reached, and no parameter of the model's own is involved in arranging that.
 
 **The link states the cost; it is not how the optimum is found.** At full closure `A = −R_d < 0`, so `log A` does not exist — and that endpoint has to be a candidate. The optimiser therefore maximises the product directly, which is exact because `log` is monotone, while the *derivative* uses the log form.
 
@@ -360,8 +368,6 @@ for (nm in names(model)) {
 ```
 
 Agreement is at the last bit, and the relative error is measured against the **scale of the two terms** rather than against their sum. That is deliberate: `A'g + Ag'` cancels to exactly zero at the optimum, so an error relative to the sum would diverge there for a perfectly correct implementation.
-
-⚠️ **The link is how to state this cost, not how to search for it.** `log A` needs `A > 0`, and that fails precisely in the closed-stomata state where `A = −R_d < 0` — which is a candidate the optimiser has to keep, since a hot leaf's best move is to shut. So the solvers maximise the **product** and report the product in `profit_`, while the derivative uses the log form. They share an argmax, so this is a free choice of representation rather than a compromise.
 
 One consequence to keep in view when reading `profit_` across models: it now carries three kinds of number — carbon for the four difference objectives, a dimensionless normalised profit for `ProfitMax`, and carbon times a dimensionless factor for the two products. Comparing it between curves is not meaningful; comparing each curve's argmax is.
 
@@ -561,7 +567,7 @@ So the published models map on as follows:
 
 They supply `ψ_crit` as a free parameter and their supply is linear in the potential, `Ψleaf = Ψpd − r_p E`. Here `psi_crit` is derived from the stem curve like everything else, and the supply is that curve's integral, which saturates. Deriving `psi_crit` is the deliberate choice: it costs a parameter of theirs but it is what puts `JW26` and `SOX` on the same two anchors, so the comparison between them is structural rather than a fitted match. Reproducing the paper's own numbers would need the free `ψ_crit` and the linear supply together — and those two are coupled, because flattening the vulnerability curve to recover their supply sends a derived `psi_crit` to infinity and deletes the cost.
 
-The constraints on the log form are worth keeping in view either way. `log A` requires `A > 0`, which fails exactly in the closed-stomata state where `A = −R_d`, so the optimiser maximises the product directly rather than its logarithm. And the cost diverges where `g` reaches zero, which is the mechanism by which no product objective can be pinned dry.
+Both constraints on the log form are stated where they arise — `log A` needs `A > 0`, which fails at closure, and `C` diverges where `g` reaches zero, which is why no product objective can be pinned dry. They apply to `JW26` exactly as to `SOX`.
 
 ## The biological components
 
@@ -835,38 +841,36 @@ With `|A|max` differentiable, the composite simply re-solves it per perturbation
 
 # Appendix C — numerical practice
 
-Four facts about this model that decide whether a number you compute from it means anything.
+Three facts about this model that decide whether a number you compute from it means anything. All three are consequences of the same thing — the objective is flat where it matters — seen from three distances: in the value itself, in a difference of it, and in a derivative of its argmax.
 
-## The maximum is well conditioned; the argmax is not
+## The maximum is flat, so its location is the delicate quantity
 
-`J` is flat at its optimum, with curvature `k ≈ 1` in `J ≈ J* − k(ψ − ψ*)²`. So an error `dJ` in the *value* displaces its *location* by `√(dJ/k)`: a 2e-09 disagreement in profit becomes ~1e-04 in the potential at which it occurs. Across platforms the profit agrees to 2.1e-09 while every argmax-evaluated output disagrees by 1.4e-04, three orders worse, for exactly this reason.
+`J` is flat at its optimum, with curvature `k ≈ 1` in `J ≈ J* − k(ψ − ψ*)²`. So an error `dJ` in the *value* displaces its *location* by `√(dJ/k)`. That is why the two are not interchangeable as things to check, and it has two practical consequences.
 
-**So check `profit` for a portable comparison, and check the residual `|dJ/dψ|` — not the profit — when judging a change to a solver.** Profit is the wrong instrument there: when the collar solve moved to a first-order condition, two of 288 rows came out ~6e-07 *lower* in profit while their residual improved by ten orders of magnitude.
+**Check the residual `|dJ/dψ|`, not the profit, when judging a change to a solver.** Profit is the wrong instrument precisely because it is flat: when the collar solve moved to a first-order condition, two of 288 rows came out ~6e-07 *lower* in profit while their residual improved by ten orders of magnitude. A change that improves the answer can make the objective look worse.
+
+**And be careful reading a relative disagreement in either.** Comparing this model's outputs between platforms — glibc and Apple's libm do not agree in the last bits of `exp` and `pow` — the reference grid disagrees by **1.35e-09 µmol C m⁻² s⁻¹** in profit and **3.62e-09 Pa** in `c_i`, which is the solver's own floor in both cases. The *relative* figures are much larger, 1.86e-07 and 9.02e-06, and both land on rows where the quantity concerned is passing through zero: the worst profit row is the grid's minimum |profit| (1.05e-03 against a median of 2.47) and the worst `c_i` row an assimilation of 4.05e-07 against a median of 1.44. A dim, hot leaf whose assimilation barely clears respiration. So those two numbers are the metric cancelling, not the model disagreeing — a distinction this project's own notes got wrong for a long time, and the reason the test now prints both.
 
 ## A finite difference through a solve has a noise floor, so sweep the step
 
-Differencing anything computed by a solver divides that solver's tolerance by the step, so the relative error goes as `1/h` until truncation takes over. The error-versus-`h` curve is a **V**, and only its floor is a derivative. Measured through the collar solve: 1.3e-01 at `h = 1e-08`, falling to 1.9e-07 at 1e-03, then rising to 1.3e-04 at 1e-02.
+Differencing anything computed by a solver divides that solver's tolerance by the step, so the relative error goes as `1/h` until truncation takes over. The error-versus-`h` curve is a **V**, and only its floor is a derivative. **A small step is not the safe choice** — it is the noise side.
 
-⚠️ **A "small" step is the wrong instinct.** `h = 1e-06` sits three orders up the noise side of that V and reads as a wrong derivative.
+⚠️ **And the V's position is a property of the solver, not of the model, which is the part that catches people.** How well a solver locates its argmax sets how small a step can still move it. A route that root-finds `dJ/dψ = 0` locates ψ* to ~1e-15, so a 1e-06 relative parameter step moves it far more than the solve's own precision and the floor sits near 1e-06. A route that refined on bracket *width* located ψ* to ~1e-06 of the bracket — about 4e-06 MPa on a 4.4 MPa one — and the same step then differenced pure quantisation. Measured on `SOX` for `vcmax_25`, against a composite flat at 0.0551 across six decades:
 
-## …and the floor depends on which solver you differenced
+| relative step | width-refined | root-found |
+|---|---|---|
+| 1e-06 | 0.1855 | 0.0551 |
+| 1e-03 | 0.0552 | 0.0551 |
+| 1e-02 | 0.0551 | 0.0551 |
 
-The V's position moves with the solver, which is sharper than the rule above and easier to miss — and this is the measurement that closed the gap described earlier in this vignette. Both routes root-find `dJ/dψ = 0` now and locate ψ* to ~1e-15. While the stem routes scanned a 64-point grid and refined on bracket *width* they located it to ~1e-06 of the bracket — about 4e-06 MPa on a 4.4 MPa one — and a relative parameter step of 1e-06 moves ψ* by ~3e-06 MPa, which is **below that resolution**, so the difference returned quantisation. Measured for `SOX`'s `vcmax_25`: 0.1855 against a converged 0.0551, and the wrong **sign** for `JW26`. Every route now takes the same 1e-06 step, which is what that fix bought; re-sweep if a solver changes again.
+At 1e-06 the width-refined difference also gets the **sign** wrong for `JW26`. Two bugs were reported against the composite on the strength of a single 1e-06 step, and neither existed — the composite was right and the verification was broken.
 
-Measured on `SOX` for `vcmax_25`, against a composite that is flat at 0.0551 across six decades:
-
-| relative step | differenced solve |
-|---|---|
-| 1e-06 | 0.1855 |
-| 1e-03 | 0.0552 |
-| 1e-02 | 0.0551 |
-
-At 1e-06 the same difference gets the **sign** wrong for `JW26`. Two bugs were reported against the composite on the strength of a single 1e-06 step, and neither existed. Each gradient route therefore carries its own finite-difference step, matched to the solver whose argmax it is differencing.
+Every route in the package root-finds now, so **one step of 1e-06 serves all of them**, and each route still carries its own `fd_step` so the value travels with the solver rather than with the caller. Re-sweep if a solver changes: the number is not a constant of the model.
 
 ## A scan's argmax cannot feed a parameter gradient
 
-A grid argmax is piecewise constant in the parameters: it sits at one grid point until the winner changes cells, so its derivative is zeros interrupted by jumps. That is why a bracketing search cannot support a trait gradient however tight its tolerance, and why the collar solve moved to a first-order condition — over eleven parameter steps golden section returned 6 distinct argmax values where the root-find returns 11, and the second differences fell from 3.9e-04 (the step size, i.e. noise) to 3.4e-07.
+The section above is about resolution. This one is about a harder obstruction: a grid argmax is piecewise constant in the parameters — it sits at one grid point until the winner changes cells — so its derivative is not merely imprecise but is zeros interrupted by jumps. **No tolerance fixes that**, which is why a bracketing search cannot support a trait gradient however tightly it is run, and why every solver here moved to a first-order condition. Over eleven parameter steps golden section returned 6 distinct argmax values where the root-find returns 11, and the second differences fell from 3.9e-04 — the step size, i.e. nothing — to 3.4e-07.
 
-It is also why ProfitMax's `|A|max` normaliser is held fixed rather than differentiated: it comes from a scan, so the same objection applies to it directly. Appendix B has what that costs.
+The same objection once applied to ProfitMax's `|A|max`, which came from a 500-point scan and so had to be pinned rather than differentiated. It is a root-find now, so it is differentiable and the composite lets it move; Appendix B has what that changed.
 
 # References
