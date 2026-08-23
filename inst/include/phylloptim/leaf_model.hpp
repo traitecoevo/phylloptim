@@ -2488,7 +2488,7 @@ if(assim_max_ < 0){
       }
 
       opt_psi_stem_ = psi_stem_single;
-      profit_ = profit_psi_stem_TF(opt_psi_stem_, opt_root_psi);
+      profit_ = profit_psi_stem_for<K>(opt_psi_stem_, opt_root_psi);
       opt_root_psi_ = opt_root_psi;
       // Feasibility DETERMINED this point; no maximisation happened, and there is
       // no free variable left for a derivative to move.
@@ -2713,7 +2713,11 @@ inline void Leaf::find_root_collar_psi_for(){
     opt_psi_stem_ = find_psi_stem_from_psi_root(opt_root_psi, supply_psi_soil());
 
     opt_root_psi_ = opt_root_psi;
-    profit_ = profit_psi_stem_TF(opt_psi_stem_, opt_root_psi);
+    // ⚠️ `<K>`, NOT TF24. This read TF24's objective for every curve after the
+    // collar route was templated -- so a SOX solve maximised SOX and then reported
+    // TF24's profit at SOX's argmax, which is finite, plausible, and always a
+    // little below TF24's own maximum. Two of these survived the templating pass.
+    profit_ = profit_psi_stem_for<K>(opt_psi_stem_, opt_root_psi);
     // Reported on the same axis as the single-layer solvers, using the MULTI-LAYER
     // lambda: the collar is the free variable here, so the marginal cost carries
     // the series-resistance correction for the soil-to-collar path that the
