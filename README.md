@@ -48,6 +48,15 @@ without moving the argmax. This is the central result of a companion manuscript,
 and it is something none of the existing R packages can support, because each
 commits to a single hydraulically explicit scheme or to none.
 
+**One solver, so the comparison is not just fair but cheap.** Every model reaches its
+operating point through the same call: evaluate both interval endpoints, optionally
+scan for the basin, then root-find `dJ/dψ = 0` inside the winning cell. Nothing here
+is per-model except a row in two dispatch tables. That is what keeps a seven-model
+package as fast as a one-model one — the stem entry points run at **2.9 µs** and
+ProfitMax at **5.6 µs**, against 9.3 and 58.2 before the solvers were merged, because
+a basin scan is now used only where multi-modality is measured rather than everywhere
+by default. The residual `|dJ/dψ|` at the returned optimum has a median of **1.2e-15**.
+
 **Either supply path, so the comparison is fair.** The gas-exchange core is
 soil-agnostic: the multi-layer soil and root system enter the solve only as a
 supply function `E_up = f(P_collar)`. So the multi-layer root system can be

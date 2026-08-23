@@ -809,7 +809,7 @@ The envelope does not survive the active set. At a pinned optimum ψ* is a param
 
 ⚠️ **One route still differences the solve under `method = "auto"`, and it is `ProfitMax`.** Every route now root-finds `dJ/dψ = 0` — one solver, endpoints plus an optional basin scan plus a root-find — so an interior optimum is classified `interior` and the composite applies. Measured over 427 interior rows across six curves, the residual `|dJ/dψ|` at the returned ψ* has a median of **1.2e-15**, against 4.4e-05 when those routes refined on bracket width instead. That is also what lets one finite-difference step serve every route: at h = 1e-06 a difference of the solve now matches the composite to 2.5e-05 (SOX) and 5.1e-11 (TF24), where the same step once returned 0.1855 against a true 0.0551 and the wrong sign for JW26.
 
-`ProfitMax` is the exception because its `|A|max` is still the argmax of a 500-point scan, so it is piecewise constant in the parameters: the composite holds it fixed and returns a partial, differencing lets it re-run and returns the total, and a fit needs the total. Its step is set by that scan's resolution, 1e-02.
+`ProfitMax` is the exception, though no longer for a numerical reason. Its `|A|max` used to be the argmax of a 500-point scan, hence piecewise constant in the parameters, and differencing it needed a step big enough to cross a scan cell. `|A|max` is found by a root-find now, so the difference is flat from 1e-02 to 1e-06 and **one step of 1e-06 serves every route**. What remains is a modelling distinction rather than a staircase: the composite holds `|A|max` fixed and returns a partial, differencing the solve lets it move and returns the total, and a fit needs the total.
 
 ## Prescribed versus optimised
 
@@ -817,9 +817,11 @@ Pass `psi` and the outputs are evaluated at that potential instead of the argmax
 
 ## A partial is not always a total
 
-⚠️ ProfitMax normalises by `|A|max`, which comes from a **scan** over the supply stream. Its argmax is piecewise constant in the parameters, so `d|A|max/dθ` is a sequence of zeros and jumps and a total derivative through it is not a quantity worth computing. The composite therefore holds `|A|max` fixed and returns the **partial**, while differencing the solve lets the scan re-run and returns the **total**. Measured for `vcmax_25` at ψ_soil 1.5: partial 0.0766, total 0.0579, `d|A|max/dvcmax_25` = 0.0768 — the omitted term is 32% of the partial.
+⚠️ ProfitMax normalises by `|A|max`, the largest assimilation on the supply stream, and the composite holds that fixed — so it returns a **partial** where differencing the solve returns the **total**. Measured for `vcmax_25` at ψ_soil 1.5: partial 0.0766, total 0.0579, so the omitted term is 32% of the partial.
 
-**A fit needs the total**, because the model re-scans `|A|max` at every parameter vector: an optimiser fed the partial stops where the partial vanishes rather than where the objective does. So `method = "auto"` differences the solve for this one curve. No other model has this split.
+`|A|max` is itself an optimum, found by endpoints plus a root-find on `dA/dψ = 0` (it sits at the dry bound on 1318 of 1320 driver rows and interior on 2). It used to be a 500-point scan, which made `d|A|max/dθ` a sequence of zeros and jumps and the total derivative step-dependent — 0.014 at h = 1e-06 against 0.058 at 1e-02. That is fixed: the total is flat across six decades of step. Carrying the chain rule through `|A|max` into the composite is now a well-posed thing to do, and is the remaining work here.
+
+**A fit needs the total**, because the model re-solves `|A|max` at every parameter vector: an optimiser fed the partial stops where the partial vanishes rather than where the objective does. So `method = "auto"` differences the solve for this one curve. No other model has this split.
 
 # Appendix C — numerical practice
 
