@@ -415,6 +415,23 @@ public:
   // A member for the same reason as profitmax_scan_n_: the constructor's arity is
   // pinned by plant's generated glue and by the CI consumer program.
   int boundary_scan_n_ = 64;
+
+  // Cells to scan before refining. ZERO unless the energy balance is on, and that
+  // is measured rather than assumed: over a 1728-row sweep (8 air temperatures x 4
+  // gate combinations x 6 soil potentials x 3 deficits x 3 light levels) the only
+  // stem objectives carrying TWO prominent interior basins are TF24 (21 rows) and
+  // JS22 (66), and EVERY one of those rows has `use_energy_balance_` true. With the
+  // gate off the objective is unimodal, so endpoints plus a root-find on the
+  // first-order condition is not an approximation -- it is the whole answer, and it
+  // costs `n` fewer objective evaluations on the path plant calls millions of times.
+  //
+  // ⚠️ Re-measure this before widening the gate predicate. The valleys involved are
+  // 7.0e-01 (TF24) and 3.5e+00 (JS22) deep, so a missed basin is a large error, not
+  // a rounding one -- this is a cheap scan to skip and an expensive one to skip
+  // wrongly.
+  int basin_scan_cells() const {
+    return use_energy_balance_ ? boundary_scan_n_ : 0;
+  }
   double PPFD_;
   double atm_vpd_;
   // The vapour pressure deficit the DIFFUSION equations use, kPa. Off the
@@ -5060,9 +5077,34 @@ inline void Leaf::optimise_psi_stem_single() {
   }
 
   double profit_opt = 0.0;
-  opt_psi_stem_ = util::maximise_over_closed_interval(
-      [&](double psi_stem) { return profit_psi_stem_for<K>(psi_stem, psi_soil); },
-      psi_soil, psi_crit, boundary_scan_n_, &profit_opt);
+  const auto objective = [&](double psi_stem) {
+    return profit_psi_stem_for<K>(psi_stem, psi_soil);
+  };
+  // ⚠️ WHETHER A DERIVATIVE EXISTS IS DECIDED HERE, NOT BY CATCHING A THROW. Under
+  // a non-identity benefit link with the energy balance on, dJ/dpsi is REFUSED
+  // rather than approximated (the temperature term needs the same h'(A) factor).
+  // The OBJECTIVE is still perfectly well defined there, so that configuration
+  // keeps the bracket-width refinement instead of losing the solve to an
+  // exception -- letting the refusal fire from inside the optimiser turned 3236 of
+  // 4608 golden rows into throws.
+  constexpr bool link_blocks_derivative =
+      benefit_link<K>() != BenefitLink::Identity;
+  if (link_blocks_derivative && use_energy_balance_) {
+    opt_psi_stem_ = util::maximise_over_closed_interval(
+        objective, psi_soil, psi_crit, boundary_scan_n_, &profit_opt);
+  } else {
+    // ONE solver, shared with the collar route: endpoints, an optional basin scan,
+    // then a ROOT-FIND of dJ/dpsi == 0 inside the winning cell. The root-find is
+    // what makes the argmax stationary rather than grid-resolved, which is what a
+    // derivative taken through this solve needs.
+    opt_psi_stem_ = util::maximise_over_closed_interval_foc(
+        objective,
+        [&](double psi_stem, bool* ok) {
+          return dprofit_dpsi_stem<K>(psi_stem, psi_soil, ok);
+        },
+        psi_soil, psi_crit, basin_scan_cells(), collar_root_tol,
+        static_cast<size_t>(ci_niter), &profit_opt);
+  }
   profit_ = profit_psi_stem_for<K>(opt_psi_stem_, psi_soil);
   lambda_emergent_ = lambda_for<K>(opt_psi_stem_, psi_soil);
   (void)profit_opt;
