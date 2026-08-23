@@ -1139,6 +1139,10 @@ public:
   template <CostCurve K> static constexpr BenefitLink benefit_link();
   template <CostCurve K> double benefit_link_deriv(double A) const;
   template <CostCurve K> void optimise_psi_stem_single();
+  // ProfitMax's shut state. Its objective is A/|A|max minus a normalised cost,
+  // so with |A|max <= 0 there is nothing to evaluate -- unlike every other curve,
+  // whose objective is defined everywhere. Hence zeroed rather than evaluated.
+  void set_profitmax_degenerate_state();
   template <CostCurve K> void check_cost_parameters();
   template <CostCurve K> double cost_deriv(double psi_stem,
                                            double psi_upstream);
@@ -4652,104 +4656,19 @@ inline std::vector<double> Leaf::profitmax_curve(int n) {
   return out;
 }
 
+inline void Leaf::set_profitmax_degenerate_state() {
+  profit_ = 0;
+  transpiration_ = 0;
+  stom_cond_CO2_ = 0;
+  carbon_gain_ = 0;
+  hydraulic_cost_norm_ = 0;
+  thermal_cost_ = 0;
+  lambda_emergent_ = util::na_value;
+}
+
+
 inline void Leaf::optimise_psi_stem_ProfitMax() {
-  clear_collar_solve_state();
-
-  if (!supply_is_single_layer()) {
-    util::stop("psi soil must have only one value to use non-root-based profit "
-               "optimisation methods");
-  }
-  const double psi_soil = supply_psi_soil_scalar();
-  opt_psi_stem_ = psi_soil;
-
-  if ((PPFD_ < 1.5e-8) | (psi_soil > psi_crit)) {
-    profit_ = 0;
-    transpiration_ = 0;
-    stom_cond_CO2_ = 0;
-    carbon_gain_ = 0;
-    hydraulic_cost_norm_ = 0;
-    thermal_cost_ = 0;
-    lambda_emergent_ = util::na_value;
-    return;
-  }
-
-  prepare_profitmax();
-  if (!(profitmax_k_span_ > 0.0) || !(profitmax_A_max_ > 0.0)) {
-    // No usable normalisation: either the soil is already at the critical
-    // potential (no conductance to spend) or nothing on the stream assimilates.
-    profit_ = 0;
-    transpiration_ = 0;
-    stom_cond_CO2_ = 0;
-    carbon_gain_ = 0;
-    hydraulic_cost_norm_ = 0;
-    thermal_cost_ = 0;
-    lambda_emergent_ = util::na_value;
-    return;
-  }
-
-  // The marginal cost of water this operating point implies, reported so the
-  // relation to the lambda form is inspectable rather than asserted. Exactly:
-  //
-  //   A_max*ProfitMax(psi) == [A(psi) - lambda*(k(psi_soil)-k(psi))]
-  //                           - A_max*thermal_cost_at(Tleaf(psi))
-  //
-  // to ~4e-15. The bracketed term is a constant-lambda objective, so the two share
-  // an argmax only where the thermal cost is CONSTANT in psi -- thermal cost off
-  // (TC is exactly 0), or energy balance off (Tleaf is a driver, so TC is an
-  // additive constant that cannot move the argmax). With BOTH gates on the extra
-  // term is genuinely psi-dependent, and the argmaxes differ by up to 1.1 MPa at
-  // Tair 40. A prescribed lambda is therefore not a substitute for this model.
-  //
-
-  // ⚠️ GRID FIRST, THEN REFINE, AND A BARE BRENT SEARCH IS WRONG HERE.
-  //
-  // This used to be `brent_fmin` over [psi_soil, psi_crit] alone. Brent is a
-  // LOCAL optimiser that steps in from the bounds, so it cannot return an
-  // endpoint and it cannot see past a local maximum -- and this objective has
-  // both of those, in exactly the regime the model is interesting in. Measured at
-  // Tair 50 C with the thermal cost on: the profit runs -1.5314 at psi_soil,
-  // -1.5510 at 1.19, -1.5459 at 1.88, then falls away, so the GLOBAL maximum is
-  // the closed-stomata endpoint and there is a local one near 1.9. Brent returned
-  // 1.643. The model was reporting a leaf with open stomata where the objective
-  // says it should be shut.
-  //
-  // It is not a hypothetical: full closure at high temperature is what Sicangco
-  // et al. (2026) report for their CGnet arms -- "for sufficiently high
-  // temperatures CGnet is negative for all possible values of Psi_leaf and the
-  // optimum shifts toward stomatal closure" -- and their own implementation finds
-  // it because it takes `which.max` over a 500-point grid rather than searching.
-  //
-  // So: evaluate the objective on the scan prepare_profitmax() has ALREADY run
-  // (no extra model evaluations -- A and Tleaf are stored, and HC and TC are
-  // analytic in psi and Tleaf), take the grid argmax, and refine with Brent only
-  // when that argmax is interior. An endpoint argmax is returned as the endpoint,
-  // which is the answer rather than a failure to search.
-  // THE SHARED SOLVER, not a second one. This used to walk the |A|max scan grid to
-  // pick a basin and then Brent-refine inside it -- a duplicate of
-  // maximise_over_closed_interval with the added constraint that its grid had to be
-  // the normaliser's grid. Both are gone: |A|max is found by optimisation now, so
-  // there is no grid to reuse, and this route gets the same endpoints-plus-basin-
-  // plus-root-find treatment as every other curve.
-  const auto objective = [&](double psi_stem) {
-    return profit_psi_stem_ProfitMax(psi_stem, psi_soil);
-  };
-  double profit_opt = 0.0;
-  // ⚠️ The Scaled link refuses a derivative with the energy balance on, for the
-  // reason the link table gives, so that configuration keeps the width refinement
-  // rather than losing the solve to a throw from inside the optimiser.
-  opt_psi_stem_ = util::maximise_over_closed_interval_foc(
-      objective,
-      [&](double psi_stem, bool* ok) -> double {
-        if (use_energy_balance_) {          // Scaled link: derivative refused
-          if (ok != nullptr) *ok = false;
-          return 0.0;
-        }
-        return dprofit_dpsi_stem<CostCurve::ProfitMax>(psi_stem, psi_soil, ok);
-      },
-      psi_soil, psi_crit, basin_scan_cells(), collar_root_tol,
-      static_cast<size_t>(ci_niter), &profit_opt);
-  profit_ = profit_psi_stem_ProfitMax(opt_psi_stem_, psi_soil);
-  lambda_emergent_ = lambda_ProfitMax(opt_psi_stem_);
+  optimise_psi_stem_single<CostCurve::ProfitMax>();
 }
 
 // --- runtime curve selection --------------------------------------------------
@@ -4788,10 +4707,8 @@ inline void Leaf::optimise_psi_stem_by(int curve) {
     case CostCurve::CMax: optimise_psi_stem_single<CostCurve::CMax>(); return;
     case CostCurve::SOX:  optimise_psi_stem_single<CostCurve::SOX>();  return;
     case CostCurve::JW26: optimise_psi_stem_single<CostCurve::JW26>(); return;
-    // ⚠️ NOT the shared body. ProfitMax seeds |A|max and the conductance span
-    // before searching, so it keeps its own optimiser -- the LINK is what it
-    // shares with the others, not the search.
-    case CostCurve::ProfitMax: optimise_psi_stem_ProfitMax(); return;
+    case CostCurve::ProfitMax:
+      optimise_psi_stem_single<CostCurve::ProfitMax>(); return;
   }
   util::stop("unknown cost curve index " + util::to_string(curve));
 }
@@ -5016,8 +4933,25 @@ inline void Leaf::optimise_psi_stem_single() {
   const double psi_soil = supply_psi_soil_scalar();
   opt_psi_stem_ = psi_soil;
 
-  // Drier soil than the stem can reach: one feasible potential, and this is it.
-  if (psi_soil > psi_crit) {
+  // ⚠️ ONE CURVE NEEDS SETUP BEFORE THE SEARCH, AND ITS DEGENERATE EXIT DIFFERS.
+  // ProfitMax divides by |A|max, so it is seeded here -- and where the normalisers
+  // come out unusable there is no normalised objective to evaluate at the no-flow
+  // point, which is why that arm ZEROES where every other curve EVALUATES. `PPFD_`
+  // joins the test because a dark leaf has A = -R_d everywhere, so |A|max is
+  // non-positive and the second bail-out would catch it anyway; testing it first
+  // avoids seeding in order to discover that.
+  if constexpr (K == CostCurve::ProfitMax) {
+    if ((PPFD_ < 1.5e-8) | (psi_soil > psi_crit)) {
+      set_profitmax_degenerate_state();
+      return;
+    }
+    prepare_profitmax();
+    if (!(profitmax_k_span_ > 0.0) || !(profitmax_A_max_ > 0.0)) {
+      set_profitmax_degenerate_state();
+      return;
+    }
+  } else if (psi_soil > psi_crit) {
+    // Drier soil than the stem can reach: one feasible potential, and this is it.
     profit_ = profit_psi_stem_for<K>(psi_soil, psi_soil);
     lambda_emergent_ = lambda_for<K>(psi_soil, psi_soil);
     return;
