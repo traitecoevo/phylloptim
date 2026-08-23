@@ -4771,26 +4771,20 @@ inline void Leaf::optimise_psi_stem_ProfitMax() {
 //
 // One switch, so the integer-to-curve mapping is written once. `-Werror=switch`
 // makes a curve added to the enum and forgotten here a build failure.
-namespace detail {
-inline const char* cost_curve_name(Leaf::CostCurve k) {
-  switch (k) {
-    case Leaf::CostCurve::TF24: return "TF24";
-    case Leaf::CostCurve::CF77: return "CF77";
-    case Leaf::CostCurve::JS22: return "JS22";
-    case Leaf::CostCurve::CMax: return "CMax";
-    case Leaf::CostCurve::SOX:  return "SOX";
-    case Leaf::CostCurve::JW26: return "JW26";
-    case Leaf::CostCurve::ProfitMax: return "ProfitMax";
-  }
-  return "unknown";
-}
-}  // namespace detail
-
 inline std::string Leaf::curve_name(int curve) {
   if (curve < 0 || curve >= n_cost_curves) {
     return "unknown";
   }
-  return detail::cost_curve_name(static_cast<CostCurve>(curve));
+  switch (static_cast<CostCurve>(curve)) {
+    case CostCurve::TF24: return "TF24";
+    case CostCurve::CF77: return "CF77";
+    case CostCurve::JS22: return "JS22";
+    case CostCurve::CMax: return "CMax";
+    case CostCurve::SOX:  return "SOX";
+    case CostCurve::JW26: return "JW26";
+    case CostCurve::ProfitMax: return "ProfitMax";
+  }
+  return "unknown";   // unreachable past the bounds check above
 }
 
 // Whether `dprofit_dpsi_stem_by` will accept this curve. Exposed so a caller can

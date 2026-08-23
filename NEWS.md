@@ -30,6 +30,58 @@ rather than approximated.
 All 4608 rows of `psi_stem_optima.tsv` are bit-identical across the unification:
 the identity arm's derivative is textually unchanged.
 
+## One entry point: `set_model()` then `optimise()`
+
+**BREAKING.** Choosing a model was ten functions: seven per-curve aliases, two
+dispatchers taking a curve INDEX, and the TF24 shorthand. It is now
+
+```r
+l$set_model("SOX", "stem")     # or ("TF24", "collar"), the default
+l$CF77_lambda_ <- 1.5e5        # whatever constants that model needs
+l$optimise()                   # takes nothing
+l$model_curve(); l$model_route()
+```
+
+The model is configuration rather than a call argument, because its **parameters
+already were**: `CF77_lambda_` is a field, and `JS22_gamma`, `CMax_a` and `CMax_b`
+are traits. Naming the curve at the call site while its constants live on the object
+configures half a model in each place. Unknown names are refused with the valid set
+listed, so no caller handles an index that silently means a different model when the
+enumeration grows.
+
+Removed from the R surface: `optimise_psi_stem_TF/CF77/JS22/CMax/SOX/JW26/ProfitMax`,
+`optimise_psi_stem_by()` and `find_root_collar_psi_by()`. They remain in C++ — plant
+calls two of them directly, and the compile-time form is what a hot path should use.
+`find_root_collar_psi()` is kept for now: it is `optimise()` under the default model,
+and it is what plant's own sources spell.
+
+Defaults are `"TF24"` and `"collar"`, so a caller that never sets a model gets the
+production path — and all four golden baselines are bit-identical, which is that
+statement checked rather than asserted.
+
+## The collar route's zero-resistance limit converges
+
+A collapsed collar bracket used to DERIVE `psi_stem` from continuity and stop. That
+threw away the freedom that survives: feasibility pins the **collar**, not the stem,
+so the leaf can still choose how far to let `psi_stem` fall. Measured at `psi_soil`
+1.0, PPFD 900: deriving gave `psi_stem` 1.6465 and profit 8.255 where optimising
+gives 3.0935 and 13.389 — 38% of the objective.
+
+That branch now optimises `psi_stem` with the upstream potential pinned at the
+determined collar, through the same solver everything else uses. The limit is clean
+and monotone — the gap to the stem route's answer runs 9.8e-03, 3.5e-05, 3.5e-07,
+7.0e-09 as the series resistance goes 1e0 to 1e-6 — where it was 38% off and not even
+monotone.
+
+⚠️ **This is not a change of coordinate, and that is what keeps it free.** Optimising
+`psi_stem` everywhere would need a nested root-find per objective evaluation, because
+the supply maps `psi_collar` to `E` and any other coordinate has to invert it. It is
+also unnecessary: `psi_collar` and `psi_stem` are monotone in each other, so
+`dJ/dpsi_stem` and `dJ/dpsi_collar` differ by a strictly positive factor and share
+their roots. The coordinate was never wrong; only the bracket collapsed. Interleaved
+timings are flat (collar 3.06 against 3.05 us/solve) and every golden baseline is
+bit-identical, because the branch fires only where the solve previously gave up.
+
 ## One solver for every model, and the scan is now an argument
 
 There used to be two optimisers doing the same job with different numerics. The
