@@ -2517,8 +2517,42 @@ if(assim_max_ < 0){
                    "; E_up_=" + util::to_string(E_up_));
       }
 
-      opt_psi_stem_ = psi_stem_single;
+      // ⚠️ THE COLLAR IS DETERMINED; psi_stem IS NOT. This branch used to DERIVE
+      // psi_stem from continuity at the collapsed collar and stop, which threw the
+      // remaining degree of freedom away: the leaf can still choose how far to let
+      // psi_stem fall, it is only the COLLAR that feasibility has pinned. Measured
+      // at psi_soil 1.0, PPFD 900, single potential: deriving gave psi_stem 1.6465
+      // and profit 8.255 where optimising gives 3.0935 and 13.389 -- a 38% loss,
+      // and the reason the collar route's r -> 0 limit did not converge onto the
+      // stem route's answer.
+      //
+      // So optimise psi_stem with the upstream potential pinned at the determined
+      // collar. That is exactly the problem `optimise_psi_stem_single` solves, and
+      // the same shared solver does it -- `profit_psi_stem_for` and
+      // `dprofit_dpsi_stem` both already take the upstream potential as an
+      // argument, so nothing new is derived here.
+      //
+      // ⚠️ COSTS NOTHING ON THE NORMAL PATH. This runs only where the interval has
+      // collapsed, which is where the solve previously gave up; a bracket wider
+      // than GSS_tol_abs never reaches it.
+      double collapsed_profit = 0.0;
+      opt_psi_stem_ = util::maximise_over_closed_interval_foc(
+          [&](double psi_stem) {
+            return profit_psi_stem_for<K>(psi_stem, opt_root_psi);
+          },
+          [&](double psi_stem, bool* ok) -> double {
+            if constexpr (benefit_link<K>() != BenefitLink::Identity) {
+              if (use_energy_balance_) {
+                if (ok != nullptr) *ok = false;
+                return 0.0;
+              }
+            }
+            return dprofit_dpsi_stem<K>(psi_stem, opt_root_psi, ok);
+          },
+          opt_root_psi, psi_crit, basin_scan_cells(), collar_root_tol,
+          static_cast<size_t>(ci_niter), &collapsed_profit);
       profit_ = profit_psi_stem_for<K>(opt_psi_stem_, opt_root_psi);
+      (void)psi_stem_single;
       opt_root_psi_ = opt_root_psi;
       // Feasibility DETERMINED this point; no maximisation happened, and there is
       // no free variable left for a derivative to move.
