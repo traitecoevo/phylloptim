@@ -185,36 +185,12 @@ Leaf__lambda_TF24 <- function(obj_, psi_stem) {
     .Call('_phylloptim_Leaf__lambda_TF24', PACKAGE = 'phylloptim', obj_, psi_stem)
 }
 
-Leaf__optimise_psi_stem_CF77 <- function(obj_) {
-    invisible(.Call('_phylloptim_Leaf__optimise_psi_stem_CF77', PACKAGE = 'phylloptim', obj_))
-}
-
-Leaf__optimise_psi_stem_JS22 <- function(obj_) {
-    invisible(.Call('_phylloptim_Leaf__optimise_psi_stem_JS22', PACKAGE = 'phylloptim', obj_))
-}
-
-Leaf__optimise_psi_stem_CMax <- function(obj_) {
-    invisible(.Call('_phylloptim_Leaf__optimise_psi_stem_CMax', PACKAGE = 'phylloptim', obj_))
-}
-
-Leaf__optimise_psi_stem_SOX <- function(obj_) {
-    invisible(.Call('_phylloptim_Leaf__optimise_psi_stem_SOX', PACKAGE = 'phylloptim', obj_))
-}
-
-Leaf__optimise_psi_stem_JW26 <- function(obj_) {
-    invisible(.Call('_phylloptim_Leaf__optimise_psi_stem_JW26', PACKAGE = 'phylloptim', obj_))
-}
-
 Leaf__prepare_profitmax_at <- function(obj_, A_max) {
     invisible(.Call('_phylloptim_Leaf__prepare_profitmax_at', PACKAGE = 'phylloptim', obj_, A_max))
 }
 
-Leaf__optimise_psi_stem_by <- function(obj_, curve) {
-    invisible(.Call('_phylloptim_Leaf__optimise_psi_stem_by', PACKAGE = 'phylloptim', obj_, curve))
-}
-
-Leaf__find_root_collar_psi_by <- function(obj_, curve) {
-    invisible(.Call('_phylloptim_Leaf__find_root_collar_psi_by', PACKAGE = 'phylloptim', obj_, curve))
+Leaf__optimise <- function(obj_, curve, route) {
+    invisible(.Call('_phylloptim_Leaf__optimise', PACKAGE = 'phylloptim', obj_, curve, route))
 }
 
 Leaf__evaluate_psi_stem_by <- function(obj_, curve, target_psi_stem) {
@@ -239,14 +215,6 @@ Leaf__profit_psi_stem_ProfitMax <- function(obj_, psi_stem, psi_upstream) {
 
 Leaf__profitmax_curve <- function(obj_, n) {
     .Call('_phylloptim_Leaf__profitmax_curve', PACKAGE = 'phylloptim', obj_, n)
-}
-
-Leaf__optimise_psi_stem_ProfitMax <- function(obj_) {
-    invisible(.Call('_phylloptim_Leaf__optimise_psi_stem_ProfitMax', PACKAGE = 'phylloptim', obj_))
-}
-
-Leaf__optimise_psi_stem_TF <- function(obj_) {
-    invisible(.Call('_phylloptim_Leaf__optimise_psi_stem_TF', PACKAGE = 'phylloptim', obj_))
 }
 
 Leaf__medlyn_model_gs <- function(obj_, assim_colimited_) {

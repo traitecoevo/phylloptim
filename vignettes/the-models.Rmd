@@ -33,7 +33,7 @@ l0 <- leaf_model()
 set_drivers(l0, psi_soil = 1.0, PPFD = 1500)
 plot_model_overview(l0)
 
-l0$optimise_psi_stem_TF()
+l0$optimise("TF24", "stem")
 cat(sprintf("best operating point: %.3f MPa, profit %.3f\n",
             l0$opt_psi_stem_, l0$profit_))
 ```
@@ -367,7 +367,7 @@ One consequence to keep in view when reading `profit_` across models: it now car
 out <- do.call(rbind, lapply(c(0.5, 1, 1.5, 2, 3), function(ps) {
   l <- leaf_model()
   set_drivers(l, psi_soil = ps, PPFD = 1500)
-  l$optimise_psi_stem_TF()
+  l$optimise("TF24", "stem")
   dpsi <- l$opt_psi_stem_ - ps
   data.frame(psi_soil = ps, psi_stem = l$opt_psi_stem_, dpsi = dpsi,
              cost_TF24 = l$hydraulic_cost_,
@@ -407,7 +407,7 @@ For Cowan-Farquhar it is *by construction* the prescribed constant — that mode
 implied <- vapply(c(0.5, 1, 2, 3), function(ps) {
   x <- leaf_model()
   set_drivers(x, psi_soil = ps, PPFD = 1500)
-  x$optimise_psi_stem_TF()
+  x$optimise("TF24", "stem")
   x$lambda
 }, numeric(1))
 cat(sprintf(paste0("implied lambda over psi_soil 0.5-3 MPa: ",
@@ -422,12 +422,12 @@ And because both optima satisfy `dA/dE = λ`, handing Cowan-Farquhar the λ that
 ```{r}
 ref <- leaf_model()
 set_drivers(ref, psi_soil = 1.0, PPFD = 1500)
-ref$optimise_psi_stem_TF()
+ref$optimise("TF24", "stem")
 
 cf <- leaf_model()
 set_drivers(cf, psi_soil = 1.0, PPFD = 1500)
 cf$CF77_lambda_ <- ref$lambda
-cf$optimise_psi_stem_CF77()
+cf$optimise("CF77", "stem")
 
 cat(sprintf(paste0("TF24 optimum %.6f MPa; Cowan-Farquhar at its implied ",
                    "lambda %.6f MPa (gap %.2e)\n"),
@@ -449,7 +449,7 @@ cat(" psi_soil   lambda      A/E (WUE)   lambda/WUE\n")
 for (ps in c(0.5, 1, 2, 3)) {
   lw <- leaf_model()
   set_drivers(lw, psi_soil = ps, PPFD = 1500)
-  lw$optimise_psi_stem_TF()
+  lw$optimise("TF24", "stem")
   cat(sprintf(" %7.1f  %10.4g  %10.4g  %9.3f\n", ps, lw$lambda_emergent,
               lw$assim_colimited_ / lw$transpiration_,
               lw$lambda_emergent / (lw$assim_colimited_ / lw$transpiration_)))
@@ -491,7 +491,7 @@ shift <- function(method, kappa) {
   l <- leaf_model(leaf_traits(vcmax_25 = 96 * kappa, jmax_25 = 157.44 * kappa),
                   supply = leaf_supply_singlelayer())
   set_drivers(l, psi_soil = 1.5, PPFD = 1500)
-  l[[paste0("optimise_psi_stem_", method)]]()
+  l$optimise(if (method == "TF") "TF24" else method, "stem")
   l$opt_psi_stem_
 }
 for (m in c("SOX", "TF", "CMax")) {
@@ -520,7 +520,7 @@ Where the soil is drier than the stem's critical potential there is no flow, and
 d <- leaf_model()                       # psi_soil drier than psi_crit
 set_drivers(d, psi_soil = 6.0, PPFD = 1500)
 d$CF77_lambda_ <- 1.5e5
-d$optimise_psi_stem_CF77()
+d$optimise("CF77", "stem")
 cat(sprintf("E = %.1e, cost = %.1e, profit = %.6f, -R_d = %.6f\n",
             d$transpiration_, d$hydraulic_cost_, d$profit_, -d$R_d_))
 ```
@@ -617,7 +617,7 @@ solved over `[Γ*, c_a]` by a bracketing method. This is the innermost loop of t
 # The residual really is zero at the solved ci -- the statement above, checked.
 l2 <- leaf_model()
 set_drivers(l2, psi_soil = 1.0, PPFD = 1500)
-l2$optimise_psi_stem_TF()
+l2$optimise("TF24", "stem")
 ci <- l2$ci_
 gc <- l2$stom_cond_CO2_
 resid <- l2$assim_colimited(ci) * 1e-6 - gc * (l2$ca_ - ci) / (l2$atm_kpa_ * 1000)

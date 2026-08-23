@@ -144,7 +144,7 @@
   cost <- vapply(psi, l$hydraulic_cost_TF, numeric(1))
   profit <- benefit - cost
 
-  l$optimise_psi_stem_TF()
+  l$optimise("TF24", "stem")
   star <- l$opt_psi_stem_
   jstar <- l$profit_
 
@@ -188,7 +188,7 @@
 ## rising, diffusive supply falling, and the operating point where they cross.
 
 .fig_aci_panel <- function(l, n = 200, cex = 1) {
-  l$optimise_psi_stem_TF()
+  l$optimise("TF24", "stem")
   gc <- l$stom_cond_CO2_
   ca <- l$ca_
   P <- l$atm_kpa_ * 1000

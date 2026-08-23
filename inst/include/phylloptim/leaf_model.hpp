@@ -1031,6 +1031,16 @@ public:
   // bindings call it.
   template <CostCurve K> void find_root_collar_psi_for();
   void find_root_collar_psi_by(int curve);
+  // ⚠️ THE ONE ENTRY POINT. Takes the curve BY NAME and the route by name, so a
+  // caller never handles a curve index -- an integer that silently means a
+  // different model when the enumeration grows is the kind of API this package has
+  // been removing. Everything else here is either an alias over this or the
+  // compile-time form the hot path uses.
+  //
+  // `route` is "collar" (the production formulation: the full soil-to-collar path,
+  // any supply) or "stem" (psi_stem with the upstream potential pinned at psi_soil,
+  // the form the literature is written in, single soil potential only).
+  void optimise(const std::string& curve, const std::string& route);
   // Shared setup for the root-collar solve: builds the soil-side caches, handles
   // every feasibility early-exit (shutdown / assim<0 / collapsed interval) by
   // setting the final operating point itself, and otherwise returns the feasible
@@ -2763,6 +2773,33 @@ inline void Leaf::find_root_collar_psi() {
 
 
 // Runtime dispatch, for R and for a caller holding a curve index.
+inline void Leaf::optimise(const std::string& curve,
+                           const std::string& route) {
+  int k = -1;
+  for (int i = 0; i < n_cost_curves; ++i) {
+    if (curve_name(i) == curve) { k = i; break; }
+  }
+  if (k < 0) {
+    std::string names;
+    for (int i = 0; i < n_cost_curves; ++i) {
+      names += (i == 0 ? "" : ", ") + curve_name(i);
+    }
+    util::stop("unknown cost curve \"" + curve + "\". Available: " + names + ".");
+  }
+  if (route == "collar") {
+    find_root_collar_psi_by(k);
+    return;
+  }
+  if (route == "stem") {
+    optimise_psi_stem_by(k);
+    return;
+  }
+  util::stop("unknown route \"" + route + "\": use \"collar\" for the full "
+             "soil-to-collar path or \"stem\" for psi_stem with the upstream "
+             "potential pinned at psi_soil.");
+}
+
+
 inline void Leaf::find_root_collar_psi_by(int curve) {
   switch (static_cast<CostCurve>(curve)) {
     case CostCurve::TF24: find_root_collar_psi_for<CostCurve::TF24>(); return;

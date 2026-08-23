@@ -188,36 +188,12 @@ double Leaf__lambda_TF24(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, doub
   return obj_->lambda_TF24(psi_stem);
 }
 // [[Rcpp::export]]
-void Leaf__optimise_psi_stem_CF77(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
-  obj_->optimise_psi_stem_CF77();
-}
-// [[Rcpp::export]]
-void Leaf__optimise_psi_stem_JS22(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
-  obj_->optimise_psi_stem_JS22();
-}
-// [[Rcpp::export]]
-void Leaf__optimise_psi_stem_CMax(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
-  obj_->optimise_psi_stem_CMax();
-}
-// [[Rcpp::export]]
-void Leaf__optimise_psi_stem_SOX(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
-  obj_->optimise_psi_stem_SOX();
-}
-// [[Rcpp::export]]
-void Leaf__optimise_psi_stem_JW26(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
-  obj_->optimise_psi_stem_JW26();
-}
-// [[Rcpp::export]]
 void Leaf__prepare_profitmax_at(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double A_max) {
   obj_->prepare_profitmax_at(A_max);
 }
 // [[Rcpp::export]]
-void Leaf__optimise_psi_stem_by(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int curve) {
-  obj_->optimise_psi_stem_by(curve);
-}
-// [[Rcpp::export]]
-void Leaf__find_root_collar_psi_by(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int curve) {
-  obj_->find_root_collar_psi_by(curve);
+void Leaf__optimise(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, std::string curve, std::string route) {
+  obj_->optimise(curve, route);
 }
 // [[Rcpp::export]]
 double Leaf__evaluate_psi_stem_by(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int curve, double target_psi_stem) {
@@ -242,14 +218,6 @@ double Leaf__profit_psi_stem_ProfitMax(phylloptim::RcppR6::RcppR6<phylloptim::Le
 // [[Rcpp::export]]
 std::vector<double> Leaf__profitmax_curve(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int n) {
   return obj_->profitmax_curve(n);
-}
-// [[Rcpp::export]]
-void Leaf__optimise_psi_stem_ProfitMax(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
-  obj_->optimise_psi_stem_ProfitMax();
-}
-// [[Rcpp::export]]
-void Leaf__optimise_psi_stem_TF(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
-  obj_->optimise_psi_stem_TF();
 }
 // [[Rcpp::export]]
 double Leaf__medlyn_model_gs(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double assim_colimited_) {

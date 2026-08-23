@@ -595,21 +595,6 @@ Leaf:
     # a lambda far outside that band pins the optimum shut or wide open.
     # `$lambda` (that is, `marginal_cost_water()`) reports the same quantity for
     # the other cost curves, so it is how you find a value that means something.
-    optimise_psi_stem_CF77:
-      return_type: void
-      args: []
-    optimise_psi_stem_JS22:
-      return_type: void
-      args: []
-    optimise_psi_stem_CMax:
-      return_type: void
-      args: []
-    optimise_psi_stem_SOX:
-      return_type: void
-      args: []
-    optimise_psi_stem_JW26:
-      return_type: void
-      args: []
     # --- runtime curve selection, for the gradient ----------------------------
     # ⚠️ `curve` is the CostCurve enum's VALUE. R sends positions into it, so
     # appending is safe and reordering would silently solve a different model;
@@ -620,21 +605,23 @@ Leaf:
     prepare_profitmax_at:
       return_type: void
       args: [A_max: double]
-    optimise_psi_stem_by:
-      return_type: void
-      args: [curve: int]
-    find_root_collar_psi_by:
+    optimise:
       roxygen: |
-        Solve the production collar optimum for any cost curve.
+        Solve for the optimal operating point under one optimality model.
 
-        `find_root_collar_psi()` is the TF24 instantiation of this; `curve` indexes
-        \code{\link{cost_curve_names}}. Unlike the `optimise_psi_stem_*` routes this
-        keeps the full soil-to-collar path, so it works with a root network AND with
-        a single soil potential carrying a real series resistance.
-        @param curve cost curve index, 0-based, from \code{\link{cost_curve_names}}
+        The single entry point: `curve` names a model from
+        \code{\link{cost_curve_names}} and `route` names the formulation.
+
+        `route = "collar"` is the production formulation -- it solves the full
+        soil-to-collar-to-stem path and works with a root network or with a single
+        soil potential carrying a series resistance. `route = "stem"` optimises
+        `psi_stem` with the upstream potential pinned at `psi_soil`, which is the
+        form the published models are written in, and needs a single soil potential.
+        @param curve cost curve name, from \code{\link{cost_curve_names}}
+        @param route `"collar"` or `"stem"`
         @export
       return_type: void
-      args: [curve: int]
+      args: [curve: "std::string", route: "std::string"]
     evaluate_psi_stem_by:
       return_type: double
       args: [curve: int, target_psi_stem: double]
@@ -670,12 +657,6 @@ Leaf:
     profitmax_curve:
       return_type: "std::vector<double>"
       args: [n: int]
-    optimise_psi_stem_ProfitMax:
-      return_type: void
-      args: []
-    optimise_psi_stem_TF:
-      return_type: void
-      args: []
 
     # --- Medlyn stomatal-conductance model (plant develop #450) --------------
     medlyn_model_gs:

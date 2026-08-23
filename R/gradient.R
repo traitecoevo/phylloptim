@@ -107,8 +107,8 @@ set_traits <- function(x, traits) {
 ##' fixed no matter which optimiser you called on the leaf beforehand.
 ##'
 ##' ⚠️ **So a gradient requested for a leaf you set up for another cost curve is
-##' the TF24 gradient, silently.** `$optimise_psi_stem_CF77()` and
-##' `$optimise_psi_stem_ProfitMax()` maximise different objectives over `psi_stem`
+##' the TF24 gradient, silently.** `$optimise("CF77", "stem")` and
+##' `$optimise("ProfitMax", "stem")` maximise different objectives over `psi_stem`
 ##' rather than the collar, and neither is what this function differentiates.
 ##' There is no warning, because the numbers that come back are perfectly good
 ##' TF24 derivatives.
@@ -995,7 +995,7 @@ leaf_gradient <- function(psi_soil,
     # exception is gone. Sweep again if that normaliser ever goes back to a grid.
     fd_step = 1e-6,
     solve = function() {
-      l$optimise_psi_stem_by(code)
+      l$optimise(model, "stem")
       pinned$capture()
     },
     psi_star = function() l$opt_psi_stem_,

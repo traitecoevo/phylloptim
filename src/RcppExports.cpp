@@ -619,56 +619,6 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// Leaf__optimise_psi_stem_CF77
-void Leaf__optimise_psi_stem_CF77(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
-RcppExport SEXP _phylloptim_Leaf__optimise_psi_stem_CF77(SEXP obj_SEXP) {
-BEGIN_RCPP
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
-    Leaf__optimise_psi_stem_CF77(obj_);
-    return R_NilValue;
-END_RCPP
-}
-// Leaf__optimise_psi_stem_JS22
-void Leaf__optimise_psi_stem_JS22(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
-RcppExport SEXP _phylloptim_Leaf__optimise_psi_stem_JS22(SEXP obj_SEXP) {
-BEGIN_RCPP
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
-    Leaf__optimise_psi_stem_JS22(obj_);
-    return R_NilValue;
-END_RCPP
-}
-// Leaf__optimise_psi_stem_CMax
-void Leaf__optimise_psi_stem_CMax(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
-RcppExport SEXP _phylloptim_Leaf__optimise_psi_stem_CMax(SEXP obj_SEXP) {
-BEGIN_RCPP
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
-    Leaf__optimise_psi_stem_CMax(obj_);
-    return R_NilValue;
-END_RCPP
-}
-// Leaf__optimise_psi_stem_SOX
-void Leaf__optimise_psi_stem_SOX(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
-RcppExport SEXP _phylloptim_Leaf__optimise_psi_stem_SOX(SEXP obj_SEXP) {
-BEGIN_RCPP
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
-    Leaf__optimise_psi_stem_SOX(obj_);
-    return R_NilValue;
-END_RCPP
-}
-// Leaf__optimise_psi_stem_JW26
-void Leaf__optimise_psi_stem_JW26(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
-RcppExport SEXP _phylloptim_Leaf__optimise_psi_stem_JW26(SEXP obj_SEXP) {
-BEGIN_RCPP
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
-    Leaf__optimise_psi_stem_JW26(obj_);
-    return R_NilValue;
-END_RCPP
-}
 // Leaf__prepare_profitmax_at
 void Leaf__prepare_profitmax_at(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double A_max);
 RcppExport SEXP _phylloptim_Leaf__prepare_profitmax_at(SEXP obj_SEXP, SEXP A_maxSEXP) {
@@ -680,25 +630,15 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
-// Leaf__optimise_psi_stem_by
-void Leaf__optimise_psi_stem_by(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int curve);
-RcppExport SEXP _phylloptim_Leaf__optimise_psi_stem_by(SEXP obj_SEXP, SEXP curveSEXP) {
+// Leaf__optimise
+void Leaf__optimise(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, std::string curve, std::string route);
+RcppExport SEXP _phylloptim_Leaf__optimise(SEXP obj_SEXP, SEXP curveSEXP, SEXP routeSEXP) {
 BEGIN_RCPP
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
-    Rcpp::traits::input_parameter< int >::type curve(curveSEXP);
-    Leaf__optimise_psi_stem_by(obj_, curve);
-    return R_NilValue;
-END_RCPP
-}
-// Leaf__find_root_collar_psi_by
-void Leaf__find_root_collar_psi_by(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, int curve);
-RcppExport SEXP _phylloptim_Leaf__find_root_collar_psi_by(SEXP obj_SEXP, SEXP curveSEXP) {
-BEGIN_RCPP
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
-    Rcpp::traits::input_parameter< int >::type curve(curveSEXP);
-    Leaf__find_root_collar_psi_by(obj_, curve);
+    Rcpp::traits::input_parameter< std::string >::type curve(curveSEXP);
+    Rcpp::traits::input_parameter< std::string >::type route(routeSEXP);
+    Leaf__optimise(obj_, curve, route);
     return R_NilValue;
 END_RCPP
 }
@@ -773,26 +713,6 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< int >::type n(nSEXP);
     rcpp_result_gen = Rcpp::wrap(Leaf__profitmax_curve(obj_, n));
     return rcpp_result_gen;
-END_RCPP
-}
-// Leaf__optimise_psi_stem_ProfitMax
-void Leaf__optimise_psi_stem_ProfitMax(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
-RcppExport SEXP _phylloptim_Leaf__optimise_psi_stem_ProfitMax(SEXP obj_SEXP) {
-BEGIN_RCPP
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
-    Leaf__optimise_psi_stem_ProfitMax(obj_);
-    return R_NilValue;
-END_RCPP
-}
-// Leaf__optimise_psi_stem_TF
-void Leaf__optimise_psi_stem_TF(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
-RcppExport SEXP _phylloptim_Leaf__optimise_psi_stem_TF(SEXP obj_SEXP) {
-BEGIN_RCPP
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
-    Leaf__optimise_psi_stem_TF(obj_);
-    return R_NilValue;
 END_RCPP
 }
 // Leaf__medlyn_model_gs
@@ -3115,22 +3035,14 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__profit_psi_stem_JW26", (DL_FUNC) &_phylloptim_Leaf__profit_psi_stem_JW26, 3},
     {"_phylloptim_Leaf__lambda_JW26", (DL_FUNC) &_phylloptim_Leaf__lambda_JW26, 3},
     {"_phylloptim_Leaf__lambda_TF24", (DL_FUNC) &_phylloptim_Leaf__lambda_TF24, 2},
-    {"_phylloptim_Leaf__optimise_psi_stem_CF77", (DL_FUNC) &_phylloptim_Leaf__optimise_psi_stem_CF77, 1},
-    {"_phylloptim_Leaf__optimise_psi_stem_JS22", (DL_FUNC) &_phylloptim_Leaf__optimise_psi_stem_JS22, 1},
-    {"_phylloptim_Leaf__optimise_psi_stem_CMax", (DL_FUNC) &_phylloptim_Leaf__optimise_psi_stem_CMax, 1},
-    {"_phylloptim_Leaf__optimise_psi_stem_SOX", (DL_FUNC) &_phylloptim_Leaf__optimise_psi_stem_SOX, 1},
-    {"_phylloptim_Leaf__optimise_psi_stem_JW26", (DL_FUNC) &_phylloptim_Leaf__optimise_psi_stem_JW26, 1},
     {"_phylloptim_Leaf__prepare_profitmax_at", (DL_FUNC) &_phylloptim_Leaf__prepare_profitmax_at, 2},
-    {"_phylloptim_Leaf__optimise_psi_stem_by", (DL_FUNC) &_phylloptim_Leaf__optimise_psi_stem_by, 2},
-    {"_phylloptim_Leaf__find_root_collar_psi_by", (DL_FUNC) &_phylloptim_Leaf__find_root_collar_psi_by, 2},
+    {"_phylloptim_Leaf__optimise", (DL_FUNC) &_phylloptim_Leaf__optimise, 3},
     {"_phylloptim_Leaf__evaluate_psi_stem_by", (DL_FUNC) &_phylloptim_Leaf__evaluate_psi_stem_by, 3},
     {"_phylloptim_Leaf__dprofit_dpsi_stem_by", (DL_FUNC) &_phylloptim_Leaf__dprofit_dpsi_stem_by, 3},
     {"_phylloptim_Leaf__thermal_cost_at", (DL_FUNC) &_phylloptim_Leaf__thermal_cost_at, 2},
     {"_phylloptim_Leaf__prepare_profitmax", (DL_FUNC) &_phylloptim_Leaf__prepare_profitmax, 1},
     {"_phylloptim_Leaf__profit_psi_stem_ProfitMax", (DL_FUNC) &_phylloptim_Leaf__profit_psi_stem_ProfitMax, 3},
     {"_phylloptim_Leaf__profitmax_curve", (DL_FUNC) &_phylloptim_Leaf__profitmax_curve, 2},
-    {"_phylloptim_Leaf__optimise_psi_stem_ProfitMax", (DL_FUNC) &_phylloptim_Leaf__optimise_psi_stem_ProfitMax, 1},
-    {"_phylloptim_Leaf__optimise_psi_stem_TF", (DL_FUNC) &_phylloptim_Leaf__optimise_psi_stem_TF, 1},
     {"_phylloptim_Leaf__medlyn_model_gs", (DL_FUNC) &_phylloptim_Leaf__medlyn_model_gs, 2},
     {"_phylloptim_Leaf__solve_medlyn_ci_numerical", (DL_FUNC) &_phylloptim_Leaf__solve_medlyn_ci_numerical, 1},
     {"_phylloptim_Leaf__solve_medlyn_ci_analytical", (DL_FUNC) &_phylloptim_Leaf__solve_medlyn_ci_analytical, 1},
