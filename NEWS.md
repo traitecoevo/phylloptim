@@ -30,6 +30,83 @@ rather than approximated.
 All 4608 rows of `psi_stem_optima.tsv` are bit-identical across the unification:
 the identity arm's derivative is textually unchanged.
 
+## One solver for every model, and the scan is now an argument
+
+There used to be two optimisers doing the same job with different numerics. The
+collar route (`find_root_collar_psi`, what `plant` calls) root-found `dJ/dpsi == 0`
+but ran **TF24 only**; the `optimise_psi_stem_*` routes ran all seven curves but
+refined on **bracket width**, which has no stationarity guarantee — nothing in Brent
+references the derivative. Each had exactly the half the other lacked.
+
+Both now go through one function: evaluate both endpoints, optionally scan for the
+basin, then root-find the first-order condition inside the winning cell. The collar
+objective is templated on the cost curve, so six of the seven solve on the production
+multi-layer topology for the first time (ProfitMax is refused there — `|A|max` has no
+multi-layer definition yet, and it says so rather than returning a plausible number).
+
+**Faster and more accurate at once**, because scanning was buying less than it cost:
+
+| | before | after |
+|---|---|---|
+| `psi_stem:TF` | 9.30 us/call | **2.88 us/call** |
+| `psi_stem:CF77` | 8.23 us/call | **2.94 us/call** |
+| `psi_stem:ProfitMax` | 58.2 us/call | **5.64 us/call** |
+| collar solve | 3.29 us/solve | 3.30 us/solve (interleaved) |
+| median `\|dJ/dpsi\|` at psi* | 4.4e-05 | **1.2e-15** |
+
+`operating_points.tsv` is bit-identical, so the production path did not move.
+`psi_stem_optima.tsv` was regenerated: the argmax is now stationary rather than
+grid-resolved, worst relative movement 1.5e-05 with profit changing at 1e-10.
+
+**Whether to scan is measured, not assumed.** Over a 1728-row sweep (8 air
+temperatures x 4 gate combinations x 6 soil potentials x 3 deficits x 3 light levels)
+the only objectives carrying two prominent interior basins are `TF24` (21 rows) and
+`JS22` (66) — and **every one of those rows has the energy balance on**. The collar
+objective has none in 432 rows over the same range. So the scan is skipped with the
+gate off, which is what makes the routes ~3x faster. The valleys are 7.0e-01 and
+3.5e+00 deep, so this is a cheap scan to skip and an expensive one to skip wrongly:
+re-measure before widening the predicate.
+
+### `|A|max` is solved, not scanned
+
+ProfitMax normalises by the largest assimilation on the supply stream, found until
+now by a 500-point scan. Measured, that maximum sits at the dry bound on 1318 of 1320
+driver rows and interior on 2, beating the bound by at most 1.1e-03 — so it is
+endpoints plus a root-find on `dA/dpsi == 0` like everything else. `dA/dpsi` needs no
+new algebra: for an identity link it is `dJ/dpsi + dC/dpsi`.
+
+That is the 10x on ProfitMax above, and it also fixes its gradient. A scan argmax is
+piecewise constant in the parameters, so differencing through it was step-dependent:
+0.014 at `h = 1e-06` against 0.058 at 1e-02. It is now flat across six decades, so
+**one finite-difference step (1e-06) serves every route** and the per-route split is
+gone. ProfitMax's partial-versus-total gradient distinction remains — the composite
+holds `|A|max` fixed — but it is a modelling choice now rather than a staircase.
+
+### Removed
+
+**BREAKING.** All dead or duplicated by the above:
+
+* `cost_curve_has_derivative()` — returned `TRUE` for all seven curves and nothing
+  read it; every curve has a derivative through its benefit link
+* `leaf_behaviour_fingerprint()`, with `tools/fingerprint.R` and its test — no
+  consumer, and it only ever covered two of the four recorded baselines. The
+  bit-exact golden comparison is the guard
+* `profitmax_scan_n_` — an R-exposed field controlling a scan that no longer exists
+* `GSS_tol_abs` is now documented for what it actually reaches: two places, both on
+  the collar route. It never reached the `optimise_psi_stem_*` refinement, whose
+  tolerance is not settable
+* `Imports: tools`
+
+### `leaf_supply_single()` is `leaf_supply_singlelayer()`
+
+**BREAKING**, and purely for symmetry with `leaf_supply_multilayer()`.
+
+⚠️ Worth knowing while renaming callers: the single-layer *supply path* carries a
+series resistance, but the `optimise_psi_stem_*` routes pin the upstream potential at
+`psi_soil` and **ignore it**. "Single layer" and "no root resistance" are not the same
+thing, and a single-layer plant with a real root resistance is not yet representable
+in the stem formulation.
+
 ## Both vulnerability curves are parameterised on (P50, c)
 
 **BREAKING.** The stem curve's traits are now `stem_P50` and `stem_c`, and the
