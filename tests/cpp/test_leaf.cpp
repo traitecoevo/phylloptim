@@ -1226,9 +1226,9 @@ void test_lambda_equals_dA_dE_single_layer() {
   Drivers d;
   for (double psi_soil : {0.5, 1.0, 2.0, 3.0}) {
     phylloptim::Leaf l = make_leaf(d, {psi_soil}, {1.0});
-    // optimise_psi_stem_TF holds the collar fixed at psi_soil_[0] and optimises
+    // the TF24 stem route holds the collar fixed at psi_soil_[0] and optimises
     // the stem, so the single-layer lambda is the one that applies here.
-    l.optimise_psi_stem_TF();
+    l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::TF24>();
     const double psi = l.opt_psi_stem_;
     const double eps = 1e-6;
     l.set_leaf_states_rates_from_psi_stem(psi + eps, psi_soil);
@@ -1236,7 +1236,7 @@ void test_lambda_equals_dA_dE_single_layer() {
     l.set_leaf_states_rates_from_psi_stem(psi - eps, psi_soil);
     const double A0 = l.assim_colimited_, E0 = l.transpiration_;
     const double fd = (A1 - A0) / (E1 - E0);
-    l.optimise_psi_stem_TF();
+    l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::TF24>();
     // Tolerance is set by the optimiser: GSS_tol_abs is 1e-3 on psi, so the
     // first-order condition only holds to about that accuracy.
     near(l.marginal_cost_water() / fd, 1.0, 1e-3,
@@ -1275,7 +1275,7 @@ void test_cowan_farquhar_equates_dA_dE_to_lambda() {
     for (double psi_soil : {0.5, 1.0, 2.0}) {
       phylloptim::Leaf l = make_leaf(d, {psi_soil}, {1.0});
       l.CF77_lambda_ = lambda;
-      l.optimise_psi_stem_CF77();
+      l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::CF77>();
       const double psi = l.opt_psi_stem_;
 
       // An interior optimum is where the condition applies. At a bound the
@@ -1332,13 +1332,13 @@ void test_cowan_farquhar_reproduces_the_TF_optimum() {
   double worst = 0.0;
   for (double psi_soil : {0.5, 1.0, 2.0, 3.0}) {
     phylloptim::Leaf ref = make_leaf(d, {psi_soil}, {1.0});
-    ref.optimise_psi_stem_TF();
+    ref.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::TF24>();
     const double psi_tf = ref.opt_psi_stem_;
     const double lambda_implied = ref.marginal_cost_water();
 
     phylloptim::Leaf cf = make_leaf(d, {psi_soil}, {1.0});
     cf.CF77_lambda_ = lambda_implied;
-    cf.optimise_psi_stem_CF77();
+    cf.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::CF77>();
 
     worst = std::max(worst, std::abs(cf.opt_psi_stem_ - psi_tf));
     // Measured 1.2e-05 MPa on the generating platform. The tolerance is 5e-4
@@ -1360,7 +1360,7 @@ void test_cowan_farquhar_closed_state() {
   Drivers d;
   phylloptim::Leaf l = make_leaf(d, {6.0}, {1.0}); // drier than psi_crit
   l.CF77_lambda_ = 800.0;
-  l.optimise_psi_stem_CF77();
+  l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::CF77>();
   near(l.opt_psi_stem_, 6.0, 1e-12, "the stem is held at the soil potential");
   near(l.transpiration_, 0.0, 1e-300, "transpiration is exactly zero");
   near(l.hydraulic_cost_, 0.0, 1e-300, "so the cost is exactly zero");
@@ -1379,7 +1379,7 @@ void test_cowan_farquhar_refuses_an_unset_lambda() {
   bool threw = false;
   std::string what;
   try {
-    l.optimise_psi_stem_CF77();
+    l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::CF77>();
   } catch (const std::exception &e) {
     threw = true;
     what = e.what();
@@ -1473,7 +1473,7 @@ void test_dprofit_dpsi_stem_vanishes_at_the_optimum() {
   for (double psi_soil : {0.5, 1.0, 2.0}) {
     phylloptim::Leaf l = make_leaf(d, {psi_soil}, {1.0});
     l.CF77_lambda_ = 1.5e5;
-    l.optimise_psi_stem_CF77();
+    l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::CF77>();
     const double psi = l.opt_psi_stem_;
     if (psi <= psi_soil + 1e-6 || psi >= l.psi_crit - 1e-6) {
       continue; // pinned: the gradient is genuinely non-zero there
@@ -1508,7 +1508,7 @@ void test_evaluate_psi_stem_prescribes_rather_than_optimises() {
 
   phylloptim::Leaf l = make_leaf(d, {psi_soil}, {1.0});
   l.CF77_lambda_ = 1.5e5;
-  l.optimise_psi_stem_CF77();
+  l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::CF77>();
   const double psi_opt = l.opt_psi_stem_, profit_opt = l.profit_;
 
   // A point deliberately away from the optimum is NOT stationary, and is worth
@@ -1576,7 +1576,7 @@ void test_profitmax_emergent_lambda_matches_a_finite_difference() {
       l.use_energy_balance_ = eb;
       l.use_thermal_cost_ = true;
       if (eb) { l.Rn_ = 300.0; l.d_ = 0.05; l.wind_speed_ = 2.0; }
-      l.optimise_psi_stem_ProfitMax();
+      l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::ProfitMax>();
       const double psi = l.opt_psi_stem_;
       if (psi <= 1.0 + h || psi >= l.psi_crit - h) continue;
 
@@ -1591,7 +1591,7 @@ void test_profitmax_emergent_lambda_matches_a_finite_difference() {
       const double fd = l.profitmax_A_max() *
                         ((up.first - dn.first) / (up.second - dn.second));
 
-      l.optimise_psi_stem_ProfitMax();
+      l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::ProfitMax>();
       ++rows;
       worst = std::max(worst, std::abs(l.lambda_emergent() / fd - 1.0));
       near(l.lambda_emergent() / fd, 1.0, 5e-3,
@@ -1614,14 +1614,14 @@ void test_every_curve_reports_an_emergent_lambda() {
     {
       phylloptim::Leaf l = make_leaf(d, {psi_soil}, {1.0});
       l.CF77_lambda_ = 1.5e5;
-      l.optimise_psi_stem_CF77();
+      l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::CF77>();
       ok(l.lambda_emergent() == l.CF77_lambda_,
          "Cowan-Farquhar's emergent lambda is its prescribed one, exactly");
     }
     // --- TF24: against a finite difference of dC/dE -------------------------
     {
       phylloptim::Leaf l = make_leaf(d, {psi_soil}, {1.0});
-      l.optimise_psi_stem_TF();
+      l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::TF24>();
       const double psi = l.opt_psi_stem_;
       if (psi <= psi_soil + h || psi >= l.psi_crit - h) continue;
       const double dC =
@@ -1631,7 +1631,7 @@ void test_every_curve_reports_an_emergent_lambda() {
       l.profit_psi_stem_TF(psi - h, psi_soil);
       const double E0 = l.transpiration_;
       const double fd = dC / ((E1 - E0) / (2 * h));
-      l.optimise_psi_stem_TF();
+      l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::TF24>();
       near(l.lambda_emergent() / fd, 1.0, 1e-4,
            "TF24's emergent lambda is dC/dE at psi_soil=" +
                std::to_string(psi_soil));
@@ -2474,7 +2474,7 @@ void test_closed_form() {
   // Near the wet end, where the leading-order expansion is centred, it should be
   // very accurate.
   setp(l, 1.0, 2.0);
-  l.optimise_psi_stem_TF();
+  l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::TF24>();
   const double A_wet = l.assim_colimited_;
   setp(l, 1.0, 2.0);
   const phylloptim::closed_form::Solution wet = phylloptim::closed_form::solve(l, 1);
@@ -2490,7 +2490,7 @@ void test_closed_form() {
   };
   for (const Case &cs : {Case{3.0, 2e-3}, Case{8.0, 1.5e-2}, Case{12.0, 4e-2}}) {
     setp(l, cs.h, 2.0);
-    l.optimise_psi_stem_TF();
+    l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::TF24>();
     const double A_ex = l.assim_colimited_;
     setp(l, cs.h, 2.0);
     const double A_cf = phylloptim::closed_form::solve(l, 1).assim;
@@ -2503,7 +2503,7 @@ void test_closed_form() {
   // So it is a filter on gross failure, not an error bound -- and note that the
   // heights it rejects are the dominant canopy trees.
   setp(l, 20.0, 2.0);
-  l.optimise_psi_stem_TF();
+  l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::TF24>();
   const double A_tall = l.assim_colimited_;
   setp(l, 20.0, 2.0);
   const phylloptim::closed_form::Solution tall = phylloptim::closed_form::solve(l, 1);
@@ -2518,7 +2518,7 @@ void test_closed_form() {
      "beta2_is_exact recognises TF24_beta2 = 1/stem_c");
   ok(!phylloptim::closed_form::beta2_is_exact(l), "and rejects the default TF24_beta2 = 1.5");
   setp(exact_leaf, 5.0, 1.5);
-  exact_leaf.optimise_psi_stem_TF();
+  exact_leaf.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::TF24>();
   const double A_ref = exact_leaf.assim_colimited_;
   setp(exact_leaf, 5.0, 1.5);
   const phylloptim::closed_form::Solution ex =
@@ -2544,7 +2544,7 @@ void test_closed_form() {
   };
   const double t_setp = time_it(l, [&] { return l.ca_; });
   const double t_exact = time_it(l, [&] {
-    l.optimise_psi_stem_TF();
+    l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::TF24>();
     return l.assim_colimited_;
   });
   const double t_cf =
@@ -3991,7 +3991,7 @@ void test_profitmax_normalisation() {
   printf("    HC under kmax x3: worst difference %.3e\n", hc_worst);
 
   // The optimiser lands on the curve's own maximum.
-  l.optimise_psi_stem_ProfitMax();
+  l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::ProfitMax>();
   double best = -1e300;
   std::size_t at = 0;
   for (std::size_t i = 0; i < n; ++i) {
@@ -4009,7 +4009,7 @@ void test_profitmax_thermal_cost() {
   d.leaf_temp = 48.0;
 
   phylloptim::Leaf off = make_single_leaf(d, 0.5);
-  off.optimise_psi_stem_ProfitMax();
+  off.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::ProfitMax>();
   ok(off.thermal_cost_ == 0.0, "gate off: TC is exactly zero");
 
   phylloptim::Leaf on = make_single_leaf(d, 0.5);
@@ -4030,7 +4030,7 @@ void test_profitmax_thermal_cost() {
   rn.c_r_H = std::vector<double>{0.0};
   on.set_physiology(rn, d.PPFD, {0.5}, {1.0}, d.K_s * d.theta / d.h, d.atm_vpd,
                     d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
-  on.optimise_psi_stem_ProfitMax();
+  on.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::ProfitMax>();
   ok(on.thermal_cost_ > 0.0 && on.thermal_cost_ < 1.0,
      "gate on at 48 C: TC is in (0,1)");
   ok(on.jmax_ < off.jmax_, "and Jmax is scaled down by (1 - TC)");
@@ -4072,7 +4072,7 @@ void test_single_layer_optimisers_clear_collar_state() {
   ok(std::isfinite(l.opt_root_psi_) && std::isfinite(l.E_up_),
      "the collar solve wrote a collar operating point");
 
-  l.optimise_psi_stem_ProfitMax();
+  l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::ProfitMax>();
   ok(!std::isfinite(l.opt_root_psi_), "ProfitMax clears opt_root_psi_");
   ok(!std::isfinite(l.E_up_), "ProfitMax clears E_up_");
   bool consumption_cleared = true;
@@ -4100,7 +4100,7 @@ void test_profitmax_reports_an_emergent_lambda() {
 
   phylloptim::Leaf l = make_single_leaf(d, 0.5);
   l.CF77_lambda_ = prescribed;
-  l.optimise_psi_stem_ProfitMax();
+  l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::ProfitMax>();
 
   ok(l.CF77_lambda_ == prescribed, "the prescribed CF77_lambda_ survives untouched");
   ok(std::isfinite(l.lambda_emergent()) && l.lambda_emergent() > 0.0,
@@ -4186,7 +4186,7 @@ void test_profitmax_finds_a_closed_optimum() {
 
   phylloptim::Leaf l = make_single_leaf(d, 0.5);
   l.use_thermal_cost_ = true;
-  l.optimise_psi_stem_ProfitMax();
+  l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::ProfitMax>();
 
   // Reconstruct the objective on a coarse grid and find its global maximum
   // independently of the solver.
@@ -4200,7 +4200,7 @@ void test_profitmax_finds_a_closed_optimum() {
          curve[best], best, n, l.opt_psi_stem_);
 
   // profitmax_curve re-prepares, so re-solve before reading the operating point.
-  l.optimise_psi_stem_ProfitMax();
+  l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::ProfitMax>();
   const double step = curve[1] - curve[0];
   ok(std::abs(l.opt_psi_stem_ - curve[best]) < 3.0 * step,
      "the solver lands on the objective's GLOBAL maximum, not a local one");
@@ -4210,41 +4210,57 @@ void test_profitmax_finds_a_closed_optimum() {
      "at no lower profit than the grid's best");
 }
 
-// util::maximise_over_closed_interval, on functions whose answers are known by
-// inspection rather than by running the leaf. Here because the three leaf
-// optimisers all route through it, so a failure in the leaf tests below should be
+// util::maximise_over_closed_interval_foc, on functions whose answers are known
+// by inspection rather than by running the leaf. Here because EVERY optimiser in
+// the package routes through it, so a failure in the leaf tests below should be
 // attributable to the leaf rather than to the search.
+//
+// ⚠️ There used to be a second maximiser, `maximise_over_closed_interval`, which
+// was this one without the root-find and which these cases tested instead. It had
+// no caller left and is deleted; the cases moved here. Case 7 is what only this
+// one can pass, and is the reason the other went.
 void test_maximise_over_closed_interval() {
-  printf("maximise_over_closed_interval\n");
+  printf("maximise_over_closed_interval_foc\n");
   const int n = 64;
+  const double tol = 1e-12;
+  const size_t iters = 200;
+  // The derivative contract: `df(x, ok)` sets `*ok` false to mean "no usable
+  // derivative here", which is what the leaf's shut-down exits report.
+  auto ok_deriv = [](double v) {
+    return [v](double, bool* ok) { if (ok) *ok = true; return v; };
+  };
 
   // 1. Maximum AT the left endpoint. A bracketing search cannot return this, and
   //    that is the whole reason this function exists.
   {
     double fmax = 0.0;
-    const double x = phylloptim::util::maximise_over_closed_interval(
-        [](double v) { return -v; }, 0.0, 1.0, n, &fmax);
+    const double x = phylloptim::util::maximise_over_closed_interval_foc(
+        [](double v) { return -v; }, ok_deriv(-1.0), 0.0, 1.0, n, tol, iters,
+        &fmax);
     ok(x == 0.0, "a maximum at the left endpoint is returned exactly");
     ok(fmax == 0.0, "with its value");
   }
   // 2. ...and at the right.
   {
     double fmax = 0.0;
-    const double x = phylloptim::util::maximise_over_closed_interval(
-        [](double v) { return v; }, 0.0, 1.0, n, &fmax);
+    const double x = phylloptim::util::maximise_over_closed_interval_foc(
+        [](double v) { return v; }, ok_deriv(1.0), 0.0, 1.0, n, tol, iters,
+        &fmax);
     ok(x == 1.0, "a maximum at the right endpoint is returned exactly");
     ok(fmax == 1.0, "with its value");
   }
   // 3. An interior maximum is refined, not left on the scan grid. The grid is
-  //    64 cells over [0,1] so 0.3 is NOT a grid point; landing within 1e-6 of it
-  //    is only possible if the refinement ran.
+  //    64 cells over [0,1] so 0.3 is NOT a grid point; landing within 1e-9 of it
+  //    is only possible if the root-find ran.
   {
     double fmax = 0.0;
-    const double x = phylloptim::util::maximise_over_closed_interval(
-        [](double v) { return -(v - 0.3) * (v - 0.3); }, 0.0, 1.0, n, &fmax);
-    ok(std::abs(x - 0.3) < 1e-6,
+    const double x = phylloptim::util::maximise_over_closed_interval_foc(
+        [](double v) { return -(v - 0.3) * (v - 0.3); },
+        [](double v, bool* o) { if (o) *o = true; return -2.0 * (v - 0.3); },
+        0.0, 1.0, n, tol, iters, &fmax);
+    ok(std::abs(x - 0.3) < 1e-9,
        "an interior maximum is refined off the scan grid");
-    ok(fmax <= 0.0 && fmax > -1e-12, "and its value is the peak's");
+    ok(fmax <= 0.0 && fmax > -1e-18, "and its value is the peak's");
   }
   // 4. TWO humps, the taller one NOT the one a search from the bounds finds
   //    first. This is the half that endpoints alone do not fix.
@@ -4255,9 +4271,15 @@ void test_maximise_over_closed_interval() {
       const double b = 2.0 * std::exp(-200.0 * (v - 0.75) * (v - 0.75));
       return a + b;
     };
+    auto d_two_humps = [&](double v, bool* o) {
+      if (o) *o = true;
+      const double a = std::exp(-200.0 * (v - 0.25) * (v - 0.25));
+      const double b = 2.0 * std::exp(-200.0 * (v - 0.75) * (v - 0.75));
+      return -400.0 * (v - 0.25) * a - 400.0 * (v - 0.75) * b;
+    };
     double fmax = 0.0;
-    const double x = phylloptim::util::maximise_over_closed_interval(
-        two_humps, 0.0, 1.0, n, &fmax);
+    const double x = phylloptim::util::maximise_over_closed_interval_foc(
+        two_humps, d_two_humps, 0.0, 1.0, n, tol, iters, &fmax);
     ok(std::abs(x - 0.75) < 1e-5, "the TALLER of two humps is found");
     ok(fmax > 1.9, "and its height is reported");
     // The premise: a bare Brent on the same interval really does miss it, so this
@@ -4272,22 +4294,58 @@ void test_maximise_over_closed_interval() {
   //    still return a point in range rather than reading off the end of the scan.
   {
     double fmax = 0.0;
-    const double x = phylloptim::util::maximise_over_closed_interval(
-        [](double v) { return -v; }, 0.5, 0.5, n, &fmax);
+    const double x = phylloptim::util::maximise_over_closed_interval_foc(
+        [](double v) { return -v; }, ok_deriv(-1.0), 0.5, 0.5, n, tol, iters,
+        &fmax);
     ok(x == 0.5, "a collapsed interval returns its one point");
-    const double y = phylloptim::util::maximise_over_closed_interval(
-        [](double v) { return v; }, 0.0, 1.0, 1, &fmax);
+    const double y = phylloptim::util::maximise_over_closed_interval_foc(
+        [](double v) { return v; }, ok_deriv(1.0), 0.0, 1.0, 1, tol, iters,
+        &fmax);
     ok(y == 1.0, "and n < 2 still compares the endpoints");
   }
-  // 6. A non-finite region is skipped rather than selected.
+  // 6. A non-finite region is skipped rather than selected, and the derivative
+  //    REPORTS that rather than returning a number there -- which is the `ok`
+  //    flag's whole job.
   {
     double fmax = 0.0;
-    const double x = phylloptim::util::maximise_over_closed_interval(
+    const double x = phylloptim::util::maximise_over_closed_interval_foc(
         [](double v) {
           return v > 0.6 ? std::numeric_limits<double>::quiet_NaN() : v;
         },
-        0.0, 1.0, n, &fmax);
+        [](double v, bool* o) {
+          if (o) *o = !(v > 0.6);
+          return v > 0.6 ? std::numeric_limits<double>::quiet_NaN() : 1.0;
+        },
+        0.0, 1.0, n, tol, iters, &fmax);
     ok(x <= 0.6 && std::isfinite(fmax), "a NaN region is not selected");
+  }
+  // 7. ⚠️ THE PROPERTY THE DELETED MAXIMISER COULD NOT HAVE. Brent terminates on
+  //    bracket WIDTH, so it leaves the argmax resolved to the tolerance and the
+  //    derivative there is merely small. This one solves df == 0, so the returned
+  //    point is stationary to solver precision -- which is what a trait gradient
+  //    differences, and why a scan-and-refine argmax returned 0.1855 against a
+  //    true 0.0551 before this landed.
+  {
+    auto f  = [](double v) { return -(v - 0.3) * (v - 0.3) * (v - 0.3) * (v - 0.3)
+                                    - (v - 0.3) * (v - 0.3); };
+    auto df = [](double v, bool* o) {
+      if (o) *o = true;
+      return -4.0 * (v - 0.3) * (v - 0.3) * (v - 0.3) - 2.0 * (v - 0.3);
+    };
+    double fmax = 0.0;
+    const double x = phylloptim::util::maximise_over_closed_interval_foc(
+        f, df, 0.0, 1.0, n, tol, iters, &fmax);
+    bool o = false;
+    const double resid = std::abs(df(x, &o));
+    ok(resid < 1e-11, "the returned interior point is STATIONARY, not merely "
+                      "inside a narrow bracket");
+    // The same objective refined on bracket width instead, for the contrast.
+    double neg = 0.0;
+    const double width_refined = phylloptim::util::brent_fmin(
+        [&](double v) { return -f(v); }, 0.28125, 0.3125,
+        (0.3125 - 0.28125) * 1e-4, &neg);
+    ok(std::abs(df(width_refined, &o)) > resid,
+       "and a bracket-width refinement of the same cell is not");
   }
 }
 
@@ -4331,7 +4389,7 @@ void test_single_layer_optimisers_reach_a_bound() {
     {
       phylloptim::Leaf l = make_single_leaf(d, r.psi_soil);
       l.use_thermal_cost_ = true;
-      l.optimise_psi_stem_TF();
+      l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::TF24>();
       const double psi = l.opt_psi_stem_, p = l.profit_;
 
       // Independent scan of the same objective, on a fresh leaf so the solve's
@@ -4345,7 +4403,7 @@ void test_single_layer_optimisers_reach_a_bound() {
         if (std::isfinite(v) && v > best) { best = v; best_psi = q; }
       }
       ok(p >= best - 1e-9,
-         "optimise_psi_stem_TF is at no lower profit than a 1001-point scan");
+         "the TF24 stem optimum is at no lower profit than a 1001-point scan");
       // And the reported fields describe the returned point rather than the
       // search's last probe (hazard 8).
       ok(l.profit_ == m.profit_psi_stem_TF(psi, r.psi_soil),
@@ -4368,13 +4426,13 @@ void test_single_layer_optimisers_reach_a_bound() {
     // 3.4x across a drydown and a fixed number would leave some rows unpriced.
     {
       phylloptim::Leaf ref = make_single_leaf(d, r.psi_soil);
-      ref.optimise_psi_stem_TF();
+      ref.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::TF24>();
       const double lambda = 5.0 * ref.marginal_cost_water();
       if (!(std::isfinite(lambda) && lambda > 0.0)) continue;
 
       phylloptim::Leaf l = make_single_leaf(d, r.psi_soil);
       l.CF77_lambda_ = lambda;
-      l.optimise_psi_stem_CF77();
+      l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::CF77>();
       const double psi = l.opt_psi_stem_, p = l.profit_;
 
       phylloptim::Leaf m = make_single_leaf(d, r.psi_soil);
@@ -4467,8 +4525,10 @@ void test_product_link_is_the_product_rule() {
         if (!(P > 0.0) || !(g > 0.0)) {
           continue;
         }
-        const std::vector<double> dlog = l.dprofit_dpsi_stem_by(curve, psi);
-        const std::vector<double> dA = l.dprofit_dpsi_stem_by(kJS22, psi);
+        l.set_model(static_cast<phylloptim::Leaf::CostCurve>(curve), false);
+        const std::vector<double> dlog = l.dprofit_dpsi_stem_checked(psi);
+        l.set_model(static_cast<phylloptim::Leaf::CostCurve>(kJS22), false);
+        const std::vector<double> dA = l.dprofit_dpsi_stem_checked(psi);
         if (!std::isfinite(dlog[0]) || !std::isfinite(dA[0])) {
           continue;
         }
@@ -4548,8 +4608,9 @@ void test_every_curve_returns_its_own_maximum() {
       phylloptim::Leaf l = make_single_leaf(d, r.psi_soil);
       // The one curve with no default: prescribed, not derived, and unset is NA.
       l.CF77_lambda_ = 1.5e5;
-      l.optimise_psi_stem_by(curve);
-      const double psi = l.opt_psi_stem_, got = l.profit_;
+      l.set_model(static_cast<phylloptim::Leaf::CostCurve>(curve), false);
+      l.optimise();
+      const double got = l.profit_;
       if (!std::isfinite(got)) {
         continue;   // a refused row; psi_stem_optima.tsv covers the refusals
       }
@@ -4566,11 +4627,12 @@ void test_every_curve_returns_its_own_maximum() {
       if (curve == static_cast<int>(phylloptim::Leaf::CostCurve::ProfitMax)) {
         m.prepare_profitmax_at(l.profitmax_A_max_);
       }
+      m.set_model(static_cast<phylloptim::Leaf::CostCurve>(curve), false);
       const double lo = r.psi_soil, hi = m.psi_crit;
       double best = -std::numeric_limits<double>::infinity(), best_psi = lo;
       for (int i = 0; i <= N; ++i) {
         const double q = lo + (hi - lo) * (double(i) / double(N));
-        const double v = m.evaluate_psi_stem_by(curve, q);
+        const double v = m.evaluate_psi_stem_at(q);
         if (std::isfinite(v) && v > best) { best = v; best_psi = q; }
       }
       if (!std::isfinite(best)) {
@@ -4638,7 +4700,8 @@ void test_collar_profit_is_its_own_curve() {
     phylloptim::Leaf l = make_single_leaf(d, 1.0);
     l.CF77_lambda_ = 1.5e5;
     try {
-      l.find_root_collar_psi_by(c);
+      l.set_model(static_cast<phylloptim::Leaf::CostCurve>(c), true);
+      l.optimise();
     } catch (const std::exception&) {
       continue;   // a curve that refuses this configuration says so elsewhere
     }
@@ -4649,7 +4712,8 @@ void test_collar_profit_is_its_own_curve() {
     // A fresh leaf, so the solve's own trailing state cannot supply the answer.
     phylloptim::Leaf m = make_single_leaf(d, 1.0);
     m.CF77_lambda_ = 1.5e5;
-    const double again = m.evaluate_psi_stem_by(c, psi);
+    m.set_model(static_cast<phylloptim::Leaf::CostCurve>(c), false);
+    const double again = m.evaluate_psi_stem_at(psi);
     (void)collar;
     ok(std::isfinite(again), std::string("re-evaluating ") +
        phylloptim::Leaf::curve_name(c) + " at its own optimum is finite");

@@ -173,11 +173,11 @@ double pass_optimiser(Arm arm, std::vector<phylloptim::Leaf> &leaves,
     l.set_physiology(net, pt.ppfd, pt.ps, pt.depth, kKs * kTheta / kH,
                      pt.vpd, kCa, kTleaf, kO2, kPatm);
     switch (arm) {
-      case Arm::TF:        l.optimise_psi_stem_TF();        break;
-      case Arm::ProfitMax: l.optimise_psi_stem_ProfitMax(); break;
+      case Arm::TF:        l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::TF24>();        break;
+      case Arm::ProfitMax: l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::ProfitMax>(); break;
       case Arm::CF77:
                            l.CF77_lambda_ = kLambdaCF77;
-                           l.optimise_psi_stem_CF77(); break;
+                           l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::CF77>(); break;
     }
     for (double v : {l.opt_psi_stem_, l.ci_, l.assim_colimited_,
                      l.transpiration_, l.stom_cond_CO2_, l.profit_}) {

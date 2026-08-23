@@ -670,18 +670,18 @@ void blank_outputs(OptRow &r) {
 // the reuse pass can drive one Leaf through many rows.
 void dispatch(phylloptim::Leaf &l, Solver s) {
   switch (s) {
-    case Solver::TF:        l.optimise_psi_stem_TF();        break;
-    case Solver::ProfitMax: l.optimise_psi_stem_ProfitMax(); break;
+    case Solver::TF:        l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::TF24>();        break;
+    case Solver::ProfitMax: l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::ProfitMax>(); break;
     case Solver::CF77:
                             l.CF77_lambda_ = kLambdaCF77;
-                            l.optimise_psi_stem_CF77(); break;
+                            l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::CF77>(); break;
     case Solver::Collar:    l.find_root_collar_psi();        break;
     // These three need nothing set first: their parameters are TRAITS with
     // defaults, where CF77_lambda_ above is an input with none.
-    case Solver::JS22:      l.optimise_psi_stem_JS22();      break;
-    case Solver::CMax:      l.optimise_psi_stem_CMax();      break;
-    case Solver::SOX:       l.optimise_psi_stem_SOX();       break;
-    case Solver::JW26:      l.optimise_psi_stem_JW26();      break;
+    case Solver::JS22:      l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::JS22>();      break;
+    case Solver::CMax:      l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::CMax>();      break;
+    case Solver::SOX:       l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::SOX>();       break;
+    case Solver::JW26:      l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::JW26>();      break;
   }
 }
 

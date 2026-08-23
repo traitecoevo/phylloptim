@@ -91,10 +91,14 @@ inline constexpr int par_R_d_25 = 11;
 inline constexpr int par_JS22_gamma = 12;
 inline constexpr int par_CMax_a = 13;
 inline constexpr int par_CMax_b = 14;
-// ⚠️ THESE TWO MOVE WHENEVER A TRAIT IS ADDED. They are the non-traits, and they
-// sit AFTER the contiguous trait block -- R's `.gradient_theta_matrix()` takes the
-// traits as "everything but the last two", so a trait has to be appended here
-// rather than after them. Bumping both is the whole cost of that, and
+// ⚠️ THESE MOVE WHENEVER A TRAIT IS ADDED, and bumping them is the whole cost.
+// They are the non-traits and they sit AFTER the contiguous trait block, which is
+// a readability convention rather than a constraint now: R's
+// `.gradient_theta_matrix()` addresses EVERY column by name, including these.
+// It used to take the traits as "everything but the last two", which is what made
+// the ordering load-bearing; that is fixed. What is still load-bearing is the
+// ORDER ITSELF -- R passes integer positions into this enumeration, so appending
+// is safe and reordering silently differentiates the wrong parameter, and
 // `test-gradient-batch.R` compares this enumeration against R's copy.
 inline constexpr int par_kmax = 15;
 inline constexpr int par_resistance = 16;
@@ -136,6 +140,7 @@ inline const std::vector<std::string>& par_names() {
 // the carbon that reaches its mass budget, so until #87 the two sets were
 // disjoint and no gradient this package produced reached a demographic model.
 inline constexpr int n_outputs = 5;
+inline constexpr int out_psi_stem = 2;
 inline constexpr int out_collar = 3;
 inline constexpr int out_profit = 4;
 
@@ -167,11 +172,25 @@ inline const std::vector<std::string>& output_names() {
 // R-versus-C++ bit-for-bit contract and the golden files intact.
 inline constexpr int kCollar = -1;
 
+// Seat the model on the leaf ONCE, at the top of a gradient, rather than naming a
+// curve at each of the calls below. `Settings::curve` is still an int here --
+// nothing outside this file sees it -- but the Leaf's own API takes names only, so
+// this is the single place the two representations meet.
+//
+// ⚠️ SEAT IT EVEN ON THE PRESCRIBED PATH, which never calls `route_solve`. The
+// stem entry points read the seated curve, so without this a prescribed gradient
+// would silently differentiate whatever model the leaf was last used for.
+inline void route_seat(Leaf& l, int curve) {
+  l.set_model(curve < 0 ? Leaf::CostCurve::TF24
+                        : static_cast<Leaf::CostCurve>(curve),
+              curve < 0);
+}
+
 inline void route_solve(Leaf& l, int curve) {
   if (curve < 0) {
     l.find_root_collar_psi();
   } else {
-    l.optimise_psi_stem_by(curve);
+    l.optimise();
   }
 }
 
@@ -183,32 +202,38 @@ inline void route_evaluate(Leaf& l, int curve, double psi) {
   if (curve < 0) {
     l.evaluate_root_collar_psi(psi);
   } else {
-    l.evaluate_psi_stem_by(curve, psi);
+    l.evaluate_psi_stem_at(psi);
   }
 }
 
-inline double route_dprofit(Leaf& l, int curve, double psi) {
-  return curve < 0 ? l.dprofit_droot_collar_psi(psi)
-                   : l.dprofit_dpsi_stem_by(curve, psi)[0];
-}
-
+// ⚠️ THE FLAG IS THE POINT; the unchecked form is this with a null. Both routes
+// return a hard 0.0 SENTINEL on their shut-down and reversed-gradient exits, and a
+// bare zero is indistinguishable from a stationary point -- see
+// Leaf::dprofit_droot_collar_psi's header. There used to be two functions here,
+// the shorter one being a call to the longer with `nullptr`; there is one now.
 inline double route_dprofit_checked(Leaf& l, int curve, double psi,
-                                    bool* feasible) {
+                                    bool* feasible = nullptr) {
   if (curve < 0) {
     return l.dprofit_droot_collar_psi(psi, feasible);
   }
-  const std::vector<double> r = l.dprofit_dpsi_stem_by(curve, psi);
+  const std::vector<double> r = l.dprofit_dpsi_stem_checked(psi);
   if (feasible != nullptr) {
     *feasible = r[1] != 0.0;
   }
   return r[0];
 }
 
+inline double route_dprofit(Leaf& l, int curve, double psi) {
+  return route_dprofit_checked(l, curve, psi, nullptr);
+}
+
 // ⚠️ WHICH OUTPUT IS THE DECISION VARIABLE MOVES WITH THE ROUTE. On the collar
 // route `collar` IS psi*, so `dcollar/dtheta` is `dpsi* / dtheta` and assigned
 // rather than differenced. On a stem route `psi_stem` plays that part and the
 // collar is never solved for.
-inline int route_decision(int curve) { return curve < 0 ? out_collar : 2; }
+inline int route_decision(int curve) {
+  return curve < 0 ? out_collar : out_psi_stem;
+}
 
 inline void outputs(const Leaf& l, double* y) {
   y[0] = l.assim_colimited_;
@@ -644,6 +669,11 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
   out.reset(npars);
 
   apply(l, theta, d, single, -1, s.fast_stem_curve);
+  // Seat the model before anything reads it. `apply` runs `set_traits`, which
+  // clears the solved state but NOT the seated curve, so this could be hoisted
+  // out of the per-observation loop -- it is here because `at()` is a public
+  // entry point in its own right and must not depend on `batch` having run.
+  route_seat(l, s.curve);
 
   // Two ways in. The default SOLVES for the collar potential; `prescribed`
   // IMPOSES one, which is what a caller tracking the optimum rather than
