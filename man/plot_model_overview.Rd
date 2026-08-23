@@ -7,15 +7,15 @@
 plot_model_overview(model = NULL, cex = 1)
 }
 \arguments{
-\item{model}{A `Leaf`, already driven. Defaults to a leaf at
-`psi_soil = 1` MPa and `PPFD = 1500`, which is the reference state used
-throughout `vignette("the-models")`.}
+\item{model}{A \code{Leaf}, already driven. Defaults to a leaf at
+\code{psi_soil = 1} MPa and \code{PPFD = 1500}, which is the reference state used
+throughout \code{vignette("the-models")}.}
 
 \item{cex}{Overall text scaling, applied on top of the per-element sizes.
 Raise it for a slide, lower it for a two-column figure.}
 }
 \value{
-`NULL`, invisibly. Called for the plot.
+\code{NULL}, invisibly. Called for the plot.
 }
 \description{
 Draws the four zones of the model in one figure: the profit panel that
@@ -24,7 +24,7 @@ benefit, the causal wiring between the parts, and the soil-to-leaf path the
 equations describe.
 }
 \details{
-The two left-hand panels are computed from `model`, so they move if the model
+The two left-hand panels are computed from \code{model}, so they move if the model
 does. The two right-hand zones are schematic.
 
 The layout follows figure 1 of Westoby et al. (2012), which pairs a data
@@ -45,5 +45,5 @@ dev.off()
 \references{
 Westoby, M., Falster, D.S. and Moles, A.T. (2012) Trade-offs between height
 growth rate, stem persistence and maximum height among plant species in a
-post-fire succession. *Journal of Theoretical Biology*.
+post-fire succession. \emph{Journal of Theoretical Biology}.
 }

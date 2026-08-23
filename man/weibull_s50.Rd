@@ -15,17 +15,17 @@ weibull_s50(P50, c)
 The slope at P50, \% PLC per MPa.
 }
 \description{
-`S50 = 50*c*ln(2)/|P50|`, in \% PLC per MPa, which is the other form
+\verb{S50 = 50*c*ln(2)/|P50|}, in \% PLC per MPa, which is the other form
 vulnerability curves are commonly published in.
 
-⚠️ **`S50` is not an independent shape parameter** — it has `P50` built into it
-by construction, so a curve is not determined by `S50` alone. It is exported
+⚠️ \strong{\code{S50} is not an independent shape parameter} — it has \code{P50} built into it
+by construction, so a curve is not determined by \code{S50} alone. It is exported
 rather than kept internal for exactly that reason: a caller reading a published
-`S50` needs to see what it depends on.
+\code{S50} needs to see what it depends on.
 }
 \examples{
 weibull_s50(3.4, 2.680147)
 }
 \seealso{
-[weibull_p50_c()], which accepts `S50` as one of its two inputs.
+\code{\link[=weibull_p50_c]{weibull_p50_c()}}, which accepts \code{S50} as one of its two inputs.
 }

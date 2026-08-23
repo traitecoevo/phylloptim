@@ -12,22 +12,22 @@ weibull_p50_from_b(b, c)
 \item{c}{shape parameter of the Weibull curve (unitless)}
 }
 \value{
-`P50`, MPa as a positive magnitude.
+\code{P50}, MPa as a positive magnitude.
 }
 \description{
-`b` is the scale of the conventional form `exp(-(psi/b)^c)`; this package is
-parameterised on `P50` instead. The two are one substitution apart,
-`b = P50 / (ln 2)^(1/c)`, so
+\code{b} is the scale of the conventional form \code{exp(-(psi/b)^c)}; this package is
+parameterised on \code{P50} instead. The two are one substitution apart,
+\verb{b = P50 / (ln 2)^(1/c)}, so
 
 \deqn{P_{50} = b\,(\ln 2)^{1/c}}
 
-Exported because published fits and older datasets carry `b`, and the
-alternative is that conversion being pasted at each call site. `Leaf` reports
-`stem_b` and `root_b` as derived read-only accessors, which is the forward
+Exported because published fits and older datasets carry \code{b}, and the
+alternative is that conversion being pasted at each call site. \code{Leaf} reports
+\code{stem_b} and \code{root_b} as derived read-only accessors, which is the forward
 direction of the same identity.
 
-⚠️ **`P50` is always SMALLER than `b`**, by a factor of `(ln 2)^(1/c)` — 0.87
-at `c = 2.68`. So passing a `b` where a `P50` is wanted, or the reverse, gives
+⚠️ \strong{\code{P50} is always SMALLER than \code{b}}, by a factor of \verb{(ln 2)^(1/c)} — 0.87
+at \code{c = 2.68}. So passing a \code{b} where a \code{P50} is wanted, or the reverse, gives
 a plausible number roughly 15\% out rather than an error. Neither function can
 detect it: both arguments are positive potentials in MPa.
 }
@@ -35,5 +35,5 @@ detect it: both arguments are positive potentials in MPa.
 weibull_p50_from_b(3.898245, 2.680147)   # the package default, 3.4
 }
 \seealso{
-[weibull_p50_c()], [psi_at_plc()]
+\code{\link[=weibull_p50_c]{weibull_p50_c()}}, \code{\link[=psi_at_plc]{psi_at_plc()}}
 }

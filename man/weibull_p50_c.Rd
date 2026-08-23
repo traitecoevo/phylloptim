@@ -19,41 +19,41 @@ weibull_p50_c(
 \item{P50, P88, P95, P99}{potentials at 50\%, 88\%, 95\% and 99\% loss of
 conductivity, MPa as positive magnitudes}
 
-\item{px, plc}{an arbitrary quantile: the potential `px` at which the
-proportion `plc` of conductivity is lost. Supply both or neither; the pair
+\item{px, plc}{an arbitrary quantile: the potential \code{px} at which the
+proportion \code{plc} of conductivity is lost. Supply both or neither; the pair
 counts as ONE of the two quantities.}
 
-\item{S50}{slope at P50, \% PLC per MPa. See [weibull_s50()].}
+\item{S50}{slope at P50, \% PLC per MPa. See \code{\link[=weibull_s50]{weibull_s50()}}.}
 
 \item{c}{shape parameter, if you already have it.}
 }
 \value{
-A list with `P50` and `c`, suitable for splicing into
-  [leaf_traits()].
+A list with \code{P50} and \code{c}, suitable for splicing into
+\code{\link[=leaf_traits]{leaf_traits()}}.
 }
 \description{
-A vulnerability curve has two parameters, so **any two** of the quantities
-below determine it. This solves for `(P50, c)` from whichever pair you have.
+A vulnerability curve has two parameters, so \strong{any two} of the quantities
+below determine it. This solves for \verb{(P50, c)} from whichever pair you have.
 }
 \section{Which pairs are closed-form}{
 
-All of them except `S50` paired with a quantile other than P50, which is
-transcendental in `c` and is solved by a root-find over `c` in `(0, 20]`.
+All of them except \code{S50} paired with a quantile other than P50, which is
+transcendental in \code{c} and is solved by a root-find over \code{c} in \verb{(0, 20]}.
 Everything else follows from
 
 \deqn{P_f = P_{50}\,\big(\log_2(1/f)\big)^{1/c}}
 
-with `f` the remaining fraction (`f = 1 - PLC`), so `log2(1/f)` is 1, 3.0589,
+with \code{f} the remaining fraction (\code{f = 1 - PLC}), so \code{log2(1/f)} is 1, 3.0589,
 4.3219 and 6.6439 for P50, P88, P95 and P99. From two quantiles,
-`c = ln(L2/L1) / ln(P_f2/P_f1)`.
+\code{c = ln(L2/L1) / ln(P_f2/P_f1)}.
 }
 
 \section{Guards}{
 
-`c > 0` is required. A `c` below 1 is **warned about rather than refused**: it
+\code{c > 0} is required. A \code{c} below 1 is \strong{warned about rather than refused}: it
 is possible, but across measured angiosperm stems it usually flags a
 measurement artefact — native embolism already present at low tension flattens
-the curve — rather than a real trait. For reference, `c = 2.0` is a reasonable
+the curve — rather than a real trait. For reference, \code{c = 2.0} is a reasonable
 default for angiosperm stems, measured 1.8–2.6 across three species whose P50
 spanned 2.9–4.3 MPa, i.e. shape roughly conserved while scale varied freely.
 }
@@ -69,5 +69,5 @@ weibull_p50_c(P50 = 3.4, S50 = 39.4)
 weibull_p50_c(px = 5.87, plc = 0.95, c = 2.680147)
 }
 \seealso{
-[psi_at_plc()], [weibull_s50()]
+\code{\link[=psi_at_plc]{psi_at_plc()}}, \code{\link[=weibull_s50]{weibull_s50()}}
 }

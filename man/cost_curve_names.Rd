@@ -11,7 +11,7 @@ A character vector of curve names.
 }
 \description{
 Every optimality model this package implements, as names, in the order of the
-`CostCurve` enumeration. R selects a curve by its POSITION in this vector, so
+\code{CostCurve} enumeration. R selects a curve by its POSITION in this vector, so
 the vector is read back out of C++ rather than restated in R: appending a curve
 is safe and reordering the enumeration would silently solve a different model.
 }
@@ -19,5 +19,5 @@ is safe and reordering the enumeration would silently solve a different model.
 cost_curve_names()
 }
 \seealso{
-[cost_curve_has_derivative()], [leaf_gradient()]
+\code{\link[=leaf_gradient]{leaf_gradient()}}, \code{\link[=leaf_gradient_batch]{leaf_gradient_batch()}}
 }

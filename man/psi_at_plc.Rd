@@ -11,14 +11,14 @@ psi_at_plc(P50, c, plc)
 
 \item{c}{shape parameter of the Weibull curve (unitless)}
 
-\item{plc}{proportion of conductivity LOST, in `(0, 1)`. `plc = 0.5` returns
-`P50` by construction; `0.88`, `0.95` and `0.99` return P88, P95 and P99.}
+\item{plc}{proportion of conductivity LOST, in \verb{(0, 1)}. \code{plc = 0.5} returns
+\code{P50} by construction; \code{0.88}, \code{0.95} and \code{0.99} return P88, P95 and P99.}
 }
 \value{
 The potential, MPa as a positive magnitude.
 }
 \description{
-Inverts `f(psi) = 2^-(psi/P50)^c` for the potential at which a given fraction
+Inverts \code{f(psi) = 2^-(psi/P50)^c} for the potential at which a given fraction
 of conductivity has been lost.
 }
 \examples{
@@ -26,6 +26,6 @@ psi_at_plc(3.4, 2.680147, 0.5)   # returns P50
 psi_at_plc(3.4, 2.680147, 0.95)  # P95, which is also `psi_crit`
 }
 \seealso{
-[weibull_p50_c()] for the reverse, and [leaf_traits()] for where the
-  result goes.
+\code{\link[=weibull_p50_c]{weibull_p50_c()}} for the reverse, and \code{\link[=leaf_traits]{leaf_traits()}} for where the
+result goes.
 }

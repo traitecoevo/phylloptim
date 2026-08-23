@@ -15,10 +15,10 @@ plot_solver_convergence(psi_soil = 1, PPFD = 1500, atm_vpd = 1.5, n_eval = 60)
 Invisibly, a list with the two traces and the reference optimum.
 }
 \description{
-Draws two panels for `vignette("the-models")`: the error in the located
+Draws two panels for \code{vignette("the-models")}: the error in the located
 operating point, and the first-order residual at it, both against the number
-of model evaluations spent. One series solves `dJ/dpsi = 0` by Brent's
-method; the other searches `J` for its maximum by golden section.
+of model evaluations spent. One series solves \code{dJ/dpsi = 0} by Brent's
+method; the other searches \code{J} for its maximum by golden section.
 }
 \details{
 The iterations run in R against the package's own objective and derivative;
