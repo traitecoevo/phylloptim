@@ -460,16 +460,27 @@ The test names the worst row per class now, and the answer disposes of most of w
 this section used to argue. **Both** worst rows are rows where the reported quantity
 is passing through zero:
 
-| class | worst row | the value there | grid median | amplification |
+| class | worst RELATIVE row | the value there | grid median | amplification |
 |---|---|---|---|---|
-| `profit` 1.86e-07 | `psi_soil=0.5 ppfd=100 vpd=2 T=40 layers=5` | 1.05e-03 — the grid **minimum** | 2.47 | **2348×** |
-| argmax 9.02e-06 | `psi_soil=4 ppfd=100 vpd=4 T=25 layers=3`, `assim` | 4.05e-07 | 1.44 | **3.6e+06×** |
+| `profit` **1.86e-07** | `psi_soil=0.5 ppfd=100 vpd=2 T=40 layers=5` | 1.05e-03 — the grid **minimum** | 2.47 | **2348×** |
+| argmax **9.02e-06** | `psi_soil=4 ppfd=100 vpd=4 T=25 layers=3`, `assim` | 4.05e-07 | 1.44 | **3.6e+06×** |
 
 A relative difference divides by the value, so wherever a reported quantity nearly
 cancels — a dim, hot leaf whose assimilation barely clears respiration — the metric
-is amplified by the cancellation and says nothing about the model. In absolute terms
-profit's worst disagreement is **1.96e-10 µmol C m⁻² s⁻¹**, which as a fraction of a
-typical profit is 7.9e-11.
+is amplified by the cancellation and says nothing about the model.
+
+**And the ABSOLUTE figures, which is what the platforms actually disagree by:**
+
+| class | worst ABSOLUTE | where | units |
+|---|---|---|---|
+| `profit` | **1.35e-09** | `psi_soil=1 ppfd=1500 vpd=1 T=25 layers=1` | µmol C m⁻² s⁻¹ |
+| argmax | **3.62e-09** | `psi_soil=0.5 ppfd=100 vpd=2 T=40 layers=5`, `ci` | Pa |
+
+⚠️ **Both land on ~1e-09, which is this guide's own documented solver floor** — and
+note that neither absolute worst is the same row as its relative worst. On the
+relative worst row profit's absolute disagreement is 1.96e-10, an order *below* the
+grid's worst. So the two classes are not three orders apart, or five: **in the units
+the model reports, they are the same size, and that size is the floor.**
 
 So **"profit is well-conditioned and the eight argmax fields are sqrt-amplified", as
 this file has said for a long time, is a statement about the metric at two singular
