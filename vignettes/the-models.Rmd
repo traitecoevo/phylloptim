@@ -324,7 +324,7 @@ That is checkable rather than decorative. Below, the left-hand side comes from t
 curve_index <- function(nm) match(nm, cost_curve_names()) - 1L
 psi_soil <- 1.0
 tr <- leaf_traits(JS22_gamma = 0)          # a zero unit cost: dC/dpsi is exactly 0,
-l  <- leaf_model(tr, supply = leaf_supply_single())   # so JS22's derivative IS dA/dpsi
+l  <- leaf_model(tr, supply = leaf_supply_singlelayer())   # so JS22's derivative IS dA/dpsi
 set_drivers(l, psi_soil = psi_soil, PPFD = 900)
 
 f      <- function(p) 2^-((p / tr$stem_P50)^tr$stem_c)
@@ -489,7 +489,7 @@ Two consequences are worth carrying out of this document:
 #| label: product-sensitivity
 shift <- function(method, kappa) {
   l <- leaf_model(leaf_traits(vcmax_25 = 96 * kappa, jmax_25 = 157.44 * kappa),
-                  supply = leaf_supply_single())
+                  supply = leaf_supply_singlelayer())
   set_drivers(l, psi_soil = 1.5, PPFD = 1500)
   l[[paste0("optimise_psi_stem_", method)]]()
   l$opt_psi_stem_
@@ -807,7 +807,9 @@ At a stationary point `dJ/dψ = 0` identically, so the objective's own indirect 
 
 The envelope does not survive the active set. At a pinned optimum ψ* is a parameter-dependent *bound*, `dJ/dψ` is not zero there, and `−M/H` is not the bound's derivative — so the composite's premise is tested rather than assumed, by an implied Newton step `|dJ/dψ ÷ H|` in MPa. Where it fails, the gradient falls back to differencing the whole solve, which respects the constraint by construction.
 
-⚠️ **A stem route reports `pinned` at a perfectly interior optimum, and that is about the solver rather than the point.** The collar solve root-finds `dJ/dψ = 0` and leaves a residual of ~1e-15; the `optimise_psi_stem_*` entry points scan and refine, leaving 2e-08 to 1e-06. The stationarity tolerance was measured in the empty band between the collar route's own two populations, so it reads a stem solver's residual as a bound. Read it as "the premise is untested here", not "the premise fails".
+⚠️ **One route still differences the solve under `method = "auto"`, and it is `ProfitMax`.** Every route now root-finds `dJ/dψ = 0` — one solver, endpoints plus an optional basin scan plus a root-find — so an interior optimum is classified `interior` and the composite applies. Measured over 427 interior rows across six curves, the residual `|dJ/dψ|` at the returned ψ* has a median of **1.2e-15**, against 4.4e-05 when those routes refined on bracket width instead. That is also what lets one finite-difference step serve every route: at h = 1e-06 a difference of the solve now matches the composite to 2.5e-05 (SOX) and 5.1e-11 (TF24), where the same step once returned 0.1855 against a true 0.0551 and the wrong sign for JW26.
+
+`ProfitMax` is the exception because its `|A|max` is still the argmax of a 500-point scan, so it is piecewise constant in the parameters: the composite holds it fixed and returns a partial, differencing lets it re-run and returns the total, and a fit needs the total. Its step is set by that scan's resolution, 1e-02.
 
 ## Prescribed versus optimised
 

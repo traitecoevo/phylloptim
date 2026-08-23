@@ -58,7 +58,7 @@ assimilation by percent, not by rounding.}
 \item{control}{a [leaf_control()] object}
 
 \item{supply}{how water reaches the root collar: [leaf_supply_multilayer()]
-(the default) or [leaf_supply_single()]. On the single-potential path
+(the default) or [leaf_supply_singlelayer()]. On the single-potential path
 `soil_depth` and `root_network` must be omitted, and each `psi_soil` is one
 value rather than a profile.}
 

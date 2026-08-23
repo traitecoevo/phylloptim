@@ -66,7 +66,7 @@ test_that("set_drivers() does not build a supply network per call", {
   expect_identical(n, 1L)
 
   # The single-potential path, through its own mechanism.
-  s <- leaf_model(supply = leaf_supply_single())
+  s <- leaf_model(supply = leaf_supply_singlelayer())
   set_drivers(s, psi_soil = 1.5)
   n <- count_calls("RootNetwork__ctor",
                    for (i in 1:20) set_drivers(s, psi_soil = 1.5))
@@ -182,7 +182,7 @@ test_that("a driven row costs a bounded multiple of a trivial .Call", {
       1e6 * as.numeric(difftime(Sys.time(), t0, units = "secs")) / n
     }))
   }
-  l <- leaf_model(supply = leaf_supply_single())
+  l <- leaf_model(supply = leaf_supply_singlelayer())
   net <- series_resistance(1e3)
   set_drivers(l, psi_soil = 1.5, root_network = net)
   l$find_root_collar_psi()
@@ -196,6 +196,6 @@ test_that("a driven row costs a bounded multiple of a trivial .Call", {
 
   expect_lt(row / ref, 30)      # measured 14
   expect_lt(timeit(function() leaf_solve(psi_soil = rep(1.5, 16),
-                                         supply = leaf_supply_single(),
+                                         supply = leaf_supply_singlelayer(),
                                          root_network = net), 30) / 16 / ref, 45)  # measured 20
 })

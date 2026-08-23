@@ -16,7 +16,7 @@ leaf_model(
 \item{control}{a [leaf_control()] object}
 
 \item{supply}{how water reaches the root collar: [leaf_supply_multilayer()]
-(the default) or [leaf_supply_single()]}
+(the default) or [leaf_supply_singlelayer()]}
 }
 \value{
 A `Leaf` R6 object.
@@ -39,6 +39,6 @@ l$find_root_collar_psi()
 operating_point(l)
 }
 \seealso{
-[leaf_traits()], [leaf_control()], [leaf_supply_single()],
+[leaf_traits()], [leaf_control()], [leaf_supply_singlelayer()],
   [set_drivers()], [leaf_solve()]
 }

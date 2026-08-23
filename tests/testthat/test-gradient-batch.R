@@ -147,7 +147,7 @@ test_that("the batch matches leaf_gradient() on the single-potential path", {
     for (resistance in c(1e3, 1e4)) {
       for (method in c("auto", "ift", "fd")) {
         args <- list(psi_soil = psi_soil, PPFD = 900, atm_vpd = 3.0,
-                     supply = leaf_supply_single(),
+                     supply = leaf_supply_singlelayer(),
                      root_network = series_resistance(resistance))
         expect_batch_matches_r(
           args, pars, method,
@@ -199,7 +199,7 @@ test_that("the recorded gradients have not moved", {
     "shutdown-1layer" = list(args = batch_drivers(6.0), pars = pars_grid),
     "single-potential" = list(
       args = list(psi_soil = 1.5, PPFD = 900, atm_vpd = 2.0,
-                  supply = leaf_supply_single(),
+                  supply = leaf_supply_singlelayer(),
                   root_network = series_resistance(1e4)),
       pars = c("vcmax_25", "leaf_specific_conductance_max", "resistance",
                "R_d_25")))
@@ -509,7 +509,7 @@ test_that("leaf_batch() recycles its drivers the way leaf_solve() does", {
 
 test_that("leaf_gradient_batch() rejects what it cannot do", {
   b <- leaf_batch(psi_soil = 1.5, PPFD = 900)
-  s <- leaf_batch(psi_soil = 1.5, supply = leaf_supply_single())
+  s <- leaf_batch(psi_soil = 1.5, supply = leaf_supply_singlelayer())
 
   expect_error(leaf_gradient_batch(b, pars = "not_a_trait"),
                "cannot differentiate")
@@ -678,11 +678,11 @@ test_that("the batch reproduces leaf_gradient() on every model, bit-for-bit", {
   for (m in names(own)) {
     p <- own[[m]]
     b <- leaf_batch(psi_soil = psv, PPFD = 1500, root_network = net,
-                    supply = leaf_supply_single(), traits = tr,
+                    supply = leaf_supply_singlelayer(), traits = tr,
                     CF77_lambda = 1.5e5)
     gb <- leaf_gradient_batch(b, pars = p, model = m)
     one <- vapply(psv, function(ps) {
-      l <- leaf_model(tr, leaf_control(), leaf_supply_single())
+      l <- leaf_model(tr, leaf_control(), leaf_supply_singlelayer())
       l$CF77_lambda_ <- 1.5e5
       leaf_gradient(psi_soil = ps, PPFD = 1500, root_network = net, x = l,
                     traits = tr, pars = p, model = m)$gradient[1, "A"]

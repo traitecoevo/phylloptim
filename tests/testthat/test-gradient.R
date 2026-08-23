@@ -374,12 +374,12 @@ test_that("the active-set classification splits the golden grid as measured", {
 
 test_that("leaf_gradient() works on the single-potential supply path", {
   g <- leaf_gradient(psi_soil = 1.5, PPFD = 900,
-                     supply = leaf_supply_single(),
+                     supply = leaf_supply_singlelayer(),
                      root_network = series_resistance(1e3),
                      pars = c("vcmax_25", "stem_P50"))
   expect_identical(g$status, "interior")
   fd <- leaf_gradient(psi_soil = 1.5, PPFD = 900,
-                      supply = leaf_supply_single(),
+                      supply = leaf_supply_singlelayer(),
                       root_network = series_resistance(1e3),
                       pars = c("vcmax_25", "stem_P50"), method = "fd")
   expect_equal(g$gradient, fd$gradient, tolerance = 1e-3)
@@ -438,7 +438,7 @@ test_that("the two non-trait parameters agree with a resolved reference", {
   # Arbitrated the way 11c arbitrated the traits: against a central difference of
   # the WHOLE SOLVE, read where the step sweep plateaus rather than at one step.
   d <- list(psi_soil = 1.5, PPFD = 900, atm_vpd = 2.0,
-            supply = leaf_supply_single(),
+            supply = leaf_supply_singlelayer(),
             root_network = series_resistance(1e4))
 
   solve_at <- function(par, value) {
@@ -483,7 +483,7 @@ test_that("the non-trait gradients are stable across decades of step", {
   # leaf_specific_conductance_max defaults to 3.14e-05, so the traits' rule of
   # flooring the step at 1 would perturb it by 3% and measure a secant.
   d <- list(psi_soil = 1.5, PPFD = 900, atm_vpd = 2.0,
-            supply = leaf_supply_single(),
+            supply = leaf_supply_singlelayer(),
             root_network = series_resistance(1e4))
   for (p in c("leaf_specific_conductance_max", "resistance")) {
     vals <- vapply(10^-(4:7), function(st) {
@@ -500,7 +500,7 @@ test_that("the active-set guard covers the non-trait parameters too", {
   # perturbation can push a bound past psi* more readily than a trait
   # perturbation can. The guard must not be trait-specific.
   dry <- list(psi_soil = 5.5, PPFD = 900, atm_vpd = 3.0,
-              supply = leaf_supply_single(),
+              supply = leaf_supply_singlelayer(),
               root_network = series_resistance(1e4))
   auto <- do.call(leaf_gradient,
                   c(dry, list(pars = c("leaf_specific_conductance_max",
@@ -794,7 +794,7 @@ test_that("leaf_gradient() refuses the combinations that would disagree", {
   # The supply path is read off the object, so `resistance` is differentiable when
   # `x` is on the single-potential path and not when it is not -- without the caller
   # naming the path twice.
-  s <- leaf_model(supply = leaf_supply_single())
+  s <- leaf_model(supply = leaf_supply_singlelayer())
   g <- leaf_gradient(psi_soil = 1.5, x = s, traits = tr,
                      root_network = series_resistance(1e3), pars = "resistance")
   expect_true(is.finite(g$gradient["resistance", "A"]))
@@ -1084,11 +1084,13 @@ test_that("the curve registry is read from C++, not restated in R", {
   expect_identical(nms, c("TF24", "CF77", "JS22", "CMax", "SOX", "JW26",
                           "ProfitMax"))
 
-  # ⚠️ EVERY curve has a derivative now, because every one is `h(A) - C(psi)` and
-  # the derivative is `h'(A)*dA/dpsi - dC/dpsi` -- one expression with a per-model
-  # factor on the benefit term. Product objectives are the `log` link and
-  # ProfitMax the `A/|A|max` one; neither is a special case any more.
-  expect_true(all(cost_curve_has_derivative()))
+  # ⚠️ THERE IS NO `cost_curve_has_derivative()` ANY MORE, and its absence is the
+  # statement. Every curve is `h(A) - C(psi)` and every derivative is
+  # `h'(A)*dA/dpsi - dC/dpsi`, so the predicate returned TRUE for all seven and
+  # nothing read it -- a constant dressed as a query. Product objectives are the
+  # `log` link and ProfitMax the `A/|A|max` one; neither is a special case.
+  expect_false(exists("cost_curve_has_derivative",
+                      where = asNamespace("phylloptim"), inherits = FALSE))
 
   # ⚠️ Having a derivative and having a VERIFIED GRADIENT are different claims,
   # and only the second gates `leaf_gradient()`. The two non-identity links are
@@ -1099,7 +1101,7 @@ test_that("the curve registry is read from C++, not restated in R", {
 
   # The C++ derivative itself answers for a product curve rather than refusing --
   # that is the point of the link.
-  l <- leaf_model(supply = leaf_supply_single())
+  l <- leaf_model(supply = leaf_supply_singlelayer())
   set_drivers(l, psi_soil = 1.5, PPFD = 900)
   l$optimise_psi_stem_SOX()
   d <- l$dprofit_dpsi_stem_by(which(nms == "SOX") - 1L, l$opt_psi_stem_)
@@ -1117,7 +1119,7 @@ test_that("every additive curve's IFT gradient matches differencing its solve", 
   tr <- leaf_traits()
   net <- series_resistance(1e4)
   mk <- function() {
-    l <- leaf_model(tr, leaf_control(), leaf_supply_single())
+    l <- leaf_model(tr, leaf_control(), leaf_supply_singlelayer())
     l$CF77_lambda_ <- 1.5e5   # in band: marginal_cost_water runs 9e4-3e5
     l
   }
@@ -1134,18 +1136,17 @@ test_that("every additive curve's IFT gradient matches differencing its solve", 
     ift <- g("ift")
     fd <- g("fd")
     expect_identical(ift$model, m)
-    # ⚠️ `status` IS "pinned" HERE AND THE POINT IS NOT PINNED. The stem
-    # optimisers SCAN a 64-point grid and refine the winning cell, so they leave
-    # dprofit at 2e-08 to 1e-06 where the collar solve -- which root-finds
-    # dprofit == 0 -- leaves 1e-15. `stationarity_tol`'s 1e-08 was measured in the
-    # empty band between the COLLAR route's two populations, so on a stem route it
-    # classifies the solver's own residual as a bound. Asserted as measured so the
-    # day a stem route gains a first-order-condition polish, this fails and says so.
-    expect_identical(ift$status, "pinned")
-    expect_lt(ift$stationarity, 1e-5)
-    expect_gt(ift$stationarity, 1e-9)
-    # Forced, therefore: `method = "auto"` would fall back to differencing the
-    # solve on every stem row until that is fixed.
+    # ⚠️ THIS ASSERTED `"pinned"` AND A RESIDUAL ABOVE 1e-09, AND IT FAILED ON
+    # PURPOSE. It was written to fail the day a stem route gained a
+    # first-order-condition polish, and that is what happened: the stem entry
+    # points now root-find dJ/dpsi == 0 through the same solver the collar route
+    # uses, so an interior point is CLASSIFIED interior instead of being read as a
+    # bound by its own solver residual.
+    expect_identical(ift$status, "interior")
+    expect_lt(ift$stationarity, 1e-9)
+    # And `method = "auto"` therefore reaches the composite on a stem route rather
+    # than falling back to differencing the solve. Still forced here so the arm
+    # under test cannot change silently.
     expect_identical(ift$method, "ift")
     for (out in c("A", "gc", "psi_stem")) {
       expect_equal(ift$gradient[p, out], fd$gradient[p, out],
@@ -1159,7 +1160,7 @@ test_that("every additive curve's IFT gradient matches differencing its solve", 
 test_that("the decision variable follows the route", {
   tr <- leaf_traits()
   net <- series_resistance(1e4)
-  l <- leaf_model(tr, leaf_control(), leaf_supply_single())
+  l <- leaf_model(tr, leaf_control(), leaf_supply_singlelayer())
 
   collar <- leaf_gradient(psi_soil = 1.5, PPFD = 1500, pars = "TF24_cost_scale")
   stem <- leaf_gradient(psi_soil = 1.5, PPFD = 1500, root_network = net, x = l,
@@ -1189,7 +1190,7 @@ test_that("a product objective's gradient survives an h-sweep", {
   net <- series_resistance(1e4)
   mk <- function(v, p50) {
     l <- leaf_model(leaf_traits(vcmax_25 = v, stem_P50 = p50), leaf_control(),
-                    leaf_supply_single())
+                    leaf_supply_singlelayer())
     set_drivers(l, psi_soil = 1.5, PPFD = 1500, root_network = net)
     l
   }
@@ -1231,7 +1232,7 @@ test_that("ProfitMax's normaliser is pinned, and auto returns the total", {
   net <- series_resistance(1e4)
   mkv <- function(v) {
     l <- leaf_model(leaf_traits(vcmax_25 = v), leaf_control(),
-                    leaf_supply_single())
+                    leaf_supply_singlelayer())
     set_drivers(l, psi_soil = 1.5, PPFD = 1500, root_network = net)
     l
   }

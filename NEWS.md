@@ -659,7 +659,7 @@ could be corrected outside the package — which strengthens the case for exposi
 `dprofit`'s `gc_const`), so a solved leaf must be re-solved after changing it.
 
 **#56's second half is documented rather than fixed**, which is what that issue asks for
-regardless: `?leaf_supply_single` now states that `leaf_specific_conductance_max` is
+regardless: `?leaf_supply_singlelayer` now states that `leaf_specific_conductance_max` is
 kg-based while `series_resistance()`'s resistance is mol-based, so a caller
 parameterising the whole path carries a `molar_mass_h2o` factor between two quantities
 presented as two ends of one series. The calibration study recorded dropping that 0.018
@@ -1532,9 +1532,9 @@ the soil-to-collar resistances on **both** supply paths, out of the same
 and the single-potential path took its resistance at construction — so the same
 quantity arrived at a different *time* depending on which path was in force.
 
-* **`leaf_supply_single()` no longer takes `resistance`.** Migration:
-  `leaf_supply_single(resistance = r)` ->
-  `leaf_supply_single()` plus `root_network = series_resistance(r)` on
+* **`leaf_supply_singlelayer()` no longer takes `resistance`.** Migration:
+  `leaf_supply_singlelayer(resistance = r)` ->
+  `leaf_supply_singlelayer()` plus `root_network = series_resistance(r)` on
   `set_drivers()` / `leaf_solve()` / `leaf_gradient()`. The C++
   `$set_supply_single(resistance, gravity_head)` becomes
   `$set_supply_single(gravity_head)`.
@@ -1979,7 +1979,7 @@ Two decisions worth knowing:
 
 ## A bare leaf needs no root carbon profile (#5 stage 3, #32)
 
-`leaf_supply_single()` collapses the whole soil-to-collar path to one series
+`leaf_supply_singlelayer()` collapses the whole soil-to-collar path to one series
 resistance, so a leaf physiologist with a soil water potential and no root-mass
 profile can use the model without going through a plant-shaped one to get at a
 leaf. It is also what makes the optimality-model comparison meaningful, since
@@ -1988,13 +1988,13 @@ soil potential.
 
 ```r
 leaf_solve(psi_soil = 1.5, PPFD = 900,
-           supply = leaf_supply_single(resistance = 1e3))
+           supply = leaf_supply_singlelayer(resistance = 1e3))
 ```
 
 The path is chosen when the leaf is built, and **there is no
 `leaf$supply_kind <- "single"`.** Flipping a tag would leave the other path's
 state configured and silently ignored — and flipping back would make it stale
-rather than absent. `leaf_supply_multilayer()` and `leaf_supply_single()`
+rather than absent. `leaf_supply_multilayer()` and `leaf_supply_singlelayer()`
 reconfigure the object completely instead, so it can never be in a state where
 the tag and the supply disagree. `supply_kind`, `single_resistance_` and
 `single_gravity_head_` are readable but not settable, for the same reason.

@@ -91,7 +91,7 @@ per rooted layer; on the single-potential path it carries one series resistance
 in `r_R_V_sum` and nothing else, which is that field's own meaning with one
 layer and no vulnerability-weighted term. [root_network_from_carbon()] builds
 the first, [series_resistance()] the second. Before this change the
-single-potential resistance was an argument to [leaf_supply_single()] instead —
+single-potential resistance was an argument to [leaf_supply_singlelayer()] instead —
 so the same quantity arrived at a different *time* depending on which path was
 in force, and it was the only fitted parameter whose setter reset the object.
 
@@ -105,7 +105,7 @@ Both are stand-ins, not recommendations.
 `soil_depth` is the one argument that is genuinely multi-layer-only, and
 passing it on the single-potential path is an error rather than ignored: there
 is no depth profile there for anything to read. That is also why
-[leaf_supply_single()] keeps `gravity_head` — see its documentation for the one
+[leaf_supply_singlelayer()] keeps `gravity_head` — see its documentation for the one
 remaining asymmetry between the two paths, and why it is left in place.
 }
 

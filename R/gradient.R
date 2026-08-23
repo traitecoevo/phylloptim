@@ -136,16 +136,16 @@ set_traits <- function(x, traits) {
 ##' number is the truthful answer rather than a gap -- reading one would be reading
 ##' state from whichever solve ran last.
 ##'
-##' ⚠️ **A stem route reports `status == "pinned"` at a perfectly interior
-##' optimum, and `method = "auto"` therefore differences the solve.** This is a
-##' property of the optimisers rather than of the points: the stem entry points
-##' scan a 64-point grid and refine the winning cell, so they leave `dprofit` at
-##' 2e-08 to 1e-06, where the collar solve root-finds `dprofit == 0` and leaves
-##' 1e-15. `stationarity_tol`'s default was measured in the empty band between the
-##' collar route's own two populations and does not transfer. Pass
-##' `method = "ift"` to force the composite -- its numbers agree with differencing
-##' the solve -- and read the caveat as "the premise is untested here", not
-##' "the premise fails".
+##' ⚠️ **`ProfitMax` is the one route where `method = "auto"` differences the
+##' solve, and the reason is its normaliser.** Every other route now root-finds
+##' `dJ/dpsi == 0`, so an interior optimum is classified `interior` and the
+##' composite is used. ProfitMax normalises by `|A|max`, whose argmax comes from a
+##' 500-point scan of the supply stream and is therefore piecewise constant in the
+##' parameters -- the composite holds it fixed and returns a PARTIAL, while
+##' differencing the solve lets the scan re-run and returns the TOTAL. A fit needs
+##' the total, so `auto` picks it. It no longer needs a coarser step for this:
+##' `|A|max` is found by a root-find rather than a scan, so the difference is flat
+##' from 1e-02 to 1e-06 and every route uses 1e-06.
 ##'
 ##' ⚠️ **A zero column for another curve's parameter means two different things,
 ##' and they are not distinguishable from the number.** On a `collar` or `TF24`
@@ -395,7 +395,7 @@ set_traits <- function(x, traits) {
 ##'   differentiate at
 ##' @param control a [leaf_control()] object
 ##' @param supply how water reaches the root collar: [leaf_supply_multilayer()]
-##'   (the default) or [leaf_supply_single()]
+##'   (the default) or [leaf_supply_singlelayer()]
 ##' @param model which optimality model to differentiate: `"collar"` (the
 ##'   default, the production path) or any name from [cost_curve_names()], which
 ##'   differentiates that curve's stem optimum instead. See *Choosing which model
@@ -559,7 +559,7 @@ leaf_gradient <- function(psi_soil,
            "the ", x$supply_kind, " path.", call. = FALSE)
     }
     supply <- if (identical(x$supply_kind, "single")) {
-      leaf_supply_single()
+      leaf_supply_singlelayer()
     } else {
       leaf_supply_multilayer()
     }
@@ -982,17 +982,25 @@ leaf_gradient <- function(psi_soil,
   list(
     model = model,
     decision = "psi_stem",
-    # ⚠️ A COARSER STEP, AND IT IS MEASURED. The stem entry points SCAN and refine,
-    # resolving psi* to ~1e-06 of the bracket -- ~4e-06 MPa on a 4.4 MPa one. A
-    # 1e-06 relative trait perturbation moves psi* by ~3e-06 MPa, i.e. BELOW that,
-    # so differencing the solve there returns quantisation rather than a
-    # derivative: measured for SOX's `vcmax_25`, 0.1855 at 1e-06 against a
-    # converged 0.0551, and the wrong SIGN for JW26.
+    # THE SAME STEP AS THE COLLAR ROUTE, because there is now one solver. The stem
+    # entry points root-find dJ/dpsi == 0 inside a scanned basin, so psi* is
+    # stationary to ~1e-15 and a 1e-06 relative perturbation moves it far more than
+    # the solve can resolve.
     #
-    # 1e-03 sits on the floor of the V -- the FD is flat from there to 1e-02 -- and
-    # is used ONLY by the finite-difference arm. The composite perturbs at fixed
-    # psi and never re-solves, so it keeps the fine step.
-    fd_step = 1e-3,
+    # ⚠️ THIS USED TO BE 1e-03 AND THE REASON IS WORTH KNOWING BEFORE ANYONE
+    # TIGHTENS IT FURTHER. While these entry points refined on bracket WIDTH they
+    # resolved psi* only to ~4e-06 MPa, so a 1e-06 step differenced quantisation:
+    # measured for SOX's `vcmax_25`, 0.1855 against a converged 0.0551, and the
+    # wrong SIGN for JW26. At the same step now: 2.5e-05 and 1.5e-05 relative.
+    # The floor moves with the solver, so re-sweep if the solver changes again.
+    #
+    # ⚠️ ONE STEP FOR EVERY ROUTE, INCLUDING ProfitMax, AND THAT IS NEW. While
+    # `|A|max` was the argmax of a 500-point scan it was piecewise constant in the
+    # traits, so a step smaller than a scan cell differenced a staircase: 0.014 at
+    # 1e-06 against 0.058 at 1e-02. `|A|max` is found by a root-find now, so the
+    # difference is flat from 1e-02 to 1e-06 (0.057884 to 0.057885) and the
+    # exception is gone. Sweep again if that normaliser ever goes back to a grid.
+    fd_step = 1e-6,
     solve = function() {
       l$optimise_psi_stem_by(code)
       pinned$capture()

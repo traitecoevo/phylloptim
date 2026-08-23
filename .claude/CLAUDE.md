@@ -542,6 +542,66 @@ breakdown lives ("moves 240 golden cells; split by cause in #15"). The cell coun
 the per-cause split and the tolerance bands go in the first PR comment — see
 "Writing commits here" below.
 
+## One solver. Do not add a second.
+
+**Every optimality model in this package reaches its operating point through ONE
+function**, and the single most likely way to damage this codebase is to add another
+alongside it. It has happened twice already and both times the duplicate was slower
+*and* wrong in a way the original was not.
+
+The shape, and where each piece lives:
+
+```
+util::maximise_over_closed_interval_foc(f, df, lo, hi, n, tol, iters, &fmax)
+    endpoints, so a constrained optimum is reachable
+    an n-cell scan, so a second basin cannot hide the global one
+    a ROOT-FIND of df == 0 inside the winning cell
+    the grid argmax always kept, so refinement can only improve on it
+```
+
+Everything is an argument to that call. A new cost curve is a row in
+`benefit_link<K>()` and `cost_deriv<K>()`. A new topology is a bracket and a chain
+factor. A configuration that needs a basin scan passes `n > 0`; one that does not
+passes `0`, which makes the same function the endpoints-plus-root-find method.
+
+**Four things that are arguments, not reasons for a new function:**
+
+| you might think you need | you need |
+|---|---|
+| a different cost curve | a `CostCurve` enumerator and two table rows |
+| a different objective *shape* (a product, a normalised ratio) | a `BenefitLink` — the cost goes in log form and `h'` carries the rest |
+| a different decision variable or supply topology | the bracket and the chain factor `dpsi_stem/dpsi` |
+| a scan, or no scan | `n` |
+
+⚠️ **`n` IS SET FROM MEASUREMENT, NOT FROM CAUTION, AND SCANNING BY DEFAULT IS THE
+EXPENSIVE MISTAKE.** This is a package whose reason for existing is a ~3 µs solve
+that plant calls millions of times. Measured over a 1728-row sweep (8 air
+temperatures × 4 gate combinations × 6 soil potentials × 3 deficits × 3 light
+levels), the only objectives carrying two prominent interior basins are `TF24` (21
+rows) and `JS22` (66), and **every one of those rows has the energy balance on**;
+the collar objective has none in 432 rows across the same range. So
+`basin_scan_cells()` returns 0 with the gate off. Re-measure before widening that —
+the valleys are 7.0e-01 and 3.5e+00 deep, so a missed basin is a large error, but a
+scan added "to be safe" is a 3× cost on the hot path for nothing.
+
+⚠️ **AND A SCAN IS NOT A WAY TO FIND A MAXIMUM YOU WILL LATER DIFFERENTIATE.** A
+scan argmax is piecewise constant in the parameters, so any derivative through it is
+a staircase. That cost this project real time twice over: the stem routes refined on
+bracket width and left `|dJ/dpsi|` at a median of 4.4e-05, which made a
+finite-difference gradient return 0.1855 against a true 0.0551 and the wrong SIGN on
+another curve; and `|A|max` came from a 500-point scan, which is where ProfitMax's
+partial-versus-total gradient split came from. Both are now root-finds. Median
+residual is **1.2e-15**, one finite-difference step (1e-06) serves every route, and
+ProfitMax got **10× faster** (58.2 → 5.6 µs) because the scan is gone.
+
+**If you are about to write a new `optimise_*` or `maximise_*`, the question to
+answer first is which of the four arguments above you actually need.** If the answer
+is "none of them, my case is genuinely different", say so in the PR with the
+measurement that shows it — because the last three times that claim was made
+(`optimise_psi_stem_Sperry`, ProfitMax's grid walk, the collar solve's separate
+maximiser) it was wrong, and deleting each one made the code both smaller and
+faster.
+
 ## Hazards, each of which has cost someone real numbers
 
 1. **There are TWO Weibull vulnerability curves.** Stem (`stem_P50`, `stem_c`)

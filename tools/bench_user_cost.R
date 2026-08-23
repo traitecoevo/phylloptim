@@ -58,14 +58,14 @@ timeit <- function(f, n, reps) {
 # --- which API surface is this? -------------------------------------------
 sd_args <- names(formals(set_drivers))
 has_network <- "root_network" %in% sd_args
-single_takes_resistance <- "resistance" %in% names(formals(leaf_supply_single))
+single_takes_resistance <- "resistance" %in% names(formals(leaf_supply_singlelayer))
 api <- paste0(if (has_network) "resistance-driver" else "root-carbon",
               if (single_takes_resistance) "/supply-cfg" else "/supply-driver")
 
 supply <- if (single_takes_resistance) {
-  leaf_supply_single(resistance = 1e3)
+  leaf_supply_singlelayer(resistance = 1e3)
 } else {
-  leaf_supply_single()
+  leaf_supply_singlelayer()
 }
 net <- if (has_network && !single_takes_resistance) series_resistance(1e3) else NULL
 

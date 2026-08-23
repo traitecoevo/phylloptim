@@ -51,7 +51,7 @@ commits to a single hydraulically explicit scheme or to none.
 **Either supply path, so the comparison is fair.** The gas-exchange core is
 soil-agnostic: the multi-layer soil and root system enter the solve only as a
 supply function `E_up = f(P_collar)`. So the multi-layer root system can be
-swapped for a single soil water potential (`leaf_supply_single()`), which both
+swapped for a single soil water potential (`leaf_supply_singlelayer()`), which both
 lowers the barrier for a bare-leaf user — no root-mass profile to construct — and
 is what makes the comparison fair, because the alternative formulations worth
 comparing against are all written for one ψ_soil.
@@ -295,7 +295,7 @@ soil-to-collar path to one resistance:
 
 ```r
 leaf_solve(psi_soil = 1.5, PPFD = 900,
-           supply = leaf_supply_single(),
+           supply = leaf_supply_singlelayer(),
            root_network = series_resistance(1e3))
 ```
 
@@ -328,7 +328,7 @@ g$method     # "ift" or "fd" -- see below
 
 # any of the seven models, same call
 leaf_gradient(psi_soil = 2.0, PPFD = 900, model = "JS22",
-              supply = leaf_supply_single(), pars = c("vcmax_25", "JS22_gamma"))
+              supply = leaf_supply_singlelayer(), pars = c("vcmax_25", "JS22_gamma"))
 ```
 
 The first four columns are what a gas-exchange calibration observes. `profit` is
@@ -342,7 +342,7 @@ fits them and nothing in the derivation cares whether a parameter is a trait.
 
 ```r
 leaf_gradient(psi_soil = 1.5, PPFD = 900,
-              supply = leaf_supply_single(),
+              supply = leaf_supply_singlelayer(),
               root_network = series_resistance(1e4),
               pars = c("leaf_specific_conductance_max", "resistance"))
 ```

@@ -256,7 +256,7 @@ leaf_control <- function(GSS_tol_abs = 1e-3,
 ##' profile of one or more layers, each with its own water potential, feeding a
 ##' root network whose resistances are derived from a root carbon profile.
 ##'
-##' `leaf_supply_single()` collapses the whole soil-to-collar path to **one
+##' `leaf_supply_singlelayer()` collapses the whole soil-to-collar path to **one
 ##' resistance**. This is what a leaf physiologist arriving from `plantecophys`
 ##' or `tealeaves` actually has: a soil water potential and no root-mass profile.
 ##' It is also what makes comparison against other optimality models meaningful,
@@ -277,7 +277,7 @@ leaf_control <- function(GSS_tol_abs = 1e-3,
 ##' multi-layer path derives a per-layer head from the depth profile it is handed
 ##' (`gravity_head * z_soil_mid`); this path has no depth profile to derive one
 ##' from, and a bare leaf wants **zero** rather than a geometric default — which is
-##' precisely the caller `leaf_supply_single()` exists for. Making it a driver here
+##' precisely the caller `leaf_supply_singlelayer()` exists for. Making it a driver here
 ##' would mean either inventing a depth for a leaf that has none, or adding a
 ##' second supply-shaped argument to [set_drivers()] that only one path reads. If
 ##' you do want the multi-layer rule for a single layer of thickness `d`, pass
@@ -319,14 +319,14 @@ leaf_control <- function(GSS_tol_abs = 1e-3,
 ##' @seealso [series_resistance()] for the resistance itself, which is a driver.
 ##' @examples
 ##' # a bare leaf: one soil potential, one resistance, no root profile
-##' leaf_solve(psi_soil = 1.5, PPFD = 900, supply = leaf_supply_single(),
+##' leaf_solve(psi_soil = 1.5, PPFD = 900, supply = leaf_supply_singlelayer(),
 ##'            root_network = series_resistance(1e3))
 ##' @export
-leaf_supply_single <- function(gravity_head = 0) {
+leaf_supply_singlelayer <- function(gravity_head = 0) {
   out <- list(kind = "single", gravity_head = gravity_head)
-  .check_scalars(out["gravity_head"], "leaf_supply_single")
+  .check_scalars(out["gravity_head"], "leaf_supply_singlelayer")
   if (gravity_head < 0) {
-    stop("leaf_supply_single(): `gravity_head` must be non-negative (MPa)",
+    stop("leaf_supply_singlelayer(): `gravity_head` must be non-negative (MPa)",
          call. = FALSE)
   }
   structure(out, class = c("leaf_supply", "list"))
@@ -351,10 +351,10 @@ leaf_supply_single <- function(gravity_head = 0) {
 ##'   purely intensive — nothing here may scale with plant size.
 ##'
 ##' @return A [RootNetwork()] with one entry in `r_R_V_sum`.
-##' @seealso [leaf_supply_single()], [root_network_from_carbon()], [set_drivers()]
+##' @seealso [leaf_supply_singlelayer()], [root_network_from_carbon()], [set_drivers()]
 ##' @examples
 ##' series_resistance(1500)
-##' leaf_solve(psi_soil = 1.5, supply = leaf_supply_single(),
+##' leaf_solve(psi_soil = 1.5, supply = leaf_supply_singlelayer(),
 ##'            root_network = series_resistance(1500))
 ##' @export
 series_resistance <- function(resistance) {
@@ -380,7 +380,7 @@ series_resistance <- function(resistance) {
   out
 }
 
-##' @rdname leaf_supply_single
+##' @rdname leaf_supply_singlelayer
 ##' @export
 leaf_supply_multilayer <- function() {
   structure(list(kind = "multilayer"), class = c("leaf_supply", "list"))
@@ -400,10 +400,10 @@ leaf_supply_multilayer <- function() {
 ##' @param traits a [leaf_traits()] object
 ##' @param control a [leaf_control()] object
 ##' @param supply how water reaches the root collar: [leaf_supply_multilayer()]
-##'   (the default) or [leaf_supply_single()]
+##'   (the default) or [leaf_supply_singlelayer()]
 ##'
 ##' @return A `Leaf` R6 object.
-##' @seealso [leaf_traits()], [leaf_control()], [leaf_supply_single()],
+##' @seealso [leaf_traits()], [leaf_control()], [leaf_supply_singlelayer()],
 ##'   [set_drivers()], [leaf_solve()]
 ##' @examples
 ##' l <- leaf_model()
@@ -421,7 +421,7 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
   }
   if (!inherits(supply, "leaf_supply")) {
     stop("`supply` must come from leaf_supply_multilayer() or ",
-         "leaf_supply_single()", call. = FALSE)
+         "leaf_supply_singlelayer()", call. = FALSE)
   }
 
   # Positional, because that is what the generated constructor takes. The whole
@@ -519,7 +519,7 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
 # memo and for the same reason. 1e3 MPa s (mol H2O)^-1 m^2 leaf is the value the
 # package's own vignettes and the companion calibration study use, and like the
 # multi-layer default it is a stand-in rather than a recommendation -- but it means
-# `leaf_solve(psi_soil = 2, supply = leaf_supply_single())` means something, exactly
+# `leaf_solve(psi_soil = 2, supply = leaf_supply_singlelayer())` means something, exactly
 # as it does on the other path. Neither path forces a caller to own a supply model.
 # One default-constructed RootNetwork per session, as a prototype to copy. See
 # series_resistance() for why, and .network_memo above for the measurement.
@@ -569,7 +569,7 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
 ##' in `r_R_V_sum` and nothing else, which is that field's own meaning with one
 ##' layer and no vulnerability-weighted term. [root_network_from_carbon()] builds
 ##' the first, [series_resistance()] the second. Before this change the
-##' single-potential resistance was an argument to [leaf_supply_single()] instead —
+##' single-potential resistance was an argument to [leaf_supply_singlelayer()] instead —
 ##' so the same quantity arrived at a different *time* depending on which path was
 ##' in force, and it was the only fitted parameter whose setter reset the object.
 ##'
@@ -583,7 +583,7 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
 ##' `soil_depth` is the one argument that is genuinely multi-layer-only, and
 ##' passing it on the single-potential path is an error rather than ignored: there
 ##' is no depth profile there for anything to read. That is also why
-##' [leaf_supply_single()] keeps `gravity_head` — see its documentation for the one
+##' [leaf_supply_singlelayer()] keeps `gravity_head` — see its documentation for the one
 ##' remaining asymmetry between the two paths, and why it is left in place.
 ##'
 ##' @param x a `Leaf`, from [leaf_model()]
@@ -691,7 +691,7 @@ set_drivers <- function(x,
     # `root_network` IS used here, and is the same argument the multi-layer path
     # takes: one series resistance in r_R_V_sum. That is the whole point of the
     # consistency change -- the resistance is a driver on both paths now, where it
-    # used to be a leaf_supply_single() argument on this one.
+    # used to be a leaf_supply_singlelayer() argument on this one.
     if (is.null(root_network)) {
       root_network <- .default_series_resistance()
     } else if (!inherits(root_network, "RootNetwork")) {
@@ -873,7 +873,7 @@ operating_point <- function(x) {
 ##' @param traits a [leaf_traits()] object
 ##' @param control a [leaf_control()] object
 ##' @param supply how water reaches the root collar: [leaf_supply_multilayer()]
-##'   (the default) or [leaf_supply_single()]. On the single-potential path
+##'   (the default) or [leaf_supply_singlelayer()]. On the single-potential path
 ##'   `soil_depth` and `root_network` must be omitted, and each `psi_soil` is one
 ##'   value rather than a profile.
 ##' @param reuse solve every row with one `Leaf` object (`TRUE`) or construct a

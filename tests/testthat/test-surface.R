@@ -491,7 +491,7 @@ test_that("operating_point() reports lambda and g1_eff from the solved state", {
 test_that("the supply path can be chosen, and reports which is in force", {
   expect_identical(leaf_model()$supply_kind, "multilayer")
 
-  single <- leaf_model(supply = leaf_supply_single(gravity_head = 0.05))
+  single <- leaf_model(supply = leaf_supply_singlelayer(gravity_head = 0.05))
   expect_identical(single$supply_kind, "single")
   expect_identical(single$single_gravity_head_, 0.05)
   # The resistance is a DRIVER now, so it is unset until set_drivers() runs -- the
@@ -526,7 +526,7 @@ test_that("there is no state in which the tag and the supply disagree", {
 test_that("the single-potential path solves, and responds to its resistance", {
   solve_at <- function(r) {
     leaf_solve(psi_soil = 1.5, PPFD = 900,
-               supply = leaf_supply_single(),
+               supply = leaf_supply_singlelayer(),
                root_network = series_resistance(r))
   }
   easy <- solve_at(1e3)
@@ -548,7 +548,7 @@ test_that("the single-potential path solves, and responds to its resistance", {
 test_that("the single path refuses inputs it would otherwise ignore", {
   # Silently ignoring a soil profile someone took the trouble to pass is the
   # kind of thing that produces a plausible wrong number, so it errors.
-  l <- leaf_model(supply = leaf_supply_single())
+  l <- leaf_model(supply = leaf_supply_singlelayer())
   expect_error(set_drivers(l, psi_soil = c(1, 2)), "single value")
   # `soil_depth` is the one argument that stays multi-layer-only: this path has no
   # depth profile for anything to read.
@@ -572,17 +572,17 @@ test_that("the single path refuses inputs it would otherwise ignore", {
 
   expect_error(series_resistance(0), "must be positive")
   expect_error(series_resistance(-1), "must be positive")
-  expect_error(leaf_supply_single(gravity_head = -1), "non-negative")
+  expect_error(leaf_supply_singlelayer(gravity_head = -1), "non-negative")
   expect_error(leaf_model(supply = list(kind = "single")),
                "must come from leaf_supply")
 })
 
 test_that("gravity_head costs the leaf water, on the single path", {
   flat <- leaf_solve(psi_soil = 1.5, PPFD = 900,
-                     supply = leaf_supply_single(),
+                     supply = leaf_supply_singlelayer(),
                      root_network = series_resistance(1e3))
   uphill <- leaf_solve(psi_soil = 1.5, PPFD = 900,
-                       supply = leaf_supply_single(gravity_head = 0.5),
+                       supply = leaf_supply_singlelayer(gravity_head = 0.5),
                        root_network = series_resistance(1e3))
   expect_lt(uphill$A, flat$A)
 })
@@ -707,10 +707,10 @@ test_that("the default-root-network memo cannot go stale", {
 
   # The same for the single-potential path's cached empty network: reused across
   # calls, and reuse must not carry state.
-  s1 <- leaf_model(supply = leaf_supply_single(1e3))
+  s1 <- leaf_model(supply = leaf_supply_singlelayer(1e3))
   set_drivers(s1, psi_soil = 1.5); s1$find_root_collar_psi()
   first <- operating_point(s1)
-  s2 <- leaf_model(supply = leaf_supply_single(1e3))
+  s2 <- leaf_model(supply = leaf_supply_singlelayer(1e3))
   set_drivers(s2, psi_soil = 1.5); s2$find_root_collar_psi()
   expect_identical(operating_point(s2), first)
 })
@@ -738,11 +738,11 @@ test_that("series_resistance() copies its prototype rather than mutating it", {
   expect_length(a$r_R_H_min, 0L)
 
   # It must still drive a solve identically to the constructor route it replaced.
-  by_ctor <- leaf_model(supply = leaf_supply_single())
+  by_ctor <- leaf_model(supply = leaf_supply_singlelayer())
   set_drivers(by_ctor, psi_soil = 1.5,
               root_network = RootNetwork(r_R_V_sum = 1500))
   by_ctor$find_root_collar_psi()
-  by_helper <- leaf_model(supply = leaf_supply_single())
+  by_helper <- leaf_model(supply = leaf_supply_singlelayer())
   set_drivers(by_helper, psi_soil = 1.5, root_network = series_resistance(1500))
   by_helper$find_root_collar_psi()
   expect_identical(operating_point(by_helper), operating_point(by_ctor))
@@ -756,7 +756,7 @@ test_that("a prescribed CF77_lambda_ survives both re-driving calls (#96)", {
   #
   # Both arms matter. `set_drivers` always kept it; asserting only that one
   # passes on the code this test exists to reject.
-  l <- leaf_model(supply = leaf_supply_single())
+  l <- leaf_model(supply = leaf_supply_singlelayer())
   expect_true(is.na(l$CF77_lambda_))          # not "never initialised"
 
   l$CF77_lambda_ <- 30

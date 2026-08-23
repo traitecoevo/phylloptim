@@ -94,30 +94,6 @@ std::vector<std::string> cost_curve_names() {
   return out;
 }
 
-//' Which cost curves have an analytic first derivative
-//'
-//' `TRUE` where `dprofit/dpsi_stem` exists, which is what a gradient needs in
-//' order to test stationarity and to apply the implicit function theorem.
-//'
-//' It is `FALSE` for the **product** objectives. Those maximise `A * g(psi)`
-//' rather than `A - C(psi)`, so their derivative is `(dA/dpsi)*g + A*g'` and not
-//' the `dA/dpsi - dC/dpsi` the shared expression computes. They remain solvable
-//' through their own optimisers; only the exact gradient is unavailable.
-//'
-//' @return A logical vector parallel to [cost_curve_names()].
-//' @seealso [cost_curve_names()]
-//' @examples
-//' stats::setNames(cost_curve_has_derivative(), cost_curve_names())
-//' @export
-// [[Rcpp::export]]
-std::vector<bool> cost_curve_has_derivative() {
-  std::vector<bool> out;
-  for (int i = 0; ; ++i) {
-    if (phylloptim::Leaf::curve_name(i) == "unknown") break;
-    out.push_back(phylloptim::Leaf::curve_has_derivative(i));
-  }
-  return out;
-}
 
 //' The differentiated outputs, in the order C++ indexes them
 //'

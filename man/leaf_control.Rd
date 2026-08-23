@@ -15,14 +15,20 @@ leaf_control(
 }
 \arguments{
 \item{GSS_tol_abs}{absolute tolerance for the golden-section search over
-stem water potential. ⚠️ **This does not set how well the operating point is
-determined.** The collar solve
-solves its own first-order condition to about `1e-12` instead of searching
-profit to `GSS_tol_abs`, so changing this leaves the answer bit-identical on
-the production path. What it still does: it is the width below which the
-feasible collar interval is treated as a single point, and it is the
-tolerance of the two single-layer `optimise_psi_stem_*` optimisers, which
-are off that path.}
+  stem water potential. ⚠️ **This does not set how well the operating point is
+  determined.** The collar solve
+  solves its own first-order condition to about `1e-12` instead of searching
+  profit to `GSS_tol_abs`, so changing this leaves the answer bit-identical on
+  the production path. What it still does, and it is less than the name
+  suggests: it is read in exactly two places, both on the collar path -- the
+  width below which the feasible collar interval is treated as a single point,
+  and the tolerance of the golden-section FALLBACK used when neither bracket
+  endpoint has a usable gradient.
+
+  ⚠️ **It does NOT reach the `optimise_psi_stem_*` optimisers.** They maximise
+  over a closed interval and refine within a scan cell to `(cell width) * 1e-4`,
+  which is hardcoded and not settable from here. Tightening this to sharpen a
+  stem-route argmax does nothing at all.}
 
 \item{vulnerability_curve_ncontrol}{number of control points used to
 pre-integrate the two Weibull vulnerability curves into splines. Higher is

@@ -2019,27 +2019,28 @@ void test_zero_E_branch_derives_its_own_block() {
     ok(l.R_d_ != rd, "and it is NOT the Tair value -- the two really differ");
   }
 
-  // The scan is how this branch reaches an ARGMAX rather than only a reported
-  // state: `prepare_profitmax` starts at psi_soil, which IS this branch, and
-  // records the A there as a profit candidate that `optimise_psi_stem_ProfitMax`
-  // can select (hazard 11). So index 0 has to be reproducible across scans.
+  // Closure is still a profit CANDIDATE the optimiser can select (hazard 11) even
+  // though it is excluded from |A|max, so its carbon and its temperature have to
+  // stay mutually consistent. This used to be asserted through
+  // `profitmax_scan_A_[0]`; |A|max is found by optimisation now and those arrays
+  // are gone, so the property is asserted where it actually lives.
   {
     phylloptim::Leaf l = make_pm_leaf(d, {1.0}, {1.0}, true);
     l.use_thermal_cost_ = true;
+    l.set_leaf_states_rates_from_psi_stem(1.0, 1.0);      // psi_stem == psi_soil
+    const double a0 = l.assim_colimited_;
+    ok(l.transpiration_ == 0.0, "at psi_stem == psi_soil no water moves");
+    l.set_leaf_states_rates_from_psi_stem(1.0, 1.0);
+    ok(l.assim_colimited_ == a0, "and the closure candidate is reproducible");
+    l.update_temperature_dependent_params(l.leaf_temp_from_E(0.0));
+    near(a0, -l.R_d_, 1e-14,
+         "its carbon is -R_d at the temperature E = 0 implies");
+
+    // And |A|max EXCLUDES it: a positive normaliser cannot be a respiration rate.
     l.prepare_profitmax();
-    const double a0 = l.profitmax_scan_A_[0];
-    l.prepare_profitmax();
-    ok(l.profitmax_scan_A_[0] == a0,
-       "the scan's closure candidate does not depend on the previous scan");
-    // And it must belong to the temperature the scan records beside it: the grid
-    // argmax reads `profitmax_scan_A_` and `profitmax_scan_Tleaf_` together, so a
-    // mismatch is one candidate whose carbon and whose thermal cost come from
-    // different leaves.
-    ok(l.profitmax_scan_Tleaf_[0] == l.leaf_temp_from_E(0.0),
-       "the closure candidate's recorded Tleaf is the E = 0 one");
-    l.update_temperature_dependent_params(l.profitmax_scan_Tleaf_[0]);
-    near(l.profitmax_scan_A_[0], -l.R_d_, 1e-14,
-         "and its carbon is -R_d at that same temperature");
+    ok(l.profitmax_A_max_ > 0.0, "|A|max is a positive carbon gain");
+    ok(l.profitmax_A_max_ != std::abs(a0),
+       "and it is not the closure point's magnitude");
   }
 
   // Gate off, which is the arm the golden file covers and which must stay exactly

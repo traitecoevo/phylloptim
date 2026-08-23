@@ -885,14 +885,6 @@ Leaf__Tcrit___set <- function(obj_, value) {
     invisible(.Call('_phylloptim_Leaf__Tcrit___set', PACKAGE = 'phylloptim', obj_, value))
 }
 
-Leaf__profitmax_scan_n___get <- function(obj_) {
-    .Call('_phylloptim_Leaf__profitmax_scan_n___get', PACKAGE = 'phylloptim', obj_)
-}
-
-Leaf__profitmax_scan_n___set <- function(obj_, value) {
-    invisible(.Call('_phylloptim_Leaf__profitmax_scan_n___set', PACKAGE = 'phylloptim', obj_, value))
-}
-
 Leaf__boundary_scan_n___get <- function(obj_) {
     .Call('_phylloptim_Leaf__boundary_scan_n___get', PACKAGE = 'phylloptim', obj_)
 }
@@ -1076,25 +1068,6 @@ gradient_par_names <- function() {
 #' @export
 cost_curve_names <- function() {
     .Call('_phylloptim_cost_curve_names', PACKAGE = 'phylloptim')
-}
-
-#' Which cost curves have an analytic first derivative
-#'
-#' `TRUE` where `dprofit/dpsi_stem` exists, which is what a gradient needs in
-#' order to test stationarity and to apply the implicit function theorem.
-#'
-#' It is `FALSE` for the **product** objectives. Those maximise `A * g(psi)`
-#' rather than `A - C(psi)`, so their derivative is `(dA/dpsi)*g + A*g'` and not
-#' the `dA/dpsi - dC/dpsi` the shared expression computes. They remain solvable
-#' through their own optimisers; only the exact gradient is unavailable.
-#'
-#' @return A logical vector parallel to [cost_curve_names()].
-#' @seealso [cost_curve_names()]
-#' @examples
-#' stats::setNames(cost_curve_has_derivative(), cost_curve_names())
-#' @export
-cost_curve_has_derivative <- function() {
-    .Call('_phylloptim_cost_curve_has_derivative', PACKAGE = 'phylloptim')
 }
 
 #' The differentiated outputs, in the order C++ indexes them

@@ -394,12 +394,6 @@ public:
   double T50_ = 50.4;    // deg C; Sicangco Table 2, heatwave treatment
   double Tcrit_ = 46.5;  // deg C; Sicangco Table 2, heatwave treatment
 
-  // Points used to scan the transpiration supply stream for |A|max, which is what
-  // Sperry's carbon gain is normalised by. Sicangco's Ps_to_Pcrit defaults to 500
-  // and their instantaneous simulations use 600. A member rather than a
-  // constructor argument on purpose: the constructor's arity is pinned by plant's
-  // generated RcppR6 glue and by the CI consumer program.
-  int profitmax_scan_n_ = 500;
   // Cells the single-layer optimisers WITHOUT a scan of their own use to locate
   // the basin before refining (see util::maximise_over_closed_interval). Six of
   // the seven; ProfitMax scans profitmax_scan_n_ points for |A|max anyway.
@@ -565,9 +559,6 @@ public:
   // The scan prepare_profitmax() already runs, kept so the objective can be
   // rebuilt on it without evaluating the model a second time. See
   // optimise_psi_stem_ProfitMax for why a grid is needed at all.
-  std::vector<double> profitmax_scan_psi_;
-  std::vector<double> profitmax_scan_A_;
-  std::vector<double> profitmax_scan_Tleaf_;
   // THE MARGINAL COST OF WATER THE OPERATING POINT IMPLIES, and the one output
   // every cost curve can report on the same axis:
   //
@@ -1128,59 +1119,6 @@ public:
   double dprofit_dpsi_stem(double psi_stem, double psi_upstream,
                            bool* feasible = nullptr);
 
-  // Evaluate the operating point at a PRESCRIBED psi_stem instead of optimising
-  // one, the psi_stem counterpart of evaluate_root_collar_psi. Clamps the target
-  // into [psi_soil, psi_crit] so a tracked state that has drifted outside still
-  // yields a finite point, and tags the result `Prescribed`.
-  //
-  // ⚠️ WHY THIS EXISTS SEPARATELY, and it is not a convenience: a gradient at a
-  // prescribed point is a DIFFERENT derivative from a gradient at an optimum.
-  // At an optimum psi* moves with the traits, so every output picks up an
-  // indirect term through dpsi*/dtheta, and profit's own indirect term vanishes
-  // by the envelope theorem. At a prescribed point psi does not move at all, so
-  // there is no indirect term for any output and no envelope identity to invoke
-  // -- the answer is the direct partial at fixed psi, which is a strictly simpler
-  // computation and a different number.
-  //
-  // ⚠️ EXCEPT WHERE THE CLAMP BINDS. A clamped target is pinned to a bound, and
-  // the bound is itself a function of the traits (`psi_crit` is one), so
-  // dpsi/dtheta is NOT zero there and the indirect term comes back. The returned
-  // tag is what distinguishes the two cases; do not infer it from the value.
-  // --- ONE optimiser for every single-layer cost curve ----------------------
-  //
-  // These six differ in exactly three things: what they validate first, which
-  // profit function they evaluate, and which lambda they report. Everything else
-  // -- clearing the collar state, refusing a multi-layer supply, the no-flow
-  // branch, the closed-interval maximisation, writing profit_ and
-  // lambda_emergent_ -- is identical.
-  //
-  // ⚠️ THEY USED TO BE SIX NEAR-COPIES, 61-67% line-identical, and adding a curve
-  // meant pasting a seventh. The three varying pieces are `if constexpr` chains
-  // below, each written ONCE, and the body is written once. A new curve is now a
-  // `CostCurve` member plus one arm in each chain.
-  //
-  // ⚠️ ProfitMax is deliberately NOT one of them. It seeds |A|max and the
-  // conductance span before searching and writes its own normalised members, so
-  // its body is genuinely a different shape rather than a differently
-  // parameterised one. Forcing it in here would mean a fourth chain whose arms
-  // are empty for six of the seven.
-  // --- runtime curve selection, for the gradient (plan item 5) ---------------
-  //
-  // The three primitives a gradient needs -- solve, derivative, evaluate at a
-  // prescribed point -- for a curve chosen at RUN time. R has to pick the curve
-  // from an argument, and RcppR6 cannot bind a template, so these four dispatch a
-  // `CostCurve` from an integer once rather than needing twelve bound wrappers.
-  //
-  // ⚠️ The integer IS the enum's value and R sends positions into it, exactly as
-  // it already does for `gradient::par_names`. Appending a curve is safe;
-  // reordering `CostCurve` would silently solve a different model. `curve_name()`
-  // exists so R can read the mapping back out and compare rather than trust it.
-  //
-  // ⚠️ THE ADDITIVE CURVES ONLY. `dprofit_dpsi_stem` computes `dA/dpsi - dC/dpsi`
-  // and a product objective's derivative is `(dA/dpsi)*g + A*g'`, so `SOX` and
-  // `JW26` are refused here rather than returned wrong. They are still reachable
-  // through their own `optimise_psi_stem_*`.
-  static bool curve_has_derivative(int curve);
   static std::string curve_name(int curve);
   void optimise_psi_stem_by(int curve);
   double evaluate_psi_stem_by(int curve, double target_psi_stem);
@@ -4579,41 +4517,63 @@ inline void Leaf::prepare_profitmax() {
   const double psi_soil = supply_psi_soil_scalar();
   prepare_profitmax_norms();
 
-  // |A|max over the transpiration supply stream (Sperry Eqn 4; Sicangco use
-  // max|Anet| because CG_net can be negative). A scan rather than "A at psi_crit"
-  // on purpose: that shortcut is only valid for GROSS assimilation, where A is
-  // monotone in psi, and the net-assimilation arms of this paper are precisely
-  // where it stops being.
+  // |A|max BY OPTIMISATION, NOT BY A SCAN. Sperry's carbon gain is normalised by
+  // the largest |A| on the supply stream, and this used to find it with a
+  // 500-point sweep. Two reasons that was the wrong instrument:
   //
-  // ⚠️ THE psi_soil ENDPOINT IS SKIPPED, matching gsthermal's `A[E == 0] <- NA`.
-  // There E is exactly zero and this model shuts down and reports A = -R_d, a
-  // number that describes a leaf with closed stomata rather than a point on the
-  // supply stream. Including it would set |A|max from respiration whenever
-  // assimilation is small, which is the whole high-temperature regime.
-  const int n = profitmax_scan_n_;
-  if (n < 3) {
-    util::stop("profitmax_scan_n_ must be at least 3");
+  //   * the argmax of a scan is piecewise constant in the parameters, so
+  //     d|A|max/dtheta is a staircase -- which is the whole reason ProfitMax's
+  //     gradient had a partial/total split and needed a coarse finite-difference
+  //     step where every other route uses 1e-06;
+  //   * it is 500 evaluations to locate something that measurement puts at the DRY
+  //     BOUND on 1318 of 1320 driver rows, interior on 2, with the interior case
+  //     beating the bound by at most 1.1e-03.
+  //
+  // So: endpoints plus a root-find on dA/dpsi == 0, the same method the objective
+  // itself uses. ONE maximisation of A suffices, and that is a statement about the
+  // model rather than a shortcut: on this interval the only way |A| could peak at a
+  // MINIMUM of A is where A is negative, and A is negative only at full closure,
+  // where E = 0 and A = -R_d -- the one point excluded below. Away from it A is the
+  // carbon the leaf actually gains, so |A|max is max A.
+  //
+  // dA/dpsi needs no new algebra: for an identity link dJ/dpsi = A'*dci/dpsi - C',
+  // so adding the cost derivative back recovers the benefit term exactly.
+  //
+  // ⚠️ THE CLOSURE POINT IS EXCLUDED, as it was from the scan. At exactly psi_soil
+  // E is zero and A is -R_d: a closed stoma rather than a point on the stream, and
+  // gsthermal drops it too (`A[E == 0] <- NA`). The scan expressed that as "skip
+  // grid point 0"; with no grid, the search starts one probe inside the bound.
+  const auto A_of = [&](double psi) {
+    set_leaf_states_rates_from_psi_stem(psi, psi_soil);
+    return assim_colimited_;
+  };
+  const auto dA_of = [&](double psi, bool* ok) {
+    const double dJ = dprofit_dpsi_stem<CostCurve::TF24>(psi, psi_soil, ok);
+    return dJ + cost_deriv<CostCurve::TF24>(psi, psi_soil);
+  };
+  const double width = psi_crit - psi_soil;
+  const double lo = psi_soil + 1e-9 * width;   // the open end: closure excluded
+  double a_hi = -std::numeric_limits<double>::infinity();
+  if (width > 0.0) {
+    util::maximise_over_closed_interval_foc(A_of, dA_of, lo, psi_crit, 0,
+                                            collar_root_tol,
+                                            static_cast<size_t>(ci_niter), &a_hi);
   }
-  double a_max = 0.0;
-  const double step = (psi_crit - psi_soil) / double(n - 1);
-  profitmax_scan_psi_.assign(static_cast<std::size_t>(n), util::na_value);
-  profitmax_scan_A_.assign(static_cast<std::size_t>(n), util::na_value);
-  profitmax_scan_Tleaf_.assign(static_cast<std::size_t>(n), util::na_value);
-  for (int i = 0; i < n; ++i) {
-    const double p = psi_soil + step * double(i);
-    set_leaf_states_rates_from_psi_stem(p, psi_soil);
-    const std::size_t k = static_cast<std::size_t>(i);
-    profitmax_scan_psi_[k] = p;
-    profitmax_scan_A_[k] = assim_colimited_;
-    profitmax_scan_Tleaf_[k] =
-        use_energy_balance_ ? leaf_temp_from_E(transpiration_) : leaf_temp_;
-    // i == 0 is the psi_soil endpoint, where E is exactly zero and this model
-    // reports A = -R_d: a closed stoma rather than a point on the supply stream.
-    // It is RECORDED (the profit at full closure is a legitimate candidate) but
-    // excluded from |A|max, which is what gsthermal's `A[E == 0] <- NA` does.
-    if (i > 0 && std::isfinite(assim_colimited_)) {
-      a_max = std::max(a_max, std::abs(assim_colimited_));
-    }
+  double a_max = (std::isfinite(a_hi) && a_hi > 0.0) ? a_hi : 0.0;
+  // ⚠️ THE ONE CASE WHERE max|A| IS NOT max A, and it is reachable. If A is
+  // NEGATIVE across the whole stream -- a leaf hot enough that gross assimilation
+  // cannot cover respiration anywhere, measured at 48 C -- then the largest
+  // magnitude is the most negative value, and normalising by zero would leave
+  // ProfitMax with no objective at all. Solved the same way, by maximising -A, and
+  // only in that case: one extra root-find on the rows that need it and none on the
+  // rows that do not.
+  if (!(a_max > 0.0) && width > 0.0) {
+    double neg = -std::numeric_limits<double>::infinity();
+    util::maximise_over_closed_interval_foc(
+        [&](double psi) { return -A_of(psi); },
+        [&](double psi, bool* ok) { return -dA_of(psi, ok); }, lo, psi_crit, 0,
+        collar_root_tol, static_cast<size_t>(ci_niter), &neg);
+    if (std::isfinite(neg) && neg > 0.0) a_max = neg;
   }
   profitmax_A_max_ = a_max;
 }
@@ -4734,64 +4694,30 @@ inline void Leaf::optimise_psi_stem_ProfitMax() {
   // analytic in psi and Tleaf), take the grid argmax, and refine with Brent only
   // when that argmax is interior. An endpoint argmax is returned as the endpoint,
   // which is the answer rather than a failure to search.
-  const std::size_t n = profitmax_scan_psi_.size();
-  const double inv_A = 1.0 / profitmax_A_max_;
-  const double inv_k = 1.0 / profitmax_k_span_;
-  auto grid_profit = [&](std::size_t i) {
-    const double A = profitmax_scan_A_[i];
-    if (!std::isfinite(A)) {
-      return -std::numeric_limits<double>::infinity();
-    }
-    const double hc = (profitmax_k_soil_ - leaf_specific_conductance_max_ *
-                                               proportion_of_conductivity(
-                                                   profitmax_scan_psi_[i])) *
-                      inv_k;
-    return A * inv_A - (hc + thermal_cost_at(profitmax_scan_Tleaf_[i]));
+  // THE SHARED SOLVER, not a second one. This used to walk the |A|max scan grid to
+  // pick a basin and then Brent-refine inside it -- a duplicate of
+  // maximise_over_closed_interval with the added constraint that its grid had to be
+  // the normaliser's grid. Both are gone: |A|max is found by optimisation now, so
+  // there is no grid to reuse, and this route gets the same endpoints-plus-basin-
+  // plus-root-find treatment as every other curve.
+  const auto objective = [&](double psi_stem) {
+    return profit_psi_stem_ProfitMax(psi_stem, psi_soil);
   };
-
-  std::size_t best = 0;
-  double best_profit = grid_profit(0);
-  for (std::size_t i = 1; i < n; ++i) {
-    const double p = grid_profit(i);
-    if (p > best_profit) {
-      best_profit = p;
-      best = i;
-    }
-  }
-
-  if (best == 0 || best + 1 == n) {
-    // Pinned to a bound. Re-evaluate through the real objective so every reported
-    // field describes the returned point rather than the grid's reconstruction.
-    opt_psi_stem_ = profitmax_scan_psi_[best];
-    profit_ = profit_psi_stem_ProfitMax(opt_psi_stem_, psi_soil);
-    lambda_emergent_ = lambda_ProfitMax(opt_psi_stem_);
-    return;
-  }
-
-  // ⚠️ THE TOLERANCE IS SCALED TO THE CELL, not taken from GSS_tol_abs. Brent
-  // terminates on bracket width, so an absolute tolerance comparable to the cell
-  // leaves the answer at essentially the grid point -- and then a FINER scan is
-  // worse, because the cells narrow while the tolerance does not. The two
-  // single-layer optimisers use the same rule through
-  // util::maximise_over_closed_interval; the measurement is on its declaration.
-  const double cell_a = profitmax_scan_psi_[best - 1];
-  const double cell_b = profitmax_scan_psi_[best + 1];
-  double neg_profit_opt = 0.0;
-  opt_psi_stem_ = util::brent_fmin(
-      [&](double psi_stem) { return -profit_psi_stem_ProfitMax(psi_stem, psi_soil); },
-      cell_a, cell_b, (cell_b - cell_a) * 1e-4, &neg_profit_opt);
-  profit_ = -neg_profit_opt;
-
-  // ⚠️ Keep whichever of the grid point and the refinement is better. The grid
-  // point is always a feasible candidate, and the refinement is only a refinement
-  // if it wins.
-  if (best_profit > profit_) {
-    opt_psi_stem_ = profitmax_scan_psi_[best];
-  }
-
-  // brent_fmin's last evaluation is not necessarily at the returned argmax, so
-  // re-evaluate to leave every reported field describing ONE operating point.
-  // Hazard 8, in the form where the fields are individually plausible.
+  double profit_opt = 0.0;
+  // ⚠️ The Scaled link refuses a derivative with the energy balance on, for the
+  // reason the link table gives, so that configuration keeps the width refinement
+  // rather than losing the solve to a throw from inside the optimiser.
+  opt_psi_stem_ = util::maximise_over_closed_interval_foc(
+      objective,
+      [&](double psi_stem, bool* ok) -> double {
+        if (use_energy_balance_) {          // Scaled link: derivative refused
+          if (ok != nullptr) *ok = false;
+          return 0.0;
+        }
+        return dprofit_dpsi_stem<CostCurve::ProfitMax>(psi_stem, psi_soil, ok);
+      },
+      psi_soil, psi_crit, basin_scan_cells(), collar_root_tol,
+      static_cast<size_t>(ci_niter), &profit_opt);
   profit_ = profit_psi_stem_ProfitMax(opt_psi_stem_, psi_soil);
   lambda_emergent_ = lambda_ProfitMax(opt_psi_stem_);
 }
@@ -4824,15 +4750,6 @@ inline std::string Leaf::curve_name(int curve) {
 
 // Whether `dprofit_dpsi_stem_by` will accept this curve. Exposed so a caller can
 // ask before committing to a route, rather than discovering it through an error.
-inline bool Leaf::curve_has_derivative(int curve) {
-  if (curve < 0 || curve >= n_cost_curves) return false;
-  // Every curve has one now, through its benefit link. Kept as a function rather
-  // than deleted because R reads it to build the route table, and because the
-  // energy-balance guard means a curve can still refuse at run time.
-  (void)curve;
-  return true;
-}
-
 inline void Leaf::optimise_psi_stem_by(int curve) {
   switch (static_cast<CostCurve>(curve)) {
     case CostCurve::TF24: optimise_psi_stem_single<CostCurve::TF24>(); return;
@@ -5087,24 +5004,26 @@ inline void Leaf::optimise_psi_stem_single() {
   // keeps the bracket-width refinement instead of losing the solve to an
   // exception -- letting the refusal fire from inside the optimiser turned 3236 of
   // 4608 golden rows into throws.
-  constexpr bool link_blocks_derivative =
-      benefit_link<K>() != BenefitLink::Identity;
-  if (link_blocks_derivative && use_energy_balance_) {
-    opt_psi_stem_ = util::maximise_over_closed_interval(
-        objective, psi_soil, psi_crit, boundary_scan_n_, &profit_opt);
-  } else {
-    // ONE solver, shared with the collar route: endpoints, an optional basin scan,
-    // then a ROOT-FIND of dJ/dpsi == 0 inside the winning cell. The root-find is
-    // what makes the argmax stationary rather than grid-resolved, which is what a
-    // derivative taken through this solve needs.
-    opt_psi_stem_ = util::maximise_over_closed_interval_foc(
-        objective,
-        [&](double psi_stem, bool* ok) {
-          return dprofit_dpsi_stem<K>(psi_stem, psi_soil, ok);
-        },
-        psi_soil, psi_crit, basin_scan_cells(), collar_root_tol,
-        static_cast<size_t>(ci_niter), &profit_opt);
-  }
+  // ONE solver, and NO caller-side branch on whether a derivative exists: the
+  // derivative closure reports that itself through `ok`, and the solver's own
+  // fallback handles it. A non-identity link with the energy balance on refuses
+  // dJ/dpsi (the temperature term needs the same h'(A) factor), and that refusal is
+  // reported rather than thrown, because the OBJECTIVE is perfectly well defined
+  // there. `basin_scan_cells()` already returns a scan whenever the gate is on,
+  // which is exactly when the fallback needs one.
+  opt_psi_stem_ = util::maximise_over_closed_interval_foc(
+      objective,
+      [&](double psi_stem, bool* ok) -> double {
+        if constexpr (benefit_link<K>() != BenefitLink::Identity) {
+          if (use_energy_balance_) {
+            if (ok != nullptr) *ok = false;
+            return 0.0;
+          }
+        }
+        return dprofit_dpsi_stem<K>(psi_stem, psi_soil, ok);
+      },
+      psi_soil, psi_crit, basin_scan_cells(), collar_root_tol,
+      static_cast<size_t>(ci_niter), &profit_opt);
   profit_ = profit_psi_stem_for<K>(opt_psi_stem_, psi_soil);
   lambda_emergent_ = lambda_for<K>(opt_psi_stem_, psi_soil);
   (void)profit_opt;

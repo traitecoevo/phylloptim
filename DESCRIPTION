@@ -34,7 +34,6 @@ Depends:
 Imports:
     R6,
     Rcpp,
-    tools
 LinkingTo: Rcpp, BH, odelia (>= 0.2.0)
 Suggests:
     dplyr,

@@ -71,7 +71,7 @@ differentiate at}
 \item{control}{a [leaf_control()] object}
 
 \item{supply}{how water reaches the root collar: [leaf_supply_multilayer()]
-(the default) or [leaf_supply_single()]}
+(the default) or [leaf_supply_singlelayer()]}
 
 \item{pars}{what to differentiate with respect to. Any of the fourteen
   [leaf_traits()] names, plus `"leaf_specific_conductance_max"` and — on the
@@ -203,16 +203,16 @@ back non-finite.** The collar is not solved for at all there, and an absent
 number is the truthful answer rather than a gap -- reading one would be reading
 state from whichever solve ran last.
 
-⚠️ **A stem route reports `status == "pinned"` at a perfectly interior
-optimum, and `method = "auto"` therefore differences the solve.** This is a
-property of the optimisers rather than of the points: the stem entry points
-scan a 64-point grid and refine the winning cell, so they leave `dprofit` at
-2e-08 to 1e-06, where the collar solve root-finds `dprofit == 0` and leaves
-1e-15. `stationarity_tol`'s default was measured in the empty band between the
-collar route's own two populations and does not transfer. Pass
-`method = "ift"` to force the composite -- its numbers agree with differencing
-the solve -- and read the caveat as "the premise is untested here", not
-"the premise fails".
+⚠️ **`ProfitMax` is the one route where `method = "auto"` differences the
+solve, and the reason is its normaliser.** Every other route now root-finds
+`dJ/dpsi == 0`, so an interior optimum is classified `interior` and the
+composite is used. ProfitMax normalises by `|A|max`, whose argmax comes from a
+500-point scan of the supply stream and is therefore piecewise constant in the
+parameters -- the composite holds it fixed and returns a PARTIAL, while
+differencing the solve lets the scan re-run and returns the TOTAL. A fit needs
+the total, so `auto` picks it. It no longer needs a coarser step for this:
+`|A|max` is found by a root-find rather than a scan, so the difference is flat
+from 1e-02 to 1e-06 and every route uses 1e-06.
 
 ⚠️ **A zero column for another curve's parameter means two different things,
 and they are not distinguishable from the number.** On a `collar` or `TF24`
@@ -348,7 +348,7 @@ back inside — and it fires for a `psi` within one step of an end too, since
 Stationarity is the premise of the whole derivation, and it fails when the
 optimum is pinned to an end of the feasible collar interval. There `psi*` is a
 bound, `dprofit` is not zero at the answer, and `-M/H` is not the bound's
-derivative. The formula does not fail loudly: measured at a wet-pinned point
+derivative. The formula does not fail loudly: measured at a boundary-soil point
 the true gradient is about `1e-08` and the bare composite returns `O(1)` --
 plausible-looking and wrong by seven orders of magnitude. About one operating
 point in six is pinned across this package's test grid, all at soil suctions of
@@ -369,7 +369,7 @@ better, and `method` in the result says which was used.
 It is better in a second way, which is sharper than accuracy. `psi_crit` does
 not appear in the profit function at all -- it only sets the dry end of the
 feasible collar interval -- so the composite necessarily returns **exactly
-zero** for it. At an interior optimum that is correct. At a dry-pinned optimum
+zero** for it. At an interior optimum that is correct. At a boundary-crit optimum
 `psi_crit` *is* the binding constraint, the true `dA/dθ` is about `1.26`, and a
 zero is arguably a worse answer than a wildly wrong one: it tells an optimiser
 the parameter does nothing, and nothing about it looks suspicious. The

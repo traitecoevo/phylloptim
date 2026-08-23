@@ -30,9 +30,9 @@ ignored, since it would otherwise silently drop a resistance you meant to use.
 }
 \examples{
 series_resistance(1500)
-leaf_solve(psi_soil = 1.5, supply = leaf_supply_single(),
+leaf_solve(psi_soil = 1.5, supply = leaf_supply_singlelayer(),
            root_network = series_resistance(1500))
 }
 \seealso{
-[leaf_supply_single()], [root_network_from_carbon()], [set_drivers()]
+[leaf_supply_singlelayer()], [root_network_from_carbon()], [set_drivers()]
 }

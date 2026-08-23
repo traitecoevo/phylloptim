@@ -196,7 +196,7 @@ argument**, because both paths take their resistances as a per-call driver:
 
 ```{r}
 leaf_solve(psi_soil = 1.5, PPFD = 900,
-           supply = leaf_supply_single(),
+           supply = leaf_supply_singlelayer(),
            root_network = series_resistance(1e3)) |>
   as_tibble() |>
   select(psi_soil, psi_stem, collar, A, gc, g1_eff)
@@ -213,7 +213,7 @@ down:
 tibble(resistance = 10^seq(2.5, 4.5, length.out = 25)) |>
   rowwise() |>
   mutate(A = leaf_solve(psi_soil = 1.5, PPFD = 900,
-                        supply = leaf_supply_single(),
+                        supply = leaf_supply_singlelayer(),
                         root_network = series_resistance(resistance))$A) |>
   ungroup() |>
   ggplot(aes(resistance, A)) +
@@ -485,6 +485,6 @@ measured distance from stationarity the classification rests on.
 - Both supply paths now take resistances, through the same `root_network`
   argument, so a caller with measured or fitted resistances never has to go
   through a root carbon model to reach a leaf. The one asymmetry left is
-  `gravity_head`, which `leaf_supply_single()` still takes as configuration
+  `gravity_head`, which `leaf_supply_singlelayer()` still takes as configuration
   because this path has no depth profile to derive it from — see its
   documentation.

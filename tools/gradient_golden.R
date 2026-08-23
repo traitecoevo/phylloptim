@@ -127,7 +127,7 @@ cases <- list(
        pars = c("vcmax_25", "stem_P50", "stem_c", "R_d_25")),
   list(label = "single-potential",
        args = list(psi_soil = 1.5, PPFD = 900, atm_vpd = 2.0,
-                   supply = leaf_supply_single(),
+                   supply = leaf_supply_singlelayer(),
                    root_network = series_resistance(1e4)),
        pars = c("vcmax_25", "leaf_specific_conductance_max", "resistance",
                 "R_d_25"))
