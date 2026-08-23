@@ -260,6 +260,27 @@ int generate() {
   return 0;
 }
 
+// One row's identity, for a diagnostic. Two static buffers so the two class
+// summaries can be printed in ONE printf without the second overwriting the
+// first -- which is exactly what a single buffer did, and it reported the same
+// row twice.
+const char *where(const Row &r, const char *field) {
+  static char buf[2][160];
+  static int slot = 0;
+  slot = 1 - slot;
+  if (field[0] == '\0') {
+    // No field in this class differed at all, so there is no row to name. On the
+    // platform that generated the file that is every run, and printing a
+    // zero-filled Row there reads like a real operating point at psi_soil = 0.
+    std::snprintf(buf[slot], sizeof buf[slot], "%s", "no difference");
+  } else {
+    std::snprintf(buf[slot], sizeof buf[slot],
+                  "psi_soil=%g ppfd=%g vpd=%g T=%g layers=%d %s", r.psi_soil,
+                  r.ppfd, r.vpd, r.leaf_temp, r.layers, field);
+  }
+  return buf[slot];
+}
+
 // Exact equality, with NaN treated as equal to NaN -- some grid points shut down
 // and legitimately produce the NA sentinel.
 bool same(double got, double want) {
@@ -341,6 +362,14 @@ int compare(Tolerance tol) {
   double worst_got = 0.0, worst_want = 0.0;
   const char *worst_desc = "";
   Row worst_row{};
+  // ⚠️ PER CLASS, AND NAMED. The two class magnitudes are what the developer
+  // guide quotes, and they have been wrong four times -- most recently the pair
+  // that stood through a solver merge which moved one of them 87x. A magnitude
+  // with no row attached can only be watched drift; one that names its row can be
+  // reproduced, which is the difference between a number and a diagnosis.
+  Row worst_max_row{}, worst_argmax_row{};
+  const char *worst_max_field = "";
+  const char *worst_argmax_field = "";
   size_t i = 0;
   for (; i < rows.size(); ++i) {
     if (fgets(line, sizeof line, f) == nullptr) {
@@ -386,6 +415,13 @@ int compare(Tolerance tol) {
       double &worst_in_class = is_max ? worst_max_rel : worst_argmax_rel;
       if (rd > worst_in_class) {
         worst_in_class = rd;
+        if (is_max) {
+          worst_max_row = r;
+          worst_max_field = fd.name;
+        } else {
+          worst_argmax_row = r;
+          worst_argmax_field = fd.name;
+        }
       }
       if (rd > worst_rel) {
         worst_rel = rd;
@@ -437,10 +473,12 @@ int compare(Tolerance tol) {
     } else {
       printf("golden: %zu operating points within cross-platform tolerance\n"
              "  %d of %zu values differ. Worst by class:\n"
-             "    profit  (the maximum)      %.3g   tolerance %.1g\n"
-             "    others  (from the argmax)  %.3g   tolerance %.1g\n",
-             rows.size(), inexact, rows.size() * 9, worst_max_rel, tol.maximum,
-             worst_argmax_rel, tol.argmax);
+             "    profit  (the maximum)      %.3g   tolerance %.1g   at %s\n"
+             "    others  (from the argmax)  %.3g   tolerance %.1g   at %s\n",
+             rows.size(), inexact, rows.size() * 9,
+             worst_max_rel, tol.maximum, where(worst_max_row, worst_max_field),
+             worst_argmax_rel, tol.argmax,
+             where(worst_argmax_row, worst_argmax_field));
     }
     return 0;
   }
@@ -451,8 +489,11 @@ int compare(Tolerance tol) {
           exact_mode ? "" : " beyond cross-platform tolerance", worst);
   if (!exact_mode) {
     fprintf(stderr,
-            "  by class: profit %.3g (tol %.1g), argmax-derived %.3g (tol %.1g)\n",
-            worst_max_rel, tol.maximum, worst_argmax_rel, tol.argmax);
+            "  by class: profit %.3g (tol %.1g) at %s, argmax-derived %.3g "
+            "(tol %.1g) at %s\n",
+            worst_max_rel, tol.maximum, where(worst_max_row, worst_max_field),
+            worst_argmax_rel, tol.argmax,
+            where(worst_argmax_row, worst_argmax_field));
   }
   if (exact_mode) {
     fprintf(stderr,
