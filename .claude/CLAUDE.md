@@ -48,14 +48,13 @@ inst/include/phylloptim/
                                not sequence `f(a) - f(b)` and R does
   vulnerability.hpp            the Weibull cumulative-integral builder, shared by both
   constants.hpp                physical constants as inline constexpr
-  closed_form.hpp              the closed form, reachable as `set_model(.., .., "closed")`
-                               since #129. Defines Leaf::optimise_closed OUT OF
-                               LINE, which is legal only because this header is
-                               included AFTER leaf_model.hpp by <phylloptim.hpp>.
-                               ⚠️ Its guard tests an OUTPUT, so the method
-                               switches on a surface in DRIVER space and the
-                               argmax is discontinuous there -- 100x rougher
-                               across it. Never put it under a derivative
+  closed_form.hpp              the closed form, reachable as `set_model(.., .., "closed")`.
+                               Defines Leaf::optimise_closed OUT OF LINE, which is
+                               legal only because this header is included AFTER
+                               leaf_model.hpp by <phylloptim.hpp>.
+                               ⚠️ Its guard tests an OUTPUT, so the method switches
+                               on a surface in DRIVER space and the argmax is
+                               discontinuous there. Never put it under a derivative
   quadrature.hpp               adaptive Simpson (replaced plant's compiled QAG)
   util.hpp                     R-free stop()/sentinels
   uniroot.hpp, optimize.hpp    1-D root finders and optimisers
@@ -879,22 +878,17 @@ satisfies `-Werror=switch` and so removes the check they exist for.
    optimisers. Do not read its existence as evidence that a comparison-based
    search is the safe default here.
 
-   ⚠️ **AND THE CLOSED FORM (#129) FAILS THIS HAZARD, WHICH IS WHY IT IS NOT ON A
-   DIFFERENTIATED PATH.** Re-measured over a 201-point `kmax` sweep, the mean
-   |second difference| of `opt_psi_stem_`:
-
-   | the sweep | exact | closed |
-   |---|---|---|
-   | stays on one method | 6.1e-06 | 7.2e-06 |
-   | crosses the guard | 1.0e-05 | **1.0e-03** |
-
-   The closed form's own arithmetic is 1.2x rougher, which is fine. What costs two
-   orders of magnitude is that its validity guard tests an **output**, so the set
-   of drivers on which the method switches is a surface in driver space and the
-   argmax JUMPS across it. **A mixture of two methods is discontinuous even where
-   both are individually smooth**, and no tolerance fixes that. `set_model` resets
-   the method to exact for this reason, so `gradient::route_seat` cannot pick it
-   up.
+   ⚠️ **The closed form fails this hazard, which is why it is not on a
+   differentiated path.** Its own arithmetic is fine; what breaks is that its
+   validity guard tests an **output**, so the set of drivers on which the method
+   switches is a surface in driver space and the argmax JUMPS across it. **A
+   mixture of two methods is discontinuous even where both are individually
+   smooth**, and no tolerance fixes that. `set_model` resets the method to exact
+   for this reason, so `gradient::route_seat` cannot pick it up. Measurements are
+   in `closed_form.hpp`; the short version is that the mean |second difference| of
+   `opt_psi_stem_` across a parameter sweep -- which is the quantity a trait
+   gradient differentiates, and which for a smooth argmax should shrink with the
+   step -- rises a hundredfold where the sweep crosses the guard.
 4. **The leaf is purely intensive.** Every input is per unit leaf area or a
    dimensionless/intensive driver. Nothing scales with plant size — whole-plant
    allometry (`kmax(h)`, root carbon totals) is computed on the plant side and passed
