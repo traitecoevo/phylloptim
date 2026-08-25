@@ -806,7 +806,15 @@ operating_point <- function(x) {
   "hydraulic_cost",
   "E_up",
   "uptake",
-  "lambda",         # dA/dE
+  # ⚠️ TF24's MARGINAL COST OF WATER, WHATEVER CURVE IS SEATED. It is
+  # `marginal_cost_water()`, i.e. `lambda_TF24(opt_psi_stem_)`, so on any other
+  # curve it reports what the TF24 cost WOULD price water at at this leaf's
+  # operating point -- not what the seated curve does. The per-curve number is
+  # `$lambda_emergent`, which is `(dC/dpsi)/(dE/dpsi)` for whichever curve ran and
+  # is the one output every curve reports on the same axis. It is not in this
+  # vector because these names are POSITIONS and inserting one would shift every
+  # saved output; read it off the object.
+  "lambda",         # dA/dE under the TF24 cost -- see above
   "g1_eff",         # the Medlyn g1 this leaf implies
   # deg C. APPENDED rather than placed beside the other state variables, because
   # these names are positions and a saved output would shift under an insertion.
@@ -901,8 +909,19 @@ operating_point <- function(x) {
 ##'   rather than a gap -- reading one would be reading whatever the last solve
 ##'   left behind.
 ##'
-##'   `CF77` needs `$CF77_lambda_`, which has no default and is not reachable
-##'   through this function; build the leaf with [leaf_model()] and set it.
+##'   Two curves take a PRESCRIBED price of water rather than deriving one:
+##'   `CF77` reads `CF77_lambda` and `TF24_floor` reads `TF24_floor_lambda_o`,
+##'   both below. Neither has a default, and each curve refuses to solve without
+##'   its own.
+##' @param CF77_lambda,TF24_floor_lambda_o the prescribed marginal value of water
+##'   for the two curves that take one, in umol C (kg H2O)^-1. `NA_real_` (the
+##'   default) leaves the field unset, which every other model wants.
+##'
+##'   ⚠️ **Their scale is set by the leaf, not chosen freely.** At this package's
+##'   defaults the leaf's own marginal cost of water runs 9e4 to 3e5, and a price
+##'   far outside that band pins the optimum against a bound — where the answer
+##'   describes the bracket rather than the model. [operating_point()]'s
+##'   `lambda_emergent` is how you find a value that means something.
 ##' @param reuse solve every row with one `Leaf` object (`TRUE`) or construct a
 ##'   fresh one per row (`FALSE`, the default). Reuse is faster because the two
 ##'   vulnerability splines are built once, and it is safe -- every exit from the
@@ -944,8 +963,11 @@ leaf_solve <- function(psi_soil,
                        control = leaf_control(),
                        supply = leaf_supply_multilayer(),
                        reuse = TRUE,
-                       model = "collar") {
+                       model = "collar",
+                       CF77_lambda = NA_real_,
+                       TF24_floor_lambda_o = NA_real_) {
   .check_model(model, supply)
+  prices <- .check_prices(model, CF77_lambda, TF24_floor_lambda_o)
   layered <- .as_layer_list(psi_soil, "psi_soil")
   scalars <- list(PPFD = PPFD, atm_vpd = atm_vpd, ca = ca,
                   leaf_temp = leaf_temp, atm_o2_kpa = atm_o2_kpa,
@@ -976,7 +998,8 @@ leaf_solve <- function(psi_soil,
     .recycle_to(root_network, n, "root_network")
   }
 
-  shared <- if (reuse) .seat_model(leaf_model(traits, control, supply), model)
+  shared <- if (reuse) .seat_model(leaf_model(traits, control, supply), model,
+                                   prices)
             else NULL
 
   # ⚠️ COLUMNWISE, AND THAT IS MOST OF THE PERFORMANCE STORY OF THIS FUNCTION.
@@ -1006,7 +1029,7 @@ leaf_solve <- function(psi_soil,
   with_phylloptim_conditions(
   for (i in seq_len(n)) {
     l <- if (reuse) shared else .seat_model(leaf_model(traits, control, supply),
-                                            model)
+                                            model, prices)
     set_drivers(l,
                 psi_soil = layered[[i]],
                 PPFD = scalars$PPFD[[i]],
@@ -1066,12 +1089,65 @@ leaf_solve <- function(psi_soil,
 }
 
 # `set_model()` is CONFIGURATION -- it survives set_drivers() and set_traits() --
-# so this runs once per Leaf rather than once per row.
-.seat_model <- function(x, model) {
+# so this runs once per Leaf rather than once per row. The prescribed prices are
+# the same kind of thing (#96: they survive both re-driving calls), which is why
+# they are applied here and not in the row loop.
+#
+# ⚠️ THE PRICES REACH THE LEAF ONLY THROUGH HERE, and before they did there was no
+# route at all: `$CF77_lambda_` and `$TF24_floor_lambda_o` are FIELDS, not traits,
+# so `leaf_traits()` cannot carry them and `leaf_solve()` builds its own `Leaf`
+# internally. The two priced curves were therefore reachable from `leaf_model()`
+# and unreachable from the one-call surface -- `leaf_solve(model = "CF77")` could
+# only ever raise the "needs CF77_lambda_ set" refusal. That was survivable while
+# CF77 was the only such curve and its documentation said "build the leaf
+# yourself"; it stopped being survivable when a second curve arrived whose ONLY
+# parameter is a price.
+.seat_model <- function(x, model, prices = NULL) {
   x$set_model(if (identical(model, "collar")) "TF24" else model,
               if (identical(model, "collar")) "collar" else "stem")
+  for (nm in names(prices)) {
+    if (!is.na(prices[[nm]])) {
+      x[[nm]] <- prices[[nm]]
+    }
+  }
   x
 }
+
+# Which price belongs to which curve, and the refusal when they are crossed.
+#
+# ⚠️ ONE TABLE, and it is the R-side twin of `.gradient_owned_pars`. Both say the
+# same thing -- this price belongs to that curve -- for the solve and for the
+# gradient respectively. If a third priced curve appears, both need the row.
+#
+# Passing a price the seated model does not read is REFUSED rather than ignored,
+# because silently ignoring it is how someone spends an afternoon wondering why
+# their lambda had no effect. Passing none is fine: the curve's own check is what
+# reports the omission, and it reports it with the units and the reason.
+.solve_price_fields <- c(CF77 = "CF77_lambda_",
+                         TF24_floor = "TF24_floor_lambda_o")
+
+.check_prices <- function(model, CF77_lambda, TF24_floor_lambda_o) {
+  given <- c(CF77_lambda_ = CF77_lambda,
+             TF24_floor_lambda_o = TF24_floor_lambda_o)
+  # ⚠️ NOT `[[model]]`, which raises "subscript out of bounds" on every unpriced
+  # model rather than reporting no price. "" is a name no field has.
+  mine <- if (model %in% names(.solve_price_fields)) {
+    .solve_price_fields[[model]]
+  } else {
+    ""
+  }
+  wrong <- names(given)[!is.na(given) & names(given) != mine]
+  if (length(wrong)) {
+    owner <- names(.solve_price_fields)[match(wrong[[1]], .solve_price_fields)]
+    stop("`", sub("_$", "", wrong[[1]]), "` is the ", owner,
+         " curve's prescribed price of water, and model = \"", model,
+         "\" does not read it: on every other curve the price is emergent, ",
+         "derived from that curve's own parameters rather than set. Pass ",
+         "model = \"", owner, "\", or drop the argument.", call. = FALSE)
+  }
+  given
+}
+
 
 .check_scalars <- function(x, what) {
   bad <- names(x)[!vapply(x, function(v) {

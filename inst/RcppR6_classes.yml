@@ -83,14 +83,15 @@ Leaf:
 
       **Which model is configuration, not a call argument.** `$set_model(curve,
       route)` seats it and `$optimise()` takes nothing, because the curves'
-      constants already live on the object -- `$CF77_lambda_` is a field, and
-      `JS22_gamma`, `CMax_a` and `CMax_b` are traits. `curve` is any name from
+      constants already live on the object -- `$CF77_lambda_` and
+      `$TF24_floor_lambda_o` are fields, and `JS22_gamma`, `CMax_a` and `CMax_b`
+      are traits. `curve` is any name from
       [cost_curve_names()]; `route` is `"collar"` (the full soil-to-collar path,
       any supply) or `"stem"` (psi_stem with the upstream potential pinned at
       `psi_soil`, single soil layer only). A third argument, `method`, chooses HOW
       the operating point is reached: `"exact"` (the default, a root-find of the
-      first-order condition) or `"closed"` (the closed form, for `TF24` and `CF77`
-      on the stem route only). `$model_curve()`, `$model_route()` and
+      first-order condition) or `"closed"` (the closed form, for `TF24`, `CF77`
+      and `TF24_floor` on the stem route only). `$model_curve()`, `$model_route()` and
       `$model_method()` report what is seated. The defaults are `"TF24"`,
       `"collar"` and `"exact"`, which is the production path.
 
@@ -104,8 +105,8 @@ Leaf:
       `$hydraulic_cost_`; `$profitmax_curve()` returns its whole cost, gain and
       profit curve in one call.
 
-      ⚠️ **`$profit_` carries three kinds of number across the seven curves** --
-      carbon for the four difference objectives, a dimensionless normalised
+      ⚠️ **`$profit_` carries three kinds of number across the eight curves** --
+      carbon for the five difference objectives, a dimensionless normalised
       profit for `ProfitMax`, and carbon times a dimensionless factor for the two
       products. Comparing it BETWEEN curves is not meaningful; comparing each
       curve's argmax is.
@@ -216,6 +217,18 @@ Leaf:
     # `theta_w_` and `theta_fc_` (all fields) to drive it. beta is clamped at 1, so
     # at any `theta_ >= theta_fc_` this is plain CF77 exactly.
     CF77_soil_beta_: {type: bool, access: field}
+    # The TF24_floor curve's price of water as transpiration goes to zero, umol C
+    # (kg H2O)^-1, and the curve's ONLY parameter: the hydraulic half is TF24's own
+    # cost at TF24's own traits. An INPUT on exactly the same footing as
+    # `CF77_lambda_`: same units, no default, NA until you set one, and not cleared
+    # by re-driving or by `set_traits()`.
+    #
+    # ⚠️ NO DEFAULT ON PURPOSE. Zero is a valid value and it is the value at which
+    # this curve stops being itself -- at `lambda_o = 0` `TF24_floor` IS `TF24` --
+    # so omitting it is refused rather than defaulted. An explicit zero is accepted.
+    # `leaf_solve()` and `leaf_batch()` take it as an argument; on a bare `Leaf`,
+    # assign the field.
+    TF24_floor_lambda_o: {type: double, access: field}
     # --- soil-moisture inputs for the Medlyn beta factor ----------------------
     # ⚠️ SET THESE, NOT the trailing-underscore ones. `theta_`, `theta_fc_` and
     # `theta_w_` below are WORKING COPIES: set_physiology overwrites all three from
@@ -607,12 +620,29 @@ Leaf:
     profit_psi_stem_CMax:
       return_type: double
       args: [psi_stem: double, psi_upstream: double]
+    # `TF24_cost_scale*(1-f)^TF24_beta2 + TF24_floor_lambda_o*E`: TF24's own cost
+    # plus CF77's price. Both halves are carbon fluxes, so this is directly
+    # comparable with either parent -- and reduces to each of them, bit-for-bit, at
+    # `TF24_floor_lambda_o = 0` and `TF24_cost_scale = 0` respectively.
+    hydraulic_cost_TF24_floor:
+      return_type: double
+      args: [psi_stem: double, psi_upstream: double]
+    profit_psi_stem_TF24_floor:
+      return_type: double
+      args: [psi_stem: double, psi_upstream: double]
     lambda_JS22:
       return_type: double
       args: [psi_stem: double, psi_upstream: double]
     lambda_CMax:
       return_type: double
       args: [psi_stem: double, psi_upstream: double]
+    # ⚠️ THE ONE lambda HERE THAT DOES NOT VANISH AT THE WET END: it is `lambda_TF24`
+    # plus `$TF24_floor_lambda_o`, so as the potential closes on zero the price
+    # falls to that constant instead of to zero. One argument, like `lambda_TF24`,
+    # because the hydraulic half reads the absolute potential.
+    lambda_TF24_floor:
+      return_type: double
+      args: [psi_stem: double]
     # --- the product-objective family (PLAN 7c) ------------------------------
     # ⚠️ profit_psi_stem_SOX returns a PRODUCT, not a carbon profit.
     sox_reduction:
@@ -664,9 +694,9 @@ Leaf:
         Choose the optimality model this leaf solves.
 
         The model is configuration rather than a call argument, because its
-        PARAMETERS already are: `CF77_lambda_` is a field, and `JS22_gamma`,
-        `CMax_a` and `CMax_b` are traits. Seat the model, set whatever constants it
-        needs, then call `optimise()`.
+        PARAMETERS already are: `CF77_lambda_` and `TF24_floor_lambda_o` are
+        fields, and `JS22_gamma`, `CMax_a` and `CMax_b` are traits. Seat the
+        model, set whatever constants it needs, then call `optimise()`.
 
         `route = "collar"` is the production formulation -- the full
         soil-to-collar-to-stem path, with a root network or with a single soil
@@ -684,7 +714,10 @@ Leaf:
 
         ⚠️ **`"closed"` is an approximation with a guard and a fallback, and it is
         refused rather than approximated where it does not apply.** It exists for
-        `TF24` and `CF77` only; `SOX` and `JW26` cannot have one at all (their
+        `TF24`, `CF77` and `TF24_floor` (the last needing
+        `TF24_floor_lambda_o > 0`, since at zero that curve is `TF24` and has no
+        wet-end constant to expand about); `SOX` and `JW26` cannot have one at all
+        (their
         benefit link makes `lambda` carry the assimilation the solve is for); it
         needs the stem route and a single soil layer; and it is refused with
         `use_energy_balance_` on, because the deficit then depends on the

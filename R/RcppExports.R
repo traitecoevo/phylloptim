@@ -149,12 +149,24 @@ Leaf__profit_psi_stem_CMax <- function(obj_, psi_stem, psi_upstream) {
     .Call('_phylloptim_Leaf__profit_psi_stem_CMax', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
 }
 
+Leaf__hydraulic_cost_TF24_floor <- function(obj_, psi_stem, psi_upstream) {
+    .Call('_phylloptim_Leaf__hydraulic_cost_TF24_floor', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
+}
+
+Leaf__profit_psi_stem_TF24_floor <- function(obj_, psi_stem, psi_upstream) {
+    .Call('_phylloptim_Leaf__profit_psi_stem_TF24_floor', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
+}
+
 Leaf__lambda_JS22 <- function(obj_, psi_stem, psi_upstream) {
     .Call('_phylloptim_Leaf__lambda_JS22', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
 }
 
 Leaf__lambda_CMax <- function(obj_, psi_stem, psi_upstream) {
     .Call('_phylloptim_Leaf__lambda_CMax', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream)
+}
+
+Leaf__lambda_TF24_floor <- function(obj_, psi_stem) {
+    .Call('_phylloptim_Leaf__lambda_TF24_floor', PACKAGE = 'phylloptim', obj_, psi_stem)
 }
 
 Leaf__sox_reduction <- function(obj_, psi_stem) {
@@ -399,6 +411,14 @@ Leaf__CF77_soil_beta___get <- function(obj_) {
 
 Leaf__CF77_soil_beta___set <- function(obj_, value) {
     invisible(.Call('_phylloptim_Leaf__CF77_soil_beta___set', PACKAGE = 'phylloptim', obj_, value))
+}
+
+Leaf__TF24_floor_lambda_o__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__TF24_floor_lambda_o__get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__TF24_floor_lambda_o__set <- function(obj_, value) {
+    invisible(.Call('_phylloptim_Leaf__TF24_floor_lambda_o__set', PACKAGE = 'phylloptim', obj_, value))
 }
 
 Leaf__theta__get <- function(obj_) {
