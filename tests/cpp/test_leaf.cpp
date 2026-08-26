@@ -1776,7 +1776,11 @@ void test_leaf_temperature_is_reported() {
     ok(l.Tleaf_ == T,
        "off the energy-balance path Tleaf is the driver, at T = " +
            std::to_string(T));
-    ok(l.operating_point_values().back() == l.Tleaf_,
+    // ⚠️ NOT `.back()` any more: `shadow_cost` was appended after `Tleaf`, so the
+    // last element is that. Addressed from the end by name-order instead, which
+    // is what the R side's `.operating_point_names` pins.
+    const std::vector<double> ov = l.operating_point_values();
+    ok(ov[ov.size() - 2] == l.Tleaf_,
        "operating_point_values() reports it, at T = " + std::to_string(T));
   }
 
@@ -4819,6 +4823,70 @@ const char *reported_names[] = {"opt_psi_stem", "profit", "hydraulic_cost",
                                 "ci", "assim", "transpiration", "gc",
                                 "lambda_emergent"};
 
+void test_shadow_cost() {
+  printf("shadow_cost separates the price from the realised carbon cost\n");
+  // WHAT THIS PINS. `hydraulic_cost_` is the whole cost the objective subtracted;
+  // `shadow_cost()` is the share of it that is a price rather than carbon the
+  // plant gave up. So the carbon actually forgone is the difference, and the
+  // realised profit is `profit + shadow_cost`. A consumer that grows a plant on
+  // this leaf wants that second quantity and never `profit`, or it taxes growth
+  // by something the plant never spent.
+  //
+  // ⚠️ BIT EQUALITY against `lambda_o * transpiration_`, not a tolerance. The
+  // accessor reads the stored transpiration rather than recomputing it, precisely
+  // so this identity holds exactly against the REPORTED `E` -- which is what a
+  // caller checks. A tolerance would pass on an accessor that recomputed
+  // transpiration from the potentials and drifted in the last bit.
+  Drivers d;
+  int compared = 0;
+  for (double ppfd : {300.0, 900.0, 1500.0}) {
+    for (double vpd : {1.0, 2.0, 4.0}) {
+      for (double psi_soil : {0.5, 1.0, 2.0, 3.0}) {
+        d.PPFD = ppfd;
+        d.atm_vpd = vpd;
+
+        for (double lo : {0.0, 1.5e4, 1.5e5}) {
+          phylloptim::Leaf l = make_single_leaf(d, psi_soil);
+          l.TF24_floor_lambda_o = lo;
+          l.set_model(phylloptim::Leaf::CostCurve::TF24_floor, false);
+          l.optimise();
+          if (!std::isfinite(l.transpiration_)) continue;
+
+          ok(l.shadow_cost() == lo * l.transpiration_,
+             "shadow_cost is lambda_o * E exactly");
+          // the realised cost is what is left, and it is never the whole cost
+          // unless the price is zero
+          const double realised = l.hydraulic_cost_ - l.shadow_cost();
+          ok(std::isfinite(realised) && realised >= 0.0,
+             "the realised cost is non-negative");
+          ok((lo == 0.0) == (l.shadow_cost() == 0.0),
+             "the price vanishes exactly when lambda_o does");
+          ++compared;
+        }
+
+        // ⚠️ ZERO ON EVERY OTHER CURVE, INCLUDING CF77. That is a statement about
+        // the curve, not about the cost: CF77's whole cost IS `lambda * E` and
+        // reading it as a shadow price is ordinary, but the model supplies one
+        // number and nothing to attribute it with. Reporting it as all-shadow
+        // would ship one reading as a fact. See `Leaf::shadow_cost`.
+        for (auto c : {phylloptim::Leaf::CostCurve::TF24,
+                       phylloptim::Leaf::CostCurve::CF77,
+                       phylloptim::Leaf::CostCurve::JS22,
+                       phylloptim::Leaf::CostCurve::CMax}) {
+          phylloptim::Leaf l = make_single_leaf(d, psi_soil);
+          l.CF77_lambda_ = 1.5e5;
+          l.set_model(c, false);
+          l.optimise();
+          ok(l.shadow_cost() == 0.0,
+             "shadow_cost is exactly zero off TF24_floor");
+        }
+      }
+    }
+  }
+  printf("  compared %d priced operating points\n", compared);
+}
+
+
 void test_tf24_floor_reduces() {
   printf("TF24_floor reduces to TF24 and to CF77, bit-for-bit\n");
   // ⚠️ BIT EQUALITY IS THE RIGHT TEST HERE AND A TOLERANCE WOULD BE THE WRONG
@@ -5470,6 +5538,7 @@ int main() {
   test_maximise_over_closed_interval_foc();
   test_single_layer_optimisers_reach_a_bound();
   test_product_link_is_the_product_rule();
+  test_shadow_cost();
   test_tf24_floor_reduces();
   test_tf24_floor_wet_end_price();
   test_tf24_floor_emergent_lambda();

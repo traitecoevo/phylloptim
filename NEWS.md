@@ -40,6 +40,50 @@ never named a price would be running the production model under a new name.
 Omitting it is refused, with the units and the routes that can supply one; an
 explicit zero is accepted.
 
+**`shadow_cost`, a new reported output, because the two terms are not the same
+kind of thing.** `Theta~` is a **realised** cost: carbon actually forgone, in
+damaged tissue and in capacity that has to be rebuilt, and it belongs in a carbon
+budget. `lambda_o` is not a cost at all. It is a **shadow price** — the value of
+water in its best alternative use, which for a leaf is assimilation later — and no
+carbon is lost when the plant pays it. It changes the aperture the plant chooses
+and nothing else, which is what a multiplier does.
+
+`profit` still reports the objective, so it deducts both. The new column reports
+the part that is a price, and the two quantities a caller wants follow:
+
+```
+realised cost   = hydraulic_cost - shadow_cost
+carbon profit   = profit + shadow_cost
+```
+
+⚠️ **A consumer that grows a plant on this leaf wants the second of those, never
+`profit`.** Deducting a shadow price from a carbon budget taxes growth by something
+the plant never spent. At `lambda_o = 1e5` the objective understates the carbon the
+leaf actually kept by 28%.
+
+⚠️ **Zero on every other curve means "this curve does not separate the two", not
+"this curve's cost is all realised carbon".** `CF77` is the case worth stating: its
+whole cost is `lambda * E`, and reading that as a shadow price is an ordinary thing
+to do — but the model supplies one number and nothing to attribute it with, and
+behaves identically whether that number is read as carbon lost to water already
+taken or as the value of water withheld for later. Reporting it as all-shadow would
+present one reading as a fact; as zero-shadow, the other. The field is defined only
+where the *curve* defines it, and that is itself an argument for the two-term form:
+it is the first curve here in which the question "is `lambda` a cost to deduct, or a
+price that only shapes behaviour?" can be posed at all.
+
+The sharpest test of the column is the pair that was already here. `CF77` at
+`lambda` and `TF24_floor` at `TF24_cost_scale = 0` are the same model numerically —
+every state and flux bit-identical — and `shadow_cost` is the only column that
+separates them.
+
+Appended to `operating_point()`, after `Tleaf`, for the reason `Tleaf` was: those
+names are positions and an insertion would shift every saved output. It reads the
+stored transpiration rather than recomputing it, so `shadow_cost == lambda_o * E`
+holds bit-exactly against the reported `E`. No golden file moves, since those are
+written from their own struct, and `n_pars` is unchanged at 19 — this is a reported
+output, not a parameter.
+
 **A real prediction, and a test of it.** Scaling `kmax` and the vapour deficit
 together by 16 leaves stomatal conductance untouched at every potential, so a cost
 whose marginal value depends on `psi` alone is invariant and one that prices the

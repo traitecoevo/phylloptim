@@ -3135,6 +3135,17 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// Leaf__shadow_cost__get
+double Leaf__shadow_cost__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__shadow_cost__get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__shadow_cost__get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
 // Leaf__gs_H2O__get
 double Leaf__gs_H2O__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
 RcppExport SEXP _phylloptim_Leaf__gs_H2O__get(SEXP obj_SEXP) {
@@ -3540,6 +3551,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__profitmax_A_max__get", (DL_FUNC) &_phylloptim_Leaf__profitmax_A_max__get, 1},
     {"_phylloptim_Leaf__profitmax_k_span__get", (DL_FUNC) &_phylloptim_Leaf__profitmax_k_span__get, 1},
     {"_phylloptim_Leaf__g1_eff__get", (DL_FUNC) &_phylloptim_Leaf__g1_eff__get, 1},
+    {"_phylloptim_Leaf__shadow_cost__get", (DL_FUNC) &_phylloptim_Leaf__shadow_cost__get, 1},
     {"_phylloptim_Leaf__gs_H2O__get", (DL_FUNC) &_phylloptim_Leaf__gs_H2O__get, 1},
     {"_phylloptim_Leaf__H2O_CO2_stom_diff_ratio___get", (DL_FUNC) &_phylloptim_Leaf__H2O_CO2_stom_diff_ratio___get, 1},
     {"_phylloptim_Leaf__H2O_CO2_stom_diff_ratio___set", (DL_FUNC) &_phylloptim_Leaf__H2O_CO2_stom_diff_ratio___set, 2},

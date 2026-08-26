@@ -750,9 +750,33 @@ set_drivers <- function(x,
 ##' constructed with.
 ##'
 ##' Costs about 4 µs, so it is usable in a loop. It was 180 µs until it stopped
-##' reading the thirteen outputs through thirteen separate calls into C++ and
+##' reading the fourteen outputs through fourteen separate calls into C++ and
 ##' stopped building its one row with `data.frame()` (#39) -- 45× more than the
 ##' ~3 µs solve it was reporting on.
+##'
+##' @section What the cost columns mean:
+##'
+##' `hydraulic_cost` is the whole cost the objective subtracted. `shadow_cost` is
+##' the share of it that is a *price* rather than carbon the plant gave up: the
+##' value of water in its best alternative use, which for a leaf is assimilation
+##' later. So
+##'
+##' \preformatted{
+##'   realised cost   = hydraulic_cost - shadow_cost
+##'   carbon profit   = profit + shadow_cost
+##' }
+##'
+##' and a consumer that grows a plant on this leaf wants the second of those,
+##' never `profit`. Deducting a shadow price from a carbon budget taxes growth by
+##' something the plant never spent.
+##'
+##' `shadow_cost` is `TF24_floor_lambda_o * E` on that curve and zero on every
+##' other. Zero means *this curve does not separate the two*, not *this curve's
+##' cost is all realised carbon*. `CF77` is the case worth stating: its whole cost
+##' is `lambda * E`, and reading that as a shadow price is an ordinary thing to do,
+##' but the model supplies one number and nothing to attribute it with and behaves
+##' identically whichever way it is read. Reporting it as all-shadow would present
+##' one reading as a fact. The field is defined only where the curve defines it.
 ##'
 ##' @param x a solved `Leaf`
 ##' @return A one-row data.frame.
@@ -774,7 +798,7 @@ operating_point <- function(x) {
   # ⚠️ Built directly rather than through data.frame(), which costs 158 us
   # against 2 us for this -- on a function called once per solved point, to
   # report a 3 us solve. What data.frame() spends it on is checking and recycling
-  # thirteen arguments that are already thirteen length-1 doubles by construction.
+  # fourteen arguments that are already fourteen length-1 doubles by construction.
   # The result is `identical()` to what data.frame() returned, which
   # test-surface.R asserts rather than assumes; note row.names has to be the
   # integer 1L and not 1.0, or it would not be.
@@ -783,7 +807,7 @@ operating_point <- function(x) {
   structure(v, class = "data.frame", row.names = 1L)
 }
 
-# What an operating point IS: the names of the thirteen values
+# What an operating point IS: the names of the fourteen values
 # `Leaf::operating_point_values()` returns, in its order. `operating_point()`
 # wraps them in a one-row data.frame and `leaf_solve()` fills a matrix row with
 # them, so the two cannot disagree about which outputs there are.
@@ -791,7 +815,7 @@ operating_point <- function(x) {
 # ⚠️ THE ORDER IS AN INTERFACE, and it is one nothing in the types enforces --
 # the C++ side returns a flat vector, because a flat vector is what crosses the
 # boundary for free. test-surface.R asserts these names line up with the
-# thirteen individual bindings by reading each one and comparing, so a field
+# fourteen individual bindings by reading each one and comparing, so a field
 # inserted on either side without the other fails there instead of silently
 # shifting a column. test-golden.R then compares leaf_solve()'s output
 # bit-exactly against a file generated in C++.
@@ -827,7 +851,30 @@ operating_point <- function(x) {
   # ⚠️ At a PM shut-down the reported `A` does not correspond to this temperature
   # -- respiration is still the Tair value. That is #105, not a property of this
   # column.
-  "Tleaf"
+  "Tleaf",
+  # umol C m^-2 s^-1. APPENDED, like Tleaf and for the same reason.
+  #
+  # THE PART OF THE COST THAT IS A PRICE RATHER THAN A REALISED CARBON LOSS.
+  # `hydraulic_cost` is the whole cost the objective subtracted; this is the share
+  # of it that buys nothing and loses nothing, being the value of water in its best
+  # alternative use. `TF24_floor_lambda_o * E` on that curve, zero on every other.
+  # So a caller who wants the carbon the plant actually gave up takes
+  #
+  #     realised cost   = hydraulic_cost - shadow_cost
+  #     carbon profit   = profit + shadow_cost
+  #
+  # and a consumer that grows a plant on this leaf wants the SECOND of those, never
+  # `profit`. Deducting a shadow price from a carbon budget taxes growth by
+  # something the plant never spent.
+  #
+  # ⚠️ ZERO IS NOT A CLAIM THAT THE CURVE'S COST IS ALL REALISED CARBON -- it says
+  # the curve does not separate the two. CF77 is the case that matters: its whole
+  # cost is `lambda * E`, which many would read as a shadow price, but the model
+  # supplies one number and nothing to attribute it with and behaves identically
+  # under either reading. Reporting it as all-shadow would ship an interpretation
+  # as a fact, and as zero-shadow the opposite one; the field is defined only where
+  # the CURVE defines it.
+  "shadow_cost"
 )
 
 ##' Solve a leaf, in one call

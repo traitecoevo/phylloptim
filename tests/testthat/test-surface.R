@@ -253,7 +253,7 @@ test_that("leaf_solve() reproduces the stateful path exactly", {
                    operating_point(stateful))
 })
 
-# Read the thirteen outputs the slow way -- one active binding at a time, which is
+# Read the fourteen outputs the slow way -- one active binding at a time, which is
 # what operating_point() did before #39 -- so the one-call C++ reader can be
 # checked against it.
 #
@@ -289,10 +289,11 @@ outputs_one_at_a_time <- function(l) {
     uptake = Reduce(`+`, finite, 0),
     lambda = l$lambda,
     g1_eff = l$g1_eff,
-    Tleaf = l$Tleaf_)
+    Tleaf = l$Tleaf_,
+    shadow_cost = l$shadow_cost)
 }
 
-test_that("operating_point_values() returns the thirteen fields, in that order", {
+test_that("operating_point_values() returns the fourteen fields, in that order", {
   # ⚠️ THE ORDER IS AN INTERFACE AND NOTHING IN THE TYPES ENFORCES IT. The C++
   # method returns a flat vector because that is what crosses the R boundary for
   # free (#39: twelve active bindings cost ~15 us against a ~3 us solve, one call
@@ -346,7 +347,7 @@ test_that("Tleaf is reported, and is not the leaf_temp driver on the PM path", {
   expect_identical(d$Tleaf, rep(30, 3L))
   # Last column, not inserted: these names are positions, and a saved output
   # would shift under an insertion.
-  expect_identical(names(d)[[length(names(d))]], "Tleaf")
+  expect_identical(names(d)[[length(names(d)) - 1L]], "Tleaf")
 
   # With the energy balance on, driven by hand because the gate is a field.
   l <- leaf_model()
@@ -383,7 +384,8 @@ test_that("operating_point() is the data.frame it replaced", {
     uptake = sum(consumption[is.finite(consumption)]),
     lambda = l$lambda,
     g1_eff = l$g1_eff,
-    Tleaf = l$Tleaf_
+    Tleaf = l$Tleaf_,
+    shadow_cost = l$shadow_cost
   )
   expect_identical(operating_point(l), as_written_before)
 
@@ -828,10 +830,21 @@ test_that("TF24_floor is TF24 plus a price, and reduces to each of them", {
   # the diagnostic disagreeing, not the model: every reported state and flux is
   # bit-identical. Pinned rather than papered over, because this column is the one
   # a reader of this curve is most likely to quote by mistake.
-  cols <- setdiff(names(cf77), "lambda")
+  #
+  # ⚠️ AND `shadow_cost`, WHICH IS A SECOND EXCEPTION OF A DIFFERENT KIND. These two
+  # leaves are the same model numerically -- same state, same fluxes, bit for bit --
+  # and this is the one column that separates them, because only one of them
+  # DECLARES its price as a price. TF24_floor reports `lambda_o * E`; CF77 reports
+  # zero, not because its cost is realised carbon but because its single `lambda`
+  # merges the two readings and supplies nothing to attribute the number with. So
+  # the pair below is the sharpest available statement of what the column means: it
+  # is about what a curve can attribute, not about what a leaf does.
+  cols <- setdiff(names(cf77), c("lambda", "shadow_cost"))
   expect_identical(no_hydraulic[cols], cf77[cols])
   expect_identical(no_hydraulic$lambda, 0)
   expect_gt(cf77$lambda, 0)
+  expect_gt(no_hydraulic$shadow_cost, 0)
+  expect_identical(cf77$shadow_cost, 0)
 
   # And with both halves live it is neither of them, which is what makes the two
   # equalities above tests rather than tautologies.

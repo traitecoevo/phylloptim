@@ -1648,6 +1648,34 @@ public:
   // companion manuscript's job, not this header's.
   double g1_eff() const;
 
+  // THE PART OF THE COST THAT IS A PRICE RATHER THAN A REALISED CARBON LOSS, in
+  // umol C m^-2 s^-1. `TF24_floor_lambda_o * E` on that curve and exactly zero on
+  // every other one.
+  //
+  // ⚠️ ZERO IS NOT A CLAIM THAT THE CURVE'S COST IS ALL REALISED CARBON. It says
+  // the curve does not separate the two. CF77 is the case that matters: its whole
+  // cost is `lambda * E`, and reading that as a shadow price is a perfectly
+  // ordinary thing to do -- but the model supplies ONE number and nothing to
+  // attribute it with, so it behaves identically whether that number is read as
+  // carbon lost to water already taken or as the value of water withheld for
+  // later. Reporting it as all-shadow would ship one reading as a fact; reporting
+  // it as zero-shadow ships the other. Zero plus this comment is the honest
+  // choice, because the field is defined only where the CURVE defines it.
+  //
+  // That is also the argument for the two-term form: it is the first curve here in
+  // which the question "is lambda a cost to deduct, or a price that only shapes
+  // behaviour?" can be posed at all.
+  //
+  // Reads `transpiration_` rather than recomputing it, so
+  // `shadow_cost == TF24_floor_lambda_o * E` holds bit-exactly against the
+  // reported `E` -- which is the identity a caller checks.
+  //
+  // An accessor, not stored state (hazard 5), and it deliberately does NOT touch
+  // `hydraulic_cost_`: that member is the cost the OBJECTIVE subtracted, its
+  // expression carries the two bit-exact reductions, and splitting it would
+  // reassociate the arithmetic those depend on.
+  double shadow_cost() const;
+
   // Stomatal conductance to WATER VAPOUR, mol H2O m^-2 s^-1 (#56). The model solves
   // for conductance to CO2; every data source and the g1 literature record it to
   // water, so the conversion belongs here rather than in each caller.
@@ -1709,7 +1737,8 @@ public:
             uptake,
             marginal_cost_water(),
             g1_eff(),
-            Tleaf_};        // deg C -- APPENDED, see below
+            Tleaf_,          // deg C -- APPENDED, see below
+            shadow_cost()};  // APPENDED likewise, for the same reason
   }
 
 // leaf economics functions
@@ -4791,6 +4820,15 @@ inline double Leaf::hydraulic_cost_TF24_floor(double psi_stem,
   hydraulic_cost_ = hydraulic_cost_TF_kernel(psi_stem) +
                     TF24_floor_lambda_o * transpiration(psi_stem, psi_upstream);
   return hydraulic_cost_;
+}
+
+
+// See the declaration for why zero on the other curves is a statement about the
+// curve and not about the cost.
+inline double Leaf::shadow_cost() const {
+  return cost_curve_ == CostCurve::TF24_floor
+           ? TF24_floor_lambda_o * transpiration_
+           : 0.0;
 }
 
 

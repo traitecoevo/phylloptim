@@ -1215,6 +1215,11 @@ double Leaf__g1_eff__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
 }
 
 // [[Rcpp::export]]
+double Leaf__shadow_cost__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->shadow_cost();
+}
+
+// [[Rcpp::export]]
 double Leaf__gs_H2O__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
   return obj_->stom_cond_H2O();
 }
