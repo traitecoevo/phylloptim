@@ -1,4 +1,4 @@
-# phylloptim (development version)
+# phylloptim 0.7.0
 
 ## A new cost curve, `TF24_floor`: TF24 with a price of water at the wet end
 
