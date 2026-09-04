@@ -1,3 +1,13 @@
+# phylloptim 0.8.1
+
+Maintenance release off `v0.8.0` (`845390c`). **No code, tests or numerics change** — the only difference is one line of `DESCRIPTION`.
+
+`Remotes:` moves from `traitecoevo/odelia@v0.3.1` to `@v0.4.0`. A package's `Remotes:` are honoured wherever it is installed from source, so this pin is not local to phylloptim's own CI: any package depending on both phylloptim and a different odelia ref gets two pinned refs for one package in a single graph, which `pkgdepends` reports as an unexplained `dependency conflict`. That blocked plant's fix for traitecoevo/plant#642, which needs odelia 0.4.0.
+
+The `LinkingTo: odelia (>= 0.2.0)` floor is deliberately left alone. phylloptim uses nothing added in 0.4.0 and should stay installable against older odelia; it is the *pin*, not the floor, that has to track.
+
+This branch (`release/0.8.x`) exists so plant can take odelia 0.4.0 without also taking phylloptim 0.9.0, whose #134 changes root resistance and so moves numbers. `master` needs the same one-line bump on its own.
+
 # phylloptim 0.8.0
 
 ## `leaf_solve()` reports the seated curve's lambda
