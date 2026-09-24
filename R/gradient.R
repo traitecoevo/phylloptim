@@ -594,7 +594,9 @@ leaf_gradient <- function(psi_soil,
                            CF77_lambda = if (is.null(x)) NA_real_ else
                              x$CF77_lambda_,
                            TF24_floor_lambda_o = if (is.null(x)) NA_real_ else
-                             x$TF24_floor_lambda_o)
+                             x$TF24_floor_lambda_o,
+                           LeastCost_beta = if (is.null(x)) NA_real_ else
+                             x$LeastCost_beta)
   if (is.null(pars)) {
     # ⚠️ WHAT IS AVAILABLE, not every slot in `theta`. The enumeration now carries
     # a parameter that belongs to one model, so "all of them" and "all of the ones
@@ -1109,7 +1111,8 @@ leaf_gradient <- function(psi_soil,
 # subset, and the batch's column fills. It used to be spelled as "everything but
 # the last two", which was correct only while there were exactly two.
 .gradient_non_traits <- c("leaf_specific_conductance_max", "resistance",
-                          "CF77_lambda_", "TF24_floor_lambda_o")
+                          "CF77_lambda_", "TF24_floor_lambda_o",
+                          "LeastCost_beta")
 
 # What `pars` may name, and the message when it names something else. One
 # definition, used by `leaf_gradient()` and by `leaf_gradient_batch()`: the
@@ -1138,7 +1141,15 @@ leaf_gradient <- function(psi_soil,
 # copy of it. There are two such parameters now, so "the CF77 slot" has stopped
 # being a safe way to describe the class: what the function returns is everything
 # owned by a model OTHER than the active one.
-.gradient_owned_pars <- c(CF77 = "CF77_lambda_", TF24_floor = "TF24_floor_lambda_o")
+# ⚠️ THE THIRD ENTRY IS NOT A PRICE. `CF77_lambda_` and `TF24_floor_lambda_o` are
+# marginal values of water in umol C (kg H2O)^-1; `LeastCost_beta` is a
+# dimensionless ratio of two unit costs, and least-cost's price of water is
+# emergent from it rather than equal to it. What all three share is the only thing
+# this table is about: a parameter that one curve owns and no other curve has a
+# slot for.
+.gradient_owned_pars <- c(CF77 = "CF77_lambda_",
+                          TF24_floor = "TF24_floor_lambda_o",
+                          LeastCost = "LeastCost_beta")
 
 .gradient_model_pars <- function(model) {
   if (!(model %in% .gradient_models())) {
@@ -1213,7 +1224,8 @@ leaf_gradient <- function(psi_soil,
 # applies it, which is .gradient_setter's job.
 .gradient_theta <- function(traits, kmax, supply, root_network,
                             CF77_lambda = NA_real_,
-                            TF24_floor_lambda_o = NA_real_) {
+                            TF24_floor_lambda_o = NA_real_,
+                            LeastCost_beta = NA_real_) {
   theta <- c(unlist(traits), leaf_specific_conductance_max = kmax)
   if (identical(supply$kind, "single")) {
     theta <- c(theta, resistance = root_network$r_R_V_sum[[1]])
@@ -1222,7 +1234,8 @@ leaf_gradient <- function(psi_soil,
   # unconditionally, so each must hold a number the solve will actually use -- and
   # on every other route that number is never read, exactly as `resistance` is not
   # read on the multi-layer path.
-  c(theta, CF77_lambda_ = CF77_lambda, TF24_floor_lambda_o = TF24_floor_lambda_o)
+  c(theta, CF77_lambda_ = CF77_lambda, TF24_floor_lambda_o = TF24_floor_lambda_o,
+    LeastCost_beta = LeastCost_beta)
 }
 
 

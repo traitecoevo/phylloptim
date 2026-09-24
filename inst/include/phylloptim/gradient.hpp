@@ -71,7 +71,7 @@ namespace gradient {
 // parameter. `test-gradient-batch.R` reads the names back out of C++ and compares
 // them with R's, so the two cannot drift apart without a failure.
 inline constexpr int n_traits = 15;
-inline constexpr int n_pars = 19;
+inline constexpr int n_pars = 20;
 
 // Every index by name, so nothing below indexes `theta` with a bare integer.
 // The first `n_traits` are `set_traits`' arguments in its order, which is also
@@ -120,6 +120,25 @@ inline constexpr int par_CF77_lambda = 17;
 // safe way to talk about this class. R's `.gradient_model_pars()` is the single
 // table that says which model owns which slot; there is no second copy here.
 inline constexpr int par_TF24_floor_lambda_o = 18;
+// Least-cost's unit-cost ratio (Prentice et al. 2014's beta), the THIRD
+// model-specific slot and another pure append. Same treatment as the two prices
+// above: `.gradient_model_pars()` offers it for `LeastCost` alone and refuses it
+// elsewhere, naming the model.
+//
+// ⚠️ IT IS NOT A PRICE, unlike the other two model-specific slots, and the message
+// R raises for it says so. `CF77_lambda_` and `TF24_floor_lambda_o` are marginal
+// values of water in umol C (kg H2O)^-1; this is a DIMENSIONLESS ratio of two unit
+// costs, and least-cost's price of water is emergent from it rather than equal to
+// it. What the three share is the reason they live here: a parameter of one curve
+// that every other curve has no slot for.
+//
+// ⚠️ THE STEP RULE ABOVE IS RIGHT FOR IT BY LUCK RATHER THAN BY DESIGN. Its
+// published value is 146, so the `max(|value|, 1)` floor never binds and it takes a
+// relative step. A caller sweeping beta below 1 would get the absolute step
+// instead, which at beta = 0.5 is a 2x perturbation -- the same trap
+// `leaf_specific_conductance_max` is exempted from, and not exempted here because
+// no such use exists yet.
+inline constexpr int par_LeastCost_beta = 19;
 
 inline const std::vector<std::string>& par_names() {
   static const std::vector<std::string> names{
@@ -131,7 +150,8 @@ inline const std::vector<std::string>& par_names() {
       "leaf_specific_conductance_max",
       "resistance",
       "CF77_lambda_",
-      "TF24_floor_lambda_o"};
+      "TF24_floor_lambda_o",
+      "LeastCost_beta"};
   return names;
 }
 
@@ -502,6 +522,7 @@ inline void apply(Leaf& l, const double* theta, const Drivers& d, bool single,
   // nothing is derived from either, so a bare write leaves no stale state behind.
   l.CF77_lambda_ = theta[par_CF77_lambda];
   l.TF24_floor_lambda_o = theta[par_TF24_floor_lambda_o];
+  l.LeastCost_beta = theta[par_LeastCost_beta];
   if (single) {
     // R's `series_resistance()`: a default-constructed network carrying one
     // series resistance in `r_R_V_sum`, which is that field's own meaning with
