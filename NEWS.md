@@ -20,6 +20,55 @@ Measured over 24 driver rows per case (1 and 3 layers), every moved row's `profi
 
 A trait gradient on these curves moves with the solve, since `leaf_gradient()` reaches the FOC through `dprofit_droot_collar_psi`.
 
+## ⚠️ Breaking: the leaf supplies its own derivative rows, and three counts moved
+
+`Leaf` is templated on its scalar and supplies the derivative of its operating
+point from the implicit function theorem at the converged point, instead of
+being recorded and differentiated. What that changes for a caller:
+
+* **`vulnerability_curve_ncontrol` defaults to 400, was 100.** The
+  pre-integrated vulnerability tables are built on four times the knots, and
+  every number read off them moves. `leaf_control()` carries the new default.
+  ⚠️ The number is written twice -- `Leaf::ncontrol_default` in
+  `leaf_model.hpp`, which plant's `Control` reads, and `leaf_control()`'s formal,
+  which R has to pass because only the 15-argument constructor is bound. plant's
+  `test-control.R` compares the two with `expect_identical`; nothing in this
+  package does, and the golden file cannot see the difference.
+* **`n_pars` is 20, and the fitted length is `n_theta` = 19.** The pack the
+  kernels read also holds `par_PPFD`, which is seated per observation from the
+  drivers and is never fitted, so it has a slot and no name. Read `theta` out to
+  `n_pars` and you run past its end.
+* **odelia `>= 0.6.0`** is required, for the reverse-mode surface and the
+  Hermite interpolant (`hermite_spline`, odelia 0.5.0) this leaf's supplied rows
+  are read through. The curves read the interpolant directly rather than
+  through odelia's refusing front end, so each states its own bound where it
+  applies it -- `root_vuln_at` clamps the argument, `root_vuln_integral_at`
+  caps the value, `eval_stem_curve` raises.
+* **A pinned optimum's bound is solved to collar precision.** The zero-flux and
+  continuity bounds were placed to 1e-4 MPa, which is fine for a bracket but not
+  where the bound IS the answer. There, the loose root-finder's stopping point
+  moved with the parameters differently from the root, so the supplied rows,
+  which differentiate the root, disagreed with a finite difference of the solve.
+  The worst case was root-trait profit rows 100× off near shutdown. A pinned
+  solve now polishes its bound, and the wet-bound row corrects its residual from
+  the step-in point back to the root. Against a central-difference referee, bad
+  rows fall from 72 to 0 of 2640, and from 183 to 12 of 7784 on a grid across
+  deficits. Those 12 are within 5e-8 absolute at one-layer wet bounds, plus one
+  interior `curv_elec` row off by 2e-4 relative, which predates this change.
+  Pinned and shade-death results move: collar potential by at most 1.3e-4 MPa,
+  profit by -1.3e-5 to +5.6e-4, and 112 of 576 golden rows. Interior rows are
+  bit-identical. The two bracket root-finds now share their endpoint values, so
+  the solve is no slower (3.01 against 3.03 µs).
+* **`leaf_gradient(method = "ift")` refuses a pinned optimum by name**, with "a
+  pinned optimum" in the message, in R and in the batch. It used to fail because
+  a centred step would not fit beside the loose bound, and with the bound solved
+  exactly it can.
+
+⚠️ **This retracts two earlier entries.** "`n_pars` is unchanged" under the
+`Tleaf` reporting entry, and "`n_pars` is unchanged at 19" under the
+`shadow_cost` entry, were true when written and are not now: the count is 20 and
+the one a caller wants is `n_theta`.
+
 ## ⚠️ Breaking: root layer thickness is per layer, and it was a 3.7× error
 
 `root_network_from_carbon()`'s C++ signature takes a **vector** of layer
