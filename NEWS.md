@@ -1,3 +1,11 @@
+# phylloptim 0.8.2
+
+Maintenance release off `v0.8.1`. **No code changes.** `Remotes:` and the C++ workflow's odelia checkout both move from `v0.4.0` to odelia `2b44657`, the merge of traitecoevo/odelia#60, which rebuilt odelia's spline on a local cubic Hermite backend. This lets plant take that spline without also taking phylloptim 0.9.0. Otherwise the two odelia pins conflict in one install graph, which is the conflict 0.8.1 existed to remove.
+
+The spline agrees with the old natural spline to one or two ULP, so all four recorded baselines were regenerated. In `primitives.tsv` only the spline tier moved (15 values, at most 3.9e-16 relative). The solved outputs moved at the documented solver floor: median 1e-15 relative and at most 4.2e-09 in absolute terms. The recorded trait gradients moved at most 1.6e-03 relative, on the single-layer row whose partials are finite differences on that floor; every other row moved 1e-8 or less.
+
+`test-gradient.R`'s envelope-theorem check moved to the golden-grid row with the largest `fd`, as its own comment prescribes after a results change. The collar solve is about 2% faster.
+
 # phylloptim 0.8.1
 
 Maintenance release off `v0.8.0` (`845390c`). **No code, tests or numerics change** — the only difference is one line of `DESCRIPTION`.
