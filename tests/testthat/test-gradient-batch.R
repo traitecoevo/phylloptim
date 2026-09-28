@@ -82,11 +82,12 @@ test_that("the parameter enumeration is the same order in R and in C++", {
   # is safe and reordering would differentiate the wrong parameter and report
   # plausible numbers for it. Compared rather than trusted, in both directions.
   r_side <- c(names(leaf_traits()), "leaf_specific_conductance_max",
-              "resistance", "CF77_lambda_", "TF24_floor_lambda_o")
+              "resistance", "CF77_lambda_", "TF24_floor_lambda_o",
+              "LeastCost_beta")
   expect_identical(gradient_par_names(), r_side)
   # And the count, which is what a positional trait call would silently break:
-  # fifteen traits then the four that are not traits.
-  expect_length(gradient_par_names(), 19L)
+  # fifteen traits then the five that are not traits.
+  expect_length(gradient_par_names(), 20L)
   expect_identical(gradient_par_names()[1:15], names(leaf_traits()))
 })
 
