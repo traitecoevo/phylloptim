@@ -1,3 +1,7 @@
+# phylloptim 0.8.3
+
+Maintenance release off `v0.8.2`. **No code, tests or numerics change.** `Remotes:` and the C++ workflow's odelia checkout move to odelia 0.5.1 (traitecoevo/odelia#61), which restores 0.4.0's span lookup on graded knot grids. That lookup returns the same span as 0.5.0's binary search, so all four baselines are bit-identical. plant needs the pins to agree, which is why this release exists.
+
 # phylloptim 0.8.2
 
 Maintenance release off `v0.8.1`. **No code changes.** `Remotes:` and the C++ workflow's odelia checkout both move from `v0.4.0` to odelia `2b44657`, the merge of traitecoevo/odelia#60, which rebuilt odelia's spline on a local cubic Hermite backend. This lets plant take that spline without also taking phylloptim 0.9.0. Otherwise the two odelia pins conflict in one install graph, which is the conflict 0.8.1 existed to remove.

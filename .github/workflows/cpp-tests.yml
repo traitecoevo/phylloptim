@@ -58,7 +58,7 @@ jobs:
           # The commit DESCRIPTION's Remotes pins: an unpinned checkout builds
           # against odelia's default branch, so an odelia merge would move this
           # package's bit-exact goldens with no change here.
-          ref: 2b446570e1bc0f535886e839adb49c5063d1f170
+          ref: c28e4d309a65c818db20131690f7a22f3853105a
           path: odelia
           fetch-depth: 1
 
