@@ -1,3 +1,7 @@
+# phylloptim 0.8.4
+
+Maintenance release off `v0.8.3`. **No code, tests or numerics change.** `Remotes:` and the C++ workflow's odelia checkout move to odelia 0.6.0 (traitecoevo/odelia#63), which adds an R-side ODE stepper that regnans now steps the canonical equation with; the interpolator phylloptim uses is untouched. plant needs the pins to agree, which is why this release exists.
+
 # phylloptim 0.8.3
 
 Maintenance release off `v0.8.2`. **No code, tests or numerics change.** `Remotes:` and the C++ workflow's odelia checkout move to odelia 0.5.1 (traitecoevo/odelia#61), which restores 0.4.0's span lookup on graded knot grids. That lookup returns the same span as 0.5.0's binary search, so all four baselines are bit-identical. plant needs the pins to agree, which is why this release exists.
