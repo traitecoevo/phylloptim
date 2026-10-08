@@ -744,6 +744,16 @@ leaf_gradient <- function(psi_soil,
          "on. This is a shut-down or otherwise determined operating point; use ",
          "method = \"auto\".", call. = FALSE)
   }
+  # ⚠️ REFUSED BY NAME, NOT LEFT TO THE STEP CHECK BELOW. At a pinned optimum the
+  # composite divides by a curvature the argmax does not sit on, and its answer is
+  # O(1) where the truth is ~1e-07. The step check used to catch every pinned row
+  # only because psi* sat 1e-06 of a bracket width from a bound found to 1e-04;
+  # with the bound solved exactly, psi* sits beside it and a step can fit.
+  if (use_ift && !prescribed && identical(status, "pinned")) {
+    stop("leaf_gradient(): method = \"ift\" was asked for at a pinned optimum, ",
+         "where psi* is held by a bound and the implicit-function composite ",
+         "does not apply. Use method = \"auto\".", call. = FALSE)
+  }
   # ⚠️ A CLAMPED PRESCRIBED PSI GETS NO GRADIENT, RATHER THAN THE DIRECT TERM.
   # It is not a failure -- the outputs at the clamped collar are perfectly good,
   # and TF24f relies on the clamp to pull an out-of-range tracked state back
@@ -764,20 +774,9 @@ leaf_gradient <- function(psi_soil,
     # evaluation would silently make this a one-sided difference over a shorter
     # interval, which is the same class of error as the pinned case.
     #
-    # This turns out to be a SECOND, INDEPENDENT detector of a pinned optimum
-    # rather than the unreachable guard it was written as, and the measurement is
-    # worth recording. At a pinned point psi* sits one step-in fraction (1e-06 of
-    # the bracket width) from the bound, so a step of `step` * psi in psi crosses
-    # it whenever the bracket is narrower than psi -- which every pinned row in
-    # the package's grid is, being at the dry end where the feasible interval has
-    # nearly closed. Measured: forcing method = "ift" fails here on all 42 pinned
-    # rows and on all 48 shut-down ones, so the composite's silently-wrong answer
-    # is not reachable through this function at all.
-    #
-    # It is NOT a substitute for the stationarity test, and reading it as one
-    # would be the mistake: it fires only when the bracket is narrow, so a pinned
-    # optimum on a wide bracket would pass it. The stationarity test is the one
-    # that is scale-free and the one the default relies on.
+    # It also catches SOME pinned optima -- psi* within h_psi of a bound -- but
+    # not all, and nothing relies on it for that: a forced "ift" at a pinned point
+    # is refused by name above, on the stationarity test, which is scale-free.
     hi <- .gradient_outputs_at(l, psi_star + h_psi, route)
     lo <- .gradient_outputs_at(l, psi_star - h_psi, route)
     if (is.null(hi) || is.null(lo)) {
@@ -809,8 +808,8 @@ leaf_gradient <- function(psi_soil,
       #
       # ⚠️ THIS IS THE READER #87 SAID DID NOT EXIST YET. Until the prescribed path
       # landed, the only consumer was `.gradient_ift(envelope = FALSE)` -- a forced
-      # method = "ift" at a pinned point, which throws at all 42 pinned rows of the
-      # grid. A prescribed psi away from the optimum is not stationary, so it takes
+      # method = "ift" at a pinned point, which is refused. A prescribed psi away
+      # from the optimum is not stationary, so it takes
       # this branch for real, and the exactness now matters.
       dY_dpsi[["profit"]] <- resid
     }
@@ -954,12 +953,11 @@ leaf_gradient <- function(psi_soil,
   # destroys -- `set_traits` + `set_physiology` clears it, measured 16.757 -> NaN --
   # so something has to put it back before every read.
   #
-  # It used to be PINNED at the base point, for a reason that has since been fixed:
-  # `|A|max` was the argmax of a 500-point scan, so it was piecewise constant in the
-  # traits and a total derivative through it was zeros and jumps. It is found by a
-  # root-find now, and cheaply (it sits at the dry bound on 1318 of 1320 driver
-  # rows), so re-solving it lets it follow the traits -- which is the quantity a fit
-  # needs, and removes the partial-versus-total split this route used to carry.
+  # ⚠️ DO NOT PIN IT AT THE BASE POINT. `|A|max` is found by a root-find, and
+  # cheaply (it sits at the dry bound on 1318 of 1320 driver rows), so re-solving it
+  # lets it follow the traits, which is the quantity a fit needs. Pinned, it is
+  # piecewise constant in the traits and a total derivative through it is zeros and
+  # jumps.
   #
   # A no-op on every other curve, which is why it is one function and not a pair
   # with a `capture` half that did nothing on either branch.
@@ -1304,15 +1302,14 @@ leaf_gradient <- function(psi_soil,
     # list is however many traits `set_traits()` takes, in its order, derived
     # rather than restated.
     #
-    # It used to be fifteen subscripts spelled out, and the comment here said so:
-    # "adding a trait breaks here and nowhere else -- at run time, with `argument
-    # <name> is missing` raised inside the generated binding, which names neither
-    # this line nor the count." That is how #41 broke, and adding `TF24_floor_a` broke
-    # it again in exactly the predicted way -- 118 gradient-batch rows reporting
-    # `error` where they had reported `interior`, because the R reference threw and
-    # the batch did not. A `do.call` over the derived vector costs no `.Call` (the
-    # boundary crossing is `apply_traits` either way, which `test-cost.R` counts)
-    # and removes the class rather than the instance.
+    # ⚠️ DO NOT SPELL THE SUBSCRIPTS OUT. A fixed list breaks when a trait is added,
+    # at run time, with `argument <name> is missing` raised inside the generated
+    # binding, which names neither this line nor the count. That has happened twice;
+    # adding `TF24_floor_a` put 118 gradient-batch rows into `error` where they had
+    # reported `interior`, because the R reference threw and the batch did not. A
+    # `do.call` over the derived vector costs no `.Call` (the boundary crossing is
+    # `apply_traits` either way, which `test-cost.R` counts) and removes the class
+    # rather than the instance.
     tv <- theta[trait_names]
     do.call(apply_traits, unname(as.list(tv)))
     # `resistance` is a driver, so it goes in with the others rather than through

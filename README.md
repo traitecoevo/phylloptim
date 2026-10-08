@@ -1,4 +1,4 @@
-# leaf
+# phylloptim
 
 A C++ leaf gas-exchange model, callable from R, in which **stomatal behaviour
 emerges from hydraulics** instead of an empirical conductance function.
@@ -7,9 +7,7 @@ Farquhar-von Caemmerer-Berry photosynthesis is coupled to an explicit
 soil → root → stem → leaf water transport path — Weibull vulnerability curves
 for both xylem and roots, multi-layer soil, per-layer root resistance,
 gravitational head — and the operating point is chosen by Sperry-style gain-risk
-**profit maximisation** over the root-collar water potential. Forward-mode
-automatic differentiation (XAD) supplies exact derivatives of profit with respect
-to that potential, for models that need to track acclimation.
+**profit maximisation** over the root-collar water potential. Automatic differentiation (XAD, through odelia) supplies exact derivatives of profit with respect to that potential, for models that track acclimation, and the derivative of the whole operating point with respect to every trait and soil input, for models that differentiate a run containing the leaf.
 
 A full solve costs about **3 µs**, which is what makes it usable inside a
 demographic model that calls it millions of times. That is the C++ figure; from R
@@ -19,6 +17,16 @@ see [Performance from R](#performance-from-r) before optimising anything.
 This code was developed as the TF24 strategy inside
 [traitecoevo/plant](https://github.com/traitecoevo/plant) and is extracted here
 so it can be tested, profiled, extended and embedded on its own.
+
+**Start here**, by what you want:
+
+| You want to | Read |
+|---|---|
+| solve a leaf from R, or fit traits | [Use from R](#use-from-r), then `vignette("phylloptim")` and `vignette("fitting")` |
+| compare the eight stomatal models | `vignette("the-models")` |
+| embed the leaf in C++ or Python | [Use from C++](#use-from-c), then `vignette("cpp-interface")` |
+| differentiate a model that contains the leaf | [Derivatives of the operating point](#derivatives-of-the-operating-point), then `vignette("derivative-surface")` |
+| change the code | `.claude/CLAUDE.md`, the developer guide: build, tests, the map of the headers, and the invariants |
 
 ## Why a separate package
 **A home for several stomatal models, not just ours.** The package solves **eight**
@@ -96,30 +104,11 @@ calibration wants — gradient-based optimisers and Hamiltonian samplers need ma
 evaluations *and* clean gradients, and finite-differencing a nested root-find is
 exactly the case where numerical gradients are noisiest.
 
-One honest caveat: there is still no calibration vignette in the package, though
-the fit that drove the gradient work exists outside it in
-a companion calibration study.
+`vignette("fitting")` walks through a calibration with these gradients.
 
 ## Status
 
-**v0.8.0 — the model is mature and in production use inside plant. 0.7.0 added a
-cost curve, `TF24_floor`, and separated the shadow price from the realised carbon
-cost in what a solved leaf reports; 0.8.0 reports the seated curve's own marginal
-cost of water rather than TF24's.**
-
-- **Cross-checked against plant's compiled build**, and the swap was bit-identical
-  at the point it was made: plant's full suite 0 fail / 0 error on both builds,
-  and the SCM regression identical across 78/78 nodes. The 1-ULP disagreement
-  that held this up turned out to be R's decimal parser rather than either model.
-- **The shutdown defect is fixed.** On the hydraulic-shutdown path, transpiration,
-  assimilation and uptake were left holding the previous solve's values (plant
-  #578). That, and three further stale-state exits ported from plant #585, are all
-  fixed here.
-- **Results now differ from plant's own leaf, deliberately** — see
-  [NEWS.md](NEWS.md). The most consequential single change is deriving the
-  ppm→Pa conversion from the actual atmospheric pressure instead of a hard-coded
-  101.3 kPa, which moves TF24 offspring production by 2.4% in plant, because
-  plant's driver default is 100.5.
+**0.10.0.** The model is in production use inside plant. 0.10.0 adds the derivative surface a model differentiating a run needs, and moves the vulnerability tables from 100 to 400 knots, which moves every number read off them; [NEWS.md](NEWS.md) has what changed in each release and why.
 
 ## Two ways in, and the model does not need R
 
@@ -140,8 +129,8 @@ There is nothing to link against — one include is the whole library.
 #include <phylloptim.hpp>
 
 phylloptim::Leaf l;                   // default Eucalyptus saligna traits
-l.setup_transpiration(100);     // build the xylem vulnerability splines
-l.setup_root_vulnerability(100);
+l.setup_transpiration(phylloptim::Leaf::ncontrol_default);   // the xylem vulnerability tables, 400 knots
+l.setup_root_vulnerability(phylloptim::Leaf::ncontrol_default);
 
 std::vector<double> psi_soil{2.0};             // positive suction, MPa
 std::vector<double> soil_depth{1.0};           // m
@@ -175,7 +164,7 @@ Compile with C++20 and three include paths — this package, `odelia`, and Boost
 
 ```sh
 c++ -std=c++20 -O2 \
-  -I /path/to/leaf/inst/include \
+  -I /path/to/phylloptim/inst/include \
   -isystem /path/to/odelia/inst/include \
   -isystem /path/to/boost \
   my_program.cpp -o my_program
@@ -199,8 +188,7 @@ target_link_libraries(my_program PRIVATE phylloptim::phylloptim)
 ```
 
 `phylloptim::phylloptim` is an INTERFACE target — headers, an include path and `cxx_std_20`,
-with nothing to link. `add_subdirectory(leaf)` works the same way if you would
-rather vendor it.
+with nothing to link. `add_subdirectory(phylloptim)` works the same way if you would rather vendor it.
 
 ⚠️ **Build with optimisation on if you intend to compare against the golden
 file.** Measured on macOS/arm64: `-O1`, `-O2` and `-O3` all reproduce
@@ -208,6 +196,21 @@ file.** Measured on macOS/arm64: `-O1`, `-O2` and `-O3` all reproduce
 by about 13 ULP because it declines to contract `a*b + c` into an FMA. A debug
 build that fails `test_golden` by ~1e-15 has found nothing. The CMake build
 therefore defaults to `Release` rather than to CMake's flagless default.
+
+### Derivatives of the operating point
+
+A model that differentiates a run containing the leaf (plant's stand gradient is one) needs the derivative of the operating point with respect to the traits and the soil. The leaf supplies it from the implicit function theorem at the converged point, so nothing the root-find did is recorded. After the ordinary solve at `double`, three calls at the consumer's scalar `S`:
+
+```cpp
+l.find_root_collar_psi();                                    // the solve, at double
+auto draw = l.supply_draw_at<S>(S(l.opt_root_psi_), supply);  // the soil's draw at the solved collar
+S    psi  = l.collar_at<K, S>(draw, pars, curvature);         // the collar, carrying its rows
+auto out  = l.outputs_at<K, S>(psi, draw, pars);              // profit and per-layer uptake
+```
+
+`l.operating_point_kind()` says which condition placed the point, and decides what `collar_at` does; a consumer branches on it. The preconditions, the kinds, and a compiled example are at the top of `inst/include/phylloptim/leaf_model.hpp`; `vignette("derivative-surface")` explains the design. The surface is implemented for the TF24 and TF24_floor curves and the multi-layer supply.
+
+A consumer that records on an adjoint tape also compiles with `-DXAD_NO_THREADLOCAL -DXAD_USE_STRONG_INLINE`, matching odelia's and every other package sharing that tape, and links odelia's `src/Tape.cpp` once (an R package gets it from odelia's DLL). The defines are not carried by the CMake target; a mismatch is not diagnosed.
 
 ## Use from Python
 
@@ -246,7 +249,7 @@ target_link_libraries(pyleaf PRIVATE phylloptim::phylloptim)
 >>> l.set_physiology(roots, 900, [2.0], [1.0], 3.14e-5, 2.0, 40.0, 25.0, 21.0, 101.3)
 >>> l.find_root_collar_psi()
 >>> l.profit
-2.5158434915102319
+2.5171574542596087
 ```
 
 `set_physiology` takes a `RootNetwork`, so the binding above needs it exposed too:
@@ -280,10 +283,10 @@ curve is one call:
 library(phylloptim)
 
 leaf_solve(psi_soil = 2.0, PPFD = 900)
-#>   psi_soil layers PPFD atm_vpd ca leaf_temp atm_kpa psi_stem  collar    ci
-#> 1        2      1  900       2 40        25   101.3 3.595247 2.92039 10.49
-#>          A         E         gc   profit ... lambda    g1_eff
-#> 1 5.599511 1.142e-05 0.01921993 2.515843 ... 159884.6 0.5025448
+#>   psi_soil layers PPFD atm_vpd ca leaf_temp atm_kpa psi_stem   collar       ci
+#> 1        2      1  900       2 40        25   101.3 3.595348 2.920437 10.48887
+#>          A            E         gc   profit ...   lambda    g1_eff
+#> 1 5.601051 1.141996e-05 0.01922619 2.517157 ... 159896.1 0.5026412
 
 # a drought response
 leaf_solve(psi_soil = seq(0.5, 5, length.out = 20), PPFD = 900)
@@ -530,7 +533,7 @@ Two costs worth knowing because they surprise people:
   or `root_c`, and 21.8 µs if you do**, because those four own the pre-integrated
   vulnerability splines and it rebuilds one. That is 8× a solve, in C++, where
   batching cannot help — worth knowing before writing a sweep over a vulnerability
-  curve. Most of it is the incomplete gamma function seeding 101 knots, not the
+  curve. Most of it is the incomplete gamma function seeding 401 knots, not the
   spline machinery. `leaf_gradient()` sidesteps it for `stem_P50`, because the
   curve is homogeneous of degree 1 in the scale that pair implies: see
   `fast_stem_curve` in `?leaf_gradient`.
@@ -540,11 +543,10 @@ Two costs worth knowing because they surprise people:
 Name it in `LinkingTo` to compile against the headers, the way `BH` is used:
 
 ```
-LinkingTo: BH, odelia (>= 0.2.0), phylloptim (>= 0.1.0)
+LinkingTo: BH, odelia (>= 0.7.0), phylloptim (>= 0.10.0)
 ```
 
-`LinkingTo` is **not** transitive in R, so you must name `BH` and `odelia`
-yourself even though it is `leaf` that includes them — including the odelia
+`LinkingTo` is **not** transitive in R, so you must name `BH` and `odelia` yourself even though it is phylloptim that includes them — including the odelia
 version, for the same reason. A `LinkingTo` consumer gets `<phylloptim.hpp>`, which is
 R-free; `<phylloptim.h>` is the R binding layer's own umbrella and is not for you.
 
@@ -554,21 +556,22 @@ Deliberately few. The two the *model* needs are header-only:
 
 | | why | how |
 |---|---|---|
-| **odelia** (>= 0.2.0) | cubic-spline interpolator for the pre-integrated vulnerability curves, and the vendored **XAD** automatic-differentiation library | `LinkingTo` |
+| **odelia** (>= 0.7.0) | cubic Hermite interpolator for the pre-integrated vulnerability curves, the supplied-derivative nodes the leaf's rows are handed over through, and the vendored **XAD** automatic-differentiation library | `LinkingTo` |
 | **BH** (Boost) | TOMS748 root finder, incomplete gamma for the closed-form vulnerability integral | `LinkingTo` |
 
 **Rcpp** and **R6** are needed by the R layer only. They are not in the model's
 include graph and a C++ or Python consumer never sees them.
 
 Nothing else, and **neither model dependency needs R**. The leaf model itself does not
-touch **Rcpp** or the R C API: `leaf/util.hpp` replaced plant's `util::stop`
+touch **Rcpp** or the R C API: `phylloptim/util.hpp` replaced plant's `util::stop`
 with a plain `std::runtime_error` and `NA_REAL` with a quiet NaN. odelia's
 solver core was the last R touchpoint in the include graph, via `ode_util.hpp`;
 that was removed upstream in traitecoevo/odelia#44, so the test suite now builds
-against the real headers with nothing standing in for R at all. **odelia 0.2.0 is
-the first release with that fix**, hence the version requirement: an older odelia
-would otherwise fail deep in the build with `RcppCommon.h: No such file or
-directory`, which does not point at the cause.
+against the real headers with nothing standing in for R at all. odelia 0.2.0 was the first release with that fix; an older odelia fails deep in
+the build with `RcppCommon.h: No such file or directory`, which does not point at
+the cause. **The floor is 0.7.0** because the leaf's supplied derivative rows are
+built on headers that first shipped there (`implicit_node.hpp`, `tangent.hpp`,
+`value_with_slope.hpp`).
 
 Both dependencies are already required by plant, so plant pays nothing new for
 depending on this package.
@@ -582,11 +585,9 @@ make -C tests/cpp        # plain C++: no R, no test framework
 ```
 
 It discovers BH and odelia through `Rscript` if R is installed, and otherwise
-falls back to a sibling `odelia/` checkout and Homebrew Boost. Override with
-`make BH_INC=... ODELIA_INC=...`. `ctest --test-dir build` runs the same two
-programs through CMake.
+falls back to a sibling `odelia/` checkout and Homebrew Boost. Override with `make BH_INC=... ODELIA_INC=...`. It builds five programs: `test_leaf` (unit), `test_supplied_rows` and `test_transpose` (the derivative rows), `test_golden` and `test_primitives` (the baselines). `ctest --test-dir build` runs the same five through CMake.
 
-At its centre is `tests/cpp/golden/operating_points.tsv`: 288 operating points
+At its centre is `tests/cpp/golden/operating_points.tsv`: 576 operating points
 recorded at full precision and compared **bit-exactly**, which is what makes a
 large refactor of this code checkable rather than hopeful. It is bit-exact on the
 platform that generated it (macOS/arm64) and compared with per-field tolerances

@@ -71,8 +71,8 @@ const double kLeafTemps[] = {25.0, 40.0};
 Row solve(double psi_soil, double ppfd, double vpd, int layers,
           double leaf_temp) {
   phylloptim::Leaf l;
-  l.setup_transpiration(100);
-  l.setup_root_vulnerability(100);
+  l.setup_transpiration(phylloptim::Leaf::ncontrol_default);
+  l.setup_root_vulnerability(phylloptim::Leaf::ncontrol_default);
 
   // Spread the soil profile over `layers` equal 1 m layers, drying with depth so
   // that multi-layer runs are not just a repeated single layer, and split root
@@ -146,10 +146,14 @@ std::vector<Row> run_grid() {
 // not reproduce this split, because dprofit's shut-down sentinel is exactly 0.0
 // and would move all 48 shutdown points into `interior`.
 //
-// Three kinds are expected to be EMPTY here: `shade-death` because assim_max_ never
-// gets there (it is reached by light, not by drying, and not by heat either at 40 C);
-// `solver-refused` and `non-finite-gradient` because both bracket endpoints admit a
-// usable gradient on every feasible row.
+// Seven kinds are expected to be EMPTY here, and the table below asserts each:
+// `shade-death` because assim_max_ never gets there (it is reached by light, not by
+// drying, and not by heat either at 40 C); `solver-refused` and
+// `non-finite-gradient` because both bracket endpoints admit a usable gradient on
+// every feasible row; `boundary-root-crit` because the continuity root never
+// reaches the root's own limit at these traits; `determined` because no interval
+// collapses at the package's GSS_tol_abs; and `prescribed` and `unsolved` because
+// every row is solved rather than evaluated at a given collar.
 //
 // ⚠️ The hot end does NOT reach the compensation-point exit either, which is worth
 // knowing before reading the zeros as coverage: at the defaults that needs about
@@ -190,6 +194,11 @@ int check_operating_kinds(const std::vector<Row> &rows) {
         {Kind::Interior, e.interior},
         {Kind::BoundarySoil, e.boundary_soil},
         {Kind::BoundaryCrit, e.boundary_crit},
+        // The dry end's other bound. At these traits root_psi_crit is 5.87 MPa
+        // and the continuity root never reaches it, so the arm is zero over the
+        // whole grid -- asserted rather than left out, because a kind absent from
+        // this list is a kind the golden file stops covering.
+        {Kind::BoundaryRootCrit, 0},
         {Kind::HydraulicShutdown, e.shutdown},
         {Kind::Determined, 0},        {Kind::ShadeDeath, 0},
         {Kind::Prescribed, 0},        {Kind::SolverRefused, 0},
@@ -788,8 +797,8 @@ OptRow solve_one(Solver s, Topology t, double psi_soil, double ppfd,
   OptRow r{s, t, psi_soil, ppfd, leaf_temp, eb, tc, false, "ok", "-",
            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
   phylloptim::Leaf l;
-  l.setup_transpiration(100);
-  l.setup_root_vulnerability(100);
+  l.setup_transpiration(phylloptim::Leaf::ncontrol_default);
+  l.setup_root_vulnerability(phylloptim::Leaf::ncontrol_default);
   l.use_energy_balance_ = eb;
   l.use_thermal_cost_ = tc;
   try {
@@ -843,8 +852,8 @@ std::vector<OptRow> run_optima_grid() {
     for (bool eb : {false, true})
       for (bool tc : {false, true}) {
         phylloptim::Leaf l;
-        l.setup_transpiration(100);
-        l.setup_root_vulnerability(100);
+        l.setup_transpiration(phylloptim::Leaf::ncontrol_default);
+        l.setup_root_vulnerability(phylloptim::Leaf::ncontrol_default);
         l.use_energy_balance_ = eb;
         l.use_thermal_cost_ = tc;
         for (double ps : kReusePsiSoils)

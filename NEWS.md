@@ -1,3 +1,82 @@
+# phylloptim 0.10.0
+
+## `Remotes:` tracks odelia 0.7.0
+
+`LinkingTo: odelia (>= 0.7.0)`; `Remotes:` and the C++ workflow's odelia checkout pin `6d32329`, the merge of traitecoevo/odelia#59 (reverse mode, 0.7.0). The rows below are taken on odelia 0.7.0's `implicit_node.hpp`, `tangent.hpp` and `value_with_slope.hpp`.
+
+## A replayed boundary point hands over its solve's rows
+
+`replay_operating_point(collar, kind)`, which puts a recorded operating point back, lost two things a pinned solve has and a replay does not compute: the polished root of the zero-flux bound, which `bound_at` corrects a `boundary-soil` row back to, and the collar itself where that polished root sits outside the unpolished bracket, which the replay clamped back in. Rows from a replayed `boundary-soil` point therefore differed from the solve's: over 1,048 rows on a grid of dry and hot cases, 258 of the 643 larger than 1e-6 moved by more than 1e-4, worst 25×, with sign flips on `root_c` and `root_P50` at one-layer wet bounds. plant re-solves every recorded leaf through this call during a reverse sweep, so its gradient took those rows. The replay now re-takes the polish from the same bracket and evaluates at the recorded collar; replayed rows are bit-identical to the solve's at interior, `boundary-soil` and `boundary-crit` points, and `test_leaf.cpp` asserts it. Forward values are unchanged.
+
+## The derivative surface is documented in the package
+
+`vignette("derivative-surface")` explains the three calls, the eleven operating-point kinds and what `collar_at` does at each, why the derivative comes from the implicit function theorem, and how it differs from `leaf_gradient()`. `leaf_model.hpp` opens with the same map and the preconditions. The README is retitled and gains a section on it; the developer guide gains a map of the headers.
+
+## ⚠️ Breaking: the leaf supplies its own derivative rows, and three counts moved
+
+`Leaf`'s derivative surface is a set of member templates on the caller's scalar
+(`supply_draw_at`, `collar_at`, `outputs_at`), and supplies the derivative of
+its operating point from the implicit function theorem at the converged point,
+instead of being recorded and differentiated. What that changes for a caller:
+
+* **`vulnerability_curve_ncontrol` defaults to 400, was 100.** The
+  pre-integrated vulnerability tables are built on four times the knots, and
+  every number read off them moves. `leaf_control()` carries the new default.
+  ⚠️ The number is written twice -- `Leaf::ncontrol_default` in
+  `leaf_model.hpp`, which plant's `Control` reads, and `leaf_control()`'s formal,
+  which R has to pass because only the 15-argument constructor is bound. plant's
+  `test-control.R` compares the two with `expect_identical`; nothing in this
+  package does, and the golden file cannot see the difference.
+* **`n_pars` is 20, and the fitted length is `n_theta` = 19.** The pack the
+  kernels read also holds `par_PPFD`, which is seated per observation from the
+  drivers and is never fitted, so it has a slot and no name. Read `theta` out to
+  `n_pars` and you run past its end.
+* **odelia `>= 0.7.0`** is required: the supplied rows are built on its
+  `implicit_node.hpp`, `tangent.hpp` and `value_with_slope.hpp`, which 0.6.0
+  does not have, and read through its Hermite interpolant (`hermite_spline`,
+  odelia 0.5.0).
+* **The four golden files are regenerated** (macOS/arm64, odelia 0.7.0), for
+  the 400-knot default. Against the 0.9.1 baselines: `operating_points.tsv`
+  480 of 576 rows move, 108 beyond the cross-platform tolerance, all near-shut
+  rows at `psi_soil = 4, ppfd = 100`; `psi_stem_optima.tsv` 1539 of 5184;
+  `primitives.tsv` 129 of 544, with the arithmetic, vulnerability and
+  assimilation tiers bit-identical and the spline tier the lowest that moves
+  (88 of 110, at 3.5e-8); `gradient_golden.tsv` 15 of 20 rows, worst 1.6e-3
+  relative.
+* **Two double-path changes a caller can see.** `evaluate_root_collar_psi` and
+  `dprofit_droot_collar_psi` dispatch on the seated cost curve, where they had
+  been pinned to TF24's, so a CF77 or TF24_floor leaf evaluates its own curve
+  there. `ci_at_compensation_point()` is derived from the kernel rather than
+  carried as a flag, which decides which branch `dprofit_at_collar_psi` takes at
+  a zero-flux probe. The curves read the interpolant directly rather than
+  through odelia's refusing front end, so each states its own bound where it
+  applies it -- `root_vuln_at` clamps the argument, `root_vuln_integral_at`
+  caps the value, `eval_stem_curve` raises.
+* **A pinned optimum's bound is solved to collar precision.** The zero-flux and
+  continuity bounds were placed to 1e-4 MPa, which is fine for a bracket but not
+  where the bound IS the answer. There, the loose root-finder's stopping point
+  moved with the parameters differently from the root, so the supplied rows,
+  which differentiate the root, disagreed with a finite difference of the solve.
+  The worst case was root-trait profit rows 100× off near shutdown. A pinned
+  solve now polishes its bound, and the wet-bound row corrects its residual from
+  the step-in point back to the root. Against a central-difference referee, bad
+  rows fall from 72 to 0 of 2640, and from 183 to 12 of 7784 on a grid across
+  deficits. Those 12 are within 5e-8 absolute at one-layer wet bounds, plus one
+  interior `curv_elec` row off by 2e-4 relative, which predates this change.
+  Pinned and shade-death results move: collar potential by at most 1.3e-4 MPa,
+  profit by -1.3e-5 to +5.6e-4, and 112 of 576 golden rows. Interior rows are
+  bit-identical. The two bracket root-finds now share their endpoint values, so
+  the solve is no slower (3.01 against 3.03 µs).
+* **`leaf_gradient(method = "ift")` refuses a pinned optimum by name**, with "a
+  pinned optimum" in the message, in R and in the batch. It used to fail because
+  a centred step would not fit beside the loose bound, and with the bound solved
+  exactly it can.
+
+⚠️ **This retracts two earlier entries.** "`n_pars` is unchanged" under the
+`Tleaf` reporting entry, and "`n_pars` is unchanged at 19" under the
+`shadow_cost` entry, were true when written and are not now: the count is 20 and
+the one a caller wants is `n_theta`.
+
 # phylloptim 0.9.2
 
 ## `Remotes:` tracks odelia 0.6.2
