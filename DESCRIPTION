@@ -45,7 +45,7 @@ Suggests:
     tidyr
 VignetteBuilder: knitr
 Remotes:
-    traitecoevo/odelia@485622f
+    traitecoevo/odelia@88cbff7
 Config/testthat/edition: 3
 URL: https://github.com/traitecoevo/phylloptim
 BugReports: https://github.com/traitecoevo/phylloptim/issues
