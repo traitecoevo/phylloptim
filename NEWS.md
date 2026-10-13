@@ -1,3 +1,9 @@
+# phylloptim 0.10.2
+
+## `Remotes:` tracks odelia 0.7.2
+
+`LinkingTo: odelia (>= 0.7.2)`; `Remotes:` and the C++ workflow's odelia checkout pin `13bd153`, odelia's master with its replay fixes (traitecoevo/odelia#71, #73), which traitecoevo/plant's FF16 fitness gradient needs. Nothing in this package changes; the pin moves so that a consumer pinning both packages sees one odelia.
+
 # phylloptim 0.10.1
 
 ## `Remotes:` tracks odelia 0.7.1
