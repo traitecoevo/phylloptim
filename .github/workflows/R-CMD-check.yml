@@ -53,11 +53,16 @@ jobs:
       # tool whose output is committed, so nobody installing this package needs
       # it (PLAN item 6c). It is installed here, and only here, for the
       # regeneration check below.
+      # odelia is not on CRAN, and DESCRIPTION names only the oldest release
+      # this package builds against (LinkingTo), not where to fetch it: a
+      # `Remotes:` pin here would be inherited by every consumer and would have
+      # to match theirs. So the check fetches that oldest release itself.
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           extra-packages: |
             any::rcmdcheck
             github::richfitz/RcppR6
+            github::traitecoevo/odelia@v0.7.3
           needs: check
 
       # The generated glue is committed, so a check runs without RcppR6. But a
