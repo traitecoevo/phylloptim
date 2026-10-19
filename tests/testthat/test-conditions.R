@@ -89,6 +89,20 @@ test_that("an infeasible exit is catchable by class and carries its code", {
                fixed = TRUE)
 })
 
+test_that("a soil drier than the stem curve's last knot is a closed leaf (#157)", {
+  # The knot grid stops at P99 (6.89 MPa at the default stem curve). Past it the
+  # single-potential stem route used to throw stem_curve_domain, though the
+  # answer is a shut leaf. It now reads the curve's closed form there. P95
+  # (psi_crit, 5.87) to P99 already gave this answer; past P99 must agree.
+  for (ps in c(6.5, 6.95, 10, 1000)) {
+    o <- leaf_solve(psi_soil = ps, model = "TF24_floor", TF24_floor_lambda_o = 0,
+                    supply = leaf_supply_singlelayer())
+    expect_equal(o$gc, 0, info = paste("psi_soil", ps))
+    expect_equal(o$E, 0, info = paste("psi_soil", ps))
+    expect_equal(o$psi_stem, ps, info = paste("psi_soil", ps))
+  }
+})
+
 test_that("the same failure driven by hand needs the wrapper, and gets it", {
   # `$find_root_collar_psi()` is generated glue, so it cannot classify on its own --
   # this is the case with_phylloptim_conditions() exists for, and the reason it is
