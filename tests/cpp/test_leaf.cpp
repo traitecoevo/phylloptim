@@ -266,7 +266,10 @@ void test_vulnerability_integral_derivatives() {
     const double above = b * std::pow(x_hand * (1 + 1e-9), 1.0 / c);
     const auto s0 = cumulative_vulnerability_integral_derivatives_at(below, b, c);
     const auto s1 = cumulative_vulnerability_integral_derivatives_at(above, b, c);
-    near((s1.value - s0.value) / s0.value, 0.0, 1e-15,
+    // The true gap is gamma_upper(1/c, 40) * b/c, ~1e-18 relative; what is left
+    // is the series' rounding against boost's tgamma, a few ulp and libm-
+    // dependent (1.28e-15 on Linux), so the series' own 1e-14 bound applies.
+    near((s1.value - s0.value) / s0.value, 0.0, 1e-14,
          "G is continuous where the series hands over to the limit");
     near((s1.db - s0.db) / s0.db, 0.0, 1e-13, "and so is dG/db");
     near((s1.dc - s0.dc) / s0.dc, 0.0, 1e-13, "and so is dG/dc");
