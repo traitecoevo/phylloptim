@@ -1,91 +1,1067 @@
-# phylloptim 0.5.4
+# phylloptim 0.11.0
 
 ## Net longwave depends on air temperature and humidity (#97, #28)
 
-⚠️ **Results move on the energy-balance path.** The net longwave was
-`longwave_net_offset = -40` W m^-2, a constant. It is not a constant: with an
-atmospheric emissivity it runs about -144 to 0 W m^-2 over Tair 20-60 C at
-`atm_vpd` 2 kPa, so the fixed value was out by up to 104 W m^-2 and **had the wrong
-sign of error at both ends** -- too weak when cool, too strong when hot, crossing
-over near Tair 37 C.
-
-Replaced by an isothermal net radiation plus a radiative conductance:
+⚠️ **Results move on the energy-balance path; with the gate off they are bit-identical**, which is how plant runs its leaf. The net longwave was a constant, `longwave_net_offset = -40` W m⁻². With an atmospheric emissivity it runs from −144 W m⁻² at Tair 20 °C to 0 at 45 °C (at `atm_vpd` 2 kPa), so the constant was out by up to 104 W m⁻² and wrong in opposite directions at the two ends, crossing over near Tair 37 °C. It is replaced by an isothermal net radiation plus a radiative conductance:
 
 ```
+ea     = esat(Tair) - atm_vpd                              in PASCALS
+ema    = min(0.642 * (ea/Tair_K)^(1/7), 1)                 Brutsaert
 Rn_iso = absorbed shortwave - (1 - ema) * sigma * Tair_K^4
-ema    = min(0.642 * (ea/Tair_K)^(1/7), 1)          Brutsaert, ea in PASCALS
 g_rad  = 4 * eps_leaf * sigma * Tair_K^3
 Tleaf  = Tair + (Rn_iso - lambda*E) / (vol_heat_cap_air/ra + g_rad)
 ```
 
-**The balance is still explicit, which is the objection #97 and PLAN 13.2 raise
-against a faithful longwave.** A leaf emits as `Tleaf^4`, which would make `Rn` a
-function of the temperature being solved for -- an inner iteration, and no analytic
-`dTleaf/dE` for the collar solve's implicit-function theorem to stand on.
-Linearising the leaf's own emission about `Tair` moves that dependence into the
-DENOMINATOR, so `Tleaf` is still affine in `E` and `dTleaf/dE` is still a constant,
-now `-lambda / (g_sensible + g_radiative)`. No iteration was added and the gradient
-path is structurally unchanged.
+**The balance is still explicit.** Linearising the leaf's own `Tleaf^4` emission about `Tair` puts it in the denominator, so `Tleaf` stays affine in `E` and `dTleaf/dE = -lambda / (g_sensible + g_radiative)` is still a constant. No inner iteration was added, the first-order conditions and their implicit-function derivatives are structurally unchanged, and `leaf_temp_from_E()` is still the one place the expression is evaluated.
 
-**Two effects, and above ~Tair 40 they oppose.** The longwave term itself cools a
-cool leaf much harder than -40 did; the radiative conductance (13-18% of the total
-here) pulls the leaf *toward* air temperature in both directions. Net, at PPFD 900,
-ψ_soil 0.5, D_air 2, zero transpiration:
+**What moves.** `g_rad` is 13–18% of the total conductance at the default leaf size and wind, so it pulls the leaf toward air temperature, while the longwave term cools a cool leaf much harder than −40 did and a hot one less. Solved with `find_root_collar_psi()` at PPFD 900, ψ_soil 0.5, D_air 2:
 
-| Tair | Tleaf before | Tleaf after | net longwave before | after |
+| Tair | net longwave | Tleaf | profit | kind |
 |---|---|---|---|---|
-| 20 | 28.11 | **24.61** | -40 | -144.4 |
-| 25 | 33.23 | **30.71** | -40 | -98.5 |
-| 30 | 38.45 | **36.50** | -40 | -69.7 |
-| 40 | 49.33 | **48.37** | -40 | -19.8 |
-| 45 | 54.33 | **53.75** | -40 | 0.0 (clamped) |
+| 20 | −40 → −144.4 | 28.11 → 24.61 | 3.645 → 5.069 | interior |
+| 25 | −40 → −98.5 | 33.23 → 30.71 | 2.544 → 3.587 | interior |
+| 30 | −40 → −69.7 | 38.45 → 36.50 | 1.137 → 1.893 | interior |
+| 35 | −40 → −44.5 | 44.21 → 42.49 | −3.568 → 0.051 | solver-refused → interior |
+| 40 | −40 → −19.8 | 49.33 → 48.37 | −3.813 → −3.789 | solver-refused |
+| 45 | −40 → 0 (clamped) | 54.33 → 53.75 | −3.741 → −3.767 | shade-death |
 
-At Tair 45 the longwave is 40 W m^-2 *warmer* than before and the leaf is still
-cooler, because the added conductance outweighs it.
+Above Tair ~40 the two effects oppose and the conductance wins: at 45 the longwave is 40 W m⁻² warmer than before and the leaf is still 0.58 K cooler. At Tair 35 a leaf that used to come back refused, at `A = -3.56`, now transpires.
 
-On solved operating points the change is largest in the middle of the range, and it
-is qualitative around Tair 35: leaves that used to report shut with `A = -3.56`
-now transpire. Profit at Tair 20-30, ψ_soil 0.5, D_air 2 goes 3.645 -> 5.069, 2.544
--> 3.587, 1.137 -> 1.893.
+⚠️ **`ea` is in Pascals.** The same relation is more often quoted as `1.24*(ea/T)^(1/7)` with `ea` in hPa, and the two agree because `0.642*100^(1/7) = 1.2395`. Using 0.642 with kPa gives ~0.31 where the answer is ~0.82: finite, plausible, and it triples the longwave loss. `test_longwave_and_radiative_conductance` asserts the Pa form against the hPa one.
 
-⚠️ **The emissivity is clamped at 1, and that is a physical bound rather than
-padding.** Brutsaert's relation is an empirical fit and extrapolates past unity: at
-these defaults it reaches 1.028 by Tair 45 C and 1.143 by 60 C, which makes the
-isothermal longwave *positive* -- a sky radiating more than a blackbody at its own
-temperature, heating the leaf. Unclamped it is the right order of magnitude and the
-wrong sign. Above the clamp the term is exactly 0, which is the correct limit but
-carries no temperature dependence; a parameterisation valid at those temperatures is
-#28's remaining business.
+⚠️ **The emissivity is clamped at 1, and above the clamp `Rn_` no longer responds to air temperature or humidity.** Brutsaert's fit passes unity once `ea` exceeds ~22.25 Pa K⁻¹ × Tair_K: above Tair 38.9 °C in saturated air, 43.9 °C at a 2 kPa deficit and 48.0 °C at 4 kPa. Unclamped, the isothermal longwave would turn positive (+100 W m⁻² by Tair 60 at 2 kPa), a sky heating the leaf. Clamped, the term is exactly 0, which is the correct limit, but a heatwave sweep past the clamp sees only `g_rad`'s temperature dependence. An emissivity valid at those temperatures is not part of this release.
 
-⚠️ **`ea` IS IN PASCALS.** The same relation is more often quoted as
-`1.24*(ea/T)^(1/7)` with `ea` in hPa, and the two agree because
-`0.642*100^(1/7) = 1.2395`. Using 0.642 with kPa returns ~0.31 where the answer is
-~0.82 -- finite, plausible, and it triples the longwave loss. Asserted in
-`test_longwave_and_radiative_conductance` against the hPa form.
+⚠️ **`ra_` is now strictly aerodynamic, and `Rn_` is the isothermal net radiation.** A caller that overwrites `ra_` after `set_drivers()` with a combined convective-plus-radiative resistance (Jones et al.'s `r_HR`, or `1/(Gbh + Grad)`) must also set `l$g_rad_ <- 0`, or the radiative conductance is counted twice: `Tleaf - Tair` and `dTleaf/dE` come out 5–7% small and nothing can detect it. Before this release a combined resistance was the right way to add radiative coupling. `g_rad_ = 0` recovers the single-resistance balance, and a test asserts it. `g_rad_` is a new R-bound field; `longwave_net_offset` is deleted.
 
-**Verification against Sicangco et al. (2026).** Our expression reproduces theirs to
-1.4e-14 over Tair 20-60 at two deficits. #97 quotes their term as running "-98 to
--133 W m^-2" over the sweep, which we do *not* reproduce at fixed `atm_vpd` -- and
-the reason is the driver convention rather than the formula: at fixed `ea = 1.0` kPa
-the same expression gives **-98.41 at Tair 20 and -132.05 at Tair 40**. phylloptim's
-driver is the deficit, so holding it fixed across an air-temperature sweep is a
-different atmosphere from holding absolute humidity fixed. The 0.07 K alignment in
-`leaf_calibration_test/sicangco-2026` should now be reachable with one Picard pass
-instead of four; that re-run is the follow-up check #97 asks for and has not been
-done here.
+**Against Sicangco et al. (2026).** The expression reproduces theirs to 1.4e-14 over Tair 20–60 at two deficits. The range #97 quotes for theirs, −98 to −133 W m⁻², is what it gives at a fixed `ea` of 1.0 kPa (−98.41 at Tair 20, −132.05 at 40), not at a fixed `atm_vpd`: phylloptim's driver is the deficit, and at a fixed deficit `ea = esat(Tair) - atm_vpd` climbs steeply with Tair, so such a sweep is drier than `ea = 1` kPa at the cool end and far more humid at the hot end.
 
-Cost: **none measurable.** `find_root_collar_psi` with the gate on is 212-214 µs
-both before and after (interleaved x3); the `pow()` is once per `set_physiology`,
-not once per candidate potential. Gate-off is 73.0-73.3 µs both ways with a
-**bit-identical checksum.**
+**Cost.** With the gate on a collar solve is unchanged (interleaved ×3). With it off, `set_physiology` gains one `pow` and one `exp`, about 0.026 µs, under 1% of a `set_physiology` plus collar solve, with an identical checksum.
 
-`operating_points.tsv` is bit-identical (it runs gate-off). `primitives.tsv` is
-**regenerated deliberately**: 34 of 544 values move, and all 34 are
-`leaf_temp_from_E` / `dleaf_temp_dE` in the `arithmetic` tier -- every other tier is
-exactly 0, which is the containment statement that file exists to make.
+**Golden files.** `operating_points.tsv` and `gradient_golden.tsv` are bit-identical (gate off). `primitives.tsv`: 34 of 544 values move, all `leaf_temp_from_E` and `dleaf_temp_dE` in the arithmetic tier; every other tier is exactly 0. `psi_stem_optima.tsv`: 1708 of 5184 rows move, every one with the energy balance on; all 2592 gate-off rows are byte-identical, no row changes status, and four collar rows (ψ_soil 2, PPFD 1500, Tair 25) move from `boundary-soil` to `interior`.
 
-`g_rad_` is exposed to R alongside `Rn_`, whose meaning is now the **isothermal**
-net radiation.
+# phylloptim 0.10.3
+
+## odelia is a floor, not a pin, at 0.8.0
+
+`DESCRIPTION` no longer names an odelia commit in `Remotes:`; `LinkingTo: odelia (>= 0.8.0)` states the oldest release this package builds against, and the R check and the C++ workflow both build against that release (tag `v0.8.0`). A consumer such as traitecoevo/plant pins odelia once, in its own `Remotes:`, and this package no longer has to move in step with every odelia it takes: a `Remotes:` pin here was inherited by every consumer, and pak refuses an install whose packages pin one sibling two ways. odelia 0.8.0 changes the ODE step-size default (traitecoevo/odelia#77), which this package does not use; of the headers it does use, only a spline read at an active position changes, and that changes an adjoint only to rounding. Nothing in the package's code changes.
+
+# phylloptim 0.10.2
+
+## `Remotes:` tracks odelia 0.7.3
+
+`LinkingTo: odelia (>= 0.7.3)`; `Remotes:` and the C++ workflow's odelia checkout pin `88cbff7`, odelia 0.7.3 on master: its replay fixes (traitecoevo/odelia#71, #73) and a sweep across steps with no state (traitecoevo/odelia#75), which traitecoevo/plant's FF16 fitness gradient needs. Nothing in this package changes; the pin moves so that a consumer pinning both packages sees one odelia.
+
+# phylloptim 0.10.1
+
+## `Remotes:` tracks odelia 0.7.1
+
+`LinkingTo: odelia (>= 0.7.1)`; `Remotes:` and the C++ workflow's odelia checkout pin `e9a179e`, odelia's fix for a run that starts with no state (traitecoevo/plant's FF16 stand gradient needs it). Nothing in this package changes; the pin moves so that a consumer pinning both packages sees one odelia.
+
+# phylloptim 0.10.0
+
+## `Remotes:` tracks odelia 0.7.0
+
+`LinkingTo: odelia (>= 0.7.0)`; `Remotes:` and the C++ workflow's odelia checkout pin `6d32329`, the merge of traitecoevo/odelia#59 (reverse mode, 0.7.0). The rows below are taken on odelia 0.7.0's `implicit_node.hpp`, `tangent.hpp` and `value_with_slope.hpp`.
+
+## A replayed boundary point hands over its solve's rows
+
+`replay_operating_point(collar, kind)`, which puts a recorded operating point back, lost two things a pinned solve has and a replay does not compute: the polished root of the zero-flux bound, which `bound_at` corrects a `boundary-soil` row back to, and the collar itself where that polished root sits outside the unpolished bracket, which the replay clamped back in. Rows from a replayed `boundary-soil` point therefore differed from the solve's: over 1,048 rows on a grid of dry and hot cases, 258 of the 643 larger than 1e-6 moved by more than 1e-4, worst 25×, with sign flips on `root_c` and `root_P50` at one-layer wet bounds. plant re-solves every recorded leaf through this call during a reverse sweep, so its gradient took those rows. The replay now re-takes the polish from the same bracket and evaluates at the recorded collar; replayed rows are bit-identical to the solve's at interior, `boundary-soil` and `boundary-crit` points, and `test_leaf.cpp` asserts it. Forward values are unchanged.
+
+## The derivative surface is documented in the package
+
+`vignette("derivative-surface")` explains the three calls, the eleven operating-point kinds and what `collar_at` does at each, why the derivative comes from the implicit function theorem, and how it differs from `leaf_gradient()`. `leaf_model.hpp` opens with the same map and the preconditions. The README is retitled and gains a section on it; the developer guide gains a map of the headers.
+
+## ⚠️ Breaking: the leaf supplies its own derivative rows, and three counts moved
+
+`Leaf`'s derivative surface is a set of member templates on the caller's scalar
+(`supply_draw_at`, `collar_at`, `outputs_at`), and supplies the derivative of
+its operating point from the implicit function theorem at the converged point,
+instead of being recorded and differentiated. What that changes for a caller:
+
+* **`vulnerability_curve_ncontrol` defaults to 400, was 100.** The
+  pre-integrated vulnerability tables are built on four times the knots, and
+  every number read off them moves. `leaf_control()` carries the new default.
+  ⚠️ The number is written twice -- `Leaf::ncontrol_default` in
+  `leaf_model.hpp`, which plant's `Control` reads, and `leaf_control()`'s formal,
+  which R has to pass because only the 15-argument constructor is bound. plant's
+  `test-control.R` compares the two with `expect_identical`; nothing in this
+  package does, and the golden file cannot see the difference.
+* **`n_pars` is 20, and the fitted length is `n_theta` = 19.** The pack the
+  kernels read also holds `par_PPFD`, which is seated per observation from the
+  drivers and is never fitted, so it has a slot and no name. Read `theta` out to
+  `n_pars` and you run past its end.
+* **odelia `>= 0.7.0`** is required: the supplied rows are built on its
+  `implicit_node.hpp`, `tangent.hpp` and `value_with_slope.hpp`, which 0.6.0
+  does not have, and read through its Hermite interpolant (`hermite_spline`,
+  odelia 0.5.0).
+* **The four golden files are regenerated** (macOS/arm64, odelia 0.7.0), for
+  the 400-knot default. Against the 0.9.1 baselines: `operating_points.tsv`
+  480 of 576 rows move, 108 beyond the cross-platform tolerance, all near-shut
+  rows at `psi_soil = 4, ppfd = 100`; `psi_stem_optima.tsv` 1539 of 5184;
+  `primitives.tsv` 129 of 544, with the arithmetic, vulnerability and
+  assimilation tiers bit-identical and the spline tier the lowest that moves
+  (88 of 110, at 3.5e-8); `gradient_golden.tsv` 15 of 20 rows, worst 1.6e-3
+  relative.
+* **Two double-path changes a caller can see.** `evaluate_root_collar_psi` and
+  `dprofit_droot_collar_psi` dispatch on the seated cost curve, where they had
+  been pinned to TF24's, so a CF77 or TF24_floor leaf evaluates its own curve
+  there. `ci_at_compensation_point()` is derived from the kernel rather than
+  carried as a flag, which decides which branch `dprofit_at_collar_psi` takes at
+  a zero-flux probe. The curves read the interpolant directly rather than
+  through odelia's refusing front end, so each states its own bound where it
+  applies it -- `root_vuln_at` clamps the argument, `root_vuln_integral_at`
+  caps the value, `eval_stem_curve` raises.
+* **A pinned optimum's bound is solved to collar precision.** The zero-flux and
+  continuity bounds were placed to 1e-4 MPa, which is fine for a bracket but not
+  where the bound IS the answer. There, the loose root-finder's stopping point
+  moved with the parameters differently from the root, so the supplied rows,
+  which differentiate the root, disagreed with a finite difference of the solve.
+  The worst case was root-trait profit rows 100× off near shutdown. A pinned
+  solve now polishes its bound, and the wet-bound row corrects its residual from
+  the step-in point back to the root. Against a central-difference referee, bad
+  rows fall from 72 to 0 of 2640, and from 183 to 12 of 7784 on a grid across
+  deficits. Those 12 are within 5e-8 absolute at one-layer wet bounds, plus one
+  interior `curv_elec` row off by 2e-4 relative, which predates this change.
+  Pinned and shade-death results move: collar potential by at most 1.3e-4 MPa,
+  profit by -1.3e-5 to +5.6e-4, and 112 of 576 golden rows. Interior rows are
+  bit-identical. The two bracket root-finds now share their endpoint values, so
+  the solve is no slower (3.01 against 3.03 µs).
+* **`leaf_gradient(method = "ift")` refuses a pinned optimum by name**, with "a
+  pinned optimum" in the message, in R and in the batch. It used to fail because
+  a centred step would not fit beside the loose bound, and with the bound solved
+  exactly it can.
+
+⚠️ **This retracts two earlier entries.** "`n_pars` is unchanged" under the
+`Tleaf` reporting entry, and "`n_pars` is unchanged at 19" under the
+`shadow_cost` entry, were true when written and are not now: the count is 20 and
+the one a caller wants is `n_theta`.
+
+# phylloptim 0.9.2
+
+## `Remotes:` tracks odelia 0.6.2
+
+`Remotes:` and the C++ workflow's odelia checkout move from `815a54f` (0.6.0) to `64ae092`, the merge of traitecoevo/odelia#69 (0.6.2). plant pins the same odelia as phylloptim and needs 0.6.2, whose solver no longer pays the square of the state length on every resize (traitecoevo/plant#656), which is why this release exists. No code changes. Between 0.6.0 and 0.6.2 odelia added a steady-state solver (0.6.1) and moved when RODAS allocates its buffers (0.6.2); neither changes any arithmetic, so the golden baselines are unchanged. The `LinkingTo: odelia (>= 0.2.0)` floor is unchanged.
+
+# phylloptim 0.9.1
+
+## `Remotes:` tracks odelia 0.6.0
+
+`Remotes:` and the C++ workflow's odelia checkout move from v0.4.0 to `815a54f`, the merge of traitecoevo/odelia#63 (an R-side ODE stepper, which regnans steps the canonical equation with). plant pins the same odelia as phylloptim and must move to 0.6.0 for regnans, which is why this release exists. No code changes.
+
+The golden baselines move with the pin, as they did on the `release/0.8.x` line (0.8.2, #139): odelia 0.5.0 made the spline behind the soil and leaf lookups a local cubic Hermite, which reads the same natural cubic spline as before with values alone, so the goldens differ at rounding only — `operating_points.tsv`, `psi_stem_optima.tsv`, `primitives.tsv` and `gradient_golden.tsv` are the 0.8.x line's, re-verified bit-identical here against the 0.6.0 headers. `test-gradient.R`'s operating point is the 0.8.x line's as well. The `LinkingTo: odelia (>= 0.2.0)` floor is unchanged.
+
+# phylloptim 0.9.0
+
+## Fix: the collar solve maximised the wrong objective for four cost curves
+
+On the collar route the solve chooses the root-collar potential, and `psi_stem` follows from it through the supply. Every cost is billed through `psi_stem`, and the first-order condition carries that channel. Four costs also read the collar itself, because they price the stem path between collar and leaf rather than the state of the leaf end. **CF77** and **TF24_floor** charge for the flow `E = kmax·(G(psi_stem) − G(psi_collar))`. **JS22** charges for the drop `psi_stem − psi_collar`. **CMax** integrates its price from `psi_collar` to `psi_stem`. That direct dependence was missing from the first-order condition, so for these four the collar solve converged, to `|dprofit| ~ 1e-15`, onto a point that was not the maximum of the `profit_` it reported.
+
+The other four price the leaf end alone: **TF24** by the stem conductivity lost at `psi_stem`, **SOX** and **JW26** by a reduction factor of `psi_stem`, **ProfitMax** by `k(psi_stem)` against a fixed soil conductance. They see the collar only through `psi_stem` and are unaffected. So are all eight stem routes, which hold the upstream end at `psi_soil`.
+
+The missing term is `dC/dpsi_upstream`, now a table beside `cost_deriv<K>()` (`cost_reads_upstream<K>()` and `cost_deriv_upstream<K>()`), and appended to the collar FOC so the curves that do not read upstream compile to the same code: `bench_solve` is byte-identical, and all three golden baselines and `gradient_golden.tsv` are bit-identical, because none of them solves an upstream-reading curve on the collar route. `test_collar_foc_matches_profit` is the first test that does.
+
+Measured over 24 driver rows per case (1 and 3 layers), every moved row's `profit_` rose, so the old point was strictly worse by the model's own objective:
+
+| curve | rows moved | worst collar shift, MPa | worst transpiration change |
+|---|---|---|---|
+| CMax | 24/24 | 0.346 | 34% |
+| JS22 | 24/24 | 0.269 | 19% |
+| TF24_floor, lambda_o = 1e4 | 24/24 | 0.057 | 5.9% |
+| TF24_floor, lambda_o = 1e3 | 24/24 | 0.0054 | 0.5% |
+| CF77, lambda = 1e4 | 0/24 (all pinned) | 0 | 0 |
+
+A trait gradient on these curves moves with the solve, since `leaf_gradient()` reaches the FOC through `dprofit_droot_collar_psi`.
+
+## ⚠️ Breaking: root layer thickness is per layer, and it was a 3.7× error
+
+`root_network_from_carbon()`'s C++ signature takes a **vector** of layer
+thicknesses where it took one scalar:
+
+```
+// was
+root_network_from_carbon(carbon, double dz, beta_R_H, beta_R_V [, out])
+// now
+root_network_from_carbon(carbon, const std::vector<double>& dz, beta_R_H, beta_R_V [, out])
+```
+
+`layer_thickness()` → **`layer_thicknesses()`**, returning the per-layer widths
+implied by a cumulative depth profile (consecutive differences, implicit 0 at the
+surface). Both scalar versions are **deleted** rather than kept as overloads, so a
+stale call is a compile error instead of silently binding the old model.
+
+**The R signature does not change.** `root_network_from_carbon(carbon,
+soil_depth, ...)` has always taken the profile and derived the widths itself.
+
+**Why this is a fix and not a generalisation.** The vertical resistance is
+`beta_R_V * dz^2 / c_r_V`, and one scalar `dz = D/n` is correct only for a profile
+of equal layers. What fails otherwise is **discretisation invariance**: slicing a
+soil column is a numerical choice, so no property of the plant may depend on it.
+With root density uniform over depth the layer-integrated carbon goes as `dz[i]`,
+so the per-layer form gives a total `sum(r_R_V) = 3*beta_R_V*D^2/C` for any
+slicing — and a single scalar does not. Total vertical root resistance over 1.5 m
+carrying 20 kg C m^-2 leaf:
+
+| profile | scalar `dz` (0.8.0) | per-layer `dz[i]` (0.9.0) | ratio |
+|---|---|---|---|
+| 5 equal layers | 3172.5 | 3172.5 | 1.000 |
+| 3 equal layers | 3172.5 | 3172.5 | 1.000 |
+| 5 cm surface layer | 6059.5 | 3172.5 | **1.910** |
+| 2 cm surface layer | 11688.4 | 3172.5 | **3.684** |
+
+So a graded profile inflated total vertical root resistance up to 3.7×, throttling
+uptake, with nothing anywhere reporting it. Unreachable before now only because
+nothing built a graded profile; plant #626 makes them reachable, which is what
+brought this up.
+
+**Bit-identical for every profile reachable before this change.** All three golden
+baselines unchanged (576 operating points, 5184 psi_stem optima, 544 primitives),
+and `gradient_golden.tsv` bit-exact. Equal layers give equal widths exactly, and
+the golden grid's 1 m boundaries difference exactly.
+
+⚠️ **Two floating-point facts, both asserted in the suite, because they decide how
+a caller should reach this function.** Passing widths a caller already holds is
+bit-exact against 0.8.0 in 180 of 180 `(depth, n)` pairs. *Differencing* a profile
+built as `(i+1)*depth/n` is not — it loses a bit in 122 of those 180, the package
+defaults among them. So **a caller holding its own widths must pass them and must
+not re-derive them through `layer_thicknesses()`**; the helper is for a caller who
+genuinely has only a profile. The one R export therefore is not bit-exact against
+0.8.0 for a uniform *non-integer* profile; no golden value moves, because every
+baseline here uses integer-metre boundaries.
+
+## `MultiLayerRoots::dz_` is gone
+
+A scalar layer thickness, re-derived from the profile on every `set_soil_state`,
+that nothing in this package had read since #33 — and that #626 removed the last
+reason to carry, since thickness is now stated by the caller per layer rather than
+being something this object holds a second opinion about. Dropped from
+`inst/RcppR6_classes.yml`, so `leaf$dz_` no longer exists on the R side; read the
+widths off the profile with `layer_thicknesses()`, or off the network via `r_R_V`.
+
+Downstream (plant) must drop the matching `dz_` line from its own
+`RcppR6_classes.yml` in the same coupled change.
+
+## Two test-suite bugs the new guards surfaced
+
+`layer_thicknesses()` refuses a profile that is not strictly increasing, and that
+immediately caught `test_multi_layer_soil`, which had passed `{0.5, 0.5, 0.5}` as
+a cumulative profile — three layers all bottoming at 0.5 m, so two of the three
+midpoints sat at the same depth. It went unnoticed because that test asserts
+finiteness and sign only. The profile is `{0.5, 1.0, 1.5}` now.
+
+`test-surface.R`'s "reproduces the leaf's own layer thickness" **asserted the
+bug**: on a graded profile of 0.4, 0.5 and 0.6 m layers it required all three
+`r_R_V` to be equal, computed from a column-average thickness. Replaced by a
+per-layer expectation plus the invariance test above.
+
+⚠️ The strictly-increasing guard does **not** catch widths passed where boundaries
+were wanted — a width vector that increases with depth passes every check and
+yields plausible, different widths. That limit is asserted rather than left
+implicit, so the guard is not mistaken for protection it does not give.
+
+## `Remotes:` tracks odelia v0.4.0
+
+A package's `Remotes:` are honoured wherever it is installed from source, so this pin is not private to phylloptim's own CI. Anything depending on both phylloptim and a different odelia ref ends up with two pinned refs for one package in a single graph, which `pkgdepends` refuses with an unexplained `dependency conflict`. That blocked plant's fix for traitecoevo/plant#642, which needs odelia 0.4.0 for step rejection on the pinned-time path.
+
+The `LinkingTo: odelia (>= 0.2.0)` floor is deliberately unchanged: phylloptim uses nothing added since 0.2.0 and should stay installable against older odelia. It is the pin that has to track, not the floor.
+
+Also released as [`v0.8.1`](https://github.com/traitecoevo/phylloptim/tree/release/0.8.x) — the same one-line change off `v0.8.0`, so plant could take odelia 0.4.0 without also taking 0.9.0's breaking root-thickness change.
+
+# phylloptim 0.8.0
+
+## `leaf_solve()` reports the seated curve's lambda
+
+`lambda` is `marginal_cost_water()` — TF24's price at this operating point,
+**whatever curve ran** — so on any other curve it answers a question nobody asked.
+The seated curve's own `(dC/dpsi)/(dE/dpsi)` is `lambda_emergent`, and it was
+reachable only off a `leaf_model()` object. Every `leaf_solve()` caller on a
+non-TF24 curve was therefore reconstructing it, and on `TF24_floor` that meant
+knowing that `lambda` carries only the hydraulic half and adding the price floor
+back by hand:
+
+| curve | `lambda` | `lambda_emergent` |
+|---|---|---|
+| TF24 | 55757 | 55757 |
+| CF77, price 1e5 | 26012 | **100000** |
+| SOX | 23354 | 108864 |
+| TF24_floor, floor 5e4 | 32996 | 82996 |
+
+CF77's row is the one that pins the field: its emergent lambda is known
+independently of the solve, being the constant it was given, and it comes back as
+that constant. Appended to `operating_point()` after `shadow_cost`, for the reason
+`Tleaf` and `shadow_cost` were appended — those names are positions, so an
+insertion beside its namesake would shift every saved output.
+
+## ⚠️ A stale `lambda_emergent` after a shut-down row, found by reporting it
+
+Two terminal exits — hydraulic shutdown and shade death — wrote every other flux
+output and left `lambda_emergent_` alone, so a **reused** `Leaf` reported the
+previous row's price for a leaf that moves no water. `leaf_solve()` reuses one Leaf
+across rows, so a batch containing a dry row returned a finite, plausible price
+there — 3.49e+05 — where the same drivers on a fresh leaf give NA.
+
+Both exits now write the NA sentinel, with the reasoning recorded beside the block
+in `set_shutdown_state` that already existed for exactly this hazard on the flux
+outputs (plant #577, #578). `shadow_cost` needs no equivalent: it is computed from
+`transpiration_`, which those exits zero, so it follows to zero on its own.
+
+The bug predates this change and was latent because the field was reachable only
+off an object the caller had driven themselves. Reporting it through `leaf_solve()`
+is what made it visible, and `test-surface.R`'s row-order test caught it
+immediately — the test whose own comment says it crosses into shut-down because
+"that is where a last-written-value bug would show up as a duplicated row".
+
+No golden file moves; `n_pars` is unchanged. The C++ assertion that read `Tleaf`
+off the end of the reported vector is now two from the end, and the R name/binding
+alignment test is what catches that drifting again.
+
+# phylloptim 0.7.0
+
+## A new cost curve, `TF24_floor`: TF24 with a price of water at the wet end
+
+Every conductance-loss cost in this package prices water at **zero** as
+transpiration goes to zero. That is not a choice anyone made — it is what "the cost
+of water is the conductivity you lose to move it" implies, since no conductivity is
+lost when nothing flows — and its consequence is that water is free precisely when
+it is abundant. `TF24_floor` is the repair, applied to our own cost.
+
+It takes the split any cost admits, into a part depending on the potential alone
+and a part linear in the flux:
+
+```
+Theta(E) = Theta~(psi) + lambda_o * E,   lambda = Theta~'(psi)/K(psi) + lambda_o
+```
+
+with `K = kmax * f(psi)` the stem conductance, and `Theta~` taken to be **TF24's own
+cost at TF24's own traits**. So `lambda_o` is the curve's only parameter, `TF24` is
+the same curve at `lambda_o = 0` at identical parameter values, and the comparison
+between them is a one-restriction test rather than a fit of two
+differently-parameterised models.
+
+```r
+leaf_solve(psi_soil = 1.5, PPFD = 1500, model = "TF24_floor",
+           supply = leaf_supply_singlelayer(),
+           root_network = series_resistance(1e4),
+           TF24_floor_lambda_o = 1.5e5)   # umol C (kg H2O)^-1
+```
+
+**Two reductions, asserted BIT-FOR-BIT** over 45 driver rows and eight reported
+fields, with no fixture and no tolerance: `lambda_o = 0` gives `TF24`, and
+`TF24_cost_scale = 0` gives `CF77`. Each term is the parent's own expression, so
+zeroing a parameter adds an exact zero to the other curve's exact value — and that
+survives fused multiply-add, since the fused addend is then an exact zero.
+
+**`TF24_floor_lambda_o` is an INPUT with no default**, like `CF77_lambda_`, and the
+reason is sharper: at zero this curve **is** `TF24`, so a caller who seated it and
+never named a price would be running the production model under a new name.
+Omitting it is refused, with the units and the routes that can supply one; an
+explicit zero is accepted.
+
+**`shadow_cost`, a new reported output, because the two terms are not the same
+kind of thing.** `Theta~` is a **realised** cost: carbon actually forgone, in
+damaged tissue and in capacity that has to be rebuilt, and it belongs in a carbon
+budget. `lambda_o` is not a cost at all. It is a **shadow price** — the value of
+water in its best alternative use, which for a leaf is assimilation later — and no
+carbon is lost when the plant pays it. It changes the aperture the plant chooses
+and nothing else, which is what a multiplier does.
+
+`profit` still reports the objective, so it deducts both. The new column reports
+the part that is a price, and the two quantities a caller wants follow:
+
+```
+realised cost   = hydraulic_cost - shadow_cost
+carbon profit   = profit + shadow_cost
+```
+
+⚠️ **A consumer that grows a plant on this leaf wants the second of those, never
+`profit`.** Deducting a shadow price from a carbon budget taxes growth by something
+the plant never spent. At `lambda_o = 1e5` the objective understates the carbon the
+leaf actually kept by 28%.
+
+⚠️ **Zero on every other curve means "this curve does not separate the two", not
+"this curve's cost is all realised carbon".** `CF77` is the case worth stating: its
+whole cost is `lambda * E`, and reading that as a shadow price is an ordinary thing
+to do — but the model supplies one number and nothing to attribute it with, and
+behaves identically whether that number is read as carbon lost to water already
+taken or as the value of water withheld for later. Reporting it as all-shadow would
+present one reading as a fact; as zero-shadow, the other. The field is defined only
+where the *curve* defines it, and that is itself an argument for the two-term form:
+it is the first curve here in which the question "is `lambda` a cost to deduct, or a
+price that only shapes behaviour?" can be posed at all.
+
+The sharpest test of the column is the pair that was already here. `CF77` at
+`lambda` and `TF24_floor` at `TF24_cost_scale = 0` are the same model numerically —
+every state and flux bit-identical — and `shadow_cost` is the only column that
+separates them.
+
+Appended to `operating_point()`, after `Tleaf`, for the reason `Tleaf` was: those
+names are positions and an insertion would shift every saved output. It reads the
+stored transpiration rather than recomputing it, so `shadow_cost == lambda_o * E`
+holds bit-exactly against the reported `E`. No golden file moves, since those are
+written from their own struct, and `n_pars` is unchanged at 19 — this is a reported
+output, not a parameter.
+
+**A real prediction, and a test of it.** Scaling `kmax` and the vapour deficit
+together by 16 leaves stomatal conductance untouched at every potential, so a cost
+whose marginal value depends on `psi` alone is invariant and one that prices the
+FLUX is not. Measured: `TF24` moves by 0, `CF77` by 64%, and `TF24_floor` in
+between and monotonically in `lambda_o` — 4.5e-02, 3.8e-01, 5.7e-01 at `lambda_o`
+of 1.5e3, 1.5e4 and 1.5e5.
+
+**The closed form serves it, and its tail is worse than the other two's.** The
+wet-end `lambda` IS `lambda_o`, a constant — the `n = 0` case, reached for a reason
+belonging to the MODEL rather than to the vulnerability curve — so
+`set_model("TF24_floor", "stem", "closed")` works and runs at 1.40 against 2.90
+µs/call, 2.11x realised at phi = 0.375. But the leading order discards the whole
+TF24 term, and the shared `ci/ca` guard does not see the resulting error: over a
+150-row grid the worst SERVED error is 2.9e-01 at `TF24_cost_scale = 0.5` (against
+`CF77`'s own 2.4e-01) and **5.2e-01 at the DEFAULT scale**. Read `solve_TF24_floor`'s
+table before using that arm. At `lambda_o = 0` it is refused by name and points at
+`TF24`, which has its own start.
+
+## `leaf_solve()` and `leaf_batch()` can set the prescribed prices
+
+`$CF77_lambda_` and `$TF24_floor_lambda_o` are fields rather than traits, so
+`leaf_traits()` could not carry them — and `leaf_solve()` builds its own `Leaf`
+internally. The two priced curves were therefore reachable from `leaf_model()` and
+**unreachable from the one-call surface**: `leaf_solve(model = "CF77")` could only
+ever raise that curve's own "needs `CF77_lambda_` set" refusal. That was survivable
+while CF77 was the only such curve and its documentation said "build the leaf
+yourself"; it stopped being survivable for a curve whose only parameter is a price.
+
+`leaf_solve()` takes `CF77_lambda` and `TF24_floor_lambda_o` now, matching
+`leaf_batch()`, and applies them where the model is seated — so they survive
+`set_drivers()` per row on both the `reuse = TRUE` and `reuse = FALSE` paths.
+Passing a price the seated model does not read is **refused rather than ignored**,
+naming the curve that does read it: silently ignoring it is how someone spends an
+afternoon wondering why their lambda had no effect.
+
+## Smaller things
+
+`.gradient_setter()`'s positional trait call is a `do.call` over the derived trait
+vector rather than fifteen subscripts written out. The comment beside it predicted
+that adding a trait would break it at run time inside the generated binding,
+"naming neither this line nor the count" — which is how #41 broke — and an
+intermediate version of this work added one and broke it again, in exactly that
+way: 118 gradient-batch rows reporting `error` where they had reported `interior`,
+because the R reference threw and the batch did not. The trait was withdrawn, so
+the shipped trait vector is unchanged at fifteen; the fix is kept, because the next
+trait will not be so easy to withdraw.
+
+⚠️ **`operating_point()$lambda` is TF24's, whatever curve is seated.** It is
+`marginal_cost_water()`. The per-curve number is `$lambda_emergent`. That is not
+new, but `TF24_floor` is the curve where reading the wrong one is easiest — its
+hydraulic half really is TF24's — so the field list now says so, and the R
+reduction test pins the one column where the two legitimately disagree.
+
+`gradient_par_names()` goes 18 -> 19: `TF24_floor_lambda_o` is appended after
+`CF77_lambda_`, and nothing before it moves. `psi_stem_optima.tsv` grows 4608 ->
+5184 rows; every pre-existing row is byte-identical, which is the check the
+append-only rule exists for. The 576 operating points, the 544 primitives and the
+recorded R gradient baseline are untouched.
+
+## A third axis on `set_model()`: the closed form as a selectable method
+
+`set_model()` took a cost curve and a route. It now takes a **method** as well,
+and `"closed"` reaches the same optimum by a different route:
+
+```r
+l$set_model("TF24", "stem", "closed")
+l$optimise()
+l$closed_form_fallback_fraction()   # phi, which sets the realised speedup
+```
+
+Given `lambda`, every model here collapses to the Medlyn relation
+`ci/ca = xi/(xi + sqrt(D))`; where `lambda` is a wet-end power law in `psi` that
+inverts explicitly, so a leading-order potential plus one Newton step on the
+supply-minus-demand residual replaces the search over the bracket. `closed_form.hpp`
+has existed for a while and nothing called it; it is reachable now, through the same
+infrastructure as everything else.
+
+**`method = "exact"` is the default and is bit-identical.** `optimise()` returns
+to its previous body before anything new runs: all 4608 golden `psi_stem` optima,
+576 operating points and 544 primitives are unchanged.
+
+**Implemented for `TF24` and `CF77`; refused, with reasons, everywhere else.** The
+existence criterion is that `h'(A)` — the benefit link's derivative — must not
+depend on the solution. `JS22`, `CMax` and `ProfitMax` satisfy it, so a closed
+form *exists* for them and only an analytic `dlambda/dpsi` is unwritten. `SOX` and
+`JW26` do not: their link is `log`, `h'(A) = 1/A`, so `lambda` carries the
+assimilation the solve is for and the dependency closes into a fixed point. Those
+two **cannot** have one. Also refused on the collar route, on a layered soil, and
+with `use_energy_balance_` on — the last being the resolution of #116, since the
+deficit then depends on the transpiration being solved for.
+
+Three things worth knowing before using it:
+
+- **It buys about 2x, not an order of magnitude.** 2.65 -> 1.16 µs for `TF24` and
+  2.74 -> 1.37 for `CF77`, both arms in one process. The header's old 10.8x and 47x
+  predated the current solver and priced the inversion without the evaluation that
+  writes a caller's outputs. The validity guard tests an OUTPUT, so a rejected row
+  falls back and the realised figure is `1/[phi + (1-phi)/s]`; `phi` is measurable
+  now (`$closed_form_fallback_fraction()`), which it was not before.
+- **Accuracy is set by the Medlyn collapse, not by the power law.** The Newton step
+  converges — 2, 3 and 5 steps agree — and the residual's fixed point is still not
+  the optimum, because `3*Gstar` is the electron-transport-limited `dA/dci`. At
+  25 C the error in `A` runs 0.2 % above `ci/ca` 0.9 and 2 % at 0.5-0.6; below
+  `ci/ca` about 0.3 the fixed point ceases to exist and the guard is what handles
+  it. A fallback row is the exact answer bit for bit.
+- ⚠️ **The argmax is discontinuous across the guard boundary, so this must not sit
+  under a derivative.** Sweeping `kmax`, the mean second difference of
+  `opt_psi_stem_` is 1.2x the exact solve's where the sweep stays on one method and
+  **100x** where it crosses. Seating a model resets the method to `"exact"`, so
+  `leaf_gradient()` always differentiates the exact solve.
+
+`stem_c` is 2.680147 here, so the no-iteration special case `TF24_beta2 = 1/stem_c`
+sits at **0.373**, not the 0.917 the header used to quote. That figure came from a
+stem curve built with *E. saligna*'s measured P12 in the P50 slot, and with it goes
+the claim that `beta2 = 1/stem_c` was biologically preferred: reaching `beta2 ~ 1`
+that way needs `stem_c ~ 1`, a non-threshold vulnerability curve the eucalypt
+literature does not support. The case is kept as a valid special case at an
+unmotivated parameter value.
+
+## Cowan-Farquhar can have a soil-moisture shutdown
+
+`CF77` is the one cost curve here whose **price** of water does not respond to
+soil state. That is the model, not an oversight: `cost_deriv<CF77>` discards
+`psi_upstream` and `lambda_for<CF77>` returns the bare constant, so soil water
+reaches the optimum only through the feasible bracket and the cost's *value*. The
+consequence is that it has no soil-moisture shutdown, which is the one behaviour a
+Medlyn-style model is usually reached for.
+
+A new field supplies one, dividing the price by the Medlyn (2011) beta factor:
+
+```r
+l$CF77_lambda_ <- 1.5e5
+l$CF77_soil_beta_ <- TRUE       # default FALSE
+l$theta <- 0.35                 # with l$theta_fc, l$theta_w
+l$set_model("CF77", "stem"); l$optimise()
+```
+
+`price = CF77_lambda_ / beta`, `beta = (theta - theta_w)/(theta_fc - theta_w)`.
+Drying the soil then closes stomata monotonically and shuts the leaf as `theta`
+approaches the wilting point; with the option off the same sweep does nothing.
+
+**A field rather than an eighth `CostCurve`.** The enum is append-only with its
+ordering propagating into `gradient.hpp`'s parameter indices, `RcppR6_classes.yml`,
+R's mirror enumeration and a 4608-row golden file. A field defaulting to the
+current behaviour avoids all of it: **all 4608 golden rows, 576 operating points
+and 544 primitives are bit-identical**, and `cf77_price()` returns the member
+untouched on the off path rather than dividing it by a computed 1.0 — do not
+"simplify" that into one expression.
+
+Two decisions worth knowing when reading output:
+
+- **beta is clamped at 1**, so `theta` above field capacity does not price water
+  *below* `CF77_lambda_`. That makes the prescribed value a floor rather than
+  something the wet end can undercut, and it means that for any
+  `theta >= theta_fc` this curve is plain CF77 exactly, not approximately.
+- **beta <= 0 is refused rather than optimised.** At or below the wilting point the
+  price is infinite or negative, and a negative price pays the leaf to transpire —
+  which the optimiser takes to the wet bound and reports as an operating point.
+  The check fires only when the option is on.
+
+## `theta`, `theta_fc` and `theta_w` are now settable
+
+⚠️ **Set these, not the trailing-underscore ones.** `theta_`, `theta_fc_` and
+`theta_w_` are working copies that `set_physiology` overwrites from the inputs on
+every driver set, so a bare `l$theta_ <- 0.25` was silently undone by the next
+`set_drivers()` — the same shape as #96, and it would have made the soil-beta
+option run every point of a sweep at the default. The three inputs survive
+re-driving.
+
+# phylloptim 0.6.0
+
+## Seven optimality models, one optimiser
+
+The package now solves seven stomatal optimality models, and they share a single
+templated body rather than one function each. Two things specify a model: a **cost
+curve** and a **benefit link**.
+
+| `CostCurve` | objective | link |
+|---|---|---|
+| `TF24` | `A - C(psi)` | identity |
+| `CF77` | `A - lambda*E` | identity |
+| `JS22` | `A - gamma*dpsi^2` | identity |
+| `CMax` | `A - (a*psibar + b)*dpsi` | identity |
+| `ProfitMax` | normalised gain-risk | scaled by `|A|max` |
+| `SOX` | `A * g(psi)` | log |
+| `JW26` | `A * (1 - psi/psi_crit)` | log |
+
+`JS22`, `CMax`, `SOX` and `JW26` are new. The unification is what makes the
+product objectives fit: maximising `A*g` and maximising `log A + log g` share an
+argmax, so every model is `max h(A(psi)) - C(psi)` and one derivative serves all
+seven --
+
+    d/dpsi [h(A) - C] = h'(A) * dA/dpsi - dC/dpsi
+
+with `h' = 1`, `1/A` or `1/|A|max`. Adding a curve is a row in three dispatch
+tables, not a new solver. Energy balance with a non-identity link is refused
+rather than approximated.
+
+All 4608 rows of `psi_stem_optima.tsv` are bit-identical across the unification:
+the identity arm's derivative is textually unchanged.
+
+## One entry point: `set_model()` then `optimise()`
+
+**BREAKING.** Choosing a model was ten functions: seven per-curve aliases, two
+dispatchers taking a curve INDEX, and the TF24 shorthand. It is now
+
+```r
+l$set_model("SOX", "stem")     # or ("TF24", "collar"), the default
+l$CF77_lambda_ <- 1.5e5        # whatever constants that model needs
+l$optimise()                   # takes nothing
+l$model_curve(); l$model_route()
+```
+
+The model is configuration rather than a call argument, because its **parameters
+already were**: `CF77_lambda_` is a field, and `JS22_gamma`, `CMax_a` and `CMax_b`
+are traits. Naming the curve at the call site while its constants live on the object
+configures half a model in each place. Unknown names are refused with the valid set
+listed, so no caller handles an index that silently means a different model when the
+enumeration grows.
+
+Removed entirely: `optimise_psi_stem_TF/CF77/JS22/CMax/SOX/JW26/ProfitMax`,
+`optimise_psi_stem_by()` and `find_root_collar_psi_by()` — from the R surface first,
+and then from C++ too (see *One curve dispatcher* below). A C++ caller that wants
+the compile-time form calls `optimise_psi_stem_single<K>()` or
+`find_root_collar_psi_for<K>()` directly. `find_root_collar_psi()` is kept: it is
+`optimise()` under the default model, and it is what plant's own sources spell.
+
+Defaults are `"TF24"` and `"collar"`, so a caller that never sets a model gets the
+production path — and all four golden baselines are bit-identical, which is that
+statement checked rather than asserted.
+
+## One curve dispatcher, not five switches
+
+Adding a cost curve meant an arm in six places. Four of them were runtime `switch`es
+over `CostCurve` with the same seven arms each — solve-collar, solve-stem,
+evaluate-stem, dprofit-stem — and they are now one template, `Leaf::with_curve()`,
+which hands a body a compile-time curve tag. Adding a curve touches two places: an
+arm there and an arm in `curve_name()`. Neither has a `default:`, deliberately, so
+`-Werror=switch` still refuses a forgotten curve.
+
+Deleted with them: the seven `optimise_psi_stem_<curve>()` aliases, each a single
+call to `optimise_psi_stem_single<K>()`, none bound to R and none called by the
+model. Their per-curve documentation — JS22's always-interior wet end, CMax's
+`5.930e-06` step-in tell, SOX's product-versus-log derivation — is one table above
+`optimise_psi_stem_single` instead of one paragraph per alias.
+
+⚠️ **plant must move two lines when it bumps its `phylloptim` pin.** Its
+`inst/RcppR6_classes.yml` binds `optimise_psi_stem_TF` and `optimise_psi_stem_Sperry`;
+the second has not existed here for some time, so plant already cannot build against
+`master`, and the bump is already a coordinated edit. Both become `set_model` +
+`optimise`.
+
+**BREAKING: no method takes a curve index any more.** `evaluate_psi_stem_by(curve,
+psi)` and `dprofit_dpsi_stem_by(curve, psi)` are `evaluate_psi_stem_at(psi)` and
+`dprofit_dpsi_stem_checked(psi)`, reading the model `set_model()` seated — the same
+rule `optimise()` follows. `vignette("the-models")` had to define its own
+`curve_index()` helper to use the old pair, which is the tell that the index was
+still API. Both refuse on the collar route rather than answering about a model the
+leaf is not seated on, which is a distinction an index could not make.
+
+`leaf_solve()` takes `model =` now, so the one-call R surface reaches all seven
+curves rather than only TF24-collar. `leaf_gradient()` has taken it since 0.6.0.
+
+## util::maximise_over_closed_interval is gone
+
+It was `maximise_over_closed_interval_foc` without the root-find. Both routes moved
+onto the `_foc` form, leaving it called only by its own test — a second solver in the
+file whose guide says not to add one. Its test cases move onto `_foc`, plus one they
+could not make: that the returned interior point is *stationary* rather than merely
+inside a narrow bracket.
+
+`Leaf::maximise_profit_over_collar` and the two `dprofit` bodies stay as they are,
+and now say why at the definition: the first is this algorithm at `n = 0` plus a
+five-way `OperatingPointKind` classification that 42 of 240 golden rows read; the
+second pair's Identity arm is textually pinned because four golden baselines compare
+at the last bit. The compensation branch's `dR_d/dT` — genuinely identical in both —
+is now shared.
+
+## Documentation the 0.6.0 changes falsified
+
+`R CMD check` reports **Status: OK**, and `man/` is legible for the first time.
+
+- **`Roxygen: list(markdown = TRUE)` was missing from `DESCRIPTION`**, so every
+  `[fn()]` link, `**bold**` and backtick across all of `man/` rendered as literal
+  text — `man/leaf_gradient.Rd` contained zero `\code{}` and zero `\link{}`. Nothing
+  objected, because generated Rd files are not read and `R CMD check` does not mind a
+  `[foo()]` that is only prose. ⚠️ Turning it on means `\%` in a roxygen block
+  becomes a literal backslash-percent, which comments out the rest of the Rd line;
+  every `\%` is now a bare `%`.
+- **`man/Leaf.Rd` documented two R methods that do not exist**, `$optimise_psi_stem_
+  ProfitMax()` and `$optimise_psi_stem_TF()`, both removed from the R surface in
+  0.6.0. It documents `$set_model()` / `$optimise()` now.
+- **Two README examples errored**, both from the `stem_b` → `stem_P50` rename: one
+  passed `stem_b` to `leaf_traits()` and one named it in `pars`. `README.md` is plain
+  markdown, so nothing in the repo could see them —
+  `tests/testthat/test-readme.R` parses and evaluates every ```` ```r ```` block now,
+  and catching exactly that regression is what it was checked against.
+- **Counts, everywhere.** Fifteen traits, not fourteen; `n_pars` 18, not 16;
+  thirteen reported outputs, not twelve; a fifteen-argument constructor, not
+  seventeen. `vignette("cpp-interface")` told a C++ consumer to write 16 doubles into
+  an 18-element array — the exact under-fill that returns `nan` with no diagnostic.
+  `vignette("phylloptim")` computes its counts with inline R now.
+- **`vignette("the-models")` described the pre-merge solver**, arguing that the stem
+  routes "still scan" and that closing the gap was future work. 0.6.0 closed it. The
+  timing table it quoted was pre-merge too: `TF24` 8.69 → **2.66** µs/call, `CF77`
+  7.58 → **2.73**, `ProfitMax` 53.70 → **5.24**.
+- **`ci_abs_tol` reaches neither family of optimality solver.** The vignette said it
+  reached the stem routes; it is read in exactly one place, `solve_medlyn_ci_
+  numerical`.
+- **Leaf construction is quoted as a ratio now.** Five places said "204 µs" beside
+  four different solve counts (33, 55, 70, 73), and its share of a one-parameter
+  gradient had gone 40% → **61%** as the solvers got cheaper. Re-measured in one
+  process: **~180× a trivial `.Call`, or 45 solves**.
+- Dead references removed: `cost_curve_has_derivative()` (deleted in 0.6.0) from two
+  `@seealso`; `profitmax_scan_n_` (a member that no longer exists);
+  `find_root_collar_psi_by`, whose declaration outlived its definition.
+- **`R/gradient.R` had an unreachable error message** telling callers to
+  `$optimise_psi_stem_<curve>()`. `.GRADIENT_VERIFIED_LINKS` had come to list every
+  route, so the predicate behind it was a constant. Both gone; the model registry is
+  derived from `cost_curve_names()`, so it is one list rather than three.
+
+## The collar route's zero-resistance limit converges
+
+A collapsed collar bracket used to DERIVE `psi_stem` from continuity and stop. That
+threw away the freedom that survives: feasibility pins the **collar**, not the stem,
+so the leaf can still choose how far to let `psi_stem` fall. Measured at `psi_soil`
+1.0, PPFD 900: deriving gave `psi_stem` 1.6465 and profit 8.255 where optimising
+gives 3.0935 and 13.389 — 38% of the objective.
+
+That branch now optimises `psi_stem` with the upstream potential pinned at the
+determined collar, through the same solver everything else uses. The limit is clean
+and monotone — the gap to the stem route's answer runs 9.8e-03, 3.5e-05, 3.5e-07,
+7.0e-09 as the series resistance goes 1e0 to 1e-6 — where it was 38% off and not even
+monotone.
+
+⚠️ **This is not a change of coordinate, and that is what keeps it free.** Optimising
+`psi_stem` everywhere would need a nested root-find per objective evaluation, because
+the supply maps `psi_collar` to `E` and any other coordinate has to invert it. It is
+also unnecessary: `psi_collar` and `psi_stem` are monotone in each other, so
+`dJ/dpsi_stem` and `dJ/dpsi_collar` differ by a strictly positive factor and share
+their roots. The coordinate was never wrong; only the bracket collapsed. Interleaved
+timings are flat (collar 3.06 against 3.05 us/solve) and every golden baseline is
+bit-identical, because the branch fires only where the solve previously gave up.
+
+## One solver for every model, and the scan is now an argument
+
+There used to be two optimisers doing the same job with different numerics. The
+collar route (`find_root_collar_psi`, what `plant` calls) root-found `dJ/dpsi == 0`
+but ran **TF24 only**; the `optimise_psi_stem_*` routes ran all seven curves but
+refined on **bracket width**, which has no stationarity guarantee — nothing in Brent
+references the derivative. Each had exactly the half the other lacked.
+
+Both now go through one function: evaluate both endpoints, optionally scan for the
+basin, then root-find the first-order condition inside the winning cell. The collar
+objective is templated on the cost curve, so six of the seven solve on the production
+multi-layer topology for the first time (ProfitMax is refused there — `|A|max` has no
+multi-layer definition yet, and it says so rather than returning a plausible number).
+
+**Faster and more accurate at once**, because scanning was buying less than it cost:
+
+| | before | after |
+|---|---|---|
+| `psi_stem:TF` | 9.30 us/call | **2.88 us/call** |
+| `psi_stem:CF77` | 8.23 us/call | **2.94 us/call** |
+| `psi_stem:ProfitMax` | 58.2 us/call | **5.64 us/call** |
+| collar solve | 3.29 us/solve | 3.30 us/solve (interleaved) |
+| median `\|dJ/dpsi\|` at psi* | 4.4e-05 | **1.2e-15** |
+
+`operating_points.tsv` is bit-identical, so the production path did not move.
+`psi_stem_optima.tsv` was regenerated: the argmax is now stationary rather than
+grid-resolved, worst relative movement 1.5e-05 with profit changing at 1e-10.
+
+**Whether to scan is measured, not assumed.** Over a 1728-row sweep (8 air
+temperatures x 4 gate combinations x 6 soil potentials x 3 deficits x 3 light levels)
+the only objectives carrying two prominent interior basins are `TF24` (21 rows) and
+`JS22` (66) — and **every one of those rows has the energy balance on**. The collar
+objective has none in 432 rows over the same range. So the scan is skipped with the
+gate off, which is what makes the routes ~3x faster. The valleys are 7.0e-01 and
+3.5e+00 deep, so this is a cheap scan to skip and an expensive one to skip wrongly:
+re-measure before widening the predicate.
+
+### `|A|max` is solved, not scanned
+
+ProfitMax normalises by the largest assimilation on the supply stream, found until
+now by a 500-point scan. Measured, that maximum sits at the dry bound on 1318 of 1320
+driver rows and interior on 2, beating the bound by at most 1.1e-03 — so it is
+endpoints plus a root-find on `dA/dpsi == 0` like everything else. `dA/dpsi` needs no
+new algebra: for an identity link it is `dJ/dpsi + dC/dpsi`.
+
+That is the 10x on ProfitMax above, and it also fixes its gradient. A scan argmax is
+piecewise constant in the parameters, so differencing through it was step-dependent:
+0.014 at `h = 1e-06` against 0.058 at 1e-02. It is now flat across six decades, so
+**one finite-difference step (1e-06) serves every route** and the per-route split is
+gone. ProfitMax's partial-versus-total gradient distinction remains — the composite
+holds `|A|max` fixed — but it is a modelling choice now rather than a staircase.
+
+### Removed
+
+**BREAKING.** All dead or duplicated by the above:
+
+* `cost_curve_has_derivative()` — returned `TRUE` for all seven curves and nothing
+  read it; every curve has a derivative through its benefit link
+* `leaf_behaviour_fingerprint()`, with `tools/fingerprint.R` and its test — no
+  consumer, and it only ever covered two of the four recorded baselines. The
+  bit-exact golden comparison is the guard
+* `profitmax_scan_n_` — an R-exposed field controlling a scan that no longer exists
+* `GSS_tol_abs` is now documented for what it actually reaches: two places, both on
+  the collar route. It never reached the `optimise_psi_stem_*` refinement, whose
+  tolerance is not settable
+* `Imports: tools`
+
+### `leaf_supply_single()` is `leaf_supply_singlelayer()`
+
+**BREAKING**, and purely for symmetry with `leaf_supply_multilayer()`.
+
+⚠️ Worth knowing while renaming callers: the single-layer *supply path* carries a
+series resistance, but the `optimise_psi_stem_*` routes pin the upstream potential at
+`psi_soil` and **ignore it**. "Single layer" and "no root resistance" are not the same
+thing, and a single-layer plant with a real root resistance is not yet representable
+in the stem formulation.
+
+## Both vulnerability curves are parameterised on (P50, c)
+
+**BREAKING.** The stem curve's traits are now `stem_P50` and `stem_c`, and the
+root curve's `root_P50` and `root_c`. `stem_b`, `psi_crit`, `root_b` and
+`root_psi_crit` are **derived**: still readable on a `Leaf`, no longer settable
+and no longer arguments to `leaf_traits()`, `set_traits()` or the constructor.
+
+    b        = P50 / (ln 2)^(1/c)
+    psi_crit = b * ln(1/0.05)^(1/c)          i.e. P95 of the same curve
+
+`perturb_stem_b()` becomes `perturb_stem_P50()`. See *Model-scoped parameter
+names* below for the parameter set as a whole.
+
+Why: `psi_crit` was a free trait describing a curve it was not derived from, and
+Sperry's reference conductivity `k_crit = 0.05 * kmax` used the same 0.05 from a
+separate hard-coded constant. The three could disagree, and a consistency check
+existed to police them. They are now one number, so the check is gone -- along
+with the domain check, which becomes vacuous (a derived P95 is inside P99 for
+every c > 0).
+
+**The reference values moved**, and were regenerated. The defaults were round in
+`stem_b` and `psi_crit` rather than in `P50`, so `psi_crit` was P95 rounded to
+seven figures and `f(psi_crit)` was 0.049999968739194864 rather than 0.05.
+Adopting a round `P50 = 3.4` shifts `stem_b` by 3.1e-08 and `psi_crit` by 4.7e-08,
+which propagates to a worst 4.4e-05 on assimilation over the 576-point grid and
+2.2e-05 on profit over the optimiser grid (2304 rows when this was measured; the
+grid ships at 4608) -- below the 1e-4 at which this
+project calls a difference real. No operating point changed branch. The lowest
+primitive tier to move is the vulnerability curve itself, at 3.1e-08; the
+arithmetic tier is unchanged.
+
+Two behavioural consequences, both asserted:
+
+* A shut-down leaf's hydraulic cost no longer depends on the curve's scale. It
+  sits at `psi_crit`, where remaining conductivity is exactly 0.05 whatever `P50`
+  is, so `dprofit/dstem_P50` there is exactly zero rather than negative.
+* Stem gradients carry a term through the moving `psi_crit`. It is exactly zero at
+  an interior optimum and order 1 at a pinned one, where it is 29% of the total.
+
+## Model-scoped parameter names
+
+**BREAKING.** A parameter that belongs to one model now carries that model's name.
+
+| was | is |
+|---|---|
+| `beta2` | `TF24_beta2` |
+| `cost_scale_TF24` | `TF24_cost_scale` |
+| `lambda_` | `CF77_lambda_` |
+
+New parameters follow the same rule: `JS22_gamma`, `CMax_a`, `CMax_b`. Models
+without a published name take initials-plus-year.
+
+### What the parameter set looks like against 0.5.2
+
+Everything below landed in one release, so the deltas that matter to a caller are
+against **0.5.2**, the last version published:
+
+* the trait vector goes **14 to 15** and `gradient_par_names()` **16 to 18**
+* four traits are gone, being derived now: `stem_b`, `psi_crit`, `root_b`,
+  `root_psi_crit`
+* five are new: `stem_P50`, `root_P50`, `JS22_gamma`, `CMax_a`, `CMax_b`
+* two are renamed: `beta2` and `cost_scale_TF24`
+* `CF77_lambda_` is differentiable, which is the 18th parameter
+
+Traits are bound **positionally** across the R/C++ boundary, so a caller passing
+them by position must be updated with this release. Appending is safe; reordering
+differentiates the wrong thing and returns plausible numbers.
+
+## The prescribed-lambda optimiser is removed
+
+**BREAKING.** `optimise_psi_stem_Sperry()`, `profit_psi_stem_Sperry()` and
+`hydraulic_cost_Sperry()` are deleted, with no deprecated alias. Nothing in the
+plant-family tree called them.
+
+They maximised `A - lambda*(k(psi_soil) - k(psi))` with lambda a prescribed
+constant, under Sperry's name. `optimise_psi_stem_ProfitMax()` is Sperry's model,
+and the point of it is that the cost scaling is **emergent**: multiplying the
+normalised objective by |A|max gives exactly that constant-lambda form with
+`lambda = |A|max / (k_soil - k_crit)`, a quantity that moves with the drivers.
+Measured here, the implied lambda runs 9.19e4 to 3.15e5 over psi_soil 0.5 to
+3 MPa, a 3.4x range. So a fixed lambda is not a variant of the model, and the two
+entry points were not two models.
+
+`$lambda_` now has one meaning: the Cowan-Farquhar marginal value of water, in
+umol C (kg H2O)^-1, supplied by the caller.
+
+## Gradients for every model, through one entry point
+
+**BREAKING (signature).** `leaf_gradient()` and `leaf_gradient_batch()` take
+`model =`, defaulting to `"collar"` -- the production path, unchanged. Naming any
+of the seven curves differentiates that model's **stem** optimum instead. All
+eight routes are verified; none is refused.
+
+`leaf_gradient_batch()` remains bit-for-bit identical to the R route on every
+route, which is what makes a fit free to choose its model.
+
+⚠️ **Each route carries its own finite-difference step.** A difference through a
+solve has a noise floor set by the solver being differenced: the collar route
+root-finds to ~1e-15 and takes 1e-6, while the stem optimisers scan and refine to
+~1e-6 of the bracket and take 1e-3. A 1e-6 step on a stem route returns
+quantisation -- measured 0.1855 against a true 0.0551, and the wrong sign on one
+curve. Sweep the step and read the floor of the V; do not trust a single step.
+
+New: `cost_curve_names()` and `cost_curve_has_derivative()`.
+
+## `$lambda_` is an input; every curve reports an emergent lambda
+
+**BREAKING for anyone reading `$lambda_` after a ProfitMax solve.**
+`optimise_psi_stem_ProfitMax()` used to overwrite `$lambda_`, so solving it and
+then Cowan-Farquhar on the same leaf priced water at ProfitMax's number rather
+than the caller's — silently, since both are finite and plausible. `$lambda_` is
+now an input that no model code touches.
+
+In its place, **every** cost curve now reports the marginal cost of water its
+operating point implies, on one shared axis:
+
+    $lambda_emergent = (dC/dpsi) / (dE/dpsi)      umol C (kg H2O)^-1
+
+Same units as the `$lambda_` input, so the two are directly comparable — which is
+the point. Cowan-Farquhar prices water at a constant, so its emergent lambda IS
+that constant, exactly. TF24's is `lambda_TF24` at the operating point, the collar
+solve's carries the series-resistance correction, and ProfitMax's is derived from
+its normalised cost and scaled by |A|max to restore carbon units. Verified against
+finite differences of each curve's own dC/dE: worst relative error 4.9e-07.
+
+`$lambda_emergent` is read-only, and NA until an optimiser has run.
+
+⚠️ ProfitMax's `|A|max / k_span` is **not** a lambda, whatever it has been called:
+its units are carbon per unit CONDUCTANCE lost, because it multiplies
+`k(psi_soil) - k(psi)`. It is a normaliser. `$profitmax_A_max` and
+`$profitmax_k_span` are now exposed read-only so that ratio is one division away.
+
+Both older golden files stay bit-identical and the fingerprint is unchanged. The
+optimiser fixture gains a `lambda_emergent` column; no other column moves.
+
+No numbers move on any surviving path: `operating_points.tsv` and
+`primitives.tsv` are bit-identical, the behaviour fingerprint is unchanged, and
+`psi_stem_optima.tsv` loses its 576 Sperry rows with no surviving row altered.
+The equivalence the deleted entry point used to demonstrate is now asserted
+directly as an identity, which holds to 9.5e-16 rather than the 5e-3 two argmaxes
+could agree to.
+
+## Constrained optima are named for the bound that binds
+
+**BREAKING for C++ consumers.** `OperatingPointKind::PinnedWet` and `PinnedDry`
+are now `BoundarySoil` and `BoundaryCrit`, and `operating_point_kind_name()`
+returns `"boundary-soil"` and `"boundary-crit"`. No R surface: the accessor is C++
+only.
+
+The old names read backwards. `psi_stem == psi_soil` is the least-tension end of
+the feasible interval, so "wet" sounds like the comfortable case -- but it is what
+a leaf does under stress, when no interior point earns its water. Warming the
+reference grid from 25 to 40 C takes that kind from **24 rows to 80** while the
+`psi_crit` end goes from **18 to none**, so the reading inverted with temperature.
+Naming each for the bound it sits on cannot invert.
+
+`psi_stem_optima.tsv`'s `kind` column was patched in place rather than
+regenerated, so the bit-exact comparison itself proves that the other thirteen columns
+did not move: 32 cells, columns 1-9 and 11+ byte-identical.
+
+## The single-layer optimisers reach a maximum at a bound (#94)
+
+⚠️ **Results move on `optimise_psi_stem_TF` and `optimise_psi_stem_Sperry`.** Both
+maximised profit with a bare `brent_fmin`, which steps in from the bounds and
+follows one basin — so it could return neither endpoint nor the taller of two
+humps. Both failure modes are reachable and neither is rare: over a 1728-row
+driver sweep (4 gate combinations × 8 air temperatures × 6 soil potentials × 3
+deficits × 3 light levels), measured against a 2001-point scan of the same
+objective,
+
+| entry point | rows short of the reference | worst profit lost | worst ψ gap |
+|---|---|---|---|
+| `optimise_psi_stem_TF` | **866 / 1728** | 1.70e-01 | 1.77 MPa |
+| `optimise_psi_stem_Sperry` | **837 / 1728** | 4.71e-01 | 4.50 MPa |
+| `optimise_psi_stem_ProfitMax` | 29 / 1728 | 2.54e-05 | 2e-04 MPa |
+
+824 and 780 of those rows have their true optimum **at** a bound. All three now
+match the reference on **every row**, exactly.
+
+Both now route through `util::maximise_over_closed_interval`, which evaluates the
+endpoints, scans `boundary_scan_n_` cells to locate the basin, and refines with
+Brent inside the winning cell. `optimise_psi_stem_ProfitMax` keeps reusing
+`prepare_profitmax`'s own 500-point scan, so it gains no evaluations.
+
+**One part of this is easy to get wrong and was:** the refinement tolerance has to
+scale with the CELL, not with the interval. Brent terminates on bracket width, so a
+fixed `GSS_tol_abs` comparable to a cell leaves the answer at essentially the grid
+point — and then adding grid points makes the result *worse*, because cells narrow
+while the tolerance does not. Measured: with a fixed tolerance the Sperry shortfall
+count **rose** from 64 (32 cells) to 104 (64 cells); with the cell-scaled tolerance
+64 cells is exact. `optimise_psi_stem_ProfitMax` had the fixed-tolerance form and
+now uses the scaled one; that is what closes its remaining 29 rows.
+
+⚠️ **Cost, and it is not small.** `optimise_psi_stem_TF` goes **157 → 395 µs**
+(+150%, interleaved ×3, reproducible to ~1%) because its objective is cheap and 65
+extra evaluations dominate it. `optimise_psi_stem_Sperry` pays the same ~240 µs on a
+larger base (+9%). `optimise_psi_stem_ProfitMax` is unchanged (2443 vs 2445 µs) and
+so is **`find_root_collar_psi` — 77.9 µs both ways, checksum identical.** The
+production path is untouched: these three entry points require
+`supply_is_single_layer()` and plant does not call them.
+
+`boundary_scan_n_` is R-settable for callers who would rather have the speed. 32
+cells halves the added cost and is exact for TF24, leaving 6 Sperry rows short by
+3.9e-04; 8 cells leaves 17 and 7 rows short by 3.2e-03 and 3.9e-04. Below that the
+boundary half still works and the second-hump half stops being reliable.
+
+Both golden files are bit-identical — the grid uses the collar solve, so it never
+touched any of this, which is why the defect survived to be measured here.
+
+## Published vulnerability curves convert to (P50, c)
+
+`weibull_p50_c()` takes any two of `P50`, `P88`, `P95`, `P99`, `(px, plc)`, `S50`
+and `c`, and returns the pair `leaf_traits()` wants. Also exported:
+`psi_at_plc()`, `weibull_s50()` and `weibull_p50_from_b()`.
+
+⚠️ `S50` with a non-P50 quantile has **two** solutions -- `S50(c)` has an analytic
+minimum at `c = ln L`, so it is U-shaped. The upper branch is returned, with a
+message; the lower branch lands below `c = 1`, where measured angiosperm stems sit
+at 1.8-2.6.
+
+Published P50 is negative and is **refused** rather than silently negated: every
+potential in this package is a positive magnitude.
+
+## `plot_model_overview()`: the whole model in one figure
+
+New exported function, and the opening figure of `vignette("the-models")`, which
+it replaces the bare profit curve with. Four zones: the profit trade-off and the
+supply-equals-demand root-find computed from a live `Leaf`, then a schematic of
+how the parts are wired and of the soil-to-leaf path they describe.
+
+The wiring panel is what it exists for. One decision variable feeds two branches
+that meet again at the objective; the two gates are drawn dashed because both
+default off; and the arrows crossing between the columns are the interactions that
+are otherwise only stated in prose — the energy balance as the cycle it is, and
+the thermal cost reaching past it into the *benefit* column, which is the one gate
+that moves both sides of the ledger.
+
+Base graphics on a vector device, so the vignette embeds it as SVG and `pdf()`
+gives a manuscript figure whose every line and label stays a separate object.
+Shapes are aspect-corrected and box labels shrink to fit, so it holds together at
+figure sizes other than the default. No model code is touched and no number moves.
 
 # phylloptim 0.5.2
 
@@ -474,7 +1450,7 @@ could be corrected outside the package — which strengthens the case for exposi
 `dprofit`'s `gc_const`), so a solved leaf must be re-solved after changing it.
 
 **#56's second half is documented rather than fixed**, which is what that issue asks for
-regardless: `?leaf_supply_single` now states that `leaf_specific_conductance_max` is
+regardless: `?leaf_supply_singlelayer` now states that `leaf_specific_conductance_max` is
 kg-based while `series_resistance()`'s resistance is mol-based, so a caller
 parameterising the whole path carries a `molar_mass_h2o` factor between two quantities
 presented as two ends of one series. The calibration study recorded dropping that 0.018
@@ -675,7 +1651,7 @@ The thirteen `set_traits()` traits were write-only from R: `psi_crit`, `stem_b`,
 `stem_c`, `beta2`, `root_*` and the rest could be set and not read. Anything that
 had to compute a quantity the model defines in terms of one had to carry it —
 Sperry's cost normalises by `k_crit = kmax * proportion_of_conductivity(psi_crit)`,
-and a probe script in `leaf_calibration_test/sicangco-2026` therefore held a
+and a downstream replication probe therefore held a
 hard-coded `5.870283`.
 
 All thirteen are now bound **read-only**. `set_traits()` is still the only way to
@@ -888,7 +1864,7 @@ as the TF24 one is a units error the names are chosen to prevent.
 The normalised hydraulic cost is invariant to `kmax` by construction, and it is
 asserted rather than assumed: worst difference **1.1e-16** across a 3× change.
 
-Motivated by `leaf_calibration_test/sicangco-2026`, a replication of Sicangco et
+Motivated by a downstream replication of Sicangco et
 al. (2026), which needed ProfitMax measured against TF24 rather than described.
 
 ## ⚠️ Four fixes on the single-layer optimisers, and the fourth is a solver bug
@@ -1347,9 +2323,9 @@ the soil-to-collar resistances on **both** supply paths, out of the same
 and the single-potential path took its resistance at construction — so the same
 quantity arrived at a different *time* depending on which path was in force.
 
-* **`leaf_supply_single()` no longer takes `resistance`.** Migration:
-  `leaf_supply_single(resistance = r)` ->
-  `leaf_supply_single()` plus `root_network = series_resistance(r)` on
+* **`leaf_supply_singlelayer()` no longer takes `resistance`.** Migration:
+  `leaf_supply_singlelayer(resistance = r)` ->
+  `leaf_supply_singlelayer()` plus `root_network = series_resistance(r)` on
   `set_drivers()` / `leaf_solve()` / `leaf_gradient()`. The C++
   `$set_supply_single(resistance, gravity_head)` becomes
   `$set_supply_single(gravity_head)`.
@@ -1497,7 +2473,7 @@ observation. What reverses it is `P_fit` exceeding `P_model`.
 
 Both regimes are now measured. The vignette gains a scaling sweep that fits the two
 coefficients, and those coefficients — taken from 72 simulated observations —
-**predict** the companion study `leaf-calibration` (1,327 observations, 16 species,
+**predict** a companion calibration study (1,327 observations, 16 species,
 `P_fit = 40`, `P_model = 4`) to within a few percent: **638 ms predicted against
 679 measured**, break-even 12.3 fitted parameters against 13.1. There the composite
 wins **3.4×** and reaches the same optimum as the numerical gradient, and its
@@ -1554,7 +2530,7 @@ boundary you are.
 `pars` now accepts **`leaf_specific_conductance_max`** and — on the
 single-potential path — **`resistance`**, alongside the thirteen traits.
 
-They are here because a calibration fits them. Of `leaf-calibration`'s four free
+They are here because a calibration fits them. Of that study's four free
 parameters, two are traits (`cost_scale_TF24`, `beta2`) and two are these
 (`K_total` and `f_plant` reach the leaf as a conductance and a resistance), so
 restricting `pars` to `leaf_traits()` left half of that fit with no exact
@@ -1794,7 +2770,7 @@ Two decisions worth knowing:
 
 ## A bare leaf needs no root carbon profile (#5 stage 3, #32)
 
-`leaf_supply_single()` collapses the whole soil-to-collar path to one series
+`leaf_supply_singlelayer()` collapses the whole soil-to-collar path to one series
 resistance, so a leaf physiologist with a soil water potential and no root-mass
 profile can use the model without going through a plant-shaped one to get at a
 leaf. It is also what makes the optimality-model comparison meaningful, since
@@ -1803,13 +2779,13 @@ soil potential.
 
 ```r
 leaf_solve(psi_soil = 1.5, PPFD = 900,
-           supply = leaf_supply_single(resistance = 1e3))
+           supply = leaf_supply_singlelayer(resistance = 1e3))
 ```
 
 The path is chosen when the leaf is built, and **there is no
 `leaf$supply_kind <- "single"`.** Flipping a tag would leave the other path's
 state configured and silently ignored — and flipping back would make it stale
-rather than absent. `leaf_supply_multilayer()` and `leaf_supply_single()`
+rather than absent. `leaf_supply_multilayer()` and `leaf_supply_singlelayer()`
 reconfigure the object completely instead, so it can never be in a state where
 the tag and the supply disagree. `supply_kind`, `single_resistance_` and
 `single_gravity_head_` are readable but not settable, for the same reason.

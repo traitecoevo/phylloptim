@@ -110,40 +110,34 @@ inline constexpr double vol_heat_cap_air = 1200.0;
 inline constexpr double umol_par_per_joule = 4.57;
 // shortwave absorbed ~= 2 * absorbed PAR (PAR ~= 50% of shortwave; doc 3.3)
 inline constexpr double sw_abs_per_par = 2.0;
-// --- Longwave radiation (#97 / #28) ------------------------------------------
+// --- Longwave radiation (#97, #28) -------------------------------------------
 //
-// ⚠️ A `longwave_net_offset = -40.0` USED TO STAND HERE and the net longwave was
-// that constant. It is not a constant: over Tair 20-60 C the physical term runs
-// about -80 to -135 W m^-2, so a fixed -40 is out by 40-95 W m^-2 at the hot end,
-// which is where the energy balance matters most.
-//
-// The treatment now: an ISOTHERMAL net radiation (as if the leaf sat at air
-// temperature) plus a RADIATIVE CONDUCTANCE for the leaf's own departure from it.
+// The net longwave is an ISOTHERMAL net radiation (as if the leaf sat at air
+// temperature) plus a RADIATIVE CONDUCTANCE for the leaf's own departure from it:
 //
 //   Rn_iso = absorbed shortwave - (1 - ema)*sigma*Tair_K^4
 //   g_rad  = 4*eps_leaf*sigma*Tair_K^3
+//   Tleaf  = Tair + (Rn_iso - lambda*E) / (vol_heat_cap_air/ra + g_rad)
 //
-// ⚠️ THIS IS WHAT KEEPS THE BALANCE EXPLICIT, which is the objection #97 and PLAN
-// 13.2 both raise against a faithful longwave. A leaf's own emission is
-// sigma*eps*Tleaf_K^4, which would make Rn a function of the temperature being
-// solved for; linearising it about Tair turns that dependence into one extra term
-// in the DENOMINATOR of the balance. So Tleaf is still algebraic in E, dTleaf/dE
-// is still a constant, and no inner iteration is introduced. The linearisation is
-// the standard radiation-conductance one (Monteith & Unsworth; the same step
-// plantecophys takes) and is accurate to the extent that (Tleaf - Tair) is small
-// against Tair_K -- 20 K against 300 K is a 4th-order term of order 1%.
+// ⚠️ THE LINEARISATION IS WHAT KEEPS THE BALANCE EXPLICIT. A leaf emits
+// eps*sigma*Tleaf_K^4, which in Rn would make Rn a function of the temperature
+// being solved for: an inner iteration, and no constant dTleaf/dE for the collar
+// solve's implicit-function theorem. Linearised about Tair (Monteith & Unsworth;
+// the step plantecophys takes) it becomes g_rad in the DENOMINATOR, so Tleaf stays
+// affine in E. Do not move any Tleaf dependence into Rn_. The error is of order
+// (Tleaf - Tair)/Tair_K, about 1% at 20 K.
 inline constexpr double stefan_boltzmann = 5.670374419e-8;  // W m^-2 K^-4
 // Longwave emissivity of a leaf. Thermal-infrared leaf emissivities are measured
 // at 0.94-0.99; 0.97 is the usual working value.
 inline constexpr double leaf_emissivity = 0.97;
 // Clear-sky atmospheric emissivity, Brutsaert (1975) as Campbell & Norman write
-// it: ema = 0.642*(ea/Tair_K)^(1/7).
+// it: ema = 0.642*(ea/Tair_K)^(1/7), clamped at 1 (see set_physiology).
 //
-// ⚠️ ea IS IN PASCALS HERE, and getting that wrong is silent. The same relation is
-// more often quoted as `1.24*(ea/T)^(1/7)` with ea in hPa; the two agree because
-// 0.642*100^(1/7) = 0.642*1.9307 = 1.2395. With ea in kPa the coefficient would
-// have to be 1.723, and using 0.642 with kPa returns ~0.31 where the answer is
-// ~0.82 -- a plausible-looking number that triples the longwave loss.
+// ⚠️ ea MUST BE IN PASCALS. The same relation is more often quoted as
+// `1.24*(ea/T)^(1/7)` with ea in hPa; the two agree because 0.642*100^(1/7) =
+// 1.2395. Feeding kPa to 0.642 gives ~0.31 where the answer is ~0.82: finite,
+// plausible, and it triples the longwave loss. Change the unit and the
+// coefficient together, or not at all.
 inline constexpr double atmos_emissivity_coef = 0.642;
 inline constexpr double atmos_emissivity_exponent = 1.0 / 7.0;
 // Floor on the actual vapour pressure used above, Pa. `ea = esat(Tair) - D_air`
@@ -151,7 +145,6 @@ inline constexpr double atmos_emissivity_exponent = 1.0 / 7.0;
 // atmosphere but is reachable from a driver sweep; the emissivity would then be
 // NaN through pow() of a negative base.
 inline constexpr double vapour_pressure_min = 1.0;
-inline constexpr double zero_celsius_in_kelvin = 273.15;
 // fixed aerodynamic resistance fallback, s m^-1 (doc 6/7.4; used when the wind
 // model is unavailable, e.g. a bare Leaf with no wind/d set)
 inline constexpr double aerodynamic_resistance_fixed = 50.0;
@@ -166,7 +159,7 @@ inline constexpr double aerodynamic_resistance_coef = 200.0;
 inline constexpr double leaf_temp_min = -40.0;
 inline constexpr double leaf_temp_max = 70.0;
 // Floor on the leaf-to-air vapour pressure deficit (kPa) used by Fick's law
-// (PLAN 13.1). The same argument as the temperature clamp above, one step
+// The same argument as the temperature clamp above, one step
 // downstream: a leaf cooled below the dew point has a NEGATIVE deficit, and
 // dividing a positive transpiration by it reports a negative stomatal
 // conductance. Flooring keeps such points finite and unattractive rather than

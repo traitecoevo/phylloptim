@@ -7,16 +7,14 @@
 *.Rcheck/
 *.tar.gz
 
-# C++ / test harness
+# plot_model_overview() written out by hand, as vignette("the-models") suggests
+overview.pdf
+
+# C++ / test harness. The binaries under tests/cpp/ are ignored beside themselves,
+# in tests/cpp/.gitignore, so that one list matches what the Makefile builds.
 *.o
 *.so
 *.dylib
-tests/cpp/test_leaf
-tests/cpp/test_golden
-tests/cpp/test_primitives
-tests/cpp/bench_solve
-tests/cpp/bench_gradient
-tests/cpp/*.dSYM/
 
 # macOS
 .DS_Store
@@ -30,3 +28,7 @@ CMakeFiles/
 
 # Doxygen output (generated; see Doxyfile)
 docs/
+
+# Agent worktrees. A worktree checked out here records as a gitlink with no
+# .gitmodules entry, which clones as an empty directory nothing can populate.
+.claude/worktrees/

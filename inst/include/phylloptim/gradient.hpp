@@ -2,7 +2,7 @@
 #ifndef PHYLLOPTIM_GRADIENT_HPP_
 #define PHYLLOPTIM_GRADIENT_HPP_
 
-// Trait gradients, composed here rather than in R (issue #4, PLAN 11d stage 2).
+// Trait gradients, composed here rather than in R (#4).
 //
 // WHAT THIS IS. A transcription of R/gradient.R's `.gradient_ift()` and
 // `.gradient_fd()` into C++, plus a loop over observations. It computes exactly
@@ -21,7 +21,7 @@
 // ⚠️ WHAT IT DELIBERATELY IS NOT: a likelihood. The likelihood is the caller's
 // model -- sigma, robustness, hierarchy -- and baking one in would commit this
 // package to it. This returns dY/dtheta for the FOUR model parameters a leaf
-// has; the caller's parameterisation Jacobian (leaf-calibration maps 40 fitted
+// has; the caller's parameterisation Jacobian (one study maps 40 fitted
 // parameters onto 4 model ones) stays in R, vectorised over observations, where
 // it is cheap. That split is the `P_fit > P_model` structure
 // `vignette("fitting")` identified as where the exact gradient wins at all.
@@ -61,47 +61,54 @@
 namespace phylloptim {
 namespace gradient {
 
-// --- the parameter enumeration, which R indexes into --------------------------
-//
-// The fourteen traits in `Leaf::set_traits`' argument order, then the two
-// quantities a calibration fits that are not traits: the conductance driver and
-// the single-potential path's series resistance.
-//
-// ⚠️ R INDEXES THESE POSITIONS, so a reordering silently differentiates the wrong
-// parameter. `test-gradient-batch.R` reads the names back out of C++ and compares
-// them with R's, so the two cannot drift apart without a failure.
-inline constexpr int n_traits = 14;
-inline constexpr int n_pars = 16;
+// Re-exported here under the names this namespace's callers already use, so the
+// move is not a rename. One definition, in the model; two ways to reach it.
+using phylloptim::n_traits;
+using phylloptim::par_vcmax_25;   using phylloptim::par_stem_c;
+using phylloptim::par_stem_P50;   using phylloptim::par_root_c;
+using phylloptim::par_root_P50;   using phylloptim::par_TF24_beta2;
+using phylloptim::par_jmax_25;    using phylloptim::par_a;
+using phylloptim::par_curv_fact_elec_trans;
+using phylloptim::par_curv_fact_colim;
+using phylloptim::par_TF24_cost_scale; using phylloptim::par_R_d_25;
+using phylloptim::par_JS22_gamma; using phylloptim::par_CMax_a;
+using phylloptim::par_CMax_b;     using phylloptim::par_kmax;
+using phylloptim::par_resistance; using phylloptim::par_CF77_lambda;
+using phylloptim::par_TF24_floor_lambda_o;
+using phylloptim::par_PPFD;
 
-// Every index by name, so nothing below indexes `theta` with a bare integer.
-// The first `n_traits` are `set_traits`' arguments in its order, which is also
-// `leaf_traits()`'; the two non-traits follow and take a relative step.
-inline constexpr int par_vcmax_25 = 0;
-inline constexpr int par_stem_c = 1;
-inline constexpr int par_stem_b = 2;
-inline constexpr int par_psi_crit = 3;
-inline constexpr int par_root_c = 4;
-inline constexpr int par_root_b = 5;
-inline constexpr int par_root_psi_crit = 6;
-inline constexpr int par_beta2 = 7;
-inline constexpr int par_jmax_25 = 8;
-inline constexpr int par_a = 9;
-inline constexpr int par_curv_fact_elec_trans = 10;
-inline constexpr int par_curv_fact_colim = 11;
-inline constexpr int par_cost_scale_TF24 = 12;
-inline constexpr int par_R_d_25 = 13;
-inline constexpr int par_kmax = 14;
-inline constexpr int par_resistance = 15;
+// The parameter enumeration now lives in leaf_model.hpp, beside the set_traits
+// whose argument order it IS. It was here while only this file indexed it; the
+// differentiable surface indexes it too, and a list two headers can disagree
+// about is the hazard the comment above it warns of.
 
+// How long `theta` is: one entry per `par_names()` below, indexed by the same
+// enumeration.
+//
+// ⚠️ NOT `n_pars`, WHICH IS LONGER. The pack the leaf's kernels read also holds
+// slots a calibration never proposes -- the light a cohort stands in is seated
+// from the drivers -- so reading `theta` out to `n_pars` runs past its end. The
+// proposed slots come FIRST in the enumeration and `par_PPFD` is where they stop,
+// which is why this is spelled as that index rather than as a count to keep in
+// step by hand.
+inline constexpr int n_theta = par_PPFD;
+
+// ⚠️ THESE ARE THE SLOTS A CALIBRATION PROPOSES, which is fewer than the pack
+// holds: `par_PPFD` is seated per cohort or per observation from the drivers and
+// is never fitted, so it has a slot in the enumeration and no name here. R's
+// `.gradient_par_names()` is compared against this list by
+// `test-gradient-batch.R`, so the two cannot drift apart without a failure.
 inline const std::vector<std::string>& par_names() {
   static const std::vector<std::string> names{
-      "vcmax_25",  "stem_c",              "stem_b",
-      "psi_crit",  "root_c",              "root_b",
-      "root_psi_crit", "beta2",           "jmax_25",
-      "a",         "curv_fact_elec_trans", "curv_fact_colim",
-      "cost_scale_TF24", "R_d_25",
+      "vcmax_25",  "stem_c",              "stem_P50",
+      "root_c",    "root_P50",            "TF24_beta2",
+      "jmax_25",   "a",                   "curv_fact_elec_trans",
+      "curv_fact_colim", "TF24_cost_scale", "R_d_25",
+      "JS22_gamma", "CMax_a", "CMax_b",
       "leaf_specific_conductance_max",
-      "resistance"};
+      "resistance",
+      "CF77_lambda_",
+      "TF24_floor_lambda_o"};
   return names;
 }
 
@@ -119,6 +126,7 @@ inline const std::vector<std::string>& par_names() {
 // the carbon that reaches its mass budget, so until #87 the two sets were
 // disjoint and no gradient this package produced reached a demographic model.
 inline constexpr int n_outputs = 5;
+inline constexpr int out_psi_stem = 2;
 inline constexpr int out_collar = 3;
 inline constexpr int out_profit = 4;
 
@@ -137,6 +145,82 @@ inline const std::vector<std::string>& output_names() {
 // output in this list has to be a field R COPIES; `uptake` is one R sums over
 // the finite soil layers, so adding it means reproducing that summation -- and
 // its order -- on this side too.
+// --- which model's optimum is being differentiated ---------------------------
+//
+// `kCollar` is the production path: the TF24 cost maximised over the root-collar
+// potential, which is what this file did unconditionally. Anything >= 0 is a
+// `Leaf::CostCurve` value and selects a STEM route -- psi_stem with the upstream
+// potential pinned at psi_soil.
+//
+// ⚠️ THE COLLAR BRANCH IS TEXTUALLY WHAT IT ALWAYS WAS. These wrappers exist so
+// the six call sites below stop naming a solver, not to change one: the collar
+// arms call exactly the same functions in the same order, which is what keeps the
+// R-versus-C++ bit-for-bit contract and the golden files intact.
+inline constexpr int kCollar = -1;
+
+// Seat the model on the leaf ONCE, at the top of a gradient, rather than naming a
+// curve at each of the calls below. `Settings::curve` is still an int here --
+// nothing outside this file sees it -- but the Leaf's own API takes names only, so
+// this is the single place the two representations meet.
+//
+// ⚠️ SEAT IT EVEN ON THE PRESCRIBED PATH, which never calls `route_solve`. The
+// stem entry points read the seated curve, so without this a prescribed gradient
+// would silently differentiate whatever model the leaf was last used for.
+inline void route_seat(Leaf& l, int curve) {
+  l.set_model(curve < 0 ? Leaf::CostCurve::TF24
+                        : static_cast<Leaf::CostCurve>(curve),
+              curve < 0);
+}
+
+inline void route_solve(Leaf& l, int curve) {
+  if (curve < 0) {
+    l.find_root_collar_psi();
+  } else {
+    l.optimise();
+  }
+}
+
+inline double route_psi(const Leaf& l, int curve) {
+  return curve < 0 ? l.opt_root_psi_ : l.opt_psi_stem_;
+}
+
+inline void route_evaluate(Leaf& l, int curve, double psi) {
+  if (curve < 0) {
+    l.evaluate_root_collar_psi(psi);
+  } else {
+    l.evaluate_psi_stem_at(psi);
+  }
+}
+
+// ⚠️ THE FLAG IS THE POINT; the unchecked form is this with a null. Both routes
+// return a hard 0.0 SENTINEL on their shut-down and reversed-gradient exits, and a
+// bare zero is indistinguishable from a stationary point -- see
+// Leaf::dprofit_droot_collar_psi's header. There used to be two functions here,
+// the shorter one being a call to the longer with `nullptr`; there is one now.
+inline double route_dprofit_checked(Leaf& l, int curve, double psi,
+                                    bool* feasible = nullptr) {
+  if (curve < 0) {
+    return l.dprofit_droot_collar_psi(psi, feasible);
+  }
+  const std::vector<double> r = l.dprofit_dpsi_stem_checked(psi);
+  if (feasible != nullptr) {
+    *feasible = r[1] != 0.0;
+  }
+  return r[0];
+}
+
+inline double route_dprofit(Leaf& l, int curve, double psi) {
+  return route_dprofit_checked(l, curve, psi, nullptr);
+}
+
+// ⚠️ WHICH OUTPUT IS THE DECISION VARIABLE MOVES WITH THE ROUTE. On the collar
+// route `collar` IS psi*, so `dcollar/dtheta` is `dpsi* / dtheta` and assigned
+// rather than differenced. On a stem route `psi_stem` plays that part and the
+// collar is never solved for.
+inline int route_decision(int curve) {
+  return curve < 0 ? out_collar : out_psi_stem;
+}
+
 inline void outputs(const Leaf& l, double* y) {
   y[0] = l.assim_colimited_;
   y[1] = l.stom_cond_CO2_;
@@ -155,9 +239,9 @@ inline void outputs(const Leaf& l, double* y) {
 // -- the same class of error as differentiating at a pinned optimum, and just as
 // plausible-looking. The clamp is a min/max, so an unclamped target comes back
 // bit-identical and a tolerance would only blur the detector.
-inline bool outputs_at(Leaf& l, double psi, double* y) {
-  l.evaluate_root_collar_psi(psi);
-  if (!util::identical(l.opt_root_psi_, psi)) {
+inline bool outputs_at(Leaf& l, double psi, double* y, int curve = kCollar) {
+  route_evaluate(l, curve, psi);
+  if (!util::identical(route_psi(l, curve), psi)) {
     return false;
   }
   outputs(l, y);
@@ -254,12 +338,28 @@ struct Settings {
   double stationarity_tol = 1e-8;
   Method method = Method::Auto;
   bool fast_stem_curve = true;
+  // Which model's optimum to differentiate. `kCollar` is the production path and
+  // the default, so an existing caller is unaffected.
+  int curve = kCollar;
+  // ⚠️ THE STEP THE FINITE-DIFFERENCE ARM USES, separately from `step`. That arm
+  // differences the SOLVE, so it has to clear the solver's own resolution: the
+  // collar route root-finds `dprofit == 0` to ~1e-15, while the stem routes scan
+  // and refine to ~1e-06 of the bracket. Differencing a stem solve at 1e-06
+  // returns quantisation -- measured, the wrong SIGN for JW26. `step` still drives
+  // the composite, which perturbs at fixed psi and never re-solves.
+  double fd_step = 1e-6;
+  // |A|max held fixed across perturbations, for ProfitMax's `Scaled` link. Zero
+  // means "not pinned"; the caller seeds it from the base solve.
+  // ProfitMax only: re-solve `|A|max` after each perturbation, because `apply()`
+  // clears it. Named for what it does rather than for a value to hold, since
+  // holding one is exactly what made this a partial derivative.
+  bool resolve_profitmax = false;
 };
 
 // A collar potential the caller imposes, in place of the one `at` would solve
 // for, plus how that collar responds to each parameter (#88).
 //
-// ⚠️ `dpsi_dtheta` is npars long and in `pars` order, NOT n_pars: it is one value
+// ⚠️ `dpsi_dtheta` is npars long and in `pars` order, NOT n_theta: it is one value
 // per parameter ASKED FOR, because that is the vector a caller integrating its
 // own sensitivity state is carrying. Null means zero -- the partial at fixed
 // collar -- which is a different statement from the solving path's "derive it".
@@ -319,7 +419,7 @@ struct Result {
 // `only` names the single parameter that has moved, or -1 for "all of them".
 inline void apply(Leaf& l, const double* theta, const Drivers& d, bool single,
                   int only, bool fast_stem_curve) {
-  // THE FAST PATH FOR stem_b, which is the whole of PLAN 11f. The stem
+  // THE FAST PATH FOR stem_b. The stem
   // cumulative-vulnerability integral is homogeneous of degree 1 in stem_b, so
   // the spline for a perturbed stem_b is the existing one with its argument
   // rescaled and the 11.9 us of incomplete gammas a rebuild spends is
@@ -330,44 +430,55 @@ inline void apply(Leaf& l, const double* theta, const Drivers& d, bool single,
   // nowhere else, which is why the argument exists rather than the function
   // guessing. `stem_c` is deliberately not here: it has no such identity, and
   // reading the curve from its closed form instead differentiates a slightly
-  // different model and disagrees by 3e-4 (PLAN 11f).
-  if (fast_stem_curve && only == par_stem_b) {
-    l.perturb_stem_b(theta[par_stem_b]);
+  // different model and disagrees by 3e-4.
+  if (fast_stem_curve && only == par_stem_P50) {
+    l.perturb_stem_P50(theta[par_stem_P50]);
     return;
   }
   // AND THE WAY BACK OUT OF IT (#74), which is what makes the shortcut worth its
   // 24.5x through a batch instead of 2.4x. `set_traits()` below rebuilds the stem
   // curve whenever `stem_b != stem_b_spline_`, and that third clause is what
   // returns a shortcut-displaced leaf to a rebuilt one -- so a restore that
-  // followed a `perturb_stem_b()` always paid for a rebuild, once per observation,
+  // followed a `perturb_stem_P50()` always paid for a rebuild, once per observation,
   // whatever `pars` contained. Undoing the displacement WITH the shortcut leaves
   // the clause false and the splines alone.
   //
-  // Bit-identical by construction rather than by measurement, and the reason is
-  // that `perturb_stem_b()` writes `stem_b` and nothing else: the splines here ARE
-  // the ones built at `stem_b_spline_`, not a rescaled copy of them, and at
-  // `stem_b == stem_b_spline_` all four `stem_curve_*` accessors take their
-  // scale == 1 branch and read them directly.
+  // Bit-identical by construction rather than by measurement. Everything
+  // `perturb_stem_P50()` writes -- `stem_P50`, and `stem_b`/`psi_crit` derived
+  // from it -- is a pure function of `(stem_P50, stem_c)` computed by the same
+  // expression `set_traits()` uses, so restoring the base P50 restores all three
+  // to the base bit pattern. The splines here ARE the ones built at
+  // `stem_b_spline_`, not a rescaled copy, and at `stem_b == stem_b_spline_` all
+  // four `stem_curve_*` accessors take their scale == 1 branch and read them
+  // directly.
   //
   // ⚠️ The two guards are both load-bearing, and neither is an optimisation.
-  // Displacement can only be created by `perturb_stem_b()`, which is sound only
+  // Displacement can only be created by `perturb_stem_P50()`, which is sound only
   // when everything else is already at base -- so a displaced leaf is one whose
-  // psi_crit/stem_c/root_* are the values `stem_b_spline_` was validated against,
-  // and `perturb_stem_b()`'s own domain checks cannot fire on the way back.
-  // Without the equality test that argument is gone: in a batch with a theta
-  // MATRIX the next row's restore moves stem_b somewhere new, and pushing it
-  // through `perturb_stem_b()` would check it against the previous row's psi_crit
-  // and could throw where `set_traits()` succeeds.
+  // stem_c/root_* are the values `stem_b_spline_` was validated against. Without
+  // the equality test that argument is gone: in a batch with a theta MATRIX the
+  // next row's restore moves stem_b somewhere new, and pushing it through the
+  // shortcut would rescale off a spline built for a different curve.
+  //
+  // The equality is on the DERIVED scale, not on the trait, because
+  // `stem_b_spline_` records a `b`. Same expression as the one inside
+  // `perturb_stem_P50()`, so a genuine round trip compares exactly equal.
   if (fast_stem_curve && l.stem_b != l.stem_b_spline_ &&
-      theta[par_stem_b] == l.stem_b_spline_) {
-    l.perturb_stem_b(theta[par_stem_b]);
+      Leaf::weibull_b_from_P50(theta[par_stem_P50], l.stem_c) ==
+          l.stem_b_spline_) {
+    l.perturb_stem_P50(theta[par_stem_P50]);
   }
-  l.set_traits(theta[par_vcmax_25], theta[par_stem_c], theta[par_stem_b],
-               theta[par_psi_crit], theta[par_root_c], theta[par_root_b],
-               theta[par_root_psi_crit], theta[par_beta2], theta[par_jmax_25],
+  l.set_traits(theta[par_vcmax_25], theta[par_stem_c], theta[par_stem_P50],
+               theta[par_root_c], theta[par_root_P50],
+               theta[par_TF24_beta2], theta[par_jmax_25],
                theta[par_a], theta[par_curv_fact_elec_trans],
-               theta[par_curv_fact_colim], theta[par_cost_scale_TF24],
-               theta[par_R_d_25]);
+               theta[par_curv_fact_colim], theta[par_TF24_cost_scale],
+               theta[par_R_d_25], theta[par_JS22_gamma],
+               theta[par_CMax_a], theta[par_CMax_b]);
+  // Not traits, so they are set directly rather than through set_traits -- and
+  // nothing is derived from either, so a bare write leaves no stale state behind.
+  l.CF77_lambda_ = theta[par_CF77_lambda];
+  l.TF24_floor_lambda_o = theta[par_TF24_floor_lambda_o];
   if (single) {
     // R's `series_resistance()`: a default-constructed network carrying one
     // series resistance in `r_R_V_sum`, which is that field's own meaning with
@@ -393,7 +504,7 @@ inline void apply(Leaf& l, const double* theta, const Drivers& d, bool single,
 // The loops restore base once at the END, not between parameters, because every
 // parameter's setter normally goes through the full `set_traits()` +
 // `set_physiology()` path and restores everything on the way. The `stem_b`
-// shortcut is the one that does not: `perturb_stem_b()` rescales the stem spline
+// shortcut is the one that does not: `perturb_stem_P50()` rescales the stem spline
 // and touches nothing else, which is sound only if the rest of the object is
 // already at base. So a `stem_b` that is not the FIRST entry of `pars` was
 // differentiated at a point displaced by one step in whichever parameter
@@ -410,7 +521,7 @@ inline void apply(Leaf& l, const double* theta, const Drivers& d, bool single,
 // stem_b". `root_b` obeys the same homogeneity identity and would get the same
 // treatment, at which point a name-based test would silently stop covering it.
 inline bool takes_shortcut(int par, const Settings& s) {
-  return s.fast_stem_curve && par == par_stem_b;
+  return s.fast_stem_curve && par == par_stem_P50;
 }
 
 // The implicit-function composite. Two perturbed evaluations per parameter,
@@ -427,7 +538,7 @@ inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
                          double psi_star, double H, const double* dY_dpsi,
                          const Settings& s, const double* dpsi_dtheta,
                          bool envelope, double* M_out, double* out) {
-  double th[n_pars];
+  double th[n_theta];
   double up[1 + n_outputs];
   double dn[1 + n_outputs];
   bool at_base = true;
@@ -441,13 +552,22 @@ inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
     for (int side = 0; side < 2; ++side) {
       // Up first, then down: R evaluates `up <- side(1)` before `dn <- side(-1)`
       // and both mutate the leaf.
-      std::copy(theta, theta + n_pars, th);
+      std::copy(theta, theta + n_theta, th);
       th[p] = side == 0 ? theta[p] + h : theta[p] - h;
       apply(l, th, d, single, p, s.fast_stem_curve);
       double* dst = side == 0 ? up : dn;
       // Evaluate first, then read dprofit at the same fixed collar -- R's order,
       // and `evaluate_root_collar_psi` is what seats the state `dprofit` reads.
-      if (!outputs_at(l, psi_star, dst + 1)) {
+      if (s.resolve_profitmax) {
+        // `apply()` above cleared ProfitMax's normaliser, so it has to be put back
+        // before anything reads the objective. RE-SOLVED, not pinned at the base
+        // point: |A|max is found by a root-find now rather than by a scan, so it is
+        // differentiable in the traits and letting it follow them makes this the
+        // TOTAL derivative -- which is what a fit needs. Must match R/gradient.R's
+        // `pinned$reseat`, which calls the same thing.
+        l.prepare_profitmax();
+      }
+      if (!outputs_at(l, psi_star, dst + 1, s.curve)) {
         util::stop_infeasible(
             "gradient_active_set",
             "leaf_gradient(): perturbing `" + par_names()[std::size_t(p)] +
@@ -456,7 +576,16 @@ inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
                    "on an active-set boundary; lower `stationarity_tol` or "
                    "difference the solve directly.");
       }
-      dst[0] = l.dprofit_droot_collar_psi(psi_star);
+      // ⚠️ AGAIN BEFORE THE DERIVATIVE READ, because R re-seats inside EVERY
+      // accessor rather than once per perturbation, and `prepare_profitmax()`
+      // mutates the leaf's rate fields while it maximises. Once here and twice
+      // there leaves the two reading `dprofit` at different states: measured, the
+      // batch and the one-observation route then agreed only to 3e-05 where they
+      // are required to agree bit-for-bit.
+      if (s.resolve_profitmax) {
+        l.prepare_profitmax();
+      }
+      dst[0] = route_dprofit(l, s.curve, psi_star);
     }
     // M = d2profit/dpsi dtheta, with psi held FIXED at psi*.
     const double M = (up[0] - dn[0]) / (2.0 * h);
@@ -470,7 +599,7 @@ inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
     // its direct term is zero by construction and the composite reduces to
     // dpsi*/dtheta. Set explicitly rather than left as the difference of two
     // identical numbers.
-    out[k * n_outputs + out_collar] = d_psi;
+    out[k * n_outputs + route_decision(s.curve)] = d_psi;
     // The envelope theorem, ASSIGNED for the same reason `collar` is: profit's
     // indirect term is identically zero at a stationary point, so stating that
     // beats multiplying a measured near-zero by dpsi/dtheta. It is also immune
@@ -491,7 +620,7 @@ inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
 inline void gradient_fd(Leaf& l, const double* theta, const Drivers& d,
                         bool single, const int* pars, std::size_t npars,
                         const Settings& s, double* out) {
-  double th[n_pars];
+  double th[n_theta];
   double up[n_outputs];
   double dn[n_outputs];
   bool at_base = true;
@@ -501,12 +630,12 @@ inline void gradient_fd(Leaf& l, const double* theta, const Drivers& d,
       apply(l, theta, d, single, -1, s.fast_stem_curve);
     }
     at_base = false;
-    const double h = step_for(p, theta[p], s.step);
+    const double h = step_for(p, theta[p], s.fd_step);
     for (int side = 0; side < 2; ++side) {
-      std::copy(theta, theta + n_pars, th);
+      std::copy(theta, theta + n_theta, th);
       th[p] = side == 0 ? theta[p] + h : theta[p] - h;
       apply(l, th, d, single, p, s.fast_stem_curve);
-      l.find_root_collar_psi();
+      route_solve(l, s.curve);
       outputs(l, side == 0 ? up : dn);
     }
     for (int j = 0; j < n_outputs; ++j) {
@@ -527,6 +656,11 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
   out.reset(npars);
 
   apply(l, theta, d, single, -1, s.fast_stem_curve);
+  // Seat the model before anything reads it. `apply` runs `set_traits`, which
+  // clears the solved state but NOT the seated curve, so this could be hoisted
+  // out of the per-observation loop -- it is here because `at()` is a public
+  // entry point in its own right and must not depend on `batch` having run.
+  route_seat(l, s.curve);
 
   // Two ways in. The default SOLVES for the collar potential; `prescribed`
   // IMPOSES one, which is what a caller tracking the optimum rather than
@@ -537,20 +671,20 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
   // every use of it below actually means.
   bool clamped = false;
   if (prescribed != nullptr) {
-    l.evaluate_root_collar_psi(prescribed->psi);
+    route_evaluate(l, s.curve, prescribed->psi);
     // Exact equality, for the reason `outputs_at` documents above.
-    clamped = !util::identical(l.opt_root_psi_, prescribed->psi);
+    clamped = !util::identical(route_psi(l, s.curve), prescribed->psi);
   } else {
-    l.find_root_collar_psi();
+    route_solve(l, s.curve);
   }
-  const double psi_star = l.opt_root_psi_;
+  const double psi_star = route_psi(l, s.curve);
   out.psi = psi_star;
   outputs(l, out.value);
 
   // Is the composite's premise true HERE? Stationarity is what the whole
   // derivation rests on and it fails at a pinned optimum, where psi* is a bound,
   // dprofit is not zero at the answer, and -M/H is not the bound's derivative.
-  // The formula does not fail loudly: at a wet-pinned point the true gradient is
+  // The formula does not fail loudly: at a boundary-soil point the true gradient is
   // ~1e-08 and the bare composite returns O(1).
   //
   // So the premise is TESTED. The test is the implied Newton step
@@ -566,11 +700,12 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
   // the prescribed path does not divide by `H`, so it would adopt the sentinel as
   // if it were dprofit/dpsi.
   bool resid_feasible = false;
-  const double resid = l.dprofit_droot_collar_psi(psi_star, &resid_feasible);
+  const double resid =
+      route_dprofit_checked(l, s.curve, psi_star, &resid_feasible);
   // Named halves: `f(a) - f(b)` has unspecified operand order in C++ and
   // left-to-right order in R, and `dprofit_droot_collar_psi` mutates the leaf.
-  const double d_hi = l.dprofit_droot_collar_psi(psi_star + h_psi);
-  const double d_lo = l.dprofit_droot_collar_psi(psi_star - h_psi);
+  const double d_hi = route_dprofit(l, s.curve, psi_star + h_psi);
+  const double d_lo = route_dprofit(l, s.curve, psi_star - h_psi);
   const double H = (d_hi - d_lo) / (2.0 * h_psi);
   // H == 0 with resid == 0 is the shut-down signature: dprofit returns a
   // sentinel zero there rather than a derivative, so the ratio would be 0/0.
@@ -620,25 +755,28 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
                "has nothing to stand on. This is a shut-down or otherwise "
                "determined operating point; use method = \"auto\".");
   }
+  // ⚠️ REFUSED BY NAME, as R/gradient.R does and in the same place. The step
+  // check below caught every pinned row only while psi* sat 1e-06 of a bracket
+  // width from a bound found to 1e-04; with the bound solved exactly it can fit.
+  if (use_ift && prescribed == nullptr && out.status == Status::Pinned) {
+    util::stop("leaf_gradient(): method = \"ift\" was asked for at a pinned "
+               "optimum, where psi* is held by a bound and the "
+               "implicit-function composite does not apply. Use "
+               "method = \"auto\".");
+  }
 
   double dY_dpsi[n_outputs];
   if (use_ift) {
-    // dY/dpsi at fixed traits, and a SECOND, INDEPENDENT detector of a pinned
-    // optimum. At a pinned point psi* sits one step-in fraction (1e-06 of the
-    // bracket width) from its bound, so a step of `step * psi` crosses it
-    // whenever the bracket is narrower than psi -- which every pinned row in
-    // this package's grid is. Measured, that catches all 42 pinned rows and all
-    // 48 shut-down ones on its own.
-    //
-    // It is NOT a substitute for the stationarity test: it fires only when the
-    // bracket is narrow, so a pinned optimum on a wide bracket would pass it.
+    // dY/dpsi at fixed traits. It also catches SOME pinned optima -- psi* within
+    // h_psi of a bound -- but not all, and nothing relies on it for that: a
+    // forced Method::Ift at a pinned point is refused by name above.
     double hi[n_outputs];
     double lo[n_outputs];
     // Both, unconditionally, before the test -- R computes `hi` and `lo` on
     // consecutive lines and only then checks either, and each call moves the
     // leaf.
-    const bool hi_ok = outputs_at(l, psi_star + h_psi, hi);
-    const bool lo_ok = outputs_at(l, psi_star - h_psi, lo);
+    const bool hi_ok = outputs_at(l, psi_star + h_psi, hi, s.curve);
+    const bool lo_ok = outputs_at(l, psi_star - h_psi, lo, s.curve);
     if (!hi_ok || !lo_ok) {
       if (prescribed != nullptr) {
         // The same reasoning as the clamp on psi itself, one step out: a psi
@@ -671,8 +809,8 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
       //
       // ⚠️ THIS IS THE READER #87 SAID DID NOT EXIST YET. Until the prescribed
       // path landed, the only consumer was `gradient_ift` with `envelope` false --
-      // a forced Method::Ift at a pinned point, which throws at all 42 pinned rows
-      // of the grid. A prescribed psi away from the optimum is not stationary, so
+      // a forced Method::Ift at a pinned point, which is refused. A prescribed psi
+      // away from the optimum is not stationary, so
       // it takes this branch for real, and the exactness now matters.
       dY_dpsi[out_profit] = resid;
     }
@@ -739,7 +877,7 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
 
 // --- the batch ---------------------------------------------------------------
 //
-// `theta` is a COLUMN-MAJOR matrix of `theta_nrow` x n_pars, as R hands one
+// `theta` is a COLUMN-MAJOR matrix of `theta_nrow` x n_theta, as R hands one
 // over: either one row per observation, or exactly one row shared by all of
 // them.
 //
@@ -748,7 +886,7 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
 // cannot handle -- that is what a proposal distribution does -- and that has to
 // cost those rows rather than the whole dataset. Throwing would take out a
 // likelihood evaluation, and with it the draw, for one observation the sampler
-// was entitled to reject on its own. `leaf_predict()` isolates per row for the
+// was entitled to reject on its own. `batch()` below isolates per row for the
 // same reason.
 //
 // A failed row's gradient is ALL NA rather than partially filled. A parameter
@@ -770,11 +908,11 @@ inline std::vector<Result> batch(Leaf& l, const double* theta,
                                 const double* dpsi_dtheta = nullptr) {
   const std::size_t n = drivers.size();
   std::vector<Result> out(n);
-  double th[n_pars];
+  double th[n_theta];
   std::vector<double> dpsi(npars);
   for (std::size_t i = 0; i < n; ++i) {
     const std::size_t row = theta_nrow == 1 ? 0 : i;
-    for (int j = 0; j < n_pars; ++j) {
+    for (int j = 0; j < n_theta; ++j) {
       th[j] = theta[row + std::size_t(j) * theta_nrow];
     }
     Prescribed p;
@@ -797,7 +935,7 @@ inline std::vector<Result> batch(Leaf& l, const double* theta,
       out[i].grad.assign(npars * n_outputs, util::na_value);
       // Put the leaf back at this row's base parameters before the next one.
       // The next row's own `apply(only = -1)` would do it -- `set_traits` forces
-      // the vulnerability rebuild that `perturb_stem_b` displaced -- but the
+      // the vulnerability rebuild that `perturb_stem_P50` displaced -- but the
       // LAST row has no next one, and a batch that ended on the fast path would
       // hand back a leaf quietly running on a rescaled stem curve (hazard 8).
       try {

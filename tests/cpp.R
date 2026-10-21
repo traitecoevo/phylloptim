@@ -1,4 +1,4 @@
-# Run the C++ suite under `R CMD check` (issue #12, PLAN item 15).
+# Run the C++ suite under `R CMD check` (#12).
 #
 # This package ships headers and nothing else -- no R code, no compiled code --
 # so without this file `R CMD check` validates essentially nothing. The point is
@@ -102,10 +102,17 @@ includes <- c("-I", shQuote(deps[["phylloptim"]]),
               "-isystem", shQuote(deps[["odelia"]]),
               "-isystem", shQuote(deps[["BH"]]))
 
-# ⚠️ Every program under tests/cpp/ that has a golden file belongs in this list, and
-# in tests/cpp/Makefile, CMakeLists.txt and cpp-tests.yml. #64 is what a program in
-# none of them turns into.
-for (prog in c("test_leaf", "test_golden", "test_primitives")) {
+# ⚠️ Every program under tests/cpp/ belongs in this list, and in tests/cpp/Makefile,
+# CMakeLists.txt and cpp-tests.yml. #64 is what a program in none of them turns into.
+#
+# test_transpose is the one exclusion and it cannot be lifted here. It records, so it
+# needs the tape out of odelia's src/Tape.cpp -- 129 undefined references without it,
+# xad::Tape<double,1>::active_tape_ among them -- and an INSTALLED odelia ships
+# headers only. The one other route, linking the installed odelia.so, drags libR.so
+# in behind it and so needs an R configured --enable-R-shlib, which a consumer's need
+# not be. CMakeLists.txt states the same exclusion as `if(EXISTS .../src/Tape.cpp)`,
+# and `make all` and cpp-tests.yml both run it from a checkout, where the tape is.
+for (prog in c("test_leaf", "test_supplied_rows", "test_golden", "test_primitives")) {
   src <- paste0(prog, ".cpp")
   message("\n== ", src)
   status <- system2(cxx, c(cxxstd, "-O2", "-Wall", "-Wextra",

@@ -17,11 +17,13 @@ test_that("leaf_traits() and leaf_control() partition the C++ constructor", {
   covered <- c(names(leaf_traits()), names(leaf_control()))
 
   expect_setequal(setdiff(ctor_args, covered), character(0))
-  # `R_d_25` is a trait the constructor does not take: plant's own RcppR6 bindings
-  # pin this constructor by arity, so `leaf_model()` assigns the field afterwards.
-  # The test below checks that assignment really happens.
+  # `R_d_25`, `JS22_gamma` and the two `CMax` parameters are traits the constructor
+  # does not take: plant's own RcppR6 bindings pin this constructor by arity, so
+  # `leaf_model()` assigns the fields afterwards. The test below checks those
+  # assignments really happen.
   expect_setequal(setdiff(covered, ctor_args),
-                  c("R_d_25", "integration_rule", "integration_tol"))
+                  c("R_d_25", "JS22_gamma", "CMax_a", "CMax_b",
+                    "integration_rule", "integration_tol"))
   expect_length(intersect(names(leaf_traits()), names(leaf_control())), 0)
 
   # And the split is the one the issue asked for: tolerances on the control
@@ -35,15 +37,15 @@ test_that("every trait can be read back from the object (#95)", {
   # The traits were `set_traits()` arguments and nothing else, so from R they could
   # be written and not read. A caller who needed one to compute a derived quantity
   # -- Sperry's cost normalises by `k_crit = kmax * proportion_of_conductivity(psi_crit)`
-  # -- had to carry it themselves, and in leaf_calibration_test/sicangco-2026 that
+  # -- had to carry it themselves, and in one downstream study that
   # was a hard-coded 5.870283 in a probe script.
   #
   # This is a COVERAGE test on purpose: it asserts the readable set contains the
   # whole trait list rather than naming four fields, so a trait added to
   # leaf_traits() without a binding fails here instead of being noticed by the next
   # caller who needs it.
-  traits <- leaf_traits(vcmax_25 = 111, stem_b = 3.1, psi_crit = 4.4, beta2 = 1.7,
-                        root_b = 3.3, root_psi_crit = 4.9, a = 0.28)
+  traits <- leaf_traits(vcmax_25 = 111, stem_P50 = 3.1, TF24_beta2 = 1.7,
+                        root_P50 = 3.3, a = 0.28)
   l <- leaf_model(traits)
   for (nm in names(traits)) {
     expect_true(nm %in% names(l), label = paste("Leaf binds", nm))
@@ -53,17 +55,28 @@ test_that("every trait can be read back from the object (#95)", {
   # ⚠️ Read-only, and that is hazard 10 rather than tidiness: changing a trait means
   # rebuilding up to two vulnerability splines and clearing the solved operating
   # point, so a bare write would leave the object describing two different curves.
-  # `R_d_25` is the documented exception -- it is settable because plant's bindings
-  # pin the generated constructor by arity, so `leaf_model()` applies it afterwards.
-  for (nm in setdiff(names(traits), "R_d_25")) {
+  # `R_d_25` and `JS22_gamma` are the documented exceptions -- both are settable
+  # because plant's bindings pin the generated constructor by arity, so
+  # `leaf_model()` applies them afterwards.
+  #
+  # ⚠️ Settable is only SAFE for these two because nothing is derived from either.
+  # `JS22_gamma` is read at call time by `hydraulic_cost_JS22` -- no spline, no
+  # temperature cache, no precomputation -- so a bare write cannot leave the object
+  # describing two different models the way a bare `stem_P50` write would. Do not
+  # read this exemption as permission for the next trait.
+  for (nm in setdiff(names(traits), c("R_d_25", "JS22_gamma", "CMax_a", "CMax_b"))) {
     expect_error(l[[nm]] <- 1, "read-only", label = paste(nm, "rejects a write"))
   }
 
   # And the read tracks set_traits(), which is what makes it a read-back rather
   # than a second copy of the constructor arguments.
-  set_traits(l, leaf_traits(psi_crit = 5.0, stem_b = 3.9))
-  expect_identical(l$psi_crit, 5.0)
-  expect_identical(l$stem_b, 3.9)
+  set_traits(l, leaf_traits(stem_P50 = 3.9))
+  expect_identical(l$stem_P50, 3.9)
+
+  # The DERIVED pair is bound too, and moves with the trait rather than being
+  # settable beside it -- which is the whole reason they are no longer traits.
+  expect_identical(l$stem_b, 3.9 / log(2)^(1 / l$stem_c))
+  expect_identical(l$psi_crit, l$stem_b * log(1 / 0.05)^(1 / l$stem_c))
 })
 
 test_that("conductance is reported to water as well as to CO2 (#56)", {
@@ -110,12 +123,17 @@ test_that("the H2O:CO2 diffusion ratio is settable, and 1.67 changes nothing (#5
 })
 
 test_that("leaf_model() and the raw Leaf() constructor agree", {
-  # The reason leaf_model() exists is that mapping 13 traits and 4 tolerances
-  # onto 17 positional slots is exactly the kind of thing that goes wrong once
+  # The reason leaf_model() exists is that mapping 11 traits and 4 tolerances
+  # onto 15 positional slots is exactly the kind of thing that goes wrong once
   # and is never noticed. So check it against a hand-written positional call
   # with the same values, on a full solve rather than on the arguments.
-  raw <- Leaf(96, 2.680147, 3.898245, 5.870283, 2.680147, 3.898245, 5.870283,
-              1.5, 157.44, 0.30, 0.7, 0.99, 1e-3, 100, 1e-3, 1000, 7.5)
+  # ⚠️ THE CONTROL'S OWN VALUE IN THE 12th SLOT, NOT A LITERAL. It is the knot
+  # count, and a number pinned here compares a curve at that resolution against
+  # one leaf_model() built at the shipped default -- so the two disagree for the
+  # fixture's reason and this test reports a mapping error that is not there.
+  raw <- Leaf(96, 2.680147, 3.4, 2.680147, 3.4,
+              1.5, 157.44, 0.30, 0.7, 0.99, 1e-3,
+              leaf_control()$vulnerability_curve_ncontrol, 1e-3, 1000, 7.5)
   raw$initialize_integrator(21, 1e-8)
   friendly <- leaf_model()
 
@@ -131,16 +149,16 @@ test_that("a non-default trait reaches the model through leaf_model()", {
   # The previous test would pass even if leaf_model() ignored `traits` entirely
   # and always used the defaults, because the defaults are what it compares. So
   # move one and check it lands in the right slot -- vcmax_25, which raises
-  # assimilation, against stem_b, which moves the vulnerability curve.
+  # assimilation, against stem_P50, which moves the vulnerability curve.
   base <- leaf_solve(psi_soil = 2.0, PPFD = 900)
   hi_vcmax <- leaf_solve(psi_soil = 2.0, PPFD = 900,
                          traits = leaf_traits(vcmax_25 = 150))
   expect_gt(hi_vcmax$A, base$A)
 
-  # ⚠️ `psi_crit` MOVES WITH `stem_b`, and it has to: at stem_b = 2.0 the curve's P99
-  # is 3.5359, so the default psi_crit of 5.870283 is off the end of it and #38's
-  # check refuses the pair. 3.0 is roughly the P95 that stem_b implies (3.0118).
-  brittle <- leaf_model(leaf_traits(stem_b = 2.0, psi_crit = 3.0))
+  # One trait moves the whole curve: `stem_b` and `psi_crit` are quantiles of it
+  # and follow, so a brittle stem is stated once rather than as a pair that has to
+  # be kept consistent by hand.
+  brittle <- leaf_model(leaf_traits(stem_P50 = 2.0))
   expect_lt(brittle$proportion_of_conductivity(2.0),
             leaf_model()$proportion_of_conductivity(2.0))
 
@@ -240,7 +258,7 @@ test_that("leaf_solve() reproduces the stateful path exactly", {
                    operating_point(stateful))
 })
 
-# Read the thirteen outputs the slow way -- one active binding at a time, which is
+# Read the fifteen outputs the slow way -- one active binding at a time, which is
 # what operating_point() did before #39 -- so the one-call C++ reader can be
 # checked against it.
 #
@@ -276,10 +294,12 @@ outputs_one_at_a_time <- function(l) {
     uptake = Reduce(`+`, finite, 0),
     lambda = l$lambda,
     g1_eff = l$g1_eff,
-    Tleaf = l$Tleaf_)
+    Tleaf = l$Tleaf_,
+    shadow_cost = l$shadow_cost,
+    lambda_emergent = l$lambda_emergent)
 }
 
-test_that("operating_point_values() returns the thirteen fields, in that order", {
+test_that("operating_point_values() returns the fifteen fields, in that order", {
   # ⚠️ THE ORDER IS AN INTERFACE AND NOTHING IN THE TYPES ENFORCES IT. The C++
   # method returns a flat vector because that is what crosses the R boundary for
   # free (#39: twelve active bindings cost ~15 us against a ~3 us solve, one call
@@ -333,7 +353,7 @@ test_that("Tleaf is reported, and is not the leaf_temp driver on the PM path", {
   expect_identical(d$Tleaf, rep(30, 3L))
   # Last column, not inserted: these names are positions, and a saved output
   # would shift under an insertion.
-  expect_identical(names(d)[[length(names(d))]], "Tleaf")
+  expect_identical(names(d)[[length(names(d)) - 2L]], "Tleaf")
 
   # With the energy balance on, driven by hand because the gate is a field.
   l <- leaf_model()
@@ -370,7 +390,9 @@ test_that("operating_point() is the data.frame it replaced", {
     uptake = sum(consumption[is.finite(consumption)]),
     lambda = l$lambda,
     g1_eff = l$g1_eff,
-    Tleaf = l$Tleaf_
+    Tleaf = l$Tleaf_,
+    shadow_cost = l$shadow_cost,
+    lambda_emergent = l$lambda_emergent
   )
   expect_identical(operating_point(l), as_written_before)
 
@@ -479,7 +501,7 @@ test_that("operating_point() reports lambda and g1_eff from the solved state", {
 test_that("the supply path can be chosen, and reports which is in force", {
   expect_identical(leaf_model()$supply_kind, "multilayer")
 
-  single <- leaf_model(supply = leaf_supply_single(gravity_head = 0.05))
+  single <- leaf_model(supply = leaf_supply_singlelayer(gravity_head = 0.05))
   expect_identical(single$supply_kind, "single")
   expect_identical(single$single_gravity_head_, 0.05)
   # The resistance is a DRIVER now, so it is unset until set_drivers() runs -- the
@@ -490,7 +512,7 @@ test_that("the supply path can be chosen, and reports which is in force", {
 })
 
 test_that("there is no state in which the tag and the supply disagree", {
-  # The footgun PLAN 7b-iii flagged, and the reason this is two entry points
+  # The footgun to design around, and the reason this is two entry points
   # rather than a settable field: assigning the tag alone would leave the other
   # path's state configured and silently ignored. So the tag must not be
   # assignable at all, and the resistance must not be settable behind the tag's
@@ -514,7 +536,7 @@ test_that("there is no state in which the tag and the supply disagree", {
 test_that("the single-potential path solves, and responds to its resistance", {
   solve_at <- function(r) {
     leaf_solve(psi_soil = 1.5, PPFD = 900,
-               supply = leaf_supply_single(),
+               supply = leaf_supply_singlelayer(),
                root_network = series_resistance(r))
   }
   easy <- solve_at(1e3)
@@ -536,7 +558,7 @@ test_that("the single-potential path solves, and responds to its resistance", {
 test_that("the single path refuses inputs it would otherwise ignore", {
   # Silently ignoring a soil profile someone took the trouble to pass is the
   # kind of thing that produces a plausible wrong number, so it errors.
-  l <- leaf_model(supply = leaf_supply_single())
+  l <- leaf_model(supply = leaf_supply_singlelayer())
   expect_error(set_drivers(l, psi_soil = c(1, 2)), "single value")
   # `soil_depth` is the one argument that stays multi-layer-only: this path has no
   # depth profile for anything to read.
@@ -560,17 +582,17 @@ test_that("the single path refuses inputs it would otherwise ignore", {
 
   expect_error(series_resistance(0), "must be positive")
   expect_error(series_resistance(-1), "must be positive")
-  expect_error(leaf_supply_single(gravity_head = -1), "non-negative")
+  expect_error(leaf_supply_singlelayer(gravity_head = -1), "non-negative")
   expect_error(leaf_model(supply = list(kind = "single")),
                "must come from leaf_supply")
 })
 
 test_that("gravity_head costs the leaf water, on the single path", {
   flat <- leaf_solve(psi_soil = 1.5, PPFD = 900,
-                     supply = leaf_supply_single(),
+                     supply = leaf_supply_singlelayer(),
                      root_network = series_resistance(1e3))
   uphill <- leaf_solve(psi_soil = 1.5, PPFD = 900,
-                       supply = leaf_supply_single(gravity_head = 0.5),
+                       supply = leaf_supply_singlelayer(gravity_head = 0.5),
                        root_network = series_resistance(1e3))
   expect_lt(uphill$A, flat$A)
 })
@@ -590,20 +612,59 @@ test_that("atm_kpa is not decorative", {
 # The root network as an input (#33)
 # ---------------------------------------------------------------------------
 
-test_that("root_network_from_carbon() reproduces the leaf's own layer thickness", {
-  # The one thing that could go silently wrong when the carbon -> resistance step
-  # crossed the package boundary: dz is derived from the soil-depth profile, and
-  # the vertical resistance scales with dz^2, so a caller deriving dz differently
-  # would be wrong by a squared factor with nothing to catch it. This asserts the
-  # R helper agrees with what the leaf computes from the same profile.
+test_that("root_network_from_carbon() uses each layer's own thickness", {
+  # ⚠️ THIS TEST ENCODED THE BUG #626 FIXED, AND THE OLD EXPECTATION IS WORTH
+  # KNOWING. It asserted `r_R_V` was the SAME in all three layers of a graded
+  # profile, using a single column-average thickness `depth[[3]] / 3`. That is
+  # right only for equal layers, and this profile's layers are 0.4, 0.5 and 0.6 m.
+  # The vertical resistance scales with the square of the thickness of the segment
+  # spanning the layer, so it is per layer.
   depth <- c(0.4, 0.9, 1.5)
-  l <- leaf_model()
-  set_drivers(l, psi_soil = c(1, 2, 3), soil_depth = depth)
-  expect_equal(l$dz_, depth[[3]] / 3)
+  dz <- diff(c(0, depth))
 
   n <- root_network_from_carbon(rep(2, 3), soil_depth = depth)
-  # r_R_V[i] = beta_R_V * dz^2 / (carbon/3)
-  expect_equal(n$r_R_V, rep(9.4e3 * (depth[[3]] / 3)^2 / (2 / 3), 3))
+  # r_R_V[i] = beta_R_V * dz[i]^2 / (carbon/3)
+  expect_equal(n$r_R_V, 9.4e3 * dz^2 / (2 / 3))
+  # ...so they differ across the profile, which the old expectation denied.
+  expect_false(isTRUE(all.equal(n$r_R_V[[1]], n$r_R_V[[3]])))
+})
+
+test_that("total vertical root resistance does not depend on the layer slicing", {
+  # The property the scalar thickness broke, and the reason #626 is a fix rather
+  # than a generalisation. Slicing a soil column is a numerical choice, so nothing
+  # about the plant may depend on it: with root density uniform over depth, the
+  # layer-integrated carbon in layer i goes as dz[i], and the total vertical
+  # resistance comes to 3 * beta_R_V * D^2 / C for ANY profile of the same depth D
+  # carrying the same carbon C.
+  #
+  # Measured before the fix, on the 2 cm profile below: 3.68x this value.
+  D <- 1.5
+  C <- 20
+  beta_R_V <- 9.4e3
+  profiles <- list(
+    uniform_5 = rep(0.3, 5),
+    uniform_3 = rep(0.5, 3),
+    evap_2cm = c(0.02, 0.28, 0.3, 0.4, 0.5),
+    thick_first = c(0.75, 0.25, 0.25, 0.15, 0.1)
+  )
+
+  for (nm in names(profiles)) {
+    dz <- profiles[[nm]]
+    expect_equal(sum(dz), D, info = nm)
+    n <- root_network_from_carbon(C * dz / D, soil_depth = cumsum(dz))
+    expect_equal(n$r_R_V_sum[[length(dz)]], 3 * beta_R_V * D^2 / C, info = nm)
+  }
+})
+
+test_that("root_network_from_carbon() rejects a profile that is not a profile", {
+  # `soil_depth` is cumulative depth to the bottom of each layer, so it must
+  # increase. The refusal exists because the likely mistake is passing WIDTHS
+  # here -- and note it catches that only when the widths are non-monotone, which
+  # is why the C++ side asserts the limit rather than claiming protection.
+  expect_error(root_network_from_carbon(rep(2, 3), soil_depth = c(0.5, 0.4, 0.3)),
+               "strictly increasing")
+  expect_error(root_network_from_carbon(rep(2, 2), soil_depth = c(0.3, 0.3)),
+               "strictly increasing")
 })
 
 test_that("root_network_from_carbon() is homogeneous of degree 1 in each beta", {
@@ -695,10 +756,10 @@ test_that("the default-root-network memo cannot go stale", {
 
   # The same for the single-potential path's cached empty network: reused across
   # calls, and reuse must not carry state.
-  s1 <- leaf_model(supply = leaf_supply_single(1e3))
+  s1 <- leaf_model(supply = leaf_supply_singlelayer(1e3))
   set_drivers(s1, psi_soil = 1.5); s1$find_root_collar_psi()
   first <- operating_point(s1)
-  s2 <- leaf_model(supply = leaf_supply_single(1e3))
+  s2 <- leaf_model(supply = leaf_supply_singlelayer(1e3))
   set_drivers(s2, psi_soil = 1.5); s2$find_root_collar_psi()
   expect_identical(operating_point(s2), first)
 })
@@ -726,44 +787,215 @@ test_that("series_resistance() copies its prototype rather than mutating it", {
   expect_length(a$r_R_H_min, 0L)
 
   # It must still drive a solve identically to the constructor route it replaced.
-  by_ctor <- leaf_model(supply = leaf_supply_single())
+  by_ctor <- leaf_model(supply = leaf_supply_singlelayer())
   set_drivers(by_ctor, psi_soil = 1.5,
               root_network = RootNetwork(r_R_V_sum = 1500))
   by_ctor$find_root_collar_psi()
-  by_helper <- leaf_model(supply = leaf_supply_single())
+  by_helper <- leaf_model(supply = leaf_supply_singlelayer())
   set_drivers(by_helper, psi_soil = 1.5, root_network = series_resistance(1500))
   by_helper$find_root_collar_psi()
   expect_identical(operating_point(by_helper), operating_point(by_ctor))
 })
 
-test_that("a prescribed lambda_ survives both re-driving calls (#96)", {
+test_that("a prescribed CF77_lambda_ survives both re-driving calls (#96)", {
   # The issue's own reproduction, from R, which is where it was found: two calls
   # that look interchangeable in a sweep disagreed about whether the caller's
-  # `lambda_` survived. `lambda_` is Sperry's prescribed marginal water cost --
+  # `CF77_lambda_` survived. `CF77_lambda_` is Sperry's prescribed marginal water cost --
   # an input -- so the answer is that neither call touches it.
   #
   # Both arms matter. `set_drivers` always kept it; asserting only that one
   # passes on the code this test exists to reject.
-  l <- leaf_model(supply = leaf_supply_single())
-  expect_true(is.na(l$lambda_))          # not "never initialised"
+  l <- leaf_model(supply = leaf_supply_singlelayer())
+  expect_true(is.na(l$CF77_lambda_))          # not "never initialised"
 
-  l$lambda_ <- 30
+  l$CF77_lambda_ <- 30
   set_drivers(l, psi_soil = 1.5, root_network = series_resistance(1500))
-  expect_identical(l$lambda_, 30)
+  expect_identical(l$CF77_lambda_, 30)
 
   set_traits(l, leaf_traits(vcmax_25 = 120))
-  expect_identical(l$lambda_, 30)
+  expect_identical(l$CF77_lambda_, 30)
 
   # And it is still there after a solve on the re-traited object, which is the
   # sequence a sweep actually runs.
   set_drivers(l, psi_soil = 1.5, root_network = series_resistance(1500))
   l$find_root_collar_psi()
-  expect_identical(l$lambda_, 30)
+  expect_identical(l$CF77_lambda_, 30)
 
   # The derived state around it is still cleared, so the fix did not widen into
   # hazard 8: set_traits must leave nothing describing the old traits.
   set_traits(l, leaf_traits(vcmax_25 = 96))
   expect_true(is.na(l$profit_))
   expect_true(is.na(l$opt_psi_stem_))
-  expect_identical(l$lambda_, 30)
+  expect_identical(l$CF77_lambda_, 30)
+})
+
+test_that("TF24_floor_lambda_o is a caller input on CF77_lambda_'s footing (#96)", {
+  # The same three-part contract, because it is the same kind of field: an input
+  # the caller supplies, not derived state, so re-driving and re-traiting must both
+  # leave it standing while clearing everything around it.
+  l <- leaf_model(supply = leaf_supply_singlelayer())
+  expect_true(is.na(l$TF24_floor_lambda_o))
+
+  l$TF24_floor_lambda_o <- 1.5e5
+  set_drivers(l, psi_soil = 1.5, root_network = series_resistance(1500))
+  expect_identical(l$TF24_floor_lambda_o, 1.5e5)
+
+  set_traits(l, leaf_traits(vcmax_25 = 120))
+  expect_identical(l$TF24_floor_lambda_o, 1.5e5)
+})
+
+test_that("TF24_floor is TF24 plus a price, and reduces to each of them", {
+  # ⚠️ THE SAME TWO REDUCTIONS THE C++ SUITE ASSERTS BIT-FOR-BIT, restated at the R
+  # surface so that the BINDINGS are covered too: a field bound to the wrong member
+  # would give a plausible answer the C++ test cannot see.
+  net <- series_resistance(1e4)
+  solve_at <- function(model, ..., traits = leaf_traits()) {
+    l <- leaf_model(traits, leaf_control(), leaf_supply_singlelayer())
+    prices <- list(...)
+    for (nm in names(prices)) l[[nm]] <- prices[[nm]]
+    set_drivers(l, psi_soil = 1.5, PPFD = 1500, root_network = net)
+    l$set_model(model, "stem")
+    l$optimise()
+    operating_point(l)
+  }
+
+  # ⚠️ THE ONE-RESTRICTION REDUCTION. Nothing is set on either leaf but the price,
+  # because the hydraulic half reads TF24's own traits -- which is the whole reason
+  # this curve has no scale of its own.
+  tf24 <- solve_at("TF24")
+  floor_at_zero <- solve_at("TF24_floor", TF24_floor_lambda_o = 0)
+  expect_identical(floor_at_zero, tf24)
+
+  cf77 <- solve_at("CF77", CF77_lambda_ = 1.5e5)
+  no_hydraulic <- solve_at("TF24_floor", TF24_floor_lambda_o = 1.5e5,
+                           traits = leaf_traits(TF24_cost_scale = 0))
+  # ⚠️ EVERY COLUMN BUT `lambda`, AND THE EXCEPTION IS THE POINT. `lambda` here is
+  # `marginal_cost_water()`, i.e. TF24's own price at this operating point -- and
+  # the two leaves reach the same operating point with DIFFERENT
+  # `TF24_cost_scale`, so it is 0 on the left and 1.65e+05 on the right. That is
+  # the diagnostic disagreeing, not the model: every reported state and flux is
+  # bit-identical. Pinned rather than papered over, because this column is the one
+  # a reader of this curve is most likely to quote by mistake.
+  #
+  # ⚠️ AND `shadow_cost`, WHICH IS A SECOND EXCEPTION OF A DIFFERENT KIND. These two
+  # leaves are the same model numerically -- same state, same fluxes, bit for bit --
+  # and this is the one column that separates them, because only one of them
+  # DECLARES its price as a price. TF24_floor reports `lambda_o * E`; CF77 reports
+  # zero, not because its cost is realised carbon but because its single `lambda`
+  # merges the two readings and supplies nothing to attribute the number with. So
+  # the pair below is the sharpest available statement of what the column means: it
+  # is about what a curve can attribute, not about what a leaf does.
+  cols <- setdiff(names(cf77), c("lambda", "shadow_cost"))
+  expect_identical(no_hydraulic[cols], cf77[cols])
+  expect_identical(no_hydraulic$lambda, 0)
+  expect_gt(cf77$lambda, 0)
+  expect_gt(no_hydraulic$shadow_cost, 0)
+  expect_identical(cf77$shadow_cost, 0)
+
+  # And with both halves live it is neither of them, which is what makes the two
+  # equalities above tests rather than tautologies.
+  both <- solve_at("TF24_floor", TF24_floor_lambda_o = 1.5e5)
+  expect_false(isTRUE(all.equal(both$psi_stem, tf24$psi_stem)))
+  expect_false(isTRUE(all.equal(both$psi_stem, cf77$psi_stem)))
+
+  # ⚠️ THE FLOOR IS ON THE EMERGENT PRICE, and `$lambda_emergent` is where to read
+  # it -- NOT `operating_point()$lambda`, which is `marginal_cost_water()` and so
+  # reports the TF24 cost's price whatever curve is seated. On THIS curve the two
+  # are especially easy to confuse, since the hydraulic half really is TF24's.
+  emergent <- function(model, ..., traits = leaf_traits()) {
+    l <- leaf_model(traits, leaf_control(), leaf_supply_singlelayer())
+    prices <- list(...)
+    for (nm in names(prices)) l[[nm]] <- prices[[nm]]
+    set_drivers(l, psi_soil = 1.5, PPFD = 1500, root_network = net)
+    l$set_model(model, "stem")
+    l$optimise()
+    l$lambda_emergent
+  }
+  expect_gt(emergent("TF24_floor", TF24_floor_lambda_o = 1.5e5), 1.5e5)
+
+  # ⚠️ AND THE FLOOR IS A WET-END STATEMENT, NOT A STATEMENT ABOUT THE OPTIMUM. A
+  # curve with no price floor can still be expensive where it settles; what
+  # distinguishes the two is the limit as the POTENTIAL closes on zero -- zero for
+  # every conductance-loss curve here, `lambda_o` for this one. Read through the
+  # bindings, so this covers them too.
+  l <- leaf_model(supply = leaf_supply_singlelayer())
+  l$TF24_floor_lambda_o <- 1.5e5
+  set_drivers(l, psi_soil = 1.5, PPFD = 1500, root_network = net)
+  expect_equal(l$lambda_TF24_floor(1e-6), 1.5e5, tolerance = 1e-6)
+  expect_lt(l$lambda_TF24(1e-6), 1)
+})
+
+test_that("TF24_floor refuses an unset price at the R surface too", {
+  l <- leaf_model(supply = leaf_supply_singlelayer())
+  set_drivers(l, psi_soil = 1.5, PPFD = 1500,
+              root_network = series_resistance(1e4))
+  l$set_model("TF24_floor", "stem")
+  expect_error(l$optimise(), "needs TF24_floor_lambda_o set")
+  # The message has to say why there is no default, or the obvious repair -- set it
+  # to zero -- silently substitutes TF24 for the model the caller asked for.
+  expect_error(l$optimise(), "TF24")
+})
+
+test_that("the prescribed prices are reachable from leaf_solve() (#132)", {
+  # ⚠️ THE GAP THIS CLOSES WAS REAL AND WAS NOT HYPOTHETICAL. `$CF77_lambda_` and
+  # `$TF24_floor_lambda_o` are FIELDS, not traits, so `leaf_traits()` cannot carry
+  # them -- and `leaf_solve()` builds its own `Leaf` internally, so before these
+  # arguments existed the two priced curves could only ever raise their own
+  # refusal from the one-call surface. It survived for CF77 because its docs said
+  # "build the leaf yourself"; it stopped being survivable for a curve whose ONLY
+  # parameter is a price.
+  one <- leaf_solve(psi_soil = 1.5, PPFD = 1500,
+                    supply = leaf_supply_singlelayer(),
+                    root_network = series_resistance(1e4),
+                    model = "TF24_floor", TF24_floor_lambda_o = 1.5e5)
+  expect_true(is.finite(one$psi_stem))
+
+  # The same answer the stateful route gives, to the bit.
+  l <- leaf_model(supply = leaf_supply_singlelayer())
+  l$TF24_floor_lambda_o <- 1.5e5
+  set_drivers(l, psi_soil = 1.5, PPFD = 1500,
+              root_network = series_resistance(1e4))
+  l$set_model("TF24_floor", "stem")
+  l$optimise()
+  expect_identical(one$psi_stem, operating_point(l)$psi_stem)
+
+  # CF77 too, which is the pre-existing half of the same gap.
+  expect_true(is.finite(leaf_solve(psi_soil = 1.5, PPFD = 1500,
+                                   supply = leaf_supply_singlelayer(),
+                                   root_network = series_resistance(1e4),
+                                   model = "CF77",
+                                   CF77_lambda = 1.5e5)$psi_stem))
+
+  # Without one, the curve's own refusal reaches the caller rather than a NaN.
+  expect_error(leaf_solve(psi_soil = 1.5, PPFD = 1500,
+                          supply = leaf_supply_singlelayer(),
+                          root_network = series_resistance(1e4),
+                          model = "TF24_floor"),
+               "needs TF24_floor_lambda_o set")
+
+  # ⚠️ A PRICE THE SEATED MODEL DOES NOT READ IS REFUSED, NOT IGNORED. Silently
+  # ignoring it is how someone spends an afternoon wondering why their lambda had
+  # no effect, so the refusal names the curve that does read it.
+  expect_error(leaf_solve(psi_soil = 1.5, PPFD = 1500,
+                          supply = leaf_supply_singlelayer(),
+                          root_network = series_resistance(1e4),
+                          model = "TF24_floor", CF77_lambda = 1.5e5),
+               "CF77 curve's prescribed price")
+  expect_error(leaf_solve(psi_soil = 2.0, PPFD = 900,
+                          TF24_floor_lambda_o = 1.5e5),
+               "model = \"collar\" does not read it")
+
+  # And it survives the `reuse = FALSE` path, which builds a Leaf per row and so
+  # applies the price through a different call.
+  fresh <- leaf_solve(psi_soil = c(1.0, 1.5), PPFD = 1500,
+                      supply = leaf_supply_singlelayer(),
+                      root_network = series_resistance(1e4),
+                      model = "TF24_floor", TF24_floor_lambda_o = 1.5e5,
+                      reuse = FALSE)
+  shared <- leaf_solve(psi_soil = c(1.0, 1.5), PPFD = 1500,
+                       supply = leaf_supply_singlelayer(),
+                       root_network = series_resistance(1e4),
+                       model = "TF24_floor", TF24_floor_lambda_o = 1.5e5,
+                       reuse = TRUE)
+  expect_identical(fresh, shared)
 })
