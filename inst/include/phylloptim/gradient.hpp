@@ -645,6 +645,22 @@ inline void gradient_fd(Leaf& l, const double* theta, const Drivers& d,
   apply(l, theta, d, single, -1, s.fast_stem_curve);
 }
 
+// ⚠️ NO TRAIT GRADIENT CARRIES THE THERMAL-DAMAGE LAYER (Leaf::use_thermal_damage_).
+// Its inputs, the acclimation and damage states among them, are not in theta, and
+// this route has not been checked against a difference of a solve with the layer
+// on -- so it refuses rather than return a derivative nobody has verified. R's
+// leaf_gradient() refuses in the same words.
+inline void refuse_thermal_damage(const Leaf& l, const char* who) {
+  if (l.use_thermal_damage_) {
+    util::stop(std::string(who) +
+               ": refused with use_thermal_damage_ on. No trait gradient "
+               "carries the thermal-damage layer: its inputs are not "
+               "differentiable parameters, and this route has not been checked "
+               "against a difference of a solve with the layer on. Set "
+               "use_thermal_damage_ to false.");
+  }
+}
+
 // --- one observation ---------------------------------------------------------
 //
 // Fills `out` progressively and THROWS on the three conditions `leaf_gradient()`
@@ -653,6 +669,7 @@ inline void gradient_fd(Leaf& l, const double* theta, const Drivers& d,
 inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
                const int* pars, std::size_t npars, const Settings& s,
                Result& out, const Prescribed* prescribed = nullptr) {
+  refuse_thermal_damage(l, "leaf_gradient()");
   out.reset(npars);
 
   apply(l, theta, d, single, -1, s.fast_stem_curve);
@@ -906,6 +923,10 @@ inline std::vector<Result> batch(Leaf& l, const double* theta,
                                 std::size_t npars, const Settings& s,
                                 const double* psi = nullptr,
                                 const double* dpsi_dtheta = nullptr) {
+  // ONCE, BEFORE THE LOOP, and so a throw rather than a status. The gate is the
+  // leaf's, not a row's, so `at()`'s own refusal would mark every row an error
+  // and hand back a batch that looks like N separate failures.
+  refuse_thermal_damage(l, "leaf_gradient_batch()");
   const std::size_t n = drivers.size();
   std::vector<Result> out(n);
   double th[n_theta];

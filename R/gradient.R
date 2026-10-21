@@ -565,6 +565,16 @@ leaf_gradient <- function(psi_soil,
     } else {
       leaf_supply_multilayer()
     }
+    # The same refusal, in the same words, as gradient.hpp's
+    # refuse_thermal_damage(), which guards the C++ twin and the batch. Only a
+    # reused leaf can arrive with the layer on: one built here has it off.
+    if (isTRUE(x$use_thermal_damage_)) {
+      stop("leaf_gradient(): refused with use_thermal_damage_ on. No trait ",
+           "gradient carries the thermal-damage layer: its inputs are not ",
+           "differentiable parameters, and this route has not been checked ",
+           "against a difference of a solve with the layer on. Set ",
+           "use_thermal_damage_ to false.", call. = FALSE)
+    }
   }
 
   # Resolve the single path's default resistance HERE rather than letting

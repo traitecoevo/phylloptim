@@ -1130,6 +1130,14 @@ satisfies `-Werror=switch` and so removes the check they exist for.
    complain. `test_temperature_params_invalidate_cache` asserts it through the
    route a caller actually takes.
 
+   ⚠️ **One deliberate exception: the thermal-damage layer's inputs are NOT in
+   the key.** `set_physiology` never serves the cache while
+   `use_thermal_damage_` is on, because `A_`, `I_r_` and `I_p_` are state a
+   caller moves every step; only the gate itself is keyed, so switching it off
+   at unchanged drivers recomputes. Remove that bypass and all fifteen inputs
+   must join the key. `test_thermal_damage_bypasses_the_cache` (C++) and
+   `test-thermal-damage.R` fail if either half goes.
+
    `set_traits()` is still the right way to change a trait: the splines and the
    solved operating point need clearing too, and the cache key does not do that.
 

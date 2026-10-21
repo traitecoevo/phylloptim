@@ -1,3 +1,15 @@
+# phylloptim 0.12.0
+
+## An optional thermal-damage layer on the leaf, off by default
+
+`Leaf$use_thermal_damage_` turns on the leaf half of the ATLS thermal-damage model (traitecoevo/plant#566), ported from the layer plant carried in its own leaf model. The caller integrates three states, an acclimation state `A_` and the recoverable and permanent damaged fractions `I_r_` and `I_p_`, sets them before each `set_drivers()`, and reads back `phi_d_`, the deactivated fraction of the Vcmax/Jmax curves' two-state equilibrium at the leaf's temperature, and `k_rec_eff_`, the repair rate there. With the gate on, the Vcmax and Jmax optima move by `topt_offset_ + dTopt_max_ * A_ / (A_ + K_A_)` degrees through the entropy term, both capacities are scaled by `1 - I_r_ - I_p_` (floored at 1e-6), and four maintenance costs, zero by default, are added to `R_d_`. On the energy-balance path all of it is taken at the operating point's leaf temperature, so transpirational cooling lowers `phi_d_`. Rates are per day. `$logistic_()` and `$softplus_()`, the layer's guarded switches, are bound for a caller's acclimation forcing.
+
+Off by default, and off it reads none of its inputs: every golden file is bit-identical, and `phi_d_` and `k_rec_eff_` are zero.
+
+Respiration departs from the original layer on purpose: there `R_d` was `0.015 * Vcmax` after the damage discount, so a damaged leaf respired less; here `R_d` stays `R_d_25` on its Q10 (#86) and the layer only adds its costs.
+
+No derivative path carries the layer, so each refuses a leaf with it on rather than return the derivative of a different model: `leaf_gradient()` on a reused leaf, `leaf_gradient_batch()`, the derivative surface (`collar_at`, `outputs_at` and the kernels that read capacities off the parameter pack), and the closed form. The solve's own `dprofit` in the collar or stem potential reads the same temperature block and does carry it. The temperature cache is bypassed while the gate is on, because the states move between calls.
+
 # phylloptim 0.10.3
 
 ## odelia is a floor, not a pin, at 0.8.0

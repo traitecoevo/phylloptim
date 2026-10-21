@@ -60,7 +60,9 @@
 //   - K is the curve the solve used, TF24 or TF24_floor;
 //   - the supply path is multi-layer;
 //   - `curvature` is marginal_collar_slope<K>() at an Interior point, and is
-//     not read at any other kind.
+//     not read at any other kind;
+//   - the thermal-damage layer is off: collar_at and outputs_at refuse
+//     use_thermal_damage_, because the kernels they read do not apply it.
 //
 // operating_point_kind() says which condition placed the point. Branch on it,
 // never on a returned value. What collar_at does at each:
@@ -630,6 +632,82 @@ public:
   double T50_ = 50.4;    // deg C; Sicangco Table 2, heatwave treatment
   double Tcrit_ = 46.5;  // deg C; Sicangco Table 2, heatwave treatment
 
+  // --- ATLS thermal damage and acclimation, default OFF (traitecoevo/plant#566) --
+  // The leaf half of a LASTING damage model; the states it reads are integrated
+  // by the caller. Behind this one gate, update_temperature_dependent_params:
+  //
+  //   * shifts the entropy term of the Vcmax and Jmax peaked Arrhenius so their
+  //     optimum moves by topt_offset_ + dTopt_max_ * A/(A + K_A_) degrees;
+  //   * scales both capacities by the surviving fraction 1 - I_r_ - I_p_, floored
+  //     at damage_surv_floor;
+  //   * reports phi_d_, the deactivated fraction K/(1+K) of the SAME two-state
+  //     equilibrium the Jmax curve's denominator holds, and k_rec_eff_, the repair
+  //     rate gated off above t_rep_cut_;
+  //   * adds four maintenance costs to R_d_, after the Q10 response.
+  //
+  // With the gate off none of these inputs is read, phi_d_ and k_rec_eff_ are
+  // written as zero, and every other number is bit-identical to a leaf without
+  // the layer.
+  //
+  // ⚠️ RATES ARE PER DAY. k_i_, k_i_ref_, k_rec_ and k_rec_eff_ are day^-1; a
+  // caller integrating on another clock converts them itself.
+  //
+  // ⚠️ DAMAGE ENTERS THE BENEFIT, NOT THE HYDRAULIC COST: both capacities carry
+  // the survival factor and R_d_ carries the costs, so the optimiser sees damage
+  // only through assimilation. phi_d_ is an output and enters no objective.
+  //
+  // ⚠️ R_d_ IS NOT SCALED BY SURVIVAL. Respiration is R_d_25 * Q10(T) whatever the
+  // damage, plus the costs below.
+  //
+  // ⚠️ NO DERIVATIVE PATH CARRIES THIS LAYER. The pack-reading kernels the
+  // derivative surface reads do not apply it, and the trait gradient and the
+  // closed form have not been checked with it, so collar_at, outputs_at, the
+  // gradient and the closed form refuse a leaf with the gate on. The solve's own
+  // dprofit in the collar or stem potential reads the members this block writes,
+  // so it does carry the layer.
+  bool use_thermal_damage_ = false;
+  // Constitutive shift of the photosynthetic optimum, deg C, applied through the
+  // entropy term; moves the deactivation onset with it.
+  double topt_offset_ = 0.0;
+  // Slope (deg C^-1) and midpoint (deg C) of the logistic that shuts repair off
+  // when hot: k_rec_eff_ = k_rec_ * logistic(-m_rep_ * (T - t_rep_cut_)).
+  double m_rep_ = 0.4;
+  double t_rep_cut_ = 45.0;
+  // Leak from the deactivated fraction into recoverable damage, and the
+  // no-extra-protection reference it is costed against, day^-1. Read here only by
+  // the protection cost; the caller's damage ODE reads k_i_ itself.
+  double k_i_ = 0.5;
+  double k_i_ref_ = 0.5;
+  // Restorative resynthesis of recoverable damage at cool temperatures, day^-1.
+  double k_rec_ = 0.25;
+  // Acclimation: the most the optimum can rise, deg C, and the half-saturation
+  // of that rise in the acclimation state A_.
+  double dTopt_max_ = 6.0;
+  double K_A_ = 1.0;
+  // STATE, set by the caller before each set_physiology: the acclimation state
+  // and the recoverable and permanent damaged fractions. Zero is an unacclimated,
+  // undamaged leaf. Negative A_ is read as zero.
+  double A_ = 0.0;
+  double I_r_ = 0.0;
+  double I_p_ = 0.0;
+  // Maintenance costs added to R_d_, umol C m^-2 s^-1 per unit of what each
+  // multiplies: the acclimation state A_; the repair capacity k_rec_ (day^-1);
+  // the protection bought, max(0, k_i_ref_ - k_i_) (day^-1); and the realised
+  // repair flux k_rec_eff_ * I_r_ (day^-1). Zero by default, so the layer costs
+  // nothing until a caller prices it.
+  double c_acclim_maint_ = 0.0;
+  double c_repair_maint_ = 0.0;
+  double c_protect_maint_ = 0.0;
+  double c_repair_flux_ = 0.0;
+  // The survival factor's floor. Strictly positive so the capacities stay
+  // positive and the solve stays well-conditioned as I_r_ + I_p_ -> 1.
+  static constexpr double damage_surv_floor = 1e-6;
+  // OUTPUTS, at the temperature the block was last seated at -- the operating
+  // point's leaf temperature after a solve on the energy-balance path, the
+  // leaf_temp driver off it. Zero with the gate off.
+  double phi_d_ = 0.0;       // deactivated fraction, [0, 1]
+  double k_rec_eff_ = 0.0;   // repair rate there, day^-1
+
   // Cells a stem route scans to locate the basin before refining, WHERE ONE IS
   // ASKED FOR -- see `basin_scan_cells()` below, which returns 0 with the energy
   // balance off. This is only the size of the scan, not whether there is one.
@@ -893,7 +971,7 @@ public:
   //   * the cost is 17 double comparisons per set_physiology() call, i.e. per
   //     driver set, NOT per inner solve iteration. Measured: within run-to-run
   //     noise on bench_solve.
-  static constexpr int photo_temp_key_size = 22;
+  static constexpr int photo_temp_key_size = 23;
   std::array<double, photo_temp_key_size> photo_temp_cache_key_{};
   std::array<double, photo_temp_key_size> photo_temp_key() const;
   std::vector<double> f_r;
@@ -1746,10 +1824,12 @@ public:
   // around a call with side effects, which is not a thing to keep two of.
   //
   // ⚠️ NOT const, and the caller sees no change. `update_temperature_dependent_
-  // params` writes eight members; this saves them, perturbs, reads R_d_, and puts
-  // all eight back. Adding a member to that block without adding it here leaves
-  // the leaf perturbed by 1e-3 degrees after a gradient evaluation, silently --
-  // the same failure mode `photo_temp_key()` guards for the cache.
+  // params` writes ten outputs -- the eight capacities and rates, plus the
+  // thermal-damage layer's phi_d_ and k_rec_eff_; this saves them, perturbs, reads
+  // R_d_, and puts all ten back. Adding a member to that block without adding it
+  // here leaves the leaf perturbed by 1e-3 degrees after a gradient evaluation,
+  // silently -- the same failure mode `photo_temp_key()` guards for the cache.
+  // dprofit_energy_balance_term restores the same ten.
   double respiration_temp_deriv(double leaf_temp);
   // The energy-balance correction to the above, zero when the gate is off. Kept
   // out of line so that adding it cannot change FMA contraction in the inlined
@@ -1830,7 +1910,8 @@ public:
 
   // --- Penman-Monteith leaf energy balance (minimal core; #523) ---------------
   // Recompute the temperature-dependent photosynthetic parameters (vcmax_,
-  // jmax_, gamma_, ko_, kc_, R_d_, km_, electron_transport_) at a given leaf
+  // jmax_, gamma_, ko_, kc_, R_d_, km_, electron_transport_, and the
+  // thermal-damage layer's phi_d_ and k_rec_eff_) at a given leaf
   // temperature. Extracted verbatim from the inline block in set_physiology so
   // the non-PM path is bit-identical; on the PM path it is called per
   // operating point with the energy-balance Tleaf (defeating the photo_temp
@@ -2435,6 +2516,33 @@ public:
   // The instantaneous thermal cost at a leaf temperature, in [0,1]. Zero when the
   // gate is off, so callers need not branch.
   double thermal_cost_at(double leaf_temp) const;
+
+  // --- the ATLS thermal-damage layer's pieces (see use_thermal_damage_) --------
+  // Every exponential argument is clamped to [-30, 30], and every shifted optimum
+  // or onset to [250, 350] K, so no driver or trait makes them non-finite.
+  //
+  // 1/(1 + exp(-x)), and the smooth max(0, x), log1p(exp(s*x))/s. Static: a
+  // caller's acclimation forcing uses them too.
+  static double logistic_(double x);
+  static double softplus_(double x, double s);
+  // The entropy term that moves a peaked Arrhenius optimum,
+  // Topt = H_d / (d_S - R*ln(Ea/(H_d - Ea))), by delta_topt degrees.
+  double d_S_shifted(double Ea, double H_d, double d_S_base,
+                     double delta_topt) const;
+  // The deactivated fraction K/(1+K), K = exp((d_S*T - H_d)/(R*T)), with the
+  // Jmax curve's H_d. Half-deactivated at T = H_d/d_S.
+  double deactivated_fraction(double leaf_temp, double d_S) const;
+  // The entropy term that moves that onset, H_d/d_S, by delta_topt degrees. Has
+  // no Ea correction, so the onset and the capacity optimum move by nearly, not
+  // exactly, the same amount.
+  double d_S_damage_shifted(double H_d, double d_S_base,
+                            double delta_topt) const;
+  // The repair rate at a leaf temperature, day^-1.
+  double k_rec_eff(double leaf_temp) const;
+  // Throws, naming `who`, when use_thermal_damage_ is on. Called by every path
+  // that reads the capacities off the parameter pack (vcmax_at and the rest),
+  // which do not apply the layer.
+  void refuse_thermal_damage(const char* who) const;
 
   // Sperry (2017) ProfitMax, with BOTH terms normalised as the paper defines them
   // -- see the ProfitMax notes above optimise_psi_stem_single for what that buys
@@ -3104,8 +3212,13 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
    // candidate psi in set_leaf_states_rates_from_psi_stem, so we always recompute
    // the Tair baseline (used for assim_max_ / feasibility) and let the solve
    // override it.
+   //
+   // ⚠️ AND IT IS BYPASSED WITH THE THERMAL-DAMAGE GATE ON. The block then reads
+   // A_, I_r_ and I_p_, which a caller moves between calls and which the key
+   // does not hold (see photo_temp_key).
    const std::array<double, photo_temp_key_size> photo_key = photo_temp_key();
    if (!use_energy_balance_ &&
+       !use_thermal_damage_ &&
        photo_temp_cached_ &&
        photo_key == photo_temp_cache_key_) {
      // Cache hit (non-PM): every input unchanged; only electron_transport_
@@ -4783,12 +4896,14 @@ inline double Leaf::respiration_temp_deriv(double leaf_temp) {
   const double h = 1e-3;
   const double vc0 = vcmax_, jm0 = jmax_, ga0 = gamma_, ko0 = ko_,
                kc0 = kc_, rd0 = R_d_, km0 = km_, J0 = electron_transport_;
+  const double phi0 = phi_d_, krec0 = k_rec_eff_;
   update_temperature_dependent_params(leaf_temp + h);
   const double Rd_up = R_d_;
   update_temperature_dependent_params(leaf_temp - h);
   const double Rd_dn = R_d_;
   vcmax_ = vc0; jmax_ = jm0; gamma_ = ga0; ko_ = ko0; kc_ = kc0;
   R_d_ = rd0; km_ = km0; electron_transport_ = J0;
+  phi_d_ = phi0; k_rec_eff_ = krec0;
   return (Rd_up - Rd_dn) / (2.0 * h);
 }
 
@@ -4822,6 +4937,7 @@ inline double Leaf::dprofit_energy_balance_term(
   const double h = 1e-3;
   const double vcmax0 = vcmax_, jmax0 = jmax_, gamma0 = gamma_, ko0 = ko_,
                kc0 = kc_, Rd0 = R_d_, km0 = km_, J0 = electron_transport_;
+  const double phi0 = phi_d_, krec0 = k_rec_eff_;
   // ⚠️ Tleaf, NOT leaf_temp_. On the energy-balance path set_physiology
   // reinterprets leaf_temp_ as AIR temperature (Tair_ = leaf_temp_), so
   // differencing around it evaluates dA/dT at the wrong point entirely. The
@@ -4839,6 +4955,7 @@ inline double Leaf::dprofit_energy_balance_term(
   // than re-running the Arrhenius block.
   vcmax_ = vcmax0; jmax_ = jmax0; gamma_ = gamma0; ko_ = ko0; kc_ = kc0;
   R_d_ = Rd0; km_ = km0; electron_transport_ = J0;
+  phi_d_ = phi0; k_rec_eff_ = krec0;
 
   const double A_T = (A_up - A_dn) / (2.0 * h);
 
@@ -4909,16 +5026,46 @@ inline std::array<double, Leaf::photo_temp_key_size> Leaf::photo_temp_key() cons
           R_d_25, rd_q10_intercept_, rd_q10_slope_,
           // The thermal cost reaches jmax_ above, so it belongs in the key. A
           // bool widens to 0.0/1.0, which compares by == exactly like the rest.
-          double(use_thermal_cost_), T50_, Tcrit_};
+          double(use_thermal_cost_), T50_, Tcrit_,
+          // ⚠️ THE THERMAL-DAMAGE GATE IS HERE AND ITS INPUTS ARE NOT, because
+          // set_physiology never serves this cache while the gate is on: A_, I_r_
+          // and I_p_ are state a caller moves every step. The gate itself must be
+          // here, or switching it off at unchanged drivers would be served the
+          // gate-on block. Drop that bypass and every thermal input has to join
+          // this list.
+          double(use_thermal_damage_)};
 }
 
 inline void Leaf::update_temperature_dependent_params(double leaf_temp) {
   // FIRST: the pack-reading kernels take the block's temperature from here, and
   // two of them are called below.
   photo_temp_ = leaf_temp;
-  vcmax_ =
-      peak_arrh_curve(vcmax_ha_, vcmax_25, leaf_temp, vcmax_H_d_, vcmax_d_S_);
-  jmax_ = peak_arrh_curve(jmax_ha_, jmax_25, leaf_temp, jmax_H_d_, jmax_d_S_);
+  if (use_thermal_damage_) {
+    // The ATLS layer (see use_thermal_damage_). One shift moves both optima and
+    // the deactivation onset together.
+    const double A = std::max(A_, 0.0);
+    const double delta_topt = topt_offset_ + dTopt_max_ * A / (A + K_A_);
+    const double vcmax_dS =
+        d_S_shifted(vcmax_ha_, vcmax_H_d_, vcmax_d_S_, delta_topt);
+    const double jmax_dS = d_S_shifted(jmax_ha_, jmax_H_d_, jmax_d_S_, delta_topt);
+    vcmax_ = peak_arrh_curve(vcmax_ha_, vcmax_25, leaf_temp, vcmax_H_d_, vcmax_dS);
+    jmax_ = peak_arrh_curve(jmax_ha_, jmax_25, leaf_temp, jmax_H_d_, jmax_dS);
+    // Lasting damage discounts BOTH capacities. The reversible deactivation is
+    // already inside the peaked Arrhenius, so this is not a second count of it.
+    const double surv =
+        std::min(std::max(1.0 - I_r_ - I_p_, damage_surv_floor), 1.0);
+    vcmax_ *= surv;
+    jmax_ *= surv;
+    const double damage_dS = d_S_damage_shifted(jmax_H_d_, jmax_d_S_, delta_topt);
+    phi_d_ = deactivated_fraction(leaf_temp, damage_dS);
+    k_rec_eff_ = k_rec_eff(leaf_temp);
+  } else {
+    vcmax_ =
+        peak_arrh_curve(vcmax_ha_, vcmax_25, leaf_temp, vcmax_H_d_, vcmax_d_S_);
+    jmax_ = peak_arrh_curve(jmax_ha_, jmax_25, leaf_temp, jmax_H_d_, jmax_d_S_);
+    phi_d_ = 0.0;
+    k_rec_eff_ = 0.0;
+  }
   // Sicangco et al. (2026) Eqn 12: irreversible PSII damage takes electron
   // transport down with it, so the peaked Arrhenius Jmax is scaled by (1 - TC).
   // Branched rather than multiplied by a gate-off zero, so the gate-off
@@ -4942,8 +5089,85 @@ inline void Leaf::update_temperature_dependent_params(double leaf_temp) {
   const double q10 =
       rd_q10_intercept_ - rd_q10_slope_ * (leaf_temp + 25.0) / 2.0;
   R_d_ = R_d_25 * std::pow(q10, (leaf_temp - 25.0) / 10.0);
+  if (use_thermal_damage_) {
+    // The layer's maintenance costs, added to the respiration above rather than
+    // folded into it, so the gate-off arithmetic is untouched. Standing costs for
+    // the acclimation held and for the repair capacity and protection kept, paid
+    // whether or not they are used; an activity cost for the repair done.
+    const double acclim_load = std::max(A_, 0.0);
+    const double protection = std::max(0.0, k_i_ref_ - k_i_);
+    const double repair_flux = k_rec_eff_ * std::max(0.0, I_r_);
+    R_d_ += c_acclim_maint_ * acclim_load + c_repair_maint_ * k_rec_ +
+            c_protect_maint_ * protection + c_repair_flux_ * repair_flux;
+  }
   km_ = (kc_*umol_per_mol_to_Pa_)*(1 + (atm_o2_kpa_*kPa_to_Pa)/(ko_*umol_per_mol_to_Pa_));
   electron_transport_ = electron_transport();
+}
+
+// --- the ATLS thermal-damage layer ------------------------------------------
+
+inline double Leaf::logistic_(double x) {
+  const double z = std::min(std::max(x, -30.0), 30.0);
+  return 1.0 / (1.0 + std::exp(-z));
+}
+
+inline double Leaf::softplus_(double x, double s) {
+  const double z = std::min(std::max(s * x, -30.0), 30.0);
+  return std::log1p(std::exp(z)) / s;
+}
+
+// Inverts the peaked Arrhenius optimum Topt = H_d/(d_S - corr), corr =
+// R*ln(Ea/(H_d - Ea)), for the d_S that puts it delta_topt higher.
+//
+// ⚠️ THE OPTIMUM EXISTS ONLY FOR 0 < Ea < H_d, and both are settable members, so
+// that is refused here rather than left to return a NaN capacity.
+inline double Leaf::d_S_shifted(double Ea, double H_d, double d_S_base,
+                                double delta_topt) const {
+  if (!(Ea > 0.0 && H_d > Ea)) {
+    util::stop("the thermal-damage layer moves the peaked Arrhenius optimum, "
+               "which exists only for 0 < Ea < H_d; got Ea = " +
+               util::format_double(Ea) + ", H_d = " + util::format_double(H_d));
+  }
+  const double corr = gas_constant * std::log(Ea / (H_d - Ea));
+  const double Topt0_K = H_d / (d_S_base - corr);
+  const double Topt_K = std::min(std::max(Topt0_K + delta_topt, 250.0), 350.0);
+  return H_d / Topt_K + corr;
+}
+
+// ⚠️ THE SAME K AS peak_arrh_curve's DENOMINATOR, 1 + K, and that is what makes
+// phi_d_ the deactivated fraction of the curve the capacities follow rather than
+// a second response beside it -- so it must use the same gas constant and the same
+// Kelvin offset. Reads the Jmax curve's H_d, so a caller who moves jmax_H_d_
+// moves the onset too.
+inline double Leaf::deactivated_fraction(double leaf_temp, double d_S) const {
+  const double T_K = leaf_temp + C_to_K;
+  const double arg = std::min(
+      std::max((d_S * T_K - jmax_H_d_) / (gas_constant * T_K), -30.0), 30.0);
+  const double K = std::exp(arg);
+  return K / (1.0 + K);
+}
+
+inline double Leaf::d_S_damage_shifted(double H_d, double d_S_base,
+                                       double delta_topt) const {
+  const double onset0_K = H_d / d_S_base;
+  const double onset_K = std::min(std::max(onset0_K + delta_topt, 250.0), 350.0);
+  return H_d / onset_K;
+}
+
+inline double Leaf::k_rec_eff(double leaf_temp) const {
+  return k_rec_ * logistic_(-m_rep_ * (leaf_temp - t_rep_cut_));
+}
+
+inline void Leaf::refuse_thermal_damage(const char* who) const {
+  if (use_thermal_damage_) {
+    util::stop(std::string(who) +
+               ": refused with use_thermal_damage_ on. The derivative surface "
+               "takes Vcmax, Jmax and R_d from the traits through a temperature "
+               "response that does not apply the thermal-damage layer -- its "
+               "shifted optimum, its survival factor and its maintenance costs -- "
+               "so its rows would describe a different model from the one the "
+               "solve ran. Set use_thermal_damage_ to false.");
+  }
 }
 
 // Saturation vapour pressure es(T) in kPa (Tetens), T in deg C.
@@ -5909,14 +6133,18 @@ inline T Leaf::hydraulic_cost_TF_kernel(T psi_stem) const {
 // filling it from the members give the same numbers bit for bit -- which
 // test_leaf asserts on both temperature paths rather than leaving to the reader.
 
+// ⚠️ THE THREE RESPONSES BELOW DO NOT APPLY THE THERMAL-DAMAGE LAYER, so each
+// refuses a leaf with it on rather than disagree with the member it twins.
 template <typename T>
 inline T Leaf::vcmax_at(const leaf_pars<T>& pars) const {
+  refuse_thermal_damage("Leaf::vcmax_at");
   return peak_arrh_curve<T>(vcmax_ha_, pars[par_vcmax_25], photo_temp_,
                             vcmax_H_d_, vcmax_d_S_);
 }
 
 template <typename T>
 inline T Leaf::jmax_at(const leaf_pars<T>& pars) const {
+  refuse_thermal_damage("Leaf::jmax_at");
   T j = peak_arrh_curve<T>(jmax_ha_, pars[par_jmax_25], photo_temp_, jmax_H_d_,
                            jmax_d_S_);
   // The thermal cost reads leaf temperature and two thresholds, none of which is
@@ -5931,6 +6159,7 @@ inline T Leaf::jmax_at(const leaf_pars<T>& pars) const {
 
 template <typename T>
 inline T Leaf::respiration_at(const leaf_pars<T>& pars) const {
+  refuse_thermal_damage("Leaf::respiration_at");
   const double q10 =
       rd_q10_intercept_ - rd_q10_slope_ * (photo_temp_ + 25.0) / 2.0;
   return pars[par_R_d_25] *
@@ -6272,6 +6501,7 @@ inline Leaf::LeafOutputs<S> Leaf::outputs_at(const S& collar,
                                              const SupplyDraw<S>& draw,
                                              const leaf_pars<S>& pars) const {
   using odelia::util::to_passive;
+  refuse_thermal_damage("Leaf::outputs_at");
   check_draw(to_passive(collar), draw);
   LeafOutputs<S> out;
   const std::size_t n = static_cast<std::size_t>(supply_n_layers());
@@ -6444,6 +6674,10 @@ inline S Leaf::bound_at(bool wet, double bound_x, const SupplyDraw<S>& draw,
 template <Leaf::CostCurve K, class S>
 inline S Leaf::collar_at(const SupplyDraw<S>& draw, const leaf_pars<S>& pars,
                          double interior_curvature) {
+  // At every kind, not only where the kernels below are read: a bound is placed
+  // by the supply alone, but outputs_at refuses beside it, and a surface that
+  // answers at some kinds and not others is one a caller cannot plan around.
+  refuse_thermal_damage("Leaf::collar_at");
   check_draw(opt_root_psi_, draw);
   S collar = S(opt_root_psi_);
   switch (operating_point_kind_) {
