@@ -963,7 +963,7 @@ void test_operating_point_kind_is_written_by_every_path() {
   // set_traits returns the object to its just-constructed state, and the
   // classification is part of that state (hazard 10 / setup_clean_leaf).
   l.set_traits(l.vcmax_25, l.stem_c, l.stem_P50, l.roots_.root_c,
-               l.roots_.root_P50, l.TF24_beta2, l.jmax_25, l.a,
+               l.roots_.root_P50, l.TF24_beta2, l.jmax_25, l.phi_J,
                l.curv_fact_elec_trans, l.curv_fact_colim, l.TF24_cost_scale,
                l.R_d_25, l.JS22_gamma, l.CMax_a, l.CMax_b);
   ok(l.operating_point_kind() == Kind::Unsolved,
@@ -1823,6 +1823,8 @@ phylloptim::Leaf make_pm_leaf(const Drivers &d, std::vector<double> psi_soil,
   l.use_energy_balance_ = gate;
   l.wind_speed_ = wind_speed;
   l.d_ = leaf_dim;
+  // Daylight: the NIR band carries as much energy as the PAR band.
+  l.NIR_int_ = d.PPFD / phylloptim::umol_par_per_joule;
   std::vector<double> root(psi_soil.size(),
                            1.0 / double(psi_soil.size()) / d.area_leaf);
   l.set_physiology(fixture::root_network(root, soil_depth), d.PPFD, psi_soil, soil_depth,
@@ -2261,6 +2263,75 @@ void test_pm_wind_speed_validation() {
   ok(!threw, "zero wind is a legitimate case, not an error");
 }
 
+// Light arrives INTERCEPTED and the leaf absorbs it: net radiation is each band
+// times its own absorptance, and the NIR band has no default because the right
+// one depends on the light source.
+void test_pm_absorbed_shortwave() {
+  printf("PM net radiation is the absorbed shortwave of two intercepted bands\n");
+  Drivers d;
+
+  phylloptim::Leaf l = make_pm_leaf(d, {2.0}, {1.0}, true);
+  const double expected =
+      l.alpha_PAR_ * d.PPFD / phylloptim::umol_par_per_joule +
+      l.alpha_NIR_ * l.NIR_int_ + phylloptim::longwave_net_offset;
+  near(l.Rn_, expected, 1e-12, "Rn_ = alpha_PAR*PAR + alpha_NIR*NIR + longwave");
+
+  // The NIR band heats the leaf and drives no photosynthesis.
+  phylloptim::Leaf hot = make_pm_leaf(d, {2.0}, {1.0}, true);
+  hot.NIR_int_ = 2.0 * l.NIR_int_;
+  hot.set_physiology(fixture::root_network({1.0 / d.area_leaf}, {1.0}), d.PPFD,
+                     {2.0}, {1.0}, d.K_s * d.theta / d.h, d.atm_vpd, d.ca,
+                     d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  near(hot.Rn_ - l.Rn_, l.alpha_NIR_ * l.NIR_int_, 1e-12,
+       "doubling NIR adds alpha_NIR * NIR to Rn_");
+  near(hot.electron_transport_, l.electron_transport_, 0.0,
+       "and leaves electron transport untouched");
+
+  // No default: a missing NIR band throws on the energy-balance path...
+  phylloptim::Leaf unset;
+  unset.setup_transpiration(100);
+  unset.setup_root_vulnerability(100);
+  unset.use_energy_balance_ = true;
+  bool threw = false;
+  try {
+    unset.set_physiology(fixture::root_network({1.0 / d.area_leaf}, {1.0}),
+                         d.PPFD, {2.0}, {1.0}, d.K_s * d.theta / d.h,
+                         d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(threw, "an unset NIR_int_ throws on the energy-balance path");
+
+  // ...and is never read off it.
+  unset.use_energy_balance_ = false;
+  threw = false;
+  try {
+    unset.set_physiology(fixture::root_network({1.0 / d.area_leaf}, {1.0}),
+                         d.PPFD, {2.0}, {1.0}, d.K_s * d.theta / d.h,
+                         d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+    unset.find_root_collar_psi();
+    ok(std::isfinite(unset.profit_), "and solves without it off the path");
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(!threw, "an unset NIR_int_ is ignored with the gate off");
+}
+
+// phi_J is per ABSORBED photon, so the light term of J is phi_J * alpha_PAR *
+// PPFD: halving the absorptance at a doubled yield leaves J where it was.
+void test_quantum_yield_on_absorbed_basis() {
+  printf("electron transport reads phi_J * alpha_PAR * PPFD\n");
+  Drivers d;
+  phylloptim::Leaf base = make_leaf(d, {2.0}, {1.0});
+  phylloptim::Leaf swap = make_leaf(d, {2.0}, {1.0});
+  swap.alpha_PAR_ = base.alpha_PAR_ / 2.0;
+  swap.phi_J = base.phi_J * 2.0;
+  near(swap.electron_transport(), base.electron_transport(), 1e-12,
+       "J depends on phi_J and alpha_PAR only through their product");
+  near(base.phi_J * base.alpha_PAR_, 0.30, 1e-15,
+       "the default restates the old incident-basis yield of 0.30");
+}
+
 // The behavioural content of plant's PM demo smoke test, which asserted these
 // through the R shim over a Fick-vs-PM grid. The implementation is here now, so
 // the sign of the effect is asserted here too.
@@ -2632,7 +2703,7 @@ void test_closed_form() {
      "and it is rejected because the error really is large there");
 
   // The TF24_beta2 = 1/c leaf, where xi is constant and nothing needs solving.
-  phylloptim::Leaf exact_leaf(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.0 / 2.680147, 157.44, 0.30, 0.7, 0.99, 1e-3,
+  phylloptim::Leaf exact_leaf(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.0 / 2.680147, 157.44, 0.30 / 0.85, 0.7, 0.99, 1e-3,
                         100, 1e-3, 1000, 7.5);
   ok(phylloptim::closed_form::beta2_is_exact(exact_leaf),
      "beta2_is_exact recognises TF24_beta2 = 1/stem_c");
@@ -3630,7 +3701,7 @@ void test_the_dry_end_reports_which_bound_closed_it() {
   int continuity = 0, root_limit = 0;
   for (double root_P50 : {3.4, 2.0, 1.2, 0.9, 0.7, 0.5, 0.3}) {
     phylloptim::Leaf l = make_leaf(d, psi_soil, depth);
-    l.set_traits(96.0, 2.680147, 3.4, 2.680147, root_P50, 1.5, 157.44, 0.30, 0.7,
+    l.set_traits(96.0, 2.680147, 3.4, 2.680147, root_P50, 1.5, 157.44, 0.30 / 0.85, 0.7,
                  0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth,
                      d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
@@ -3827,7 +3898,7 @@ void test_perturb_stem_P50_matches_a_rebuild() {
     // The reference: stem_b through set_traits, which rebuilds the spline.
     phylloptim::Leaf rebuilt = make_leaf(d, {2.0}, {1.0});
     rebuilt.find_root_collar_psi();
-    rebuilt.set_traits(96.0, 2.680147, P50_new, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
+    rebuilt.set_traits(96.0, 2.680147, P50_new, 2.680147, 3.4, 1.5, 157.44, 0.30 / 0.85, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     rebuilt.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                            d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa,
                            d.atm_kpa);
@@ -3859,7 +3930,7 @@ void test_perturb_stem_P50_matches_a_rebuild() {
     // which is only true if the rebuild is forced.
     phylloptim::Leaf fresh = make_leaf(d, {2.0}, {1.0});
     fresh.find_root_collar_psi();
-    rescaled.set_traits(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
+    rescaled.set_traits(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30 / 0.85, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     rescaled.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                             d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa,
                             d.atm_kpa);
@@ -3905,7 +3976,7 @@ void test_stem_curve_shortcut_needs_no_rebuild() {
     undone.perturb_stem_P50(P50_0 * 1.001);
     undone.perturb_stem_P50(P50_0);  // the way back, WITH the shortcut
     undone.set_traits(96.0, 2.680147, P50_0, 2.680147, P50_0, 1.5,
-                      157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
+                      157.44, 0.30 / 0.85, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     ok(undone.stem_curve_builds_ == builds,
        "set_traits after an undone displacement rebuilds nothing");
     undone.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil,
@@ -3938,7 +4009,7 @@ void test_stem_curve_shortcut_needs_no_rebuild() {
   // this does not, so count the entries against `n_theta` when you touch it.
   double theta[phylloptim::gradient::n_theta] = {
       96.0,   2.680147, P50_0, 2.680147, P50_0, 1.5,
-      157.44, 0.30,     0.7,   0.99,     7.5,   kRd25, kGammaJS22,
+      157.44, 0.30 / 0.85,     0.7,   0.99,     7.5,   kRd25, kGammaJS22,
       kCMaxA, kCMaxB,  kmax,      0.0};
   // The two prices and the fifteen thermal-damage inputs are left zero-filled:
   // this test differentiates the collar route with the layer off, which reads
@@ -4034,7 +4105,7 @@ void test_set_traits_matches_a_fresh_leaf() {
     // The default trait vector, in set_traits' own argument order (R_d_25 apart,
     // which the constructor does not take).
     double t[11] = {96.0, 2.680147, 3.4,  2.680147, 3.4, 1.5,
-                    157.44, 0.30,   0.7,  0.99,     7.5};
+                    157.44, 0.30 / 0.85,   0.7,  0.99,     7.5};
     t[c.which] = c.value;
 
     // Fresh: the traits go through the constructor.
@@ -4094,7 +4165,7 @@ void test_set_traits_matches_a_fresh_leaf() {
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     const double vcmax_before = l.vcmax_;
-    l.set_traits(96.0 * 2.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
+    l.set_traits(96.0 * 2.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30 / 0.85, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
     // The same leaf_temp and atm_o2_kpa -- which used to be the whole key, and so
     // used to be what ARMED the trap. It no longer is: `vcmax_25` has moved, so the
@@ -4112,7 +4183,7 @@ void test_set_traits_matches_a_fresh_leaf() {
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     const double E_before = l.transpiration(3.0, 1.0);
-    l.set_traits(96.0, 2.680147, 3.4 * 1.5, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
+    l.set_traits(96.0, 2.680147, 3.4 * 1.5, 2.680147, 3.4, 1.5, 157.44, 0.30 / 0.85, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
     l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                      d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
@@ -4127,7 +4198,7 @@ void test_set_traits_matches_a_fresh_leaf() {
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     const double good[11] = {96.0, 2.680147, 3.4,  2.680147, 3.4, 1.5,
-                             157.44, 0.30,   0.7,  0.99,     7.5};
+                             157.44, 0.30 / 0.85,   0.7,  0.99,     7.5};
     // Only two potentials are settable now -- the derived scales and critical
     // potentials take their sign from these, so there is nothing else to reject.
     const int signed_positions[] = {2, 4};
@@ -4186,7 +4257,7 @@ void test_prescribed_lambda_survives_redriving() {
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     l.CF77_lambda_ = prescribed;
-    l.set_traits(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
+    l.set_traits(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30 / 0.85, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     ok(l.CF77_lambda_ == prescribed, "set_traits leaves a prescribed CF77_lambda_ alone");
   }
 
@@ -4196,7 +4267,7 @@ void test_prescribed_lambda_survives_redriving() {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     l.CF77_lambda_ = prescribed;
     l.find_root_collar_psi();
-    l.set_traits(96.0 * 1.05, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
+    l.set_traits(96.0 * 1.05, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30 / 0.85, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth,
                      d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
                      d.atm_o2_kpa, d.atm_kpa);
@@ -4212,7 +4283,7 @@ void test_prescribed_lambda_survives_redriving() {
     l.CF77_lambda_ = prescribed;
     l.find_root_collar_psi();
     ok(!std::isnan(l.opt_psi_stem_), "the solve seated an operating point");
-    l.set_traits(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
+    l.set_traits(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30 / 0.85, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     ok(std::isnan(l.opt_psi_stem_),
        "set_traits still clears the solved operating point");
     ok(std::isnan(l.profit_), "set_traits still clears profit_");
@@ -4390,7 +4461,7 @@ void test_psi_crit_lies_inside_the_stem_curve_domain() {
   // because a psi_crit chosen as though it were free landed past this curve's
   // domain. There is nothing left to get wrong, so it constructs.
   ok(message_of([] {
-       phylloptim::Leaf l(96, 3.5463, 7.6291, 2.680147, 3.4, 1.5, 157.44, 0.30,
+       phylloptim::Leaf l(96, 3.5463, 7.6291, 2.680147, 3.4, 1.5, 157.44, 0.30 / 0.85,
                           0.7, 0.99, 1e-3, 100, 1e-3, 1000, 7.5);
      }).empty(),
      "a brittle stem curve constructs without a psi_crit to reconcile");
@@ -4642,6 +4713,7 @@ phylloptim::Leaf make_single_leaf(const Drivers &d, double psi_soil,
   l.setup_root_vulnerability(100);
   l.use_energy_balance_ = gate;
   l.set_supply_single(0.0);
+  l.NIR_int_ = d.PPFD / phylloptim::umol_par_per_joule;  // daylight
   phylloptim::RootNetwork rn;
   rn.r_R_V_sum = std::vector<double>{1.0e3};
   rn.r_R_H_min = std::vector<double>{0.0};
@@ -5093,7 +5165,7 @@ void test_transpiration_survives_negative_assim() {
   // of exactly zero.
   Drivers dg = d;
   phylloptim::Leaf gross = make_single_leaf(dg, 0.5);
-  gross.set_traits(96, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, /*R_d_25=*/0.0, kGammaJS22, kCMaxA, kCMaxB);
+  gross.set_traits(96, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30 / 0.85, 0.7, 0.99, 7.5, /*R_d_25=*/0.0, kGammaJS22, kCMaxA, kCMaxB);
   phylloptim::RootNetwork rn;
   rn.r_R_V_sum = std::vector<double>{1.0e3};
   rn.r_R_H_min = std::vector<double>{0.0};
@@ -6389,6 +6461,7 @@ phylloptim::Leaf make_thermal_leaf(const Drivers &d, std::vector<double> psi_soi
   l.setup_root_vulnerability(100);
   l.use_energy_balance_ = eb;
   l.use_thermal_damage_ = gate;
+  l.NIR_int_ = d.PPFD / phylloptim::umol_par_per_joule;  // daylight
   if (inputs != nullptr) {
     inputs(l);
   }
@@ -6817,6 +6890,8 @@ int main() {
   test_zero_E_branch_derives_its_own_block();
   test_energy_balance_path_runs();
   test_pm_wind_speed_validation();
+  test_pm_absorbed_shortwave();
+  test_quantum_yield_on_absorbed_basis();
   test_pm_leaf_temperature_response();
   test_energy_balance_collar_solve_is_measured();
   test_energy_balance_gate_off_is_inert();

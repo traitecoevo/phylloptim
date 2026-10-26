@@ -24,6 +24,8 @@ thermal_leaf <- function(supply = leaf_supply_singlelayer()) {
 }
 
 drive_at <- function(l, leaf_temp, psi_soil = 0.5) {
+  # Daylight NIR for the PPFD below; read only with the energy balance on.
+  l$NIR_int_ <- 1200 / 4.57
   if (identical(l$supply_kind, "single")) {
     set_drivers(l, psi_soil = psi_soil, PPFD = 1200,
                 root_network = series_resistance(50),

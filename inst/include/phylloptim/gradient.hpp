@@ -67,7 +67,7 @@ using phylloptim::n_traits;
 using phylloptim::par_vcmax_25;   using phylloptim::par_stem_c;
 using phylloptim::par_stem_P50;   using phylloptim::par_root_c;
 using phylloptim::par_root_P50;   using phylloptim::par_TF24_beta2;
-using phylloptim::par_jmax_25;    using phylloptim::par_a;
+using phylloptim::par_jmax_25;    using phylloptim::par_phi_J;
 using phylloptim::par_curv_fact_elec_trans;
 using phylloptim::par_curv_fact_colim;
 using phylloptim::par_TF24_cost_scale; using phylloptim::par_R_d_25;
@@ -110,7 +110,7 @@ inline const std::vector<std::string>& par_names() {
   static const std::vector<std::string> names{
       "vcmax_25",  "stem_c",              "stem_P50",
       "root_c",    "root_P50",            "TF24_beta2",
-      "jmax_25",   "a",                   "curv_fact_elec_trans",
+      "jmax_25",   "phi_J",               "curv_fact_elec_trans",
       "curv_fact_colim", "TF24_cost_scale", "R_d_25",
       "JS22_gamma", "CMax_a", "CMax_b",
       "leaf_specific_conductance_max",
@@ -279,7 +279,7 @@ inline double rounded(double x) {
 
 // The step: relative to the parameter for values above 1, and plain `step`
 // below it. The floor is at 1, which is deliberate rather than an epsilon --
-// traits here span `a` = 0.3 to `jmax_25` = 157.44, and a strictly relative step
+// traits here span `phi_J` = 0.35 to `jmax_25` = 157.44, and a strictly relative step
 // would perturb the small ones so little that the difference is dominated by the
 // solve's ~1e-09 noise.
 //
@@ -482,7 +482,7 @@ inline void apply(Leaf& l, const double* theta, const Drivers& d, bool single,
   l.set_traits(theta[par_vcmax_25], theta[par_stem_c], theta[par_stem_P50],
                theta[par_root_c], theta[par_root_P50],
                theta[par_TF24_beta2], theta[par_jmax_25],
-               theta[par_a], theta[par_curv_fact_elec_trans],
+               theta[par_phi_J], theta[par_curv_fact_elec_trans],
                theta[par_curv_fact_colim], theta[par_TF24_cost_scale],
                theta[par_R_d_25], theta[par_JS22_gamma],
                theta[par_CMax_a], theta[par_CMax_b]);

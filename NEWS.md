@@ -1,3 +1,23 @@
+# phylloptim 0.13.0
+
+## Light arrives intercepted and the leaf absorbs it
+
+The leaf's light input is now named for what it is, and absorption happens inside the leaf. Breaking: the quantum-yield trait is renamed and rebased, and the energy-balance path needs one new input.
+
+* `PPFD` (the `set_drivers()` / `leaf_solve()` driver, `set_physiology()`'s second argument, the `par_PPFD` slot) is the **intercepted** photon flux per unit leaf area: incident on the leaf, before its absorptance. Its value and units are unchanged; the documentation now says which stage of the light chain it is.
+* New leaf properties `alpha_PAR_` (0.85) and `alpha_NIR_` (0.20), the PAR and near-infrared absorptances. Settable fields, not fitted traits.
+* `a` -> `phi_J`, the quantum yield of electron transport per **absorbed** photon. Electron transport reads `phi_J * alpha_PAR_ * PPFD`. The default `0.30 / 0.85` restates the old incident-basis 0.30, so with the defaults J is unchanged to rounding. Migration:
+  * `leaf_traits(a = x)` -> `leaf_traits(phi_J = x / 0.85)`
+  * `Leaf(..., a = x, ...)` -> `Leaf(..., phi_J = x / 0.85, ...)`
+  * `l$set_traits(..., a, ...)` (8th argument) -> the same position, `phi_J = a / 0.85`
+  * `l$a` -> `l$phi_J`
+  * `leaf_gradient(pars = "a")` / gradient columns named `a` -> `"phi_J"`; the derivative is per unit `phi_J`, so `d/da = d/dphi_J / 0.85`
+  * A gas-exchange fit identifies only `phi_J * alpha_PAR_`: fix `alpha_PAR_` and the fitted `phi_J` is per absorbed photon.
+* **Energy-balance path:** net radiation is the absorbed shortwave of two intercepted bands, `Rn = alpha_PAR_ * PPFD / 4.57 + alpha_NIR_ * NIR_int_ - 40`, where it was `2 * PPFD / 4.57 - 40` (all shortwave absorbed). New per-call field `NIR_int_`, the intercepted near-infrared in W m^-2, set before `set_drivers()` like `wind_speed_`. **It has no default**, because the right one depends on the light source (about `PPFD / 4.57` in daylight, 0 under an LED), so `set_physiology()` refuses a non-finite `NIR_int_` with `use_energy_balance_` on. Off the energy-balance path it is never read. Migration: `l$use_energy_balance_ <- TRUE` -> also `l$NIR_int_ <- PPFD / 4.57` for daylight.
+* `constants.hpp`: `sw_abs_per_par` (2.0) is removed. It folded the PAR share of shortwave and an absorptance of 1 into one number.
+
+Golden files regenerated. Rows with the energy balance off move by reassociation only (operating points: 342 cells, worst 2.0e-10; psi_stem optima: 836 cells on 133 rows, worst 1.8e-10). Energy-balance rows move by the physics: with daylight NIR at the grid's PPFD of 1500, absorbed shortwave falls from 657 to 345 W m^-2 and the solved leaf temperature by a median 7.9 C (up to 14.2 C); 14 of 2592 rows change kind. The 17 `leaf_temp_from_E` primitives move for the same reason.
+
 # phylloptim 0.12.0
 
 ## An optional thermal-damage layer on the leaf, off by default

@@ -458,7 +458,7 @@ test_that("`pars` order does not change any gradient (#72)", {
   # homogeneity identity and would get the same shortcut, and a stem_b-shaped
   # test would silently stop covering the case it was written for.
   b <- leaf_batch(psi_soil = 1.5, PPFD = 900)
-  pars <- c("vcmax_25", "stem_c", "a", "stem_P50", "TF24_cost_scale", "root_P50")
+  pars <- c("vcmax_25", "stem_c", "phi_J", "stem_P50", "TF24_cost_scale", "root_P50")
 
   for (method in c("auto", "fd")) {
     for (fast in c(TRUE, FALSE)) {

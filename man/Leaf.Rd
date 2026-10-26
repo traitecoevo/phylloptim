@@ -12,7 +12,7 @@ Leaf(
   root_P50,
   TF24_beta2,
   jmax_25,
-  a,
+  phi_J,
   curv_fact_elec_trans,
   curv_fact_colim,
   GSS_tol_abs,
@@ -37,8 +37,6 @@ Leaf(
 
 \item{jmax_25}{maximum rate of electron transport at 25 C (umol m^-2 s^-1)}
 
-\item{a}{quantum yield of photosynthetic electron transport (mol mol^-1)}
-
 \item{curv_fact_elec_trans}{curvature factor for the light response curve (unitless)}
 
 \item{curv_fact_colim}{curvature factor for the colimited photosynthesis equation}
@@ -56,6 +54,8 @@ condition -- and it does NOT reach the stem route at all.}
 \item{ci_niter}{maximum number of iterations for root-solving ci}
 
 \item{TF24_cost_scale}{cost parameter for the TF24 profit model (umol m^-2 s^-1)}
+
+\item{a}{quantum yield of photosynthetic electron transport (mol mol^-1)}
 }
 \description{
 Stomatal behaviour emerges from a gain-risk profit maximisation over the

@@ -221,7 +221,7 @@ jobs:
                 3.4,                    // root_P50
                 1.5,                    // TF24_beta2
                 157.44,                 // jmax_25
-                0.30,                   // a
+                0.30 / 0.85,            // phi_J
                 0.7,                    // curv_fact_elec_trans
                 0.99,                   // curv_fact_colim
                 7.5,                    // TF24_cost_scale

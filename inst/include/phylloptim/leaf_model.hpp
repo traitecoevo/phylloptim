@@ -111,7 +111,7 @@ inline constexpr int par_root_c = 3;
 inline constexpr int par_root_P50 = 4;
 inline constexpr int par_TF24_beta2 = 5;
 inline constexpr int par_jmax_25 = 6;
-inline constexpr int par_a = 7;
+inline constexpr int par_phi_J = 7;
 inline constexpr int par_curv_fact_elec_trans = 8;
 inline constexpr int par_curv_fact_colim = 9;
 inline constexpr int par_TF24_cost_scale = 10;
@@ -176,9 +176,10 @@ inline constexpr int par_c_acclim_maint = 30;
 inline constexpr int par_c_repair_maint = 31;
 inline constexpr int par_c_protect_maint = 32;
 inline constexpr int par_c_repair_flux = 33;
-// The light the leaf is standing in. A DRIVER rather than a trait, on the same
-// footing as `kmax`: the consumer seats it per cohort and it carries that
-// consumer's rows.
+// The light the leaf is standing in: the INTERCEPTED PPFD per unit leaf area,
+// the photon flux incident on the leaf before its absorptance. A DRIVER rather
+// than a trait, on the same footing as `kmax`: the consumer seats it per cohort
+// and it carries that consumer's rows.
 //
 // ⚠️ IT IS THE ONLY ROUTE LIGHT HAS TO CARBON. Read off the `PPFD_` member the
 // forward pass seats, the electron transport is a constant in it, so every trait
@@ -385,7 +386,7 @@ public:
        double root_P50,
        double TF24_beta2, 
        double jmax_25, 
-       double a, 
+       double phi_J, 
        double curv_fact_elec_trans, 
        double curv_fact_colim,
        double GSS_tol_abs,
@@ -636,7 +637,7 @@ public:
   double psi_crit;
   double TF24_beta2;
   double jmax_25;
-  double a;
+  double phi_J;
   double curv_fact_elec_trans; // unitless - obtained from Smith and Keenan (2020)
   double curv_fact_colim;
   // Despite its name, no longer the tolerance of the collar solve, which is a
@@ -807,6 +808,29 @@ public:
   // set_physiology falls back to the fixed ra. Only read on the PM path.
   double d_ = 0.05;          // characteristic leaf dimension, m
   double wind_speed_ = 2.0;  // above-canopy wind speed U0, m s^-1
+
+  // Leaf absorptances, the fractions of INTERCEPTED radiation the leaf absorbs.
+  // Light reaches the leaf as intercepted quantities (PPFD_ and NIR_int_); these
+  // are the leaf's own optical properties, so the conversion to absorbed happens
+  // here and nowhere upstream. alpha_PAR_ reaches both photosynthesis (APAR =
+  // alpha_PAR_ * PPFD_, which phi_J multiplies) and the energy balance;
+  // alpha_NIR_ only the energy balance. Leaf properties, not fitted traits.
+  //
+  // ⚠️ IN A GAS-EXCHANGE FIT ONLY phi_J * alpha_PAR_ IS IDENTIFIED: the two enter
+  // J as a product. Fix alpha_PAR_ (at this default or a measured absorptance)
+  // and the fitted phi_J is per absorbed photon.
+  double alpha_PAR_ = 0.85;  // PAR absorptance, unitless
+  double alpha_NIR_ = 0.20;  // near-infrared absorptance, unitless
+  // Intercepted near-infrared (700-3000 nm) per unit leaf area, W m^-2: the
+  // non-PAR part of the shortwave, which heats the leaf but drives no
+  // photosynthesis. A per-call driver like wind_speed_, set before
+  // set_physiology, and read on the energy-balance path ONLY.
+  //
+  // ⚠️ NO DEFAULT, BECAUSE NONE IS RIGHT. It depends on the light source, which
+  // the leaf cannot see: about PPFD_ / umol_par_per_joule in daylight, zero under
+  // an LED. A default of either would be silently wrong for the other, so
+  // set_physiology refuses a non-finite value on the energy-balance path.
+  double NIR_int_ = util::na_value;
 
   // --- Sicangco et al. (2026) thermal cost, default OFF -----------------------
   // An instantaneous cost of PSII damage, sigmoid in LEAF temperature:
@@ -1004,6 +1028,10 @@ public:
   int basin_scan_cells() const {
     return use_energy_balance_ ? boundary_scan_n_ : 0;
   }
+  // INTERCEPTED photosynthetic photon flux density per unit leaf area, umol m^-2
+  // s^-1: incident on the leaf, NOT absorbed. Absorption is the leaf's own
+  // business (alpha_PAR_), so the caller hands over the light that arrives and
+  // never the light that is kept. Seated by set_physiology's PPFD argument.
   double PPFD_;
   double atm_vpd_;
   // The vapour pressure deficit the DIFFUSION equations use, kPa. Off the
@@ -1276,6 +1304,10 @@ public:
   // resistances that arrive already scaled, and a caller passing resistances built
   // from absolute carbon gets a silently wrong E_up rather than an error: no
   // check here can see the difference, because both are just positive numbers.
+  //
+  // `PPFD` is the INTERCEPTED photon flux per unit leaf area (see PPFD_). On the
+  // energy-balance path the leaf also needs the intercepted near-infrared,
+  // NIR_int_, set before this call.
   void set_physiology(const RootNetwork& root_network, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double leaf_temp, double atm_o2_kpa, double atm_kpa);
 
   // Replace the fourteen traits on an existing Leaf, leaving the four numerical
@@ -1325,7 +1357,7 @@ public:
   // photosynthetic parameters really are unknown until the drivers are re-supplied.
   void set_traits(double vcmax_25, double stem_c, double stem_P50,
                   double root_c, double root_P50,
-                  double TF24_beta2, double jmax_25, double a,
+                  double TF24_beta2, double jmax_25, double phi_J,
                   double curv_fact_elec_trans, double curv_fact_colim,
                   double TF24_cost_scale, double R_d_25, double JS22_gamma,
                   double CMax_a, double CMax_b);
@@ -3103,7 +3135,7 @@ inline Leaf::Leaf()
     stem_P50(3.4), // MPa, positive magnitude -- THE trait; stem_b/psi_crit derive
     TF24_beta2(1.5), //exponent for effect of hydraulic risk (unitless)
     jmax_25(157.44), // maximum electron transport rate umol m^-2 s^-1
-    a(0.30), //quantum yield of photosynthetic electron transport (mol mol^-1)
+    phi_J(0.30 / 0.85), // quantum yield of electron transport per ABSORBED photon (mol mol^-1); 0.30 per incident photon at alpha_PAR_ = 0.85
     curv_fact_elec_trans(0.7), //curvature factor for the light response curve (unitless)
     curv_fact_colim(0.99), //curvature factor for the colimited photosythnthesis equatiom
     GSS_tol_abs(1e-3),
@@ -3134,7 +3166,7 @@ inline Leaf::Leaf(double vcmax_25, double stem_c, double stem_P50,
            double root_c,
            double root_P50,
            double TF24_beta2, double jmax_25,
-           double a, double curv_fact_elec_trans, double curv_fact_colim, 
+           double phi_J, double curv_fact_elec_trans, double curv_fact_colim, 
            double GSS_tol_abs,
            double vulnerability_curve_ncontrol,
            double ci_abs_tol,
@@ -3145,7 +3177,7 @@ inline Leaf::Leaf(double vcmax_25, double stem_c, double stem_P50,
     stem_P50(stem_P50), // MPa, positive magnitude
     TF24_beta2(TF24_beta2), //exponent for effect of hydraulic risk (unitless)
     jmax_25(jmax_25), // maximum electron transport rate umol m^-2 s^-1
-    a(a), //quantum yield of photosynthetic electron transport (mol mol^-1)
+    phi_J(phi_J), // quantum yield of electron transport per ABSORBED photon (mol mol^-1)
     curv_fact_elec_trans(curv_fact_elec_trans), //curvature factor for the light response curve (unitless)
     curv_fact_colim(curv_fact_colim), //curvature factor for the colimited photosythnthesis equation
     GSS_tol_abs(GSS_tol_abs),
@@ -3200,7 +3232,7 @@ inline void Leaf::check_psi_magnitudes(double stem_P50, double stem_c,
 // See the header for why this exists rather than fourteen settable fields.
 inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_P50_,
                              double root_c_, double root_P50_, double TF24_beta2_,
-                             double jmax_25_, double a_,
+                             double jmax_25_, double phi_J_,
                              double curv_fact_elec_trans_,
                              double curv_fact_colim_,
                              double TF24_cost_scale_, double R_d_25_,
@@ -3240,7 +3272,7 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_P50_,
   psi_crit = psi_crit_;
   TF24_beta2 = TF24_beta2_;
   jmax_25 = jmax_25_;
-  a = a_;
+  phi_J = phi_J_;
   curv_fact_elec_trans = curv_fact_elec_trans_;
   curv_fact_colim = curv_fact_colim_;
   TF24_cost_scale = TF24_cost_scale_;
@@ -3309,7 +3341,7 @@ inline leaf_pars<double> Leaf::passive_pars() const {
   p[par_root_P50] = roots_.root_P50;
   p[par_TF24_beta2] = TF24_beta2;
   p[par_jmax_25] = jmax_25;
-  p[par_a] = a;
+  p[par_phi_J] = phi_J;
   p[par_curv_fact_elec_trans] = curv_fact_elec_trans;
   p[par_curv_fact_colim] = curv_fact_colim;
   p[par_TF24_cost_scale] = TF24_cost_scale;
@@ -3486,12 +3518,20 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
    transpiration_cached_ = false;
    ca_ = ca;
    // Penman-Monteith leaf energy-balance inputs (#523). Reinterpret the incoming
-   // leaf_temp driver as air temperature; derive net radiation from the absorbed
-   // PAR (PPFD_, umol m^-2 s^-1): shortwave ~= 2*PAR converted to W m^-2, plus a
-   // fixed clear-sky longwave cooling offset (doc 3.3). ra fixed for the minimal
-   // cut (doc fallback). Only read on the use_energy_balance_ path.
+   // leaf_temp driver as air temperature. Net radiation is the ABSORBED
+   // shortwave -- each intercepted band times its own absorptance, the PAR band
+   // converted from photons to W m^-2 at the daylight ratio -- plus a fixed
+   // clear-sky longwave cooling offset (doc 3.3). Only read on the
+   // use_energy_balance_ path.
+   if (use_energy_balance_ && !std::isfinite(NIR_int_)) {
+     util::stop("set_physiology: non-finite NIR_int_ on the energy-balance path. "
+                "Set the intercepted near-infrared (W m^-2) before set_physiology: "
+                "about PPFD / umol_par_per_joule in daylight, 0 under an LED; "
+                "NIR_int_=" + util::to_string(NIR_int_));
+   }
    Tair_ = leaf_temp_;
-   Rn_ = sw_abs_per_par * PPFD_ / umol_par_per_joule + longwave_net_offset;
+   Rn_ = alpha_PAR_ * PPFD_ / umol_par_per_joule + alpha_NIR_ * NIR_int_ +
+         longwave_net_offset;
    // Aerodynamic resistance from leaf boundary-layer theory: ra = C_ra*sqrt(d/U)
    // (doc 4.1), with the per-strategy leaf dimension d_ and the above-canopy wind
    // wind_speed_. On the PM path a non-finite wind_speed_/d_ is a broken driver /
@@ -6081,17 +6121,15 @@ inline double Leaf:: stom_cond_CO2(double psi_stem, double psi_upstream) {
 
 
 // biochemical photosynthesis model equations
-//ensure that units of PPFD_ actually correspond to something real.
-// electron trnansport rate based on light availability and vcmax assuming co-limitation hypothesis
+// Electron transport: the non-rectangular hyperbola in the electron flux the
+// ABSORBED light can drive, phi_J * APAR with APAR = alpha_PAR_ * PPFD_ (PPFD_ is
+// the intercepted photon flux, umol m^-2 s^-1). electron_transport_at is the same
+// expression on the parameter pack, in the same order.
 inline double Leaf::electron_transport() {
-
-
-
-  double electron_transport_ = (a * PPFD_ + jmax_ - sqrt(pow(a * PPFD_ + jmax_, 2) - 
-  4 * curv_fact_elec_trans * a * PPFD_ * jmax_)) / (2 * curv_fact_elec_trans); // check brackets are correct
-
-  // double electron_transport_ = (4*a*PPFD_)/sqrt(pow(4*a*PPFD_/jmax_,2)+ 1);
-    return electron_transport_;           
+  const double I = phi_J * alpha_PAR_ * PPFD_;
+  double electron_transport_ = (I + jmax_ - sqrt(pow(I + jmax_, 2) -
+  4 * curv_fact_elec_trans * I * jmax_)) / (2 * curv_fact_elec_trans);
+    return electron_transport_;
 }
 
 //calculate the rubisco-limited assimilation rate, returns umol m^-2 s^-1
@@ -6604,12 +6642,12 @@ inline T Leaf::respiration_at(const leaf_pars<T>& pars) const {
 
 template <typename T>
 inline T Leaf::electron_transport_at(const leaf_pars<T>& pars) const {
-  const T a_at = pars[par_a];
+  // alpha_PAR_ is a leaf property, not a slot, so it enters as a constant.
+  const T I = pars[par_phi_J] * alpha_PAR_ * pars[par_PPFD];
   const T jm = jmax_at<T>(pars);
   const T curv = pars[par_curv_fact_elec_trans];
-  const T q = pars[par_PPFD];
-  return (a_at * q + jm -
-          sqrt(pow(a_at * q + jm, 2) - 4 * curv * a_at * q * jm)) /
+  return (I + jm -
+          sqrt(pow(I + jm, 2) - 4 * curv * I * jm)) /
          (2 * curv);
 }
 

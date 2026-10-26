@@ -87,11 +87,11 @@ struct Traits {
 };
 
 const Traits kBase{{96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5,
-                    157.44, 0.30, 0.7, 0.99, 7.5}};
+                    157.44, 0.30 / 0.85, 0.7, 0.99, 7.5}};
 
 const char *kNames[kNTraits] = {"vcmax_25",  "stem_c",     "stem_P50",
                           "root_c",    "root_P50",   "TF24_beta2",
-                          "jmax_25",   "a",          "curv_elec",
+                          "jmax_25",   "phi_J",      "curv_elec",
                           "curv_colim", "cost_scale"};
 
 static_assert(sizeof(kBase.v) / sizeof(kBase.v[0]) == kNTraits,

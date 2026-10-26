@@ -145,7 +145,7 @@ Leaf:
       - root_P50: double
       - TF24_beta2: double
       - jmax_25: double
-      - a: double
+      - phi_J: double
       - curv_fact_elec_trans: double
       - curv_fact_colim: double
       - GSS_tol_abs: double
@@ -190,10 +190,10 @@ Leaf:
     root_b: {type: double, access: field, readonly: true, name_cpp: "roots_.root_b"}
     root_psi_crit: {type: double, access: field, readonly: true, name_cpp: "roots_.root_psi_crit"}
     TF24_beta2: {type: double, access: field, readonly: true}
-    # `a` reads badly as a field name and stays `a` anyway: it is what `set_traits()`
-    # and `leaf_traits()` call the quantum yield, and a read whose name differs from
-    # the write's cannot be round-tripped by a caller iterating over trait names.
-    a: {type: double, access: field, readonly: true}
+    # Quantum yield of electron transport per ABSORBED photon. Named as in
+    # `set_traits()` and `leaf_traits()`: a read whose name differs from the
+    # write's cannot be round-tripped by a caller iterating over trait names.
+    phi_J: {type: double, access: field, readonly: true}
     curv_fact_elec_trans: {type: double, access: field, readonly: true}
     curv_fact_colim: {type: double, access: field, readonly: true}
     TF24_cost_scale: {type: double, access: field, readonly: true}
@@ -426,6 +426,10 @@ Leaf:
     boundary_scan_n_: {type: int, access: field}
     d_: {type: double, access: field}
     wind_speed_: {type: double, access: field}
+    # Leaf absorptances and the intercepted near-infrared (energy balance only).
+    alpha_PAR_: {type: double, access: field}
+    alpha_NIR_: {type: double, access: field}
+    NIR_int_: {type: double, access: field}
     Tair_: {type: double, access: field}
     Rn_: {type: double, access: field}
     ra_: {type: double, access: field}
@@ -563,7 +567,7 @@ Leaf:
       args: [stem_P50: double]
     set_traits:
       return_type: void
-      args: [vcmax_25: double, stem_c: double, stem_P50: double, root_c: double, root_P50: double, TF24_beta2: double, jmax_25: double, a: double, curv_fact_elec_trans: double, curv_fact_colim: double, TF24_cost_scale: double, R_d_25: double, JS22_gamma: double, CMax_a: double, CMax_b: double]
+      args: [vcmax_25: double, stem_c: double, stem_P50: double, root_c: double, root_P50: double, TF24_beta2: double, jmax_25: double, phi_J: double, curv_fact_elec_trans: double, curv_fact_colim: double, TF24_cost_scale: double, R_d_25: double, JS22_gamma: double, CMax_a: double, CMax_b: double]
 
     # --- transpiration and conductance ---------------------------------------
     proportion_of_conductivity:

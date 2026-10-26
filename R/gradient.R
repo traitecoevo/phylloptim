@@ -88,7 +88,7 @@ set_traits <- function(x, traits) {
   # the ordering is written down once rather than at every call site.
   x$set_traits(traits$vcmax_25, traits$stem_c, traits$stem_P50,
                traits$root_c, traits$root_P50, traits$TF24_beta2,
-               traits$jmax_25, traits$a, traits$curv_fact_elec_trans,
+               traits$jmax_25, traits$phi_J, traits$curv_fact_elec_trans,
                traits$curv_fact_colim, traits$TF24_cost_scale, traits$R_d_25,
                traits$JS22_gamma, traits$CMax_a, traits$CMax_b)
   invisible(x)
@@ -1411,7 +1411,7 @@ leaf_gradient <- function(psi_soil,
 
 # The step: relative to the parameter for values above 1, and plain `step` below
 # it. Not a relative step with an epsilon floor -- the floor is at 1, which is
-# deliberate. Traits here span `a` = 0.3 to `jmax_25` = 157.44, and a strictly
+# deliberate. Traits here span `phi_J` = 0.35 to `jmax_25` = 157.44, and a strictly
 # relative step would perturb the small ones so little that the difference is
 # dominated by the solve's ~1e-09 noise. It also means a trait sitting at zero is
 # still perturbed rather than not differentiated at all.
