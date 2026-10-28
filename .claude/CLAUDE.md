@@ -1134,7 +1134,7 @@ satisfies `-Werror=switch` and so removes the check they exist for.
    the key.** `set_physiology` never serves the cache while
    `use_thermal_damage_` is on, because `A_`, `I_r_` and `I_p_` are state a
    caller moves every step; only the gate itself is keyed, so switching it off
-   at unchanged drivers recomputes. Remove that bypass and all fifteen inputs
+   at unchanged drivers recomputes. Remove that bypass and all twenty inputs
    must join the key. `test_thermal_damage_bypasses_the_cache` (C++) and
    `test-thermal-damage.R` fail if either half goes.
 

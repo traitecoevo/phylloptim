@@ -973,6 +973,22 @@ Leaf__topt_offset___set <- function(obj_, value) {
     invisible(.Call('_phylloptim_Leaf__topt_offset___set', PACKAGE = 'phylloptim', obj_, value))
 }
 
+Leaf__impair_H___get <- function(obj_) {
+    .Call('_phylloptim_Leaf__impair_H___get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__impair_H___set <- function(obj_, value) {
+    invisible(.Call('_phylloptim_Leaf__impair_H___set', PACKAGE = 'phylloptim', obj_, value))
+}
+
+Leaf__impair_Tmid___get <- function(obj_) {
+    .Call('_phylloptim_Leaf__impair_Tmid___get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__impair_Tmid___set <- function(obj_, value) {
+    invisible(.Call('_phylloptim_Leaf__impair_Tmid___set', PACKAGE = 'phylloptim', obj_, value))
+}
+
 Leaf__m_rep___get <- function(obj_) {
     .Call('_phylloptim_Leaf__m_rep___get', PACKAGE = 'phylloptim', obj_)
 }
@@ -997,12 +1013,28 @@ Leaf__k_i___set <- function(obj_, value) {
     invisible(.Call('_phylloptim_Leaf__k_i___set', PACKAGE = 'phylloptim', obj_, value))
 }
 
-Leaf__k_i_ref___get <- function(obj_) {
-    .Call('_phylloptim_Leaf__k_i_ref___get', PACKAGE = 'phylloptim', obj_)
+Leaf__k_i_Ea___get <- function(obj_) {
+    .Call('_phylloptim_Leaf__k_i_Ea___get', PACKAGE = 'phylloptim', obj_)
 }
 
-Leaf__k_i_ref___set <- function(obj_, value) {
-    invisible(.Call('_phylloptim_Leaf__k_i_ref___set', PACKAGE = 'phylloptim', obj_, value))
+Leaf__k_i_Ea___set <- function(obj_, value) {
+    invisible(.Call('_phylloptim_Leaf__k_i_Ea___set', PACKAGE = 'phylloptim', obj_, value))
+}
+
+Leaf__k_i_Tref___get <- function(obj_) {
+    .Call('_phylloptim_Leaf__k_i_Tref___get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__k_i_Tref___set <- function(obj_, value) {
+    invisible(.Call('_phylloptim_Leaf__k_i_Tref___set', PACKAGE = 'phylloptim', obj_, value))
+}
+
+Leaf__k_i_baseline___get <- function(obj_) {
+    .Call('_phylloptim_Leaf__k_i_baseline___get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__k_i_baseline___set <- function(obj_, value) {
+    invisible(.Call('_phylloptim_Leaf__k_i_baseline___set', PACKAGE = 'phylloptim', obj_, value))
 }
 
 Leaf__k_rec___get <- function(obj_) {
@@ -1019,6 +1051,14 @@ Leaf__dTopt_max___get <- function(obj_) {
 
 Leaf__dTopt_max___set <- function(obj_, value) {
     invisible(.Call('_phylloptim_Leaf__dTopt_max___set', PACKAGE = 'phylloptim', obj_, value))
+}
+
+Leaf__dTimpair_max___get <- function(obj_) {
+    .Call('_phylloptim_Leaf__dTimpair_max___get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__dTimpair_max___set <- function(obj_, value) {
+    invisible(.Call('_phylloptim_Leaf__dTimpair_max___set', PACKAGE = 'phylloptim', obj_, value))
 }
 
 Leaf__K_A___get <- function(obj_) {
@@ -1085,8 +1125,12 @@ Leaf__c_repair_flux___set <- function(obj_, value) {
     invisible(.Call('_phylloptim_Leaf__c_repair_flux___set', PACKAGE = 'phylloptim', obj_, value))
 }
 
-Leaf__phi_d___get <- function(obj_) {
-    .Call('_phylloptim_Leaf__phi_d___get', PACKAGE = 'phylloptim', obj_)
+Leaf__phi_i___get <- function(obj_) {
+    .Call('_phylloptim_Leaf__phi_i___get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__k_i_eff___get <- function(obj_) {
+    .Call('_phylloptim_Leaf__k_i_eff___get', PACKAGE = 'phylloptim', obj_)
 }
 
 Leaf__k_rec_eff___get <- function(obj_) {

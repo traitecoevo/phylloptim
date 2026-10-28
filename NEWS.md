@@ -1,3 +1,17 @@
+# phylloptim 0.13.0
+
+## The thermal-damage layer: impairment gets its own parameters, and the leak is an Arrhenius rate
+
+The layer's three states are now named for what they do: functional ⇌ impaired → damaged. The Vcmax and Jmax peaked-Arrhenius curves are the instantaneous, fully reversible temperature response; impairment is a separate process in addition to it, and the only route into lasting damage.
+
+- **The impaired fraction has its own equilibrium.** `phi_i_ = K/(1 + K)` with `K = exp[(impair_H_/R)(1/Tmid - 1/T)]`, one half at `impair_Tmid_` (°C). It used to reuse the Jmax curve's `jmax_H_d_` and `jmax_d_S_`, so recalibrating the photosynthetic response moved the damage onset. The defaults (200 kJ mol⁻¹, 200000/650 K) reproduce the old onset to rounding.
+- **Acclimation moves the onset by its own amount**, `topt_offset_ + dTimpair_max_ * A_/(A_ + K_A_)`. `dTimpair_max_` defaults to `dTopt_max_`'s 6 °C, which is the old behaviour.
+- **The leak into damage is a centred Arrhenius**, reported as `k_i_eff_ = k_i_ * exp[(k_i_Ea_/R)(1/T_ref - 1/T)]` at `k_i_Tref_` (°C). The caller's damage ODE should read `k_i_eff_`. The default `k_i_Ea_ = 0` gives exactly `k_i_`.
+
+⚠️ **Renamed, so a caller of 0.12.0 fails at the binding rather than reading the wrong number:** `phi_d_` → `phi_i_`, and `k_i_ref_` → `k_i_baseline_` (the no-extra-protection baseline the protection cost is measured from, not a reference temperature).
+
+With the gate off every golden file is bit-identical. With it on and the new parameters at their defaults, capacities, costs and `k_i_eff_` are unchanged and `phi_i_` moves by rounding only.
+
 # phylloptim 0.12.0
 
 ## An optional thermal-damage layer on the leaf, off by default

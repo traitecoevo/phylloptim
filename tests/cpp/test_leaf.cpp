@@ -6321,12 +6321,17 @@ void test_outputs_agree_with_the_solve() {
 // Every input of the layer at a value other than its default.
 void set_atls_inputs(phylloptim::Leaf &l) {
   l.topt_offset_ = 2.5;
+  l.impair_H_ = 2.6e5;
+  l.impair_Tmid_ = 37.0;
   l.m_rep_ = 0.7;
   l.t_rep_cut_ = 41.0;
   l.k_i_ = 0.2;
-  l.k_i_ref_ = 0.6;
+  l.k_i_Ea_ = 8e4;
+  l.k_i_Tref_ = 30.0;
+  l.k_i_baseline_ = 0.6;
   l.k_rec_ = 0.4;
   l.dTopt_max_ = 4.0;
+  l.dTimpair_max_ = 2.5;
   l.K_A_ = 2.0;
   l.A_ = 1.5;
   l.I_r_ = 0.2;
@@ -6341,12 +6346,17 @@ void set_atls_inputs(phylloptim::Leaf &l) {
 void poison_atls_inputs(phylloptim::Leaf &l) {
   const double nan = std::numeric_limits<double>::quiet_NaN();
   l.topt_offset_ = nan;
+  l.impair_H_ = nan;
+  l.impair_Tmid_ = nan;
   l.m_rep_ = nan;
   l.t_rep_cut_ = nan;
   l.k_i_ = nan;
-  l.k_i_ref_ = nan;
+  l.k_i_Ea_ = nan;
+  l.k_i_Tref_ = nan;
+  l.k_i_baseline_ = nan;
   l.k_rec_ = nan;
   l.dTopt_max_ = nan;
+  l.dTimpair_max_ = nan;
   l.K_A_ = nan;
   l.A_ = nan;
   l.I_r_ = nan;
@@ -6392,9 +6402,9 @@ void reseat_thermal_leaf(phylloptim::Leaf &l, const Drivers &d,
 }
 
 // The block update_temperature_dependent_params writes, as one comparable value.
-std::array<double, 10> thermal_block(const phylloptim::Leaf &l) {
+std::array<double, 11> thermal_block(const phylloptim::Leaf &l) {
   return {l.vcmax_, l.jmax_, l.gamma_, l.ko_, l.kc_, l.R_d_, l.km_,
-          l.electron_transport_, l.phi_d_, l.k_rec_eff_};
+          l.electron_transport_, l.phi_i_, l.k_i_eff_, l.k_rec_eff_};
 }
 
 // NaN in every input, gate off, against a leaf that never had them: bit-identical
@@ -6430,7 +6440,8 @@ void test_thermal_damage_gate_off_is_inert() {
         ok(clean.Tleaf_ == poisoned.Tleaf_, "Tleaf is bit-identical" + at);
         ok(thermal_block(clean) == thermal_block(poisoned),
            "the temperature block is bit-identical" + at);
-        ok(poisoned.phi_d_ == 0.0 && poisoned.k_rec_eff_ == 0.0,
+        ok(poisoned.phi_i_ == 0.0 && poisoned.k_i_eff_ == 0.0 &&
+               poisoned.k_rec_eff_ == 0.0,
            "the outputs are zero" + at);
         const double p0 = clean.opt_root_psi_;
         ok(clean.dprofit_droot_collar_psi(p0) ==
@@ -6449,7 +6460,8 @@ void test_thermal_damage_gate_off_is_inert() {
 
         phylloptim::Leaf on =
             make_thermal_leaf(d, psi, depth, eb, true, poison_atls_inputs);
-        ok(std::isnan(on.vcmax_) && std::isnan(on.phi_d_),
+        ok(std::isnan(on.vcmax_) && std::isnan(on.phi_i_) &&
+               std::isnan(on.k_i_eff_),
            "the same poison reaches the block with the gate on" + at);
       }
     }
@@ -6574,8 +6586,8 @@ void test_thermal_damage_dprofit_is_the_solves_own() {
 }
 
 // respiration_temp_deriv and dprofit_energy_balance_term perturb the block by
-// 1e-3 degrees and put it back by assignment. The layer adds two outputs to the
-// block, so each must put back ten numbers, not eight.
+// 1e-3 degrees and put it back by assignment. The layer adds three outputs to
+// the block, so each must put back eleven numbers, not eight.
 void test_thermal_damage_fd_helpers_restore_the_block() {
   printf("thermal damage: the finite-difference helpers restore the block\n");
   Drivers d;
@@ -6585,19 +6597,19 @@ void test_thermal_damage_fd_helpers_restore_the_block() {
   l.find_root_collar_psi();
   ok(l.operating_point_kind() == phylloptim::Leaf::OperatingPointKind::Interior,
      "the fixture is an interior point");
-  const std::array<double, 10> before = thermal_block(l);
-  ok(before[8] > 0.0 && before[9] > 0.0,
-     "the fixture has non-zero phi_d and k_rec_eff to lose");
+  const std::array<double, 11> before = thermal_block(l);
+  ok(before[8] > 0.0 && before[9] > 0.0 && before[10] > 0.0,
+     "the fixture has non-zero phi_i, k_i_eff and k_rec_eff to lose");
 
   const double dRd = l.respiration_temp_deriv(l.Tleaf_ + 2.0);
-  ok(thermal_block(l) == before, "respiration_temp_deriv restores all ten");
+  ok(thermal_block(l) == before, "respiration_temp_deriv restores all eleven");
   ok(std::isfinite(dRd), "respiration_temp_deriv is finite");
 
   const double term = l.dprofit_energy_balance_term(
       l.ci_, l.stom_cond_CO2_, 1.0, 1e-5, 1.0, 0.1, 0.1, 0.1, 1.0, -1e3,
       l.Tleaf_ + 2.0);
   ok(std::isfinite(term), "dprofit_energy_balance_term is finite");
-  ok(thermal_block(l) == before, "dprofit_energy_balance_term restores all ten");
+  ok(thermal_block(l) == before, "dprofit_energy_balance_term restores all eleven");
 
   // The repair-flux cost reads k_rec_eff(T), so it reaches dR_d/dT: the
   // derivative moves with that coefficient, at a temperature where repair is

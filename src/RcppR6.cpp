@@ -1069,6 +1069,24 @@ void Leaf__topt_offset___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, 
 }
 
 // [[Rcpp::export]]
+double Leaf__impair_H___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->impair_H_;
+}
+// [[Rcpp::export]]
+void Leaf__impair_H___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
+  obj_->impair_H_ = value;
+}
+
+// [[Rcpp::export]]
+double Leaf__impair_Tmid___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->impair_Tmid_;
+}
+// [[Rcpp::export]]
+void Leaf__impair_Tmid___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
+  obj_->impair_Tmid_ = value;
+}
+
+// [[Rcpp::export]]
 double Leaf__m_rep___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
   return obj_->m_rep_;
 }
@@ -1096,12 +1114,30 @@ void Leaf__k_i___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double v
 }
 
 // [[Rcpp::export]]
-double Leaf__k_i_ref___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
-  return obj_->k_i_ref_;
+double Leaf__k_i_Ea___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->k_i_Ea_;
 }
 // [[Rcpp::export]]
-void Leaf__k_i_ref___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
-  obj_->k_i_ref_ = value;
+void Leaf__k_i_Ea___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
+  obj_->k_i_Ea_ = value;
+}
+
+// [[Rcpp::export]]
+double Leaf__k_i_Tref___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->k_i_Tref_;
+}
+// [[Rcpp::export]]
+void Leaf__k_i_Tref___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
+  obj_->k_i_Tref_ = value;
+}
+
+// [[Rcpp::export]]
+double Leaf__k_i_baseline___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->k_i_baseline_;
+}
+// [[Rcpp::export]]
+void Leaf__k_i_baseline___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
+  obj_->k_i_baseline_ = value;
 }
 
 // [[Rcpp::export]]
@@ -1120,6 +1156,15 @@ double Leaf__dTopt_max___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) 
 // [[Rcpp::export]]
 void Leaf__dTopt_max___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
   obj_->dTopt_max_ = value;
+}
+
+// [[Rcpp::export]]
+double Leaf__dTimpair_max___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->dTimpair_max_;
+}
+// [[Rcpp::export]]
+void Leaf__dTimpair_max___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
+  obj_->dTimpair_max_ = value;
 }
 
 // [[Rcpp::export]]
@@ -1195,8 +1240,13 @@ void Leaf__c_repair_flux___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_
 }
 
 // [[Rcpp::export]]
-double Leaf__phi_d___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
-  return obj_->phi_d_;
+double Leaf__phi_i___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->phi_i_;
+}
+
+// [[Rcpp::export]]
+double Leaf__k_i_eff___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->k_i_eff_;
 }
 
 // [[Rcpp::export]]
