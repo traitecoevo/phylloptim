@@ -771,7 +771,7 @@ inline void Leaf::optimise_closed() {
   if (use_thermal_damage_) {
     util::stop("the closed form is refused with use_thermal_damage_ on: it has "
                "not been checked against the exact solve with the thermal-damage "
-               "layer's shifted capacities, survival factor and costs in place, "
+               "layer's shifted capacities, functional fraction and costs in place, "
                "and its validity guard was measured without them. Use method "
                "\"exact\", or set use_thermal_damage_ to false.");
   }

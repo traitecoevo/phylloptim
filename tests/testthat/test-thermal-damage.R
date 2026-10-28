@@ -229,7 +229,7 @@ test_that("impaired and damaged area discount BOTH capacities by F = 1 - I - D",
   expect_equal(damaged$vcmax_ / undamaged$vcmax_, 0.6, tolerance = 1e-14)
   expect_equal(damaged$jmax_ / undamaged$jmax_, 0.6, tolerance = 1e-14)
 
-  # Past total damage the survival factor sits on its floor, so the capacities
+  # Past total damage the functional fraction sits on its floor, so the capacities
   # stay strictly positive and the solve stays well-conditioned.
   crushed <- thermal_leaf()
   crushed$use_thermal_damage_ <- TRUE
@@ -451,7 +451,7 @@ test_that("the entropy shift moves each capacity optimum by the requested amount
                  tolerance = 1e-5, info = field)
   }
 
-  # The survival factor is applied on top of the shifted curve.
+  # The functional fraction is applied on top of the shifted curve.
   surv <- 1 - atls_inputs$I_ - atls_inputs$D_
   undamaged <- set_inputs(thermal_leaf(),
                           utils::modifyList(atls_inputs,

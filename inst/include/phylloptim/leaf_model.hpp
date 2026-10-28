@@ -881,12 +881,14 @@ public:
   // state, plus the costs below: impaired and damaged area costs carbon and
   // gains none.
   //
-  // ⚠️ NO DERIVATIVE PATH CARRIES THIS LAYER. The pack-reading kernels the
-  // derivative surface reads do not apply it, and the trait gradient and the
-  // closed form have not been checked with it, so collar_at, outputs_at, the
-  // gradient and the closed form refuse a leaf with the gate on. The solve's own
-  // dprofit in the collar or stem potential reads the members this block writes,
-  // so it does carry the layer.
+  // ⚠️ ONLY THE TRAIT GRADIENT CARRIES THIS LAYER. leaf_gradient() and the
+  // batch difference the solve's own dprofit and outputs, which read the members
+  // this block writes, and take A_, I_, D_ and the parameters that reach the
+  // solve as inputs (gradient.hpp). The derivative surface (collar_at,
+  // outputs_at) reads capacities off the parameter pack, whose kernels do not
+  // apply the layer, and the closed form has not been checked with it, so those
+  // refuse a leaf with the gate on. The dynamics' own sensitivities are
+  // damage_trajectory_gradient().
   bool use_thermal_damage_ = false;
   // Constitutive thermostability shift, deg C. Moves BOTH the photosynthetic
   // optimum (through the entropy term) and the impairment switch's midpoint by
@@ -5597,7 +5599,7 @@ inline void Leaf::refuse_thermal_damage(const char* who) const {
                ": refused with use_thermal_damage_ on. The derivative surface "
                "takes Vcmax, Jmax and R_d from the traits through a temperature "
                "response that does not apply the thermal-damage layer -- its "
-               "shifted optimum, its survival factor and its maintenance costs -- "
+               "shifted optimum, its functional fraction and its maintenance costs -- "
                "so its rows would describe a different model from the one the "
                "solve ran. Set use_thermal_damage_ to false.");
   }
