@@ -6334,8 +6334,13 @@ void set_atls_inputs(phylloptim::Leaf &l) {
   l.dTimpair_max_ = 2.5;
   l.K_A_ = 2.0;
   l.A_ = 1.5;
-  l.I_r_ = 0.2;
-  l.I_p_ = 0.15;
+  l.I_ = 0.2;
+  l.D_ = 0.15;
+  l.k_mat_ = 0.05;
+  l.acclim_alpha_ = 0.03;
+  l.acclim_beta_ = 0.2;
+  l.acclim_T_ = 28.0;
+  l.acclim_s_ = 2.0;
   l.c_acclim_maint_ = 0.05;
   l.c_repair_maint_ = 0.3;
   l.c_protect_maint_ = 0.4;
@@ -6359,8 +6364,13 @@ void poison_atls_inputs(phylloptim::Leaf &l) {
   l.dTimpair_max_ = nan;
   l.K_A_ = nan;
   l.A_ = nan;
-  l.I_r_ = nan;
-  l.I_p_ = nan;
+  l.I_ = nan;
+  l.D_ = nan;
+  l.k_mat_ = nan;
+  l.acclim_alpha_ = nan;
+  l.acclim_beta_ = nan;
+  l.acclim_T_ = nan;
+  l.acclim_s_ = nan;
   l.c_acclim_maint_ = nan;
   l.c_repair_maint_ = nan;
   l.c_protect_maint_ = nan;
@@ -6404,7 +6414,7 @@ void reseat_thermal_leaf(phylloptim::Leaf &l, const Drivers &d,
 // The block update_temperature_dependent_params writes, as one comparable value.
 std::array<double, 11> thermal_block(const phylloptim::Leaf &l) {
   return {l.vcmax_, l.jmax_, l.gamma_, l.ko_, l.kc_, l.R_d_, l.km_,
-          l.electron_transport_, l.phi_i_, l.k_i_eff_, l.k_rec_eff_};
+          l.electron_transport_, l.k_imp_eff_, l.k_rec_eff_, l.functional_};
 }
 
 // NaN in every input, gate off, against a leaf that never had them: bit-identical
@@ -6440,7 +6450,7 @@ void test_thermal_damage_gate_off_is_inert() {
         ok(clean.Tleaf_ == poisoned.Tleaf_, "Tleaf is bit-identical" + at);
         ok(thermal_block(clean) == thermal_block(poisoned),
            "the temperature block is bit-identical" + at);
-        ok(poisoned.phi_i_ == 0.0 && poisoned.k_i_eff_ == 0.0 &&
+        ok(poisoned.k_imp_eff_ == 0.0 && poisoned.functional_ == 1.0 &&
                poisoned.k_rec_eff_ == 0.0,
            "the outputs are zero" + at);
         const double p0 = clean.opt_root_psi_;
@@ -6460,8 +6470,8 @@ void test_thermal_damage_gate_off_is_inert() {
 
         phylloptim::Leaf on =
             make_thermal_leaf(d, psi, depth, eb, true, poison_atls_inputs);
-        ok(std::isnan(on.vcmax_) && std::isnan(on.phi_i_) &&
-               std::isnan(on.k_i_eff_),
+        ok(std::isnan(on.vcmax_) && std::isnan(on.k_imp_eff_) &&
+               std::isnan(on.functional_),
            "the same poison reaches the block with the gate on" + at);
       }
     }
@@ -6469,8 +6479,8 @@ void test_thermal_damage_gate_off_is_inert() {
   ok(compared == 8, "every configuration was compared");
 }
 
-// ⚠️ THE CACHE INVARIANT. The temperature cache's key does not hold A_, I_r_ or
-// I_p_, so set_physiology must not serve it while the gate is on: re-seating at
+// ⚠️ THE CACHE INVARIANT. The temperature cache's key does not hold A_, I_ or
+// D_, so set_physiology must not serve it while the gate is on: re-seating at
 // unchanged drivers after the caller moves the state has to recompute. And the
 // gate itself is in the key, so switching it off at unchanged drivers must not be
 // served the gate-on block.
@@ -6484,7 +6494,7 @@ void test_thermal_damage_bypasses_the_cache() {
   const std::vector<double> psi{2.0}, depth{1.0};
   phylloptim::Leaf l = make_thermal_leaf(d, psi, depth, false, true);
   const double vcmax_undamaged = l.vcmax_;
-  l.I_r_ = 0.25;
+  l.I_ = 0.25;
   reseat_thermal_leaf(l, d, psi, depth);
   near(l.vcmax_ / vcmax_undamaged, 0.75, 1e-14,
        "a new damage state at unchanged drivers reaches vcmax");
@@ -6599,7 +6609,7 @@ void test_thermal_damage_fd_helpers_restore_the_block() {
      "the fixture is an interior point");
   const std::array<double, 11> before = thermal_block(l);
   ok(before[8] > 0.0 && before[9] > 0.0 && before[10] > 0.0,
-     "the fixture has non-zero phi_i, k_i_eff and k_rec_eff to lose");
+     "the fixture has non-zero k_imp_eff, k_rec_eff and functional to lose");
 
   const double dRd = l.respiration_temp_deriv(l.Tleaf_ + 2.0);
   ok(thermal_block(l) == before, "respiration_temp_deriv restores all eleven");

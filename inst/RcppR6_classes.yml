@@ -372,47 +372,53 @@ Leaf:
     T50_: {type: double, access: field}
     Tcrit_: {type: double, access: field}
     # --- ATLS thermal damage and acclimation, default OFF (plant#566) ---------
-    # The leaf half of a LASTING damage model, functional <=> impaired -> damaged,
-    # whose states (A_, I_r_, I_p_) the caller integrates and sets before each
-    # set_drivers(). With the gate on, the Vcmax and Jmax optima shift by
-    # topt_offset_ + dTopt_max_ * A/(A + K_A_), both capacities are scaled by
-    # 1 - I_r_ - I_p_ (floored at 1e-6), and four maintenance costs are added to
-    # R_d_. The impaired fraction has its OWN equilibrium (impair_H_, impair_Tmid_,
-    # moved by topt_offset_ + dTimpair_max_ * A/(A + K_A_)), independent of the
-    # Vcmax and Jmax curves, and the leak out of it is a centred Arrhenius
-    # (k_i_ at k_i_Tref_, sensitivity k_i_Ea_). Off, nothing here is read and every
-    # result is bit-identical. Rates (k_i_, k_i_baseline_, k_i_eff_, k_rec_,
-    # k_rec_eff_) are per DAY. leaf_gradient(), leaf_gradient_batch() and the
-    # closed form refuse a leaf with the gate on. See `use_thermal_damage_` in
+    # A lasting damage model on three fractions of leaf area, functional F <=>
+    # impaired I -> damaged D (F = 1 - I - D), plus an acclimation state A. The
+    # states are inputs (A_, I_, D_) seated before each set_drivers(); with the gate
+    # on, the Vcmax and Jmax optima shift by topt_offset_ + dTopt_max_ * A/(A + K_A_),
+    # both capacities are scaled by F (floored at 1e-6), and four maintenance costs
+    # are added to R_d_. The dynamics are $damage_rates() and $damage_trajectory();
+    # see leaf_damage_trajectory(). The impairment rate is k_i_ (at k_i_Tref_,
+    # sensitivity k_i_Ea_) times a switch K/(1+K) with its OWN impair_H_ and
+    # impair_Tmid_ (moved by topt_offset_ + dTimpair_max_ * A/(A + K_A_)),
+    # independent of the Vcmax and Jmax curves. Every rate is per DAY and every
+    # temperature the LEAF's. leaf_gradient(), leaf_gradient_batch() and the closed
+    # form refuse a leaf with the gate on. See `use_thermal_damage_` in
     # leaf_model.hpp.
     use_thermal_damage_: {type: bool, access: field}
     topt_offset_: {type: double, access: field}
     impair_H_: {type: double, access: field}
     impair_Tmid_: {type: double, access: field}
-    m_rep_: {type: double, access: field}
-    t_rep_cut_: {type: double, access: field}
     k_i_: {type: double, access: field}
     k_i_Ea_: {type: double, access: field}
     k_i_Tref_: {type: double, access: field}
     k_i_baseline_: {type: double, access: field}
     k_rec_: {type: double, access: field}
+    m_rep_: {type: double, access: field}
+    t_rep_cut_: {type: double, access: field}
+    k_mat_: {type: double, access: field}
+    acclim_alpha_: {type: double, access: field}
+    acclim_beta_: {type: double, access: field}
+    acclim_T_: {type: double, access: field}
+    acclim_s_: {type: double, access: field}
     dTopt_max_: {type: double, access: field}
     dTimpair_max_: {type: double, access: field}
     K_A_: {type: double, access: field}
     A_: {type: double, access: field}
-    I_r_: {type: double, access: field}
-    I_p_: {type: double, access: field}
+    I_: {type: double, access: field}
+    D_: {type: double, access: field}
     c_acclim_maint_: {type: double, access: field}
     c_repair_maint_: {type: double, access: field}
     c_protect_maint_: {type: double, access: field}
     c_repair_flux_: {type: double, access: field}
     # OUTPUTS, written by every set_drivers() and by the solve at the leaf
-    # temperature it reports: the impaired fraction, and the leak into damage and
-    # the repair rate there (day^-1). Zero with the gate off. Read-only, so a write
-    # cannot outlive the next solve unnoticed.
-    phi_i_: {type: double, access: field, readonly: true}
-    k_i_eff_: {type: double, access: field, readonly: true}
+    # temperature it reports: the impairment and repair rates there (day^-1), zero
+    # with the gate off, and the functional fraction F that scaled the capacities,
+    # one with the gate off. Read-only, so a write cannot outlive the next solve
+    # unnoticed.
+    k_imp_eff_: {type: double, access: field, readonly: true}
     k_rec_eff_: {type: double, access: field, readonly: true}
+    functional_: {type: double, access: field, readonly: true}
     # Points used to scan the supply stream for |A|max. Sicangco use 500-600.
     # Cells the single-layer optimisers scan before refining, so a maximum at
     # full closure or past a second hump is reachable. 64 matches a 2001-point
@@ -879,6 +885,17 @@ Leaf:
     profitmax_curve:
       return_type: "std::vector<double>"
       args: [n: int]
+
+    # --- the ATLS thermal-damage layer's dynamics ------------------------------
+    # {dA/dt, dI/dt, dD/dt} per day at a leaf temperature and a state, and the
+    # states integrated over a leaf-temperature series (column-major A, I, D).
+    # Neither reads the gate, the members A_/I_/D_ or the drivers.
+    damage_rates:
+      return_type: "std::vector<double>"
+      args: [leaf_temp: double, A: double, I: double, D: double]
+    damage_trajectory:
+      return_type: "std::vector<double>"
+      args: [times: "const std::vector<double>&", leaf_temp: "const std::vector<double>&", A0: double, I0: double, D0: double]
 
     # --- the ATLS thermal-damage layer's two smooth switches -----------------
     # Argument-clamped so they stay finite. Static in C++; bound so a caller's

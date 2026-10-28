@@ -1,12 +1,12 @@
 # The ATLS thermal-damage layer (traitecoevo/plant#566), behind
 # `use_thermal_damage_`.
 #
-# The leaf half of a lasting-damage model, functional <=> impaired -> damaged: a
-# caller integrates the acclimation state A_ and the damaged fractions I_r_ and
-# I_p_, seats them, and reads back phi_i_ (the impaired fraction), k_i_eff_ (the
-# leak from impaired into damage) and k_rec_eff_ (the repair rate) at the leaf's
-# temperature. The equations are a port of plant's July layer; the checks
-# ported from its test-leaf-thermal.R are the first half of this file.
+# A lasting-damage model on three fractions of leaf area, functional <=> impaired
+# -> damaged (F = 1 - I - D), plus an acclimation state A. The states are seated
+# as A_, I_ and D_; the solve scales both capacities by F and reports the
+# impairment and repair rates (k_imp_eff_, k_rec_eff_) at the leaf's temperature;
+# $damage_rates() and leaf_damage_trajectory() are the dynamics. The structure is
+# plant's July layer with its recoverable and permanent damage renamed I and D.
 #
 # ⚠️ TWO KINDS OF ASSERTION, and both are needed. Off, the layer must be INERT,
 # which is asserted with identical() against inputs set to values that would
@@ -15,7 +15,7 @@
 # pass the first half by doing nothing at all.
 
 # The gas constant and Kelvin offset the leaf uses. A reference built on R = 8.314
-# would disagree with phi_i_ by more than rounding.
+# would disagree with the impairment switch by more than rounding.
 .R_gas <- 8.314462618153240
 .T0 <- 273.15
 
@@ -37,17 +37,17 @@ drive_at <- function(l, leaf_temp, psi_soil = 0.5) {
   invisible(l)
 }
 
-# K/(1+K), K = exp[(H/R)(1/Tmid - 1/T)], Tmid in deg C. The defaults are the
-# leaf's: H = 200 kJ/mol and Tmid = 200000/650 K, which is where the port's
-# Jmax-tied equilibrium put its midpoint.
-phi_i_ref <- function(leaf_temp, H = 200000, Tmid = 200000 / 650 - .T0) {
+# The impairment switch, K/(1+K), K = exp[(H/R)(1/Tmid - 1/T)], Tmid in deg C. The
+# defaults are the leaf's: H = 200 kJ/mol and Tmid = 200000/650 K, which is where
+# the port's Jmax-tied equilibrium put its midpoint.
+switch_ref <- function(leaf_temp, H = 200000, Tmid = 200000 / 650 - .T0) {
   K <- exp((H / .R_gas) * (1 / (Tmid + .T0) - 1 / (leaf_temp + .T0)))
   K / (1 + K)
 }
 
 # The Jmax curve's own deactivation equilibrium, K/(1+K) with K = exp((d_S*T -
-# H_d)/(R*T)): what the impaired fraction USED to be, and what its defaults
-# still reproduce.
+# H_d)/(R*T)): what the switch USED to be, and what its defaults still
+# reproduce.
 jmax_deactivation_ref <- function(leaf_temp, d_S = 650, H_d = 200000) {
   T_K <- leaf_temp + .T0
   K <- exp((d_S * T_K - H_d) / (.R_gas * T_K))
@@ -59,10 +59,21 @@ atls_inputs <- list(topt_offset_ = 2.5, impair_H_ = 2.6e5, impair_Tmid_ = 37,
                     m_rep_ = 0.7, t_rep_cut_ = 41,
                     k_i_ = 0.2, k_i_Ea_ = 8e4, k_i_Tref_ = 30,
                     k_i_baseline_ = 0.6, k_rec_ = 0.4, dTopt_max_ = 4,
-                    dTimpair_max_ = 2.5, K_A_ = 2, A_ = 1.5, I_r_ = 0.2,
-                    I_p_ = 0.15,
+                    dTimpair_max_ = 2.5, K_A_ = 2, A_ = 1.5, I_ = 0.2,
+                    D_ = 0.15, k_mat_ = 0.05, acclim_alpha_ = 0.03,
+                    acclim_beta_ = 0.2, acclim_T_ = 28, acclim_s_ = 2,
                     c_acclim_maint_ = 0.05, c_repair_maint_ = 0.3,
                     c_protect_maint_ = 0.4, c_repair_flux_ = 0.8)
+
+# The switch the leaf applied, read back off the impairment rate. Exact only
+# where the rate's Arrhenius factor is one: k_i_Ea_ = 0 (the default) or the leaf
+# at k_i_Tref_.
+switch_of <- function(l) l$k_imp_eff_ / l$k_i_
+
+# The impairment rate's Arrhenius factor.
+arrh_ref <- function(leaf_temp, Ea, Tref) {
+  exp((Ea / .R_gas) * (1 / (Tref + .T0) - 1 / (leaf_temp + .T0)))
+}
 
 set_inputs <- function(l, inputs = atls_inputs) {
   for (nm in names(inputs)) l[[nm]] <- inputs[[nm]]
@@ -75,9 +86,9 @@ test_that("thermal damage is off by default and writes zero outputs", {
   l <- thermal_leaf()
   expect_false(l$use_thermal_damage_)
   drive_at(l, 30)
-  expect_identical(l$phi_i_, 0)
-  expect_identical(l$k_i_eff_, 0)
+  expect_identical(l$k_imp_eff_, 0)
   expect_identical(l$k_rec_eff_, 0)
+  expect_identical(l$functional_, 1)
 
   # On but undamaged and unshifted: the shift is an exact zero in exact
   # arithmetic, and d_S_shifted's round trip H_d/(H_d/(d_S - corr)) + corr
@@ -90,29 +101,29 @@ test_that("thermal damage is off by default and writes zero outputs", {
   expect_equal(on$jmax_, off$jmax_, tolerance = 1e-9)
 })
 
-test_that("phi_i is a centred Arrhenius equilibrium with its own midpoint", {
+test_that("the impairment switch is a centred Arrhenius with its own midpoint", {
   for (temp in c(20, 34.54, 45, 55)) {
     l <- thermal_leaf()
     l$use_thermal_damage_ <- TRUE
     drive_at(l, temp)
-    expect_equal(l$phi_i_, phi_i_ref(temp), tolerance = 1e-12,
+    expect_equal(switch_of(l), switch_ref(temp), tolerance = 1e-12,
                  info = paste("leaf_temp", temp))
     # The defaults reproduce the port, where the onset was the Jmax curve's
     # deactivation equilibrium, to rounding.
-    expect_equal(l$phi_i_, jmax_deactivation_ref(temp), tolerance = 1e-12,
+    expect_equal(switch_of(l), jmax_deactivation_ref(temp), tolerance = 1e-12,
                  info = paste("leaf_temp", temp))
   }
   # Half-impaired (K = 1) exactly at the midpoint, which is a parameter now.
   l <- thermal_leaf()
   l$use_thermal_damage_ <- TRUE
   drive_at(l, l$impair_Tmid_)
-  expect_equal(l$phi_i_, 0.5, tolerance = 1e-12)
+  expect_equal(switch_of(l), 0.5, tolerance = 1e-12)
   l$impair_Tmid_ <- 41
   l$impair_H_ <- 3e5
   drive_at(l, 41)
-  expect_equal(l$phi_i_, 0.5, tolerance = 1e-12)
+  expect_equal(switch_of(l), 0.5, tolerance = 1e-12)
   drive_at(l, 44)
-  expect_equal(l$phi_i_, phi_i_ref(44, H = 3e5, Tmid = 41), tolerance = 1e-12)
+  expect_equal(switch_of(l), switch_ref(44, H = 3e5, Tmid = 41), tolerance = 1e-12)
 })
 
 test_that("a non-positive impairment enthalpy is refused", {
@@ -137,24 +148,25 @@ test_that("the impairment onset is independent of the Jmax curve", {
   jm$jmax_d_S_ <- 670
   drive_at(jm, 38)
   expect_false(isTRUE(all.equal(jm$jmax_, base$jmax_)))  # the curve moved
-  expect_identical(jm$phi_i_, base$phi_i_)                # the onset did not
+  expect_identical(switch_of(jm), switch_of(base))                # the onset did not
 
   im <- thermal_leaf()
   im$use_thermal_damage_ <- TRUE
   im$impair_Tmid_ <- 40
   im$impair_H_ <- 3e5
   drive_at(im, 38)
-  expect_false(isTRUE(all.equal(im$phi_i_, base$phi_i_)))  # the onset moved
+  expect_false(isTRUE(all.equal(switch_of(im), switch_of(base))))  # the onset moved
   expect_identical(c(im$vcmax_, im$jmax_), c(base$vcmax_, base$jmax_))
 })
 
-test_that("the leak into damage is a centred Arrhenius in leaf temperature", {
-  # Default k_i_Ea_ = 0: exactly k_i_ at every temperature.
+test_that("the impairment rate's scale is a centred Arrhenius in leaf temperature", {
+  # Default k_i_Ea_ = 0: the scale is exactly k_i_ at every temperature.
   for (temp in c(5, 25, 45)) {
     l <- thermal_leaf()
     l$use_thermal_damage_ <- TRUE
     drive_at(l, temp)
-    expect_identical(l$k_i_eff_, l$k_i_, info = paste("leaf_temp", temp))
+    expect_equal(l$k_imp_eff_, l$k_i_ * switch_ref(temp), tolerance = 1e-14,
+                 info = paste("leaf_temp", temp))
   }
   l <- thermal_leaf()
   l$use_thermal_damage_ <- TRUE
@@ -162,20 +174,19 @@ test_that("the leak into damage is a centred Arrhenius in leaf temperature", {
   l$k_i_Ea_ <- 1.5e5
   l$k_i_Tref_ <- 35
   drive_at(l, 35)
-  expect_identical(l$k_i_eff_, 0.3)   # exact at the reference
+  expect_equal(l$k_imp_eff_, 0.3 * switch_ref(35), tolerance = 1e-14)
   drive_at(l, 42)
-  expect_equal(l$k_i_eff_,
-               0.3 * exp((1.5e5 / .R_gas) * (1 / (35 + .T0) - 1 / (42 + .T0))),
+  expect_equal(l$k_imp_eff_, 0.3 * arrh_ref(42, 1.5e5, 35) * switch_ref(42),
                tolerance = 1e-14)
   # The sharpness Ea sets: tenfold between T1 and the T2 with
   # 1/T2 = 1/T1 - R*ln(10)/Ea, about ln(10)*R*T^2/Ea degrees above it.
   T2 <- 1 / (1 / (35 + .T0) - .R_gas * log(10) / 1.5e5) - .T0
   drive_at(l, T2)
-  expect_equal(l$k_i_eff_ / 0.3, 10, tolerance = 1e-12)
+  expect_equal(l$k_imp_eff_ / switch_ref(T2) / 0.3, 10, tolerance = 1e-12)
   # Bounded: the exponent is clamped at 30, so an absurd Ea stays finite.
   l$k_i_Ea_ <- 1e8
   drive_at(l, 90)
-  expect_identical(l$k_i_eff_, 0.3 * exp(30))
+  expect_equal(l$k_imp_eff_, 0.3 * exp(30) * switch_ref(90), tolerance = 1e-14)
 })
 
 test_that("acclimation moves the impairment onset by its own amount", {
@@ -190,7 +201,7 @@ test_that("acclimation moves the impairment onset by its own amount", {
   acc$dTimpair_max_ <- 0
   drive_at(acc, 38)
   expect_false(isTRUE(all.equal(acc$vcmax_, base$vcmax_)))
-  expect_equal(acc$phi_i_, base$phi_i_, tolerance = 1e-15)
+  expect_equal(switch_of(acc), switch_of(base), tolerance = 1e-15)
 
   # And the other way round.
   only <- thermal_leaf()
@@ -198,7 +209,7 @@ test_that("acclimation moves the impairment onset by its own amount", {
   only$A_ <- 3
   only$dTopt_max_ <- 0
   drive_at(only, 38)
-  expect_lt(only$phi_i_, base$phi_i_)
+  expect_lt(switch_of(only), switch_of(base))
   expect_equal(only$vcmax_, base$vcmax_, tolerance = 1e-12)
 
   # At the defaults the two maxima are equal, so one shift moves both by the
@@ -206,14 +217,14 @@ test_that("acclimation moves the impairment onset by its own amount", {
   expect_identical(base$dTimpair_max_, base$dTopt_max_)
 })
 
-test_that("lasting damage discounts BOTH capacities by 1 - I_r - I_p", {
+test_that("impaired and damaged area discount BOTH capacities by F = 1 - I - D", {
   undamaged <- thermal_leaf()
   undamaged$use_thermal_damage_ <- TRUE
   drive_at(undamaged, 30)
   damaged <- thermal_leaf()
   damaged$use_thermal_damage_ <- TRUE
-  damaged$I_r_ <- 0.3
-  damaged$I_p_ <- 0.1
+  damaged$I_ <- 0.3
+  damaged$D_ <- 0.1
   drive_at(damaged, 30)
   expect_equal(damaged$vcmax_ / undamaged$vcmax_, 0.6, tolerance = 1e-14)
   expect_equal(damaged$jmax_ / undamaged$jmax_, 0.6, tolerance = 1e-14)
@@ -222,8 +233,8 @@ test_that("lasting damage discounts BOTH capacities by 1 - I_r - I_p", {
   # stay strictly positive and the solve stays well-conditioned.
   crushed <- thermal_leaf()
   crushed$use_thermal_damage_ <- TRUE
-  crushed$I_r_ <- 0.8
-  crushed$I_p_ <- 0.5
+  crushed$I_ <- 0.8
+  crushed$D_ <- 0.5
   drive_at(crushed, 30)
   expect_equal(crushed$vcmax_ / undamaged$vcmax_, 1e-6, tolerance = 1e-12)
   expect_equal(crushed$jmax_ / undamaged$jmax_, 1e-6, tolerance = 1e-12)
@@ -244,7 +255,7 @@ test_that("a thermostability offset moves the whole response up in temperature",
   tolerant$topt_offset_ <- 8
   drive_at(tolerant, 40)
   expect_gt(tolerant$vcmax_, base$vcmax_)  # the capacity optimum moved up
-  expect_lt(tolerant$phi_i_, base$phi_i_)  # and so did the impairment onset
+  expect_lt(switch_of(tolerant), switch_of(base))  # and so did the impairment onset
 })
 
 test_that("the repair rate is gated off above t_rep_cut", {
@@ -263,13 +274,13 @@ test_that("the repair rate is gated off above t_rep_cut", {
   expect_identical(cut$k_rec_eff_, cut$k_rec_ / 2)
 })
 
-test_that("phi_i is finite, in [0, 1] and non-decreasing across a wide sweep", {
+test_that("the switch is finite, in [0, 1] and non-decreasing across a wide sweep", {
   temps <- seq(-30, 90, by = 1)
   phis <- vapply(temps, function(temp) {
     l <- thermal_leaf()
     l$use_thermal_damage_ <- TRUE
     drive_at(l, temp)
-    l$phi_i_
+    switch_of(l)
   }, numeric(1))
   expect_true(all(is.finite(phis)))
   expect_true(all(phis >= 0 & phis <= 1))
@@ -280,21 +291,22 @@ test_that("outlandish inputs still give finite capacities and outputs", {
   l <- thermal_leaf()
   l$use_thermal_damage_ <- TRUE
   l$topt_offset_ <- 50
-  l$I_r_ <- 0.4
-  l$I_p_ <- 0.4
+  l$I_ <- 0.4
+  l$D_ <- 0.4
   drive_at(l, 99)
   l$k_i_Ea_ <- 5e5
   l$impair_Tmid_ <- 200
   drive_at(l, 99)
-  expect_true(all(is.finite(c(l$vcmax_, l$jmax_, l$phi_i_, l$k_i_eff_,
+  expect_true(all(is.finite(c(l$vcmax_, l$jmax_, l$k_imp_eff_, l$functional_,
                               l$k_rec_eff_, l$electron_transport_))))
-  expect_true(l$phi_i_ >= 0 && l$phi_i_ <= 1)
+  expect_true(l$k_imp_eff_ >= 0)
+  expect_true(all(is.finite(l$damage_rates(99, 50, 0.4, 0.4))))
 })
 
 # On the energy-balance path the block is re-seated at each candidate's leaf
-# temperature, so phi_i_ follows the operating point: more transpiration, a
-# cooler leaf, less impairment. That is the avoidance axis.
-test_that("on the energy-balance path phi_i is taken at the operating Tleaf", {
+# temperature, so the impairment rate follows the operating point: more
+# transpiration, a cooler leaf, slower impairment. That is the avoidance axis.
+test_that("on the energy-balance path impairment is taken at the operating Tleaf", {
   pm_leaf <- function(gate) {
     l <- thermal_leaf()
     l$use_energy_balance_ <- TRUE
@@ -308,14 +320,14 @@ test_that("on the energy-balance path phi_i is taken at the operating Tleaf", {
   hi$set_leaf_states_rates_from_psi_stem(3.5, 0.2)
   expect_gt(hi$transpiration_, lo$transpiration_)
   expect_lt(hi$Tleaf_, lo$Tleaf_)
-  expect_lt(hi$phi_i_, lo$phi_i_)
+  expect_lt(switch_of(hi), switch_of(lo))
   # At THAT temperature, not at the air temperature driver.
-  expect_equal(hi$phi_i_, phi_i_ref(hi$Tleaf_), tolerance = 1e-12)
-  expect_equal(lo$phi_i_, phi_i_ref(lo$Tleaf_), tolerance = 1e-12)
+  expect_equal(switch_of(hi), switch_ref(hi$Tleaf_), tolerance = 1e-12)
+  expect_equal(switch_of(lo), switch_ref(lo$Tleaf_), tolerance = 1e-12)
 
   off <- pm_leaf(FALSE)
   off$set_leaf_states_rates_from_psi_stem(3.5, 0.2)
-  expect_identical(off$phi_i_, 0)
+  expect_identical(off$k_imp_eff_, 0)
 })
 
 # --- respiration: phylloptim's R_d, plus the costs --------------------------
@@ -328,8 +340,8 @@ test_that("R_d is not scaled by survival, and the costs add to it", {
   off <- drive_at(thermal_leaf(), 30)
   damaged <- thermal_leaf()
   damaged$use_thermal_damage_ <- TRUE
-  damaged$I_r_ <- 0.3
-  damaged$I_p_ <- 0.1
+  damaged$I_ <- 0.3
+  damaged$D_ <- 0.1
   drive_at(damaged, 30)
   # Coefficients zero: the four terms add an exact zero.
   expect_identical(damaged$R_d_, off$R_d_)
@@ -352,7 +364,7 @@ test_that("R_d is not scaled by survival, and the costs add to it", {
   # Protection above the baseline costs nothing extra: max(0, k_i_baseline - k_i).
   none <- cost_of(k_i_ = 0.9, c_protect_maint_ = 0.5)
   expect_identical(none$R_d_, off$R_d_)
-  flux <- cost_of(I_r_ = 0.4, c_repair_flux_ = 1.0)
+  flux <- cost_of(I_ = 0.4, c_repair_flux_ = 1.0)
   expect_equal(flux$R_d_ - off$R_d_, flux$k_rec_eff_ * 0.4, tolerance = 1e-12)
   expect_gt(flux$R_d_, off$R_d_)
 
@@ -361,7 +373,7 @@ test_that("R_d is not scaled by survival, and the costs add to it", {
   expected <- with(atls_inputs,
                    c_acclim_maint_ * A_ + c_repair_maint_ * k_rec_ +
                      c_protect_maint_ * (k_i_baseline_ - k_i_) +
-                     c_repair_flux_ * all4$k_rec_eff_ * I_r_)
+                     c_repair_flux_ * all4$k_rec_eff_ * I_)
   expect_equal(all4$R_d_ - off$R_d_, expected, tolerance = 1e-12)
 })
 
@@ -393,8 +405,8 @@ test_that("with the gate off, no thermal-damage input is read", {
         psi <- clean$opt_root_psi_
         expect_identical(set$dprofit_droot_collar_psi(psi),
                          clean$dprofit_droot_collar_psi(psi), info = at)
-        expect_identical(c(set$phi_i_, set$k_i_eff_, set$k_rec_eff_),
-                         c(0, 0, 0), info = at)
+        expect_identical(c(set$k_imp_eff_, set$k_rec_eff_, set$functional_),
+                         c(0, 0, 1), info = at)
 
         # ...and the same inputs DO move it with the gate on, or the identity
         # above could be an inert gate rather than an inert layer.
@@ -440,10 +452,10 @@ test_that("the entropy shift moves each capacity optimum by the requested amount
   }
 
   # The survival factor is applied on top of the shifted curve.
-  surv <- 1 - atls_inputs$I_r_ - atls_inputs$I_p_
+  surv <- 1 - atls_inputs$I_ - atls_inputs$D_
   undamaged <- set_inputs(thermal_leaf(),
                           utils::modifyList(atls_inputs,
-                                            list(I_r_ = 0, I_p_ = 0)))
+                                            list(I_ = 0, D_ = 0)))
   undamaged$use_thermal_damage_ <- TRUE
   drive_at(undamaged, 33)
   drive_at(shifted, 33)
@@ -457,8 +469,10 @@ test_that("the onset moves with its own shift, and repair halves at t_rep_cut", 
   delta <- with(atls_inputs, topt_offset_ + dTimpair_max_ * A_ / (A_ + K_A_))
   # The midpoint, moved by the constitutive offset and the onset's own
   # acclimated shift.
-  drive_at(l, l$impair_Tmid_ + delta)
-  expect_equal(l$phi_i_, 0.5, tolerance = 1e-12)
+  Tm <- l$impair_Tmid_ + delta
+  drive_at(l, Tm)
+  expect_equal(l$k_imp_eff_ / (l$k_i_ * arrh_ref(Tm, l$k_i_Ea_, l$k_i_Tref_)),
+               0.5, tolerance = 1e-12)
 
   drive_at(l, l$t_rep_cut_)
   expect_identical(l$k_rec_eff_, l$k_rec_ / 2)
@@ -484,7 +498,7 @@ test_that("the two switches are the guarded logistic and softplus", {
 #
 # ⚠️ THE INVARIANT A LATER EDIT COULD BREAK. The cache key does not hold the
 # layer's inputs, because set_physiology bypasses the cache whenever the gate is
-# on: A_, I_r_ and I_p_ are state a caller moves every step. Remove the bypass and
+# on: A_, I_ and D_ are state a caller moves every step. Remove the bypass and
 # the second drive below takes a cache hit and keeps the first damage level.
 test_that("with the gate on, every re-drive reads the current state", {
   l <- thermal_leaf()
@@ -494,7 +508,7 @@ test_that("with the gate on, every re-drive reads the current state", {
   vcmax_first <- l$vcmax_
   A_first <- l$assim_colimited_
 
-  l$I_r_ <- 0.25                      # same drivers, new damage state
+  l$I_ <- 0.25                      # same drivers, new damage state
   drive_at(l, 30)
   l$find_root_collar_psi()
   expect_equal(l$vcmax_ / vcmax_first, 0.75, tolerance = 1e-14)
@@ -513,7 +527,113 @@ test_that("with the gate on, every re-drive reads the current state", {
   never <- drive_at(thermal_leaf(), 30)
   never$find_root_collar_psi()
   expect_identical(l$operating_point_values(), never$operating_point_values())
-  expect_identical(c(l$phi_i_, l$k_i_eff_, l$k_rec_eff_), c(0, 0, 0))
+  expect_identical(c(l$k_imp_eff_, l$k_rec_eff_, l$functional_), c(0, 0, 1))
+})
+
+# --- the dynamics ---------------------------------------------------------------
+#
+# $damage_rates() is the right-hand side everything integrates, and
+# leaf_damage_trajectory() integrates it: the route for fitting the layer to a
+# leaf experiment with this package alone.
+
+test_that("damage_rates is the three-state model, at every input non-default", {
+  l <- set_inputs(thermal_leaf())
+  for (temp in c(20, 38, 47)) {
+    A <- 1.5; I <- 0.2; D <- 0.15
+    delta_i <- with(atls_inputs, topt_offset_ + dTimpair_max_ * A / (A + K_A_))
+    k_imp <- with(atls_inputs,
+                  k_i_ * arrh_ref(temp, k_i_Ea_, k_i_Tref_) *
+                    switch_ref(temp, H = impair_H_, Tmid = impair_Tmid_ + delta_i))
+    k_rec <- with(atls_inputs,
+                  k_rec_ / (1 + exp(m_rep_ * (temp - t_rep_cut_))))
+    # softplus as the leaf computes it: its argument s*x is clamped at 30.
+    sp <- with(atls_inputs,
+               log1p(exp(min(max(acclim_s_ * (temp - acclim_T_), -30), 30))) / acclim_s_)
+    expected <- with(atls_inputs, c(
+      acclim_alpha_ * sp - acclim_beta_ * A,
+      k_imp * (1 - I - D) - (k_rec + k_mat_) * I,
+      k_mat_ * I))
+    expect_equal(l$damage_rates(temp, A, I, D), expected, tolerance = 1e-13,
+                 info = paste("leaf_temp", temp))
+  }
+})
+
+test_that("damage_rates reads its arguments, not the seated state or the gate", {
+  a <- set_inputs(thermal_leaf())
+  b <- set_inputs(thermal_leaf())
+  b$A_ <- NaN; b$I_ <- NaN; b$D_ <- NaN
+  b$use_thermal_damage_ <- TRUE
+  expect_identical(b$damage_rates(40, 1, 0.1, 0.05),
+                   a$damage_rates(40, 1, 0.1, 0.05))
+  expect_true(all(is.finite(b$damage_rates(40, 1, 0.1, 0.05))))
+})
+
+test_that("the trajectory matches the exact solution at a constant temperature", {
+  # With A held at its equilibrium, the (I, D) system is linear with constant
+  # coefficients, so the matrix exponential is the exact answer.
+  l <- set_inputs(thermal_leaf())
+  temp <- 41
+  sp <- with(atls_inputs, log1p(exp(acclim_s_ * (temp - acclim_T_))) / acclim_s_)
+  A_eq <- with(atls_inputs, acclim_alpha_ / acclim_beta_ * sp)
+  r0 <- l$damage_rates(temp, A_eq, 0, 0)
+  expect_equal(r0[1], 0, tolerance = 1e-14)
+  k <- r0[2]                              # k_imp at F = 1
+  r1 <- l$damage_rates(temp, A_eq, 1, 0)  # dI = -(k_rec + k_mat), dD = k_mat
+  out_rate <- -r1[2]                      # k_rec + k_mat
+  kmat <- r1[3]
+  # y' = M y + b, y = (I, D)
+  M <- matrix(c(-(k + out_rate), kmat, -k, 0), 2, 2)
+  b <- c(k, 0)
+  times <- c(0, 0.5, 2, 7, 30)
+  ev <- eigen(M)
+  exact <- t(vapply(times, function(t) {
+    E <- Re(ev$vectors %*% diag(exp(ev$values * t)) %*% solve(ev$vectors))
+    as.vector((E - diag(2)) %*% solve(M, b))
+  }, numeric(2)))
+  d <- leaf_damage_trajectory(l, times, temp, A0 = A_eq)
+  expect_equal(d$A, rep(A_eq, length(times)), tolerance = 1e-12)
+  # RK4 at the integrator's step rule is good to ~2e-8 relative here; a fit to a
+  # leaf experiment needs nothing like that, so 1e-7 is a check of the method, not
+  # of the last digits.
+  expect_equal(d$I, exact[, 1], tolerance = 1e-7)
+  expect_equal(d$D, exact[, 2], tolerance = 1e-7)
+  expect_equal(d$F, 1 - d$I - d$D)
+})
+
+test_that("acclimation relaxes exponentially, on the leaf temperature", {
+  l <- set_inputs(thermal_leaf())
+  temp <- 36
+  sp <- with(atls_inputs, log1p(exp(acclim_s_ * (temp - acclim_T_))) / acclim_s_)
+  A_eq <- with(atls_inputs, acclim_alpha_ / acclim_beta_ * sp)
+  t <- c(0, 1, 5, 20)
+  d <- leaf_damage_trajectory(l, t, temp, A0 = 0)
+  expect_equal(d$A, A_eq * (1 - exp(-atls_inputs$acclim_beta_ * t)),
+               tolerance = 1e-9)
+})
+
+test_that("the output grid does not coarsen the solution", {
+  l <- set_inputs(thermal_leaf())
+  fine <- seq(0, 3, by = 1 / 96)
+  temp_fine <- 30 + 15 * pmax(0, sin(2 * pi * fine))  # daily heat peaks
+  coarse_i <- seq(1, length(fine), by = 24)
+  a <- leaf_damage_trajectory(l, fine, temp_fine, A0 = 0.5)
+  b <- leaf_damage_trajectory(l, fine[coarse_i], temp_fine[coarse_i], A0 = 0.5)
+  # The coarse run sees a coarser temperature series, so it agrees only where the
+  # series agrees: compare against a fine run of that same piecewise-linear input.
+  temp_interp <- approx(fine[coarse_i], temp_fine[coarse_i], xout = fine)$y
+  c <- leaf_damage_trajectory(l, fine, temp_interp, A0 = 0.5)
+  expect_equal(b$I, c$I[coarse_i], tolerance = 1e-7)
+  expect_equal(b$D, c$D[coarse_i], tolerance = 1e-7)
+  expect_true(all(a$I >= 0 & a$D >= 0 & a$F <= 1))
+  expect_true(all(diff(a$D) >= 0))                  # damage only accumulates
+})
+
+test_that("the trajectory refuses a malformed series", {
+  l <- thermal_leaf()
+  expect_error(l$damage_trajectory(c(0, 1, 1), c(30, 30, 30), 0, 0, 0),
+               "strictly increasing")
+  expect_error(l$damage_trajectory(c(0, 1), 30, 0, 0, 0), "same length")
+  expect_identical(nrow(leaf_damage_trajectory(l, c(0, 1, 2), 30)), 3L)
 })
 
 # --- refusals -----------------------------------------------------------------
