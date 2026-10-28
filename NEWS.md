@@ -1,24 +1,18 @@
-# phylloptim 0.13.0
-
-## The thermal-damage layer: impairment gets its own parameters, and the leak is an Arrhenius rate
-
-The layer's three states are now named for what they do: functional ⇌ impaired → damaged. The Vcmax and Jmax peaked-Arrhenius curves are the instantaneous, fully reversible temperature response; impairment is a separate process in addition to it, and the only route into lasting damage.
-
-- **The impaired fraction has its own equilibrium.** `phi_i_ = K/(1 + K)` with `K = exp[(impair_H_/R)(1/Tmid - 1/T)]`, one half at `impair_Tmid_` (°C). It used to reuse the Jmax curve's `jmax_H_d_` and `jmax_d_S_`, so recalibrating the photosynthetic response moved the damage onset. The defaults (200 kJ mol⁻¹, 200000/650 K) reproduce the old onset to rounding.
-- **Acclimation moves the onset by its own amount**, `topt_offset_ + dTimpair_max_ * A_/(A_ + K_A_)`. `dTimpair_max_` defaults to `dTopt_max_`'s 6 °C, which is the old behaviour.
-- **The leak into damage is a centred Arrhenius**, reported as `k_i_eff_ = k_i_ * exp[(k_i_Ea_/R)(1/T_ref - 1/T)]` at `k_i_Tref_` (°C). The caller's damage ODE should read `k_i_eff_`. The default `k_i_Ea_ = 0` gives exactly `k_i_`.
-
-⚠️ **Renamed, so a caller of 0.12.0 fails at the binding rather than reading the wrong number:** `phi_d_` → `phi_i_`, and `k_i_ref_` → `k_i_baseline_` (the no-extra-protection baseline the protection cost is measured from, not a reference temperature).
-
-With the gate off every golden file is bit-identical. With it on and the new parameters at their defaults, capacities, costs and `k_i_eff_` are unchanged and `phi_i_` moves by rounding only.
-
 # phylloptim 0.12.0
 
 ## An optional thermal-damage layer on the leaf, off by default
 
-`Leaf$use_thermal_damage_` turns on the leaf half of the ATLS thermal-damage model (traitecoevo/plant#566), ported from the layer plant carried in its own leaf model. The caller integrates three states, an acclimation state `A_` and the recoverable and permanent damaged fractions `I_r_` and `I_p_`, sets them before each `set_drivers()`, and reads back `phi_d_`, the deactivated fraction of the Vcmax/Jmax curves' two-state equilibrium at the leaf's temperature, and `k_rec_eff_`, the repair rate there. With the gate on, the Vcmax and Jmax optima move by `topt_offset_ + dTopt_max_ * A_ / (A_ + K_A_)` degrees through the entropy term, both capacities are scaled by `1 - I_r_ - I_p_` (floored at 1e-6), and four maintenance costs, zero by default, are added to `R_d_`. On the energy-balance path all of it is taken at the operating point's leaf temperature, so transpirational cooling lowers `phi_d_`. Rates are per day. `$logistic_()` and `$softplus_()`, the layer's guarded switches, are bound for a caller's acclimation forcing.
+`Leaf$use_thermal_damage_` turns on the leaf half of the ATLS thermal-damage model (traitecoevo/plant#566), ported from the layer plant carried in its own leaf model. Its three states are named for what they do: functional ⇌ impaired → damaged. The caller integrates an acclimation state `A_` and the recoverable and permanent damaged fractions `I_r_` and `I_p_`, sets them before each `set_drivers()`, and reads back three rates at the leaf's temperature: `phi_i_`, the impaired fraction; `k_i_eff_`, the leak from impaired into recoverable damage; and `k_rec_eff_`, the repair rate. Rates are per day.
 
-Off by default, and off it reads none of its inputs: every golden file is bit-identical, and `phi_d_` and `k_rec_eff_` are zero.
+The Vcmax and Jmax peaked-Arrhenius curves are the instantaneous, fully reversible temperature response. Impairment is a separate process in addition to it, and the only route into lasting damage, so the two share no parameter:
+
+- **The impaired fraction has its own equilibrium.** `phi_i_ = K/(1 + K)` with `K = exp[(impair_H_/R)(1/Tmid - 1/T)]`, one half at `impair_Tmid_` (°C). The defaults, 200 kJ mol⁻¹ and 200000/650 K, equal the Jmax curve's own deactivation term, which is where plant's original layer put the onset; moving `jmax_H_d_` or `jmax_d_S_` does not move it.
+- **Acclimation shifts both, by separate amounts.** The Vcmax and Jmax optima move by `topt_offset_ + dTopt_max_ * A_/(A_ + K_A_)` degrees through the entropy term; the impairment midpoint by `topt_offset_ + dTimpair_max_ * A_/(A_ + K_A_)`. Both maxima default to 6 °C.
+- **The leak into damage is a centred Arrhenius**, `k_i_eff_ = k_i_ * exp[(k_i_Ea_/R)(1/T_ref - 1/T)]` with `T_ref = k_i_Tref_` (°C). The default `k_i_Ea_ = 0` gives exactly `k_i_`.
+
+With the gate on, both capacities are also scaled by `1 - I_r_ - I_p_` (floored at 1e-6), and four maintenance costs, zero by default, are added to `R_d_`; the protection cost is measured from `k_i_baseline_`. On the energy-balance path all of it is taken at the operating point's leaf temperature, so transpirational cooling lowers `phi_i_`. `$logistic_()` and `$softplus_()`, the layer's guarded switches, are bound for a caller's acclimation forcing.
+
+Off by default, and off it reads none of its inputs: every golden file is bit-identical, and `phi_i_`, `k_i_eff_` and `k_rec_eff_` are zero.
 
 Respiration departs from the original layer on purpose: there `R_d` was `0.015 * Vcmax` after the damage discount, so a damaged leaf respired less; here `R_d` stays `R_d_25` on its Q10 (#86) and the layer only adds its costs.
 
