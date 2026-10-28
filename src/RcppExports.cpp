@@ -847,6 +847,34 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// Leaf__damage_trajectory_gradient
+std::vector<double> Leaf__damage_trajectory_gradient(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, const std::vector<double>& times, const std::vector<double>& leaf_temp, double A0, double I0, double D0, const std::vector<int>& which);
+RcppExport SEXP _phylloptim_Leaf__damage_trajectory_gradient(SEXP obj_SEXP, SEXP timesSEXP, SEXP leaf_tempSEXP, SEXP A0SEXP, SEXP I0SEXP, SEXP D0SEXP, SEXP whichSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    Rcpp::traits::input_parameter< const std::vector<double>& >::type times(timesSEXP);
+    Rcpp::traits::input_parameter< const std::vector<double>& >::type leaf_temp(leaf_tempSEXP);
+    Rcpp::traits::input_parameter< double >::type A0(A0SEXP);
+    Rcpp::traits::input_parameter< double >::type I0(I0SEXP);
+    Rcpp::traits::input_parameter< double >::type D0(D0SEXP);
+    Rcpp::traits::input_parameter< const std::vector<int>& >::type which(whichSEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__damage_trajectory_gradient(obj_, times, leaf_temp, A0, I0, D0, which));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__damage_par_names
+std::vector<std::string> Leaf__damage_par_names(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__damage_par_names(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__damage_par_names(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
 // Leaf__logistic_
 double Leaf__logistic_(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double x);
 RcppExport SEXP _phylloptim_Leaf__logistic_(SEXP obj_SEXP, SEXP xSEXP) {
@@ -3981,6 +4009,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__profitmax_curve", (DL_FUNC) &_phylloptim_Leaf__profitmax_curve, 2},
     {"_phylloptim_Leaf__damage_rates", (DL_FUNC) &_phylloptim_Leaf__damage_rates, 5},
     {"_phylloptim_Leaf__damage_trajectory", (DL_FUNC) &_phylloptim_Leaf__damage_trajectory, 6},
+    {"_phylloptim_Leaf__damage_trajectory_gradient", (DL_FUNC) &_phylloptim_Leaf__damage_trajectory_gradient, 7},
+    {"_phylloptim_Leaf__damage_par_names", (DL_FUNC) &_phylloptim_Leaf__damage_par_names, 1},
     {"_phylloptim_Leaf__logistic_", (DL_FUNC) &_phylloptim_Leaf__logistic_, 2},
     {"_phylloptim_Leaf__softplus_", (DL_FUNC) &_phylloptim_Leaf__softplus_, 3},
     {"_phylloptim_Leaf__medlyn_model_gs", (DL_FUNC) &_phylloptim_Leaf__medlyn_model_gs, 2},

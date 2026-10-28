@@ -1132,9 +1132,11 @@ satisfies `-Werror=switch` and so removes the check they exist for.
 
    ⚠️ **One deliberate exception: the thermal-damage layer's inputs are NOT in
    the key.** `set_physiology` never serves the cache while
-   `use_thermal_damage_` is on, because `A_`, `I_r_` and `I_p_` are state a
+   `use_thermal_damage_` is on, because `A_`, `I_` and `D_` are state a
    caller moves every step; only the gate itself is keyed, so switching it off
-   at unchanged drivers recomputes. Remove that bypass and all twenty inputs
+   at unchanged drivers recomputes. Remove that bypass and every input the block
+   reads (the solve-reaching fifteen in the gradient enumeration, plus
+   `impair_H_`, `impair_Tmid_`, `dTimpair_max_`, `k_i_Ea_` and `k_i_Tref_`)
    must join the key. `test_thermal_damage_bypasses_the_cache` (C++) and
    `test-thermal-damage.R` fail if either half goes.
 
@@ -1226,7 +1228,7 @@ satisfies `-Werror=switch` and so removes the check they exist for.
 
 12. **`n_theta` is a compile-time constant, and a short aggregate initialiser is
    legal C++.** Several places fill `theta` with a literal list sized by
-   `gradient::n_theta` (19; `phylloptim::n_pars`, 20, is the kernels' pack with
+   `gradient::n_theta` (34; `phylloptim::n_pars`, 35, is the kernels' pack with
    `par_PPFD` and must not size `theta`). An initialiser shorter than the array
    zero-fills the rest,
    so adding a parameter shifts `kmax` and `resistance` down a slot and drops

@@ -638,23 +638,142 @@ test_that("the trajectory refuses a malformed series", {
 
 # --- refusals -----------------------------------------------------------------
 
-test_that("the trait gradient refuses a leaf with the layer on", {
-  l <- thermal_leaf(leaf_supply_multilayer())
-  l$use_thermal_damage_ <- TRUE
-  expect_error(leaf_gradient(psi_soil = 2, x = l, traits = leaf_traits(),
-                             pars = "vcmax_25"),
-               "leaf_gradient\\(\\): refused with use_thermal_damage_ on")
-  # The refusal comes before the leaf is touched.
-  expect_true(l$use_thermal_damage_)
+# --- gradients ------------------------------------------------------------------
+#
+# The trait gradient CARRIES the layer: both routes difference the solve's own
+# dprofit and outputs, which read the block the layer writes. Its inputs that
+# reach the solve are parameters on a leaf with the gate on, and refused by name
+# on one with it off.
 
-  b <- leaf_batch(psi_soil = c(1, 2), PPFD = 900)
+damage_gradient_pars <- c("A_", "I_", "D_", "topt_offset_", "dTopt_max_", "K_A_",
+                          "k_i_", "k_i_baseline_", "k_rec_", "m_rep_",
+                          "t_rep_cut_", "c_acclim_maint_", "c_repair_maint_",
+                          "c_protect_maint_", "c_repair_flux_")
+
+# The layer's solve-reaching inputs at non-default values. At 35 C rather than 25:
+# the peaked Arrhenius is normalised at 25 C, so `topt_offset_` and `dTopt_max_`
+# have an exactly zero effect there, and a difference of the solve is a clean
+# referee at 35 C (see test_leaf.cpp's note on the 25 C floor).
+gradient_leaf <- function(supply = leaf_supply_multilayer()) {
+  set_inputs(thermal_leaf(supply), atls_inputs[c(damage_gradient_pars)])
+}
+
+test_that("the layer's inputs are gradient parameters only with its gate on", {
+  off <- thermal_leaf(leaf_supply_multilayer())
+  expect_error(leaf_gradient(psi_soil = c(1, 2, 3), soil_depth = c(.5, 1, 1.5),
+                             x = off, traits = leaf_traits(), pars = "I_"),
+               "input of the thermal-damage layer, which is off")
+  on <- gradient_leaf()
+  on$use_thermal_damage_ <- TRUE
+  g <- leaf_gradient(psi_soil = c(1, 2, 3), soil_depth = c(.5, 1, 1.5),
+                     PPFD = 1500, leaf_temp = 35, x = on, traits = leaf_traits())
+  expect_true(all(damage_gradient_pars %in% rownames(g$gradient)))
+  # Its DYNAMICS parameters reach no solved output and are not offered.
+  expect_false(any(c("impair_H_", "k_mat_", "acclim_beta_") %in%
+                     rownames(g$gradient)))
+  expect_error(leaf_gradient(psi_soil = 2, x = on, traits = leaf_traits(),
+                             pars = "k_mat_"),
+               "cannot differentiate")
+})
+
+test_that("with the gate on, the composite agrees with differencing the solve", {
+  for (supply in list(leaf_supply_multilayer(), leaf_supply_singlelayer())) {
+    single <- identical(supply$kind, "single")
+    psi <- if (single) 1.0 else c(1, 2, 3)
+    depth <- if (single) NULL else c(.5, 1, 1.5)
+    l <- gradient_leaf(supply)
+    l$use_thermal_damage_ <- TRUE
+    pars <- c("vcmax_25", damage_gradient_pars)
+    a <- leaf_gradient(psi_soil = psi, soil_depth = depth, PPFD = 1500,
+                       leaf_temp = 35, x = l, traits = leaf_traits(), pars = pars,
+                       method = "ift")
+    b <- leaf_gradient(psi_soil = psi, soil_depth = depth, PPFD = 1500,
+                       leaf_temp = 35, x = l, traits = leaf_traits(), pars = pars,
+                       method = "fd", step = 1e-5)
+    expect_identical(a$status, "interior", info = supply$kind)
+    rel <- abs(a$gradient - b$gradient) / pmax(1, abs(a$gradient))
+    expect_lt(max(rel), 1e-6, label = paste(supply$kind, "worst", max(rel)))
+    # Impaired and damaged area do not photosynthesise: A falls with each.
+    expect_lt(a$gradient["I_", "A"], 0)
+    expect_lt(a$gradient["D_", "A"], 0)
+    # The reused leaf is handed back with its inputs as they were.
+    expect_identical(l$I_, atls_inputs$I_)
+  }
+})
+
+test_that("with the gate on, the batch reproduces leaf_gradient() bit-for-bit", {
+  pars <- c("vcmax_25", "I_", "A_", "topt_offset_", "c_repair_flux_")
+  psis <- c(0.5, 1.5, 2.5)
+  b <- leaf_batch(psi_soil = lapply(psis, function(p) p + c(0, 0.5, 1)),
+                  soil_depth = list(c(.5, 1, 1.5)), PPFD = 1500, leaf_temp = 35)
+  set_inputs(b$leaf, atls_inputs[damage_gradient_pars])
   b$leaf$use_thermal_damage_ <- TRUE
-  expect_error(leaf_gradient_batch(b, pars = "vcmax_25"),
-               "leaf_gradient_batch\\(\\): refused with use_thermal_damage_ on")
-  # And the batch runs again once the gate is off.
-  b$leaf$use_thermal_damage_ <- FALSE
-  g <- leaf_gradient_batch(b, pars = "vcmax_25")
-  expect_true(all(g$status %in% c("interior", "pinned")))
+  for (method in c("ift", "fd")) {
+    g <- leaf_gradient_batch(b, pars = pars, method = method)
+    for (i in seq_along(psis)) {
+      l <- gradient_leaf()
+      l$use_thermal_damage_ <- TRUE
+      r <- leaf_gradient(psi_soil = psis[i] + c(0, 0.5, 1),
+                         soil_depth = c(.5, 1, 1.5), PPFD = 1500, leaf_temp = 35,
+                         x = l, traits = leaf_traits(), pars = pars,
+                         method = method)
+      expect_identical(g$gradient[i, , ], r$gradient,
+                       info = paste(method, "row", i))
+      expect_identical(g$status[i], r$status, info = paste(method, "row", i))
+    }
+  }
+  # Per-observation state through a theta matrix: each row its own I_.
+  th <- matrix(rep(.gradient_theta_matrix(b, b$traits, TRUE), each = 1),
+               nrow = 1)
+  th <- th[rep(1, 3), , drop = FALSE]
+  th[, match("I_", gradient_par_names())] <- c(0.05, 0.2, 0.4)
+  g3 <- leaf_gradient_batch(b, pars = "vcmax_25", theta = th)
+  expect_true(all(g3$status %in% c("interior", "pinned")))
+  expect_false(isTRUE(all.equal(g3$value[1, "A"], g3$value[3, "A"])))
+})
+
+test_that("the trajectory gradient is the derivative of the trajectory", {
+  l <- set_inputs(thermal_leaf())
+  t <- seq(0, 3, by = 1 / 24)
+  temp <- 30 + 14 * pmax(0, sin(2 * pi * t))
+  g <- leaf_damage_gradient(l, t, temp, A0 = 0.5, I0 = 0.05, D0 = 0.01)
+  expect_identical(dimnames(g$gradient)[[3]], l$damage_par_names())
+  expect_identical(dim(g$gradient), c(length(t), 3L, 19L))
+  base <- leaf_damage_trajectory(l, t, temp, A0 = 0.5, I0 = 0.05, D0 = 0.01)
+  expect_identical(g$value, base)
+  worst <- 0
+  for (nm in l$damage_par_names()) {
+    fd <- function(h) {
+      shift <- function(sgn) {
+        m <- set_inputs(thermal_leaf())
+        init <- list(A0 = 0.5, I0 = 0.05, D0 = 0.01)
+        if (nm %in% names(init)) {
+          init[[nm]] <- init[[nm]] + sgn * h
+        } else {
+          m[[nm]] <- m[[nm]] + sgn * h
+        }
+        d <- leaf_damage_trajectory(m, t, temp, init$A0, init$I0, init$D0)
+        cbind(d$A, d$I, d$D)
+      }
+      (shift(1) - shift(-1)) / (2 * h)
+    }
+    v <- if (nm %in% c("A0", "I0", "D0")) 0 else l[[nm]]
+    h <- max(abs(v), 1) * 1e-5
+    an <- g$gradient[, , nm]
+    rel <- max(abs(an - fd(h)) / pmax(1e-3, abs(an)))
+    worst <- max(worst, rel)
+    expect_lt(rel, 1e-5, label = paste(nm, "worst relative", signif(rel, 3)))
+  }
+  # Pure-dynamics inputs genuinely move the states: a nonzero column each.
+  expect_true(all(apply(abs(g$gradient), 3, max) > 0))
+})
+
+test_that("the trajectory gradient refuses an unknown input", {
+  l <- thermal_leaf()
+  expect_error(leaf_damage_gradient(l, c(0, 1), 30, pars = "vcmax_25"),
+               "does not have")
+  expect_error(l$damage_trajectory_gradient(c(0, 1), c(30, 30), 0, 0, 0, 99L),
+               "out of range")
 })
 
 test_that("a temperature response with no optimum to move is refused", {

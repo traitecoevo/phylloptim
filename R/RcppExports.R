@@ -261,6 +261,14 @@ Leaf__damage_trajectory <- function(obj_, times, leaf_temp, A0, I0, D0) {
     .Call('_phylloptim_Leaf__damage_trajectory', PACKAGE = 'phylloptim', obj_, times, leaf_temp, A0, I0, D0)
 }
 
+Leaf__damage_trajectory_gradient <- function(obj_, times, leaf_temp, A0, I0, D0, which) {
+    .Call('_phylloptim_Leaf__damage_trajectory_gradient', PACKAGE = 'phylloptim', obj_, times, leaf_temp, A0, I0, D0, which)
+}
+
+Leaf__damage_par_names <- function(obj_) {
+    .Call('_phylloptim_Leaf__damage_par_names', PACKAGE = 'phylloptim', obj_)
+}
+
 Leaf__logistic_ <- function(obj_, x) {
     .Call('_phylloptim_Leaf__logistic_', PACKAGE = 'phylloptim', obj_, x)
 }

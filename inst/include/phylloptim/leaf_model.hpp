@@ -87,18 +87,19 @@ namespace phylloptim {
 
 // --- the parameter enumeration, which R indexes into --------------------------
 //
-// The fifteen traits in `Leaf::set_traits`' argument order, then five slots that
+// The fifteen traits in `Leaf::set_traits`' argument order, then the slots that
 // are not traits: `kmax` (the conductance driver), `resistance` (the
 // single-potential path's series resistance), the two model-owned prices
-// (`CF77_lambda`, `TF24_floor_lambda_o`), and `PPFD`. The first nineteen are what
-// a calibration fits, `gradient::n_theta`; `PPFD` is seated per observation from
-// the drivers and is never fitted, and `n_pars` (20) counts it.
+// (`CF77_lambda`, `TF24_floor_lambda_o`), the fifteen inputs of the thermal-damage
+// layer that reach the solve, and `PPFD`. Everything before `PPFD` is what a
+// calibration fits, `gradient::n_theta` (34); `PPFD` is seated per observation
+// from the drivers and is never fitted, and `n_pars` (35) counts it.
 //
 // ⚠️ R INDEXES THESE POSITIONS, so a reordering silently differentiates the wrong
 // parameter. `test-gradient-batch.R` reads the names back out of C++ and compares
 // them with R's, so the two cannot drift apart without a failure.
 inline constexpr int n_traits = 15;
-inline constexpr int n_pars = 20;
+inline constexpr int n_pars = 35;
 
 // Every index by name, so nothing below indexes `theta` with a bare integer.
 // The first `n_traits` are `set_traits`' arguments in its order, which is also
@@ -147,6 +148,34 @@ inline constexpr int par_CF77_lambda = 17;
 // safe way to talk about this class. R's `.gradient_model_pars()` is the single
 // table that says which model owns which slot; there is no second copy here.
 inline constexpr int par_TF24_floor_lambda_o = 18;
+// The thermal-damage layer's inputs that REACH THE SOLVE (use_thermal_damage_):
+// its three states, the acclimated shift of the Vcmax/Jmax optima, and every
+// quantity a maintenance cost multiplies. Model-owned in the same sense as the two
+// prices -- available only on a leaf with the gate on, and refused by name
+// elsewhere -- and seated BEFORE the drivers, because set_physiology is what reads
+// them.
+//
+// ⚠️ THE LAYER'S DYNAMICS PARAMETERS ARE NOT HERE, AND MUST NOT BE ADDED. The
+// impairment switch (impair_H_, impair_Tmid_, dTimpair_max_), the impairment
+// rate's Arrhenius (k_i_Ea_, k_i_Tref_), k_mat_ and the acclimation kinetics move
+// only damage_rates(), never a solved output, so a slot here would report an exact
+// zero that reads as an answer. Their gradient is the trajectory's
+// (damage_trajectory_gradient).
+inline constexpr int par_A = 19;
+inline constexpr int par_I = 20;
+inline constexpr int par_D = 21;
+inline constexpr int par_topt_offset = 22;
+inline constexpr int par_dTopt_max = 23;
+inline constexpr int par_K_A = 24;
+inline constexpr int par_k_i = 25;
+inline constexpr int par_k_i_baseline = 26;
+inline constexpr int par_k_rec = 27;
+inline constexpr int par_m_rep = 28;
+inline constexpr int par_t_rep_cut = 29;
+inline constexpr int par_c_acclim_maint = 30;
+inline constexpr int par_c_repair_maint = 31;
+inline constexpr int par_c_protect_maint = 32;
+inline constexpr int par_c_repair_flux = 33;
 // The light the leaf is standing in. A DRIVER rather than a trait, on the same
 // footing as `kmax`: the consumer seats it per cohort and it carries that
 // consumer's rows.
@@ -156,7 +185,7 @@ inline constexpr int par_TF24_floor_lambda_o = 18;
 // that moves the light a cohort stands in -- the extinction coefficient, the leaf
 // area a stem carries -- reaches assimilation with no row at all and reads as an
 // exact zero, which is the signature of a missing accumulator.
-inline constexpr int par_PPFD = 19;
+inline constexpr int par_PPFD = 34;
 
 
 // The differentiable parameters, as one array indexed by the enumeration above.
@@ -174,6 +203,175 @@ inline constexpr int par_PPFD = 19;
 // caller remembering to move three numbers together. Passing the derived pair
 // instead is what lets a curve be stated twice and the two disagree.
 template <class S> using leaf_pars = std::array<S, n_pars>;
+
+// THE LAYER'S DYNAMICS, written ONCE as templates on the scalar type, so the
+// rates the solve's block reports, damage_rates(), damage_trajectory() and the
+// trajectory's exact sensitivities (damage_trajectory_gradient(), on a forward
+// dual number) are one set of expressions. At double each is the same expression,
+// in the same order, as the member it replaced, so nothing at double moves.
+namespace damage {
+
+// A forward-mode dual number: a value and its derivative in one seeded input.
+// Only what the dynamics need. Comparisons and clamps read the value.
+struct Dual {
+  double v = 0.0;
+  double d = 0.0;
+  Dual() = default;
+  Dual(double value) : v(value), d(0.0) {}  // NOLINT: implicit by design
+  Dual(double value, double slope) : v(value), d(slope) {}
+};
+inline double val(double x) { return x; }
+inline double val(const Dual& x) { return x.v; }
+inline Dual operator+(const Dual& a, const Dual& b) { return {a.v + b.v, a.d + b.d}; }
+inline Dual operator-(const Dual& a, const Dual& b) { return {a.v - b.v, a.d - b.d}; }
+inline Dual operator-(const Dual& a) { return {-a.v, -a.d}; }
+inline Dual operator*(const Dual& a, const Dual& b) {
+  return {a.v * b.v, a.d * b.v + a.v * b.d};
+}
+inline Dual operator/(const Dual& a, const Dual& b) {
+  return {a.v / b.v, (a.d * b.v - a.v * b.d) / (b.v * b.v)};
+}
+inline Dual operator+(const Dual& a, double b) { return {a.v + b, a.d}; }
+inline Dual operator+(double a, const Dual& b) { return {a + b.v, b.d}; }
+inline Dual operator-(const Dual& a, double b) { return {a.v - b, a.d}; }
+inline Dual operator-(double a, const Dual& b) { return {a - b.v, -b.d}; }
+inline Dual operator*(const Dual& a, double b) { return {a.v * b, a.d * b}; }
+inline Dual operator*(double a, const Dual& b) { return {a * b.v, a * b.d}; }
+inline Dual operator/(const Dual& a, double b) { return {a.v / b, a.d / b}; }
+inline Dual operator/(double a, const Dual& b) {
+  return {a / b.v, -a * b.d / (b.v * b.v)};
+}
+inline Dual exp(const Dual& a) {
+  const double e = std::exp(a.v);
+  return {e, e * a.d};
+}
+inline Dual log1p(const Dual& a) { return {std::log1p(a.v), a.d / (1.0 + a.v)}; }
+inline double exp(double a) { return std::exp(a); }
+inline double log1p(double a) { return std::log1p(a); }
+
+// std::min(std::max(x, lo), hi), on the value. Returns x itself inside the range,
+// so a NaN passes through exactly as it does through std::min/std::max.
+template <class T> inline T clamp(const T& x, double lo, double hi) {
+  if (val(x) < lo) return T(lo);
+  if (val(x) > hi) return T(hi);
+  return x;
+}
+
+// The dynamics parameters, by name. ⚠️ R's leaf_damage_gradient() names these by
+// POSITION through `Leaf::damage_par_names()`, and `test-thermal-damage.R` reads
+// the names back, so a reordering fails there rather than differentiating the
+// wrong parameter. The three initial states follow them in a gradient request.
+enum : int {
+  dp_impair_H, dp_impair_Tmid, dp_k_i, dp_k_i_Ea, dp_k_i_Tref, dp_k_rec,
+  dp_m_rep, dp_t_rep_cut, dp_k_mat, dp_acclim_alpha, dp_acclim_beta,
+  dp_acclim_T, dp_acclim_s, dp_dTimpair_max, dp_K_A, dp_topt_offset,
+  n_dyn_pars
+};
+template <class T> using dyn_pars = std::array<T, n_dyn_pars>;
+
+template <class T> inline T logistic(const T& x) {
+  const T z = clamp(x, -30.0, 30.0);
+  return 1.0 / (1.0 + exp(-z));
+}
+
+template <class T> inline T softplus(const T& x, const T& s) {
+  const T z = clamp(s * x, -30.0, 30.0);
+  return log1p(exp(z)) / s;
+}
+
+// The acclimation shift of the impairment switch's midpoint. Negative A is read
+// as zero.
+template <class T> inline T delta_impair(const T& A, const dyn_pars<T>& p) {
+  const T a = val(A) < 0.0 ? T(0.0) : A;
+  return p[dp_topt_offset] + p[dp_dTimpair_max] * a / (a + p[dp_K_A]);
+}
+
+template <class T>
+inline T impair_switch(double leaf_temp, const T& delta, const dyn_pars<T>& p) {
+  const T mid_K = clamp(p[dp_impair_Tmid] + C_to_K + delta, 250.0, 350.0);
+  const double T_K = leaf_temp + C_to_K;
+  const T arg = clamp((p[dp_impair_H] / gas_constant) * (1.0 / mid_K - 1.0 / T_K),
+                      -30.0, 30.0);
+  const T K = exp(arg);
+  return K / (1.0 + K);
+}
+
+template <class T> inline T k_i_eff(double leaf_temp, const dyn_pars<T>& p) {
+  const T arg = clamp((p[dp_k_i_Ea] / gas_constant) *
+                          (1.0 / (p[dp_k_i_Tref] + C_to_K) -
+                           1.0 / (leaf_temp + C_to_K)),
+                      -30.0, 30.0);
+  return p[dp_k_i] * exp(arg);
+}
+
+template <class T> inline T k_rec_eff(double leaf_temp, const dyn_pars<T>& p) {
+  return p[dp_k_rec] * logistic(-p[dp_m_rep] * (leaf_temp - p[dp_t_rep_cut]));
+}
+
+// {dA/dt, dI/dt, dD/dt}, per day.
+template <class T>
+inline std::array<T, 3> rates(double leaf_temp, const T& A, const T& I,
+                              const T& D, const dyn_pars<T>& p) {
+  const T F = 1.0 - I - D;
+  const T k_imp = k_i_eff(leaf_temp, p) *
+                  impair_switch(leaf_temp, delta_impair(A, p), p);
+  const T k_rec = k_rec_eff(leaf_temp, p);
+  const T dA = p[dp_acclim_alpha] *
+                   softplus(T(leaf_temp) - p[dp_acclim_T], p[dp_acclim_s]) -
+               p[dp_acclim_beta] * A;
+  const T dI = k_imp * F - (k_rec + p[dp_k_mat]) * I;
+  const T dD = p[dp_k_mat] * I;
+  return {dA, dI, dD};
+}
+
+// RK4 over a piecewise-linear leaf temperature; calls `put(i, y)` at every time.
+// The sub-step count is chosen from VALUES, so on a dual run it is the same
+// count as on the double run and the sensitivity is that of the discrete map
+// the double run evaluates.
+template <class T, class Put>
+inline void trajectory(const std::vector<double>& times,
+                       const std::vector<double>& leaf_temp,
+                       std::array<T, 3> y, const dyn_pars<T>& p, Put put) {
+  const std::size_t n = times.size();
+  put(0, y);
+  for (std::size_t i = 1; i < n; ++i) {
+    const double t0 = times[i - 1], dt_all = times[i] - t0;
+    const double T0 = leaf_temp[i - 1], T1 = leaf_temp[i];
+    // The stiffest rate on the interval bounds the sub-step. Both ends, because
+    // the impairment and repair rates are monotone in temperature.
+    double fastest = val(p[dp_acclim_beta]) + val(p[dp_k_mat]);
+    for (double Tx : {T0, T1}) {
+      fastest = std::max(fastest, val(k_i_eff(Tx, p)) + val(k_rec_eff(Tx, p)) +
+                                      val(p[dp_k_mat]) + val(p[dp_acclim_beta]));
+    }
+    // Two bounds on the sub-step: the fastest rate times the step below 0.1, and
+    // at most 0.25 K of temperature change per step, because the switch and the
+    // Arrhenius scale are steep in temperature and a forcing swept across them in
+    // one step is under-resolved however slow the rates are.
+    const int m = std::max({1, static_cast<int>(std::ceil(dt_all * fastest / 0.1)),
+                            static_cast<int>(std::ceil(std::abs(T1 - T0) / 0.25))});
+    const double h = dt_all / m;
+    auto temp_at = [&](double t) { return T0 + (T1 - T0) * (t - t0) / dt_all; };
+    for (int k = 0; k < m; ++k) {
+      const double t = t0 + k * h;
+      const std::array<T, 3> k1 = rates(temp_at(t), y[0], y[1], y[2], p);
+      const std::array<T, 3> k2 =
+          rates(temp_at(t + h / 2), y[0] + h / 2 * k1[0], y[1] + h / 2 * k1[1],
+                y[2] + h / 2 * k1[2], p);
+      const std::array<T, 3> k3 =
+          rates(temp_at(t + h / 2), y[0] + h / 2 * k2[0], y[1] + h / 2 * k2[1],
+                y[2] + h / 2 * k2[2], p);
+      const std::array<T, 3> k4 = rates(temp_at(t + h), y[0] + h * k3[0],
+                                        y[1] + h * k3[1], y[2] + h * k3[2], p);
+      for (int j = 0; j < 3; ++j) {
+        y[j] = y[j] + h / 6 * (k1[j] + 2 * k2[j] + 2 * k3[j] + k4[j]);
+      }
+    }
+    put(i, y);
+  }
+}
+
+}  // namespace damage
 
 class Leaf {
 public:
@@ -2601,6 +2799,22 @@ public:
   // The acclimation shift of the impairment switch's midpoint at a state A.
   double delta_impair_at(double A) const;
 
+  // The layer's parameters, packed for the templates in `damage`, and the
+  // refusal of a non-positive impair_H_ every entry point applies.
+  damage::dyn_pars<double> damage_pars() const;
+  void check_damage_pars() const;
+  void check_damage_series(const std::vector<double>& times,
+                           const std::vector<double>& leaf_temp) const;
+  // The names of damage_trajectory_gradient()'s inputs, in index order: the
+  // sixteen dynamics parameters, then the three initial states.
+  std::vector<std::string> damage_par_names() const;
+  // d(state)/d(input) along the trajectory, exact by forward-mode differentiation
+  // of the same RK4: 3 * times.size() * which.size() numbers, time fastest, then
+  // state (A, I, D), then input. `which` indexes damage_par_names().
+  std::vector<double> damage_trajectory_gradient(
+      const std::vector<double>& times, const std::vector<double>& leaf_temp,
+      double A0, double I0, double D0, const std::vector<int>& which) const;
+
   // THE LAYER'S DYNAMICS, per DAY, at a leaf temperature and a state:
   // {dA/dt, dI/dt, dD/dt}. Reads the layer's parameters and nothing of the
   // members A_, I_, D_ or the drivers, and does not need set_physiology, so a
@@ -3107,6 +3321,21 @@ inline leaf_pars<double> Leaf::passive_pars() const {
                                     : roots_.network_.r_R_V_sum.front();
   p[par_CF77_lambda] = CF77_lambda_;
   p[par_TF24_floor_lambda_o] = TF24_floor_lambda_o;
+  p[par_A] = A_;
+  p[par_I] = I_;
+  p[par_D] = D_;
+  p[par_topt_offset] = topt_offset_;
+  p[par_dTopt_max] = dTopt_max_;
+  p[par_K_A] = K_A_;
+  p[par_k_i] = k_i_;
+  p[par_k_i_baseline] = k_i_baseline_;
+  p[par_k_rec] = k_rec_;
+  p[par_m_rep] = m_rep_;
+  p[par_t_rep_cut] = t_rep_cut_;
+  p[par_c_acclim_maint] = c_acclim_maint_;
+  p[par_c_repair_maint] = c_repair_maint_;
+  p[par_c_protect_maint] = c_protect_maint_;
+  p[par_c_repair_flux] = c_repair_flux_;
   p[par_PPFD] = PPFD_;
   return p;
 }
@@ -5186,14 +5415,11 @@ inline void Leaf::update_temperature_dependent_params(double leaf_temp) {
 
 // --- the ATLS thermal-damage layer ------------------------------------------
 
-inline double Leaf::logistic_(double x) {
-  const double z = std::min(std::max(x, -30.0), 30.0);
-  return 1.0 / (1.0 + std::exp(-z));
-}
+
+inline double Leaf::logistic_(double x) { return damage::logistic(x); }
 
 inline double Leaf::softplus_(double x, double s) {
-  const double z = std::min(std::max(s * x, -30.0), 30.0);
-  return std::log1p(std::exp(z)) / s;
+  return damage::softplus(x, s);
 }
 
 // Inverts the peaked Arrhenius optimum Topt = H_d/(d_S - corr), corr =
@@ -5214,46 +5440,59 @@ inline double Leaf::d_S_shifted(double Ea, double H_d, double d_S_base,
   return H_d / Topt_K + corr;
 }
 
-// A centred Arrhenius K through a saturating link: below the midpoint the
-// switch is ~K, a plain Arrhenius rise with activation energy impair_H_; above
-// it the switch saturates at one, which is what keeps the impairment rate bounded
-// by k_i_eff.
+// The layer's helpers on this leaf: its parameters, packed for the templates in
+// `damage` above.
+inline damage::dyn_pars<double> Leaf::damage_pars() const {
+  damage::dyn_pars<double> p{};
+  p[damage::dp_impair_H] = impair_H_;
+  p[damage::dp_impair_Tmid] = impair_Tmid_;
+  p[damage::dp_k_i] = k_i_;
+  p[damage::dp_k_i_Ea] = k_i_Ea_;
+  p[damage::dp_k_i_Tref] = k_i_Tref_;
+  p[damage::dp_k_rec] = k_rec_;
+  p[damage::dp_m_rep] = m_rep_;
+  p[damage::dp_t_rep_cut] = t_rep_cut_;
+  p[damage::dp_k_mat] = k_mat_;
+  p[damage::dp_acclim_alpha] = acclim_alpha_;
+  p[damage::dp_acclim_beta] = acclim_beta_;
+  p[damage::dp_acclim_T] = acclim_T_;
+  p[damage::dp_acclim_s] = acclim_s_;
+  p[damage::dp_dTimpair_max] = dTimpair_max_;
+  p[damage::dp_K_A] = K_A_;
+  p[damage::dp_topt_offset] = topt_offset_;
+  return p;
+}
+
+// ⚠️ A NON-POSITIVE impair_H_ IS REFUSED: the switch would then turn OFF with
+// temperature. A NaN passes through rather than throwing, so an unset input
+// poisons the outputs where a test can see it.
+inline void Leaf::check_damage_pars() const {
+  if (impair_H_ <= 0.0) {
+    util::stop("the thermal-damage layer needs impair_H_ > 0, so that "
+               "impairment switches on with temperature; got impair_H_ = " +
+               util::format_double(impair_H_));
+  }
+}
+
+// A centred Arrhenius K through a saturating link: below the midpoint the switch
+// is ~K, a plain Arrhenius rise with activation energy impair_H_; above it the
+// switch saturates at one, which is what keeps the impairment rate bounded by
+// k_i_eff.
 //
 // ⚠️ ITS OWN PARAMETERS, AND NOTHING OF THE JMAX CURVE. Do not read jmax_H_d_ or
 // jmax_d_S_ here: that would make recalibrating the instantaneous photosynthetic
 // response silently move the impairment onset. The DEFAULTS equal those values:
 // (d_S*T - H_d)/(R*T) and (H_d/R)(1/Tmid - 1/T) are the same expression at
 // Tmid = H_d/d_S, differently associated.
-//
-// ⚠️ A NON-POSITIVE impair_H_ IS REFUSED: the switch would then turn OFF with
-// temperature. A NaN passes through rather than throwing, so an unset input
-// poisons the outputs where a test can see it.
-inline double Leaf::impair_switch(double leaf_temp,
-                                  double delta_impair) const {
-  if (impair_H_ <= 0.0) {
-    util::stop("the thermal-damage layer needs impair_H_ > 0, so that "
-               "impairment switches on with temperature; got impair_H_ = " +
-               util::format_double(impair_H_));
-  }
-  const double mid_K = std::min(
-      std::max(impair_Tmid_ + C_to_K + delta_impair, 250.0), 350.0);
-  const double T_K = leaf_temp + C_to_K;
-  const double arg = std::min(
-      std::max((impair_H_ / gas_constant) * (1.0 / mid_K - 1.0 / T_K), -30.0),
-      30.0);
-  const double K = std::exp(arg);
-  return K / (1.0 + K);
+inline double Leaf::impair_switch(double leaf_temp, double delta_impair) const {
+  check_damage_pars();
+  return damage::impair_switch(leaf_temp, delta_impair, damage_pars());
 }
 
 // k_i_ at k_i_Tref_, on a centred Arrhenius. At k_i_Ea_ = 0 the argument is an
 // exact (signed) zero and exp of it exactly one, so the default IS k_i_.
 inline double Leaf::k_i_eff(double leaf_temp) const {
-  const double arg = std::min(
-      std::max((k_i_Ea_ / gas_constant) *
-                   (1.0 / (k_i_Tref_ + C_to_K) - 1.0 / (leaf_temp + C_to_K)),
-               -30.0),
-      30.0);
-  return k_i_ * std::exp(arg);
+  return damage::k_i_eff(leaf_temp, damage_pars());
 }
 
 inline double Leaf::k_imp_eff(double leaf_temp, double delta_impair) const {
@@ -5261,32 +5500,22 @@ inline double Leaf::k_imp_eff(double leaf_temp, double delta_impair) const {
 }
 
 inline double Leaf::delta_impair_at(double A) const {
-  const double a = std::max(A, 0.0);
-  return topt_offset_ + dTimpair_max_ * a / (a + K_A_);
+  return damage::delta_impair(A, damage_pars());
 }
 
 inline double Leaf::k_rec_eff(double leaf_temp) const {
-  return k_rec_ * logistic_(-m_rep_ * (leaf_temp - t_rep_cut_));
+  return damage::k_rec_eff(leaf_temp, damage_pars());
 }
 
-// The right-hand side, written once: the trajectory below and every caller that
-// integrates the states itself use this, so the dynamics cannot drift between
-// them. Negative A is read as zero for the forcing's shift but decays as given.
 inline std::vector<double> Leaf::damage_rates(double leaf_temp, double A,
                                               double I, double D) const {
-  const double F = 1.0 - I - D;
-  const double k_imp = k_imp_eff(leaf_temp, delta_impair_at(A));
-  const double k_rec = k_rec_eff(leaf_temp);
-  const double dA = acclim_alpha_ * softplus_(leaf_temp - acclim_T_, acclim_s_) -
-                    acclim_beta_ * A;
-  const double dI = k_imp * F - (k_rec + k_mat_) * I;
-  const double dD = k_mat_ * I;
-  return {dA, dI, dD};
+  check_damage_pars();
+  const std::array<double, 3> r = damage::rates(leaf_temp, A, I, D, damage_pars());
+  return {r[0], r[1], r[2]};
 }
 
-inline std::vector<double> Leaf::damage_trajectory(
-    const std::vector<double>& times, const std::vector<double>& leaf_temp,
-    double A0, double I0, double D0) const {
+inline void Leaf::check_damage_series(const std::vector<double>& times,
+                                      const std::vector<double>& leaf_temp) const {
   const std::size_t n = times.size();
   if (n == 0 || leaf_temp.size() != n) {
     util::stop("damage_trajectory: times and leaf_temp must be non-empty and "
@@ -5301,48 +5530,63 @@ inline std::vector<double> Leaf::damage_trajectory(
                  std::to_string(i));
     }
   }
+  check_damage_pars();
+}
+
+inline std::vector<double> Leaf::damage_trajectory(
+    const std::vector<double>& times, const std::vector<double>& leaf_temp,
+    double A0, double I0, double D0) const {
+  check_damage_series(times, leaf_temp);
+  const std::size_t n = times.size();
   std::vector<double> out(3 * n);
-  double y[3] = {A0, I0, D0};
-  auto put = [&](std::size_t i) {
-    out[i] = y[0];
-    out[n + i] = y[1];
-    out[2 * n + i] = y[2];
-  };
-  put(0);
-  for (std::size_t i = 1; i < n; ++i) {
-    const double t0 = times[i - 1], dt_all = times[i] - t0;
-    const double T0 = leaf_temp[i - 1], T1 = leaf_temp[i];
-    // The stiffest rate on the interval bounds the sub-step. Both ends, because
-    // the impairment and repair rates are monotone in temperature.
-    double fastest = acclim_beta_ + k_mat_;
-    for (double T : {T0, T1}) {
-      fastest = std::max(fastest, k_i_eff(T) + k_rec_eff(T) + k_mat_ +
-                                      acclim_beta_);
+  damage::trajectory<double>(times, leaf_temp, {A0, I0, D0}, damage_pars(),
+                             [&](std::size_t i, const std::array<double, 3>& y) {
+                               out[i] = y[0];
+                               out[n + i] = y[1];
+                               out[2 * n + i] = y[2];
+                             });
+  return out;
+}
+
+inline std::vector<std::string> Leaf::damage_par_names() const {
+  return {"impair_H_", "impair_Tmid_", "k_i_", "k_i_Ea_", "k_i_Tref_", "k_rec_",
+          "m_rep_", "t_rep_cut_", "k_mat_", "acclim_alpha_", "acclim_beta_",
+          "acclim_T_", "acclim_s_", "dTimpair_max_", "K_A_", "topt_offset_",
+          "A0", "I0", "D0"};
+}
+
+// One forward-mode pass per requested input, each seeding a dual number in that
+// parameter (or initial state) and running the same RK4 the double trajectory
+// runs. Exact for the discrete map, at the sub-step count the double run uses.
+inline std::vector<double> Leaf::damage_trajectory_gradient(
+    const std::vector<double>& times, const std::vector<double>& leaf_temp,
+    double A0, double I0, double D0, const std::vector<int>& which) const {
+  check_damage_series(times, leaf_temp);
+  const std::size_t n = times.size(), np = which.size();
+  const int n_inputs = damage::n_dyn_pars + 3;
+  std::vector<double> out(3 * n * np);
+  const damage::dyn_pars<double> base = damage_pars();
+  for (std::size_t k = 0; k < np; ++k) {
+    const int w = which[k];
+    if (w < 0 || w >= n_inputs) {
+      util::stop("damage_trajectory_gradient: input index " + std::to_string(w) +
+                 " is out of range; see damage_par_names()");
     }
-    // Two bounds on the sub-step: the fastest rate times the step below 0.1, and
-    // at most 0.25 K of temperature change per step, because the switch and the
-    // Arrhenius scale are steep in temperature and a forcing swept across them in
-    // one step is under-resolved however slow the rates are.
-    const int m = std::max({1, static_cast<int>(std::ceil(dt_all * fastest / 0.1)),
-                            static_cast<int>(std::ceil(std::abs(T1 - T0) / 0.25))});
-    const double h = dt_all / m;
-    auto temp_at = [&](double t) { return T0 + (T1 - T0) * (t - t0) / dt_all; };
-    for (int k = 0; k < m; ++k) {
-      const double t = t0 + k * h;
-      const std::vector<double> k1 = damage_rates(temp_at(t), y[0], y[1], y[2]);
-      const std::vector<double> k2 = damage_rates(
-          temp_at(t + h / 2), y[0] + h / 2 * k1[0], y[1] + h / 2 * k1[1],
-          y[2] + h / 2 * k1[2]);
-      const std::vector<double> k3 = damage_rates(
-          temp_at(t + h / 2), y[0] + h / 2 * k2[0], y[1] + h / 2 * k2[1],
-          y[2] + h / 2 * k2[2]);
-      const std::vector<double> k4 = damage_rates(
-          temp_at(t + h), y[0] + h * k3[0], y[1] + h * k3[1], y[2] + h * k3[2]);
-      for (int j = 0; j < 3; ++j) {
-        y[j] += h / 6 * (k1[j] + 2 * k2[j] + 2 * k3[j] + k4[j]);
-      }
+    damage::dyn_pars<damage::Dual> p;
+    for (int j = 0; j < damage::n_dyn_pars; ++j) {
+      p[std::size_t(j)] = damage::Dual(base[std::size_t(j)], j == w ? 1.0 : 0.0);
     }
-    put(i);
+    const int s0 = w - damage::n_dyn_pars;
+    std::array<damage::Dual, 3> y0{damage::Dual(A0, s0 == 0 ? 1.0 : 0.0),
+                                   damage::Dual(I0, s0 == 1 ? 1.0 : 0.0),
+                                   damage::Dual(D0, s0 == 2 ? 1.0 : 0.0)};
+    damage::trajectory<damage::Dual>(
+        times, leaf_temp, y0, p,
+        [&](std::size_t i, const std::array<damage::Dual, 3>& y) {
+          for (int st = 0; st < 3; ++st) {
+            out[i + n * (std::size_t(st) + 3 * k)] = y[std::size_t(st)].d;
+          }
+        });
   }
   return out;
 }

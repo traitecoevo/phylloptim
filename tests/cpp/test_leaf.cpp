@@ -3940,11 +3940,12 @@ void test_stem_curve_shortcut_needs_no_rebuild() {
       96.0,   2.680147, P50_0, 2.680147, P50_0, 1.5,
       157.44, 0.30,     0.7,   0.99,     7.5,   kRd25, kGammaJS22,
       kCMaxA, kCMaxB,  kmax,      0.0};
-  // The two prices are left zero-filled: this test differentiates the collar
-  // route, which reads neither. ⚠️ THE ASSERTION IS WHAT MAKES THE SHORT
+  // The two prices and the fifteen thermal-damage inputs are left zero-filled:
+  // this test differentiates the collar route with the layer off, which reads
+  // none of them. ⚠️ THE ASSERTION IS WHAT MAKES THE SHORT
   // INITIALISER SAFE -- without it the next appended parameter shifts `kmax`
   // silently, which is the failure the comment above describes.
-  static_assert(phylloptim::gradient::n_theta == 19,
+  static_assert(phylloptim::gradient::n_theta == 34,
                 "theta above is positional and deliberately short; recount it "
                 "against n_theta and update this assertion together");
 
@@ -6643,6 +6644,12 @@ void test_thermal_damage_refusals() {
   const std::string refused = "refused with use_thermal_damage_ on";
   Drivers d;
   d.PPFD = 1500.0;
+  // 35 C, not 25: the gradient check below needs a finite difference clean enough
+  // to referee the composite. At 25 C differencing the solve has a floor of ~2e-4
+  // relative for inputs that only shift respiration a little (c_repair_flux_ moves
+  // profit ~12x less per step than R_d_25, whose own floor there is 1.8e-5 with the
+  // layer OFF); at 35 C every column agrees to ~1e-9.
+  d.leaf_temp = 35.0;
   const std::vector<double> psi{1.0, 2.0, 3.0}, depth{0.5, 1.0, 1.5};
   phylloptim::Leaf l =
       make_thermal_leaf(d, psi, depth, false, false, set_atls_inputs);
@@ -6702,12 +6709,46 @@ void test_thermal_damage_refusals() {
   const int par[] = {phylloptim::gradient::par_vcmax_25};
   phylloptim::gradient::Settings s;
   phylloptim::gradient::Result r;
-  ok(throws_with([&] { phylloptim::gradient::at(on, theta, gd, false, par, 1, s, r); },
-                 "leaf_gradient(): " + refused),
-     "gradient::at refuses");
-  ok(throws_with([&] { phylloptim::gradient::batch(on, theta, 1, obs, false, par, 1, s); },
-                 "leaf_gradient_batch(): " + refused),
-     "gradient::batch refuses the whole call, not row by row");
+  // The trait gradient CARRIES the layer: both routes difference the solve's own
+  // dprofit and outputs, which read the block the layer writes. So with the gate
+  // on it runs, and the IFT composite agrees with differencing the solve.
+  // The gate-on leaf's own theta: its damage slots carry the inputs it was given.
+  double theta_on[phylloptim::gradient::n_theta];
+  {
+    const phylloptim::leaf_pars<double> p_on = on.passive_pars();
+    for (int i = 0; i < phylloptim::gradient::n_theta; ++i) {
+      theta_on[i] = p_on[std::size_t(i)];
+    }
+  }
+  // A trait, a damage state and a cost-carried input, through both routes.
+  const int pars_on[] = {phylloptim::gradient::par_vcmax_25,
+                         phylloptim::gradient::par_I,
+                         phylloptim::gradient::par_c_repair_flux};
+  phylloptim::gradient::Result r_on;
+  phylloptim::gradient::at(on, theta_on, gd, false, pars_on, 3, s, r_on);
+  ok(r_on.status != phylloptim::gradient::Status::Error,
+     "gradient::at runs with the gate on");
+  {
+    phylloptim::gradient::Settings sfd = s;
+    sfd.method = phylloptim::gradient::Method::Fd;
+    phylloptim::gradient::Result rfd;
+    phylloptim::gradient::at(on, theta_on, gd, false, pars_on, 3, sfd, rfd);
+    double worst = 0.0;
+    for (std::size_t k = 0; k < r_on.grad.size(); ++k) {
+      const double scale = std::max(1.0, std::abs(rfd.grad[k]));
+      worst = std::max(worst, std::abs(r_on.grad[k] - rfd.grad[k]) / scale);
+    }
+    printf("    gate on: IFT against differencing the solve, worst %.3e\n", worst);
+    ok(worst < 1e-6,
+       "with the gate on, the IFT composite agrees with differencing the solve");
+    // dA/dI: impaired area does not photosynthesise, so A must FALL with I.
+    ok(r_on.grad[1 * phylloptim::gradient::n_outputs + 0] < 0.0,
+       "assimilation falls as the impaired fraction rises");
+  }
+  const std::vector<phylloptim::gradient::Result> gon =
+      phylloptim::gradient::batch(on, theta_on, 1, obs, false, par, 1, s);
+  ok(gon.size() == 2 && gon[0].status != phylloptim::gradient::Status::Error,
+     "gradient::batch runs with the gate on");
   const std::vector<phylloptim::gradient::Result> g =
       phylloptim::gradient::batch(l, theta, 1, obs, false, par, 1, s);
   ok(g.size() == 2 && g[0].status != phylloptim::gradient::Status::Error &&

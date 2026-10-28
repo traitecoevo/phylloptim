@@ -896,6 +896,13 @@ Leaf:
     damage_trajectory:
       return_type: "std::vector<double>"
       args: [times: "const std::vector<double>&", leaf_temp: "const std::vector<double>&", A0: double, I0: double, D0: double]
+    # Exact forward-mode sensitivities of that trajectory: time fastest, then state
+    # (A, I, D), then input; `which` is 0-based into damage_par_names().
+    damage_trajectory_gradient:
+      return_type: "std::vector<double>"
+      args: [times: "const std::vector<double>&", leaf_temp: "const std::vector<double>&", A0: double, I0: double, D0: double, which: "const std::vector<int>&"]
+    damage_par_names:
+      return_type: "std::vector<std::string>"
 
     # --- the ATLS thermal-damage layer's two smooth switches -----------------
     # Argument-clamped so they stay finite. Static in C++; bound so a caller's

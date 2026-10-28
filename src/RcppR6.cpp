@@ -264,6 +264,14 @@ std::vector<double> Leaf__damage_trajectory(phylloptim::RcppR6::RcppR6<phyllopti
   return obj_->damage_trajectory(times, leaf_temp, A0, I0, D0);
 }
 // [[Rcpp::export]]
+std::vector<double> Leaf__damage_trajectory_gradient(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, const std::vector<double>& times, const std::vector<double>& leaf_temp, double A0, double I0, double D0, const std::vector<int>& which) {
+  return obj_->damage_trajectory_gradient(times, leaf_temp, A0, I0, D0, which);
+}
+// [[Rcpp::export]]
+std::vector<std::string> Leaf__damage_par_names(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->damage_par_names();
+}
+// [[Rcpp::export]]
 double Leaf__logistic_(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double x) {
   return obj_->logistic_(x);
 }
