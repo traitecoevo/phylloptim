@@ -72,7 +72,7 @@ test_that("set_traits() enforces the one representation for psi (#25)", {
 })
 
 test_that("the composite reproduces the arbitrated reference gradients", {
-  # psi_soil = 2, PPFD = 900, VPD = 2, one layer, default traits. H = -8.9561.
+  # psi_soil = 2, PPFD = 900, VPD = 2, one layer, default traits.
   # Ratios against a least-squares slope over +-2% at n = 41 were 0.9979-1.0000
   # when these were established; the tolerance below is that agreement, not the
   # composite's own precision, which is finer.
@@ -111,7 +111,14 @@ test_that("the composite reproduces the arbitrated reference gradients", {
   g <- grid_gradient(2.0, pars = rownames(ref))
   expect_identical(g$status, "interior")
   expect_identical(g$method, "ift")
-  expect_equal(g$H, -8.9578, tolerance = 1e-4)
+  # ⚠️ THE MODEL'S OWN NUMBER, NOT AN ARBITRATED ONE, and it had drifted from the
+  # model by more than this tolerance: the literal read -8.9578 and the comment
+  # above it -8.9561, where the model gives -8.9554 at 100 knots. It is pinned at
+  # the CONVERGED value, which holds at every resolution measured -- -8.955414,
+  # -8.955057, -8.955110, -8.955133, -8.955141 at 100, 200, 400, 800 and 1600
+  # knots, a spread of 4e-05 relative and so well inside this tolerance. The
+  # seven rows below are the arbitrated ones and did not move.
+  expect_equal(g$H, -8.9551, tolerance = 1e-4)
 
   expect_equal(g$gradient[rownames(ref), "collar"], ref[, "collar"],
                tolerance = 5e-3)
@@ -170,15 +177,12 @@ test_that("a pinned optimum takes the fallback, and the composite would be wrong
     expect_gt(auto$stationarity, 1e-7)
     expect_lt(abs(auto$gradient["stem_P50", "A"]), 1e-3)
 
-    # Forcing the composite here does not produce the wrong number -- it fails.
-    # That was not the design and is worth stating as a measurement: psi* sits
-    # 1e-06 of a bracket width from its bound at a pinned point, so the step in
-    # psi cannot be centred without clamping, and that is checked. The grid test
-    # below shows it holds at all 42 pinned rows, which means the composite's
-    # O(1) answer is not reachable through this function.
+    # Forcing the composite here is refused by name, so its O(1) answer is not
+    # reachable through this function. The grid test below checks that at every
+    # pinned row.
     expect_error(grid_gradient(w$psi_soil, vpd = w$vpd, layers = w$layers,
                                pars = "stem_P50", method = "ift"),
-                 "narrower than one step", label = lab)
+                 "pinned optimum", label = lab)
   }
 
   # Pinned DRY is the milder case and is worth separating: the composite is only
@@ -634,7 +638,7 @@ test_that("profit's gradient is the direct term alone at an interior optimum", {
   #
   # ⚠️ Those figures are macOS/arm64's, and the second half of this test says why
   # that matters. Read it before adding an assertion on a magnitude here.
-  d <- grid_drivers(1.0, ppfd = 1500, vpd = 1.0, layers = 1L)
+  d <- grid_drivers(0.5, ppfd = 1500, vpd = 2.0, layers = 1L)
   g <- do.call(leaf_gradient, c(d, list(pars = "vcmax_25")))
   expect_identical(g$status, "interior")
 
@@ -668,8 +672,9 @@ test_that("profit's gradient is the direct term alone at an interior optimum", {
 
   # ⚠️ THE MAGNITUDES BELOW ARE PLATFORM-SPECIFIC, AND THE FIRST VERSION OF THIS
   # TEST ASSERTED THEM EVERYWHERE. It passed on macOS/arm64 and failed on Linux
-  # CI, where the same operating point gives `exact` = 6.6e-11 and `fd` = 8.0e-10
-  # rather than 2.4e-15 and 2.1e-04.
+  # CI, where the point then in use gave `exact` = 6.6e-11 and `fd` = 8.0e-10
+  # rather than macOS's 2.4e-15 and 2.1e-04. At this point macOS gives 1.2e-14
+  # and 3.3e-04.
   #
   # That is not a different answer, it is a different NOISE FLOOR: which side of
   # the collar solver's tolerance the root-find lands on is set by libm's exp/pow,
@@ -1048,15 +1053,17 @@ test_that("CF77_lambda_ is in the enumeration and refused by other models", {
   # EMERGENT -- derived from that curve's own parameters rather than set -- so the
   # slot exists once in the enumeration and is available for one model.
   expect_true("CF77_lambda_" %in% gradient_par_names())
-  # ⚠️ NO LONGER LAST. `TF24_floor_lambda_o` is the second model-owned slot and
-  # `LeastCost_beta` the third, each appended after the last, which is exactly the
-  # "appending is safe" the enumeration is designed for -- so what is asserted is
-  # the group and its order, not a position.
+  # ⚠️ NOT A FIXED POSITION. `TF24_floor_lambda_o` was appended after it,
+  # `LeastCost_beta` after that, and the thermal-damage layer's inputs after all
+  # three, which is exactly the "appending is safe" the enumeration is designed
+  # for -- so what is asserted is the group and its order, adjacent, not where it
+  # sits.
   #
   # ⚠️ AND THE THIRD IS NOT A PRICE. `LeastCost_beta` is a dimensionless ratio of
   # two unit costs; least-cost's price of water is emergent from it. What puts it
   # in this group is only that one curve reads it and no other has the slot.
-  expect_identical(tail(gradient_par_names(), 3L),
+  i <- match("CF77_lambda_", gradient_par_names())
+  expect_identical(gradient_par_names()[i + 0:2],
                    c("CF77_lambda_", "TF24_floor_lambda_o", "LeastCost_beta"))
 
   # ⚠️ REFUSED, not returned as a zero. A zero means "in this objective but

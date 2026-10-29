@@ -87,11 +87,11 @@ struct Traits {
 };
 
 const Traits kBase{{96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5,
-                    157.44, 0.30, 0.7, 0.99, 7.5}};
+                    157.44, 0.30 / 0.85, 0.7, 0.99, 7.5}};
 
 const char *kNames[kNTraits] = {"vcmax_25",  "stem_c",     "stem_P50",
                           "root_c",    "root_P50",   "TF24_beta2",
-                          "jmax_25",   "a",          "curv_elec",
+                          "jmax_25",   "phi_J",      "curv_elec",
                           "curv_colim", "cost_scale"};
 
 static_assert(sizeof(kBase.v) / sizeof(kBase.v[0]) == kNTraits,
@@ -333,21 +333,22 @@ int main(int argc, char **argv) {
   // the fixed cost of the composite. Say which one you mean.
   {
     const double kmax = kKs * kTheta / kH;
-    double theta[phylloptim::gradient::n_pars] = {
+    double theta[phylloptim::gradient::n_theta] = {
         kBase.v[0], kBase.v[1], kBase.v[2],  kBase.v[3], kBase.v[4],
         kBase.v[5], kBase.v[6], kBase.v[7],  kBase.v[8], kBase.v[9],
         // ⚠️ POSITIONAL and silently short-fillable -- see test_leaf.cpp's copy of
-        // this array for what adding a trait did to it. Count against `n_pars`.
+        // this array for what adding a trait did to it. Count against `n_theta`.
         kBase.v[10], 1.44,      /*JS22_gamma=*/1.0,
         /*CMax_a=*/0.6, /*CMax_b=*/0.0, kmax, 0.0};
-    // ⚠️ THE TRAILING ZEROS ARE THE THREE MODEL-OWNED SLOTS -- `resistance`,
-    // `CF77_lambda_`, `TF24_floor_lambda_o` and `LeastCost_beta` -- and this
-    // benchmark differentiates `vcmax_25` on the collar route, which reads none
-    // of them. The short initialiser zero-fills the rest, which is why the
-    // assertion below is what makes it safe.
-    static_assert(phylloptim::gradient::n_pars == 20,
+    // ⚠️ THE ZERO-FILLED TAIL IS `resistance`, THE THREE MODEL-OWNED SLOTS
+    // (`CF77_lambda_`, `TF24_floor_lambda_o`, `LeastCost_beta`) AND THE FIFTEEN
+    // THERMAL-DAMAGE INPUTS. This benchmark differentiates `vcmax_25` on the
+    // collar route with the layer off, which reads none of them. The short
+    // initialiser zero-fills the rest, which is why the assertion below is what
+    // makes it safe.
+    static_assert(phylloptim::gradient::n_theta == 35,
                   "theta above is positional and deliberately short; recount it "
-                  "against n_pars and update this assertion together");
+                  "against n_theta and update this assertion together");
 
     std::vector<double> root{1.0 / kAreaLeaf}, psi_soil{2.0}, depth{1.0};
     phylloptim::gradient::Drivers gd;

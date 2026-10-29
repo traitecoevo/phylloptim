@@ -12,11 +12,14 @@
 
 #include "root_network.hpp"
 
+#include <odelia/tangent.hpp>
+
 #include <chrono>
 #include <cmath>
 #include <functional>
 #include <cstdio>
 #include <limits>
+#include <map>
 #include <string>
 #include <algorithm>
 #include <iterator>
@@ -91,6 +94,12 @@ const double kCMaxB = 0.0;
 // its scale is set by the leaf, whose own marginal cost of water runs 9e4 to 3e5 at
 // these drivers.
 const double kFloorLambdaO = 1.5e5;
+// The price CF77 and TF24_floor are given where a test only needs the price's own
+// term to be visible, not a particular operating point. Both prices are caller
+// inputs with no default (NA until set), so any test of a priced curve must name
+// one. At 1e4 the upstream term in the collar FOC is ~0.2 umol m^-2 s^-1 MPa^-1,
+// three orders above the difference's floor.
+const double kPriceForFOC = 1e4;
 
 phylloptim::Leaf make_leaf(const Drivers &d, std::vector<double> psi_soil,
                      std::vector<double> soil_depth) {
@@ -230,34 +239,139 @@ void test_vulnerability_integral_derivatives() {
   ok(at_zero.db == 0.0, "dG/db is exactly zero at psi = 0");
   ok(at_zero.dc == 0.0, "dG/dc is exactly zero at psi = 0");
 
-  // Past the last knot the series would overflow rather than mislead, so the
-  // bound is asserted instead of branched around.
-  bool threw = false;
-  try {
-    cumulative_vulnerability_integral_derivatives_at(3.0, 1.0, 2.0);
-  } catch (const std::runtime_error &) {
-    threw = true;
+  // Past the last knot: (3.0, 1.0, 2.0) is x = 9, past the knot grid's
+  // x_max = log(100) and inside the series' reach, and agrees with the closed
+  // form and a central difference like any other point.
+  {
+    const double psi = 3.0, b = 1.0, c = 2.0, h = 1e-5;
+    const auto d = cumulative_vulnerability_integral_derivatives_at(psi, b, c);
+    near(d.value, cumulative_vulnerability_integral_at(psi, b, c), 1e-14,
+         "past the knot grid, the series still matches the closed form");
+    near(d.db,
+         (cumulative_vulnerability_integral_at(psi, b * (1 + h), c) -
+          cumulative_vulnerability_integral_at(psi, b * (1 - h), c)) / (2 * h * b),
+         1e-7, "and dG/db matches a central difference");
+    near(d.dc,
+         (cumulative_vulnerability_integral_at(psi, b, c * (1 + h)) -
+          cumulative_vulnerability_integral_at(psi, b, c * (1 - h))) / (2 * h * c),
+         1e-7, "and dG/dc matches a central difference");
   }
-  ok(threw, "an argument past the curve's domain throws");
-  double just_inside = 0.0;
-  try {
-    just_inside =
-        cumulative_vulnerability_integral_derivatives_at(
-            phylloptim::vulnerability_psi_max(3.898245, 2.680147), 3.898245,
-            2.680147)
-            .value;
-  } catch (const std::runtime_error &) {
-    just_inside = -1.0;
+  // Past vulnerability_x_series_max the limit's derivatives take over. They must
+  // agree with the series either side of the hand-over, and with a central
+  // difference of the closed form far past it.
+  {
+    const double b = 3.898245, c = 2.680147;
+    const double x_hand = phylloptim::vulnerability_x_series_max;
+    const double below = b * std::pow(x_hand * (1 - 1e-9), 1.0 / c);
+    const double above = b * std::pow(x_hand * (1 + 1e-9), 1.0 / c);
+    const auto s0 = cumulative_vulnerability_integral_derivatives_at(below, b, c);
+    const auto s1 = cumulative_vulnerability_integral_derivatives_at(above, b, c);
+    // The true gap is gamma_upper(1/c, 40) * b/c, ~1e-18 relative; what is left
+    // is the series' rounding against boost's tgamma, a few ulp and libm-
+    // dependent (1.28e-15 on Linux), so the series' own 1e-14 bound applies.
+    near((s1.value - s0.value) / s0.value, 0.0, 1e-14,
+         "G is continuous where the series hands over to the limit");
+    near((s1.db - s0.db) / s0.db, 0.0, 1e-13, "and so is dG/db");
+    near((s1.dc - s0.dc) / s0.dc, 0.0, 1e-13, "and so is dG/dc");
+    for (double psi : {50.0, 1000.0}) {
+      const double h = 1e-5;
+      const auto d = cumulative_vulnerability_integral_derivatives_at(psi, b, c);
+      const std::string at = " at psi=" + std::to_string(psi);
+      ok(d.value == phylloptim::cumulative_vulnerability_integral_limit(b, c),
+         "far past the grid G is its limit" + at);
+      near(d.db,
+           (cumulative_vulnerability_integral_at(psi, b * (1 + h), c) -
+            cumulative_vulnerability_integral_at(psi, b * (1 - h), c)) / (2 * h * b),
+           1e-7, "the limit's dG/db matches a central difference" + at);
+      near(d.dc,
+           (cumulative_vulnerability_integral_at(psi, b, c * (1 + h)) -
+            cumulative_vulnerability_integral_at(psi, b, c * (1 - h))) / (2 * h * c),
+           1e-7, "the limit's dG/dc matches a central difference" + at);
+    }
   }
+  const double just_inside =
+      cumulative_vulnerability_integral_derivatives_at(
+          phylloptim::vulnerability_psi_max(3.898245, 2.680147), 3.898245,
+          2.680147)
+          .value;
   ok(just_inside > 0.0, "the last knot itself is inside the bound");
+}
+
+// A soil drier than the stem curve's last knot (P99) is a closed leaf on the
+// single-potential stem routes, and the accessors read the closed form past the
+// knot grid to give that answer (#157). These are the properties that make the
+// read safe.
+void test_stem_curve_past_its_grid() {
+  printf("stem curve past its knot grid (#157)\n");
+  Drivers d;
+  phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
+  const double b = l.stem_b, c = l.stem_c;
+  const double p99 = phylloptim::vulnerability_psi_max(b, c);
+  const double G_inf = phylloptim::cumulative_vulnerability_integral_limit(b, c);
+
+  // Continuous at the join, in value and in slope: the knots were seeded from
+  // the closed form and given the curve as their slopes.
+  const double eps = 1e-9;
+  const double G_at = l.stem_curve_integral(p99);
+  const double G_past = l.stem_curve_integral(p99 * (1 + eps));
+  near(G_at, phylloptim::cumulative_vulnerability_integral_at(p99, b, c), 1e-15,
+       "at P99 the table equals the closed form");
+  near((G_past - G_at) / (p99 * eps), l.stem_curve_integral_deriv(p99), 1e-6,
+       "G is continuous across P99");
+  // The slope moves by d ln f / d ln psi = -c x over the step, about 1.2e-8 here,
+  // so the join is checked against the curve rather than against no change.
+  near(l.stem_curve_integral_deriv(p99), std::exp(-std::pow(p99 / b, c)), 1e-15,
+       "at P99 the table's slope is the curve");
+  near(l.stem_curve_integral_deriv(p99 * (1 + eps)),
+       std::exp(-std::pow(p99 * (1 + eps) / b, c)), 1e-15,
+       "and just past it the slope is the curve too");
+
+  // Past the grid: the closed form, increasing, bounded by its limit.
+  double prev = G_at;
+  for (double psi : {6.95, 7.0, 10.0, 50.0, 1000.0}) {
+    const std::string at = " at psi=" + std::to_string(psi);
+    const double G = l.stem_curve_integral(psi);
+    ok(G == phylloptim::cumulative_vulnerability_integral_at(psi, b, c),
+       "past the grid G is the closed form" + at);
+    ok(G >= prev && G <= G_inf, "increasing and below G(inf)" + at);
+    near(l.stem_curve_integral_deriv(psi), std::exp(-std::pow(psi / b, c)), 1e-15,
+         "and its slope is the curve" + at);
+    prev = G;
+  }
+
+  // The inverse past the table, round trip, where the curve is not yet flat.
+  for (double psi : {6.95, 7.5, 8.5}) {
+    const double w = l.stem_curve_integral(psi);
+    near(l.stem_curve_integral_inverse(w) / psi, 1.0, 1e-10,
+         "G^-1(G(psi)) = psi past the table, at psi=" + std::to_string(psi));
+  }
+  // Past G(inf) no potential carries the flow: still infeasible, still the code.
+  bool infeasible = false;
+  try {
+    l.stem_curve_integral_inverse(G_inf * (1 + 1e-6));
+  } catch (const phylloptim::util::infeasible_error &e) {
+    infeasible =
+        std::string(e.what()).rfind(phylloptim::util::infeasible_token("stem_curve_domain"), 0) == 0;
+  }
+  ok(infeasible, "past G(inf) the inverse is stem_curve_domain");
+
+  // The single-potential path end to end: a closed stem at a soil drier than P99
+  // moves no water, and a demanded flux of zero puts the stem at the soil.
+  for (double psi_soil : {6.95, 10.0, 1000.0}) {
+    const std::string at = " at psi_soil=" + std::to_string(psi_soil);
+    ok(l.transpiration(psi_soil, psi_soil) == 0.0, "no flux with the stem at the soil" + at);
+    near(l.transpiration_to_psi_stem(0.0, psi_soil) / psi_soil, 1.0, 1e-9,
+         "zero flux inverts to the soil's own potential" + at);
+  }
 }
 
 void test_spline_matches_direct_integration() {
   printf("pre-integrated spline vs direct quadrature\n");
   Drivers d;
   phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
-  // This is the check plant makes at test-leaf.r:214. The spline is what the hot
-  // path reads; adaptive Simpson integrates the curve directly.
+  // The same check plant makes in test-leaf.r, on transpiration against
+  // transpiration_full_integration. The spline is what the hot path reads;
+  // adaptive Simpson integrates the curve directly.
   for (double psi_stem : {2.5, 3.0, 4.0, 5.0}) {
     near(l.transpiration(psi_stem, 2.0),
          l.transpiration_full_integration(psi_stem, 2.0), 1e-6,
@@ -547,6 +661,80 @@ void test_analytic_gradient_matches_finite_difference() {
   const double fd = (up - dn) / (2 * eps);
   ok(std::isfinite(analytic), "analytic gradient is finite");
   near(analytic, fd, 2e-3, "analytic gradient matches central difference");
+}
+
+// The collar solve root-finds `dprofit_droot_collar_psi == 0`, so that function has
+// to be the derivative of the profit the solve REPORTS, on every curve. A cost that
+// reads the upstream potential moves with the collar directly, and a first-order
+// condition missing that term still converges -- to a point that is not the
+// maximum -- with every reported number plausible. So this checks the slope
+// against a difference of `profit_`, on each curve whose objective IS `profit_`
+// (the identity-link ones; the log links report the product, not its log), at two
+// collars wetter than the solved one. Not AT it: a curve pinned to the dry bound
+// would put a central difference across the bound, which halves the slope.
+// Through the `_for<K>` entry points, not the seated-curve wrappers: those are the
+// functions the solve itself calls, whatever the wrappers dispatch to.
+template <phylloptim::Leaf::CostCurve K>
+int check_collar_foc_matches_profit(const Drivers &d) {
+  const struct {
+    std::vector<double> psi;
+    std::vector<double> depth;
+  } soils[] = {{{1.0}, {1.0}}, {{1.0, 2.0, 3.0}, {0.5, 1.0, 1.5}}};
+  int compared = 0;
+  for (const auto &s : soils) {
+    phylloptim::Leaf l = make_leaf(d, s.psi, s.depth);
+    l.CF77_lambda_ = kPriceForFOC;
+    l.TF24_floor_lambda_o = kPriceForFOC;
+    // ⚠️ LeastCost IS THE ONE LOG-LINK CURVE CHECKED HERE, and it is here
+    // because its cost reads the upstream potential: `log W` with `W` carrying
+    // `E(psi_stem, psi_upstream)`. SOX and JW26 read no upstream. The reported
+    // `profit_` is the ratio `A/W` and the solve differentiates its LOG, so the
+    // difference below is taken of `log(profit_)` for this curve.
+    l.LeastCost_beta = 146.0;
+    l.JS22_gamma = kGammaJS22;
+    l.CMax_a = kCMaxA;
+    l.CMax_b = kCMaxB;
+    l.set_model(K, true);
+    l.optimise();
+    const double p0 = l.opt_root_psi_;
+    for (double target : {p0 - 0.05, p0 - 0.1}) {
+      const double eps = 1e-5;
+      const double analytic = l.template dprofit_droot_collar_psi_for<K>(target);
+      double up = l.template evaluate_root_collar_psi_for<K>(target + eps);
+      double dn = l.template evaluate_root_collar_psi_for<K>(target - eps);
+      if constexpr (K == phylloptim::Leaf::CostCurve::LeastCost) {
+        up = std::log(up);
+        dn = std::log(dn);
+      }
+      if (!std::isfinite(up) || !std::isfinite(dn)) {
+        continue;
+      }
+      // The difference's own floor is ~3e-5 on the three-layer supply (TF24
+      // included, which reads no upstream); the term this guards is O(1).
+      near(analytic, (up - dn) / (2 * eps), 1e-4,
+           phylloptim::Leaf::curve_name(static_cast<int>(K)) + " at collar " +
+               std::to_string(target) + ", " + std::to_string(s.psi.size()) +
+               " layer(s)");
+      ++compared;
+    }
+  }
+  return compared;
+}
+
+void test_collar_foc_matches_profit() {
+  printf("collar dprofit is the derivative of the reported profit, every curve\n");
+  using CC = phylloptim::Leaf::CostCurve;
+  Drivers d;
+  d.PPFD = 1500.0;
+  const int compared = check_collar_foc_matches_profit<CC::TF24>(d) +
+                       check_collar_foc_matches_profit<CC::CF77>(d) +
+                       check_collar_foc_matches_profit<CC::JS22>(d) +
+                       check_collar_foc_matches_profit<CC::CMax>(d) +
+                       check_collar_foc_matches_profit<CC::TF24_floor>(d) +
+                       check_collar_foc_matches_profit<CC::LeastCost>(d);
+  // Hazard 16: a row whose difference straddles the feasible edge is skipped.
+  printf("    %d points compared\n", compared);
+  ok(compared == 24, "every curve, layer count and point was compared");
 }
 
 // lambda = dA/dE is the first-order condition every model in this family shares,
@@ -890,7 +1078,7 @@ void test_operating_point_kind_is_written_by_every_path() {
   // set_traits returns the object to its just-constructed state, and the
   // classification is part of that state (hazard 10 / setup_clean_leaf).
   l.set_traits(l.vcmax_25, l.stem_c, l.stem_P50, l.roots_.root_c,
-               l.roots_.root_P50, l.TF24_beta2, l.jmax_25, l.a,
+               l.roots_.root_P50, l.TF24_beta2, l.jmax_25, l.phi_J,
                l.curv_fact_elec_trans, l.curv_fact_colim, l.TF24_cost_scale,
                l.R_d_25, l.JS22_gamma, l.CMax_a, l.CMax_b);
   ok(l.operating_point_kind() == Kind::Unsolved,
@@ -946,7 +1134,8 @@ void test_collar_solve_refuses_rather_than_guessing() {
   ok(m.operating_point_kind() == Kind::SolverRefused,
      "the solve reports that it could not resolve the bracket");
   ok(m.operating_point_kind() != Kind::BoundarySoil &&
-         m.operating_point_kind() != Kind::BoundaryCrit,
+         m.operating_point_kind() != Kind::BoundaryCrit &&
+         m.operating_point_kind() != Kind::BoundaryRootCrit,
      "and does not pass it off as a constrained optimum");
   // The endpoint the solve returns is stepped a fraction of the width inside the
   // bound it came from, so compare against the bound rather than for equality.
@@ -954,22 +1143,29 @@ void test_collar_solve_refuses_rather_than_guessing() {
      "and returns the end with the higher profit");
   ok(std::abs(refused - dry_end) > 0.1, "which is not the drier end");
 
-  // A bracket lying wholly inside the infeasible sliver at bound_a, where dprofit
-  // takes its reversed-gradient exit: no usable gradient at either end. The
+  // A bracket lying wholly at or below bound_a, where dprofit takes its
+  // reversed-gradient exit: no usable gradient at either end. The
   // non-finite-gradient half of the same guard has no bracket that reaches it and
   // is not covered.
+  //
+  // ⚠️ THE BRACKET IS BELOW THE BOUND, NOT JUST INSIDE IT. G^-1 is the forward
+  // table inverted, so zero flux returns the collar exactly and the infeasible
+  // region is exactly (-inf, bound_a] -- one ulp above it answers. DO NOT fit the
+  // inverse separately: at zero flux the round trip then puts psi_stem about 1e-07
+  // below the collar, which is a reversed gradient the model does not have, and it
+  // opens an infeasible sliver that wide above bound_a.
   phylloptim::Leaf s = make_leaf(d, psi, depth);
   double sa = 0.0, sb = 0.0;
   s.prepare_collar_solve<phylloptim::Leaf::CostCurve::TF24>(sa, sb);
   const double sliver = 1e-9;
   bool feasible = true;
-  s.dprofit_at_collar_psi<phylloptim::Leaf::CostCurve::TF24>(sa + 1e-6 * sliver, &feasible);
+  s.dprofit_at_collar_psi<phylloptim::Leaf::CostCurve::TF24>(sa, &feasible);
   ok(!feasible, "the wet bound admits no informative gradient");
-  const double fallen_back = s.maximise_profit_over_collar<phylloptim::Leaf::CostCurve::TF24>(sa, sa + sliver);
+  const double fallen_back = s.maximise_profit_over_collar<phylloptim::Leaf::CostCurve::TF24>(sa - sliver, sa);
   ok(s.operating_point_kind() == Kind::SolverRefused,
      "a bracket with no usable gradient at either end is refused too");
-  ok(std::isfinite(fallen_back) && fallen_back >= sa &&
-         fallen_back <= sa + sliver,
+  ok(std::isfinite(fallen_back) && fallen_back >= sa - sliver &&
+         fallen_back <= sa,
      "and the fallback stays inside the bracket it was handed");
 }
 
@@ -1742,6 +1938,8 @@ phylloptim::Leaf make_pm_leaf(const Drivers &d, std::vector<double> psi_soil,
   l.use_energy_balance_ = gate;
   l.wind_speed_ = wind_speed;
   l.d_ = leaf_dim;
+  // Daylight: the NIR band carries as much energy as the PAR band.
+  l.NIR_int_ = d.PPFD / phylloptim::umol_par_per_joule;
   std::vector<double> root(psi_soil.size(),
                            1.0 / double(psi_soil.size()) / d.area_leaf);
   l.set_physiology(fixture::root_network(root, soil_depth), d.PPFD, psi_soil, soil_depth,
@@ -1848,9 +2046,9 @@ void test_leaf_temperature_is_reported() {
 // rather than a regenerated baseline.
 //
 // ⚠️ The two exits move in OPPOSITE directions, so a test that only checked "R_d
-// went up" would pass on half the fix. Rn is proportional to PPFD with a fixed
-// longwave offset subtracted, so a hydraulically shut leaf in full sun is hotter
-// than the air and a shade-dead one is cooler.
+// went up" would pass on half the fix. Rn is absorbed shortwave (proportional to
+// PPFD) less the isothermal longwave loss, so a hydraulically shut leaf in full
+// sun is hotter than the air and a shade-dead one is cooler.
 void test_shutdown_reports_one_temperature() {
   printf("a shut-down leaf reports one temperature, not two\n");
   using Kind = phylloptim::Leaf::OperatingPointKind;
@@ -2180,6 +2378,89 @@ void test_pm_wind_speed_validation() {
   ok(!threw, "zero wind is a legitimate case, not an error");
 }
 
+// Light arrives INTERCEPTED and the leaf absorbs it: net radiation is each band
+// times its own absorptance, and the NIR band has no default because the right
+// one depends on the light source.
+void test_pm_absorbed_shortwave() {
+  printf("PM net radiation is the absorbed shortwave of two intercepted bands\n");
+  Drivers d;
+
+  phylloptim::Leaf l = make_pm_leaf(d, {2.0}, {1.0}, true);
+  // The longwave half is the isothermal sky term of #97, written out from the
+  // drivers here so the shortwave half is asserted against something independent
+  // of Rn_ itself; test_longwave_and_radiative_conductance owns the longwave.
+  const double Tair_K = l.Tair_ + phylloptim::C_to_K;
+  const double ea_Pa =
+      std::max(1000.0 * (l.saturation_vapour_pressure(l.Tair_) - l.atm_vpd_),
+               phylloptim::vapour_pressure_min);
+  const double ema = std::min(
+      phylloptim::atmos_emissivity_coef *
+          std::pow(ea_Pa / Tair_K, phylloptim::atmos_emissivity_exponent),
+      1.0);
+  const double expected =
+      l.alpha_PAR_ * d.PPFD / phylloptim::umol_par_per_joule +
+      l.alpha_NIR_ * l.NIR_int_ -
+      (1.0 - ema) * phylloptim::stefan_boltzmann * Tair_K * Tair_K * Tair_K *
+          Tair_K;
+  near(l.Rn_, expected, 1e-12,
+       "Rn_ = alpha_PAR*PAR + alpha_NIR*NIR - isothermal longwave");
+
+  // The NIR band heats the leaf and drives no photosynthesis.
+  phylloptim::Leaf hot = make_pm_leaf(d, {2.0}, {1.0}, true);
+  hot.NIR_int_ = 2.0 * l.NIR_int_;
+  hot.set_physiology(fixture::root_network({1.0 / d.area_leaf}, {1.0}), d.PPFD,
+                     {2.0}, {1.0}, d.K_s * d.theta / d.h, d.atm_vpd, d.ca,
+                     d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  near(hot.Rn_ - l.Rn_, l.alpha_NIR_ * l.NIR_int_, 1e-12,
+       "doubling NIR adds alpha_NIR * NIR to Rn_");
+  near(hot.electron_transport_, l.electron_transport_, 0.0,
+       "and leaves electron transport untouched");
+
+  // No default: a missing NIR band throws on the energy-balance path...
+  phylloptim::Leaf unset;
+  unset.setup_transpiration(100);
+  unset.setup_root_vulnerability(100);
+  unset.use_energy_balance_ = true;
+  bool threw = false;
+  try {
+    unset.set_physiology(fixture::root_network({1.0 / d.area_leaf}, {1.0}),
+                         d.PPFD, {2.0}, {1.0}, d.K_s * d.theta / d.h,
+                         d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(threw, "an unset NIR_int_ throws on the energy-balance path");
+
+  // ...and is never read off it.
+  unset.use_energy_balance_ = false;
+  threw = false;
+  try {
+    unset.set_physiology(fixture::root_network({1.0 / d.area_leaf}, {1.0}),
+                         d.PPFD, {2.0}, {1.0}, d.K_s * d.theta / d.h,
+                         d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+    unset.find_root_collar_psi();
+    ok(std::isfinite(unset.profit_), "and solves without it off the path");
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(!threw, "an unset NIR_int_ is ignored with the gate off");
+}
+
+// phi_J is per ABSORBED photon, so the light term of J is phi_J * alpha_PAR *
+// PPFD: halving the absorptance at a doubled yield leaves J where it was.
+void test_quantum_yield_on_absorbed_basis() {
+  printf("electron transport reads phi_J * alpha_PAR * PPFD\n");
+  Drivers d;
+  phylloptim::Leaf base = make_leaf(d, {2.0}, {1.0});
+  phylloptim::Leaf swap = make_leaf(d, {2.0}, {1.0});
+  swap.alpha_PAR_ = base.alpha_PAR_ / 2.0;
+  swap.phi_J = base.phi_J * 2.0;
+  near(swap.electron_transport(), base.electron_transport(), 1e-12,
+       "J depends on phi_J and alpha_PAR only through their product");
+  near(base.phi_J * base.alpha_PAR_, 0.30, 1e-15,
+       "the default restates the old incident-basis yield of 0.30");
+}
+
 // The behavioural content of plant's PM demo smoke test, which asserted these
 // through the R shim over a Fick-vs-PM grid. The implementation is here now, so
 // the sign of the effect is asserted here too.
@@ -2326,8 +2607,8 @@ void test_energy_balance_collar_solve_is_measured() {
 // golden file already pins values; what it cannot say is that the energy-balance
 // inputs are never *read* when the gate is off. Setting them to NaN and demanding
 // bit-identical results says exactly that: if any of the new code path touched
-// Rn_, ra_ or Tair_ off-gate, a NaN would propagate and nothing would compare
-// equal. Same shape as test_pm_wind_speed_validation uses for wind_speed_.
+// Rn_, g_rad_, ra_ or Tair_ off-gate, a NaN would propagate and nothing would
+// compare equal. Same shape as test_pm_wind_speed_validation uses for wind_speed_.
 void test_energy_balance_gate_off_is_inert() {
   printf("gate off: the EB inputs are never read (NaN poisoning)\n");
   const double nan = std::numeric_limits<double>::quiet_NaN();
@@ -2336,7 +2617,8 @@ void test_energy_balance_gate_off_is_inert() {
     d.leaf_temp = tair;
     phylloptim::Leaf clean = make_pm_leaf(d, {2.0}, {1.0}, false);
     phylloptim::Leaf poisoned = make_pm_leaf(d, {2.0}, {1.0}, false);
-    poisoned.Rn_ = nan; poisoned.ra_ = nan; poisoned.Tair_ = nan;
+    poisoned.Rn_ = nan; poisoned.g_rad_ = nan; poisoned.ra_ = nan;
+    poisoned.Tair_ = nan;
 
     clean.find_root_collar_psi();
     poisoned.find_root_collar_psi();
@@ -2408,18 +2690,18 @@ void test_energy_balance_stomatal_decoupling() {
       Drivers d;
       d.PPFD = 1200.0; d.leaf_temp = t; d.atm_vpd = 1.0; d.h = 1.5;
       phylloptim::Leaf l = make_pm_leaf(d, {0.5}, {1.0}, gate);
-      // ⚠️ OVERRIDE THE DERIVED RADIATION, and this is the second thing the
-      // defaults cannot express. phylloptim sets Rn = 2*PPFD/4.57 - 40, which at
-      // PPFD 1200 is 485 W m^-2 with net longwave fixed at -40 -- against an
-      // isothermal value that runs -98 to -133 over this range. Combined with
-      // ra from the wind model (31.6 s m^-1) the leaf runs ~18 K above air and
-      // its thermal optimum falls off the bottom of any sensible sweep: the
-      // first version of this test measured a curve that had already peaked
-      // before 15 C. These are the values Jones et al. drive with (their eq. 25
-      // and 29 at Iabs = 500, ra = 10), and both fields are settable precisely
-      // so a caller can supply a better radiation budget than the minimal cut.
+      // ⚠️ OVERRIDE THE DERIVED RADIATION BUDGET, and this is the second thing
+      // the defaults cannot express. At PPFD 1200 the derived isothermal Rn is
+      // 420-525 W m^-2 over this sweep, and with ra from the wind model (31.6 s
+      // m^-1) the leaf runs 10-12 K above air at zero transpiration, so its
+      // thermal optimum falls off the bottom of any sensible sweep. These are
+      // the values Jones et al. drive with (their eq. 25 and 29 at Iabs = 500,
+      // ra = 10), and the fields are settable precisely so a caller can supply
+      // its own budget. ⚠️ ra_ = 12 is their r_HR, which ALREADY folds in the
+      // radiative conductance, so g_rad_ is zeroed or that path counts twice.
       l.Rn_ = 400.0;
       l.ra_ = 12.0;
+      l.g_rad_ = 0.0;
       l.find_root_collar_psi();
       if (!std::isfinite(l.assim_colimited_) || !std::isfinite(l.stom_cond_CO2_)) continue;
       Ta.push_back(t); A.push_back(l.assim_colimited_); gs.push_back(l.stom_cond_CO2_);
@@ -2551,7 +2833,7 @@ void test_closed_form() {
      "and it is rejected because the error really is large there");
 
   // The TF24_beta2 = 1/c leaf, where xi is constant and nothing needs solving.
-  phylloptim::Leaf exact_leaf(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.0 / 2.680147, 157.44, 0.30, 0.7, 0.99, 1e-3,
+  phylloptim::Leaf exact_leaf(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.0 / 2.680147, 157.44, 0.30 / 0.85, 0.7, 0.99, 1e-3,
                         100, 1e-3, 1000, 7.5);
   ok(phylloptim::closed_form::beta2_is_exact(exact_leaf),
      "beta2_is_exact recognises TF24_beta2 = 1/stem_c");
@@ -3088,6 +3370,496 @@ void test_temperature_params_invalidate_cache() {
 // exists. Every reference value in the model is DEFINED at 25 C, so a change to any
 // response curve is inert there by construction; the golden grid carries one hot
 // block for exactly this reason, and this test is what pins the response itself.
+// The pack-reading kernels against the member-reading ones they are twins of,
+// at double, where the two must be THE SAME NUMBERS and not merely close.
+//
+// This is the only check on the reverse-mode surface's VALUES. The transpose
+// identity reads that surface in two directions and is satisfied exactly by a
+// kernel evaluated at the wrong temperature or in the wrong light, because both
+// directions are then wrong together.
+//
+// ⚠️ THE ENERGY-BALANCE ARM IS THE POINT, not a second case for completeness.
+// Off that path the block's temperature and `leaf_temp_` are one number and a
+// kernel reading either passes; on it they run up to 10 K apart, and reading
+// `leaf_temp_` moved assimilation by 100%, electron transport by 84% and dA/dci
+// by 8.3%. The block members are compared FIRST so a failure names the cause
+// rather than the three consequences below it.
+void test_pack_kernels_are_the_models_own() {
+  printf("the pack-reading kernels are the model's own numbers\n");
+  using AD = xad::fwd<double>::active_type;
+  int compared = 0, agreed = 0, refused = 0;
+  double widest_gap = 0.0;
+  // Identical numbers, and identical refusals. At a leaf 50 C hot the
+  // colimitation discriminant leaves dA/dci NaN, and two NaNs from two spellings
+  // of one function are the agreement being asserted rather than an exception to
+  // it -- `near` cannot say that, since NaN compares false against everything.
+  // Counted, so a fixture that started refusing everywhere cannot pass by it.
+  auto same = [&](double got, double want, const std::string &what) {
+    if (std::isnan(got) && std::isnan(want)) {
+      ++refused;
+      ++checks;
+      return;
+    }
+    ++agreed;
+    near(got, want, 0.0, what);
+  };
+  for (bool gate : {false, true}) {
+    for (double psi0 : {0.5, 1.0, 2.0, 3.0}) {
+      for (double ppfd : {100.0, 1500.0}) {
+        for (double temp : {25.0, 40.0}) {
+          Drivers d;
+          d.PPFD = ppfd;
+          d.leaf_temp = temp;
+          phylloptim::Leaf l =
+              make_pm_leaf(d, {psi0, psi0 + 0.35, psi0 + 0.7}, {1.0, 2.0, 3.0},
+                           gate);
+          l.find_root_collar_psi();
+          const double ci = l.ci_;
+          if (!std::isfinite(ci)) continue;
+          ++compared;
+          widest_gap = std::max(widest_gap, std::abs(l.Tleaf_ - l.leaf_temp_));
+          const phylloptim::leaf_pars<double> p = l.passive_pars();
+          const std::string at = " at psi_soil=" + std::to_string(psi0) +
+                                 " ppfd=" + std::to_string(ppfd) + " Tair=" +
+                                 std::to_string(temp) +
+                                 (gate ? " eb=1" : " eb=0");
+          same(l.vcmax_at<double>(p), l.vcmax_, "vcmax" + at);
+          same(l.jmax_at<double>(p), l.jmax_, "jmax" + at);
+          same(l.respiration_at<double>(p), l.R_d_, "respiration" + at);
+          same(l.electron_transport_at<double>(p), l.electron_transport(),
+               "electron transport" + at);
+          const phylloptim::Leaf::PhotoCapacity<double> cap =
+              l.photo_capacity_at<double>(p);
+          same(l.assim_colimited_kernel<double>(ci, cap), l.assim_colimited(ci),
+               "colimited assimilation" + at);
+          AD ci_ad = ci;
+          xad::derivative(ci_ad) = 1.0;
+          same(l.assim_slope_at<double>(ci, cap),
+               xad::derivative(l.assim_colimited_kernel(ci_ad)),
+               "dA/dci" + at);
+          // The cost's slope walks its own four arguments rather than the pack,
+          // so it needs the same referee the assimilation's has.
+          AD sigma_ad = l.opt_psi_stem_;
+          xad::derivative(sigma_ad) = 1.0;
+          same(l.cost_slope_at<double>(l.opt_psi_stem_, p),
+               xad::derivative(l.hydraulic_cost_TF_kernel(sigma_ad)),
+               "dC/dsigma" + at);
+        }
+      }
+    }
+  }
+  ok(compared >= 20, "the sweep reached at least 20 operating points");
+  ok(agreed > 4 * refused,
+     "most comparisons were of numbers, not of refusals: " +
+         std::to_string(agreed) + " numbers, " + std::to_string(refused) +
+         " refusals");
+  // The claim is only evidence where the two temperatures actually differ, so
+  // a fixture that stopped separating them would have stopped checking.
+  ok(widest_gap > 1.0,
+     "the sweep reached a leaf more than 1 K off air temperature, gap=" +
+         std::to_string(widest_gap));
+}
+
+// Light reaches carbon with a ROW, and the row is the right size.
+//
+// ⚠️ AN EXACT ZERO IS THE FAILURE THIS EXISTS FOR, not a small number. The pack
+// slot is the only route light has into the electron transport; read off the
+// `PPFD_` member instead, every trait that moves the light a cohort stands in --
+// the extinction coefficient, the leaf area a stem carries -- reaches
+// assimilation with no row and the gradient reads zero rather than wrong. The
+// transpose identity is satisfied exactly by a zero row on both sides, so it
+// cannot see this either.
+//
+// The difference is taken at a FIXED ci, so it differences the kernel and not the
+// solve, and the row is required to FALL with light: at 100 umol the leaf is
+// light-limited and at 1500 it is rubisco-limited, so a row that did not saturate
+// would be reading light somewhere it does not belong.
+void test_light_reaches_carbon_with_a_row() {
+  printf("light reaches carbon with a row\n");
+  using AD = xad::fwd<double>::active_type;
+  double previous = std::numeric_limits<double>::infinity();
+  int compared = 0;
+  for (double ppfd : {100.0, 400.0, 900.0, 1500.0}) {
+    Drivers d;
+    d.PPFD = ppfd;
+    phylloptim::Leaf l = make_leaf(d, {1.0}, {1.0});
+    l.find_root_collar_psi();
+    const double ci = l.ci_;
+    if (!std::isfinite(ci)) continue;
+    ++compared;
+    const std::string at = " at ppfd=" + std::to_string(ppfd);
+
+    phylloptim::leaf_pars<AD> p;
+    const phylloptim::leaf_pars<double> seated = l.passive_pars();
+    for (std::size_t i = 0; i < p.size(); ++i) p[i] = AD(seated[i]);
+    xad::derivative(p[phylloptim::par_PPFD]) = 1.0;
+    const double row = xad::derivative(
+        l.assim_colimited_kernel<AD>(AD(ci), l.photo_capacity_at<AD>(p)));
+
+    const double h = ppfd * 1e-6;
+    Drivers up_d = d, dn_d = d;
+    up_d.PPFD = ppfd + h;
+    dn_d.PPFD = ppfd - h;
+    phylloptim::Leaf up = make_leaf(up_d, {1.0}, {1.0});
+    phylloptim::Leaf dn = make_leaf(dn_d, {1.0}, {1.0});
+    const double fd = (up.assim_colimited(ci) - dn.assim_colimited(ci)) / (2 * h);
+
+    ok(row != 0.0, "dA/dPPFD is not an exact zero" + at);
+    ok(row > 0.0, "more light cannot lower assimilation" + at);
+    near(row, fd, 1e-7, "dA/dPPFD against a central difference" + at);
+    ok(row < previous, "the light response saturates" + at);
+    previous = row;
+  }
+  ok(compared == 4, "every light level solved");
+}
+
+// Every operating point the model answers at hands over FINITE rows.
+//
+// ⚠️ A NON-FINITE ROW IS NOT REPORTED ANYWHERE DOWNSTREAM, which is why this is
+// asserted here. plant records its rows against a constant 1.0, so the row it
+// validates is always finite and the sentinel rides in on the tape behind it;
+// its census gradient then polls for a DECLARED refusal, finds none, and hands
+// back NaN as a number the sweep computed. Measured before this check existed:
+// three of five census drivers returned NaN in every trait column of three
+// metrics, with nothing refused.
+//
+// The two routes are separate claims. `duptake_dpsi` returns NaN deliberately
+// where its analytic branch is not valid, and a single-layer wet bound -- where
+// the shade-death exit places the collar -- is such a point; the
+// coordinates additionally run the implicit function theorem, which has no
+// residual to invert wherever the model assigned ci rather than solving for it.
+void test_every_answered_point_hands_over_finite_rows() {
+  printf("every answered operating point hands over finite rows\n");
+  using T = odelia::ode::tangent_scalar<double>;
+  std::map<std::string, int> reached;
+  int draws = 0, uptakes = 0, coords = 0;
+  for (int layers : {1, 3}) {
+    for (double psi0 : {0.25, 1.0, 2.0, 4.0, 6.0}) {
+      for (double ppfd : {1.0, 100.0, 900.0}) {
+        Drivers d;
+        d.PPFD = ppfd;
+        std::vector<double> psi_soil, soil_depth;
+        for (int i = 0; i < layers; ++i) {
+          psi_soil.push_back(psi0 + 0.35 * i);
+          soil_depth.push_back(1.0 * (i + 1));
+        }
+        phylloptim::Leaf l = make_leaf(d, psi_soil, soil_depth);
+        l.find_root_collar_psi();
+        const auto kind = l.operating_point_kind();
+        const std::string name = l.operating_point_kind_name(kind);
+        if (kind == phylloptim::Leaf::OperatingPointKind::Unsolved ||
+            kind == phylloptim::Leaf::OperatingPointKind::SolverRefused ||
+            kind == phylloptim::Leaf::OperatingPointKind::NonFiniteGradient) {
+          continue;
+        }
+        ++reached[name];
+        const std::string at = " at " + name + " psi_soil=" +
+                               std::to_string(psi0) + " ppfd=" +
+                               std::to_string(ppfd) + " layers=" +
+                               std::to_string(layers);
+
+        phylloptim::leaf_pars<T> pars;
+        const phylloptim::leaf_pars<double> seated = l.passive_pars();
+        for (std::size_t i = 0; i < pars.size(); ++i) pars[i] = T(seated[i]);
+        odelia::ode::seed_direction(pars[phylloptim::par_vcmax_25], 1.0);
+        std::vector<T> soil, r_h, r_v;
+        for (int i = 0; i < l.supply_n_layers(); ++i) {
+          soil.push_back(T(l.roots_.psi_soil_[std::size_t(i)]));
+          r_h.push_back(T(l.roots_.network_.r_R_H_min[std::size_t(i)]));
+          r_v.push_back(T(l.roots_.network_.r_R_V_sum[std::size_t(i)]));
+        }
+        const phylloptim::SupplyAt<T> supply{soil, r_h, r_v,
+                                             pars[phylloptim::par_root_P50],
+                                             pars[phylloptim::par_root_c]};
+        const auto draw = l.supply_draw_at<T>(T(l.opt_root_psi_), supply);
+        ++draws;
+        ok(std::isfinite(odelia::util::to_passive(draw.flux.slope)),
+           "the draw's collar slope is finite" + at);
+        for (std::size_t j = 0; j < draw.duptake_dp.size(); ++j) {
+          ok(std::isfinite(draw.duptake_dp[j]),
+             "layer " + std::to_string(j) + "'s supplied collar slope is finite" + at);
+        }
+
+        const double curvature =
+            kind == phylloptim::Leaf::OperatingPointKind::Interior
+                ? l.marginal_collar_slope<phylloptim::Leaf::CostCurve::TF24>()
+                : std::numeric_limits<double>::quiet_NaN();
+        if (kind == phylloptim::Leaf::OperatingPointKind::Interior &&
+            !std::isfinite(curvature)) {
+          continue;
+        }
+        const T collar =
+            l.collar_at<phylloptim::Leaf::CostCurve::TF24, T>(draw, pars, curvature);
+        const auto out =
+            l.outputs_at<phylloptim::Leaf::CostCurve::TF24, T>(collar, draw, pars);
+        ++uptakes;
+        ok(std::isfinite(odelia::ode::derivative_along(out.profit)),
+           "profit's row is finite" + at);
+        for (std::size_t j = 0; j < out.uptake.size(); ++j) {
+          ok(std::isfinite(odelia::ode::derivative_along(out.uptake[j])),
+             "layer " + std::to_string(j) + "'s uptake row is finite" + at);
+        }
+        // The coordinates are refused by name at a shutdown; outputs_at answers
+        // there instead, which the branch above just exercised.
+        if (kind != phylloptim::Leaf::OperatingPointKind::HydraulicShutdown) {
+          const auto cap = l.photo_capacity_at<T>(pars);
+          const auto co = l.collar_coords_at<T>(l.opt_psi_stem_, l.ci_, collar,
+                                                draw, pars, cap, true);
+          ++coords;
+          ok(std::isfinite(odelia::ode::derivative_along(co.sigma.value)) &&
+                 std::isfinite(odelia::util::to_passive(co.sigma.slope)),
+             "sigma's row and collar slope are finite" + at);
+          ok(std::isfinite(odelia::ode::derivative_along(co.ci.value)) &&
+                 std::isfinite(odelia::util::to_passive(co.ci.slope)),
+             "ci's row and collar slope are finite" + at);
+          // Omitting the channel is what profit asks for at an interior point,
+          // and it must move no number: the step it multiplies is exactly zero
+          // in value, so both coordinates are the residuals' own bit for bit.
+          // Asserted here because the value is where an omission would show and
+          // the row is not -- a channel that went missing leaves every number
+          // finite.
+          const auto held = l.collar_coords_at<T>(l.opt_psi_stem_, l.ci_, collar,
+                                                  draw, pars, cap, false);
+          ok(odelia::util::to_passive(held.sigma.value) ==
+                 odelia::util::to_passive(co.sigma.value),
+             "sigma is the same number with the channel omitted" + at);
+          ok(odelia::util::to_passive(held.ci.value) ==
+                 odelia::util::to_passive(co.ci.value),
+             "ci is the same number with the channel omitted" + at);
+          ok(std::isfinite(odelia::ode::derivative_along(held.sigma.value)) &&
+                 std::isfinite(odelia::ode::derivative_along(held.ci.value)),
+             "both coordinates keep a finite row without the channel" + at);
+        }
+      }
+    }
+  }
+  std::string names;
+  for (const auto &[name, n] : reached) {
+    names += (names.empty() ? "" : ", ") + name + "(" + std::to_string(n) + ")";
+  }
+  printf("    %d draws, %d output sets, %d coordinate pairs | kinds: %s\n", draws,
+         uptakes, coords, names.c_str());
+  // ⚠️ THE CLAIM IS ONLY EVIDENCE ABOUT THE KINDS IT REACHED, and shade death is
+  // the one that carried the sentinel: a fixture that stopped reaching it would
+  // pass this while checking nothing.
+  ok(reached.count("shade-death") > 0, "the sweep reached a shade death");
+  ok(reached.count("hydraulic-shutdown") > 0, "the sweep reached a shutdown");
+  ok(reached.count("interior") > 0, "the sweep reached an interior point");
+}
+
+// TF24_floor's rows at a nonzero price, against re-solving at a perturbed price.
+//
+// ⚠️ THE TWO ROWS FAIL DIFFERENTLY, which is why both are asserted. The profit row
+// is the envelope theorem, so it is right only if the solve's collar is stationary
+// in the profit it reports; the collar row is the implicit function theorem on
+// marginal_at, so it is right only if marginal_at is the FOC the solve drove to
+// zero. The floor's price reads the collar directly, so a solve or a marginal
+// missing that term fails one row or the other -- and a difference taken through
+// the same solve cannot see it, because it re-solves the same wrong condition.
+void test_tf24_floor_rows_at_a_price() {
+  printf("TF24_floor's collar and profit rows at lambda_o > 0 match a re-solve\n");
+  using T = odelia::ode::tangent_scalar<double>;
+  using K = phylloptim::Leaf::CostCurve;
+  int compared = 0;
+  for (int layers : {1, 3}) {
+    for (double price : {1e3, 1e4}) {
+      Drivers d;
+      d.PPFD = 1500.0;
+      std::vector<double> psi_soil, soil_depth;
+      for (int i = 0; i < layers; ++i) {
+        psi_soil.push_back(1.0 + 0.35 * i);
+        soil_depth.push_back(1.0 * (i + 1));
+      }
+      auto solved = [&](double lam) {
+        phylloptim::Leaf l = make_leaf(d, psi_soil, soil_depth);
+        l.TF24_floor_lambda_o = lam;
+        l.set_model(K::TF24_floor, true);
+        l.optimise();
+        return l;
+      };
+      phylloptim::Leaf l = solved(price);
+      const std::string at = " at lambda_o=" + std::to_string(price) +
+                             " layers=" + std::to_string(layers);
+      if (l.operating_point_kind() != phylloptim::Leaf::OperatingPointKind::Interior) {
+        continue;
+      }
+
+      phylloptim::leaf_pars<T> pars;
+      const phylloptim::leaf_pars<double> seated = l.passive_pars();
+      for (std::size_t i = 0; i < pars.size(); ++i) pars[i] = T(seated[i]);
+      odelia::ode::seed_direction(pars[phylloptim::par_TF24_floor_lambda_o], 1.0);
+      std::vector<T> soil, r_h, r_v;
+      for (int i = 0; i < l.supply_n_layers(); ++i) {
+        soil.push_back(T(l.roots_.psi_soil_[std::size_t(i)]));
+        r_h.push_back(T(l.roots_.network_.r_R_H_min[std::size_t(i)]));
+        r_v.push_back(T(l.roots_.network_.r_R_V_sum[std::size_t(i)]));
+      }
+      const phylloptim::SupplyAt<T> supply{soil, r_h, r_v,
+                                           pars[phylloptim::par_root_P50],
+                                           pars[phylloptim::par_root_c]};
+      const auto draw = l.supply_draw_at<T>(T(l.opt_root_psi_), supply);
+      const double curvature = l.marginal_collar_slope<K::TF24_floor>();
+      const T collar = l.collar_at<K::TF24_floor, T>(draw, pars, curvature);
+      const auto out = l.outputs_at<K::TF24_floor, T>(collar, draw, pars);
+
+      const double h = 1e-4 * price;
+      const phylloptim::Leaf up = solved(price + h), dn = solved(price - h);
+      const double dcollar = (up.opt_root_psi_ - dn.opt_root_psi_) / (2 * h);
+      const double dprofit = (up.profit_ - dn.profit_) / (2 * h);
+      // Scaled by the row's own size: both are small numbers per unit price.
+      auto rel = [](double got, double want) {
+        return std::abs(got - want) / std::max(std::abs(want), 1e-300);
+      };
+      ok(rel(odelia::ode::derivative_along(collar), dcollar) < 1e-4,
+         "the collar row matches a re-solve" + at + ": " +
+             std::to_string(odelia::ode::derivative_along(collar)) + " vs " +
+             std::to_string(dcollar));
+      ok(rel(odelia::ode::derivative_along(out.profit), dprofit) < 1e-4,
+         "the profit row matches a re-solve" + at + ": " +
+             std::to_string(odelia::ode::derivative_along(out.profit)) + " vs " +
+             std::to_string(dprofit));
+      ++compared;
+    }
+  }
+  printf("    %d interior points compared\n", compared);
+  ok(compared == 4, "every layer count and price reached an interior point");
+}
+
+// The dry end has TWO bounds, closed by different conditions, and which one bound
+// is a classification a tally has to be able to report.
+//
+// ⚠️ AT SHIPPED DEFAULTS ONE ARM NEVER WINS, so it needs a fixture built for it
+// rather than a sweep that waits for one. root_psi_crit is 5.87 MPa against a
+// continuity root near 1.3, so the root's own limit is never the min until the
+// trait that sets it is lowered deliberately. Without this the kind exists and
+// nothing reaches it, which is a classification no run can produce -- and while
+// the distinction was a private bool, no tally could report it either.
+//
+// The two arms place the collar by DIFFERENT expressions -- a residual on one and
+// a closed form on the other -- so the check is the placement as well as the
+// name: at the root-limit arm the collar is root_psi_crit exactly.
+// d(profit)/d(pars[par]) through the three calls, at whatever point the leaf
+// holds, on the tangent scalar.
+double profit_row_at_current_point(phylloptim::Leaf &l, int par) {
+  using T = odelia::ode::tangent_scalar<double>;
+  phylloptim::leaf_pars<T> pars;
+  const phylloptim::leaf_pars<double> seated = l.passive_pars();
+  for (std::size_t i = 0; i < pars.size(); ++i) pars[i] = T(seated[i]);
+  odelia::ode::seed_direction(pars[par], 1.0);
+  std::vector<T> soil, r_h, r_v;
+  for (int i = 0; i < l.supply_n_layers(); ++i) {
+    soil.push_back(T(l.roots_.psi_soil_[std::size_t(i)]));
+    r_h.push_back(T(l.roots_.network_.r_R_H_min[std::size_t(i)]));
+    r_v.push_back(T(l.roots_.network_.r_R_V_sum[std::size_t(i)]));
+  }
+  const phylloptim::SupplyAt<T> supply{soil, r_h, r_v,
+                                       pars[phylloptim::par_root_P50],
+                                       pars[phylloptim::par_root_c]};
+  const auto draw = l.supply_draw_at<T>(T(l.opt_root_psi_), supply);
+  const double curvature =
+      l.operating_point_kind() == phylloptim::Leaf::OperatingPointKind::Interior
+          ? l.marginal_collar_slope<phylloptim::Leaf::CostCurve::TF24>()
+          : std::numeric_limits<double>::quiet_NaN();
+  const T collar =
+      l.collar_at<phylloptim::Leaf::CostCurve::TF24, T>(draw, pars, curvature);
+  const auto out =
+      l.outputs_at<phylloptim::Leaf::CostCurve::TF24, T>(collar, draw, pars);
+  return odelia::ode::derivative_along(out.profit);
+}
+
+// A consumer that records each solve and replays it later (plant does, on every
+// step of a reverse sweep) must be handed the rows the solve itself would hand
+// over. A pinned solve places its collar at a POLISHED bound and corrects its
+// rows back to that bound's root, and neither is in the replay's inputs; a
+// replay that lost them gave root-trait rows of the wrong sign at one-layer wet
+// bounds. Asserted bit for bit, across interior and both pinned kinds.
+void test_a_replay_hands_over_the_rows_its_solve_did() {
+  printf("a replayed operating point hands over its solve's rows\n");
+  std::map<std::string, int> seen;
+  int compared = 0, differ = 0;
+  for (int layers : {1, 2}) {
+    for (double psi0 : {2.5, 4.0, 5.0, 5.5}) {
+      for (double ppfd : {100.0, 900.0}) {
+        for (double temp : {25.0, 40.0}) {
+          Drivers d;
+          d.PPFD = ppfd;
+          d.leaf_temp = temp;
+          std::vector<double> psi_soil, soil_depth;
+          for (int i = 0; i < layers; ++i) {
+            psi_soil.push_back(psi0 + 0.35 * i);
+            soil_depth.push_back(1.0 * (i + 1));
+          }
+          phylloptim::Leaf fresh = make_leaf(d, psi_soil, soil_depth);
+          fresh.find_root_collar_psi();
+          const auto kind = fresh.operating_point_kind();
+          if (kind != phylloptim::Leaf::OperatingPointKind::Interior &&
+              kind != phylloptim::Leaf::OperatingPointKind::BoundarySoil &&
+              kind != phylloptim::Leaf::OperatingPointKind::BoundaryCrit) {
+            continue;
+          }
+          ++seen[phylloptim::Leaf::operating_point_kind_name(kind)];
+          const double collar = fresh.opt_root_psi_;
+          phylloptim::Leaf replay = make_leaf(d, psi_soil, soil_depth);
+          replay.replay_operating_point(collar, kind);
+          if (replay.opt_root_psi_ != collar) ++differ;
+          for (int par : {phylloptim::par_vcmax_25, phylloptim::par_stem_P50,
+                          phylloptim::par_root_c, phylloptim::par_root_P50}) {
+            ++compared;
+            if (profit_row_at_current_point(replay, par) !=
+                profit_row_at_current_point(fresh, par)) {
+              ++differ;
+            }
+          }
+        }
+      }
+    }
+  }
+  printf("       (%d rows; interior %d, boundary-soil %d, boundary-crit %d points)\n",
+         compared, seen["interior"], seen["boundary-soil"], seen["boundary-crit"]);
+  ok(seen["interior"] > 0 && seen["boundary-soil"] > 0,
+     "the grid reaches an interior point and a wet bound (test is not vacuous)");
+  ok(differ == 0, "every replayed collar and row equals its solve's, bit for bit");
+}
+
+void test_the_dry_end_reports_which_bound_closed_it() {
+  printf("the dry end reports which of its two bounds closed it\n");
+  using Kind = phylloptim::Leaf::OperatingPointKind;
+  Drivers d;
+  const std::vector<double> psi_soil{2.0}, depth{1.0};
+  const std::vector<double> mrp(psi_soil.size(),
+                               1.0 / double(psi_soil.size()) / d.area_leaf);
+  int continuity = 0, root_limit = 0;
+  for (double root_P50 : {3.4, 2.0, 1.2, 0.9, 0.7, 0.5, 0.3}) {
+    phylloptim::Leaf l = make_leaf(d, psi_soil, depth);
+    l.set_traits(96.0, 2.680147, 3.4, 2.680147, root_P50, 1.5, 157.44, 0.30 / 0.85, 0.7,
+                 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
+    l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth,
+                     d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                     d.atm_o2_kpa, d.atm_kpa);
+    l.find_root_collar_psi();
+    const Kind kind = l.operating_point_kind();
+    const std::string at = " at root_P50=" + std::to_string(root_P50);
+    if (kind == Kind::BoundaryCrit) {
+      ++continuity;
+    } else if (kind == Kind::BoundaryRootCrit) {
+      ++root_limit;
+      // The collar IS the root's critical potential on this arm, which is what
+      // distinguishes it from the continuity root beside it.
+      near(l.opt_root_psi_, l.roots_.root_psi_crit, 1e-9,
+           "the collar is the root's critical potential" + at);
+    }
+    printf("    root_P50=%4.2f  root_psi_crit=%7.4f  collar=%7.4f  %s\n", root_P50,
+           l.roots_.root_psi_crit, l.opt_root_psi_,
+           l.operating_point_kind_name(kind));
+  }
+  // The arm this exists for. The continuity arm is covered where it occurs
+  // naturally -- the golden grid pins 18 of them at 25 C and none at 40 C, and
+  // now pins this arm at zero over the same grid, which is the pair of counts
+  // that says the two are told apart rather than merged.
+  ok(root_limit > 0, "the sweep reached the root-limit arm");
+  (void)continuity;
+}
+
 void test_rd_temperature_response() {
   printf("R_d rises with temperature\n");
   Drivers d;
@@ -3172,7 +3944,7 @@ void test_rd_temperature_response() {
     l.find_root_collar_psi();
     printf("    T = %4.1f C   R_d %6.3f   A %8.4f%s\n", T, l.R_d_,
            l.assim_colimited_,
-           l.ci_at_compensation_point_ ? "   <-- shut down" : "");
+           l.ci_at_compensation_point() ? "   <-- shut down" : "");
   }
 
   // ⚠️ AND IT MUST SHUT DOWN RATHER THAN THROW. A leaf too hot to gain carbon at
@@ -3189,7 +3961,7 @@ void test_rd_temperature_response() {
       threw = true;
     }
     ok(!threw, "a leaf too hot to gain carbon shuts down instead of throwing");
-    ok(hot.ci_at_compensation_point_,
+    ok(hot.ci_at_compensation_point(),
        "and says so, rather than reporting an ordinary operating point");
     near(hot.ci_, hot.gamma_ * hot.umol_per_mol_to_Pa_, 1e-12,
          "ci sits at the compensation point");
@@ -3202,7 +3974,7 @@ void test_rd_temperature_response() {
   {
     phylloptim::Leaf ok_leaf = make_leaf(d, {2.0}, {1.0});
     ok_leaf.find_root_collar_psi();
-    ok(!ok_leaf.ci_at_compensation_point_,
+    ok(!ok_leaf.ci_at_compensation_point(),
        "an ordinary leaf is not flagged as shut down");
   }
 }
@@ -3212,10 +3984,10 @@ void test_rd_temperature_response() {
 // constructing afresh, so that is what is asserted -- bit-exactly, which is a
 // statement neither a tolerance nor an eyeball could make.
 //
-// Bit-exactness is the whole point here rather than strictness for its own sake:
-// the two ways to reach the same traits share no code, so any piece of derived
-// state that set_traits fails to refresh shows up as a difference. Three pieces
-// were candidates, and each is a real trap rather than a hypothetical one:
+// Bit-exactness is what makes this check work: the two ways to reach the same
+// traits share no code, so any piece of derived state that set_traits fails to
+// refresh shows up as a difference. Three pieces were candidates, and each is a
+// real trap rather than a hypothetical one:
 //
 //   * the two pre-integrated vulnerability splines (stem_b/stem_c, root_b/root_c);
 //   * vcmax_/jmax_/R_d_, behind set_physiology's (leaf_temp, atm_o2_kpa) cache --
@@ -3256,7 +4028,7 @@ void test_perturb_stem_P50_matches_a_rebuild() {
     // The reference: stem_b through set_traits, which rebuilds the spline.
     phylloptim::Leaf rebuilt = make_leaf(d, {2.0}, {1.0});
     rebuilt.find_root_collar_psi();
-    rebuilt.set_traits(96.0, 2.680147, P50_new, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
+    rebuilt.set_traits(96.0, 2.680147, P50_new, 2.680147, 3.4, 1.5, 157.44, 0.30 / 0.85, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     rebuilt.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                            d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa,
                            d.atm_kpa);
@@ -3288,7 +4060,7 @@ void test_perturb_stem_P50_matches_a_rebuild() {
     // which is only true if the rebuild is forced.
     phylloptim::Leaf fresh = make_leaf(d, {2.0}, {1.0});
     fresh.find_root_collar_psi();
-    rescaled.set_traits(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
+    rescaled.set_traits(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30 / 0.85, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     rescaled.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                             d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa,
                             d.atm_kpa);
@@ -3334,7 +4106,7 @@ void test_stem_curve_shortcut_needs_no_rebuild() {
     undone.perturb_stem_P50(P50_0 * 1.001);
     undone.perturb_stem_P50(P50_0);  // the way back, WITH the shortcut
     undone.set_traits(96.0, 2.680147, P50_0, 2.680147, P50_0, 1.5,
-                      157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
+                      157.44, 0.30 / 0.85, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     ok(undone.stem_curve_builds_ == builds,
        "set_traits after an undone displacement rebuilds nothing");
     undone.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil,
@@ -3359,23 +4131,24 @@ void test_stem_curve_shortcut_needs_no_rebuild() {
   // --- and through the batch, which is where the cost was being paid ---------
   const double kmax = d.K_s * d.theta / d.h;
   // ⚠️ POSITIONAL, AND IT FAILS SILENTLY. An aggregate initialiser shorter than
-  // `n_pars` is legal C++ and zero-fills the rest, so adding a trait shifts `kmax`
+  // `n_theta` is legal C++ and zero-fills the rest, so adding a trait shifts `kmax`
   // and `resistance` down a slot and drops `resistance` off the end WITHOUT a
   // compiler diagnostic. Adding JS22_gamma put `kmax` into JS22_gamma's slot and
   // left kmax itself 0.0, and the only symptom was this test's three observations
   // failing to solve. `set_traits` above catches the same mistake at compile time;
-  // this does not, so count the entries against `n_pars` when you touch it.
-  double theta[phylloptim::gradient::n_pars] = {
+  // this does not, so count the entries against `n_theta` when you touch it.
+  double theta[phylloptim::gradient::n_theta] = {
       96.0,   2.680147, P50_0, 2.680147, P50_0, 1.5,
-      157.44, 0.30,     0.7,   0.99,     7.5,   kRd25, kGammaJS22,
+      157.44, 0.30 / 0.85,     0.7,   0.99,     7.5,   kRd25, kGammaJS22,
       kCMaxA, kCMaxB,  kmax,      0.0};
-  // The three model-specific slots are left zero-filled: this test differentiates
-  // the collar route, which reads none of them. ⚠️ THE ASSERTION IS WHAT MAKES THE
-  // SHORT INITIALISER SAFE -- without it the next appended parameter shifts `kmax`
+  // The three model-owned slots and the fifteen thermal-damage inputs are left
+  // zero-filled: this test differentiates the collar route with the layer off,
+  // which reads none of them. ⚠️ THE ASSERTION IS WHAT MAKES THE SHORT
+  // INITIALISER SAFE -- without it the next appended parameter shifts `kmax`
   // silently, which is the failure the comment above describes.
-  static_assert(phylloptim::gradient::n_pars == 20,
+  static_assert(phylloptim::gradient::n_theta == 35,
                 "theta above is positional and deliberately short; recount it "
-                "against n_pars and update this assertion together");
+                "against n_theta and update this assertion together");
 
   phylloptim::gradient::Drivers gd;
   gd.root_network = fixture::root_network(mrp, depth);
@@ -3462,7 +4235,7 @@ void test_set_traits_matches_a_fresh_leaf() {
     // The default trait vector, in set_traits' own argument order (R_d_25 apart,
     // which the constructor does not take).
     double t[11] = {96.0, 2.680147, 3.4,  2.680147, 3.4, 1.5,
-                    157.44, 0.30,   0.7,  0.99,     7.5};
+                    157.44, 0.30 / 0.85,   0.7,  0.99,     7.5};
     t[c.which] = c.value;
 
     // Fresh: the traits go through the constructor.
@@ -3522,7 +4295,7 @@ void test_set_traits_matches_a_fresh_leaf() {
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     const double vcmax_before = l.vcmax_;
-    l.set_traits(96.0 * 2.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
+    l.set_traits(96.0 * 2.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30 / 0.85, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
     // The same leaf_temp and atm_o2_kpa -- which used to be the whole key, and so
     // used to be what ARMED the trap. It no longer is: `vcmax_25` has moved, so the
@@ -3540,7 +4313,7 @@ void test_set_traits_matches_a_fresh_leaf() {
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     const double E_before = l.transpiration(3.0, 1.0);
-    l.set_traits(96.0, 2.680147, 3.4 * 1.5, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
+    l.set_traits(96.0, 2.680147, 3.4 * 1.5, 2.680147, 3.4, 1.5, 157.44, 0.30 / 0.85, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
     l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                      d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
@@ -3555,7 +4328,7 @@ void test_set_traits_matches_a_fresh_leaf() {
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     const double good[11] = {96.0, 2.680147, 3.4,  2.680147, 3.4, 1.5,
-                             157.44, 0.30,   0.7,  0.99,     7.5};
+                             157.44, 0.30 / 0.85,   0.7,  0.99,     7.5};
     // Only two potentials are settable now -- the derived scales and critical
     // potentials take their sign from these, so there is nothing else to reject.
     const int signed_positions[] = {2, 4};
@@ -3614,7 +4387,7 @@ void test_prescribed_lambda_survives_redriving() {
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     l.CF77_lambda_ = prescribed;
-    l.set_traits(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
+    l.set_traits(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30 / 0.85, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     ok(l.CF77_lambda_ == prescribed, "set_traits leaves a prescribed CF77_lambda_ alone");
   }
 
@@ -3624,7 +4397,7 @@ void test_prescribed_lambda_survives_redriving() {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     l.CF77_lambda_ = prescribed;
     l.find_root_collar_psi();
-    l.set_traits(96.0 * 1.05, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
+    l.set_traits(96.0 * 1.05, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30 / 0.85, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth,
                      d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
                      d.atm_o2_kpa, d.atm_kpa);
@@ -3640,7 +4413,7 @@ void test_prescribed_lambda_survives_redriving() {
     l.CF77_lambda_ = prescribed;
     l.find_root_collar_psi();
     ok(!std::isnan(l.opt_psi_stem_), "the solve seated an operating point");
-    l.set_traits(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
+    l.set_traits(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30 / 0.85, 0.7, 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB);
     ok(std::isnan(l.opt_psi_stem_),
        "set_traits still clears the solved operating point");
     ok(std::isnan(l.profit_), "set_traits still clears profit_");
@@ -3818,7 +4591,7 @@ void test_psi_crit_lies_inside_the_stem_curve_domain() {
   // because a psi_crit chosen as though it were free landed past this curve's
   // domain. There is nothing left to get wrong, so it constructs.
   ok(message_of([] {
-       phylloptim::Leaf l(96, 3.5463, 7.6291, 2.680147, 3.4, 1.5, 157.44, 0.30,
+       phylloptim::Leaf l(96, 3.5463, 7.6291, 2.680147, 3.4, 1.5, 157.44, 0.30 / 0.85,
                           0.7, 0.99, 1e-3, 100, 1e-3, 1000, 7.5);
      }).empty(),
      "a brittle stem curve constructs without a psi_crit to reconcile");
@@ -3959,19 +4732,22 @@ void test_out_of_domain_names_the_spline() {
   Drivers d;
   phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
 
-  // Forward direction, past the far end of the vulnerability curve.
-  const std::string fwd = message_of([&] { l.transpiration(50.0, 0.0); });
+  // Forward direction, below the near end of the vulnerability curve. Past the
+  // FAR end reads the closed form, which test_stem_curve_past_its_grid covers.
+  const std::string fwd = message_of([&] { l.transpiration(-1.0, 0.0); });
   ok(mentions(fwd, "transpiration_from_psi"), "forward lookup names its spline");
-  ok(mentions(fwd, "psi = 50"), "forward lookup reports the point");
-  ok(mentions(fwd, "beyond the upper end"), "forward lookup reports which end");
+  ok(mentions(fwd, "psi = -1"), "forward lookup reports the point");
+  ok(mentions(fwd, "beyond the lower end"), "forward lookup reports which end");
   ok(mentions(fwd, "Leaf::transpiration"), "forward lookup names the caller");
+  ok(message_of([&] { l.transpiration(50.0, 0.0); }).empty(),
+     "and past the far end the forward lookup answers");
 
   // Inverse direction, below the lower end -- the plant#576 signature. A
   // sufficiently negative flux puts E/K_max below the domain, which is the
   // statement "the collar cannot supply this, so no stem potential carries it".
   const std::string inv =
       message_of([&] { l.transpiration_to_psi_stem(-1e3, 0.0); });
-  ok(mentions(inv, "psi_from_transpiration"), "inverse lookup names its spline");
+  ok(mentions(inv, "INVERTED"), "inverse lookup names which direction it is");
   ok(mentions(inv, "beyond the lower end"), "inverse lookup reports which end");
   ok(mentions(inv, "E/K_max"), "inverse lookup names its argument's units");
   ok(mentions(inv, "Leaf::transpiration_to_psi_stem"),
@@ -4002,18 +4778,27 @@ void test_out_of_domain_names_the_spline() {
 // there.
 void test_out_of_domain_under_rescale() {
   Drivers d;
+  // At the LOWER end: past the upper end reads the closed form.
   phylloptim::Leaf wide = make_leaf(d, {2.0}, {1.0});
-  const std::string before = message_of([&] { wide.transpiration(50.0, 0.0); });
+  const std::string before = message_of([&] { wide.transpiration(-1.0, 0.0); });
 
   phylloptim::Leaf rescaled = make_leaf(d, {2.0}, {1.0});
   rescaled.perturb_stem_P50(rescaled.stem_P50 * 2.0);
   const std::string after =
-      message_of([&] { rescaled.transpiration(50.0, 0.0); });
+      message_of([&] { rescaled.transpiration(-1.0, 0.0); });
 
   ok(!before.empty() && !after.empty(), "both report a domain failure");
   ok(before != after, "the rescaled domain is reported, not the spline's own");
   ok(mentions(after, "rescaled by"),
      "the rescale is named so the two domains are not confused");
+
+  // And past the upper end the rescaled leaf reads the closed form at ITS curve,
+  // not the spline's: the homogeneity identity holds for the closed form too.
+  const double psi = 50.0;
+  ok(rescaled.stem_curve_integral(psi) ==
+         phylloptim::cumulative_vulnerability_integral_at(psi, rescaled.stem_b,
+                                                          rescaled.stem_c),
+     "past the rescaled table G is the closed form at the perturbed curve");
 }
 
 // ===========================================================================
@@ -4070,6 +4855,7 @@ phylloptim::Leaf make_single_leaf(const Drivers &d, double psi_soil,
   l.setup_root_vulnerability(100);
   l.use_energy_balance_ = gate;
   l.set_supply_single(0.0);
+  l.NIR_int_ = d.PPFD / phylloptim::umol_par_per_joule;  // daylight
   phylloptim::RootNetwork rn;
   rn.r_R_V_sum = std::vector<double>{1.0e3};
   rn.r_R_H_min = std::vector<double>{0.0};
@@ -4521,7 +5307,7 @@ void test_transpiration_survives_negative_assim() {
   // of exactly zero.
   Drivers dg = d;
   phylloptim::Leaf gross = make_single_leaf(dg, 0.5);
-  gross.set_traits(96, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30, 0.7, 0.99, 7.5, /*R_d_25=*/0.0, kGammaJS22, kCMaxA, kCMaxB);
+  gross.set_traits(96, 2.680147, 3.4, 2.680147, 3.4, 1.5, 157.44, 0.30 / 0.85, 0.7, 0.99, 7.5, /*R_d_25=*/0.0, kGammaJS22, kCMaxA, kCMaxB);
   phylloptim::RootNetwork rn;
   rn.r_R_V_sum = std::vector<double>{1.0e3};
   rn.r_R_H_min = std::vector<double>{0.0};
@@ -4573,6 +5359,170 @@ void test_profitmax_finds_a_closed_optimum() {
   // And the profit it reports is at least the grid's best.
   ok(l.profit_ >= curve[4 * n + best] - 1e-9,
      "at no lower profit than the grid's best");
+}
+
+// The longwave half of the energy balance (#97 / #28): an isothermal net radiation
+// from a temperature- and humidity-dependent atmospheric emissivity, plus a
+// radiative conductance for the leaf's own departure from air temperature.
+//
+// ⚠️ THE CONTRACT THAT MATTERS IS THAT THE BALANCE STAYS EXPLICIT. A leaf's own
+// emission goes as Tleaf^4, so a faithful longwave would make Rn a function of the
+// temperature the balance solves for -- an inner iteration, and no analytic
+// dTleaf/dE for the collar solve's implicit-function theorem to stand on.
+// Linearising the leaf's emission about Tair moves that dependence into the
+// DENOMINATOR, so Tleaf stays affine in E. The first block below is what asserts
+// that, and it is the assertion to keep if any of the rest is ever rewritten.
+void test_longwave_and_radiative_conductance() {
+  printf("longwave: isothermal Rn and the radiative conductance\n");
+  Drivers d;
+  d.PPFD = 900.0;
+  d.atm_vpd = 2.0;
+
+  // 1. STILL AFFINE IN E, with the slope the model reports. Three transpirations,
+  //    all inside the clamp: the second difference of an affine function is zero.
+  {
+    d.leaf_temp = 30.0;
+    phylloptim::Leaf l = make_pm_leaf(d, {1.0}, {1.0}, true);
+    const double E0 = 0.0, E1 = 1e-5, E2 = 2e-5;
+    const double t0 = l.leaf_temp_from_E(E0), t1 = l.leaf_temp_from_E(E1),
+                 t2 = l.leaf_temp_from_E(E2);
+    ok(t0 > phylloptim::leaf_temp_min && t2 > phylloptim::leaf_temp_min,
+       "the three test points are inside the clamp");
+    near((t2 - t1) - (t1 - t0), 0.0, 1e-9,
+         "leaf temperature is still AFFINE in transpiration");
+    double dT_dE = 0.0;
+    l.leaf_temp_from_E(E1, &dT_dE);
+    near(dT_dE, (t2 - t0) / (E2 - E0), 1e-6,
+         "and the reported slope is that line's");
+
+    // The slope's closed form, which is the whole point: one conductance, made of
+    // the sensible and the radiative parts.
+    const double g_total = phylloptim::vol_heat_cap_air / l.ra_ + l.g_rad_;
+    near(dT_dE, -phylloptim::latent_heat_vap / g_total, 1e-9,
+         "dTleaf/dE is -lambda / (g_sensible + g_radiative)");
+  }
+
+  // 2. The radiative conductance is the linearisation it claims to be, and it is
+  //    NOT negligible -- an assertion, because a term worth 13% is exactly the
+  //    size that gets dropped in a rewrite and not noticed.
+  {
+    d.leaf_temp = 25.0;
+    phylloptim::Leaf l = make_pm_leaf(d, {1.0}, {1.0}, true);
+    const double Tair_K = l.Tair_ + phylloptim::C_to_K;
+    ok(l.g_rad_ == 4.0 * phylloptim::leaf_emissivity *
+                       phylloptim::stefan_boltzmann * Tair_K * Tair_K * Tair_K,
+       "g_rad is 4*eps*sigma*Tair^3, bit-for-bit");
+    const double g_sens = phylloptim::vol_heat_cap_air / l.ra_;
+    ok(l.g_rad_ / (l.g_rad_ + g_sens) > 0.05,
+       "and it is more than 5% of the total conductance -- not negligible");
+
+    // Radiative coupling pulls the leaf TOWARD air temperature: the same Rn over a
+    // larger conductance is a smaller departure.
+    const double with_rad = l.leaf_temp_from_E(0.0);
+    const double without_rad = l.Tair_ + l.Rn_ / g_sens;
+    ok(std::abs(with_rad - l.Tair_) < std::abs(without_rad - l.Tair_),
+       "a radiatively coupled leaf sits closer to air temperature");
+  }
+
+  // 3. The atmospheric emissivity, against the form it is usually quoted in.
+  //    ⚠️ THIS IS THE UNIT TRAP: `0.642*(ea/T)^(1/7)` needs ea in PASCALS, and the
+  //    same relation is more often written `1.24*(ea/T)^(1/7)` with ea in hPa.
+  //    Using 0.642 with kPa gives ~0.31 where the answer is ~0.82 -- finite,
+  //    plausible, and it triples the longwave loss.
+  {
+    d.leaf_temp = 25.0;
+    d.atm_vpd = 1.0;
+    phylloptim::Leaf l = make_pm_leaf(d, {1.0}, {1.0}, true);
+    const double Tair_K = l.Tair_ + phylloptim::C_to_K;
+    const double ea_Pa =
+        1000.0 * (l.saturation_vapour_pressure(l.Tair_) - l.atm_vpd_);
+    const double ema_ours =
+        phylloptim::atmos_emissivity_coef *
+        std::pow(ea_Pa / Tair_K, phylloptim::atmos_emissivity_exponent);
+    // The hPa form, independently written out.
+    const double ema_hPa = 1.2395 * std::pow((ea_Pa / 100.0) / Tair_K,
+                                             1.0 / 7.0);
+    near(ema_ours, ema_hPa, 1e-4, "the Pa and hPa forms of Brutsaert agree");
+    ok(ema_ours > 0.7 && ema_ours < 0.95,
+       "and a clear-sky emissivity lands in 0.7-0.95, not 0.3");
+
+    // Rn_ is the ISOTHERMAL net radiation: absorbed shortwave minus that term.
+    const double sw = l.alpha_PAR_ * l.PPFD_ / phylloptim::umol_par_per_joule +
+                      l.alpha_NIR_ * l.NIR_int_;
+    near(l.Rn_,
+         sw - (1.0 - ema_ours) * phylloptim::stefan_boltzmann * Tair_K * Tair_K *
+                  Tair_K * Tair_K,
+         1e-9, "Rn_ is the isothermal net radiation");
+    ok(l.Rn_ - sw < -40.0,
+       "and at 25 C the net longwave is stronger than a fixed -40 offset");
+  }
+
+  // 4. THE CLAMP, which is a physical bound and not padding. Brutsaert's fit runs
+  //    past emissivity 1 at high air temperature, which would make the sky heat
+  //    the leaf. At the bound the isothermal term is exactly zero.
+  {
+    d.leaf_temp = 60.0;
+    d.atm_vpd = 2.0;
+    phylloptim::Leaf hot = make_pm_leaf(d, {1.0}, {1.0}, true);
+    const double Tair_K = hot.Tair_ + phylloptim::C_to_K;
+    const double ea_Pa =
+        1000.0 * (hot.saturation_vapour_pressure(hot.Tair_) - hot.atm_vpd_);
+    const double unclamped =
+        phylloptim::atmos_emissivity_coef *
+        std::pow(ea_Pa / Tair_K, phylloptim::atmos_emissivity_exponent);
+    ok(unclamped > 1.0,
+       "the premise: the fit really does exceed 1 here, so the clamp is live");
+    const double sw = hot.alpha_PAR_ * hot.PPFD_ / phylloptim::umol_par_per_joule +
+                      hot.alpha_NIR_ * hot.NIR_int_;
+    ok(hot.Rn_ == sw,
+       "clamped, the isothermal longwave is EXACTLY zero, not positive");
+    ok(hot.Rn_ - sw <= 0.0, "so the sky never heats the leaf");
+  }
+
+  // 5. A deficit larger than saturation is not a physical atmosphere but is
+  //    reachable from a driver sweep, and pow() of a negative base is NaN.
+  {
+    d.leaf_temp = 5.0;      // esat ~ 0.87 kPa
+    d.atm_vpd = 5.0;        // deficit far beyond it
+    phylloptim::Leaf l = make_pm_leaf(d, {1.0}, {1.0}, true);
+    ok(std::isfinite(l.Rn_) && std::isfinite(l.g_rad_),
+       "an impossible deficit still gives finite radiation terms");
+    ok(std::isfinite(l.leaf_temp_from_E(0.0)),
+       "and a finite leaf temperature");
+  }
+
+  // 6. Gate off, nothing reads any of it: Tleaf is the driver. This is the arm the
+  //    golden file covers.
+  {
+    d.leaf_temp = 25.0;
+    d.atm_vpd = 2.0;
+    phylloptim::Leaf off = make_pm_leaf(d, {1.0}, {1.0}, false);
+    off.find_root_collar_psi();
+    ok(off.Tleaf_ == off.leaf_temp_, "gate off: Tleaf is still the driver");
+  }
+
+  // 7. THE ESCAPE HATCH FOR A COMBINED RESISTANCE IS A CONTRACT. A caller that
+  //    injects a convective-plus-radiative resistance into ra_ (Jones et al.'s
+  //    r_HR) sets g_rad_ = 0, and must then get the single-resistance balance
+  //    back, value AND slope. To rounding, not bit-for-bit: dividing by
+  //    vol_heat_cap_air/ra_ and multiplying by ra_/vol_heat_cap_air round apart.
+  {
+    d.leaf_temp = 30.0;
+    d.atm_vpd = 2.0;
+    phylloptim::Leaf l = make_pm_leaf(d, {1.0}, {1.0}, true);
+    l.Rn_ = 400.0;
+    l.ra_ = 12.0;
+    l.g_rad_ = 0.0;
+    for (double E : {0.0, 5e-5, 1e-4}) {
+      double dT_dE = 0.0;
+      const double got = l.leaf_temp_from_E(E, &dT_dE);
+      const double want = l.Tair_ + (l.Rn_ - phylloptim::latent_heat_vap * E) *
+                                        l.ra_ / phylloptim::vol_heat_cap_air;
+      near(got, want, 1e-14, "g_rad_ = 0: Tleaf is Tair + (Rn - lambda*E)*ra/rho_cp");
+      near(dT_dE, -phylloptim::latent_heat_vap * l.ra_ / phylloptim::vol_heat_cap_air,
+           1e-14, "g_rad_ = 0: and dTleaf/dE is -lambda*ra/rho_cp");
+    }
+  }
 }
 
 // util::maximise_over_closed_interval_foc, on functions whose answers are known
@@ -5913,6 +6863,548 @@ void benchmark() {
 
 } // namespace
 
+// What plant reads, against what the solve itself left.
+//
+// outputs_at and marginal_at ASSEMBLE the leaf's answers from kernels, where the
+// solve reaches the same numbers by a different route entirely -- through
+// set_leaf_states_rates and the members. So agreement is a statement about the
+// assembly rather than a tautology, and it is asserted BIT-FOR-BIT because
+// nothing here is reassociated: the assembly is meant to be the same arithmetic.
+//
+// ⚠️ EVERY KIND, because the branches differ. An interior point reads the held
+// collar (the envelope omission), a bound reads its own condition, and the two
+// SHUT kinds are not the same point: a hydraulic shutdown holds the stem at
+// psi_crit and zeroes every layer, while shade death sits on the wet bound where
+// the flux is zero in value but the rows are the bound's own. The census below is
+// part of the result -- a fixture reaching only one of them has narrowed the
+// check without narrowing what it claims.
+void test_outputs_agree_with_the_solve() {
+  printf("outputs_at and marginal_at against the solve's own numbers\n");
+  using K = phylloptim::Leaf::CostCurve;
+  const std::vector<std::vector<double>> soils = {
+      {2.0}, {1.0, 2.0, 3.0}, {0.5, 1.0, 1.5, 2.0, 2.5}};
+  const std::vector<std::vector<double>> depths = {
+      {1.0}, {0.5, 1.0, 1.5}, {0.4, 0.8, 1.2, 1.6, 2.0}};
+  int n_interior = 0, n_bound = 0, n_shut = 0, n_marg = 0;
+  for (double T : {25.0, 40.0}) {
+    for (double psi0 : {0.5, 1.0, 2.0, 3.0, 4.0, 6.0}) {
+      for (std::size_t k = 0; k < soils.size(); ++k) {
+        Drivers d;
+        d.leaf_temp = T;
+        std::vector<double> ps;
+        bool bad = false;
+        for (double v : soils[k]) {
+          ps.push_back(v + psi0 - 1.0);
+          if (ps.back() <= 0.0) bad = true;
+        }
+        if (bad) continue;
+        phylloptim::Leaf l = make_leaf(d, ps, depths[k]);
+        l.find_root_collar_psi();
+        const auto kind = l.operating_point_kind();
+        if (kind == phylloptim::Leaf::OperatingPointKind::SolverRefused ||
+            kind == phylloptim::Leaf::OperatingPointKind::NonFiniteGradient ||
+            kind == phylloptim::Leaf::OperatingPointKind::Unsolved) {
+          continue;
+        }
+        if (kind == phylloptim::Leaf::OperatingPointKind::Interior) ++n_interior;
+        else if (kind == phylloptim::Leaf::OperatingPointKind::HydraulicShutdown ||
+                 kind == phylloptim::Leaf::OperatingPointKind::ShadeDeath) ++n_shut;
+        else ++n_bound;
+
+        const auto pars = l.passive_pars();
+        const double p0 = l.opt_root_psi_;
+        const auto draw = l.supply_draw_at<double>(p0, l.roots_.held_supply());
+        const auto got = l.outputs_at<K::TF24, double>(p0, draw, pars);
+        ok(got.profit == l.profit_, "outputs_at's profit IS the solve's");
+        ok(got.uptake.size() == l.soil_consumption_.size(),
+           "one uptake per layer");
+        for (std::size_t j = 0; j < got.uptake.size(); ++j) {
+          ok(got.uptake[j] == l.soil_consumption_[j],
+             "outputs_at's layer draw IS the solve's");
+        }
+        if (kind == phylloptim::Leaf::OperatingPointKind::Interior) {
+          bool feasible = false;
+          const double up = l.dprofit_at_collar_psi<K::TF24>(p0, &feasible);
+          // dprofit_at_collar_psi drives the model to that collar; put the point
+          // back before reading anything else off this leaf, because every path
+          // out of the solve writes its own rates.
+          l.replay_operating_point(p0, kind);
+          if (feasible && std::isfinite(up)) {
+            ++n_marg;
+            const auto d2 = l.supply_draw_at<double>(p0, l.roots_.held_supply());
+            ok(l.marginal_at<K::TF24, double>(p0, d2, pars) == up,
+               "marginal_at IS upstream's dprofit_at_collar_psi");
+          }
+        }
+      }
+    }
+  }
+  printf("    %d interior (%d refereed against dprofit), %d at a bound, %d shut\n",
+         n_interior, n_marg, n_bound, n_shut);
+  ok(n_interior > 0 && n_bound > 0 && n_shut > 0,
+     "the sweep reached an interior point, a bound and a shut point");
+  ok(n_marg > 0, "the sweep refereed the marginal somewhere");
+}
+
+// --- the ATLS thermal-damage layer (use_thermal_damage_) ----------------------
+//
+// tests/testthat/test-thermal-damage.R checks what the layer computes. These check
+// what only C++ reaches: that the gate-off path reads none of it, that the solve's
+// own dprofit carries it, that the two finite-difference helpers put its outputs
+// back, and that every derivative path which would not carry it refuses.
+
+// Every input of the layer at a value other than its default.
+void set_atls_inputs(phylloptim::Leaf &l) {
+  l.topt_offset_ = 2.5;
+  l.impair_H_ = 2.6e5;
+  l.impair_Tmid_ = 37.0;
+  l.m_rep_ = 0.7;
+  l.t_rep_cut_ = 41.0;
+  l.k_i_ = 0.2;
+  l.k_i_Ea_ = 8e4;
+  l.k_i_Tref_ = 30.0;
+  l.k_i_baseline_ = 0.6;
+  l.k_rec_ = 0.4;
+  l.dTopt_max_ = 4.0;
+  l.dTimpair_max_ = 2.5;
+  l.K_A_ = 2.0;
+  l.A_ = 1.5;
+  l.I_ = 0.2;
+  l.D_ = 0.15;
+  l.k_mat_ = 0.05;
+  l.acclim_alpha_ = 0.03;
+  l.acclim_beta_ = 0.2;
+  l.acclim_T_ = 28.0;
+  l.acclim_s_ = 2.0;
+  l.c_acclim_maint_ = 0.05;
+  l.c_repair_maint_ = 0.3;
+  l.c_protect_maint_ = 0.4;
+  l.c_repair_flux_ = 0.8;
+}
+
+// Every input NaN: read anywhere, it reaches the outputs.
+void poison_atls_inputs(phylloptim::Leaf &l) {
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  l.topt_offset_ = nan;
+  l.impair_H_ = nan;
+  l.impair_Tmid_ = nan;
+  l.m_rep_ = nan;
+  l.t_rep_cut_ = nan;
+  l.k_i_ = nan;
+  l.k_i_Ea_ = nan;
+  l.k_i_Tref_ = nan;
+  l.k_i_baseline_ = nan;
+  l.k_rec_ = nan;
+  l.dTopt_max_ = nan;
+  l.dTimpair_max_ = nan;
+  l.K_A_ = nan;
+  l.A_ = nan;
+  l.I_ = nan;
+  l.D_ = nan;
+  l.k_mat_ = nan;
+  l.acclim_alpha_ = nan;
+  l.acclim_beta_ = nan;
+  l.acclim_T_ = nan;
+  l.acclim_s_ = nan;
+  l.c_acclim_maint_ = nan;
+  l.c_repair_maint_ = nan;
+  l.c_protect_maint_ = nan;
+  l.c_repair_flux_ = nan;
+}
+
+// make_pm_leaf with the layer's gate and inputs set BEFORE the drivers, which is
+// the order a caller has to use: set_physiology is what seats the block.
+phylloptim::Leaf make_thermal_leaf(const Drivers &d, std::vector<double> psi_soil,
+                                   std::vector<double> soil_depth, bool eb,
+                                   bool gate,
+                                   void (*inputs)(phylloptim::Leaf &) = nullptr) {
+  phylloptim::Leaf l;
+  l.setup_transpiration(100);
+  l.setup_root_vulnerability(100);
+  l.use_energy_balance_ = eb;
+  l.use_thermal_damage_ = gate;
+  l.NIR_int_ = d.PPFD / phylloptim::umol_par_per_joule;  // daylight
+  if (inputs != nullptr) {
+    inputs(l);
+  }
+  std::vector<double> root(psi_soil.size(),
+                           1.0 / double(psi_soil.size()) / d.area_leaf);
+  l.set_physiology(fixture::root_network(root, soil_depth), d.PPFD, psi_soil,
+                   soil_depth, d.K_s * d.theta / d.h, d.atm_vpd, d.ca,
+                   d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+  return l;
+}
+
+// The drivers make_thermal_leaf seated, again: what a caller does each step after
+// moving the layer's state.
+void reseat_thermal_leaf(phylloptim::Leaf &l, const Drivers &d,
+                         const std::vector<double> &psi_soil,
+                         const std::vector<double> &soil_depth) {
+  std::vector<double> root(psi_soil.size(),
+                           1.0 / double(psi_soil.size()) / d.area_leaf);
+  l.set_physiology(fixture::root_network(root, soil_depth), d.PPFD, psi_soil,
+                   soil_depth, d.K_s * d.theta / d.h, d.atm_vpd, d.ca,
+                   d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+}
+
+// The block update_temperature_dependent_params writes, as one comparable value.
+std::array<double, 11> thermal_block(const phylloptim::Leaf &l) {
+  return {l.vcmax_, l.jmax_, l.gamma_, l.ko_, l.kc_, l.R_d_, l.km_,
+          l.electron_transport_, l.k_imp_eff_, l.k_rec_eff_, l.functional_};
+}
+
+// NaN in every input, gate off, against a leaf that never had them: bit-identical
+// on both temperature paths and both soil profiles. Paired with the same poison
+// reaching vcmax_ once the gate is on, so the identity is evidence about the
+// layer rather than about a gate that does nothing.
+void test_thermal_damage_gate_off_is_inert() {
+  printf("thermal damage, gate off: no input is read (NaN poisoning)\n");
+  int compared = 0;
+  for (bool eb : {false, true}) {
+    for (double temp : {25.0, 40.0}) {
+      for (int layers : {1, 3}) {
+        Drivers d;
+        d.leaf_temp = temp;
+        std::vector<double> psi, depth;
+        for (int i = 0; i < layers; ++i) {
+          psi.push_back(1.5 + 0.4 * i);
+          depth.push_back(0.5 * (i + 1));
+        }
+        phylloptim::Leaf clean = make_thermal_leaf(d, psi, depth, eb, false);
+        phylloptim::Leaf poisoned =
+            make_thermal_leaf(d, psi, depth, eb, false, poison_atls_inputs);
+        clean.find_root_collar_psi();
+        poisoned.find_root_collar_psi();
+        const std::string at = " at Tair=" + std::to_string(int(temp)) +
+                               " eb=" + std::to_string(eb) +
+                               " layers=" + std::to_string(layers);
+        ok(clean.profit_ == poisoned.profit_, "profit is bit-identical" + at);
+        ok(clean.assim_colimited_ == poisoned.assim_colimited_,
+           "assimilation is bit-identical" + at);
+        ok(clean.opt_root_psi_ == poisoned.opt_root_psi_,
+           "the collar is bit-identical" + at);
+        ok(clean.Tleaf_ == poisoned.Tleaf_, "Tleaf is bit-identical" + at);
+        ok(thermal_block(clean) == thermal_block(poisoned),
+           "the temperature block is bit-identical" + at);
+        ok(poisoned.k_imp_eff_ == 0.0 && poisoned.functional_ == 1.0 &&
+               poisoned.k_rec_eff_ == 0.0,
+           "the outputs are zero" + at);
+        const double p0 = clean.opt_root_psi_;
+        ok(clean.dprofit_droot_collar_psi(p0) ==
+               poisoned.dprofit_droot_collar_psi(p0),
+           "dprofit is bit-identical" + at);
+        if (layers == 1) {
+          clean.set_model(phylloptim::Leaf::CostCurve::TF24, false);
+          poisoned.set_model(phylloptim::Leaf::CostCurve::TF24, false);
+          clean.optimise();
+          poisoned.optimise();
+          ok(clean.opt_psi_stem_ == poisoned.opt_psi_stem_ &&
+                 clean.profit_ == poisoned.profit_,
+             "the stem route is bit-identical" + at);
+        }
+        ++compared;
+
+        phylloptim::Leaf on =
+            make_thermal_leaf(d, psi, depth, eb, true, poison_atls_inputs);
+        ok(std::isnan(on.vcmax_) && std::isnan(on.k_imp_eff_) &&
+               std::isnan(on.functional_),
+           "the same poison reaches the block with the gate on" + at);
+      }
+    }
+  }
+  ok(compared == 8, "every configuration was compared");
+}
+
+// ⚠️ THE CACHE INVARIANT. The temperature cache's key does not hold A_, I_ or
+// D_, so set_physiology must not serve it while the gate is on: re-seating at
+// unchanged drivers after the caller moves the state has to recompute. And the
+// gate itself is in the key, so switching it off at unchanged drivers must not be
+// served the gate-on block.
+void test_thermal_damage_bypasses_the_cache() {
+  printf("thermal damage: with the gate on, a re-seat reads the current state\n");
+  Drivers d;
+  // Not 25 C: the peaked Arrhenius is normalised to its reference value there,
+  // so no entropy shift moves vcmax at 25 C and the acclimation check would be
+  // blind.
+  d.leaf_temp = 35.0;
+  const std::vector<double> psi{2.0}, depth{1.0};
+  phylloptim::Leaf l = make_thermal_leaf(d, psi, depth, false, true);
+  const double vcmax_undamaged = l.vcmax_;
+  l.I_ = 0.25;
+  reseat_thermal_leaf(l, d, psi, depth);
+  near(l.vcmax_ / vcmax_undamaged, 0.75, 1e-14,
+       "a new damage state at unchanged drivers reaches vcmax");
+  const double vcmax_damaged = l.vcmax_;
+  l.A_ = 2.0;
+  reseat_thermal_leaf(l, d, psi, depth);
+  ok(l.vcmax_ != vcmax_damaged,
+     "a new acclimation state at unchanged drivers reaches vcmax");
+
+  l.use_thermal_damage_ = false;
+  reseat_thermal_leaf(l, d, psi, depth);
+  l.find_root_collar_psi();
+  phylloptim::Leaf never = make_thermal_leaf(d, psi, depth, false, false);
+  never.find_root_collar_psi();
+  ok(thermal_block(l) == thermal_block(never) && l.profit_ == never.profit_,
+     "switched off at unchanged drivers, the leaf is one never switched on");
+}
+
+// The solve root-finds dprofit == 0, so with the layer on dprofit has to be the
+// derivative of the profit the solve REPORTS with the layer on. It is, because
+// both read the block update_temperature_dependent_params writes -- and on the
+// energy-balance path both re-seat it at each candidate's own leaf temperature.
+// Collar route against a difference of evaluate_root_collar_psi, stem route
+// against a difference of profit_psi_stem_TF, at every input non-default.
+void test_thermal_damage_dprofit_is_the_solves_own() {
+  printf("thermal damage, gate on: dprofit is the derivative of the reported "
+         "profit\n");
+  using CC = phylloptim::Leaf::CostCurve;
+  int collar_rows = 0, stem_rows = 0, stationary = 0;
+  double worst_collar = 0.0, worst_stem = 0.0, worst_resid = 0.0;
+  for (bool eb : {false, true}) {
+    for (double temp : {30.0, 40.0}) {
+      Drivers d;
+      d.PPFD = 1500.0;
+      d.leaf_temp = temp;
+      const struct {
+        std::vector<double> psi;
+        std::vector<double> depth;
+      } soils[] = {{{1.0}, {1.0}}, {{1.0, 2.0, 3.0}, {0.5, 1.0, 1.5}}};
+      for (const auto &s : soils) {
+        phylloptim::Leaf l =
+            make_thermal_leaf(d, s.psi, s.depth, eb, true, set_atls_inputs);
+        l.find_root_collar_psi();
+        const double p0 = l.opt_root_psi_;
+        const std::string at = " at Tair=" + std::to_string(int(temp)) +
+                               " eb=" + std::to_string(eb) + " layers=" +
+                               std::to_string(s.psi.size());
+        if (l.operating_point_kind() ==
+            phylloptim::Leaf::OperatingPointKind::Interior) {
+          const double r = std::abs(l.dprofit_droot_collar_psi(p0));
+          worst_resid = std::max(worst_resid, r);
+          ok(r < 1e-8, "the solved collar is stationary" + at);
+          ++stationary;
+        }
+        for (double target : {p0 - 0.05, p0 - 0.1}) {
+          const double eps = 1e-5;
+          const double analytic = l.dprofit_droot_collar_psi_for<CC::TF24>(target);
+          const double up = l.evaluate_root_collar_psi_for<CC::TF24>(target + eps);
+          const double dn = l.evaluate_root_collar_psi_for<CC::TF24>(target - eps);
+          if (!std::isfinite(up) || !std::isfinite(dn)) {
+            continue;
+          }
+          const double fd = (up - dn) / (2 * eps);
+          worst_collar = std::max(worst_collar, std::abs(analytic - fd));
+          near(analytic, fd, 1e-4, "collar dprofit at " +
+                                       std::to_string(target) + at);
+          ++collar_rows;
+        }
+        if (s.psi.size() == 1) {
+          // As test_dprofit_dpsi_stem_matches_a_finite_difference: h = 1e-3 is
+          // the floor of that difference's V.
+          const double h = 1e-3, psi_soil = s.psi[0];
+          for (double frac : {0.25, 0.5}) {
+            const double psi = psi_soil + frac * (l.psi_crit - psi_soil);
+            bool feasible = false;
+            const double an =
+                l.dprofit_dpsi_stem<CC::TF24>(psi, psi_soil, &feasible);
+            const double fd = (l.profit_psi_stem_TF(psi + h, psi_soil) -
+                               l.profit_psi_stem_TF(psi - h, psi_soil)) /
+                              (2.0 * h);
+            if (!feasible) {
+              continue;
+            }
+            worst_stem = std::max(worst_stem, std::abs(an / fd - 1.0));
+            near(an / fd, 1.0, 5e-5, "stem dprofit at frac=" +
+                                         std::to_string(frac) + at);
+            ++stem_rows;
+          }
+        }
+      }
+    }
+  }
+  printf("    %d collar rows (worst |error| %.3e), %d stem rows (worst relative "
+         "%.3e), %d stationary (worst |dprofit| %.3e)\n",
+         collar_rows, worst_collar, stem_rows, worst_stem, stationary,
+         worst_resid);
+  ok(collar_rows >= 12 && stem_rows >= 6 && stationary >= 4,
+     "the sweep compared enough rows of each kind");
+}
+
+// respiration_temp_deriv and dprofit_energy_balance_term perturb the block by
+// 1e-3 degrees and put it back by assignment. The layer adds three outputs to
+// the block, so each must put back eleven numbers, not eight.
+void test_thermal_damage_fd_helpers_restore_the_block() {
+  printf("thermal damage: the finite-difference helpers restore the block\n");
+  Drivers d;
+  d.leaf_temp = 30.0;
+  phylloptim::Leaf l =
+      make_thermal_leaf(d, {1.0, 2.0}, {0.5, 1.0}, true, true, set_atls_inputs);
+  l.find_root_collar_psi();
+  ok(l.operating_point_kind() == phylloptim::Leaf::OperatingPointKind::Interior,
+     "the fixture is an interior point");
+  const std::array<double, 11> before = thermal_block(l);
+  ok(before[8] > 0.0 && before[9] > 0.0 && before[10] > 0.0,
+     "the fixture has non-zero k_imp_eff, k_rec_eff and functional to lose");
+
+  const double dRd = l.respiration_temp_deriv(l.Tleaf_ + 2.0);
+  ok(thermal_block(l) == before, "respiration_temp_deriv restores all eleven");
+  ok(std::isfinite(dRd), "respiration_temp_deriv is finite");
+
+  const double term = l.dprofit_energy_balance_term(
+      l.ci_, l.stom_cond_CO2_, 1.0, 1e-5, 1.0, 0.1, 0.1, 0.1, 1.0, -1e3,
+      l.Tleaf_ + 2.0);
+  ok(std::isfinite(term), "dprofit_energy_balance_term is finite");
+  ok(thermal_block(l) == before, "dprofit_energy_balance_term restores all eleven");
+
+  // The repair-flux cost reads k_rec_eff(T), so it reaches dR_d/dT: the
+  // derivative moves with that coefficient, at a temperature where repair is
+  // switching off.
+  phylloptim::Leaf no_flux = l;
+  no_flux.c_repair_flux_ = 0.0;
+  ok(no_flux.respiration_temp_deriv(l.t_rep_cut_) !=
+         l.respiration_temp_deriv(l.t_rep_cut_),
+     "the repair-flux cost's temperature response reaches dR_d/dT");
+}
+
+// Every derivative path that reads the capacities off the parameter pack, the
+// trait gradient, and the closed form refuse a leaf with the layer on; each is
+// checked for its message, and each beside a control that runs with the gate
+// off. Two paths deliberately do NOT refuse, and are checked to run: the supply
+// draw, which reads no capacity, and the marginal's curvature, which differences
+// the solve's own dprofit.
+void test_thermal_damage_refusals() {
+  printf("thermal damage: the derivative paths that cannot carry it refuse\n");
+  using CC = phylloptim::Leaf::CostCurve;
+  const std::string refused = "refused with use_thermal_damage_ on";
+  Drivers d;
+  d.PPFD = 1500.0;
+  // 35 C, not 25: the gradient check below needs a finite difference clean enough
+  // to referee the composite. At 25 C differencing the solve has a floor of ~2e-4
+  // relative for inputs that only shift respiration a little (c_repair_flux_ moves
+  // profit ~12x less per step than R_d_25, whose own floor there is 1.8e-5 with the
+  // layer OFF); at 35 C every column agrees to ~1e-9.
+  d.leaf_temp = 35.0;
+  const std::vector<double> psi{1.0, 2.0, 3.0}, depth{0.5, 1.0, 1.5};
+  phylloptim::Leaf l =
+      make_thermal_leaf(d, psi, depth, false, false, set_atls_inputs);
+  l.find_root_collar_psi();
+  phylloptim::Leaf on =
+      make_thermal_leaf(d, psi, depth, false, true, set_atls_inputs);
+  on.find_root_collar_psi();
+  ok(on.operating_point_kind() ==
+         phylloptim::Leaf::OperatingPointKind::Interior,
+     "the gate-on fixture is an interior point");
+  ok(std::isfinite(profit_row_at_current_point(l, phylloptim::par_vcmax_25)),
+     "control: the derivative surface answers with the gate off");
+
+  ok(throws_with([&] { profit_row_at_current_point(on, phylloptim::par_vcmax_25); },
+                 "Leaf::collar_at: " + refused),
+     "collar_at refuses");
+  const phylloptim::leaf_pars<double> pars = on.passive_pars();
+  const auto draw = on.supply_draw_at<double>(on.opt_root_psi_,
+                                              on.roots_.held_supply());
+  ok(std::isfinite(draw.flux.value), "supply_draw_at reads no capacity, and runs");
+  ok(std::isfinite(on.marginal_collar_slope<CC::TF24>()),
+     "marginal_collar_slope differences the solve's own dprofit, and runs");
+  ok(throws_with([&] { on.collar_at<CC::TF24, double>(draw, pars); },
+                 "Leaf::collar_at: " + refused),
+     "collar_at refuses at double too");
+  ok(throws_with([&] { on.outputs_at<CC::TF24, double>(on.opt_root_psi_, draw, pars); },
+                 "Leaf::outputs_at: " + refused),
+     "outputs_at refuses");
+  ok(throws_with([&] { on.vcmax_at<double>(pars); }, "Leaf::vcmax_at: " + refused),
+     "vcmax_at refuses");
+  ok(throws_with([&] { on.jmax_at<double>(pars); }, "Leaf::jmax_at: " + refused),
+     "jmax_at refuses");
+  ok(throws_with([&] { on.respiration_at<double>(pars); },
+                 "Leaf::respiration_at: " + refused),
+     "respiration_at refuses");
+  ok(throws_with([&] { on.photo_capacity_at<double>(pars); },
+                 "Leaf::vcmax_at: " + refused),
+     "photo_capacity_at refuses, through vcmax_at");
+
+  // The trait gradient, both entry points.
+  double theta[phylloptim::gradient::n_theta];
+  for (int i = 0; i < phylloptim::gradient::n_theta; ++i) {
+    theta[i] = pars[std::size_t(i)];
+  }
+  phylloptim::gradient::Drivers gd;
+  gd.root_network = fixture::root_network(
+      std::vector<double>(3, 1.0 / 3.0 / d.area_leaf), depth);
+  gd.PPFD = d.PPFD;
+  gd.psi_soil = psi;
+  gd.soil_depth = depth;
+  gd.atm_vpd = d.atm_vpd;
+  gd.ca = d.ca;
+  gd.leaf_temp = d.leaf_temp;
+  gd.atm_o2_kpa = d.atm_o2_kpa;
+  gd.atm_kpa = d.atm_kpa;
+  const std::vector<phylloptim::gradient::Drivers> obs{gd, gd};
+  const int par[] = {phylloptim::gradient::par_vcmax_25};
+  phylloptim::gradient::Settings s;
+  phylloptim::gradient::Result r;
+  // The trait gradient CARRIES the layer: both routes difference the solve's own
+  // dprofit and outputs, which read the block the layer writes. So with the gate
+  // on it runs, and the IFT composite agrees with differencing the solve.
+  // The gate-on leaf's own theta: its damage slots carry the inputs it was given.
+  double theta_on[phylloptim::gradient::n_theta];
+  {
+    const phylloptim::leaf_pars<double> p_on = on.passive_pars();
+    for (int i = 0; i < phylloptim::gradient::n_theta; ++i) {
+      theta_on[i] = p_on[std::size_t(i)];
+    }
+  }
+  // A trait, a damage state and a cost-carried input, through both routes.
+  const int pars_on[] = {phylloptim::gradient::par_vcmax_25,
+                         phylloptim::gradient::par_I,
+                         phylloptim::gradient::par_c_repair_flux};
+  phylloptim::gradient::Result r_on;
+  phylloptim::gradient::at(on, theta_on, gd, false, pars_on, 3, s, r_on);
+  ok(r_on.status != phylloptim::gradient::Status::Error,
+     "gradient::at runs with the gate on");
+  {
+    phylloptim::gradient::Settings sfd = s;
+    sfd.method = phylloptim::gradient::Method::Fd;
+    phylloptim::gradient::Result rfd;
+    phylloptim::gradient::at(on, theta_on, gd, false, pars_on, 3, sfd, rfd);
+    double worst = 0.0;
+    for (std::size_t k = 0; k < r_on.grad.size(); ++k) {
+      const double scale = std::max(1.0, std::abs(rfd.grad[k]));
+      worst = std::max(worst, std::abs(r_on.grad[k] - rfd.grad[k]) / scale);
+    }
+    printf("    gate on: IFT against differencing the solve, worst %.3e\n", worst);
+    ok(worst < 1e-6,
+       "with the gate on, the IFT composite agrees with differencing the solve");
+    // dA/dI: impaired area does not photosynthesise, so A must FALL with I.
+    ok(r_on.grad[1 * phylloptim::gradient::n_outputs + 0] < 0.0,
+       "assimilation falls as the impaired fraction rises");
+  }
+  const std::vector<phylloptim::gradient::Result> gon =
+      phylloptim::gradient::batch(on, theta_on, 1, obs, false, par, 1, s);
+  ok(gon.size() == 2 && gon[0].status != phylloptim::gradient::Status::Error,
+     "gradient::batch runs with the gate on");
+  const std::vector<phylloptim::gradient::Result> g =
+      phylloptim::gradient::batch(l, theta, 1, obs, false, par, 1, s);
+  ok(g.size() == 2 && g[0].status != phylloptim::gradient::Status::Error &&
+         g[1].status != phylloptim::gradient::Status::Error,
+     "control: the batch runs with the gate off");
+
+  // The closed form, on the one configuration it otherwise accepts.
+  phylloptim::Leaf cf = make_thermal_leaf(d, {1.0}, {1.0}, false, false,
+                                          set_atls_inputs);
+  cf.set_model(CC::TF24, false, true);
+  cf.optimise();
+  ok(std::isfinite(cf.opt_psi_stem_), "control: the closed form runs gate off");
+  cf.use_thermal_damage_ = true;
+  ok(throws_with([&] { cf.optimise(); },
+                 "the closed form is refused with use_thermal_damage_ on"),
+     "the closed form refuses");
+  cf.set_model(CC::TF24, false);
+  cf.optimise();
+  ok(std::isfinite(cf.opt_psi_stem_), "and the exact method runs gate on");
+}
+
 int main() {
   test_defaults_are_unset();
   test_vulnerability_curve();
@@ -5930,6 +7422,7 @@ int main() {
   test_shallow_roots_do_not_inherit_deep_uptake();
   test_negative_assim_exit_writes_its_own_rates();
   test_analytic_gradient_matches_finite_difference();
+  test_collar_foc_matches_profit();
   test_gradient_needs_no_prior_solve();
   test_gradient_is_zero_in_reversed_gradient_state();
   test_gradient_reports_feasibility();
@@ -5939,6 +7432,7 @@ int main() {
   test_operating_point_kind_is_written_by_every_path();
   test_collar_solve_refuses_rather_than_guessing();
   test_collar_argmax_is_smooth_in_a_trait();
+  test_outputs_agree_with_the_solve();
   test_soil_conductance_is_positive();
   test_root_vulnerability_is_bounded_past_its_grid();
   test_root_psi_crit_clamp_binds();
@@ -5957,7 +7451,10 @@ int main() {
   test_shutdown_reports_one_temperature();
   test_zero_E_branch_derives_its_own_block();
   test_energy_balance_path_runs();
+  test_longwave_and_radiative_conductance();
   test_pm_wind_speed_validation();
+  test_pm_absorbed_shortwave();
+  test_quantum_yield_on_absorbed_basis();
   test_pm_leaf_temperature_response();
   test_energy_balance_collar_solve_is_measured();
   test_energy_balance_gate_off_is_inert();
@@ -5970,6 +7467,12 @@ int main() {
   test_temperature_parameters_are_settable();
   test_temperature_params_invalidate_cache();
   test_rd_temperature_response();
+  test_the_dry_end_reports_which_bound_closed_it();
+  test_pack_kernels_are_the_models_own();
+  test_light_reaches_carbon_with_a_row();
+  test_every_answered_point_hands_over_finite_rows();
+  test_a_replay_hands_over_the_rows_its_solve_did();
+  test_tf24_floor_rows_at_a_price();
   test_set_traits_matches_a_fresh_leaf();
   test_prescribed_lambda_survives_redriving();
   test_profitmax_reports_an_emergent_lambda();
@@ -5981,6 +7484,7 @@ int main() {
   test_gas_constant_and_arrhenius_reference_point();
   test_knot_grid_reaches_its_intended_domain();
   test_psi_crit_lies_inside_the_stem_curve_domain();
+  test_stem_curve_past_its_grid();
   test_bad_input_throws();
   test_infeasible_is_a_distinct_failure();
   test_out_of_domain_names_the_spline();
@@ -6009,6 +7513,11 @@ int main() {
   test_leastcost_lambda_is_dA_dE();
   test_every_curve_returns_its_own_maximum();
   test_collar_profit_is_its_own_curve();
+  test_thermal_damage_gate_off_is_inert();
+  test_thermal_damage_bypasses_the_cache();
+  test_thermal_damage_dprofit_is_the_solves_own();
+  test_thermal_damage_fd_helpers_restore_the_block();
+  test_thermal_damage_refusals();
   benchmark();
 
   printf("\n%d checks, %d failures\n", checks, failures);

@@ -43,7 +43,7 @@
   root_P50 = 3.4,
   TF24_beta2 = 1.5,
   jmax_25 = 157.44,
-  a = 0.30,
+  phi_J = 0.30 / 0.85,
   curv_fact_elec_trans = 0.7,
   curv_fact_colim = 0.99,
   TF24_cost_scale = 7.5,
@@ -51,15 +51,6 @@
   JS22_gamma = 1.0,
   CMax_a = 0.6,
   CMax_b = 0.0
-)
-
-.leaf_control_defaults <- list(
-  GSS_tol_abs = 1e-3,
-  vulnerability_curve_ncontrol = 100,
-  ci_abs_tol = 1e-3,
-  ci_niter = 1000,
-  integration_rule = 21,
-  integration_tol = 1e-8
 )
 
 ##' Physiological traits for a leaf
@@ -83,11 +74,10 @@
 ##'
 ##' @section psi_crit is not a free trait:
 ##' `psi_crit` is the stem curve's **P95** and is derived from `stem_P50`/`stem_c`,
-##' not set. It used to be settable, describing a curve it was not derived from:
-##' the curve is pre-integrated over `[0, P99]`, `psi_crit` never entered that
-##' bound, and every solve evaluates the curve *at* `psi_crit` -- so anyone fitting
-##' a measured vulnerability curve picked a plausible number and got a domain error
-##' naming only the interpolator.
+##' not set, and could not safely be: the curve is pre-integrated over `[0, P99]`,
+##' `psi_crit` does not enter that bound, and every solve evaluates the curve *at*
+##' `psi_crit` -- so setting it to a plausible number off a measured vulnerability
+##' curve gives a domain error naming only the interpolator.
 ##'
 ##' At the defaults:
 ##'
@@ -110,7 +100,12 @@
 ##'   magnitude), with `root_b` and `root_psi_crit` derived from it.
 ##' @param TF24_beta2 exponent for the effect of hydraulic risk (unitless)
 ##' @param jmax_25 maximum electron transport rate at 25 C (umol m^-2 s^-1)
-##' @param a quantum yield of photosynthetic electron transport (mol mol^-1)
+##' @param phi_J quantum yield of electron transport per ABSORBED photon
+##'   (mol mol^-1). The leaf absorbs `alpha_PAR_` (0.85 by default) of the
+##'   intercepted `PPFD`, so the default 0.30 / 0.85 is the old incident-basis
+##'   yield of 0.30 restated. A gas-exchange fit identifies only
+##'   `phi_J * alpha_PAR_`; fix `alpha_PAR_` to make the fitted value per absorbed
+##'   photon. Was `a` (incident basis) before 0.13.0: `phi_J = a / 0.85`.
 ##' @param curv_fact_elec_trans curvature of the light response curve (unitless)
 ##' @param curv_fact_colim curvature of the colimited photosynthesis equation
 ##' @param TF24_cost_scale cost parameter for the TF24 profit model
@@ -167,7 +162,7 @@ leaf_traits <- function(vcmax_25 = 96,
                         root_P50 = 3.4,
                         TF24_beta2 = 1.5,
                         jmax_25 = 157.44,
-                        a = 0.30,
+                        phi_J = 0.30 / 0.85,
                         curv_fact_elec_trans = 0.7,
                         curv_fact_colim = 0.99,
                         TF24_cost_scale = 7.5,
@@ -177,7 +172,7 @@ leaf_traits <- function(vcmax_25 = 96,
                         CMax_b = 0.0) {
   out <- list(vcmax_25 = vcmax_25, stem_c = stem_c, stem_P50 = stem_P50,
               root_c = root_c, root_P50 = root_P50, TF24_beta2 = TF24_beta2,
-              jmax_25 = jmax_25, a = a,
+              jmax_25 = jmax_25, phi_J = phi_J,
               curv_fact_elec_trans = curv_fact_elec_trans,
               curv_fact_colim = curv_fact_colim,
               TF24_cost_scale = TF24_cost_scale,
@@ -204,15 +199,15 @@ leaf_traits <- function(vcmax_25 = 96,
 ##' caller produce non-finite photosynthetic parameters and get NaNs back with no
 ##' indication of why.
 ##'
-##' @param GSS_tol_abs absolute tolerance for a golden-section search over stem
-##'   water potential. ⚠️ **This does not set how well the operating point is
+##' @param GSS_tol_abs a width on the collar potential, despite its name, which
+##'   dates from a golden-section search the solve no longer uses. ⚠️ **This does not set how well the operating point is
 ##'   determined.** Every solver in the package now root-finds its own first-order
 ##'   condition instead of searching the objective, so changing this leaves the
 ##'   answer bit-identical on the production path. What it still does, and it is
 ##'   less than the name suggests: it is read in exactly two places, both on the
 ##'   COLLAR route -- the width below which the feasible collar interval is treated
 ##'   as a single point, and the tolerance of the golden-section FALLBACK used when
-##'   neither bracket endpoint has a usable gradient (no driver sweep has reached
+##'   either bracket endpoint has no usable gradient (no driver sweep has reached
 ##'   that fallback).
 ##'
 ##'   ⚠️ **It does not reach the stem route at all.** That refines by a root-find
@@ -238,8 +233,21 @@ leaf_traits <- function(vcmax_25 = 96,
 ##' leaf_control()
 ##' leaf_control(GSS_tol_abs = 1e-5)
 ##' @export
+# ⚠️ `vulnerability_curve_ncontrol` MUST EQUAL `Leaf::ncontrol_default` in
+# leaf_model.hpp. RcppR6 binds only the 15-argument constructor, so R has to pass
+# the number in and cannot read the C++ one -- this literal is the copy. What
+# holds the two together is plant's test-control.R, which compares plant's
+# Control (seated from the constant in plant/src/control.cpp) against
+# `leaf_control()` with expect_identical. It runs in plant's check and not in
+# this package's, so a drift introduced here surfaces one repository away.
+#
+# ⚠️ AND THE GOLDEN FILE DOES NOT CATCH IT, whatever helper-golden.R's note about
+# drifting defaults suggests: that argument holds for a trait, which enters the
+# answer, and not for a spline resolution, which only refines it. Measured on the
+# golden grid's own driver rows, 400 -> 40 moves every field by 3.0e-06 and
+# 400 -> 20 by 5.0e-06, against per-class tolerances of 1e-05 and 5e-03.
 leaf_control <- function(GSS_tol_abs = 1e-3,
-                         vulnerability_curve_ncontrol = 100,
+                         vulnerability_curve_ncontrol = 400,
                          ci_abs_tol = 1e-3,
                          ci_niter = 1000,
                          integration_rule = 21,
@@ -443,7 +451,7 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
     root_P50 = traits$root_P50,
     TF24_beta2 = traits$TF24_beta2,
     jmax_25 = traits$jmax_25,
-    a = traits$a,
+    phi_J = traits$phi_J,
     curv_fact_elec_trans = traits$curv_fact_elec_trans,
     curv_fact_colim = traits$curv_fact_colim,
     GSS_tol_abs = control$GSS_tol_abs,
@@ -597,7 +605,10 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
 ##' @param x a `Leaf`, from [leaf_model()]
 ##' @param psi_soil soil water potential, MPa, **positive magnitude**. Length
 ##'   sets the number of soil layers.
-##' @param PPFD photosynthetic photon flux density, umol m^-2 s^-1
+##' @param PPFD INTERCEPTED photosynthetic photon flux density per unit leaf area,
+##'   umol m^-2 s^-1: the light incident on the leaf, before its absorptance
+##'   (`alpha_PAR_`). On the energy-balance path the leaf also needs `$NIR_int_`,
+##'   the intercepted near-infrared in W m^-2, set before this call.
 ##' @param soil_depth cumulative depth to the bottom of each layer, m. Defaults
 ##'   to 1 m layers.
 ##' @param root_network the soil-to-collar hydraulic resistances, a

@@ -127,6 +127,39 @@ test_that("LeastCost_beta is in the gradient enumeration, owned by one curve", {
     "LeastCost")
 })
 
+test_that("LeastCost_beta is differentiated, and the R reference agrees with its FD", {
+  # ⚠️ THE SLOT HAS TO REACH THE LEAF ON EVERY PERTURBATION. C++'s
+  # `gradient::apply()` writes `LeastCost_beta` from theta; R's `.gradient_setter`
+  # must do the same, or the R reference re-solves at the seated beta on every
+  # step and reports an EXACT ZERO -- finite, plausible, and wrong. The first
+  # version of this curve did exactly that. The sign is the check that the write
+  # lands where the objective reads it: a dearer capacity (larger beta) buys more
+  # water per unit carbon, so the leaf opens and A rises.
+  tr <- leaf_traits()
+  net <- series_resistance(1e4)
+  mk <- function() {
+    l <- leaf_model(tr, leaf_control(), leaf_supply_singlelayer())
+    l$LeastCost_beta <- 146
+    l
+  }
+  g <- function(meth) {
+    leaf_gradient(psi_soil = 0.5, PPFD = 1500, atm_vpd = 2,
+                  leaf_specific_conductance_max = 6.3e-3,
+                  root_network = net, x = mk(), traits = tr,
+                  pars = "LeastCost_beta", model = "LeastCost", method = meth)
+  }
+  ift <- g("ift")
+  fd <- g("fd")
+  expect_identical(ift$model, "LeastCost")
+  expect_identical(ift$status, "interior")
+  expect_gt(ift$gradient["LeastCost_beta", "A"], 0)
+  for (out in c("A", "gc", "psi_stem")) {
+    expect_equal(ift$gradient["LeastCost_beta", out],
+                 fd$gradient["LeastCost_beta", out],
+                 tolerance = 5e-3, label = out)
+  }
+})
+
 test_that("the closed form is refused for LeastCost, and says why", {
   # ⚠️ NOT A MISSING PIECE. Prentice et al. DO publish a closed form, but they
   # obtain it by solving the condition in `ci`, where the `A` in lambda cancels.
