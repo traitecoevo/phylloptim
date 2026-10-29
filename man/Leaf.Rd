@@ -37,6 +37,8 @@ Leaf(
 
 \item{jmax_25}{maximum rate of electron transport at 25 C (umol m^-2 s^-1)}
 
+\item{phi_J}{quantum yield of electron transport per ABSORBED photon (mol mol^-1); J reads phi_J * alpha_PAR_ * PPFD. Was \code{a} (incident basis) before 0.13.0: phi_J = a / alpha_PAR_.}
+
 \item{curv_fact_elec_trans}{curvature factor for the light response curve (unitless)}
 
 \item{curv_fact_colim}{curvature factor for the colimited photosynthesis equation}
@@ -54,8 +56,6 @@ condition -- and it does NOT reach the stem route at all.}
 \item{ci_niter}{maximum number of iterations for root-solving ci}
 
 \item{TF24_cost_scale}{cost parameter for the TF24 profit model (umol m^-2 s^-1)}
-
-\item{a}{quantum yield of photosynthetic electron transport (mol mol^-1)}
 }
 \description{
 Stomatal behaviour emerges from a gain-risk profit maximisation over the
