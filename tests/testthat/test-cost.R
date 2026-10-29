@@ -199,3 +199,71 @@ test_that("a driven row costs a bounded multiple of a trivial .Call", {
                                          supply = leaf_supply_singlelayer(),
                                          root_network = net), 30) / 16 / ref, 45)  # measured 20
 })
+
+
+test_that("shadow_cost separates the price from the realised carbon cost", {
+  # ⚠️ BIT EQUALITY against `lambda_o * E`, not a tolerance. The accessor reads the
+  # stored transpiration rather than recomputing it, precisely so the identity
+  # holds exactly against the REPORTED `E` -- which is what a caller checks.
+  sp <- leaf_supply_singlelayer()
+  for (lo in c(0, 1.5e4, 1.5e5)) {
+    r <- leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = "TF24_floor",
+                    TF24_floor_lambda_o = lo, supply = sp)
+    expect_identical(r$shadow_cost, lo * r$E)
+    # The two routes to the carbon the plant actually kept agree, but NOT to the
+    # last bit: `profit` is `A - hydraulic_cost` computed in C++, so adding the
+    # shadow term back reassociates the subtraction. 1 ULP, and asserting
+    # `identical` here would be asserting that floating-point addition is
+    # associative.
+    expect_equal(r$profit + r$shadow_cost,
+                 r$A - (r$hydraulic_cost - r$shadow_cost))
+    expect_gte(r$hydraulic_cost - r$shadow_cost, 0)
+  }
+
+  # At a zero price the curve IS TF24, so the realised cost is the whole cost and
+  # the carbon profit is the objective.
+  r0 <- leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = "TF24_floor",
+                   TF24_floor_lambda_o = 0, supply = sp)
+  expect_identical(r0$shadow_cost, 0)
+  expect_identical(r0$profit + r0$shadow_cost, r0$profit)
+
+  # ⚠️ ZERO ON EVERY OTHER CURVE, CF77 INCLUDED, and that is a statement about the
+  # curve rather than about the cost -- see operating_point()'s documentation.
+  for (m in c("TF24", "JS22", "CMax", "SOX", "JW26", "ProfitMax")) {
+    r <- leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = m, supply = sp)
+    expect_identical(r$shadow_cost, 0, info = m)
+  }
+  rc <- leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = "CF77",
+                   CF77_lambda = 1.5e5, supply = sp)
+  expect_identical(rc$shadow_cost, 0)
+})
+
+
+test_that("leaf_solve() reports the seated curve's lambda, not TF24's", {
+  # `lambda` is `marginal_cost_water()` -- TF24's price at this operating point,
+  # whatever curve ran. `lambda_emergent` is the curve's own. Until it was appended
+  # to the reported vector it was reachable only off a `leaf_model()` object, so a
+  # `leaf_solve()` caller on any other curve had to reconstruct it -- and on
+  # TF24_floor that meant knowing `lambda` carries only the hydraulic half and
+  # adding the floor back by hand.
+  sp <- leaf_supply_singlelayer()
+  price <- 1.5e5
+
+  # ⚠️ CF77 PINS IT, its emergent lambda being known independently of the solve:
+  # the curve prices water at a prescribed constant, so this must return it.
+  cf <- leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = "CF77",
+                   CF77_lambda = price, supply = sp)
+  expect_equal(cf$lambda_emergent, price, tolerance = 1e-6)
+  expect_false(isTRUE(all.equal(cf$lambda, price)))   # `lambda` is NOT the price
+
+  # TF24 is the one curve where the two agree, by construction
+  tf <- leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = "TF24",
+                   supply = sp)
+  expect_identical(tf$lambda_emergent, tf$lambda)
+
+  # and TF24_floor's is the hydraulic half plus the floor
+  fl <- leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = "TF24_floor",
+                   TF24_floor_lambda_o = price, supply = sp)
+  expect_equal(fl$lambda_emergent, fl$lambda + price)
+  expect_gt(fl$lambda_emergent, fl$lambda)
+})

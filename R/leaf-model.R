@@ -43,7 +43,7 @@
   root_P50 = 3.4,
   TF24_beta2 = 1.5,
   jmax_25 = 157.44,
-  a = 0.30,
+  phi_J = 0.30 / 0.85,
   curv_fact_elec_trans = 0.7,
   curv_fact_colim = 0.99,
   TF24_cost_scale = 7.5,
@@ -51,15 +51,6 @@
   JS22_gamma = 1.0,
   CMax_a = 0.6,
   CMax_b = 0.0
-)
-
-.leaf_control_defaults <- list(
-  GSS_tol_abs = 1e-3,
-  vulnerability_curve_ncontrol = 100,
-  ci_abs_tol = 1e-3,
-  ci_niter = 1000,
-  integration_rule = 21,
-  integration_tol = 1e-8
 )
 
 ##' Physiological traits for a leaf
@@ -83,11 +74,10 @@
 ##'
 ##' @section psi_crit is not a free trait:
 ##' `psi_crit` is the stem curve's **P95** and is derived from `stem_P50`/`stem_c`,
-##' not set. It used to be settable, describing a curve it was not derived from:
-##' the curve is pre-integrated over `[0, P99]`, `psi_crit` never entered that
-##' bound, and every solve evaluates the curve *at* `psi_crit` -- so anyone fitting
-##' a measured vulnerability curve picked a plausible number and got a domain error
-##' naming only the interpolator.
+##' not set, and could not safely be: the curve is pre-integrated over `[0, P99]`,
+##' `psi_crit` does not enter that bound, and every solve evaluates the curve *at*
+##' `psi_crit` -- so setting it to a plausible number off a measured vulnerability
+##' curve gives a domain error naming only the interpolator.
 ##'
 ##' At the defaults:
 ##'
@@ -110,7 +100,12 @@
 ##'   magnitude), with `root_b` and `root_psi_crit` derived from it.
 ##' @param TF24_beta2 exponent for the effect of hydraulic risk (unitless)
 ##' @param jmax_25 maximum electron transport rate at 25 C (umol m^-2 s^-1)
-##' @param a quantum yield of photosynthetic electron transport (mol mol^-1)
+##' @param phi_J quantum yield of electron transport per ABSORBED photon
+##'   (mol mol^-1). The leaf absorbs `alpha_PAR_` (0.85 by default) of the
+##'   intercepted `PPFD`, so the default 0.30 / 0.85 is the old incident-basis
+##'   yield of 0.30 restated. A gas-exchange fit identifies only
+##'   `phi_J * alpha_PAR_`; fix `alpha_PAR_` to make the fitted value per absorbed
+##'   photon. Was `a` (incident basis) before 0.13.0: `phi_J = a / 0.85`.
 ##' @param curv_fact_elec_trans curvature of the light response curve (unitless)
 ##' @param curv_fact_colim curvature of the colimited photosynthesis equation
 ##' @param TF24_cost_scale cost parameter for the TF24 profit model
@@ -167,7 +162,7 @@ leaf_traits <- function(vcmax_25 = 96,
                         root_P50 = 3.4,
                         TF24_beta2 = 1.5,
                         jmax_25 = 157.44,
-                        a = 0.30,
+                        phi_J = 0.30 / 0.85,
                         curv_fact_elec_trans = 0.7,
                         curv_fact_colim = 0.99,
                         TF24_cost_scale = 7.5,
@@ -177,7 +172,7 @@ leaf_traits <- function(vcmax_25 = 96,
                         CMax_b = 0.0) {
   out <- list(vcmax_25 = vcmax_25, stem_c = stem_c, stem_P50 = stem_P50,
               root_c = root_c, root_P50 = root_P50, TF24_beta2 = TF24_beta2,
-              jmax_25 = jmax_25, a = a,
+              jmax_25 = jmax_25, phi_J = phi_J,
               curv_fact_elec_trans = curv_fact_elec_trans,
               curv_fact_colim = curv_fact_colim,
               TF24_cost_scale = TF24_cost_scale,
@@ -204,15 +199,15 @@ leaf_traits <- function(vcmax_25 = 96,
 ##' caller produce non-finite photosynthetic parameters and get NaNs back with no
 ##' indication of why.
 ##'
-##' @param GSS_tol_abs absolute tolerance for a golden-section search over stem
-##'   water potential. ⚠️ **This does not set how well the operating point is
+##' @param GSS_tol_abs a width on the collar potential, despite its name, which
+##'   dates from a golden-section search the solve no longer uses. ⚠️ **This does not set how well the operating point is
 ##'   determined.** Every solver in the package now root-finds its own first-order
 ##'   condition instead of searching the objective, so changing this leaves the
 ##'   answer bit-identical on the production path. What it still does, and it is
 ##'   less than the name suggests: it is read in exactly two places, both on the
 ##'   COLLAR route -- the width below which the feasible collar interval is treated
 ##'   as a single point, and the tolerance of the golden-section FALLBACK used when
-##'   neither bracket endpoint has a usable gradient (no driver sweep has reached
+##'   either bracket endpoint has no usable gradient (no driver sweep has reached
 ##'   that fallback).
 ##'
 ##'   ⚠️ **It does not reach the stem route at all.** That refines by a root-find
@@ -238,8 +233,21 @@ leaf_traits <- function(vcmax_25 = 96,
 ##' leaf_control()
 ##' leaf_control(GSS_tol_abs = 1e-5)
 ##' @export
+# ⚠️ `vulnerability_curve_ncontrol` MUST EQUAL `Leaf::ncontrol_default` in
+# leaf_model.hpp. RcppR6 binds only the 15-argument constructor, so R has to pass
+# the number in and cannot read the C++ one -- this literal is the copy. What
+# holds the two together is plant's test-control.R, which compares plant's
+# Control (seated from the constant in plant/src/control.cpp) against
+# `leaf_control()` with expect_identical. It runs in plant's check and not in
+# this package's, so a drift introduced here surfaces one repository away.
+#
+# ⚠️ AND THE GOLDEN FILE DOES NOT CATCH IT, whatever helper-golden.R's note about
+# drifting defaults suggests: that argument holds for a trait, which enters the
+# answer, and not for a spline resolution, which only refines it. Measured on the
+# golden grid's own driver rows, 400 -> 40 moves every field by 3.0e-06 and
+# 400 -> 20 by 5.0e-06, against per-class tolerances of 1e-05 and 5e-03.
 leaf_control <- function(GSS_tol_abs = 1e-3,
-                         vulnerability_curve_ncontrol = 100,
+                         vulnerability_curve_ncontrol = 400,
                          ci_abs_tol = 1e-3,
                          ci_niter = 1000,
                          integration_rule = 21,
@@ -443,7 +451,7 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
     root_P50 = traits$root_P50,
     TF24_beta2 = traits$TF24_beta2,
     jmax_25 = traits$jmax_25,
-    a = traits$a,
+    phi_J = traits$phi_J,
     curv_fact_elec_trans = traits$curv_fact_elec_trans,
     curv_fact_colim = traits$curv_fact_colim,
     GSS_tol_abs = control$GSS_tol_abs,
@@ -597,7 +605,10 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
 ##' @param x a `Leaf`, from [leaf_model()]
 ##' @param psi_soil soil water potential, MPa, **positive magnitude**. Length
 ##'   sets the number of soil layers.
-##' @param PPFD photosynthetic photon flux density, umol m^-2 s^-1
+##' @param PPFD INTERCEPTED photosynthetic photon flux density per unit leaf area,
+##'   umol m^-2 s^-1: the light incident on the leaf, before its absorptance
+##'   (`alpha_PAR_`). On the energy-balance path the leaf also needs `$NIR_int_`,
+##'   the intercepted near-infrared in W m^-2, set before this call.
 ##' @param soil_depth cumulative depth to the bottom of each layer, m. Defaults
 ##'   to 1 m layers.
 ##' @param root_network the soil-to-collar hydraulic resistances, a
@@ -750,9 +761,33 @@ set_drivers <- function(x,
 ##' constructed with.
 ##'
 ##' Costs about 4 µs, so it is usable in a loop. It was 180 µs until it stopped
-##' reading the thirteen outputs through thirteen separate calls into C++ and
+##' reading the fifteen outputs through fifteen separate calls into C++ and
 ##' stopped building its one row with `data.frame()` (#39) -- 45× more than the
 ##' ~3 µs solve it was reporting on.
+##'
+##' @section What the cost columns mean:
+##'
+##' `hydraulic_cost` is the whole cost the objective subtracted. `shadow_cost` is
+##' the share of it that is a *price* rather than carbon the plant gave up: the
+##' value of water in its best alternative use, which for a leaf is assimilation
+##' later. So
+##'
+##' \preformatted{
+##'   realised cost   = hydraulic_cost - shadow_cost
+##'   carbon profit   = profit + shadow_cost
+##' }
+##'
+##' and a consumer that grows a plant on this leaf wants the second of those,
+##' never `profit`. Deducting a shadow price from a carbon budget taxes growth by
+##' something the plant never spent.
+##'
+##' `shadow_cost` is `TF24_floor_lambda_o * E` on that curve and zero on every
+##' other. Zero means *this curve does not separate the two*, not *this curve's
+##' cost is all realised carbon*. `CF77` is the case worth stating: its whole cost
+##' is `lambda * E`, and reading that as a shadow price is an ordinary thing to do,
+##' but the model supplies one number and nothing to attribute it with and behaves
+##' identically whichever way it is read. Reporting it as all-shadow would present
+##' one reading as a fact. The field is defined only where the curve defines it.
 ##'
 ##' @param x a solved `Leaf`
 ##' @return A one-row data.frame.
@@ -774,7 +809,7 @@ operating_point <- function(x) {
   # ⚠️ Built directly rather than through data.frame(), which costs 158 us
   # against 2 us for this -- on a function called once per solved point, to
   # report a 3 us solve. What data.frame() spends it on is checking and recycling
-  # thirteen arguments that are already thirteen length-1 doubles by construction.
+  # fifteen arguments that are already fifteen length-1 doubles by construction.
   # The result is `identical()` to what data.frame() returned, which
   # test-surface.R asserts rather than assumes; note row.names has to be the
   # integer 1L and not 1.0, or it would not be.
@@ -783,7 +818,7 @@ operating_point <- function(x) {
   structure(v, class = "data.frame", row.names = 1L)
 }
 
-# What an operating point IS: the names of the thirteen values
+# What an operating point IS: the names of the fifteen values
 # `Leaf::operating_point_values()` returns, in its order. `operating_point()`
 # wraps them in a one-row data.frame and `leaf_solve()` fills a matrix row with
 # them, so the two cannot disagree about which outputs there are.
@@ -791,7 +826,7 @@ operating_point <- function(x) {
 # ⚠️ THE ORDER IS AN INTERFACE, and it is one nothing in the types enforces --
 # the C++ side returns a flat vector, because a flat vector is what crosses the
 # boundary for free. test-surface.R asserts these names line up with the
-# thirteen individual bindings by reading each one and comparing, so a field
+# fifteen individual bindings by reading each one and comparing, so a field
 # inserted on either side without the other fails there instead of silently
 # shifting a column. test-golden.R then compares leaf_solve()'s output
 # bit-exactly against a file generated in C++.
@@ -806,7 +841,15 @@ operating_point <- function(x) {
   "hydraulic_cost",
   "E_up",
   "uptake",
-  "lambda",         # dA/dE
+  # ⚠️ TF24's MARGINAL COST OF WATER, WHATEVER CURVE IS SEATED. It is
+  # `marginal_cost_water()`, i.e. `lambda_TF24(opt_psi_stem_)`, so on any other
+  # curve it reports what the TF24 cost WOULD price water at at this leaf's
+  # operating point -- not what the seated curve does. The per-curve number is
+  # `lambda_emergent`, which is `(dC/dpsi)/(dE/dpsi)` for whichever curve ran and
+  # is the one output every curve reports on the same axis. It is APPENDED at the
+  # end of this vector rather than placed here beside its namesake, because these
+  # names are POSITIONS and an insertion would shift every saved output.
+  "lambda",         # dA/dE under the TF24 cost -- see above
   "g1_eff",         # the Medlyn g1 this leaf implies
   # deg C. APPENDED rather than placed beside the other state variables, because
   # these names are positions and a saved output would shift under an insertion.
@@ -819,7 +862,45 @@ operating_point <- function(x) {
   # ⚠️ At a PM shut-down the reported `A` does not correspond to this temperature
   # -- respiration is still the Tair value. That is #105, not a property of this
   # column.
-  "Tleaf"
+  "Tleaf",
+  # umol C m^-2 s^-1. APPENDED, like Tleaf and for the same reason.
+  #
+  # THE PART OF THE COST THAT IS A PRICE RATHER THAN A REALISED CARBON LOSS.
+  # `hydraulic_cost` is the whole cost the objective subtracted; this is the share
+  # of it that buys nothing and loses nothing, being the value of water in its best
+  # alternative use. `TF24_floor_lambda_o * E` on that curve, zero on every other.
+  # So a caller who wants the carbon the plant actually gave up takes
+  #
+  #     realised cost   = hydraulic_cost - shadow_cost
+  #     carbon profit   = profit + shadow_cost
+  #
+  # and a consumer that grows a plant on this leaf wants the SECOND of those, never
+  # `profit`. Deducting a shadow price from a carbon budget taxes growth by
+  # something the plant never spent.
+  #
+  # ⚠️ ZERO IS NOT A CLAIM THAT THE CURVE'S COST IS ALL REALISED CARBON -- it says
+  # the curve does not separate the two. CF77 is the case that matters: its whole
+  # cost is `lambda * E`, which many would read as a shadow price, but the model
+  # supplies one number and nothing to attribute it with and behaves identically
+  # under either reading. Reporting it as all-shadow would ship an interpretation
+  # as a fact, and as zero-shadow the opposite one; the field is defined only where
+  # the CURVE defines it.
+  "shadow_cost",
+  # umol C (kg H2O)^-1. APPENDED, for the reason Tleaf and shadow_cost were.
+  #
+  # ⚠️ THIS, NOT `lambda`, IS THE SEATED CURVE'S MARGINAL COST OF WATER.
+  # `lambda` above is `marginal_cost_water()` -- TF24's price at this operating
+  # point, whatever curve actually ran -- so on any other curve it reports what the
+  # TF24 cost WOULD charge here. This one is `(dC/dpsi)/(dE/dpsi)` for the curve
+  # that ran, which is the quantity the optimality literature means by lambda and
+  # the one every curve reports on the same axis.
+  #
+  # It was reachable only off the object until now, so a caller using leaf_solve()
+  # on any curve but TF24 had to reconstruct it. On TF24_floor that meant knowing
+  # that `lambda` carries only the hydraulic half and adding the price floor back
+  # by hand -- which is exactly the kind of correction a package should not leave
+  # to its callers, and it read 6.8e+04 against a floor of 1.5e+05.
+  "lambda_emergent"
 )
 
 ##' Solve a leaf, in one call
@@ -901,8 +982,25 @@ operating_point <- function(x) {
 ##'   rather than a gap -- reading one would be reading whatever the last solve
 ##'   left behind.
 ##'
-##'   `CF77` needs `$CF77_lambda_`, which has no default and is not reachable
-##'   through this function; build the leaf with [leaf_model()] and set it.
+##'   Two curves take a PRESCRIBED price of water rather than deriving one:
+##'   `CF77` reads `CF77_lambda` and `TF24_floor` reads `TF24_floor_lambda_o`,
+##'   both below. Neither has a default, and each curve refuses to solve without
+##'   its own.
+##' @param LeastCost_beta the `LeastCost` curve's unit-cost ratio (Prentice et
+##'   al. 2014's beta): the cost of maintaining carboxylation capacity relative to
+##'   the cost of transpiration, dimensionless. Only `model = "LeastCost"` reads
+##'   it. That curve refuses to solve without one, and refuses zero as well, since
+##'   at zero the capacity term vanishes and what is left is water-use efficiency,
+##'   which rises without bound as transpiration falls. The published value is 146.
+##' @param CF77_lambda,TF24_floor_lambda_o the prescribed marginal value of water
+##'   for the two curves that take one, in umol C (kg H2O)^-1. `NA_real_` (the
+##'   default) leaves the field unset, which every other model wants.
+##'
+##'   ⚠️ **Their scale is set by the leaf, not chosen freely.** At this package's
+##'   defaults the leaf's own marginal cost of water runs 9e4 to 3e5, and a price
+##'   far outside that band pins the optimum against a bound — where the answer
+##'   describes the bracket rather than the model. [operating_point()]'s
+##'   `lambda_emergent` is how you find a value that means something.
 ##' @param reuse solve every row with one `Leaf` object (`TRUE`) or construct a
 ##'   fresh one per row (`FALSE`, the default). Reuse is faster because the two
 ##'   vulnerability splines are built once, and it is safe -- every exit from the
@@ -944,8 +1042,13 @@ leaf_solve <- function(psi_soil,
                        control = leaf_control(),
                        supply = leaf_supply_multilayer(),
                        reuse = TRUE,
-                       model = "collar") {
+                       model = "collar",
+                       CF77_lambda = NA_real_,
+                       TF24_floor_lambda_o = NA_real_,
+                       LeastCost_beta = NA_real_) {
   .check_model(model, supply)
+  prices <- .check_prices(model, CF77_lambda, TF24_floor_lambda_o,
+                          LeastCost_beta)
   layered <- .as_layer_list(psi_soil, "psi_soil")
   scalars <- list(PPFD = PPFD, atm_vpd = atm_vpd, ca = ca,
                   leaf_temp = leaf_temp, atm_o2_kpa = atm_o2_kpa,
@@ -976,7 +1079,8 @@ leaf_solve <- function(psi_soil,
     .recycle_to(root_network, n, "root_network")
   }
 
-  shared <- if (reuse) .seat_model(leaf_model(traits, control, supply), model)
+  shared <- if (reuse) .seat_model(leaf_model(traits, control, supply), model,
+                                   prices)
             else NULL
 
   # ⚠️ COLUMNWISE, AND THAT IS MOST OF THE PERFORMANCE STORY OF THIS FUNCTION.
@@ -1006,7 +1110,7 @@ leaf_solve <- function(psi_soil,
   with_phylloptim_conditions(
   for (i in seq_len(n)) {
     l <- if (reuse) shared else .seat_model(leaf_model(traits, control, supply),
-                                            model)
+                                            model, prices)
     set_drivers(l,
                 psi_soil = layered[[i]],
                 PPFD = scalars$PPFD[[i]],
@@ -1066,12 +1170,79 @@ leaf_solve <- function(psi_soil,
 }
 
 # `set_model()` is CONFIGURATION -- it survives set_drivers() and set_traits() --
-# so this runs once per Leaf rather than once per row.
-.seat_model <- function(x, model) {
+# so this runs once per Leaf rather than once per row. The prescribed prices are
+# the same kind of thing (#96: they survive both re-driving calls), which is why
+# they are applied here and not in the row loop.
+#
+# ⚠️ THE PRICES REACH THE LEAF ONLY THROUGH HERE, and before they did there was no
+# route at all: `$CF77_lambda_` and `$TF24_floor_lambda_o` are FIELDS, not traits,
+# so `leaf_traits()` cannot carry them and `leaf_solve()` builds its own `Leaf`
+# internally. The two priced curves were therefore reachable from `leaf_model()`
+# and unreachable from the one-call surface -- `leaf_solve(model = "CF77")` could
+# only ever raise the "needs CF77_lambda_ set" refusal. That was survivable while
+# CF77 was the only such curve and its documentation said "build the leaf
+# yourself"; it stopped being survivable when a second curve arrived whose ONLY
+# parameter is a price.
+.seat_model <- function(x, model, prices = NULL) {
   x$set_model(if (identical(model, "collar")) "TF24" else model,
               if (identical(model, "collar")) "collar" else "stem")
+  for (nm in names(prices)) {
+    if (!is.na(prices[[nm]])) {
+      x[[nm]] <- prices[[nm]]
+    }
+  }
   x
 }
+
+# Which price belongs to which curve, and the refusal when they are crossed.
+#
+# ⚠️ ONE TABLE, and it is the R-side twin of `.gradient_owned_pars`. Both say the
+# same thing -- this price belongs to that curve -- for the solve and for the
+# gradient respectively. If a third priced curve appears, both need the row.
+#
+# Passing a price the seated model does not read is REFUSED rather than ignored,
+# because silently ignoring it is how someone spends an afternoon wondering why
+# their lambda had no effect. Passing none is fine: the curve's own check is what
+# reports the omission, and it reports it with the units and the reason.
+.solve_price_fields <- c(CF77 = "CF77_lambda_",
+                         TF24_floor = "TF24_floor_lambda_o",
+                         LeastCost = "LeastCost_beta")
+
+# ⚠️ THE THIRD ENTRY IS NOT A PRICE, and the message below branches on it
+# rather than calling it one. `CF77_lambda_` and `TF24_floor_lambda_o` are
+# marginal values of water; `LeastCost_beta` is a dimensionless ratio of two unit
+# costs, and least-cost's price of water is emergent FROM it. What the three share
+# is the only thing this table is for: a field one curve reads and no other has.
+.check_prices <- function(model, CF77_lambda, TF24_floor_lambda_o,
+                          LeastCost_beta = NA_real_) {
+  given <- c(CF77_lambda_ = CF77_lambda,
+             TF24_floor_lambda_o = TF24_floor_lambda_o,
+             LeastCost_beta = LeastCost_beta)
+  # ⚠️ NOT `[[model]]`, which raises "subscript out of bounds" on every unpriced
+  # model rather than reporting no price. "" is a name no field has.
+  mine <- if (model %in% names(.solve_price_fields)) {
+    .solve_price_fields[[model]]
+  } else {
+    ""
+  }
+  wrong <- names(given)[!is.na(given) & names(given) != mine]
+  if (length(wrong)) {
+    owner <- names(.solve_price_fields)[match(wrong[[1]], .solve_price_fields)]
+    what <- if (wrong[[1]] == "LeastCost_beta") {
+      paste("the LeastCost curve's unit-cost ratio, the cost of maintaining",
+            "carboxylation capacity relative to that of transpiration")
+    } else {
+      paste("the", owner, "curve's prescribed price of water")
+    }
+    stop("`", sub("_$", "", wrong[[1]]), "` is ", what,
+         ", and model = \"", model,
+         "\" does not read it: on every other curve the price is emergent, ",
+         "derived from that curve's own parameters rather than set. Pass ",
+         "model = \"", owner, "\", or drop the argument.", call. = FALSE)
+  }
+  given
+}
+
 
 .check_scalars <- function(x, what) {
   bad <- names(x)[!vapply(x, function(v) {

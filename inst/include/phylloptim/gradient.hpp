@@ -61,68 +61,67 @@
 namespace phylloptim {
 namespace gradient {
 
-// --- the parameter enumeration, which R indexes into --------------------------
-//
-// The fifteen traits in `Leaf::set_traits`' argument order, then the two
-// quantities a calibration fits that are not traits: the conductance driver and
-// the single-potential path's series resistance.
-//
-// ⚠️ R INDEXES THESE POSITIONS, so a reordering silently differentiates the wrong
-// parameter. `test-gradient-batch.R` reads the names back out of C++ and compares
-// them with R's, so the two cannot drift apart without a failure.
-inline constexpr int n_traits = 15;
-inline constexpr int n_pars = 18;
+// Re-exported here under the names this namespace's callers already use, so the
+// move is not a rename. One definition, in the model; two ways to reach it.
+using phylloptim::n_traits;
+using phylloptim::par_vcmax_25;   using phylloptim::par_stem_c;
+using phylloptim::par_stem_P50;   using phylloptim::par_root_c;
+using phylloptim::par_root_P50;   using phylloptim::par_TF24_beta2;
+using phylloptim::par_jmax_25;    using phylloptim::par_phi_J;
+using phylloptim::par_curv_fact_elec_trans;
+using phylloptim::par_curv_fact_colim;
+using phylloptim::par_TF24_cost_scale; using phylloptim::par_R_d_25;
+using phylloptim::par_JS22_gamma; using phylloptim::par_CMax_a;
+using phylloptim::par_CMax_b;     using phylloptim::par_kmax;
+using phylloptim::par_resistance; using phylloptim::par_CF77_lambda;
+using phylloptim::par_TF24_floor_lambda_o;
+using phylloptim::par_LeastCost_beta;
+using phylloptim::par_A;          using phylloptim::par_I;
+using phylloptim::par_D;          using phylloptim::par_topt_offset;
+using phylloptim::par_dTopt_max;  using phylloptim::par_K_A;
+using phylloptim::par_k_i;        using phylloptim::par_k_i_baseline;
+using phylloptim::par_k_rec;      using phylloptim::par_m_rep;
+using phylloptim::par_t_rep_cut;  using phylloptim::par_c_acclim_maint;
+using phylloptim::par_c_repair_maint; using phylloptim::par_c_protect_maint;
+using phylloptim::par_c_repair_flux;
+using phylloptim::par_PPFD;
 
-// Every index by name, so nothing below indexes `theta` with a bare integer.
-// The first `n_traits` are `set_traits`' arguments in its order, which is also
-// `leaf_traits()`'; the two non-traits follow and take a relative step.
-inline constexpr int par_vcmax_25 = 0;
-inline constexpr int par_stem_c = 1;
-inline constexpr int par_stem_P50 = 2;
-inline constexpr int par_root_c = 3;
-inline constexpr int par_root_P50 = 4;
-inline constexpr int par_TF24_beta2 = 5;
-inline constexpr int par_jmax_25 = 6;
-inline constexpr int par_a = 7;
-inline constexpr int par_curv_fact_elec_trans = 8;
-inline constexpr int par_curv_fact_colim = 9;
-inline constexpr int par_TF24_cost_scale = 10;
-inline constexpr int par_R_d_25 = 11;
-inline constexpr int par_JS22_gamma = 12;
-inline constexpr int par_CMax_a = 13;
-inline constexpr int par_CMax_b = 14;
-// ⚠️ THESE MOVE WHENEVER A TRAIT IS ADDED, and bumping them is the whole cost.
-// They are the non-traits and they sit AFTER the contiguous trait block, which is
-// a readability convention rather than a constraint now: R's
-// `.gradient_theta_matrix()` addresses EVERY column by name, including these.
-// It used to take the traits as "everything but the last two", which is what made
-// the ordering load-bearing; that is fixed. What is still load-bearing is the
-// ORDER ITSELF -- R passes integer positions into this enumeration, so appending
-// is safe and reordering silently differentiates the wrong parameter, and
-// `test-gradient-batch.R` compares this enumeration against R's copy.
-inline constexpr int par_kmax = 15;
-inline constexpr int par_resistance = 16;
-// Cowan-Farquhar's prescribed marginal value of water. A pure APPEND after the two
-// existing non-traits, which is only safe because R addresses theta's non-trait
-// columns by NAME rather than by position -- a positional rule ("everything but
-// the last two") reads this as `resistance`.
-//
-// ⚠️ AVAILABLE FOR ONE MODEL. It is CF77's only parameter and every other curve's
-// lambda is EMERGENT, derived from that curve's own parameters rather than set. So
-// `.gradient_available_pars()` offers it only for CF77 and refuses it elsewhere,
-// naming the model -- the same treatment `resistance` gets on the wrong supply path.
-inline constexpr int par_CF77_lambda = 17;
+// The parameter enumeration now lives in leaf_model.hpp, beside the set_traits
+// whose argument order it IS. It was here while only this file indexed it; the
+// differentiable surface indexes it too, and a list two headers can disagree
+// about is the hazard the comment above it warns of.
 
+// How long `theta` is: one entry per `par_names()` below, indexed by the same
+// enumeration.
+//
+// ⚠️ NOT `n_pars`, WHICH IS LONGER. The pack the leaf's kernels read also holds
+// slots a calibration never proposes -- the light a cohort stands in is seated
+// from the drivers -- so reading `theta` out to `n_pars` runs past its end. The
+// proposed slots come FIRST in the enumeration and `par_PPFD` is where they stop,
+// which is why this is spelled as that index rather than as a count to keep in
+// step by hand.
+inline constexpr int n_theta = par_PPFD;
+
+// ⚠️ THESE ARE THE SLOTS A CALIBRATION PROPOSES, which is fewer than the pack
+// holds: `par_PPFD` is seated per cohort or per observation from the drivers and
+// is never fitted, so it has a slot in the enumeration and no name here. R's
+// `.gradient_par_names()` is compared against this list by
+// `test-gradient-batch.R`, so the two cannot drift apart without a failure.
 inline const std::vector<std::string>& par_names() {
   static const std::vector<std::string> names{
       "vcmax_25",  "stem_c",              "stem_P50",
       "root_c",    "root_P50",            "TF24_beta2",
-      "jmax_25",   "a",                   "curv_fact_elec_trans",
+      "jmax_25",   "phi_J",               "curv_fact_elec_trans",
       "curv_fact_colim", "TF24_cost_scale", "R_d_25",
       "JS22_gamma", "CMax_a", "CMax_b",
       "leaf_specific_conductance_max",
       "resistance",
-      "CF77_lambda_"};
+      "CF77_lambda_",
+      "TF24_floor_lambda_o",
+      "LeastCost_beta",
+      "A_", "I_", "D_", "topt_offset_", "dTopt_max_", "K_A_", "k_i_",
+      "k_i_baseline_", "k_rec_", "m_rep_", "t_rep_cut_", "c_acclim_maint_",
+      "c_repair_maint_", "c_protect_maint_", "c_repair_flux_"};
   return names;
 }
 
@@ -282,7 +281,7 @@ inline double rounded(double x) {
 
 // The step: relative to the parameter for values above 1, and plain `step`
 // below it. The floor is at 1, which is deliberate rather than an epsilon --
-// traits here span `a` = 0.3 to `jmax_25` = 157.44, and a strictly relative step
+// traits here span `phi_J` = 0.35 to `jmax_25` = 157.44, and a strictly relative step
 // would perturb the small ones so little that the difference is dominated by the
 // solve's ~1e-09 noise.
 //
@@ -373,7 +372,7 @@ struct Settings {
 // A collar potential the caller imposes, in place of the one `at` would solve
 // for, plus how that collar responds to each parameter (#88).
 //
-// ⚠️ `dpsi_dtheta` is npars long and in `pars` order, NOT n_pars: it is one value
+// ⚠️ `dpsi_dtheta` is npars long and in `pars` order, NOT n_theta: it is one value
 // per parameter ASKED FOR, because that is the vector a caller integrating its
 // own sensitivity state is carrying. Null means zero -- the partial at fixed
 // collar -- which is a different statement from the solving path's "derive it".
@@ -485,13 +484,35 @@ inline void apply(Leaf& l, const double* theta, const Drivers& d, bool single,
   l.set_traits(theta[par_vcmax_25], theta[par_stem_c], theta[par_stem_P50],
                theta[par_root_c], theta[par_root_P50],
                theta[par_TF24_beta2], theta[par_jmax_25],
-               theta[par_a], theta[par_curv_fact_elec_trans],
+               theta[par_phi_J], theta[par_curv_fact_elec_trans],
                theta[par_curv_fact_colim], theta[par_TF24_cost_scale],
                theta[par_R_d_25], theta[par_JS22_gamma],
                theta[par_CMax_a], theta[par_CMax_b]);
-  // Not a trait, so it is set directly rather than through set_traits -- and
-  // nothing is derived from it, so a bare write leaves no stale state behind.
+  // Not traits, so they are set directly rather than through set_traits -- and
+  // nothing is derived from either, so a bare write leaves no stale state behind.
   l.CF77_lambda_ = theta[par_CF77_lambda];
+  l.TF24_floor_lambda_o = theta[par_TF24_floor_lambda_o];
+  l.LeastCost_beta = theta[par_LeastCost_beta];
+  // The thermal-damage layer's inputs, ONLY with its gate on -- off, the slots
+  // hold whatever a caller zero-filled and are never read -- and BEFORE the
+  // drivers, because set_physiology is what seats the block that reads them.
+  if (l.use_thermal_damage_) {
+    l.A_ = theta[par_A];
+    l.I_ = theta[par_I];
+    l.D_ = theta[par_D];
+    l.topt_offset_ = theta[par_topt_offset];
+    l.dTopt_max_ = theta[par_dTopt_max];
+    l.K_A_ = theta[par_K_A];
+    l.k_i_ = theta[par_k_i];
+    l.k_i_baseline_ = theta[par_k_i_baseline];
+    l.k_rec_ = theta[par_k_rec];
+    l.m_rep_ = theta[par_m_rep];
+    l.t_rep_cut_ = theta[par_t_rep_cut];
+    l.c_acclim_maint_ = theta[par_c_acclim_maint];
+    l.c_repair_maint_ = theta[par_c_repair_maint];
+    l.c_protect_maint_ = theta[par_c_protect_maint];
+    l.c_repair_flux_ = theta[par_c_repair_flux];
+  }
   if (single) {
     // R's `series_resistance()`: a default-constructed network carrying one
     // series resistance in `r_R_V_sum`, which is that field's own meaning with
@@ -551,7 +572,7 @@ inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
                          double psi_star, double H, const double* dY_dpsi,
                          const Settings& s, const double* dpsi_dtheta,
                          bool envelope, double* M_out, double* out) {
-  double th[n_pars];
+  double th[n_theta];
   double up[1 + n_outputs];
   double dn[1 + n_outputs];
   bool at_base = true;
@@ -565,7 +586,7 @@ inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
     for (int side = 0; side < 2; ++side) {
       // Up first, then down: R evaluates `up <- side(1)` before `dn <- side(-1)`
       // and both mutate the leaf.
-      std::copy(theta, theta + n_pars, th);
+      std::copy(theta, theta + n_theta, th);
       th[p] = side == 0 ? theta[p] + h : theta[p] - h;
       apply(l, th, d, single, p, s.fast_stem_curve);
       double* dst = side == 0 ? up : dn;
@@ -633,7 +654,7 @@ inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
 inline void gradient_fd(Leaf& l, const double* theta, const Drivers& d,
                         bool single, const int* pars, std::size_t npars,
                         const Settings& s, double* out) {
-  double th[n_pars];
+  double th[n_theta];
   double up[n_outputs];
   double dn[n_outputs];
   bool at_base = true;
@@ -645,7 +666,7 @@ inline void gradient_fd(Leaf& l, const double* theta, const Drivers& d,
     at_base = false;
     const double h = step_for(p, theta[p], s.fd_step);
     for (int side = 0; side < 2; ++side) {
-      std::copy(theta, theta + n_pars, th);
+      std::copy(theta, theta + n_theta, th);
       th[p] = side == 0 ? theta[p] + h : theta[p] - h;
       apply(l, th, d, single, p, s.fast_stem_curve);
       route_solve(l, s.curve);
@@ -657,6 +678,13 @@ inline void gradient_fd(Leaf& l, const double* theta, const Drivers& d,
   }
   apply(l, theta, d, single, -1, s.fast_stem_curve);
 }
+
+// THE THERMAL-DAMAGE LAYER IS CARRIED (Leaf::use_thermal_damage_). Both routes
+// difference the solve's own dprofit and outputs, which read the block the layer
+// writes, so they need nothing of it but its inputs in `theta` -- seated by
+// `apply()` above. The derivative SURFACE (collar_at, outputs_at) still refuses
+// it: those read capacities off the parameter pack, whose kernels do not apply
+// the layer.
 
 // --- one observation ---------------------------------------------------------
 //
@@ -768,18 +796,21 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
                "has nothing to stand on. This is a shut-down or otherwise "
                "determined operating point; use method = \"auto\".");
   }
+  // ⚠️ REFUSED BY NAME, as R/gradient.R does and in the same place. The step
+  // check below caught every pinned row only while psi* sat 1e-06 of a bracket
+  // width from a bound found to 1e-04; with the bound solved exactly it can fit.
+  if (use_ift && prescribed == nullptr && out.status == Status::Pinned) {
+    util::stop("leaf_gradient(): method = \"ift\" was asked for at a pinned "
+               "optimum, where psi* is held by a bound and the "
+               "implicit-function composite does not apply. Use "
+               "method = \"auto\".");
+  }
 
   double dY_dpsi[n_outputs];
   if (use_ift) {
-    // dY/dpsi at fixed traits, and a SECOND, INDEPENDENT detector of a pinned
-    // optimum. At a pinned point psi* sits one step-in fraction (1e-06 of the
-    // bracket width) from its bound, so a step of `step * psi` crosses it
-    // whenever the bracket is narrower than psi -- which every pinned row in
-    // this package's grid is. Measured, that catches all 42 pinned rows and all
-    // 48 shut-down ones on its own.
-    //
-    // It is NOT a substitute for the stationarity test: it fires only when the
-    // bracket is narrow, so a pinned optimum on a wide bracket would pass it.
+    // dY/dpsi at fixed traits. It also catches SOME pinned optima -- psi* within
+    // h_psi of a bound -- but not all, and nothing relies on it for that: a
+    // forced Method::Ift at a pinned point is refused by name above.
     double hi[n_outputs];
     double lo[n_outputs];
     // Both, unconditionally, before the test -- R computes `hi` and `lo` on
@@ -819,8 +850,8 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
       //
       // ⚠️ THIS IS THE READER #87 SAID DID NOT EXIST YET. Until the prescribed
       // path landed, the only consumer was `gradient_ift` with `envelope` false --
-      // a forced Method::Ift at a pinned point, which throws at all 42 pinned rows
-      // of the grid. A prescribed psi away from the optimum is not stationary, so
+      // a forced Method::Ift at a pinned point, which is refused. A prescribed psi
+      // away from the optimum is not stationary, so
       // it takes this branch for real, and the exactness now matters.
       dY_dpsi[out_profit] = resid;
     }
@@ -887,7 +918,7 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
 
 // --- the batch ---------------------------------------------------------------
 //
-// `theta` is a COLUMN-MAJOR matrix of `theta_nrow` x n_pars, as R hands one
+// `theta` is a COLUMN-MAJOR matrix of `theta_nrow` x n_theta, as R hands one
 // over: either one row per observation, or exactly one row shared by all of
 // them.
 //
@@ -896,7 +927,7 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
 // cannot handle -- that is what a proposal distribution does -- and that has to
 // cost those rows rather than the whole dataset. Throwing would take out a
 // likelihood evaluation, and with it the draw, for one observation the sampler
-// was entitled to reject on its own. `leaf_predict()` isolates per row for the
+// was entitled to reject on its own. `batch()` below isolates per row for the
 // same reason.
 //
 // A failed row's gradient is ALL NA rather than partially filled. A parameter
@@ -918,11 +949,11 @@ inline std::vector<Result> batch(Leaf& l, const double* theta,
                                 const double* dpsi_dtheta = nullptr) {
   const std::size_t n = drivers.size();
   std::vector<Result> out(n);
-  double th[n_pars];
+  double th[n_theta];
   std::vector<double> dpsi(npars);
   for (std::size_t i = 0; i < n; ++i) {
     const std::size_t row = theta_nrow == 1 ? 0 : i;
-    for (int j = 0; j < n_pars; ++j) {
+    for (int j = 0; j < n_theta; ++j) {
       th[j] = theta[row + std::size_t(j) * theta_nrow];
     }
     Prescribed p;

@@ -19,9 +19,16 @@
 //     closed TF24                  1.16 us/call   2.29x realised, phi = 0.271
 //     exact CF77 stem solve        2.74 us/call   1x
 //     closed CF77                  1.37 us/call   1.99x realised, phi = 0.385
+//     exact TF24_floor stem solve     2.93 us/call   1x
+//     closed TF24_floor               1.39 us/call   2.11x realised, phi = 0.375
 //
-// Inverting `1/[phi + (1-phi)/S]` puts the CEILING at S = 4.4x (TF24) and 5.2x
-// (CF77) -- what the method would be worth at phi = 0. Quote the realised column.
+// Inverting `1/[phi + (1-phi)/S]` puts the CEILING at S = 4.4x (TF24), 5.2x (CF77)
+// and 6.3x (TF24_floor) -- what the method would be worth at phi = 0. Quote the
+// realised column.
+//
+// ⚠️ FOR TF24_floor THE REALISED FIGURE IS THE LEAST OF THE STORY, because its tail
+// is worse than the other two's and the shared guard does not see it. Read
+// `solve_TF24_floor`'s own accuracy table before using that arm for anything.
 //
 // HOW. Every model in this family satisfies dA/dE = lambda at the optimum, and
 // given lambda the solution collapses to the Medlyn USO form
@@ -41,9 +48,9 @@
 // exists iff **h'(A) is independent of the solution** -- because that is what lets
 // lambda be evaluated before A is known:
 //
-//   Identity  h' = 1                    TF24, CF77, JS22, CMax    -- qualifies
-//   Scaled    h' = 1/|A|max             ProfitMax                 -- qualifies
-//   Log       h' = 1/A                  SOX, JW26                 -- DOES NOT
+//   Identity  h' = 1              TF24, CF77, JS22, CMax, TF24_floor  -- qualifies
+//   Scaled    h' = 1/|A|max       ProfitMax                        -- qualifies
+//   Log       h' = 1/A            SOX, JW26                        -- DOES NOT
 //
 // `Scaled` qualifies although h' is not 1, because `|A|max` is computed once per
 // driver set by its own maximisation over the supply stream: at solve time it is a
@@ -65,11 +72,32 @@
 //   CMax       (a*psi+b)/(kmax*f) -> b/kmax, or ~psi if b == 0    0 if b != 0 else 1
 //   JS22       2*gamma*dpsi/(kmax*f) -> 2*gamma*psi/kmax          1
 //   TF24       ~psi^(stem_c*beta2 - 1)                            stem_c*beta2 - 1
+//   TF24_floor    lambda_TF24 + lambda_o -> lambda_o                 0    (exact, if
+//                                                                      lambda_o > 0
+//                                                                      and
+//                                                                      stem_c*beta2
+//                                                                      > 1)
 //   ProfitMax  |A|max/(k(psi_soil)-kcrit) rescaling on |f'|/f     stem_c - 1
 //   SOX, JW26  carries A                                          no power law
 //
-// IMPLEMENTED HERE: **TF24 and CF77 only.** The other four are refused, and the two
-// refusals say different things on purpose -- see `optimise_into` below.
+// IMPLEMENTED HERE: **TF24, CF77 and TF24_floor.** The other four are refused, and the
+// two refusals say different things on purpose -- see `optimise_into` below.
+//
+// ⚠️ TF24_floor IS THE n = 0 CASE FOR A REASON WORTH STATING, because it is the one
+// curve here whose exponent is a property of the MODEL rather than of the
+// vulnerability curve. Its lambda is `Theta~'(psi)/K(psi) + lambda_o`, and the
+// first term goes to zero at the wet end -- so the price there is `lambda_o`, a
+// constant, exactly as for CF77. That makes the leading order free and leaves the
+// Newton step doing all the work of restoring the `Theta~'/K` term. At
+// `lambda_o == 0` the limit is zero instead, `xi = sqrt(Q/lambda)` diverges, and
+// the expansion has nothing to expand about: that is TF24, which HAS its own
+// power-law start above, and the refusal points there.
+//
+// ⚠️ THE n = 0 CLAIM INHERITS TF24's OWN CAVEAT ON `TF24_beta2`. `lambda_TF24`
+// goes as `psi^(stem_c*beta2 - 1)`, which vanishes at the wet end only while
+// `stem_c*beta2 > 1` -- 4.02 at this package's defaults, and comfortable. Below
+// that it DIVERGES there, the wet-end limit is not `lambda_o`, and this leading
+// order is wrong rather than merely loose. See `Leaf::lambda_TF24`.
 // ============================================================================
 //
 // ⚠️ HOW ACCURATE IT CAN POSSIBLY BE, WHICH IS NOT SET BY THE POWER LAW.
@@ -148,9 +176,21 @@
 //    `atm_vpd_` EXACTLY when `use_energy_balance_` is false. It is not a no-op with
 //    the gate on, and there the form is not closed at all: `vpd_leaf_` depends on
 //    Tleaf, Tleaf depends on E, and E is what these expressions solve for, so `D`
-//    is not known at the moment of inversion. Option 3 of the three in #116, taken
-//    because it is the honest one and because the measurement is in that issue: the
-//    error with the gate bypassed is reported in the PR.
+//    is not known at the moment of inversion.
+//
+//    ⚠️ THE REFUSAL IS IN THE SOLVERS THEMSELVES, NOT ONLY AT `optimise_closed`,
+//    BECAUSE `within_guard` CANNOT SEE THIS. Measured with the gate forced through
+//    (#121): against a 4000-point argmax of the exact TF24 objective, single layer,
+//    PPFD 900, D_air 1 kPa, the closed form overstates assimilation by 15% at Tair
+//    25, 38% at 30, 146% at 35 and 178% at 40 -- and the guard passed every row.
+//    It compares the solution against itself, so a wrong INPUT (a deficit out by
+//    the 3-4x `vpd_leaf_`/`atm_vpd_` ratio on that path) leaves ci/ca plausible.
+//    Off the gate the same comparison is 0-4%, which is the accuracy claimed above.
+//    Two repairs were worked through in #116 and not taken: one Picard pass over
+//    `D` roughly halves the speedup, and linearising `esat(Tleaf)` about Tair makes
+//    `E` explicit again but leaves a fixed point in `ci`. Hence
+//    `require_prescribed_temperature` below, a hard stop rather than a NaN: a NaN
+//    would reach `within_guard`, read as "fall back", and hide the cause.
 
 #include <phylloptim/constants.hpp>
 #include <phylloptim/leaf_model.hpp>
@@ -208,6 +248,10 @@ inline double stom_cond_from_E(const Leaf &l, double E) {
 // ⚠️ THE ONE PIECE JS22, CMax AND ProfitMax ARE MISSING. Each needs a `dlambda_*`
 // of its own before `solve()` can serve it -- see the taxonomy in the header for
 // the n each of them carries.
+//
+// ⚠️ TF24_floor NEEDS NO SECOND COPY, and that is a consequence of what its cost is
+// rather than a saving. Its lambda is `lambda_TF24 + lambda_o` and the constant
+// differentiates away, so `dlambda/dpsi` for that curve IS this function.
 inline double dlambda_TF24(const Leaf &l, double psi) {
   const double K =
       l.TF24_cost_scale * l.TF24_beta2 * l.stem_c / (l.stem_b * l.leaf_specific_conductance_max_);
@@ -238,6 +282,27 @@ inline double dassim_dci(const Leaf &l, double ci, double electron_transport) {
   const double ddisc =
       (2.0 * s * ds - 4.0 * cv * (dar * ae + ar * dae)) / (2.0 * disc);
   return (ds - ddisc) / (2.0 * cv);
+}
+
+// The energy-balance refusal, in ONE place: `Leaf::optimise_closed` and each of
+// the four solvers below call it, so the production route and a direct call of a
+// solver -- from a test, a bench, a consumer -- cannot drift apart on what they
+// refuse. A hard stop rather than a NaN, because a NaN would reach `within_guard`,
+// which would report `false`, which `optimise_into` reads as "fall back to the
+// exact solve": the right answer, silently, with the cause one step further away.
+// The cost on the hot path is one bool read.
+inline void require_prescribed_temperature(const Leaf &l, const char *who) {
+  if (l.use_energy_balance_) {
+    util::stop(std::string(who) +
+               " is refused with use_energy_balance_ on, and this is a statement "
+               "about the form rather than about its accuracy (#116). Fick's law "
+               "divides by vpd_leaf_, which depends on Tleaf, which depends on E "
+               "-- and E is what the inversion solves for. So the deficit D is not "
+               "known at the moment of inversion and the form is not closed; "
+               "forced through, it overstates assimilation by up to 178% and "
+               "within_guard does not see it. Use method \"exact\", or prescribe "
+               "the leaf temperature by setting use_energy_balance_ to false.");
+  }
 }
 
 struct Solution {
@@ -271,14 +336,22 @@ inline double psi_from_supply(Leaf &l, double E, double psi_upstream) {
   return l.transpiration_to_psi_stem(E, psi_upstream);
 }
 
-// Assemble the outputs implied by a stem potential, for TF24.
-inline Solution evaluate_at(Leaf &l, double psi, double Q, double sqrt_D) {
-  const double lambda = l.lambda_TF24(psi);
+// Assemble the outputs implied by a stem potential and the marginal cost of water
+// there. The curve enters through `lambda` and nowhere else, which is what lets one
+// body serve every curve whose `h'` is a solve-time constant.
+inline Solution evaluate_at_lambda(Leaf &l, double psi, double lambda, double Q,
+                                   double sqrt_D) {
   const double xi = std::sqrt(Q / lambda);
   const double ci = l.ca_ * xi / (xi + sqrt_D);
   const double assim = l.assim_colimited(ci);
   const double E = transpiration_from_assim(l, assim, ci);
   return Solution{psi, ci, assim, E, stom_cond_from_E(l, E), xi};
+}
+
+// The same, for TF24. Kept as a named wrapper rather than folded into its one call
+// site so that the TF24 arm still reads as TF24's.
+inline Solution evaluate_at(Leaf &l, double psi, double Q, double sqrt_D) {
+  return evaluate_at_lambda(l, psi, l.lambda_TF24(psi), Q, sqrt_D);
 }
 
 // The wet-end starting potential, in units of stem_b. Pure arithmetic: no spline
@@ -330,6 +403,7 @@ inline double wet_end_p(double C, double p_up, double n, double p_crit) {
 // steps on the full supply-minus-demand residual. Requires set_physiology to have
 // run. See note 1 in the header: leave newton_steps at 1.
 inline Solution solve(Leaf &l, double psi_upstream, int newton_steps = 1) {
+  require_prescribed_temperature(l, "closed_form::solve");
   const double kmax = l.leaf_specific_conductance_max_;
   const double sqrt_D = std::sqrt(l.vpd_leaf_);
   const double Q = uso_group(l);
@@ -401,6 +475,7 @@ inline Solution solve(Leaf &l, double psi_upstream, int newton_steps = 1) {
 // clean test of the n = 0 arm; the claim that it is the preferred parameterisation
 // is withdrawn.
 inline Solution solve_exact_beta2(Leaf &l, double psi_upstream) {
+  require_prescribed_temperature(l, "closed_form::solve_exact_beta2");
   const double sqrt_D = std::sqrt(l.vpd_leaf_);
   const double Q = uso_group(l);
   const double xi = std::sqrt(Q * l.stem_b * l.leaf_specific_conductance_max_ /
@@ -430,6 +505,7 @@ inline bool beta2_is_exact(const Leaf &l, double tol = 1e-12) {
 // inversion, exact to the spline. The n = 0 exactness is a statement about lambda,
 // which is the only thing the power-law machinery approximates.
 inline Solution solve_CF77(Leaf &l, double psi_upstream) {
+  require_prescribed_temperature(l, "closed_form::solve_CF77");
   const double sqrt_D = std::sqrt(l.vpd_leaf_);
   const double xi = std::sqrt(uso_group(l) / l.cf77_price());
   const double ci = l.ca_ * xi / (xi + sqrt_D);
@@ -437,6 +513,105 @@ inline Solution solve_CF77(Leaf &l, double psi_upstream) {
   const double E = transpiration_from_assim(l, assim, ci);
   return Solution{psi_from_supply(l, E, psi_upstream),
                   ci, assim, E, stom_cond_from_E(l, E), xi};
+}
+
+// TF24_floor. The leading order is CF77's -- at the wet end lambda IS `lambda_o`, and
+// the `Theta~'/K` term vanishes with the drop -- so the start costs one pass with no
+// power law and no `wet_end_p`. What the Newton step then restores is that term,
+// which is what separates this curve from Cowan-Farquhar.
+//
+// ⚠️ THE START IS ONE-SIDED, AND KNOWING WHICH SIDE IS WHAT MAKES IT SAFE.
+// lambda is `lambda_o` plus a non-negative term, so the start assumes the LOWEST
+// price this curve can charge; a lower price buys more water, so it overstates E
+// and lands too DRY. The Newton step walks back toward the soil from there, and
+// `psi_from_supply` clamps at psi_crit on the way, so a start past the dry bound is
+// a clamp rather than a failure -- and if the walk-back does not clear the bound,
+// `within_guard` hands the row to the exact solve.
+//
+// ⚠️ THE STRICT CLAMP ON THE START IS LOAD-BEARING, NOT TIDINESS. `psi_from_supply`
+// returns psi_crit ITSELF when the leading order asks for more water than the stem
+// can carry, and the Newton loop's own bracket test breaks on `psi >= psi_crit` --
+// so an unclamped start at the bound takes zero steps and every such row falls
+// back. Measured over the 150-row grid below: clamping takes the fallback fraction
+// from 0.56 to 0.29 at `TF24_cost_scale = 0.5`, and from 0.67 to 0.61 at the
+// default 7.5, with the worst served error unchanged in both. It buys coverage,
+// not accuracy.
+//
+// ⚠️ AND THIS ARM'S TAIL IS WORSE THAN THE OTHER TWO, WHICH THE SHARED GUARD DOES
+// NOT SEE. 150-row grid (5 lambda_o x 5 psi_soil x 3 D x 2 PPFD, 25 C),
+// `|psi* - psi*_exact| / psi*_exact` over the rows the guard SERVED:
+//
+//     curve                            phi    worst served   median served
+//     TF24                             0.30   5.3e-02        2.3e-02
+//     CF77                             0.55   2.4e-01        7.0e-02
+//     TF24_floor, TF24_cost_scale = 0.5   0.29   2.9e-01        4.4e-02
+//     TF24_floor, TF24_cost_scale = 7.5   0.61   5.2e-01        5.1e-02
+//
+// At a small hydraulic scale it is CF77's method with roughly CF77's accuracy,
+// which is what it should be -- the curve is nearly CF77 there. At the DEFAULT
+// scale the discarded TF24 term dominates `lambda_o` at the operating point, the
+// leading order is correspondingly bad, and one Newton step does not recover it.
+// The guard does not catch that: it tests `ci/ca`, which is computed from the
+// closed form's own lambda and stays plausible while psi* is wrong. **Do not read
+// the median as the method's accuracy on this curve, and note that the bad column
+// is the DEFAULT one.** A guard on the expansion's own small parameter -- the share
+// of lambda the leading order discarded -- was tried and does not discriminate:
+// bucketing 1050 rows by it, the worst served error was 3.2e-01 in the smallest
+// bucket and 1.2e-01 in the largest.
+//
+// `newton_steps` defaults to 1 for note 1's reason unchanged.
+inline Solution solve_TF24_floor(Leaf &l, double psi_upstream,
+                              int newton_steps = 1) {
+  require_prescribed_temperature(l, "closed_form::solve_TF24_floor");
+  const double kmax = l.leaf_specific_conductance_max_;
+  const double sqrt_D = std::sqrt(l.vpd_leaf_);
+  const double Q = uso_group(l);
+  const double electron_transport = l.electron_transport();
+
+  // Leading order: lambda == lambda_o, i.e. `solve_CF77` at this curve's price.
+  const double xi0 = std::sqrt(Q / l.TF24_floor_lambda_o);
+  const double ci0 = l.ca_ * xi0 / (xi0 + sqrt_D);
+  const double assim0 = l.assim_colimited(ci0);
+  double psi = std::min(psi_from_supply(l, transpiration_from_assim(l, assim0, ci0),
+                                        psi_upstream),
+                        l.psi_crit * (1.0 - 1e-9));
+
+  for (int k = 0; k < newton_steps; ++k) {
+    // The bracket, not just positivity -- `solve()`'s reason verbatim: below
+    // psi_upstream no water moves and the residual's supply term is negative,
+    // which Newton would chase outward.
+    if (!(psi > psi_upstream) || psi >= l.psi_crit) {
+      break;
+    }
+    const double lambda = l.lambda_TF24_floor(psi);
+    const double xi = std::sqrt(Q / lambda);
+    const double ci = l.ca_ * xi / (xi + sqrt_D);
+    const double assim = l.assim_colimited(ci);
+    const double dassim = dassim_dci(l, ci, electron_transport);
+    const double u = l.ca_ - ci;
+    const double E = transpiration_from_assim(l, assim, ci);
+    const double dE_dci = l.H2O_CO2_stom_diff_ratio_ * 1e-3 * l.vpd_leaf_ /
+                          kg_to_mol_h2o * (dassim * u + assim) / (u * u);
+    const double dci_dxi = l.ca_ * sqrt_D / ((xi + sqrt_D) * (xi + sqrt_D));
+    // The price floor differentiates away: d(lambda_TF24 + lambda_o)/dpsi is
+    // dlambda_TF24 exactly, so this arm shares TF24's derivative rather than
+    // carrying one of its own.
+    const double dxi_dpsi = -0.5 * xi / lambda * dlambda_TF24(l, psi);
+    const double R = l.transpiration(psi, psi_upstream) - E;
+    const double dR = kmax * l.proportion_of_conductivity(psi) -
+                      dE_dci * dci_dxi * dxi_dpsi;
+    if (dR == 0.0 || !std::isfinite(R) || !std::isfinite(dR)) {
+      break;
+    }
+    const double psi_next = psi - R / dR;
+    if (!std::isfinite(psi_next)) {
+      break;
+    }
+    psi = std::max(psi_upstream,
+                   std::min(psi_next, l.psi_crit * (1.0 - 1e-9)));
+  }
+
+  return evaluate_at_lambda(l, psi, l.lambda_TF24_floor(psi), Q, sqrt_D);
 }
 
 // The validity guard. The closed form degrades where the leaf is far from the
@@ -458,6 +633,13 @@ inline Solution solve_CF77(Leaf &l, double psi_upstream) {
 // error. A bound is where the two methods are least comparable and where the exact
 // solve is cheapest to be right about -- it tests the gradient's sign there
 // explicitly -- so a closed form that arrives at one hands the row back.
+// ⚠️ AND IT GUARDS THE EXPANSION, NOT THE MODEL. It reads the solution and three
+// bounds (`ca_`, `psi_soil`, `psi_crit`) and no driver, so it cannot see an INPUT
+// being wrong: with the energy balance forced through, the deficit out by 3-4x and
+// assimilation by up to 178%, it returned true on every row (#116). A `false`
+// means "outside the expansion, fall back to the exact solve"; a `true` never
+// means "the answer is right". That is why the energy-balance refusal is a stop in
+// the solvers and not a case here.
 inline bool within_guard(const Leaf &l, const Solution &s) {
   return std::isfinite(s.psi_stem) && std::isfinite(s.ci) &&
          std::isfinite(s.assim) && s.ci / l.ca_ > 0.5 &&
@@ -487,10 +669,35 @@ inline bool within_guard(const Leaf &l, const Solution &s) {
 template <Leaf::CostCurve K>
 inline void optimise_into(Leaf &l) {
   using CostCurve = Leaf::CostCurve;
-  if constexpr (K == CostCurve::TF24 || K == CostCurve::CF77) {
+  if constexpr (K == CostCurve::TF24 || K == CostCurve::CF77 ||
+                K == CostCurve::TF24_floor) {
     l.clear_collar_solve_state();
     l.check_cost_parameters<K>();
     ++l.closed_form_calls_;
+
+    // ⚠️ THE ONE CONFIGURATION REFUSAL INSIDE A CURVE RATHER THAN BESIDE IT, and
+    // it is a statement about the expansion rather than about the parameter.
+    // TF24_floor's wet-end lambda is `lambda_o`, which is what makes it the n = 0
+    // case; at `lambda_o == 0` that limit is zero, `xi = sqrt(Q/lambda)` diverges
+    // and there is nothing to expand about. That case is TF24 exactly (see
+    // `Leaf::hydraulic_cost_TF24_floor`), which has its own start -- so the refusal
+    // names it rather than returning a silent infinity.
+    //
+    // Checked here and not in `check_cost_parameters`, because zero is a VALID
+    // parameter for the model and an invalid one for this method. The exact solve
+    // takes it without complaint, which is the point of the last sentence.
+    if constexpr (K == CostCurve::TF24_floor) {
+      if (!(l.TF24_floor_lambda_o > 0.0)) {
+        util::stop("the closed form needs TF24_floor_lambda_o > 0; got " +
+                   util::to_string(l.TF24_floor_lambda_o) + ". At lambda_o = 0 this "
+                   "curve IS TF24 -- its wet-end marginal cost of water is zero "
+                   "rather than a constant, so the USO slope xi = sqrt(Q/lambda) "
+                   "diverges and the leading order this method expands about does "
+                   "not exist. Seat TF24 instead, whose own power-law start "
+                   "(n = stem_c*TF24_beta2 - 1) is implemented, or use method "
+                   "\"exact\", which takes lambda_o = 0 without complaint.");
+      }
+    }
 
     const double psi_soil = l.supply_psi_soil_scalar();
     l.opt_psi_stem_ = psi_soil;
@@ -509,6 +716,8 @@ inline void optimise_into(Leaf &l) {
     Solution s{};
     if constexpr (K == CostCurve::CF77) {
       s = solve_CF77(l, psi_soil);
+    } else if constexpr (K == CostCurve::TF24_floor) {
+      s = solve_TF24_floor(l, psi_soil);
     } else {
       s = beta2_is_exact(l) ? solve_exact_beta2(l, psi_soil)
                             : solve(l, psi_soil);
@@ -550,20 +759,32 @@ inline void optimise_into(Leaf &l) {
                "rescaling. Use method \"exact\", or add the derivative to "
                "closed_form.hpp.");
   } else {
-    static_assert(K == CostCurve::SOX || K == CostCurve::JW26,
+    static_assert(K == CostCurve::SOX || K == CostCurve::JW26 ||
+                      K == CostCurve::LeastCost,
                   "unhandled CostCurve in closed_form::optimise_into");
     // ⚠️ NOT A MISSING PIECE. This is the one place the closed form cannot exist,
     // and saying so precisely matters more than the refusal: the LOG benefit link
     // has h'(A) = 1/A, so lambda carries A, xi carries lambda, ci carries xi and
     // A = A(ci) closes the loop. It is a fixed point in the unknown, which can be
     // iterated but not inverted. Every other link's h' is a constant at solve time.
+    //
+    // ⚠️ LEAST-COST IS THE AWKWARD MEMBER OF THIS ARM, and the refusal is still
+    // right. Prentice et al. (2014) DO publish a closed form -- `chi = xi/(xi +
+    // sqrt(D))` with `xi = sqrt(beta*(Km + Gamma*)/1.6)` -- but they obtain it by
+    // solving the first-order condition in `ci` directly, where the `A` in lambda
+    // cancels against the `A` in the ratio. THIS routine inverts a lambda into a
+    // Medlyn xi and then into a potential, which is the step the fixed point
+    // blocks. `tests/cpp/test_leaf.cpp`'s least-cost test checks the exact solve
+    // against that published form instead; a closed form here would be a second
+    // solver for the same argmax, which this package does not add (see
+    // .claude/CLAUDE.md, "One solver").
     util::stop("the closed form does not exist for the " +
                Leaf::curve_name(static_cast<int>(K)) + " cost curve, and it is "
-               "not a matter of unwritten algebra. SOX and JW26 are the two "
-               "curves with the LOG benefit link, where h'(A) = 1/A -- so lambda "
-               "carries the assimilation the solve is for, and given lambda -> xi "
-               "-> ci -> A the dependency closes into a fixed point rather than "
-               "an inversion. Use method \"exact\".");
+               "not a matter of unwritten algebra. SOX, JW26 and LeastCost are the "
+               "three curves with the LOG benefit link, where h'(A) = 1/A -- so "
+               "lambda carries the assimilation the solve is for, and given "
+               "lambda -> xi -> ci -> A the dependency closes into a fixed point "
+               "rather than an inversion. Use method \"exact\".");
   }
 }
 
@@ -574,9 +795,9 @@ inline void optimise_into(Leaf &l) {
 // `Leaf` -- see the declaration for why that is legal and what breaks if the
 // include order changes.
 //
-// ⚠️ THE THREE REFUSALS ARE CONFIGURATION CHECKS, SO THEY BELONG AT SOLVE TIME AND
-// NOT IN `set_model`. Every one of route, supply topology and energy balance is
-// settable after the model is seated, so a check at seating time would either fire
+// ⚠️ THE FOUR REFUSALS ARE CONFIGURATION CHECKS, SO THEY BELONG AT SOLVE TIME AND
+// NOT IN `set_model`. Every one of route, supply topology, energy balance and the
+// thermal-damage layer is settable after the model is seated, so a check at seating time would either fire
 // on a leaf that was about to become valid or miss a leaf that had just stopped
 // being.
 inline void Leaf::optimise_closed() {
@@ -594,14 +815,14 @@ inline void Leaf::optimise_closed() {
                + util::to_string(static_cast<int>(supply_n_layers())) +
                " layers; use one layer, or method \"exact\".");
   }
-  if (use_energy_balance_) {
-    util::stop("the closed form is refused with use_energy_balance_ on, and this "
-               "is a statement about the form rather than about its accuracy "
-               "(#116). Fick's law divides by vpd_leaf_, which depends on Tleaf, "
-               "which depends on E -- and E is what the inversion solves for. So "
-               "the deficit D is not known at the moment of inversion and the "
-               "form is not closed. Use method \"exact\", or prescribe the leaf "
-               "temperature by setting use_energy_balance_ to false.");
+  // The same stop the four solvers raise, so this check and theirs cannot drift.
+  closed_form::require_prescribed_temperature(*this, "the closed form");
+  if (use_thermal_damage_) {
+    util::stop("the closed form is refused with use_thermal_damage_ on: it has "
+               "not been checked against the exact solve with the thermal-damage "
+               "layer's shifted capacities, functional fraction and costs in place, "
+               "and its validity guard was measured without them. Use method "
+               "\"exact\", or set use_thermal_damage_ to false.");
   }
   with_curve(cost_curve_, [&](auto tag) {
     closed_form::optimise_into<tag.value>(*this);

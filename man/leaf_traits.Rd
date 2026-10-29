@@ -12,7 +12,7 @@ leaf_traits(
   root_P50 = 3.4,
   TF24_beta2 = 1.5,
   jmax_25 = 157.44,
-  a = 0.3,
+  phi_J = 0.3/0.85,
   curv_fact_elec_trans = 0.7,
   curv_fact_colim = 0.99,
   TF24_cost_scale = 7.5,
@@ -40,7 +40,12 @@ magnitude), with \code{root_b} and \code{root_psi_crit} derived from it.}
 
 \item{jmax_25}{maximum electron transport rate at 25 C (umol m^-2 s^-1)}
 
-\item{a}{quantum yield of photosynthetic electron transport (mol mol^-1)}
+\item{phi_J}{quantum yield of electron transport per ABSORBED photon
+(mol mol^-1). The leaf absorbs \code{alpha_PAR_} (0.85 by default) of the
+intercepted \code{PPFD}, so the default 0.30 / 0.85 is the old incident-basis
+yield of 0.30 restated. A gas-exchange fit identifies only
+\code{phi_J * alpha_PAR_}; fix \code{alpha_PAR_} to make the fitted value per absorbed
+photon. Was \code{a} (incident basis) before 0.13.0: \code{phi_J = a / 0.85}.}
 
 \item{curv_fact_elec_trans}{curvature of the light response curve (unitless)}
 
@@ -104,11 +109,10 @@ the resulting \code{Leaf} and not settable anywhere. See \code{\link[=weibull_p5
 \section{psi_crit is not a free trait}{
 
 \code{psi_crit} is the stem curve's \strong{P95} and is derived from \code{stem_P50}/\code{stem_c},
-not set. It used to be settable, describing a curve it was not derived from:
-the curve is pre-integrated over \verb{[0, P99]}, \code{psi_crit} never entered that
-bound, and every solve evaluates the curve \emph{at} \code{psi_crit} -- so anyone fitting
-a measured vulnerability curve picked a plausible number and got a domain error
-naming only the interpolator.
+not set, and could not safely be: the curve is pre-integrated over \verb{[0, P99]},
+\code{psi_crit} does not enter that bound, and every solve evaluates the curve \emph{at}
+\code{psi_crit} -- so setting it to a plausible number off a measured vulnerability
+curve gives a domain error naming only the interpolator.
 
 At the defaults:
 

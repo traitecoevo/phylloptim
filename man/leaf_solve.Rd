@@ -19,14 +19,20 @@ leaf_solve(
   control = leaf_control(),
   supply = leaf_supply_multilayer(),
   reuse = TRUE,
-  model = "collar"
+  model = "collar",
+  CF77_lambda = NA_real_,
+  TF24_floor_lambda_o = NA_real_,
+  LeastCost_beta = NA_real_
 )
 }
 \arguments{
 \item{psi_soil}{soil water potential, MPa, \strong{positive magnitude}. Length
 sets the number of soil layers.}
 
-\item{PPFD}{photosynthetic photon flux density, umol m^-2 s^-1}
+\item{PPFD}{INTERCEPTED photosynthetic photon flux density per unit leaf area,
+umol m^-2 s^-1: the light incident on the leaf, before its absorptance
+(\code{alpha_PAR_}). On the energy-balance path the leaf also needs \verb{$NIR_int_},
+the intercepted near-infrared in W m^-2, set before this call.}
 
 \item{soil_depth}{cumulative depth to the bottom of each layer, m. Defaults
 to 1 m layers.}
@@ -85,8 +91,27 @@ the collar is not solved for at all. An absent number is the truthful answer
 rather than a gap -- reading one would be reading whatever the last solve
 left behind.
 
-\code{CF77} needs \verb{$CF77_lambda_}, which has no default and is not reachable
-through this function; build the leaf with \code{\link[=leaf_model]{leaf_model()}} and set it.}
+Two curves take a PRESCRIBED price of water rather than deriving one:
+\code{CF77} reads \code{CF77_lambda} and \code{TF24_floor} reads \code{TF24_floor_lambda_o},
+both below. Neither has a default, and each curve refuses to solve without
+its own.}
+
+\item{CF77_lambda, TF24_floor_lambda_o}{the prescribed marginal value of water
+for the two curves that take one, in umol C (kg H2O)^-1. \code{NA_real_} (the
+default) leaves the field unset, which every other model wants.
+
+⚠️ \strong{Their scale is set by the leaf, not chosen freely.} At this package's
+defaults the leaf's own marginal cost of water runs 9e4 to 3e5, and a price
+far outside that band pins the optimum against a bound — where the answer
+describes the bracket rather than the model. \code{\link[=operating_point]{operating_point()}}'s
+\code{lambda_emergent} is how you find a value that means something.}
+
+\item{LeastCost_beta}{the \code{LeastCost} curve's unit-cost ratio (Prentice et
+al. 2014's beta): the cost of maintaining carboxylation capacity relative to
+the cost of transpiration, dimensionless. Only \code{model = "LeastCost"} reads
+it. That curve refuses to solve without one, and refuses zero as well, since
+at zero the capacity term vanishes and what is left is water-use efficiency,
+which rises without bound as transpiration falls. The published value is 146.}
 }
 \value{
 A data.frame with one row per driver combination: the drivers, then

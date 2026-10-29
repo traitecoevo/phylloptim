@@ -88,7 +88,7 @@ set_traits <- function(x, traits) {
   # the ordering is written down once rather than at every call site.
   x$set_traits(traits$vcmax_25, traits$stem_c, traits$stem_P50,
                traits$root_c, traits$root_P50, traits$TF24_beta2,
-               traits$jmax_25, traits$a, traits$curv_fact_elec_trans,
+               traits$jmax_25, traits$phi_J, traits$curv_fact_elec_trans,
                traits$curv_fact_colim, traits$TF24_cost_scale, traits$R_d_25,
                traits$JS22_gamma, traits$CMax_a, traits$CMax_b)
   invisible(x)
@@ -342,7 +342,7 @@ set_traits <- function(x, traits) {
 ##' 57-parameter variant costing the same as its 40-parameter one, because
 ##' `P_model` is 4 in both.
 ##'
-##' ⚠️ **Always pass `pars`.** It is `P_model`, so the default — all sixteen on
+##' ⚠️ **Always pass `pars`.** It is `P_model`, so the default — all fifteen on
 ##' the multi-layer path — is the most expensive thing you can ask for, and a fit
 ##' that reads four of them pays for twelve it discards.
 ##'
@@ -402,8 +402,23 @@ set_traits <- function(x, traits) {
 ##'   to differentiate*.
 ##' @param pars what to differentiate with respect to. Any of the fifteen
 ##'   [leaf_traits()] names, plus `"leaf_specific_conductance_max"`, on the
-##'   single-potential path only `"resistance"`, and on `model = "CF77"` only
-##'   `"CF77_lambda_"`. Defaults to all the route allows.
+##'   single-potential path only `"resistance"`, on `model = "CF77"` only
+##'   `"CF77_lambda_"`, on `model = "TF24_floor"` only `"TF24_floor_lambda_o"`,
+##'   and on `model = "LeastCost"` only `"LeastCost_beta"`.
+##'   On a reused leaf `x` with `use_thermal_damage_` on, also the layer's inputs
+##'   that reach the solve: its states `"A_"`, `"I_"`, `"D_"`, the optimum shift
+##'   `"topt_offset_"`, `"dTopt_max_"`, `"K_A_"`, and every quantity a maintenance
+##'   cost multiplies (`"k_i_"`, `"k_i_baseline_"`, `"k_rec_"`, `"m_rep_"`,
+##'   `"t_rep_cut_"`, `"c_acclim_maint_"`, `"c_repair_maint_"`,
+##'   `"c_protect_maint_"`, `"c_repair_flux_"`). The layer's dynamics parameters
+##'   move no solved output and are refused; their gradient is
+##'   [leaf_damage_gradient()]'s. Defaults to all the route allows.
+##'
+##'   ⚠️ At 25 C the peaked Arrhenius is normalised to its reference, so
+##'   `topt_offset_` and `dTopt_max_` have an exactly zero effect there -- a true
+##'   zero, not a missing row.
+##'   `max(0, k_i_baseline_ - k_i_)` has a kink at equality (the default), where
+##'   the two columns report the difference's average slope.
 ##'
 ##'   `dY/dvcmax_25` is a PARTIAL at fixed respiration: `R_d_25` is its own trait,
 ##'   so a fit that wants respiration to follow Vcmax moves both and adds the two
@@ -565,6 +580,9 @@ leaf_gradient <- function(psi_soil,
       leaf_supply_multilayer()
     }
   }
+  # The thermal-damage layer's inputs are parameters ONLY on a leaf with its gate
+  # on, which only a reused leaf can have: one built here has it off.
+  damage <- !is.null(x) && isTRUE(x$use_thermal_damage_)
 
   # Resolve the single path's default resistance HERE rather than letting
   # set_drivers() do it, because `resistance` is one of the parameters being
@@ -582,25 +600,32 @@ leaf_gradient <- function(psi_soil,
                   atm_vpd = atm_vpd, ca = ca, leaf_temp = leaf_temp,
                   atm_o2_kpa = atm_o2_kpa, atm_kpa = atm_kpa)
 
-  # The differentiable parameters: the fifteen traits, plus the three that are not
+  # The differentiable parameters: the fifteen traits, plus the four that are not
   # traits and that a calibration nonetheless fits (#44). See .gradient_theta.
   # ⚠️ READ OFF THE LEAF, not defaulted, for the same reason the resistance is:
-  # theta has to hold the value the solve will actually use, and on the CF77 route
-  # that is whatever the caller assigned to `x$CF77_lambda_` before calling.
+  # theta has to hold the value the solve will actually use, and on the two priced
+  # routes that is whatever the caller assigned to `x$CF77_lambda_` /
+  # `x$TF24_floor_lambda_o` before calling.
   theta <- .gradient_theta(traits, leaf_specific_conductance_max, supply,
                            root_network,
                            CF77_lambda = if (is.null(x)) NA_real_ else
-                             x$CF77_lambda_)
+                             x$CF77_lambda_,
+                           TF24_floor_lambda_o = if (is.null(x)) NA_real_ else
+                             x$TF24_floor_lambda_o,
+                           LeastCost_beta = if (is.null(x)) NA_real_ else
+                             x$LeastCost_beta,
+                           damage = if (damage) .gradient_damage_values(x))
   if (is.null(pars)) {
     # ⚠️ WHAT IS AVAILABLE, not every slot in `theta`. The enumeration now carries
     # a parameter that belongs to one model, so "all of them" and "all of the ones
     # this route can differentiate" have stopped being the same set -- and taking
     # the former made the default refuse itself.
-    pars <- .gradient_available_pars(identical(supply$kind, "single"), model)
+    pars <- .gradient_available_pars(identical(supply$kind, "single"), model,
+                                     damage)
   }
   # Shared with leaf_gradient_batch(), so the two entry points cannot disagree
   # about which parameters exist or explain a rejection differently.
-  .gradient_check_pars(pars, identical(supply$kind, "single"), model)
+  .gradient_check_pars(pars, identical(supply$kind, "single"), model, damage)
   # ⚠️ HERE, NOT WHERE IT IS USED. `dpsi_dtheta` is only READ inside the
   # composite, which a clamped or shut-down operating point never reaches -- so
   # validating it there made a wrong-length vector an error at some psi and
@@ -617,7 +642,7 @@ leaf_gradient <- function(psi_soil,
   # a call in a per-observation fit. Construction is the single largest term on
   # this surface.
   l <- if (is.null(x)) leaf_model(traits, control, supply) else x
-  reset <- .gradient_setter(l, traits, drivers, supply, fast_stem_curve)
+  reset <- .gradient_setter(l, traits, drivers, supply, fast_stem_curve, damage)
 
   if (is.null(x)) {
     do.call(set_drivers, c(list(l), drivers))
@@ -740,6 +765,16 @@ leaf_gradient <- function(psi_soil,
          "on. This is a shut-down or otherwise determined operating point; use ",
          "method = \"auto\".", call. = FALSE)
   }
+  # ⚠️ REFUSED BY NAME, NOT LEFT TO THE STEP CHECK BELOW. At a pinned optimum the
+  # composite divides by a curvature the argmax does not sit on, and its answer is
+  # O(1) where the truth is ~1e-07. The step check used to catch every pinned row
+  # only because psi* sat 1e-06 of a bracket width from a bound found to 1e-04;
+  # with the bound solved exactly, psi* sits beside it and a step can fit.
+  if (use_ift && !prescribed && identical(status, "pinned")) {
+    stop("leaf_gradient(): method = \"ift\" was asked for at a pinned optimum, ",
+         "where psi* is held by a bound and the implicit-function composite ",
+         "does not apply. Use method = \"auto\".", call. = FALSE)
+  }
   # ⚠️ A CLAMPED PRESCRIBED PSI GETS NO GRADIENT, RATHER THAN THE DIRECT TERM.
   # It is not a failure -- the outputs at the clamped collar are perfectly good,
   # and TF24f relies on the clamp to pull an out-of-range tracked state back
@@ -760,20 +795,9 @@ leaf_gradient <- function(psi_soil,
     # evaluation would silently make this a one-sided difference over a shorter
     # interval, which is the same class of error as the pinned case.
     #
-    # This turns out to be a SECOND, INDEPENDENT detector of a pinned optimum
-    # rather than the unreachable guard it was written as, and the measurement is
-    # worth recording. At a pinned point psi* sits one step-in fraction (1e-06 of
-    # the bracket width) from the bound, so a step of `step` * psi in psi crosses
-    # it whenever the bracket is narrower than psi -- which every pinned row in
-    # the package's grid is, being at the dry end where the feasible interval has
-    # nearly closed. Measured: forcing method = "ift" fails here on all 42 pinned
-    # rows and on all 48 shut-down ones, so the composite's silently-wrong answer
-    # is not reachable through this function at all.
-    #
-    # It is NOT a substitute for the stationarity test, and reading it as one
-    # would be the mistake: it fires only when the bracket is narrow, so a pinned
-    # optimum on a wide bracket would pass it. The stationarity test is the one
-    # that is scale-free and the one the default relies on.
+    # It also catches SOME pinned optima -- psi* within h_psi of a bound -- but
+    # not all, and nothing relies on it for that: a forced "ift" at a pinned point
+    # is refused by name above, on the stationarity test, which is scale-free.
     hi <- .gradient_outputs_at(l, psi_star + h_psi, route)
     lo <- .gradient_outputs_at(l, psi_star - h_psi, route)
     if (is.null(hi) || is.null(lo)) {
@@ -805,8 +829,8 @@ leaf_gradient <- function(psi_soil,
       #
       # ⚠️ THIS IS THE READER #87 SAID DID NOT EXIST YET. Until the prescribed path
       # landed, the only consumer was `.gradient_ift(envelope = FALSE)` -- a forced
-      # method = "ift" at a pinned point, which throws at all 42 pinned rows of the
-      # grid. A prescribed psi away from the optimum is not stationary, so it takes
+      # method = "ift" at a pinned point, which is refused. A prescribed psi away
+      # from the optimum is not stationary, so it takes
       # this branch for real, and the exactness now matters.
       dY_dpsi[["profit"]] <- resid
     }
@@ -950,12 +974,11 @@ leaf_gradient <- function(psi_soil,
   # destroys -- `set_traits` + `set_physiology` clears it, measured 16.757 -> NaN --
   # so something has to put it back before every read.
   #
-  # It used to be PINNED at the base point, for a reason that has since been fixed:
-  # `|A|max` was the argmax of a 500-point scan, so it was piecewise constant in the
-  # traits and a total derivative through it was zeros and jumps. It is found by a
-  # root-find now, and cheaply (it sits at the dry bound on 1318 of 1320 driver
-  # rows), so re-solving it lets it follow the traits -- which is the quantity a fit
-  # needs, and removes the partial-versus-total split this route used to carry.
+  # ⚠️ DO NOT PIN IT AT THE BASE POINT. `|A|max` is found by a root-find, and
+  # cheaply (it sits at the dry bound on 1318 of 1320 driver rows), so re-solving it
+  # lets it follow the traits, which is the quantity a fit needs. Pinned, it is
+  # piecewise constant in the traits and a total derivative through it is zeros and
+  # jumps.
   #
   # A no-op on every other curve, which is why it is one function and not a pair
   # with a `capture` half that did nothing on either branch.
@@ -1038,7 +1061,7 @@ leaf_gradient <- function(psi_soil,
 # ⚠️ ONE call, not four field reads. Every `l$field` is an R6 ACTIVE BINDING -- a
 # closure call wrapping a `.Call` -- and this function runs once per perturbation, so
 # eleven times per four-parameter gradient. Four reads cost 4.65 us against 0.93 us
-# for the one C++ reader that returns all thirteen outputs, and `$` was 12.7% of a
+# for the one C++ reader that returns all fifteen outputs, and `$` was 12.7% of a
 # gradient's self time before this. Same numbers: the reader is the same accessor the
 # bindings wrap, and test-gradient.R requires bit-identical gradients.
 #
@@ -1105,7 +1128,31 @@ leaf_gradient <- function(psi_soil,
 # subset, and the batch's column fills. It used to be spelled as "everything but
 # the last two", which was correct only while there were exactly two.
 .gradient_non_traits <- c("leaf_specific_conductance_max", "resistance",
-                          "CF77_lambda_")
+                          "CF77_lambda_", "TF24_floor_lambda_o",
+                          "LeastCost_beta",
+                          # .gradient_damage_pars, spelled out because this file
+                          # is collated before the definition below is needed
+                          "A_", "I_", "D_", "topt_offset_", "dTopt_max_", "K_A_",
+                          "k_i_", "k_i_baseline_", "k_rec_", "m_rep_",
+                          "t_rep_cut_", "c_acclim_maint_", "c_repair_maint_",
+                          "c_protect_maint_", "c_repair_flux_")
+
+# The thermal-damage layer's inputs that reach the solve, in enumeration order: its
+# three states, the acclimated shift of the Vcmax/Jmax optima, and every quantity a
+# maintenance cost multiplies. Leaf FIELDS, read off and written back by name.
+# Available only on a leaf with `use_thermal_damage_` on, and refused by name
+# elsewhere. The layer's DYNAMICS parameters (the impairment switch, the impairment
+# rate's Arrhenius, `k_mat_`, the acclimation kinetics) move no solved output and
+# are deliberately absent: their gradient is leaf_damage_gradient()'s.
+.gradient_damage_pars <- c("A_", "I_", "D_", "topt_offset_", "dTopt_max_", "K_A_",
+                           "k_i_", "k_i_baseline_", "k_rec_", "m_rep_",
+                           "t_rep_cut_", "c_acclim_maint_", "c_repair_maint_",
+                           "c_protect_maint_", "c_repair_flux_")
+
+# Their current values, off a leaf, in that order.
+.gradient_damage_values <- function(l) {
+  vapply(.gradient_damage_pars, function(nm) l[[nm]], numeric(1))
+}
 
 # What `pars` may name, and the message when it names something else. One
 # definition, used by `leaf_gradient()` and by `leaf_gradient_batch()`: the
@@ -1114,10 +1161,11 @@ leaf_gradient <- function(psi_soil,
 # rather than merely unhelpful.
 # ⚠️ TWO AXES, not one. A parameter can be unavailable because of the SUPPLY PATH
 # (`resistance` exists only on the single-potential one) or because of the ACTIVE
-# MODEL (`CF77_lambda_` is Cowan-Farquhar's only parameter, and every other curve's
-# lambda is emergent rather than set). Both refuse, and both name which axis ruled
-# the parameter out, because "not differentiable" alone sends a caller looking in
-# the wrong place.
+# MODEL (`CF77_lambda_` is Cowan-Farquhar's PRESCRIBED price of water and
+# `TF24_floor_lambda_o` is the two-term curve's; on every other curve the price is
+# emergent rather than set). Both refuse, and both name which axis ruled the
+# parameter out, because "not differentiable" alone sends a caller looking in the
+# wrong place.
 #
 # Refusing is deliberate and is NOT the same as returning a zero. A zero means "in
 # this objective but inactive at this operating point", which is the `psi_crit`
@@ -1128,16 +1176,32 @@ leaf_gradient <- function(psi_soil,
 # this used to be an eight-row table that said `"CF77_lambda_"` seven times and
 # was a THIRD place a model name had to appear. A curve added to the C++
 # enumeration now reaches here on its own.
+#
+# ⚠️ ONE TABLE, `.gradient_owned_pars`, MAPS PRICE TO OWNER, and this is the only
+# copy of it. There are two such parameters now, so "the CF77 slot" has stopped
+# being a safe way to describe the class: what the function returns is everything
+# owned by a model OTHER than the active one.
+# ⚠️ THE THIRD ENTRY IS NOT A PRICE. `CF77_lambda_` and `TF24_floor_lambda_o` are
+# marginal values of water in umol C (kg H2O)^-1; `LeastCost_beta` is a
+# dimensionless ratio of two unit costs, and least-cost's price of water is
+# emergent from it rather than equal to it. What all three share is the only thing
+# this table is about: a parameter that one curve owns and no other curve has a
+# slot for.
+.gradient_owned_pars <- c(CF77 = "CF77_lambda_",
+                          TF24_floor = "TF24_floor_lambda_o",
+                          LeastCost = "LeastCost_beta")
+
 .gradient_model_pars <- function(model) {
   if (!(model %in% .gradient_models())) {
     return(NULL)
   }
-  if (identical(model, "CF77")) character(0) else "CF77_lambda_"
+  unname(.gradient_owned_pars[names(.gradient_owned_pars) != model])
 }
 
-.gradient_available_pars <- function(single, model = "collar") {
+.gradient_available_pars <- function(single, model = "collar", damage = FALSE) {
   nms <- .gradient_par_names()
   if (!single) nms <- setdiff(nms, "resistance")
+  if (!damage) nms <- setdiff(nms, .gradient_damage_pars)
   excluded <- .gradient_model_pars(model)
   if (is.null(excluded)) {
     stop("no gradient route for model \"", model, "\". Available: ",
@@ -1146,9 +1210,16 @@ leaf_gradient <- function(psi_soil,
   setdiff(nms, excluded)
 }
 
-.gradient_check_pars <- function(pars, single, model = "collar") {
-  unknown <- setdiff(pars, .gradient_available_pars(single, model))
+.gradient_check_pars <- function(pars, single, model = "collar", damage = FALSE) {
+  unknown <- setdiff(pars, .gradient_available_pars(single, model, damage))
   if (length(unknown)) {
+    off <- intersect(unknown, .gradient_damage_pars)
+    if (length(off) && !damage) {
+      stop("`pars` names `", off[[1L]], "`, an input of the thermal-damage layer, ",
+           "which is off on this leaf. Set use_thermal_damage_ to TRUE on the leaf ",
+           "you pass (`x`, or the batch's leaf) to differentiate it.",
+           call. = FALSE)
+    }
     why <- if (!single && "resistance" %in% unknown) {
       paste(" `resistance` is a parameter of the single-potential path only;",
             "on the multi-layer path the soil-to-collar resistances are derived",
@@ -1156,12 +1227,15 @@ leaf_gradient <- function(psi_soil,
     } else {
       ""
     }
-    if ("CF77_lambda_" %in% unknown) {
-      stop("`pars` names `CF77_lambda_`, which is not a parameter of the ", model,
-           " model: it is Cowan & Farquhar's PRESCRIBED marginal value of water, ",
-           "and every other cost curve's lambda is emergent -- derived from that ",
-           "curve's own parameters rather than set. Differentiate those instead, ",
-           "or pass model = \"CF77\".", call. = FALSE)
+    owned <- intersect(unknown, .gradient_owned_pars)
+    if (length(owned)) {
+      par <- owned[[1L]]
+      owner <- names(.gradient_owned_pars)[match(par, .gradient_owned_pars)]
+      stop("`pars` names `", par, "`, which is not a parameter of the ", model,
+           " model: it is the ", owner, " curve's PRESCRIBED price of water, ",
+           "and on every other cost curve the price is emergent -- derived from ",
+           "that curve's own parameters rather than set. Differentiate those ",
+           "instead, or pass model = \"", owner, "\".", call. = FALSE)
     }
     stop("`pars` names things this cannot differentiate: ",
          paste(unknown, collapse = ", "),
@@ -1175,7 +1249,7 @@ leaf_gradient <- function(psi_soil,
 
 # Everything this can differentiate, and its current value, as one named vector.
 #
-# The fifteen traits, plus the three quantities a calibration fits that are NOT
+# The fifteen traits, plus the four quantities a calibration fits that are NOT
 # traits (#44) and that `pars` therefore used to reject:
 #
 #   * `leaf_specific_conductance_max` -- a DRIVER, set through set_drivers(). It
@@ -1197,16 +1271,28 @@ leaf_gradient <- function(psi_soil,
 # parameter profit depends on. What differs per parameter is only which setter
 # applies it, which is .gradient_setter's job.
 .gradient_theta <- function(traits, kmax, supply, root_network,
-                            CF77_lambda = NA_real_) {
+                            CF77_lambda = NA_real_,
+                            TF24_floor_lambda_o = NA_real_,
+                            LeastCost_beta = NA_real_,
+                            damage = NULL) {
   theta <- c(unlist(traits), leaf_specific_conductance_max = kmax)
   if (identical(supply$kind, "single")) {
     theta <- c(theta, resistance = root_network$r_R_V_sum[[1]])
   }
-  # ⚠️ NA unless the caller is on the CF77 route. C++ reads the slot
-  # unconditionally, so it must hold a number the solve will actually use -- and on
-  # every other route that number is never read, exactly as `resistance` is not
+  # ⚠️ NA unless the caller is on the route that owns it. C++ reads both slots
+  # unconditionally, so each must hold a number the solve will actually use -- and
+  # on every other route that number is never read, exactly as `resistance` is not
   # read on the multi-layer path.
-  c(theta, CF77_lambda_ = CF77_lambda)
+  theta <- c(theta, CF77_lambda_ = CF77_lambda,
+             TF24_floor_lambda_o = TF24_floor_lambda_o,
+             LeastCost_beta = LeastCost_beta)
+  # The thermal-damage inputs, read off the leaf when its gate is on and NA
+  # otherwise -- in which case neither side reads them.
+  if (is.null(damage)) {
+    damage <- stats::setNames(rep(NA_real_, length(.gradient_damage_pars)),
+                              .gradient_damage_pars)
+  }
+  c(theta, damage)
 }
 
 
@@ -1228,7 +1314,7 @@ leaf_gradient <- function(psi_soil,
                     "leaf_temp", "atm_o2_kpa", "atm_kpa")
 
 .gradient_setter <- function(l, traits, drivers, supply,
-                             fast_stem_curve = TRUE) {
+                             fast_stem_curve = TRUE, damage = FALSE) {
   trait_names <- names(traits)
   single <- identical(supply$kind, "single")
   # ⚠️ RESOLVE THE DRIVERS ONCE. This closure runs once per perturbation -- eleven
@@ -1283,15 +1369,29 @@ leaf_gradient <- function(psi_soil,
     # `leaf_traits()` object the caller already handed in, and the C++ setter asserts
     # the #25 positive-magnitude invariants itself. Do not copy this pattern anywhere
     # the values are not already known-good.
-    # ⚠️ POSITIONAL, so the count is load-bearing. `set_traits()`'s C++ signature and
-    # `leaf_traits()` must agree on FIFTEEN, and adding a trait breaks here and
-    # nowhere else -- at run time, with "argument <name> is missing" raised inside
-    # the generated binding, which names neither this line nor the count. That is
-    # how #41 broke; test-gradient.R asserts the arity so the next one is caught.
+    # ⚠️ POSITIONAL, AND THE COUNT IS NO LONGER WRITTEN DOWN HERE. `trait_names`
+    # comes from the C++ enumeration with the non-traits removed, so the argument
+    # list is however many traits `set_traits()` takes, in its order, derived
+    # rather than restated.
+    #
+    # ⚠️ DO NOT SPELL THE SUBSCRIPTS OUT. A fixed list breaks when a trait is added,
+    # at run time, with `argument <name> is missing` raised inside the generated
+    # binding, which names neither this line nor the count. That has happened twice;
+    # adding `TF24_floor_a` put 118 gradient-batch rows into `error` where they had
+    # reported `interior`, because the R reference threw and the batch did not. A
+    # `do.call` over the derived vector costs no `.Call` (the boundary crossing is
+    # `apply_traits` either way, which `test-cost.R` counts) and removes the class
+    # rather than the instance.
     tv <- theta[trait_names]
-    apply_traits(tv[[1L]], tv[[2L]], tv[[3L]], tv[[4L]], tv[[5L]], tv[[6L]],
-                 tv[[7L]], tv[[8L]], tv[[9L]], tv[[10L]], tv[[11L]], tv[[12L]],
-                 tv[[13L]], tv[[14L]], tv[[15L]])
+    do.call(apply_traits, unname(as.list(tv)))
+    # The thermal-damage inputs, ONLY with its gate on, and BEFORE the drivers:
+    # set_physiology is what seats the block that reads them. A field write per
+    # input costs a `.Call` each, which is why the gate-off path skips the loop.
+    if (damage) {
+      for (nm in .gradient_damage_pars) {
+        l[[nm]] <- theta[[nm]]
+      }
+    }
     # `resistance` is a driver, so it goes in with the others rather than through
     # $set_supply_single() -- which keeps this to ONE object-resetting call.
     net <- if (single) {
@@ -1304,13 +1404,27 @@ leaf_gradient <- function(psi_soil,
                   base$ca, base$leaf_temp, base$atm_o2_kpa, base$atm_kpa)
     # ⚠️ ONLY WHEN IT IS IN PLAY, and the guard is about cost as much as
     # correctness. This is a field write, so it costs a `.Call` per perturbation --
-    # and `test-cost.R` counts those. On every route but CF77 the slot is NA, so
-    # writing it unconditionally would both poison the leaf and add a crossing to
-    # every gradient that has nothing to do with this parameter. The `is.na` is
-    # pure R and free.
+    # and `test-cost.R` counts those. On every route but the one that owns a price
+    # the slot is NA, so writing it unconditionally would both poison the leaf and
+    # add a crossing to every gradient that has nothing to do with this parameter.
+    # The `is.na` is pure R and free.
     lam <- theta[["CF77_lambda_"]]
     if (!is.na(lam)) {
       l$CF77_lambda_ <- lam
+    }
+    lam_o <- theta[["TF24_floor_lambda_o"]]
+    if (!is.na(lam_o)) {
+      l$TF24_floor_lambda_o <- lam_o
+    }
+    # The third model-owned slot, on the same terms. ⚠️ WITHOUT THIS WRITE THE R
+    # REFERENCE DIFFERENTIATES NOTHING IN `LeastCost_beta`: the perturbed theta
+    # never reaches the leaf, the solve repeats at the seated beta, and the
+    # column comes back exactly zero while C++'s `gradient::apply()` writes the
+    # slot and reports a number -- an R-versus-C++ disagreement rather than an
+    # error, which is how this was first missed.
+    beta <- theta[["LeastCost_beta"]]
+    if (!is.na(beta)) {
+      l$LeastCost_beta <- beta
     }
     invisible(l)
   }
@@ -1321,7 +1435,7 @@ leaf_gradient <- function(psi_soil,
 
 # The step: relative to the parameter for values above 1, and plain `step` below
 # it. Not a relative step with an epsilon floor -- the floor is at 1, which is
-# deliberate. Traits here span `a` = 0.3 to `jmax_25` = 157.44, and a strictly
+# deliberate. Traits here span `phi_J` = 0.35 to `jmax_25` = 157.44, and a strictly
 # relative step would perturb the small ones so little that the difference is
 # dominated by the solve's ~1e-09 noise. It also means a trait sitting at zero is
 # still perturbed rather than not differentiated at all.

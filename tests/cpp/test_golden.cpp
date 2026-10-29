@@ -71,8 +71,8 @@ const double kLeafTemps[] = {25.0, 40.0};
 Row solve(double psi_soil, double ppfd, double vpd, int layers,
           double leaf_temp) {
   phylloptim::Leaf l;
-  l.setup_transpiration(100);
-  l.setup_root_vulnerability(100);
+  l.setup_transpiration(phylloptim::Leaf::ncontrol_default);
+  l.setup_root_vulnerability(phylloptim::Leaf::ncontrol_default);
 
   // Spread the soil profile over `layers` equal 1 m layers, drying with depth so
   // that multi-layer runs are not just a repeated single layer, and split root
@@ -146,10 +146,14 @@ std::vector<Row> run_grid() {
 // not reproduce this split, because dprofit's shut-down sentinel is exactly 0.0
 // and would move all 48 shutdown points into `interior`.
 //
-// Three kinds are expected to be EMPTY here: `shade-death` because assim_max_ never
-// gets there (it is reached by light, not by drying, and not by heat either at 40 C);
-// `solver-refused` and `non-finite-gradient` because both bracket endpoints admit a
-// usable gradient on every feasible row.
+// Seven kinds are expected to be EMPTY here, and the table below asserts each:
+// `shade-death` because assim_max_ never gets there (it is reached by light, not by
+// drying, and not by heat either at 40 C); `solver-refused` and
+// `non-finite-gradient` because both bracket endpoints admit a usable gradient on
+// every feasible row; `boundary-root-crit` because the continuity root never
+// reaches the root's own limit at these traits; `determined` because no interval
+// collapses at the package's GSS_tol_abs; and `prescribed` and `unsolved` because
+// every row is solved rather than evaluated at a given collar.
 //
 // ⚠️ The hot end does NOT reach the compensation-point exit either, which is worth
 // knowing before reading the zeros as coverage: at the defaults that needs about
@@ -190,6 +194,11 @@ int check_operating_kinds(const std::vector<Row> &rows) {
         {Kind::Interior, e.interior},
         {Kind::BoundarySoil, e.boundary_soil},
         {Kind::BoundaryCrit, e.boundary_crit},
+        // The dry end's other bound. At these traits root_psi_crit is 5.87 MPa
+        // and the continuity root never reaches it, so the arm is zero over the
+        // whole grid -- asserted rather than left out, because a kind absent from
+        // this list is a kind the golden file stops covering.
+        {Kind::BoundaryRootCrit, 0},
         {Kind::HydraulicShutdown, e.shutdown},
         {Kind::Determined, 0},        {Kind::ShadeDeath, 0},
         {Kind::Prescribed, 0},        {Kind::SolverRefused, 0},
@@ -618,17 +627,29 @@ const double kPoison = -12345.0;
 // row records the bracket rather than the model.
 const double kLambdaCF77 = 1.5e5;
 
+// The TF24_floor curve's price of water as transpiration goes to zero. Same units,
+// same scale argument, and a separate constant rather than a reuse of the one
+// above: the two are independent inputs and sharing them would make a stale write
+// to either invisible in the other's rows. The curve's hydraulic half is TF24's
+// cost at TF24's own traits, so there is nothing else to set.
+const double kLambdaFloorO = 1.5e5;
+// ⚠️ DIMENSIONLESS, unlike the two prices above, and it is @Prentice-2014's
+// published value. A beta derived against this package's kg H2O and umol CO2
+// rather than mol and mol would be out by 5.6e7 and would still solve.
+const double kBetaLeastCost = 146.0;
+
 // ⚠️ APPEND ONLY. The reuse pass drives ONE Leaf through kSolvers in order, so
 // inserting a solver changes what every solver after it inherits -- see the header.
 // Appending leaves every existing row byte-identical, which is the check when this
 // file is regenerated.
-enum class Solver { TF, ProfitMax, CF77, Collar, JS22, CMax, SOX, JW26 };
+enum class Solver { TF, ProfitMax, CF77, Collar, JS22, CMax, SOX, JW26, TF24_floor,
+                    LeastCost };
 
 // ⚠️ EVERY PER-SOLVER ARRAY IS SIZED FROM THIS, never from a literal. Those arrays
 // are indexed by the enum VALUE, so a hardcoded bound is an out-of-bounds write the
 // moment a solver is appended -- which is exactly the bug bench_gradient carried
 // through three trait-count changes before ASan named it. Keep it last-member + 1.
-constexpr int kNSolvers = static_cast<int>(Solver::JW26) + 1;
+constexpr int kNSolvers = static_cast<int>(Solver::LeastCost) + 1;
 enum class Topology { Single, Multi1, Multi3 };
 
 const char *solver_name(Solver s) {
@@ -641,6 +662,8 @@ const char *solver_name(Solver s) {
     case Solver::CMax:          return "CMax";
     case Solver::SOX:           return "SOX";
     case Solver::JW26:          return "JW26";
+    case Solver::TF24_floor:       return "TF24_floor";
+    case Solver::LeastCost:        return "LeastCost";
   }
   return "unknown";
 }
@@ -686,6 +709,9 @@ const double kSeriesResistance = 1.0e3;
 void configure_supply(phylloptim::Leaf &l, Topology t, double psi_soil,
                       double ppfd, double leaf_temp) {
   const int layers = topology_layers(t);
+  // Daylight: the NIR band carries as much energy as the PAR band. Read only on
+  // the energy-balance rows.
+  l.NIR_int_ = ppfd / phylloptim::umol_par_per_joule;
   if (t == Topology::Single) {
     l.set_supply_single(0.0);
     phylloptim::RootNetwork rn;
@@ -765,6 +791,19 @@ void dispatch(phylloptim::Leaf &l, Solver s) {
     case Solver::CMax:      l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::CMax>();      break;
     case Solver::SOX:       l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::SOX>();       break;
     case Solver::JW26:      l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::JW26>();      break;
+    // ⚠️ ONE PARAMETER, AND IT IS AN INPUT WITH NO DEFAULT, like CF77_lambda_
+    // above: this curve refuses to solve without it. The hydraulic half reads
+    // TF24's own traits, so these rows differ from the TF row above by the price
+    // alone.
+    case Solver::TF24_floor:
+                            l.TF24_floor_lambda_o = kLambdaFloorO;
+                            l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::TF24_floor>(); break;
+    // ⚠️ ALSO AN INPUT WITH NO DEFAULT, and refused at zero as well as unset --
+    // zero is not a limiting case here but deletes the capacity term. The only
+    // curve in this corpus whose penalty weighs something other than water.
+    case Solver::LeastCost:
+                            l.LeastCost_beta = kBetaLeastCost;
+                            l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::LeastCost>(); break;
   }
 }
 
@@ -773,8 +812,8 @@ OptRow solve_one(Solver s, Topology t, double psi_soil, double ppfd,
   OptRow r{s, t, psi_soil, ppfd, leaf_temp, eb, tc, false, "ok", "-",
            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
   phylloptim::Leaf l;
-  l.setup_transpiration(100);
-  l.setup_root_vulnerability(100);
+  l.setup_transpiration(phylloptim::Leaf::ncontrol_default);
+  l.setup_root_vulnerability(phylloptim::Leaf::ncontrol_default);
   l.use_energy_balance_ = eb;
   l.use_thermal_cost_ = tc;
   try {
@@ -795,7 +834,8 @@ const double kOptPPFDs[] = {0.0, 1500.0};
 const Solver kSolvers[] = {Solver::TF, Solver::ProfitMax,
                            Solver::CF77, Solver::Collar,
                            Solver::JS22, Solver::CMax, Solver::SOX,
-                           Solver::JW26};
+                           Solver::JW26, Solver::TF24_floor,
+                           Solver::LeastCost};
 static_assert(sizeof(kSolvers) / sizeof(kSolvers[0]) == kNSolvers,
               "kSolvers must list every Solver exactly once");
 const Topology kTopologies[] = {Topology::Single, Topology::Multi1,
@@ -828,8 +868,8 @@ std::vector<OptRow> run_optima_grid() {
     for (bool eb : {false, true})
       for (bool tc : {false, true}) {
         phylloptim::Leaf l;
-        l.setup_transpiration(100);
-        l.setup_root_vulnerability(100);
+        l.setup_transpiration(phylloptim::Leaf::ncontrol_default);
+        l.setup_root_vulnerability(phylloptim::Leaf::ncontrol_default);
         l.use_energy_balance_ = eb;
         l.use_thermal_cost_ = tc;
         for (double ps : kReusePsiSoils)
