@@ -1,4 +1,4 @@
-# phylloptim 0.11.0
+# phylloptim 0.14.0
 
 ## Net longwave depends on air temperature and humidity (#97, #28)
 
@@ -8,24 +8,25 @@
 ea     = esat(Tair) - atm_vpd                              in PASCALS
 ema    = min(0.642 * (ea/Tair_K)^(1/7), 1)                 Brutsaert
 Rn_iso = absorbed shortwave - (1 - ema) * sigma * Tair_K^4
+         (absorbed shortwave = alpha_PAR_ * PPFD / 4.57 + alpha_NIR_ * NIR_int_, as in 0.13.0)
 g_rad  = 4 * eps_leaf * sigma * Tair_K^3
 Tleaf  = Tair + (Rn_iso - lambda*E) / (vol_heat_cap_air/ra + g_rad)
 ```
 
 **The balance is still explicit.** Linearising the leaf's own `Tleaf^4` emission about `Tair` puts it in the denominator, so `Tleaf` stays affine in `E` and `dTleaf/dE = -lambda / (g_sensible + g_radiative)` is still a constant. No inner iteration was added, the first-order conditions and their implicit-function derivatives are structurally unchanged, and `leaf_temp_from_E()` is still the one place the expression is evaluated.
 
-**What moves.** `g_rad` is 13–18% of the total conductance at the default leaf size and wind, so it pulls the leaf toward air temperature, while the longwave term cools a cool leaf much harder than −40 did and a hot one less. Solved with `find_root_collar_psi()` at PPFD 900, ψ_soil 0.5, D_air 2:
+**What moves.** `g_rad` is 13–18% of the total conductance at the default leaf size and wind, so it pulls the leaf toward air temperature, while the longwave term cools a cool leaf much harder than −40 did and a hot one less. Solved with `find_root_collar_psi()` at PPFD 900 with daylight NIR, ψ_soil 0.5, D_air 2, on the 0.13.0 shortwave:
 
 | Tair | net longwave | Tleaf | profit | kind |
 |---|---|---|---|---|
-| 20 | −40 → −144.4 | 28.11 → 24.61 | 3.645 → 5.069 | interior |
-| 25 | −40 → −98.5 | 33.23 → 30.71 | 2.544 → 3.587 | interior |
-| 30 | −40 → −69.7 | 38.45 → 36.50 | 1.137 → 1.893 | interior |
-| 35 | −40 → −44.5 | 44.21 → 42.49 | −3.568 → 0.051 | solver-refused → interior |
-| 40 | −40 → −19.8 | 49.33 → 48.37 | −3.813 → −3.789 | solver-refused |
-| 45 | −40 → 0 (clamped) | 54.33 → 53.75 | −3.741 → −3.767 | shade-death |
+| 20 | −40 → −144.4 | 23.06 → 20.24 | 5.786 → 7.229 | interior |
+| 25 | −40 → −98.5 | 28.10 → 26.31 | 4.920 → 6.026 | interior |
+| 30 | −40 → −69.7 | 33.21 → 32.05 | 3.575 → 4.349 | interior |
+| 35 | −40 → −44.5 | 38.45 → 37.82 | 1.591 → 1.958 | interior |
+| 40 | −40 → −19.8 | 44.28 → 44.10 | −3.574 → −3.559 | solver-refused |
+| 45 | −40 → 0 (clamped) | 49.40 → 49.59 | −3.815 → −3.818 | shade-death |
 
-Above Tair ~40 the two effects oppose and the conductance wins: at 45 the longwave is 40 W m⁻² warmer than before and the leaf is still 0.58 K cooler. At Tair 35 a leaf that used to come back refused, at `A = -3.56`, now transpires.
+Below Tair ~40 the leaf is 0.6–2.8 K cooler at the solved point (3.0 K at zero transpiration at Tair 20) and profit is 22–25% higher. Above ~42 the two effects oppose and the longwave wins: at 45 the sky term is 40 W m⁻² warmer than the constant was, `g_rad` pulls back only part of that, and the leaf is 0.2 K warmer. No row changes kind.
 
 ⚠️ **`ea` is in Pascals.** The same relation is more often quoted as `1.24*(ea/T)^(1/7)` with `ea` in hPa, and the two agree because `0.642*100^(1/7) = 1.2395`. Using 0.642 with kPa gives ~0.31 where the answer is ~0.82: finite, plausible, and it triples the longwave loss. `test_longwave_and_radiative_conductance` asserts the Pa form against the hPa one.
 
@@ -37,7 +38,52 @@ Above Tair ~40 the two effects oppose and the conductance wins: at 45 the longwa
 
 **Cost.** With the gate on a collar solve is unchanged (interleaved ×3). With it off, `set_physiology` gains one `pow` and one `exp`, about 0.026 µs, under 1% of a `set_physiology` plus collar solve, with an identical checksum.
 
-**Golden files.** `operating_points.tsv` and `gradient_golden.tsv` are bit-identical (gate off). `primitives.tsv`: 34 of 544 values move, all `leaf_temp_from_E` and `dleaf_temp_dE` in the arithmetic tier; every other tier is exactly 0. `psi_stem_optima.tsv`: 1708 of 5184 rows move, every one with the energy balance on; all 2592 gate-off rows are byte-identical, no row changes status, and four collar rows (ψ_soil 2, PPFD 1500, Tair 25) move from `boundary-soil` to `interior`.
+**Golden files.** `operating_points.tsv` and `gradient_golden.tsv` are bit-identical (gate off). `primitives.tsv`: 34 of 544 values move, all `leaf_temp_from_E` and `dleaf_temp_dE` in the arithmetic tier; every other tier is exactly 0. `psi_stem_optima.tsv`: 1708 of 5184 rows move, every one with the energy balance on; all 2592 gate-off rows are byte-identical, and no row changes status or kind.
+
+# phylloptim 0.13.0
+
+## Light arrives intercepted and the leaf absorbs it
+
+The leaf's light input is now named for what it is, and absorption happens inside the leaf. Breaking: the quantum-yield trait is renamed and rebased, and the energy-balance path needs one new input.
+
+* `PPFD` (the `set_drivers()` / `leaf_solve()` driver, `set_physiology()`'s second argument, the `par_PPFD` slot) is the **intercepted** photon flux per unit leaf area: incident on the leaf, before its absorptance. Its value and units are unchanged; the documentation now says which stage of the light chain it is.
+* New leaf properties `alpha_PAR_` (0.85) and `alpha_NIR_` (0.20), the PAR and near-infrared absorptances. Settable fields, not fitted traits.
+* `a` -> `phi_J`, the quantum yield of electron transport per **absorbed** photon. Electron transport reads `phi_J * alpha_PAR_ * PPFD`. The default `0.30 / 0.85` restates the old incident-basis 0.30, so with the defaults J is unchanged to rounding. Migration:
+  * `leaf_traits(a = x)` -> `leaf_traits(phi_J = x / 0.85)`
+  * `Leaf(..., a = x, ...)` -> `Leaf(..., phi_J = x / 0.85, ...)`
+  * `l$set_traits(..., a, ...)` (8th argument) -> the same position, `phi_J = a / 0.85`
+  * `l$a` -> `l$phi_J`
+  * `leaf_gradient(pars = "a")` / gradient columns named `a` -> `"phi_J"`; the derivative is per unit `phi_J`, so `d/da = d/dphi_J / 0.85`
+  * A gas-exchange fit identifies only `phi_J * alpha_PAR_`: fix `alpha_PAR_` and the fitted `phi_J` is per absorbed photon.
+* **Energy-balance path:** net radiation is the absorbed shortwave of two intercepted bands, `Rn = alpha_PAR_ * PPFD / 4.57 + alpha_NIR_ * NIR_int_ - 40`, where it was `2 * PPFD / 4.57 - 40` (all shortwave absorbed). New per-call field `NIR_int_`, the intercepted near-infrared in W m^-2, set before `set_drivers()` like `wind_speed_`. **It has no default**, because the right one depends on the light source (about `PPFD / 4.57` in daylight, 0 under an LED), so `set_physiology()` refuses a non-finite `NIR_int_` with `use_energy_balance_` on. Off the energy-balance path it is never read. Migration: `l$use_energy_balance_ <- TRUE` -> also `l$NIR_int_ <- PPFD / 4.57` for daylight.
+* `constants.hpp`: `sw_abs_per_par` (2.0) is removed. It folded the PAR share of shortwave and an absorptance of 1 into one number.
+
+Golden files regenerated. Rows with the energy balance off move by reassociation only (operating points: 342 cells, worst 2.0e-10; psi_stem optima: 836 cells on 133 rows, worst 1.8e-10). Energy-balance rows move by the physics: with daylight NIR at the grid's PPFD of 1500, absorbed shortwave falls from 657 to 345 W m^-2 and the solved leaf temperature by a median 7.9 C (up to 14.2 C); 14 of 2592 rows change kind. The 17 `leaf_temp_from_E` primitives move for the same reason.
+
+# phylloptim 0.12.0
+
+## An optional thermal-damage layer on the leaf, off by default
+
+`Leaf$use_thermal_damage_` turns on a lasting thermal-damage model, ported from the layer plant carried in its own leaf (traitecoevo/plant#566). Three fractions of leaf area, named for what they do — functional F ⇌ impaired I → damaged D, with F = 1 − I − D — plus an acclimation state A, all driven by LEAF temperature:
+
+```
+dA/dt = acclim_alpha_ * softplus(T - acclim_T_; acclim_s_) - acclim_beta_ * A
+dI/dt = k_imp(T) * F - (k_rec_eff(T) + k_mat_) * I
+dD/dt = k_mat_ * I
+k_imp(T) = k_i_ * exp[(k_i_Ea_/R)(1/T_ref - 1/T)] * K/(1 + K),  K = exp[(impair_H_/R)(1/Tmid - 1/T)]
+```
+
+Rates are per day. The Vcmax and Jmax peaked-Arrhenius curves stay the instantaneous, fully reversible temperature response; impairment is rate-and-state and lasts until repaired, and the two share no parameter. The switch K/(1+K) has its own enthalpy `impair_H_` and midpoint `impair_Tmid_` (defaults 200 kJ mol⁻¹ and 200000/650 K, the Jmax curve's deactivation term), moved by acclimation through its own `dTimpair_max_`.
+
+- **On the solve.** The caller seats `A_`, `I_` and `D_` before each `set_drivers()`. Both capacities are scaled by F (floored at 1e-6), the Vcmax and Jmax optima move by `topt_offset_ + dTopt_max_ * A/(A + K_A_)` through the entropy term, and four maintenance costs, zero by default, are added to `R_d_`, which is otherwise not scaled. `k_imp_eff_`, `k_rec_eff_` and `functional_` are reported at the leaf's temperature; on the energy-balance path that is the operating point's.
+- **The dynamics, on the leaf.** `$damage_rates()` evaluates the right-hand side and `leaf_damage_trajectory()` integrates it over a leaf-temperature series (RK4, sub-stepped so the fastest rate × step < 0.1 and ≤ 0.25 K per step), so a leaf experiment can be fitted with this package alone. A caller integrating the states itself — plant's TF24t, which adds dilution of D by leaf turnover and growth — calls `$damage_rates()`.
+- **Gradients.** `leaf_gradient()` and `leaf_gradient_batch()` carry the layer: on a leaf with the gate on, its fifteen inputs that reach the solve (`A_`, `I_`, `D_`, `topt_offset_`, `dTopt_max_`, `K_A_`, `k_i_`, `k_i_baseline_`, `k_rec_`, `m_rep_`, `t_rep_cut_` and the four costs) are gradient parameters, appended to the enumeration (`n_theta` 19 → 34) and refused by name with the gate off. `leaf_damage_gradient()` gives the trajectory's exact forward-mode sensitivities to all sixteen dynamics parameters and the three initial states. The derivative surface (`collar_at`, `outputs_at`) and the closed form still refuse the layer.
+
+Off by default, and off it reads none of its inputs: every golden file is bit-identical, `k_imp_eff_` and `k_rec_eff_` are zero and `functional_` one.
+
+⚠️ **`n_theta` is 34 and `n_pars` 35.** A C++ caller filling `theta[gradient::n_theta]` by hand must recount: the layer's slots are read only with the gate on, but a short initialiser shifts nothing else only while it stays short.
+
+Respiration departs from the original layer on purpose: there `R_d` was `0.015 * Vcmax` after the damage discount, so a damaged leaf respired less; here `R_d` stays `R_d_25` on its Q10 (#86) and the layer only adds its costs.
 
 # phylloptim 0.10.3
 
