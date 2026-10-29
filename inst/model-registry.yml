@@ -37,10 +37,10 @@
 # integrator), replica (base-R source of the printed equation; other replicas
 # are callable by id), and optionally also (further symbols involved), uses
 # (other equation ids the replica calls), cite, tol (the check tolerance where
-# 1e-10 is not attainable) and note. `diagnostics` is keyed by bound field: the
-# fields that are neither a parameter nor written by an equation (today, the ones
-# nothing writes), each with a meaning and a code symbol, so every bound field is
-# accounted for somewhere.
+# 1e-10 is not attainable) and note. An optional `diagnostics` map, keyed by
+# bound field, holds any bound field that is neither a parameter nor written by
+# an equation, each with a meaning and a code symbol, so every bound field is
+# accounted for somewhere; none is needed today.
 #
 # To add an equation: an entry here, and a probe of the same id in one of the
 # R/registry-probes*.R files that reads the package side.
@@ -473,16 +473,6 @@ parameters:
     placeholder: false
     literal: 237.3
     code: phylloptim::Leaf::saturation_vapour_pressure
-  tetens_slope_numerator:
-    section: vapour
-    symbol: '4098'
-    units: 'K'
-    class: constant
-    meaning: 'numerator of the Tetens slope $\Delta(T)$; the FAO-56 rounding of $17.27 \times 237.3 = 4098.17$, so the coded slope is $4.2 \times 10^{-5}$ low'
-    source: FAO-56 form
-    placeholder: false
-    literal: 4098
-    code: phylloptim::Leaf::saturation_vapour_pressure_slope
   vpd_leaf_min:
     section: vapour
     symbol: 'D_\min'
@@ -1346,14 +1336,11 @@ parameters:
     symbol: '1.6'
     units: '–'
     class: constant
-    meaning: 'H₂O:CO₂ diffusivity ratio written into the Medlyn form and its residual; hard-coded, so it does not follow the settable H2O_CO2_stom_diff_ratio_ (1.67) the rest of the leaf uses'
+    meaning: 'H₂O:CO₂ diffusivity ratio of the Medlyn route: in the USO form, in its residual, and in converting the result to the CO₂ basis; deliberately not the settable H2O_CO2_stom_diff_ratio_ (1.67), because published g1 values are fitted with 1.6'
     source: Medlyn-2011 eq. 11
     cite: Medlyn-2011
     placeholder: false
-    literal: 1.6
-    code: phylloptim::Leaf::medlyn_model_gs
-
-  # --- soil moisture ------------------------------------------------------------
+    code: phylloptim::Leaf::medlyn_H2O_CO2_ratio
   theta:
     section: soil_moisture
     symbol: '\theta'
@@ -1559,15 +1546,15 @@ equations:
     section: vapour
     title: Slope of the saturation curve
     latex: |
-      \Delta(T) = \frac{4098\, e_s(T)}{(T + 237.3)^2}
+      \Delta(T) = \frac{17.27 \times 237.3\; e_s(T)}{(T + 237.3)^2}
     code: phylloptim::Leaf::saturation_vapour_pressure_slope
-    reads: [tetens_slope_numerator, tetens_c]
+    reads: [tetens_b, tetens_c]
     writes: []
     uses: [saturation_vapour_pressure]
     kind: closed_form
-    note: 'kPa K⁻¹. Reaches no reported output; it enters the energy-balance derivative only.'
+    note: 'kPa K⁻¹, the exact derivative of the Tetens form. Reaches no reported output; it enters the energy-balance derivative only, through $\partial g_c/\partial T$, which is why FAO-56''s rounded 4098 (4.2e-5 low) put a 2e-5 error into that first-order condition until 0.15.4.'
     replica: |
-      function(T) 4098 * saturation_vapour_pressure(T) / ((T + 237.3) * (T + 237.3))
+      function(T) (17.27 * 237.3) * saturation_vapour_pressure(T) / ((T + 237.3) * (T + 237.3))
   leaf_vpd:
     section: vapour
     title: Leaf-to-air deficit
@@ -1726,8 +1713,8 @@ equations:
     writes: []
     uses: [saturation_vapour_pressure_slope]
     kind: derivative
-    tol: 1.0e-4
-    note: '$A_T = \partial A/\partial T_\mathrm{leaf}$ at fixed $c_i$ is a central difference of the temperature block with the fixed step $h$. Checked as the bound stem-route derivative, which carries this term, against a central difference of the profit; the term itself is not observable. With the gate on the two differ by 2e-6 to 2e-5 relative at every step, because the slope of the saturation curve uses FAO-56''s rounded 4098 for 17.27 x 237.3 and reaches this term through $\partial g_c/\partial T$. With the exact numerator the difference falls to its own floor (median 1.5e-8 at a step of 3e-4 MPa). That fix is a separate change; this tolerance tightens when it lands.'
+    tol: 5.0e-6
+    note: '$A_T = \partial A/\partial T_\mathrm{leaf}$ at fixed $c_i$ is a central difference of the temperature block with the fixed step $h$. Checked as the bound stem-route derivative, which carries this term, against a central difference of the profit; the term itself is not observable. Measured worst 4.1e-7 over these 11 points on macOS, the difference''s noise floor; with FAO-56''s rounded 4098 in the slope of the saturation curve (before 0.15.4) it was a 2e-6 to 2e-5 plateau at every step, 1.9e-5 here, so the tolerance still fails that.'
     replica: |
       function(f, x, h) (f(x + h) - f(x - h)) / (2 * h)
 
@@ -3068,21 +3055,35 @@ equations:
     uses: [lambda_TF24]
     kind: derivative
     tol: 1.0e-9
-    note: 'What the collar solve equalises: the bracket is $\ge 1$, so the single-layer λ understates the marginal cost. NA where $S$ is unavailable or not positive. Bound as `lambda_multilayer`; it is also what `lambda_emergent` reports after EVERY collar-route solve, whatever the seated curve (see lambda_emergent). $S$ is a central difference of `E_from_Soil_to_Root_Collar`, step 1e-4 MPa: measured floor 2e-12 (single layer, where $S$ is constant) and 3e-12 (three layers) at 1e-4 to 1e-5, rising to 3e-8 at 1e-2 and 9e-9 at 1e-8.'
+    note: 'TF24''s λ on the collar route: the bracket is $\ge 1$, so the single-layer λ understates the marginal cost. NA where $S$ is unavailable or not positive. Bound as `lambda_multilayer`; it is lambda_emergent on the collar route for TF24 only (lambda_collar). Checked against a central difference of the bound uptake for $S$.'
     replica: |
       function(lambda_stem, k_r, Eup, x, h) lambda_stem * (1 + k_r / ((Eup(x + h) - Eup(x - h)) / (2 * h)))
+  lambda_collar:
+    section: marginal_cost
+    title: The seated curve's λ on the collar route
+    latex: |
+      \lambda_{\mathrm{collar},K} = \lambda_{\psi,K}(\psi_s, \psi_r)\left[1 + \frac{k_{max} f(\psi_r)}{S}\right] + \lambda_{E,K} + \frac{1}{S}\frac{\partial C_K}{\partial \psi_r}, \qquad S = \frac{dE_\mathrm{up}}{d\psi_r}
+    code: phylloptim::Leaf::lambda_collar_for
+    also: [phylloptim::Leaf::marginal_cost_water_multilayer, phylloptim::Leaf::find_root_collar_psi_for, phylloptim::Leaf::profit_at_collar_psi]
+    reads: [leaf_specific_conductance_max]
+    writes: []
+    kind: identity
+    tol: 1.0e-4
+    note: 'dC/dE along the collar path. $\lambda_\psi$ is the part of a cost that reads $\psi_\mathrm{stem}$ alone (TF24, SOX, JW26, ProfitMax''s conductance term), which takes the series factor; $\lambda_E$ the part that reads the potentials only through E (CF77''s price, LeastCost, the floor''s $\lambda_o$, ProfitMax''s thermal term), which carries over; the last term is the explicit collar read of JS22 and CMax. Checked as the identity that defines it: at an interior optimum the first-order condition makes λ equal $dA/dE$ along the collar path for every link, taken by central difference of assimilation and transpiration at the collar either side. Measured worst 1.8e-6 (C++ suite); the tolerance leaves platform room and still fails a λ of the wrong curve, which is off by O(1).'
+    replica: |
+      function(Afun, Efun, x, h) (Afun(x + h) - Afun(x - h)) / (Efun(x + h) - Efun(x - h))
   lambda_emergent:
     section: marginal_cost
     title: The seated curve's λ at its operating point
     latex: |
-      \lambda_\mathrm{emergent} = \begin{cases} \lambda_K(\psi^*, \psi_s) & \text{stem route} \\ \lambda_\mathrm{multi} & \text{collar route, every } K \end{cases}, \qquad \lambda_\mathrm{CF77} = p
+      \lambda_\mathrm{emergent} = \begin{cases} \lambda_K(\psi^*, \psi_s) & \text{stem route} \\ \lambda_{\mathrm{collar},K} & \text{collar route (lambda\_collar)} \end{cases}, \qquad \lambda_\mathrm{CF77} = p
     code: phylloptim::Leaf::lambda_emergent
     also: [phylloptim::Leaf::lambda_for, phylloptim::Leaf::optimise_psi_stem_single, phylloptim::Leaf::find_root_collar_psi_for]
     reads: []
     writes: []
     uses: [lambda_TF24, lambda_JS22, lambda_CMax, lambda_TF24_floor, lambda_SOX, lambda_JW26, lambda_ProfitMax, lambda_LeastCost]
     kind: closed_form
-    note: 'Written by the optimiser that ran; NA before. On the stem route it is the seated curve''s λ (CF77''s is its price, exactly). ⚠️ On the collar route it is `marginal_cost_water_multilayer()`, which is TF24''s λ with the series correction FOR EVERY CURVE: a CF77 collar solve at $\lambda_\mathrm{CF} = 10^5$ reports 1.05e6, not the price. That contradicts the binding''s own documentation ("Cowan-Farquhar ... its emergent lambda IS that constant") and is flagged here as a probable defect; the collar branch is checked as written, under marginal_cost_water_multilayer. Probed here on the stem route, every curve.'
+    note: 'Written by the optimiser that ran; NA before. On the stem route it is the seated curve''s λ (CF77''s is its price, exactly); on the collar route, the same curve''s λ along the collar path (lambda_collar). Until 0.15.4 the collar route reported TF24''s multilayer λ whatever curve was seated.'
     replica: |
       function(curve, psi, up, p) {
         switch(curve,
@@ -3124,58 +3125,75 @@ equations:
 
   # --- Medlyn route, soil moisture and the closed form ---------------------------
   # --- medlyn -------------------------------------------------------------------
+  medlyn_beta:
+    section: medlyn
+    title: Medlyn soil-moisture factor
+    latex: |
+      \beta = \mathrm{clamp}_{[0,\,1]}\!\left(\frac{\theta - \theta_w}{\theta_{fc} - \theta_w}\right)
+    code: phylloptim::Leaf::medlyn_beta
+    reads: [theta, theta_fc, theta_w]
+    writes: []
+    kind: closed_form
+    note: 'Both Medlyn routes multiply g1 by it. Clamped, so a soil wetter than field capacity is field capacity and one drier than the wilting point is the wilting point. Not bound: read back through medlyn_model_gs at g0 = 0.'
+    replica: |
+      function(theta, theta_fc, theta_w) pmin(pmax((theta - theta_w) / (theta_fc - theta_w), 0), 1)
   medlyn_gs:
     section: medlyn
-    title: Medlyn stomatal conductance
+    title: Medlyn stomatal conductance, on the CO₂ basis
     latex: |
-      g_s = g_0 + 1.6\left(1 + \frac{g_1\,\beta}{\sqrt{D_\mathrm{air}}}\right)\frac{A}{c_a / c_P}, \qquad
-      \beta = \frac{\theta - \theta_w}{\theta_{fc} - \theta_w}
+      g_s = \frac{1}{1.6}\left[g_0 + 1.6\left(1 + \frac{g_1\,\beta}{\sqrt{D_\mathrm{air}}}\right)\frac{A}{c_a / c_P}\right], \qquad g_s = g_0/1.6 \text{ at } D_\mathrm{air} = 0
     code: phylloptim::Leaf::medlyn_model_gs
-    reads: [g0, g1, medlyn_ratio, atm_vpd, ca, atm_kpa, theta, theta_fc, theta_w]
+    also: [phylloptim::Leaf::medlyn_beta]
+    reads: [g0, g1, medlyn_ratio, atm_vpd, ca, atm_kpa]
     writes: [medlyn_model_gs_]
+    uses: [medlyn_beta]
     kind: closed_form
     cite: Medlyn-2011
-    note: 'Medlyn-2011 eq. 11 with $c_a$ converted from Pa to µmol mol⁻¹, and with $\beta$ on $g_1$, which is the code''s and not the paper''s. Unlike the CF77 price, $\beta$ is NOT clamped here: it exceeds 1 above field capacity and is negative below the wilting point, and the probe reaches both. The 1.6 makes this a conductance to WATER (#129) although the solvers store it in `stom_cond_CO2_`, and `gs_H2O` then multiplies by 1.67 again. $D$ is the air deficit `atm_vpd_`, not `vpd_leaf_`. The code''s $D = 0$ branch (return $g_0$) tests the unbound default member `atm_vpd` (2 kPa, never driven) rather than the driver `atm_vpd_`, so it is dead: at `atm_vpd_` = 0 the package returns Inf. Not reached by any compute path; R-callable only.'
+    note: 'Medlyn-2011 eq. 11, the USO form, which is a water-vapour conductance; divided by its 1.6 to the CO₂ basis every other conductance in the leaf is on (#129), so that $A = g_s (c_a - c_i)$ holds for this route too. $c_a$ converted from Pa to µmol mol⁻¹, and $\beta$ on $g_1$, which is the code''s and not the paper''s.'
     replica: |
       function(A, g0, g1, D, ca, atm_kpa, theta, theta_fc, theta_w) {
-        beta <- (theta - theta_w) / (theta_fc - theta_w)
-        g0 + 1.6 * (1 + (g1 * beta) / sqrt(D)) * (A / (ca * (1 / (atm_kpa * 1000 * 1e-6))))
+        beta <- medlyn_beta(theta, theta_fc, theta_w)
+        h2o <- if (D == 0) g0 + 0 * A else g0 + 1.6 * (1 + (g1 * beta) / sqrt(D)) * (A / (ca * (1 / (atm_kpa * 1000 * 1e-6))))
+        h2o / 1.6
       }
   medlyn_ci_numerical:
     section: medlyn
     title: Medlyn operating point by root-finding
     latex: |
-      r(c_i) = g_s\big(A(c_i)\big)\,(c_a - c_i) - 1.6\,A(c_i)\,\frac{10^{3} P}{10^{6}}, \qquad
-      c_i:\ r(c_i) = 0 \text{ on } [\arg\max r,\ c_a]
+      r(c_i) = g_s\big(A(c_i)\big)\,(c_a - c_i) - A(c_i)\,\frac{10^{3} P}{10^{6}}, \qquad
+      c_i:\ r(c_i) = 0 \text{ on } [\arg\max r,\ c_a]; \qquad g_s < 0 \Rightarrow g_s = 0,\ c_i = \Gamma^* c_P,\ A = -R_d
     code: phylloptim::Leaf::solve_medlyn_ci_numerical
-    also: [phylloptim::Leaf::medlyn_stom_cond_minus_coupled_stom_cond]
-    reads: [medlyn_ratio, atm_kpa, ca, kPa_to_Pa]
+    also: [phylloptim::Leaf::medlyn_stom_cond_minus_coupled_stom_cond, phylloptim::Leaf::set_medlyn_shutdown_if_closed]
+    reads: [atm_kpa, ca, kPa_to_Pa]
     writes: [ci_, assim_colimited_, stom_cond_CO2_]
     uses: [medlyn_gs, assimilation]
     kind: identity
     tol: 1.0e-10
-    note: 'Supply equals demand with both sides multiplied by $(c_a - c_i)$, so the residual stays finite at $c_a$; both sides carry the 1.6, so the root is on a water basis throughout. Brent maximisation of $r$ on $[\Gamma^* c_P, c_a]$ first, then bisection on $[\arg\max, c_a]$ isolates the high-$c_i$ root. The probe solves with ci_abs_tol = 1e-12 and pairs the package''s $c_i$ with one Newton step on the replica residual from it (central difference for $r''$; $h$ = 1e-3, 1e-4, 1e-5 and 1e-6 Pa all give a worst relative difference of 5.7e-13, because the correction is the solver''s 1e-12 residual and the slope''s error only scales it), then the reported $A$ and $g_s$ at that $c_i$. Two other branches, paired as indicators: in the dark $r(c_a) > 0$, there is no sign change on the bracket and the package stops (infeasible ci_solve); with $R_d = 0$ and $\beta < 0$ the residual peak is $\le 0$ and the package reports the bracket''s left end (to Brent''s $\sqrt{\epsilon}$ resolution). At the default ci_abs_tol = 1e-3 the bisection stops at an interval of $10^{-3}(1 + c_i)$ Pa, and the same grid then lands up to 7.6e-3 Pa from the root.'
+    note: 'Supply equals demand on the CO₂ basis, with both sides multiplied by $(c_a - c_i)$ so the residual stays finite at $c_a$. Brent maximisation of $r$ on $[\Gamma^* c_P, c_a]$, then a root-find from the maximum. Where no root exists ($r \le 0$ everywhere) the closest approach is taken, and a negative conductance there collapses to the closed state, as the optimality routes'' shutdown exits do. Checked by one Newton step on the replica residual from the package''s $c_i$, at a tightened `ci_abs_tol`.'
     replica: |
       function(x, p) {
         A <- assimilation(x, p$vcmax, p$J, p$gamma, p$km, p$theta_c, p$R_d, p$atm_kpa)
         medlyn_gs(A, p$g0, p$g1, p$D, p$ca, p$atm_kpa, p$theta, p$theta_fc, p$theta_w) * (p$ca - x) -
-          A * (p$atm_kpa * 1000) * 1.6 / 1e6
+          A * (p$atm_kpa * 1000) / 1e6
       }
   medlyn_ci_analytical:
     section: medlyn
-    title: Medlyn operating point, analytic
+    title: Medlyn operating point, closed form
     latex: |
-      c_i = c_a\,\frac{g_1}{g_1 + \sqrt{D_\mathrm{air}}}
+      c_i = c_a\,\frac{g_1 \beta}{g_1 \beta + \sqrt{D_\mathrm{air}}}
     code: phylloptim::Leaf::solve_medlyn_ci_analytical
+    also: [phylloptim::Leaf::medlyn_beta, phylloptim::Leaf::set_medlyn_shutdown_if_closed]
     reads: [g1, atm_vpd, ca]
     writes: [ci_, assim_colimited_, stom_cond_CO2_]
+    uses: [medlyn_beta]
     kind: closed_form
     cite: Medlyn-2011
-    note: 'Medlyn-2011 eq. 13. It is the root of the numerical residual only at $g_0 = 0$ and $\beta = 1$: the code drops both, so at the defaults ($\beta = 1/3$, $g_0$ = 0.022) it gives $c_i$ = 25.8 Pa where the numerical route gives 20.0. The probe pairs $c_i$, then $A$ and $g_s$ (by medlyn_gs, which does apply $g_0$ and $\beta$) at it, and checks the residual is zero there at $g_0 = 0$, $\theta = \theta_{fc}$.'
+    note: 'Medlyn-2011 eq. 13 with $\beta$ on $g_1$. The same model as the numerical route in the limit $g_0 \to 0$, where it is that route''s root exactly; at the default $g_0$ it drops the $g_0$ term, so its $g_s$ and $c_i$ are mutually consistent only in that limit. Its conductance is the USO form at this $c_i$, on the CO₂ basis.'
     replica: |
-      function(ca, g1, D) ca * (g1 / (g1 + sqrt(D)))
-
-  # --- soil moisture ------------------------------------------------------------
+      function(ca, g1, D, theta, theta_fc, theta_w) {
+        g1b <- g1 * medlyn_beta(theta, theta_fc, theta_w)
+        ca * (g1b / (g1b + sqrt(D)))
+      }
   soil_moisture_state:
     section: soil_moisture
     title: Soil-moisture working copies
@@ -3510,20 +3528,3 @@ equations:
                      !(curve %in% c("TF24", "CF77", "TF24_floor")) ||
                      (curve == "TF24_floor" && !(lambda_o > 0)))
       }
-
-# Bound fields that are neither a parameter nor a quantity an equation writes:
-# four fields nothing in the C++ writes. Listed so the coverage check accounts
-# for every bound field; they are candidates for removal from the bindings.
-diagnostics:
-  count:
-    meaning: 'DEAD: never initialised, written or read in the C++, so a read returns whatever the memory held (3e-314 measured)'
-    code: phylloptim::Leaf::count
-  psi_stem:
-    meaning: 'DEAD: the member psi_stem (not opt_psi_stem_) is never initialised or written; a read returns uninitialised memory'
-    code: phylloptim::Leaf::psi_stem
-  opt_ci_:
-    meaning: 'DEAD: set to NA by setup_clean_leaf and never written; the operating point''s ci is ci_'
-    code: phylloptim::Leaf::opt_ci_
-  f_r:
-    meaning: 'DEAD: a bound vector nothing writes; it always reads numeric(0)'
-    code: phylloptim::Leaf::f_r

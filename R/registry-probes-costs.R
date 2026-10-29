@@ -565,11 +565,36 @@
         lam <- rep$lambda_TF24(ps, l$TF24_cost_scale, l$TF24_beta2, l$stem_b, l$stem_c,
                                l$leaf_specific_conductance_max_)
         k_r <- l$leaf_specific_conductance_max_ * l$proportion_of_conductivity(r)
-        # the multilayer lambda and lambda_emergent read the leaf at the optimum,
-        # so take both before the difference moves E_up_
-        pkg <- c(l$lambda_multilayer, l$lambda_emergent)
+        # read at the optimum, before the difference moves E_up_
+        pkg <- l$lambda_multilayer
         mine <- rep$marginal_cost_water_multilayer(lam, k_r, Eup, r, h)
-        out[[length(out) + 1L]] <- .probe_pairs(pkg, c(mine, mine))
+        out[[length(out) + 1L]] <- .probe_pairs(pkg, mine)
+      }
+    }
+    do.call(rbind, out)
+  },
+  # Collar route, every curve, at its interior optima: lambda_emergent against
+  # dA/dE along the collar path. An interior optimum is one where the bound
+  # first-order condition is feasible and vanishes; a pinned one carries no
+  # such identity and is skipped. CF77 at 3e5, where it is interior; at the
+  # shared 1e5 it pins at psi_crit on these supplies.
+  lambda_collar = function(rep, temps) {
+    h <- 1e-4
+    out <- list()
+    for (cv in .c_curves) {
+      for (setup in list(list(multi = FALSE, ps = 0.5), list(multi = FALSE, ps = 1),
+                         list(multi = TRUE))) {
+        l <- if (setup$multi) .c_multi(cv) else
+          .c_leaf(cv, "collar", psi_soil = setup$ps, PPFD = 1500)
+        if (cv == "CF77") l$CF77_lambda_ <- 3e5
+        l$optimise()
+        r <- l$opt_root_psi_
+        g <- l$dprofit_droot_collar_psi_checked(r)
+        if (!(g[2] == 1) || !is.finite(g[1]) || abs(g[1]) > 1e-8) next
+        lam <- l$lambda_emergent
+        Af <- function(x) { l$evaluate_root_collar_psi(x); l$assim_colimited_ }
+        Ef <- function(x) { l$evaluate_root_collar_psi(x); l$transpiration_ }
+        out[[length(out) + 1L]] <- .c_rel(lam, rep$lambda_collar(Af, Ef, r, h))
       }
     }
     do.call(rbind, out)

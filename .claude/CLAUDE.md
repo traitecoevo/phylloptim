@@ -369,8 +369,8 @@ down for documents: each with its LaTeX, the C++ symbol that evaluates it, the
 parameters it reads, the bound fields it writes and a base-R replica of the
 printed form; and each parameter with its symbol, units, class, meaning, source
 and placeholder flag (#166). It covers every bound field: a parameter, an
-equation's `writes`, or a diagnostic (a bound field nothing in the C++
-writes). A document's equation list or parameter
+equation's `writes`, or an entry under `diagnostics` (a bound field that is
+neither; none is needed today). A document's equation list or parameter
 table is generated from it, so the two cannot drift apart. `model_registry()`
 reads it, `registry_values()` adds the values, `registry_check()` runs the
 replicas, `registry_resolve()` adds file, line and API link.

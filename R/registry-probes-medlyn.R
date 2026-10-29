@@ -92,10 +92,25 @@
 .registry_probes_medlyn <- list(
 
   # --- medlyn -----------------------------------------------------------------
-  # Called at a grid of A through the binding, with beta below 0, at 0, inside,
-  # at 1 and above 1 (unclamped), and g0 from 0.
+  # Not bound: read back through medlyn_model_gs at g0 = 0, where the
+  # conductance is (1 + g1 beta / sqrt(D)) A / (ca / c_P) on the CO2 basis, over
+  # theta below the wilting point, inside, and above field capacity.
+  medlyn_beta = function(rep, temps) {
+    l <- leaf_model()
+    out <- lapply(c(0.05, 0.1, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.9), function(theta) {
+      l$theta <- theta; l$g0 <- 0; l$g1 <- 2.57
+      set_drivers(l, psi_soil = 1, atm_vpd = 2)
+      A <- 10
+      gs <- l$medlyn_model_gs(A)
+      beta <- (gs * (l$ca_ / (l$atm_kpa_ * 1000 * 1e-6)) / A - 1) * sqrt(l$atm_vpd_) / l$g1
+      .probe_pairs(beta, rep$medlyn_beta(l$theta_, l$theta_fc_, l$theta_w_))
+    })
+    do.call(rbind, out)
+  },
+  # Called at a grid of A through the binding, with theta below the wilting
+  # point, inside, at and above field capacity, a zero deficit, and g0 from 0.
   medlyn_gs = function(rep, temps) {
-    g <- expand.grid(A = c(-2, 0, 5, 15, 30), D = c(0.25, 1, 2, 4), theta = c(0.1, 0.2, 0.3, 0.5, 0.8),
+    g <- expand.grid(A = c(-2, 0, 5, 15, 30), D = c(0, 0.25, 1, 2, 4), theta = c(0.1, 0.2, 0.3, 0.5, 0.8),
                      g0 = c(0, 0.022, 0.1), g1 = c(1, 2.57, 6))
     l <- leaf_model()
     out <- lapply(split(g, list(g$D, g$theta, g$g0, g$g1), drop = TRUE), function(s) {
@@ -122,42 +137,56 @@
       r <- function(x) rep$medlyn_ci_numerical(x, p)
       x <- l$ci_
       if (!ok) return(.probe_pairs(1, as.numeric(r(p$ca) > 0)))
+      # A closest approach with a negative conductance is the closed state.
+      if (l$stom_cond_CO2_ == 0) {
+        return(.probe_pairs(c(l$ci_, l$assim_colimited_, l$transpiration_),
+                            c(p$gamma * p$atm_kpa * 1e-3, -p$R_d, 0)))
+      }
       h <- 1e-4
       A <- rep$assimilation(x, p$vcmax, p$J, p$gamma, p$km, p$theta_c, p$R_d, p$atm_kpa)
       .probe_pairs(c(x, l$assim_colimited_, l$stom_cond_CO2_),
                    c(x - r(x) / ((r(x + h) - r(x - h)) / (2 * h)), A,
                      rep$medlyn_gs(A, p$g0, p$g1, p$D, p$ca, p$atm_kpa, p$theta, p$theta_fc, p$theta_w)))
     })
+    # Dark: no root, a stop, as the replica residual's sign at ca says.
     dark <- lapply(.mf_T(temps), function(T) {
       l <- .mf_medlyn_leaf(T, PPFD = 0)
       ok <- tryCatch({ l$solve_medlyn_ci_numerical(); TRUE }, error = function(e) FALSE)
       p <- .mf_p(l); p$D <- l$atm_vpd_
       .probe_pairs(as.numeric(!ok), as.numeric(rep$medlyn_ci_numerical(p$ca, p) > 0))
     })
-    flat <- lapply(.mf_T(temps), function(T) {
-      l <- .mf_medlyn_leaf(T, theta = 0.15, g0 = 0, R_d_25 = 0)
-      l$solve_medlyn_ci_numerical()
-      p <- .mf_p(l); p$D <- l$atm_vpd_
-      lo <- p$gamma * p$atm_kpa * 1e-3
-      peak <- max(vapply(seq(lo, p$ca, length.out = 50), function(x) rep$medlyn_ci_numerical(x, p), 0))
-      .probe_pairs(c(as.numeric(abs(l$ci_ - lo) < 1e-6 * lo), 1),
-                   c(1, as.numeric(peak <= 1e-12)))
+    # Just above the wilting point with g0 = 0, the closest approach has a
+    # negative conductance, so the closed state: no conductance, ci at the
+    # compensation point, A = -R_d. At least one temperature must reach it.
+    shut <- lapply(.mf_T(temps), function(T) {
+      l <- .mf_medlyn_leaf(T, PPFD = 900, D = 2, theta = 0.2001, g0 = 0)
+      ok <- tryCatch({ l$solve_medlyn_ci_numerical(); TRUE }, error = function(e) FALSE)
+      if (!ok || l$stom_cond_CO2_ != 0) return(NULL)
+      .probe_pairs(c(l$stom_cond_CO2_, l$ci_, l$assim_colimited_, l$transpiration_),
+                   c(0, l$gamma_ * l$atm_kpa_ * 1e-3, -l$R_d_, 0))
     })
-    do.call(rbind, c(root, dark, flat))
+    shut <- Filter(Negate(is.null), shut)
+    reached <- .probe_pairs(as.numeric(length(shut) > 0), 1)
+    do.call(rbind, c(root, dark, shut, list(reached)))
   },
   medlyn_ci_analytical = function(rep, temps) {
-    g <- expand.grid(T = .mf_T(temps), D = c(0.3, 1, 2, 4), g1 = c(1, 2.57, 6))
+    g <- expand.grid(T = .mf_T(temps), D = c(0.3, 1, 2, 4), g1 = c(1, 2.57, 6), theta = c(0.25, 0.3, 0.5, 0.7))
     out <- lapply(seq_len(nrow(g)), function(i) {
-      l <- .mf_medlyn_leaf(g$T[i], D = g$D[i], g1 = g$g1[i])
+      l <- .mf_medlyn_leaf(g$T[i], D = g$D[i], g1 = g$g1[i], theta = g$theta[i])
       l$solve_medlyn_ci_analytical()
       p <- .mf_p(l); p$D <- l$atm_vpd_
-      ci <- rep$medlyn_ci_analytical(l$ca_, l$g1, l$atm_vpd_)
-      A <- rep$assimilation(l$ci_, p$vcmax, p$J, p$gamma, p$km, p$theta_c, p$R_d, p$atm_kpa)
-      # The root of the residual only at g0 = 0, beta = 1.
-      w <- p; w$g0 <- 0; w$theta <- w$theta_fc
+      ci <- rep$medlyn_ci_analytical(l$ca_, l$g1, l$atm_vpd_, l$theta_, l$theta_fc_, l$theta_w_)
+      A <- rep$assimilation(ci, p$vcmax, p$J, p$gamma, p$km, p$theta_c, p$R_d, p$atm_kpa)
+      gs <- rep$medlyn_gs(A, p$g0, p$g1, p$D, p$ca, p$atm_kpa, p$theta, p$theta_fc, p$theta_w)
+      # A negative conductance at the closed form's ci is the closed state.
+      if (gs < 0) {
+        return(.probe_pairs(c(l$ci_, l$assim_colimited_, l$stom_cond_CO2_),
+                            c(p$gamma * p$atm_kpa * 1e-3, -p$R_d, 0)))
+      }
+      # The numerical route's root exactly at g0 = 0, at any beta.
+      w <- p; w$g0 <- 0
       .probe_pairs(c(l$ci_, l$assim_colimited_, l$stom_cond_CO2_, 0),
-                   c(ci, A, rep$medlyn_gs(A, p$g0, p$g1, p$D, p$ca, p$atm_kpa, p$theta, p$theta_fc, p$theta_w),
-                     rep$medlyn_ci_numerical(ci, w)))
+                   c(ci, A, gs, rep$medlyn_ci_numerical(ci, w)))
     })
     do.call(rbind, out)
   },
