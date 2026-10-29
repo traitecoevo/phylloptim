@@ -421,14 +421,6 @@ Leaf__profit___set <- function(obj_, value) {
     invisible(.Call('_phylloptim_Leaf__profit___set', PACKAGE = 'phylloptim', obj_, value))
 }
 
-Leaf__psi_stem__get <- function(obj_) {
-    .Call('_phylloptim_Leaf__psi_stem__get', PACKAGE = 'phylloptim', obj_)
-}
-
-Leaf__psi_stem__set <- function(obj_, value) {
-    invisible(.Call('_phylloptim_Leaf__psi_stem__set', PACKAGE = 'phylloptim', obj_, value))
-}
-
 Leaf__CF77_lambda___get <- function(obj_) {
     .Call('_phylloptim_Leaf__CF77_lambda___get', PACKAGE = 'phylloptim', obj_)
 }
@@ -533,14 +525,6 @@ Leaf__opt_root_psi___set <- function(obj_, value) {
     invisible(.Call('_phylloptim_Leaf__opt_root_psi___set', PACKAGE = 'phylloptim', obj_, value))
 }
 
-Leaf__opt_ci___get <- function(obj_) {
-    .Call('_phylloptim_Leaf__opt_ci___get', PACKAGE = 'phylloptim', obj_)
-}
-
-Leaf__opt_ci___set <- function(obj_, value) {
-    invisible(.Call('_phylloptim_Leaf__opt_ci___set', PACKAGE = 'phylloptim', obj_, value))
-}
-
 Leaf__E_up___get <- function(obj_) {
     .Call('_phylloptim_Leaf__E_up___get', PACKAGE = 'phylloptim', obj_)
 }
@@ -555,14 +539,6 @@ Leaf__assim_max___get <- function(obj_) {
 
 Leaf__assim_max___set <- function(obj_, value) {
     invisible(.Call('_phylloptim_Leaf__assim_max___set', PACKAGE = 'phylloptim', obj_, value))
-}
-
-Leaf__count__get <- function(obj_) {
-    .Call('_phylloptim_Leaf__count__get', PACKAGE = 'phylloptim', obj_)
-}
-
-Leaf__count__set <- function(obj_, value) {
-    invisible(.Call('_phylloptim_Leaf__count__set', PACKAGE = 'phylloptim', obj_, value))
 }
 
 Leaf__Tleaf___get <- function(obj_) {
@@ -915,14 +891,6 @@ Leaf__r_R_V_sum__get <- function(obj_) {
 
 Leaf__r_R_V_sum__set <- function(obj_, value) {
     invisible(.Call('_phylloptim_Leaf__r_R_V_sum__set', PACKAGE = 'phylloptim', obj_, value))
-}
-
-Leaf__f_r__get <- function(obj_) {
-    .Call('_phylloptim_Leaf__f_r__get', PACKAGE = 'phylloptim', obj_)
-}
-
-Leaf__f_r__set <- function(obj_, value) {
-    invisible(.Call('_phylloptim_Leaf__f_r__set', PACKAGE = 'phylloptim', obj_, value))
 }
 
 Leaf__last_solve_fell_back___get <- function(obj_) {
