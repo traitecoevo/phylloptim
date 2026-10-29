@@ -235,6 +235,36 @@
   # conductance against Fick's law on the reported transpiration and deficit,
   # with the gate off (the air's deficit) and on (the leaf's, at the leaf
   # temperature that transpiration gives).
+  # Read off the gb_H2O and gs_stomatal_H2O bindings after a transpiring
+  # evaluation, with the gate on over the driver grid and off.
+  boundary_layer_conductance = function(rep, temps) {
+    g <- .probe_eb_grid
+    on <- do.call(rbind, lapply(seq_len(nrow(g)), function(i) {
+      e <- .probe_eb(PPFD = g$Q[i], Tair = g$Ta[i], atm_vpd = g$D[i], d = g$d[i], U = g$U[i])
+      .probe_pairs(e$gb_H2O, rep$boundary_layer_conductance(e$atm_kpa_, e$Tair_, e$ra_))
+    }))
+    l <- leaf_model()
+    .probe_drive(l, 25)
+    off <- .probe_pairs(as.numeric(is.infinite(l$gb_H2O)), 1)
+    rbind(on, off)
+  },
+  stomatal_conductance_stomatal = function(rep, temps) {
+    g <- expand.grid(psi = c(1.2, 1.5, 2, 3), Ta = c(15, 25, 35), U = c(0.5, 2))
+    on <- do.call(rbind, lapply(seq_len(nrow(g)), function(i) {
+      e <- .probe_eb(Tair = g$Ta[i], U = g$U[i])
+      e$set_leaf_states_rates_from_psi_stem(g$psi[i], 1)
+      .probe_pairs(e$gs_stomatal_H2O, rep$stomatal_conductance_stomatal(e$gs_H2O, e$gb_H2O))
+    }))
+    off <- leaf_model(supply = leaf_supply_singlelayer())
+    set_drivers(off, psi_soil = 1, PPFD = 900, atm_vpd = 2, leaf_temp = 25,
+                root_network = series_resistance(1e3))
+    gate_off <- do.call(rbind, lapply(c(1.2, 2, 3), function(psi) {
+      off$set_leaf_states_rates_from_psi_stem(psi, 1)
+      .probe_pairs(off$gs_stomatal_H2O,
+                   rep$stomatal_conductance_stomatal(off$gs_H2O, off$gb_H2O, energy_balance = FALSE))
+    }))
+    rbind(on, gate_off)
+  },
   stomatal_conductance = function(rep, temps) {
     off <- leaf_model(supply = leaf_supply_singlelayer())
     set_drivers(off, psi_soil = 1, PPFD = 900, atm_vpd = 2, leaf_temp = 25,

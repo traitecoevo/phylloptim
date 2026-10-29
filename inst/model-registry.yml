@@ -512,6 +512,16 @@ parameters:
     source: standard atomic weights
     placeholder: false
     code: phylloptim::kg_to_mol_h2o
+  bl_vapour_heat_ratio:
+    section: vapour
+    symbol: '1.075'
+    units: '–'
+    class: constant
+    meaning: 'boundary-layer conductance to water vapour over that to heat, for a hypostomatous leaf; read only by the reported boundary-layer and stomatal conductances, never by the solve'
+    source: 'plantecophys convention (Gbw = 1.075 Gbh in LeafEnergyBalance, at StomatalRatio 1)'
+    cite: Duursma-2015
+    placeholder: false
+    code: phylloptim::bl_vapour_heat_ratio
 
   # --- energy balance ----------------------------------------------------------
   use_energy_balance_:
@@ -1589,6 +1599,40 @@ equations:
     replica: |
       function(E, atm_kpa, vpd_leaf, ratio = 1.67) atm_kpa * E * (1 / 0.018015) / vpd_leaf / ratio
 
+  boundary_layer_conductance:
+    section: vapour
+    title: Boundary-layer conductance to water vapour
+    latex: |
+      g_{bw} = \frac{1.075\, P / (R\, T_{\mathrm{air},K})}{r_a} \ \text{with the energy balance on}, \qquad g_{bw} = \infty \ \text{off it}
+    code: phylloptim::Leaf::boundary_layer_cond_H2O
+    reads: [use_energy_balance_, bl_vapour_heat_ratio, atm_kpa, kPa_to_Pa, gas_constant, C_to_K]
+    writes: []
+    kind: closed_form
+    cite: Duursma-2015
+    note: 'mol m⁻² s⁻¹; bound as `gb_H2O`. The molar density of air at air temperature over the aerodynamic resistance to heat, scaled to vapour for a hypostomatous leaf. Reported only: the diffusion in the solve has no boundary-layer term (#122).'
+    replica: |
+      function(atm_kpa, Tair, ra, energy_balance = TRUE) {
+        if (!energy_balance) return(Inf)
+        1.075 * (atm_kpa * 1000 / (8.314462618153240 * (Tair + 273.15))) / ra
+      }
+  stomatal_conductance_stomatal:
+    section: vapour
+    title: Stomatal conductance with the boundary layer removed
+    latex: |
+      g_{sw} = \left(\frac{1}{g_w} - \frac{1}{g_{bw}}\right)^{-1}, \qquad g_w = 1.67\, g_c \ \text{(the total leaf-to-air conductance, bound as gs\_H2O)}
+    code: phylloptim::Leaf::stom_cond_stomatal_H2O
+    also: [phylloptim::Leaf::stom_cond_H2O, phylloptim::Leaf::boundary_layer_cond_H2O]
+    reads: [use_energy_balance_]
+    writes: []
+    uses: [boundary_layer_conductance]
+    kind: closed_form
+    note: 'mol m⁻² s⁻¹; bound as `gs_stomatal_H2O`. Equal to the total, bit for bit, with the gate off or a shut leaf. Refused where $g_w \ge g_{bw}$: the transpiration is then more than the boundary layer can carry at that deficit and no finite stomatal conductance exists.'
+    replica: |
+      function(g_total, g_b, energy_balance = TRUE) {
+        if (!energy_balance || !(g_total > 0) || !is.finite(g_total)) return(g_total)
+        1 / (1 / g_total - 1 / g_b)
+      }
+
   # --- energy balance ----------------------------------------------------------
   atmospheric_emissivity:
     section: energy_balance
@@ -1677,6 +1721,7 @@ equations:
       \tau = \frac{dT_\mathrm{leaf}}{dE}\, \frac{dE}{d\psi}, \qquad
       \frac{\partial g_c}{\partial T} = -\, g_c\, \frac{\Delta(T_\mathrm{leaf})}{D_\mathrm{leaf}} \quad (0 \text{ on the floor } D_\min)
     code: phylloptim::Leaf::dprofit_energy_balance_term
+    also: [phylloptim::Leaf::respiration_temp_deriv, phylloptim::Leaf::vcmax_temp_deriv, phylloptim::Leaf::thermal_cost_temp_deriv]
     reads: [fd_step, ca, vpd_leaf_min, use_energy_balance_]
     writes: []
     uses: [saturation_vapour_pressure_slope]
