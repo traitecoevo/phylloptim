@@ -1,0 +1,1511 @@
+# The model registry (#166): the equations of phylloptim's temperature paths,
+# the parameters they read, and the C++ symbol that evaluates each, in one file
+# that documents are generated FROM rather than written beside.
+#
+# Three rules, so it does not rot:
+#
+#   1. Nothing here stores a line number or a default value. A symbol's file and
+#      line come from Doxygen's XML at render time (registry_locations(),
+#      registry_resolve()), and a parameter's value is read off a live Leaf, off
+#      set_drivers()'s formals, or off the constexpr's initializer in that XML
+#      (registry_values()). A `literal:` is the one exception: a number that IS
+#      part of an equation's form (Tetens' 17.27) rather than a default, and the
+#      equation's replica is what asserts it against the code.
+#   2. CI checks it. tests/testthat/test-registry.R asserts every symbol and bound
+#      field named here exists, snapshots the bound fields NOT yet covered, and
+#      runs every equation's replica against the package (registry_check());
+#      docs.yml resolves every `code` in Doxygen's XML and checks each
+#      equation's `reads` against what its function references.
+#   3. One registry per package. plant's covers its strategies and points at these
+#      ids rather than copying them.
+#
+# Schema. `sections` is id: title, in document order. `parameters` is keyed by
+# the name in code; each has section, symbol (LaTeX, no $), units, class (trait |
+# hyperparameter | constant | driver), meaning, source (free text), placeholder
+# (true where the value is an uncalibrated default or no source is recorded),
+# code (the qualified C++ symbol that holds it), and optionally cite (a Zotero
+# key, Surname-Year), default_code (the constexpr the member's default is copied
+# from), driver (the set_drivers() argument), literal (see rule 1) and aliases
+# (other symbols the same quantity is read through, for the references check).
+# `equations` is keyed by id; each has section, title, latex, code (the symbol
+# that evaluates it, or ~ for an identity with none), reads (parameter ids),
+# writes (bound fields it seats), kind (closed_form | identity | derivative |
+# integrator), replica (base-R source of the printed equation; other replicas
+# are callable by id), and optionally also (further symbols involved), uses
+# (other equation ids the replica calls), cite, tol (the check tolerance where
+# 1e-10 is not attainable) and note.
+#
+# To add an equation: an entry here, and a probe of the same id in
+# R/registry-probes.R that reads the package side.
+#
+# YAML 1.1 reads `1e-3` as a string: write floats with a point and a signed
+# exponent (1.0e-3, 2.45e+6).
+
+package: phylloptim
+
+sections:
+  drivers: Drivers
+  biochemistry: Photosynthetic biochemistry
+  respiration: Respiration
+  vapour: Water vapour and the leaf-to-air deficit
+  energy_balance: Energy balance
+  damage: Damage, repair and acclimation
+
+parameters:
+
+  # --- drivers ---------------------------------------------------------------
+  leaf_temp:
+    section: drivers
+    symbol: 'T_\mathrm{air} \text{ or } T_\mathrm{leaf}'
+    units: '°C'
+    class: driver
+    meaning: 'the leaf temperature with the energy balance off, the air temperature with it on'
+    source: set_drivers() default
+    placeholder: false
+    code: phylloptim::Leaf::leaf_temp_
+    driver: leaf_temp
+  PPFD:
+    section: drivers
+    symbol: 'Q'
+    units: 'µmol m⁻² s⁻¹'
+    class: driver
+    meaning: 'intercepted photosynthetic photon flux per unit leaf area, before absorptance'
+    source: set_drivers() default
+    placeholder: false
+    code: phylloptim::Leaf::PPFD_
+    driver: PPFD
+  NIR_int_:
+    section: drivers
+    symbol: 'Q_\mathrm{NIR}'
+    units: 'W m⁻²'
+    class: driver
+    meaning: 'intercepted near-infrared; no default, set on the leaf before set_drivers() (about PPFD / 4.57 in daylight, 0 under an LED); read only with the energy balance on'
+    source: 0.13.0, no default by design
+    placeholder: false
+    code: phylloptim::Leaf::NIR_int_
+  atm_vpd:
+    section: drivers
+    symbol: 'D_\mathrm{air}'
+    units: 'kPa'
+    class: driver
+    meaning: 'air vapour pressure deficit'
+    source: set_drivers() default
+    placeholder: false
+    code: phylloptim::Leaf::atm_vpd_
+    driver: atm_vpd
+  ca:
+    section: drivers
+    symbol: 'c_a'
+    units: 'Pa'
+    class: driver
+    meaning: 'atmospheric CO₂ partial pressure'
+    source: set_drivers() default
+    placeholder: false
+    code: phylloptim::Leaf::ca_
+    driver: ca
+  atm_o2_kpa:
+    section: drivers
+    symbol: 'O'
+    units: 'kPa'
+    class: driver
+    meaning: 'O₂ partial pressure'
+    source: set_drivers() default
+    placeholder: false
+    code: phylloptim::Leaf::atm_o2_kpa_
+    driver: atm_o2_kpa
+  atm_kpa:
+    section: drivers
+    symbol: 'P'
+    units: 'kPa'
+    class: driver
+    meaning: 'atmospheric pressure; the mixing-ratio to partial-pressure factor $c_P = P \times 10^{3} \times 10^{-6}$ is derived from it'
+    source: set_drivers() default
+    placeholder: false
+    code: phylloptim::Leaf::atm_kpa_
+    driver: atm_kpa
+    aliases: [phylloptim::Leaf::umol_per_mol_to_Pa_]
+  wind_speed_:
+    section: drivers
+    symbol: 'U'
+    units: 'm s⁻¹'
+    class: driver
+    meaning: 'wind speed at the leaf (plant: the wind_speed driver); read only with the energy balance on'
+    source: code default
+    placeholder: true
+    code: phylloptim::Leaf::wind_speed_
+
+  # --- biochemistry ------------------------------------------------------------
+  vcmax_25:
+    section: biochemistry
+    symbol: 'V_{c,25}'
+    units: 'µmol m⁻² s⁻¹'
+    class: trait
+    meaning: 'maximum carboxylation rate at 25 °C'
+    source: E. saligna default
+    placeholder: false
+    code: phylloptim::Leaf::vcmax_25
+  jmax_25:
+    section: biochemistry
+    symbol: 'J_{25}'
+    units: 'µmol m⁻² s⁻¹'
+    class: trait
+    meaning: 'maximum electron transport rate at 25 °C (plant: $1.64\,V_{c,25}$)'
+    source: E. saligna default
+    placeholder: false
+    code: phylloptim::Leaf::jmax_25
+  vcmax_ha_:
+    section: biochemistry
+    symbol: 'E_{a,V}'
+    units: 'J mol⁻¹'
+    class: hyperparameter
+    meaning: 'activation energy of $V_{cmax}$'
+    source: 'Medlyn-2002 range; the constants.hpp comment says kJ'
+    cite: Medlyn-2002
+    placeholder: true
+    code: phylloptim::Leaf::vcmax_ha_
+    default_code: phylloptim::vcmax_ha
+  vcmax_H_d_:
+    section: biochemistry
+    symbol: 'H_{d,V}'
+    units: 'J mol⁻¹'
+    class: hyperparameter
+    meaning: 'deactivation energy of $V_{cmax}$'
+    source: Medlyn-2002 (fixed at 200 kJ)
+    cite: Medlyn-2002
+    placeholder: true
+    code: phylloptim::Leaf::vcmax_H_d_
+    default_code: phylloptim::vcmax_H_d
+  vcmax_d_S_:
+    section: biochemistry
+    symbol: '\Delta S_V'
+    units: 'J mol⁻¹ K⁻¹'
+    class: hyperparameter
+    meaning: 'entropy term of $V_{cmax}$'
+    source: Medlyn-2002 range
+    cite: Medlyn-2002
+    placeholder: true
+    code: phylloptim::Leaf::vcmax_d_S_
+    default_code: phylloptim::vcmax_d_S
+  jmax_ha_:
+    section: biochemistry
+    symbol: 'E_{a,J}'
+    units: 'J mol⁻¹'
+    class: hyperparameter
+    meaning: 'activation energy of $J_{max}$'
+    source: Medlyn-2002 range
+    cite: Medlyn-2002
+    placeholder: true
+    code: phylloptim::Leaf::jmax_ha_
+    default_code: phylloptim::jmax_ha
+  jmax_H_d_:
+    section: biochemistry
+    symbol: 'H_{d,J}'
+    units: 'J mol⁻¹'
+    class: hyperparameter
+    meaning: 'deactivation energy of $J_{max}$'
+    source: Medlyn-2002 (fixed at 200 kJ)
+    cite: Medlyn-2002
+    placeholder: true
+    code: phylloptim::Leaf::jmax_H_d_
+    default_code: phylloptim::jmax_H_d
+  jmax_d_S_:
+    section: biochemistry
+    symbol: '\Delta S_J'
+    units: 'J mol⁻¹ K⁻¹'
+    class: hyperparameter
+    meaning: 'entropy term of $J_{max}$'
+    source: Medlyn-2002 range
+    cite: Medlyn-2002
+    placeholder: true
+    code: phylloptim::Leaf::jmax_d_S_
+    default_code: phylloptim::jmax_d_S
+  gamma_25_:
+    section: biochemistry
+    symbol: '\Gamma^*_{25}'
+    units: 'µmol mol⁻¹'
+    class: constant
+    meaning: 'CO₂ compensation point at 25 °C'
+    source: Bernacchi-2001 Table 1
+    cite: Bernacchi-2001
+    placeholder: false
+    code: phylloptim::Leaf::gamma_25_
+    default_code: phylloptim::gamma_25
+  gamma_ha_:
+    section: biochemistry
+    symbol: 'E_{a,\Gamma}'
+    units: 'J mol⁻¹'
+    class: constant
+    meaning: 'activation energy of $\Gamma^*$'
+    source: Bernacchi-2001 Table 1
+    cite: Bernacchi-2001
+    placeholder: false
+    code: phylloptim::Leaf::gamma_ha_
+    default_code: phylloptim::gamma_ha
+  kc_25_:
+    section: biochemistry
+    symbol: 'K_{c,25}'
+    units: 'µmol mol⁻¹'
+    class: constant
+    meaning: 'Rubisco Michaelis constant for CO₂ at 25 °C'
+    source: Bernacchi-2001 Table 1
+    cite: Bernacchi-2001
+    placeholder: false
+    code: phylloptim::Leaf::kc_25_
+    default_code: phylloptim::kc_25
+  kc_ha_:
+    section: biochemistry
+    symbol: 'E_{a,K_c}'
+    units: 'J mol⁻¹'
+    class: constant
+    meaning: 'activation energy of $K_c$'
+    source: Bernacchi-2001 Table 1
+    cite: Bernacchi-2001
+    placeholder: false
+    code: phylloptim::Leaf::kc_ha_
+    default_code: phylloptim::kc_ha
+  ko_25_:
+    section: biochemistry
+    symbol: 'K_{o,25}'
+    units: 'µmol mol⁻¹'
+    class: constant
+    meaning: 'Rubisco Michaelis constant for O₂ at 25 °C (converted from mmol mol⁻¹)'
+    source: Bernacchi-2001 Table 1
+    cite: Bernacchi-2001
+    placeholder: false
+    code: phylloptim::Leaf::ko_25_
+    default_code: phylloptim::ko_25
+  ko_ha_:
+    section: biochemistry
+    symbol: 'E_{a,K_o}'
+    units: 'J mol⁻¹'
+    class: constant
+    meaning: 'activation energy of $K_o$'
+    source: Bernacchi-2001 Table 1
+    cite: Bernacchi-2001
+    placeholder: false
+    code: phylloptim::Leaf::ko_ha_
+    default_code: phylloptim::ko_ha
+  phi_J:
+    section: biochemistry
+    symbol: '\phi_J'
+    units: 'mol e⁻ (mol absorbed photon)⁻¹'
+    class: trait
+    meaning: 'quantum yield of electron transport per absorbed photon; no temperature dependence (was $a$, per incident photon, before 0.13.0; only $\phi_J \alpha_\mathrm{PAR}$ is identified by a gas-exchange fit)'
+    source: E. saligna default, 0.30 / 0.85
+    placeholder: false
+    code: phylloptim::Leaf::phi_J
+  alpha_PAR_:
+    section: biochemistry
+    symbol: '\alpha_\mathrm{PAR}'
+    units: '–'
+    class: hyperparameter
+    meaning: 'PAR absorptance: the leaf absorbs $\alpha_\mathrm{PAR}$ of the intercepted PPFD, in both photosynthesis and the energy balance; a leaf property, not a fitted trait'
+    source: code default; no citation recorded
+    placeholder: true
+    code: phylloptim::Leaf::alpha_PAR_
+  curv_fact_elec_trans:
+    section: biochemistry
+    symbol: '\theta_J'
+    units: '–'
+    class: trait
+    meaning: 'curvature of the light response of $J$; no temperature dependence'
+    source: 'code comment: Smith & Keenan (2020), not in Zotero'
+    placeholder: false
+    code: phylloptim::Leaf::curv_fact_elec_trans
+  curv_fact_colim:
+    section: biochemistry
+    symbol: '\theta'
+    units: '–'
+    class: trait
+    meaning: 'curvature of the colimitation of $W_c$ and $W_j$; no temperature dependence'
+    source: default
+    placeholder: false
+    code: phylloptim::Leaf::curv_fact_colim
+  gas_constant:
+    section: biochemistry
+    symbol: 'R'
+    units: 'J mol⁻¹ K⁻¹'
+    class: constant
+    meaning: 'universal gas constant, exact since the 2019 SI redefinition'
+    source: SI 2019
+    placeholder: false
+    code: phylloptim::gas_constant
+  C_to_K:
+    section: biochemistry
+    symbol: 'T_0'
+    units: 'K'
+    class: constant
+    meaning: 'Celsius to kelvin offset'
+    source: SI
+    placeholder: false
+    code: phylloptim::C_to_K
+  ref_temp:
+    section: biochemistry
+    symbol: 'T_{25}'
+    units: '°C'
+    class: constant
+    meaning: 'reference temperature of every response, 25 °C = 298.15 K, written `25 + C_to_K` (Medlyn-2002 write 298 K)'
+    source: code
+    placeholder: false
+    literal: 25
+    code: phylloptim::Leaf::arrh_curve
+  umol_to_mol:
+    section: biochemistry
+    symbol: '10^{-6}'
+    units: 'mol µmol⁻¹'
+    class: constant
+    meaning: 'unit conversion in the mixing-ratio to partial-pressure factor $c_P$'
+    source: definition
+    placeholder: false
+    code: phylloptim::umol_to_mol
+  kPa_to_Pa:
+    section: biochemistry
+    symbol: '10^{3}'
+    units: 'Pa kPa⁻¹'
+    class: constant
+    meaning: 'unit conversion in $c_P$ and in the O₂ term of $K_m$'
+    source: definition
+    placeholder: false
+    code: phylloptim::kPa_to_Pa
+  use_thermal_cost_:
+    section: biochemistry
+    symbol: 'g_\mathrm{TC}'
+    units: '–'
+    class: hyperparameter
+    meaning: 'gate: the Sicangco instantaneous thermal cost, which scales $J_{max}$ by $1 - TC$'
+    source: default off
+    placeholder: false
+    code: phylloptim::Leaf::use_thermal_cost_
+  T50_:
+    section: biochemistry
+    symbol: 'T_{50}'
+    units: '°C'
+    class: hyperparameter
+    meaning: 'half-damage temperature of the sigmoid thermal cost'
+    source: Sicangco-2026 Table 2, heatwave treatment
+    cite: Sicangco-2026
+    placeholder: false
+    code: phylloptim::Leaf::T50_
+  Tcrit_:
+    section: biochemistry
+    symbol: 'T_\mathrm{crit}'
+    units: '°C'
+    class: hyperparameter
+    meaning: 'onset temperature of the thermal cost; $r = 2/(T_{50} - T_\mathrm{crit})$, as the authors'' code computes it and not as their Eqn 8 prints it'
+    source: Sicangco-2026 Table 2
+    cite: Sicangco-2026
+    placeholder: false
+    code: phylloptim::Leaf::Tcrit_
+
+  # --- respiration ------------------------------------------------------------
+  R_d_25:
+    section: respiration
+    symbol: 'R_{d,25}'
+    units: 'µmol m⁻² s⁻¹'
+    class: trait
+    meaning: 'leaf dark respiration at 25 °C ($0.015 \times 96$, the value the old $V_{cmax}$-derived form gave)'
+    source: derived default
+    placeholder: true
+    code: phylloptim::Leaf::R_d_25
+  rd_q10_intercept_:
+    section: respiration
+    symbol: 'q_0'
+    units: '–'
+    class: hyperparameter
+    meaning: 'intercept of the declining $Q_{10}$'
+    source: 'Atkin-2003 Fig. 2 (foliar: 3.090); the code cites Tjoelker-2001'
+    cite: Atkin-2003
+    placeholder: false
+    code: phylloptim::Leaf::rd_q10_intercept_
+  rd_q10_slope_:
+    section: respiration
+    symbol: 'q_1'
+    units: 'K⁻¹'
+    class: hyperparameter
+    meaning: 'slope of the declining $Q_{10}$; zero makes $Q_{10} = q_0$ constant'
+    source: 'Atkin-2003 Fig. 2 (foliar: 0.043); the code cites Tjoelker-2001'
+    cite: Atkin-2003
+    placeholder: false
+    code: phylloptim::Leaf::rd_q10_slope_
+
+  # --- water vapour -----------------------------------------------------------
+  tetens_a:
+    section: vapour
+    symbol: '0.6108'
+    units: 'kPa'
+    class: constant
+    meaning: 'Tetens coefficient of $e_s(T)$'
+    source: FAO-56 form (Allen et al. 1998, not in Zotero)
+    placeholder: false
+    literal: 0.6108
+    code: phylloptim::Leaf::saturation_vapour_pressure
+  tetens_b:
+    section: vapour
+    symbol: '17.27'
+    units: '–'
+    class: constant
+    meaning: 'Tetens coefficient of $e_s(T)$'
+    source: FAO-56 form
+    placeholder: false
+    literal: 17.27
+    code: phylloptim::Leaf::saturation_vapour_pressure
+  tetens_c:
+    section: vapour
+    symbol: '237.3'
+    units: '°C'
+    class: constant
+    meaning: 'Tetens coefficient of $e_s(T)$'
+    source: FAO-56 form
+    placeholder: false
+    literal: 237.3
+    code: phylloptim::Leaf::saturation_vapour_pressure
+  tetens_slope_numerator:
+    section: vapour
+    symbol: '4098'
+    units: 'K'
+    class: constant
+    meaning: 'numerator of the Tetens slope $\Delta(T)$; the FAO-56 rounding of $17.27 \times 237.3 = 4098.17$, so the coded slope is $4.2 \times 10^{-5}$ low'
+    source: FAO-56 form
+    placeholder: false
+    literal: 4098
+    code: phylloptim::Leaf::saturation_vapour_pressure_slope
+  vpd_leaf_min:
+    section: vapour
+    symbol: 'D_\min'
+    units: 'kPa'
+    class: constant
+    meaning: 'floor on the leaf-to-air deficit, so a leaf cooled below the dew point cannot report a negative conductance'
+    source: code
+    placeholder: true
+    code: phylloptim::vpd_leaf_min
+  H2O_CO2_stom_diff_ratio_:
+    section: vapour
+    symbol: '1.67'
+    units: '–'
+    class: constant
+    meaning: 'H₂O:CO₂ diffusivity ratio in $g_c$ (1.6 in Medlyn-2011 and the $g_1$ literature); a convention, settable'
+    source: code (#50)
+    cite: Medlyn-2011
+    placeholder: false
+    code: phylloptim::Leaf::H2O_CO2_stom_diff_ratio_
+    default_code: phylloptim::H2O_CO2_stom_diff_ratio
+  kg_to_mol_h2o:
+    section: vapour
+    symbol: '1/M_w'
+    units: 'mol kg⁻¹'
+    class: constant
+    meaning: 'moles of water per kilogram, the reciprocal of the molar mass 0.018015 kg mol⁻¹'
+    source: standard atomic weights
+    placeholder: false
+    code: phylloptim::kg_to_mol_h2o
+
+  # --- energy balance ----------------------------------------------------------
+  use_energy_balance_:
+    section: energy_balance
+    symbol: 'g_\mathrm{EB}'
+    units: '–'
+    class: hyperparameter
+    meaning: 'gate: energy balance on or off (plant: `use_energy_balance != 0`)'
+    source: default off
+    placeholder: false
+    code: phylloptim::Leaf::use_energy_balance_
+  d_:
+    section: energy_balance
+    symbol: 'd'
+    units: 'm'
+    class: trait
+    meaning: 'characteristic leaf dimension (plant: pars.d)'
+    source: plant default
+    placeholder: true
+    code: phylloptim::Leaf::d_
+  alpha_NIR_:
+    section: energy_balance
+    symbol: '\alpha_\mathrm{NIR}'
+    units: '–'
+    class: hyperparameter
+    meaning: 'near-infrared absorptance; a leaf property, not a fitted trait'
+    source: code default; no citation recorded
+    placeholder: true
+    code: phylloptim::Leaf::alpha_NIR_
+  umol_par_per_joule:
+    section: energy_balance
+    symbol: 'c_Q'
+    units: 'µmol J⁻¹'
+    class: constant
+    meaning: 'PAR photons per joule of PAR energy, for sunlight (an LED is 5–5.5); read on the energy-balance path only'
+    source: code
+    placeholder: true
+    code: phylloptim::umol_par_per_joule
+  stefan_boltzmann:
+    section: energy_balance
+    symbol: '\sigma'
+    units: 'W m⁻² K⁻⁴'
+    class: constant
+    meaning: 'Stefan–Boltzmann constant'
+    source: SI
+    placeholder: false
+    code: phylloptim::stefan_boltzmann
+  leaf_emissivity:
+    section: energy_balance
+    symbol: '\varepsilon_l'
+    units: '–'
+    class: constant
+    meaning: 'leaf longwave emissivity'
+    source: code (0.94–0.99 measured)
+    placeholder: true
+    code: phylloptim::leaf_emissivity
+  atmos_emissivity_coef:
+    section: energy_balance
+    symbol: 'c_\varepsilon'
+    units: '–'
+    class: constant
+    meaning: 'Brutsaert clear-sky emissivity coefficient, with $e_a$ in Pa (the same relation reads $1.24\,(e_a/T)^{1/7}$ with $e_a$ in hPa)'
+    source: Brutsaert (1975), not in Zotero
+    placeholder: false
+    code: phylloptim::atmos_emissivity_coef
+  atmos_emissivity_exponent:
+    section: energy_balance
+    symbol: '1/7'
+    units: '–'
+    class: constant
+    meaning: 'Brutsaert clear-sky emissivity exponent'
+    source: Brutsaert (1975), not in Zotero
+    placeholder: false
+    code: phylloptim::atmos_emissivity_exponent
+  vapour_pressure_min:
+    section: energy_balance
+    symbol: 'e_{a,\min}'
+    units: 'Pa'
+    class: constant
+    meaning: 'floor on the actual vapour pressure in the emissivity, where a deficit larger than saturation would otherwise give a negative base'
+    source: code
+    placeholder: false
+    code: phylloptim::vapour_pressure_min
+  aerodynamic_resistance_coef:
+    section: energy_balance
+    symbol: 'C_{ra}'
+    units: 's^{1/2} m⁻¹'
+    class: constant
+    meaning: 'laminar boundary-layer coefficient in $r_a = C_{ra}\sqrt{d/U}$'
+    source: PM note §4.1 (standard formulation)
+    placeholder: true
+    code: phylloptim::aerodynamic_resistance_coef
+  aerodynamic_resistance_fixed:
+    section: energy_balance
+    symbol: 'r_{a,\mathrm{fixed}}'
+    units: 's m⁻¹'
+    class: constant
+    meaning: '$r_a$ fallback when $d$ or $U$ is zero'
+    source: code
+    placeholder: true
+    code: phylloptim::aerodynamic_resistance_fixed
+  latent_heat_vap:
+    section: energy_balance
+    symbol: '\lambda_v'
+    units: 'J kg⁻¹'
+    class: constant
+    meaning: 'latent heat of vaporisation, fixed (a value for about 21.5 °C, not 25 °C; #28)'
+    source: code
+    placeholder: true
+    code: phylloptim::latent_heat_vap
+  vol_heat_cap_air:
+    section: energy_balance
+    symbol: '\rho c_p'
+    units: 'J m⁻³ K⁻¹'
+    class: constant
+    meaning: 'volumetric heat capacity of air, fixed; air density is never computed from pressure or temperature'
+    source: code
+    placeholder: true
+    code: phylloptim::vol_heat_cap_air
+  leaf_temp_min:
+    section: energy_balance
+    symbol: 'T_\min'
+    units: '°C'
+    class: constant
+    meaning: 'lower clamp on the solved leaf temperature, so an extreme non-equilibrium $E$ cannot make the Arrhenius block non-finite'
+    source: code
+    placeholder: false
+    code: phylloptim::leaf_temp_min
+  leaf_temp_max:
+    section: energy_balance
+    symbol: 'T_\max'
+    units: '°C'
+    class: constant
+    meaning: 'upper clamp on the solved leaf temperature'
+    source: code
+    placeholder: false
+    code: phylloptim::leaf_temp_max
+  fd_step:
+    section: energy_balance
+    symbol: 'h'
+    units: 'K'
+    class: constant
+    meaning: 'fixed, absolute step of the central difference for $\partial A/\partial T_\mathrm{leaf}$ inside the optimiser'
+    source: code
+    placeholder: false
+    literal: 1.0e-3
+    code: phylloptim::Leaf::dprofit_energy_balance_term
+  boundary_scan_n_:
+    section: energy_balance
+    symbol: 'n_\mathrm{scan}'
+    units: '–'
+    class: constant
+    meaning: 'basin-scan cells on the stem routes, used only with the energy balance on, where the objective can be two-humped'
+    source: measured (64)
+    placeholder: false
+    code: phylloptim::Leaf::boundary_scan_n_
+    read_by: the stem-route solve (basin_scan_cells), not an equation printed here
+
+  # --- damage, repair and acclimation ---------------------------------------------
+  use_thermal_damage_:
+    section: damage
+    symbol: 'g_\mathrm{TD}'
+    units: '–'
+    class: hyperparameter
+    meaning: 'gate: the thermal-damage layer (TF24t forces it on, with the energy balance)'
+    source: default off
+    placeholder: false
+    code: phylloptim::Leaf::use_thermal_damage_
+  topt_offset_:
+    section: damage
+    symbol: '\delta_0'
+    units: '°C'
+    class: trait
+    meaning: 'constitutive shift of both $T_\mathrm{opt}$ and the switch midpoint'
+    source: placeholder
+    placeholder: true
+    code: phylloptim::Leaf::topt_offset_
+    aliases: [phylloptim::damage::dp_topt_offset]
+  impair_H_:
+    section: damage
+    symbol: 'H_\mathrm{imp}'
+    units: 'J mol⁻¹'
+    class: trait
+    meaning: 'enthalpy of the impairment switch: how sharply it turns on'
+    source: placeholder (copies the Jmax curve $H_d$)
+    placeholder: true
+    code: phylloptim::Leaf::impair_H_
+    default_code: phylloptim::jmax_H_d
+    aliases: [phylloptim::damage::dp_impair_H]
+  impair_Tmid_:
+    section: damage
+    symbol: 'T_\mathrm{mid}'
+    units: '°C'
+    class: trait
+    meaning: 'midpoint of the impairment switch before shifts'
+    source: placeholder (copies $H_d/\Delta S$ of Jmax)
+    placeholder: true
+    code: phylloptim::Leaf::impair_Tmid_
+    aliases: [phylloptim::damage::dp_impair_Tmid]
+  k_i_:
+    section: damage
+    symbol: 'k_i'
+    units: 'day⁻¹'
+    class: trait
+    meaning: 'impairment rate $F \to I$ at $T_\mathrm{ref}$ with the switch on'
+    source: placeholder
+    placeholder: true
+    code: phylloptim::Leaf::k_i_
+    aliases: [phylloptim::damage::dp_k_i]
+  k_i_Ea_:
+    section: damage
+    symbol: 'E_{a,i}'
+    units: 'J mol⁻¹'
+    class: trait
+    meaning: 'activation energy of $k_i$; 0 is constant'
+    source: placeholder
+    placeholder: true
+    code: phylloptim::Leaf::k_i_Ea_
+    aliases: [phylloptim::damage::dp_k_i_Ea]
+  k_i_Tref_:
+    section: damage
+    symbol: 'T_\mathrm{ref}'
+    units: '°C'
+    class: hyperparameter
+    meaning: 'reference temperature of the Arrhenius scale of $k_i$'
+    source: placeholder
+    placeholder: true
+    code: phylloptim::Leaf::k_i_Tref_
+    aliases: [phylloptim::damage::dp_k_i_Tref]
+  k_i_baseline_:
+    section: damage
+    symbol: 'k_{i,\mathrm{base}}'
+    units: 'day⁻¹'
+    class: hyperparameter
+    meaning: 'no-extra-protection baseline for the protection cost; a rate, not a reference temperature'
+    source: placeholder
+    placeholder: true
+    code: phylloptim::Leaf::k_i_baseline_
+  k_rec_:
+    section: damage
+    symbol: 'k_\mathrm{rec}'
+    units: 'day⁻¹'
+    class: trait
+    meaning: 'repair rate $I \to F$ when cool'
+    source: placeholder
+    placeholder: true
+    code: phylloptim::Leaf::k_rec_
+    aliases: [phylloptim::damage::dp_k_rec]
+  m_rep_:
+    section: damage
+    symbol: 'm_\mathrm{rep}'
+    units: '°C⁻¹'
+    class: trait
+    meaning: 'slope of the repair shut-off logistic'
+    source: placeholder
+    placeholder: true
+    code: phylloptim::Leaf::m_rep_
+    aliases: [phylloptim::damage::dp_m_rep]
+  t_rep_cut_:
+    section: damage
+    symbol: 'T_\mathrm{rep,cut}'
+    units: '°C'
+    class: trait
+    meaning: 'midpoint of the repair shut-off'
+    source: placeholder
+    placeholder: true
+    code: phylloptim::Leaf::t_rep_cut_
+    aliases: [phylloptim::damage::dp_t_rep_cut]
+  k_mat_:
+    section: damage
+    symbol: 'k_\mathrm{mat}'
+    units: 'day⁻¹'
+    class: trait
+    meaning: 'maturation $I \to D$, constant in temperature'
+    source: placeholder (July runs used 0.00125)
+    placeholder: true
+    code: phylloptim::Leaf::k_mat_
+    aliases: [phylloptim::damage::dp_k_mat]
+  acclim_alpha_:
+    section: damage
+    symbol: '\alpha_A'
+    units: 'day⁻¹ °C⁻¹'
+    class: trait
+    meaning: 'gain of the acclimation forcing'
+    source: placeholder
+    placeholder: true
+    code: phylloptim::Leaf::acclim_alpha_
+    aliases: [phylloptim::damage::dp_acclim_alpha]
+  acclim_beta_:
+    section: damage
+    symbol: '\beta_A'
+    units: 'day⁻¹'
+    class: trait
+    meaning: 'decay of the acclimation state; $1/\beta_A$ is its timescale'
+    source: placeholder
+    placeholder: true
+    code: phylloptim::Leaf::acclim_beta_
+    aliases: [phylloptim::damage::dp_acclim_beta]
+  acclim_T_:
+    section: damage
+    symbol: 'T_\mathrm{accl}'
+    units: '°C'
+    class: trait
+    meaning: 'leaf temperature above which acclimation is forced'
+    source: placeholder
+    placeholder: true
+    code: phylloptim::Leaf::acclim_T_
+    aliases: [phylloptim::damage::dp_acclim_T]
+  acclim_s_:
+    section: damage
+    symbol: 's'
+    units: '°C⁻¹'
+    class: hyperparameter
+    meaning: 'sharpness of the softplus forcing'
+    source: placeholder
+    placeholder: true
+    code: phylloptim::Leaf::acclim_s_
+    aliases: [phylloptim::damage::dp_acclim_s]
+  dTopt_max_:
+    section: damage
+    symbol: '\Delta T_{\max}'
+    units: '°C'
+    class: trait
+    meaning: 'acclimated rise in $T_\mathrm{opt}$ as $A \to \infty$; a parameter, not a hard cap'
+    source: placeholder
+    placeholder: true
+    code: phylloptim::Leaf::dTopt_max_
+  dTimpair_max_:
+    section: damage
+    symbol: '\Delta T_{\mathrm{imp},\max}'
+    units: '°C'
+    class: trait
+    meaning: 'acclimated rise in the switch midpoint as $A \to \infty$'
+    source: placeholder (= $\Delta T_{\max}$)
+    placeholder: true
+    code: phylloptim::Leaf::dTimpair_max_
+    aliases: [phylloptim::damage::dp_dTimpair_max]
+  K_A_:
+    section: damage
+    symbol: 'K_A'
+    units: '–'
+    class: trait
+    meaning: 'half-saturation of both rises in the acclimation state $A$'
+    source: placeholder
+    placeholder: true
+    code: phylloptim::Leaf::K_A_
+    aliases: [phylloptim::damage::dp_K_A]
+  A_:
+    section: damage
+    symbol: 'A'
+    units: '–'
+    class: driver
+    meaning: 'acclimation state, seated by the caller before each solve; negative is read as zero'
+    source: state
+    placeholder: false
+    code: phylloptim::Leaf::A_
+  I_:
+    section: damage
+    symbol: 'I'
+    units: '–'
+    class: driver
+    meaning: 'impaired fraction of leaf area, seated by the caller before each solve'
+    source: state
+    placeholder: false
+    code: phylloptim::Leaf::I_
+  D_:
+    section: damage
+    symbol: 'D'
+    units: '–'
+    class: driver
+    meaning: 'damaged fraction of leaf area, seated by the caller before each solve'
+    source: state
+    placeholder: false
+    code: phylloptim::Leaf::D_
+  c_acclim_maint_:
+    section: damage
+    symbol: 'c_A'
+    units: 'µmol m⁻² s⁻¹ per unit $A$'
+    class: trait
+    meaning: 'maintenance cost of acclimation, added to $R_d$ (leaf default 0; priced by TF24t)'
+    source: placeholder
+    placeholder: true
+    code: phylloptim::Leaf::c_acclim_maint_
+  c_repair_maint_:
+    section: damage
+    symbol: 'c_\mathrm{rep}'
+    units: 'µmol m⁻² s⁻¹ per day⁻¹'
+    class: trait
+    meaning: 'maintenance cost of the repair capacity $k_\mathrm{rec}$ (leaf default 0)'
+    source: placeholder
+    placeholder: true
+    code: phylloptim::Leaf::c_repair_maint_
+  c_protect_maint_:
+    section: damage
+    symbol: 'c_\mathrm{prot}'
+    units: 'µmol m⁻² s⁻¹ per day⁻¹'
+    class: trait
+    meaning: 'maintenance cost of protection $\max(0, k_{i,\mathrm{base}} - k_i)$ (leaf default 0)'
+    source: placeholder
+    placeholder: true
+    code: phylloptim::Leaf::c_protect_maint_
+  c_repair_flux_:
+    section: damage
+    symbol: 'c_\mathrm{flux}'
+    units: 'µmol m⁻² s⁻¹ per day⁻¹'
+    class: trait
+    meaning: 'activity cost of the realised repair flux $k_\mathrm{rec,eff}\, I$ (leaf default 0)'
+    source: placeholder
+    placeholder: true
+    code: phylloptim::Leaf::c_repair_flux_
+  damage_surv_floor:
+    section: damage
+    symbol: 'F_\min'
+    units: '–'
+    class: constant
+    meaning: 'floor on the functional fraction $F = 1 - I - D$ where it scales capacity'
+    source: code
+    placeholder: false
+    code: phylloptim::Leaf::damage_surv_floor
+  exp_clamp:
+    section: damage
+    symbol: '\pm 30'
+    units: '–'
+    class: constant
+    meaning: 'clamp on every exponent argument in the layer (the logistic, the softplus, the switch and the Arrhenius scale), so an extreme temperature stays finite'
+    source: code
+    placeholder: false
+    literal: 30
+    code: phylloptim::damage::logistic
+  topt_clamp_min:
+    section: damage
+    symbol: '250'
+    units: 'K'
+    class: constant
+    meaning: 'lower clamp on a shifted optimum or switch midpoint'
+    source: code
+    placeholder: false
+    literal: 250
+    code: phylloptim::damage::impair_switch
+  topt_clamp_max:
+    section: damage
+    symbol: '350'
+    units: 'K'
+    class: constant
+    meaning: 'upper clamp on a shifted optimum or switch midpoint'
+    source: code
+    placeholder: false
+    literal: 350
+    code: phylloptim::damage::impair_switch
+  rk_rate_step:
+    section: damage
+    symbol: '0.1'
+    units: '–'
+    class: constant
+    meaning: 'the fastest rate times the RK4 sub-step is kept below this'
+    source: code
+    placeholder: false
+    literal: 0.1
+    code: phylloptim::damage::trajectory
+  rk_temp_step:
+    section: damage
+    symbol: '0.25'
+    units: 'K'
+    class: constant
+    meaning: 'the leaf temperature moves at most this far per RK4 sub-step'
+    source: code
+    placeholder: false
+    literal: 0.25
+    code: phylloptim::damage::trajectory
+
+equations:
+
+  # --- biochemistry ------------------------------------------------------------
+  arrhenius:
+    section: biochemistry
+    title: Arrhenius
+    latex: |
+      X(T) = X_{25}\, \exp\!\left[\frac{E_a\,(T_K - T_{25})}{T_{25}\, R\, T_K}\right], \qquad T_K = T + T_0
+    code: phylloptim::Leaf::arrh_curve
+    reads: [gas_constant, C_to_K, ref_temp]
+    writes: [gamma_, kc_, ko_]
+    kind: closed_form
+    cite: Bernacchi-2001
+    note: 'The plain form, normalised to 25 °C; $\Gamma^*$, $K_c$ and $K_o$ take it with the Bernacchi-2001 values, fitted to 10–40 °C, so above 40 °C it is extrapolation.'
+    replica: |
+      function(T, Ea, ref) {
+        TK <- T + 273.15; Tr <- 25 + 273.15
+        ref * exp(Ea * (TK - Tr) / (Tr * 8.314462618153240 * TK))
+      }
+  peaked_arrhenius:
+    section: biochemistry
+    title: Peaked Arrhenius
+    latex: |
+      X(T) = X_{25}\, \exp\!\left[\frac{E_a\,(T_K - T_{25})}{T_{25}\, R\, T_K}\right]
+      \frac{1 + \exp\!\big[(\Delta S\, T_{25} - H_d)/(R\, T_{25})\big]}
+           {1 + \exp\!\big[(\Delta S\, T_K - H_d)/(R\, T_K)\big]}
+    code: phylloptim::Leaf::peak_arrh_curve
+    reads: [gas_constant, C_to_K, ref_temp]
+    writes: [vcmax_, jmax_]
+    kind: closed_form
+    cite: Medlyn-2002
+    note: 'Medlyn-2002 eq. 17 at 298.15 K and the exact $R$ where the paper writes 298 K and 8.314; $V_{cmax}$ and $J_{max}$ take it with the six settable response parameters.'
+    replica: |
+      function(T, Ea, ref, H_d, d_S) {
+        TK <- T + 273.15; Tr <- 25 + 273.15; R <- 8.314462618153240
+        arrh <- ref * exp(Ea * (TK - Tr) / (Tr * R * TK))
+        arg2 <- 1 + exp((d_S * Tr - H_d) / (R * Tr))
+        arg3 <- 1 + exp((d_S * TK - H_d) / (R * TK))
+        arrh * arg2 / arg3
+      }
+  thermal_optimum:
+    section: biochemistry
+    title: Thermal optimum of the peaked form
+    latex: |
+      T_\mathrm{opt} = \frac{H_d}{\Delta S - R \ln\!\big[E_a/(H_d - E_a)\big]} - T_0
+    code: ~
+    also: [phylloptim::Leaf::d_S_shifted]
+    reads: [gas_constant, C_to_K]
+    writes: []
+    kind: identity
+    tol: 1.0e-6
+    cite: Medlyn-2002
+    note: 'Medlyn-2002 eq. 19. No binding reports it; the damage layer inverts it (entropy_shift). Checked as the stationary point of the peaked replica.'
+    replica: |
+      function(Ea, H_d, d_S) {
+        H_d / (d_S - 8.314462618153240 * log(Ea / (H_d - Ea))) - 273.15
+      }
+  temperature_block:
+    section: biochemistry
+    title: The temperature block
+    latex: |
+      V_{cmax}(T),\ J_{max}(T) \text{ by the peaked form};\qquad \Gamma^*(T),\ K_c(T),\ K_o(T) \text{ by the plain form}
+    code: phylloptim::Leaf::update_temperature_dependent_params
+    reads: [vcmax_25, vcmax_ha_, vcmax_H_d_, vcmax_d_S_, jmax_25, jmax_ha_, jmax_H_d_, jmax_d_S_, gamma_25_, gamma_ha_, kc_25_, kc_ha_, ko_25_, ko_ha_]
+    writes: [vcmax_, jmax_, gamma_, kc_, ko_]
+    uses: [peaked_arrhenius, arrhenius]
+    kind: closed_form
+    note: 'Seated once per set_physiology at the driver temperature and, with the energy balance on, per candidate operating point at the solved leaf temperature. A cache keyed on every scalar it reads (photo_temp_key) serves repeat calls.'
+    replica: |
+      function(T, p) {
+        c(vcmax = peaked_arrhenius(T, p$vcmax_ha_, p$vcmax_25, p$vcmax_H_d_, p$vcmax_d_S_),
+          jmax = peaked_arrhenius(T, p$jmax_ha_, p$jmax_25, p$jmax_H_d_, p$jmax_d_S_),
+          gamma = arrhenius(T, p$gamma_ha_, p$gamma_25_),
+          kc = arrhenius(T, p$kc_ha_, p$kc_25_),
+          ko = arrhenius(T, p$ko_ha_, p$ko_25_))
+      }
+  michaelis_constant:
+    section: biochemistry
+    title: Michaelis constant in pascals
+    latex: |
+      K_m = K_c\, c_P \left(1 + \frac{1000\, O}{K_o\, c_P}\right), \qquad c_P = P \times 10^{3} \times 10^{-6}
+    code: phylloptim::Leaf::update_temperature_dependent_params
+    also: [phylloptim::Leaf::set_physiology]
+    reads: [atm_o2_kpa, atm_kpa, umol_to_mol, kPa_to_Pa]
+    writes: [km_]
+    kind: closed_form
+    replica: |
+      function(kc, ko, atm_o2_kpa, atm_kpa) {
+        conv <- atm_kpa * 1000 * 1e-6
+        (kc * conv) * (1 + (atm_o2_kpa * 1000) / (ko * conv))
+      }
+  electron_transport:
+    section: biochemistry
+    title: Electron transport
+    latex: |
+      J = \frac{I + J_{max} - \sqrt{(I + J_{max})^2 - 4\,\theta_J\, I\, J_{max}}}{2\,\theta_J}, \qquad I = \phi_J\, \alpha_\mathrm{PAR}\, Q
+    code: phylloptim::Leaf::electron_transport
+    reads: [phi_J, alpha_PAR_, PPFD, curv_fact_elec_trans]
+    writes: [electron_transport_]
+    kind: closed_form
+    cite: Farquhar-1980
+    note: 'Depends on temperature only through $J_{max}$.'
+    replica: |
+      function(Q, phi_J, alpha_PAR, jmax, theta_J) {
+        I <- phi_J * alpha_PAR * Q
+        (I + jmax - sqrt((I + jmax)^2 - 4 * theta_J * I * jmax)) / (2 * theta_J)
+      }
+  assimilation:
+    section: biochemistry
+    title: Net assimilation
+    latex: |
+      W_c = \frac{V_{cmax}\,(c_i - \Gamma^* c_P)}{c_i + K_m}, \qquad
+      W_j = \frac{J}{4}\,\frac{c_i - \Gamma^* c_P}{c_i + 2\,\Gamma^* c_P}, \qquad
+      A = \frac{W_c + W_j - \sqrt{(W_c + W_j)^2 - 4\,\theta\, W_c W_j}}{2\,\theta} - R_d
+    code: phylloptim::Leaf::assim_colimited
+    also: [phylloptim::Leaf::assim_colimited_kernel, phylloptim::Leaf::assim_rubisco_limited_kernel, phylloptim::Leaf::assim_electron_limited_kernel, phylloptim::Leaf::photo_capacity]
+    reads: [curv_fact_colim, atm_kpa]
+    writes: [assim_colimited_]
+    kind: closed_form
+    cite: Farquhar-1980
+    note: 'Net of dark respiration; $c_i$ in Pa.'
+    replica: |
+      function(ci, vcmax, J, gamma_star, km, theta, R_d, atm_kpa) {
+        conv <- atm_kpa * 1000 * 1e-6
+        Wc <- vcmax * (ci - gamma_star * conv) / (ci + km)
+        Wj <- J / 4 * ((ci - gamma_star * conv) / (ci + 2 * gamma_star * conv))
+        (Wc + Wj - sqrt((Wc + Wj)^2 - 4 * theta * Wc * Wj)) / (2 * theta) - R_d
+      }
+  thermal_cost:
+    section: biochemistry
+    title: Instantaneous thermal cost
+    latex: |
+      TC(T) = \frac{1}{1 + \exp\!\big[-r\,(T - T_{50})\big]}, \qquad r = \frac{2}{T_{50} - T_\mathrm{crit}}, \qquad J_{max} \leftarrow J_{max}\,(1 - TC)
+    code: phylloptim::Leaf::thermal_cost_at
+    also: [phylloptim::Leaf::update_temperature_dependent_params]
+    reads: [use_thermal_cost_, T50_, Tcrit_]
+    writes: [jmax_]
+    kind: closed_form
+    cite: Sicangco-2026
+    note: 'Off by default; exactly zero with the gate off. Instantaneous, with no memory: not the damage layer.'
+    replica: |
+      function(T, T50, Tcrit) 1 / (1 + exp(-(2 / (T50 - Tcrit)) * (T - T50)))
+
+  # --- respiration ------------------------------------------------------------
+  q10_respiration:
+    section: respiration
+    title: Leaf dark respiration
+    latex: |
+      R_d(T) = R_{d,25}\, Q_{10}(T)^{(T - 25)/10}, \qquad Q_{10}(T) = q_0 - q_1\, \frac{T + 25}{2}
+    code: phylloptim::Leaf::update_temperature_dependent_params
+    reads: [R_d_25, rd_q10_intercept_, rd_q10_slope_, ref_temp]
+    writes: [R_d_]
+    kind: closed_form
+    cite: Tjoelker-2001
+    note: 'Temperature in °C throughout. The $Q_{10}$ is evaluated at the midpoint of the measurement and reference temperatures, the code''s convention and neither paper''s.'
+    replica: |
+      function(T, R_d_25, q0, q1) R_d_25 * (q0 - q1 * (T + 25) / 2)^((T - 25) / 10)
+
+  # --- water vapour -----------------------------------------------------------
+  saturation_vapour_pressure:
+    section: vapour
+    title: Saturation vapour pressure
+    latex: |
+      e_s(T) = 0.6108\, \exp\!\left(\frac{17.27\, T}{T + 237.3}\right)
+    code: phylloptim::Leaf::saturation_vapour_pressure
+    reads: [tetens_a, tetens_b, tetens_c]
+    writes: []
+    kind: closed_form
+    note: 'Tetens, kPa, $T$ in °C.'
+    replica: |
+      function(T) 0.6108 * exp(17.27 * T / (T + 237.3))
+  saturation_vapour_pressure_slope:
+    section: vapour
+    title: Slope of the saturation curve
+    latex: |
+      \Delta(T) = \frac{4098\, e_s(T)}{(T + 237.3)^2}
+    code: phylloptim::Leaf::saturation_vapour_pressure_slope
+    reads: [tetens_slope_numerator, tetens_c]
+    writes: []
+    uses: [saturation_vapour_pressure]
+    kind: closed_form
+    note: 'kPa K⁻¹. Reaches no reported output; it enters the energy-balance derivative only.'
+    replica: |
+      function(T) 4098 * saturation_vapour_pressure(T) / ((T + 237.3) * (T + 237.3))
+  leaf_vpd:
+    section: vapour
+    title: Leaf-to-air deficit
+    latex: |
+      D_\mathrm{leaf} = \begin{cases} D_\mathrm{air} & g_\mathrm{EB} = 0 \\
+      \max\!\big(D_\mathrm{air} + [e_s(T_\mathrm{leaf}) - e_s(T_\mathrm{air})],\; D_\min\big) & g_\mathrm{EB} = 1 \end{cases}
+    code: phylloptim::Leaf::set_leaf_vpd
+    reads: [use_energy_balance_, atm_vpd, vpd_leaf_min]
+    writes: [vpd_leaf_]
+    uses: [saturation_vapour_pressure]
+    kind: closed_form
+    note: 'The bracketing is deliberate: at $T_\mathrm{leaf} = T_\mathrm{air}$ it is an exact zero and the prescribed path is bit-identical.'
+    replica: |
+      function(Tleaf, Tair, atm_vpd, energy_balance = TRUE) {
+        if (!energy_balance) return(atm_vpd)
+        pmax(atm_vpd + (saturation_vapour_pressure(Tleaf) - saturation_vapour_pressure(Tair)), 0.01)
+      }
+  stomatal_conductance:
+    section: vapour
+    title: Stomatal conductance to CO₂ from the transpiration
+    latex: |
+      g_c = \frac{P\, E / M_w}{D_\mathrm{leaf}\; \times 1.67}
+    code: phylloptim::Leaf::stom_cond_CO2
+    also: [phylloptim::Leaf::set_leaf_states_rates_from_psi_stem]
+    reads: [atm_kpa, kg_to_mol_h2o, H2O_CO2_stom_diff_ratio_]
+    writes: [stom_cond_CO2_]
+    kind: closed_form
+    note: 'Fick''s law with $E$ in kg m⁻² s⁻¹, $P$ and $D_\mathrm{leaf}$ in kPa; mol CO₂ m⁻² s⁻¹. No boundary-layer term (#122): $r_a$ resists heat only.'
+    replica: |
+      function(E, atm_kpa, vpd_leaf, ratio = 1.67) atm_kpa * E * (1 / 0.018015) / vpd_leaf / ratio
+
+  # --- energy balance ----------------------------------------------------------
+  atmospheric_emissivity:
+    section: energy_balance
+    title: Clear-sky emissivity
+    latex: |
+      e_a = \max\!\big(1000\,[e_s(T_\mathrm{air}) - D_\mathrm{air}],\; e_{a,\min}\big) \ \text{Pa}, \qquad
+      \varepsilon_a = \min\!\Big(c_\varepsilon\, (e_a / T_{\mathrm{air},K})^{1/7},\; 1\Big)
+    code: phylloptim::Leaf::set_physiology
+    reads: [atm_vpd, atmos_emissivity_coef, atmos_emissivity_exponent, vapour_pressure_min, C_to_K]
+    writes: []
+    uses: [saturation_vapour_pressure]
+    kind: closed_form
+    note: 'Brutsaert (1975) as Campbell & Norman write it, $e_a$ in pascals. Clamped at 1, above which the longwave term is exactly zero: above 43.9 °C at a 2 kPa deficit.'
+    replica: |
+      function(Tair, atm_vpd) {
+        TK <- Tair + 273.15
+        ea_Pa <- pmax(1000 * (saturation_vapour_pressure(Tair) - atm_vpd), 1)
+        pmin(0.642 * (ea_Pa / TK)^(1 / 7), 1)
+      }
+  net_radiation:
+    section: energy_balance
+    title: Isothermal net radiation
+    latex: |
+      R_{n,\mathrm{iso}} = \alpha_\mathrm{PAR}\, \frac{Q}{c_Q} + \alpha_\mathrm{NIR}\, Q_\mathrm{NIR} - (1 - \varepsilon_a)\, \sigma\, T_{\mathrm{air},K}^4
+    code: phylloptim::Leaf::set_physiology
+    reads: [alpha_PAR_, PPFD, umol_par_per_joule, alpha_NIR_, NIR_int_, stefan_boltzmann, C_to_K]
+    writes: [Rn_, Tair_]
+    uses: [atmospheric_emissivity]
+    kind: closed_form
+    cite: Duursma-2015
+    note: 'The net radiation a leaf at air temperature would exchange; seated once per set_physiology from the drivers, which also stores the leaf_temp driver as the air temperature `Tair_`. The leaf''s own departure from air temperature is carried by the radiative conductance.'
+    replica: |
+      function(Q, NIR, Tair, atm_vpd, alpha_PAR, alpha_NIR) {
+        TK <- Tair + 273.15
+        sw_abs <- alpha_PAR * Q / 4.57 + alpha_NIR * NIR
+        sw_abs - (1 - atmospheric_emissivity(Tair, atm_vpd)) * 5.670374419e-8 * TK * TK * TK * TK
+      }
+  radiative_conductance:
+    section: energy_balance
+    title: Radiative conductance
+    latex: |
+      g_\mathrm{rad} = 4\, \varepsilon_l\, \sigma\, T_{\mathrm{air},K}^3
+    code: phylloptim::Leaf::set_physiology
+    reads: [leaf_emissivity, stefan_boltzmann, C_to_K]
+    writes: [g_rad_]
+    kind: closed_form
+    cite: Duursma-2015
+    note: 'The Stefan–Boltzmann emission linearised about $T_\mathrm{air}$, which keeps the balance explicit; the error is of order $(T_\mathrm{leaf} - T_\mathrm{air})/T_{\mathrm{air},K}$.'
+    replica: |
+      function(Tair) {
+        TK <- Tair + 273.15
+        4 * 0.97 * 5.670374419e-8 * TK * TK * TK
+      }
+  aerodynamic_resistance:
+    section: energy_balance
+    title: Aerodynamic resistance to heat
+    latex: |
+      r_a = C_{ra} \sqrt{d / U}, \qquad r_a = r_{a,\mathrm{fixed}} \text{ if } d \le 0 \text{ or } U \le 0
+    code: phylloptim::Leaf::set_physiology
+    reads: [aerodynamic_resistance_coef, aerodynamic_resistance_fixed, d_, wind_speed_]
+    writes: [ra_]
+    kind: closed_form
+    note: 'Laminar boundary layer; no free-convection term and no within-canopy wind profile (#7). A non-finite $d$ or $U$ with the gate on is refused.'
+    replica: |
+      function(d, U) ifelse(d > 0 & U > 0, 200 * sqrt(d / U), 50)
+  leaf_temperature:
+    section: energy_balance
+    title: Leaf temperature at a prescribed transpiration
+    latex: |
+      T_\mathrm{leaf}(E) = \mathrm{clamp}_{[T_\min,\,T_\max]}\!\left[T_\mathrm{air} + \frac{R_{n,\mathrm{iso}} - \lambda_v E}{\rho c_p / r_a + g_\mathrm{rad}}\right], \qquad
+      \frac{dT_\mathrm{leaf}}{dE} = \begin{cases} -\lambda_v / (\rho c_p / r_a + g_\mathrm{rad}) & \text{inside the clamp} \\ 0 & \text{on it} \end{cases}
+    code: phylloptim::Leaf::leaf_temp_from_E
+    reads: [latent_heat_vap, vol_heat_cap_air, leaf_temp_min, leaf_temp_max]
+    writes: [Tleaf_]
+    kind: closed_form
+    note: 'Explicit, not iterated: $E$ is fixed by the hydraulic supply at the candidate potential and the balance gives the temperature at which the leaf sheds the rest as sensible heat and extra longwave. The one place $T_\mathrm{leaf}$ and $dT_\mathrm{leaf}/dE$ are computed.'
+    replica: |
+      function(Tair, Rn, E, ra, g_rad) {
+        pmin(pmax(Tair + (Rn - 2.45e6 * E) / (1200 / ra + g_rad), -40), 70)
+      }
+  energy_balance_foc:
+    section: energy_balance
+    title: The energy-balance term of the first-order condition
+    latex: |
+      \Delta_\mathrm{EB} = \tau\, \frac{A_T\, g_c / P \;+\; A'\, (\partial g_c/\partial T)\,(c_a - c_i)/P}{g_{ci}}, \qquad
+      \tau = \frac{dT_\mathrm{leaf}}{dE}\, \frac{dE}{d\psi}, \qquad
+      \frac{\partial g_c}{\partial T} = -\, g_c\, \frac{\Delta(T_\mathrm{leaf})}{D_\mathrm{leaf}} \quad (0 \text{ on the floor } D_\min)
+    code: phylloptim::Leaf::dprofit_energy_balance_term
+    reads: [fd_step, ca, vpd_leaf_min, use_energy_balance_]
+    writes: []
+    uses: [saturation_vapour_pressure_slope]
+    kind: derivative
+    tol: 1.0e-4
+    note: '$A_T = \partial A/\partial T_\mathrm{leaf}$ at fixed $c_i$ is a central difference of the temperature block with the fixed step $h$. The check compares the bound stem-route derivative, which carries this term, with a central difference of the profit; the term itself is not observable. Measured: with the gate off the two agree to 1e-10 at a step of 1e-5 MPa; with it on they differ by 2e-6 to 2e-5 relative at every step from 1e-2 to 1e-6 MPa, so the gap is in the analytic term, not the difference quotient. It is the size the Tetens slope''s 4098 rounding (4.2e-5 low) would give through $\partial g_c/\partial T$.'
+    replica: |
+      function(f, x, h) (f(x + h) - f(x - h)) / (2 * h)
+
+  # --- damage, repair and acclimation ---------------------------------------------
+  acclimation_shift:
+    section: damage
+    title: Acclimation shift of the photosynthetic optimum
+    latex: |
+      \delta = \delta_0 + \Delta T_{\max}\, \frac{A}{A + K_A}, \qquad A \ge 0
+    code: phylloptim::Leaf::update_temperature_dependent_params
+    reads: [use_thermal_damage_, topt_offset_, dTopt_max_, K_A_, A_]
+    writes: []
+    kind: closed_form
+    note: 'The same shift moves both peaked-Arrhenius optima; negative $A$ is read as zero.'
+    replica: |
+      function(A, topt_offset, dTopt_max, K_A) {
+        a <- pmax(A, 0)
+        topt_offset + dTopt_max * a / (a + K_A)
+      }
+  entropy_shift:
+    section: damage
+    title: Entropy term that moves the optimum
+    latex: |
+      \Delta S'(\delta) = \frac{H_d}{\mathrm{clamp}_{[250,\,350]}(T_{\mathrm{opt},0} + \delta)} + R \ln\frac{E_a}{H_d - E_a}, \qquad
+      T_{\mathrm{opt},0} = \frac{H_d}{\Delta S - R \ln[E_a/(H_d - E_a)]}
+    code: phylloptim::Leaf::d_S_shifted
+    reads: [gas_constant, topt_clamp_min, topt_clamp_max]
+    writes: [vcmax_, jmax_]
+    uses: [thermal_optimum]
+    kind: closed_form
+    note: 'The thermal optimum inverted for the entropy term that puts it $\delta$ K higher; refuses $E_a \le 0$ or $H_d \le E_a$, where no optimum exists.'
+    replica: |
+      function(Ea, H_d, d_S, delta) {
+        R <- 8.314462618153240
+        corr <- R * log(Ea / (H_d - Ea))
+        Topt0 <- H_d / (d_S - corr)
+        Topt <- pmin(pmax(Topt0 + delta, 250), 350)
+        H_d / Topt + corr
+      }
+  functional_fraction:
+    section: damage
+    title: Functional fraction
+    latex: |
+      F = \min\!\big(\max(1 - I - D,\; F_\min),\; 1\big), \qquad V_{cmax} \leftarrow F\, V_{cmax}, \qquad J_{max} \leftarrow F\, J_{max}
+    code: phylloptim::Leaf::update_temperature_dependent_params
+    reads: [use_thermal_damage_, I_, D_, damage_surv_floor]
+    writes: [functional_, vcmax_, jmax_]
+    kind: closed_form
+    note: 'The states enter the benefit through capacity and never the hydraulic cost; $R_d$ is not scaled.'
+    replica: |
+      function(I, D) pmin(pmax(1 - I - D, 1e-6), 1)
+  respiration_costs:
+    section: damage
+    title: Maintenance costs added to respiration
+    latex: |
+      R_d \leftarrow R_d + c_A\, A + c_\mathrm{rep}\, k_\mathrm{rec} + c_\mathrm{prot}\, \max(0, k_{i,\mathrm{base}} - k_i) + c_\mathrm{flux}\, k_\mathrm{rec,eff}\, \max(0, I)
+    code: phylloptim::Leaf::update_temperature_dependent_params
+    reads: [use_thermal_damage_, c_acclim_maint_, c_repair_maint_, c_protect_maint_, c_repair_flux_, k_i_baseline_, k_i_, k_rec_, A_, I_]
+    writes: [R_d_]
+    kind: closed_form
+    note: 'Added after the $Q_{10}$ response, so the gate-off arithmetic is untouched; all four prices default to zero on the leaf.'
+    replica: |
+      function(A, I, k_rec_eff, p) {
+        p$c_acclim_maint_ * pmax(A, 0) + p$c_repair_maint_ * p$k_rec_ +
+          p$c_protect_maint_ * pmax(0, p$k_i_baseline_ - p$k_i_) +
+          p$c_repair_flux_ * k_rec_eff * pmax(0, I)
+      }
+  logistic:
+    section: damage
+    title: Guarded logistic
+    latex: |
+      \mathrm{logistic}(x) = \frac{1}{1 + e^{-x}}, \qquad x \text{ clamped to } \pm 30
+    code: phylloptim::damage::logistic
+    reads: [exp_clamp]
+    writes: []
+    kind: closed_form
+    replica: |
+      function(x) 1 / (1 + exp(-pmin(pmax(x, -30), 30)))
+  softplus:
+    section: damage
+    title: Guarded softplus
+    latex: |
+      \mathrm{softplus}(x; s) = \frac{\ln(1 + e^{s x})}{s}, \qquad s x \text{ clamped to } \pm 30
+    code: phylloptim::damage::softplus
+    reads: [exp_clamp]
+    writes: []
+    kind: closed_form
+    note: 'Softplus only for $x < 30/s$ and constant at $30/s$ above.'
+    replica: |
+      function(x, s) log1p(exp(pmin(pmax(s * x, -30), 30))) / s
+  delta_impair:
+    section: damage
+    title: Acclimation shift of the switch midpoint
+    latex: |
+      \delta_\mathrm{imp} = \delta_0 + \Delta T_{\mathrm{imp},\max}\, \frac{A}{A + K_A}, \qquad A \ge 0
+    code: phylloptim::damage::delta_impair
+    also: [phylloptim::Leaf::delta_impair_at, phylloptim::Leaf::update_temperature_dependent_params]
+    reads: [topt_offset_, dTimpair_max_, K_A_, A_]
+    writes: []
+    kind: closed_form
+    replica: |
+      function(A, topt_offset, dTimpair_max, K_A) {
+        a <- pmax(A, 0)
+        topt_offset + dTimpair_max * a / (a + K_A)
+      }
+  impair_switch:
+    section: damage
+    title: Impairment switch
+    latex: |
+      \frac{K}{1 + K}, \qquad K = \exp\!\left[\frac{H_\mathrm{imp}}{R}\left(\frac{1}{T'_{\mathrm{mid},K}} - \frac{1}{T_K}\right)\right]_{[-30,\,30]}, \qquad
+      T'_{\mathrm{mid},K} = \mathrm{clamp}_{[250,\,350]}(T_\mathrm{mid} + T_0 + \delta_\mathrm{imp})
+    code: phylloptim::damage::impair_switch
+    reads: [impair_H_, impair_Tmid_, gas_constant, C_to_K, topt_clamp_min, topt_clamp_max, exp_clamp]
+    writes: []
+    kind: closed_form
+    note: 'Exactly ½ at the shifted midpoint; its own parameters, and nothing of the $J_{max}$ curve, though the defaults copy that curve''s $H_d$ and $H_d/\Delta S$.'
+    replica: |
+      function(T, H, Tmid, delta) {
+        mid <- pmin(pmax(Tmid + 273.15 + delta, 250), 350)
+        K <- exp(pmin(pmax((H / 8.314462618153240) * (1 / mid - 1 / (T + 273.15)), -30), 30))
+        K / (1 + K)
+      }
+  k_i_eff:
+    section: damage
+    title: Arrhenius scale of the impairment rate
+    latex: |
+      k_{i,\mathrm{eff}}(T) = k_i\, \exp\!\left[\frac{E_{a,i}}{R}\left(\frac{1}{T_{\mathrm{ref},K}} - \frac{1}{T_K}\right)\right]_{[-30,\,30]}
+    code: phylloptim::damage::k_i_eff
+    reads: [k_i_, k_i_Ea_, k_i_Tref_, gas_constant, C_to_K, exp_clamp]
+    writes: []
+    kind: closed_form
+    note: 'At $E_{a,i} = 0$ the argument is an exact zero and the scale is exactly $k_i$.'
+    replica: |
+      function(T, k_i, Ea, Tref) {
+        k_i * exp(pmin(pmax((Ea / 8.314462618153240) * (1 / (Tref + 273.15) - 1 / (T + 273.15)), -30), 30))
+      }
+  impairment_rate:
+    section: damage
+    title: Impairment rate
+    latex: |
+      k_\mathrm{imp}(T) = k_{i,\mathrm{eff}}(T)\, \frac{K}{1 + K}
+    code: phylloptim::Leaf::k_imp_eff
+    reads: []
+    writes: [k_imp_eff_]
+    uses: [k_i_eff, impair_switch, delta_impair]
+    kind: closed_form
+    note: 'Reported at the temperature the block is seated at; enters no objective.'
+    replica: |
+      function(T, A, p) {
+        k_i_eff(T, p$k_i_, p$k_i_Ea_, p$k_i_Tref_) *
+          impair_switch(T, p$impair_H_, p$impair_Tmid_,
+                        delta_impair(A, p$topt_offset_, p$dTimpair_max_, p$K_A_))
+      }
+  k_rec_eff:
+    section: damage
+    title: Repair rate, gated off when hot
+    latex: |
+      k_\mathrm{rec,eff}(T) = k_\mathrm{rec}\, \mathrm{logistic}\!\big(-m_\mathrm{rep}\,(T - T_\mathrm{rep,cut})\big)
+    code: phylloptim::damage::k_rec_eff
+    reads: [k_rec_, m_rep_, t_rep_cut_]
+    writes: [k_rec_eff_]
+    uses: [logistic]
+    kind: closed_form
+    replica: |
+      function(T, k_rec, m_rep, t_rep_cut) k_rec * logistic(-m_rep * (T - t_rep_cut))
+  damage_rates:
+    section: damage
+    title: The dynamics
+    latex: |
+      \frac{dA}{dt} = \alpha_A\, \mathrm{softplus}(T - T_\mathrm{accl};\, s) - \beta_A\, A, \qquad
+      \frac{dI}{dt} = k_\mathrm{imp}(T)\, F - \big(k_\mathrm{rec,eff}(T) + k_\mathrm{mat}\big)\, I, \qquad
+      \frac{dD}{dt} = k_\mathrm{mat}\, I, \qquad F = 1 - I - D
+    code: phylloptim::damage::rates
+    also: [phylloptim::Leaf::damage_rates]
+    reads: [acclim_alpha_, acclim_beta_, acclim_T_, acclim_s_, k_mat_]
+    writes: []
+    uses: [impairment_rate, k_rec_eff, softplus]
+    kind: closed_form
+    note: 'Per day, $T$ the leaf temperature. $F$ confines fresh impairment to functional leaf, so $I + D \le 1$ without a clamp. A detached leaf has no sink for $D$; TF24t adds one.'
+    replica: |
+      function(T, A, I, D, p) {
+        F <- 1 - I - D
+        k_imp <- impairment_rate(T, A, p)
+        k_rec <- k_rec_eff(T, p$k_rec_, p$m_rep_, p$t_rep_cut_)
+        c(p$acclim_alpha_ * softplus(T - p$acclim_T_, p$acclim_s_) - p$acclim_beta_ * A,
+          k_imp * F - (k_rec + p$k_mat_) * I,
+          p$k_mat_ * I)
+      }
+  damage_trajectory:
+    section: damage
+    title: The integrator
+    latex: |
+      \text{RK4 on a piecewise-linear } T(t),\ \text{each interval cut into } m = \max\!\Big(1,\ \Big\lceil \frac{\Delta t\, k_\mathrm{fastest}}{0.1} \Big\rceil,\ \Big\lceil \frac{|\Delta T|}{0.25} \Big\rceil\Big) \text{ sub-steps}
+    code: phylloptim::damage::trajectory
+    also: [phylloptim::Leaf::damage_trajectory]
+    reads: [rk_rate_step, rk_temp_step, acclim_beta_, k_mat_]
+    writes: []
+    uses: [damage_rates, k_i_eff, k_rec_eff]
+    kind: integrator
+    note: '$k_\mathrm{fastest}$ is the largest of $k_{i,\mathrm{eff}} + k_\mathrm{rec,eff} + k_\mathrm{mat} + \beta_A$ at the two ends of the interval. The sub-step count is chosen from values, so a gradient through it is the derivative of the discrete map.'
+    replica: |
+      function(times, temps, y0, p) {
+        kie <- function(T) k_i_eff(T, p$k_i_, p$k_i_Ea_, p$k_i_Tref_)
+        kre <- function(T) k_rec_eff(T, p$k_rec_, p$m_rep_, p$t_rep_cut_)
+        out <- matrix(NA_real_, length(times), 3)
+        y <- y0
+        out[1, ] <- y
+        for (i in seq_along(times)[-1]) {
+          t0 <- times[i - 1]; dt <- times[i] - t0
+          T0 <- temps[i - 1]; T1 <- temps[i]
+          fastest <- p$acclim_beta_ + p$k_mat_
+          for (Tx in c(T0, T1)) {
+            fastest <- max(fastest, kie(Tx) + kre(Tx) + p$k_mat_ + p$acclim_beta_)
+          }
+          m <- max(1, ceiling(dt * fastest / 0.1), ceiling(abs(T1 - T0) / 0.25))
+          h <- dt / m
+          temp_at <- function(t) T0 + (T1 - T0) * (t - t0) / dt
+          for (k in seq_len(m) - 1) {
+            t <- t0 + k * h
+            k1 <- damage_rates(temp_at(t), y[1], y[2], y[3], p)
+            y2 <- y + h / 2 * k1
+            k2 <- damage_rates(temp_at(t + h / 2), y2[1], y2[2], y2[3], p)
+            y3 <- y + h / 2 * k2
+            k3 <- damage_rates(temp_at(t + h / 2), y3[1], y3[2], y3[3], p)
+            y4 <- y + h * k3
+            k4 <- damage_rates(temp_at(t + h), y4[1], y4[2], y4[3], p)
+            y <- y + h / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
+          }
+          out[i, ] <- y
+        }
+        out
+      }

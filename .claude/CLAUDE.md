@@ -31,6 +31,7 @@ Family context lives in [`plant-meta`](https://github.com/traitecoevo/plant-meta
 | change a trait or the parameter set | hazards 10, 12 and 13 |
 | move a golden number | "The golden file is the safety net" |
 | build and test | "Build and test" |
+| add or change an equation of the temperature paths | "The model registry" |
 
 **Map of the headers**, `inst/include/phylloptim/`, in dependency order:
 
@@ -94,6 +95,19 @@ inst/include/phylloptim/
                                model. Never include one from a model header
 inst/RcppR6_classes.yml        the R bindings' source of truth. Edit this, then
                                `Rscript -e 'RcppR6::RcppR6()'`, never the output
+inst/model-registry.yml        the model registry: the temperature paths' equations,
+                               parameters and code symbols, which documents are
+                               generated from. Its header holds the schema and
+                               the rules; see "The model registry" below
+R/registry-locations.R         reads the registry and resolves its symbols in
+                               Doxygen's XML. Sourced standalone by docs.yml, so
+                               it may reference nothing else in the package
+R/registry.R, R/registry-probes.R
+                               the registry as data frames, its replicas, the
+                               live values, and registry_check(): one probe per
+                               equation that drives a Leaf and reads the quantity
+                               back for its replica to be compared with
+tools/registry_symbols.R       what docs.yml runs after the render
 src/, R/                       the R layer. Depends downward on inst/include/;
                                nothing there depends back on it
 R/leaf-model.R                 the friendly surface: leaf_traits/leaf_control,
@@ -346,6 +360,57 @@ code, 120 lines away in the case that found it. **A local `doxygen` run renders
 it in silence**, so this is only ever visible in CI and only cryptically. Put the
 equations in one display rather than one on each side of a paragraph; `docs.yml`
 now asserts the shape and names the block, so it fails legibly.
+
+### The model registry
+
+`inst/model-registry.yml` is the one place the temperature paths' equations are
+written down for documents: each with its LaTeX, the C++ symbol that evaluates
+it, the parameters it reads, the bound fields it writes and a base-R replica of
+the printed form; and each parameter with its symbol, units, class, meaning,
+source and placeholder flag (#166). A document's equation list or parameter
+table is generated from it, so the two cannot drift apart. `model_registry()`
+reads it, `registry_values()` adds the values, `registry_check()` runs the
+replicas, `registry_resolve()` adds file, line and API link.
+
+Three rules keep it from rotting, and each has a mechanism:
+
+- **It stores no line number and no default.** Both go stale silently: the
+  methods document this grew out of cited line numbers that moved twice in one
+  day, and a default's comment that outlived the parameter's rename. Lines come
+  from Doxygen's XML (`GENERATE_XML` in the Doxyfile); values come off a live
+  `Leaf`, `set_drivers()`'s formals or a constexpr's initializer in that XML.
+  The one number the file holds is a `literal:`, a constant written inside an
+  equation (Tetens' 17.27), which the equation's replica asserts.
+- **CI validates it.** `test-registry.R` checks every symbol and field named
+  exists, runs every replica against the package, and snapshots the bound
+  fields not yet registered (`_snaps/registry.md`): a bound field added
+  anywhere changes the snapshot and fails until it is registered or the
+  snapshot is accepted. `docs.yml` resolves every symbol in the XML and checks
+  that what an equation `reads` is what its function references
+  (`REFERENCES_RELATION`), through `tools/registry_symbols.R`.
+- **One registry per package.** plant's will cover its strategies and point at
+  these ids rather than copy them.
+
+To add an equation: an entry in the YAML, and a probe of the same id in
+`R/registry-probes.R` that drives a `Leaf` and reads the quantity through a
+binding (`registry_check()` refuses an equation with no probe). A quantity no
+binding exposes is read through the one that does, and the entry's `note` says
+which: the saturation vapour pressure was reachable only through `vpd_leaf_`
+until the two Tetens methods were bound for this. An entry that cannot be a
+closed-form comparison at 1e-10 is typed `identity`, `derivative` or
+`integrator` and carries its own `tol` with the measurement that set it, rather
+than a tolerance chosen to pass.
+
+Doxygen's line numbers are in the stream it parsed, which is the awk filter's
+output, not the source: the filter inserts a `\file` block and `\verbatim`
+pairs and drops held blank `//` lines. The lines that are not whole-line
+comments are byte-identical in both streams, docs.yml asserts that, and every
+line Doxygen reports is one of them, so `registry_line_map()` maps the k-th
+code line of one to the k-th of the other and refuses a header whose code
+lines differ. Do not read a line out of the XML without that map.
+
+YAML 1.1 reads `1e-3` as a string: write a float with a point and a signed
+exponent (`1.0e-3`), which the reader checks.
 
 ## Cost: the one thing the golden file cannot see
 

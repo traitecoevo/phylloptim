@@ -1,3 +1,15 @@
+# phylloptim 0.14.2
+
+## The model registry: equations, parameters and code links from one YAML (#166)
+
+`inst/model-registry.yml` holds the temperature paths as one record: 32 equations, each with its LaTeX, the C++ symbol that evaluates it, the parameters it reads, the bound fields it writes and a base-R replica of the printed form; and 93 parameters, each with symbol, units, class, meaning, source and a placeholder flag, in six sections (drivers, biochemistry, respiration, water vapour, energy balance, damage). Documents are generated from it rather than written beside it. It stores no line number and no default value: `registry_resolve()` reads each symbol's file, line, body span and API anchor from Doxygen's XML, which the `Doxyfile` now emits together with the references relation, and `registry_values()` reads each value off a live `Leaf`, off `set_drivers()`'s defaults, or off a constexpr's initializer in that XML. `model_registry()` returns the registry as data frames; `registry_check()` runs every replica against the package; `registry_replica()` hands back one replica as a function. The schema and the three rules the file is kept by are in its header.
+
+CI checks it two ways. `tests/testthat/test-registry.R` asserts that every symbol and field the registry names exists, runs every replica against the package, and snapshots the 58 bound fields the registry does not yet cover (the cost curves, the roots and soil, the Medlyn route, the solver's bookkeeping), so a bound field added anywhere fails until it is registered or the snapshot is accepted. `docs.yml` resolves every symbol in the XML through `tools/registry_symbols.R`, maps the line numbers from the filtered stream Doxygen parsed back to the source, checks that what each equation reads is what its function references, and writes the resolved registry into the site as `model-registry.yml`.
+
+Measured by that check: the 30 closed forms and the RK4 integrator agree with the package to 1e-14 relative or better. The thermal optimum is typed `identity` (the package's own peaked curve is stationary there, to 3e-10) and the energy-balance term of the first-order condition `derivative`: with the gate off, `dprofit_dpsi_stem_checked()` and a central difference of `evaluate_psi_stem_at()` agree to 1e-10 at a step of 1e-5 MPa; with it on they differ by 2e-6 to 2e-5 relative at every step from 1e-2 to 1e-6 MPa, so the gap is in the analytic term, and it is the size the Tetens slope's 4098 rounding (4.2e-5 low) would give through dg_c/dT. The entry carries that tolerance and the measurement; the rounding is not changed here, because it reaches the energy-balance baselines.
+
+Two methods are bound for the check, `saturation_vapour_pressure(temp)` and `saturation_vapour_pressure_slope(temp)`, which the solve reaches only through `vpd_leaf_` and the derivative. No numerics change; the golden baselines are bit-identical.
+
 # phylloptim 0.14.1
 
 ## A soil drier than the stem curve's P99 is a closed leaf, not an error
