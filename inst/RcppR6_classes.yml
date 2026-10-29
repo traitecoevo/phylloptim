@@ -636,6 +636,16 @@ Leaf:
     leaf_temp_from_E:
       return_type: double
       args: [E: double]
+    # Tetens' saturation vapour pressure (kPa) and its slope (kPa K^-1), T in deg
+    # C. Bound so the model registry (inst/model-registry.yml) can assert its
+    # replicas of both against the package; the solve reaches them only through
+    # vpd_leaf_ and the energy-balance derivative.
+    saturation_vapour_pressure:
+      return_type: double
+      args: [temp: double]
+    saturation_vapour_pressure_slope:
+      return_type: double
+      args: [temp: double]
     set_leaf_states_rates_from_psi_stem:
       return_type: void
       args: [psi_stem: double, psi_upstream: double]
