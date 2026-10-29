@@ -737,6 +737,87 @@ void test_collar_foc_matches_profit() {
   ok(compared == 24, "every curve, layer count and point was compared");
 }
 
+// lambda_emergent on the collar route, for EVERY curve. At an interior optimum
+// the first-order condition makes the marginal cost of water equal the marginal
+// carbon of water along the path the solve moves on, whatever the curve and its
+// link: h'(A) dA/dpsi = dC/dpsi gives lambda = dA/dE for the identity, log and
+// scaled links alike. So the reported lambda is checked against dA/dE taken by a
+// central difference ALONG THE COLLAR PATH: assimilation and transpiration at
+// the collar either side of the optimum.
+//
+// ⚠️ This is what catches a lambda of the wrong curve. Every collar solve used to
+// report TF24's (marginal_cost_water_multilayer, its series-corrected form)
+// whatever it had maximised: CF77 at a price of 1e5 read 1.05e6. A check on TF24
+// alone, or on the stem route, where each curve has always reported its own,
+// cannot see that.
+template <phylloptim::Leaf::CostCurve K>
+int check_collar_lambda_emergent(const Drivers &d, double *worst) {
+  const struct {
+    std::vector<double> psi;
+    std::vector<double> depth;
+  } soils[] = {{{0.5}, {1.0}}, {{1.0}, {1.0}}, {{0.5, 1.0, 1.5}, {0.5, 1.0, 1.5}}};
+  int compared = 0;
+  for (const auto &s : soils) {
+    phylloptim::Leaf l = make_leaf(d, s.psi, s.depth);
+    // 3e5, not kPriceForFOC: at 1e5 and below CF77 pins at psi_crit on all three
+    // soils here, and a pinned optimum carries no dA/dE identity to check.
+    l.CF77_lambda_ = 3e5;
+    l.TF24_floor_lambda_o = kPriceForFOC;
+    l.LeastCost_beta = 2.0;
+    l.JS22_gamma = kGammaJS22;
+    l.CMax_a = kCMaxA;
+    l.CMax_b = kCMaxB;
+    l.set_model(K, true);
+    l.optimise();
+    if (l.operating_point_kind() !=
+        phylloptim::Leaf::OperatingPointKind::Interior) {
+      continue;  // pinned: the gradient is genuinely non-zero there
+    }
+    const double lambda = l.lambda_emergent();
+    const double p0 = l.opt_root_psi_;
+    const double h = 1e-4;
+    l.template evaluate_root_collar_psi_for<K>(p0 + h);
+    const double A_up = l.assim_colimited_, E_up = l.transpiration_;
+    l.template evaluate_root_collar_psi_for<K>(p0 - h);
+    const double A_dn = l.assim_colimited_, E_dn = l.transpiration_;
+    const double dA_dE = (A_up - A_dn) / (E_up - E_dn);
+    const double err = std::abs(lambda / dA_dE - 1.0);
+    *worst = std::max(*worst, err);
+    near(lambda / dA_dE, 1.0, 1e-4,
+         phylloptim::Leaf::curve_name(static_cast<int>(K)) +
+             " collar lambda_emergent against dA/dE, " +
+             std::to_string(s.psi.size()) + " layer(s), psi_soil " +
+             std::to_string(s.psi[0]));
+    ++compared;
+  }
+  return compared;
+}
+
+void test_collar_lambda_emergent_is_dA_dE() {
+  printf("collar lambda_emergent is dA/dE along the collar path, every curve\n");
+  using CC = phylloptim::Leaf::CostCurve;
+  Drivers d;
+  d.PPFD = 1500.0;
+  double worst = 0.0;
+  int per_curve[9] = {
+      check_collar_lambda_emergent<CC::TF24>(d, &worst),
+      check_collar_lambda_emergent<CC::CF77>(d, &worst),
+      check_collar_lambda_emergent<CC::JS22>(d, &worst),
+      check_collar_lambda_emergent<CC::CMax>(d, &worst),
+      check_collar_lambda_emergent<CC::SOX>(d, &worst),
+      check_collar_lambda_emergent<CC::JW26>(d, &worst),
+      check_collar_lambda_emergent<CC::ProfitMax>(d, &worst),
+      check_collar_lambda_emergent<CC::TF24_floor>(d, &worst),
+      check_collar_lambda_emergent<CC::LeastCost>(d, &worst)};
+  int total = 0;
+  for (int i = 0; i < 9; ++i) {
+    total += per_curve[i];
+    // Hazard 16: a curve whose every solve pinned would pass by never comparing.
+    ok(per_curve[i] > 0, "curve " + std::to_string(i) + " reached an interior optimum");
+  }
+  printf("    %d interior optima | worst relative error %.3e\n", total, worst);
+}
+
 // lambda = dA/dE is the first-order condition every model in this family shares,
 // so checking the analytic lambda against a finite-difference dA/dE is a check on
 // the whole optimisation, not just on one formula.
@@ -8142,6 +8223,7 @@ int main() {
   test_negative_assim_exit_writes_its_own_rates();
   test_analytic_gradient_matches_finite_difference();
   test_collar_foc_matches_profit();
+  test_collar_lambda_emergent_is_dA_dE();
   test_gradient_needs_no_prior_solve();
   test_gradient_is_zero_in_reversed_gradient_state();
   test_gradient_reports_feasibility();
