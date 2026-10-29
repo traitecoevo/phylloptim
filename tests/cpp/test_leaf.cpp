@@ -1685,6 +1685,66 @@ void test_dprofit_dpsi_stem_matches_a_finite_difference() {
          rows, worst_tf, worst_cf);
 }
 
+// The same check with the energy balance ON, which the one above cannot see: its
+// leaf is at a prescribed temperature, so the energy-balance term of the
+// first-order condition, dA/dTleaf and dgc/dT = -gc * Delta(Tleaf) / D_leaf never
+// enter. With the gate on they all do.
+//
+// ⚠️ THE ASSERTION IS ON THE MEDIAN, AND THAT IS MEASURED. At h = 3e-4 a wrong
+// slope of the saturation curve (FAO-56's 4098, 4.2e-5 below 17.27 * 237.3) put
+// the median relative error at 4.0e-06 over these 34 points, never below 2.2e-07;
+// the exact slope puts it at 1.5e-08. But single points of the exact build reach
+// 1.3e-06, where the ci root-find's ~1e-10 noise in profit is divided by 2h on a
+// hot leaf with small A, so no per-point bound separates the two. A median does,
+// by 270x. The per-point bound only catches a missing or mis-signed term, which
+// is an O(1) error.
+void test_dprofit_dpsi_stem_matches_a_finite_difference_energy_balance() {
+  printf("dprofit/dpsi_stem with the energy balance on: analytic vs a central difference\n");
+  Drivers d;
+  d.PPFD = 900.0;
+  const double h = 3e-4;
+  std::vector<double> errs;
+  for (double leaf_temp : {20.0, 30.0, 40.0}) {
+    for (double psi_soil : {0.5, 1.0, 2.0}) {
+      phylloptim::Leaf l;
+      l.setup_transpiration(400);
+      l.setup_root_vulnerability(400);
+      l.use_energy_balance_ = true;
+      l.NIR_int_ = d.PPFD / phylloptim::umol_par_per_joule;  // daylight
+      l.set_supply_single(0.0);
+      l.set_physiology(fixture::series_resistance(1e3), d.PPFD, {psi_soil}, {1.0},
+                       d.K_s * d.theta / d.h, d.atm_vpd, d.ca, leaf_temp,
+                       d.atm_o2_kpa, d.atm_kpa);
+      const double lo = psi_soil, hi = l.psi_crit;
+      for (double frac : {0.15, 0.35, 0.55, 0.75}) {
+        const double psi = lo + frac * (hi - lo);
+        bool feasible = false;
+        const double an =
+            l.dprofit_dpsi_stem<phylloptim::Leaf::CostCurve::TF24>(psi, psi_soil,
+                                                                   &feasible);
+        if (!feasible) continue;
+        const double up = l.profit_psi_stem_TF(psi + h, psi_soil);
+        const double dn = l.profit_psi_stem_TF(psi - h, psi_soil);
+        const double fd = (up - dn) / (2.0 * h);
+        const double err = std::abs(an - fd) / std::max(std::abs(an), 1.0);
+        errs.push_back(err);
+        near(err, 0.0, 1e-5,
+             "TF24 dprofit, energy balance on, T=" + std::to_string(leaf_temp) +
+                 " psi_soil=" + std::to_string(psi_soil) +
+                 " frac=" + std::to_string(frac));
+      }
+    }
+  }
+  ok(errs.size() >= 30, "enough feasible rows reached the comparison");
+  std::vector<double> sorted = errs;
+  std::sort(sorted.begin(), sorted.end());
+  const double median = sorted[sorted.size() / 2];
+  ok(median < 1e-7, "median relative error " + std::to_string(median) +
+                        " is at the difference's floor, not a wrong slope's");
+  printf("    %zu points | median relative error %.3e, worst %.3e\n", errs.size(),
+         median, sorted.back());
+}
+
 // The derivative and the optimiser have to agree about where the optimum is: the
 // solver returns an argmax, so dprofit there must be ~zero, and AWAY from it must
 // not be. The second half is what makes this more than a tautology -- a
@@ -8102,6 +8162,7 @@ int main() {
   test_cowan_farquhar_closed_state();
   test_cowan_farquhar_refuses_an_unset_lambda();
   test_dprofit_dpsi_stem_matches_a_finite_difference();
+  test_dprofit_dpsi_stem_matches_a_finite_difference_energy_balance();
   test_dprofit_dpsi_stem_vanishes_at_the_optimum();
   test_evaluate_psi_stem_prescribes_rather_than_optimises();
   test_multilayer_lambda_identity();

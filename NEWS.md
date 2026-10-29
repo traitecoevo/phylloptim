@@ -1,3 +1,11 @@
+# phylloptim 0.15.3
+
+## The slope of the saturation curve is the exact derivative
+
+`saturation_vapour_pressure_slope()` used FAO-56's quoted numerator 4098, which rounds `17.27 * 237.3 = 4098.171`, so the slope was 4.2e-5 low. The slope reaches the energy-balance first-order condition through `dgc/dT = -gc * Delta(Tleaf) / D_leaf`, and there it made the analytic `dprofit/dpsi_stem` miss a central difference of the profit by 2e-6 to 2e-5 relative at every step from 1e-2 to 1e-6 MPa: a plateau rather than the difference's V. The numerator is now the product of the two Tetens coefficients, and the same comparison falls to the difference's own floor (median 1.5e-8 over 34 points at a step of 3e-4 MPa). `test_leaf.cpp` now makes it with the energy balance on, where only the gate-off case was checked before; on the old constant it fails.
+
+**What moves:** the energy-balance rows of `psi_stem_optima.tsv` and nothing else. 244 of its 5760 rows change, all with the energy balance on, none in status or kind: the argmax by at most 1.2e-5 relative, profit by at most 5.6e-10. `operating_points.tsv`, `primitives.tsv` and `gradient_golden.tsv` are bit-identical. With the gate off the slope is never read.
+
 # phylloptim 0.15.2
 
 ## LeastCost's cost moves with leaf temperature in its first-order condition (#167 follow-up)

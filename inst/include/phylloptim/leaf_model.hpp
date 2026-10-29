@@ -5974,9 +5974,18 @@ inline double Leaf::saturation_vapour_pressure(double temp) const {
   return 0.6108 * exp(17.27 * temp / (temp + 237.3));
 }
 
-// Slope of the saturation vapour pressure curve Delta(T) in kPa K^-1, T in deg C.
+// Slope of the saturation vapour pressure curve Delta(T) in kPa K^-1, T in deg C:
+// the derivative of the Tetens form above, so its numerator is the product of
+// that form's two coefficients.
+//
+// ⚠️ KEEP IT THE EXACT DERIVATIVE, NOT FAO-56's QUOTED 4098. That constant rounds
+// 17.27 * 237.3 = 4098.171, 4.2e-5 low, and the slope reaches the energy-balance
+// first-order condition through dgc/dT = -gc * Delta(Tleaf) / D_leaf. Rounded, the
+// analytic dprofit/dpsi_stem missed a central difference of the profit by 2e-6 to
+// 2e-5 relative at every step size; exact, it agrees to the difference's own floor.
 inline double Leaf::saturation_vapour_pressure_slope(double temp) const {
-  return 4098.0 * saturation_vapour_pressure(temp) / ((temp + 237.3) * (temp + 237.3));
+  return (17.27 * 237.3) * saturation_vapour_pressure(temp) /
+         ((temp + 237.3) * (temp + 237.3));
 }
 
 // The deficit that drives diffusion out of the leaf (#7).
