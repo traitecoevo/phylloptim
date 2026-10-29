@@ -31,7 +31,27 @@ raw <- registry_read(file.path(root, "inst", "model-registry.yml"))
 locations <- registry_locations(xml_dir,
                                 include_dir = file.path(root, "inst", "include"),
                                 filter = file.path(root, "tools", "doxygen_filter.awk"))
-res <- registry_resolve(raw, locations = locations, unreferenced = "error")
+res <- registry_resolve(raw, locations = locations, unreferenced = "none")
+# What Doxygen records as a function's references differs between versions (CI
+# runs 1.9.8), so on a failure print what this one recorded for each function
+# involved: the next fix is then a matter of reading the log, not of guessing.
+if (nrow(res$unreferenced)) {
+  eq <- res$equations
+  for (i in seq_len(nrow(res$unreferenced))) {
+    e <- res$unreferenced$equation[i]
+    p <- res$unreferenced$parameter[i]
+    fns <- c(eq$code[eq$id == e], eq$also[[which(eq$id == e)]])
+    target <- res$parameters$code[res$parameters$id == p]
+    cat(sprintf("\n%s reads %s (%s), which none of these references:\n", e, p, target))
+    for (f in fns) {
+      refs <- unique(unlist(locations$references[locations$symbol == f]))
+      cat("  ", f, ": ", paste(refs, collapse = " "), "\n", sep = "")
+    }
+  }
+  stop("reads not referenced by the equation's function: ",
+       paste(res$unreferenced$equation, res$unreferenced$parameter, sep = ":", collapse = ", "),
+       call. = FALSE)
+}
 
 cat(sprintf("model registry: %d parameters and %d equations resolved against %d symbols\n",
             nrow(res$parameters), nrow(res$equations), nrow(locations)))

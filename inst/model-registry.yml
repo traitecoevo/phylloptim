@@ -2286,7 +2286,7 @@ equations:
       E_i = \frac{-\rho_w g z_i}{r_{H,\min,i}/\hat f_r(\psi_c) + r_{V,\Sigma,i}} \ \text{if } |\psi_c - \psi_{s,i}| < 10^{-8}, \qquad
       E_i = 0 \ \text{if } |\psi_c - \psi_{s,i} - \rho_w g z_i| < 10^{-8}
     code: phylloptim::MultiLayerRoots::uptake_impl
-    also: [phylloptim::MultiLayerRoots::uptake_at, phylloptim::MultiLayerRoots::set_soil_state, phylloptim::MultiLayerRoots::set_root_network, phylloptim::Leaf::E_from_Soil_to_Root_Collar]
+    also: [phylloptim::MultiLayerRoots::uptake_at, phylloptim::MultiLayerRoots::supply_over, phylloptim::MultiLayerRoots::held_supply, phylloptim::MultiLayerRoots::set_soil_state, phylloptim::MultiLayerRoots::set_root_network, phylloptim::Leaf::E_from_Soil_to_Root_Collar]
     reads: [psi_soil, gravity_head, kg_per_mol_h2o, r_R_H_min, r_R_V_sum]
     writes: [E_up_, soil_consumption_]
     uses: [layer_midpoints, root_vulnerability, root_vulnerability_integral]
