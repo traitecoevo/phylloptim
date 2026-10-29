@@ -249,8 +249,9 @@ inline Dual log1p(const Dual& a) { return {std::log1p(a.v), a.d / (1.0 + a.v)}; 
 inline double exp(double a) { return std::exp(a); }
 inline double log1p(double a) { return std::log1p(a); }
 
-// std::min(std::max(x, lo), hi), on the value. Returns x itself inside the range,
-// so a NaN passes through exactly as it does through std::min/std::max.
+// `std::min(std::max(x, lo), hi)`, on the value. Returns x itself inside the
+// range, so a NaN passes through exactly as it does through `std::min` and
+// `std::max`.
 template <class T> inline T clamp(const T& x, double lo, double hi) {
   if (val(x) < lo) return T(lo);
   if (val(x) > hi) return T(hi);
