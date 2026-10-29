@@ -15,8 +15,9 @@ registry_values(registry, leaf = leaf_model(), locations = NULL)
 }
 \value{
 the registry's \code{parameters} data frame with \code{value} and
-\code{value_source} (\code{"binding"}, \code{"set_drivers()"}, \code{"initializer"},
-\code{"literal"} or \code{NA})
+\code{value_source} (\code{"binding"}, \code{"binding (vector)"}, \code{"set_drivers()"},
+\code{"initializer"}, \code{"literal"} or \code{NA}), and the list-column \code{value_vector}
+holding a per-layer field whole (its \code{value} is then \code{NA})
 }
 \description{
 Adds \code{value} and \code{value_source} to the registry's parameters: a bound field

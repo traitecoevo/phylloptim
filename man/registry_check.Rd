@@ -8,6 +8,7 @@ registry_check(
   registry = model_registry(),
   temps = seq(0, 50, by = 2.5),
   tol = 1e-10,
+  ids = NULL,
   assert = FALSE
 )
 }
@@ -17,6 +18,8 @@ registry_check(
 \item{temps}{the leaf temperatures of the grid, deg C}
 
 \item{tol}{the tolerance for an entry that sets none}
+
+\item{ids}{the equation ids to check; all of them by default}
 
 \item{assert}{stop, naming the failures, if any entry fails}
 }

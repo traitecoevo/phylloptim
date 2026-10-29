@@ -6,7 +6,7 @@
 
 #' The model registry
 #'
-#' phylloptim's temperature paths as one record: every equation (its LaTeX,
+#' phylloptim's leaf as one record: every equation (its LaTeX,
 #' the C++ symbol that evaluates it, the parameters it reads, the bound fields
 #' it writes, a base-R replica) and every parameter (symbol, units, class,
 #' meaning, source, placeholder flag, the symbol that holds it). The file is
@@ -19,7 +19,8 @@
 #' @return an object of class `model_registry`: `package`, `sections` (a data
 #'   frame of `id` and `title`), `parameters` and `equations` (data frames, one
 #'   row each, with list-columns for `reads`, `writes`, `also`, `uses` and
-#'   `aliases`), `raw` (the validated list) and `path`
+#'   `aliases`), `diagnostics` (the bound fields that are neither), `raw` (the
+#'   validated list) and `path`
 #' @seealso [registry_values()] for the values at render time,
 #'   [registry_check()] for the replicas against the package,
 #'   [registry_resolve()] for file, line and API link from Doxygen's XML
@@ -37,6 +38,7 @@ model_registry <- function(path = system.file("model-registry.yml", package = "p
                                        stringsAsFactors = FALSE),
                  parameters = tabs$parameters,
                  equations = tabs$equations,
+                 diagnostics = tabs$diagnostics,
                  raw = raw, path = path),
             class = "model_registry")
 }
@@ -84,6 +86,13 @@ registry_replica <- function(registry, id) {
   get(id, envir = env, inherits = FALSE)
 }
 
+# The bound fields the registry accounts for: parameters' fields, what equations
+# write, and the diagnostics.
+.registry_covered <- function(registry) {
+  unique(c(registry$parameters$field[!is.na(registry$parameters$field)],
+           unlist(registry$equations$writes), registry$diagnostics$id))
+}
+
 # The bound field a `phylloptim::Leaf::` symbol names, or NA.
 .registry_field <- function(code) {
   ifelse(grepl("^phylloptim::Leaf::", code), sub("^phylloptim::Leaf::", "", code), NA_character_)
@@ -129,8 +138,9 @@ registry_replica <- function(registry, id) {
 #' @param leaf the `Leaf` to read bound fields off; `NULL` reads none
 #' @param locations the output of [registry_locations()], for the constexprs
 #' @return the registry's `parameters` data frame with `value` and
-#'   `value_source` (`"binding"`, `"set_drivers()"`, `"initializer"`,
-#'   `"literal"` or `NA`)
+#'   `value_source` (`"binding"`, `"binding (vector)"`, `"set_drivers()"`,
+#'   `"initializer"`, `"literal"` or `NA`), and the list-column `value_vector`
+#'   holding a per-layer field whole (its `value` is then `NA`)
 #' @examples
 #' v <- registry_values(model_registry())
 #' v[v$section == "respiration", c("id", "symbol", "value", "value_source")]
@@ -141,23 +151,44 @@ registry_values <- function(registry, leaf = leaf_model(), locations = NULL) {
   drivers <- formals(set_drivers)
   bound <- if (is.null(leaf)) character() else names(leaf)
   value <- rep(NA_real_, nrow(p))
+  vectors <- vector("list", nrow(p))
   src <- rep(NA_character_, nrow(p))
   for (i in seq_len(nrow(p))) {
     if (!is.na(p$literal[i])) {
       value[i] <- p$literal[i]; src[i] <- "literal"
     } else if (!is.na(p$driver[i]) && p$driver[i] %in% names(drivers)) {
       value[i] <- eval(drivers[[p$driver[i]]]); src[i] <- "set_drivers()"
-    } else if (!is.na(f <- .registry_field(p$code[i])) && f %in% bound) {
+    } else if (!is.na(f <- p$field[i]) && f %in% bound) {
       v <- leaf[[f]]
-      value[i] <- if (is.logical(v)) as.numeric(v) else v
-      src[i] <- "binding"
+      if (is.logical(v)) v <- as.numeric(v)
+      # A per-layer field (psi_soil_, r_R_H_min, ...) is a vector, and empty
+      # until a solve seats it: its scalar value is NA and the whole is kept.
+      if (length(v) == 1L) value[i] <- v else vectors[[i]] <- v
+      src[i] <- if (length(v) == 1L) "binding" else "binding (vector)"
     } else if (p$code[i] %in% names(consts)) {
       value[i] <- consts[[p$code[i]]]; src[i] <- "initializer"
     }
   }
   p$value <- value
   p$value_source <- src
+  p$value_vector <- vectors
   p
+}
+
+# The probes registry_check() runs: `.registry_probes` (R/registry-probes.R) and
+# every `.registry_probes_<section>` list beside it, collected here at call time
+# so the files' collation order does not matter. A caller drafting new entries
+# can add probes without editing the package, through
+# options(phylloptim.registry_probes = list(<id> = function(rep, temps) ...)).
+registry_probes <- function() {
+  ns <- environment(registry_probes)
+  lists <- c(list(.registry_probes),
+             mget(sort(ls(ns, all.names = TRUE, pattern = "^\\.registry_probes_")), envir = ns))
+  out <- do.call(c, unname(lists))
+  dup <- unique(names(out)[duplicated(names(out))])
+  if (length(dup)) stop("two probes for: ", paste(dup, collapse = ", "), call. = FALSE)
+  extra <- getOption("phylloptim.registry_probes")
+  if (is.null(extra)) out else utils::modifyList(out, extra)
 }
 
 #' Check every replica against the package
@@ -173,6 +204,7 @@ registry_values <- function(registry, leaf = leaf_model(), locations = NULL) {
 #' @param registry a [model_registry()]
 #' @param temps the leaf temperatures of the grid, deg C
 #' @param tol the tolerance for an entry that sets none
+#' @param ids the equation ids to check; all of them by default
 #' @param assert stop, naming the failures, if any entry fails
 #' @return a data frame: `id`, `kind`, `n` (comparisons made), `max_abs`,
 #'   `max_rel`, `tol`, `pass`
@@ -182,12 +214,19 @@ registry_values <- function(registry, leaf = leaf_model(), locations = NULL) {
 #' }
 #' @export
 registry_check <- function(registry = model_registry(), temps = seq(0, 50, by = 2.5),
-                           tol = 1e-10, assert = FALSE) {
+                           tol = 1e-10, ids = NULL, assert = FALSE) {
   rep <- registry_replicas(registry)
   eq <- registry$equations
+  if (!is.null(ids)) {
+    unknown <- setdiff(ids, eq$id)
+    if (length(unknown)) {
+      stop("registry_check(): no equation ", paste(unknown, collapse = ", "), call. = FALSE)
+    }
+    eq <- eq[eq$id %in% ids, , drop = FALSE]
+  }
   rows <- lapply(seq_len(nrow(eq)), function(i) {
     id <- eq$id[i]
-    probe <- .registry_probes[[id]]
+    probe <- registry_probes()[[id]]
     if (is.null(probe)) {
       stop("registry_check(): equation `", id, "` has no probe in R/registry-probes.R",
            call. = FALSE)

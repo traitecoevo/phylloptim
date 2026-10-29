@@ -15,10 +15,11 @@ model_registry(
 an object of class \code{model_registry}: \code{package}, \code{sections} (a data
 frame of \code{id} and \code{title}), \code{parameters} and \code{equations} (data frames, one
 row each, with list-columns for \code{reads}, \code{writes}, \code{also}, \code{uses} and
-\code{aliases}), \code{raw} (the validated list) and \code{path}
+\code{aliases}), \code{diagnostics} (the bound fields that are neither), \code{raw} (the
+validated list) and \code{path}
 }
 \description{
-phylloptim's temperature paths as one record: every equation (its LaTeX,
+phylloptim's leaf as one record: every equation (its LaTeX,
 the C++ symbol that evaluates it, the parameters it reads, the bound fields
 it writes, a base-R replica) and every parameter (symbol, units, class,
 meaning, source, placeholder flag, the symbol that holds it). The file is

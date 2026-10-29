@@ -96,6 +96,10 @@ registry_read <- function(path) {
       raw$parameters[[id]]$literal <- .registry_number(p$literal, paste(what, "literal"))
     }
   }
+  for (id in names(raw$diagnostics)) {
+    d <- raw$diagnostics[[id]]
+    need(d, c("meaning", "code"), paste0("diagnostic `", id, "`"))
+  }
   for (id in eids) {
     e <- raw$equations[[id]]
     what <- paste0("equation `", id, "`")
@@ -141,6 +145,10 @@ registry_tables <- function(raw) {
     code = vapply(raw$parameters, function(p) p$code, ""),
     default_code = vapply(raw$parameters, function(p) opt(p, "default_code"), ""),
     driver = vapply(raw$parameters, function(p) opt(p, "driver"), ""),
+    field = vapply(raw$parameters, function(p) {
+      if (!is.null(p$field)) return(p$field)
+      if (grepl("^phylloptim::Leaf::", p$code)) sub("^phylloptim::Leaf::", "", p$code) else NA_character_
+    }, ""),
     literal = vapply(raw$parameters, function(p) opt(p, "literal", NA_real_), 0),
     read_by = vapply(raw$parameters, function(p) opt(p, "read_by"), ""),
     stringsAsFactors = FALSE, row.names = NULL)
@@ -161,7 +169,13 @@ registry_tables <- function(raw) {
   for (key in c("reads", "writes", "also", "uses")) {
     equations[[key]] <- lapply(raw$equations, function(e) .registry_character(e[[key]]))
   }
-  list(parameters = parameters, equations = equations)
+  dids <- names(raw$diagnostics)
+  diagnostics <- data.frame(
+    id = as.character(dids),
+    meaning = vapply(raw$diagnostics, function(d) d$meaning, character(1)),
+    code = vapply(raw$diagnostics, function(d) d$code, character(1)),
+    stringsAsFactors = FALSE, row.names = NULL)
+  list(parameters = parameters, equations = equations, diagnostics = diagnostics)
 }
 
 #' Map the lines of a header's filtered stream back to its source
@@ -378,6 +392,7 @@ registry_resolve <- function(raw, xml_dir = NULL, locations = NULL,
   }))
   equations <- cbind(equations, eq_loc)
   for (s in unique(unlist(equations$also))) take(s)
+  for (s in tabs$diagnostics$code) take(s)
   unresolved <- unique(unresolved)
   if (length(unresolved)) {
     stop("model registry names symbols Doxygen does not know: ",
