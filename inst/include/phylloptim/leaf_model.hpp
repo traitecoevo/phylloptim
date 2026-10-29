@@ -1688,6 +1688,9 @@ public:
   // Collapses a negative-conductance result to the class's closed state. Called by
   // both solve routes, so neither can report a negative gs. See the definition.
   void set_medlyn_shutdown_if_closed();
+  // The soil-moisture factor both Medlyn routes multiply g1 by, clamped to
+  // [0, 1]. See the definition.
+  double medlyn_beta() const;
   // std::vector<double> root_collar_psi(std::vector<double> soil_moist_);
 
   // Every psi crossing this boundary is a POSITIVE MAGNITUDE in MPa (#25). The
@@ -8813,7 +8816,7 @@ inline void Leaf::optimise_psi_stem_single() {
 // ===========================================================================
 inline double Leaf::medlyn_model_gs(double assim_colimited_){
 
-  double beta_ = (theta_ - theta_w_)/(theta_fc_ - theta_w_);
+  const double beta_ = medlyn_beta();
 
   // The USO expression as published, which is a WATER VAPOUR conductance -- that is
   // what its diffusion ratio is doing there, and what `g1` is fitted against.
@@ -8922,7 +8925,7 @@ inline void Leaf::solve_medlyn_ci_numerical(){
 // sweep moves.
 inline void Leaf::solve_medlyn_ci_analytical(){
 
-  const double beta_ = (theta_ - theta_w_)/(theta_fc_ - theta_w_);
+  const double beta_ = medlyn_beta();
   const double g1_beta = g1 * beta_;
   ci_ = ca_ * (g1_beta/(g1_beta + sqrt(atm_vpd_)));
   assim_colimited_ = assim_colimited(ci_);
@@ -8942,6 +8945,19 @@ inline void Leaf::solve_medlyn_ci_analytical(){
 // still respires, so assimilation is -R_d_ rather than zero. Clamped rather than
 // refused because a hot or dry leaf reaching it is a legitimate model state, unlike
 // the parameter errors `check_cost_parameters` rejects.
+// The soil-moisture factor, the linear beta of the beta-factor literature,
+// CLAMPED TO [0, 1]. Unclamped, a soil wetter than field capacity scaled g1 ABOVE
+// its fitted value (theta 0.6 with field capacity 0.5 and wilting point 0.2 gave
+// beta 1.33), and one drier than the wilting point gave a negative beta, so a
+// negative g1 term the shutdown exit then had to catch. Between the two the
+// factor is unchanged, so every value inside [theta_w_, theta_fc_] is
+// bit-identical. CF77's soil price clamps the same factor at 1 for the same
+// reason, and divides by it, so it has no use for the lower clamp.
+inline double Leaf::medlyn_beta() const {
+  const double beta = (theta_ - theta_w_) / (theta_fc_ - theta_w_);
+  return std::min(std::max(beta, 0.0), 1.0);
+}
+
 inline void Leaf::set_medlyn_shutdown_if_closed(){
   if (medlyn_model_gs_ < 0.0 || stom_cond_CO2_ < 0.0) {
     stom_cond_CO2_ = 0.0;

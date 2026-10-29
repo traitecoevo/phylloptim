@@ -157,3 +157,20 @@ test_that("neither route reports a negative conductance", {
     }
   }
 })
+
+test_that("the soil-moisture factor is clamped to [0, 1]", {
+  # Unclamped, a soil wetter than field capacity scaled g1 above its fitted value
+  # and one drier than the wilting point gave a negative g1 term. Clamped, wetter
+  # than field capacity is exactly field capacity, and drier than the wilting
+  # point is exactly the wilting point, on both routes.
+  for (route in c("num", "ana")) {
+    solve <- function(theta) {
+      l <- medlyn_leaf(theta = theta)
+      if (route == "num") l$solve_medlyn_ci_numerical() else l$solve_medlyn_ci_analytical()
+      c(ci = l$ci_, gs = l$stom_cond_CO2_)
+    }
+    expect_identical(solve(0.6), solve(0.5))     # theta_fc_ is 0.5 in medlyn_leaf
+    expect_identical(solve(0.1), solve(0.2))     # theta_w_ is 0.2
+    expect_false(identical(solve(0.35), solve(0.5)))  # and it still responds between
+  }
+})
