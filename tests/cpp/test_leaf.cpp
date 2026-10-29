@@ -239,9 +239,9 @@ void test_vulnerability_integral_derivatives() {
   ok(at_zero.db == 0.0, "dG/db is exactly zero at psi = 0");
   ok(at_zero.dc == 0.0, "dG/dc is exactly zero at psi = 0");
 
-  // Past the last knot (#157). (3.0, 1.0, 2.0) is x = 9, past the knot grid's
-  // x_max = log(100) and inside the series' reach: it used to throw, and now
-  // agrees with the closed form and a central difference like any other point.
+  // Past the last knot: (3.0, 1.0, 2.0) is x = 9, past the knot grid's
+  // x_max = log(100) and inside the series' reach, and agrees with the closed
+  // form and a central difference like any other point.
   {
     const double psi = 3.0, b = 1.0, c = 2.0, h = 1e-5;
     const auto d = cumulative_vulnerability_integral_derivatives_at(psi, b, c);
@@ -297,10 +297,10 @@ void test_vulnerability_integral_derivatives() {
   ok(just_inside > 0.0, "the last knot itself is inside the bound");
 }
 
-// A soil drier than the stem curve's last knot (P99) used to throw
-// stem_curve_domain from every single-potential stem route, though the answer
-// there is a closed leaf (#157). The accessors now read the closed form past the
-// knot grid; these are the properties that make that safe.
+// A soil drier than the stem curve's last knot (P99) is a closed leaf on the
+// single-potential stem routes, and the accessors read the closed form past the
+// knot grid to give that answer (#157). These are the properties that make the
+// read safe.
 void test_stem_curve_past_its_grid() {
   printf("stem curve past its knot grid (#157)\n");
   Drivers d;
@@ -4722,8 +4722,7 @@ void test_out_of_domain_names_the_spline() {
   phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
 
   // Forward direction, below the near end of the vulnerability curve. Past the
-  // FAR end is no longer a domain error: it reads the closed form (#157), which
-  // test_stem_curve_past_its_grid covers.
+  // FAR end reads the closed form, which test_stem_curve_past_its_grid covers.
   const std::string fwd = message_of([&] { l.transpiration(-1.0, 0.0); });
   ok(mentions(fwd, "transpiration_from_psi"), "forward lookup names its spline");
   ok(mentions(fwd, "psi = -1"), "forward lookup reports the point");
@@ -4768,7 +4767,7 @@ void test_out_of_domain_names_the_spline() {
 // there.
 void test_out_of_domain_under_rescale() {
   Drivers d;
-  // At the LOWER end: past the upper end is no longer a domain failure (#157).
+  // At the LOWER end: past the upper end reads the closed form.
   phylloptim::Leaf wide = make_leaf(d, {2.0}, {1.0});
   const std::string before = message_of([&] { wide.transpiration(-1.0, 0.0); });
 

@@ -839,7 +839,7 @@ satisfies `-Werror=switch` and so removes the check they exist for.
    last knot rather than throwing (#77). A layer silently reporting the floor
    conductivity is #85's question, not this one.
 
-   ⚠️ **Past the stem curve's last knot is not a domain error any more (#157).**
+   ⚠️ **Past the stem curve's last knot is not a domain error (#157).**
    The stem table is a cache of `G(psi) = (b/c) gamma_lower(1/c, (psi/b)^c)`, and
    a soil drier than P99 is an ordinary state (plant's ceiling is 1000 MPa). Past
    the grid, `stem_curve_integral` reads that closed form, `stem_curve_integral_deriv`
@@ -847,10 +847,11 @@ satisfies `-Werror=switch` and so removes the check they exist for.
    knots are seeded from the same expression, so value and slope are continuous at
    the join. What stays `stem_curve_domain`: a negative potential, a flow below
    the table (plant#576), and a flow at or past `G(inf)`, which no stem potential
-   carries. The in-grid path does not move: all three golden files stayed
-   bit-identical. The collar route never hit this: it shuts down holding the stem
-   at `psi_crit`. Only the single-potential stem routes, where the stem's
-   upstream end is pinned at `psi_soil`, read `G(psi_soil)`.
+   carries. The in-grid path is untouched: the forward read's branch sits inside
+   its out-of-range test and `stem_curve_integral_deriv` pays one comparison. The
+   collar route never reads past the grid: it shuts down holding the stem at
+   `psi_crit`. Only the single-potential stem routes, where the stem's upstream
+   end is pinned at `psi_soil`, read `G(psi_soil)`.
 
    ⚠️ **The domain edge itself was unstable until #92.** The knot grid accumulated
    `psi += step`, so it produced `resolution` *or* `resolution - 1` knots depending
