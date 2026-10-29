@@ -1,4 +1,4 @@
-# phylloptim 0.15.2
+# phylloptim 0.15.3
 
 ## The model registry: equations, parameters and code links from one YAML (#166)
 
@@ -13,6 +13,26 @@ Measured by that check, the 92 closed forms agree with the package to 3.6e-11 re
 Four bound fields are written by nothing in the C++, and are listed as diagnostics so that every bound field is accounted for: `count` and `psi_stem` read uninitialised memory, `opt_ci_` is always `NA`, and `f_r` is always empty.
 
 Two methods are bound for the check, `saturation_vapour_pressure(temp)` and `saturation_vapour_pressure_slope(temp)`. No numerics change; the golden baselines are bit-identical.
+
+# phylloptim 0.15.2
+
+## LeastCost's cost moves with leaf temperature in its first-order condition (#167 follow-up)
+
+⚠️ **LeastCost results move with the energy balance on; with it off they are bit-identical**, and so is every other curve. LeastCost's capacity term reads `vcmax_` at the leaf temperature, so with the gate on its cost `log W` moves with `psi` through `Tleaf(E(psi))`. Until 0.15.1 the stem routes refused a non-identity link's derivative with the gate on, which hid this. 0.15.1 lifted that refusal and gave the benefit its `h'(A)`, but left out this cost slope, so LeastCost root-found the wrong first-order condition on both routes. Its derivative was 1 to 4% off a finite difference of its own objective, at every step size.
+
+`dprofit_energy_balance_term` now subtracts `beta*umol_to_mol*dVcmax/dT*dT/dpsi / W`, beside ProfitMax's thermal slope. It is cost-side, so it takes no `h'`. The derivative now matches a difference to 4e-6, the same floor as SOX. `lambda_LeastCost()` carries the same slope in `dTheta/dE`, through the new `vcmax_temp_deriv()`, as `lambda_ProfitMax()` carries its thermal term. At an interior optimum it equals `dA/dE` along the stream to 4e-6.
+
+**What moves.** The psi_stem golden file changes on LeastCost's 192 energy-balance rows, in `lambda_emergent` only, with no sign change. Its optima there do not move, because at `beta = 146` every one is pinned at a bound, which is also why no golden file saw the wrong derivative. On the collar route LeastCost pins at most drivers too; at `beta = 2` with three soil layers at 25 °C the old collar sat 0.02 MPa from a dense scan's argmax and now lands on it.
+
+## The stomatal conductance, separated from the boundary layer (#122)
+
+On the energy-balance path `gs_H2O` (and `stom_cond_CO2_`) is the TOTAL leaf-to-air conductance, `E*P/D_leaf`. The transpiration crosses the leaf boundary layer as well as the stoma, so comparing it with a measured stomatal conductance compares different quantities. Two read-only accessors separate them. `gb_H2O` is the boundary layer's conductance to vapour, `1.075 * P/(R*Tair) / ra_`, which is plantecophys's convention for a hypostomatous leaf. `gs_stomatal_H2O` is the stoma's own, `1/(1/gs_H2O - 1/gb_H2O)`.
+
+Off the energy balance there is no boundary layer: `gb_H2O` is `Inf` and `gs_stomatal_H2O` is `gs_H2O` bit for bit. On it, over 216 transpiring driver rows, the total conductance reaches 27% of the boundary layer's at 0.5 m/s wind and 13% at the default 2 m/s. At that worst row the stomatal conductance is 37% above the reported total.
+
+⚠️ **`gs_stomatal_H2O` refuses where `gs_H2O >= gb_H2O`.** Then the transpiration is more than the boundary layer can carry at that deficit, and no finite stomatal conductance exists. Hydraulics set the transpiration, so nothing in the solve prevents it. The refusal sits in the accessor rather than in the solve so that it cannot abort a run; no row of the grid above reaches it.
+
+Nothing in the solve reads either accessor, so every result is unchanged and every golden file is bit-identical. The diffusivity ratio is still the stomatal 1.67 along the whole path, which #122's third part changes separately.
 
 # phylloptim 0.15.1
 
