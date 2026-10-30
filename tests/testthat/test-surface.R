@@ -42,6 +42,22 @@ test_that("leaf_control()'s knot count is the C++ default, read not restated (#1
                    quote(.leaf_ncontrol_default()))
 })
 
+test_that("a stem wetter than its upstream potential is refused, not answered (#31)", {
+  # Below the upstream potential the flux integral is negative, and these used
+  # to return it as a finite number. Equality is the shut-down state and stays
+  # legal; the profit functions seat the no-flow state there and refuse nothing.
+  l <- leaf_model()
+  set_drivers(l, psi_soil = 2.0, PPFD = 900)
+  msg <- "psi_stem \\(1.99\\) is wetter than psi_upstream \\(2\\)"
+  expect_error(l$transpiration(1.99, 2.0), msg)
+  expect_error(l$stom_cond_CO2(1.99, 2.0), msg)
+  expect_true(is.finite(l$profit_psi_stem_TF(1.99, 2.0)))
+  expect_identical(l$transpiration_, 0)
+  expect_identical(l$transpiration(2.0, 2.0), 0)
+  expect_true(is.finite(l$profit_psi_stem_TF(2.0, 2.0)))
+  expect_gt(l$transpiration(2.01, 2.0), 0)
+})
+
 test_that("every trait can be read back from the object (#95)", {
   # The traits were `set_traits()` arguments and nothing else, so from R they could
   # be written and not read. A caller who needed one to compute a derived quantity

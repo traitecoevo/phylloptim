@@ -6582,6 +6582,13 @@ inline double Leaf::transpiration_full_integration(double psi_stem, double psi_u
                                       integration_tol_);
 }
 
+// The refusal transpiration() raises on a reversed gradient. Out of line for the
+// same reason as stem_curve_out_of_domain: with the message built inside it,
+// transpiration() stopped being inlined into its callers, which measured +2% on
+// every solve arm.
+[[noreturn]] inline void transpiration_reversed(double psi_stem,
+                                                double psi_upstream);
+
 //calculates supply-side transpiration from psi_stem and opt_root_psi_, returns kg h20 s^-1 m^-2 LA
 // SIGN: psi_stem and psi_upstream are POSITIVE magnitudes here (passed straight
 // to the spline). Contrast transpiration_to_psi_stem below. See the sign-
@@ -6597,6 +6604,20 @@ inline double Leaf::transpiration(double psi_stem, double psi_upstream) {
     return transpiration_cache_value_;
   }
 
+  // ⚠️ A REVERSED GRADIENT IS A CALLER ERROR, NOT A REGIME. Below psi_upstream
+  // the integral is negative -- water flowing from the leaf to the soil, which
+  // this model does not represent -- and stom_cond_CO2 and psi_stem_to_ci, which
+  // read the flux only through here, would inherit the sign as a finite,
+  // plausible number. So this is their guard too. (The profit functions never
+  // arrive here reversed: set_leaf_states_rates_from_psi_stem seats the no-flow
+  // state at psi_stem <= psi_upstream.) `<`, not `<=`: equality is the shut-down
+  // state, with E exactly zero. A NaN fails the comparison and falls through,
+  // keeping NA-in, NA-out. After the memo, because a reversed pair can never have
+  // been memoised.
+  if (psi_stem < psi_upstream) {
+    transpiration_reversed(psi_stem, psi_upstream);
+  }
+
   // integration of proportion_of_conductivity over [opt_root_psi_, psi_stem]
   const double E = leaf_specific_conductance_max_ *
     (stem_curve_integral(psi_stem, "Leaf::transpiration, at psi_stem") -
@@ -6608,6 +6629,16 @@ inline double Leaf::transpiration(double psi_stem, double psi_upstream) {
   transpiration_cache_value_ = E;
   transpiration_cached_ = true;
   return E;
+}
+
+[[noreturn]] inline void transpiration_reversed(double psi_stem,
+                                                double psi_upstream) {
+  util::stop("Leaf::transpiration: psi_stem (" + util::format_double(psi_stem) +
+             ") is wetter than psi_upstream (" +
+             util::format_double(psi_upstream) +
+             "), so the flux would run from the leaf to the soil, which this "
+             "model does not represent. psi_stem == psi_upstream is the "
+             "shut-down state; evaluate from there upward");
 }
 
 // converts a known transpiration to its corresponding psi_stem, returns -MPa

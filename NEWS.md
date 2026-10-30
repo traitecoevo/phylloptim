@@ -12,6 +12,10 @@ At an interior point `collar_at` divided every collar row by the curvature it wa
 
 Four ways to get every number finite and some of them wrong now fail by name. `collar_at` and `outputs_at` refuse a curve `K` other than the seated `cost_curve_` (`find_root_collar_psi()`, which solves TF24 whatever is seated, is the one solve this cannot see). `supply_draw_at` refuses a leaf on the single-potential path, since it walks the multi-layer supply whatever the leaf solved on. `PhotoCapacity` and `SupplyDraw` carry a `static_assert` on their layout, so a member added without a matching `for_each_active` entry is a compile error rather than a column of exact zeros. `SupplyDraw::flux` is zero-initialised, where a shutdown draw used to return it indeterminate. And `leaf_control()`'s `vulnerability_curve_ncontrol` default is read from C++ `Leaf::ncontrol_default` rather than restated as a literal. No number moves.
 
+## `transpiration()` refuses a stem wetter than its upstream potential (#31)
+
+`transpiration(psi_stem, psi_upstream)` integrates the conductivity over `[psi_upstream, psi_stem]`, so below `psi_upstream` it returned a negative flux, water running from the leaf to the soil, as a finite number. It now refuses that by name, giving both potentials. `psi_stem == psi_upstream` stays legal: it is the shut-down state, with `E` exactly zero. `stom_cond_CO2()` and `psi_stem_to_ci()` read the flux only through `transpiration()` and inherit the refusal, which `psi_stem_to_ci()`'s compensation-point fallback does not swallow. The profit functions are unaffected, because they already seat the no-flow state at or below the upstream potential. A counter over both golden grids found no solve calling it reversed (0 of 23,676 calls on the collar grid, 0 of 600,456 on the psi_stem grid), and every golden file is bit-identical. The refusal is built out of line so `transpiration()` stays inlined: the collar solve measured 3.79 against 3.81 us (min of 8, interleaved), within noise.
+
 # phylloptim 0.16.2
 
 ## The Medlyn route reports a CO2-basis conductance (#129)

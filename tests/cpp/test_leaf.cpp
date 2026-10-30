@@ -5327,7 +5327,9 @@ void test_out_of_domain_names_the_spline() {
 
   // Forward direction, below the near end of the vulnerability curve. Past the
   // FAR end reads the closed form, which test_stem_curve_past_its_grid covers.
-  const std::string fwd = message_of([&] { l.transpiration(-1.0, 0.0); });
+  // The upstream potential is below the stem's too, so the pair is not a
+  // reversed gradient and the lookup is what refuses.
+  const std::string fwd = message_of([&] { l.transpiration(-1.0, -2.0); });
   ok(mentions(fwd, "transpiration_from_psi"), "forward lookup names its spline");
   ok(mentions(fwd, "psi = -1"), "forward lookup reports the point");
   ok(mentions(fwd, "beyond the lower end"), "forward lookup reports which end");
@@ -5365,6 +5367,38 @@ void test_out_of_domain_names_the_spline() {
      "an in-domain lookup still returns a finite value");
 }
 
+// Below psi_upstream the flux integral is negative: water running from the leaf
+// to the soil, returned as a finite number (#31). transpiration() refuses it,
+// and the two functions that read the flux through it inherit the refusal --
+// psi_stem_to_ci included, whose compensation-point fallback must not swallow
+// it. The profit functions never read it there: they seat the no-flow state at
+// or below the upstream potential, which this pins so the two decisions stay
+// apart. Equality is the shut-down state and stays legal, at exactly zero.
+void test_transpiration_refuses_a_reversed_gradient() {
+  printf("transpiration refuses a stem wetter than its upstream potential\n");
+  Drivers d;
+  phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
+  const std::string reversed = "Leaf::transpiration: psi_stem (1.99) is wetter "
+                               "than psi_upstream (2)";
+  ok(throws_with([&] { l.transpiration(1.99, 2.0); }, reversed),
+     "transpiration refuses, naming both potentials");
+  ok(throws_with([&] { l.stom_cond_CO2(1.99, 2.0); }, reversed),
+     "stom_cond_CO2 inherits the refusal");
+  ok(throws_with([&] { l.psi_stem_to_ci(1.99, 2.0); }, reversed),
+     "psi_stem_to_ci inherits it, not its compensation-point fallback");
+  ok(std::isfinite(l.profit_psi_stem_TF(1.99, 2.0)) && l.transpiration_ == 0.0 &&
+         l.stom_cond_CO2_ == 0.0,
+     "profit_psi_stem_TF seats the no-flow state below upstream, reading no flux");
+  ok(l.transpiration(2.0, 2.0) == 0.0,
+     "psi_stem == psi_upstream is legal and moves exactly no water");
+  ok(std::isfinite(l.profit_psi_stem_TF(2.0, 2.0)),
+     "profit at the shut-down state is finite");
+  ok(l.transpiration(2.01, 2.0) > 0.0, "a stem drier than upstream draws water");
+  // Twice: the memo must not hand a refused pair back after a legal call.
+  ok(throws_with([&] { l.transpiration(1.99, 2.0); }, reversed),
+     "the refusal survives the memo");
+}
+
 // The rescaled path reports the domain in the CALLER's units, not the spline's.
 // Under perturb_stem_P50 the value handed to the spline is psi/s, so quoting the
 // spline's own endpoints would send the reader after a discrepancy that is not
@@ -5373,12 +5407,12 @@ void test_out_of_domain_under_rescale() {
   Drivers d;
   // At the LOWER end: past the upper end reads the closed form.
   phylloptim::Leaf wide = make_leaf(d, {2.0}, {1.0});
-  const std::string before = message_of([&] { wide.transpiration(-1.0, 0.0); });
+  const std::string before = message_of([&] { wide.transpiration(-1.0, -2.0); });
 
   phylloptim::Leaf rescaled = make_leaf(d, {2.0}, {1.0});
   rescaled.perturb_stem_P50(rescaled.stem_P50 * 2.0);
   const std::string after =
-      message_of([&] { rescaled.transpiration(-1.0, 0.0); });
+      message_of([&] { rescaled.transpiration(-1.0, -2.0); });
 
   ok(!before.empty() && !after.empty(), "both report a domain failure");
   ok(before != after, "the rescaled domain is reported, not the spline's own");
@@ -8663,6 +8697,7 @@ int main() {
   test_infeasible_is_a_distinct_failure();
   test_out_of_domain_names_the_spline();
   test_out_of_domain_under_rescale();
+  test_transpiration_refuses_a_reversed_gradient();
   test_leaf_to_air_vpd();
   test_profitmax_is_a_constant_lambda_objective();
   test_profitmax_normalisation();
