@@ -99,9 +99,9 @@ costs 60-100 µs to cross the R boundary — some 60 times a trivial \code{.Call
 because it is an \code{RcppR6} \verb{list:} class and every crossing rebuilds a
 five-element named list. Converting 1,327 of them per likelihood evaluation
 would cost ~80 ms and swamp the ~13 ms of gradient it was carrying. The same
-argument applies to the \code{Leaf}: constructing one from R costs about \strong{180x a
-trivial \code{.Call}}, or 45 solves, so a fit builds it once here rather than once
-per gradient (#52).
+argument applies to the \code{Leaf}: constructing one is the largest single cost in
+the R layer (the README's "Performance from R" has the measured ratio), so a fit
+builds it once here rather than once per gradient (#52).
 
 ⚠️ \strong{The result holds a C++ pointer, so it does not survive \code{saveRDS()} or a
 new session.} Rebuild it rather than restoring it; \code{\link[=leaf_gradient_batch]{leaf_gradient_batch()}}

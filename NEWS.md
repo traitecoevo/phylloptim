@@ -10,6 +10,10 @@ Each curve with a level parameter now defaults to the value at which its stem op
 
 The three golden baselines are bit-identical; `test_golden.cpp` now pins JS22 and CMax at their former defaults and clears the two new ones, since it tests the solver rather than the defaults. A value cleared to NA on the leaf is still refused by name.
 
+## Documentation (#150, #151, #152)
+
+The developer guide is split into `.claude/CLAUDE.md` (the standing rules), `.claude/hazards.md` and `.claude/measurements.md`, with hazard numbers unchanged and its stale figures and counts corrected against the code (#150). `?phylloptim` is now a package help page, and a pkgdown site (`_pkgdown.yml`) groups the reference by purpose and carries all five vignettes as articles; `docs.yml` builds it beside the Doxygen API and publishes both as one site, still gated on `PUBLISH_DOCS` (#151). The cost figures are re-measured at 0.16.2, recorded as a new row of `tools/cost-baseline.tsv`, quoted as ratios in one place each (the README's "Performance from R" for the R side and `set_traits()`, `vignette("the-models")` for the solver) and linked from everywhere else. Two of them changed direction: constructing a `Leaf` from R now costs about 97 solves rather than 45, and a `set_traits()` that rebuilds a vulnerability curve about 16 C++ solves rather than 3.5 (the 400-knot default postdates both old figures), and driving one leaf by hand is now about half the per-row cost of `leaf_solve()` rather than level with it (#152).
+
 # phylloptim 0.16.2
 
 ## The Medlyn route reports a CO2-basis conductance (#129)
@@ -2741,7 +2745,6 @@ name for them, because the leaf does not have them. Perturbing them is cheap
 network is a scaling of the base one and needs no rebuild) but the derivative of a
 solved output still costs two solves. The previously recorded values are kept in a
 comment in `tests/testthat/test-gradient.R` for anyone checking that route.
-
 
 ## Documented when the exact gradient beats differencing, and it is not "at more parameters"
 

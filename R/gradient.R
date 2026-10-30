@@ -9,12 +9,12 @@
 # theorem would replace 2N re-solves per gradient with 2N evaluations of the exact
 # `dprofit`, at 7% of the cost of a solve, for a 10x win in the R layer. The
 # theorem is right and it is implemented below. The 10x is not there, and the
-# reason is worth stating once: in R the per-call overhead (~1.8 us) is seven
-# times the C++ work it wraps (0.26 us), so replacing a 3.6 us solve with a
-# 0.26 us gradient evaluation saves almost nothing measurable from R. What DOES
-# dominate is that perturbing a trait used to mean constructing a new Leaf, which
-# costs ~180x a trivial `.Call`, or 45 solves. `set_traits()` removed that, and it is where the
-# speedup actually came from.
+# reason is worth stating once: in R the per-call overhead is several times the
+# C++ work of a gradient evaluation, so replacing a solve with one saves almost
+# nothing measurable from R. What DOES dominate is that perturbing a trait used to
+# mean constructing a new Leaf, the largest single cost in the R layer (README,
+# "Performance from R"). `set_traits()` removed that, and it is where the speedup
+# actually came from.
 #
 # ⚠️ THAT PARAGRAPH IS TRUE AND IT WAS OVER-GENERALISED, INCLUDING HERE. "The
 # value of this file is exactness, not speed" held for the case measured -- a fit
@@ -346,9 +346,9 @@ set_traits <- function(x, traits) {
 ##' the multi-layer path — is the most expensive thing you can ask for, and a fit
 ##' that reads four of them pays for twelve it discards.
 ##'
-##' The intercept is a fresh `Leaf` per call, ~45 solves' worth. Pass `x` to reuse one
-##' across calls (#52); without it, construction is 29% of the exact gradient in
-##' the study above.
+##' The intercept is a fresh `Leaf` per call. Pass `x` to reuse one across calls
+##' (#52); without it, construction is 29% of the exact gradient in the study
+##' above.
 ##'
 ##' @section Precision:
 ##' Do not ask for more than about `1e-09` from any of this. That is the
@@ -356,17 +356,11 @@ set_traits <- function(x, traits) {
 ##' the intercellular-CO2 root-find.
 ##'
 ##' @section Reusing a leaf across gradients:
-##' Constructing a `Leaf` costs about **180x a trivial `.Call`** — 45 solves — and
-##' this function does it once per call, which is **61% of a one-parameter
-##' gradient**: the largest single term on this surface by some way, and paid once
-##' per observation by a fit that differentiates per observation.
-##'
-##' ⚠️ **That share has GROWN, and the reason is worth knowing.** It was quoted at
-##' 40% when the solvers searched their objectives; they root-find their
-##' first-order conditions now, so the composite got cheaper while construction did
-##' not. Re-measure it as a RATIO in one process — absolute microseconds here moved
-##' by 50% between machines, and four places in this package quoted the same
-##' absolute with four different solve counts beside it. Pass `x` to reuse one:
+##' Constructing a `Leaf` is the largest single cost on this surface, and this
+##' function does it once per call: it is **most of a one-parameter gradient** on a
+##' fresh leaf, paid once per observation by a fit that differentiates per
+##' observation. The measured ratios are in the README's "Performance from R", the
+##' one place the package quotes them. Pass `x` to reuse one:
 ##'
 ##' ```r
 ##' l <- leaf_model(traits, control, supply)
@@ -384,8 +378,8 @@ set_traits <- function(x, traits) {
 ##'
 ##' **`x` is left solved at the base point**, not at the last perturbation — the
 ##' state this function seats it in, restored on the way out including on an error.
-##' The restore costs one re-trait and one solve, about 4 solves against the 45
-##' saved.
+##' The restore costs one re-trait and one solve, a small fraction of the
+##' construction it saves.
 ##'
 ##' @inheritParams set_drivers
 ##' @param x an existing `Leaf` from [leaf_model()] to reuse instead of building
@@ -634,8 +628,9 @@ leaf_gradient <- function(psi_soil,
   dpsi_dtheta <- .gradient_dpsi_dtheta(dpsi_dtheta, pars, !is.null(psi))
 
   # ONE leaf for the whole gradient, re-traited rather than reconstructed. This is
-  # the measurement that decided it: a fresh Leaf costs ~45 solves against ~3.4 to
-  # re-trait and re-drive this one, so reconstructing per perturbation would swamp
+  # the measurement that decided it: a fresh Leaf costs about a hundred solves
+  # against about four to re-trait and re-drive this one (README, "Performance
+  # from R"), so reconstructing per perturbation would swamp
   # any difference between the two gradient routes below.
   #
   # And with `x`, one leaf across gradients too -- which is #52, and worth ~40% of
@@ -1337,8 +1332,9 @@ leaf_gradient <- function(psi_soil,
     # THE FAST PATH FOR stem_b.
     #
     # stem_b owns the pre-integrated stem vulnerability spline, so moving it
-    # through set_traits() rebuilds it -- 11.9 us of incomplete gammas plus two
-    # interpolator inits, which is essentially the entire cost of its gradient.
+    # through set_traits() rebuilds it -- incomplete gammas at every knot plus two
+    # interpolator inits, many solves' worth (README, "Performance from R"), which
+    # is essentially the entire cost of its gradient.
     # But the curve is homogeneous of degree 1 in stem_b, so the spline for
     # another stem_b IS this one with its argument rescaled, and no rebuild is
     # needed at all.

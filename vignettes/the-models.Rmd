@@ -163,16 +163,16 @@ Take the derivative away and the comparison closes up again. Differencing `dJ/d�
 
 A root-find finds *a* stationary point, not the best one, so where the objective has two humps something has to choose between them. That job falls to a scan: a sweep of the interval on a coarse grid, picking the cell that contains the taller hump, after which the root-find refines inside that cell.
 
-The sweep costs 64 objective evaluations before refinement begins, which is expensive in a package built around a 3 µs solve. So it is switched on only where the objective is measurably two-humped, which over a 1728-row driver sweep is only ever with the energy balance on. With that gate off, which is the default, there is no scan and the solver is endpoints plus a root-find.
+The sweep costs 64 objective evaluations before refinement begins, which is expensive in a package built around a solve of a few microseconds. So it is switched on only where the objective is measurably two-humped, which over a 1728-row driver sweep is only ever with the energy balance on. With that gate off, which is the default, there is no scan and the solver is endpoints plus a root-find.
 
-| entry point | µs/call |
+| entry point | cost per call, relative to `TF24` |
 |---|---:|
-| collar route, `TF24` | 3.06 |
-| stem route, `TF24` | 2.66 |
-| stem route, `CF77` | 2.73 |
-| stem route, `ProfitMax` | 5.24 |
+| stem route, `TF24` | 1 |
+| stem route, `CF77` | 1.05 |
+| stem route, `TF24_floor` | 1.4 |
+| stem route, `ProfitMax` | 2.1 |
 
-: Cost per call on a single soil layer, from `bench_solve`, best of 2000, gate off and so no scan. `ProfitMax` costs about twice the others because it solves for its own `\|A\|max` normaliser before it can evaluate its objective at all.
+: Cost per call on a single soil layer, from `bench_solve` at 0.16.2, best of 2000, all arms in one process, gate off and so no scan. Ratios rather than microseconds because ratios travel between machines. `ProfitMax` costs about twice the others because it solves for its own `\|A\|max` normaliser before it can evaluate its objective at all. This table is the one place these figures are quoted.
 
 ### When the answer is a bound, not a stationary point
 
