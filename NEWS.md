@@ -1,5 +1,9 @@
 # phylloptim 0.16.3
 
+## `collar_at` can hand its coordinates to `outputs_at` (#161)
+
+At an interior point `collar_at` solves the stem potential and intercellular CO2 on its way to the marginal, and `outputs_at` solved them again for profit. Both now take an optional `HeldCoords<S>*`: `collar_at` fills it, `outputs_at` reads it, and refuses one placed at another collar or kind. Values and forward tangents are bit-identical and reverse rows agree to rounding (worst 1.0e-15 on plant's gradient references). plant's long-drought reverse sweep (108 introductions, `ode_tol` 1e-3) is about 4.6% faster once its TF24 strategy passes the struct. Migration: none; both arguments default to null.
+
 ## The cost curves' defaults are aligned, so they can be compared at defaults (#156)
 
 Each curve with a level parameter now defaults to the value at which its stem optimum has TF24's conductance at one reference environment (single-potential supply, `psi_soil` 1 MPa, PPFD 900, VPD 2 kPa, 25 C, energy balance off). The new `align_curves()` solves those values, and the defaults are its answer at its own defaults: `JS22_gamma` 1.0 -> 0.4718, `CMax_a` 0.6 -> 0.6386, and `CF77_lambda_` and `LeastCost_beta`, which had no default and refused to solve without one, now 107751 (TF24's own emergent lambda there) and 51.60. Previously the eight curves gave conductances 1.4-fold apart at the same drivers, and that spread said where each curve's parameters sat rather than how it responds. TF24 is the anchor and does not move, so neither do plant's results. `TF24_floor_lambda_o` keeps no default: TF24_floor reaches TF24's conductance only at zero, where it is TF24. SOX, JW26 and ProfitMax have no level parameter and are left where the supply puts them.
