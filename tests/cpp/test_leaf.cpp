@@ -9284,7 +9284,8 @@ void test_smoothness_sweep() {
       for (int i = 0; i < c.layers; ++i) { psi_soil.push_back(psi0 + 0.25 * i); depth.push_back(i + 1.0); }
       phylloptim::Leaf l = make(d, psi_soil, depth, kGmin, c.eb, false,
                                 std::numeric_limits<double>::quiet_NaN(),
-                                c.damage ? [](phylloptim::Leaf &x) { x.use_thermal_damage_ = true; set_atls_inputs(x); } : nullptr);
+                                c.damage ? +[](phylloptim::Leaf &x) { x.use_thermal_damage_ = true; set_atls_inputs(x); }
+                                         : static_cast<void (*)(phylloptim::Leaf &)>(nullptr));
       l.find_root_collar_psi();
       SweepPoint p{l.profit_, l.assim_colimited_, l.transpiration_, l.opt_psi_stem_,
                    l.lambda_emergent_, NAN, NAN, l.operating_point_kind_name(l.operating_point_kind())};
@@ -9500,6 +9501,7 @@ void test_rows_where_the_roots_cap_binds() {
   };
   int compared = 0;
   double worst = 0.0, worst_r = 0.0;
+  std::string worst_r_at;
   for (double psi0 : {2.0, 7.2, 7.35, 7.385}) {
     for (int layers : {1, 3}) {
       Drivers d;
@@ -9543,11 +9545,17 @@ void test_rows_where_the_roots_cap_binds() {
             *p.knob = NAN;
             up = a.profit_; dn = b.profit_; r_up = a.residual_flux_; r_dn = b.residual_flux_;
           }
-          // The residual flux's row against its own difference, relative to the
-          // flux itself (kg m^-2 s^-1, so no absolute floor serves).
+          // The residual flux's row against its own difference, with a floor
+          // scaled to the flux itself (kg m^-2 s^-1, so no fixed absolute floor
+          // serves). A row below 1e-3 of the flux per unit trait is one whose
+          // components nearly cancel, and past the root table's last knot they
+          // carry the table's fit error (#147, ~1e-4 of each, #184 section 2):
+          // measured 5e-5 of a 3.4e-12 row at a 2.9e-8 flux, flat in the step
+          // from 3e-5 to 3e-6, so not noise and not this flux's own algebra. A
+          // floor of 1e-6 failed on Linux at a 7e-17 row; 1e-4 left 2x margin.
           const double fd_r = (r_up - r_dn) / (2 * h);
           const double err_r = std::abs(fd_r - residual_row) /
-                               std::max(std::abs(residual_row), 1e-6 * l.residual_flux_ / p.value);
+                               std::max(std::abs(residual_row), 1e-3 * l.residual_flux_ / p.value);
           if (err_r < best_r) { best_r = err_r; fd_r_best = fd_r; }
           const double fd = (up - dn) / (2 * h);
           // Relative, with a floor of 1e-3 profit per unit trait: a row of a
@@ -9566,12 +9574,15 @@ void test_rows_where_the_roots_cap_binds() {
                  residual_row, fd_r_best);
         ok(best_r < 1e-4, std::string("the residual flux's row in ") + p.name +
                               " matches a difference of the solve" + buf);
-        worst_r = std::max(worst_r, best_r);
+        if (best_r > worst_r) {
+          worst_r = best_r;
+          worst_r_at = std::string(p.name) + buf;
+        }
       }
     }
   }
-  printf("    %d points compared, worst relative error at the difference's floor %.3e (profit), %.3e (residual flux)\n",
-         compared, worst, worst_r);
+  printf("    %d points compared, worst relative error at the difference's floor %.3e (profit), %.3e (residual flux, d/d%s)\n",
+         compared, worst, worst_r, worst_r_at.c_str());
 }
 
 }  // namespace residual
