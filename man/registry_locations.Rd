@@ -20,8 +20,9 @@ registry_locations(
 }
 \value{
 a data frame with columns \code{symbol}, \code{kind}, \code{id}, \code{compound}, \code{file},
-\code{line}, \code{body_start}, \code{body_end}, \code{url}, \code{initializer} and the list-column
-\code{references}
+\code{line}, \code{body_file}, \code{body_start}, \code{body_end}, \code{url}, \code{initializer} and the
+list-column \code{references}; the body is in \code{body_file}, which differs from
+\code{file} for a member defined out of line
 }
 \description{
 Walks the compounds Doxygen's \code{index.xml} lists and returns one row per

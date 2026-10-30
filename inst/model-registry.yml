@@ -9,14 +9,13 @@
 #      registry_resolve()), and a parameter's value is read off a live Leaf, off
 #      set_drivers()'s formals, or off the constexpr's initializer in that XML
 #      (registry_values()). A `literal:` is the one exception: a number that IS
-#      part of an equation's form (Tetens' 17.27) rather than a default, and the
-#      equation's replica is what asserts it against the code.
+#      part of an equation's form (Tetens' 17.27) rather than a default, and
+#      docs.yml checks that it is written in the function its `code` names.
 #   2. CI checks it. tests/testthat/test-registry.R asserts every symbol and bound
-#      field named here exists, that every bound field of the Leaf is accounted
-#      for (a parameter, an equation's `writes`, or a diagnostic), and runs every
-#      equation's replica against the package (registry_check()); docs.yml
-#      resolves every `code` in Doxygen's XML and checks each equation's `reads`
-#      against what its function references.
+#      field named here exists and that every bound field of the Leaf is
+#      accounted for (a parameter, an equation's `writes`, or a diagnostic);
+#      docs.yml resolves every `code` in Doxygen's XML, checks each equation's
+#      `reads` against what its function references, and checks every literal.
 #   3. One registry per package. plant's covers its strategies and points at these
 #      ids rather than copying them.
 #
@@ -34,16 +33,16 @@
 # `equations` is keyed by id; each has section, title, latex, code (the symbol
 # that evaluates it, or ~ for an identity with none), reads (parameter ids),
 # writes (bound fields it seats), kind (closed_form | identity | derivative |
-# integrator), replica (base-R source of the printed equation; other replicas
-# are callable by id), and optionally also (further symbols involved), uses
-# (other equation ids the replica calls), cite, tol (the check tolerance where
-# 1e-10 is not attainable) and note. An optional `diagnostics` map, keyed by
+# integrator: what sort of statement the LaTeX is), and optionally also (further
+# symbols involved), cite and note. An optional `diagnostics` map, keyed by
 # bound field, holds any bound field that is neither a parameter nor written by
 # an equation, each with a meaning and a code symbol, so every bound field is
 # accounted for somewhere; none is needed today.
 #
-# To add an equation: an entry here, and a probe of the same id in one of the
-# R/registry-probes*.R files that reads the package side.
+# The registry records the model; the golden files and the test suites check
+# it. It holds no second implementation of the equations, so a change to an
+# equation's code needs its entry here re-read by hand: see "The model
+# registry" in .claude/CLAUDE.md.
 #
 # YAML 1.1 reads `1e-3` as a string: write floats with a point and a signed
 # exponent (1.0e-3, 2.45e+6).
@@ -1385,11 +1384,6 @@ equations:
     kind: closed_form
     cite: Bernacchi-2001
     note: 'The plain form, normalised to 25 °C; $\Gamma^*$, $K_c$ and $K_o$ take it with the Bernacchi-2001 values, fitted to 10–40 °C, so above 40 °C it is extrapolation.'
-    replica: |
-      function(T, Ea, ref) {
-        TK <- T + 273.15; Tr <- 25 + 273.15
-        ref * exp(Ea * (TK - Tr) / (Tr * 8.314462618153240 * TK))
-      }
   peaked_arrhenius:
     section: biochemistry
     title: Peaked Arrhenius
@@ -1403,14 +1397,6 @@ equations:
     kind: closed_form
     cite: Medlyn-2002
     note: 'Medlyn-2002 eq. 17 at 298.15 K and the exact $R$ where the paper writes 298 K and 8.314; $V_{cmax}$ and $J_{max}$ take it with the six settable response parameters.'
-    replica: |
-      function(T, Ea, ref, H_d, d_S) {
-        TK <- T + 273.15; Tr <- 25 + 273.15; R <- 8.314462618153240
-        arrh <- ref * exp(Ea * (TK - Tr) / (Tr * R * TK))
-        arg2 <- 1 + exp((d_S * Tr - H_d) / (R * Tr))
-        arg3 <- 1 + exp((d_S * TK - H_d) / (R * TK))
-        arrh * arg2 / arg3
-      }
   thermal_optimum:
     section: biochemistry
     title: Thermal optimum of the peaked form
@@ -1421,13 +1407,8 @@ equations:
     reads: [gas_constant, C_to_K]
     writes: []
     kind: identity
-    tol: 1.0e-6
     cite: Medlyn-2002
-    note: 'Medlyn-2002 eq. 19. No binding reports it; the damage layer inverts it (entropy_shift). Checked as the stationary point of the peaked replica.'
-    replica: |
-      function(Ea, H_d, d_S) {
-        H_d / (d_S - 8.314462618153240 * log(Ea / (H_d - Ea))) - 273.15
-      }
+    note: 'Medlyn-2002 eq. 19. No binding reports it; the damage layer inverts it (entropy_shift).'
   temperature_block:
     section: biochemistry
     title: The temperature block
@@ -1436,17 +1417,8 @@ equations:
     code: phylloptim::Leaf::update_temperature_dependent_params
     reads: [vcmax_25, vcmax_ha_, vcmax_H_d_, vcmax_d_S_, jmax_25, jmax_ha_, jmax_H_d_, jmax_d_S_, gamma_25_, gamma_ha_, kc_25_, kc_ha_, ko_25_, ko_ha_]
     writes: [vcmax_, jmax_, gamma_, kc_, ko_]
-    uses: [peaked_arrhenius, arrhenius]
     kind: closed_form
     note: 'Seated once per set_physiology at the driver temperature and, with the energy balance on, per candidate operating point at the solved leaf temperature. A cache keyed on every scalar it reads (photo_temp_key) serves repeat calls.'
-    replica: |
-      function(T, p) {
-        c(vcmax = peaked_arrhenius(T, p$vcmax_ha_, p$vcmax_25, p$vcmax_H_d_, p$vcmax_d_S_),
-          jmax = peaked_arrhenius(T, p$jmax_ha_, p$jmax_25, p$jmax_H_d_, p$jmax_d_S_),
-          gamma = arrhenius(T, p$gamma_ha_, p$gamma_25_),
-          kc = arrhenius(T, p$kc_ha_, p$kc_25_),
-          ko = arrhenius(T, p$ko_ha_, p$ko_25_))
-      }
   michaelis_constant:
     section: biochemistry
     title: Michaelis constant in pascals
@@ -1457,11 +1429,6 @@ equations:
     reads: [atm_o2_kpa, atm_kpa, umol_to_mol, kPa_to_Pa]
     writes: [km_]
     kind: closed_form
-    replica: |
-      function(kc, ko, atm_o2_kpa, atm_kpa) {
-        conv <- atm_kpa * 1000 * 1e-6
-        (kc * conv) * (1 + (atm_o2_kpa * 1000) / (ko * conv))
-      }
   electron_transport:
     section: biochemistry
     title: Electron transport
@@ -1473,11 +1440,6 @@ equations:
     kind: closed_form
     cite: Farquhar-1980
     note: 'Depends on temperature only through $J_{max}$.'
-    replica: |
-      function(Q, phi_J, alpha_PAR, jmax, theta_J) {
-        I <- phi_J * alpha_PAR * Q
-        (I + jmax - sqrt((I + jmax)^2 - 4 * theta_J * I * jmax)) / (2 * theta_J)
-      }
   assimilation:
     section: biochemistry
     title: Net assimilation
@@ -1492,13 +1454,6 @@ equations:
     kind: closed_form
     cite: Farquhar-1980
     note: 'Net of dark respiration; $c_i$ in Pa.'
-    replica: |
-      function(ci, vcmax, J, gamma_star, km, theta, R_d, atm_kpa) {
-        conv <- atm_kpa * 1000 * 1e-6
-        Wc <- vcmax * (ci - gamma_star * conv) / (ci + km)
-        Wj <- J / 4 * ((ci - gamma_star * conv) / (ci + 2 * gamma_star * conv))
-        (Wc + Wj - sqrt((Wc + Wj)^2 - 4 * theta * Wc * Wj)) / (2 * theta) - R_d
-      }
   thermal_cost:
     section: biochemistry
     title: Instantaneous thermal cost
@@ -1511,8 +1466,6 @@ equations:
     kind: closed_form
     cite: Sicangco-2026
     note: 'Off by default; exactly zero with the gate off. Instantaneous, with no memory: not the damage layer.'
-    replica: |
-      function(T, T50, Tcrit) 1 / (1 + exp(-(2 / (T50 - Tcrit)) * (T - T50)))
 
   # --- respiration ------------------------------------------------------------
   q10_respiration:
@@ -1526,8 +1479,6 @@ equations:
     kind: closed_form
     cite: Tjoelker-2001
     note: 'Temperature in °C throughout. The $Q_{10}$ is evaluated at the midpoint of the measurement and reference temperatures, the code''s convention and neither paper''s.'
-    replica: |
-      function(T, R_d_25, q0, q1) R_d_25 * (q0 - q1 * (T + 25) / 2)^((T - 25) / 10)
 
   # --- water vapour -----------------------------------------------------------
   saturation_vapour_pressure:
@@ -1540,8 +1491,6 @@ equations:
     writes: []
     kind: closed_form
     note: 'Tetens, kPa, $T$ in °C.'
-    replica: |
-      function(T) 0.6108 * exp(17.27 * T / (T + 237.3))
   saturation_vapour_pressure_slope:
     section: vapour
     title: Slope of the saturation curve
@@ -1550,11 +1499,8 @@ equations:
     code: phylloptim::Leaf::saturation_vapour_pressure_slope
     reads: [tetens_b, tetens_c]
     writes: []
-    uses: [saturation_vapour_pressure]
     kind: closed_form
     note: 'kPa K⁻¹, the exact derivative of the Tetens form. Reaches no reported output; it enters the energy-balance derivative only, through $\partial g_c/\partial T$, which is why FAO-56''s rounded 4098 (4.2e-5 low) put a 2e-5 error into that first-order condition until 0.15.4.'
-    replica: |
-      function(T) (17.27 * 237.3) * saturation_vapour_pressure(T) / ((T + 237.3) * (T + 237.3))
   leaf_vpd:
     section: vapour
     title: Leaf-to-air deficit
@@ -1564,14 +1510,8 @@ equations:
     code: phylloptim::Leaf::set_leaf_vpd
     reads: [use_energy_balance_, atm_vpd, vpd_leaf_min]
     writes: [vpd_leaf_]
-    uses: [saturation_vapour_pressure]
     kind: closed_form
     note: 'The bracketing is deliberate: at $T_\mathrm{leaf} = T_\mathrm{air}$ it is an exact zero and the prescribed path is bit-identical.'
-    replica: |
-      function(Tleaf, Tair, atm_vpd, energy_balance = TRUE) {
-        if (!energy_balance) return(atm_vpd)
-        pmax(atm_vpd + (saturation_vapour_pressure(Tleaf) - saturation_vapour_pressure(Tair)), 0.01)
-      }
   stomatal_conductance:
     section: vapour
     title: Stomatal conductance to CO₂ from the transpiration
@@ -1583,8 +1523,6 @@ equations:
     writes: [stom_cond_CO2_]
     kind: closed_form
     note: 'Fick''s law with $E$ in kg m⁻² s⁻¹, $P$ and $D_\mathrm{leaf}$ in kPa; mol CO₂ m⁻² s⁻¹. No boundary-layer term (#122): $r_a$ resists heat only.'
-    replica: |
-      function(E, atm_kpa, vpd_leaf, ratio = 1.67) atm_kpa * E * (1 / 0.018015) / vpd_leaf / ratio
 
   boundary_layer_conductance:
     section: vapour
@@ -1597,11 +1535,6 @@ equations:
     kind: closed_form
     cite: Duursma-2015
     note: 'mol m⁻² s⁻¹; bound as `gb_H2O`. The molar density of air at air temperature over the aerodynamic resistance to heat, scaled to vapour for a hypostomatous leaf. Reported only: the diffusion in the solve has no boundary-layer term (#122).'
-    replica: |
-      function(atm_kpa, Tair, ra, energy_balance = TRUE) {
-        if (!energy_balance) return(Inf)
-        1.075 * (atm_kpa * 1000 / (8.314462618153240 * (Tair + 273.15))) / ra
-      }
   stomatal_conductance_stomatal:
     section: vapour
     title: Stomatal conductance with the boundary layer removed
@@ -1611,14 +1544,8 @@ equations:
     also: [phylloptim::Leaf::stom_cond_H2O, phylloptim::Leaf::boundary_layer_cond_H2O]
     reads: [use_energy_balance_]
     writes: []
-    uses: [boundary_layer_conductance]
     kind: closed_form
     note: 'mol m⁻² s⁻¹; bound as `gs_stomatal_H2O`. Equal to the total, bit for bit, with the gate off or a shut leaf. Refused where $g_w \ge g_{bw}$: the transpiration is then more than the boundary layer can carry at that deficit and no finite stomatal conductance exists.'
-    replica: |
-      function(g_total, g_b, energy_balance = TRUE) {
-        if (!energy_balance || !(g_total > 0) || !is.finite(g_total)) return(g_total)
-        1 / (1 / g_total - 1 / g_b)
-      }
 
   # --- energy balance ----------------------------------------------------------
   atmospheric_emissivity:
@@ -1630,15 +1557,8 @@ equations:
     code: phylloptim::Leaf::set_physiology
     reads: [atm_vpd, atmos_emissivity_coef, atmos_emissivity_exponent, vapour_pressure_min, C_to_K]
     writes: []
-    uses: [saturation_vapour_pressure]
     kind: closed_form
     note: 'Brutsaert (1975) as Campbell & Norman write it, $e_a$ in pascals. Clamped at 1, above which the longwave term is exactly zero: above 43.9 °C at a 2 kPa deficit.'
-    replica: |
-      function(Tair, atm_vpd) {
-        TK <- Tair + 273.15
-        ea_Pa <- pmax(1000 * (saturation_vapour_pressure(Tair) - atm_vpd), 1)
-        pmin(0.642 * (ea_Pa / TK)^(1 / 7), 1)
-      }
   net_radiation:
     section: energy_balance
     title: Isothermal net radiation
@@ -1647,16 +1567,9 @@ equations:
     code: phylloptim::Leaf::set_physiology
     reads: [alpha_PAR_, PPFD, umol_par_per_joule, alpha_NIR_, NIR_int_, stefan_boltzmann, C_to_K]
     writes: [Rn_, Tair_]
-    uses: [atmospheric_emissivity]
     kind: closed_form
     cite: Duursma-2015
     note: 'The net radiation a leaf at air temperature would exchange; seated once per set_physiology from the drivers, which also stores the leaf_temp driver as the air temperature `Tair_`. The leaf''s own departure from air temperature is carried by the radiative conductance.'
-    replica: |
-      function(Q, NIR, Tair, atm_vpd, alpha_PAR, alpha_NIR) {
-        TK <- Tair + 273.15
-        sw_abs <- alpha_PAR * Q / 4.57 + alpha_NIR * NIR
-        sw_abs - (1 - atmospheric_emissivity(Tair, atm_vpd)) * 5.670374419e-8 * TK * TK * TK * TK
-      }
   radiative_conductance:
     section: energy_balance
     title: Radiative conductance
@@ -1668,11 +1581,6 @@ equations:
     kind: closed_form
     cite: Duursma-2015
     note: 'The Stefan–Boltzmann emission linearised about $T_\mathrm{air}$, which keeps the balance explicit; the error is of order $(T_\mathrm{leaf} - T_\mathrm{air})/T_{\mathrm{air},K}$.'
-    replica: |
-      function(Tair) {
-        TK <- Tair + 273.15
-        4 * 0.97 * 5.670374419e-8 * TK * TK * TK
-      }
   aerodynamic_resistance:
     section: energy_balance
     title: Aerodynamic resistance to heat
@@ -1683,8 +1591,6 @@ equations:
     writes: [ra_]
     kind: closed_form
     note: 'Laminar boundary layer; no free-convection term and no within-canopy wind profile (#7). A non-finite $d$ or $U$ with the gate on is refused.'
-    replica: |
-      function(d, U) ifelse(d > 0 & U > 0, 200 * sqrt(d / U), 50)
   leaf_temperature:
     section: energy_balance
     title: Leaf temperature at a prescribed transpiration
@@ -1696,10 +1602,6 @@ equations:
     writes: [Tleaf_]
     kind: closed_form
     note: 'Explicit, not iterated: $E$ is fixed by the hydraulic supply at the candidate potential and the balance gives the temperature at which the leaf sheds the rest as sensible heat and extra longwave. The one place $T_\mathrm{leaf}$ and $dT_\mathrm{leaf}/dE$ are computed.'
-    replica: |
-      function(Tair, Rn, E, ra, g_rad) {
-        pmin(pmax(Tair + (Rn - 2.45e6 * E) / (1200 / ra + g_rad), -40), 70)
-      }
   energy_balance_foc:
     section: energy_balance
     title: The energy-balance term of the first-order condition
@@ -1711,12 +1613,8 @@ equations:
     also: [phylloptim::Leaf::respiration_temp_deriv, phylloptim::Leaf::vcmax_temp_deriv, phylloptim::Leaf::thermal_cost_temp_deriv]
     reads: [fd_step, ca, vpd_leaf_min, use_energy_balance_]
     writes: []
-    uses: [saturation_vapour_pressure_slope]
     kind: derivative
-    tol: 5.0e-6
-    note: '$A_T = \partial A/\partial T_\mathrm{leaf}$ at fixed $c_i$ is a central difference of the temperature block with the fixed step $h$. Checked as the bound stem-route derivative, which carries this term, against a central difference of the profit; the term itself is not observable. Measured worst 4.1e-7 over these 11 points on macOS, the difference''s noise floor; with FAO-56''s rounded 4098 in the slope of the saturation curve (before 0.15.4) it was a 2e-6 to 2e-5 plateau at every step, 1.9e-5 here, so the tolerance still fails that.'
-    replica: |
-      function(f, x, h) (f(x + h) - f(x - h)) / (2 * h)
+    note: '$A_T = \partial A/\partial T_\mathrm{leaf}$ at fixed $c_i$ is a central difference of the temperature block with the fixed step $h$. The term is not observable on its own: it reaches the outputs only through the stem-route derivative.''s noise floor; with FAO-56''s rounded 4098 in the slope of the saturation curve (before 0.15.4) it was a 2e-6 to 2e-5 plateau at every step, 1.9e-5 here, so the tolerance still fails that.'
 
   # --- damage, repair and acclimation ---------------------------------------------
   acclimation_shift:
@@ -1729,11 +1627,6 @@ equations:
     writes: []
     kind: closed_form
     note: 'The same shift moves both peaked-Arrhenius optima; negative $A$ is read as zero.'
-    replica: |
-      function(A, topt_offset, dTopt_max, K_A) {
-        a <- pmax(A, 0)
-        topt_offset + dTopt_max * a / (a + K_A)
-      }
   entropy_shift:
     section: damage
     title: Entropy term that moves the optimum
@@ -1743,17 +1636,8 @@ equations:
     code: phylloptim::Leaf::d_S_shifted
     reads: [gas_constant, topt_clamp_min, topt_clamp_max]
     writes: [vcmax_, jmax_]
-    uses: [thermal_optimum]
     kind: closed_form
     note: 'The thermal optimum inverted for the entropy term that puts it $\delta$ K higher; refuses $E_a \le 0$ or $H_d \le E_a$, where no optimum exists.'
-    replica: |
-      function(Ea, H_d, d_S, delta) {
-        R <- 8.314462618153240
-        corr <- R * log(Ea / (H_d - Ea))
-        Topt0 <- H_d / (d_S - corr)
-        Topt <- pmin(pmax(Topt0 + delta, 250), 350)
-        H_d / Topt + corr
-      }
   functional_fraction:
     section: damage
     title: Functional fraction
@@ -1764,8 +1648,6 @@ equations:
     writes: [functional_, vcmax_, jmax_]
     kind: closed_form
     note: 'The states enter the benefit through capacity and never the hydraulic cost; $R_d$ is not scaled.'
-    replica: |
-      function(I, D) pmin(pmax(1 - I - D, 1e-6), 1)
   respiration_costs:
     section: damage
     title: Maintenance costs added to respiration
@@ -1776,12 +1658,6 @@ equations:
     writes: [R_d_]
     kind: closed_form
     note: 'Added after the $Q_{10}$ response, so the gate-off arithmetic is untouched; all four prices default to zero on the leaf.'
-    replica: |
-      function(A, I, k_rec_eff, p) {
-        p$c_acclim_maint_ * pmax(A, 0) + p$c_repair_maint_ * p$k_rec_ +
-          p$c_protect_maint_ * pmax(0, p$k_i_baseline_ - p$k_i_) +
-          p$c_repair_flux_ * k_rec_eff * pmax(0, I)
-      }
   logistic:
     section: damage
     title: Guarded logistic
@@ -1791,8 +1667,6 @@ equations:
     reads: [exp_clamp]
     writes: []
     kind: closed_form
-    replica: |
-      function(x) 1 / (1 + exp(-pmin(pmax(x, -30), 30)))
   softplus:
     section: damage
     title: Guarded softplus
@@ -1803,8 +1677,6 @@ equations:
     writes: []
     kind: closed_form
     note: 'Softplus only for $x < 30/s$ and constant at $30/s$ above.'
-    replica: |
-      function(x, s) log1p(exp(pmin(pmax(s * x, -30), 30))) / s
   delta_impair:
     section: damage
     title: Acclimation shift of the switch midpoint
@@ -1815,11 +1687,6 @@ equations:
     reads: [topt_offset_, dTimpair_max_, K_A_, A_]
     writes: []
     kind: closed_form
-    replica: |
-      function(A, topt_offset, dTimpair_max, K_A) {
-        a <- pmax(A, 0)
-        topt_offset + dTimpair_max * a / (a + K_A)
-      }
   impair_switch:
     section: damage
     title: Impairment switch
@@ -1831,12 +1698,6 @@ equations:
     writes: []
     kind: closed_form
     note: 'Exactly ½ at the shifted midpoint; its own parameters, and nothing of the $J_{max}$ curve, though the defaults copy that curve''s $H_d$ and $H_d/\Delta S$.'
-    replica: |
-      function(T, H, Tmid, delta) {
-        mid <- pmin(pmax(Tmid + 273.15 + delta, 250), 350)
-        K <- exp(pmin(pmax((H / 8.314462618153240) * (1 / mid - 1 / (T + 273.15)), -30), 30))
-        K / (1 + K)
-      }
   k_i_eff:
     section: damage
     title: Arrhenius scale of the impairment rate
@@ -1847,10 +1708,6 @@ equations:
     writes: []
     kind: closed_form
     note: 'At $E_{a,i} = 0$ the argument is an exact zero and the scale is exactly $k_i$.'
-    replica: |
-      function(T, k_i, Ea, Tref) {
-        k_i * exp(pmin(pmax((Ea / 8.314462618153240) * (1 / (Tref + 273.15) - 1 / (T + 273.15)), -30), 30))
-      }
   impairment_rate:
     section: damage
     title: Impairment rate
@@ -1859,15 +1716,8 @@ equations:
     code: phylloptim::Leaf::k_imp_eff
     reads: []
     writes: [k_imp_eff_]
-    uses: [k_i_eff, impair_switch, delta_impair]
     kind: closed_form
     note: 'Reported at the temperature the block is seated at; enters no objective.'
-    replica: |
-      function(T, A, p) {
-        k_i_eff(T, p$k_i_, p$k_i_Ea_, p$k_i_Tref_) *
-          impair_switch(T, p$impair_H_, p$impair_Tmid_,
-                        delta_impair(A, p$topt_offset_, p$dTimpair_max_, p$K_A_))
-      }
   k_rec_eff:
     section: damage
     title: Repair rate, gated off when hot
@@ -1876,10 +1726,7 @@ equations:
     code: phylloptim::damage::k_rec_eff
     reads: [k_rec_, m_rep_, t_rep_cut_]
     writes: [k_rec_eff_]
-    uses: [logistic]
     kind: closed_form
-    replica: |
-      function(T, k_rec, m_rep, t_rep_cut) k_rec * logistic(-m_rep * (T - t_rep_cut))
   damage_rates:
     section: damage
     title: The dynamics
@@ -1891,18 +1738,8 @@ equations:
     also: [phylloptim::Leaf::damage_rates]
     reads: [acclim_alpha_, acclim_beta_, acclim_T_, acclim_s_, k_mat_]
     writes: []
-    uses: [impairment_rate, k_rec_eff, softplus]
     kind: closed_form
     note: 'Per day, $T$ the leaf temperature. $F$ confines fresh impairment to functional leaf, so $I + D \le 1$ without a clamp. A detached leaf has no sink for $D$; TF24t adds one.'
-    replica: |
-      function(T, A, I, D, p) {
-        F <- 1 - I - D
-        k_imp <- impairment_rate(T, A, p)
-        k_rec <- k_rec_eff(T, p$k_rec_, p$m_rep_, p$t_rep_cut_)
-        c(p$acclim_alpha_ * softplus(T - p$acclim_T_, p$acclim_s_) - p$acclim_beta_ * A,
-          k_imp * F - (k_rec + p$k_mat_) * I,
-          p$k_mat_ * I)
-      }
   damage_trajectory:
     section: damage
     title: The integrator
@@ -1912,41 +1749,8 @@ equations:
     also: [phylloptim::Leaf::damage_trajectory]
     reads: [rk_rate_step, rk_temp_step, acclim_beta_, k_mat_]
     writes: []
-    uses: [damage_rates, k_i_eff, k_rec_eff]
     kind: integrator
     note: '$k_\mathrm{fastest}$ is the largest of $k_{i,\mathrm{eff}} + k_\mathrm{rec,eff} + k_\mathrm{mat} + \beta_A$ at the two ends of the interval. The sub-step count is chosen from values, so a gradient through it is the derivative of the discrete map.'
-    replica: |
-      function(times, temps, y0, p) {
-        kie <- function(T) k_i_eff(T, p$k_i_, p$k_i_Ea_, p$k_i_Tref_)
-        kre <- function(T) k_rec_eff(T, p$k_rec_, p$m_rep_, p$t_rep_cut_)
-        out <- matrix(NA_real_, length(times), 3)
-        y <- y0
-        out[1, ] <- y
-        for (i in seq_along(times)[-1]) {
-          t0 <- times[i - 1]; dt <- times[i] - t0
-          T0 <- temps[i - 1]; T1 <- temps[i]
-          fastest <- p$acclim_beta_ + p$k_mat_
-          for (Tx in c(T0, T1)) {
-            fastest <- max(fastest, kie(Tx) + kre(Tx) + p$k_mat_ + p$acclim_beta_)
-          }
-          m <- max(1, ceiling(dt * fastest / 0.1), ceiling(abs(T1 - T0) / 0.25))
-          h <- dt / m
-          temp_at <- function(t) T0 + (T1 - T0) * (t - t0) / dt
-          for (k in seq_len(m) - 1) {
-            t <- t0 + k * h
-            k1 <- damage_rates(temp_at(t), y[1], y[2], y[3], p)
-            y2 <- y + h / 2 * k1
-            k2 <- damage_rates(temp_at(t + h / 2), y2[1], y2[2], y2[3], p)
-            y3 <- y + h / 2 * k2
-            k3 <- damage_rates(temp_at(t + h / 2), y3[1], y3[2], y3[3], p)
-            y4 <- y + h * k3
-            k4 <- damage_rates(temp_at(t + h), y4[1], y4[2], y4[3], p)
-            y <- y + h / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
-          }
-          out[i, ] <- y
-        }
-        out
-      }
 
   # --- vulnerability and supply --------------------------------------------------
   # --- vulnerability -----------------------------------------------------------
@@ -1960,9 +1764,7 @@ equations:
     reads: [stem_P50, stem_c, root_P50, root_c]
     writes: [stem_b, root_b]
     kind: closed_form
-    note: 'Seated by the constructor (derive_vulnerability_curves_from_P50) and by set_traits() through the same weibull_b_from_P50; both routes are probed. With it $\exp[-(\psi/b)^c] = 2^{-(\psi/P_{50})^c}$ identically (vignette Appendix A).'
-    replica: |
-      function(P50, c) P50 / log(2)^(1 / c)
+    note: 'Seated by the constructor (derive_vulnerability_curves_from_P50) and by set_traits() through the same weibull_b_from_P50. With it $\exp[-(\psi/b)^c] = 2^{-(\psi/P_{50})^c}$ identically (vignette Appendix A).'
   critical_potential:
     section: vulnerability
     title: Critical potential (P95)
@@ -1973,15 +1775,9 @@ equations:
     also: [phylloptim::Leaf::weibull_psi_at_fraction]
     reads: [stem_b, stem_c, root_b, root_c, k_crit_fraction]
     writes: [psi_crit, root_psi_crit]
-    uses: [weibull_scale]
     kind: closed_form
     cite: Sperry-2017
-    note: 'A quantile of the curve, not a trait: the probe also pairs $f(\psi_\mathrm{crit})$ read off the leaf with $f_\mathrm{crit}$. Being P95 it lies inside the P99 grid for every $c > 0$.'
-    replica: |
-      function(P50, c, f = 0.05) {
-        b <- weibull_scale(P50, c)
-        b * log(1 / f)^(1 / c)
-      }
+    note: 'A quantile of the curve, not a trait. Being P95 it lies inside the P99 grid for every $c > 0$.'
   weibull_vulnerability:
     section: vulnerability
     title: Stem vulnerability curve
@@ -1991,11 +1787,8 @@ equations:
     also: [phylloptim::Leaf::proportion_of_conductivity_kernel]
     reads: [stem_b, stem_c]
     writes: []
-    uses: [weibull_scale]
     kind: closed_form
     note: 'The fraction of maximum conductivity left at $\psi$, evaluated in closed form at every potential (no spline, no clamp); it also supplies the stem integral''s knot slopes and its value past the grid.'
-    replica: |
-      function(psi, P50, c) exp(-(psi / weibull_scale(P50, c))^c)
   vulnerability_psi_max:
     section: vulnerability
     title: Dry end of the knot grid (P99)
@@ -2006,9 +1799,7 @@ equations:
     reads: [vulnerability_conductivity_floor]
     writes: []
     kind: closed_form
-    note: 'Both curves'' grids stop here, and the last knot is written as $\psi_{\max}$ itself (#92). No binding reports it: the probe finds it as the potential past which the ROOT conductivity read stops changing (root_vuln_at clamps its argument to the last knot), by bisection on the equal-potential uptake branch, at several root curves; the stem grid is built by the same function.'
-    replica: |
-      function(b, c) b * log(1 / 0.01)^(1 / c)
+    note: 'Both curves'' grids stop here, and the last knot is written as $\psi_{\max}$ itself (#92). No binding reports it; root_vuln_at clamps its argument to the last knot, and the stem grid is built by the same function.'
   cumulative_vulnerability_integral:
     section: vulnerability
     title: Cumulative vulnerability integral
@@ -2020,30 +1811,7 @@ equations:
     reads: []
     writes: []
     kind: closed_form
-    note: '$\gamma$ is the lower incomplete gamma (boost in the code; its series in the replica, which takes the limit past $(\psi/b)^c = 40$ where the two differ below a double''s resolution). The code reads it where it is exact: to seed every knot, and in place of the stem spline past the grid (#157). The probe reads it there, through transpiration at $k_{max} = 1$ and $\psi_\mathrm{up} = 0$: at the knots, past P99, and at 1000 MPa, where it is the limit.'
-    replica: |
-      function(psi, b, c) {
-        a <- 1 / c
-        out <- numeric(length(psi))
-        pos <- psi > 0
-        x <- (psi[pos] / b)^c
-        v <- numeric(length(x))
-        big <- !(x <= 40)
-        v[big] <- (b / c) * gamma(a)
-        xs <- x[!big]
-        if (length(xs)) {
-          term <- rep(1 / a, length(xs))
-          s <- term
-          for (n in 1:400) {
-            term <- term * xs / (a + n)
-            s <- s + term
-            if (all(term <= 1e-17 * s)) break
-          }
-          v[!big] <- (b / c) * xs^a * exp(-xs) * s
-        }
-        out[pos] <- v
-        out
-      }
+    note: '$\gamma$ is the lower incomplete gamma (boost in the code). The code reads it where it is exact: to seed every knot, and in place of the stem spline past the grid (#157).'
   vulnerability_spline:
     section: vulnerability
     title: The pre-integrated curves
@@ -2056,37 +1824,8 @@ equations:
     also: [phylloptim::vulnerability_x_max, phylloptim::Leaf::setup_transpiration, phylloptim::MultiLayerRoots::setup_vulnerability]
     reads: [vulnerability_curve_ncontrol, vulnerability_conductivity_floor]
     writes: []
-    uses: [vulnerability_psi_max, cumulative_vulnerability_integral]
     kind: closed_form
-    note: 'A cubic Hermite interpolant whose knot values AND slopes are exact (odelia hermite_spline), so the code''s in-grid integral is not the closed form: measured, $|\hat F - F|$ reaches 8.7e-11 between knots at the defaults ($k_{max} = 1$), and is exact at the knots. Letting the interpolant choose slopes instead was a measured regression (setup_transpiration). The replica returns the reader as a function; the probe reads the stem integral between knots through transpiration at $k_{max} = 1$.'
-    replica: |
-      function(b, c, n, curve = c("integral", "conductivity")) {
-        curve <- match.arg(curve)
-        pm <- vulnerability_psi_max(b, c)
-        x <- c(0, pm * seq_len(n) / n)
-        x[n + 1] <- pm
-        f <- exp(-(x / b)^c)
-        if (curve == "integral") {
-          y <- cumulative_vulnerability_integral(x, b, c); m <- f
-        } else {
-          y <- f; m <- -f * (c / b) * (x / b)^(c - 1)
-        }
-        inv_h0 <- 1 / (x[2] - x[1])
-        function(u) {
-          vapply(u, function(q) {
-            if (q <= x[1]) return(y[1] + m[1] * (q - x[1]))
-            if (q >= x[n + 1]) return(y[n + 1] + m[n + 1] * (q - x[n + 1]))
-            k <- min(floor((q - x[1]) * inv_h0), n - 1) + 1
-            h <- x[k + 1] - x[k]
-            a <- y[k]; e <- y[k + 1]
-            sa <- m[k] * h; sb <- m[k + 1] * h
-            c1 <- 3 * (e - a) - 2 * sa - sb
-            c2 <- 2 * (a - e) + sa + sb
-            t <- (q - x[k]) * (1 / h)
-            a + t * (sa + t * (c1 + t * c2))
-          }, 0)
-        }
-      }
+    note: 'A cubic Hermite interpolant whose knot values AND slopes are exact (odelia hermite_spline), so the code''s in-grid integral is not the closed form: measured, $|\hat F - F|$ reaches 8.7e-11 between knots at the defaults ($k_{max} = 1$), and is exact at the knots. Letting the interpolant choose slopes instead was a measured regression (setup_transpiration).'
   stem_vulnerability_integral:
     section: vulnerability
     title: The stem integral as the code reads it
@@ -2097,21 +1836,8 @@ equations:
     also: [phylloptim::Leaf::eval_stem_curve, phylloptim::Leaf::setup_transpiration, phylloptim::Leaf::perturb_stem_P50]
     reads: [stem_b, stem_c, vulnerability_curve_ncontrol]
     writes: []
-    uses: [vulnerability_spline, vulnerability_psi_max, cumulative_vulnerability_integral]
     kind: closed_form
-    note: '$b_0$ is the scale the spline was built at: $s = 1$ except after perturb_stem_P50(), which moves $b$ by the homogeneity identity $F_b(\psi) = s F_{b_0}(\psi/s)$ rather than rebuilding (derivative work only; set_traits() is the way back). Past the grid it reads the closed form at the current $(b, c)$, continuous in value and slope at the join (#157); a negative potential is a stem_curve_domain error. Probed through transpiration at $k_{max} = 1$, $\psi_\mathrm{up} = 0$, in grid, past it, and after a perturbation.'
-    replica: |
-      function(psi, b, c, n, b0 = b) {
-        if (any(psi < 0)) stop("stem_curve_domain: negative potential")
-        rd <- vulnerability_spline(b0, c, n, "integral")
-        s <- if (b == b0) 1 else b / b0
-        v <- if (s == 1) psi else psi / s
-        past <- v > vulnerability_psi_max(b0, c)
-        out <- numeric(length(psi))
-        out[past] <- cumulative_vulnerability_integral(psi[past], b, c)
-        out[!past] <- if (s == 1) rd(v[!past]) else s * rd(v[!past])
-        out
-      }
+    note: '$b_0$ is the scale the spline was built at: $s = 1$ except after perturb_stem_P50(), which moves $b$ by the homogeneity identity $F_b(\psi) = s F_{b_0}(\psi/s)$ rather than rebuilding (derivative work only; set_traits() is the way back). Past the grid it reads the closed form at the current $(b, c)$, continuous in value and slope at the join (#157); a negative potential is a stem_curve_domain error.'
   root_vulnerability:
     section: vulnerability
     title: Root conductivity as the code reads it
@@ -2122,15 +1848,8 @@ equations:
     also: [phylloptim::MultiLayerRoots::setup_vulnerability, phylloptim::Leaf::setup_root_vulnerability]
     reads: [root_b, root_c, vulnerability_curve_ncontrol]
     writes: []
-    uses: [vulnerability_spline, vulnerability_psi_max, weibull_scale]
     kind: closed_form
     note: 'The conductivity spline (values and slopes exact at the knots) read at an argument clamped into the grid (#77), so past P99 it reports the floor conductivity, 0.01, however dry the layer: #85''s question. No binding: read through E_from_Soil_to_Root_Collar at a collar equal to the layer''s potential, where the layer flux is $-\rho_w g z/(r_{H,\min}/\hat f_r + r_{V,\Sigma})$ (multilayer_uptake), with $r_{V,\Sigma} = 0$.'
-    replica: |
-      function(psi, P50, c, n) {
-        b <- weibull_scale(P50, c)
-        rd <- vulnerability_spline(b, c, n, "conductivity")
-        rd(pmax(pmin(psi, vulnerability_psi_max(b, c)), 0))
-      }
   root_vulnerability_integral:
     section: vulnerability
     title: Root integral as the code reads it
@@ -2140,15 +1859,8 @@ equations:
     also: [phylloptim::MultiLayerRoots::setup_vulnerability, phylloptim::Leaf::setup_root_vulnerability, phylloptim::cumulative_vulnerability_integral_limit]
     reads: [root_b, root_c, vulnerability_curve_ncontrol]
     writes: []
-    uses: [vulnerability_spline, cumulative_vulnerability_integral, weibull_scale]
     kind: closed_form
     note: 'Unlike the stem, past the grid the root integral is the spline''s LINEAR extension from the last knot, capped at its limit $F_r(\infty)$ (binds past 7.3132 MPa at the defaults), not the closed form: 3.46212 against 3.46176 at 7 MPa. Uncapped, a drier layer would conduct more (#1). No binding: read through E_from_Soil_to_Root_Collar on the general branch, where the layer flux is $(\psi_c - \psi_s - \rho_w g z)\,\hat F/(r_{H,\min}\,\Delta\psi)$ at $r_{V,\Sigma} = 0$.'
-    replica: |
-      function(psi, P50, c, n) {
-        b <- weibull_scale(P50, c)
-        rd <- vulnerability_spline(b, c, n, "integral")
-        pmin(rd(psi), (b / c) * gamma(1 / c))
-      }
 
   # --- supply ------------------------------------------------------------------
   stem_transpiration:
@@ -2161,15 +1873,9 @@ equations:
     also: [phylloptim::Leaf::stem_curve_integral]
     reads: [leaf_specific_conductance_max, stem_b, stem_c]
     writes: []
-    uses: [stem_vulnerability_integral]
     kind: closed_form
     cite: Sperry-2017
-    note: 'kg m⁻² s⁻¹. $\psi_\mathrm{up}$ is the collar on the collar route and $\psi_\mathrm{soil}$ on the stem route; a reversed pair gives a negative flux. A one-entry memo keyed on the two potentials (invalidated by set_physiology and perturb_stem_P50) returns the same value bit for bit. Probed at $k_{max} = 1$ and 2.5 so the comparison is not vacuous, and at the default.'
-    replica: |
-      function(psi_stem, psi_up, kmax, b, c, n, b0 = b) {
-        kmax * (stem_vulnerability_integral(psi_stem, b, c, n, b0) -
-                  stem_vulnerability_integral(psi_up, b, c, n, b0))
-      }
+    note: 'kg m⁻² s⁻¹. $\psi_\mathrm{up}$ is the collar on the collar route and $\psi_\mathrm{soil}$ on the stem route; a reversed pair gives a negative flux. A one-entry memo keyed on the two potentials (invalidated by set_physiology and perturb_stem_P50) returns the same value bit for bit.'
   stem_transpiration_quadrature:
     section: supply
     title: Stem supply by direct quadrature
@@ -2179,15 +1885,8 @@ equations:
     also: [phylloptim::Leaf::proportion_of_conductivity, phylloptim::Leaf::proportion_of_conductivity_kernel]
     reads: [leaf_specific_conductance_max, stem_b, stem_c]
     writes: []
-    uses: [cumulative_vulnerability_integral]
     kind: integrator
-    tol: 1.0e-12
-    note: 'An independent check on the spline, not on the production path: adaptive Simpson at absolute tolerance $\epsilon$ = integration_tol (initialize_integrator(), default 1e-8), against the closed form. It converges to it: measured max |error| over the probe grid at $k_{max} = 1$ and three stem curves is 2.7e-06 at $\epsilon$ = 1e-6, 1.7e-08 at 1e-8 (the default; 1.7x the requested tolerance at $c = 5$, the local Simpson criterion not being a global bound), 4.2e-11 at 1e-10, 4.4e-13 at 1e-12 and 2.7e-15 at 1e-14, the rounding floor. The probe runs at $\epsilon$ = 1e-12 and the tolerance is that floor.'
-    replica: |
-      function(psi_stem, psi_up, kmax, b, c) {
-        kmax * (cumulative_vulnerability_integral(psi_stem, b, c) -
-                  cumulative_vulnerability_integral(psi_up, b, c))
-      }
+    note: 'An independent check on the spline, not on the production path: adaptive Simpson at absolute tolerance $\epsilon$ = integration_tol (initialize_integrator(), default 1e-8), against the closed form. It converges to it: measured max |error| at $k_{max} = 1$ and three stem curves is 2.7e-06 at $\epsilon$ = 1e-6, 1.7e-08 at 1e-8 (the default; 1.7x the requested tolerance at $c = 5$, the local Simpson criterion not being a global bound), 4.2e-11 at 1e-10, 4.4e-13 at 1e-12 and 2.7e-15 at 1e-14, the rounding floor.'
   stem_transpiration_inverse:
     section: supply
     title: Stem potential from a transpiration
@@ -2198,32 +1897,8 @@ equations:
     also: [phylloptim::Leaf::stem_curve_integral, phylloptim::Leaf::stem_curve_integral_inverse, phylloptim::Leaf::invert_stem_curve, phylloptim::Leaf::invert_stem_curve_past_grid]
     reads: [leaf_specific_conductance_max, stem_b, stem_c]
     writes: []
-    uses: [stem_vulnerability_integral, vulnerability_spline, vulnerability_psi_max, cumulative_vulnerability_integral]
     kind: closed_form
-    note: 'The forward table inverted (a quintic start plus Newton inside one knot span), not a fitted inverse; past the table, Newton on the closed form. Infeasible (stem_curve_domain) where the target is negative or at or past $F(\infty)$: no stem potential carries that flow. Past P99 the curve is flat to rounding, so a zero flux returns the upstream potential rather than inverting. The replica inverts by bisection to full precision; the probe pairs feasible points by value and infeasible ones as a 1/0 refusal.'
-    replica: |
-      function(E, psi_up, kmax, b, c, n) {
-        pm <- vulnerability_psi_max(b, c)
-        if (E == 0 && psi_up > pm) return(psi_up)
-        w <- E / kmax + stem_vulnerability_integral(psi_up, b, c, n)
-        Finf <- (b / c) * gamma(1 / c)
-        ytop <- cumulative_vulnerability_integral(pm, b, c)
-        if (w < 0) stop("stem_curve_domain: negative target")
-        if (w <= ytop) {
-          g <- vulnerability_spline(b, c, n, "integral"); lo <- 0; hi <- pm
-        } else {
-          if (w >= Finf) stop("stem_curve_domain: at or past G(inf)")
-          g <- function(p) cumulative_vulnerability_integral(p, b, c)
-          lo <- pm; hi <- 2 * pm
-          while (g(hi) < w) { lo <- hi; hi <- 2 * hi }
-        }
-        for (i in 1:200) {
-          mid <- 0.5 * (lo + hi)
-          if (mid <= lo || mid >= hi) break
-          if (g(mid) < w) lo <- mid else hi <- mid
-        }
-        0.5 * (lo + hi)
-      }
+    note: 'The forward table inverted (a quintic start plus Newton inside one knot span), not a fitted inverse; past the table, Newton on the closed form. Infeasible (stem_curve_domain) where the target is negative or at or past $F(\infty)$: no stem potential carries that flow. Past P99 the curve is flat to rounding, so a zero flux returns the upstream potential rather than inverting.'
   layer_midpoints:
     section: supply
     title: Layer midpoints and gravity head
@@ -2233,9 +1908,7 @@ equations:
     reads: [soil_depth, gravity_head]
     writes: [soil_depth_, z_soil_mid_, soil_number_of_depths_]
     kind: closed_form
-    note: 'Correct at any layer spacing (#626). The head $h_i$ is not bound; it enters through multilayer_uptake, whose probe reaches the gravity-balance branch. Plant may supply precomputed midpoints instead (use_precomputed_z_soil_mid_), a path not reachable from R.'
-    replica: |
-      function(soil_depth) (c(0, soil_depth[-length(soil_depth)]) + soil_depth) / 2
+    note: 'Correct at any layer spacing (#626). The head $h_i$ is not bound; it enters through multilayer_uptake. Plant may supply precomputed midpoints instead (use_precomputed_z_soil_mid_), a path not reachable from R.'
   root_network_from_carbon:
     section: supply
     title: Root resistances from root carbon
@@ -2250,18 +1923,6 @@ equations:
     kind: closed_form
     cite: Potkay-2021
     note: '$C_i$ is root carbon per unit leaf area, kg C m⁻² (hazard 4: absolute carbon gives resistances wrong by the leaf area, silently). The network is truncated at the deepest layer with carbon, which set_physiology stores as max_soil_layer; an interior zero-carbon layer gets $r_{H,\min} = 0$ (infinite conductance, backwards, preserved) and passes the running sum through. A helper the caller runs, not part of the solve (#33): the leaf reads only $r_{H,\min}$ and $r_{V,\Sigma}$. $\Delta z_i^2$ per layer is what makes $\sum r_V$ independent of the slicing (#626).'
-    replica: |
-      function(C, soil_depth, beta_R_H = 340, beta_R_V = 9400) {
-        dz <- diff(c(0, soil_depth))
-        L <- max(c(0, which(C != 0)))
-        C <- C[seq_len(L)]; dz <- dz[seq_len(L)]
-        cV <- ifelse(C == 0, 0, C / 3)
-        cH <- ifelse(C == 0, 0, C * 2 / 3)
-        rH <- ifelse(C == 0, 0, beta_R_H / cH)
-        rV <- ifelse(C == 0, 0, beta_R_V * (dz * dz) / cV)
-        list(c_r_V = cV, c_r_H = cH, r_R_H_min = rH, r_R_V = rV,
-             r_R_V_sum = cumsum(rV), max_soil_layer = L)
-      }
   multilayer_uptake:
     section: supply
     title: Multi-layer root uptake
@@ -2276,35 +1937,9 @@ equations:
     also: [phylloptim::MultiLayerRoots::uptake_at, phylloptim::MultiLayerRoots::supply_over, phylloptim::MultiLayerRoots::held_supply, phylloptim::MultiLayerRoots::set_soil_state, phylloptim::MultiLayerRoots::set_root_network, phylloptim::Leaf::E_from_Soil_to_Root_Collar]
     reads: [psi_soil, gravity_head, kg_per_mol_h2o, r_R_H_min, r_R_V_sum]
     writes: [E_up_, soil_consumption_]
-    uses: [layer_midpoints, root_vulnerability, root_vulnerability_integral]
     kind: closed_form
     cite: Potkay-2021
-    note: 'Per rooted layer ($i \le L$ = max_soil_layer) in parallel to the collar: the horizontal resistance is $r_{H,\min}$ over the MEAN root conductivity across the span between the collar and the layer ($\psi_\mathrm{lo}, \psi_\mathrm{hi}$ its ends), from two reads of the root integral; conductivity is 1 at negative (positive-pressure) potentials. $E_i < 0$ is a layer gaining water (hydraulic redistribution). soil_consumption_ keeps $E_i$ in mol m⁻² s⁻¹ and E_up_ is in kg (the unit split is deliberate); unrooted layers stay 0. Probed with small resistances so the fluxes are O(1), on profiles with unequal, unrooted and zero-carbon layers.'
-    replica: |
-      function(psi_c, psi_soil, soil_depth, r_H_min, r_V_sum, P50, c, n) {
-        z <- layer_midpoints(soil_depth)
-        L <- length(r_H_min)
-        E <- numeric(length(psi_soil))
-        for (i in seq_len(L)) {
-          ps <- psi_soil[i]; g <- 9.8e-3 * z[i]
-          if (abs(psi_c - ps) < 1e-8) {
-            fr <- root_vulnerability(max(psi_c, ps), P50, c, n)
-            E[i] <- -g / (r_H_min[i] / fr + r_V_sum[i])
-          } else if (abs((psi_c - ps) - g) < 1e-8) {
-            E[i] <- 0
-          } else {
-            lo <- min(psi_c, ps); hi <- max(psi_c, ps)
-            I <- 0
-            if (max(lo, 0) < hi) {
-              I <- I + (root_vulnerability_integral(hi, P50, c, n) -
-                        root_vulnerability_integral(max(lo, 0), P50, c, n))
-            }
-            if (lo < min(hi, 0)) I <- I + (min(hi, 0) - lo)
-            E[i] <- (psi_c - ps - g) / (r_H_min[i] * (hi - lo) / I + r_V_sum[i])
-          }
-        }
-        c(E_up = sum(E[seq_len(L)]) * 0.018015, E)
-      }
+    note: 'Per rooted layer ($i \le L$ = max_soil_layer) in parallel to the collar: the horizontal resistance is $r_{H,\min}$ over the MEAN root conductivity across the span between the collar and the layer ($\psi_\mathrm{lo}, \psi_\mathrm{hi}$ its ends), from two reads of the root integral; conductivity is 1 at negative (positive-pressure) potentials. $E_i < 0$ is a layer gaining water (hydraulic redistribution). soil_consumption_ keeps $E_i$ in mol m⁻² s⁻¹ and E_up_ is in kg (the unit split is deliberate); unrooted layers stay 0.'
   single_series_supply:
     section: supply
     title: Single-potential supply
@@ -2316,11 +1951,6 @@ equations:
     writes: [E_up_, soil_consumption_, single_psi_soil_]
     kind: closed_form
     note: 'Ohm''s law through one series resistance, with no vulnerability term and no kinks (so its collar derivative never asks for the finite-difference fallback). The one-entry soil_consumption_ holds the molar flux. single_psi_soil_ is the psi_soil driver as this path holds it, seated by set_physiology. The head $h$ is configuration, not derived from a depth (hazard 6); the multi-layer rule for one layer of thickness $d$ is $h = \rho_w g\, d/2$. A zero or non-finite resistance, or a non-zero $r_{H,\min}$, is refused.'
-    replica: |
-      function(psi_c, psi_s, r, h = 0) {
-        Ei <- (psi_c - psi_s - h) / r
-        c(E_up = Ei * 0.018015, Ei)
-      }
 
   # --- the solve -----------------------------------------------------------------
   intercellular_co2:
@@ -2333,17 +1963,8 @@ equations:
     also: [phylloptim::Leaf::assim_minus_stom_cond_CO2, phylloptim::Leaf::ci_at_compensation_point]
     reads: [ca, atm_kpa, umol_to_mol, kPa_to_Pa]
     writes: [ci_]
-    uses: []
     kind: closed_form
-    note: '$A$ in µmol m⁻² s⁻¹ (net, the assimilation entry), $g_c$ in mol m⁻² s⁻¹ (the stomatal_conductance entry), $c_i$, $c_a$ in Pa, $P$ in kPa. TOMS748 to 1e-10 absolute plus relative in $c_i$. $g$ is negative at $\Gamma^* c_P$, so a root exists exactly when $A(c_a) > 0$; otherwise (no root in the bracket, or any solver failure with the energy balance on) $c_i$ is put at the compensation point, where gross assimilation is zero and net is $-R_d$. Checked as the distance from the package''s $c_i$ to the printed root: one Newton step of the printed residual from the package''s $c_i$, which converges quadratically from within the solver''s tolerance.'
-    replica: |
-      function(ci, A, gc, ca, atm_kpa, gamma_star) {
-        lo <- gamma_star * atm_kpa * 1000 * 1.0e-6
-        g <- function(x) A(x) * 1.0e-6 - gc * (ca - x) / (atm_kpa * 1000)
-        if (g(lo) * g(ca) > 0) return(lo)
-        h <- 1.0e-6 * max(1, abs(ci))
-        ci - g(ci) * 2 * h / (g(ci + h) - g(ci - h))
-      }
+    note: '$A$ in µmol m⁻² s⁻¹ (net, the assimilation entry), $g_c$ in mol m⁻² s⁻¹ (the stomatal_conductance entry), $c_i$, $c_a$ in Pa, $P$ in kPa. TOMS748 to 1e-10 absolute plus relative in $c_i$. $g$ is negative at $\Gamma^* c_P$, so a root exists exactly when $A(c_a) > 0$; otherwise (no root in the bracket, or any solver failure with the energy balance on) $c_i$ is put at the compensation point, where gross assimilation is zero and net is $-R_d$.'
 
   assim_max:
     section: solve
@@ -2354,13 +1975,8 @@ equations:
     also: [phylloptim::Leaf::prepare_collar_solve]
     reads: [ca]
     writes: [assim_max_]
-    uses: [assimilation]
     kind: closed_form
     note: 'Seated once per set_physiology at the DRIVER temperature, with the energy balance on as well as off (the air-temperature baseline): it asks whether any open, transpiring operating point can pay for respiration. $A_\max < 0$ is the collar solve''s light shut-down (kind `shade-death`). It is also, by the sign argument in intercellular_co2, the condition for the $c_i$ root to exist at that temperature.'
-    replica: |
-      function(ca, vcmax, J, gamma_star, km, theta, R_d, atm_kpa) {
-        assimilation(ca, vcmax, J, gamma_star, km, theta, R_d, atm_kpa)
-      }
 
   leaf_state_chain:
     section: solve
@@ -2372,17 +1988,8 @@ equations:
     code: phylloptim::Leaf::set_leaf_states_rates_from_psi_stem
     reads: [atm_kpa, use_energy_balance_]
     writes: [transpiration_, stom_cond_CO2_, ci_, assim_colimited_]
-    uses: [stomatal_conductance, intercellular_co2, assimilation]
     kind: closed_form
-    note: 'One forward pass, no iteration: $E$ is the hydraulic supply at the candidate potential whatever photosynthesis is doing; with the energy balance on, the temperature block and the deficit are re-seated at $T_\mathrm{leaf}(E)$ before $c_i$ is solved, and at $T_\mathrm{leaf}(0)$ on the zero-flow branch. Potentials are positive magnitudes, so $\psi_\mathrm{up} \ge \psi_\mathrm{stem}$ is no flow or a reversed gradient. Checked with $E$ read through the supply binding (`transpiration()`, the hydraulics entries) and every other link by its replica, gate off and on, both branches.'
-    replica: |
-      function(psi_stem, psi_up, E_supply, A, ca, atm_kpa, vpd_leaf, gamma_star, ci_pkg) {
-        lo <- gamma_star * atm_kpa * 1000 * 1.0e-6
-        if (psi_up >= psi_stem) return(c(E = 0, gc = 0, ci = lo, A = A(lo)))
-        gc <- stomatal_conductance(E_supply, atm_kpa, vpd_leaf)
-        ci <- intercellular_co2(ci_pkg, A, gc, ca, atm_kpa, gamma_star)
-        c(E = E_supply, gc = gc, ci = ci, A = A(ci))
-      }
+    note: 'One forward pass, no iteration: $E$ is the hydraulic supply at the candidate potential whatever photosynthesis is doing; with the energy balance on, the temperature block and the deficit are re-seated at $T_\mathrm{leaf}(E)$ before $c_i$ is solved, and at $T_\mathrm{leaf}(0)$ on the zero-flow branch. Potentials are positive magnitudes, so $\psi_\mathrm{up} \ge \psi_\mathrm{stem}$ is no flow or a reversed gradient.'
 
   no_flow_state:
     section: solve
@@ -2395,14 +2002,7 @@ equations:
     reads: [psi_crit]
     writes: [opt_psi_stem_, opt_root_psi_, profit_, transpiration_, stom_cond_CO2_, ci_, assim_colimited_, E_up_]
     kind: closed_form
-    note: 'Hydraulic shut-down: no collar potential both moves water and stays inside the critical potentials (wettest layer at or past $\psi_\mathrm{crit}$; uptake negative even at $\psi_\mathrm{crit}$; continuity root at or past $\psi_\mathrm{crit}$; inverted bracket). The recorded collar $\psi_r^*$ is $\psi_\mathrm{crit}$, the supply''s critical potential, the continuity root and the supply''s critical potential respectively. Shade death ($A_\max < 0$): both potentials sit at the zero-uptake collar, polished to 1e-15, and the leaf respires. With the energy balance on, $R_d$ and $\Gamma^*$ are taken at $T_\mathrm{leaf}(0)$, the hottest the leaf gets. $C$ is the seated curve''s cost (TF24 here), read through its binding. Checked on the collar route only; the stem route''s no-flow point is in profit.'
-    replica: |
-      function(kind, collar, psi_crit, R_d, gamma_star, atm_kpa, C, Eup = 0, dEup = 1) {
-        psi <- if (kind == "hydraulic-shutdown") psi_crit else collar - Eup / dEup
-        r <- if (kind == "hydraulic-shutdown") collar else psi
-        c(psi_stem = psi, collar = r, E = 0, gc = 0, ci = gamma_star * atm_kpa * 1000 * 1.0e-6,
-          A = -R_d, profit = -R_d - C, E_up = 0)
-      }
+    note: 'Hydraulic shut-down: no collar potential both moves water and stays inside the critical potentials (wettest layer at or past $\psi_\mathrm{crit}$; uptake negative even at $\psi_\mathrm{crit}$; continuity root at or past $\psi_\mathrm{crit}$; inverted bracket). The recorded collar $\psi_r^*$ is $\psi_\mathrm{crit}$, the supply''s critical potential, the continuity root and the supply''s critical potential respectively. Shade death ($A_\max < 0$): both potentials sit at the zero-uptake collar, polished to 1e-15, and the leaf respires. With the energy balance on, $R_d$ and $\Gamma^*$ are taken at $T_\mathrm{leaf}(0)$, the hottest the leaf gets. $C$ is the seated curve''s cost (TF24 here), read through its binding. The stem route''s no-flow point is in profit.'
 
   profit:
     section: solve
@@ -2417,12 +2017,7 @@ equations:
     writes: [profit_, opt_psi_stem_, opt_root_psi_]
     kind: closed_form
     cite: Wolf-2016
-    note: '$A$ is the net assimilation of leaf_state_chain at the operating point and $C$ the seated curve''s cost (the costs section), so $J$ is in µmol m⁻² s⁻¹ for the five difference curves (TF24, CF77, JS22, CMax, TF24_floor) checked here. SOX and JW26 report the product $A\,g(\psi)$ (their first-order condition is the log link, $h = \log$) and ProfitMax a normalised profit; those are the costs section''s. Stem route: the upstream potential is $\psi_\mathrm{soil}$, and soil drier than $\psi_\mathrm{crit}$ has the one feasible point $\psi_\mathrm{soil}$. Collar route: $[\psi_a, \psi_b]$ is the collar_bracket and $\psi_\mathrm{stem}$ follows by stem_from_collar. Not an optimum: the kind is `prescribed`.'
-    replica: |
-      function(target, lo, hi, A, C) {
-        psi <- if (lo > hi) lo else min(max(target, lo), hi)
-        c(psi = psi, J = A - C)
-      }
+    note: '$A$ is the net assimilation of leaf_state_chain at the operating point and $C$ the seated curve''s cost (the costs section), so $J$ is in µmol m⁻² s⁻¹ for the five difference curves (TF24, CF77, JS22, CMax, TF24_floor). SOX and JW26 report the product $A\,g(\psi)$ (their first-order condition is the log link, $h = \log$) and ProfitMax a normalised profit; those are the costs section''s. Stem route: the upstream potential is $\psi_\mathrm{soil}$, and soil drier than $\psi_\mathrm{crit}$ has the one feasible point $\psi_\mathrm{soil}$. Collar route: $[\psi_a, \psi_b]$ is the collar_bracket and $\psi_\mathrm{stem}$ follows by stem_from_collar. Not an optimum: the kind is `prescribed`.'
 
   foc_stem:
     section: solve
@@ -2437,10 +2032,7 @@ equations:
     reads: [ca, atm_kpa, umol_to_mol, kPa_to_Pa, leaf_specific_conductance_max, use_energy_balance_]
     writes: []
     kind: derivative
-    tol: 5.0e-8
-    note: '$dc_i/d\psi$ by the implicit function theorem on the residual of intercellular_co2, so the derivative never passes through the $c_i$ iteration; $A''$ by forward AD of the assimilation kernel. Upstream potential fixed at $\psi_\mathrm{soil}$. Returns (value, feasible): feasible is 0 on the no-flow exit ($\psi_\mathrm{up} \ge \psi_\mathrm{stem}$, a 0.0 sentinel) and on the compensation-point branch, where the residual is not zero and only the cost term survives. The energy-balance term is energy_balance_foc; checked here with the gate OFF, against a central difference of the bound objective (evaluate_psi_stem_at) swept over steps 1e-3 to 1e-7 MPa, reading the floor of the V per row (hazard 15). Measured over 4 difference curves (TF24, CF77, JS22, CMax) × 3 temperatures × 5 potentials at PPFD 300 and 1800 (120 rows, all feasible) and at PPFD 0 (60 compensation-point rows, flag 0, value $-\partial C/\partial\psi$): worst floor 2.5e-9 relative, most rows ~1e-10 at 1e-4 to 1e-5 MPa. No row has a step-independent plateau. What sets the floor is noise in $J$ itself: the $c_i$ root-find stops anywhere in its 1e-10 band, which leaves jumps of up to 5.5e-10 (s.d. 9e-11) in $J$ on some stretches of $\psi$ and none on others, and a central difference turns that into ~1e-10/$h$. The tolerance is the noise floor measured on two platforms, not one: the worst row is 2.5e-9 on macOS/arm64 and 1.05e-8 on ubuntu/x86-64, because the c_i root-find''s ~1e-10 noise in profit, divided by 2h, depends on libm. The same mechanism sets foc_collar''s, so both carry 5e-8; a wrong chain-rule term is an O(1) error and a plateau, which no step moves.'
-    replica: |
-      function(f, x, h) (f(x + h) - f(x - h)) / (2 * h)
+    note: '$dc_i/d\psi$ by the implicit function theorem on the residual of intercellular_co2, so the derivative never passes through the $c_i$ iteration; $A''$ by forward AD of the assimilation kernel. Upstream potential fixed at $\psi_\mathrm{soil}$. Returns (value, feasible): feasible is 0 on the no-flow exit ($\psi_\mathrm{up} \ge \psi_\mathrm{stem}$, a 0.0 sentinel) and on the compensation-point branch, where the residual is not zero and only the cost term survives. The energy-balance term is energy_balance_foc. Measured over 4 difference curves (TF24, CF77, JS22, CMax) × 3 temperatures × 5 potentials at PPFD 300 and 1800 (120 rows, all feasible) and at PPFD 0 (60 compensation-point rows, flag 0, value $-\partial C/\partial\psi$): worst floor 2.5e-9 relative, most rows ~1e-10 at 1e-4 to 1e-5 MPa. No row has a step-independent plateau. What sets the floor is noise in $J$ itself: the $c_i$ root-find stops anywhere in its 1e-10 band, which leaves jumps of up to 5.5e-10 (s.d. 9e-11) in $J$ on some stretches of $\psi$ and none on others, and a central difference turns that into ~1e-10/$h$. The tolerance is the noise floor measured on two platforms, not one: the worst row is 2.5e-9 on macOS/arm64 and 1.05e-8 on ubuntu/x86-64, because the c_i root-find''s ~1e-10 noise in profit, divided by 2h, depends on libm. The same mechanism sets foc_collar''s, so both carry 5e-8; a wrong chain-rule term is an O(1) error and a plateau, which no step moves.'
 
   foc_collar:
     section: solve
@@ -2455,10 +2047,7 @@ equations:
     reads: [ca, atm_kpa, umol_to_mol, kPa_to_Pa, leaf_specific_conductance_max, use_energy_balance_]
     writes: []
     kind: derivative
-    tol: 5.0e-8
-    note: 'The collar potential is the decision variable and $\psi_\mathrm{stem}$ follows by continuity (stem_from_collar), whose slope is the second fraction: $E_\mathrm{up}''$ is the soil-to-collar conductance (analytic, with a 1e-6 central difference of the transport at a layer kink). $\partial C/\partial \psi_r$ is non-zero only for a curve whose cost reads the upstream potential (JS22). The same two sentinels as the stem route: no flow ($\psi_r \ge \psi_\mathrm{stem}$) returns 0.0 with feasible 0, and the compensation-point branch drops the assimilation term. Checked with the gate OFF against a central difference of evaluate_root_collar_psi, swept over 1e-3 to 1e-7 MPa and read at the floor, at interior collars (5% to 95% of the bracket) on a single layer behind a series resistance and on three-layer profiles. Measured over TF24, CF77 and JS22 × 3 temperatures × 4 supplies × 3 collars (108 rows, all feasible): worst floor 3.5e-8 relative, median 1e-10; 98 rows reach 1e-9 and 73 reach 2e-10. No plateau: on the worst rows the error runs from 6e-5 to 3e-8 and changes sign across the sweep. It is the same $c_i$-tolerance noise in $J$ as on the stem route (measured s.d. 1.4e-10, jumps to 4.6e-10, at 5e-6 MPa spacing), which lands inside the stencil on 10 of these rows and leaves no step at which both truncation ($\propto h^2$, clean at 1e-3 and above) and noise ($\propto 1/h$) are below 1e-8. A difference cannot certify this route more tightly than that; the stem route''s 2.5e-9 is the same noise landing less often.'
-    replica: |
-      function(f, x, h) (f(x + h) - f(x - h)) / (2 * h)
+    note: 'The collar potential is the decision variable and $\psi_\mathrm{stem}$ follows by continuity (stem_from_collar), whose slope is the second fraction: $E_\mathrm{up}''$ is the soil-to-collar conductance (analytic, with a 1e-6 central difference of the transport at a layer kink). $\partial C/\partial \psi_r$ is non-zero only for a curve whose cost reads the upstream potential (JS22). The same two sentinels as the stem route: no flow ($\psi_r \ge \psi_\mathrm{stem}$) returns 0.0 with feasible 0, and the compensation-point branch drops the assimilation term. Measured over TF24, CF77 and JS22 × 3 temperatures × 4 supplies × 3 collars (108 rows, all feasible): worst floor 3.5e-8 relative, median 1e-10; 98 rows reach 1e-9 and 73 reach 2e-10. No plateau: on the worst rows the error runs from 6e-5 to 3e-8 and changes sign across the sweep. It is the same $c_i$-tolerance noise in $J$ as on the stem route (measured s.d. 1.4e-10, jumps to 4.6e-10, at 5e-6 MPa spacing), which lands inside the stencil on 10 of these rows and leaves no step at which both truncation ($\propto h^2$, clean at 1e-3 and above) and noise ($\propto 1/h$) are below 1e-8. A difference cannot certify this route more tightly than that; the stem route''s 2.5e-9 is the same noise landing less often.'
 
   continuity_root:
     section: solve
@@ -2471,13 +2060,7 @@ equations:
     reads: [psi_crit]
     writes: []
     kind: identity
-    tol: 1.0e-4
-    note: '$\psi_{r,\mathrm{crit}}$ (root_crit) is the collar at which the soil supplies what the stem carries with the stem at its critical potential, the dry end of the bracket; $\psi_{r,0}$ (root_zero_E) the collar at which uptake is zero, the wet end. $E_\mathrm{up}$ and $E$ are the hydraulics section''s, read through their bindings. TOMS748 stops at 1e-4 absolute plus relative: plenty for a bracket, and a bound that turns out to BE the answer is re-solved to 1e-15 first (polish_bracket_bound). Checked as one Newton step of the printed residual from the package''s root, against TOMS748''s own stopping rule (bracket narrower than 1e-4 (1 + |x|), so the midpoint is within 1e-4 relative for $x \ge 1$): measured worst 2.9e-4 MPa absolute, 5.9e-5 relative, on a single layer behind a 1e4 resistance; the multi-layer roots land within 6e-9.'
-    replica: |
-      function(x, residual) {
-        h <- 1.0e-7 * max(1, abs(x))
-        x - residual(x) * 2 * h / (residual(x + h) - residual(x - h))
-      }
+    note: '$\psi_{r,\mathrm{crit}}$ (root_crit) is the collar at which the soil supplies what the stem carries with the stem at its critical potential, the dry end of the bracket; $\psi_{r,0}$ (root_zero_E) the collar at which uptake is zero, the wet end. $E_\mathrm{up}$ and $E$ are the hydraulics section''s, read through their bindings. TOMS748 stops at 1e-4 absolute plus relative: plenty for a bracket, and a bound that turns out to BE the answer is re-solved to 1e-15 first (polish_bracket_bound).'
 
   stem_from_collar:
     section: solve
@@ -2490,13 +2073,7 @@ equations:
     also: [phylloptim::Leaf::transpiration_to_psi_stem]
     writes: []
     kind: closed_form
-    note: 'What the soil delivers to the collar the stem carries to the leaf. $G$ is the stem vulnerability curve''s cumulative integral and $G^{-1}$ its inverse, both the hydraulics section''s; a zero flux past the knot grid returns the upstream potential. Checked as one Newton step of $E(\psi_\mathrm{stem};\psi_r) - E_\mathrm{up}(\psi_r)$ from the package''s $\psi_\mathrm{stem}$, both fluxes read through their bindings.'
-    replica: |
-      function(psi_stem, E_up, E) {
-        h <- 1.0e-7 * max(1, abs(psi_stem))
-        g <- function(x) E(x) - E_up
-        psi_stem - g(psi_stem) * 2 * h / (g(psi_stem + h) - g(psi_stem - h))
-      }
+    note: 'What the soil delivers to the collar the stem carries to the leaf. $G$ is the stem vulnerability curve''s cumulative integral and $G^{-1}$ its inverse, both the hydraulics section''s; a zero flux past the knot grid returns the upstream potential.'
 
   collar_bracket:
     section: solve
@@ -2509,20 +2086,8 @@ equations:
     also: [phylloptim::Leaf::supply_psi_crit, phylloptim::Leaf::set_shutdown_state]
     reads: [psi_crit, root_psi_crit, GSS_tol_abs]
     writes: []
-    uses: []
     kind: closed_form
-    note: '$\psi_{\mathrm{crit},\mathrm{supply}}$ is the root''s own 5%-conductivity potential on the multi-layer supply and $\psi_\mathrm{crit}$ on the single one. The dry end is whichever limit binds first: the continuity root (kind `boundary-crit` if the optimum pins there) or the root limit (`boundary-root-crit`); the clamp can invert the interval, which is a shut-down, not an optimisation over an empty set. A collapsed interval holds the collar at its midpoint and optimises only $\psi_\mathrm{stem}$ (kind `determined`). Shade death ($A_\max < 0$) is no_flow_state. Checked as the collar evaluate_root_collar_psi returns for a target far wet and far dry, against the ends built from the continuity roots'' bindings, in every regime: continuity binds, root limit binds, inverted, collapsed, and the three shut-down tests reachable from R.'
-    replica: |
-      function(wettest, psi_crit, E_at_crit, root_crit, root_zero_E, supply_psi_crit, gss_tol) {
-        if (wettest >= psi_crit) return(c(psi_crit, psi_crit))
-        if (E_at_crit < 0) return(c(supply_psi_crit, supply_psi_crit))
-        if (root_crit >= psi_crit) return(c(root_crit, root_crit))
-        a <- root_zero_E
-        b <- min(root_crit, supply_psi_crit)
-        if (b < a) return(c(supply_psi_crit, supply_psi_crit))
-        if (abs(b - a) <= gss_tol) return(c(0.5 * (a + b), 0.5 * (a + b)))
-        c(a, b)
-      }
+    note: '$\psi_{\mathrm{crit},\mathrm{supply}}$ is the root''s own 5%-conductivity potential on the multi-layer supply and $\psi_\mathrm{crit}$ on the single one. The dry end is whichever limit binds first: the continuity root (kind `boundary-crit` if the optimum pins there) or the root limit (`boundary-root-crit`); the clamp can invert the interval, which is a shut-down, not an optimisation over an empty set. A collapsed interval holds the collar at its midpoint and optimises only $\psi_\mathrm{stem}$ (kind `determined`). Shade death ($A_\max < 0$) is no_flow_state.'
 
   operating_point_kind:
     section: solve
@@ -2537,23 +2102,8 @@ equations:
     also: [phylloptim::Leaf::OperatingPointKind, phylloptim::Leaf::prepare_collar_solve, phylloptim::Leaf::find_root_collar_psi_for]
     reads: [collar_root_tol, GSS_tol_abs]
     writes: [opt_root_psi_, opt_psi_stem_, profit_]
-    uses: []
     kind: identity
-    note: 'The collar solve root-finds $J'' = 0$ (foc_collar) to collar_root_tol inside the bracket rather than searching $J$, so a bound that binds has to be detected by the sign of $J''$ at each end: $\psi_a^+$ is the wet end stepped in by 1e-6 of the width (the wet end itself is the no-flow sentinel), $\psi_b$ the dry end. A pinned bound is polished to 1e-15 before it is returned. Codes follow the enum: 1 interior, 2 boundary-soil, 3 boundary-crit, 4 boundary-root-crit, 5 determined, 6 hydraulic-shutdown, 7 shade-death, 9 solver-refused. ⚠️ The kind is NOT bound (operating_point_kind() is C++ only), so the probe reads it through the location of the answer the bound fields report and pairs it with the code this replica derives from the end gradients; interior rows also pair the distance to the stationary point, $J''(\psi^*)/J''''(\psi^*)$ in MPa, with zero. Measured over 40 collar solves: 24 interior, 2 boundary-soil, 2 boundary-crit, 2 boundary-root-crit, 1 determined, 8 hydraulic-shutdown, 1 shade-death, every one classified as the replica predicts; worst interior distance 3.0e-11 MPa. solver-refused, non-finite-gradient and unsolved are not reached, and prescribed is profit''s.'
-    replica: |
-      function(wettest, psi_crit, E_at_crit, root_crit, root_zero_E, supply_psi_crit, assim_max,
-               f_lo, f_hi, gss_tol) {
-        if (wettest >= psi_crit || E_at_crit < 0 || root_crit >= psi_crit) return(6)
-        if (assim_max < 0) return(7)
-        a <- root_zero_E
-        b <- min(root_crit, supply_psi_crit)
-        if (b < a) return(6)
-        if (abs(b - a) <= gss_tol) return(5)
-        if (f_lo <= 0 && f_hi >= 0) return(9)
-        if (f_lo <= 0) return(2)
-        if (f_hi >= 0) return(if (root_crit < supply_psi_crit) 3 else 4)
-        1
-      }
+    note: 'The collar solve root-finds $J'' = 0$ (foc_collar) to collar_root_tol inside the bracket rather than searching $J$, so a bound that binds has to be detected by the sign of $J''$ at each end: $\psi_a^+$ is the wet end stepped in by 1e-6 of the width (the wet end itself is the no-flow sentinel), $\psi_b$ the dry end. A pinned bound is polished to 1e-15 before it is returned. Codes follow the enum: 1 interior, 2 boundary-soil, 3 boundary-crit, 4 boundary-root-crit, 5 determined, 6 hydraulic-shutdown, 7 shade-death, 9 solver-refused. The kind is not bound: operating_point_kind() is C++ only.'
 
   # --- cost curves and the marginal cost of water --------------------------------
   # --- the cost curves ---------------------------------------------------------
@@ -2569,8 +2119,6 @@ equations:
     kind: closed_form
     cite: Towers-2024
     note: 'Carbon units, a function of the absolute stem potential. Written into `hydraulic_cost_` by the double entry point; the kernel itself is pure so the AD pass of `cost_deriv` cannot write state.'
-    replica: |
-      function(psi, gamma, beta, b, c) gamma * (1 - exp(-(psi / b)^c))^beta
   cost_CF77:
     section: costs
     title: Cowan–Farquhar cost
@@ -2582,12 +2130,7 @@ equations:
     writes: [hydraulic_cost_]
     kind: closed_form
     cite: Cowan-1977
-    note: '$E$ is the transpiration the supply gives between the two potentials (the hydraulics section), read off the package here. The price $p$ is cf77_soil_price (the soil-moisture section): the bare $\lambda_\mathrm{CF}$ with the gate off, divided by the clamped Medlyn-2011 factor with it on, which the replica writes inline. Checked with the gate off, on below field capacity and on above it.'
-    replica: |
-      function(E, lambda, soil_beta = FALSE, theta = NA, theta_w = NA, theta_fc = NA) {
-        price <- if (soil_beta) lambda / min((theta - theta_w) / (theta_fc - theta_w), 1) else lambda
-        price * E
-      }
+    note: '$E$ is the transpiration the supply gives between the two potentials (the hydraulics section). The price $p$ is cf77_soil_price (the soil-moisture section): the bare $\lambda_\mathrm{CF}$ with the gate off, divided by the clamped Medlyn-2011 factor with it on.'
   cost_JS22:
     section: costs
     title: Joshi–Stocker hydraulic term
@@ -2599,8 +2142,6 @@ equations:
     kind: closed_form
     cite: Joshi-2022
     note: 'Quadratic in the soil-to-leaf DROP, the one cost that reads it rather than the absolute potential; $\psi_u$ is the upstream potential (psi_soil on the stem route, the collar on the collar route). Joshi-2022''s capacity term $\alpha J_{max}$ is not implemented, so this is their hydraulic cost and not their model.'
-    replica: |
-      function(psi, up, gamma) { d <- psi - up; gamma * d * d }
   cost_CMax:
     section: costs
     title: CMax cost
@@ -2611,9 +2152,7 @@ equations:
     writes: [hydraulic_cost_]
     kind: closed_form
     cite: Wolf-2016
-    note: 'The marginal form $a\psi + b$ is Anderegg-2018''s (as TractLSM implements it); Wolf-2016 asked only for a concave-up cost. Evaluated FACTORED: the difference-of-squares form the vignette table prints is the same function but cancels as the drop closes (1.2e-4 wrong at a 1e-12 drop). The probe reaches a 1e-10 drop.'
-    replica: |
-      function(psi, up, a, b) (psi - up) * (0.5 * a * (psi + up) + b)
+    note: 'The marginal form $a\psi + b$ is Anderegg-2018''s (as TractLSM implements it); Wolf-2016 asked only for a concave-up cost. Evaluated FACTORED: the difference-of-squares form the vignette table prints is the same function but cancels as the drop closes (1.2e-4 wrong at a 1e-12 drop).'
   cost_TF24_floor:
     section: costs
     title: TF24 with a price floor
@@ -2623,11 +2162,8 @@ equations:
     also: [phylloptim::Leaf::hydraulic_cost_TF_kernel]
     reads: [TF24_cost_scale, TF24_beta2, TF24_floor_lambda_o]
     writes: [hydraulic_cost_]
-    uses: [cost_TF24]
     kind: closed_form
-    note: 'TF24''s own cost at TF24''s own parameters plus a CF77 price, each the parent''s expression in its operand order, so $\lambda_o = 0$ is TF24 and $\gamma = 0$ is CF77 bit for bit. The probe reaches both reductions.'
-    replica: |
-      function(psi, E, gamma, beta, b, c, lambda_o) cost_TF24(psi, gamma, beta, b, c) + lambda_o * E
+    note: 'TF24''s own cost at TF24''s own parameters plus a CF77 price, each the parent''s expression in its operand order, so $\lambda_o = 0$ is TF24 and $\gamma = 0$ is CF77 bit for bit.'
   shadow_cost:
     section: costs
     title: The shadow part of the cost
@@ -2637,9 +2173,7 @@ equations:
     reads: [TF24_floor_lambda_o]
     writes: []
     kind: closed_form
-    note: 'The part of the cost that is a price rather than a realised carbon loss, at the reported $E$. Zero on the other curves means the curve does not separate the two, not that its cost is all realised carbon (CF77''s whole cost could be read either way). Checked after solves on both routes.'
-    replica: |
-      function(E, lambda_o, curve) if (curve == "TF24_floor") lambda_o * E else 0
+    note: 'The part of the cost that is a price rather than a realised carbon loss, at the reported $E$. Zero on the other curves means the curve does not separate the two, not that its cost is all realised carbon (CF77''s whole cost could be read either way).'
   sox_reduction:
     section: costs
     title: SOX reduction factor
@@ -2651,11 +2185,6 @@ equations:
     kind: closed_form
     cite: Eller-2020
     note: '1 at zero tension and exactly 0 at $\psi_\mathrm{crit}$, where $f = k_\mathrm{crit} = 0.05$ by construction, so it takes no parameter. Clamped at zero (Eller-2020 do not): without it a shut-down leaf ($A = -R_d$) past $\psi_\mathrm{crit}$ reports a positive product. Written so a NaN propagates.'
-    replica: |
-      function(psi, b, c, k_crit = 0.05) {
-        g <- (exp(-(psi / b)^c) - k_crit) / (1 - k_crit)
-        ifelse(g < 0, 0, g)
-      }
   sox_reduction_deriv:
     section: costs
     title: Slope of the SOX reduction factor
@@ -2667,8 +2196,6 @@ equations:
     kind: closed_form
     cite: Eller-2020
     note: 'Analytic. Not bound: read through `lambda_SOX` $= -A\,(g''/g)/(k_{max} f)$, inverted with the package''s own $g$, $f$ and $A$ at the same point. Not zeroed past $\psi_\mathrm{crit}$ where $g$ is, which no caller reaches (the objective is zero there).'
-    replica: |
-      function(psi, b, c, k_crit = 0.05) -exp(-(psi / b)^c) * (c / b) * (psi / b)^(c - 1) / (1 - k_crit)
   jw26_reduction:
     section: costs
     title: Jones reduction factor
@@ -2680,8 +2207,6 @@ equations:
     kind: closed_form
     cite: Jones-2026
     note: 'Linear between the same two anchors as SOX. $\psi_\mathrm{crit}$ is DERIVED (the 95% quantile of the stem curve), where Jones-2026 supply their own $P_\mathrm{crit}$. Clamped at zero past it.'
-    replica: |
-      function(psi, psi_crit) { g <- 1 - psi / psi_crit; ifelse(g < 0, 0, g) }
   jw26_reduction_deriv:
     section: costs
     title: Slope of the Jones reduction factor
@@ -2691,11 +2216,8 @@ equations:
     reads: [psi_crit]
     writes: []
     kind: identity
-    tol: 1.0e-9
     cite: Jones-2026
-    note: 'Not bound and called by nothing in the solve (only tests/cpp/test_leaf.cpp): `cost_deriv<JW26>` writes the collapsed $-g''/g = 1/(\psi_\mathrm{crit} - \psi)$ directly. Checked as that ratio, read off the stem-route derivative as $C'' = d_0/A - \partial J/\partial\psi$ (see cost_deriv); the decomposition, not this slope, sets the tolerance (measured floor below 1e-12).'
-    replica: |
-      function(psi, psi_crit) ifelse(psi > psi_crit, 0, -1 / psi_crit)
+    note: 'Not bound and called by nothing in the solve (only tests/cpp/test_leaf.cpp): `cost_deriv<JW26>` writes the collapsed $-g''/g = 1/(\psi_\mathrm{crit} - \psi)$ directly.'
   leastcost_flux:
     section: costs
     title: Least-cost weighted resource use
@@ -2707,8 +2229,6 @@ equations:
     kind: closed_form
     cite: Prentice-2014
     note: 'mol m⁻² s⁻¹, so $\beta_\mathrm{LC}$ is the published dimensionless $c_V/c_E$. Weighs `vcmax_`, the capacity at the leaf''s temperature, not $V_{c,25}$; Prentice-2014''s $\beta$ carries a viscosity term this package does not model, so this is $\beta/\eta^*$, equal at 25 °C. Not bound: read back from the LeastCost objective, $W = A/J$.'
-    replica: |
-      function(E, vcmax, beta) E * (1 / 0.018015) + beta * vcmax * 1.0e-6
   profitmax_A_max:
     section: costs
     title: ProfitMax carbon normaliser
@@ -2719,15 +2239,8 @@ equations:
     reads: [psi_crit]
     writes: []
     kind: identity
-    tol: 1.0e-9
     cite: Sperry-2017
-    note: 'Found by maximisation (endpoints plus a root-find of $dA/d\psi$), not by Sperry-2017''s scan; the closure point $\psi_s$ itself, where $A = -R_d$, is excluded. Checked against the largest $|A|$ the package reports on a 401-point grid refined three times about its argmax: at the dry bound (energy balance off, where $A$ rises monotonically), inside the stream (energy balance on in cold air, where transpiration cooling turns $A$ over, which reaches the root-find), and at a 48 °C leaf with $A < 0$ throughout. Held constant in the gradient (a partial at fixed normaliser).'
-    replica: |
-      function(A) {
-        if (max(A) > 0) return(max(A))
-        if (max(-A) > 0) return(max(-A))
-        0
-      }
+    note: 'Found by maximisation (endpoints plus a root-find of $dA/d\psi$), not by Sperry-2017''s scan; the closure point $\psi_s$ itself, where $A = -R_d$, is excluded. The maximum can sit at the dry bound (energy balance off, where $A$ rises monotonically) or inside the stream (energy balance on in cold air, where transpiration cooling turns $A$ over). Held constant in the gradient (a partial at fixed normaliser).'
   profitmax_normalisers:
     section: costs
     title: ProfitMax conductance normaliser
@@ -2739,12 +2252,7 @@ equations:
     writes: []
     kind: closed_form
     cite: Sperry-2017
-    note: '$k_\mathrm{crit} = 0.05\,k_{max}$ as Sperry-2017 set it, which is the same 0.05 $\psi_\mathrm{crit}$ is derived from. $\psi_s$ is psi_soil on a single soil potential; on a layered profile it is the collar potential at which uptake is zero (the collar bracket''s wet end, not bound), so the probe checks the single-layer case only. Read through the `profitmax_k_span` accessor.'
-    replica: |
-      function(psi_s, psi_crit, kmax, b, c) {
-        k_soil <- kmax * exp(-(psi_s / b)^c)
-        c(k_soil = k_soil, k_span = k_soil - kmax * exp(-(psi_crit / b)^c))
-      }
+    note: '$k_\mathrm{crit} = 0.05\,k_{max}$ as Sperry-2017 set it, which is the same 0.05 $\psi_\mathrm{crit}$ is derived from. $\psi_s$ is psi_soil on a single soil potential; on a layered profile it is the collar potential at which uptake is zero (the collar bracket''s wet end, not bound). Read through the `profitmax_k_span` accessor.'
   profitmax_objective:
     section: costs
     title: ProfitMax objective
@@ -2753,19 +2261,9 @@ equations:
     code: phylloptim::Leaf::profit_psi_stem_ProfitMax
     reads: [leaf_specific_conductance_max, use_energy_balance_]
     writes: [carbon_gain_, hydraulic_cost_norm_, thermal_cost_]
-    uses: [thermal_cost]
     kind: closed_form
     cite: Sperry-2017
-    note: 'Sperry-2017''s normalised profit with Sicangco-2026''s thermal cost (zero with use_thermal_cost_ off, constant across the stream with the energy balance off). $CG = 0$ when $|A|_{\max} \le 0$. All three are dimensionless, so `hydraulic_cost_` is not reused. Checked with each gate off and on.'
-    replica: |
-      function(A, A_max, psi, psi_s, psi_crit, kmax, b, c, T, T50, Tcrit, tc_gate) {
-        f <- function(p) exp(-(p / b)^c)
-        k_soil <- kmax * f(psi_s)
-        CG <- if (A_max > 0) A / A_max else 0
-        HC <- (k_soil - kmax * f(psi)) / (k_soil - kmax * f(psi_crit))
-        TC <- if (tc_gate) thermal_cost(T, T50, Tcrit) else 0
-        c(CG, HC, TC, CG - (HC + TC))
-      }
+    note: 'Sperry-2017''s normalised profit with Sicangco-2026''s thermal cost (zero with use_thermal_cost_ off, constant across the stream with the energy balance off). $CG = 0$ when $|A|_{\max} \le 0$. All three are dimensionless, so `hydraulic_cost_` is not reused.'
   objective:
     section: costs
     title: The objective each curve maximises
@@ -2778,13 +2276,6 @@ equations:
     writes: []
     kind: closed_form
     note: 'The value `profit_` reports. The product and ratio curves are evaluated in that form, not as $\log A \pm \log(\cdot)$, because at closure $A = -R_d < 0$ and the endpoint must stay a candidate; `log` is monotone so the argmax is shared. Only the five difference curves are carbon fluxes; the product, ratio and normalised values must not be compared with them. The product and ratio curves set `hydraulic_cost_` to NA.'
-    replica: |
-      function(curve, A, C = NA, g = NA, W = NA, pm = NA) {
-        if (curve %in% c("SOX", "JW26")) return(A * g)
-        if (curve == "LeastCost") return(A / W)
-        if (curve == "ProfitMax") return(pm)
-        A - C
-      }
   benefit_link_deriv:
     section: costs
     title: Slope of the benefit link
@@ -2795,14 +2286,7 @@ equations:
     reads: []
     writes: []
     kind: identity
-    tol: 1.0e-7
-    note: 'The only part of the first-order condition $h''(A)\,A'' - C'' = 0$ that varies by link. Not bound: read off the stem-route derivative as $(\partial J_K/\partial\psi + C_K'')/d_0$, where $d_0$ is the derivative of CMax at $a = b = 0$ (a zero cost under the identity link, so $d_0 = A''$) and $C_K''$ is the cost_deriv replica. Measured: below 8e-13 on TF24, JS22, CMax, SOX, JW26 and ProfitMax, and 1.4e-8 to 2.8e-8 on CF77, TF24_floor and LeastCost, whose $C''$ the package takes from the integral table''s slope where the replica has $f$ (see cost_deriv); the tolerance is set by that.'
-    replica: |
-      function(curve, A, A_max) {
-        if (curve %in% c("SOX", "JW26", "LeastCost")) return(1 / A)
-        if (curve == "ProfitMax") return(1 / A_max)
-        1
-      }
+    note: 'The only part of the first-order condition $h''(A)\,A'' - C'' = 0$ that varies by link. Not bound.'
   cost_deriv:
     section: costs
     title: The marginal cost dC/dψ
@@ -2822,26 +2306,8 @@ equations:
     also: [phylloptim::Leaf::cf77_price, phylloptim::Leaf::hydraulic_cost_TF_kernel, phylloptim::Leaf::leastcost_flux]
     reads: [TF24_cost_scale, TF24_beta2, CF77_lambda_, JS22_gamma, CMax_a, CMax_b, TF24_floor_lambda_o, LeastCost_beta, kg_to_mol_h2o, leaf_specific_conductance_max, stem_b, stem_c, psi_crit]
     writes: []
-    uses: [sox_reduction, sox_reduction_deriv, leastcost_flux]
     kind: identity
-    tol: 1.0e-7
     note: 'The one place the cost enters a derivative, shared by both routes. TF24 by forward AD of the cost kernel, the rest analytic. CF77, TF24_floor and LeastCost multiply by $G''(\psi)$, the slope of the integral TABLE the solve runs on, where the printed form has $f$: measured up to 5.0e-8 relative apart over the three trait sets (2.3e-8 at the defaults), the interpolation error of the table, not a defect; the other curves agree to rounding. Off the energy balance; with it on ProfitMax adds $(dTC/dT)(dT/dE)(dE/d\psi)$ in dprofit_energy_balance_term, not here. Read off the stem-route derivative as $h_K''(A)\, d_0 - \partial J_K/\partial\psi$ (see benefit_link_deriv), over three trait sets and two soils.'
-    replica: |
-      function(curve, psi, up, p) {
-        f <- exp(-(psi / p$b)^p$c)
-        afp <- f * (p$c / p$b) * (psi / p$b)^(p$c - 1)
-        tf <- p$gamma * p$beta * (1 - f)^(p$beta - 1) * afp
-        switch(curve,
-          TF24 = tf,
-          CF77 = p$lambda * p$kmax * f,
-          JS22 = 2 * p$gJ * (psi - up),
-          CMax = p$a * psi + p$bm,
-          TF24_floor = tf + p$lo * p$kmax * f,
-          SOX = -sox_reduction_deriv(psi, p$b, p$c) / sox_reduction(psi, p$b, p$c),
-          JW26 = 1 / (p$psi_crit - psi),
-          LeastCost = (1 / 0.018015) * p$kmax * f / leastcost_flux(p$E, p$vcmax, p$beta_lc),
-          ProfitMax = p$kmax * afp / p$k_span)
-      }
   cost_deriv_upstream:
     section: costs
     title: The marginal cost in the upstream potential
@@ -2858,21 +2324,8 @@ equations:
     also: [phylloptim::Leaf::cost_reads_upstream, phylloptim::Leaf::cf77_price, phylloptim::Leaf::leastcost_flux]
     reads: [CF77_lambda_, JS22_gamma, CMax_a, CMax_b, TF24_floor_lambda_o, kg_to_mol_h2o, leaf_specific_conductance_max]
     writes: []
-    uses: [leastcost_flux]
     kind: identity
-    tol: 1.0e-7
     note: 'On the collar route the upstream potential IS the decision variable, so a cost that reads it moves with the collar directly; a curve missing its row solves the wrong first-order condition silently (#141). The integrand at the lower limit, with $f(\psi_u)$ read through the table slope $G''$ as in cost_deriv. Read off the collar derivative as $h_K'' d_0 - C_K'' s - \partial J_K/\partial\psi_r$, with $s = d\psi/d\psi_r$ recovered from TF24 (which has no upstream term), single-layer and three-layer; the zero rows are the four curves that do not read upstream. Same table-slope floor as cost_deriv.'
-    replica: |
-      function(curve, psi, up, p) {
-        fu <- exp(-(up / p$b)^p$c)
-        switch(curve,
-          CF77 = -p$lambda * p$kmax * fu,
-          JS22 = -2 * p$gJ * (psi - up),
-          CMax = -(p$a * up + p$bm),
-          TF24_floor = -p$lo * p$kmax * fu,
-          LeastCost = -(1 / 0.018015) * p$kmax * fu / leastcost_flux(p$E, p$vcmax, p$beta_lc),
-          0)
-      }
 
   # --- the marginal cost of water -----------------------------------------------
   lambda_TF24:
@@ -2886,11 +2339,6 @@ equations:
     kind: closed_form
     cite: Towers-2024
     note: 'µmol C (kg H₂O)⁻¹. The $f$ in $|f''|$ cancels against $dE/d\psi = k_{max} f$ analytically, so it stays finite at $\psi_\mathrm{crit}$; with $\beta < 1$ it diverges as $\psi \to 0$, a property of the cost.'
-    replica: |
-      function(psi, gamma, beta, b, c, kmax) {
-        f <- exp(-(psi / b)^c)
-        gamma * beta * (c / b) * (psi / b)^(c - 1) * (1 - f)^(beta - 1) / kmax
-      }
   lambda_JS22:
     section: marginal_cost
     title: JS22 marginal cost of water
@@ -2902,8 +2350,6 @@ equations:
     kind: closed_form
     cite: Joshi-2022
     note: 'No $f$ cancels, so it divides by $f$, which stays above 0.05 inside the bracket.'
-    replica: |
-      function(psi, up, gamma, b, c, kmax) 2 * gamma * (psi - up) / (kmax * exp(-(psi / b)^c))
   lambda_CMax:
     section: marginal_cost
     title: CMax marginal cost of water
@@ -2915,8 +2361,6 @@ equations:
     kind: closed_form
     cite: Anderegg-2018
     note: 'Non-zero at the wet end unless $b = 0$. The upstream potential enters only through $E$, so it is not read.'
-    replica: |
-      function(psi, a, bm, b, c, kmax) (a * psi + bm) / (kmax * exp(-(psi / b)^c))
   lambda_TF24_floor:
     section: marginal_cost
     title: TF24_floor marginal cost of water
@@ -2926,11 +2370,8 @@ equations:
     also: [phylloptim::Leaf::lambda_TF24]
     reads: [TF24_floor_lambda_o, TF24_cost_scale, TF24_beta2, leaf_specific_conductance_max]
     writes: []
-    uses: [lambda_TF24]
     kind: closed_form
-    note: 'The one difference-curve lambda that does not vanish at the wet end. Bit-identical to lambda_TF24 at $\lambda_o = 0$, which the probe reaches.'
-    replica: |
-      function(psi, gamma, beta, b, c, kmax, lambda_o) lambda_TF24(psi, gamma, beta, b, c, kmax) + lambda_o
+    note: 'The one difference-curve lambda that does not vanish at the wet end. Bit-identical to lambda_TF24 at $\lambda_o = 0$.'
   lambda_SOX:
     section: marginal_cost
     title: SOX marginal cost of water
@@ -2940,16 +2381,9 @@ equations:
     also: [phylloptim::Leaf::sox_reduction, phylloptim::Leaf::sox_reduction_deriv]
     reads: [leaf_specific_conductance_max]
     writes: []
-    uses: [sox_reduction, sox_reduction_deriv]
     kind: closed_form
     cite: Eller-2020
-    note: 'Carries a factor of $A$ (a product objective prices water as a share of assimilation) and diverges at $\psi_\mathrm{crit}$. Reads the leaf''s current `assim_colimited_`, so it means what it says only at the potential last evaluated; the probe evaluates there first.'
-    replica: |
-      function(psi, A, b, c, kmax, k_crit = 0.05) {
-        g <- sox_reduction(psi, b, c, k_crit)
-        gp <- sox_reduction_deriv(psi, b, c, k_crit)
-        -A * (gp / g) / (kmax * exp(-(psi / b)^c))
-      }
+    note: 'Carries a factor of $A$ (a product objective prices water as a share of assimilation) and diverges at $\psi_\mathrm{crit}$. Reads the leaf''s current `assim_colimited_`, so it means what it says only at the potential last evaluated.'
   lambda_JW26:
     section: marginal_cost
     title: JW26 marginal cost of water
@@ -2961,8 +2395,6 @@ equations:
     kind: closed_form
     cite: Jones-2026
     note: 'Reads the current `assim_colimited_`, as lambda_SOX does.'
-    replica: |
-      function(psi, A, psi_crit, b, c, kmax) A / ((psi_crit - psi) * kmax * exp(-(psi / b)^c))
   lambda_ProfitMax:
     section: marginal_cost
     title: ProfitMax marginal cost of water
@@ -2973,21 +2405,9 @@ equations:
     also: [phylloptim::Leaf::thermal_cost_temp_deriv]
     reads: [stem_b, stem_c, use_thermal_cost_, use_energy_balance_]
     writes: []
-    uses: [thermal_cost]
     kind: closed_form
     cite: Sperry-2017
     note: 'Multiplying the normalised objective by $|A|_{\max}$ restores carbon units. The thermal term needs both gates on and is the slope dprofit_energy_balance_term subtracts. NA where $f$, $k_\mathrm{span}$ or $|A|_{\max}$ is not positive. Not bound: read through `lambda_emergent` after a stem-route ProfitMax solve, gates off and both on (a leaf inside the temperature clamp).'
-    replica: |
-      function(psi, A_max, k_span, b, c, Tleaf = NA, T50 = NA, Tcrit = NA, ra = NA, g_rad = NA, gate = FALSE) {
-        f <- exp(-(psi / b)^c)
-        afp <- (c / b) * (psi / b)^(c - 1) * f
-        th <- 0
-        if (gate) {
-          TC <- thermal_cost(Tleaf, T50, Tcrit)
-          th <- (2 / (T50 - Tcrit)) * TC * (1 - TC) * (-2.45e6 / (1200 / ra + g_rad))
-        }
-        A_max * (afp / (f * k_span) + th)
-      }
   lambda_LeastCost:
     section: marginal_cost
     title: LeastCost marginal cost of water
@@ -2997,12 +2417,9 @@ equations:
     also: [phylloptim::Leaf::leastcost_flux]
     reads: [kg_to_mol_h2o]
     writes: []
-    uses: [leastcost_flux]
     kind: closed_form
     cite: Prentice-2014
     note: 'Eq. S1.4 of the theory manuscript, $c_E A/(c_E E + c_V V_{cmax})$ with $c_E$ cancelled and the kg-to-mol factor supplied. Finite at the wet end, set by the capacity term. Not bound: read through `lambda_emergent` after a stem-route LeastCost solve.'
-    replica: |
-      function(A, E, vcmax, beta) A * (1 / 0.018015) / leastcost_flux(E, vcmax, beta)
   lambda_ratio:
     section: marginal_cost
     title: λ is the marginal cost over the marginal water use
@@ -3013,10 +2430,7 @@ equations:
     reads: []
     writes: []
     kind: derivative
-    tol: 1.0e-7
-    note: 'The definition every closed form above implements. Each bound lambda (TF24, JS22, CMax, TF24_floor, SOX, JW26) against a central difference of the package''s own cost and transpiration, with $C = -\log g$ and $h'' = 1/A$ for the product curves. Step 1e-5 MPa. Measured over 1e-2 to 1e-7: the error falls as $h^2$ (9e-4 at 1e-2, 9e-6 at 1e-3) onto a PLATEAU of 1.4e-8 to 2.6e-8 relative from 1e-5 down, not a V: $E$ is the integral table, whose slope differs from the closed forms'' $k_{max} f$ by that much (the same table-slope gap as cost_deriv), so the plateau is the table''s interpolation error and the tolerance is set above it.'
-    replica: |
-      function(C, E, x, h, hprime = 1) (C(x + h) - C(x - h)) / (E(x + h) - E(x - h)) / hprime
+    note: 'The definition every closed form above implements. A lambda read through $E$ agrees with its closed form only to 1.4e-8 to 2.6e-8 relative: $E$ is the integral table, whose slope differs from the closed forms'' $k_{max} f$ by that much (the same table-slope gap as cost_deriv).'
   marginal_cost_water:
     section: marginal_cost
     title: The reported λ
@@ -3026,11 +2440,8 @@ equations:
     also: [phylloptim::Leaf::lambda_TF24]
     reads: []
     writes: []
-    uses: [lambda_TF24]
     kind: closed_form
     note: 'Bound as `lambda`. TF24''s marginal cost at whatever optimum the last solve found, WHICHEVER curve ran, on either route; the seated curve''s own is `lambda_emergent`. Single-layer: on the collar route it omits the series-resistance correction (marginal_cost_water_multilayer).'
-    replica: |
-      function(psi_opt, gamma, beta, b, c, kmax) lambda_TF24(psi_opt, gamma, beta, b, c, kmax)
   marginal_cost_water_molar:
     section: marginal_cost
     title: λ in molar units
@@ -3041,8 +2452,6 @@ equations:
     writes: []
     kind: closed_form
     note: 'mol CO₂ (mol H₂O)⁻¹, the convention the optimality literature states λ in. Bound as `lambda_molar`.'
-    replica: |
-      function(lambda) lambda * 1.0e-6 / (1 / 0.018015)
   marginal_cost_water_multilayer:
     section: marginal_cost
     title: λ with the root-network resistance
@@ -3052,12 +2461,8 @@ equations:
     also: [phylloptim::Leaf::lambda_TF24]
     reads: [leaf_specific_conductance_max]
     writes: []
-    uses: [lambda_TF24]
     kind: derivative
-    tol: 1.0e-9
-    note: 'TF24''s λ on the collar route: the bracket is $\ge 1$, so the single-layer λ understates the marginal cost. NA where $S$ is unavailable or not positive. Bound as `lambda_multilayer`; it is lambda_emergent on the collar route for TF24 only (lambda_collar). Checked against a central difference of the bound uptake for $S$.'
-    replica: |
-      function(lambda_stem, k_r, Eup, x, h) lambda_stem * (1 + k_r / ((Eup(x + h) - Eup(x - h)) / (2 * h)))
+    note: 'TF24''s λ on the collar route: the bracket is $\ge 1$, so the single-layer λ understates the marginal cost. NA where $S$ is unavailable or not positive. Bound as `lambda_multilayer`; it is lambda_emergent on the collar route for TF24 only (lambda_collar).'
   lambda_collar:
     section: marginal_cost
     title: The seated curve's λ on the collar route
@@ -3068,10 +2473,7 @@ equations:
     reads: [leaf_specific_conductance_max]
     writes: []
     kind: identity
-    tol: 1.0e-4
-    note: 'dC/dE along the collar path. $\lambda_\psi$ is the part of a cost that reads $\psi_\mathrm{stem}$ alone (TF24, SOX, JW26, ProfitMax''s conductance term), which takes the series factor; $\lambda_E$ the part that reads the potentials only through E (CF77''s price, LeastCost, the floor''s $\lambda_o$, ProfitMax''s thermal term), which carries over; the last term is the explicit collar read of JS22 and CMax. Checked as the identity that defines it: at an interior optimum the first-order condition makes λ equal $dA/dE$ along the collar path for every link, taken by central difference of assimilation and transpiration at the collar either side. Measured worst 1.8e-6 (C++ suite); the tolerance leaves platform room and still fails a λ of the wrong curve, which is off by O(1).'
-    replica: |
-      function(Afun, Efun, x, h) (Afun(x + h) - Afun(x - h)) / (Efun(x + h) - Efun(x - h))
+    note: 'dC/dE along the collar path. $\lambda_\psi$ is the part of a cost that reads $\psi_\mathrm{stem}$ alone (TF24, SOX, JW26, ProfitMax''s conductance term), which takes the series factor; $\lambda_E$ the part that reads the potentials only through E (CF77''s price, LeastCost, the floor''s $\lambda_o$, ProfitMax''s thermal term), which carries over; the last term is the explicit collar read of JS22 and CMax. At an interior optimum the first-order condition makes λ equal $dA/dE$ along the collar path for every link, taken by central difference of assimilation and transpiration at the collar either side. Measured worst 1.8e-6 (C++ suite); the tolerance leaves platform room and still fails a λ of the wrong curve, which is off by O(1).'
   lambda_emergent:
     section: marginal_cost
     title: The seated curve's λ at its operating point
@@ -3081,22 +2483,8 @@ equations:
     also: [phylloptim::Leaf::lambda_for, phylloptim::Leaf::optimise_psi_stem_single, phylloptim::Leaf::find_root_collar_psi_for]
     reads: []
     writes: []
-    uses: [lambda_TF24, lambda_JS22, lambda_CMax, lambda_TF24_floor, lambda_SOX, lambda_JW26, lambda_ProfitMax, lambda_LeastCost]
     kind: closed_form
     note: 'Written by the optimiser that ran; NA before. On the stem route it is the seated curve''s λ (CF77''s is its price, exactly); on the collar route, the same curve''s λ along the collar path (lambda_collar). Until 0.15.4 the collar route reported TF24''s multilayer λ whatever curve was seated.'
-    replica: |
-      function(curve, psi, up, p) {
-        switch(curve,
-          TF24 = lambda_TF24(psi, p$gamma, p$beta, p$b, p$c, p$kmax),
-          CF77 = p$lambda,
-          JS22 = lambda_JS22(psi, up, p$gJ, p$b, p$c, p$kmax),
-          CMax = lambda_CMax(psi, p$a, p$bm, p$b, p$c, p$kmax),
-          TF24_floor = lambda_TF24_floor(psi, p$gamma, p$beta, p$b, p$c, p$kmax, p$lo),
-          SOX = lambda_SOX(psi, p$A, p$b, p$c, p$kmax),
-          JW26 = lambda_JW26(psi, p$A, p$psi_crit, p$b, p$c, p$kmax),
-          ProfitMax = lambda_ProfitMax(psi, p$A_max, p$k_span, p$b, p$c),
-          LeastCost = lambda_LeastCost(p$A, p$E, p$vcmax, p$beta_lc))
-      }
   g1_eff:
     section: marginal_cost
     title: Equivalent Medlyn slope
@@ -3107,9 +2495,7 @@ equations:
     writes: []
     kind: closed_form
     cite: Medlyn-2011
-    note: 'kPa^0.5, by inverting the USO relation $\chi = g_1/(g_1 + \sqrt{D})$ at the solved $\chi$: operational, not predicted from λ. Comparable with Lin-2015''s fitted values, which use a diffusion ratio of 1.6 where this package uses 1.67. NA for $\chi \ge 1$ or non-finite (not probed: the NA is not a number to compare). Reads the leaf deficit, so it moves with the energy balance.'
-    replica: |
-      function(ci, ca, D) { chi <- ci / ca; chi * sqrt(D) / (1 - chi) }
+    note: 'kPa^0.5, by inverting the USO relation $\chi = g_1/(g_1 + \sqrt{D})$ at the solved $\chi$: operational, not predicted from λ. Comparable with Lin-2015''s fitted values, which use a diffusion ratio of 1.6 where this package uses 1.67. NA for $\chi \ge 1$ or non-finite. Reads the leaf deficit, so it moves with the energy balance.'
   stom_cond_H2O:
     section: marginal_cost
     title: Stomatal conductance to water vapour
@@ -3119,9 +2505,7 @@ equations:
     reads: [H2O_CO2_stom_diff_ratio_]
     writes: []
     kind: closed_form
-    note: 'mol H₂O m⁻² s⁻¹ (#56); bound as `gs_H2O`. The ratio is the settable diffusion ratio, checked at 1.67 and 1.6.'
-    replica: |
-      function(gc, ratio) gc * ratio
+    note: 'mol H₂O m⁻² s⁻¹ (#56); bound as `gs_H2O`. The ratio is the settable diffusion ratio.'
 
   # --- Medlyn route, soil moisture and the closed form ---------------------------
   # --- medlyn -------------------------------------------------------------------
@@ -3135,8 +2519,6 @@ equations:
     writes: []
     kind: closed_form
     note: 'Both Medlyn routes multiply g1 by it. Clamped, so a soil wetter than field capacity is field capacity and one drier than the wilting point is the wilting point. Not bound: read back through medlyn_model_gs at g0 = 0.'
-    replica: |
-      function(theta, theta_fc, theta_w) pmin(pmax((theta - theta_w) / (theta_fc - theta_w), 0), 1)
   medlyn_gs:
     section: medlyn
     title: Medlyn stomatal conductance, on the CO₂ basis
@@ -3146,16 +2528,9 @@ equations:
     also: [phylloptim::Leaf::medlyn_beta]
     reads: [g0, g1, medlyn_ratio, atm_vpd, ca, atm_kpa]
     writes: [medlyn_model_gs_]
-    uses: [medlyn_beta]
     kind: closed_form
     cite: Medlyn-2011
     note: 'Medlyn-2011 eq. 11, the USO form, which is a water-vapour conductance; divided by its 1.6 to the CO₂ basis every other conductance in the leaf is on (#129), so that $A = g_s (c_a - c_i)$ holds for this route too. $c_a$ converted from Pa to µmol mol⁻¹, and $\beta$ on $g_1$, which is the code''s and not the paper''s.'
-    replica: |
-      function(A, g0, g1, D, ca, atm_kpa, theta, theta_fc, theta_w) {
-        beta <- medlyn_beta(theta, theta_fc, theta_w)
-        h2o <- if (D == 0) g0 + 0 * A else g0 + 1.6 * (1 + (g1 * beta) / sqrt(D)) * (A / (ca * (1 / (atm_kpa * 1000 * 1e-6))))
-        h2o / 1.6
-      }
   medlyn_ci_numerical:
     section: medlyn
     title: Medlyn operating point by root-finding
@@ -3166,16 +2541,8 @@ equations:
     also: [phylloptim::Leaf::medlyn_stom_cond_minus_coupled_stom_cond, phylloptim::Leaf::set_medlyn_shutdown_if_closed]
     reads: [atm_kpa, ca, kPa_to_Pa]
     writes: [ci_, assim_colimited_, stom_cond_CO2_]
-    uses: [medlyn_gs, assimilation]
     kind: identity
-    tol: 1.0e-10
-    note: 'Supply equals demand on the CO₂ basis, with both sides multiplied by $(c_a - c_i)$ so the residual stays finite at $c_a$. Brent maximisation of $r$ on $[\Gamma^* c_P, c_a]$, then a root-find from the maximum. Where no root exists ($r \le 0$ everywhere) the closest approach is taken, and a negative conductance there collapses to the closed state, as the optimality routes'' shutdown exits do. Checked by one Newton step on the replica residual from the package''s $c_i$, at a tightened `ci_abs_tol`.'
-    replica: |
-      function(x, p) {
-        A <- assimilation(x, p$vcmax, p$J, p$gamma, p$km, p$theta_c, p$R_d, p$atm_kpa)
-        medlyn_gs(A, p$g0, p$g1, p$D, p$ca, p$atm_kpa, p$theta, p$theta_fc, p$theta_w) * (p$ca - x) -
-          A * (p$atm_kpa * 1000) / 1e6
-      }
+    note: 'Supply equals demand on the CO₂ basis, with both sides multiplied by $(c_a - c_i)$ so the residual stays finite at $c_a$. Brent maximisation of $r$ on $[\Gamma^* c_P, c_a]$, then a root-find from the maximum. Where no root exists ($r \le 0$ everywhere) the closest approach is taken, and a negative conductance there collapses to the closed state, as the optimality routes'' shutdown exits do.'
   medlyn_ci_analytical:
     section: medlyn
     title: Medlyn operating point, closed form
@@ -3185,15 +2552,9 @@ equations:
     also: [phylloptim::Leaf::medlyn_beta, phylloptim::Leaf::set_medlyn_shutdown_if_closed]
     reads: [g1, atm_vpd, ca]
     writes: [ci_, assim_colimited_, stom_cond_CO2_]
-    uses: [medlyn_beta]
     kind: closed_form
     cite: Medlyn-2011
     note: 'Medlyn-2011 eq. 13 with $\beta$ on $g_1$. The same model as the numerical route in the limit $g_0 \to 0$, where it is that route''s root exactly; at the default $g_0$ it drops the $g_0$ term, so its $g_s$ and $c_i$ are mutually consistent only in that limit. Its conductance is the USO form at this $c_i$, on the CO₂ basis.'
-    replica: |
-      function(ca, g1, D, theta, theta_fc, theta_w) {
-        g1b <- g1 * medlyn_beta(theta, theta_fc, theta_w)
-        ca * (g1b / (g1b + sqrt(D)))
-      }
   soil_moisture_state:
     section: soil_moisture
     title: Soil-moisture working copies
@@ -3203,9 +2564,7 @@ equations:
     reads: [theta, theta_fc, theta_w]
     writes: [theta_, theta_fc_, theta_w_]
     kind: closed_form
-    note: 'The tilde marks the working copies `theta_`, `theta_fc_`, `theta_w_`. Every set_physiology overwrites the trailing-underscore working copies from the inputs, so a working copy written directly is undone by the next set_drivers() (the probe writes one first to show it). Both readers, medlyn_model_gs and cf77_price, read the working copies only; the root-water compute path reads none of them.'
-    replica: |
-      function(theta, theta_fc, theta_w) c(theta, theta_fc, theta_w)
+    note: 'The tilde marks the working copies `theta_`, `theta_fc_`, `theta_w_`. Every set_physiology overwrites the trailing-underscore working copies from the inputs, so a working copy written directly is undone by the next set_drivers(). Both readers, medlyn_model_gs and cf77_price, read the working copies only; the root-water compute path reads none of them.'
   cf77_soil_price:
     section: soil_moisture
     title: CF77 price of water with the soil-moisture factor
@@ -3218,15 +2577,7 @@ equations:
     reads: [CF77_soil_beta_, CF77_lambda_, theta, theta_fc, theta_w]
     writes: []
     kind: closed_form
-    note: 'The same $\beta$ as medlyn_gs but CLAMPED at 1, so at and above field capacity the price is plain CF77 exactly and $\lambda$ is a floor. With the gate on, a solve refuses $\theta_{fc} \le \theta_w$ and $\beta \le 0$ (a price at infinity or below zero); the replica returns NA there and the probe pairs the refusal. Read through `lambda_emergent` after an exact CF77 stem solve, which is `lambda_for<CF77>` = this price.'
-    replica: |
-      function(lambda, on, theta, theta_fc, theta_w) {
-        if (!on) return(lambda)
-        if (!(theta_fc > theta_w)) return(NA_real_)
-        beta <- (theta - theta_w) / (theta_fc - theta_w)
-        if (!is.finite(beta) || beta <= 0) return(NA_real_)
-        lambda / (if (beta > 1) 1 else beta)
-      }
+    note: 'The same $\beta$ as medlyn_gs but CLAMPED at 1, so at and above field capacity the price is plain CF77 exactly and $\lambda$ is a floor. With the gate on, a solve refuses $\theta_{fc} \le \theta_w$ and $\beta \le 0$ (a price at infinity or below zero). Readable as `lambda_emergent` after an exact CF77 stem solve, which is `lambda_for<CF77>` = this price.'
 
   # --- closed form ----------------------------------------------------------------
   uso_group:
@@ -3241,11 +2592,7 @@ equations:
     writes: []
     kind: closed_form
     cite: Medlyn-2011
-    note: 'Converts a marginal cost of water (µmol C per kg H₂O) into the USO slope $\xi$. The $3\Gamma^*$ is the electron-transport-limited $dA/dc_i$, so the collapse is an approximation under Rubisco-bound colimitation, at high temperature or low $c_i$. Not bound and its result is never reported: probed through the CF77 closed arm (no iteration, so $\psi^*$ is a function of $Q$ through the chain alone), served rows, `opt_psi_stem_` against closed_form_CF77, at two diffusivity ratios across temperature.'
-    replica: |
-      function(gamma_star, atm_kpa, ratio = 1.67) {
-        3 * gamma_star * (atm_kpa * 1000 * 1e-6) * (1 / 0.018015) / (ratio * 1e-3)
-      }
+    note: 'Converts a marginal cost of water (µmol C per kg H₂O) into the USO slope $\xi$. The $3\Gamma^*$ is the electron-transport-limited $dA/dc_i$, so the collapse is an approximation under Rubisco-bound colimitation, at high temperature or low $c_i$. Not bound and its result is never reported.'
   transpiration_from_assim:
     section: closed_form
     title: Demand-side transpiration
@@ -3255,9 +2602,7 @@ equations:
     reads: [kg_to_mol_h2o, H2O_CO2_stom_diff_ratio_]
     writes: []
     kind: closed_form
-    note: 'Fick''s law inverted for $E$ (kg m⁻² s⁻¹) given $A$ and $c_i$; the 1e-3 carries $P$ = $10^{3}$ Pa per kPa against $c_a$ in Pa, so it is exact only with $P$ cancelling, which it does on this path. Not bound: probed through the CF77 closed arm (served rows, `opt_psi_stem_`, where $\psi^*$ is the supply inversion of this $E$) across deficits.'
-    replica: |
-      function(A, ci, ca, D, ratio = 1.67) ratio * 1e-3 * A * D / ((ca - ci) * (1 / 0.018015))
+    note: 'Fick''s law inverted for $E$ (kg m⁻² s⁻¹) given $A$ and $c_i$; the 1e-3 carries $P$ = $10^{3}$ Pa per kPa against $c_a$ in Pa, so it is exact only with $P$ cancelling, which it does on this path. Not bound.'
   stom_cond_from_E:
     section: closed_form
     title: Conductance from transpiration
@@ -3268,9 +2613,7 @@ equations:
     reads: [atm_kpa, kg_to_mol_h2o, H2O_CO2_stom_diff_ratio_]
     writes: []
     kind: closed_form
-    note: 'UNREACHABLE from R: optimise_into keeps only the solution''s $\psi$, so this value is dropped. Probed through Leaf::stom_cond_CO2, which the code says is the same expression (stomatal_conductance), via `stom_cond_CO2_` after set_leaf_states_rates_from_psi_stem; that the two symbols agree is not itself checked.'
-    replica: |
-      function(E, atm_kpa, D, ratio = 1.67) atm_kpa * E * (1 / 0.018015) / D / ratio
+    note: 'UNREACHABLE from R: optimise_into keeps only the solution''s $\psi$, so this value is dropped. It is the same expression as Leaf::stom_cond_CO2 (stomatal_conductance).'
   dassim_dci:
     section: closed_form
     title: Slope of the colimited assimilation
@@ -3281,20 +2624,7 @@ equations:
     reads: [curv_fact_colim, atm_kpa]
     writes: []
     kind: derivative
-    tol: 1.0e-9
-    note: 'Analytic derivative of the assimilation quadratic, used by the Newton step. Not bound: checked against a central difference of the bound assim_colimited(), $c_i$ 6–38 Pa over the temperature grid. Step sweep, worst absolute difference: $h$ = 1e-2 gives 4.7e-7, 1e-3 gives 4.7e-9, 1e-4 gives 1.3e-10, 1e-5 gives 2.3e-9, 1e-6 gives 3.1e-8 ($h^2$ truncation, then rounding as $\epsilon/h$); the probe uses the floor, $h$ = 1e-4.'
-    replica: |
-      function(ci, vcmax, J, gamma_star, km, theta, atm_kpa) {
-        gs <- gamma_star * (atm_kpa * 1000 * 1e-6)
-        ar <- vcmax * (ci - gs) / (ci + km)
-        ae <- J / 4 * (ci - gs) / (ci + 2 * gs)
-        dar <- vcmax * (km + gs) / ((ci + km) * (ci + km))
-        dae <- J / 4 * 3 * gs / ((ci + 2 * gs) * (ci + 2 * gs))
-        s <- ar + ae
-        ds <- dar + dae
-        disc <- sqrt(s * s - 4 * theta * ar * ae)
-        (ds - (2 * s * ds - 4 * theta * (dar * ae + ar * dae)) / (2 * disc)) / (2 * theta)
-      }
+    note: 'Analytic derivative of the assimilation quadratic, used by the Newton step. Not bound.'
   dlambda_TF24:
     section: closed_form
     title: Slope of TF24's marginal cost
@@ -3305,16 +2635,7 @@ equations:
     reads: [TF24_cost_scale, TF24_beta2, stem_c, stem_b, leaf_specific_conductance_max]
     writes: []
     kind: derivative
-    tol: 1.0e-8
-    note: 'Analytic $d\lambda/d\psi$ of Leaf::lambda_TF24, used by the TF24 and TF24_floor Newton steps (the floor''s constant differentiates away). Not bound: checked against a central difference of the bound lambda_TF24(), both divided by $\lambda$, $\psi$ 0.3–5.5 MPa at $\beta_2$ 0.8, 1.5 and 3. Step sweep, worst absolute difference of the scaled slopes: $h$ = 1e-2 gives 1.3e-1, 1e-3 gives 1.3e-3, 1e-4 gives 1.3e-5, 1e-5 gives 1.3e-7, 1e-6 gives 9.7e-8 (clean $h^2$ to 1e-5, the steep $p^{c-2}$ at 0.3 MPa; rounding below). At $h$ = 1e-5 that is 5.5e-9 relative to the scaled slope, which is the measure checked.'
-    replica: |
-      function(psi, scale, beta2, c, b, kmax) {
-        K <- scale * beta2 * c / (b * kmax)
-        p <- psi / b
-        f <- exp(-p^c)
-        K * p^(c - 2) * ((beta2 - 1) * (1 - f)^(beta2 - 2) * f * c * p^c +
-                           (1 - f)^(beta2 - 1) * (c - 1)) / b
-      }
+    note: 'Analytic $d\lambda/d\psi$ of Leaf::lambda_TF24, used by the TF24 and TF24_floor Newton steps (the floor''s constant differentiates away). Not bound.'
   psi_from_supply:
     section: closed_form
     title: Stem potential from a demanded transpiration
@@ -3325,13 +2646,7 @@ equations:
     reads: [psi_crit]
     writes: []
     kind: closed_form
-    note: 'NOT $E/k_{max}$: $G$ is the cumulative vulnerability integral, so the inversion is the supply spline''s, which the replica takes as an argument (the bound transpiration_to_psi_stem and transpiration) rather than re-deriving. On the stem route $\psi_\mathrm{up}$ is $\psi_\mathrm{soil}$. Not bound: interior rows through the CF77 closed arm''s `opt_psi_stem_`; both clamped branches return a bound potential, which within_guard always rejects, so they are paired as fall-back indicators (dark leaf, $E < 0$; a low price, $E \ge E(\psi_\mathrm{crit})$).'
-    replica: |
-      function(E, psi_up, psi_crit, E_crit, inverse) {
-        if (!isTRUE(E > 0)) return(psi_up)
-        if (!isTRUE(E < E_crit)) return(psi_crit)
-        inverse(E)
-      }
+    note: 'NOT $E/k_{max}$: $G$ is the cumulative vulnerability integral, so the inversion is the supply spline''s (transpiration_to_psi_stem and transpiration). On the stem route $\psi_\mathrm{up}$ is $\psi_\mathrm{soil}$. Not bound. Both clamped branches return a bound potential, which within_guard always rejects (dark leaf, $E < 0$; a low price, $E \ge E(\psi_\mathrm{crit})$).'
   evaluate_at_lambda:
     section: closed_form
     title: Operating point at a marginal cost
@@ -3341,17 +2656,8 @@ equations:
     also: [phylloptim::closed_form::evaluate_at]
     reads: []
     writes: []
-    uses: [assimilation, transpiration_from_assim, stom_cond_from_E]
     kind: closed_form
-    note: 'Assembles the closed form''s solution at the final potential (TF24 and TF24_floor arms; CF77 inlines the same lines). Its $\psi$ is passed through and its $c_i$, $A$ reach only within_guard; the reported `ci_`, `assim_colimited_` and `transpiration_` are the EXACT state at $\psi^*$, not these USO estimates. Probed on the TF24 and TF24_floor arms: served `opt_psi_stem_`, and the fall-back flag against the guard on this $c_i$ over a grid that crosses $c_i/c_a$ = 0.5.'
-    replica: |
-      function(psi, lambda, Q, p) {
-        xi <- sqrt(Q / lambda)
-        ci <- p$ca * xi / (xi + sqrt(p$D))
-        A <- assimilation(ci, p$vcmax, p$J, p$gamma, p$km, p$theta_c, p$R_d, p$atm_kpa)
-        E <- transpiration_from_assim(A, ci, p$ca, p$D, p$ratio)
-        list(psi = psi, ci = ci, A = A, E = E, gs = stom_cond_from_E(E, p$atm_kpa, p$D, p$ratio), xi = xi)
-      }
+    note: 'Assembles the closed form''s solution at the final potential (TF24 and TF24_floor arms; CF77 inlines the same lines). Its $\psi$ is passed through and its $c_i$, $A$ reach only within_guard; the reported `ci_`, `assim_colimited_` and `transpiration_` are the EXACT state at $\psi^*$, not these USO estimates.'
   wet_end_p:
     section: closed_form
     title: Wet-end starting potential
@@ -3362,23 +2668,7 @@ equations:
     reads: []
     writes: []
     kind: closed_form
-    note: 'Comparisons are written `isTRUE()` so a NaN fails them as it does in C++ (a dark leaf gives $C < 0$ and a NaN start, which the guard then rejects). Power-law demand against a supply linearised at the wet end, in units of $b$; each step is clamped strictly inside $(p_\mathrm{up}, p_\mathrm{crit})$. Pure arithmetic on its arguments, so it references no parameter. Not bound: probed through the TF24 closed arm''s `opt_psi_stem_` (served rows) at $\psi_\mathrm{soil}$ from 0 (the $p_\mathrm{up} = 0$ branch) to 3 MPa.'
-    replica: |
-      function(C, p_up, n, p_crit) {
-        p0 <- C^(2 / (n + 2))
-        if (!isTRUE(p_up > 0)) return(p0)
-        p <- p_up + p0
-        for (i in 1:4) {
-          q <- p^(n / 2)
-          h <- (p - p_up) * q - C
-          dh <- q * (1 + 0.5 * n * (p - p_up) / p)
-          if (!isTRUE(dh > 0) || !is.finite(h)) break
-          nxt <- p - h / dh
-          if (!is.finite(nxt)) break
-          p <- min(max(nxt, p_up * (1 + 1e-12) + 1e-12), p_crit)
-        }
-        p
-      }
+    note: 'A dark leaf gives $C < 0$ and a NaN start, which the guard then rejects. Power-law demand against a supply linearised at the wet end, in units of $b$; each step is clamped strictly inside $(p_\mathrm{up}, p_\mathrm{crit})$. Pure arithmetic on its arguments, so it references no parameter. Not bound.'
   closed_form_TF24:
     section: closed_form
     title: Closed form for TF24
@@ -3390,46 +2680,8 @@ equations:
     also: [phylloptim::closed_form::solve_exact_beta2, phylloptim::closed_form::beta2_is_exact]
     reads: [TF24_cost_scale, TF24_beta2, stem_c, stem_b, leaf_specific_conductance_max, psi_crit, H2O_CO2_stom_diff_ratio_, kg_to_mol_h2o]
     writes: []
-    uses: [uso_group, wet_end_p, dlambda_TF24, dassim_dci, assimilation, transpiration_from_assim, evaluate_at_lambda, psi_from_supply, stom_cond_from_E]
     kind: closed_form
-    note: 'Leading order from the wet-end power law, then ONE Newton step on supply minus demand (two are worse in the tail); at $\beta_2 = 1/c$ (to 1e-12) $\lambda$ is constant and only the supply inversion remains. $\lambda(\psi)$ and the supply are the bound lambda_TF24, transpiration and transpiration_to_psi_stem, passed in. Prescribed temperature only (#121). Probed through `opt_psi_stem_` after optimise() with set_model("TF24", "stem", "closed"), served rows only (the guard''s rows are within_guard''s), including $\beta_2 = 1/c$.'
-    replica: |
-      function(p, h, newton_steps = 1) {
-        Q <- uso_group(p$gamma, p$atm_kpa, p$ratio)
-        sD <- sqrt(p$D)
-        if (abs(p$beta2 - 1 / p$c) <= 1e-12 * max(1, 1 / p$c)) {
-          xi <- sqrt(Q * p$b * p$kmax / (p$scale * p$beta2 * p$c))
-          ci <- p$ca * xi / (xi + sD)
-          A <- assimilation(ci, p$vcmax, p$J, p$gamma, p$km, p$theta_c, p$R_d, p$atm_kpa)
-          E <- transpiration_from_assim(A, ci, p$ca, p$D, p$ratio)
-          return(list(psi = psi_from_supply(E, h$psi_up, h$psi_crit, h$E_crit, h$inverse), ci = ci,
-                      A = A, E = E, gs = stom_cond_from_E(E, p$atm_kpa, p$D, p$ratio), xi = xi))
-        }
-        Xi <- sqrt(Q / (p$scale * p$beta2 * p$c / (p$b * p$kmax)))
-        n <- p$c * p$beta2 - 1
-        A_wet <- assimilation(p$ca * (1 - 1e-9), p$vcmax, p$J, p$gamma, p$km, p$theta_c, p$R_d, p$atm_kpa)
-        kappa <- p$ratio * 1e-3 * A_wet / (p$ca * (1 / 0.018015))
-        pp <- wet_end_p(kappa * sD * Xi / (p$kmax * p$b), h$psi_up / p$b, n, h$psi_crit / p$b)
-        for (k in seq_len(newton_steps)) {
-          psi <- pp * p$b
-          if (!isTRUE(psi > h$psi_up) || isTRUE(psi >= h$psi_crit)) break
-          lam <- h$lambda(psi)
-          xi <- sqrt(Q / lam)
-          ci <- p$ca * xi / (xi + sD)
-          A <- assimilation(ci, p$vcmax, p$J, p$gamma, p$km, p$theta_c, p$R_d, p$atm_kpa)
-          dA <- dassim_dci(ci, p$vcmax, p$J, p$gamma, p$km, p$theta_c, p$atm_kpa)
-          u <- p$ca - ci
-          E <- transpiration_from_assim(A, ci, p$ca, p$D, p$ratio)
-          dE_dci <- p$ratio * 1e-3 * p$D / (1 / 0.018015) * (dA * u + A) / (u * u)
-          dci_dxi <- p$ca * sD / ((xi + sD) * (xi + sD))
-          dxi_dpsi <- -0.5 * xi / lam * dlambda_TF24(psi, p$scale, p$beta2, p$c, p$b, p$kmax)
-          R <- h$transpiration(psi) - E
-          dR <- p$kmax * exp(-pp^p$c) - dE_dci * dci_dxi * dxi_dpsi
-          if (isTRUE(dR == 0) || !is.finite(R) || !is.finite(dR)) break
-          pp <- max(h$psi_up, min(psi - R / dR, h$psi_crit * (1 - 1e-9))) / p$b
-        }
-        evaluate_at_lambda(pp * p$b, h$lambda(pp * p$b), Q, p)
-      }
+    note: 'Leading order from the wet-end power law, then ONE Newton step on supply minus demand (two are worse in the tail); at $\beta_2 = 1/c$ (to 1e-12) $\lambda$ is constant and only the supply inversion remains. $\lambda(\psi)$ and the supply are lambda_TF24, transpiration and transpiration_to_psi_stem. Prescribed temperature only (#121).'
   closed_form_CF77:
     section: closed_form
     title: Closed form for CF77
@@ -3440,19 +2692,9 @@ equations:
     also: [phylloptim::Leaf::cf77_price]
     reads: [CF77_lambda_, CF77_soil_beta_]
     writes: []
-    uses: [uso_group, assimilation, transpiration_from_assim, psi_from_supply, stom_cond_from_E]
     kind: closed_form
     cite: Cowan-1977
-    note: 'The $n = 0$ case: $\lambda$ is the CF77 price (with the soil factor when gated), so there is no iteration. "No iteration" is not "exact": the USO collapse''s $3\Gamma^*$ remains, and the guard serves rows with $\psi^*$ off the exact optimum by up to 24% (header table). Probed through `opt_psi_stem_` after optimise() with set_model("CF77", "stem", "closed"), served rows, over $\lambda$, $\psi_\mathrm{soil}$, the soil factor and temperature.'
-    replica: |
-      function(price, p, h) {
-        xi <- sqrt(uso_group(p$gamma, p$atm_kpa, p$ratio) / price)
-        ci <- p$ca * xi / (xi + sqrt(p$D))
-        A <- assimilation(ci, p$vcmax, p$J, p$gamma, p$km, p$theta_c, p$R_d, p$atm_kpa)
-        E <- transpiration_from_assim(A, ci, p$ca, p$D, p$ratio)
-        list(psi = psi_from_supply(E, h$psi_up, h$psi_crit, h$E_crit, h$inverse), ci = ci, A = A, E = E,
-             gs = stom_cond_from_E(E, p$atm_kpa, p$D, p$ratio), xi = xi)
-      }
+    note: 'The $n = 0$ case: $\lambda$ is the CF77 price (with the soil factor when gated), so there is no iteration. "No iteration" is not "exact": the USO collapse''s $3\Gamma^*$ remains, and the guard serves rows with $\psi^*$ off the exact optimum by up to 24% (header table).'
   closed_form_TF24_floor:
     section: closed_form
     title: Closed form for TF24_floor
@@ -3462,39 +2704,8 @@ equations:
     code: phylloptim::closed_form::solve_TF24_floor
     reads: [TF24_floor_lambda_o, psi_crit, leaf_specific_conductance_max, H2O_CO2_stom_diff_ratio_, kg_to_mol_h2o]
     writes: []
-    uses: [uso_group, dlambda_TF24, dassim_dci, assimilation, transpiration_from_assim, evaluate_at_lambda, psi_from_supply, stom_cond_from_E]
     kind: closed_form
-    note: 'Leading order is CF77''s at the price $\lambda_o$ (the lowest this curve charges, so the start is too dry), then one Newton step restoring the TF24 term; $d\lambda/d\psi$ is TF24''s. At the default cost scale the guard serves rows up to 52% off the exact $\psi^*$ (header table). $\lambda(\psi)$, $f(\psi)$ and the supply are the bound lambda_TF24_floor, proportion_of_conductivity, transpiration and transpiration_to_psi_stem, passed in. Probed through `opt_psi_stem_` after optimise() with set_model("TF24_floor", "stem", "closed"), served rows, at three $\lambda_o$.'
-    replica: |
-      function(lambda_o, p, h, newton_steps = 1) {
-        Q <- uso_group(p$gamma, p$atm_kpa, p$ratio)
-        sD <- sqrt(p$D)
-        xi0 <- sqrt(Q / lambda_o)
-        ci0 <- p$ca * xi0 / (xi0 + sD)
-        A0 <- assimilation(ci0, p$vcmax, p$J, p$gamma, p$km, p$theta_c, p$R_d, p$atm_kpa)
-        psi <- min(psi_from_supply(transpiration_from_assim(A0, ci0, p$ca, p$D, p$ratio),
-                                   h$psi_up, h$psi_crit, h$E_crit, h$inverse), h$psi_crit * (1 - 1e-9))
-        for (k in seq_len(newton_steps)) {
-          if (!isTRUE(psi > h$psi_up) || isTRUE(psi >= h$psi_crit)) break
-          lam <- h$lambda(psi)
-          xi <- sqrt(Q / lam)
-          ci <- p$ca * xi / (xi + sD)
-          A <- assimilation(ci, p$vcmax, p$J, p$gamma, p$km, p$theta_c, p$R_d, p$atm_kpa)
-          dA <- dassim_dci(ci, p$vcmax, p$J, p$gamma, p$km, p$theta_c, p$atm_kpa)
-          u <- p$ca - ci
-          E <- transpiration_from_assim(A, ci, p$ca, p$D, p$ratio)
-          dE_dci <- p$ratio * 1e-3 * p$D / (1 / 0.018015) * (dA * u + A) / (u * u)
-          dci_dxi <- p$ca * sD / ((xi + sD) * (xi + sD))
-          dxi_dpsi <- -0.5 * xi / lam * dlambda_TF24(psi, p$scale, p$beta2, p$c, p$b, p$kmax)
-          R <- h$transpiration(psi) - E
-          dR <- p$kmax * h$f(psi) - dE_dci * dci_dxi * dxi_dpsi
-          if (isTRUE(dR == 0) || !is.finite(R) || !is.finite(dR)) break
-          nxt <- psi - R / dR
-          if (!is.finite(nxt)) break
-          psi <- max(h$psi_up, min(nxt, h$psi_crit * (1 - 1e-9)))
-        }
-        evaluate_at_lambda(psi, h$lambda(psi), Q, p)
-      }
+    note: 'Leading order is CF77''s at the price $\lambda_o$ (the lowest this curve charges, so the start is too dry), then one Newton step restoring the TF24 term; $d\lambda/d\psi$ is TF24''s. At the default cost scale the guard serves rows up to 52% off the exact $\psi^*$ (header table). $\lambda(\psi)$, $f(\psi)$ and the supply are lambda_TF24_floor, proportion_of_conductivity, transpiration and transpiration_to_psi_stem.'
   within_guard:
     section: closed_form
     title: The validity guard
@@ -3504,12 +2715,7 @@ equations:
     reads: [psi_crit, ca]
     writes: []
     kind: closed_form
-    note: 'Tests the closed form''s OWN output (its USO $c_i$, not the reported `ci_`), so it is applied after solving, with a fall-back to the whole exact solve that `closed_form_fallbacks_` counts. It guards the expansion, not the model: true never means "right". Probed as the fall-back flag `last_solve_fell_back_` against the replica guard on the replica solution, all three curves, over a grid that reaches every clause ($c_i/c_a \le 0.5$, $\psi^*$ at $\psi_\mathrm{soil}$, at $\psi_\mathrm{crit}$) and both outcomes.'
-    replica: |
-      function(psi, ci, A, ca, psi_soil, psi_crit) {
-        as.numeric(is.finite(psi) && is.finite(ci) && is.finite(A) && ci / ca > 0.5 &&
-                     psi > psi_soil && psi < psi_crit)
-      }
+    note: 'Tests the closed form''s OWN output (its USO $c_i$, not the reported `ci_`), so it is applied after solving, with a fall-back to the whole exact solve that `closed_form_fallbacks_` counts. It guards the expansion, not the model: true never means "right". Its verdict is reported as `last_solve_fell_back_`.'
   optimise_closed:
     section: closed_form
     title: Dispatch and refusals of the closed form
@@ -3521,10 +2727,4 @@ equations:
     reads: [use_energy_balance_, use_thermal_damage_, TF24_floor_lambda_o]
     writes: [opt_psi_stem_, last_solve_fell_back_, closed_form_calls_, closed_form_fallbacks_]
     kind: closed_form
-    note: 'Reached with set_model(curve, "stem", "closed") then optimise(). Every refusal is a stop at solve time, never a NaN (a NaN would read as "fall back" and hide the cause). Only $\psi^*$ comes from the closed form; every other output is written by the exact solve''s own assembly at that $\psi^*$. JS22, CMax and ProfitMax are refused as unimplemented (the inversion exists), SOX, JW26 and LeastCost as impossible (log benefit link). Probed as refusal indicators over every configuration, the degenerate dry-soil branch, and the counters.'
-    replica: |
-      function(curve, collar = FALSE, layers = 1, eb = FALSE, damage = FALSE, lambda_o = 1) {
-        as.numeric(collar || layers != 1 || eb || damage ||
-                     !(curve %in% c("TF24", "CF77", "TF24_floor")) ||
-                     (curve == "TF24_floor" && !(lambda_o > 0)))
-      }
+    note: 'Reached with set_model(curve, "stem", "closed") then optimise(). Every refusal is a stop at solve time, never a NaN (a NaN would read as "fall back" and hide the cause). Only $\psi^*$ comes from the closed form; every other output is written by the exact solve''s own assembly at that $\psi^*$. JS22, CMax and ProfitMax are refused as unimplemented (the inversion exists), SOX, JW26 and LeastCost as impossible (log benefit link).'

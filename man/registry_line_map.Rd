@@ -23,3 +23,4 @@ of all other lines is byte-identical in both streams (docs.yml asserts it),
 and every line Doxygen reports is one of them. So the k-th such line of the
 filtered stream is the k-th of the source, and that is the map.
 }
+\keyword{internal}

@@ -21,8 +21,7 @@
 #
 # ⚠️ Only regenerate DELIBERATELY, and say in the commit message what moved and by
 # how much. Running this after an accidental change rubber-stamps it. The guide to
-# magnitudes is in .claude/CLAUDE.md: ~1e-16 is reassociation, ~1e-9 is the
-# solver floor, ~1e-4 is a real difference.
+# magnitudes (reassociation, solver floor, real difference) is in .claude/CLAUDE.md.
 #
 # ⚠️ RUN THIS ON macOS/arm64 AND NOWHERE ELSE. Like tests/cpp/golden/, the file is
 # bit-exact only on the platform that generated it -- libm's exp/pow are not
@@ -30,15 +29,12 @@
 # test-gradient-batch.R compares with `golden_tolerance()` elsewhere. Regenerating
 # on Linux would just move the failure to the platform the file came from.
 #
-# These are derivatives of outputs evaluated at the ARGMAX of a flat maximum, so
-# they inherit that file's sqrt-amplified class -- and, being finite differences,
-# one amplification more. Measured worst cross-platform disagreement 1.3e-3,
-# against 1.4e-4 for the solved outputs themselves. A central difference cancels
-# the systematic part of a libm difference, not all of it, and what is left is
-# divided by the step: the smallest-magnitude parameter in the file therefore sets
-# the tolerance for all of it, which since #41 is `R_d_25` at 1.44 rather than
+# These are derivatives of outputs evaluated at the ARGMAX, and, being built
+# from central differences, they carry the solve's floor divided by the step: the
+# smallest-magnitude parameter in the file therefore sets the cross-platform
+# tolerance for all of it, which since #41 is `R_d_25` at 1.44 rather than
 # `vcmax_25` at 96. `gradient_golden_tolerance()` in tests/testthat/helper-golden.R
-# carries the arithmetic.
+# carries the arithmetic and the measured figure.
 suppressMessages(library(phylloptim))
 
 # ⚠️ AND SAY WHICH BUILD THAT WAS. `library(phylloptim)` resolves against the

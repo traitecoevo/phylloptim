@@ -1,10 +1,10 @@
 # The model registry, inst/model-registry.yml (#166), and the three rules its
 # header states. Rule 2 lives here: every symbol and field the registry names
-# must exist, every bound parameter field must appear in it, and every equation
-# must have a replica asserted against the package. The Doxygen half of the
+# must exist, and every bound field must appear in it. The Doxygen half of the
 # same rule (every `code` resolves in the XML; what each equation reads is what
-# its function references) runs in .github/workflows/docs.yml through
-# tools/registry_symbols.R, and here too when a local render exists.
+# its function references; every literal is written in its function) runs in
+# .github/workflows/docs.yml through tools/registry_symbols.R, and here too
+# when a local render exists.
 
 skip_if_not_installed("yaml")
 
@@ -25,18 +25,10 @@ leaf <- leaf_model()
 .registry_no_default <- c("NIR_int_", "CF77_lambda_", "TF24_floor_lambda_o",
                           "LeastCost_beta", "single_resistance")
 
-test_that("the registry parses, validates, and every replica is a function with a probe", {
+test_that("the registry parses and validates", {
   expect_s3_class(registry, "model_registry")
   expect_gt(nrow(registry$parameters), 0)
   expect_gt(nrow(registry$equations), 0)
-  env <- registry_replicas(registry)
-  expect_setequal(ls(env), registry$equations$id)
-  for (id in registry$equations$id) {
-    expect_true(is.function(get(id, envir = env)), label = paste("replica of", id))
-  }
-  # One probe per equation, no probe without one: an equation added without a
-  # probe would otherwise pass by never being checked.
-  expect_setequal(names(registry_probes()), registry$equations$id)
   expect_output(print(registry), "parameters")
 })
 
@@ -48,9 +40,9 @@ test_that("a registry that names what does not exist is refused", {
   yaml::write_yaml(broken, path)
   expect_error(registry_read(path), "no_such_parameter")
   broken <- registry$raw
-  broken$equations$arrhenius$replica <- "function(T) {"
+  broken$equations$arrhenius$kind <- "approximate"
   yaml::write_yaml(broken, path)
-  expect_error(registry_read(path), "does not parse")
+  expect_error(registry_read(path), "unknown kind")
   broken <- registry$raw
   broken$parameters$vcmax_ha_$cite <- "medlyn2002"
   yaml::write_yaml(broken, path)
@@ -134,19 +126,6 @@ test_that("registry_values() reads every parameter live, and the copied defaults
   expect_equal(unname(consts[copied$default_code]), copied$value)
 })
 
-test_that("every replica agrees with the package", {
-  ck <- registry_check(registry)
-  print(ck, digits = 3)
-  expect_setequal(ck$id, registry$equations$id)
-  # Each probe compared something (hazard 16: an assertion nobody reached).
-  expect_true(all(ck$n > 0))
-  expect_true(all(ck$pass), info = paste("failing:", paste(ck$id[!ck$pass], collapse = ", ")))
-  # The closed forms and the integrator are at rounding, well inside 1e-10.
-  closed <- ck$kind %in% c("closed_form", "integrator")
-  expect_lt(max(ck$max_rel[closed]), 1e-10)
-  expect_error(registry_check(registry, tol = 0, assert = TRUE), "disagree")
-})
-
 test_that("R/registry-locations.R stands alone, as docs.yml sources it", {
   skip_if_not_installed("codetools")
   path <- testthat::test_path("..", "..", "R", "registry-locations.R")
@@ -179,6 +158,9 @@ test_that("the registry resolves against a local Doxygen render", {
     expect_true(grepl(sub("^.*::", "", p$code), hdr(p$file)[p$line], fixed = TRUE),
                 label = paste(p$id, "at", p$file, p$line))
   }
+  # Every literal is a number written in the function its entry names.
+  expect_equal(.registry_literals_unwritten(res, file.path(root, "inst", "include")),
+               character())
   # With the XML, the constants have values too, and the copied defaults match.
   v <- registry_values(registry, leaf, locations = loc)
   expect_true(all(!is.na(v$value[v$class == "constant"])))

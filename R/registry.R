@@ -1,15 +1,13 @@
-# The model registry's live half: the registry as data frames, its replicas,
-# the parameters' values read off the package, and the check that every
-# replica agrees with the package. The pure half (reading the YAML, Doxygen
-# locations) is R/registry-locations.R; the probes that drive the package for
-# each equation are R/registry-probes.R.
+# The model registry's live half: the registry as data frames and the
+# parameters' values read off the package. The pure half (reading the YAML,
+# Doxygen locations) is R/registry-locations.R.
 
 #' The model registry
 #'
-#' phylloptim's leaf as one record: every equation (its LaTeX,
-#' the C++ symbol that evaluates it, the parameters it reads, the bound fields
-#' it writes, a base-R replica) and every parameter (symbol, units, class,
-#' meaning, source, placeholder flag, the symbol that holds it). The file is
+#' phylloptim's leaf as one record: every equation (its LaTeX, the C++ symbol
+#' that evaluates it, the parameters it reads, the bound fields it writes) and
+#' every parameter (symbol, units, class, meaning, source, placeholder flag, the
+#' symbol that holds it). The file is
 #' `inst/model-registry.yml`; documents are generated from it rather than
 #' written beside it, and CI checks it (`tests/testthat/test-registry.R`,
 #' `docs.yml`). Its header states the three rules it is kept by: no stored line
@@ -18,11 +16,10 @@
 #' @param path the YAML file; the package's own by default
 #' @return an object of class `model_registry`: `package`, `sections` (a data
 #'   frame of `id` and `title`), `parameters` and `equations` (data frames, one
-#'   row each, with list-columns for `reads`, `writes`, `also`, `uses` and
-#'   `aliases`), `diagnostics` (the bound fields that are neither), `raw` (the
+#'   row each, with list-columns for `reads`, `writes`, `also` and `aliases`),
+#'   `diagnostics` (the bound fields that are neither), `raw` (the
 #'   validated list) and `path`
 #' @seealso [registry_values()] for the values at render time,
-#'   [registry_check()] for the replicas against the package,
 #'   [registry_resolve()] for file, line and API link from Doxygen's XML
 #' @examples
 #' reg <- model_registry()
@@ -55,47 +52,11 @@ print.model_registry <- function(x, ...) {
   invisible(x)
 }
 
-#' The replicas, as functions
-#'
-#' Every equation's `replica` evaluated in one environment whose parent is the
-#' base environment, so a replica can call another by its id
-#' (`damage_rates` calls `impairment_rate`) and nothing else: no package
-#' internals, which is the point of a replica.
-#'
-#' @param registry a [model_registry()]
-#' @param id an equation id
-#' @return `registry_replicas()`: an environment holding one function per
-#'   equation id. `registry_replica()`: that one function.
-#' @export
-registry_replicas <- function(registry) {
-  env <- new.env(parent = baseenv())
-  for (i in seq_len(nrow(registry$equations))) {
-    assign(registry$equations$id[i],
-           eval(parse(text = registry$equations$replica[i]), env), envir = env)
-  }
-  env
-}
-
-#' @rdname registry_replicas
-#' @export
-registry_replica <- function(registry, id) {
-  env <- registry_replicas(registry)
-  if (!exists(id, envir = env, inherits = FALSE)) {
-    stop("no equation `", id, "` in the registry", call. = FALSE)
-  }
-  get(id, envir = env, inherits = FALSE)
-}
-
 # The bound fields the registry accounts for: parameters' fields, what equations
 # write, and the diagnostics.
 .registry_covered <- function(registry) {
   unique(c(registry$parameters$field[!is.na(registry$parameters$field)],
            unlist(registry$equations$writes), registry$diagnostics$id))
-}
-
-# The bound field a `phylloptim::Leaf::` symbol names, or NA.
-.registry_field <- function(code) {
-  ifelse(grepl("^phylloptim::Leaf::", code), sub("^phylloptim::Leaf::", "", code), NA_character_)
 }
 
 # The constexprs' values from Doxygen's initializers, which may name one another
@@ -173,87 +134,4 @@ registry_values <- function(registry, leaf = leaf_model(), locations = NULL) {
   p$value_source <- src
   p$value_vector <- vectors
   p
-}
-
-# The probes registry_check() runs: `.registry_probes` (R/registry-probes.R) and
-# every `.registry_probes_<section>` list beside it, collected here at call time
-# so the files' collation order does not matter. A caller drafting new entries
-# can add probes without editing the package, through
-# options(phylloptim.registry_probes = list(<id> = function(rep, temps) ...)).
-registry_probes <- function() {
-  ns <- environment(registry_probes)
-  lists <- c(list(.registry_probes),
-             mget(sort(ls(ns, all.names = TRUE, pattern = "^\\.registry_probes_")), envir = ns))
-  out <- do.call(c, unname(lists))
-  dup <- unique(names(out)[duplicated(names(out))])
-  if (length(dup)) stop("two probes for: ", paste(dup, collapse = ", "), call. = FALSE)
-  extra <- getOption("phylloptim.registry_probes")
-  if (is.null(extra)) out else utils::modifyList(out, extra)
-}
-
-#' Check every replica against the package
-#'
-#' Runs each equation's probe (`R/registry-probes.R`), which drives a `Leaf`
-#' and reads the quantity back, and compares it with the registry's replica of
-#' the printed equation on a grid. One row per equation: the worst absolute and
-#' relative disagreement, where relative is to the package value floored at 1 so
-#' a quantity passing through zero is judged absolutely. An equation passes if
-#' either is within its tolerance: `tol` unless the entry sets its own (an
-#' identity or a derivative, which a finite difference cannot pin to 1e-10).
-#'
-#' @param registry a [model_registry()]
-#' @param temps the leaf temperatures of the grid, deg C
-#' @param tol the tolerance for an entry that sets none
-#' @param ids the equation ids to check; all of them by default
-#' @param assert stop, naming the failures, if any entry fails
-#' @return a data frame: `id`, `kind`, `n` (comparisons made), `max_abs`,
-#'   `max_rel`, `tol`, `pass`
-#' @examples
-#' \donttest{
-#' registry_check()
-#' }
-#' @export
-registry_check <- function(registry = model_registry(), temps = seq(0, 50, by = 2.5),
-                           tol = 1e-10, ids = NULL, assert = FALSE) {
-  rep <- registry_replicas(registry)
-  eq <- registry$equations
-  if (!is.null(ids)) {
-    unknown <- setdiff(ids, eq$id)
-    if (length(unknown)) {
-      stop("registry_check(): no equation ", paste(unknown, collapse = ", "), call. = FALSE)
-    }
-    eq <- eq[eq$id %in% ids, , drop = FALSE]
-  }
-  rows <- lapply(seq_len(nrow(eq)), function(i) {
-    id <- eq$id[i]
-    probe <- registry_probes()[[id]]
-    if (is.null(probe)) {
-      stop("registry_check(): equation `", id, "` has no probe in R/registry-probes.R",
-           call. = FALSE)
-    }
-    cmp <- probe(rep, temps)
-    pkg <- as.numeric(cmp$pkg)
-    mine <- as.numeric(cmp$mine)
-    if (!length(pkg) || length(pkg) != length(mine)) {
-      stop("registry_check(): the probe for `", id, "` returned ", length(pkg),
-           " package values against ", length(mine), " replica values", call. = FALSE)
-    }
-    if (!all(is.finite(pkg)) || !all(is.finite(mine))) {
-      stop("registry_check(): a non-finite value in the probe for `", id, "`", call. = FALSE)
-    }
-    a <- abs(pkg - mine)
-    r <- a / pmax(abs(pkg), 1)
-    t <- if (is.na(eq$tol[i])) tol else eq$tol[i]
-    data.frame(id = id, kind = eq$kind[i], n = length(pkg), max_abs = max(a),
-               max_rel = max(r), tol = t, pass = max(r) <= t || max(a) <= t,
-               stringsAsFactors = FALSE)
-  })
-  out <- do.call(rbind, rows)
-  rownames(out) <- NULL
-  if (assert && !all(out$pass)) {
-    stop("registry_check(): replicas disagree with the package beyond their tolerance:\n",
-         paste(utils::capture.output(print(out[!out$pass, ])), collapse = "\n"),
-         call. = FALSE)
-  }
-  out
 }

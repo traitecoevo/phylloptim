@@ -125,7 +125,8 @@ jobs:
       # The model registry (inst/model-registry.yml) names C++ symbols and never
       # a line. This resolves every one of them in the XML just rendered, maps
       # the filtered line numbers back to the source, checks what each equation
-      # reads against what its function references, and writes the resolved
+      # reads against what its function references and that every literal is
+      # written in its function, and writes the resolved
       # registry into the site so a document can link to the API without a
       # Doxygen run of its own. R is installed for that alone: the two packages
       # are RSPM binaries and nothing is compiled.

@@ -10,14 +10,13 @@ registry_read(path)
 \item{path}{the YAML file}
 }
 \value{
-the validated list, with \code{literal} and \code{tol} coerced to numeric
+the validated list, with \code{literal} coerced to numeric
 }
 \description{
 Reads \code{inst/model-registry.yml} (or another registry in the same schema) and
 validates it: every section, class and kind is one of the allowed set, every
-\code{reads} names a parameter, every \code{uses} names an equation, every replica
-parses to a function, and every numeric is finite. The schema is written at
-the top of the file.
+\code{reads} names a parameter, and every numeric is finite. The schema is written
+at the top of the file.
 }
 \details{
 This is the raw list. \code{\link[=model_registry]{model_registry()}} is the same registry as a pair of
@@ -26,3 +25,4 @@ data frames, which is what documents want.
 \seealso{
 \code{\link[=model_registry]{model_registry()}}, \code{\link[=registry_resolve]{registry_resolve()}}
 }
+\keyword{internal}

@@ -14,15 +14,15 @@ model_registry(
 \value{
 an object of class \code{model_registry}: \code{package}, \code{sections} (a data
 frame of \code{id} and \code{title}), \code{parameters} and \code{equations} (data frames, one
-row each, with list-columns for \code{reads}, \code{writes}, \code{also}, \code{uses} and
-\code{aliases}), \code{diagnostics} (the bound fields that are neither), \code{raw} (the
+row each, with list-columns for \code{reads}, \code{writes}, \code{also} and \code{aliases}),
+\code{diagnostics} (the bound fields that are neither), \code{raw} (the
 validated list) and \code{path}
 }
 \description{
-phylloptim's leaf as one record: every equation (its LaTeX,
-the C++ symbol that evaluates it, the parameters it reads, the bound fields
-it writes, a base-R replica) and every parameter (symbol, units, class,
-meaning, source, placeholder flag, the symbol that holds it). The file is
+phylloptim's leaf as one record: every equation (its LaTeX, the C++ symbol
+that evaluates it, the parameters it reads, the bound fields it writes) and
+every parameter (symbol, units, class, meaning, source, placeholder flag, the
+symbol that holds it). The file is
 \code{inst/model-registry.yml}; documents are generated from it rather than
 written beside it, and CI checks it (\code{tests/testthat/test-registry.R},
 \code{docs.yml}). Its header states the three rules it is kept by: no stored line
@@ -35,6 +35,5 @@ subset(reg$equations, section == "respiration", c(id, title, code))
 }
 \seealso{
 \code{\link[=registry_values]{registry_values()}} for the values at render time,
-\code{\link[=registry_check]{registry_check()}} for the replicas against the package,
 \code{\link[=registry_resolve]{registry_resolve()}} for file, line and API link from Doxygen's XML
 }

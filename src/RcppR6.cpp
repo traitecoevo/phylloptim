@@ -84,14 +84,6 @@ double Leaf__leaf_temp_from_E(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_,
   return obj_->leaf_temp_from_E(E);
 }
 // [[Rcpp::export]]
-double Leaf__saturation_vapour_pressure(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double temp) {
-  return obj_->saturation_vapour_pressure(temp);
-}
-// [[Rcpp::export]]
-double Leaf__saturation_vapour_pressure_slope(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double temp) {
-  return obj_->saturation_vapour_pressure_slope(temp);
-}
-// [[Rcpp::export]]
 void Leaf__set_leaf_states_rates_from_psi_stem(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_stem, double psi_upstream) {
   obj_->set_leaf_states_rates_from_psi_stem(psi_stem, psi_upstream);
 }

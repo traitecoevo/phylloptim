@@ -7,14 +7,15 @@
 #
 #   Rscript tools/registry_symbols.R docs/xml docs/html/model-registry.yml
 #
-# Three things are checked. Every `code` (and `also`) symbol the registry names
+# Four things are checked. Every `code` (and `also`) symbol the registry names
 # resolves to a member in the XML, so a rename in the headers that the registry
 # did not follow fails here. Every resolved line maps back to the source
 # through the filter's line map, which refuses a header whose code lines the
-# filter altered. And every parameter an equation `reads` is referenced by the
+# filter altered. Every parameter an equation `reads` is referenced by the
 # equation's function (Doxygen's REFERENCES_RELATION), so an equation that
 # quietly stopped reading a parameter, or started reading one not registered,
-# fails here. The second argument, if given, receives the resolved registry:
+# fails here. And every `literal:` is a number written in the body of the
+# function its entry names, so a constant changed on one side only fails here. The second argument, if given, receives the resolved registry:
 # every parameter and equation with its file, line, body span, API anchor and
 # initializer, for a document that wants to link without a Doxygen run of its
 # own.
@@ -53,12 +54,17 @@ if (nrow(res$unreferenced)) {
        call. = FALSE)
 }
 
+unwritten <- .registry_literals_unwritten(res, file.path(root, "inst", "include"))
+if (length(unwritten)) {
+  stop("literals not written in the function their entry names: ",
+       paste(unwritten, collapse = ", "), call. = FALSE)
+}
+
 cat(sprintf("model registry: %d parameters and %d equations resolved against %d symbols\n",
             nrow(res$parameters), nrow(res$equations), nrow(locations)))
 
 if (!is.na(out_path)) {
   strip <- function(df) {
-    df$replica <- NULL
     lapply(seq_len(nrow(df)), function(i) {
       row <- lapply(df[i, , drop = FALSE], function(col) {
         v <- if (is.list(col)) col[[1]] else col

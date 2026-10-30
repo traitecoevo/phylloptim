@@ -1,16 +1,49 @@
-# phylloptim 0.15.5
+# phylloptim 0.16.3
 
 ## The model registry: equations, parameters and code links from one YAML (#166)
 
-`inst/model-registry.yml` holds the leaf as one record: 114 equations, each with its LaTeX, the C++ symbol that evaluates it, the parameters it reads, the bound fields it writes and a base-R replica of the printed form; and 132 parameters, each with symbol, units, class, meaning, source and a placeholder flag. Fourteen sections run from the drivers through the vulnerability curves and the water supply, the biochemistry, respiration, water vapour and energy balance, the solve and its first-order conditions, the nine cost curves and the marginal cost of water, the soil-moisture price, the Medlyn route and the closed form, to the thermal-damage layer. Documents are generated from it rather than written beside it.
+`inst/model-registry.yml` holds the leaf as one record: 114 equations, each with its LaTeX, the C++ symbol that evaluates it, the parameters it reads and the bound fields it writes; and 132 parameters, each with symbol, units, class, meaning, source and a placeholder flag. Fourteen sections run from the drivers to the thermal-damage layer. Documents are generated from it rather than written beside it.
 
-It stores no line number and no default value. `registry_resolve()` reads each symbol's file, line, body span and API anchor from Doxygen's XML, which the `Doxyfile` now emits with the references relation. `registry_values()` reads each value off a live `Leaf`, off `set_drivers()`'s defaults, or off a constexpr's initializer in that XML. `model_registry()` returns the registry as data frames, `registry_check()` runs every replica against the package, and `registry_replica()` hands one back as a function. The schema and the three rules the file is kept by are in its header.
+It stores no line number and no default value. `registry_resolve()` reads each symbol's file, line, body span and API anchor from Doxygen's XML, which the `Doxyfile` now emits with the references relation. `registry_values()` reads each value off a live `Leaf`, off `set_drivers()`'s defaults, or off a constexpr's initializer in that XML. `model_registry()` returns the registry as data frames.
 
-CI checks it two ways. `tests/testthat/test-registry.R` asserts that every symbol and field the registry names exists, that every bound field of the `Leaf` is accounted for, and that every replica agrees with the package. `docs.yml` resolves every symbol in the XML through `tools/registry_symbols.R`, maps line numbers from the filtered stream Doxygen parsed back to the source, checks that what each equation reads is what its function references, and writes the resolved registry into the site as `model-registry.yml`.
+CI checks it two ways. `tests/testthat/test-registry.R` asserts that every symbol and field the registry names exists and that every bound field of the `Leaf` is accounted for. `docs.yml` resolves every symbol in the XML through `tools/registry_symbols.R`, checks that what each equation reads is what its function references and that every literal is written in its function, and writes the resolved registry into the site as `model-registry.yml`.
 
-Measured by that check, the 95 closed forms agree with the package to 3.6e-11 relative or better. The other 19 entries are typed `identity`, `derivative` or `integrator` and carry a tolerance set by a step sweep recorded in their notes. Writing those replicas found the defects 0.15.3 and 0.15.4 fix, and the entries describe the fixed code.
+The registry records the model and does not test it: there is no second implementation of the equations. Two tests cover what one would have caught and the suites did not: the closed form's CF77 arm is checked as the identity its USO collapse defines, and `lambda_molar` against its units. No numerics change; the golden baselines are bit-identical. The comment explaining Medlyn's closed state now sits on `set_medlyn_shutdown_if_closed()`, not on `medlyn_beta()`.
 
-Two methods are bound for the check, `saturation_vapour_pressure(temp)` and `saturation_vapour_pressure_slope(temp)`. No numerics change; the golden baselines are bit-identical.
+# phylloptim 0.16.2
+
+## The Medlyn route reports a CO2-basis conductance (#129)
+
+`medlyn_model_gs` returns the Medlyn (2011) USO expression, which is a **water vapour** conductance -- that is what the 1.6 in it is for, and what published `g1` values are fitted against. Both `solve_medlyn_ci_*` stored it in `stom_cond_CO2_` without converting, so that field came back **1.6x high** on this route. Checked against the model's own outputs, `A = gs*(ca - ci)` was violated by 1.5984-1.6004 across VPD 1-4 and two soil-moisture levels, where the optimality routes satisfy it to 1.00000.
+
+`ci_`, `assim_colimited_` and everything downstream of them are **unchanged**: the solver residual carried a compensating factor, so scaling both sides leaves the root where it was. Only the stored conductance moves. All three golden files are bit-identical and the R suite is unchanged at 1371 passing.
+
+The divisor is 1.6, not `H2O_CO2_stom_diff_ratio_` (1.67): the residual converts with 1.6, so 1.67 would report a conductance inconsistent with the `ci` returned -- a systematic -4.2% violation instead of a 60% one. It is a named constant now, `Leaf::medlyn_H2O_CO2_ratio`, used in all three places that have to agree.
+
+Three smaller defects in the same function, all found while measuring the first:
+
+- **The zero-deficit guard read the wrong variable.** It tested the `atm_vpd` input field while the expression below read the driven `atm_vpd_`, so a leaf driven at zero deficit took the else-branch and returned `Inf` from `sqrt(0)` -- the input is still at its 2.0 default and so never looks like zero.
+- **`solve_medlyn_ci_analytical` ignored the soil-moisture factor.** `beta` multiplies `g1` in the coupled route but not in the closed form, so the two entry points disagreed about whether the model has a soil-moisture response at all: chi frozen at 0.645 against 0.681 to 0.446 over beta in [0.2, 1]. At `beta == 1` the value is unchanged, so only a soil-moisture sweep moves.
+- **The soil-moisture factor is clamped to [0, 1]**, on both routes, through one function, `medlyn_beta()`. Unclamped, a soil wetter than field capacity scaled `g1` above its fitted value (theta 0.6 against field capacity 0.5 gave beta 1.33) and one drier than the wilting point gave a negative `g1` term. Inside [wilting point, field capacity] every value is bit-identical.
+- **Neither route can report a negative conductance now.** With `g0 = 0` near the wilting point the USO expression goes negative, and the numerical route's "closest approach" exit returned it silently (gs = -3.95e-06). It collapses to the class's closed state instead -- no water moving, ci at the compensation point, still respiring.
+
+⚠️ **The two entry points are two forms of ONE model**, which is now asserted rather than assumed: the coupled solve converges on the closed form as `g0 -> 0` (chi agreeing to 1e-6, against a gap of 0.036 at the default `g0`). The remaining gap IS the `g0` term the closed form drops. A consequence worth knowing when reading output: the analytical route's `gs` and `ci` are mutually consistent only in that limit, running 1.084 to 1.316 on the diffusion identity at the default `g0`. That is the approximation, not a units error, and it is pinned so the two cannot be confused.
+
+This route had **no tests and no golden coverage**, which is how a 1.6x error survived in shipped code; `tests/testthat/test-medlyn.R` is the first, and the regression test is the substantive part of this change rather than the arithmetic.
+
+# phylloptim 0.16.1
+
+## The ci root-find is solved to 1e-13
+
+`psi_stem_to_ci`'s fixed tolerance goes from 1e-10 to 1e-13 (#172). Where the root-finder stops inside its tolerance band depends on the state, so at 1e-10 every reported output was noisy along a smooth path through the drivers: up to 3.7e-11 relative along plant height, where plant takes finite differences of the leaf at a step of 1e-7 and so read an error of 1e-4. The IFT trait gradient inherited the same noise through its own central differences of `dprofit`, and on `gradient_golden.tsv`'s one-layer interior case it was wrong by up to 2.3e-3 relative; it now matches a Richardson-extrapolated difference of the solve to 1e-8. A solve and a gradient each cost about 5% more.
+
+**What moves:** the three C++ golden files, at most 3.1e-8 absolute in `profit` and 2.1e-9 Pa in `ci`, with no point changing status, kind or branch; in `primitives.tsv` only the iterative tier moves. `gradient_golden.tsv` moves on its one-layer interior case only, by up to 2.3e-3, toward the reference. `ci_abs_tol` is unchanged and still reaches only the Medlyn route.
+
+# phylloptim 0.16.0
+
+## odelia's reverse-mode names, at 0.10.0
+
+`LinkingTo: odelia (>= 0.10.0)`, the release that renames its reverse-mode API (traitecoevo/odelia#66). The leaf records onto an `odelia::ode::adjoint_scalar` (was `active_scalar`) and puts its supplied rows on the consumer's tape with `odelia::supply_derivatives` (was `record_with_derivatives`). A value and its slope in the collar potential is `odelia::with_slope<T>` (was `value_with_slope<T>`), named directly: `Leaf::pair<T>`, which only renamed it, is gone. A direction is set with `odelia::ode::set_direction` (was `seed_direction`), and "seed" in the derivative sense is gone from the comments: a trait carries a direction, and a sweep starts from an adjoint. A **minor** bump, because the floor moves and `Leaf::pair` is gone. No number moves.
 
 # phylloptim 0.15.4
 
@@ -36,24 +69,19 @@ It is now `lambda_collar_for<K>()`, the same chain rule for every curve. The col
 
 # phylloptim 0.15.3
 
-## The Medlyn route reports a CO2-basis conductance (#129)
+## The root curve's derivative answers past its dry end
 
-`medlyn_model_gs` returns the Medlyn (2011) USO expression, which is a **water vapour** conductance -- that is what the 1.6 in it is for, and what published `g1` values are fitted against. Both `solve_medlyn_ci_*` stored it in `stom_cond_CO2_` without converting, so that field came back **1.6x high** on this route. Checked against the model's own outputs, `A = gs*(ca - ci)` was violated by 1.5984-1.6004 across VPD 1-4 and two soil-moisture levels, where the optimality routes satisfy it to 1.00000.
+A soil layer drier than the root curve's last knot (6.89 MPa at the defaults) no longer refuses the derivative path with `stem_curve_domain`. The rows are those of what the table returns there: the last knot's tangent up to G(inf), whose trait rows are G's at the knot, and G(inf) beyond it, with `dG(inf)/db = Gamma(1 + 1/c)` and a digamma row in `c`. The conductivity read past the knot has no row, since the curve there is the 1% floor for every trait. The stem table instead reads the closed form past its last knot (0.14.1), so its rows there are the closed form's; `closed_form_integral()` and `closed_form_curve()` now take a `PastLastKnot` argument naming which tail the table has, and each call site states it. Values are untouched: the golden grid is byte-identical.
 
-`ci_`, `assim_colimited_` and everything downstream of them are **unchanged**: the solver residual carried a compensating factor, so scaling both sides leaves the root where it was. Only the stored conductance moves. All three golden files are bit-identical and the R suite is unchanged at 1371 passing.
+## A determined collar answers the derivative path
 
-The divisor is 1.6, not `H2O_CO2_stom_diff_ratio_` (1.67): the residual converts with 1.6, so 1.67 would report a conductance inconsistent with the `ci` returned -- a systematic -4.2% violation instead of a 60% one. It is a named constant now, `Leaf::medlyn_H2O_CO2_ratio`, used in all three places that have to agree.
+Where the feasible interval collapses and the collar is held at its midpoint, `collar_at()` no longer refuses with "no operating point to place at one that is determined". The collar's rows are the mean of its two bounds' rows: the wet bound's, and the dry bound's from whichever limit closed it, the continuity root or the root's own critical potential. The stem there sits at its own optimum with the collar held, not at continuity with the draw, so `collar_coords_at()` places it at `psi_crit` with no response to the collar; placed by continuity, profit's row in `root_P50` read 0.053 where a difference of the solve gives -0.83. A stem optimum inside its interval is refused by name. Each bound's row is taken at that bound's own root, not at the midpoint where the draw was taken, up to 5e-4 MPa away: the draw is carried to the root along its slope, and the residual's slope is the supply's at the root. Taken at the midpoint, the collar's row along `psi_soil` read 0.50004 where its bounds give 0.5 exactly; now every collar row matches a difference of the solve to 2e-8.
 
-Three smaller defects in the same function, all found while measuring the first:
+Both bounds are now polished to collar precision before the midpoint is taken, as a pinned bound already is. Left at the bracket's 1e-4 tolerance, the continuity bound sat up to 5.6e-7 MPa from its root, and a difference of the solve along `root_P50` read 0.014 where the row, and a difference of the polished solve, give -1.6e-6. So a determined collar moves by up to 2.8e-7 MPa, and a stem conductance of 1e-30, refused before as `stem_curve_domain`, is now solved as a determined point. No other point moves: the golden grid has no determined point and is byte-identical.
 
-- **The zero-deficit guard read the wrong variable.** It tested the `atm_vpd` input field while the expression below read the driven `atm_vpd_`, so a leaf driven at zero deficit took the else-branch and returned `Inf` from `sqrt(0)` -- the input is still at its 2.0 default and so never looks like zero.
-- **`solve_medlyn_ci_analytical` ignored the soil-moisture factor.** `beta` multiplies `g1` in the coupled route but not in the closed form, so the two entry points disagreed about whether the model has a soil-moisture response at all: chi frozen at 0.645 against 0.681 to 0.446 over beta in [0.2, 1]. At `beta == 1` the value is unchanged, so only a soil-moisture sweep moves.
-- **The soil-moisture factor is clamped to [0, 1]**, on both routes, through one function, `medlyn_beta()`. Unclamped, a soil wetter than field capacity scaled `g1` above its fitted value (theta 0.6 against field capacity 0.5 gave beta 1.33) and one drier than the wilting point gave a negative `g1` term. Inside [wilting point, field capacity] every value is bit-identical.
-- **Neither route can report a negative conductance now.** With `g0 = 0` near the wilting point the USO expression goes negative, and the numerical route's "closest approach" exit returned it silently (gs = -3.95e-06). It collapses to the class's closed state instead -- no water moving, ci at the compensation point, still respiring.
+## `uniroot()` refuses a bisection that spends its budget
 
-⚠️ **The two entry points are two forms of ONE model**, which is now asserted rather than assumed: the coupled solve converges on the closed form as `g0 -> 0` (chi agreeing to 1e-6, against a gap of 0.036 at the default `g0`). The remaining gap IS the `g0` term the closed form drops. A consequence worth knowing when reading output: the analytical route's `gs` and `ci` are mutually consistent only in that limit, running 1.084 to 1.316 on the diffusion identity at the default `g0`. That is the approximation, not a units error, and it is pinned so the two cannot be confused.
-
-This route had **no tests and no golden coverage**, which is how a 1.6x error survived in shipped code; `tests/testthat/test-medlyn.R` is the first, and the regression test is the substantive part of this change rather than the arithmetic.
+`uniroot()` checked `it > max_iterations`, which cannot fire: boost's `bisect` reports the iterations it used and never exceeds its budget. It now checks `>=`, as `uniroot_smooth()` does. Its one caller, the Medlyn ci solve, needs a few tens of halvings to reach `ci_abs_tol` against a default budget of 1000, so no solve that finished before refuses now.
 
 # phylloptim 0.15.2
 

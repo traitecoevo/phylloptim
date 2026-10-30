@@ -28,17 +28,16 @@
 #'
 #' Reads `inst/model-registry.yml` (or another registry in the same schema) and
 #' validates it: every section, class and kind is one of the allowed set, every
-#' `reads` names a parameter, every `uses` names an equation, every replica
-#' parses to a function, and every numeric is finite. The schema is written at
-#' the top of the file.
+#' `reads` names a parameter, and every numeric is finite. The schema is written
+#' at the top of the file.
 #'
 #' This is the raw list. [model_registry()] is the same registry as a pair of
 #' data frames, which is what documents want.
 #'
 #' @param path the YAML file
-#' @return the validated list, with `literal` and `tol` coerced to numeric
+#' @return the validated list, with `literal` coerced to numeric
 #' @seealso [model_registry()], [registry_resolve()]
-#' @export
+#' @keywords internal
 registry_read <- function(path) {
   if (!requireNamespace("yaml", quietly = TRUE)) {
     stop("registry_read() needs the yaml package", call. = FALSE)
@@ -103,29 +102,21 @@ registry_read <- function(path) {
   for (id in eids) {
     e <- raw$equations[[id]]
     what <- paste0("equation `", id, "`")
-    need(e, c("section", "title", "latex", "reads", "writes", "kind", "replica"), what)
+    need(e, c("section", "title", "latex", "reads", "writes", "kind"), what)
     if (!"code" %in% names(e)) fail(what, ": needs code (a symbol, or ~ for none)")
     if (!e$section %in% sections) fail(what, ": unknown section ", e$section)
     if (!e$kind %in% .registry_kinds) fail(what, ": unknown kind ", e$kind)
     unknown <- setdiff(.registry_character(e$reads), pids)
     if (length(unknown)) fail(what, ": reads unknown parameters ", paste(unknown, collapse = ", "))
-    unknown <- setdiff(.registry_character(e$uses), eids)
-    if (length(unknown)) fail(what, ": uses unknown equations ", paste(unknown, collapse = ", "))
     if (!is.null(e$cite) && !grepl(.registry_cite_pattern, e$cite)) {
       fail(what, ": cite is not a Zotero key (Surname-Year): ", e$cite)
-    }
-    f <- tryCatch(eval(parse(text = e$replica), new.env(parent = baseenv())),
-                  error = function(err) fail(what, ": replica does not parse: ", conditionMessage(err)))
-    if (!is.function(f)) fail(what, ": replica is not a function")
-    if (!is.null(e$tol)) {
-      raw$equations[[id]]$tol <- .registry_number(e$tol, paste(what, "tol"))
     }
   }
   raw
 }
 
 # The registry as two data frames, one row per parameter and per equation. The
-# list-valued fields (reads, writes, also, uses, aliases) are list-columns.
+# list-valued fields (reads, writes, also, aliases) are list-columns.
 registry_tables <- function(raw) {
   opt <- function(x, key, default = NA_character_) {
     v <- x[[key]]
@@ -162,11 +153,9 @@ registry_tables <- function(raw) {
     code = vapply(raw$equations, function(e) opt(e, "code"), ""),
     kind = vapply(raw$equations, function(e) e$kind, ""),
     cite = vapply(raw$equations, function(e) opt(e, "cite"), ""),
-    tol = vapply(raw$equations, function(e) opt(e, "tol", NA_real_), 0),
     note = vapply(raw$equations, function(e) opt(e, "note"), ""),
-    replica = vapply(raw$equations, function(e) e$replica, ""),
     stringsAsFactors = FALSE, row.names = NULL)
-  for (key in c("reads", "writes", "also", "uses")) {
+  for (key in c("reads", "writes", "also")) {
     equations[[key]] <- lapply(raw$equations, function(e) .registry_character(e[[key]]))
   }
   dids <- names(raw$diagnostics)
@@ -191,7 +180,7 @@ registry_tables <- function(raw) {
 #' @param filter path of the awk filter
 #' @return an integer vector as long as the filtered stream: for each filtered
 #'   line, the source line it is, or `NA` for a comment line
-#' @export
+#' @keywords internal
 registry_line_map <- function(header, filter) {
   src <- readLines(header, warn = FALSE)
   filtered <- system2("awk", c("-f", shQuote(filter), shQuote(header)), stdout = TRUE)
@@ -239,8 +228,9 @@ registry_line_map <- function(header, filter) {
 #'   (`STRIP_FROM_PATH` in the Doxyfile): the package's `inst/include`
 #' @param filter the awk filter Doxygen read the headers through
 #' @return a data frame with columns `symbol`, `kind`, `id`, `compound`, `file`,
-#'   `line`, `body_start`, `body_end`, `url`, `initializer` and the list-column
-#'   `references`
+#'   `line`, `body_file`, `body_start`, `body_end`, `url`, `initializer` and the
+#'   list-column `references`; the body is in `body_file`, which differs from
+#'   `file` for a member defined out of line
 #' @export
 registry_locations <- function(xml_dir,
                                include_dir = file.path(dirname(dirname(xml_dir)), "inst", "include"),
@@ -323,7 +313,6 @@ registry_locations <- function(xml_dir,
   out$line <- mapply(remap, out$file, out$line)
   out$body_start <- mapply(remap, out$body_file, out$body_start)
   out$body_end <- mapply(remap, out$body_file, out$body_end)
-  out$body_file <- NULL
   rownames(out) <- NULL
   out
 }
@@ -375,6 +364,7 @@ registry_resolve <- function(raw, xml_dir = NULL, locations = NULL,
   equations <- tabs$equations
   unresolved <- character()
   blank <- function(n) data.frame(file = rep(NA_character_, n), line = NA_integer_,
+                                  body_file = NA_character_,
                                   body_start = NA_integer_, body_end = NA_integer_,
                                   url = NA_character_, initializer = NA_character_,
                                   stringsAsFactors = FALSE)
@@ -384,7 +374,7 @@ registry_resolve <- function(raw, xml_dir = NULL, locations = NULL,
       unresolved <<- c(unresolved, symbol)
       return(blank(1L))
     }
-    hit[, c("file", "line", "body_start", "body_end", "url", "initializer")]
+    hit[, c("file", "line", "body_file", "body_start", "body_end", "url", "initializer")]
   }
   parameters <- cbind(parameters, do.call(rbind, lapply(parameters$code, take)))
   eq_loc <- do.call(rbind, lapply(equations$code, function(s) {
@@ -424,4 +414,24 @@ registry_resolve <- function(raw, xml_dir = NULL, locations = NULL,
   }
   list(parameters = parameters, equations = equations, locations = locations,
        unresolved = unresolved, unreferenced = misses)
+}
+
+# Each `literal:` against the function its `code` names: a literal is a number
+# written inside that function (Tetens' 17.27), so it has to appear among the
+# numbers in the function's body, read from the source over the body span
+# Doxygen reported. Returns the ids of the literals whose number does not
+# appear; a literal changed in the code and not here, or the reverse, is one.
+# `resolved` is registry_resolve()'s output; `include_dir` is the headers' root.
+.registry_literals_unwritten <- function(resolved, include_dir) {
+  p <- resolved$parameters
+  p <- p[!is.na(p$literal), , drop = FALSE]
+  number <- "(?<![A-Za-z_0-9.])[0-9]+\\.?[0-9]*([eE][-+]?[0-9]+)?"
+  written <- vapply(seq_len(nrow(p)), function(i) {
+    if (is.na(p$body_file[i]) || is.na(p$body_start[i]) || is.na(p$body_end[i])) return(FALSE)
+    body <- readLines(file.path(include_dir, p$body_file[i]), warn = FALSE)[p$body_start[i]:p$body_end[i]]
+    body <- sub("//.*$", "", body)
+    tokens <- unlist(regmatches(body, gregexpr(number, body, perl = TRUE)))
+    any(suppressWarnings(as.numeric(sub("\\.$", "", tokens))) == p$literal[i], na.rm = TRUE)
+  }, TRUE)
+  p$id[!written]
 }

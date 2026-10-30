@@ -572,7 +572,7 @@ against the real headers with nothing standing in for R at all. odelia 0.2.0 was
 the build with `RcppCommon.h: No such file or directory`, which does not point at
 the cause. **The floor is 0.7.0** because the leaf's supplied derivative rows are
 built on headers that first shipped there (`implicit_node.hpp`, `tangent.hpp`,
-`value_with_slope.hpp`).
+`with_slope.hpp`).
 
 Both dependencies are already required by plant, so plant pays nothing new for
 depending on this package.
@@ -623,9 +623,9 @@ The leaf's equations, the parameters each reads and the symbol that evaluates
 it are one record, `inst/model-registry.yml`, which documents are
 generated from rather than written beside. It stores no line number and no
 default: `registry_resolve()` reads each symbol's file, line and page from the
-Doxygen render, and `registry_values()` reads each value off a live leaf.
-`registry_check()` asserts every equation's base-R replica against the package,
-and CI runs it.
+Doxygen render, and `registry_values()` reads each value off a live leaf. CI
+checks that every symbol it names exists and that every bound field of the leaf
+is in it.
 
 ```r
 reg <- model_registry()

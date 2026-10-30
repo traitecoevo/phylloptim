@@ -81,14 +81,6 @@ Leaf__leaf_temp_from_E <- function(obj_, E) {
     .Call('_phylloptim_Leaf__leaf_temp_from_E', PACKAGE = 'phylloptim', obj_, E)
 }
 
-Leaf__saturation_vapour_pressure <- function(obj_, temp) {
-    .Call('_phylloptim_Leaf__saturation_vapour_pressure', PACKAGE = 'phylloptim', obj_, temp)
-}
-
-Leaf__saturation_vapour_pressure_slope <- function(obj_, temp) {
-    .Call('_phylloptim_Leaf__saturation_vapour_pressure_slope', PACKAGE = 'phylloptim', obj_, temp)
-}
-
 Leaf__set_leaf_states_rates_from_psi_stem <- function(obj_, psi_stem, psi_upstream) {
     invisible(.Call('_phylloptim_Leaf__set_leaf_states_rates_from_psi_stem', PACKAGE = 'phylloptim', obj_, psi_stem, psi_upstream))
 }
