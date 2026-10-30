@@ -146,9 +146,8 @@ std::vector<Row> run_grid() {
 // not reproduce this split, because dprofit's shut-down sentinel is exactly 0.0
 // and would move all 48 shutdown points into `interior`.
 //
-// Six kinds are expected to be EMPTY here, and the table below asserts each:
-// `shade-death` because assim_max_ never gets there (it is reached by light, not by
-// drying, and not by heat either at 40 C); `solver-refused` and
+// Five kinds are expected to be EMPTY here, and the table below asserts each:
+// `solver-refused` and
 // `non-finite-gradient` because both bracket endpoints admit a usable gradient on
 // every feasible row; `boundary-root-crit` because the continuity root never
 // reaches the root's own limit at these traits; and `prescribed` and `unsolved` because
@@ -199,7 +198,6 @@ int check_operating_kinds(const std::vector<Row> &rows) {
         // this list is a kind the golden file stops covering.
         {Kind::BoundaryRootCrit, 0},
         {Kind::HydraulicShutdown, e.shutdown},
-        {Kind::ShadeDeath, 0},
         {Kind::Prescribed, 0},        {Kind::SolverRefused, 0},
         {Kind::NonFiniteGradient, 0}, {Kind::Unsolved, 0},
     };

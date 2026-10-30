@@ -26,7 +26,7 @@ Family context lives in [`plant-meta`](https://github.com/traitecoevo/plant-meta
 | To | Read |
 |---|---|
 | find which header holds what | the map below, in dependency order |
-| change the solve | "One solver" and hazards 3, 8 and 11 |
+| change the solve | "One solver" and hazards 3, 8, 11 and 18 |
 | change the derivative surface | the preamble of `leaf_model.hpp`, `vignettes/derivative-surface.Rmd`, hazard 17 |
 | change a trait or the parameter set | hazards 10, 12 and 13 |
 | move a golden number | "The golden file is the safety net" |
@@ -757,8 +757,8 @@ own hydraulic scale, on the convention that a parameter names the curve that rea
 it. That convention is right for a curve that stands alone and wrong for one that
 exists to be COMPARED with its parent: sharing makes the parent the same curve at
 one parameter's zero, so "is TF24 missing a price of water?" is a one-restriction
-question instead of a three-restriction one. It also kept the trait vector at
-fifteen, which is not nothing — see hazard 13 for what a sixteenth cost.
+question instead of a three-restriction one. It also kept the trait vector
+from growing, which is not nothing — see hazard 13 for what a new trait cost.
 
 ⚠️ **The cheapest test of a new curve is a REDUCTION to an old one, and it costs
 nothing to arrange.** `TF24_floor` is `TF24` at `lambda_o = 0` and `CF77` at
@@ -885,10 +885,10 @@ satisfies `-Werror=switch` and so removes the check they exist for.
    the table (plant#576), and a flow at or past `G(inf)`, which no stem potential
    carries. The in-grid path is untouched: the forward read's branch sits inside
    its out-of-range test and `stem_curve_integral_deriv` pays one comparison. The
-   collar route never reads past the grid: it shuts down holding the stem at
-   `psi_crit` or, when the root limit binds first, the root's own critical
-   potential. Only the single-potential stem routes, where the stem's upstream
-   end is pinned at `psi_soil`, read `G(psi_soil)`.
+   shut leaf reads past it too: since #182 it sits at its wet bound with the
+   stem at the collar, so a soil drier than P99 puts the stem there, and the
+   single-potential stem routes, where the stem's upstream end is pinned at
+   `psi_soil`, read `G(psi_soil)`.
 
    ⚠️ **So the two tables differ past their grids, and the rows follow the
    table.** The root table holds its last knot (#77), so `closed_form_rows.hpp`
@@ -1267,7 +1267,7 @@ satisfies `-Werror=switch` and so removes the check they exist for.
 
 12. **`n_theta` is a compile-time constant, and a short aggregate initialiser is
    legal C++.** Several places fill `theta` with a literal list sized by
-   `gradient::n_theta` (34; `phylloptim::n_pars`, 35, is the kernels' pack with
+   `gradient::n_theta` (36; `phylloptim::n_pars`, 37, is the kernels' pack with
    `par_PPFD` and must not size `theta`). An initialiser shorter than the array
    zero-fills the rest,
    so adding a parameter shifts `kmax` and `resistance` down a slot and drops
@@ -1314,10 +1314,9 @@ satisfies `-Werror=switch` and so removes the check they exist for.
    over the derived trait vector now and costs no extra boundary crossing. **A
    comment predicting a failure is not a guard against it.**
 
-   ⚠️ That trait was then REMOVED — `TF24_floor` shares TF24's parameters instead —
-   so the vector is back at fifteen and nothing in the shipped tree exercises a
-   sixteenth slot. The `do.call` is kept anyway: the next trait will not be so
-   easy to withdraw.
+   That trait was then removed — `TF24_floor` shares TF24's parameters instead.
+   The sixteenth slot is now `g_min`, the residual conductance (#182), which
+   went in through the `do.call` with no positional edit on the R side.
 
    ⚠️ **The MODEL-OWNED parameters are a second class now, and `CF77_lambda_` is
    no longer the only one.** `TF24_floor_lambda_o` and `LeastCost_beta` join it:
@@ -1365,6 +1364,55 @@ satisfies `-Werror=switch` and so removes the check they exist for.
    drops the correction a `boundary-soil` row needs, and 258 of 643 non-negligible
    rows then moved by more than 1e-4 (worst 25x, sign flips on root traits) before
    the replay was fixed. `test_a_replay_hands_over_the_rows_its_solve_did` pins it.
+
+18. **A shut leaf is the ordinary evaluator at its wet bound, and nothing writes
+   its outputs by hand (#182).** The wet bound is where the supply delivers
+   exactly the cuticle's residual flux: the collar where uptake equals `r*` on
+   the collar route, `stem_wet_bound` on the stem routes. At `g_min = 0` it is the
+   zero-uptake collar, found by the same call with the same bracket, which is
+   what keeps the four golden files' open rows bit-identical. Three things
+   follow that a later edit could break without a compile error:
+
+   - **Append the residual term, never interleave it.** Every expression the
+     residual conductance enters (the conductance, the flux, the energy-balance
+     term, the costs' flux) carries it as an added term that is an exact zero at
+     `g_min = 0`. Re-associating any of those sums moves every golden row by an
+     ULP, which hides a real change among 5000 noise ones.
+   - **The wet loop starts at `frac = 0` only when `g_min > 0`.** With a residual
+     conductance the bound is a regular point (the cuticle still passes CO2), so
+     a leaf that declines to open sits exactly on it. At `g_min = 0` there is no
+     conductance there, and evaluating dprofit at `frac = 0` moved interior
+     rows by 1e-14; the solve steps 1e-6 of the bracket inside, as before.
+   - **The realised residual flux is capped twice, by soft minima**: at
+     `residual_cap_fraction` of what the stem can carry from the collar, and on
+     the collar route at the same fraction of what the roots can deliver from
+     this soil (`MultiLayerRoots::uptake_limit`, seated per solve in
+     `residual_root_ceiling_`). Without the first the shut stem's potential goes
+     to infinity and `G^-1` refuses; without the second, as a layer approaches
+     the root integral's cap the wet bound has nowhere continuous to go and
+     jumps ~10 MPa. The roots' ceiling is a member, so every stem route clears
+     it (in `stem_wet_bound`) and the draw carries it onto the tape; an
+     `implicit_value` whose residual reads it must list `draw.uptake_limit` among
+     its inputs or the reverse sweep drops its rows, which `test_transpose` sees.
+     The caps are a placeholder for the regime #183 leaves to a later step; do
+     not replace either with a `min()`, which kinks every output in `psi_soil`.
+     One step is left at the root integral's cap itself, the layer's gravity
+     head (~0.009 MPa in `psi_stem`, flux continuous): past it no span conducts,
+     so the wet bound is the soil rather than the gravity balance. It is the
+     root table's tail (#85), present at `g_min = 0` too.
+
+   `test_smoothness_sweep` in `test_leaf.cpp` is the guard for the epic's
+   smoothness claim: it second-differences profit, `A`, `E`, `psi_stem`, `lambda`
+   and two derivative rows across soil, light, deficit and air temperature, with
+   the energy balance off and on, one and three layers and the damage layer.
+   A slope jump it finds is refined at a hundredth of the step before it fails,
+   which separates a kink from curvature, and an interval whose change dwarfs
+   its neighbours' is bisected, which separates a jump from a steep stretch.
+   ⚠️ The refinement alone cannot see a jump: it is centred on a sweep point and
+   a step between two points straddles it, which is how the 10 MPa jump above
+   first passed. Kind changes are corners and are excluded by design.
+   `test_a_shut_leaf_is_a_value_not_an_exception` holds #184's rule that a dry,
+   dark or hot leaf comes back as a value, from wet soil to plant's 1000 MPa.
 
 ## Validating against plant
 
