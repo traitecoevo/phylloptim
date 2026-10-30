@@ -1,3 +1,9 @@
+# phylloptim 0.16.3
+
+## Each golden file has its own cross-platform tolerance (#125)
+
+`test_golden --cross-platform` compared `operating_points.tsv` and `psi_stem_optima.tsv` with one shared pair, set before #173 when the worst disagreements were ~100-1000x larger. Each file now has its own, at ~50x its worst on Linux CI: `operating_points.tsv` profit 1e-9 (measured 2.13e-11) and argmax 5e-6 (8.6e-8); `psi_stem_optima.tsv` profit 1e-10 (2.01e-12) and argmax 1e-4 (6.63e-6, 15x, held at the scale of a real change). Tests only; no number moves.
+
 # phylloptim 0.16.2
 
 ## The Medlyn route reports a CO2-basis conductance (#129)
