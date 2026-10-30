@@ -28,6 +28,7 @@ reference:
   - set_traits
   - operating_point
   - cost_curve_names
+  - align_curves
 - title: Water supply
   desc: How water reaches the root collar, and the root resistances that carry it.
   contents:
@@ -59,6 +60,13 @@ reference:
   contents:
   - with_phylloptim_conditions
   - leaf_infeasible_codes
+- title: Model registry
+  desc: The leaf's equations and parameters as data, with their values and code locations.
+  contents:
+  - model_registry
+  - registry_values
+  - registry_resolve
+  - registry_locations
 - title: Figures
   contents:
   - plot_model_overview

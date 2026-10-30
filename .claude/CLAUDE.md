@@ -27,6 +27,7 @@ Family context lives in [`plant-meta`](https://github.com/traitecoevo/plant-meta
 | move a golden number | "Golden files" below, then [measurements.md](measurements.md#the-golden-files) |
 | time anything | "Cost" below, then [the benchmark method](measurements.md#benchmark-method) |
 | build and test | "Build and test" |
+| add or change an equation, or bind a new field | "The model registry" below |
 
 **Map of the headers**, `inst/include/phylloptim/`, in dependency order:
 
@@ -55,6 +56,7 @@ Family context lives in [`plant-meta`](https://github.com/traitecoevo/plant-meta
 - `tests/validate/` — the SCM regression pair (needs R and a plant build), and `tsv_to_hex.c`, which `test-golden.R`'s regeneration recipe pipes through because R's decimal parser is not correctly rounded. ⚠️ Never write an R-side expected value by pasting a decimal from a golden file.
 - `tools/` — `bench_history.sh`, `bench_user_cost.R`, `cost-baseline.tsv` (the recorded cost table), `gradient_golden.R`, `doxygen_filter.awk`.
 - `CMakeLists.txt` — the no-R build for C++ and Python consumers, which makes "does not need R" runnable.
+- `inst/model-registry.yml` — the model registry: the leaf's equations, parameters and code symbols, which documents are generated from. Its header holds the schema and the rules; see "The model registry" below. `R/registry-locations.R` reads it and resolves its symbols in Doxygen's XML, and is sourced standalone by `docs.yml`, so it may reference nothing else in the package. `R/registry.R` is the registry as data frames, with the parameters' values read off a live `Leaf`. `tools/registry_symbols.R` is what `docs.yml` runs after the render.
 
 ## Build and test
 
@@ -158,6 +160,24 @@ Each has cost someone real numbers; the narrative and its measurements are in [h
 2. **Guard by COUNTING, not by timing, wherever you can.** A count of `.Call`s has no variance. Timing assertions are a backstop, bounded at ~2× the measurement and `skip_on_ci()`. Count the symbol the path actually calls: the two supply paths reach C++ through different ones.
 3. **For the batch gradient a count is always available**: one `gradient_batch_run` per call for any N, and zero per-perturbation primitives.
 4. **Measure the entry point the USER calls.** A regression in `leaf_gradient()` once went unseen while the two entry points measured were flat.
+
+## The model registry
+
+`inst/model-registry.yml` is the one place the leaf's equations are written down for documents: each with its LaTeX, the C++ symbol that evaluates it, the parameters it reads and the bound fields it writes; and each parameter with its symbol, units, class, meaning, source and placeholder flag (#166). It covers every bound field: a parameter, an equation's `writes`, or an entry under `diagnostics` (a bound field that is neither; none is needed today). A document's equation list or parameter table is generated from it rather than typed beside it. `model_registry()` reads it, `registry_values()` adds the values, `registry_resolve()` adds file, line and API link.
+
+Three rules keep it from rotting, and each has a mechanism:
+
+- **It stores no line number and no default.** Both go stale silently: the methods document this grew out of cited line numbers that moved twice in one day, and a default's comment that outlived the parameter's rename. Lines come from Doxygen's XML (`GENERATE_XML` in the Doxyfile); values come off a live `Leaf`, `set_drivers()`'s formals or a constexpr's initializer in that XML. The one number the file holds is a `literal:`, a constant written inside an equation (Tetens' 17.27), and docs.yml checks that it appears in the body of the function its `code` names.
+- **CI validates it.** `test-registry.R` checks every symbol and field named exists and asserts that every bound field is accounted for, so binding a field without registering it fails by name. `docs.yml` resolves every symbol in the XML, checks that what an equation `reads` is what its function references (`REFERENCES_RELATION`), and checks every literal, through `tools/registry_symbols.R`.
+- **One registry per package.** plant's will cover its strategies and point at these ids rather than copy them.
+
+**When you change an equation's code, re-read its entry.** Nothing compares the LaTeX with the C++: CI sees a renamed symbol, a changed `reads` and a changed literal, but not a changed formula. The registry is a record, not a check; the numbers are checked by the golden files and the test suites, and an equation that has no test there gets one there, not in the registry.
+
+That is a decision, not an omission. Measured by planting sixteen one-line bugs in the C++, a base-R replica of every equation caught all sixteen and the existing suites thirteen; the three it alone caught now have their own tests, except a wrong slope in the TF24 closed form's fixed Newton steps (`wet_end_p`), which moves psi* by 2e-5 in a method accurate to a few percent. A second implementation of the whole leaf, touching about 237 bindings, costs more to keep in step than that. Do not reintroduce a per-equation replica check without a measurement that says otherwise.
+
+Doxygen's line numbers are in the stream it parsed, which is the awk filter's output, not the source: the filter inserts a `\file` block and `\verbatim` pairs and drops held blank `//` lines. The lines that are not whole-line comments are byte-identical in both streams, docs.yml asserts that, and every line Doxygen reports is one of them, so `registry_line_map()` maps the k-th code line of one to the k-th of the other and refuses a header whose code lines differ. Do not read a line out of the XML without that map.
+
+YAML 1.1 reads `1e-3` as a string: write a float with a point and a signed exponent (`1.0e-3`), which the reader checks.
 
 ## Invariants and what not to touch
 

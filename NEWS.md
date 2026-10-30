@@ -1,4 +1,4 @@
-# phylloptim 0.16.3
+# phylloptim 0.16.4
 
 ## `collar_at` can hand its coordinates to `outputs_at` (#161)
 
@@ -33,6 +33,18 @@ Four ways to get every number finite and some of them wrong now fail by name. `c
 ## Tests for what the derivative surface claims (#147)
 
 Six claims the derivative surface made with nothing checking them now have tests. The supplied trait rows are refereed in-tree against a central difference of the solve at every kind `collar_at` places (interior, both wet-bound kinds, both dry bounds, determined): 387 rows, worst 1.8e-4 relative on a row of size 3.7e-5, at a relative step of 1e-4 read off a step sweep. `test_transpose` now reaches boundary-crit, boundary-root-crit and shade-death, and asserts that every kind was reached. The stem conductivity's closed-form P50 row is bounded against the table's own response, at 9.6e-6 of the largest row at 400 knots and 1.5e-4 at 100. The stem curve's inverse round-trips to within 0.91 of its conditioning `eps * w / G'`. The template `root_network_from_carbon` is bit-identical to the double overload. A forced `method = "ift"` at a pinned row is refused by name in the batch. `leaf_control()`'s knot count against the C++ default is covered by #148. Tests only; no number moves.
+
+# phylloptim 0.16.3
+
+## The model registry: equations, parameters and code links from one YAML (#166)
+
+`inst/model-registry.yml` holds the leaf as one record: 114 equations, each with its LaTeX, the C++ symbol that evaluates it, the parameters it reads and the bound fields it writes; and 132 parameters, each with symbol, units, class, meaning, source and a placeholder flag. Fourteen sections run from the drivers to the thermal-damage layer. Documents are generated from it rather than written beside it.
+
+It stores no line number and no default value. `registry_resolve()` reads each symbol's file, line, body span and API anchor from Doxygen's XML, which the `Doxyfile` now emits with the references relation. `registry_values()` reads each value off a live `Leaf`, off `set_drivers()`'s defaults, or off a constexpr's initializer in that XML. `model_registry()` returns the registry as data frames.
+
+CI checks it two ways. `tests/testthat/test-registry.R` asserts that every symbol and field the registry names exists and that every bound field of the `Leaf` is accounted for. `docs.yml` resolves every symbol in the XML through `tools/registry_symbols.R`, checks that what each equation reads is what its function references and that every literal is written in its function, and writes the resolved registry into the site as `model-registry.yml`.
+
+The registry records the model and does not test it: there is no second implementation of the equations. Two tests cover what one would have caught and the suites did not: the closed form's CF77 arm is checked as the identity its USO collapse defines, and `lambda_molar` against its units. No numerics change; the golden baselines are bit-identical. The comment explaining Medlyn's closed state now sits on `set_medlyn_shutdown_if_closed()`, not on `medlyn_beta()`.
 
 # phylloptim 0.16.2
 
