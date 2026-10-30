@@ -4119,10 +4119,11 @@ double profit_row_at_current_point(phylloptim::Leaf &l, int par) {
       l.operating_point_kind() == phylloptim::Leaf::OperatingPointKind::Interior
           ? l.marginal_collar_slope<phylloptim::Leaf::CostCurve::TF24>()
           : std::numeric_limits<double>::quiet_NaN();
-  const T collar =
-      l.collar_at<phylloptim::Leaf::CostCurve::TF24, T>(draw, pars, curvature);
-  const auto out =
-      l.outputs_at<phylloptim::Leaf::CostCurve::TF24, T>(collar, draw, pars);
+  phylloptim::Leaf::HeldCoords<T> held;
+  const T collar = l.collar_at<phylloptim::Leaf::CostCurve::TF24, T>(
+      draw, pars, curvature, &held);
+  const auto out = l.outputs_at<phylloptim::Leaf::CostCurve::TF24, T>(
+      collar, draw, pars, &held);
   return odelia::ode::derivative_along(out.profit);
 }
 
@@ -4178,6 +4179,219 @@ void test_a_replay_hands_over_the_rows_its_solve_did() {
   ok(seen["interior"] > 0 && seen["boundary-soil"] > 0,
      "the grid reaches an interior point and a wet bound (test is not vacuous)");
   ok(differ == 0, "every replayed collar and row equals its solve's, bit for bit");
+}
+
+// The coordinates collar_at hands to outputs_at must be the ones outputs_at
+// would have solved for itself, so handing them over moves no number and no row.
+// Asserted bit for bit on the tangent, where both routes run the same arithmetic
+// on the same values; the adjoint, where the rows are summed in another order,
+// is test_transpose's.
+struct HandoffTally {
+  int interior = 0, other = 0, rows = 0, differ = 0, misplaced = 0;
+};
+
+template <phylloptim::Leaf::CostCurve K>
+void compare_held_handoff(phylloptim::Leaf &l, const std::string &at,
+                          HandoffTally &tally) {
+  using T = odelia::ode::tangent_scalar<double>;
+  using Kind = phylloptim::Leaf::OperatingPointKind;
+  const Kind kind = l.operating_point_kind();
+  const double curvature = kind == Kind::Interior
+                               ? l.marginal_collar_slope<K>()
+                               : std::numeric_limits<double>::quiet_NaN();
+  if (kind == Kind::Interior && !std::isfinite(curvature)) {
+    return;
+  }
+  ++(kind == Kind::Interior ? tally.interior : tally.other);
+  // -1 is the shallowest layer's soil potential, the supply's own direction.
+  for (int direction : {phylloptim::par_vcmax_25, phylloptim::par_stem_P50,
+                        phylloptim::par_root_P50, phylloptim::par_kmax,
+                        phylloptim::par_TF24_cost_scale,
+                        phylloptim::par_TF24_floor_lambda_o, -1}) {
+    // TF24 leaves the floor's price unset, and reads none of it.
+    if (K == phylloptim::Leaf::CostCurve::TF24 &&
+        direction == phylloptim::par_TF24_floor_lambda_o) {
+      continue;
+    }
+    phylloptim::leaf_pars<T> pars;
+    const phylloptim::leaf_pars<double> seated = l.passive_pars();
+    for (std::size_t i = 0; i < pars.size(); ++i) pars[i] = T(seated[i]);
+    std::vector<T> soil, r_h, r_v;
+    for (int i = 0; i < l.supply_n_layers(); ++i) {
+      soil.push_back(T(l.roots_.psi_soil_[std::size_t(i)]));
+      r_h.push_back(T(l.roots_.network_.r_R_H_min[std::size_t(i)]));
+      r_v.push_back(T(l.roots_.network_.r_R_V_sum[std::size_t(i)]));
+    }
+    odelia::ode::set_direction(direction < 0 ? soil[0] : pars[std::size_t(direction)],
+                               1.0);
+    const phylloptim::SupplyAt<T> supply{soil, r_h, r_v,
+                                         pars[phylloptim::par_root_P50],
+                                         pars[phylloptim::par_root_c]};
+    const auto draw = l.supply_draw_at<T>(T(l.opt_root_psi_), supply);
+    const T solved_collar = l.collar_at<K, T>(draw, pars, curvature);
+    const auto solved = l.outputs_at<K, T>(solved_collar, draw, pars);
+    phylloptim::Leaf::HeldCoords<T> held;
+    const T handed_collar = l.collar_at<K, T>(draw, pars, curvature, &held);
+    const auto handed = l.outputs_at<K, T>(handed_collar, draw, pars, &held);
+    if (held.placed() != (kind == Kind::Interior)) {
+      ++tally.misplaced;
+      printf("    placed=%d at %s\n", int(held.placed()), at.c_str());
+    }
+    auto same = [](const T &a, const T &b) {
+      return odelia::util::to_passive(a) == odelia::util::to_passive(b) &&
+             odelia::ode::derivative_along(a) == odelia::ode::derivative_along(b);
+    };
+    bool all_same = same(solved_collar, handed_collar) &&
+                    same(solved.profit, handed.profit) &&
+                    solved.uptake.size() == handed.uptake.size();
+    for (std::size_t j = 0; all_same && j < solved.uptake.size(); ++j) {
+      all_same = same(solved.uptake[j], handed.uptake[j]);
+    }
+    ++tally.rows;
+    if (!all_same) {
+      ++tally.differ;
+      printf("    differs along %d at %s: profit row %.17g vs %.17g\n", direction,
+             at.c_str(), odelia::ode::derivative_along(solved.profit),
+             odelia::ode::derivative_along(handed.profit));
+    }
+  }
+}
+
+void test_held_coordinates_move_no_row() {
+  printf("the coordinates collar_at hands to outputs_at move no number and no row\n");
+  using K = phylloptim::Leaf::CostCurve;
+  HandoffTally tally;
+  for (int layers : {1, 3}) {
+    for (double psi0 : {0.5, 1.0, 2.0, 4.0, 6.0}) {
+      for (double ppfd : {100.0, 900.0}) {
+        for (double temp : {25.0, 40.0}) {
+          Drivers d;
+          d.PPFD = ppfd;
+          d.leaf_temp = temp;
+          std::vector<double> psi_soil, soil_depth;
+          for (int i = 0; i < layers; ++i) {
+            psi_soil.push_back(psi0 + 0.35 * i);
+            soil_depth.push_back(1.0 * (i + 1));
+          }
+          const std::string at = "psi_soil=" + std::to_string(psi0) +
+                                 " ppfd=" + std::to_string(ppfd) +
+                                 " T=" + std::to_string(temp) +
+                                 " layers=" + std::to_string(layers);
+          phylloptim::Leaf tf = make_leaf(d, psi_soil, soil_depth);
+          tf.find_root_collar_psi();
+          compare_held_handoff<K::TF24>(tf, "TF24 " + at, tally);
+          // The floor's price reads the collar inside profit, so it is the curve
+          // whose profit could tell a held collar from a live one.
+          phylloptim::Leaf fl = make_leaf(d, psi_soil, soil_depth);
+          fl.TF24_floor_lambda_o = kPriceForFOC;
+          fl.set_model(K::TF24_floor, true);
+          fl.optimise();
+          compare_held_handoff<K::TF24_floor>(fl, "TF24_floor " + at, tally);
+        }
+      }
+    }
+  }
+  printf("    %d rows | %d interior points, %d at other kinds\n", tally.rows,
+         tally.interior, tally.other);
+  ok(tally.interior > 0 && tally.other > 0,
+     "the sweep reaches interior points and other kinds (test is not vacuous)");
+  ok(tally.misplaced == 0, "collar_at places coordinates at interior points only");
+  ok(tally.differ == 0,
+     "every collar, profit and uptake, value and row, is the same with the "
+     "coordinates handed over");
+}
+
+// Coordinates are handed over only where they mean something, and refused,
+// by name, where reading them would answer for another point.
+void test_held_coordinates_are_refused_off_their_point() {
+  printf("held coordinates are refused away from the point that placed them\n");
+  using T = odelia::ode::tangent_scalar<double>;
+  using CC = phylloptim::Leaf::CostCurve;
+  using Kind = phylloptim::Leaf::OperatingPointKind;
+  // pars and supply at the leaf's seated state, carrying no direction.
+  struct Seat {
+    phylloptim::leaf_pars<T> pars;
+    std::vector<T> soil, r_h, r_v;
+    phylloptim::SupplyAt<T> supply() const {
+      return {soil, r_h, r_v, pars[phylloptim::par_root_P50],
+              pars[phylloptim::par_root_c]};
+    }
+  };
+  auto seat = [](const phylloptim::Leaf &l) {
+    Seat s;
+    const phylloptim::leaf_pars<double> p = l.passive_pars();
+    for (std::size_t i = 0; i < p.size(); ++i) s.pars[i] = T(p[i]);
+    for (int i = 0; i < l.supply_n_layers(); ++i) {
+      s.soil.push_back(T(l.roots_.psi_soil_[std::size_t(i)]));
+      s.r_h.push_back(T(l.roots_.network_.r_R_H_min[std::size_t(i)]));
+      s.r_v.push_back(T(l.roots_.network_.r_R_V_sum[std::size_t(i)]));
+    }
+    return s;
+  };
+  Drivers d;
+  phylloptim::Leaf in = make_leaf(d, {1.0}, {1.0});
+  in.find_root_collar_psi();
+  // Shade death sits on the wet bound, and dim light is what reaches it.
+  Drivers dim;
+  dim.PPFD = 1.0;
+  phylloptim::Leaf bound = make_leaf(dim, {1.0}, {1.0});
+  bound.find_root_collar_psi();
+  ok(in.operating_point_kind() == Kind::Interior, "the first fixture is interior");
+  ok(bound.operating_point_kind() != Kind::Interior &&
+         bound.operating_point_kind() != Kind::HydraulicShutdown,
+     std::string("the second fixture is at a bound, got ") +
+         bound.operating_point_kind_name(bound.operating_point_kind()));
+
+  const Seat si = seat(in);
+  const auto draw = in.supply_draw_at<T>(T(in.opt_root_psi_), si.supply());
+  const double curvature = in.marginal_collar_slope<CC::TF24>();
+  phylloptim::Leaf::HeldCoords<T> held;
+  const T collar = in.collar_at<CC::TF24, T>(draw, si.pars, curvature, &held);
+  ok(held.placed() && held.at == in.opt_root_psi_,
+     "the interior arm places the coordinates at its own collar");
+
+  // Read at another collar on the same leaf: the draw is taken there, so only
+  // the coordinates are out of place.
+  const double off = in.opt_root_psi_ + 0.01;
+  const auto draw_off = in.supply_draw_at<T>(T(off), si.supply());
+  ok(throws_with([&] { in.outputs_at<CC::TF24, T>(T(off), draw_off, si.pars, &held); },
+                 "Leaf::outputs_at: the held coordinates were placed at a collar of"),
+     "outputs_at refuses coordinates placed at another collar");
+
+  // Read at a point of another kind.
+  const Seat sb = seat(bound);
+  const auto draw_b = bound.supply_draw_at<T>(T(bound.opt_root_psi_), sb.supply());
+  ok(throws_with([&] {
+       bound.outputs_at<CC::TF24, T>(T(bound.opt_root_psi_), draw_b, sb.pars, &held);
+     },
+                 "were placed at an interior point and are being read at one that is"),
+     "outputs_at refuses coordinates placed at an interior point at another kind");
+
+  // collar_at unplaces what it is handed before deciding, so coordinates left
+  // from the interior point cannot survive a call at the bound.
+  bound.collar_at<CC::TF24, T>(draw_b, sb.pars,
+                               std::numeric_limits<double>::quiet_NaN(), &held);
+  ok(!held.placed(), "collar_at at a bound leaves the coordinates unplaced");
+  ok(std::isfinite(odelia::util::to_passive(
+         bound.outputs_at<CC::TF24, T>(T(bound.opt_root_psi_), draw_b, sb.pars,
+                                       &held).profit)),
+     "outputs_at solves its own with unplaced coordinates");
+
+  // At double the interior arm records nothing, so there is nothing to hand over.
+  phylloptim::leaf_pars<double> pd = in.passive_pars();
+  std::vector<double> soil_d(in.roots_.psi_soil_), rh_d(in.roots_.network_.r_R_H_min),
+      rv_d(in.roots_.network_.r_R_V_sum);
+  const phylloptim::SupplyAt<double> supply_d{soil_d, rh_d, rv_d,
+                                              pd[phylloptim::par_root_P50],
+                                              pd[phylloptim::par_root_c]};
+  const auto draw_d = in.supply_draw_at<double>(in.opt_root_psi_, supply_d);
+  phylloptim::Leaf::HeldCoords<double> held_d;
+  const double collar_d = in.collar_at<CC::TF24, double>(draw_d, pd, curvature, &held_d);
+  ok(!held_d.placed(), "collar_at at double leaves the coordinates unplaced");
+  ok(in.outputs_at<CC::TF24, double>(collar_d, draw_d, pd, &held_d).profit ==
+         in.profit_,
+     "outputs_at at double with unplaced coordinates is the solve's profit");
+  (void)collar;
 }
 
 void test_the_dry_end_reports_which_bound_closed_it() {
@@ -8576,6 +8790,8 @@ int main() {
   test_light_reaches_carbon_with_a_row();
   test_every_answered_point_hands_over_finite_rows();
   test_a_replay_hands_over_the_rows_its_solve_did();
+  test_held_coordinates_move_no_row();
+  test_held_coordinates_are_refused_off_their_point();
   test_tf24_floor_rows_at_a_price();
   test_set_traits_matches_a_fresh_leaf();
   test_prescribed_lambda_survives_redriving();
