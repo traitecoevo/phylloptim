@@ -2408,7 +2408,8 @@ public:
   // psi_stem, the same no-flow rule set_leaf_states_rates_from_psi_stem applies,
   // and transpiration() otherwise. A cost or lambda that re-reads the flux after
   // that call must use this, or it refuses a point the evaluator accepted: a
-  // prescribed collar clamped to the wet bound puts the stem ~1e-9 MPa wetter.
+  // prescribed collar at or clamped to the wet bound puts the stem up to ~1e-9
+  // MPa wetter.
   double operating_point_flux(double psi_stem, double psi_upstream);
   // supply-side transpiration for a given water potential gradient between leaves and soil, integrated internally (return: kg h20 s^-1 m^-2 LA)
   // should be renamed to reflect supply-side
@@ -4982,10 +4983,8 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
   // magnitudes here, so psi >= psi_stem is the no-flow / reversed-gradient case --
   // the same condition set_leaf_states_rates_from_psi_stem treats as zero
   // transpiration. It has to be caught *here* because psi_stem_to_ci does not
-  // return non-finite in that state, it throws: gc = const * transpiration goes
-  // negative, which flips the sign of the supply term so the residual no longer
-  // crosses zero over (gamma*, ca] and the bracketing root-find reports that its
-  // endpoints do not bracket a root. The isfinite check below was written to cover
+  // return non-finite on a reversed pair, it throws: transpiration() refuses one
+  // (#31). The isfinite check below was written to cover
   // shut-down but cannot see a thrown exception, so a dry patch killed a whole
   // plant run: reproduced on TF24f at 5 layers, theta = 0.005-0.03 with 1 m/yr
   // rainfall, at psi_stem = 1.23 against psi_upstream = 5.92 MPa.
@@ -7058,7 +7057,7 @@ inline double Leaf::lambda_ProfitMax(double psi_stem) {
 
   double thermal = 0.0;
   if (use_thermal_cost_ && use_energy_balance_) {
-    const double E = transpiration(psi_stem, supply_psi_soil_scalar());
+    const double E = operating_point_flux(psi_stem, supply_psi_soil_scalar());
     double dT_dE = 0.0;
     const double Tleaf = leaf_temp_from_E(E, &dT_dE);
     // The same slope dprofit_energy_balance_term subtracts from dJ/dpsi, so the

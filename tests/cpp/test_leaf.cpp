@@ -5306,9 +5306,8 @@ void test_reversed_gradient_is_refused() {
   // The operating-point evaluator does not ask for the flux on a reversed pair:
   // it reads psi_upstream >= psi_stem as no flow, because the collar solve's
   // golden-section fallback can hand it a stem a hair wetter than the collar.
-  // So a profit whose cost reads only psi_stem is the shut-down state there --
-  // built on zero flux, not a negative one -- while a cost that re-reads the
-  // flux refuses.
+  // So profit there is the shut-down state, built on zero flux rather than a
+  // negative one.
   const double profit_reversed = l.profit_psi_stem_TF(up - 0.01, up);
   ok(std::isfinite(profit_reversed) && l.transpiration_ == 0.0 &&
          l.stom_cond_CO2_ == 0.0,
