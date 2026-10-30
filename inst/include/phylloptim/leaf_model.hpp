@@ -14,7 +14,7 @@
 #include <phylloptim/clamp_sites.hpp>
 
 #include <odelia/interpolator.hpp>
-#include <odelia/value_with_slope.hpp>
+#include <odelia/with_slope.hpp>
 #include <odelia/tangent.hpp>
 #include <odelia/implicit_node.hpp>
 
@@ -50,7 +50,7 @@
 // `out.profit` and each layer's `out.uptake[j]` then carry their derivatives in
 // `pars` and `supply`, supplied from the implicit function theorem at the
 // converged point; nothing the root-find did is recorded. S is double, a tangent
-// (odelia::ode::tangent_scalar) or an adjoint (odelia::ode::active_scalar).
+// (odelia::ode::tangent_scalar) or an adjoint (odelia::ode::adjoint_scalar).
 // Preconditions, none checked beyond the first:
 //
 //   - the draw is taken at the solved collar (collar_at refuses another);
@@ -72,8 +72,9 @@
 //   ShadeDeath          the same wet bound
 //   BoundaryCrit        the stem reaching psi_crit at the dry bound
 //   BoundaryRootCrit    the root's own critical potential at the dry bound
+//   Determined          the mean of the two bounds; the stem holds at psi_crit
 //   HydraulicShutdown   the collar is held; uptake rows are exactly zero
-//   Unsolved, Prescribed, Determined, SolverRefused, NonFiniteGradient: refused
+//   Unsolved, Prescribed, SolverRefused, NonFiniteGradient: refused
 //
 // A recorded point is put back with replay_operating_point(collar, kind), which
 // hands over the same rows the solve did. profit_row_at_current_point in
@@ -217,13 +218,13 @@ inline constexpr int par_PPFD = 35;
 // THIS IS THE INPUT PACK, and it is deliberately not a struct of named fields.
 // A struct would be a fourth spelling of an order that set_traits, leaf_traits()
 // and par_names() already spell three times, and every field would have to be
-// listed again in a walk for seeding -- which is how a parameter gets added to
+// listed again in a walk that sets directions -- which is how a parameter gets added to
 // the model and silently omitted from its gradient. Indexed by `par_*` the
 // access reads the same (`pars[par_kmax]`, not `pars[15]`) and there is one list.
 //
 // ⚠️ IT CARRIES THE TRAITS, NOT THE QUANTITIES DERIVED FROM THEM. stem_b and
 // psi_crit are functions of (stem_P50, stem_c) and are derived where they are
-// used, so a seed in stem_P50 reaches them by the chain rule rather than by a
+// used, so a direction in stem_P50 reaches them by the chain rule rather than by a
 // caller remembering to move three numbers together. Passing the derived pair
 // instead is what lets a curve be stated twice and the two disagree.
 template <class S> using leaf_pars = std::array<S, n_pars>;
@@ -235,7 +236,7 @@ template <class S> using leaf_pars = std::array<S, n_pars>;
 // in the same order, as the member it replaced, so nothing at double moves.
 namespace damage {
 
-// A forward-mode dual number: a value and its derivative in one seeded input.
+// A forward-mode dual number: a value and its derivative along one input.
 // Only what the dynamics need. Comparisons and clamps read the value.
 struct Dual {
   double v = 0.0;
@@ -678,7 +679,7 @@ public:
 
   // Tolerance on the collar potential for the profit-maximising root-find.
   // Hard-coded rather than a control field, for the same reason
-  // find_root_psi's 1e-4 and psi_stem_to_ci's 1e-7 are: it is a property of the
+  // find_root_psi's and psi_stem_to_ci's tolerances are: it is a property of the
   // solve, not a knob. 1e-12 sits ~8 orders below the 1e-4 at which this package
   // calls a difference real, and the cost of going there from GSS_tol_abs's 1e-3
   // is a handful of evaluations, because TOMS748 is superlinear.
@@ -691,7 +692,11 @@ public:
   double transpiration_;
   std::vector<double> soil_consumption_;
   double profit_;
-  double psi_stem;
+  // ⚠️ KEPT ONLY BECAUSE plant's RcppR6 bindings name it (hazard 7), and nothing
+  // in this package writes or reads it. Initialised so a read through those
+  // bindings is a defined NA rather than whatever the memory held; this package
+  // no longer binds it.
+  double psi_stem = util::na_value;
   // ⚠️ THE ONLY TWO INPUTS IN THIS BLOCK, and the reason they carry their default
   // here rather than in setup_clean_leaf(). Everything around them is derived
   // state or a solved output, which setup_clean_leaf() exists to wipe; these are
@@ -1258,8 +1263,14 @@ public:
 
   
   double opt_psi_stem_;
+  // Kept for plant's bindings (hazard 7) and set to NA by setup_clean_leaf;
+  // nothing writes it, and the operating point's ci is ci_.
   double opt_ci_;
-  double count;
+  // ⚠️ KEPT ONLY BECAUSE plant's RcppR6 bindings name it (hazard 7), and nothing
+  // in this package writes or reads it. Initialised so a read through those
+  // bindings is a defined NA rather than whatever the memory held; this package
+  // no longer binds it.
+  double count = util::na_value;
   double E_up_;
 
   // --- Medlyn stomatal-conductance model (from develop #450) ------------------
@@ -1359,6 +1370,10 @@ public:
   static constexpr int photo_temp_key_size = 23;
   std::array<double, photo_temp_key_size> photo_temp_cache_key_{};
   std::array<double, photo_temp_key_size> photo_temp_key() const;
+  // ⚠️ KEPT ONLY BECAUSE plant's RcppR6 bindings name it (hazard 7), and nothing
+  // in this package writes or reads it. Initialised so a read through those
+  // bindings is a defined NA rather than whatever the memory held; this package
+  // no longer binds it.
   std::vector<double> f_r;
   // TODO: move into environment?
 
@@ -1734,8 +1749,6 @@ public:
         break;
     }
   }
-  // A value and its response in the collar potential, travelling as one pair.
-  template <class T> using pair = odelia::value_with_slope<T>;
 
   // What the leaf hands over: the objective plant bills, and the water it drew
   // from each layer. At any scalar, because both re-enter plant's chain.
@@ -1757,7 +1770,7 @@ public:
   template <class S>
   struct SupplyDraw {
     double at = 0.0;
-    pair<S> flux;
+    odelia::with_slope<S> flux;
     std::vector<S> uptake;
     std::vector<double> duptake_dp;
 
@@ -1825,7 +1838,7 @@ public:
     // `NaN * step` in every layer's uptake, NaN in the value and in the row. That
     // reached plant, where one NaN row takes every trait column that shares the
     // adjoint accumulator -- and nothing named it, because the row plant hands to
-    // `record_with_derivatives` is the constant 1.0 and the sentinel is already
+    // `supply_derivatives` is the constant 1.0 and the sentinel is already
     // on the tape behind it.
     //
     // The rows go with the sentinel, which is right rather than a loss: the
@@ -1881,8 +1894,8 @@ public:
   // intercellular CO2 that goes with it.
   template <class T>
   struct CollarCoords {
-    pair<T> sigma;
-    pair<T> ci;
+    odelia::with_slope<T> sigma;
+    odelia::with_slope<T> ci;
   };
 
   // Which cost curve a psi_stem derivative differentiates. The cost enters the
@@ -2236,6 +2249,8 @@ public:
                                                     double psi_upstream);
   template <CostCurve K> double lambda_for(double psi_stem,
                                            double psi_upstream);
+  // The collar route's lambda_emergent, for the seated curve. See the definition.
+  template <CostCurve K> double lambda_collar_for();
 
   template <CostCurve K>
   double evaluate_psi_stem(double target_psi_stem);
@@ -2663,9 +2678,16 @@ public:
   // so it is an ordinary expression the chain differentiates itself and there is
   // no theorem to apply: a point the root's limit pins is tagged
   // `BoundaryRootCrit`, and collar_at places it at root_psi_crit_at.
+  //
+  // `root` is where the bound's residual vanishes, for a draw taken somewhere
+  // else: a determined collar's midpoint, up to GSS_tol_abs / 2 from either
+  // bound. The draw is carried to the root along its own slope and the residual's
+  // slope is the supply's at the root, so the row is the bound's own. NaN keeps
+  // the pinned-point behaviour, where the draw sits at or a step inside the bound.
   template <CostCurve K, class S>
   S bound_at(bool wet, double bound_x, const SupplyDraw<S>& draw,
-             const leaf_pars<S>& pars) const;
+             const leaf_pars<S>& pars,
+             double root = std::numeric_limits<double>::quiet_NaN()) const;
 
   // The ROOT curve's critical potential, derived from its trait pair exactly as
   // the stem's is.
@@ -2674,7 +2696,7 @@ public:
 
 
   // The pack as this leaf currently stands. The double path passes this where the
-  // active path passes a seeded copy, so both reach the kernels the same way and
+  // active path passes a copy carrying directions, so both reach the kernels the same way and
   // there is one call convention rather than a member-reading twin.
   leaf_pars<double> passive_pars() const;
   double assim_minus_stom_cond_CO2(double x, double psi_stem, double psi_upstream);
@@ -3194,7 +3216,8 @@ public:
     // The feasible collar interval is narrower than GSS_tol_abs. The collar is
     // held at the interval's midpoint and only the stem potential is optimised,
     // with the collar pinned; continuity between the two is not re-imposed, so
-    // the point is not a solution of the full problem. collar_at refuses it.
+    // the point is not a solution of the full problem. The collar moves as the
+    // mean of the two bounds.
     Determined,
     // Shutdown on water: no collar potential both moves water and stays inside
     // the stem's and the root's critical potentials. The stem holds at psi_crit,
@@ -3315,6 +3338,9 @@ private:
   // the residual back to the root, so the row is the root's derivative rather
   // than one proportional to the step.
   double wet_bound_root_ = std::numeric_limits<double>::quiet_NaN();
+  // The continuity root a determined collar's dry end was solved to, or NaN. Read
+  // with wet_bound_root_ by collar_at, which places that collar from both bounds.
+  double dry_bound_root_ = std::numeric_limits<double>::quiet_NaN();
 };
 
 // Human-readable tag. The switch has no default, so a missing name is a -Wswitch
@@ -3525,7 +3551,7 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_P50_,
 
 // ⚠️ THE ROWS ARE IN (P50, c), NOT (b, c). stem_b is derived, so a row in it
 // describes a parameter this model does not have -- and set_traits re-derives b
-// from P50 on every call, so a seed in b reaches nothing at all. The chain is
+// from P50 on every call, so a direction in b reaches nothing at all. The chain is
 // exact: with L = ln 2 and b = P50 * L^(-1/c),
 //
 //     db/dP50 = b / P50            db/dc = b * ln(L) / c^2
@@ -3545,7 +3571,7 @@ inline S Leaf::stem_integral_at(const S& psi, const leaf_pars<S>& pars) const {
   return closed_form_integral<S>(
       stem_curve_integral(at, "Leaf::stem_integral_at"),
       stem_curve_integral_deriv(at), psi, pars[par_stem_P50],
-      pars[par_stem_c]);
+      pars[par_stem_c], PastLastKnot::ReadsClosedForm);
 }
 
 inline leaf_pars<double> Leaf::passive_pars() const {
@@ -4181,6 +4207,7 @@ inline bool Leaf::prepare_collar_solve(double& bound_a, double& bound_b){
   // point (hazard 8). Every exit below, and both callers, write it again.
   operating_point_kind_ = OperatingPointKind::Unsolved;
   wet_bound_root_ = std::numeric_limits<double>::quiet_NaN();
+  dry_bound_root_ = std::numeric_limits<double>::quiet_NaN();
 
   // Hand the supply path the start of a solve: it builds its per-solve caches and
   // reports back the wettest rooted layer -- the SMALLEST suction, and the lower
@@ -4349,7 +4376,20 @@ if(assim_max_ < 0){
     // If no interval exists (single feasible root-collar value), use that
     // point directly as the alternative solution instead of running GSS.
     if (std::abs(bound_b - bound_a) <= GSS_tol_abs) {
-      const double opt_root_psi = 0.5 * (bound_a + bound_b);
+      // The collar is the bounds' midpoint, so both are solved to collar
+      // precision first, for the reason polish_bracket_bound gives. A polished
+      // continuity root past the root's own limit hands the dry end to that limit.
+      const double wet = polish_bracket_bound(bound_a, supply_psi_soil(), 0);
+      double dry = bound_b;
+      if (!dry_bound_is_root_limit_) {
+        dry = std::min(polish_bracket_bound(bound_b, supply_psi_soil(), 1),
+                       supply_psi_crit());
+        dry_bound_is_root_limit_ = !(dry < supply_psi_crit());
+      }
+      // collar_at differentiates each bound at its own root, not at the midpoint.
+      wet_bound_root_ = wet;
+      dry_bound_root_ = dry;
+      const double opt_root_psi = 0.5 * (wet + dry);
       const double psi_stem_single = find_psi_stem_from_psi_root(opt_root_psi, supply_psi_soil());
 
       if (!std::isfinite(psi_stem_single)) {
@@ -4395,7 +4435,7 @@ if(assim_max_ < 0){
       (void)psi_stem_single;
       opt_root_psi_ = opt_root_psi;
       // The collar is held, not optimised; see the enumerator for what that
-      // leaves out. collar_at refuses this kind.
+      // leaves out.
       operating_point_kind_ = OperatingPointKind::Determined;
 
       if (!std::isfinite(profit_)) {
@@ -4684,11 +4724,10 @@ inline void Leaf::find_root_collar_psi_for(){
     // TF24's profit at SOX's argmax, which is finite, plausible, and always a
     // little below TF24's own maximum. Two of these survived the templating pass.
     profit_ = profit_psi_stem_for<K>(opt_psi_stem_, opt_root_psi);
-    // Reported on the same axis as the single-layer solvers, using the MULTI-LAYER
-    // lambda: the collar is the free variable here, so the marginal cost carries
-    // the series-resistance correction for the soil-to-collar path that the
-    // single-layer form has no term for.
-    lambda_emergent_ = marginal_cost_water_multilayer();
+    // Reported on the same axis as the single-layer solvers: the collar is the
+    // free variable here, so the marginal cost carries the series-resistance
+    // correction for the soil-to-collar path. For the SEATED curve, `<K>`.
+    lambda_emergent_ = lambda_collar_for<K>();
 
     if(!std::isfinite(profit_)){
         util::stop_infeasible("collar_solve", "non-finite profit; opt_psi_stem_=" + util::to_string(opt_psi_stem_) +
@@ -4872,7 +4911,7 @@ inline double Leaf::profit_at_collar_psi(double target_opt_root_psi,
     profit_ = profit_psi_stem_for<K>(opt_psi_stem_, opt_root_psi);
     // Well defined off the optimum too: dC/dE is a property of the point, not of
     // its being stationary. At a prescribed point it simply is not equal to dA/dE.
-    lambda_emergent_ = marginal_cost_water_multilayer();
+    lambda_emergent_ = lambda_collar_for<K>();
     // Not an optimum of any kind: the collar potential came from the caller. On
     // this path a non-zero dprofit is the answer (TF24f's acclimation rate), not
     // a residual to be checked against zero.
@@ -5573,7 +5612,7 @@ inline double Leaf::dprofit_energy_balance_term(
   // That exact move was measured changing results even where the algebra
   // was identical. That risks the gate-off path to buy precision nobody can
   // observe: at h = 1e-3 K the truncation error is ~2e-9 relative against a
-  // model whose own floor (psi_stem_to_ci at 1e-10) is ~1e-9.
+  // model whose own floor is set by psi_stem_to_ci's tolerance.
   //
   // ⚠️ h is FIXED and ABSOLUTE, not relative to T. A relative step would make
   // the estimator itself a function of psi, which is exactly the kind of thing
@@ -5947,9 +5986,10 @@ inline std::vector<std::string> Leaf::damage_par_names() const {
           "A0", "I0", "D0"};
 }
 
-// One forward-mode pass per requested input, each seeding a dual number in that
-// parameter (or initial state) and running the same RK4 the double trajectory
-// runs. Exact for the discrete map, at the sub-step count the double run uses.
+// One forward-mode pass per requested input, each setting a dual number's
+// direction in that parameter (or initial state) and running the same RK4 the
+// double trajectory runs. Exact for the discrete map, at the sub-step count the
+// double run uses.
 inline std::vector<double> Leaf::damage_trajectory_gradient(
     const std::vector<double>& times, const std::vector<double>& leaf_temp,
     double A0, double I0, double D0, const std::vector<int>& which) const {
@@ -6000,9 +6040,18 @@ inline double Leaf::saturation_vapour_pressure(double temp) const {
   return 0.6108 * exp(17.27 * temp / (temp + 237.3));
 }
 
-// Slope of the saturation vapour pressure curve Delta(T) in kPa K^-1, T in deg C.
+// Slope of the saturation vapour pressure curve Delta(T) in kPa K^-1, T in deg C:
+// the derivative of the Tetens form above, so its numerator is the product of
+// that form's two coefficients.
+//
+// ⚠️ KEEP IT THE EXACT DERIVATIVE, NOT FAO-56's QUOTED 4098. That constant rounds
+// 17.27 * 237.3 = 4098.171, 4.2e-5 low, and the slope reaches the energy-balance
+// first-order condition through dgc/dT = -gc * Delta(Tleaf) / D_leaf. Rounded, the
+// analytic dprofit/dpsi_stem missed a central difference of the profit by 2e-6 to
+// 2e-5 relative at every step size; exact, it agrees to the difference's own floor.
 inline double Leaf::saturation_vapour_pressure_slope(double temp) const {
-  return 4098.0 * saturation_vapour_pressure(temp) / ((temp + 237.3) * (temp + 237.3));
+  return (17.27 * 237.3) * saturation_vapour_pressure(temp) /
+         ((temp + 237.3) * (temp + 237.3));
 }
 
 // The deficit that drives diffusion out of the leaf (#7).
@@ -6684,49 +6733,44 @@ inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
   // keeps bisection (its target is not smooth -- see the warning on
   // util::uniroot_smooth).
   //
-  // ⚠️ **The 1e-10 is load-bearing and was chosen by measurement, not taste. It
-  // sets the floor of what every reported output of this model MEANS.** It used to
-  // be 1e-7, which was invisible while golden section's GSS_tol_abs (1e-3)
-  // dominated; with that gone, this became the model's dominant
-  // amplifier -- a last-bit change anywhere upstream shifts which point TOMS748
-  // lands on inside its tolerance band, and that surfaces in ci, assim, gc and
-  // profit. Measured by perturbing the model identically at each tolerance and
-  // reading the golden grid:
+  // ⚠️ **The 1e-13 is load-bearing and was chosen by measurement, not taste. It
+  // sets the floor of what every reported output of this model MEANS.** This is
+  // the model's dominant amplifier: a last-bit change anywhere upstream shifts
+  // which point TOMS748 lands on inside its tolerance band, and that surfaces in
+  // ci, assim, gc and profit. Measured by perturbing the model identically at each
+  // tolerance and reading the golden grid:
   //
   //   ci tol   worst diff vs a converged (1e-15) solve   us/solve (indicative)
   //   1e-7                       1.82e-07                      2.655
   //   1e-8                       3.15e-08                      2.640
-  //   1e-10                      5.41e-10                      2.695   <- here
+  //   1e-10                      5.41e-10                      2.695
   //   1e-11                      5.41e-10                      2.768
-  //   1e-13                      7.48e-13                      2.885
+  //   1e-13                      7.48e-13                      2.885   <- here
   //   1e-15                      0                             2.945
   //
-  // 1e-10 is the knee: it lands **335x closer to a converged solve** than 1e-7
-  // did, where going on to 1e-13 buys ~700x more for roughly three times the extra
-  // time. The plateaus (1e-8 = 1e-9, 1e-10 = 1e-11) are TOMS748's discrete
-  // iterations, so tightening *between* them buys nothing and still costs.
+  // The plateaus (1e-8 = 1e-9, 1e-10 = 1e-11) are TOMS748's discrete iterations,
+  // so tightening *between* them buys nothing and still costs. The timing column
+  // is only indicative: those binaries were built in one loop in a scratch tree,
+  // and code-layout luck moves this benchmark by ~2%, the size of the effect. If
+  // you re-derive the curve, build every point from one tree and interleave.
   //
-  // ⚠️ **The precision column is solid; the timing column is only indicative and
-  // reads ~2x too cheap.** Those seven binaries were built in one loop in a
-  // scratch tree, and code-layout luck moves this benchmark by ~2%. The controlled
-  // figure for the step actually taken -- both binaries built from the same tree,
-  // interleaved x5 -- is **+3.4%** (2.65 -> 2.75 us/solve), against the +1.5% the
-  // table implies. Still a good trade next to the root-find's 24.5%, and still
-  // 21.7% faster than the 3.51 us this package ran at before 11a. If you re-derive
-  // the curve, build every point from one tree.
-  //
-  // Do not tighten further without a use that needs it, and do not loosen it back
-  // without re-reading the guide's rounding-versus-bug magnitudes, which this
-  // figure sets.
+  // ⚠️ **What chose 1e-13 over 1e-10 is a consumer that differences the solve
+  // (#172).** Where TOMS748 stops inside its band depends on the state, so at
+  // 1e-10 the reported outputs are noisy along any smooth path through the
+  // drivers -- up to 3.7e-11 relative over a grid of plant heights and light
+  // levels, 1e-15 at others. plant takes finite differences of the leaf at steps
+  // of 1e-7, where that noise is a 1e-4 error. At 1e-13 the worst over the same
+  // grid is 2.3e-14, and 1e-12 still leaves 1.2e-12. Do not loosen it without
+  // re-reading the guide's rounding-versus-bug magnitudes, which this figure sets.
   //
   // ⚠️ Not the same knob as `ci_abs_tol` (the settable control, default 1e-3).
   // `ci_abs_tol` is read in exactly one place,
   // solve_medlyn_ci_numerical, i.e. the empirical Medlyn-conductance route. It
   // reaches NEITHER family of optimality solver -- both go through this function
-  // and so through the 1e-10 above. A caller tightening it gets no extra precision
+  // and so through the 1e-13 above. A caller tightening it gets no extra precision
   // anywhere in the optimality model.
   try {
-    return ci_ = util::uniroot_smooth(target, gamma_ * umol_per_mol_to_Pa_, ca_, 1e-10, ci_niter);
+    return ci_ = util::uniroot_smooth(target, gamma_ * umol_per_mol_to_Pa_, ca_, 1e-13, ci_niter);
   } catch (const std::exception& e) {
     // Assimilation can be negative across the WHOLE [gamma*, ca] bracket -- the
     // leaf is too hot to gain carbon at any internal CO2 -- and then there is no
@@ -7131,24 +7175,24 @@ inline S Leaf::kernel_slope_at(Kernel&& kernel, const char* what, const S& x,
   // reads -- on the path that places every operating point.
   if constexpr (std::is_same_v<S, double>) {
     inner xd(x);
-    odelia::ode::seed_direction(xd, 1.0);
+    odelia::ode::set_direction(xd, 1.0);
     return odelia::ode::derivative_along(kernel(xd, inner(args)...));
   } else {
     std::array<outer, n_dir> lift;
     std::size_t d = 0;
-    const auto seed = [&](const S& v) {
+    const auto set = [&](const S& v) {
       lift[d] = outer(to_passive(v));
       xad::value(xad::derivative(lift[d])[d]) = 1.0;
       ++d;
     };
-    seed(x);
-    (seed(args), ...);
-    odelia::ode::seed_direction(xad::value(lift[0]), 1.0);
+    set(x);
+    (set(args), ...);
+    odelia::ode::set_direction(xad::value(lift[0]), 1.0);
 
     const outer y = std::apply(kernel, lift);
     const double slope = odelia::ode::derivative_along(xad::value(y));
 
-    // Every argument gets a row, in the order the walk seeded them. A braced
+    // Every argument gets a row, in the order the walk set them. A braced
     // list is sequenced left to right, so the counter follows the walk; a stack
     // array rather than a vector because the rows cross as a span, which borrows
     // storage instead of owning it.
@@ -7158,8 +7202,8 @@ inline S Leaf::kernel_slope_at(Kernel&& kernel, const char* what, const S& x,
     };
     const odelia::input_and_derivative<S> rows[n_dir]{row(x), row(args)...};
     S out;
-    const odelia::record_report report =
-        odelia::record_with_derivatives<S>(slope, rows, out);
+    const odelia::supply_report report =
+        odelia::supply_derivatives<S>(slope, rows, out);
     if (!report.whole) {
       util::stop(std::string("Leaf::kernel_slope_at: ") + what + ": " +
                  report.why);
@@ -7225,6 +7269,15 @@ inline Leaf::CollarCoords<S> Leaf::collar_coords_at(
     util::stop("Leaf::collar_coords_at: no operating point to place at a "
                "hydraulic shutdown; outputs_at answers there instead");
   }
+  // ⚠️ A DETERMINED COLLAR LEAVES THE STEM AT ITS OWN OPTIMUM, NOT AT T1. Placed by
+  // T1 it keeps its value and takes the wrong rows: profit's row in root_P50 came
+  // out 0.053 where a difference of the solve gives -0.83. Only an optimum at
+  // psi_crit is placed here; one inside the stem's interval needs its curvature.
+  const bool determined = operating_point_kind_ == OperatingPointKind::Determined;
+  if (determined && sigma_star != psi_crit) {
+    util::stop("Leaf::collar_coords_at: the stem at a determined collar sits "
+               "inside its interval, and only psi_crit is placed there");
+  }
 
   // ⚠️ THE RESIDUALS SEE A HELD COLLAR, AND THE COLLAR'S CHANNEL IS ADDED BACK AS
   // ONE SUPPLIED SLOPE. That is the split closed_form_rows.hpp states, and here it
@@ -7257,14 +7310,18 @@ inline Leaf::CollarCoords<S> Leaf::collar_coords_at(
   // MUST BE IN THIS LIST -- one left out is a row that never arrives, which
   // reads as an exact zero in that column rather than as an error. `held` is
   // to_passive and carries none.
-  const S sigma_h = odelia::implicit_value<S>(
-      sigma_star, dT1_dsigma,
-      [&](const S& sg) -> S {
-        return pars[par_kmax] * (leaf.template stem_integral_at<S>(sg, pars) -
-                                 leaf.template stem_integral_at<S>(held, pars)) -
-               draw.flux.value;
-      },
-      pars, draw.flux.value);
+  const S sigma_h =
+      determined
+          ? psi_crit_at<S>(pars)
+          : odelia::implicit_value<S>(
+                sigma_star, dT1_dsigma,
+                [&](const S& sg) -> S {
+                  return pars[par_kmax] *
+                             (leaf.template stem_integral_at<S>(sg, pars) -
+                              leaf.template stem_integral_at<S>(held, pars)) -
+                         draw.flux.value;
+                },
+                pars, draw.flux.value);
 
   // The stem's flux at the placed sigma. gc is built from THIS, not from the
   // draw, because that is what the model's ci solve reads -- the two agree only
@@ -7314,11 +7371,12 @@ inline Leaf::CollarCoords<S> Leaf::collar_coords_at(
   // ⚠️ THE SLOPES COME BACK NOT-A-NUMBER, WHICH IS DELIBERATE. They are absent
   // here, and an absent derivative spelled 0.0 is the one failure this codebase
   // cannot see -- a channel that has gone missing with every number still
-  // finite. A caller that reads one gets NaN instead, which record_with_derivatives
+  // finite. A caller that reads one gets NaN instead, which supply_derivatives
   // refuses by name. Only marginal_at reads a slope, and it asks for the channel.
   if (!collar_moves) {
     const S absent(std::numeric_limits<double>::quiet_NaN());
-    return CollarCoords<S>{pair<S>{sigma_h, absent}, pair<S>{ci_h, absent}};
+    return CollarCoords<S>{odelia::with_slope<S>{sigma_h, absent},
+                           odelia::with_slope<S>{ci_h, absent}};
   }
 
   // The collar's own channel.
@@ -7332,10 +7390,12 @@ inline Leaf::CollarCoords<S> Leaf::collar_coords_at(
   // carries none.
   const S& kmax = pars[par_kmax];
   const S f_p = closed_form_curve<S>(stem_curve_integral_deriv(to_passive(collar)),
-                               held, pars[par_stem_P50], pars[par_stem_c]);
+                               held, pars[par_stem_P50], pars[par_stem_c],
+                               PastLastKnot::ReadsClosedForm);
   const S f_sigma = closed_form_curve<S>(stem_curve_integral_deriv(sigma_star),
                                    sigma_h, pars[par_stem_P50],
-                                   pars[par_stem_c]);
+                                   pars[par_stem_c],
+                                   PastLastKnot::ReadsClosedForm);
 
   // dsigma/dcollar: THE INVERSE SPLINE'S OWN SLOPE times the transport's, which
   // is how upstream's dprofit_at_collar_psi forms it and what actually placed
@@ -7346,7 +7406,8 @@ inline Leaf::CollarCoords<S> Leaf::collar_coords_at(
   const S recip = S(1.0) / f_sigma;
   const S dsigma_du =
       S(stem_curve_integral_inverse_deriv(u_at)) + (recip - S(to_passive(recip)));
-  const S V = dsigma_du * (draw.flux.slope / kmax + f_p);
+  // psi_crit does not move with the collar.
+  const S V = determined ? S(0.0) : dsigma_du * (draw.flux.slope / kmax + f_p);
 
   const S gc_const = S(gc_per_flux);
   const S inv = S(inv_atm);
@@ -7376,8 +7437,8 @@ inline Leaf::CollarCoords<S> Leaf::collar_coords_at(
   // The step is exactly zero in VALUE, so both coordinates are the residuals'
   // bit for bit and only the collar's channel is added.
   const S step = collar - held;
-  return CollarCoords<S>{pair<S>{sigma_h + V * step, V},
-                         pair<S>{ci_h + dci_dp * step, dci_dp}};
+  return CollarCoords<S>{odelia::with_slope<S>{sigma_h + V * step, V},
+                         odelia::with_slope<S>{ci_h + dci_dp * step, dci_dp}};
 }
 
 template <class S>
@@ -7498,7 +7559,7 @@ inline S Leaf::marginal_at(const S& collar, const SupplyDraw<S>& draw,
               pars[par_TF24_floor_lambda_o] * pars[par_kmax] *
                   closed_form_curve<S>(stem_curve_integral_deriv(opt_psi_stem_),
                                  at.sigma.value, pars[par_stem_P50],
-                                 pars[par_stem_c]);
+                                 pars[par_stem_c], PastLastKnot::ReadsClosedForm);
   }
 
   S M = A_prime * at.ci.slope - C_prime * at.sigma.slope;
@@ -7509,7 +7570,8 @@ inline S Leaf::marginal_at(const S& collar, const SupplyDraw<S>& draw,
     // collar, so the term's own dM/dcollar reaches the implicit row.
     M = M + pars[par_TF24_floor_lambda_o] * pars[par_kmax] *
                 closed_form_curve<S>(stem_curve_integral_deriv(to_passive(collar)),
-                                     collar, pars[par_stem_P50], pars[par_stem_c]);
+                                     collar, pars[par_stem_P50], pars[par_stem_c],
+                                     PastLastKnot::ReadsClosedForm);
   }
   return M;
 }
@@ -7523,7 +7585,7 @@ inline S Leaf::root_psi_crit_at(const leaf_pars<S>& pars) const {
 
 template <Leaf::CostCurve K, class S>
 inline S Leaf::bound_at(bool wet, double bound_x, const SupplyDraw<S>& draw,
-                        const leaf_pars<S>& pars) const {
+                        const leaf_pars<S>& pars, double root) const {
   using odelia::util::to_passive;
   check_draw(bound_x, draw);
   const Leaf& leaf = *this;
@@ -7534,6 +7596,35 @@ inline S Leaf::bound_at(bool wet, double bound_x, const SupplyDraw<S>& draw,
   // point -- supply_draw_at has already differenced it, so there is no sentinel
   // to test for here and no second definition of the fallback.
   const double dflux_dx = to_passive(draw.flux.slope);
+
+  if (std::isfinite(root) && root != bound_x) {
+    // ⚠️ BOTH HALVES OF THE QUOTIENT ARE MOVED TO THE ROOT. Carrying only the
+    // residual, as the pinned wet bound does a step away, leaves the residual's
+    // slope at the draw, an error proportional to the distance: a determined
+    // collar's row along psi_soil read 0.50004 where its two bounds give 0.5
+    // exactly. The flux is carried along its active slope, which is second order;
+    // the slope at the root is passive, from the held supply, as at any bound.
+    const S flux_at_root = draw.flux.value + (root - bound_x) * draw.flux.slope;
+    const double slope_at_root =
+        supply_draw_at<double>(root, roots_.held_supply()).flux.slope;
+    if (wet) {
+      return odelia::implicit_value<S>(
+          root, slope_at_root, [&](const S&) -> S { return flux_at_root; },
+          flux_at_root);
+    }
+    return odelia::implicit_value<S>(
+        root,
+        -to_passive(pars[par_kmax]) * stem_curve_integral_deriv(root) -
+            slope_at_root,
+        [&](const S& x) -> S {
+          return pars[par_kmax] *
+                     (leaf.template stem_integral_at<S>(psi_crit_at<S>(pars),
+                                                        pars) -
+                      leaf.template stem_integral_at<S>(x, pars)) -
+                 flux_at_root;
+        },
+        pars, flux_at_root);
+  }
 
   if (wet) {
     // The residual IS the draw: uptake vanishes at this collar. implicit_value
@@ -7638,6 +7729,23 @@ inline S Leaf::collar_at(const SupplyDraw<S>& draw, const leaf_pars<S>& pars,
       // residual -- so it needs no theorem, only its own chain.
       collar = root_psi_crit_at<S>(pars);
       break;
+    case OperatingPointKind::Determined: {
+      // The midpoint of a collapsed interval, so it moves as the mean of its
+      // bounds. Recorded against them rather than summed, so the number stays
+      // the solve's: the root limit's own value is the bound, not the midpoint.
+      const S wet = bound_at<K, S>(true, opt_root_psi_, draw, pars, wet_bound_root_);
+      const S dry = dry_bound_is_root_limit_
+                        ? root_psi_crit_at<S>(pars)
+                        : bound_at<K, S>(false, opt_root_psi_, draw, pars,
+                                         dry_bound_root_);
+      const odelia::input_and_derivative<S> rows[]{{wet, 0.5}, {dry, 0.5}};
+      const odelia::supply_report report =
+          odelia::supply_derivatives<S>(opt_root_psi_, rows, collar);
+      if (!report.whole) {
+        util::stop("Leaf::collar_at: determined collar: " + report.why);
+      }
+      break;
+    }
     case OperatingPointKind::HydraulicShutdown:
       // The stem holds at its critical potential and nothing defines the collar
       // at all, so it does not move.
@@ -8610,6 +8718,74 @@ inline double Leaf::lambda_for(double psi_stem, double psi_upstream) {
     static_assert(K == CostCurve::ProfitMax, "unhandled CostCurve");
     (void)psi_upstream;
     return lambda_ProfitMax(psi_stem);
+  }
+}
+
+
+// lambda_emergent on the COLLAR route: dC/dE along the path the solve moves on,
+// where the collar psi_r is the free variable and psi_stem follows it. Uptake
+// gives dE/dpsi_r = S, and the stem path E = kmax [G(psi_stem) - G(psi_r)] gives
+// dpsi_stem/dpsi_r = (S + kmax f(psi_r)) / (kmax f(psi_stem)). So, for the part
+// of a cost that reads psi_stem alone, with its stem-route lambda C_s/(kmax f),
+//
+//     lambda = lambda_stem * (1 + kmax f(psi_r) / S),
+//
+// the series correction. The part of a cost that reads the potentials only
+// through E (CF77's lambda*E, LeastCost's log W, the floor's lambda_o*E,
+// ProfitMax's thermal term) moves with E directly, so its lambda carries over
+// unchanged. A cost that reads the collar explicitly as well (JS22's drop,
+// CMax's lower limit) adds its partial dC/dpsi_r over S.
+//
+// ⚠️ THIS USED TO BE marginal_cost_water_multilayer() FOR EVERY CURVE, which is
+// the TF24 row of this table: every collar solve reported TF24's lambda whatever
+// it had maximised. CF77 at a price of 1e5 reported 1.05e6 where its emergent
+// lambda is, by construction, its price. TF24's row is still that function, so
+// its number is bit-identical. The check that every row is right is that at an
+// interior optimum lambda_emergent equals dA/dE along the collar path, for every
+// curve (test_collar_lambda_emergent_is_dA_dE).
+template <Leaf::CostCurve K>
+inline double Leaf::lambda_collar_for() {
+  if constexpr (K == CostCurve::TF24) {
+    return marginal_cost_water_multilayer();
+  } else if constexpr (K == CostCurve::CF77) {
+    return cf77_price();
+  } else if constexpr (K == CostCurve::LeastCost) {
+    return lambda_LeastCost(opt_psi_stem_, opt_root_psi_);
+  } else {
+    const double S = dE_from_soil_dpsi_collar(opt_root_psi_, supply_psi_soil());
+    if (!std::isfinite(S) || S <= 0.0) {
+      return util::na_value;
+    }
+    const double series =
+        1.0 + leaf_specific_conductance_max_ *
+                  proportion_of_conductivity(opt_root_psi_) / S;
+    if constexpr (K == CostCurve::TF24_floor) {
+      return lambda_TF24(opt_psi_stem_) * series + TF24_floor_lambda_o;
+    } else if constexpr (K == CostCurve::JS22 || K == CostCurve::CMax) {
+      return lambda_for<K>(opt_psi_stem_, opt_root_psi_) * series +
+             cost_deriv_upstream<K>(opt_psi_stem_, opt_root_psi_) / S;
+    } else if constexpr (K == CostCurve::SOX || K == CostCurve::JW26) {
+      return lambda_for<K>(opt_psi_stem_, opt_root_psi_) * series;
+    } else {
+      static_assert(K == CostCurve::ProfitMax, "unhandled CostCurve");
+      // The conductance term reads psi_stem alone; the thermal term, where the
+      // gates put one in, reads the leaf temperature and so E alone.
+      const double f = proportion_of_conductivity(opt_psi_stem_);
+      if (!(f > 0.0) || !(profitmax_k_span_ > 0.0) || !(profitmax_A_max_ > 0.0)) {
+        return util::na_value;
+      }
+      const double abs_fprime = (stem_c / stem_b) *
+                                pow(opt_psi_stem_ / stem_b, stem_c - 1.0) * f;
+      double thermal = 0.0;
+      if (use_thermal_cost_ && use_energy_balance_) {
+        double dT_dE = 0.0;
+        const double Tleaf = leaf_temp_from_E(
+            transpiration(opt_psi_stem_, opt_root_psi_), &dT_dE);
+        thermal = thermal_cost_temp_deriv(Tleaf) * dT_dE;
+      }
+      return profitmax_A_max_ *
+             (abs_fprime / (f * profitmax_k_span_) * series + thermal);
+    }
   }
 }
 

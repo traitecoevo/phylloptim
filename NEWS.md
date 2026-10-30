@@ -1,4 +1,4 @@
-# phylloptim 0.15.3
+# phylloptim 0.16.2
 
 ## The Medlyn route reports a CO2-basis conductance (#129)
 
@@ -18,6 +18,58 @@ Three smaller defects in the same function, all found while measuring the first:
 ⚠️ **The two entry points are two forms of ONE model**, which is now asserted rather than assumed: the coupled solve converges on the closed form as `g0 -> 0` (chi agreeing to 1e-6, against a gap of 0.036 at the default `g0`). The remaining gap IS the `g0` term the closed form drops. A consequence worth knowing when reading output: the analytical route's `gs` and `ci` are mutually consistent only in that limit, running 1.084 to 1.316 on the diffusion identity at the default `g0`. That is the approximation, not a units error, and it is pinned so the two cannot be confused.
 
 This route had **no tests and no golden coverage**, which is how a 1.6x error survived in shipped code; `tests/testthat/test-medlyn.R` is the first, and the regression test is the substantive part of this change rather than the arithmetic.
+
+# phylloptim 0.16.1
+
+## The ci root-find is solved to 1e-13
+
+`psi_stem_to_ci`'s fixed tolerance goes from 1e-10 to 1e-13 (#172). Where the root-finder stops inside its tolerance band depends on the state, so at 1e-10 every reported output was noisy along a smooth path through the drivers: up to 3.7e-11 relative along plant height, where plant takes finite differences of the leaf at a step of 1e-7 and so read an error of 1e-4. The IFT trait gradient inherited the same noise through its own central differences of `dprofit`, and on `gradient_golden.tsv`'s one-layer interior case it was wrong by up to 2.3e-3 relative; it now matches a Richardson-extrapolated difference of the solve to 1e-8. A solve and a gradient each cost about 5% more.
+
+**What moves:** the three C++ golden files, at most 3.1e-8 absolute in `profit` and 2.1e-9 Pa in `ci`, with no point changing status, kind or branch; in `primitives.tsv` only the iterative tier moves. `gradient_golden.tsv` moves on its one-layer interior case only, by up to 2.3e-3, toward the reference. `ci_abs_tol` is unchanged and still reaches only the Medlyn route.
+
+# phylloptim 0.16.0
+
+## odelia's reverse-mode names, at 0.10.0
+
+`LinkingTo: odelia (>= 0.10.0)`, the release that renames its reverse-mode API (traitecoevo/odelia#66). The leaf records onto an `odelia::ode::adjoint_scalar` (was `active_scalar`) and puts its supplied rows on the consumer's tape with `odelia::supply_derivatives` (was `record_with_derivatives`). A value and its slope in the collar potential is `odelia::with_slope<T>` (was `value_with_slope<T>`), named directly: `Leaf::pair<T>`, which only renamed it, is gone. A direction is set with `odelia::ode::set_direction` (was `seed_direction`), and "seed" in the derivative sense is gone from the comments: a trait carries a direction, and a sweep starts from an adjoint. A **minor** bump, because the floor moves and `Leaf::pair` is gone. No number moves.
+
+# phylloptim 0.15.4
+
+Three defects the model registry (#166) surfaced, each found by checking an equation's base-R replica against the package.
+
+## The collar route reports the seated curve's lambda_emergent
+
+`lambda_emergent` is the marginal cost of water the operating point implies, `dC/dE`, and it is what puts every cost curve on one axis. The stem routes have always reported each curve's own. The collar route reported `marginal_cost_water_multilayer()` after every solve and every prescribed evaluation: TF24's lambda with the series correction for the soil-to-collar path, whatever curve was seated. CF77 at a price of 1e5, whose lambda is that price by construction, read 1.05e6.
+
+It is now `lambda_collar_for<K>()`, the same chain rule for every curve. The collar is the free variable, so uptake gives `dE/dpsi_r = S`, and the part of a cost that reads `psi_stem` alone takes the series factor `1 + kmax f(psi_r)/S`. The part that reads the potentials only through E (CF77's price, LeastCost's `log W`, the floor's `lambda_o E`, ProfitMax's thermal term) carries over unchanged. JS22 and CMax, which read the collar explicitly, add `dC/dpsi_r` over S. `test_collar_lambda_emergent_is_dA_dE` checks every curve, on one- and three-layer supplies, against `dA/dE` taken along the collar path at an interior optimum, where the first-order condition makes the two equal for every link. 26 interior optima agree to 1.8e-6. On the old reporting 23 of them fail, CF77 by up to 146%.
+
+**What moves:** `lambda_emergent` (and the last element of `operating_point_values()`) on the collar route, for every curve but TF24. TF24's row is the function it always called, so its value is bit-identical, as are all four golden files. Nothing in the solve reads `lambda_emergent`.
+
+## Four bound fields nothing wrote are no longer bound
+
+`count`, `psi_stem` (the member, not `opt_psi_stem_`), `opt_ci_` and `f_r` were bound as R fields and written by nothing in the C++. `count` and `psi_stem` were never initialised, so a read returned whatever the memory held (about 3e-314 measured); `opt_ci_` was always `NA` and `f_r` always empty. They are unbound here. The members stay, because plant's own bindings name them (moving a bound member breaks plant's generated glue); `count` and `psi_stem` are now initialised to `NA`, so a read through plant's bindings is defined.
+
+## The slope of the saturation curve is the exact derivative
+
+`saturation_vapour_pressure_slope()` used FAO-56's quoted numerator 4098, which rounds `17.27 * 237.3 = 4098.171`, so the slope was 4.2e-5 low. The slope reaches the energy-balance first-order condition through `dgc/dT = -gc * Delta(Tleaf) / D_leaf`, and there it made the analytic `dprofit/dpsi_stem` miss a central difference of the profit by 2e-6 to 2e-5 relative at every step from 1e-2 to 1e-6 MPa: a plateau rather than the difference's V. The numerator is now the product of the two Tetens coefficients, and the same comparison falls to the difference's own floor (median 1.5e-8 over 34 points at a step of 3e-4 MPa). `test_leaf.cpp` now makes it with the energy balance on, where only the gate-off case was checked before; on the old constant it fails.
+
+**What moves:** the energy-balance rows of `psi_stem_optima.tsv` and nothing else. 244 of its 5760 rows change, all with the energy balance on, none in status or kind: the argmax by at most 1.2e-5 relative, profit by at most 5.6e-10. `operating_points.tsv`, `primitives.tsv` and `gradient_golden.tsv` are bit-identical. With the gate off the slope is never read.
+
+# phylloptim 0.15.3
+
+## The root curve's derivative answers past its dry end
+
+A soil layer drier than the root curve's last knot (6.89 MPa at the defaults) no longer refuses the derivative path with `stem_curve_domain`. The rows are those of what the table returns there: the last knot's tangent up to G(inf), whose trait rows are G's at the knot, and G(inf) beyond it, with `dG(inf)/db = Gamma(1 + 1/c)` and a digamma row in `c`. The conductivity read past the knot has no row, since the curve there is the 1% floor for every trait. The stem table instead reads the closed form past its last knot (0.14.1), so its rows there are the closed form's; `closed_form_integral()` and `closed_form_curve()` now take a `PastLastKnot` argument naming which tail the table has, and each call site states it. Values are untouched: the golden grid is byte-identical.
+
+## A determined collar answers the derivative path
+
+Where the feasible interval collapses and the collar is held at its midpoint, `collar_at()` no longer refuses with "no operating point to place at one that is determined". The collar's rows are the mean of its two bounds' rows: the wet bound's, and the dry bound's from whichever limit closed it, the continuity root or the root's own critical potential. The stem there sits at its own optimum with the collar held, not at continuity with the draw, so `collar_coords_at()` places it at `psi_crit` with no response to the collar; placed by continuity, profit's row in `root_P50` read 0.053 where a difference of the solve gives -0.83. A stem optimum inside its interval is refused by name. Each bound's row is taken at that bound's own root, not at the midpoint where the draw was taken, up to 5e-4 MPa away: the draw is carried to the root along its slope, and the residual's slope is the supply's at the root. Taken at the midpoint, the collar's row along `psi_soil` read 0.50004 where its bounds give 0.5 exactly; now every collar row matches a difference of the solve to 2e-8.
+
+Both bounds are now polished to collar precision before the midpoint is taken, as a pinned bound already is. Left at the bracket's 1e-4 tolerance, the continuity bound sat up to 5.6e-7 MPa from its root, and a difference of the solve along `root_P50` read 0.014 where the row, and a difference of the polished solve, give -1.6e-6. So a determined collar moves by up to 2.8e-7 MPa, and a stem conductance of 1e-30, refused before as `stem_curve_domain`, is now solved as a determined point. No other point moves: the golden grid has no determined point and is byte-identical.
+
+## `uniroot()` refuses a bisection that spends its budget
+
+`uniroot()` checked `it > max_iterations`, which cannot fire: boost's `bisect` reports the iterations it used and never exceeds its budget. It now checks `>=`, as `uniroot_smooth()` does. Its one caller, the Medlyn ci solve, needs a few tens of halvings to reach `ci_abs_tol` against a default budget of 1000, so no solve that finished before refuses now.
 
 # phylloptim 0.15.2
 

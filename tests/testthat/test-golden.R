@@ -45,6 +45,9 @@
 # (rebasing the quantum yield onto absorbed light reassociates J) and none of the
 # other three rows.
 #
+# Then for psi_stem_to_ci's tolerance going 1e-10 -> 1e-13 (#172), which moved 23
+# of the 54 values by up to 2.6e-14 relative.
+#
 # Before that, #92 (the indexed knot grid) moved 27, the psi_stem_to_ci tolerance
 # 18, and the collar root-find 27.
 
@@ -67,29 +70,29 @@ golden_rows <- list(
   list(
     inputs = list(psi_soil = 0.5, ppfd = 1500, vpd = 0.5, layers = 1L),
     expected = list(
-      psi_stem      = "0x1.709bdd8e0f11dp+1",
-      opt_root_psi  = "0x1.066f205f53abcp+1",
-      ci            = "0x1.9f4d835015446p+4",
-      assim         = "0x1.215ca9d767532p+4",
-      transpiration = "0x1.450032bbf9f83p-16",
-      gc            = "0x1.0b2ace46dec49p-3",
-      profit        = "0x1.07970cd1529d1p+4",
-      e_up          = "0x1.450032bbf9f84p-16",
-      uptake        = "0x1.19e24250556e9p-10"
+      psi_stem      = "0x1.709bdd8e0f12p+1",
+      opt_root_psi  = "0x1.066f205f53abep+1",
+      ci            = "0x1.9f4d835015451p+4",
+      assim         = "0x1.215ca9d76753dp+4",
+      transpiration = "0x1.450032bbf9f85p-16",
+      gc            = "0x1.0b2ace46dec4cp-3",
+      profit        = "0x1.07970cd1529dbp+4",
+      e_up          = "0x1.450032bbf9f87p-16",
+      uptake        = "0x1.19e24250556ecp-10"
     )
   ),
   list(
     inputs = list(psi_soil = 2.0, ppfd = 900, vpd = 2.0, layers = 3L),
     expected = list(
-      psi_stem      = "0x1.b1bea0c268933p+1",
-      opt_root_psi  = "0x1.821842026fc9cp+1",
-      ci            = "0x1.0de793a98da7ap+3",
-      assim         = "0x1.b2e0245668c9fp+1",
+      psi_stem      = "0x1.b1bea0c26892fp+1",
+      opt_root_psi  = "0x1.821842026fc9ap+1",
+      ci            = "0x1.0de793a98da7cp+3",
+      assim         = "0x1.b2e0245668cabp+1",
       transpiration = "0x1.b29d0f7ff2d3bp-18",
       gc            = "0x1.654643ffb4b26p-7",
-      profit        = "0x1.8a7e20d7e0cf0p-1",
-      e_up          = "0x1.b29d0f7ff2d43p-18",
-      uptake        = "0x1.78f45d607ab8ep-12"
+      profit        = "0x1.8a7e20d7e0d4p-1",
+      e_up          = "0x1.b29d0f7ff2d3bp-18",
+      uptake        = "0x1.78f45d607ab87p-12"
     )
   ),
   list(
@@ -150,6 +153,19 @@ test_that("leaf_model()'s defaults are the C++ default constructor's", {
   )
 })
 
+# The worst difference per class, relative and absolute, printed at the end of the
+# file on every run: on macOS it is zero, and elsewhere it is the only place the
+# R route's own cross-platform figure exists. `golden_tolerance()` is set from it.
+golden_worst <- new.env()
+golden_worst$cells <- list()
+golden_see <- function(got, expected_hex, field, label) {
+  want <- as.numeric(expected_hex)
+  golden_worst$cells[[length(golden_worst$cells) + 1L]] <- data.frame(
+    class = if (identical(field, "profit")) "profit" else "argmax",
+    at = paste(label, field), abs = abs(got - want),
+    rel = if (want == 0) 0 else abs(got - want) / abs(want))
+}
+
 for (row in golden_rows) {
   local({
     inputs <- row$inputs
@@ -164,6 +180,7 @@ for (row in golden_rows) {
         # the same policy tests/cpp/test_golden.cpp applies, and for the same
         # reason. See expect_golden() in helper-golden.R.
         expect_golden(got[[field]], expected[[field]], field, label)
+        golden_see(got[[field]], expected[[field]], field, label)
       }
     })
   })
@@ -182,15 +199,15 @@ golden_rows_40 <- list(
     inputs = list(psi_soil = 2.0, ppfd = 900, vpd = 2.0, layers = 1L,
                   leaf_temp = 40.0),
     expected = list(
-      psi_stem      = "0x1.3c43d2872de1ap+1",
-      opt_root_psi  = "0x1.27d38b4c66e1bp+1",
-      ci            = "0x1.a8bad8ee8dd66p+4",
-      assim         = "0x1.b63a54317dbdcp-1",
+      psi_stem      = "0x1.3c43d2872de19p+1",
+      opt_root_psi  = "0x1.27d38b4c66e1ap+1",
+      ci            = "0x1.a8bad8ee8dd68p+4",
+      assim         = "0x1.b63a54317dbbcp-1",
       transpiration = "0x1.00e0c211c7b37p-18",
       gc            = "0x1.a65564b1f530fp-8",
-      profit        = "-0x1.c63090c3dfdd0p-4",
-      e_up          = "0x1.00e0c211c7b3ap-18",
-      uptake        = "0x1.bd98ec093e231p-13"
+      profit        = "-0x1.c63090c3dfeap-4",
+      e_up          = "0x1.00e0c211c7b33p-18",
+      uptake        = "0x1.bd98ec093e225p-13"
     )
   ),
   list(
@@ -222,10 +239,25 @@ for (row in golden_rows_40) {
       got <- do.call(golden_solve, inputs)
       for (field in names(expected)) {
         expect_golden(got[[field]], expected[[field]], field, label)
+        golden_see(got[[field]], expected[[field]], field, label)
       }
     })
   })
 }
+
+test_that("the golden points' worst differences are reported", {
+  d <- do.call(rbind, golden_worst$cells)
+  expect_identical(nrow(d), 54L)
+  for (cl in c("profit", "argmax")) {
+    x <- d[d$class == cl, ]
+    r <- which.max(x$rel)
+    a <- which.max(x$abs)
+    cat(sprintf("\ngolden points, %-6s worst rel %.3g at %s; abs %.3g at %s (tol %g)",
+                cl, x$rel[[r]], x$at[[r]], x$abs[[a]], x$at[[a]],
+                golden_tolerance(if (cl == "profit") "profit" else "assim")))
+  }
+  cat("\n")
+})
 
 # The 40 C rows must not equal the 25 C ones -- otherwise the two blocks above are
 # measuring one temperature twice and the coverage is still missing. Asserted rather
