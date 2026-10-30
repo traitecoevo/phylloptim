@@ -48,8 +48,8 @@
   curv_fact_colim = 0.99,
   TF24_cost_scale = 7.5,
   R_d_25 = 1.44,
-  JS22_gamma = 1.0,
-  CMax_a = 0.6,
+  JS22_gamma = 0.4717887793,
+  CMax_a = 0.6385596982,
   CMax_b = 0.0
 )
 
@@ -991,8 +991,9 @@ operating_point <- function(x) {
 ##'   it. `NA_real_` (the default) keeps the leaf's own default, aligned to TF24
 ##'   by [align_curves()]. Zero is refused, since at zero the capacity term
 ##'   vanishes and what is left is water-use efficiency, which rises without bound
-##'   as transpiration falls. The published value is 146, which pins every stem
-##'   optimum at `psi_crit` at this package's default leaf.
+##'   as transpiration falls. The published value is 146, which at this
+##'   package's default leaf pins the stem optimum at `psi_crit` from the
+##'   reference `psi_soil` of 1 MPa drier.
 ##' @param CF77_lambda,TF24_floor_lambda_o the prescribed marginal value of water
 ##'   for the two curves that take one, in umol C (kg H2O)^-1. `NA_real_` (the
 ##'   default) leaves the field as it is: `CF77`'s aligned default (see

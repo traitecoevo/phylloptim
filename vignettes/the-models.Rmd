@@ -649,7 +649,7 @@ The published models map onto that space as follows.
 | @eller2020 | `SOX` | the product objective. Takes no parameter of its own. |
 | @jones2026 | `JW26` | the same product form as `SOX`, with a linear `g`. Takes no parameter of its own; see below. |
 | @sicangco2026 | `ProfitMax` | ProfitMax with the thermal-cost gate on. |
-| @prentice2014 | `LeastCost` | the cost per unit carbon, `(c_E E + c_V V_cmax)/A`, as `log A − log(E + β V_cmax)` under the log link. One parameter, the dimensionless unit-cost ratio `β = c_V/c_E` (`LeastCost_beta`, 146 in the paper, which pins every optimum at `ψ_crit` at this package's default leaf; the default is aligned instead). Zero is refused, because at zero the objective is water-use efficiency and the optimum is the wet bound. The only cost here that weighs capacity. |
+| @prentice2014 | `LeastCost` | the cost per unit carbon, `(c_E E + c_V V_cmax)/A`, as `log A − log(E + β V_cmax)` under the log link. One parameter, the dimensionless unit-cost ratio `β = c_V/c_E` (`LeastCost_beta`, 146 in the paper, which at this package's default leaf pins the optimum at `ψ_crit` from the reference `ψ_soil` of 1 MPa drier; the default is aligned instead). Zero is refused, because at zero the objective is water-use efficiency and the optimum is the wet bound. The only cost here that weighs capacity. |
 | — | `TF24_floor` | the canonical two-term split, `Θ̃(ψ) + λ_o E`, with `Θ̃` taken to be TF24's own cost. Not a paper's model: the form is Wolf et al.'s case 8, endorsed in a sentence by Buckley (2017) and fitted once in Anderegg et al. (2018)'s supplement, but never argued for. Here so the claim can be tested rather than argued — and attached to TF24 so that the test is about *our* cost. |
 
 : The published models, and the axes they occupy.
@@ -685,9 +685,9 @@ rownames(gc) <- paste("psi_soil", c(0.5, 1, 2, 3))
 print(signif(gc, 3))
 ```
 
-The first five columns agree at `psi_soil` 1 and part either side of it, which is the comparison an alignment is for. Three curves are left where the supply puts them:
+The first five columns agree at `psi_soil` 1 and part either side of it, which is the comparison an alignment is for. Four curves are left unaligned:
 
-- `SOX`, `JW26` and `ProfitMax` have no level parameter. Matching them through `kmax` would work, but they would then no longer share the one supply every other curve uses.
+- `SOX`, `JW26` and `ProfitMax` have no level parameter; the supply puts their optimum. Matching them through `kmax` would work, but they would then no longer share the one supply every other curve uses.
 - `TF24_floor` adds a price to TF24's own cost at TF24's own traits, so the only `λ_o` that reaches TF24's conductance is zero, where the curve is TF24. It keeps no default.
 
 Call [align_curves()] with a different reference or `target` to align for a different study, and pass its answer back as traits (`JS22_gamma`, `CMax_a`) or as [leaf_solve()] arguments (`CF77_lambda`, `LeastCost_beta`).

@@ -235,8 +235,8 @@ Leaf:
     #
     # ⚠️ ITS DEFAULT IS ALIGNED, NOT PUBLISHED: the beta at which LeastCost's stem
     # optimum has TF24's conductance at the reference environment of
-    # `align_curves()`. The published 146 pins every optimum at psi_crit at this
-    # package's default leaf. Clearing it to NA is refused, since that is a NaN
+    # `align_curves()`. At this package's default leaf the published 146 pins the
+    # optimum at psi_crit from the reference psi_soil of 1 MPa drier. Clearing it to NA is refused, since that is a NaN
     # objective whose argmax is a property of the bracket.
     #
     # ⚠️ DIMENSIONLESS, so both fluxes it weighs are converted to mol m^-2 s^-1

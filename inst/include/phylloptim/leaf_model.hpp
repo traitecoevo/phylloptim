@@ -762,9 +762,9 @@ public:
   // this path rather than dividing it by a computed 1.0.
   bool CF77_soil_beta_ = false;
   // THE PRICE OF WATER AS TRANSPIRATION GOES TO ZERO, umol C (kg H2O)^-1 -- the
-  // `lambda_o` of the TF24_floor cost curve, and an INPUT on exactly the same footing
-  // as `CF77_lambda_` above: same units, same meaning, no default, never assigned
-  // by model code, and not cleared by setup_clean_leaf().
+  // `lambda_o` of the TF24_floor cost curve, and an INPUT on the same footing as
+  // `CF77_lambda_` above: same units, same meaning, never assigned by model code,
+  // and not cleared by setup_clean_leaf() -- but, unlike it, with no default.
   //
   // WHY IT HAS NO DEFAULT, and this is the sharpest case in the class. Zero is a
   // defensible number and it is the WRONG default, because at `lambda_o = 0` this
@@ -822,9 +822,10 @@ public:
   // capacity term does and it opens to the wet bound.
   //
   // ⚠️ THE DEFAULT IS NOT THE PUBLISHED 146. At this package's default leaf, 146
-  // pins every stem optimum at psi_crit (the leaf opens fully at the reference),
-  // so it cannot be compared with the other curves. The aligned value sits inside
-  // Dong's factor-of-two band about 146 only at its lower edge.
+  // pins the stem optimum at psi_crit from the reference psi_soil of 1 MPa
+  // drier (the leaf opens fully at the reference), so it cannot be compared with
+  // the other curves there. The aligned value, 146/2.83, sits below Dong's
+  // factor-of-two band about 146.
   double LeastCost_beta = 51.59667042;             // dimensionless, c_V / c_E
   double hydraulic_cost_;
   
@@ -8935,9 +8936,9 @@ inline void Leaf::check_cost_parameters() {
       util::stop("CMax_b must be finite; got " + util::to_string(CMax_b));
     }
   } else if constexpr (K == CostCurve::TF24_floor) {
-    // ⚠️ ONE PARAMETER, AND IT IS AN INPUT WITH NO DEFAULT -- exactly like
-    // CF77_lambda_ and for a sharper reason: zero is a perfectly good value here,
-    // and it is the value at which this curve stops being itself. The hydraulic
+    // ⚠️ ONE PARAMETER, AND IT IS AN INPUT WITH NO DEFAULT -- unlike
+    // CF77_lambda_, which has an aligned one -- because zero is a perfectly good
+    // value here, and it is the value at which this curve stops being itself. The hydraulic
     // half is TF24's cost at TF24's own traits, so at lambda_o = 0 TF24_floor IS
     // TF24, and a caller who seated this curve and never named a price would be
     // running the production model under the new model's name. Refuse the

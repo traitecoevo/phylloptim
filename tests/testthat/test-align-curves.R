@@ -10,8 +10,9 @@ ref_gc <- function(model, ...) {
 test_that("align_curves() reproduces the shipped defaults", {
   # ⚠️ IF THIS FAILS AFTER A MODEL CHANGE, RE-ALIGN; DO NOT LOOSEN IT. A change
   # that moves TF24 or one of these curves at the reference moves the aligned
-  # values, and the defaults in leaf_model.hpp, leaf_traits() and
-  # .level_defaults must follow, ten significant figures each.
+  # values, and the defaults in leaf_model.hpp, leaf_traits(),
+  # .leaf_trait_defaults and .level_defaults must follow, ten significant
+  # figures each.
   a <- align_curves()
   expect_named(a, c("CF77_lambda", "JS22_gamma", "CMax_a", "LeastCost_beta"))
   expect_equal(a[["CF77_lambda"]], .level_defaults[["CF77_lambda_"]],
@@ -52,6 +53,32 @@ test_that("the R defaults are the leaf's own", {
   expect_identical(l$CF77_lambda_, .level_defaults[["CF77_lambda_"]])
   expect_identical(l$LeastCost_beta, .level_defaults[["LeastCost_beta"]])
   expect_true(is.na(l$TF24_floor_lambda_o))
+  # And leaf_traits()'s two are .leaf_trait_defaults' two.
+  expect_identical(leaf_traits()$JS22_gamma, .leaf_trait_defaults$JS22_gamma)
+  expect_identical(leaf_traits()$CMax_a, .leaf_trait_defaults$CMax_a)
+})
+
+test_that("a batch gradient keeps the batch leaf's aligned defaults", {
+  # The C++ batch writes the owned slots from theta, which is NA on every
+  # route that does not own them; writing that NA cleared the default, and a
+  # later CF77 or LeastCost solve on the same leaf was refused.
+  b <- leaf_batch(psi_soil = c(1, 2), PPFD = 900,
+                  supply = leaf_supply_singlelayer())
+  leaf_gradient_batch(b, model = "TF24", pars = "vcmax_25")
+  expect_identical(b$leaf$CF77_lambda_, .level_defaults[["CF77_lambda_"]])
+  expect_identical(b$leaf$LeastCost_beta, .level_defaults[["LeastCost_beta"]])
+})
+
+test_that("an NA owned slot in a supplied theta takes the default", {
+  b <- leaf_batch(psi_soil = c(1, 2), PPFD = 900,
+                  supply = leaf_supply_singlelayer())
+  built <- leaf_gradient_batch(b, model = "LeastCost", pars = "vcmax_25")
+  th <- .gradient_theta_matrix(b, b$traits, model = "LeastCost")
+  th[, match("LeastCost_beta", .gradient_par_names())] <- NA_real_
+  given <- leaf_gradient_batch(b, model = "LeastCost", pars = "vcmax_25",
+                               theta = th)
+  expect_true(all(given$status != "error"))
+  expect_identical(given$gradient, built$gradient)
 })
 
 test_that("align_curves() follows its reference and its target", {

@@ -1305,7 +1305,7 @@ parameters:
     units: '–'
     class: hyperparameter
     meaning: 'unit-cost ratio $c_V/c_E$ of least-cost theory, dimensionless because both fluxes are weighed in mol m⁻² s⁻¹; an input, strictly positive'
-    source: 'caller input; default aligned to TF24 by align_curves() (#156); Prentice-2014 report 146, which pins the optimum at psi_crit at the default leaf'
+    source: 'caller input; default aligned to TF24 by align_curves() (#156); Prentice-2014 report 146, which at the default leaf pins the optimum at psi_crit from the reference psi_soil of 1 MPa drier'
     cite: Prentice-2014
     placeholder: false
     code: phylloptim::Leaf::LeastCost_beta

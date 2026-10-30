@@ -113,8 +113,9 @@ the cost of transpiration, dimensionless. Only \code{model = "LeastCost"} reads
 it. \code{NA_real_} (the default) keeps the leaf's own default, aligned to TF24
 by \code{\link[=align_curves]{align_curves()}}. Zero is refused, since at zero the capacity term
 vanishes and what is left is water-use efficiency, which rises without bound
-as transpiration falls. The published value is 146, which pins every stem
-optimum at \code{psi_crit} at this package's default leaf.}
+as transpiration falls. The published value is 146, which at this
+package's default leaf pins the stem optimum at \code{psi_crit} from the
+reference \code{psi_soil} of 1 MPa drier.}
 }
 \value{
 A data.frame with one row per driver combination: the drivers, then

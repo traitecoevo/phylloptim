@@ -258,7 +258,9 @@ print.leaf_batch <- function(x, ...) {
 ##' is what a hierarchical fit needs: a matrix with one row per observation (or one
 ##' row shared by all of them) and one column per [gradient_par_names()] entry, in
 ##' that order. `resistance` is ignored on the multi-layer path and may be `NA`
-##' there.
+##' there. An `NA` in the column of the level parameter `model` owns
+##' (`CF77_lambda_` or `LeastCost_beta`) takes its aligned default, as it does
+##' when `theta` is built for you.
 ##'
 ##' @param batch a [leaf_batch()]
 ##' @param traits a [leaf_traits()] object: the point in trait space to
@@ -373,7 +375,8 @@ leaf_gradient_batch <- function(batch,
            "or the other. `theta` is the general form -- put the traits in its ",
            "columns.", call. = FALSE)
     }
-    theta <- .gradient_check_theta(theta, batch, par_names)
+    theta <- .gradient_fill_level_defaults(
+      .gradient_check_theta(theta, batch, par_names), model, par_names)
   }
 
   psi <- .gradient_check_psi_batch(psi, batch$n, method)
@@ -509,15 +512,7 @@ leaf_gradient_batch <- function(batch,
   m[, "CF77_lambda_"] <- batch$CF77_lambda
   m[, "TF24_floor_lambda_o"] <- batch$TF24_floor_lambda_o
   m[, "LeastCost_beta"] <- batch$LeastCost_beta
-  # An unset slot on the route that owns it is the leaf's own default, which C++
-  # would otherwise overwrite with the NA.
-  if (!is.null(model)) {
-    for (field in names(.level_defaults)) {
-      if (.owns_field(model, field)) {
-        m[is.na(m[, field]), field] <- .level_defaults[[field]]
-      }
-    }
-  }
+  m <- .gradient_fill_level_defaults(m, model, par_names)
   # The thermal-damage inputs, off the batch's leaf, when its gate is on; NA (and
   # unread) otherwise. One row for every observation: pass `theta` to give each
   # observation its own state.
@@ -549,4 +544,20 @@ leaf_gradient_batch <- function(batch,
          nrow(theta), call. = FALSE)
   }
   theta
+}
+
+# An unset slot on the route that owns it takes the leaf's own default, whether
+# the matrix was built here or supplied, so `theta = NA` means what it means in
+# leaf_gradient(). Columns by position: a supplied matrix may have no names.
+.gradient_fill_level_defaults <- function(m, model, par_names) {
+  if (is.null(model)) {
+    return(m)
+  }
+  for (field in names(.level_defaults)) {
+    if (.owns_field(model, field)) {
+      j <- match(field, par_names)
+      m[is.na(m[, j]), j] <- .level_defaults[[field]]
+    }
+  }
+  m
 }

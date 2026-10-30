@@ -97,6 +97,11 @@ align_curves <- function(models = c("CF77", "JS22", "CMax", "LeastCost"),
   }
   if (is.null(target)) {
     target <- gc_at("TF24")
+    if (!(is.finite(target) && target > 0)) {
+      stop("TF24 has no positive conductance at this reference (gc = ",
+           format(target), "), so there is nothing to align to; choose ",
+           "another reference or pass `target`", call. = FALSE)
+    }
   }
   if (!(is.numeric(target) && length(target) == 1L && is.finite(target) &&
         target > 0)) {

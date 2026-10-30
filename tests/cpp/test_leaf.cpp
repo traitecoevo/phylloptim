@@ -5486,6 +5486,12 @@ void test_prescribed_lambda_survives_redriving() {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     ok(l.CF77_lambda_ == 107750.8846,
        "CF77_lambda_ is its aligned default on a freshly constructed leaf");
+    // The other three aligned initialisers. R assigns its own copies on every
+    // leaf it builds, so only a C++ consumer (plant) reads these, and nothing
+    // on the R side would see one drift.
+    ok(l.JS22_gamma == 0.4717887793 && l.CMax_a == 0.6385596982 &&
+           l.CMax_b == 0.0 && l.LeastCost_beta == 51.59667042,
+       "JS22_gamma, CMax_a and LeastCost_beta are their aligned defaults");
   }
 
   const double prescribed = 30.0;

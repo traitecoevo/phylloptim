@@ -181,16 +181,16 @@ YAML 1.1 reads `1e-3` as a string: write a float with a point and a signed expon
 
 ## Invariants and what not to touch
 
-- **The one-way include rule** (old comments call it "PLAN item 6a"): `inst/include/` is plain C++ and never includes from `src/`; `src/` and `R/` include downward only. A separate R-binding package was considered and rejected: two repositories for one model, installed twice.
+- **The one-way include rule** (hazard 9; older comments call it "PLAN item 6a"): `inst/include/` is plain C++ and never includes from `src/`; `src/` and `R/` include downward only. A separate R-binding package was considered and rejected: two repositories for one model, installed twice.
 - **The generated RcppR6 files** (old comments: "PLAN item 6c"): never hand-edit them, and keep RcppR6 undeclared.
 - **`gradient.hpp`'s arithmetic order**, which must match `R/gradient.R` bit-for-bit.
 - **`psi_stem_to_ci`'s tolerance** and **`basin_scan_cells()`'s gate**, both set by measurement.
 - **The `supply_kind_` enum**, which measured free where `std::variant` did not (hazard 6).
 - **Public `Leaf` members**, which plant binds by name (hazard 7).
 - **`tsv_to_hex.c`**, which is live: `test-golden.R`'s regeneration recipe needs it.
-- **The aligned level defaults** (`CF77_lambda_`, `JS22_gamma`, `CMax_a`, `LeastCost_beta`; #156) are solved by `align_curves()`, not chosen, and live in three places: the in-class initialisers in `leaf_model.hpp`, `leaf_traits()`, and `.level_defaults`. `test-align-curves.R` re-solves them, so a change that moves TF24 or one of these curves at the reference fails it; re-align all three copies rather than loosening the test. The golden files pin their own values and do not follow the defaults.
+- **The aligned level defaults** (`CF77_lambda_`, `JS22_gamma`, `CMax_a`, `LeastCost_beta`; #156) are solved by `align_curves()`, not chosen, and live in four places: the in-class initialisers in `leaf_model.hpp`, `leaf_traits()`, `.leaf_trait_defaults` (`JS22_gamma`, `CMax_a`) and `.level_defaults` (`CF77_lambda_`, `LeastCost_beta`). `test-align-curves.R` re-solves them, so a change that moves TF24 or one of these curves at the reference fails it; re-align every copy rather than loosening the test. The golden files pin their own values and do not follow the defaults.
 
-Comments in `inst/include/phylloptim.h`, `Makefile`, `CMakeLists.txt` and the workflows that cite "PLAN item N" refer to a `PLAN.md` retired in #126; its last version is `git show 83fbb25^:PLAN.md`. Item 6a is the one-way include rule above, 6c the RcppR6 layering, and 15 the Doxygen site (issue #12).
+Comments in `inst/include/phylloptim.h`, `inst/RcppR6_classes.yml`, `Doxyfile` and old `NEWS.md` entries that cite "PLAN item N" refer to a `PLAN.md` retired in #126; its last version is `git show 83fbb25^:PLAN.md`. Item 6a is the one-way include rule above, 6c the RcppR6 layering, and 15 the Doxygen site (issue #12).
 
 ## Validating against plant
 

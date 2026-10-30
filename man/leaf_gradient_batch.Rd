@@ -141,7 +141,9 @@ batch's own drivers. Pass \code{theta} instead when they vary by observation, wh
 is what a hierarchical fit needs: a matrix with one row per observation (or one
 row shared by all of them) and one column per \code{\link[=gradient_par_names]{gradient_par_names()}} entry, in
 that order. \code{resistance} is ignored on the multi-layer path and may be \code{NA}
-there.
+there. An \code{NA} in the column of the level parameter \code{model} owns
+(\code{CF77_lambda_} or \code{LeastCost_beta}) takes its aligned default, as it does
+when \code{theta} is built for you.
 }
 
 \examples{
