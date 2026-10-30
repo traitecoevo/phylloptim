@@ -612,12 +612,15 @@ against a model that is exactly right.
 ## API documentation
 
 ```sh
-doxygen        # docs/html/index.html
+doxygen                                    # the C++ API: docs/html/index.html
+Rscript -e 'pkgdown::build_site()'         # the R reference and vignettes: docs/site/
 ```
 
-Doxygen for the C++ API and roxygen for the R one. The headers' comments are the
-substantive documentation here, and `tools/doxygen_filter.awk` presents them to
-Doxygen without modifying a single source file.
+Doxygen for the C++ API and roxygen for the R one; `?phylloptim` is the R side's
+starting page. The headers' comments are the substantive documentation here, and
+`tools/doxygen_filter.awk` presents them to Doxygen without modifying a single
+source file. The two are published together as one site, with the C++ API under
+`cpp/`, once the repository's `PUBLISH_DOCS` variable is set.
 
 ## How this compares to other leaf models
 

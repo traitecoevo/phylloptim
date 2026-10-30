@@ -1,6 +1,6 @@
 # phylloptim 0.16.3
 
-Documentation only; no number moves. The developer guide is split into `.claude/CLAUDE.md` (the standing rules), `.claude/hazards.md` and `.claude/measurements.md`, with hazard numbers unchanged and its stale figures and counts corrected against the code (#150).
+Documentation only; no number moves. The developer guide is split into `.claude/CLAUDE.md` (the standing rules), `.claude/hazards.md` and `.claude/measurements.md`, with hazard numbers unchanged and its stale figures and counts corrected against the code (#150). `?phylloptim` is now a package help page, and a pkgdown site (`_pkgdown.yml`) groups the reference by purpose and carries all five vignettes as articles; `docs.yml` builds it beside the Doxygen API and publishes both as one site, still gated on `PUBLISH_DOCS` (#151).
 
 # phylloptim 0.16.2
 
