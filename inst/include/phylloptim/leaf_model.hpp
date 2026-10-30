@@ -60,7 +60,8 @@
 //   - K is the curve the solve used, TF24 or TF24_floor;
 //   - the supply path is multi-layer;
 //   - `curvature` is marginal_collar_slope<K>() at an Interior point, and is
-//     not read at any other kind;
+//     not read at any other kind or at double; collar_at refuses one that is
+//     not negative or lies inside Leaf::interior_curvature_floor;
 //   - the thermal-damage layer is off: collar_at and outputs_at refuse
 //     use_thermal_damage_, because the kernels they read do not apply it.
 //
@@ -2669,6 +2670,14 @@ public:
   S collar_at(const SupplyDraw<S>& draw, const leaf_pars<S>& pars,
               double interior_curvature =
                   std::numeric_limits<double>::quiet_NaN());
+
+  // The smallest |dM/dp| collar_at's interior arm divides by. Every collar row
+  // there is a quotient over the curvature, so one near zero returns
+  // amplification rather than a derivative -- finite, and huge. The value is
+  // plant's default gradient_curvature_floor, so plant's own guard and this one
+  // refuse the same points at its defaults; the smallest |curvature| on
+  // test_transpose's grid is 0.14.
+  static constexpr double interior_curvature_floor = 1e-3;
 
   // The conditions that pin a collar. Neither is a second derivative, so each is
   // an ordinary implicit value: the residual's own slope at the bound, and the
@@ -7703,6 +7712,25 @@ inline S Leaf::collar_at(const SupplyDraw<S>& draw, const leaf_pars<S>& pars,
             std::isnan(interior_curvature)
                 ? this->template marginal_collar_slope<K>()
                 : interior_curvature;
+        // ⚠️ odelia's implicit_value refuses only a zero or non-finite
+        // denominator, so these two are this arm's to refuse: a curvature of
+        // -1e-300 otherwise returns rows of ~1e296 with nothing flagged. Two
+        // messages because they are two findings: an interior collar sits on a
+        // downward crossing of the marginal, so a curvature that is not negative
+        // indicts the curvature, while a tiny negative one is a flat optimum.
+        if (!(curvature < 0.0)) {
+          util::stop("Leaf::collar_at: the profit curvature at this interior "
+                     "point is " + util::format_double(curvature) +
+                     ", which is not negative, so the implicit function "
+                     "theorem has nothing to divide by");
+        }
+        if (curvature > -interior_curvature_floor) {
+          util::stop("Leaf::collar_at: the profit curvature at this interior "
+                     "point is " + util::format_double(curvature) +
+                     ", inside the floor of " +
+                     util::format_double(interior_curvature_floor) +
+                     ", so the collar rows would divide by too little to answer");
+        }
         // The whole draw, because marginal_at reads more of it than the flux:
         // SupplyDraw names its own active members for this.
         collar = odelia::implicit_value<S>(

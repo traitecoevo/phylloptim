@@ -4124,6 +4124,61 @@ double profit_row_at_current_point(phylloptim::Leaf &l, int par) {
   return odelia::ode::derivative_along(out.profit);
 }
 
+// The interior arm divides every collar row by the curvature it is handed, and
+// odelia refuses only an exactly zero or non-finite one. So the arm refuses a
+// curvature that is not negative or lies inside the floor, naming the value; the
+// true curvature, one just outside the floor, and the double path (which never
+// reads the curvature) all still answer.
+void test_collar_at_refuses_a_flat_or_rising_curvature() {
+  printf("collar_at refuses a curvature it cannot divide by\n");
+  using T = odelia::ode::tangent_scalar<double>;
+  using CC = phylloptim::Leaf::CostCurve;
+  Drivers d;
+  d.PPFD = 1500.0;
+  phylloptim::Leaf l = make_leaf(d, {1.0, 1.5}, {1.0, 2.0});
+  l.find_root_collar_psi();
+  ok(l.operating_point_kind() == phylloptim::Leaf::OperatingPointKind::Interior,
+     "the fixture is an interior point");
+  phylloptim::leaf_pars<T> pars;
+  const phylloptim::leaf_pars<double> seated = l.passive_pars();
+  for (std::size_t i = 0; i < pars.size(); ++i) pars[i] = T(seated[i]);
+  odelia::ode::set_direction(pars[phylloptim::par_vcmax_25], 1.0);
+  std::vector<T> soil, r_h, r_v;
+  for (int i = 0; i < l.supply_n_layers(); ++i) {
+    soil.push_back(T(l.roots_.psi_soil_[std::size_t(i)]));
+    r_h.push_back(T(l.roots_.network_.r_R_H_min[std::size_t(i)]));
+    r_v.push_back(T(l.roots_.network_.r_R_V_sum[std::size_t(i)]));
+  }
+  const phylloptim::SupplyAt<T> supply{soil, r_h, r_v,
+                                       pars[phylloptim::par_root_P50],
+                                       pars[phylloptim::par_root_c]};
+  const auto draw = l.supply_draw_at<T>(T(l.opt_root_psi_), supply);
+  const double floor = phylloptim::Leaf::interior_curvature_floor;
+  const double k = l.marginal_collar_slope<CC::TF24>();
+  printf("    curvature at the fixture %.3g, floor %.3g\n", k, floor);
+  ok(k < -floor, "the fixture's own curvature is outside the floor");
+  auto row = [&](double curvature) {
+    return odelia::ode::derivative_along(
+        l.collar_at<CC::TF24, T>(draw, pars, curvature));
+  };
+  ok(std::isfinite(row(k)), "the true curvature answers");
+  ok(std::isfinite(row(-2.0 * floor)), "a curvature just outside the floor answers");
+  ok(throws_with([&] { row(-1e-300); }, "inside the floor of 0.001"),
+     "a curvature of -1e-300 is refused against the floor");
+  ok(throws_with([&] { row(-1e-300); }, "-1e-300"),
+     "the refusal names the curvature");
+  ok(throws_with([&] { row(-0.5 * floor); }, "inside the floor"),
+     "a curvature half the floor is refused");
+  ok(throws_with([&] { row(0.5); }, "which is not negative"),
+     "a positive curvature is refused as not negative");
+  ok(throws_with([&] { row(0.0); }, "which is not negative"),
+     "a zero curvature is refused as not negative");
+  const auto draw_d =
+      l.supply_draw_at<double>(l.opt_root_psi_, l.roots_.held_supply());
+  ok(l.collar_at<CC::TF24, double>(draw_d, seated, -1e-300) == l.opt_root_psi_,
+     "the double path reads no curvature, so refuses none");
+}
+
 // A consumer that records each solve and replays it later (plant does, on every
 // step of a reverse sweep) must be handed the rows the solve itself would hand
 // over. A pinned solve places its collar at a POLISHED bound and corrects its
@@ -8532,6 +8587,7 @@ int main() {
   test_light_reaches_carbon_with_a_row();
   test_every_answered_point_hands_over_finite_rows();
   test_a_replay_hands_over_the_rows_its_solve_did();
+  test_collar_at_refuses_a_flat_or_rising_curvature();
   test_tf24_floor_rows_at_a_price();
   test_set_traits_matches_a_fresh_leaf();
   test_prescribed_lambda_survives_redriving();

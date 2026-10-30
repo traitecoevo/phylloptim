@@ -4,6 +4,10 @@
 
 `test_golden --cross-platform` compared `operating_points.tsv` and `psi_stem_optima.tsv` with one shared pair, set before #173 when the worst disagreements were ~100-1000x larger. Each file now has its own, at ~50x its worst on Linux CI: `operating_points.tsv` profit 1e-9 (measured 2.13e-11) and argmax 5e-6 (8.6e-8); `psi_stem_optima.tsv` profit 1e-10 (2.01e-12) and argmax 1e-4 (6.63e-6, 15x, held at the scale of a real change). Tests only; no number moves.
 
+## `collar_at` refuses a curvature it cannot divide by (#146)
+
+At an interior point `collar_at` divided every collar row by the curvature it was handed, and odelia refuses only an exactly zero or non-finite one, so a curvature of `-1e-300` returned `dcollar/dvcmax = +1.5e296` with nothing flagged. The interior arm now refuses, naming the value, a curvature that is not negative or whose magnitude is below `Leaf::interior_curvature_floor` (1e-3, plant's default `gradient_curvature_floor`; the smallest on `test_transpose`'s grid is 0.14). The double path never reads the curvature and refuses nothing. No number moves.
+
 # phylloptim 0.16.2
 
 ## The Medlyn route reports a CO2-basis conductance (#129)
