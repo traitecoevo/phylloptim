@@ -1,3 +1,7 @@
+# phylloptim 0.16.3
+
+Documentation only; no number moves. The developer guide is split into `.claude/CLAUDE.md` (the standing rules), `.claude/hazards.md` and `.claude/measurements.md`, with hazard numbers unchanged and its stale figures and counts corrected against the code (#150).
+
 # phylloptim 0.16.2
 
 ## The Medlyn route reports a CO2-basis conductance (#129)

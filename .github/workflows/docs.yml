@@ -1,6 +1,6 @@
 name: API docs
 
-# Renders the C++ API with Doxygen (issue #12, PLAN item 15).
+# Renders the C++ API with Doxygen (issue #12).
 #
 # Building the docs is a check in its own right, not just a publishing step: the
 # render runs with warnings promoted to errors, so a malformed reference or a
