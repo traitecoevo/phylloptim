@@ -6,7 +6,7 @@ The guide is three files. **This one holds the standing rules** and is read at t
 
 Read alongside:
 
-- **[README.md](../README.md)** — what it is and how to use it
+- **[README.md](../README.md)** — what it is and how to use it; its "Performance from R" is the one place the R-side and set_traits costs are quoted
 - **[NEWS.md](../NEWS.md)** — what changed in each release, and what it broke
 - **[`vignettes/the-models.Rmd`](../vignettes/the-models.Rmd)** — the nine optimality models, the cost/link framework that unifies them, the solver's per-call costs, and two appendices: **B** derives the gradients, **C** is the numerical practice (finite-difference steps, golden files, cross-platform magnitudes)
 - **[`vignettes/fitting.Rmd`](../vignettes/fitting.Rmd)** — ⚠️ read *"Fitting a different collection of parameters"* before answering anything about `pars`: what a different collection costs, which parameters return exactly zero and why, which are unreachable, and what a new study has to write itself
@@ -152,9 +152,9 @@ Each has cost someone real numbers; the narrative and its measurements are in [h
 
 ## Cost: the one thing the golden files cannot see
 
-`tests/cpp/bench_solve.cpp` and `bench_gradient.cpp` cover the C++ side; `tools/bench_user_cost.R` covers the R side; `tools/bench_history.sh` runs both against a list of commits; `tools/cost-baseline.tsv` is the recorded table and `tests/testthat/test-cost.R` the guard. How to measure is in [the benchmark method](measurements.md#benchmark-method).
+`tests/cpp/bench_solve.cpp` and `bench_gradient.cpp` cover the C++ side; `tools/bench_user_cost.R` covers the R side; `tools/bench_history.sh` runs both against a list of commits; `tools/cost-baseline.tsv` is the recorded table and `tests/testthat/test-cost.R` the guard. The README's "Performance from R" quotes the R-side figures and the solver table in `vignette("the-models")` the per-model ones; everything else links to those two. How to measure is in [the benchmark method](measurements.md#benchmark-method).
 
-1. **Never pin an absolute microsecond figure, in a test or in prose.** Record cost ÷ a trivial `.Call` in the same process; that ratio travels between machines and runs.
+1. **Never pin an absolute microsecond figure, in a test or in prose.** Record cost ÷ a trivial `.Call` in the same process; that ratio travels between machines and runs. Quote each figure in one place and link to it from the others, or the copies drift apart.
 2. **Guard by COUNTING, not by timing, wherever you can.** A count of `.Call`s has no variance. Timing assertions are a backstop, bounded at ~2× the measurement and `skip_on_ci()`. Count the symbol the path actually calls: the two supply paths reach C++ through different ones.
 3. **For the batch gradient a count is always available**: one `gradient_batch_run` per call for any N, and zero per-perturbation primitives.
 4. **Measure the entry point the USER calls.** A regression in `leaf_gradient()` once went unseen while the two entry points measured were flat.

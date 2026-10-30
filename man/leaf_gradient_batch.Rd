@@ -108,10 +108,11 @@ transcription, and it is required to agree with the R version bit-for-bit.
 
 \section{Speed, and which side of the boundary the figure belongs to}{
 
-A four-parameter gradient costs ~237 µs per observation through
-\code{\link[=leaf_gradient]{leaf_gradient()}}, of which the model work — two solves — is 6 µs, or 1.5\%.
-Everything else is dispatch and the R interpreter. The C++ composite runs at
-~1.8 µs per trait, so the same gradient is order 10 µs here.
+Through \code{\link[=leaf_gradient]{leaf_gradient()}}, almost all of a four-parameter gradient's cost per
+observation is dispatch and the R interpreter; the model work — two solves — is
+a few percent of it. Composed here in C++, the same gradient costs over an order
+of magnitude less per observation. The README's "Performance from R" has the
+measured ratios.
 
 ⚠️ \strong{That is a per-observation figure and it needs a batch to be realised.}
 Calling this with one observation pays the whole R-side call overhead for one

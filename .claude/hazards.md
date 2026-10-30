@@ -52,7 +52,7 @@ The demographic growth-rate gradient depends on the argmax varying *smoothly* wi
 | distinct argmax values over 11 trait steps | 6 / 11 | **11 / 11** |
 | argmax second differences in a trait | 3.9e-04 (= the step size: noise) | **3.4e-07** |
 | `\|dprofit\|` at the returned collar, interior rows | median 7.8e-04 | **median 5.6e-15** |
-| µs/solve, interleaved at reps=2000 | 3.51 | **2.65** |
+| cost per solve, interleaved at reps=2000 | 1 | **0.76** |
 
 **A fixed iteration count is not smoothness.** Golden section terminates on bracket *width*, so it resolved the argmax only to `GSS_tol_abs` and the leftover offset wandered discontinuously as the comparison sequence flipped. That made the argmax piecewise constant at fine scales, so trait derivatives came back exactly zero — or, for traits in the hydraulic path, **smooth, plausible and sign-inverted** (`root_b`: −2.6e-03 against a true +2.6e-04).
 
@@ -74,7 +74,7 @@ Every input is per unit leaf area or a dimensionless/intensive driver. Nothing s
 
 What is *not* true is the blanket "prefer compile-time dispatch, a virtual call in the solve would cost". Measured (`make -C tests/cpp bench`), the code splits into two halves that answer oppositely:
 
-- **The soil/supply path is already out-of-line.** `E_from_Soil_to_Root_Collar` is inlined into none of its 18 call sites at `-O2`, nor at `-inline-threshold=2000`; neither is the per-layer spline `eval`. So making it virtual costs **+1.1%**, `std::function` +0.6%, `std::variant` +2.6% — noise. Forcing more inlining is *worse* (3.66 vs 3.52 µs, +4%).
+- **The soil/supply path is already out-of-line.** `E_from_Soil_to_Root_Collar` is inlined into none of its 18 call sites at `-O2`, nor at `-inline-threshold=2000`; neither is the per-layer spline `eval`. So making it virtual costs **+1.1%**, `std::function` +0.6%, `std::variant` +2.6% — noise. Forcing more inlining is *worse*, by 4%.
 - **The cost core is fully inlined.** `profit_psi_stem_TF`, `hydraulic_cost_TF`, `assim_colimited` and `transpiration_to_psi_stem` have no out-of-line symbol at all, so a change there is a different question and needs its own measurement.
 
 Before arguing from inlining, check: `nm -C test_golden | grep <fn>`. No symbol means inlined; a symbol plus `bl` call sites in `objdump -d` means it is not. How to time an A/B is in [measurements.md](measurements.md#benchmark-method).
@@ -142,10 +142,10 @@ The cache key does not clear the splines or the solved operating point, so `set_
 
 **Measure before optimising a trait loop, in the layer you actually care about.** Two costs dominate, and which one bites depends on where you are:
 
-- **From R**, constructing a `Leaf` costs **~180× a trivial `.Call`, or 45 solves**, of which only ~32 µs is the two splines; the rest is R-side object construction over ~60 active bindings. That, not the choice of gradient formula, is what dominates a finite-difference gradient in R. `set_traits` exists to avoid it — a re-trait plus a re-drive is 3.4 solves. Construction's share of a one-parameter gradient is **61%**.
-- **In C++**, `set_traits` costs **0.02 µs** normally and **21.8 µs** when it rebuilds a vulnerability curve — **3.5× a whole solve**. So a gradient loop over `stem_P50`, `stem_c`, `root_P50` or `root_c` is dominated by spline reconstruction, and no amount of cleverness in the derivative touches it. `stem_P50` has a way round it, because the stem curve is homogeneous of degree 1 in its scale: `perturb_stem_P50` rescales instead of rebuilding.
+- **From R**, constructing a `Leaf` is the largest single cost: most of a one-parameter gradient on a fresh leaf, and mostly R-side object construction over the active bindings rather than the splines. That, not the choice of gradient formula, is what dominates a finite-difference gradient in R. `set_traits` exists to avoid it: a re-trait plus a re-drive costs a few solves.
+- **In C++**, `set_traits` is almost free unless it rebuilds a vulnerability curve, and then costs many whole solves. So a gradient loop over `stem_P50`, `stem_c`, `root_P50` or `root_c` is dominated by spline reconstruction, and no amount of cleverness in the derivative touches it. `stem_P50` has a way round it, because the stem curve is homogeneous of degree 1 in its scale: `perturb_stem_P50` rescales instead of rebuilding.
 
-`make -C tests/cpp bench_gradient` measures both arms. ⚠️ **Do not carry the R conclusion into C++**: with the boundary removed, the IFT composite wins 4.4× on the eleven traits that touch no spline, which an R measurement does not show.
+The measured ratios for both are in the README's "Performance from R", the one place they are quoted; `tools/bench_user_cost.R` and `make -C tests/cpp bench_gradient` reproduce them. ⚠️ **Do not carry the R conclusion into C++**: with the boundary removed, the IFT composite beats differencing the solve several-fold on the traits that touch no spline (`bench_gradient`'s summary lines), which an R measurement does not show.
 
 ## 11. A bracketing optimiser answers "where is the interior maximum", which is not "where is the maximum"
 
