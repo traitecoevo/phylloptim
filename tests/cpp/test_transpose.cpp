@@ -139,16 +139,19 @@ Inputs<S> inputs_of(const pl::Leaf& l) {
 // <v, J u>: one tangent, every input given its direction at once.
 double forward_side(pl::Leaf l, const std::vector<double>& u,
                     const std::vector<double>& v, double curvature,
-                    bool has_coords) {
+                    bool has_coords, bool handoff) {
   Inputs<T> in = inputs_of<T>(l);
   std::vector<T*> f = in.flat();
   for (std::size_t k = 0; k < f.size(); ++k) {
     odelia::ode::set_direction(*f[k], u[k]);
   }
   const auto draw = l.supply_draw_at<T>(T(l.opt_root_psi_), in.supply());
+  pl::Leaf::HeldCoords<T> held;
+  pl::Leaf::HeldCoords<T>* h = handoff ? &held : nullptr;
   const T collar =
-      l.collar_at<pl::Leaf::CostCurve::TF24, T>(draw, in.pars, curvature);
-  const auto o = l.outputs_at<pl::Leaf::CostCurve::TF24, T>(collar, draw, in.pars);
+      l.collar_at<pl::Leaf::CostCurve::TF24, T>(draw, in.pars, curvature, h);
+  const auto o =
+      l.outputs_at<pl::Leaf::CostCurve::TF24, T>(collar, draw, in.pars, h);
 
   double acc = v[2] * odelia::ode::derivative_along(draw.flux.value) +
                v[3] * odelia::ode::derivative_along(o.profit);
@@ -174,7 +177,7 @@ struct Pairing {
 // One recording, one sweep.
 Pairing reverse_side(pl::Leaf l, const std::vector<double>& u,
                      const std::vector<double>& v, double curvature,
-                     bool hold_collar, bool has_coords) {
+                     bool hold_collar, bool has_coords, bool handoff) {
   Tape tape;
   Inputs<A> in = inputs_of<A>(l);
   std::vector<A*> f = in.flat();
@@ -182,10 +185,13 @@ Pairing reverse_side(pl::Leaf l, const std::vector<double>& u,
   tape.newRecording();
 
   auto draw = l.supply_draw_at<A>(A(l.opt_root_psi_), in.supply());
-  A collar = l.collar_at<pl::Leaf::CostCurve::TF24, A>(draw, in.pars, curvature);
+  pl::Leaf::HeldCoords<A> held;
+  pl::Leaf::HeldCoords<A>* h = handoff ? &held : nullptr;
+  A collar =
+      l.collar_at<pl::Leaf::CostCurve::TF24, A>(draw, in.pars, curvature, h);
   // The control: strip the collar's rows on THIS side only.
   if (hold_collar) collar = A(odelia::util::to_passive(collar));
-  auto o = l.outputs_at<pl::Leaf::CostCurve::TF24, A>(collar, draw, in.pars);
+  auto o = l.outputs_at<pl::Leaf::CostCurve::TF24, A>(collar, draw, in.pars, h);
 
   if (has_coords) {
     auto co = l.collar_coords_at<A>(l.opt_psi_stem_, l.ci_, collar, draw,
@@ -253,6 +259,11 @@ Arm arm_of(pl::Leaf::OperatingPointKind kind) {
 // for the reason the identity is.
 const double kControlFloor = 1e-7;
 int seen_carry = 0, seen_norows = 0, seen_determined = 0;
+// The handoff against solving the coordinates again in outputs_at: the same rows
+// summed in another order on the reverse side, so equal to rounding there and
+// bit for bit on the forward side, where the arithmetic is the same.
+double worst_handoff = 0.0;
+int handoff_forward_differs = 0;
 
 void check_solved(pl::Leaf l, const std::string& at, unsigned long seed) {
   const std::size_t layers = std::size_t(l.supply_n_layers());
@@ -288,11 +299,28 @@ void check_solved(pl::Leaf l, const std::string& at, unsigned long seed) {
 
   const bool has_coords =
       l.operating_point_kind() != pl::Leaf::OperatingPointKind::HydraulicShutdown;
-  const double fwd = forward_side(l, u, v, curvature, has_coords);
-  const Pairing rev = reverse_side(l, u, v, curvature, false, has_coords);
+  // Through the coordinates collar_at hands to outputs_at, which is how plant
+  // calls the surface.
+  const double fwd = forward_side(l, u, v, curvature, has_coords, true);
+  const Pairing rev = reverse_side(l, u, v, curvature, false, has_coords, true);
+
+  const double fwd_solved = forward_side(l, u, v, curvature, has_coords, false);
+  const Pairing rev_solved =
+      reverse_side(l, u, v, curvature, false, has_coords, false);
+  if (fwd != fwd_solved) ++handoff_forward_differs;
+  const double handoff_rel =
+      std::abs(rev.value - rev_solved.value) / std::max(rev.terms, 1e-300);
+  if (handoff_rel > worst_handoff) worst_handoff = handoff_rel;
+  // Two orders below the identity's own threshold, which is what rounding in a
+  // reordered sum reaches here (1.1e-13 on this sweep).
+  char moved_by[32];
+  std::snprintf(moved_by, sizeof moved_by, "%.3e", handoff_rel);
+  ok(handoff_rel < 1e-12,
+     "handing the coordinates over moves the reverse pairing past rounding: " +
+         at + " rel=" + moved_by);
 
   // The control, on the reverse side only.
-  const Pairing held = reverse_side(l, u, v, curvature, true, has_coords);
+  const Pairing held = reverse_side(l, u, v, curvature, true, has_coords, true);
   const double moved =
       std::abs(rev.value - held.value) / std::max(rev.terms, 1e-300);
   if (arm == Arm::CarriesRows) {
@@ -380,6 +408,11 @@ int main() {
   // Reported because it is what the scaling above is for: a sweep that stopped
   // reaching a cancelling pairing would have stopped exercising the reason.
   printf("    worst cancellation in the pairing: %.3gx\n", worst_cancel);
+  printf("    coordinates handed over against solved again: reverse worst %.3e, "
+         "forward differs at %d points\n",
+         worst_handoff, handoff_forward_differs);
+  ok(handoff_forward_differs == 0,
+     "handing the coordinates over moves no forward tangent, bit for bit");
   // The identity is only evidence about the points it ran on, so a fixture that
   // stops reaching them has narrowed the check without narrowing the claim.
   printf("    arms reached: %d placed by a rule, %d with no collar to move\n",
