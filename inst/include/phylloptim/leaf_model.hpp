@@ -51,14 +51,16 @@
 // `pars` and `supply`, supplied from the implicit function theorem at the
 // converged point; nothing the root-find did is recorded. S is double, a tangent
 // (odelia::ode::tangent_scalar) or an adjoint (odelia::ode::adjoint_scalar).
-// Preconditions, none checked beyond the first:
+// Preconditions, checked where marked:
 //
-//   - the draw is taken at the solved collar (collar_at refuses another);
+//   - the draw is taken at the solved collar (checked: collar_at and outputs_at
+//     refuse another);
 //   - nothing moves the leaf between the solve and outputs_at;
 //   - `pars` and `supply` hold, in value, the seated traits (passive_pars()) and
 //     the seated soil state and root network;
-//   - K is the curve the solve used, TF24 or TF24_floor;
-//   - the supply path is multi-layer;
+//   - K is the curve the solve used, TF24 or TF24_floor (checked against the
+//     seated curve; see check_surface_curve for the one solve it cannot see);
+//   - the supply path is multi-layer (checked: supply_draw_at refuses another);
 //   - `curvature` is marginal_collar_slope<K>() at an Interior point, and is
 //     not read at any other kind or at double; collar_at refuses one that is
 //     not negative or lies inside Leaf::interior_curvature_floor;
@@ -1771,7 +1773,10 @@ public:
   template <class S>
   struct SupplyDraw {
     double at = 0.0;
-    odelia::with_slope<S> flux;
+    // Zero, not default-initialised: at a hydraulic shutdown supply_draw_at
+    // returns before writing it, and a default-initialised double is
+    // indeterminate.
+    odelia::with_slope<S> flux{};
     std::vector<S> uptake;
     std::vector<double> duptake_dp;
 
@@ -1780,6 +1785,9 @@ public:
     // a gradient column rather than as an error -- so this exists to make the
     // theorem's inputs reachable, not for convenience. `at` and `duptake_dp` are
     // double and carry no row. Const because the harvest reads slots.
+    // A member added above and not visited here would be such a column, so the
+    // layout is asserted below this struct: adding a member fails to compile
+    // until both are updated.
     template <class F>
     void for_each_active(F&& f) const {
       f(flux.value);
@@ -1789,6 +1797,14 @@ public:
       }
     }
   };
+  static_assert(sizeof(SupplyDraw<double>) ==
+                    sizeof(double) + sizeof(odelia::with_slope<double>) +
+                        sizeof(std::vector<double>) * 2,
+                "SupplyDraw gained or lost a member: update for_each_active, "
+                "then this count");
+  static_assert(sizeof(odelia::with_slope<double>) == 2 * sizeof(double),
+                "odelia::with_slope is no longer a value and a slope: re-check "
+                "that SupplyDraw::for_each_active visits all of it");
 
   // How a draw is meant to be made: it records the collar it was taken at, so its
   // values cannot come from different ones, and collar_at refuses a draw whose
@@ -1800,6 +1816,14 @@ public:
   template <class S>
   SupplyDraw<S> supply_draw_at(const S& collar,
                                const SupplyAt<S>& supply) const {
+    // The walk below is MultiLayerRoots', whatever path the leaf solved on, so
+    // a single-potential leaf would be handed a draw from a supply its solve
+    // never read.
+    if (supply_kind_ != SupplyKind::MultiLayer) {
+      util::stop("Leaf::supply_draw_at: the derivative surface reads the "
+                 "multi-layer supply, and this leaf is on the " +
+                 supply_kind_name() + " path");
+    }
     const std::size_t n = static_cast<std::size_t>(supply_n_layers());
     SupplyDraw<S> d;
     d.at = odelia::util::to_passive(collar);
@@ -2170,6 +2194,24 @@ public:
                            bool* feasible = nullptr);
 
   static std::string curve_name(int curve);
+
+  // ⚠️ THE DERIVATIVE SURFACE READ ON ANOTHER CURVE IS A WRONG NUMBER, like a
+  // draw from another collar (check_draw): collar_at and outputs_at evaluate
+  // whatever K names at the solve's collar, and every value stays finite.
+  // Checked against the SEATED curve, which is what optimise() and
+  // replay_operating_point() solve. find_root_collar_psi() is the exception --
+  // it solves TF24 whatever is seated -- so a leaf seated on another curve and
+  // solved through it passes this check for the wrong reason.
+  template <CostCurve K>
+  void check_surface_curve(const char* who) const {
+    if (K != cost_curve_) {
+      util::stop(std::string(who) + ": asked for the " +
+                 curve_name(static_cast<int>(K)) + " curve, and the leaf is "
+                 "seated on " + curve_name(static_cast<int>(cost_curve_)) +
+                 "; read the surface on the curve the solve used");
+    }
+  }
+
   // ⚠️ THE ONLY RUNTIME CURVE DISPATCH IN THE CLASS, and the reason it is a
   // template rather than four switches. Calls `f(tag)` where `tag` is an
   // `std::integral_constant<CostCurve, K>`, so the body it hands back is
@@ -2435,7 +2477,7 @@ public:
 
     // ⚠️ WHAT CARRIES A ROW, NAMED FOR visit_active -- see SupplyDraw. A shape
     // dispatch does not open is skipped in silence, and the ci residual reads
-    // every one of these.
+    // every one of these. The member count is asserted below this struct.
     template <class F>
     void for_each_active(F&& f) const {
       f(vcmax);
@@ -2444,6 +2486,9 @@ public:
       f(respiration);
     }
   };
+  static_assert(sizeof(PhotoCapacity<double>) == 4 * sizeof(double),
+                "PhotoCapacity gained or lost a member: update for_each_active, "
+                "then this count");
 
   // --- the scalar-generic cores -------------------------------------------
   //
@@ -7487,6 +7532,7 @@ inline Leaf::LeafOutputs<S> Leaf::outputs_at(const S& collar,
                                              const leaf_pars<S>& pars) const {
   using odelia::util::to_passive;
   refuse_thermal_damage("Leaf::outputs_at");
+  check_surface_curve<K>("Leaf::outputs_at");
   check_draw(to_passive(collar), draw);
   LeafOutputs<S> out;
   const std::size_t n = static_cast<std::size_t>(supply_n_layers());
@@ -7693,6 +7739,7 @@ inline S Leaf::collar_at(const SupplyDraw<S>& draw, const leaf_pars<S>& pars,
   // by the supply alone, but outputs_at refuses beside it, and a surface that
   // answers at some kinds and not others is one a caller cannot plan around.
   refuse_thermal_damage("Leaf::collar_at");
+  check_surface_curve<K>("Leaf::collar_at");
   check_draw(opt_root_psi_, draw);
   S collar = S(opt_root_psi_);
   switch (operating_point_kind_) {

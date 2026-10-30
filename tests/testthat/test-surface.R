@@ -33,6 +33,15 @@ test_that("leaf_traits() and leaf_control() partition the C++ constructor", {
   expect_false(any(grepl("tol|niter", names(leaf_traits()))))
 })
 
+test_that("leaf_control()'s knot count is the C++ default, read not restated (#148)", {
+  # plant seats its Control from the same constant and compares it against
+  # leaf_control() with expect_identical, so the type matters as well as the value.
+  expect_identical(leaf_control()$vulnerability_curve_ncontrol,
+                   phylloptim:::.leaf_ncontrol_default())
+  expect_identical(formals(leaf_control)$vulnerability_curve_ncontrol,
+                   quote(.leaf_ncontrol_default()))
+})
+
 test_that("every trait can be read back from the object (#95)", {
   # The traits were `set_traits()` arguments and nothing else, so from R they could
   # be written and not read. A caller who needed one to compute a derived quantity

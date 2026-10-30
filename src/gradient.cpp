@@ -94,6 +94,14 @@ std::vector<std::string> cost_curve_names() {
   return out;
 }
 
+// `Leaf::ncontrol_default`, the vulnerability curves' knot count, read rather
+// than restated: leaf_control() takes its default from here, so the number has
+// one definition. Not exported; leaf_control() is the user-facing route.
+// [[Rcpp::export(name = ".leaf_ncontrol_default")]]
+double leaf_ncontrol_default() {
+  return phylloptim::Leaf::ncontrol_default;
+}
+
 
 //' The differentiated outputs, in the order C++ indexes them
 //'

@@ -4179,6 +4179,63 @@ void test_collar_at_refuses_a_flat_or_rising_curvature() {
      "the double path reads no curvature, so refuses none");
 }
 
+// Three of the surface's preconditions fail with every number finite, so each is
+// checked by name: the curve the solve was seated on, the supply path the draw
+// walks, and the draw's flux at a shutdown, which supply_draw_at returns before
+// writing. The control for each is the same call on the matching leaf.
+void test_surface_refuses_a_curve_or_supply_it_was_not_solved_on() {
+  printf("the derivative surface refuses another curve or supply path\n");
+  using CC = phylloptim::Leaf::CostCurve;
+  using Kind = phylloptim::Leaf::OperatingPointKind;
+  Drivers d;
+  d.PPFD = 1500.0;
+  phylloptim::Leaf l = make_leaf(d, {1.0, 1.5}, {1.0, 2.0});
+  l.find_root_collar_psi();
+  ok(l.operating_point_kind() == Kind::Interior, "the fixture is an interior point");
+  const phylloptim::leaf_pars<double> pars = l.passive_pars();
+  const auto draw =
+      l.supply_draw_at<double>(l.opt_root_psi_, l.roots_.held_supply());
+  ok(l.collar_at<CC::TF24, double>(draw, pars) == l.opt_root_psi_,
+     "control: collar_at answers on the seated curve");
+  ok(std::isfinite(l.outputs_at<CC::TF24, double>(l.opt_root_psi_, draw, pars).profit),
+     "control: outputs_at answers on the seated curve");
+  const std::string wrong =
+      "asked for the TF24_floor curve, and the leaf is seated on TF24";
+  ok(throws_with([&] { l.collar_at<CC::TF24_floor, double>(draw, pars); },
+                 "Leaf::collar_at: " + wrong),
+     "collar_at refuses a curve the leaf is not seated on");
+  ok(throws_with([&] {
+       l.outputs_at<CC::TF24_floor, double>(l.opt_root_psi_, draw, pars);
+     }, "Leaf::outputs_at: " + wrong),
+     "outputs_at refuses a curve the leaf is not seated on");
+
+  phylloptim::Leaf single;
+  single.setup_transpiration(100);
+  single.setup_root_vulnerability(100);
+  single.set_supply_single();
+  std::vector<double> psi_soil{1.0}, depth{1.0};
+  single.set_physiology(fixture::series_resistance(1.0e3), d.PPFD, psi_soil, depth,
+                        d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                        d.atm_o2_kpa, d.atm_kpa);
+  single.find_root_collar_psi();
+  ok(std::isfinite(single.profit_), "control: the single-potential leaf solves");
+  ok(throws_with([&] {
+       single.supply_draw_at<double>(single.opt_root_psi_,
+                                     single.roots_.held_supply());
+     }, "Leaf::supply_draw_at: the derivative surface reads the multi-layer "
+        "supply, and this leaf is on the single path"),
+     "supply_draw_at refuses the single-potential path");
+
+  phylloptim::Leaf shut = make_leaf(Drivers{}, {12.0}, {1.0});
+  shut.find_root_collar_psi();
+  ok(shut.operating_point_kind() == Kind::HydraulicShutdown,
+     "the dry fixture is a hydraulic shutdown");
+  const auto dry =
+      shut.supply_draw_at<double>(shut.opt_root_psi_, shut.roots_.held_supply());
+  ok(dry.flux.value == 0.0 && dry.flux.slope == 0.0,
+     "a shutdown draw's flux is zero, not indeterminate");
+}
+
 // A consumer that records each solve and replays it later (plant does, on every
 // step of a reverse sweep) must be handed the rows the solve itself would hand
 // over. A pinned solve places its collar at a POLISHED bound and corrects its
@@ -8588,6 +8645,7 @@ int main() {
   test_every_answered_point_hands_over_finite_rows();
   test_a_replay_hands_over_the_rows_its_solve_did();
   test_collar_at_refuses_a_flat_or_rising_curvature();
+  test_surface_refuses_a_curve_or_supply_it_was_not_solved_on();
   test_tf24_floor_rows_at_a_price();
   test_set_traits_matches_a_fresh_leaf();
   test_prescribed_lambda_survives_redriving();

@@ -8,6 +8,10 @@
 
 At an interior point `collar_at` divided every collar row by the curvature it was handed, and odelia refuses only an exactly zero or non-finite one, so a curvature of `-1e-300` returned `dcollar/dvcmax = +1.5e296` with nothing flagged. The interior arm now refuses, naming the value, a curvature that is not negative or whose magnitude is below `Leaf::interior_curvature_floor` (1e-3, plant's default `gradient_curvature_floor`; the smallest on `test_transpose`'s grid is 0.14). The double path never reads the curvature and refuses nothing. No number moves.
 
+## The derivative surface's silent failures are loud (#148)
+
+Four ways to get every number finite and some of them wrong now fail by name. `collar_at` and `outputs_at` refuse a curve `K` other than the seated `cost_curve_` (`find_root_collar_psi()`, which solves TF24 whatever is seated, is the one solve this cannot see). `supply_draw_at` refuses a leaf on the single-potential path, since it walks the multi-layer supply whatever the leaf solved on. `PhotoCapacity` and `SupplyDraw` carry a `static_assert` on their layout, so a member added without a matching `for_each_active` entry is a compile error rather than a column of exact zeros. `SupplyDraw::flux` is zero-initialised, where a shutdown draw used to return it indeterminate. And `leaf_control()`'s `vulnerability_curve_ncontrol` default is read from C++ `Leaf::ncontrol_default` rather than restated as a literal. No number moves.
+
 # phylloptim 0.16.2
 
 ## The Medlyn route reports a CO2-basis conductance (#129)
