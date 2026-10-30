@@ -49,6 +49,7 @@
 #include <odelia/tangent.hpp>
 
 #include <cmath>
+#include <map>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -264,6 +265,10 @@ int seen_carry = 0, seen_norows = 0, seen_determined = 0;
 // bit for bit on the forward side, where the arithmetic is the same.
 double worst_handoff = 0.0;
 int handoff_forward_differs = 0;
+// Compared points per kind, by name. The identity is evidence only about the
+// kinds it ran on, and collar_at places each by a different condition, so every
+// kind that carries rows is asserted reached, not just the arm.
+std::map<std::string, int> seen_kind;
 
 void check_solved(pl::Leaf l, const std::string& at, unsigned long seed) {
   const std::size_t layers = std::size_t(l.supply_n_layers());
@@ -348,6 +353,7 @@ void check_solved(pl::Leaf l, const std::string& at, unsigned long seed) {
   if (l.operating_point_kind() == pl::Leaf::OperatingPointKind::Determined) {
     ++seen_determined;
   }
+  ++seen_kind[l.operating_point_kind_name(l.operating_point_kind())];
   ok(rel < 1e-10, "transpose identity: " + at + " rel=" + std::to_string(rel) +
                       " cancellation=" + std::to_string(cancel));
 }
@@ -384,6 +390,40 @@ void check_determined(double root_P50, double psi_soil, unsigned long seed) {
                seed);
 }
 
+// The kinds the sweep above does not reach, each on test_leaf's drivers and
+// asserted to land on its kind before it is compared: a fixture that drifted to
+// another kind would narrow the check without failing it. A root_P50 of zero
+// keeps the default traits.
+void check_kind(const std::vector<double>& psi_soil, double ppfd, double vpd,
+                double root_P50, pl::Leaf::OperatingPointKind want,
+                unsigned long seed) {
+  pl::Leaf l;
+  l.setup_transpiration(100);
+  l.setup_root_vulnerability(100);
+  std::vector<double> depth, root;
+  for (std::size_t i = 0; i < psi_soil.size(); ++i) {
+    depth.push_back(1.0 * double(i + 1));
+    root.push_back(1.0 / 0.05 / double(psi_soil.size()));
+  }
+  if (root_P50 > 0.0) {
+    l.set_traits(96.0, 2.680147, 3.4287, 2.680147, root_P50, 1.5, 157.44, 0.30,
+                 0.7, 0.99, 7.5, 1.44, 1.0, 0.6, 0.0);
+  }
+  l.set_physiology(fixture::root_network(root, depth), ppfd, psi_soil, depth,
+                   0.000157 / 5.0, vpd, 40.0, 25.0, 21.0, 101.3);
+  l.find_root_collar_psi();
+  const std::string at = std::string(pl::Leaf::operating_point_kind_name(want)) +
+                         " fixture psi_soil=" + std::to_string(psi_soil[0]) +
+                         " ppfd=" + std::to_string(ppfd) +
+                         " vpd=" + std::to_string(vpd) +
+                         " root_P50=" + std::to_string(root_P50);
+  ok(l.operating_point_kind() == want,
+     "the " + at + " is " +
+         std::string(pl::Leaf::operating_point_kind_name(want)) + ", got " +
+         l.operating_point_kind_name(l.operating_point_kind()));
+  check_solved(l, at, seed);
+}
+
 }  // namespace
 
 int main() {
@@ -403,6 +443,13 @@ int main() {
   // One per dry bound: the root's own limit, and the continuity root.
   check_determined(3.4, 5.8649, seed += 7919);
   check_determined(6.0, 5.9105, seed += 7919);
+  using K = pl::Leaf::OperatingPointKind;
+  // The two dry bounds collar_at places by different conditions -- the
+  // continuity root and the root's own critical potential -- and the wet bound
+  // a dim leaf sits on.
+  check_kind({4.0, 4.25, 4.5}, 900.0, 0.5, 0.0, K::BoundaryCrit, seed += 7919);
+  check_kind({2.0}, 900.0, 2.0, 1.2, K::BoundaryRootCrit, seed += 7919);
+  check_kind({1.0}, 1.0, 2.0, 0.0, K::ShadeDeath, seed += 7919);
   printf("    %d operating points compared | worst relative %.3e\n", compared,
          worst);
   // Reported because it is what the scaling above is for: a sweep that stopped
@@ -417,12 +464,22 @@ int main() {
   // stops reaching them has narrowed the check without narrowing the claim.
   printf("    arms reached: %d placed by a rule, %d with no collar to move\n",
          seen_carry, seen_norows);
+  printf("    kinds reached:");
+  for (const auto& [name, count] : seen_kind) printf(" %s %d,", name.c_str(), count);
+  printf("\n");
   // The identity is only evidence about the arms it ran on, and the control is
   // only evidence where both expectations were exercised.
   ok(compared >= 20, "the sweep reached at least 20 operating points");
   ok(seen_carry > 0, "the sweep reached an arm whose collar carries rows");
   ok(seen_norows > 0, "the sweep reached an arm whose collar does not move");
   ok(seen_determined == 2, "both determined fixtures were compared");
-  printf("%d checks, %d failures\n", compared + seen_carry + seen_norows + 6, failures);
+  for (const char* kind : {"interior", "boundary-soil", "boundary-crit",
+                           "boundary-root-crit", "determined", "shade-death",
+                           "hydraulic-shutdown"}) {
+    ok(seen_kind[kind] > 0, std::string("the identity was checked at a ") + kind +
+                                " point");
+  }
+  printf("%d checks, %d failures\n", compared + seen_carry + seen_norows + 16,
+         failures);
   return failures == 0 ? 0 : 1;
 }

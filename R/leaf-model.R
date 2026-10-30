@@ -220,6 +220,8 @@ leaf_traits <- function(vcmax_25 = 96,
 ##' @param vulnerability_curve_ncontrol number of control points used to
 ##'   pre-integrate the two Weibull vulnerability curves into splines. Higher is
 ##'   more accurate and slower to construct; it does not affect solve speed.
+##'   The default, 400, is read from the C++ `Leaf::ncontrol_default`, so the R
+##'   and C++ defaults cannot differ.
 ##' @param ci_abs_tol absolute tolerance for root-solving intercellular CO2
 ##' @param ci_niter maximum iterations for root-solving intercellular CO2
 ##' @param integration_rule accepted and ignored. It selected a Gauss-Kronrod
@@ -236,21 +238,15 @@ leaf_traits <- function(vcmax_25 = 96,
 ##' leaf_control()
 ##' leaf_control(GSS_tol_abs = 1e-5)
 ##' @export
-# ⚠️ `vulnerability_curve_ncontrol` MUST EQUAL `Leaf::ncontrol_default` in
-# leaf_model.hpp. RcppR6 binds only the 15-argument constructor, so R has to pass
-# the number in and cannot read the C++ one -- this literal is the copy. What
-# holds the two together is plant's test-control.R, which compares plant's
-# Control (seated from the constant in plant/src/control.cpp) against
-# `leaf_control()` with expect_identical. It runs in plant's check and not in
-# this package's, so a drift introduced here surfaces one repository away.
-#
-# ⚠️ AND THE GOLDEN FILE DOES NOT CATCH IT, whatever helper-golden.R's note about
-# drifting defaults suggests: that argument holds for a trait, which enters the
-# answer, and not for a spline resolution, which only refines it. Measured on the
-# golden grid's own driver rows, 400 -> 40 moves every field by 3.0e-06 and
-# 400 -> 20 by 5.0e-06, against per-class tolerances of 1e-05 and 5e-03.
+# `vulnerability_curve_ncontrol` defaults to `Leaf::ncontrol_default`, READ from
+# C++ rather than restated: RcppR6 binds only the 15-argument constructor, so R
+# passes the number in, and a literal here would be a second copy that could
+# drift without the golden file noticing (a spline resolution only refines the
+# answer: 400 -> 40 moves every field by ~3e-06). test-surface.R asserts the
+# default is the C++ constant; plant's test-control.R compares plant's own
+# Control against `leaf_control()`.
 leaf_control <- function(GSS_tol_abs = 1e-3,
-                         vulnerability_curve_ncontrol = 400,
+                         vulnerability_curve_ncontrol = .leaf_ncontrol_default(),
                          ci_abs_tol = 1e-3,
                          ci_niter = 1000,
                          integration_rule = 21,

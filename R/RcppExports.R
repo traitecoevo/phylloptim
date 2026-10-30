@@ -1398,6 +1398,10 @@ cost_curve_names <- function() {
     .Call('_phylloptim_cost_curve_names', PACKAGE = 'phylloptim')
 }
 
+.leaf_ncontrol_default <- function() {
+    .Call('_phylloptim_leaf_ncontrol_default', PACKAGE = 'phylloptim')
+}
+
 #' The differentiated outputs, in the order C++ indexes them
 #'
 #' `A`, `gc`, `psi_stem`, `collar` and `profit`. Unlike [gradient_par_names()],

@@ -55,19 +55,22 @@
 // `held` is optional: it carries the stem potential and ci collar_at solved at
 // an interior point to outputs_at, which otherwise solves them again. Without
 // it every value and tangent is the same bit for bit, and every adjoint row the
-// same to rounding, because it is summed in another order. Preconditions, none
-// checked beyond the first two:
+// same to rounding, because it is summed in another order. Preconditions,
+// checked where marked:
 //
-//   - the draw is taken at the solved collar (collar_at refuses another);
-//   - `held`, if passed, comes from collar_at at this point (outputs_at
+//   - the draw is taken at the solved collar (checked: collar_at and outputs_at
+//     refuse another);
+//   - `held`, if passed, comes from collar_at at this point (checked: outputs_at
 //     refuses one placed at another collar or kind);
 //   - nothing moves the leaf between the solve and outputs_at;
 //   - `pars` and `supply` hold, in value, the seated traits (passive_pars()) and
 //     the seated soil state and root network;
-//   - K is the curve the solve used, TF24 or TF24_floor;
-//   - the supply path is multi-layer;
+//   - K is the curve the solve used, TF24 or TF24_floor (checked against the
+//     seated curve; see check_surface_curve for the one solve it cannot see);
+//   - the supply path is multi-layer (checked: supply_draw_at refuses another);
 //   - `curvature` is marginal_collar_slope<K>() at an Interior point, and is
-//     not read at any other kind;
+//     not read at any other kind or at double; collar_at refuses one that is
+//     not negative or lies inside Leaf::interior_curvature_floor;
 //   - the thermal-damage layer is off: collar_at and outputs_at refuse
 //     use_thermal_damage_, because the kernels they read do not apply it.
 //
@@ -1806,7 +1809,10 @@ public:
   template <class S>
   struct SupplyDraw {
     double at = 0.0;
-    odelia::with_slope<S> flux;
+    // Zero, not default-initialised: at a hydraulic shutdown supply_draw_at
+    // returns before writing it, and a default-initialised double is
+    // indeterminate.
+    odelia::with_slope<S> flux{};
     std::vector<S> uptake;
     std::vector<double> duptake_dp;
 
@@ -1815,6 +1821,9 @@ public:
     // a gradient column rather than as an error -- so this exists to make the
     // theorem's inputs reachable, not for convenience. `at` and `duptake_dp` are
     // double and carry no row. Const because the harvest reads slots.
+    // A member added above and not visited here would be such a column, so the
+    // layout is asserted below this struct: adding a member fails to compile
+    // until both are updated.
     template <class F>
     void for_each_active(F&& f) const {
       f(flux.value);
@@ -1824,6 +1833,14 @@ public:
       }
     }
   };
+  static_assert(sizeof(SupplyDraw<double>) ==
+                    sizeof(double) + sizeof(odelia::with_slope<double>) +
+                        sizeof(std::vector<double>) * 2,
+                "SupplyDraw gained or lost a member: update for_each_active, "
+                "then this count");
+  static_assert(sizeof(odelia::with_slope<double>) == 2 * sizeof(double),
+                "odelia::with_slope is no longer a value and a slope: re-check "
+                "that SupplyDraw::for_each_active visits all of it");
 
   // How a draw is meant to be made: it records the collar it was taken at, so its
   // values cannot come from different ones, and collar_at refuses a draw whose
@@ -1835,6 +1852,14 @@ public:
   template <class S>
   SupplyDraw<S> supply_draw_at(const S& collar,
                                const SupplyAt<S>& supply) const {
+    // The walk below is MultiLayerRoots', whatever path the leaf solved on, so
+    // a single-potential leaf would be handed a draw from a supply its solve
+    // never read.
+    if (supply_kind_ != SupplyKind::MultiLayer) {
+      util::stop("Leaf::supply_draw_at: the derivative surface reads the "
+                 "multi-layer supply, and this leaf is on the " +
+                 supply_kind_name() + " path");
+    }
     const std::size_t n = static_cast<std::size_t>(supply_n_layers());
     SupplyDraw<S> d;
     d.at = odelia::util::to_passive(collar);
@@ -2205,6 +2230,24 @@ public:
                            bool* feasible = nullptr);
 
   static std::string curve_name(int curve);
+
+  // ⚠️ THE DERIVATIVE SURFACE READ ON ANOTHER CURVE IS A WRONG NUMBER, like a
+  // draw from another collar (check_draw): collar_at and outputs_at evaluate
+  // whatever K names at the solve's collar, and every value stays finite.
+  // Checked against the SEATED curve, which is what optimise() and
+  // replay_operating_point() solve. find_root_collar_psi() is the exception --
+  // it solves TF24 whatever is seated -- so a leaf seated on another curve and
+  // solved through it passes this check for the wrong reason.
+  template <CostCurve K>
+  void check_surface_curve(const char* who) const {
+    if (K != cost_curve_) {
+      util::stop(std::string(who) + ": asked for the " +
+                 curve_name(static_cast<int>(K)) + " curve, and the leaf is "
+                 "seated on " + curve_name(static_cast<int>(cost_curve_)) +
+                 "; read the surface on the curve the solve used");
+    }
+  }
+
   // ⚠️ THE ONLY RUNTIME CURVE DISPATCH IN THE CLASS, and the reason it is a
   // template rather than four switches. Calls `f(tag)` where `tag` is an
   // `std::integral_constant<CostCurve, K>`, so the body it hands back is
@@ -2470,7 +2513,7 @@ public:
 
     // ⚠️ WHAT CARRIES A ROW, NAMED FOR visit_active -- see SupplyDraw. A shape
     // dispatch does not open is skipped in silence, and the ci residual reads
-    // every one of these.
+    // every one of these. The member count is asserted below this struct.
     template <class F>
     void for_each_active(F&& f) const {
       f(vcmax);
@@ -2479,6 +2522,9 @@ public:
       f(respiration);
     }
   };
+  static_assert(sizeof(PhotoCapacity<double>) == 4 * sizeof(double),
+                "PhotoCapacity gained or lost a member: update for_each_active, "
+                "then this count");
 
   // The coordinates at an interior collar, held, as collar_at placed them: the
   // capacity, the stem potential sigma, the stem's flux and ci, each carrying
@@ -2783,6 +2829,14 @@ public:
               double interior_curvature =
                   std::numeric_limits<double>::quiet_NaN(),
               HeldCoords<S>* placed = nullptr);
+
+  // The smallest |dM/dp| collar_at's interior arm divides by. Every collar row
+  // there is a quotient over the curvature, so one near zero returns
+  // amplification rather than a derivative -- finite, and huge. The value is
+  // plant's default gradient_curvature_floor, so plant's own guard and this one
+  // refuse the same points at its defaults; the smallest |curvature| on
+  // test_transpose's grid is 0.14.
+  static constexpr double interior_curvature_floor = 1e-3;
 
   // The conditions that pin a collar. Neither is a second derivative, so each is
   // an ordinary implicit value: the residual's own slope at the bound, and the
@@ -6642,6 +6696,13 @@ inline double Leaf::transpiration_full_integration(double psi_stem, double psi_u
                                       integration_tol_);
 }
 
+// The refusal transpiration() raises on a reversed gradient. Out of line for the
+// same reason as stem_curve_out_of_domain: with the message built inside it,
+// transpiration() stopped being inlined into its callers, which measured +2% on
+// every solve arm.
+[[noreturn]] inline void transpiration_reversed(double psi_stem,
+                                                double psi_upstream);
+
 //calculates supply-side transpiration from psi_stem and opt_root_psi_, returns kg h20 s^-1 m^-2 LA
 // SIGN: psi_stem and psi_upstream are POSITIVE magnitudes here (passed straight
 // to the spline). Contrast transpiration_to_psi_stem below. See the sign-
@@ -6657,6 +6718,20 @@ inline double Leaf::transpiration(double psi_stem, double psi_upstream) {
     return transpiration_cache_value_;
   }
 
+  // ⚠️ A REVERSED GRADIENT IS A CALLER ERROR, NOT A REGIME. Below psi_upstream
+  // the integral is negative -- water flowing from the leaf to the soil, which
+  // this model does not represent -- and stom_cond_CO2 and psi_stem_to_ci, which
+  // read the flux only through here, would inherit the sign as a finite,
+  // plausible number. So this is their guard too. (The profit functions never
+  // arrive here reversed: set_leaf_states_rates_from_psi_stem seats the no-flow
+  // state at psi_stem <= psi_upstream.) `<`, not `<=`: equality is the shut-down
+  // state, with E exactly zero. A NaN fails the comparison and falls through,
+  // keeping NA-in, NA-out. After the memo, because a reversed pair can never have
+  // been memoised.
+  if (psi_stem < psi_upstream) {
+    transpiration_reversed(psi_stem, psi_upstream);
+  }
+
   // integration of proportion_of_conductivity over [opt_root_psi_, psi_stem]
   const double E = leaf_specific_conductance_max_ *
     (stem_curve_integral(psi_stem, "Leaf::transpiration, at psi_stem") -
@@ -6668,6 +6743,16 @@ inline double Leaf::transpiration(double psi_stem, double psi_upstream) {
   transpiration_cache_value_ = E;
   transpiration_cached_ = true;
   return E;
+}
+
+[[noreturn]] inline void transpiration_reversed(double psi_stem,
+                                                double psi_upstream) {
+  util::stop("Leaf::transpiration: psi_stem (" + util::format_double(psi_stem) +
+             ") is wetter than psi_upstream (" +
+             util::format_double(psi_upstream) +
+             "), so the flux would run from the leaf to the soil, which this "
+             "model does not represent. psi_stem == psi_upstream is the "
+             "shut-down state; evaluate from there upward");
 }
 
 // converts a known transpiration to its corresponding psi_stem, returns -MPa
@@ -7630,6 +7715,7 @@ inline Leaf::LeafOutputs<S> Leaf::outputs_at(const S& collar,
                                              const HeldCoords<S>* placed) const {
   using odelia::util::to_passive;
   refuse_thermal_damage("Leaf::outputs_at");
+  check_surface_curve<K>("Leaf::outputs_at");
   check_draw(to_passive(collar), draw);
   // Placed coordinates exist only at an interior point and only at the collar
   // collar_at placed them at, so either check failing means the leaf moved
@@ -7886,6 +7972,7 @@ inline S Leaf::collar_at(const SupplyDraw<S>& draw, const leaf_pars<S>& pars,
   // by the supply alone, but outputs_at refuses beside it, and a surface that
   // answers at some kinds and not others is one a caller cannot plan around.
   refuse_thermal_damage("Leaf::collar_at");
+  check_surface_curve<K>("Leaf::collar_at");
   check_draw(opt_root_psi_, draw);
   // Unplaced until the interior arm places it, so coordinates left from an
   // earlier point can never be read at this one.
@@ -7910,15 +7997,32 @@ inline S Leaf::collar_at(const SupplyDraw<S>& draw, const leaf_pars<S>& pars,
             std::isnan(interior_curvature)
                 ? this->template marginal_collar_slope<K>()
                 : interior_curvature;
+        // ⚠️ odelia's implicit_value refuses only a zero or non-finite
+        // denominator, so these two are this arm's to refuse: a curvature of
+        // -1e-300 otherwise returns rows of ~1e296 with nothing flagged. Two
+        // messages because they are two findings: an interior collar sits on a
+        // downward crossing of the marginal, so a curvature that is not negative
+        // indicts the curvature, while a tiny negative one is a flat optimum.
+        if (!(curvature < 0.0)) {
+          util::stop("Leaf::collar_at: the profit curvature at this interior "
+                     "point is " + util::format_double(curvature) +
+                     ", which is not negative, so the implicit function "
+                     "theorem has nothing to divide by");
+        }
+        if (curvature > -interior_curvature_floor) {
+          util::stop("Leaf::collar_at: the profit curvature at this interior "
+                     "point is " + util::format_double(curvature) +
+                     ", inside the floor of " +
+                     util::format_double(interior_curvature_floor) +
+                     ", so the collar rows would divide by too little to answer");
+        }
         // ⚠️ THE COORDINATES ARE PLACED BEFORE THE RESIDUAL, NOT INSIDE IT. The
         // residual is recorded, swept and rewound, so anything it solves is gone
         // when this returns; placed out here they stay on the caller's tape for
         // outputs_at to read, and the residual adds only the collar's channel.
         // They are then inputs the residual reads, so they join the list: one
-        // left out is a column of exact zeros in the collar's row. A curvature
-        // implicit_value refuses skips the placement, so the refusal reads as
-        // it always has.
-        if (placed != nullptr && std::isfinite(curvature) && curvature != 0.0) {
+        // left out is a column of exact zeros in the collar's row.
+        if (placed != nullptr) {
           const S at = S(opt_root_psi_);
           placed->cap = photo_capacity_at<S>(pars);
           held_coords_at<S>(opt_psi_stem_, ci_, at, draw, pars, placed->cap,

@@ -30,7 +30,7 @@ A last-bit perturbation does not stay small: the nested solvers amplify it up to
 
 **Bit-exact only on the platform that generated the files — macOS/arm64.** libm's `exp`/`pow` are not bit-reproducible between glibc on x86-64 and Apple's libm on arm64, and FMA contraction differs too, so cross-platform bit-equality was never achievable. CI compares bit-exactly on macOS and with `--cross-platform` elsewhere.
 
-**The size of the cross-platform disagreement**, read off CI's summary line, with gcc and clang identical in every column (3808 of 5184 values differ), against tolerances of 1e-05 for `profit` and 5e-03 for the eight argmax-evaluated fields:
+**The size of the cross-platform disagreement**, read off CI's summary line, with gcc and clang identical in every column (3808 of 5184 values differ), against `operating_points.tsv`'s tolerances, now 1e-9 for `profit` and 5e-6 for the eight argmax-evaluated fields (#125; each about 50x the worst below, and set in `test_golden.cpp`):
 
 | class | worst RELATIVE | worst ABSOLUTE |
 |---|---|---|
@@ -41,7 +41,7 @@ A last-bit perturbation does not stay small: the nested solvers amplify it up to
 
 **Read the baseline off master's CI, not off this table** — `gh run list --branch master --workflow cpp-tests.yml`, then grep the g++ job's log for "values differ". It has to be the summary line from the right commit. `test_golden` prints only the first 20 failing lines, a sample biased toward whichever operating points are listed first, so never read the FAIL lines as the distribution; the summary line carries the full-grid maxima.
 
-⚠️ **`psi_stem_optima.tsv`'s cross-platform tolerances are INHERITED from `operating_points.tsv`, not measured for it.** Its worst relative difference is **6.63e-06**, at `fresh/TF/single psi_soil=0.5 ppfd=1500 T=40 eb=1 tc=0 assim`, a near-zero `assim`, against the argmax class's 5e-03. 138 of its values compare as zero on both sides. It prints the worst observed difference even when it passes.
+**`psi_stem_optima.tsv` has its own tolerances (#125)**, measured for it rather than inherited: 1e-10 for `profit` (worst 2.01e-12) and 1e-4 for the argmax class. Its worst relative difference is **6.63e-06**, at `fresh/TF/single psi_soil=0.5 ppfd=1500 T=40 eb=1 tc=0 assim`, a near-zero `assim`; the argmax tolerance sits at 15x that rather than 50x, because 50x would reach the scale of a real change. 138 of its values compare as zero on both sides. It prints the worst observed difference even when it passes.
 
 `tests/testthat/gradient_golden.tsv` is further apart across platforms than the solved outputs (1.19e-7 measured on Linux, against a tolerance of 1e-5), because a finite difference divides the solver floor by the step, `R_d_25`'s step is the smallest here, and `profit` is the smallest magnitude carrying that same floor.
 
