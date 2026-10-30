@@ -116,8 +116,9 @@
 ##'   (umol C m^-2 s^-1 MPa^-2), read only by the `JS22` cost curve and returning
 ##'   an exactly zero gradient on every other one.
 ##'
-##'   ⚠️ **The default is not a literature value.** It is order-of-magnitude
-##'   matched to TF24 at this package's defaults, and no single value matches more
+##'   ⚠️ **The default is not a literature value.** It is aligned to TF24 by
+##'   [align_curves()]: the value at which the JS22 stem optimum has TF24's
+##'   conductance at that function's reference environment. No single value matches more
 ##'   than one soil potential: the `JS22_gamma` reproducing TF24's cost at its own
 ##'   optimum runs 0.287 at `psi_soil` 0.5 MPa to 1.761 at 3.0 MPa. TF24's cost
 ##'   tracks the absolute potential and this one tracks the drop, and across a
@@ -125,6 +126,8 @@
 ##' @param CMax_a,CMax_b slope and intercept of the `CMax` marginal cost,
 ##'   `dC/dpsi = CMax_a * psi + CMax_b`, following Wolf et al. (2016) as
 ##'   Anderegg et al. (2018) parameterised it. Read only by the `CMax` curve.
+##'   `CMax_a`'s default is aligned to TF24 by [align_curves()], with `CMax_b` at
+##'   zero; neither default is a literature value.
 ##'
 ##'   ⚠️ **`CMax_b` is signed, and negative in the source convention.** Sabot's
 ##'   `TractLSM` stores it with the sign inverted "so as to get a positive
@@ -167,8 +170,8 @@ leaf_traits <- function(vcmax_25 = 96,
                         curv_fact_colim = 0.99,
                         TF24_cost_scale = 7.5,
                         R_d_25 = 1.44,
-                        JS22_gamma = 1.0,
-                        CMax_a = 0.6,
+                        JS22_gamma = 0.4717887793,
+                        CMax_a = 0.6385596982,
                         CMax_b = 0.0) {
   out <- list(vcmax_25 = vcmax_25, stem_c = stem_c, stem_P50 = stem_P50,
               root_c = root_c, root_P50 = root_P50, TF24_beta2 = TF24_beta2,
@@ -984,17 +987,20 @@ operating_point <- function(x) {
 ##'
 ##'   Two curves take a PRESCRIBED price of water rather than deriving one:
 ##'   `CF77` reads `CF77_lambda` and `TF24_floor` reads `TF24_floor_lambda_o`,
-##'   both below. Neither has a default, and each curve refuses to solve without
-##'   its own.
+##'   both below. `CF77`'s has a default, aligned to TF24 by [align_curves()];
+##'   `TF24_floor`'s has none, and that curve refuses to solve without one.
 ##' @param LeastCost_beta the `LeastCost` curve's unit-cost ratio (Prentice et
 ##'   al. 2014's beta): the cost of maintaining carboxylation capacity relative to
 ##'   the cost of transpiration, dimensionless. Only `model = "LeastCost"` reads
-##'   it. That curve refuses to solve without one, and refuses zero as well, since
-##'   at zero the capacity term vanishes and what is left is water-use efficiency,
-##'   which rises without bound as transpiration falls. The published value is 146.
+##'   it. `NA_real_` (the default) keeps the leaf's own default, aligned to TF24
+##'   by [align_curves()]. Zero is refused, since at zero the capacity term
+##'   vanishes and what is left is water-use efficiency, which rises without bound
+##'   as transpiration falls. The published value is 146, which pins every stem
+##'   optimum at `psi_crit` at this package's default leaf.
 ##' @param CF77_lambda,TF24_floor_lambda_o the prescribed marginal value of water
 ##'   for the two curves that take one, in umol C (kg H2O)^-1. `NA_real_` (the
-##'   default) leaves the field unset, which every other model wants.
+##'   default) leaves the field as it is: `CF77`'s aligned default (see
+##'   [align_curves()]), or unset for `TF24_floor`, which refuses to solve.
 ##'
 ##'   ⚠️ **Their scale is set by the leaf, not chosen freely.** At this package's
 ##'   defaults the leaf's own marginal cost of water runs 9e4 to 3e5, and a price
@@ -1207,6 +1213,33 @@ leaf_solve <- function(psi_soil,
 .solve_price_fields <- c(CF77 = "CF77_lambda_",
                          TF24_floor = "TF24_floor_lambda_o",
                          LeastCost = "LeastCost_beta")
+
+# The defaults of the owned fields that have one: aligned to TF24 by
+# align_curves(), and the R-side copy of the in-class initialisers in
+# leaf_model.hpp. `test-align-curves.R` asserts both against a fresh Leaf and
+# against a re-run of the alignment. `TF24_floor_lambda_o` has no default (see
+# align_curves()).
+.level_defaults <- c(CF77_lambda_ = 107750.8846,
+                     LeastCost_beta = 51.59667042)
+
+.owns_field <- function(model, field) {
+  model %in% names(.solve_price_fields) &&
+    identical(.solve_price_fields[[model]], field)
+}
+
+# The value an owned field takes in a gradient's theta: off the leaf when there
+# is one, its default when there is not, and NA on every route that does not own
+# it. The NA is what keeps the R reference from writing the field once per
+# perturbation on routes that never read it -- a crossing `test-cost.R` counts.
+.owned_value <- function(model, field, x = NULL) {
+  if (!.owns_field(model, field)) {
+    return(NA_real_)
+  }
+  if (!is.null(x)) {
+    return(x[[field]])
+  }
+  if (field %in% names(.level_defaults)) .level_defaults[[field]] else NA_real_
+}
 
 # ⚠️ THE THIRD ENTRY IS NOT A PRICE, and the message below branches on it
 # rather than calling it one. `CF77_lambda_` and `TF24_floor_lambda_o` are

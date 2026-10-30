@@ -3,6 +3,7 @@
 S3method(print,leaf_batch)
 export(Leaf)
 export(RootNetwork)
+export(align_curves)
 export(cost_curve_names)
 export(gradient_output_names)
 export(gradient_par_names)

@@ -62,7 +62,7 @@
 ##'
 ##' @param CF77_lambda Cowan-Farquhar's prescribed marginal value of water, in
 ##'   umol C (kg H2O)^-1, one per observation. Only `model = "CF77"` reads it;
-##'   `NA_real_` (the default) leaves it unset, which every other model wants.
+##'   `NA_real_` (the default) uses its aligned default (see [align_curves()]).
 ##' @param TF24_floor_lambda_o the `TF24_floor` curve's price of water as transpiration
 ##'   goes to zero, same units, one per observation. Only `model = "TF24_floor"`
 ##'   reads it; `NA_real_` (the default) leaves it unset. That curve refuses to
@@ -70,8 +70,8 @@
 ##' @param LeastCost_beta least-cost theory's unit-cost ratio (Prentice et al.
 ##'   2014's beta): the cost of maintaining carboxylation capacity relative to the
 ##'   cost of transpiration, dimensionless, one per observation. Only
-##'   `model = "LeastCost"` reads it; `NA_real_` (the default) leaves it unset.
-##'   That curve refuses to solve without one, and refuses zero as well, since at
+##'   `model = "LeastCost"` reads it; `NA_real_` (the default) uses its aligned
+##'   default (see [align_curves()]). Zero is refused, since at
 ##'   zero the capacity term vanishes and what is left is water-use efficiency,
 ##'   which rises without bound as transpiration falls. The published value is 146.
 ##'
@@ -365,7 +365,7 @@ leaf_gradient_batch <- function(batch,
     } else if (!inherits(traits, "leaf_traits")) {
       stop("`traits` must come from leaf_traits()", call. = FALSE)
     }
-    theta <- .gradient_theta_matrix(batch, traits, damage)
+    theta <- .gradient_theta_matrix(batch, traits, damage, model)
   } else {
     if (!is.null(traits)) {
       stop("`traits` and `theta` both say where the gradient is taken; pass one ",
@@ -478,7 +478,8 @@ leaf_gradient_batch <- function(batch,
 # The two non-traits are `leaf_specific_conductance_max` and, on the
 # single-potential path only, `resistance`: both are DRIVERS that a calibration
 # fits like traits (#44), so the enumeration carries them after the traits.
-.gradient_theta_matrix <- function(batch, traits, damage = FALSE) {
+.gradient_theta_matrix <- function(batch, traits, damage = FALSE,
+                                   model = NULL) {
   nr <- batch$theta_nrow
   par_names <- .gradient_par_names()
   m <- matrix(NA_real_, nrow = nr, ncol = length(par_names),
@@ -507,6 +508,15 @@ leaf_gradient_batch <- function(batch,
   m[, "CF77_lambda_"] <- batch$CF77_lambda
   m[, "TF24_floor_lambda_o"] <- batch$TF24_floor_lambda_o
   m[, "LeastCost_beta"] <- batch$LeastCost_beta
+  # An unset slot on the route that owns it is the leaf's own default, which C++
+  # would otherwise overwrite with the NA.
+  if (!is.null(model)) {
+    for (field in names(.level_defaults)) {
+      if (.owns_field(model, field)) {
+        m[is.na(m[, field]), field] <- .level_defaults[[field]]
+      }
+    }
+  }
   # The thermal-damage inputs, off the batch's leaf, when its gate is on; NA (and
   # unread) otherwise. One row for every observation: pass `theta` to give each
   # observation its own state.

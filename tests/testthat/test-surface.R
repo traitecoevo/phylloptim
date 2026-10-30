@@ -833,7 +833,8 @@ test_that("a prescribed CF77_lambda_ survives both re-driving calls (#96)", {
   # Both arms matter. `set_drivers` always kept it; asserting only that one
   # passes on the code this test exists to reject.
   l <- leaf_model(supply = leaf_supply_singlelayer())
-  expect_true(is.na(l$CF77_lambda_))          # not "never initialised"
+  # not "never initialised": the aligned default (#156)
+  expect_identical(l$CF77_lambda_, .level_defaults[["CF77_lambda_"]])
 
   l$CF77_lambda_ <- 30
   set_drivers(l, psi_soil = 1.5, root_network = series_resistance(1500))

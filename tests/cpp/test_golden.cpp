@@ -637,6 +637,22 @@ const double kLambdaFloorO = 1.5e5;
 // published value. A beta derived against this package's kg H2O and umol CO2
 // rather than mol and mol would be out by 5.6e7 and would still solve.
 const double kBetaLeastCost = 146.0;
+// JS22's and CMax's level parameters, at the class defaults these rows were
+// generated with. Pinned here because the defaults are now ALIGNED (#156) and
+// move whenever TF24 moves at the reference; this file tests the solver, so its
+// parameters must not follow them.
+const double kGammaJS22 = 1.0;
+const double kCMaxA = 0.6;
+
+// The two inputs whose class default is now an aligned number rather than NA,
+// cleared on every Leaf this file builds. The `lambda` column records
+// `CF77_lambda_` on every row -- it is how the reuse pass sees one solver's input
+// leak into the next -- so a fresh Leaf must read what it read when the rows were
+// generated, and the CF77 and LeastCost arms set their own values in dispatch().
+void clear_aligned_inputs(phylloptim::Leaf &l) {
+  l.CF77_lambda_ = std::numeric_limits<double>::quiet_NaN();
+  l.LeastCost_beta = std::numeric_limits<double>::quiet_NaN();
+}
 
 // ⚠️ APPEND ONLY. The reuse pass drives ONE Leaf through kSolvers in order, so
 // inserting a solver changes what every solver after it inherits -- see the header.
@@ -785,10 +801,13 @@ void dispatch(phylloptim::Leaf &l, Solver s) {
                             l.CF77_lambda_ = kLambdaCF77;
                             l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::CF77>(); break;
     case Solver::Collar:    l.find_root_collar_psi();        break;
-    // These three need nothing set first: their parameters are TRAITS with
-    // defaults, where CF77_lambda_ above is an input with none.
-    case Solver::JS22:      l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::JS22>();      break;
-    case Solver::CMax:      l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::CMax>();      break;
+    case Solver::JS22:
+                            l.JS22_gamma = kGammaJS22;
+                            l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::JS22>();      break;
+    case Solver::CMax:
+                            l.CMax_a = kCMaxA;
+                            l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::CMax>();      break;
+    // These two need nothing set: neither has a level parameter.
     case Solver::SOX:       l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::SOX>();       break;
     case Solver::JW26:      l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::JW26>();      break;
     // ⚠️ ONE PARAMETER, AND IT IS AN INPUT WITH NO DEFAULT, like CF77_lambda_
@@ -812,6 +831,7 @@ OptRow solve_one(Solver s, Topology t, double psi_soil, double ppfd,
   OptRow r{s, t, psi_soil, ppfd, leaf_temp, eb, tc, false, "ok", "-",
            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
   phylloptim::Leaf l;
+  clear_aligned_inputs(l);
   l.setup_transpiration(phylloptim::Leaf::ncontrol_default);
   l.setup_root_vulnerability(phylloptim::Leaf::ncontrol_default);
   l.use_energy_balance_ = eb;
@@ -868,6 +888,7 @@ std::vector<OptRow> run_optima_grid() {
     for (bool eb : {false, true})
       for (bool tc : {false, true}) {
         phylloptim::Leaf l;
+        clear_aligned_inputs(l);
         l.setup_transpiration(phylloptim::Leaf::ncontrol_default);
         l.setup_root_vulnerability(phylloptim::Leaf::ncontrol_default);
         l.use_energy_balance_ = eb;

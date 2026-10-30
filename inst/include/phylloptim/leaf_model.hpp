@@ -706,13 +706,36 @@ public:
   // interchangeable-looking re-driving calls comes next, so neither clears it.
   //
   // An in-class initialiser, not a line in setup_clean_leaf(), so a fresh Leaf
-  // still reads the NA sentinel: the member is otherwise uninitialised, and
-  // "never reset" must not become "never initialised".
+  // reads the default: the member is otherwise uninitialised, and "never reset"
+  // must not become "never initialised".
   // ⚠️ IT IS AN INPUT AND NOTHING ELSE. No model code assigns it. The units are
   // carbon per unit TRANSPIRATION, which is the Cowan-Farquhar marginal value of
   // water and the convention the lambda literature uses -- NOT the same quantity
   // as ProfitMax's normaliser ratio, which is per unit CONDUCTANCE.
-  double CF77_lambda_ = util::na_value;         // umol C (kg H2O)^-1
+  //
+  // ALIGNED DEFAULTS (#156). Every cost curve with a level parameter defaults to
+  // the value at which its stem optimum has TF24's conductance at one reference
+  // environment: single-potential supply, psi_soil 1 MPa, PPFD 900, VPD 2 kPa,
+  // ca 40 Pa, leaf at 25 C with the energy balance off, and every other trait at
+  // its default. The curves then agree at the reference and differ only in how
+  // their optimum moves away from it, which is what a comparison across curves
+  // is after. TF24 is the anchor and does not move. Four parameters carry it:
+  // `CF77_lambda_`, `JS22_gamma`, `CMax_a` (with `CMax_b` 0) and `LeastCost_beta`.
+  //
+  // ⚠️ THE FOUR NUMBERS ARE SOLVED, NOT CHOSEN, and R's `align_curves()` is the
+  // solver. `test-align-curves.R` re-solves them and fails when a model change
+  // moves an optimum at the reference; re-align then, rather than loosening it.
+  // `leaf_traits()` and `.level_defaults` carry the same numbers on the R side.
+  //
+  // What is left unaligned, and why. SOX, JW26 and ProfitMax have no level
+  // parameter: the shared supply sets their optimum, and aligning them through
+  // `kmax` would break the one supply every curve shares. TF24_floor's hydraulic
+  // half IS TF24's cost at TF24's traits, so the only lambda_o that reaches
+  // TF24's conductance is zero, where the curve is TF24; it keeps no default.
+  //
+  // CF77's aligned price is exactly TF24's emergent lambda at the reference: at
+  // that price the two first-order conditions coincide, so the optima do.
+  double CF77_lambda_ = 107750.8846;            // umol C (kg H2O)^-1
   // Optional Medlyn (2011) soil-moisture factor on the CF77 price: with this on,
   // the marginal value of water becomes `CF77_lambda_ / beta(theta)` rather than
   // the bare constant, where beta is the same expression medlyn_model_gs uses.
@@ -756,8 +779,8 @@ public:
   double TF24_floor_lambda_o = util::na_value;     // umol C (kg H2O)^-1
   // THE UNIT-COST RATIO OF LEAST-COST THEORY (@Prentice-2014's beta), and the
   // LeastCost curve's ONLY parameter. An INPUT on the same footing as
-  // `CF77_lambda_` and `TF24_floor_lambda_o`: no default, never assigned by model
-  // code, not cleared by setup_clean_leaf().
+  // `CF77_lambda_`: never assigned by model code, not cleared by
+  // setup_clean_leaf(), and defaulted to its ALIGNED value (see `CF77_lambda_`).
   //
   // Least-cost minimises `C_P = (c_E*E + c_V*Vcmax)/A`, so it has two unit costs
   // rather than one. ⚠️ ONE FIELD IS ENOUGH, AND THIS IS NOT A SIMPLIFICATION.
@@ -787,7 +810,12 @@ public:
   // @Prentice-2014 report beta = 146 and @Dong-2017 fit 146 +- a factor of about
   // two; below ~10 the water term dominates and the leaf closes, above ~1e4 the
   // capacity term does and it opens to the wet bound.
-  double LeastCost_beta = util::na_value;          // dimensionless, c_V / c_E
+  //
+  // ⚠️ THE DEFAULT IS NOT THE PUBLISHED 146. At this package's default leaf, 146
+  // pins every stem optimum at psi_crit (the leaf opens fully at the reference),
+  // so it cannot be compared with the other curves. The aligned value sits inside
+  // Dong's factor-of-two band about 146 only at its lower edge.
+  double LeastCost_beta = 51.59667042;             // dimensionless, c_V / c_E
   double hydraulic_cost_;
   
   double electron_transport_;
@@ -1168,14 +1196,14 @@ public:
   // is a real omission rather than a simplification. Do not describe a run of this
   // curve as "Joshi et al. (2022)".
   //
-  // ⚠️ THE DEFAULT IS NOT A LITERATURE VALUE. It is order-of-magnitude matched to
-  // TF24 at this package's defaults, and there is no single value that matches
-  // more than one soil potential: the gamma reproducing TF24's cost at its own
+  // ⚠️ THE DEFAULT IS NOT A LITERATURE VALUE. It is ALIGNED to TF24 at the
+  // reference environment (see `CF77_lambda_`), and no single value matches more
+  // than one soil potential: the gamma reproducing TF24's cost at its own
   // optimum runs 0.287 (psi_soil 0.5 MPa) to 1.761 (3.0 MPa), a 6.1x range,
   // because TF24's cost tracks the ABSOLUTE potential through (1 - f) while this
   // one tracks the DROP -- and across a drydown those move in opposite directions.
   // That spread is the models' structural difference, not a fitting problem.
-  double JS22_gamma = 1.0;             // umol C m^-2 s^-1 MPa^-2
+  double JS22_gamma = 0.4717887793;    // umol C m^-2 s^-1 MPa^-2
   // Wolf, Anderegg & Pacala (2016) carbon maximisation, in the form Anderegg et al.
   // (2018) gave it and Sabot's `TractLSM` implements (`SPAC/fregulate.py`,
   // `dcost_dpsi = Alpha*|P| + Beta`): a marginal cost LINEAR in the absolute leaf
@@ -1193,11 +1221,12 @@ public:
   // sign here has to be pinned by reproducing a TractLSM number and not by reading
   // the formula. It is therefore NOT range-checked the way JS22_gamma is.
   //
-  // ⚠️ NEITHER DEFAULT IS A LITERATURE VALUE. Measured: with CMax_b = 0 the CMax_a
-  // reproducing TF24's cost at TF24's own optimum runs 0.406 (psi_soil 0.5 MPa) to
-  // 0.807 (3.0 MPa) -- a 2.0x range, against JS22's 6.1x, which is the absolute-
-  // versus-drop distinction showing up as a number. 0.6 is mid-range of that band.
-  double CMax_a = 0.6;                 // umol C m^-2 s^-1 MPa^-2
+  // ⚠️ NEITHER DEFAULT IS A LITERATURE VALUE. CMax_a is ALIGNED to TF24 at the
+  // reference environment with CMax_b = 0 (see `CF77_lambda_`). Measured: the
+  // CMax_a reproducing TF24's cost at TF24's own optimum runs 0.406 (psi_soil
+  // 0.5 MPa) to 0.807 (3.0 MPa) -- a 2.0x range, against JS22's 6.1x, which is the
+  // absolute-versus-drop distinction showing up as a number.
+  double CMax_a = 0.6385596982;        // umol C m^-2 s^-1 MPa^-2
   double CMax_b = 0.0;                 // umol C m^-2 s^-1 MPa^-1
   // Dark respiration's temperature response, Tjoelker et al. (2001):
   //
@@ -8548,16 +8577,15 @@ inline double Leaf::benefit_link_deriv(double A) const {
 template <Leaf::CostCurve K>
 inline void Leaf::check_cost_parameters() {
   if constexpr (K == CostCurve::CF77) {
-    // ⚠️ CF77_lambda_ IS AN INPUT AND HAS NO DEFAULT. It is the marginal value of
-    // water -- the one parameter this model is defined by -- and no model code
-    // supplies one, so a caller who has not set it is maximising a NaN objective.
-    // The potential that comes back from that is a property of the bracket rather
-    // than of the leaf, and it looks entirely plausible. Refuse instead.
+    // CF77_lambda_ is an input with an aligned default, so a non-finite value
+    // means a caller cleared it. That maximises a NaN objective, whose argmax is
+    // a property of the bracket and looks entirely plausible. Refuse instead.
     if (!std::isfinite(CF77_lambda_)) {
       util::stop("the CF77 cost curve needs CF77_lambda_ set: it is the "
-                 "PRESCRIBED marginal value of water in umol C (kg H2O)^-1, NA "
-                 "until you assign one, and never set by set_physiology or "
-                 "set_traits.");
+                 "PRESCRIBED marginal value of water in umol C (kg H2O)^-1, and "
+                 "it was set to " + util::to_string(CF77_lambda_) + ". Its "
+                 "default is aligned to TF24 (see align_curves()); "
+                 "set_physiology and set_traits never touch it.");
     }
     // ⚠️ Only when the option is ON, so a caller who never touches it cannot be
     // refused for soil-moisture values the bare constant never reads. beta <= 0
@@ -8622,10 +8650,10 @@ inline void Leaf::check_cost_parameters() {
                  util::to_string(TF24_floor_lambda_o));
     }
   } else if constexpr (K == CostCurve::LeastCost) {
-    // ⚠️ AN INPUT WITH NO DEFAULT, for CF77's reason rather than TF24_floor's.
-    // There is no other curve this one collapses into, so an unset beta is not a
-    // silent substitution -- it is a NaN objective, whose argmax is a property of
-    // the bracket and looks entirely plausible. Refuse instead.
+    // An input with an aligned default, refused when cleared for CF77's reason
+    // rather than TF24_floor's: there is no other curve this one collapses into,
+    // so a non-finite beta is a NaN objective, whose argmax is a property of the
+    // bracket and looks entirely plausible.
     //
     // ⚠️ AND STRICTLY POSITIVE, WHICH IS NOT THE SAME CHECK `TF24_floor_lambda_o`
     // GETS. Zero is accepted there and is the reduction test's own case; here it
@@ -8638,9 +8666,10 @@ inline void Leaf::check_cost_parameters() {
                  "Prentice et al. (2014)'s beta, the unit cost of maintaining "
                  "carboxylation capacity relative to that of transpiration, "
                  "DIMENSIONLESS (both fluxes are weighed in mol m^-2 s^-1), "
-                 "strictly positive, and NA until you assign one -- "
-                 "set_physiology and set_traits never touch it. The published "
-                 "value is 146. Set `$LeastCost_beta` on the leaf, or pass "
+                 "strictly positive; its default is aligned to TF24 (see "
+                 "align_curves()), and set_physiology and set_traits never touch "
+                 "it. The published value is 146. Set `$LeastCost_beta` on the "
+                 "leaf, or pass "
                  "`LeastCost_beta =` to leaf_solve() / leaf_batch(); got " +
                  util::to_string(LeastCost_beta));
     }

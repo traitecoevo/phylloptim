@@ -602,18 +602,18 @@ leaf_gradient <- function(psi_soil,
 
   # The differentiable parameters: the fifteen traits, plus the four that are not
   # traits and that a calibration nonetheless fits (#44). See .gradient_theta.
-  # ⚠️ READ OFF THE LEAF, not defaulted, for the same reason the resistance is:
-  # theta has to hold the value the solve will actually use, and on the two priced
-  # routes that is whatever the caller assigned to `x$CF77_lambda_` /
-  # `x$TF24_floor_lambda_o` before calling.
+  # ⚠️ READ OFF THE LEAF when there is one, for the same reason the resistance
+  # is: theta has to hold the value the solve will actually use, which on a priced
+  # route is whatever the caller assigned to the field. Without a leaf it is the
+  # field's default. On a route that does not own the field it is NA, so the
+  # setter writes nothing (see .owned_value()).
   theta <- .gradient_theta(traits, leaf_specific_conductance_max, supply,
                            root_network,
-                           CF77_lambda = if (is.null(x)) NA_real_ else
-                             x$CF77_lambda_,
-                           TF24_floor_lambda_o = if (is.null(x)) NA_real_ else
-                             x$TF24_floor_lambda_o,
-                           LeastCost_beta = if (is.null(x)) NA_real_ else
-                             x$LeastCost_beta,
+                           CF77_lambda = .owned_value(model, "CF77_lambda_", x),
+                           TF24_floor_lambda_o =
+                             .owned_value(model, "TF24_floor_lambda_o", x),
+                           LeastCost_beta =
+                             .owned_value(model, "LeastCost_beta", x),
                            damage = if (damage) .gradient_damage_values(x))
   if (is.null(pars)) {
     # ⚠️ WHAT IS AVAILABLE, not every slot in `theta`. The enumeration now carries

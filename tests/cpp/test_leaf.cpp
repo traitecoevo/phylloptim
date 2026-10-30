@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <iterator>
 #include <tuple>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -1793,10 +1794,11 @@ void test_cowan_farquhar_closed_state() {
 }
 
 void test_cowan_farquhar_refuses_an_unset_lambda() {
-  printf("Cowan-Farquhar refuses an unset lambda\n");
+  printf("Cowan-Farquhar refuses a cleared lambda\n");
   Drivers d;
   phylloptim::Leaf l = make_leaf(d, {1.0}, {1.0});
-  ok(!std::isfinite(l.CF77_lambda_), "CF77_lambda_ starts unset");
+  ok(std::isfinite(l.CF77_lambda_), "CF77_lambda_ starts at its aligned default");
+  l.CF77_lambda_ = std::numeric_limits<double>::quiet_NaN();
   bool threw = false;
   std::string what;
   try {
@@ -4845,11 +4847,12 @@ void test_prescribed_lambda_survives_redriving() {
   Drivers d;
   std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
 
-  // A fresh Leaf reads the NA sentinel: "no longer reset" must not have become
+  // A fresh Leaf reads the default: "no longer reset" must not have become
   // "never initialised", which is the one way this change could go wrong quietly.
   {
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
-    ok(std::isnan(l.CF77_lambda_), "CF77_lambda_ is NA on a freshly constructed leaf");
+    ok(l.CF77_lambda_ == 107750.8846,
+       "CF77_lambda_ is its aligned default on a freshly constructed leaf");
   }
 
   const double prescribed = 30.0;
@@ -5346,6 +5349,45 @@ phylloptim::Leaf make_single_leaf(const Drivers &d, double psi_soil,
   l.set_physiology(rn, d.PPFD, {psi_soil}, {1.0}, d.K_s * d.theta / d.h,
                    d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
   return l;
+}
+
+// The aligned defaults (#156): at the reference environment `align_curves()`
+// uses, every curve with a level parameter has TF24's conductance at its class
+// default. This reads the C++ initialisers directly, where the R side's test
+// reads `leaf_traits()`, so the two copies of the four numbers are each checked
+// against the property rather than against each other.
+void test_aligned_defaults_match_tf24_at_the_reference() {
+  printf("the aligned level defaults give TF24's conductance at the reference\n");
+  using K = phylloptim::Leaf::CostCurve;
+  Drivers d;  // PPFD 900, VPD 2 kPa, ca 40 Pa, 25 C, kmax 3.14e-5: the reference
+  auto gc_of = [&](auto curve) {
+    phylloptim::Leaf l;
+    l.setup_transpiration(phylloptim::Leaf::ncontrol_default);
+    l.setup_root_vulnerability(phylloptim::Leaf::ncontrol_default);
+    l.set_supply_single(0.0);
+    phylloptim::RootNetwork rn;
+    rn.r_R_V_sum = std::vector<double>{1.0e3};
+    rn.r_R_H_min = std::vector<double>{0.0};
+    rn.r_R_V = std::vector<double>{1.0e3};
+    rn.c_r_V = std::vector<double>{0.0};
+    rn.c_r_H = std::vector<double>{0.0};
+    l.set_physiology(rn, d.PPFD, {1.0}, {1.0}, d.K_s * d.theta / d.h,
+                     d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
+    l.optimise_psi_stem_single<decltype(curve)::value>();
+    return l.stom_cond_CO2_;
+  };
+  const double tf24 = gc_of(std::integral_constant<K, K::TF24>{});
+  ok(tf24 > 0.0, "TF24 transpires at the reference");
+  // 1e-6: the defaults carry ten significant figures, and the alignment is
+  // re-solved in R against a 400-knot spline, as here.
+  near(gc_of(std::integral_constant<K, K::CF77>{}) / tf24, 1.0, 1e-6,
+       "CF77 at its default price");
+  near(gc_of(std::integral_constant<K, K::JS22>{}) / tf24, 1.0, 1e-6,
+       "JS22 at its default gamma");
+  near(gc_of(std::integral_constant<K, K::CMax>{}) / tf24, 1.0, 1e-6,
+       "CMax at its default slope");
+  near(gc_of(std::integral_constant<K, K::LeastCost>{}) / tf24, 1.0, 1e-6,
+       "LeastCost at its default beta");
 }
 
 // ===========================================================================
@@ -7625,9 +7667,10 @@ void test_leastcost_refuses_an_unset_or_degenerate_beta() {
   Drivers d;
   {
     phylloptim::Leaf l = make_single_leaf(d, 1.0);
+    l.LeastCost_beta = std::numeric_limits<double>::quiet_NaN();
     l.set_model(phylloptim::Leaf::CostCurve::LeastCost, false);
     ok(throws_with([&] { l.optimise(); }, "needs LeastCost_beta set"),
-       "an unset beta is refused rather than optimised as a NaN objective");
+       "a cleared beta is refused rather than optimised as a NaN objective");
     // The message has to carry the units. A beta derived against this package's
     // kg H2O and umol CO2 rather than mol and mol is out by 5.6e7, and would
     // otherwise solve to something entirely plausible.
@@ -8498,6 +8541,7 @@ int main() {
   test_cowan_farquhar_reproduces_the_TF_optimum();
   test_cowan_farquhar_closed_state();
   test_cowan_farquhar_refuses_an_unset_lambda();
+  test_aligned_defaults_match_tf24_at_the_reference();
   test_dprofit_dpsi_stem_matches_a_finite_difference();
   test_dprofit_dpsi_stem_matches_a_finite_difference_energy_balance();
   test_dprofit_dpsi_stem_vanishes_at_the_optimum();
