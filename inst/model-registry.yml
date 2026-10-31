@@ -1907,7 +1907,7 @@ equations:
     writes: [psi_crit, root_psi_crit]
     kind: closed_form
     cite: Sperry-2017
-    note: 'A quantile of the curve, not a trait. Being P95 it lies inside the P99 grid for every $c > 0$.'
+    note: 'A quantile of the curve, not a trait. It ends the solve''s domain only for the curves whose own forms end there (cost_domain_ends_at_psi_crit); for the rest the stem may run past it (#183).'
   weibull_vulnerability:
     section: vulnerability
     title: Stem vulnerability curve
@@ -1937,7 +1937,7 @@ equations:
       F(\psi) = \int_0^{\psi} f(s)\,ds = \frac{b}{c}\,\gamma\!\big(1/c,\ (\psi/b)^{c}\big),\quad F(\psi \le 0) = 0, \qquad
       F(\infty) = \frac{b}{c}\,\Gamma(1/c)
     code: phylloptim::cumulative_vulnerability_integral_at
-    also: [phylloptim::cumulative_vulnerability_integral_limit, phylloptim::VulnerabilityTable]
+    also: [phylloptim::cumulative_vulnerability_integral_limit, phylloptim::vulnerability_table]
     reads: []
     writes: []
     kind: closed_form
@@ -1950,8 +1950,8 @@ equations:
       u_i = u_\mathrm{end}\, i/n,\ u_\mathrm{end} = x_\mathrm{end}^{1/c}; \quad \text{on } [u_i, u_{i+1}],\ t = (u - u_i)/h: \\
       \hat g(u) = \textstyle\sum_{k=0}^{5} a_{i,k}\, t^k, \quad \hat g, \hat g', \hat g'' = g, g', g'' \text{ at both knots}; \quad
       \hat F' = \hat g'(\psi/b); \quad \hat F = F(\infty) \text{ past } u_\mathrm{end}
-    code: phylloptim::VulnerabilityTable
-    also: [phylloptim::vulnerability_integral, phylloptim::vulnerability_integral_deriv, phylloptim::vulnerability_table, phylloptim::Leaf::setup_transpiration, phylloptim::MultiLayerRoots::setup_vulnerability]
+    code: phylloptim::vulnerability_table
+    also: [phylloptim::vulnerability_integral, phylloptim::vulnerability_integral_deriv, phylloptim::vulnerability_psi_end, phylloptim::Leaf::setup_transpiration, phylloptim::MultiLayerRoots::setup_vulnerability]
     reads: [vulnerability_curve_ncontrol, vulnerability_x_end]
     writes: []
     kind: closed_form
@@ -1998,7 +1998,7 @@ equations:
       E(\psi_\mathrm{stem}; \psi_\mathrm{up}) = k_{max}\big[\tilde F(\psi_\mathrm{stem}) - \tilde F(\psi_\mathrm{up})\big]
       \;\approx\; k_{max}\!\int_{\psi_\mathrm{up}}^{\psi_\mathrm{stem}} f(u)\,du
     code: phylloptim::Leaf::transpiration
-    also: [phylloptim::Leaf::stem_curve_integral]
+    also: [phylloptim::Leaf::stem_curve_integral, phylloptim::Leaf::setup_transpiration]
     reads: [leaf_specific_conductance_max, stem_b, stem_c]
     writes: []
     kind: closed_form
@@ -2014,7 +2014,7 @@ equations:
     reads: [leaf_specific_conductance_max, stem_b, stem_c]
     writes: []
     kind: integrator
-    note: 'An independent check on the spline, not on the production path: adaptive Simpson at absolute tolerance $\epsilon$ = integration_tol (initialize_integrator(), default 1e-8), against the closed form. It converges to it: measured max |error| at $k_{max} = 1$ and three stem curves is 2.7e-06 at $\epsilon$ = 1e-6, 1.7e-08 at 1e-8 (the default; 1.7x the requested tolerance at $c = 5$, the local Simpson criterion not being a global bound), 4.2e-11 at 1e-10, 4.4e-13 at 1e-12 and 2.7e-15 at 1e-14, the rounding floor.'
+    note: 'An independent check on the table, not on the production path: adaptive Simpson at absolute tolerance $\epsilon$ = integration_tol (initialize_integrator(), default 1e-8), against the closed form. It converges to it: measured max |error| at $k_{max} = 1$ and three stem curves is 2.7e-06 at $\epsilon$ = 1e-6, 1.7e-08 at 1e-8 (the default; 1.7x the requested tolerance at $c = 5$, the local Simpson criterion not being a global bound), 4.2e-11 at 1e-10, 4.4e-13 at 1e-12 and 2.7e-15 at 1e-14, the rounding floor.'
   stem_transpiration_inverse:
     section: supply
     title: Stem potential from a transpiration
@@ -2127,7 +2127,7 @@ equations:
       \qquad \psi_\mathrm{stem} = \mathrm{clamp}_{[\psi_w,\,\psi_\mathrm{crit}]}(\psi) \ \text{(stem route)}, \qquad
       \psi_r = \mathrm{clamp}_{[\psi_a,\,\psi_b]}(\psi) \ \text{(collar route)}
     code: phylloptim::Leaf::profit_psi_stem_for
-    also: [phylloptim::Leaf::profit_psi_stem_TF, phylloptim::Leaf::evaluate_psi_stem, phylloptim::Leaf::evaluate_psi_stem_at, phylloptim::Leaf::evaluate_root_collar_psi, phylloptim::Leaf::evaluate_root_collar_psi_for, phylloptim::Leaf::profit_at_collar_psi]
+    also: [phylloptim::Leaf::profit_psi_stem_TF, phylloptim::Leaf::evaluate_psi_stem, phylloptim::Leaf::evaluate_psi_stem_at, phylloptim::Leaf::evaluate_root_collar_psi, phylloptim::Leaf::evaluate_root_collar_psi_for, phylloptim::Leaf::profit_at_collar_psi, phylloptim::Leaf::dry_end]
     reads: [psi_crit]
     writes: [profit_, opt_psi_stem_, opt_root_psi_]
     kind: closed_form
@@ -2761,7 +2761,7 @@ equations:
     reads: [psi_crit]
     writes: []
     kind: closed_form
-    note: 'NOT $E/k_{max}$: $G$ is the cumulative vulnerability integral, so the inversion is the supply spline''s (transpiration_to_psi_stem and transpiration). On the stem route $\psi_\mathrm{up}$ is $\psi_\mathrm{soil}$. Not bound. Both clamped branches return a bound potential, which within_guard always rejects (dark leaf, $E < 0$; a low price, $E \ge E(\psi_\mathrm{crit})$).'
+    note: 'NOT $E/k_{max}$: $G$ is the cumulative vulnerability integral, so the inversion is the supply table''s (transpiration_to_psi_stem and transpiration). On the stem route $\psi_\mathrm{up}$ is $\psi_\mathrm{soil}$. Not bound. Both clamped branches return a bound potential, which within_guard always rejects (dark leaf, $E < 0$; a low price, $E \ge E(\psi_\mathrm{crit})$).'
   evaluate_at_lambda:
     section: closed_form
     title: Operating point at a marginal cost

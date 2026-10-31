@@ -86,10 +86,10 @@ const char *kGoldenPath = "golden/primitives.tsv";
 // The tiers, in call-tree order. Named here rather than at each emit site so the
 // per-tier reporting and the file's own column agree by construction.
 enum Tier {
-  kArithmetic = 1,  // no state, no splines, no iteration: libm and FMA only
+  kArithmetic = 1,  // no state, no tables, no iteration: libm and FMA only
   kVulnerability,   // the Weibull curve and its pre-integrated grid
   kAssimilation,    // rational arithmetic, then a quadratic root
-  kSpline,          // the first functions that READ an interpolator
+  kSpline,          // the first functions that READ a vulnerability table
   kIterative,       // primitives containing their own root-find
   kTierCount
 };
@@ -183,7 +183,7 @@ std::vector<Row> run_grid() {
 
   // --- tier 2: the vulnerability curve and its grid --------------------------
   //
-  // Calls exp/pow; no spline read and no solve. The (b, c) sweep is #92's
+  // Calls exp/pow; no table read and no solve. The (b, c) sweep is #92's
   // instrument: the knot grid's realised endpoint is a function of the pair, and
   // pinning `psi_max` beside the integral is what would have caught a domain that
   // fell one step short of the one it claimed.
@@ -227,13 +227,12 @@ std::vector<Row> run_grid() {
     row(kAssimilation, "assim_colimited", ci, 0.0, l.assim_colimited(ci));
   }
 
-  // --- tier 4: the first functions that read a spline ------------------------
+  // --- tier 4: the first functions that read a table -------------------------
   //
-  // This is where the interesting money is: the spline is built by odelia, and
-  // odelia's interpolator is the one dependency shared by header rather than by
-  // copy. `stem_curve_integral` is included alongside `transpiration` because it
-  // is the raw spline read and `transpiration` is that scaled -- so a tier-4
-  // failure that appears in one and not the other separates the interpolator from
+  // (The tier is still labelled "spline" in the golden file, after what it read
+  // before #183.) `stem_curve_integral` is included alongside `transpiration`
+  // because it is the raw table read and `transpiration` is that scaled -- so a
+  // tier-4 failure that appears in one and not the other separates the table from
   // the conductance scaling.
   for (double psi_stem = 0.25; psi_stem <= 5.5 + 1e-12; psi_stem += 0.25) {
     row(kSpline, "stem_curve_integral", psi_stem, 0.0,

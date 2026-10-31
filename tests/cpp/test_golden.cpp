@@ -102,13 +102,17 @@ Row solve(double psi_soil, double ppfd, double vpd, int layers,
 }
 
 std::vector<Row> run_grid() {
-  const double psi_soils[] = {0.5, 1.0, 2.0, 3.0, 4.0, 6.0};
+  // 17 MPa is past the end of the stem curve (15.44 at the defaults), the only
+  // place a TF24 leaf shuts since psi_crit stopped bounding it (#183): it keeps
+  // the shut-down exit, where an output a path declines to write becomes the
+  // previous leaf's (hazard 8), in the baseline.
+  const double psi_soils[] = {0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 17.0};
   const double ppfds[] = {100.0, 500.0, 900.0, 1500.0};
   const double vpds[] = {0.5, 1.0, 2.0, 4.0};
   const int layer_counts[] = {1, 3, 5};
 
   // ⚠️ TEMPERATURE IS THE OUTERMOST LOOP ON PURPOSE. It makes the file contiguous
-  // copies of one 288-point state grid, so a regeneration that only adds a
+  // copies of one 336-point state grid, so a regeneration that only adds a
   // temperature is checkable as an ADDITION: the 25 C block must come out
   // byte-identical. Reordering these loops rewrites every row without changing any
   // value.
@@ -133,12 +137,12 @@ std::vector<Row> run_grid() {
 //
 // `Leaf::operating_point_kind()` says which branch of the collar solve produced
 // the point, and the grid's split between those branches is a measured number.
-// AT 25 C, of the 288 points 232 sit at an interior profit maximum and 56 at a
+// AT 25 C, of the 336 points 232 sit at an interior profit maximum and 56 at a
 // constrained optimum pinned to a bracket bound: 45 wet, and 11 dry, at
-// psi_soil = 6, where the leaf transpires all its stem can carry (#183). None
-// shuts down: psi_crit bounds nothing under TF24, and the grid's driest soil is
-// well short of the end of the stem curve. The 40 C counts are measured the same
-// way.
+// psi_soil = 6, where the leaf transpires all its stem can carry (#183). The 48
+// at psi_soil = 17, past the end of the stem curve, shut down; psi_crit bounds
+// nothing under TF24, so no drier soil short of that end does. The 40 C counts
+// are measured the same way.
 //
 // It is a cheap test with a specific job: the tag must come from the branch that
 // was TAKEN, and a plausible-looking wrong implementation -- classifying by
@@ -175,8 +179,8 @@ struct TempKinds {
 // assimilates less and respires more, so it has less to gain from water and its
 // optimum presses against the WET bound instead of the dry one.
 const TempKinds kExpectedKinds[] = {
-    {25.0, 232, 45, 11, 0},
-    {40.0, 172, 116, 0, 0},
+    {25.0, 232, 45, 11, 48},
+    {40.0, 172, 116, 0, 48},
 };
 
 int check_operating_kinds(const std::vector<Row> &rows) {

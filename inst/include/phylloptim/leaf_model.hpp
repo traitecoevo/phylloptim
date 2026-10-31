@@ -662,7 +662,7 @@ public:
   // vulnerability curves are fitted on a Px and the slope at Px rather than (b, c).
   double stem_P50;
   // DERIVED, and read-only from R. Kept as members because every internal use is
-  // in terms of them: the splines, the brackets, the cost kernels.
+  // in terms of them: the curve reads, the brackets, the cost kernels.
   double stem_b;
   double psi_crit;
   double TF24_beta2;
@@ -1585,11 +1585,11 @@ public:
   double theta_;            // current soil water content (m^3 m^-3)
 
   // 1-entry memo for transpiration(). Within a single root-collar/profit solve
-  // leaf_specific_conductance_max_ and the transpiration spline are fixed, so
+  // leaf_specific_conductance_max_ and the stem curve are fixed, so
   // supply-side transpiration depends only on (psi_stem, psi_upstream). That
   // pair is queried repeatedly with identical values per profit evaluation
   // (psi_stem_to_ci -> stom_cond_CO2 -> transpiration, then transpiration again
-  // for transpiration_). Caching the last result avoids the redundant spline
+  // for transpiration_). Caching the last result avoids the redundant table
   // lookups; it is invalidated in set_physiology when conductance/soil change.
   bool   transpiration_cached_ = false;
   double transpiration_cache_psi_stem_ = 0.0;
@@ -1630,7 +1630,7 @@ public:
   //   * it also covers `vcmax_25` and `jmax_25`, which closes the third and least
   //     visible half of hazard 10 -- a bare `l$vcmax_25 <- x` write no longer
   //     leaves `vcmax_`/`jmax_`/`R_d_` describing the old value. `set_traits()` is
-  //     still the right way to change a trait (the vulnerability splines and the
+  //     still the right way to change a trait (the vulnerability tables and the
   //     solved point need clearing too), but the silent-wrong-number failure mode
   //     is gone.
   //   * the cost is 17 double comparisons per set_physiology() call, i.e. per
@@ -1709,11 +1709,11 @@ public:
   // public plain doubles, so assigning one *compiles* -- and three separate pieces
   // of derived state go stale when it does:
   //
-  //   * the two vulnerability SPLINES. stem_b/stem_c build transpiration_from_psi;
-  //     root_b/root_c build the root curve. Both are
-  //     pre-integrated at construction, so a bare `l.stem_b = x` leaves the hot
-  //     path reading the previous curve's integral while proportion_of_conductivity
-  //     reports the new one -- two answers to the same question.
+  //   * the two vulnerability CURVES. Each c owns a pre-integrated table and each
+  //     P50 sets the scale (b, and the memoised 1/b) it is read at, so a bare
+  //     `l.stem_c = x` leaves the hot path reading the previous curve's integral
+  //     while proportion_of_conductivity reports the new one -- two answers to
+  //     the same question.
   //   * the solved OPERATING POINT, which is hazard 8: an output that no code path
   //     rewrites goes on reading as though it belonged to the new traits.
   //   * vcmax_, jmax_ and R_d_, which are derived from vcmax_25/jmax_25 inside
@@ -1730,8 +1730,8 @@ public:
   // A fourth, which is not derived state but is the same argument: a bare write
   // bypasses the #25 positive-magnitude checks below entirely.
   //
-  // So: the invariant checks run, the splines
-  // are rebuilt only when the curve that owns them actually moved, and
+  // So: the invariant checks run, the tables
+  // are rebuilt only when the c that owns them actually moved, and
   // setup_clean_leaf() puts the object back in its just-constructed state -- which
   // resets both caches and requires set_physiology() before the next solve, exactly
   // as a fresh Leaf would. That last part is not conservatism: the derived
@@ -1831,8 +1831,9 @@ public:
 
   // The stem cumulative-vulnerability integral G and its inverse, as the FOUR
   // operations the model actually performs on them. Every read goes through
-  // these. G is the table's value; G' is exp(-(psi/b)^c) in closed form; G^-1 is
-  // Newton on that pair; and (G^-1)' is 1/G' at the inverse. None of them has a
+  // these. G and G' are the table's value and slope, read from one polynomial so
+  // that G' is the derivative of the G the solve reads; G^-1 is Newton on that
+  // pair; and (G^-1)' is 1/G' at the inverse. None of them has a
   // domain end: past the end of the curve G is G(inf), and only a negative
   // potential, or a flux at or past G(inf), is refused.
   //
@@ -1871,7 +1872,7 @@ public:
 
   // Absolute tolerance for the direct quadrature in
   // transpiration_full_integration (leaf/quadrature.hpp). Not used anywhere on
-  // the production path, which reads the pre-integrated spline instead.
+  // the production path, which reads the pre-integrated table instead.
   double integration_tol_ = 1e-8;
 
   // Retained for API compatibility with plant's R bindings, which expose this
@@ -2364,8 +2365,8 @@ public:
   // Exact d(profit)/d(opt_root_psi) at a given root-collar potential (positive
   // magnitude), for TF24f's acclimation tracking (#525/#527). Combines
   // forward-mode AD for the analytic photosynthesis/cost algebra, the
-  // implicit-function theorem at the psi_stem_to_ci root-find, and analytic
-  // spline derivatives (Interpolator::deriv) for the smooth transport. Replaces
+  // implicit-function theorem at the psi_stem_to_ci root-find, and the
+  // vulnerability tables' own slopes for the smooth transport. Replaces
   // the noisy finite-difference gradient. Seats the soil-side caches itself, so a
   // solve need not have run first.
   //
@@ -2407,7 +2408,7 @@ public:
   // the collar solve can share ONE supply_begin_solve across all ~10 of its
   // gradient evaluations instead of re-seating per call -- the same saving #530
   // made for the finite-difference path, and it matters here because
-  // begin_solve() is a spline evaluation per soil layer.
+  // begin_solve() is a vulnerability read per soil layer.
   template <CostCurve K>
   double dprofit_at_collar_psi(double opt_root_psi, bool* feasible = nullptr);
 
@@ -3566,13 +3567,13 @@ public:
     // operating point in this state reads NA sentinels.
     Unsolved,
     // Interior profit maximum: dprofit == 0 was solved for, strictly inside the
-    // feasible collar interval. 198 of the 288 golden grid points at 25 C -- 160 of
+    // feasible collar interval. 232 of the 336 golden grid points at 25 C -- 172 of
     // them at 40 C, where the optimum presses against the WET bound instead.
     Interior,
     // Constrained optimum at the psi_soil end of the feasible interval, just
     // inside root_zero_E (the collar at which uptake is exactly zero). The
     // objective is still climbing toward that bound, so the bound is the answer:
-    // the leaf declines to open. 24 golden points at 25 C. The gradient here is
+    // the leaf declines to open. 45 golden points at 25 C. The gradient here is
     // genuinely non-zero.
     //
     // ⚠️ THESE TWO ARE NAMED FOR THE BOUND THAT BINDS, NOT FOR THE CONDITIONS,
@@ -3580,8 +3581,8 @@ public:
     // that reason. `psi_stem == psi_soil` is the least-tension end of the
     // bracket, so it reads as the comfortable case -- but it is what a leaf does
     // under STRESS, when no interior point earns its water. The golden grid says
-    // so: 24 -> 80 rows as the leaf goes 25 -> 40 C, while the psi_crit end goes
-    // 18 -> 0. Warming drives this one and removes the other. Do not reintroduce
+    // so: 45 -> 116 rows as the leaf goes 25 -> 40 C, while the dry end goes
+    // 11 -> 0. Warming drives this one and removes the other. Do not reintroduce
     // a name whose reading inverts with temperature.
     BoundarySoil,
     // Constrained optimum at the dry end: the continuity root with the stem
@@ -4276,7 +4277,7 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
 // representation, no flip, and no bridge point. `psi_soil_`, `psi_crit`,
 // `root_psi_crit`, `stem_b`, `root_b`, `opt_psi_stem_`, `opt_root_psi_`, the
 // find_root_psi / E_column root variable, find_psi_stem_from_psi_root's
-// psi_root, transpiration's psi_upstream, and all four spline domains are the
+// psi_root, transpiration's psi_upstream, and the vulnerability tables' arguments are the
 // same kind of number. `set_physiology` asserts psi_soil >= 0 and the
 // constructor asserts psi_crit > 0 and stem_b > 0, so the convention is
 // checkable rather than merely documented -- which is the point: before #25
@@ -4360,9 +4361,9 @@ inline double Leaf::E_column_zero(double x, const std::vector<double>& psi_soil)
 // dry_end_ endpoint is exactly the E_column(dry_end_) < 0 shutdown test, and
 // crit=0 is only reached for soil wetter than dry_end_. The genuinely
 // non-smooth failure mode in the earlier blanket-swap rejection (the root
-// vulnerability spline extrapolating negative beyond its ~root_psi_crit domain)
-// lives in E_from_Soil_to_Root_Collar itself and bites both solvers identically;
-// it does not arise on the brackets this finder is actually handed. Like
+// vulnerability spline extrapolating negative beyond its domain, before #183)
+// lived in E_from_Soil_to_Root_Collar itself and bit both solvers identically;
+// it did not arise on the brackets this finder is actually handed. Like
 // psi_stem_to_ci (Phase 6) this is a same-tolerance method swap, NOT a tolerance
 // loosening: same root, fewer evals.
 inline double Leaf::find_root_psi(double wettest_soil_layer, const std::vector<double>& psi_soil, int find_root_crit,
@@ -5379,15 +5380,14 @@ inline double Leaf::profit_at_collar_psi(double target_opt_root_psi,
 
 // Exact d(profit)/d(opt_root_psi). profit(psi) = assim_colimited(ci) -
 // hydraulic_cost_TF(psi_stem), with psi_stem = find_psi_stem_from_psi_root(psi)
-// (smooth spline transport) and ci = psi_stem_to_ci(psi_stem, psi) (root-find).
+// (smooth transport) and ci = psi_stem_to_ci(psi_stem, psi) (root-find).
 // Chain rule:
 //   dprofit/dpsi = A'(ci) dci/dpsi - C'(psi_stem) dpsi_stem/dpsi
 // where dci/dpsi = (dci/dpsi_stem) dpsi_stem/dpsi + (dci/dpsi)|_explicit, and the
 // dci/d* terms come from the implicit-function theorem on the residual
 //   g(ci; psi_stem, psi) = A(ci) umol_to_mol - gc(psi_stem,psi) (ca-ci)/(atm kPa)
 // with gc = const * transpiration(psi_stem,psi). A'/C' are obtained by forward
-// AD; the gc partials use the analytic spline derivative (transpiration_from_psi
-// .deriv); dpsi_stem/dpsi by a tight central difference on the smooth transport.
+// AD; the gc partials use the stem table's own slope (stem_curve_integral_deriv); dpsi_stem/dpsi by a tight central difference on the smooth transport.
 template <Leaf::CostCurve K>
 inline double Leaf::dprofit_droot_collar_psi_for(double opt_root_psi, bool* feasible) {
   // Every transport evaluation below reads the supply path's per-solve caches, so
@@ -5543,7 +5543,7 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
   // Stomatal-conductance supply coefficient gc and its partials. gc =
   // gc_const * (E - r*) + rho g_min, with E = transpiration(psi_stem, psi) =
   // conductance_max * (transp_from_psi(psi_stem) - transp_from_psi(psi)), so
-  // the partials use the analytic spline derivative. The residual flux reads
+  // the partials use the stem table's own slope. The residual flux reads
   // psi_stem only through the leaf temperature (the energy-balance term's) and
   // the collar through its ceiling, appended below; both are exact zeros at
   // g_min = 0.
@@ -5658,7 +5658,7 @@ inline double Leaf::cost_deriv(double psi_stem, double psi_upstream) {
               stem_curve_integral_deriv(psi_stem);
   } else if constexpr (K == CostCurve::JS22) {
     // C = gamma*(psi - psi_up)^2, so dC/dpsi = 2*gamma*(psi - psi_up). Analytic,
-    // no AD and no spline -- the simplest derivative of the four.
+    // no AD and no table -- the simplest derivative of the four.
     C_prime = 2.0 * JS22_gamma * (psi_stem - psi_upstream);
   } else if constexpr (K == CostCurve::TF24_floor) {
     // C = TF24's cost + lambda_o*E, so dC/dpsi is the TF24 arm's expression plus
@@ -7055,7 +7055,7 @@ inline void Leaf::perturb_stem_P50(double stem_P50_new) {
 }
 
 // Direct integration of the xylem vulnerability curve, as an independent check
-// on the pre-integrated spline that transpiration() uses on the hot path. Not
+// on the pre-integrated table that transpiration() uses on the hot path. Not
 // used in production. Uses leaf/quadrature.hpp rather than plant's compiled QAG,
 // so values are convergent-but-not-bit-identical to plant's; see that header.
 inline double Leaf::transpiration_full_integration(double psi_stem, double psi_upstream) {
@@ -7081,13 +7081,13 @@ stop_reversed_flow(double psi_stem, double psi_upstream) {
 
 //calculates supply-side transpiration from psi_stem and opt_root_psi_, returns kg h20 s^-1 m^-2 LA
 // SIGN: psi_stem and psi_upstream are POSITIVE magnitudes here (passed straight
-// to the spline). Contrast transpiration_to_psi_stem below. See the sign-
+// to the table). Contrast transpiration_to_psi_stem below. See the sign-
 // conventions block above.
 inline double Leaf::transpiration(double psi_stem, double psi_upstream) {
 
   // 1-entry memo: identical (psi_stem, psi_upstream) is requested several times
   // per profit evaluation; return the cached value (bit-identical) to skip the
-  // redundant spline lookups. Cache invalidated in set_physiology.
+  // redundant table lookups. Cache invalidated in set_physiology.
   if (transpiration_cached_ &&
       psi_stem == transpiration_cache_psi_stem_ &&
       psi_upstream == transpiration_cache_psi_upstream_) {
@@ -7108,7 +7108,7 @@ inline double Leaf::transpiration(double psi_stem, double psi_upstream) {
   // a cost that re-reads the flux goes through operating_point_flux. So a reversed
   // pair here is a caller error. Equality is the shut-down state and stays legal;
   // NaN falls through to a non-finite E. Tested after the lookups so a negative
-  // potential still gets the spline's domain message, and before the memo is
+  // potential still gets the table's domain message, and before the memo is
   // written so the memo never holds a reversed pair.
   if (psi_stem < psi_upstream) [[unlikely]] {
     stop_reversed_flow(psi_stem, psi_upstream);
@@ -7125,10 +7125,9 @@ inline double Leaf::operating_point_flux(double psi_stem, double psi_upstream) {
   return psi_upstream >= psi_stem ? 0.0 : transpiration(psi_stem, psi_upstream);
 }
 
-// converts a known transpiration to its corresponding psi_stem, returns -MPa
-// SIGN: unlike transpiration() above, psi_upstream here is a SIGNED (negative)
-// potential, so it is flipped with a leading `-` before the spline lookup. The
-// two functions are inverses called with opposite-sign psi_upstream.
+// converts a known transpiration to its corresponding psi_stem; both potentials
+// are positive magnitudes, as in transpiration() above, of which this is the
+// inverse.
 inline double Leaf::transpiration_to_psi_stem(double transpiration_, double psi_upstream) {
   // integration of proportion_of_conductivity over [opt_root_psi_, psi_stem].
   // psi_upstream is a positive magnitude, same as in transpiration() -- #7 noted
@@ -7150,7 +7149,7 @@ inline double Leaf::transpiration_to_psi_stem(double transpiration_, double psi_
     stem_curve_integral(psi_upstream, "Leaf::transpiration_to_psi_stem, at psi_upstream");
 
   // The lookup that killed plant#576, and the reason the inverse names its units:
-  // E_psi_stem below the spline's lower end means the demanded flux is NEGATIVE,
+  // E_psi_stem below the table's lower end means the demanded flux is NEGATIVE,
   // i.e. the collar cannot supply it and the stem potential that would carry it is
   // wetter than saturation. There is no such potential, so widening the domain is
   // not the fix -- the caller should not have asked. Naming the argument E/K_max
@@ -7427,7 +7426,7 @@ inline double Leaf::lambda_TF24_floor(double psi_stem) const {
 // derives it in one line and gives the scale-invariance test that pins it.
 //
 // ⚠️ It DIVERGES at `psi_crit`, where `g` is exactly zero. That is the mechanism by
-// which a product objective can never be boundary-crit -- water becomes infinitely
+// which a product objective can never be pinned at psi_crit -- water becomes infinitely
 // expensive before the bound is reached -- and it means this is not a number to
 // evaluate at the dry end of the bracket.
 inline double Leaf::lambda_SOX(double psi_stem, double psi_upstream) const {
@@ -7731,7 +7730,7 @@ inline void Leaf::held_coords_at(double sigma_star, double ci_star,
   // is forced rather than preferred: sigma is placed by an INVERSE TABLE, so its
   // response to the collar is that table's own slope -- while the implicit
   // function theorem on T1 divides by G'(sigma). The two agree only if the two
-  // stem splines are exact mutual inverses, and they are not. Letting the
+  // stem reads are exact mutual inverses, and they are not. Letting the
   // residual see a live collar therefore puts TWO values of dsigma/dcollar into
   // one object: measured, the lift said 0.6913 for dci/dcollar where the slope
   // beside it said 0.6382, and dM/dcollar came out an eighth of its size.
@@ -7779,7 +7778,7 @@ inline void Leaf::held_coords_at(double sigma_star, double ci_star,
 
   // The stem's flux at the placed sigma. gc is built from THIS, not from the
   // draw, because that is what the model's ci solve reads -- the two agree only
-  // to the stem splines' round-trip. The residual flux comes off it and the
+  // to the stem table's round-trip. The residual flux comes off it and the
   // cuticle's conductance goes on, as the evaluator forms them (#182); at
   // g_min = 0 both are exact zeros carrying the g_min row.
   const S stem_flux = transpiration_at<S>(sigma_h, held, pars);
@@ -7877,7 +7876,7 @@ inline Leaf::CollarCoords<S> Leaf::collar_channel_at(
                                    sigma_h, pars[par_stem_P50],
                                    pars[par_stem_c]);
 
-  // dsigma/dcollar: THE INVERSE SPLINE'S OWN SLOPE times the transport's, which
+  // dsigma/dcollar: THE INVERSE'S OWN SLOPE times the transport's, which
   // is how upstream's dprofit_at_collar_psi forms it and what actually placed
   // sigma. Read at E_up/kmax + G(collar) -- THE SOIL DRAW, the point the inverse
   // table was queried at, not the stem flux.
@@ -8652,7 +8651,7 @@ inline double Leaf::sox_reduction(double psi_stem) const {
 
 
 // Its slope. `|f'| = f*(c/b)*(psi/b)^(c-1)` is the same analytic form `lambda_TF24`
-// uses, so this needs neither AD nor a spline derivative; `f` decreases, so this is
+// uses, so this needs neither AD nor a table slope; `f` decreases, so this is
 // negative.
 inline double Leaf::sox_reduction_deriv(double psi_stem) const {
   const double f = proportion_of_conductivity(psi_stem);

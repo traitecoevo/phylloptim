@@ -26,7 +26,7 @@ Do not reintroduce `stem_b` as settable. Solving `c = ln(ln 2)/ln(P50/b)` diverg
 
 This slot used to be "signed versus magnitude water potentials". There is now one representation, so the hazard is removed rather than managed. Two conventions held together by comments cost a negative λ (`dE_from_soil_dpsi_collar` differentiated w.r.t. the *signed* potential and returned a negative where a conductance was wanted) and a dead clamp (plant #584, filed here as #24). Tagging the two conventions as types (#23, `Psi` / `AbsPsi`) was tried and closed unmerged: it described the two-convention model instead of removing one, and it could not cover the derivative, which is neither type.
 
-`psi_soil_`, `psi_crit`, `root_psi_crit`, `stem_b`, `root_b`, `opt_psi_stem_`, `opt_root_psi_`, the collar variable inside the solve, the root-finding brackets and all four spline domains are the same kind of number. Where an equation needs one potential to oppose another the minus sign is **in the equation**: `E_i = (T_collar - T_soil_i - gravity_head*z_i)/r_R`.
+`psi_soil_`, `psi_crit`, `root_psi_crit`, `stem_b`, `root_b`, `opt_psi_stem_`, `opt_root_psi_`, the collar variable inside the solve, the root-finding brackets and the vulnerability tables' arguments are the same kind of number. Where an equation needs one potential to oppose another the minus sign is **in the equation**: `E_i = (T_collar - T_soil_i - gravity_head*z_i)/r_R`.
 
 Three things follow:
 
@@ -69,7 +69,7 @@ Every input is per unit leaf area or a dimensionless/intensive driver. Nothing s
 
 What is *not* true is the blanket "prefer compile-time dispatch, a virtual call in the solve would cost". Measured (`make -C tests/cpp bench`), the code splits into two halves that answer oppositely:
 
-- **The soil/supply path is already out-of-line.** `E_from_Soil_to_Root_Collar` is inlined into none of its 18 call sites at `-O2`, nor at `-inline-threshold=2000`; neither is the per-layer spline `eval`. So making it virtual costs **+1.1%**, `std::function` +0.6%, `std::variant` +2.6% — noise. Forcing more inlining is *worse*, by 4%.
+- **The soil/supply path is already out-of-line.** `E_from_Soil_to_Root_Collar` is inlined into none of its 18 call sites at `-O2`, nor at `-inline-threshold=2000`; neither was the per-layer spline `eval` that the vulnerability table replaced in #183. So making it virtual costs **+1.1%**, `std::function` +0.6%, `std::variant` +2.6% — noise. Forcing more inlining is *worse*, by 4%.
 - **The cost core is fully inlined.** `profit_psi_stem_TF`, `hydraulic_cost_TF`, `assim_colimited` and `transpiration_to_psi_stem` have no out-of-line symbol at all, so a change there is a different question and needs its own measurement.
 
 Before arguing from inlining, check: `nm -C test_golden | grep <fn>`. No symbol means inlined; a symbol plus `bl` call sites in `objdump -d` means it is not. How to time an A/B is in [measurements.md](measurements.md#benchmark-method).

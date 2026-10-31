@@ -353,7 +353,7 @@ inline Solution evaluate_at(Leaf &l, double psi, double Q, double sqrt_D) {
   return evaluate_at_lambda(l, psi, l.lambda_TF24(psi), Q, sqrt_D);
 }
 
-// The wet-end starting potential, in units of stem_b. Pure arithmetic: no spline
+// The wet-end starting potential, in units of stem_b. Pure arithmetic: no table
 // read, no assimilation evaluation, so this is free relative to the Newton step
 // that follows it.
 //
@@ -378,7 +378,7 @@ inline double wet_end_p(double C, double p_up, double n, double p_crit) {
   // Newton on h, from above the root: h is increasing on p > p_up for n >= 0, so a
   // start at `p_up + p0` is on the far side of it and the iteration walks down.
   // Four steps, fixed: this is an algebraic scalar equation, not the model, and its
-  // cost is four `pow` calls against the spline reads and root-find that follow.
+  // cost is four `pow` calls against the table reads and root-find that follow.
   double p = p_up + p0;
   for (int i = 0; i < 4; ++i) {
     const double q = std::pow(p, n / 2.0);
@@ -458,7 +458,7 @@ inline Solution solve(Leaf &l, double psi_upstream, int newton_steps = 1) {
 // TF24_beta2 == 1/stem_c. The psi dependence cancels out of lambda entirely (n = 0),
 // so xi is constant and there is nothing to solve for it -- no power law, no Newton
 // step. The stem potential still has to come out of the supply inversion, which is
-// one spline solve.
+// one table inversion.
 //
 // ⚠️ A VALID SPECIAL CASE AT AN UNMOTIVATED PARAMETER VALUE, AND THIS FILE USED TO
 // CLAIM MORE. It said 1/stem_c was 0.917, "within a hair" of the beta2 <= 1 argued
@@ -500,8 +500,8 @@ inline bool beta2_is_exact(const Leaf &l, double tol = 1e-12) {
 // ⚠️ "NO ITERATION" IS NOT THE SAME AS "EXACT", and conflating them is what note 5
 // in the header withdraws. Two separate approximations remain: the USO form's 3*Gstar
 // is the electron-transport-limited dA/dci (see `uso_group`), so under Rubisco-bound
-// colimitation this ci is not the optimal one; and `psi_from_supply` is a spline
-// inversion, exact to the spline. The n = 0 exactness is a statement about lambda,
+// colimitation this ci is not the optimal one; and `psi_from_supply` is a table
+// inversion, exact to the table. The n = 0 exactness is a statement about lambda,
 // which is the only thing the power-law machinery approximates.
 inline Solution solve_CF77(Leaf &l, double psi_upstream) {
   require_prescribed_temperature(l, "closed_form::solve_CF77");

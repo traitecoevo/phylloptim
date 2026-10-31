@@ -123,8 +123,8 @@ everything else ([measured figures](https://github.com/traitecoevo/phylloptim#pe
 
 **Do not write `l$vcmax_25 <- x` instead.** It compiles, and it is wrong. Two
 pieces of derived state go on describing the old trait afterwards, and no
-re-driving repairs either. The first is the pre-integrated vulnerability splines,
-one owned by `stem_P50`/`stem_c` and one by `root_P50`/`root_c`. The second is the
+re-driving repairs either. The first is the vulnerability curves: each `P50`
+sets a scale and each `c` owns a pre-integrated table. The second is the
 solved operating point, which no code path rewrites, so it reads as though it
 belonged to the new traits.
 
@@ -136,7 +136,7 @@ bound to R.
 The temperature-dependent `vcmax_`, `jmax_` and `R_d_` are not part of this
 problem. Their cache is keyed on every input of the temperature block, including
 `vcmax_25` and `jmax_25`, so re-driving after a bare trait write does recompute
-them. It is the splines and the operating point that no re-driving repairs.
+them. It is the curves and the operating point that no re-driving repairs.
 
 ```{r}
 l <- leaf_model(truth)
@@ -484,11 +484,11 @@ obvious from the interface.
 
 Compare the `ms per par` column across rows: the hydraulic study is several times
 the others, and that ratio is the point rather than its exact value, which moves
-with the machine. `stem_b` and
-`stem_c` own the pre-integrated stem vulnerability spline, so perturbing either
+with the machine. `stem_c` and
+`root_c` each own a pre-integrated vulnerability table, so perturbing either
 rebuilds it, and the incomplete gamma functions that seed it cost many times a
-whole solve per side ([measured](https://github.com/traitecoevo/phylloptim#performance-from-r)). `stem_b` escapes most of that by a homogeneity identity
-(`fast_stem_curve`, on by default); `stem_c` has no such identity and cannot.
+whole solve per side ([measured](https://github.com/traitecoevo/phylloptim#performance-from-r)). The table is built in `ψ/b`, so a `P50`
+rebuilds nothing.
 
 So **a fit that frees a vulnerability curve is in a different cost regime from one
 that does not**, and it is the regime the exact gradient helps least with, since the

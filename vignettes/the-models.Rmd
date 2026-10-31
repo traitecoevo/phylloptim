@@ -937,14 +937,14 @@ So specify `(P50, c)` at whatever precision you have, and let everything else be
 
 Two things follow, and both are easy to miss.
 
-- The domain check disappears, because it becomes vacuous. It enforced `psi_crit ≤ P99`, and a derived `psi_crit = P95` satisfies that for every `c > 0`, since `ln 20 < ln 100`. There is nothing left to validate.
-- A shut-down leaf's hydraulic cost stops depending on the curve's scale. It sits at `psi_crit`, where the remaining conductivity is exactly `f` whatever `P50` is. The cost is therefore the same number for every `P50`, and `dprofit/dP50` at a shut-down point is exactly zero rather than merely small.
+- The domain check disappears, because it becomes vacuous. A derived `psi_crit` describes the curve it was derived from, so there is no consistency left to validate.
+- For the four curves whose domain ends at `psi_crit` (SOX, JW26, CF77, LeastCost), a leaf pinned there has a hydraulic cost that does not depend on the curve's scale: the remaining conductivity is exactly `f` whatever `P50` is, so `dprofit/dP50` at that pin is exactly zero rather than merely small.
 
 ## Three consequences for gradients
 
 All three are asserted in the suite rather than described here, and the numbers below are what those assertions compare against.
 
-**1. `P50` has a homogeneity shortcut.** At fixed `c`, `b` is a constant multiple of `P50`, so the cumulative-vulnerability integral is homogeneous of degree 1 and `d/dP50 = (ln 2)^{-1/c} · d/db`, a factor of 1.1465 at the defaults. That is what lets `fast_stem_curve = TRUE` move `stem_P50` by rescaling the spline's argument instead of rebuilding it. `psi_crit` scales by the same factor, which is why moving the trait can never walk the solve off the end of its own curve.
+**1. `P50` has a homogeneity shortcut.** At fixed `c`, `b` is a constant multiple of `P50`, so the cumulative-vulnerability integral is homogeneous of degree 1 and `d/dP50 = (ln 2)^{-1/c} · d/db`, a factor of 1.1465 at the defaults. It is also why the stem's vulnerability table is built in `ψ/b` and depends on `c` alone: moving `stem_P50` rebuilds nothing. `psi_crit` scales by the same factor.
 
 **2. The `c` gradient splits.** Once `P50` is the scale parameter, `b` depends on `c` as well:
 

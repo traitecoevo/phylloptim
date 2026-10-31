@@ -520,19 +520,19 @@ inline void apply(Leaf& l, const double* theta, const Drivers& d, bool single,
 //
 // The loops restore base once at the END, not between parameters, because every
 // parameter's setter normally goes through the full `set_traits()` +
-// `set_physiology()` path and restores everything on the way. The `stem_b`
-// shortcut is the one that does not: `perturb_stem_P50()` rescales the stem spline
-// and touches nothing else, which is sound only if the rest of the object is
-// already at base. So a `stem_b` that is not the FIRST entry of `pars` was
+// `set_physiology()` path and restores everything on the way. The `stem_P50`
+// shortcut is the one that does not: `perturb_stem_P50()` moves stem_b and
+// touches nothing else, which is sound only if the rest of the object is
+// already at base. So a `stem_P50` that is not the FIRST entry of `pars` was
 // differentiated at a point displaced by one step in whichever parameter
 // preceded it -- up to 3.4e-5 relative, four orders above the ~1e-9 this is
 // supposed to deliver, on both routes.
 //
-// Cheap in the case that matters: `set_traits()` decides the two spline rebuilds
-// by comparing the pairs it is given, so after a parameter that owns no
-// vulnerability curve nothing is rebuilt and this costs one trait write plus one
-// driver write. After `stem_c`/`root_b`/`root_c` it does rebuild, and those are
-// the parameters whose own gradients cost a rebuild per side anyway.
+// Cheap in the case that matters: `set_traits()` decides the two table rebuilds
+// by comparing the `c` it is given, so after a parameter that owns no
+// vulnerability table nothing is rebuilt and this costs one trait write plus one
+// driver write. After `stem_c`/`root_c` it does rebuild, and those are the
+// parameters whose own gradients cost a rebuild per side anyway.
 //
 // ⚠️ Written as "this parameter takes a shortcut", not as "this parameter is
 // stem_b". `root_b` obeys the same homogeneity identity and would get the same

@@ -59,8 +59,8 @@ double uniroot(Function f, double min, double max, double tol,
 //     [-psi_crit, wettest_soil_layer]; ~15-16 -> ~6-8 evals at 1e-4. Its
 //     brackets are guaranteed opposite-sign/finite by find_root_collar_psi's
 //     early-exits.
-// The genuine non-smoothness (vulnerability-curve clamps, the root vulnerability
-// spline extrapolating negative beyond its domain, near-flat regions) lives in
+// The genuine non-smoothness (vulnerability-curve clamps, near-flat regions)
+// lives in
 // E_from_Soil_to_Root_Collar itself, NOT in the root-finders, and would break
 // bisection too. So: use this where the target is smooth and well-behaved across
 // the whole bracket -- which the leaf solvers are, on their operating brackets.

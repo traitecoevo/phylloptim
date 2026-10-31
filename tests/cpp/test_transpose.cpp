@@ -11,8 +11,8 @@
 // two directions, and only a consistent J satisfies both -- which is what makes
 // this the referee for a construction that SUPPLIES rows rather than recording
 // them. A difference of the forward model cannot see a wrong supplied row at
-// all, and at the shipped spline resolution a difference cannot referee the
-// collar responses either: sigma comes from an inverse spline whose round-trip
+// all, and at the shipped table resolution a difference cannot referee the
+// collar responses either: sigma comes from an inverse table whose round-trip
 // dominates dsigma/dcollar - 1. This can.
 //
 // It cannot referee the VALUES, though. Both sides read one surface, so a kernel
