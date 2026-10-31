@@ -1698,8 +1698,8 @@ equations:
     latex: |
       k_\mathrm{rec,eff}(T) = k_\mathrm{rec}\, \exp\!\left[\frac{E_{a,\mathrm{rec}}}{R}\left(\frac{1}{T_{25,K}} - \frac{1}{T_K}\right)\right]
     code: phylloptim::damage::k_rec_eff
-    also: [phylloptim::Leaf::k_rec_eff]
-    reads: [k_rec_, k_rec_Ea_, damage_Tref, C_to_K]
+    also: [phylloptim::Leaf::k_rec_eff, phylloptim::damage::centred_arrhenius]
+    reads: [k_rec_, k_rec_Ea_, damage_Tref, C_to_K, gas_constant, exp_clamp]
     writes: [k_rec_eff_]
     kind: closed_form
     note: 'Does not shut off when hot: impairment outruns the default repair above about 32 °C.'
@@ -1709,7 +1709,8 @@ equations:
     latex: |
       k_\mathrm{mat,eff}(T) = k_\mathrm{mat}\, \exp\!\left[\frac{E_{a,\mathrm{mat}}}{R}\left(\frac{1}{T_{25,K}} - \frac{1}{T_K}\right)\right]
     code: phylloptim::damage::k_mat_eff
-    reads: [k_mat_, k_mat_Ea_, damage_Tref, C_to_K]
+    also: [phylloptim::damage::centred_arrhenius]
+    reads: [k_mat_, k_mat_Ea_, damage_Tref, C_to_K, gas_constant, exp_clamp]
     writes: []
     kind: closed_form
   damage_rates:

@@ -977,8 +977,8 @@ public:
   // maturation are stated at 25 C, and impairment at its isokinetic temperature
   // k_i_Tiso_ moved by the acclimation shift. Impaired area returns to functional
   // only by repair; damaged area does not return. damage_rates() evaluates the
-  // right-hand side and damage_trajectory()
-  // integrates it over a leaf-temperature series, so a leaf experiment can be
+  // right-hand side and damage_trajectory() integrates it over a
+  // leaf-temperature series, so a leaf experiment can be
   // fitted with this class alone; a caller that integrates the states itself (plant's
   // TF24t, which adds dilution by leaf turnover and growth to dD/dt) calls
   // damage_rates() and seats A_, I_ and D_ before each set_physiology.
@@ -1069,8 +1069,8 @@ public:
   double acclim_T_ = 30.0;
   double acclim_s_ = 1.0;
   // What acclimation buys: the most the photosynthetic optimum can rise, and the
-  // most the impairment's isokinetic temperature can rise, deg C, both saturating in A
-  // with half-saturation K_A_. Neither is a hard cap on anything but the shift.
+  // most the impairment's isokinetic temperature can rise, deg C, both
+  // saturating in A with half-saturation K_A_. Neither is a hard cap on anything but the shift.
   double dTopt_max_ = 6.0;
   double dTimpair_max_ = 6.0;
   double K_A_ = 1.0;
