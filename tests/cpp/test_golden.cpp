@@ -16,7 +16,7 @@
 // results, regenerate deliberately and say so in the commit.
 //
 // Bit-exactness holds on the platform that generated the file (macOS/arm64) and
-// cannot hold on any other -- `--rtol` is for those. See the comment above main().
+// cannot hold on any other -- `--cross-platform` is for those. See the comment above main().
 //
 // Note: a fresh Leaf is constructed for every grid point. That is not for tidiness
 // -- it WAS required, because the shutdown-state leak made a
@@ -146,13 +146,11 @@ std::vector<Row> run_grid() {
 // not reproduce this split, because dprofit's shut-down sentinel is exactly 0.0
 // and would move all 48 shutdown points into `interior`.
 //
-// Seven kinds are expected to be EMPTY here, and the table below asserts each:
-// `shade-death` because assim_max_ never gets there (it is reached by light, not by
-// drying, and not by heat either at 40 C); `solver-refused` and
+// Five kinds are expected to be EMPTY here, and the table below asserts each:
+// `solver-refused` and
 // `non-finite-gradient` because both bracket endpoints admit a usable gradient on
 // every feasible row; `boundary-root-crit` because the continuity root never
-// reaches the root's own limit at these traits; `determined` because no interval
-// collapses at the package's GSS_tol_abs; and `prescribed` and `unsolved` because
+// reaches the root's own limit at these traits; and `prescribed` and `unsolved` because
 // every row is solved rather than evaluated at a given collar.
 //
 // ⚠️ The hot end does NOT reach the compensation-point exit either, which is worth
@@ -200,7 +198,6 @@ int check_operating_kinds(const std::vector<Row> &rows) {
         // this list is a kind the golden file stops covering.
         {Kind::BoundaryRootCrit, 0},
         {Kind::HydraulicShutdown, e.shutdown},
-        {Kind::Determined, 0},        {Kind::ShadeDeath, 0},
         {Kind::Prescribed, 0},        {Kind::SolverRefused, 0},
         {Kind::NonFiniteGradient, 0}, {Kind::Unsolved, 0},
     };
@@ -311,6 +308,19 @@ bool same(double got, double want) {
 // measured empty band -- see the use site in compare_optima.
 constexpr double kOptNegligible = 1e-12;
 
+// The same idea for operating_points.tsv's water fluxes, kg H2O m^-2 s^-1. A
+// shut leaf at g_min = 0 sits on a bound polished to collar precision, and the
+// uptake there is that polish's residue: ~1e-20 in e_up and ~1e-18 summed over
+// layers, of either sign on either platform (#182). The smallest flux an open
+// leaf on the grid reports is 7.6e-12, so the floor sits in a measured empty
+// band four decades from each side. Tolerant mode only; macOS stays bit-exact.
+constexpr double kFluxNegligible = 1e-15;
+
+bool is_water_flux_field(const char* name) {
+  return std::strcmp(name, "transpiration") == 0 || std::strcmp(name, "gc") == 0 ||
+         std::strcmp(name, "e_up") == 0 || std::strcmp(name, "uptake") == 0;
+}
+
 double rel_diff(double a, double b) {
   if (std::isnan(a) && std::isnan(b)) {
     return 0.0;
@@ -328,9 +338,9 @@ double rel_diff(double a, double b) {
   return std::abs(a - b) / scale;
 }
 
-// Cross-platform tolerances, per field. The two classes are three orders of
-// magnitude apart and the reason is structural, not arbitrary -- see the comment
-// above main(). Negative means bit-exact.
+// Cross-platform tolerances, per class: `profit` is the maximum itself and every
+// other field is evaluated at its location, and the two classes disagree across
+// platforms by amounts orders apart. Negative means bit-exact.
 struct Tolerance {
   double maximum; // profit: the value AT the optimum
   double argmax;  // everything else: evaluated at the optimum's LOCATION
@@ -346,18 +356,19 @@ const Tolerance kExact{-1.0, -1.0};
 //     argmax-derived         8.6e-8          5e-6         58x
 //   psi_stem_optima.tsv
 //     profit                 2.01e-12        1e-10        50x
-//     argmax-derived         6.63e-6         1e-4         15x
+//     argmax-derived         1.33e-9         1e-7         75x
 //
-// The psi_stem argmax pair keeps less headroom because 50x would put it at
-// 3e-4, past the scale it exists to catch. Both worst argmax cells are in
-// `assim`, where a near-zero value cancels and inflates the relative metric (see
-// the comment above main()), so read the absolute line printed beside each too.
+// The psi_stem argmax class was 6.63e-6 until 0.19.0: its worst cells were a
+// shut leaf's `assim`, a root-find's residue around zero that cancelled in the
+// relative metric. Since #182 that A is zero by definition and reported as an
+// exact zero, so the class sits at the solver floor like the rest. Where a
+// near-zero value still cancels, read the absolute line printed beside each.
 //
 // ⚠️ THESE FIGURES ARE SET BY `psi_stem_to_ci`'S 1e-13 TOLERANCE, NOT BY libm.
 // At 1e-10 they were ~100-1000x larger. Loosen that root-find and these must be
 // re-measured off the summary lines, not widened until they pass.
 const Tolerance kCrossPlatform{1e-9, 5e-6};
-const Tolerance kCrossPlatformOptima{1e-10, 1e-4};
+const Tolerance kCrossPlatformOptima{1e-10, 1e-7};
 
 // `profit` is the only reported field that is the maximum itself; every other
 // field is evaluated at the argmax and so inherits its displacement.
@@ -449,7 +460,10 @@ int compare(Tolerance tol) {
                             {"e_up", r.e_up, g.e_up},
                             {"uptake", r.uptake, g.uptake}};
     for (const Field &fd : fields) {
-      const double rd = rel_diff(fd.got, fd.want);
+      const bool negligible = tol.argmax >= 0.0 && is_water_flux_field(fd.name) &&
+                              std::fabs(fd.got) < kFluxNegligible &&
+                              std::fabs(fd.want) < kFluxNegligible;
+      const double rd = negligible ? 0.0 : rel_diff(fd.got, fd.want);
       const bool is_max = is_maximum_field(fd.name);
       const double rtol = is_max ? tol.maximum : tol.argmax;
       // Track the worst deviation in each class over the whole grid regardless
@@ -615,9 +629,9 @@ int compare(Tolerance tol) {
 //             the other three optimise psi_stem with upstream pinned at
 //             psi_soil, ignoring that path -- which is what their own refusal
 //             message means by "non-root-based". These are different problems,
-//             and the gap does not close as the root resistance goes to zero --
-//             the collar loses its freedom there and reports `determined`
-//             instead of optimising. Neither arm is a check on the other.
+//             and the gap does not close as the root resistance goes to zero,
+//             where the collar parameterises the flux ever more poorly.
+//             Neither arm is a check on the other.
 //   topology  single-potential supply, or a multi-layer profile at 1 or 3
 //             layers. The three psi_stem solvers refuse 3 layers; the refusal
 //             is RECORDED rather than skipped, so a change that lifts it shows

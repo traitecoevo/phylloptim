@@ -310,12 +310,12 @@ tibble(psi = seq(0, 6, length.out = 200)) |>
 
 The profit function is not defined everywhere. Water flows from the soil to the
 leaf, so `psi_stem` must be at least the upstream potential. Below it the leaf
-would be wetter than the soil and the flux would run backwards, which the model
-does not represent, so `transpiration()` and `stom_cond_CO2()` refuse it.
-`profit_psi_stem_TF()` seats the no-flow state there instead, so it returns a
-number, but not one on the curve the solve maximises. `psi_stem` equal to the
-upstream potential is the shut-down state, with zero flux. Plot the domain the
-solve actually searches:
+would be wetter than the soil, so `transpiration()`, `stom_cond_CO2()` and
+`psi_stem_to_ci()` stop with an error rather than return a negative flux.
+`profit_psi_stem_TF()` reads that pair as zero flux, as the solve's evaluator
+does, so it returns a number, but not one on the curve the solve maximises.
+`psi_stem` equal to the upstream potential is the shut stomata's state, with no
+stomatal flux. Plot the domain the solve actually searches:
 
 ```{r, fig.height = 3.4}
 psi_upstream <- 2.0

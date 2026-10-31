@@ -229,6 +229,7 @@ jobs:
                 1.0,                    // JS22_gamma
                 0.6,                    // CMax_a
                 0.0,                    // CMax_b
+                0.0,                    // g_min
                 1.0 * 0.000157 / 5.0,   // leaf_specific_conductance_max
                 0.0,                    // resistance
                 0.0,                    // CF77_lambda_ (CF77 only)
@@ -240,11 +241,10 @@ jobs:
                 0.0,                    // topt_offset_
                 6.0,                    // dTopt_max_
                 1.0,                    // K_A_
-                0.5,                    // k_i_
-                0.5,                    // k_i_baseline_
+                276.0,                  // k_i_
+                276.0,                  // k_i_baseline_
                 0.25,                   // k_rec_
-                0.4,                    // m_rep_
-                45.0,                   // t_rep_cut_
+                0.0,                    // k_rec_Ea_
                 0.0,                    // c_acclim_maint_
                 0.0,                    // c_repair_maint_
                 0.0,                    // c_protect_maint_

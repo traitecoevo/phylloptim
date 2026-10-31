@@ -17,12 +17,12 @@ test_that("leaf_traits() and leaf_control() partition the C++ constructor", {
   covered <- c(names(leaf_traits()), names(leaf_control()))
 
   expect_setequal(setdiff(ctor_args, covered), character(0))
-  # `R_d_25`, `JS22_gamma` and the two `CMax` parameters are traits the constructor
-  # does not take: plant's own RcppR6 bindings pin this constructor by arity, so
-  # `leaf_model()` assigns the fields afterwards. The test below checks those
-  # assignments really happen.
+  # `R_d_25`, `JS22_gamma`, the two `CMax` parameters and `g_min` are traits the
+  # constructor does not take: plant's own RcppR6 bindings pin this constructor by
+  # arity, so `leaf_model()` assigns the fields afterwards. The test below checks
+  # those assignments really happen.
   expect_setequal(setdiff(covered, ctor_args),
-                  c("R_d_25", "JS22_gamma", "CMax_a", "CMax_b",
+                  c("R_d_25", "JS22_gamma", "CMax_a", "CMax_b", "g_min",
                     "integration_rule", "integration_tol"))
   expect_length(intersect(names(leaf_traits()), names(leaf_control())), 0)
 
@@ -45,10 +45,10 @@ test_that("leaf_control()'s knot count is the C++ default, read not restated (#1
 test_that("a stem wetter than its upstream potential is refused, not answered (#31)", {
   # Below the upstream potential the flux integral is negative, and these used
   # to return it as a finite number. Equality is the shut-down state and stays
-  # legal; the profit functions seat the no-flow state there and refuse nothing.
+  # legal; the profit functions read a reversed pair as no flow and refuse nothing.
   l <- leaf_model()
   set_drivers(l, psi_soil = 2.0, PPFD = 900)
-  msg <- "psi_stem \\(1.99\\) is wetter than psi_upstream \\(2\\)"
+  msg <- "psi_stem = 1.99 MPa is wetter than psi_upstream = 2 MPa"
   expect_error(l$transpiration(1.99, 2.0), msg)
   expect_error(l$stom_cond_CO2(1.99, 2.0), msg)
   expect_true(is.finite(l$profit_psi_stem_TF(1.99, 2.0)))
@@ -80,16 +80,18 @@ test_that("every trait can be read back from the object (#95)", {
   # ⚠️ Read-only, and that is hazard 10 rather than tidiness: changing a trait means
   # rebuilding up to two vulnerability splines and clearing the solved operating
   # point, so a bare write would leave the object describing two different curves.
-  # `R_d_25` and `JS22_gamma` are the documented exceptions -- both are settable
-  # because plant's bindings pin the generated constructor by arity, so
-  # `leaf_model()` applies them afterwards.
+  # `R_d_25`, `JS22_gamma`, `CMax_a`, `CMax_b` and `g_min` are the documented
+  # exceptions -- settable because plant's bindings pin the generated constructor
+  # by arity, so `leaf_model()` applies them afterwards.
   #
-  # ⚠️ Settable is only SAFE for these two because nothing is derived from either.
-  # `JS22_gamma` is read at call time by `hydraulic_cost_JS22` -- no spline, no
-  # temperature cache, no precomputation -- so a bare write cannot leave the object
-  # describing two different models the way a bare `stem_P50` write would. Do not
-  # read this exemption as permission for the next trait.
-  for (nm in setdiff(names(traits), c("R_d_25", "JS22_gamma", "CMax_a", "CMax_b"))) {
+  # ⚠️ Settable is only SAFE for these because nothing is derived from any of
+  # them. `JS22_gamma` is read at call time by `hydraulic_cost_JS22` and `g_min`
+  # by the solve -- no spline, no temperature cache, no precomputation -- so a
+  # bare write cannot leave the object describing two different models the way
+  # a bare `stem_P50` write would. Do not read this exemption as permission for
+  # the next trait.
+  for (nm in setdiff(names(traits),
+                     c("R_d_25", "JS22_gamma", "CMax_a", "CMax_b", "g_min"))) {
     expect_error(l[[nm]] <- 1, "read-only", label = paste(nm, "rejects a write"))
   }
 
@@ -347,10 +349,11 @@ outputs_one_at_a_time <- function(l) {
     g1_eff = l$g1_eff,
     Tleaf = l$Tleaf_,
     shadow_cost = l$shadow_cost,
-    lambda_emergent = l$lambda_emergent)
+    lambda_emergent = l$lambda_emergent,
+    residual_flux = l$residual_flux_)
 }
 
-test_that("operating_point_values() returns the fifteen fields, in that order", {
+test_that("operating_point_values() returns the sixteen fields, in that order", {
   # ⚠️ THE ORDER IS AN INTERFACE AND NOTHING IN THE TYPES ENFORCES IT. The C++
   # method returns a flat vector because that is what crosses the R boundary for
   # free (#39: twelve active bindings cost ~15 us against a ~3 us solve, one call
@@ -404,7 +407,7 @@ test_that("Tleaf is reported, and is not the leaf_temp driver on the PM path", {
   expect_identical(d$Tleaf, rep(30, 3L))
   # Last column, not inserted: these names are positions, and a saved output
   # would shift under an insertion.
-  expect_identical(names(d)[[length(names(d)) - 2L]], "Tleaf")
+  expect_identical(names(d)[[length(names(d)) - 3L]], "Tleaf")
 
   # With the energy balance on, driven by hand because the gate is a field.
   l <- leaf_model()
@@ -444,7 +447,8 @@ test_that("operating_point() is the data.frame it replaced", {
     g1_eff = l$g1_eff,
     Tleaf = l$Tleaf_,
     shadow_cost = l$shadow_cost,
-    lambda_emergent = l$lambda_emergent
+    lambda_emergent = l$lambda_emergent,
+    residual_flux = l$residual_flux_
   )
   expect_identical(operating_point(l), as_written_before)
 

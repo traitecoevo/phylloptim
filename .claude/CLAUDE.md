@@ -2,7 +2,7 @@
 
 A header-only C++ leaf gas-exchange model in which stomatal behaviour emerges from hydraulics, with an R package on top. Extracted from the TF24 strategy in [traitecoevo/plant](https://github.com/traitecoevo/plant).
 
-The guide is three files. **This one holds the standing rules** and is read at the start of every session. **[hazards.md](hazards.md)** holds the seventeen numbered hazards as narratives with their measurements, plus the long form of "One solver". **[measurements.md](measurements.md)** holds the golden files' cross-platform record, the floating-point findings that recur, and the benchmark method. A rule appears here once, as a line with its reason; its evidence lives there.
+The guide is three files. **This one holds the standing rules** and is read at the start of every session. **[hazards.md](hazards.md)** holds the eighteen numbered hazards as narratives with their measurements, plus the long form of "One solver". **[measurements.md](measurements.md)** holds the golden files' cross-platform record, the floating-point findings that recur, and the benchmark method. A rule appears here once, as a line with its reason; its evidence lives there.
 
 Read alongside:
 
@@ -20,7 +20,7 @@ Family context lives in [`plant-meta`](https://github.com/traitecoevo/plant-meta
 | To | Read |
 |---|---|
 | find which header holds what | the map below, in dependency order |
-| change the solve | "One solver" below, then hazards [3](hazards.md#3-argmax-smoothness-is-a-hard-constraint-not-a-preference), [8](hazards.md#8-every-path-out-of-the-solve-must-write-its-own-rates) and [11](hazards.md#11-a-bracketing-optimiser-answers-where-is-the-interior-maximum-which-is-not-where-is-the-maximum) |
+| change the solve | "One solver" below, then hazards [3](hazards.md#3-argmax-smoothness-is-a-hard-constraint-not-a-preference), [8](hazards.md#8-every-path-out-of-the-solve-must-write-its-own-rates), [11](hazards.md#11-a-bracketing-optimiser-answers-where-is-the-interior-maximum-which-is-not-where-is-the-maximum) and [18](hazards.md#18-a-shut-leaf-is-the-ordinary-evaluator-at-its-wet-bound-and-nothing-writes-its-outputs-by-hand-182) |
 | add a cost curve | "One solver" below, then [its long form](hazards.md#one-solver-the-long-form) |
 | change the derivative surface | the preamble of `leaf_model.hpp`, `vignettes/derivative-surface.Rmd`, hazard [17](hazards.md#17-the-derivative-surface-fails-silently-in-three-ways-and-none-is-a-compile-error) |
 | change a trait or the parameter set | hazards [10](hazards.md#10-changing-a-trait-is-not-one-assignment-and-the-reason-is-invisible), [12](hazards.md#12-n_theta-is-a-compile-time-constant-and-a-short-aggregate-initialiser-is-legal-c) and [13](hazards.md#13-the-trait-vector-is-bound-positionally-in-four-places), and grep `.github/` |
@@ -113,6 +113,7 @@ Everything is an argument to that call:
 
 - **A new cost curve touches no solver.** It is one enumerator appended last (move `n_cost_curves`, which names the last one), one arm each in `with_curve()` and `curve_name()`, and one arm in every per-curve `if constexpr` table: those are the ones ending in `static_assert(..., "unhandled CostCurve")`, so `grep -n 'unhandled CostCurve' leaf_model.hpp` lists them and a missed one is a compile error. Today they are `benefit_link`, `check_cost_parameters`, `cost_deriv`, `cost_reads_upstream`, `profit_psi_stem_for`, `lambda_for` and `lambda_collar_for`, plus `cost_deriv_upstream` for a curve that reads the upstream potential.
 - ⚠️ **A cost that reads the upstream potential needs its `cost_reads_upstream<K>()` and `cost_deriv_upstream<K>()` rows**, or the collar solve converges onto a point that is not the maximum, with no error (#141).
+- **A cost or λ that reads the flux reads it through `operating_point_flux()`, never `transpiration()`.** `transpiration()` refuses a reversed pair (#31), while the evaluator reads that pair as no flow, and a prescribed collar at the multi-layer wet bound inverts to a stem ~1e-14 MPa wetter; `test_prescribed_wet_bound_reads_no_flow` lists the curves that read E, and a new one belongs in it.
 - **Runtime curve dispatch is ONE switch, `Leaf::with_curve()`**, plus `curve_name()`. Neither has a `default:`, deliberately: a `default` satisfies `-Werror=switch` and removes the check they exist for.
 - **Test a new curve by a bit-for-bit REDUCTION to an old one** (`TF24_floor` is `TF24` at `lambda_o = 0` and `CF77` at `TF24_cost_scale = 0`) before reaching for a new baseline, and prefer sharing the parent's parameters when the new curve is a parent plus a term.
 - **A curve parameter that is a field rather than a trait needs wiring** in `.solve_price_fields`, `.gradient_owned_pars` and `.gradient_setter`, or `leaf_solve()` cannot reach it.
@@ -142,6 +143,7 @@ Each has cost someone real numbers; the narrative and its measurements are in [h
 15. **A finite difference through a solve has a noise floor that moves with the solver**; sweep the step and read the floor.
 16. **Print how many rows reached an assertion**; a test whose rows all pinned passed without evaluating anything.
 17. **The derivative surface fails silently**: unvisited `for_each_active` members, unchecked seating assumptions, and a replay that must go through `replay_operating_point`.
+18. **A shut leaf is the ordinary evaluator at its wet bound**, where uptake meets the cuticle's residual flux (#182): append residual terms, never interleave them, so `g_min = 0` stays bit-identical; never replace a soft cap with a `min()`; and list every active input a wet-bound `implicit_value` reads.
 
 ## Golden files
 

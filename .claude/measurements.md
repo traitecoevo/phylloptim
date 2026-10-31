@@ -30,7 +30,7 @@ A last-bit perturbation does not stay small: the nested solvers amplify it up to
 
 **Bit-exact only on the platform that generated the files — macOS/arm64.** libm's `exp`/`pow` are not bit-reproducible between glibc on x86-64 and Apple's libm on arm64, and FMA contraction differs too, so cross-platform bit-equality was never achievable. CI compares bit-exactly on macOS and with `--cross-platform` elsewhere.
 
-**The size of the cross-platform disagreement**, read off CI's summary line, with gcc and clang identical in every column (3808 of 5184 values differ), against `operating_points.tsv`'s tolerances, now 1e-9 for `profit` and 5e-6 for the eight argmax-evaluated fields (#125; each about 50x the worst below, and set in `test_golden.cpp`):
+**The size of the cross-platform disagreement**, read off CI's summary line, with gcc and clang identical in every column (4116 of 5184 values differ at 0.19.0), against `operating_points.tsv`'s tolerances, now 1e-9 for `profit` and 5e-6 for the eight argmax-evaluated fields (#125; each about 50x the worst below, and set in `test_golden.cpp`):
 
 | class | worst RELATIVE | worst ABSOLUTE |
 |---|---|---|
@@ -41,7 +41,7 @@ A last-bit perturbation does not stay small: the nested solvers amplify it up to
 
 **Read the baseline off master's CI, not off this table** — `gh run list --branch master --workflow cpp-tests.yml`, then grep the g++ job's log for "values differ". It has to be the summary line from the right commit. `test_golden` prints only the first 20 failing lines, a sample biased toward whichever operating points are listed first, so never read the FAIL lines as the distribution; the summary line carries the full-grid maxima.
 
-**`psi_stem_optima.tsv` has its own tolerances (#125)**, measured for it rather than inherited: 1e-10 for `profit` (worst 2.01e-12) and 1e-4 for the argmax class. Its worst relative difference is **6.63e-06**, at `fresh/TF/single psi_soil=0.5 ppfd=1500 T=40 eb=1 tc=0 assim`, a near-zero `assim`; the argmax tolerance sits at 15x that rather than 50x, because 50x would reach the scale of a real change. 138 of its values compare as zero on both sides. It prints the worst observed difference even when it passes.
+**`psi_stem_optima.tsv` has its own tolerances (#125)**, measured for it rather than inherited: 1e-10 for `profit` (worst 2.01e-12) and 1e-7 for the argmax class (worst 1.33e-9, at `fresh/collar/multi1 psi_soil=3 ppfd=1500 T=40 eb=1 tc=0 assim`). Until 0.19.0 that class's worst was 6.63e-06, a shut leaf's near-zero `assim` cancelling: a root-find's residue around zero. Since #182 that `A` is zero by definition and reported as an exact zero, so the class sits at the solver floor like the rest. Its worst *absolute* figure is no guide: it includes `lambda_emergent`, whose values reach 2.4e22. It prints the worst observed difference per class even when it passes.
 
 `tests/testthat/gradient_golden.tsv` is further apart across platforms than the solved outputs (1.19e-7 measured on Linux, against a tolerance of 1e-5), because a finite difference divides the solver floor by the step, `R_d_25`'s step is the smallest here, and `profit` is the smallest magnitude carrying that same floor.
 
@@ -60,7 +60,7 @@ Two things follow that matter beyond these files:
 
 A relative difference divides by the value, so wherever a reported quantity nearly cancels — a dim, hot leaf whose assimilation barely clears respiration — the metric is amplified by the cancellation and says nothing about the model. The worst relative rows have repeatedly been such rows (an `assim` of 4e-7 against a grid median of 1.44), and the worst absolute row is usually a different one.
 
-So the summary reports the worst **absolute** difference per class alongside the relative one, each naming its row, and a cancellation row is told from real drift by comparing the two lines. **The tolerance stays relative**: a near-zero row is exactly where a genuinely broken value would also show up, so the check stays where it is and only the reporting distinguishes the cases. The sibling file `psi_stem_optima.tsv` handles the same problem the other way, with an absolute floor (`kOptNegligible`, 1e-12) below which it declines to compare — the two files answer this differently on purpose.
+So the summary reports the worst **absolute** difference per class alongside the relative one, each naming its row, and a cancellation row is told from real drift by comparing the two lines. **The tolerance stays relative**: a near-zero row is exactly where a genuinely broken value would also show up, so the check stays where it is and only the reporting distinguishes the cases. The sibling file `psi_stem_optima.tsv` handles the same problem the other way, with an absolute floor (`kOptNegligible`, 1e-12) below which it declines to compare — the two files answer this differently on purpose. The one exception in `operating_points.tsv` is the water fluxes (`kFluxNegligible`, 1e-15 kg m⁻² s⁻¹, mirrored in `helper-golden.R`): a shut leaf's uptake is the polished wet bound's residue, ~1e-20 of either sign by platform, and no relative tolerance can pass on that. The floor sits in a measured empty band, four decades below the smallest flux an open leaf reports (7.6e-12), so it cannot hide a broken open leaf.
 
 ### Profit is the wrong instrument for checking a collar-solve change
 

@@ -57,7 +57,7 @@
 ##' `R_d_` are derived from the traits inside `set_physiology()`, so they are
 ##' genuinely unknown until the drivers are re-supplied.
 ##'
-##' The reason it is a function rather than fifteen assignable fields is that
+##' The reason it is a function rather than sixteen assignable fields is that
 ##' `leaf$vcmax_25 <- x` could not be made correct. Three separate pieces of
 ##' derived state go stale on a bare trait write: the two pre-integrated
 ##' vulnerability splines, the solved operating point, and -- least visibly --
@@ -90,7 +90,7 @@ set_traits <- function(x, traits) {
                traits$root_c, traits$root_P50, traits$TF24_beta2,
                traits$jmax_25, traits$phi_J, traits$curv_fact_elec_trans,
                traits$curv_fact_colim, traits$TF24_cost_scale, traits$R_d_25,
-               traits$JS22_gamma, traits$CMax_a, traits$CMax_b)
+               traits$JS22_gamma, traits$CMax_a, traits$CMax_b, traits$g_min)
   invisible(x)
 }
 
@@ -342,9 +342,9 @@ set_traits <- function(x, traits) {
 ##' 57-parameter variant costing the same as its 40-parameter one, because
 ##' `P_model` is 4 in both.
 ##'
-##' ⚠️ **Always pass `pars`.** It is `P_model`, so the default — all fifteen on
-##' the multi-layer path — is the most expensive thing you can ask for, and a fit
-##' that reads four of them pays for twelve it discards.
+##' ⚠️ **Always pass `pars`.** It is `P_model`, so the default — every trait plus
+##' `leaf_specific_conductance_max` on the multi-layer path — is the most expensive
+##' thing you can ask for, and a fit that reads four of them pays for the rest.
 ##'
 ##' The intercept is a fresh `Leaf` per call. Pass `x` to reuse one across calls
 ##' (#52); without it, construction is 29% of the exact gradient in the study
@@ -394,7 +394,7 @@ set_traits <- function(x, traits) {
 ##'   default, the production path) or any name from [cost_curve_names()], which
 ##'   differentiates that curve's stem optimum instead. See *Choosing which model
 ##'   to differentiate*.
-##' @param pars what to differentiate with respect to. Any of the fifteen
+##' @param pars what to differentiate with respect to. Any of the sixteen
 ##'   [leaf_traits()] names, plus `"leaf_specific_conductance_max"`, on the
 ##'   single-potential path only `"resistance"`, on `model = "CF77"` only
 ##'   `"CF77_lambda_"`, on `model = "TF24_floor"` only `"TF24_floor_lambda_o"`,
@@ -402,8 +402,8 @@ set_traits <- function(x, traits) {
 ##'   On a reused leaf `x` with `use_thermal_damage_` on, also the layer's inputs
 ##'   that reach the solve: its states `"A_"`, `"I_"`, `"D_"`, the optimum shift
 ##'   `"topt_offset_"`, `"dTopt_max_"`, `"K_A_"`, and every quantity a maintenance
-##'   cost multiplies (`"k_i_"`, `"k_i_baseline_"`, `"k_rec_"`, `"m_rep_"`,
-##'   `"t_rep_cut_"`, `"c_acclim_maint_"`, `"c_repair_maint_"`,
+##'   cost multiplies (`"k_i_"`, `"k_i_baseline_"`, `"k_rec_"`, `"k_rec_Ea_"`,
+##'   `"c_acclim_maint_"`, `"c_repair_maint_"`,
 ##'   `"c_protect_maint_"`, `"c_repair_flux_"`). The layer's dynamics parameters
 ##'   move no solved output and are refused; their gradient is
 ##'   [leaf_damage_gradient()]'s. Defaults to all the route allows.
@@ -594,7 +594,7 @@ leaf_gradient <- function(psi_soil,
                   atm_vpd = atm_vpd, ca = ca, leaf_temp = leaf_temp,
                   atm_o2_kpa = atm_o2_kpa, atm_kpa = atm_kpa)
 
-  # The differentiable parameters: the fifteen traits, plus the four that are not
+  # The differentiable parameters: the sixteen traits, plus the four that are not
   # traits and that a calibration nonetheless fits (#44). See .gradient_theta.
   # ⚠️ READ OFF THE LEAF when there is one, for the same reason the resistance
   # is: theta has to hold the value the solve will actually use, which on a priced
@@ -1128,20 +1128,21 @@ leaf_gradient <- function(psi_soil,
                           # .gradient_damage_pars, spelled out because this file
                           # is collated before the definition below is needed
                           "A_", "I_", "D_", "topt_offset_", "dTopt_max_", "K_A_",
-                          "k_i_", "k_i_baseline_", "k_rec_", "m_rep_",
-                          "t_rep_cut_", "c_acclim_maint_", "c_repair_maint_",
+                          "k_i_", "k_i_baseline_", "k_rec_", "k_rec_Ea_",
+                          "c_acclim_maint_", "c_repair_maint_",
                           "c_protect_maint_", "c_repair_flux_")
 
 # The thermal-damage layer's inputs that reach the solve, in enumeration order: its
 # three states, the acclimated shift of the Vcmax/Jmax optima, and every quantity a
 # maintenance cost multiplies. Leaf FIELDS, read off and written back by name.
 # Available only on a leaf with `use_thermal_damage_` on, and refused by name
-# elsewhere. The layer's DYNAMICS parameters (the impairment switch, the impairment
-# rate's Arrhenius, `k_mat_`, the acclimation kinetics) move no solved output and
-# are deliberately absent: their gradient is leaf_damage_gradient()'s.
+# elsewhere. The layer's DYNAMICS parameters (the impairment rate's Arrhenius,
+# maturation, the acclimation kinetics) move no solved output and are deliberately
+# absent: their gradient is leaf_damage_gradient()'s. Repair's two are here because
+# the repair-flux cost reads its rate.
 .gradient_damage_pars <- c("A_", "I_", "D_", "topt_offset_", "dTopt_max_", "K_A_",
-                           "k_i_", "k_i_baseline_", "k_rec_", "m_rep_",
-                           "t_rep_cut_", "c_acclim_maint_", "c_repair_maint_",
+                           "k_i_", "k_i_baseline_", "k_rec_", "k_rec_Ea_",
+                           "c_acclim_maint_", "c_repair_maint_",
                            "c_protect_maint_", "c_repair_flux_")
 
 # Their current values, off a leaf, in that order.
@@ -1244,7 +1245,7 @@ leaf_gradient <- function(psi_soil,
 
 # Everything this can differentiate, and its current value, as one named vector.
 #
-# The fifteen traits, plus the four quantities a calibration fits that are NOT
+# The sixteen traits, plus the four quantities a calibration fits that are NOT
 # traits (#44) and that `pars` therefore used to reject:
 #
 #   * `leaf_specific_conductance_max` -- a DRIVER, set through set_drivers(). It
@@ -1447,6 +1448,16 @@ leaf_gradient <- function(psi_soil,
   max(abs(value), floor) * step
 }
 
+# Where the stencil is centred. `g_min` is refused below zero and defaults to
+# zero, so a central difference about its base value would step onto a negative
+# residual conductance; the stencil is shifted up by one step there, so both of
+# its points are admissible and the difference is the derivative at `g_min = h`.
+# Any other parameter is centred on its value. Mirrored bit-for-bit in
+# `gradient::centre_for()`.
+.gradient_centre <- function(par, value, h) {
+  if (identical(par, "g_min") && value - h < 0) value + h else value
+}
+
 # Parameters whose setter takes a SHORTCUT that leaves the rest of the object
 # alone, and which therefore require the object to be at the base point before
 # they run. See `.gradient_reseat_base()`.
@@ -1505,9 +1516,10 @@ leaf_gradient <- function(psi_soil,
     p <- pars[[k]]
     seat(k)
     h <- .gradient_step(p, theta[[p]], step)
+    centre <- .gradient_centre(p, theta[[p]], h)
     side <- function(sign) {
       th <- theta
-      th[[p]] <- th[[p]] + sign * h
+      th[[p]] <- centre + sign * h
       reset(th, only = p)
       y <- .gradient_outputs_at(l, psi_star, route)
       if (is.null(y)) {
@@ -1655,9 +1667,10 @@ leaf_gradient <- function(psi_soil,
     p <- pars[[k]]
     seat(k)
     h <- .gradient_step(p, theta[[p]], step)
+    centre <- .gradient_centre(p, theta[[p]], h)
     side <- function(sign) {
       th <- theta
-      th[[p]] <- th[[p]] + sign * h
+      th[[p]] <- centre + sign * h
       reset(th, only = p)
       route$solve()
       .gradient_outputs(l)

@@ -76,7 +76,7 @@ differentiate at}
 \item{supply}{how water reaches the root collar: \code{\link[=leaf_supply_multilayer]{leaf_supply_multilayer()}}
 (the default) or \code{\link[=leaf_supply_singlelayer]{leaf_supply_singlelayer()}}}
 
-\item{pars}{what to differentiate with respect to. Any of the fifteen
+\item{pars}{what to differentiate with respect to. Any of the sixteen
 \code{\link[=leaf_traits]{leaf_traits()}} names, plus \code{"leaf_specific_conductance_max"}, on the
 single-potential path only \code{"resistance"}, on \code{model = "CF77"} only
 \code{"CF77_lambda_"}, on \code{model = "TF24_floor"} only \code{"TF24_floor_lambda_o"},
@@ -84,8 +84,8 @@ and on \code{model = "LeastCost"} only \code{"LeastCost_beta"}.
 On a reused leaf \code{x} with \code{use_thermal_damage_} on, also the layer's inputs
 that reach the solve: its states \code{"A_"}, \code{"I_"}, \code{"D_"}, the optimum shift
 \code{"topt_offset_"}, \code{"dTopt_max_"}, \code{"K_A_"}, and every quantity a maintenance
-cost multiplies (\code{"k_i_"}, \code{"k_i_baseline_"}, \code{"k_rec_"}, \code{"m_rep_"},
-\code{"t_rep_cut_"}, \code{"c_acclim_maint_"}, \code{"c_repair_maint_"},
+cost multiplies (\code{"k_i_"}, \code{"k_i_baseline_"}, \code{"k_rec_"}, \code{"k_rec_Ea_"},
+\code{"c_acclim_maint_"}, \code{"c_repair_maint_"},
 \code{"c_protect_maint_"}, \code{"c_repair_flux_"}). The layer's dynamics parameters
 move no solved output and are refused; their gradient is
 \code{\link[=leaf_damage_gradient]{leaf_damage_gradient()}}'s. Defaults to all the route allows.
@@ -437,9 +437,9 @@ A companion calibration study has \code{N = 1327}, \code{P_fit = 40},
 57-parameter variant costing the same as its 40-parameter one, because
 \code{P_model} is 4 in both.
 
-⚠️ \strong{Always pass \code{pars}.} It is \code{P_model}, so the default — all fifteen on
-the multi-layer path — is the most expensive thing you can ask for, and a fit
-that reads four of them pays for twelve it discards.
+⚠️ \strong{Always pass \code{pars}.} It is \code{P_model}, so the default — every trait plus
+\code{leaf_specific_conductance_max} on the multi-layer path — is the most expensive
+thing you can ask for, and a fit that reads four of them pays for the rest.
 
 The intercept is a fresh \code{Leaf} per call. Pass \code{x} to reuse one across calls
 (#52); without it, construction is 29\% of the exact gradient in the study

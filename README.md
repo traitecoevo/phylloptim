@@ -9,6 +9,8 @@ for both xylem and roots, multi-layer soil, per-layer root resistance,
 gravitational head — and the operating point is chosen by Sperry-style gain-risk
 **profit maximisation** over the root-collar water potential. Automatic differentiation (XAD, through odelia) supplies exact derivatives of profit with respect to that potential, for models that track acclimation, and the derivative of the whole operating point with respect to every trait and soil input, for models that differentiate a run containing the leaf.
 
+A residual (cuticular) conductance, the trait `g_min`, runs in parallel with the stomata and is drawn through the same soil-to-leaf path, so a leaf that shuts still loses water. A dry, dark or hot leaf therefore comes back as an ordinary operating point, with its derivatives, rather than as an exception. `g_min` defaults to 0, where every open leaf's result is unchanged.
+
 A full solve costs **a few microseconds** in C++, which is what makes it usable
 inside a demographic model that calls it millions of times. From R a solved row
 costs several times that, nearly all of it the R boundary rather than the model —
@@ -207,7 +209,7 @@ A model that differentiates a run containing the leaf (plant's stand gradient is
 l.find_root_collar_psi();                                    // the solve, at double
 auto draw = l.supply_draw_at<S>(S(l.opt_root_psi_), supply);  // the soil's draw at the solved collar
 S    psi  = l.collar_at<K, S>(draw, pars, curvature);         // the collar, carrying its rows
-auto out  = l.outputs_at<K, S>(psi, draw, pars);              // profit and per-layer uptake
+auto out  = l.outputs_at<K, S>(psi, draw, pars);              // profit, per-layer uptake, residual flux
 ```
 
 `l.operating_point_kind()` says which condition placed the point, and decides what `collar_at` does; a consumer branches on it. The preconditions, the kinds, and a compiled example are at the top of `inst/include/phylloptim/leaf_model.hpp`; `vignette("derivative-surface")` explains the design. The surface is implemented for the TF24 and TF24_floor curves and the multi-layer supply.
