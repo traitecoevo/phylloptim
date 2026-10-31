@@ -5157,10 +5157,19 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
       // boundary-soil artefact of #183: a reported state set by the step
       // below rather than by the model.
       lo = a;
-    } else if (a != bound_a && a < hi) {
-      // Stepped in on the bound's own scale, not the width's: a step that is a
-      // fraction of the width moves with the DRY bound, a parameter dependence
-      // the rows do not have -- and for root_c the same size as the answer.
+    } else if (a < hi) {
+      // With nothing conducting at the bound itself, a shut leaf in the dark
+      // has no finite ci there (ci = ca + R_d/g_c), so the reported state is
+      // taken a step inside it. Stepped in on the bound's own scale, not the
+      // width's: a step that is a fraction of the width moves with the DRY
+      // bound, a parameter dependence the rows do not have -- and for root_c the
+      // same size as the answer.
+      //
+      // ⚠️ ALWAYS FROM THE POLISHED ROOT, even where the polish left the bound
+      // where the bracket had it. Keeping the bracket's own lower end there
+      // instead put two different steps on either side of a driver value, and
+      // the reported A and E jumped by 3e-6 of their range where a sweep
+      // crossed between them.
       //
       // ⚠️ Do not start smaller than 1e-6. The rows read the flux at the stepped
       // point rather than at the root, an error proportional to the step (~1e-6

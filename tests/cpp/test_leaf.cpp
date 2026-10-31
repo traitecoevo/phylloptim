@@ -10173,13 +10173,7 @@ void test_smoothness_sweep() {
   const Config configs[] = {{false, 1, false, kGmin}, {false, 3, false, kGmin},
                             {true, 1, false, kGmin},  {true, 3, false, kGmin},
                             {false, 1, true, kGmin},  {true, 1, true, kGmin},
-                            {false, 1, false, 0.0}};
-  // ⚠️ NOT g_min = 0 WITH THE BALANCE ON, which has a known jump: a shut leaf
-  // with no residual conductance reports the state the collar root-find's last
-  // step off the wet bound leaves, so A and E step by 3e-6 of their range at
-  // psi_soil 5.4407 (A 2.6e-5 -> 2.7e-7, stem - collar 2.1e-5 -> 2.2e-7 MPa).
-  // Measured identical before the refusals; a positive g_min removes it, and
-  // whether the corner at g_min = 0 should be smoothed is decided separately.
+                            {false, 1, false, 0.0},   {true, 1, false, 0.0}};
   g_sweep_asserted = g_sweep_corner = 0;
   std::map<std::string, long> kinds;
   for (const Config &c : configs) {

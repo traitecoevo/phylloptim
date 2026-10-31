@@ -1,3 +1,11 @@
+# phylloptim 0.23.0
+
+## A shut leaf at g_min = 0 is continuous in the drivers (#183)
+
+At the default `g_min = 0` a shut leaf has no conductance at its wet bound, so its reported state is taken 1e-6 of the bound's scale inside it. That step was taken from the polished bound where the polish moved it and from the bracket's coarser lower end where it did not, and a sweep crossing between the two saw A and E jump by 3e-6 of their range (at psi_soil 5.4407 with the energy balance on: A 2.6e-5 -> 2.7e-7 umol m-2 s-1). The step is now always taken from the polished bound. The acceptance sweep runs g_min = 0 with the energy balance on again (73,070 triples asserted). Goldens: 25 of 672 operating points and 274 of 5,760 collar rows of `psi_stem_optima.tsv` move, all shut leaves at g_min = 0, profit by at most 4.1e-6 relative (5e-5 absolute on the stem file's near-zero profits). With `g_min > 0` nothing moves.
+
+Decided with it (#183 step 4): the stomatal corner E_s >= 0 stays, measured active at 55-61% of solved points on a broad grid (97.5% in the dark, 40% at PPFD >= 100, mostly hot or dry), because asymptotic closure needs a barrier term that moves every result, and solving in log E_s would cost a collar root-find per evaluation; the E_max < r regime is C2.
+
 # phylloptim 0.22.0
 
 ## Refuse rather than clamp; no corner left but the stomatal one (#183)
