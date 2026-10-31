@@ -1,4 +1,4 @@
-# phylloptim 0.18.0
+# phylloptim 0.19.0
 
 ## A residual (cuticular) conductance, and one shut leaf in place of the no-flow family (#182)
 
@@ -16,11 +16,29 @@ Where the soil cannot supply what the cuticle loses, the realised residual flux 
 
 **Smoothness.** `test_leaf` second-differences profit, `A`, `E`, `psi_stem`, `lambda` and the `vcmax_25` and `g_min` derivative rows across soil potential, light, deficit and air temperature, with the energy balance off and on, one and three layers, and the thermal-damage layer, at `g_min` = 0.5 mmol m⁻² s⁻¹. It finds no slope jump above 0.05 of each output's scale away from kind changes, and, bisecting any interval whose change dwarfs its neighbours', no jump above 1e-6 of each output's range. The same holds from `psi_soil` 4 to 12 MPa at a large residual conductance, through both caps. Profit is C1 across the light-compensation point; `A` keeps a kink there, which is the co-limitation's own.
 
-**C++ API:** `set_traits()` takes `g_min` as its sixteenth argument, after `CMax_b`. `LeafOutputs` gains `residual_flux`, and `SupplyDraw` gains `uptake_limit` (visited by `for_each_active` where it is in force). `par_g_min` is 15 and every later `par_*` moves up one, so `gradient::n_theta` is 36 and `n_pars` 37. `OperatingPointKind::ShadeDeath` is removed, so the later kinds' codes drop by one (`Prescribed` 6, `SolverRefused` 7, `NonFiniteGradient` 8). `HydraulicShutdown` now carries rows, as `BoundarySoil` does. Removed: `ci_assigned()`, `ci_no_flow()`, `no_flow_assim()`, `no_flow_assim_at()`, `no_flow_profit()`, `set_shutdown_state()` and `root_limit_binds_first()`. New: `set_shut_state()`, `find_wet_bound()`, `stem_wet_bound()`, `solve_ci()`, `assim_saturated()`, `residual_flux()`, `g_min_at()` and `supply_ceiling()`, among others in the registry. `optimise_closed()` refuses `g_min != 0`. The uptake walk skips a layer past its root cap rather than dividing by a zero integral.
+**C++ API:** `set_traits()` takes `g_min` as its sixteenth argument, after `CMax_b`. `LeafOutputs` gains `residual_flux`, and `SupplyDraw` gains `uptake_limit` (visited by `for_each_active` where it is in force). `par_g_min` is 15 and every later `par_*` moves up one, so `gradient::n_theta` is 35 and `n_pars` 36 (after 0.18.0's 34 and 35). `OperatingPointKind::ShadeDeath` is removed, so the later kinds' codes drop by one (`Prescribed` 6, `SolverRefused` 7, `NonFiniteGradient` 8). `HydraulicShutdown` now carries rows, as `BoundarySoil` does. Removed: `ci_assigned()`, `ci_no_flow()`, `no_flow_assim()`, `no_flow_assim_at()`, `no_flow_profit()`, `set_shutdown_state()` and `root_limit_binds_first()`. New: `set_shut_state()`, `find_wet_bound()`, `stem_wet_bound()`, `solve_ci()`, `assim_saturated()`, `residual_flux()`, `g_min_at()` and `supply_ceiling()`, among others in the registry. `optimise_closed()` refuses `g_min != 0`. The uptake walk skips a layer past its root cap rather than dividing by a zero integral.
 
 **R API:** `leaf_traits()` gains `g_min`; `operating_point()` and `leaf_solve()` gain a last column, `residual_flux`; `leaf_infeasible_codes()` gains `stem_wet_bound`. A finite difference in `g_min` at zero is centred one step up, so both of its points are admissible.
 
 **What moves:** nothing at `g_min = 0` on an open leaf. `primitives.tsv` is bit-identical. `operating_points.tsv` moves the 96 shut rows of 576, all at `psi_soil = 6`: the stem goes from `psi_crit` (5.87 MPa) to the zero-uptake collar (6.0 to 6.34), profit by the hydraulic cost there, `ci` on 24 of them to the root of `A(ci) = 0`, and `e_up` and `uptake` on the 64 multi-layer rows to the polished bound's residue (~1e-20, of either sign by platform, so the tolerant comparison now gives the water fluxes an absolute floor of 1e-15). `assim` stays exactly 0: with nothing conducting, `A` at the `ci` root is zero by definition. `psi_stem_optima.tsv` moves 3060 of 5760 rows: 342 collar rows go from `shade-death` to `boundary-soil` (330) or `interior` (12), with the argmax stepped 1e-6 of the bracket inside the bound; 1504 dark or net-source rows move only `ci`, to `+Inf` or a root above `ca`; 1014 hot rows move `A` without moving the argmax, now `A` at their own `ci` rather than at `ca`, among them the reused-leaf pass's ProfitMax degenerate rows, which now write `ci` and `A` instead of leaving the poison (128 fewer unwritten cells); 120 shut collar rows at `psi_soil = 6` move their stem by up to 0.32 MPa as it follows the soil past `psi_crit`, 96 of them with profit lower by the cost of that stem; and 80 stem-route rows at 40 and 50 °C move their optimum, every one with profit higher or equal. `gradient_golden.tsv` moves 6 cells, all on the shut-down case: its `stem_P50` and `stem_c` stem and collar rows go to 0, and its profit rows become the cost's slope at the new stem (1.15 and -0.83). `test-golden.R`'s shut-down row moves in `psi_stem`, `opt_root_psi`, `profit`, `e_up` and `uptake`.
+
+# phylloptim 0.18.0
+
+## Thermal impairment takes Bison & Michaletz's kinetics; every damage rate is one Arrhenius form
+
+The impairment rate was `k_i_` times a saturating switch K/(1+K), so it levelled off at `k_i_` (0.5 per day) above about 40 °C: a leaf at 50 °C took over a day to half-impair, where measured PSII inactivation takes minutes. It is now the first-order heat inactivation of Bison & Michaletz (2026, Nature Ecology & Evolution, doi:10.1038/s41559-026-03196-x), written about the isokinetic temperature their Meyer–Neldel relation makes common to every species:
+
+```
+k_imp(T) = k_i_   * exp[(k_i_Ea_/R)(1/T_iso - 1/T)],  T_iso = k_i_Tiso_ + topt_offset_ + dTimpair_max_ * A/(A + K_A_)
+k_rec(T) = k_rec_ * exp[(k_rec_Ea_/R)(1/T_25 - 1/T)]
+k_mat(T) = k_mat_ * exp[(k_mat_Ea_/R)(1/T_25 - 1/T)]
+```
+
+The defaults are their 177-species fit: `k_i_` = 276 per day (3.2e-3 s⁻¹, from the corrected A values, Zenodo 10.5281/zenodo.23752859 v3), `k_i_Tiso_` = 50.5 °C and `k_i_Ea_` = 316 kJ mol⁻¹, so impairment rises tenfold about every 6 K: 0.012 per day at 25 °C, 5.4 at 40 °C, 230 at 50 °C. First-order damage at a constant temperature then halves a leaf in a minute at 54 °C, an hour at 43 °C and a day at 35 °C, as their figures show. Repair no longer shuts off when hot. Impairment outruns the default repair above about 32 °C, so the logistic shut-off had nothing left to do.
+
+**Breaking.** Removed: `impair_H_`, `impair_Tmid_`, `k_i_Tref_`, `m_rep_`, `t_rep_cut_` and `$logistic_()`. Added: `k_i_Tiso_`, `k_rec_Ea_`, `k_mat_Ea_`, all at their defaults inert except `k_i_Tiso_`. `k_i_` and `k_i_baseline_` move from 0.5 to 276. A negative `k_i_Ea_` is refused. In the gradient enumeration `m_rep_` and `t_rep_cut_` give way to `k_rec_Ea_`, so `n_theta` is 34 and `n_pars` 35, and a C++ caller filling `theta` by hand must recount. `damage_par_names()` has fourteen dynamics parameters.
+
+Off by default, and off it reads none of its inputs: every golden file and `gradient_golden.tsv` is bit-identical.
 
 # phylloptim 0.17.0
 
