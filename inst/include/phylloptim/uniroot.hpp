@@ -90,6 +90,24 @@ double uniroot_smooth(Function f, double min, double max, double tol,
 // ~12 evaluations per solve, and a collar gradient evaluation is not cheap: each
 // one carries a nested ci root-find. Worth the overload on a path plant runs
 // millions of times.
+// The final bracket rather than its midpoint, for a caller that needs the root
+// from one side: f(first) and f(second) differ in sign (or one is zero).
+template <typename Function>
+std::pair<double, double> uniroot_smooth_bracket(Function f, double min,
+                                                 double max, double f_min,
+                                                 double f_max, double tol,
+                                                 size_t max_iterations) {
+  using boost::math::tools::toms748_solve;
+  boost::uintmax_t it = max_iterations;
+  std::pair<double, double> root = toms748_solve(
+      f, min, max, f_min, f_max, internals::uniroot_tol(tol, tol), it);
+  if (it >= static_cast<boost::uintmax_t>(max_iterations)) {
+    util::stop_infeasible("root_find_iterations",
+                          "exceeded max_iterations");
+  }
+  return root;
+}
+
 template <typename Function>
 double uniroot_smooth(Function f, double min, double max, double f_min,
                       double f_max, double tol, size_t max_iterations) {

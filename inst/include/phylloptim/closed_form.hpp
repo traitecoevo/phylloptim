@@ -321,11 +321,10 @@ struct Solution {
 // ⚠️ NOT `E/kmax`. G is the cumulative vulnerability integral, so the two agree only
 // where f == 1 -- i.e. nowhere on a real curve. See note 5 in the header.
 //
-// The domain check is done against the transpiration AT psi_crit rather than left to
-// the spline, because `stem_curve_integral_inverse` throws past its domain and the
-// only thing a caller here can do with that is report psi_crit. A demand above what
-// the stem can carry at psi_crit IS the dry bound, so it is returned rather than
-// raised: the guard downstream then sees the resulting ci/ca and falls back.
+// The domain check is done against the transpiration AT psi_crit, the expansion's
+// window (see within_guard): a demand above what the stem carries there returns
+// psi_crit rather than a potential past it, and the guard downstream hands the row
+// to the exact solve.
 inline double psi_from_supply(Leaf &l, double E, double psi_upstream) {
   if (!(E > 0.0)) {
     return psi_upstream;
@@ -633,6 +632,10 @@ inline Solution solve_TF24_floor(Leaf &l, double psi_upstream,
 // error. A bound is where the two methods are least comparable and where the exact
 // solve is cheapest to be right about -- it tests the gradient's sign there
 // explicitly -- so a closed form that arrives at one hands the row back.
+// psi_crit here is the expansion's own window, not a bound on the model: for
+// TF24 and TF24_floor the exact optimum may lie past it (#183), and a closed
+// form arriving there hands the row to the exact solve, which has no bound
+// there.
 // ⚠️ AND IT GUARDS THE EXPANSION, NOT THE MODEL. It reads the solution and three
 // bounds (`ca_`, `psi_soil`, `psi_crit`) and no driver, so it cannot see an INPUT
 // being wrong: with the energy balance forced through, the deficit out by 3-4x and
@@ -707,9 +710,19 @@ inline void optimise_into(Leaf &l) {
     // there is nothing for either method to choose between. Kept identical rather
     // than shared because the shared version would be a fourth caller of a
     // two-line body.
-    if (psi_soil > l.psi_crit) {
+    if (psi_soil > l.dry_end<K>()) {
       l.profit_ = l.profit_psi_stem_for<K>(psi_soil, psi_soil);
       l.lambda_emergent_ = l.lambda_for<K>(psi_soil, psi_soil);
+      return;
+    }
+
+    // The expansion's window is [psi_soil, psi_crit] (see within_guard). A soil
+    // at or past psi_crit leaves it empty while a curve unbounded there still
+    // has an interval, so the exact solve answers.
+    if (!(psi_soil < l.psi_crit)) {
+      ++l.closed_form_fallbacks_;
+      l.last_solve_fell_back_ = true;
+      l.optimise_psi_stem_single<K>();
       return;
     }
 
