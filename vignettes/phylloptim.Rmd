@@ -123,7 +123,7 @@ afterwards, because the drivers come back as columns of the answer.
 
 ```{r}
 expand_grid(PPFD = seq(50, 1800, length.out = 30),
-            atm_vpd = c(0.5, 1, 2, 4)) |>
+            atm_vpd = c(0.5, 1, 2, 3)) |>
   with(leaf_solve(psi_soil = 1.0, PPFD = PPFD, atm_vpd = atm_vpd)) |>
   ggplot(aes(PPFD, A, colour = factor(atm_vpd))) +
   geom_line(linewidth = 0.8) +
@@ -618,7 +618,7 @@ last of those is the binding one, and the error is organised by `ci/ca`:
 ```{r}
 grid <- expand.grid(psi_soil = c(0.25, 0.5, 1, 2, 3, 4, 5),
                     PPFD = c(100, 500, 1500),
-                    atm_vpd = c(0.5, 1, 2, 4))
+                    atm_vpd = c(0.5, 1, 2, 3))
 
 solve_both <- function(psi_soil, PPFD, atm_vpd) {
   one <- function(method) {

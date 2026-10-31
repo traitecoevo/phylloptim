@@ -8427,7 +8427,7 @@ void test_tf24_floor_closed_form() {
 // ⚠️ THE TWO ARE NOT THE SAME EQUATION AND THE DIFFERENCE IS NOT SMALL. Solving
 // (FOC) for chi gives `chi = (Gamma*/ca + r)/(1 + r)` with `r = xi/sqrt(D)`, so
 // the published form understates chi by `(Gamma*/ca)/(1 + r)` -- some 4% at
-// D = 1 kPa and 8% at D = 4 kPa on this package's defaults, growing with deficit
+// D = 1 kPa and 7% at D = 3 kPa on this package's defaults, growing with deficit
 // because `r` falls as D rises. This test checks against (FOC), which is the
 // model; it then checks the gap to the published form against that expression,
 // which is what establishes that the gap is the approximation and not a defect.
