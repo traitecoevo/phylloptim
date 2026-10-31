@@ -459,6 +459,7 @@ public:
   // nothing; and it is immutable and shared, so copying a Leaf copies a pointer.
   // Read only through the four stem_curve_* accessors below.
   std::shared_ptr<const VulnerabilityTable> stem_curve_;
+  InverseScale stem_inv_b_;
 
   // INSTRUMENTATION, not state: how many times the stem curve has been built.
   // Nothing in the model reads it, and `set_traits()` deliberately does NOT reset
@@ -6941,11 +6942,11 @@ inline double Leaf::stem_curve_integral(double psi, const char* caller) const {
                              "(psi in +MPa)",
                              "psi", caller);
   }
-  return vulnerability_integral(*stem_curve_, psi, stem_b);
+  return vulnerability_integral(*stem_curve_, psi, stem_b, stem_inv_b_.of(stem_b));
 }
 
 inline double Leaf::stem_curve_integral_deriv(double psi) const {
-  return vulnerability_integral_deriv(*stem_curve_, psi, stem_b);
+  return vulnerability_integral_deriv(*stem_curve_, psi, stem_inv_b_.of(stem_b));
 }
 
 inline double Leaf::stem_curve_integral_inverse(double w, const char* caller,

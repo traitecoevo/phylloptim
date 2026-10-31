@@ -403,6 +403,7 @@ public:
   // VulnerabilityTable). Shared with the stem's wherever the two c agree. The
   // conductivity f_r itself has no table: it is exp(-(psi/root_b)^root_c).
   std::shared_ptr<const VulnerabilityTable> vulnerability_;
+  InverseScale inv_b_;
 
   // --- soil geometry -------------------------------------------------------
   // The four scalars carry the same unset sentinels clear() assigns, so a bare
@@ -481,6 +482,9 @@ public:
   // defaults), and the one reader that divides by it, uptake_impl's
   // equal-potentials branch, takes a layer with none left as drawing nothing.
   double root_vuln_at(double psi) const {
+    if (psi <= 0.0) {
+      return 1.0;  // the curve starts at full conductivity; NaN falls through
+    }
     return exp(-pow(psi / root_b, root_c));
   }
 
@@ -495,12 +499,12 @@ public:
   // tends to integral / r_R_H_min <= G(inf) / r_R_H_min as the span grows: the
   // whole area under the conductivity curve, which is the right limit.
   double root_vuln_integral_at(double psi) const {
-    return vulnerability_integral(*vulnerability_, psi, root_b);
+    return vulnerability_integral(*vulnerability_, psi, root_b, inv_b_.of(root_b));
   }
 
   // dG/dpsi = f_r, in closed form.
   double root_vuln_integral_deriv_at(double psi) const {
-    return vulnerability_integral_deriv(*vulnerability_, psi, root_b);
+    return vulnerability_integral_deriv(*vulnerability_, psi, inv_b_.of(root_b));
   }
 
   // Per-timestep soil state: the layer potentials, the layer depths, and the
@@ -962,9 +966,12 @@ public:
         // embolised layer (f_r underflows to zero far past the curve) draws
         // exactly nothing rather than dividing by zero (#85). A layer with no
         // horizontal resistance is r_V alone at any f.
-        const T E_i = (to_passive(rH_p[i]) > 0.0)
-                          ? T(-zg_p[i]) * f_ri / (rH_p[i] + rV_p[i] * f_ri)
-                          : T(-zg_p[i]) / rV_p[i];
+        T E_i;
+        if (to_passive(rH_p[i]) > 0.0) {
+          E_i = T(-zg_p[i]) * f_ri / (rH_p[i] + rV_p[i] * f_ri);
+        } else {
+          E_i = T(-zg_p[i]) / rV_p[i];
+        }
         out_p[i] = E_i;
         E_up += E_i;
       } else if (std::is_same_v<T, double> &&

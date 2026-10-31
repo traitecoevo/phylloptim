@@ -166,10 +166,10 @@ void test_vulnerability_integral_derivatives() {
   using phylloptim::cumulative_vulnerability_integral_at;
   using phylloptim::cumulative_vulnerability_integral_derivatives_at;
 
-  // (psi/b)^c past this is past the curve's last knot, so it is unreachable and
-  // the series is not asked to hold there. It bounds the grid instead of the grid
+  // (psi/b)^c past this is past the end of the curve, where the limit's
+  // derivatives take over (checked below). It bounds the grid instead of the grid
   // bounding it -- for c = 12, psi/b = 8 means (psi/b)^c = 7e10.
-  const double x_max = phylloptim::vulnerability_x_max();
+  const double x_max = phylloptim::vulnerability_x_end;
   const double rel_step = 1e-5;
 
   double worst_value = 0.0, worst_dpsi = 0.0, worst_db = 0.0, worst_dc = 0.0;
@@ -240,14 +240,13 @@ void test_vulnerability_integral_derivatives() {
   ok(at_zero.db == 0.0, "dG/db is exactly zero at psi = 0");
   ok(at_zero.dc == 0.0, "dG/dc is exactly zero at psi = 0");
 
-  // Past the last knot: (3.0, 1.0, 2.0) is x = 9, past the knot grid's
-  // x_max = log(100) and inside the series' reach, and agrees with the closed
-  // form and a central difference like any other point.
+  // A point well along the curve: (3.0, 1.0, 2.0) is x = 9, and agrees with the
+  // closed form and a central difference like any other point.
   {
     const double psi = 3.0, b = 1.0, c = 2.0, h = 1e-5;
     const auto d = cumulative_vulnerability_integral_derivatives_at(psi, b, c);
     near(d.value, cumulative_vulnerability_integral_at(psi, b, c), 1e-14,
-         "past the knot grid, the series still matches the closed form");
+         "along the curve, the series still matches the closed form");
     near(d.db,
          (cumulative_vulnerability_integral_at(psi, b * (1 + h), c) -
           cumulative_vulnerability_integral_at(psi, b * (1 - h), c)) / (2 * h * b),
@@ -257,12 +256,12 @@ void test_vulnerability_integral_derivatives() {
           cumulative_vulnerability_integral_at(psi, b, c * (1 - h))) / (2 * h * c),
          1e-7, "and dG/dc matches a central difference");
   }
-  // Past vulnerability_x_series_max the limit's derivatives take over. They must
+  // Past vulnerability_x_end the limit's derivatives take over. They must
   // agree with the series either side of the hand-over, and with a central
   // difference of the closed form far past it.
   {
     const double b = 3.898245, c = 2.680147;
-    const double x_hand = phylloptim::vulnerability_x_series_max;
+    const double x_hand = phylloptim::vulnerability_x_end;
     const double below = b * std::pow(x_hand * (1 - 1e-9), 1.0 / c);
     const double above = b * std::pow(x_hand * (1 + 1e-9), 1.0 / c);
     const auto s0 = cumulative_vulnerability_integral_derivatives_at(below, b, c);
@@ -290,63 +289,91 @@ void test_vulnerability_integral_derivatives() {
            1e-7, "the limit's dG/dc matches a central difference" + at);
     }
   }
-  const double just_inside =
+  const double at_end =
       cumulative_vulnerability_integral_derivatives_at(
-          phylloptim::vulnerability_psi_max(3.898245, 2.680147), 3.898245,
+          phylloptim::vulnerability_psi_end(3.898245, 2.680147), 3.898245,
           2.680147)
           .value;
-  ok(just_inside > 0.0, "the last knot itself is inside the bound");
+  ok(at_end > 0.0, "the end of the curve is inside the series' reach");
 }
 
-// A soil drier than the stem curve's last knot (P99) is a closed leaf on the
-// single-potential stem routes, and the accessors read the closed form past the
-// knot grid to give that answer (#157). These are the properties that make the
-// read safe.
-void test_stem_curve_past_its_grid() {
-  printf("stem curve past its knot grid (#157)\n");
+// The vulnerability table (#183): what it reads against boost's incomplete gamma,
+// the continuity it promises across knots, its inverse, and its independence of
+// b. The accuracy bounds are the ones VulnerabilityTable states, at the default
+// knot count.
+void test_vulnerability_table() {
+  printf("vulnerability table: accuracy, C2 across knots, inverse (#183)\n");
+  const double n = phylloptim::Leaf::ncontrol_default;
+  double worst_G_default = 0.0, worst_G = 0.0, worst_dG = 0.0;
+  for (double c : {1.2, 1.5, 2.0, 2.680147, 5.0, 12.0}) {
+    const phylloptim::VulnerabilityTable t(c, static_cast<std::size_t>(n));
+    const double b = 3.898245;
+    const double G_inf = phylloptim::cumulative_vulnerability_integral_limit(b, c);
+    const double end = phylloptim::vulnerability_psi_end(b, c);
+    double wG = 0.0, wdG = 0.0;
+    for (int k = 1; k < 4000; ++k) {
+      const double psi = end * k / 4000.0;
+      const double G = phylloptim::vulnerability_integral(t, psi, b);
+      wG = std::max(wG, std::abs(G - phylloptim::cumulative_vulnerability_integral_at(psi, b, c)) / G_inf);
+      wdG = std::max(wdG, std::abs(phylloptim::vulnerability_integral_deriv(t, psi, 1.0 / b) -
+                                   std::exp(-std::pow(psi / b, c))));
+    }
+    if (c == 2.680147) worst_G_default = wG;
+    worst_G = std::max(worst_G, wG);
+    worst_dG = std::max(worst_dG, wdG);
+    // Past the end of the curve G is G(inf) and G' the curve, however small.
+    ok(phylloptim::vulnerability_integral(t, 2.0 * end, b) == G_inf * 1.0 ||
+           std::abs(phylloptim::vulnerability_integral(t, 2.0 * end, b) - G_inf) <=
+               4e-16 * G_inf,
+       "past the end of the curve G is G(inf), c=" + std::to_string(c));
+  }
+  printf("    G error / G(inf): default c %.2g, worst %.2g | G' error, worst %.2g\n",
+         worst_G_default, worst_G, worst_dG);
+  near(worst_G_default, 0.0, 1e-14, "at the default c the table is the closed form to 1e-14");
+  near(worst_G, 0.0, 1e-11, "and within 1e-11 for c from 1.2 to 12");
+  near(worst_dG, 0.0, 1e-9, "its slope is the curve within 1e-9");
+
+  // C2 across every knot: the second difference of G' (the table's slope) is
+  // continuous through a knot, where a cubic table's jumps. Measured as the
+  // jump in dG'/dpsi across each knot, against the curve's own f'.
+  {
+    const double b = 3.898245, c = 2.680147;
+    const phylloptim::VulnerabilityTable t(c, static_cast<std::size_t>(n));
+    const double h = phylloptim::vulnerability_psi_end(b, c) / n;
+    const double e = 1e-6 * h;
+    double worst_jump = 0.0;
+    for (int i = 20; i < 600; ++i) {
+      const double knot = b * t.u_at(static_cast<std::size_t>(i));
+      auto slope_of_slope = [&](double at, double side) {
+        const double a0 = at + side * e, a1 = at + side * 2 * e;
+        return (phylloptim::vulnerability_integral_deriv(t, a1, 1.0 / b) -
+                phylloptim::vulnerability_integral_deriv(t, a0, 1.0 / b)) / (side * e);
+      };
+      const double fprime = std::abs(-c / b * std::pow(knot / b, c - 1.0) *
+                                     std::exp(-std::pow(knot / b, c)));
+      worst_jump = std::max(worst_jump,
+                            std::abs(slope_of_slope(knot, 1.0) - slope_of_slope(knot, -1.0)) /
+                                std::max(fprime, 1e-3));
+    }
+    printf("    worst jump in G'' across a knot, relative: %.2g\n", worst_jump);
+    near(worst_jump, 0.0, 1e-4, "G'' is continuous across the knots");
+  }
+
+  // The inverse, round trip, wet to the end of the curve.
   Drivers d;
   phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
   const double b = l.stem_b, c = l.stem_c;
-  const double p99 = phylloptim::vulnerability_psi_max(b, c);
   const double G_inf = phylloptim::cumulative_vulnerability_integral_limit(b, c);
-
-  // Continuous at the join, in value and in slope: the knots were seeded from
-  // the closed form and given the curve as their slopes.
-  const double eps = 1e-9;
-  const double G_at = l.stem_curve_integral(p99);
-  const double G_past = l.stem_curve_integral(p99 * (1 + eps));
-  near(G_at, phylloptim::cumulative_vulnerability_integral_at(p99, b, c), 1e-15,
-       "at P99 the table equals the closed form");
-  near((G_past - G_at) / (p99 * eps), l.stem_curve_integral_deriv(p99), 1e-6,
-       "G is continuous across P99");
-  // The slope moves by d ln f / d ln psi = -c x over the step, about 1.2e-8 here,
-  // so the join is checked against the curve rather than against no change.
-  near(l.stem_curve_integral_deriv(p99), std::exp(-std::pow(p99 / b, c)), 1e-15,
-       "at P99 the table's slope is the curve");
-  near(l.stem_curve_integral_deriv(p99 * (1 + eps)),
-       std::exp(-std::pow(p99 * (1 + eps) / b, c)), 1e-15,
-       "and just past it the slope is the curve too");
-
-  // Past the grid: the closed form, increasing, bounded by its limit.
-  double prev = G_at;
-  for (double psi : {6.95, 7.0, 10.0, 50.0, 1000.0}) {
-    const std::string at = " at psi=" + std::to_string(psi);
-    const double G = l.stem_curve_integral(psi);
-    ok(G == phylloptim::cumulative_vulnerability_integral_at(psi, b, c),
-       "past the grid G is the closed form" + at);
-    ok(G >= prev && G <= G_inf, "increasing and below G(inf)" + at);
-    near(l.stem_curve_integral_deriv(psi), std::exp(-std::pow(psi / b, c)), 1e-15,
-         "and its slope is the curve" + at);
-    prev = G;
-  }
-
-  // The inverse past the table, round trip, where the curve is not yet flat.
-  for (double psi : {6.95, 7.5, 8.5}) {
+  double worst_round = 0.0;
+  for (double psi = 0.01; psi < 12.0; psi *= 1.05) {
     const double w = l.stem_curve_integral(psi);
-    near(l.stem_curve_integral_inverse(w) / psi, 1.0, 1e-10,
-         "G^-1(G(psi)) = psi past the table, at psi=" + std::to_string(psi));
+    worst_round = std::max(worst_round,
+                           std::abs(l.stem_curve_integral_inverse(w) - psi) / psi);
   }
-  // Past G(inf) no potential carries the flow: still infeasible, still the code.
+  printf("    worst |G^-1(G(psi)) - psi| / psi to 12 MPa: %.2g\n", worst_round);
+  near(worst_round, 0.0, 1e-10, "G^-1(G(psi)) = psi to 12 MPa");
+  near(l.stem_curve_limit() / G_inf, 1.0, 1e-15, "the stem's G(inf) is the closed form");
+  // Past G(inf) no potential carries the flow: infeasible, by its code.
   bool infeasible = false;
   try {
     l.stem_curve_integral_inverse(G_inf * (1 + 1e-6));
@@ -355,9 +382,31 @@ void test_stem_curve_past_its_grid() {
         std::string(e.what()).rfind(phylloptim::util::infeasible_token("stem_curve_domain"), 0) == 0;
   }
   ok(infeasible, "past G(inf) the inverse is stem_curve_domain");
+  // G(inf) itself is attained, at the end of the curve.
+  near(l.stem_curve_integral_inverse(l.stem_curve_limit()) /
+           phylloptim::vulnerability_psi_end(b, c),
+       1.0, 1e-15, "G^-1(G(inf)) is the end of the curve");
 
-  // The single-potential path end to end: a closed stem at a soil drier than P99
-  // moves no water, and a demanded flux of zero puts the stem at the soil.
+  // A P50 moves nothing in the table: b scales it out.
+  {
+    phylloptim::Leaf m = make_leaf(d, {2.0}, {1.0});
+    const auto before = m.stem_curve_;
+    const long builds = m.stem_curve_builds_;
+    m.set_traits(m.vcmax_25, m.stem_c, m.stem_P50 * 1.3, m.roots_.root_c,
+                 m.roots_.root_P50 * 0.8, m.TF24_beta2, m.jmax_25, m.phi_J,
+                 m.curv_fact_elec_trans, m.curv_fact_colim, m.TF24_cost_scale,
+                 m.R_d_25, m.JS22_gamma, m.CMax_a, m.CMax_b, m.g_min);
+    ok(m.stem_curve_ == before && m.stem_curve_builds_ == builds,
+       "moving the P50s rebuilds neither table");
+    ok(m.roots_.vulnerability_ == m.stem_curve_,
+       "the stem and the root share one table where their c agree");
+    near(m.stem_curve_integral(3.0),
+         phylloptim::cumulative_vulnerability_integral_at(3.0, m.stem_b, m.stem_c),
+         1e-13, "and the moved curve reads its closed form");
+  }
+
+  // The single-potential path end to end: a zero flux puts the stem at the soil,
+  // however dry.
   for (double psi_soil : {6.95, 10.0, 1000.0}) {
     const std::string at = " at psi_soil=" + std::to_string(psi_soil);
     ok(l.transpiration(psi_soil, psi_soil) == 0.0, "no flux with the stem at the soil" + at);
@@ -367,7 +416,7 @@ void test_stem_curve_past_its_grid() {
 }
 
 void test_spline_matches_direct_integration() {
-  printf("pre-integrated spline vs direct quadrature\n");
+  printf("vulnerability table vs direct quadrature\n");
   Drivers d;
   phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
   // The same check plant makes in test-leaf.r, on transpiration against
@@ -1238,8 +1287,7 @@ void test_collar_solve_refuses_rather_than_guessing() {
   ok(m.operating_point_kind() == Kind::SolverRefused,
      "the solve reports that it could not resolve the bracket");
   ok(m.operating_point_kind() != Kind::BoundarySoil &&
-         m.operating_point_kind() != Kind::BoundaryCrit &&
-         m.operating_point_kind() != Kind::BoundaryRootCrit,
+         m.operating_point_kind() != Kind::BoundaryDry,
      "and does not pass it off as a constrained optimum");
   // The endpoint the solve returns is stepped a fraction of the width inside the
   // bound it came from, so compare against the bound rather than for equality.
@@ -1352,65 +1400,63 @@ void test_soil_conductance_is_positive() {
   }
 }
 
-// Issue #1: the two root vulnerability curves stop at the 1%-conductivity point,
-// and a soil layer drier than that is an ordinary state -- plant's soil potential
-// is capped at 1000 MPa, the grid at 6.82. Taken as odelia extrapolants the
-// conductivity curve crossed zero at 7.3742 MPa (-20.35 at 1000) and the cumulative
-// integral kept accumulating past a limit it had already reached, which made the
-// per-layer mean resistance r_R_H = r_R_H_min * span / integral FALL as the layer
-// dried: measured on the fixture below, a reverse flux 5.70x its bound.
-//
-// ⚠️ THE GOLDEN FILE CANNOT SEE ANY OF THIS. Instrumented over the whole grid,
-// the driest argument the integral ever gets is 7.0 MPa -- past the last knot
-// (16 of 20644 lookups are) but short of 7.3132 where the cap binds -- and the
-// conductivity curve is never read past 4.0. Every golden cell is bit-identical,
-// so this test is the only thing standing behind the fix.
-void test_root_vulnerability_is_bounded_past_its_grid() {
-  printf("root vulnerability curves are bounded past their last knot\n");
+// #85: the root curves are their closed forms at every potential -- no clamp on
+// the conductivity, no cap on the integral -- and a soil layer far past the end
+// of the curve is an ordinary state (plant caps soil potential at 50 MPa). Taken
+// as odelia extrapolants, as before #77, the conductivity crossed zero at 7.37
+// MPa and the integral ran past its own limit (issue #1).
+void test_root_vulnerability_closed_form_past_the_curve() {
+  printf("root vulnerability curves are their closed forms past the curve (#85)\n");
   phylloptim::MultiLayerRoots r;
-  r.setup_vulnerability(100);
-  const double last_knot = r.root_vuln_from_psi.max();
+  r.setup_vulnerability(phylloptim::Leaf::ncontrol_default);
   const double G_inf =
       phylloptim::cumulative_vulnerability_integral_limit(r.root_b, r.root_c);
 
-  // On the grid the accessors ARE the bare splines, bit for bit. That is what
-  // makes this fix golden-identical rather than merely golden-tolerable.
-  for (double psi : {0.0, 0.5, 2.0, 4.0, 6.0}) {
-    const std::string at = " at psi=" + std::to_string(psi);
-    ok(r.root_vuln_at(psi) == r.root_vuln_from_psi.eval(psi),
-       "f_r is the unmodified spline on the grid" + at);
-    ok(r.root_vuln_integral_at(psi) == r.root_vuln_integral_from_psi.eval(psi),
-       "G is the unmodified spline on the grid" + at);
-  }
-
-  // Past it, both stay in range and neither runs away.
-  double prev_G = r.root_vuln_integral_at(last_knot);
-  for (double psi : {7.0, 7.5, 8.0, 10.0, 100.0, 1000.0}) {
+  double prev_G = 0.0;
+  for (double psi : {0.5, 2.0, 4.0, 6.0, 7.0, 7.5, 8.0, 10.0, 30.0, 100.0, 1000.0}) {
     const std::string at = " at psi=" + std::to_string(psi);
     const double f_r = r.root_vuln_at(psi);
     const double G = r.root_vuln_integral_at(psi);
-    ok(f_r > 0.0 && f_r <= r.root_vuln_at(last_knot),
-       "f_r stays positive and does not exceed the last knot" + at);
+    ok(f_r == std::exp(-std::pow(psi / r.root_b, r.root_c)),
+       "f_r is the closed form" + at);
+    near(G, phylloptim::cumulative_vulnerability_integral_at(psi, r.root_b, r.root_c),
+         1e-13, "G is the closed form" + at);
     ok(G >= prev_G && G <= G_inf, "G is monotone and at most G(inf)" + at);
+    near(r.root_vuln_integral_deriv_at(psi), f_r, 1e-10,
+         "dG/dpsi is f_r" + at);
     prev_G = G;
   }
-  near(r.root_vuln_integral_at(1000.0), G_inf, 1e-12,
-       "G saturates at its closed form (b/c)*Gamma(1/c)");
-
-  // dG/dpsi has to agree with that: zero where the value is pinned, f_r where
-  // it is not. duptake_dpsi differentiates the integral through this.
-  ok(r.root_vuln_integral_deriv_at(1000.0) == 0.0,
-     "dG/dpsi is zero where G is at its limit");
-  near(r.root_vuln_integral_deriv_at(4.0),
-       std::exp(-std::pow(4.0 / r.root_b, r.root_c)), 1e-4,
-       "dG/dpsi is f_r inside the grid");
-
-  // The wet end throws too, and MultiLayerRoots validates nothing it is handed.
-  // NaN has to come back out for the caller's !isfinite(f_ri) guard to read it.
-  ok(r.root_vuln_at(-0.5) == r.root_vuln_at(0.0),
-     "a negative suction reads as the wet end");
+  ok(r.root_vuln_integral_at(1000.0) == G_inf, "G is G(inf) past the end of the curve");
+  ok(r.root_vuln_at(-0.5) == 1.0, "a negative suction reads as the wet end");
   ok(std::isnan(r.root_vuln_at(std::numeric_limits<double>::quiet_NaN())),
-     "and a NaN suction survives both clamps");
+     "and a NaN suction comes back NaN");
+
+  // A fully embolised layer: f_r underflows to zero far past the curve (above
+  // ~46 MPa at the defaults). At equal potentials the flux was -z / (r_H / f_r),
+  // a division by zero that the walk refused; multiplied through, the layer
+  // draws exactly nothing, which is the limit as f_r -> 0.
+  {
+    ok(r.root_vuln_at(60.0) == 0.0, "f_r is exactly zero at 60 MPa");
+    r.set_soil_state(std::vector<double>{60.0}, std::vector<double>{1.0});
+    phylloptim::RootNetwork n;
+    n.r_R_H_min = {1.0};
+    n.r_R_V_sum = {0.1};
+    n.c_r_V = {1.0};
+    n.c_r_H = {1.0};
+    n.r_R_V = {0.1};
+    r.set_root_network(n);
+    r.begin_solve();
+    std::vector<double> consumption(1, 1.0);
+    double E_up = 1.0;
+    bool threw = false;
+    try {
+      r.uptake(60.0, consumption, E_up);
+    } catch (const std::exception&) {
+      threw = true;
+    }
+    ok(!threw && consumption[0] == 0.0 && E_up == 0.0,
+       "a fully embolised layer at the collar's potential draws nothing (#85)");
+  }
 
   // The live consequence. One rooted layer, unit horizontal resistance and no
   // vertical resistance, collar held at 1 MPa: the layer is drier, so it GAINS
@@ -1445,9 +1491,9 @@ void test_root_vulnerability_is_bounded_past_its_grid() {
        "a tenfold drier layer does not become a stronger pump");
 }
 
-// The rows past the dry end are the rows of what the table returns there: the
-// last knot's tangent up to G(inf), then G(inf) itself. A long drought puts soil
-// layers at 7-30 MPa, so the derivative path reads these as often as the forward.
+// The rows far along the curve are the closed form's, as everywhere: G heading to
+// G(inf), then G(inf) itself. A long drought puts soil layers at 7-30 MPa, so the
+// derivative path reads these as often as the forward.
 void test_root_rows_past_the_dry_end_match_the_table() {
   printf("root rows past the dry end match the table's differences\n");
   using AD = xad::fwd<double>::active_type;
@@ -1516,13 +1562,12 @@ void test_root_rows_past_the_dry_end_match_the_table() {
   }
 }
 
-// The stem table reads the closed form past its last knot (#157), so its rows
-// there are the closed form's, not the root table's held-knot rows. Both curves
-// share closed_form_rows.hpp, so this is the half the root test above cannot see.
+// The stem's rows far along the curve and past its end are the closed form's.
+// Both curves share closed_form_rows.hpp, so this is the half the root test above
+// cannot see.
 void test_stem_rows_past_the_dry_end_are_the_closed_forms() {
-  printf("stem rows past the dry end are the closed form's\n");
+  printf("stem rows far along the curve are the closed form's\n");
   using AD = xad::fwd<double>::active_type;
-  using phylloptim::PastLastKnot;
   const double P50 = 3.4287, c = 2.680147;
   const auto G = [](double psi, double P50_, double c_) {
     return phylloptim::cumulative_vulnerability_integral_at(
@@ -1531,9 +1576,9 @@ void test_stem_rows_past_the_dry_end_are_the_closed_forms() {
   const auto f = [](double psi, double P50_, double c_) {
     return std::exp(-std::pow(psi / phylloptim::weibull_b_from_P50(P50_, c_), c_));
   };
-  const double end = phylloptim::vulnerability_psi_max(
-      phylloptim::weibull_b_from_P50(P50, c), c);
-  for (double psi : {end * 1.05, end * 1.3}) {
+  const double p99 = phylloptim::weibull_b_from_P50(P50, c) *
+                     std::pow(std::log(100.0), 1.0 / c);
+  for (double psi : {p99 * 1.05, p99 * 1.3, p99 * 2.0}) {
     const double h = 1e-6;
     const double want_G[2] = {(G(psi, P50 + h, c) - G(psi, P50 - h, c)) / (2 * h),
                               (G(psi, P50, c + h) - G(psi, P50, c - h)) / (2 * h)};
@@ -1545,19 +1590,13 @@ void test_stem_rows_past_the_dry_end_are_the_closed_forms() {
       const std::string at = std::string(" d/d") + (k == 0 ? "stem_P50" : "stem_c") +
                              " at psi=" + std::to_string(psi);
       const AD g = phylloptim::closed_form_integral<AD>(
-          G(psi, P50, c), f(psi, P50, c), AD(psi), a_P50, a_c,
-          PastLastKnot::ReadsClosedForm);
+          G(psi, P50, c), f(psi, P50, c), AD(psi), a_P50, a_c);
       near(xad::derivative(g), want_G[k], 1e-6 * std::abs(want_G[k]) + 1e-9,
            "G's row is the closed form's" + at);
       const AD fc = phylloptim::closed_form_curve<AD>(
-          f(psi, P50, c), AD(psi), a_P50, a_c, PastLastKnot::ReadsClosedForm);
+          f(psi, P50, c), AD(psi), a_P50, a_c);
       near(xad::derivative(fc), want_f[k], 1e-6 * std::abs(want_f[k]) + 1e-12,
            "f's row is the closed form's" + at);
-      ok(want_f[k] != 0.0 &&
-             xad::derivative(phylloptim::closed_form_curve<AD>(
-                 f(psi, P50, c), AD(psi), a_P50, a_c, PastLastKnot::HoldsLastKnot)) ==
-                 0.0,
-         "a held knot has no row there, so the tail decides" + at);
     }
   }
 }
@@ -3758,9 +3797,9 @@ void test_root_network_template_is_the_double_overload() {
 }
 
 // G^-1 is Newton on the forward table with a fixed iteration cap and a
-// hard-coded acceptance test, so it is checked as a round trip: psi -> G(psi)
-// -> G^-1 -> psi', fast path and converged, over the whole table at both knot
-// counts, rescaled by perturb_stem_P50, and past the last knot. The accuracy
+// predicted-error acceptance test, so it is checked as a round trip: psi -> G(psi)
+// -> G^-1 -> psi', over the whole curve at two knot counts, and with stem_b moved
+// by perturb_stem_P50. The accuracy
 // that can be asked of an inverse is its conditioning, eps * w / G'(psi), so
 // the error is read in those units; the residual in G must be rounding.
 void test_stem_curve_inverse_round_trips() {
@@ -3783,20 +3822,15 @@ void test_stem_curve_inverse_round_trips() {
     if (cross > worst_cross) { worst_cross = cross; cross_at = at; }
     ++compared;
   };
-  for (int n : {100, 400}) {
+  for (int n : {100, 800}) {
     phylloptim::Leaf l;
     l.setup_transpiration(n);
-    const double end = phylloptim::vulnerability_psi_max(l.stem_b, l.stem_c);
+    const double end = phylloptim::vulnerability_psi_end(l.stem_b, l.stem_c);
     for (int i = 0; i <= 1000; ++i) {
       check(l, end * i / 1000.0, " at n=" + std::to_string(n) + " psi=" +
                                      std::to_string(end * i / 1000.0));
     }
-    // Past the last knot, the closed form's inverse.
-    for (double psi : {end * 1.01, end * 1.3, end * 2.0}) {
-      check(l, psi, " past the grid at n=" + std::to_string(n) + " psi=" +
-                        std::to_string(psi));
-    }
-    // Rescaled through the homogeneity identity rather than rebuilt.
+    // With stem_b moved: the table is the same table, read at psi/b.
     l.perturb_stem_P50(l.stem_P50 * 1.3);
     for (int i = 1; i <= 100; ++i) {
       check(l, end * i / 100.0, " rescaled at n=" + std::to_string(n) + " psi=" +
@@ -3806,7 +3840,7 @@ void test_stem_curve_inverse_round_trips() {
   printf("    %d points | worst %.3g x conditioning, residual %.3g, fast-vs-full %.3g "
          "x conditioning\n",
          compared, worst_cond, worst_res, worst_cross);
-  ok(compared == 2208, "every point of the round trip was compared");
+  ok(compared == 2202, "every point of the round trip was compared");
   ok(worst_cond <= 8.0, "the inverse is within 8 units of its conditioning; worst" +
                             cond_at);
   ok(worst_res <= 4.0 * eps, "the residual in G is rounding; worst" + res_at);
@@ -3817,10 +3851,10 @@ void test_stem_curve_inverse_round_trips() {
 // The stem conductivity carries the TABLE's value and the CURVE's rows
 // (closed_form_rows.hpp), so its P50 row is not the table's own response to P50:
 // the two differ by the P50-derivative of the fit error. That difference is
-// bounded here, as the worst |closed-form row - table row| over the in-grid range,
-// scaled by the largest row, with the table row a central difference of tables
-// rebuilt at P50 +/- h. It must shrink as the knots refine (the table's order),
-// which is the evidence that it is the fit and not a wrong row.
+// bounded here, as the worst |closed-form row - table row| from 0 to P99, scaled
+// by the largest row, with the table row a central difference of leaves at
+// P50 +/- h. It must shrink as the knots refine (the table's order), which is the
+// evidence that it is the fit and not a wrong row.
 void test_conductivity_row_against_the_tables_own() {
   printf("the conductivity's P50 row against the table's own response\n");
   using AD = xad::fwd<double>::active_type;
@@ -3837,8 +3871,8 @@ void test_conductivity_row_against_the_tables_own() {
     return l;
   };
   double worst[2] = {0.0, 0.0};
-  const int knots[2] = {100, 400};
-  // Measured 1.54e-4 and 9.57e-6; each bound is ~3x its figure.
+  const int knots[2] = {100, 800};
+  // Measured BOUND_MEASURED; each bound is ~3x its figure.
   const double bound[2] = {5e-4, 3e-5};
   for (int k = 0; k < 2; ++k) {
     const int n = knots[k];
@@ -3846,15 +3880,14 @@ void test_conductivity_row_against_the_tables_own() {
     const double P50 = l.stem_P50, c = l.stem_c;
     const double h = 1e-5 * P50;
     phylloptim::Leaf up = leaf_at(P50 + h, n), down = leaf_at(P50 - h, n);
-    const double end = phylloptim::vulnerability_psi_max(l.stem_b, c);
+    const double end = l.stem_b * std::pow(std::log(100.0), 1.0 / c);
     double worst_abs = 0.0, largest = 0.0;
     for (int i = 1; i < 1000; ++i) {
       const double psi = end * i / 1000.0;
       AD a_P50 = P50, a_c = c;
       xad::derivative(a_P50) = 1.0;
       const double row = xad::derivative(phylloptim::closed_form_curve<AD>(
-          l.stem_curve_integral_deriv(psi), AD(psi), a_P50, a_c,
-          phylloptim::PastLastKnot::ReadsClosedForm));
+          l.stem_curve_integral_deriv(psi), AD(psi), a_P50, a_c));
       const double table = (up.stem_curve_integral_deriv(psi) -
                             down.stem_curve_integral_deriv(psi)) / (2.0 * h);
       worst_abs = std::max(worst_abs, std::abs(row - table));
@@ -4502,19 +4535,19 @@ void test_supplied_rows_match_a_resolve_at_every_kind() {
     double g_min = 0.0;
   };
   // Golden-grid drivers: layers 0.25 MPa apart; the pinned rows test-gradient.R
-  // names, the transpose test's root-limit point, a leaf in the dark (a net
-  // source sitting on its wet bound, with a cuticle so the bound is a regular
-  // point: at g_min = 0 the solve steps 1e-6 of the bracket inside it, and a
-  // difference of the solve then measures that step), a shut leaf, and an
-  // interior control.
+  // names, a leaf in the dark (a net source sitting on its wet bound, with a
+  // cuticle so the bound is a regular point: at g_min = 0 the solve steps 1e-6
+  // of the bracket inside it, and a difference of the solve then measures that
+  // step), a soil dry enough that the leaf transpires all its stem can carry (a
+  // dry pin at the end of the stem curve, #183), a soil past the end of the
+  // curve (shut), and an interior control.
   const std::vector<Fixture> fixtures{
       {{1.0, 1.25}, 1500.0, 2.0, 0.0, Kind::Interior},
       {{4.0, 4.25, 4.5, 4.75, 5.0}, 900.0, 2.0, 0.0, Kind::BoundarySoil},
       {{3.0, 3.25, 3.5}, 900.0, 4.0, 0.0, Kind::BoundarySoil},
-      {{4.0, 4.25, 4.5}, 900.0, 0.5, 0.0, Kind::BoundaryCrit},
-      {{2.0}, 900.0, 2.0, 1.2, Kind::BoundaryRootCrit},
+      {{6.0}, 500.0, 0.5, 0.0, Kind::BoundaryDry},
       {{1.0}, 1.0, 2.0, 0.0, Kind::BoundarySoil, 5e-4},
-      {{6.0, 6.25, 6.5}, 900.0, 2.0, 0.0, Kind::HydraulicShutdown}};
+      {{16.0, 16.25, 16.5}, 900.0, 2.0, 0.0, Kind::HydraulicShutdown}};
   const std::vector<int> pars{
       pl::par_vcmax_25, pl::par_stem_c, pl::par_stem_P50, pl::par_root_c,
       pl::par_root_P50, pl::par_TF24_beta2, pl::par_jmax_25, pl::par_phi_J,
@@ -4777,7 +4810,7 @@ void test_a_replay_hands_over_the_rows_its_solve_did() {
           const auto kind = fresh.operating_point_kind();
           if (kind != phylloptim::Leaf::OperatingPointKind::Interior &&
               kind != phylloptim::Leaf::OperatingPointKind::BoundarySoil &&
-              kind != phylloptim::Leaf::OperatingPointKind::BoundaryCrit) {
+              kind != phylloptim::Leaf::OperatingPointKind::BoundaryDry) {
             continue;
           }
           ++seen[phylloptim::Leaf::operating_point_kind_name(kind)];
@@ -4797,8 +4830,8 @@ void test_a_replay_hands_over_the_rows_its_solve_did() {
       }
     }
   }
-  printf("       (%d rows; interior %d, boundary-soil %d, boundary-crit %d points)\n",
-         compared, seen["interior"], seen["boundary-soil"], seen["boundary-crit"]);
+  printf("       (%d rows; interior %d, boundary-soil %d, boundary-dry %d points)\n",
+         compared, seen["interior"], seen["boundary-soil"], seen["boundary-dry"]);
   ok(seen["interior"] > 0 && seen["boundary-soil"] > 0,
      "the grid reaches an interior point and a wet bound (test is not vacuous)");
   ok(differ == 0, "every replayed collar and row equals its solve's, bit for bit");
@@ -5017,14 +5050,18 @@ void test_held_coordinates_are_refused_off_their_point() {
   (void)collar;
 }
 
-void test_the_dry_end_reports_which_bound_closed_it() {
-  printf("the dry end reports which of its two bounds closed it\n");
+// The root's critical potential bounds nothing (#183). It used to clamp the
+// collar's dry end, and at the default traits it tied with the stem's, so every
+// shutdown sat on a kink in the stem and root traits. Lowering root_P50 used to
+// pin the collar at the root's psi_crit; now the collar runs past it.
+void test_the_root_critical_potential_bounds_nothing() {
+  printf("the root's critical potential bounds nothing (#183)\n");
   using Kind = phylloptim::Leaf::OperatingPointKind;
   Drivers d;
   const std::vector<double> psi_soil{2.0}, depth{1.0};
   const std::vector<double> mrp(psi_soil.size(),
                                1.0 / double(psi_soil.size()) / d.area_leaf);
-  int continuity = 0, root_limit = 0;
+  int past = 0, solved = 0;
   for (double root_P50 : {3.4, 2.0, 1.2, 0.9, 0.7, 0.5, 0.3}) {
     phylloptim::Leaf l = make_leaf(d, psi_soil, depth);
     l.set_traits(96.0, 2.680147, 3.4, 2.680147, root_P50, 1.5, 157.44, 0.30 / 0.85, 0.7,
@@ -5034,26 +5071,16 @@ void test_the_dry_end_reports_which_bound_closed_it() {
                      d.atm_o2_kpa, d.atm_kpa);
     l.find_root_collar_psi();
     const Kind kind = l.operating_point_kind();
-    const std::string at = " at root_P50=" + std::to_string(root_P50);
-    if (kind == Kind::BoundaryCrit) {
-      ++continuity;
-    } else if (kind == Kind::BoundaryRootCrit) {
-      ++root_limit;
-      // The collar IS the root's critical potential on this arm, which is what
-      // distinguishes it from the continuity root beside it.
-      near(l.opt_root_psi_, l.roots_.root_psi_crit, 1e-9,
-           "the collar is the root's critical potential" + at);
+    if (kind == Kind::Interior || kind == Kind::BoundarySoil || kind == Kind::BoundaryDry) {
+      ++solved;
     }
+    if (l.opt_root_psi_ > l.roots_.root_psi_crit) ++past;
     printf("    root_P50=%4.2f  root_psi_crit=%7.4f  collar=%7.4f  %s\n", root_P50,
            l.roots_.root_psi_crit, l.opt_root_psi_,
            l.operating_point_kind_name(kind));
   }
-  // The arm this exists for. The continuity arm is covered where it occurs
-  // naturally -- the golden grid pins 18 of them at 25 C and none at 40 C, and
-  // now pins this arm at zero over the same grid, which is the pair of counts
-  // that says the two are told apart rather than merged.
-  ok(root_limit > 0, "the sweep reached the root-limit arm");
-  (void)continuity;
+  ok(solved == 7, "every root curve solves to an ordinary kind");
+  ok(past > 0, "and the collar runs past the root's critical potential");
 }
 
 void test_rd_temperature_response() {
@@ -5386,8 +5413,8 @@ void test_stem_curve_shortcut_needs_no_rebuild() {
     ok(l.stem_curve_builds_ == builds,
        "three observations rebuild the stem curve zero times" + what);
     // Hazard 8, at the one place a shortcut could leave it violated: the batch
-    // must not hand back a leaf quietly running on a rescaled curve.
-    ok(l.stem_b == l.stem_b_spline_,
+    // must not hand back a leaf whose stem_b is a perturbed one.
+    ok(l.stem_b == phylloptim::weibull_b_from_P50(l.stem_P50, l.stem_c),
        "the batch leaves the leaf undisplaced" + what);
   }
 
@@ -5704,63 +5731,47 @@ void test_gas_constant_and_arrhenius_reference_point() {
   ok(warm.R_d_ > ref.R_d_, "respiration is higher at 40 C than at 25 C");
 }
 
+// The table's knot grid: indexed, not accumulated (#92), so it has the knots it
+// was asked for and its last one is the end of the curve exactly, where G is
+// G(inf). A last knot one ulp short would leave a read at the end of the curve
+// to the polynomial rather than the limit.
 void test_knot_grid_reaches_its_intended_domain() {
   printf("vulnerability knot grid\n");
   const double resolutions[] = {10.0, 50.0, 100.0, 200.0, 1000.0};
-  int wrong_count = 0, wrong_end = 0, not_increasing = 0, cases = 0;
-  double worst_end_rel = 0.0;
+  int wrong_end = 0, not_increasing = 0, wrong_limit = 0, cases = 0;
   for (double res : resolutions) {
-    for (int bi = 1; bi <= 60; ++bi) {
-      for (double c : {0.4, 1.0, 2.04, 2.680147, 6.0, 12.0}) {
-        const double b = bi / 10.0;
-        std::vector<double> x, y;
-        phylloptim::cumulative_vulnerability_integral(b, c, res, x, y);
-        ++cases;
-        // ⚠️ BIT-EXACT on the endpoint, not `near`. The whole defect was an
-        // endpoint that was *close* to vulnerability_psi_max and not equal to it,
-        // and both splines built from this grid disable extrapolation -- so a
-        // last knot one ULP short is the difference between a lookup at
-        // vulnerability_psi_max working and throwing. A tolerance here would pass
-        // on the code this test exists to reject.
-        const double want_end = phylloptim::vulnerability_psi_max(b, c);
-        if (x.size() != static_cast<std::size_t>(res) + 1) ++wrong_count;
-        if (x.back() != want_end) {
-          ++wrong_end;
-          worst_end_rel = std::max(worst_end_rel,
-                                   std::abs(x.back() - want_end) / want_end);
-        }
-        if (x.size() != y.size()) ++not_increasing;
-        for (std::size_t i = 1; i < x.size(); ++i) {
-          if (!(x[i] > x[i - 1])) { ++not_increasing; break; }
-        }
+    for (double c : {0.4, 1.0, 2.04, 2.680147, 6.0, 12.0}) {
+      const auto t = phylloptim::vulnerability_table(c, res, nullptr);
+      ++cases;
+      const std::size_t n = static_cast<std::size_t>(res);
+      if (t->intervals() != n) ++wrong_end;
+      if (t->u_at(n) != std::pow(phylloptim::vulnerability_x_end, 1.0 / c)) ++wrong_end;
+      if (t->g_at(n) != t->G_inf_over_b()) ++wrong_limit;
+      for (std::size_t i = 1; i <= n; ++i) {
+        if (!(t->g_at(i) > t->g_at(i - 1))) { ++not_increasing; break; }
       }
     }
   }
-  ok(cases == 1800, "the sweep ran the grid it meant to");
-  ok(wrong_count == 0,
-     "every grid has exactly resolution + 1 knots (" +
-         std::to_string(wrong_count) + " of " + std::to_string(cases) + " did not)");
-  ok(wrong_end == 0,
-     "every grid ends exactly at vulnerability_psi_max (" +
-         std::to_string(wrong_end) + " did not; worst rel " +
-         std::to_string(worst_end_rel) + ")");
-  ok(not_increasing == 0, "every grid is strictly increasing and paired with its y");
+  ok(cases == 30, "the sweep ran the grid it meant to");
+  ok(wrong_end == 0, "every table has its intervals and ends at the end of the curve (" +
+                         std::to_string(wrong_end) + " did not)");
+  ok(wrong_limit == 0, "and its last knot is G(inf) (" + std::to_string(wrong_limit) +
+                           " was not)");
+  ok(not_increasing == 0, "g is strictly increasing along every grid");
 
-  // A resolution below one control point is refused by name rather than reaching
-  // the interpolator, which used to report it as its own domain problem.
+  // A resolution below one interval is refused by name.
   const std::string msg = message_of(
-      [] { std::vector<double> x, y;
-           phylloptim::cumulative_vulnerability_integral(3.9, 2.7, 0.0, x, y); });
+      [] { phylloptim::vulnerability_table(2.7, 0.0, nullptr); });
   ok(mentions(msg, "resolution"), "resolution < 1 is refused by name");
 }
 
-// psi_crit against the domain stem_P50/stem_c set. This USED to be a validation
-// problem: psi_crit was a free trait, the stem curve's knot grid stops at P99, and
-// every solve evaluates that curve AT psi_crit -- so an inconsistent pair failed
-// from inside the interpolator in a message naming neither trait.
+// psi_crit against the curve stem_P50/stem_c set. This USED to be a validation
+// problem: psi_crit was a free trait, the stem curve's knot grid stopped at P99,
+// and every solve evaluated that curve AT psi_crit -- so an inconsistent pair
+// failed from inside the interpolator in a message naming neither trait.
 //
-// It is now a structural guarantee. psi_crit is the 5%-conductivity quantile of
-// the same curve, so containment reduces to log(20) < log(100) and holds for every
+// It is a structural guarantee. psi_crit is the 5%-conductivity quantile of the
+// same curve, so containment reduces to log(20) < x_end = 40 and holds for every
 // c > 0. What is asserted here is that the code realises that algebra: the
 // combination the old check refused now constructs, and the derived value is the
 // quantile it claims to be.
@@ -5775,9 +5786,9 @@ void test_psi_crit_lies_inside_the_stem_curve_domain() {
       ++cases;
       const double b = P50 / std::pow(std::log(2.0), 1.0 / c);
       const double psi_crit = b * std::pow(std::log(1.0 / 0.05), 1.0 / c);
-      const double p99 = phylloptim::vulnerability_psi_max(b, c);
-      if (!(psi_crit < p99)) ++outside;
-      worst_ratio = std::max(worst_ratio, psi_crit / p99);
+      const double end = phylloptim::vulnerability_psi_end(b, c);
+      if (!(psi_crit < end)) ++outside;
+      worst_ratio = std::max(worst_ratio, psi_crit / end);
     }
   }
   ok(cases == 30, "the containment sweep ran the grid it meant to");
@@ -5786,7 +5797,7 @@ void test_psi_crit_lies_inside_the_stem_curve_domain() {
          std::to_string(outside) + " of " + std::to_string(cases) + " were not)");
   // Ratio-of-quantiles, so it is the same number at every c: it is what the
   // margin IS, not a sampled worst case.
-  printf("  worst psi_crit / P99 over the grid: %.6f\n", worst_ratio);
+  printf("  worst psi_crit / end of the curve over the grid: %.6f\n", worst_ratio);
 
   // Sabot et al. (2022) P50/P88 territory -- the pair the old check refused,
   // because a psi_crit chosen as though it were free landed past this curve's
@@ -5934,11 +5945,12 @@ void test_out_of_domain_names_the_spline() {
   phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
 
   // Forward direction, below the near end of the vulnerability curve. Past the
-  // FAR end reads the closed form, which test_stem_curve_past_its_grid covers.
+  // FAR end G is G(inf), which test_vulnerability_table covers.
   // The upstream potential is below the stem's too, so the pair is not a
   // reversed gradient and the lookup is what refuses.
   const std::string fwd = message_of([&] { l.transpiration(-1.0, -2.0); });
-  ok(mentions(fwd, "transpiration_from_psi"), "forward lookup names its spline");
+  ok(mentions(fwd, "cumulative xylem conductivity integral G (psi"),
+     "forward lookup names its curve");
   ok(mentions(fwd, "psi = -1"), "forward lookup reports the point");
   ok(mentions(fwd, "beyond the lower end"), "forward lookup reports which end");
   ok(mentions(fwd, "Leaf::transpiration"), "forward lookup names the caller");
@@ -9911,7 +9923,7 @@ void sweep_kinks(const std::vector<double> &x, const std::vector<SweepPoint> &o,
   for (size_t i = 1; i < d1.size(); ++i) {
     // the triple (i-1, i, i+1) of points
     const std::string &k0 = o[i - 1].kind, &k1 = o[i].kind, &k2 = o[i + 1].kind;
-    const bool corner = k0 != k1 || k1 != k2 || k1 == "boundary-crit" || k1 == "boundary-root-crit";
+    const bool corner = k0 != k1 || k1 != k2 || k1 == "boundary-dry";
     if (corner) { ++excluded; continue; }
     const double k = std::abs(d1[i] - d1[i - 1]) / mx;
     if (!std::isfinite(k)) continue;
@@ -10324,7 +10336,7 @@ int main() {
   test_collar_argmax_is_smooth_in_a_trait();
   test_outputs_agree_with_the_solve();
   test_soil_conductance_is_positive();
-  test_root_vulnerability_is_bounded_past_its_grid();
+  test_root_vulnerability_closed_form_past_the_curve();
   test_root_rows_past_the_dry_end_match_the_table();
   test_stem_rows_past_the_dry_end_are_the_closed_forms();
   test_root_psi_crit_clamp_binds();
@@ -10371,7 +10383,7 @@ int main() {
   test_temperature_parameters_are_settable();
   test_temperature_params_invalidate_cache();
   test_rd_temperature_response();
-  test_the_dry_end_reports_which_bound_closed_it();
+  test_the_root_critical_potential_bounds_nothing();
   test_pack_kernels_are_the_models_own();
   test_light_reaches_carbon_with_a_row();
   test_every_answered_point_hands_over_finite_rows();
@@ -10393,7 +10405,7 @@ int main() {
   test_gas_constant_and_arrhenius_reference_point();
   test_knot_grid_reaches_its_intended_domain();
   test_psi_crit_lies_inside_the_stem_curve_domain();
-  test_stem_curve_past_its_grid();
+  test_vulnerability_table();
   test_bad_input_throws();
   test_infeasible_is_a_distinct_failure();
   test_out_of_domain_names_the_spline();
