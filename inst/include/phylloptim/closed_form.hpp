@@ -643,10 +643,15 @@ inline Solution solve_TF24_floor(Leaf &l, double psi_upstream,
 // means "outside the expansion, fall back to the exact solve"; a `true` never
 // means "the answer is right". That is why the energy-balance refusal is a stop in
 // the solvers and not a case here.
+// The window's dry edge is where the Newton step clamps, psi_crit (1 - 1e-9),
+// so an answer there is a clamp and not an optimum: handed back too (measured,
+// at psi_soil 5 and VPD 0.5 the clamp was served at psi_crit while the exact
+// optimum, unbounded under TF24, lay at 11.4 MPa: A 24% short).
 inline bool within_guard(const Leaf &l, const Solution &s) {
   return std::isfinite(s.psi_stem) && std::isfinite(s.ci) &&
          std::isfinite(s.assim) && s.ci / l.ca_ > 0.5 &&
-         s.psi_stem > l.supply_psi_soil_scalar() && s.psi_stem < l.psi_crit;
+         s.psi_stem > l.supply_psi_soil_scalar() &&
+         s.psi_stem < l.psi_crit * (1.0 - 1e-9);
 }
 
 // ---------------------------------------------------------------------------

@@ -344,7 +344,12 @@ void check_solved(pl::Leaf l, const std::string& at, unsigned long seed) {
     ++seen_shut;
   }
   if (l.g_min > 0.0) ++seen_residual;
-  ok(moved > kControlFloor,
+  // Except at a shutdown: under a curve psi_crit does not bound, a leaf shuts
+  // only where its stem can carry nothing the curve resolves (#183), so nothing
+  // the outputs read depends on where its collar sits.
+  const bool nothing_moves =
+      l.operating_point_kind() == pl::Leaf::OperatingPointKind::HydraulicShutdown;
+  ok(nothing_moves || moved > kControlFloor,
      "CONTROL: holding the collar must change the answer where it is placed "
      "by a rule -- kind=" +
          std::string(l.operating_point_kind_name(l.operating_point_kind())) +

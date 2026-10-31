@@ -2338,6 +2338,11 @@ public:
                             bool first_bracket = false);
   // Move the bracket's dry end from psi_crit to the end of the stem curve.
   double extend_collar_bracket(double bound_a);
+  // At a dry pin of a curve psi_crit does not bound, the stem is held at the end
+  // of its curve, which carries the uptake (G(inf) - G(collar), to the
+  // continuity root's precision): seat it there, rather than where the inverse
+  // lands, which is anywhere G rounds to G(inf). Returns whether it did.
+  template <CostCurve K> bool seat_stem_at_dry_pin();
   // Evaluate the leaf at a *given* root-collar potential (positive magnitude)
   // rather than optimising it: reuses prepare_collar_solve, clamps the target to
   // the feasible interval, and evaluates there (no golden-section search). Leaves
@@ -2970,6 +2975,8 @@ public:
   // end of the stem curve, b x_end^(1/c), for every other.
   template <CostCurve K, class S>
   S dry_end_at(const leaf_pars<S>& pars) const;
+  template <class S>
+  S stem_curve_end_at(const leaf_pars<S>& pars) const;
 
   // The objective at a placed operating point, and everything plant reads.
   //
@@ -4827,6 +4834,19 @@ inline bool Leaf::prepare_collar_solve(double& bound_a, double& bound_b,
   return true;
 }
 
+template <Leaf::CostCurve K>
+inline bool Leaf::seat_stem_at_dry_pin() {
+  if constexpr (cost_domain_ends_at_psi_crit<K>()) {
+    return false;
+  } else {
+    if (operating_point_kind_ != OperatingPointKind::BoundaryDry) {
+      return false;
+    }
+    opt_psi_stem_ = vulnerability_psi_end(stem_b, stem_c);
+    return true;
+  }
+}
+
 inline double Leaf::extend_collar_bracket(double bound_a) {
   const double end = vulnerability_psi_end(stem_b, stem_c);
   dry_end_ = end;
@@ -5154,6 +5174,7 @@ inline void Leaf::find_root_collar_psi_for(){
     const double opt_root_psi = maximise_profit_over_collar<K>(bound_a, bound_b);
 
     opt_psi_stem_ = find_psi_stem_from_psi_root(opt_root_psi, supply_psi_soil());
+    seat_stem_at_dry_pin<K>();
 
     opt_root_psi_ = opt_root_psi;
     // ⚠️ `<K>`, NOT TF24. This read TF24's objective for every curve after the
@@ -5312,6 +5333,11 @@ inline double Leaf::replay_operating_point_for(double collar,
                                     std::max(bound_b, collar));
     }
     operating_point_kind_ = kind;
+    if (seat_stem_at_dry_pin<K>()) {
+      profit_ = profit_psi_stem_for<K>(opt_psi_stem_, opt_root_psi_);
+      lambda_emergent_ = lambda_collar_for<K>();
+      out = profit_;
+    }
     return out;
 }
 
@@ -5392,8 +5418,17 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
     *feasible = false;
   }
 
-  // Operating point in double.
-  const double psi_stem = find_psi_stem_from_psi_root(psi, supply_psi_soil());
+  // Operating point in double. Past the continuity root with the stem at the
+  // end of its curve the soil delivers more than the stem can carry at any
+  // potential: no operating point, and so no gradient -- reachable by a caller
+  // differencing across a dry pin, as the gradient's own stationarity check
+  // does. Reported like the other no-gradient exits rather than thrown.
+  E_from_Soil_to_Root_Collar(psi, supply_psi_soil());
+  if (!(E_up_ / leaf_specific_conductance_max_ + stem_curve_integral(psi) <=
+        stem_curve_limit() * (1.0 + 16.0 * std::numeric_limits<double>::epsilon()))) {
+    return 0.0;
+  }
+  const double psi_stem = transpiration_to_psi_stem(E_up_, psi);
   // Shut down before the ci solve, not after. psi and psi_stem are both positive
   // magnitudes here, so psi >= psi_stem is the no-flow / reversed-gradient case --
   // the same condition set_leaf_states_rates_from_psi_stem treats as zero
@@ -7722,15 +7757,25 @@ inline void Leaf::held_coords_at(double sigma_star, double ci_star,
   // MUST BE IN THIS LIST -- one left out is a row that never arrives, which
   // reads as an exact zero in that column rather than as an error. `held` is
   // to_passive and carries none.
-  sigma_h = odelia::implicit_value<S>(
-      sigma_star, dT1_dsigma,
-      [&](const S& sg) -> S {
-        return pars[par_kmax] *
-                   (leaf.template stem_integral_at<S>(sg, pars) -
-                    leaf.template stem_integral_at<S>(held, pars)) -
-               draw.flux.value;
-      },
-      pars, draw.flux.value);
+  //
+  // At a dry pin at the end of the stem curve the stem is HELD there
+  // (seat_stem_at_dry_pin), so sigma is that end as a function of the traits,
+  // not the root of T1: T1's slope there is kmax e^-40, and dividing by it hands
+  // over amplified rounding (measured: forward and reverse disagreed by 0.4%).
+  if (operating_point_kind_ == OperatingPointKind::BoundaryDry &&
+      sigma_star == vulnerability_psi_end(stem_b, stem_c)) {
+    sigma_h = stem_curve_end_at<S>(pars);
+  } else {
+    sigma_h = odelia::implicit_value<S>(
+        sigma_star, dT1_dsigma,
+        [&](const S& sg) -> S {
+          return pars[par_kmax] *
+                     (leaf.template stem_integral_at<S>(sg, pars) -
+                      leaf.template stem_integral_at<S>(held, pars)) -
+                 draw.flux.value;
+        },
+        pars, draw.flux.value);
+  }
 
   // The stem's flux at the placed sigma. gc is built from THIS, not from the
   // draw, because that is what the model's ci solve reads -- the two agree only
@@ -7882,14 +7927,19 @@ inline S Leaf::psi_crit_at(const leaf_pars<S>& pars) const {
   return b * pow(S(std::log(1.0 / k_crit_fraction)), 1.0 / c);
 }
 
+template <class S>
+inline S Leaf::stem_curve_end_at(const leaf_pars<S>& pars) const {
+  const S& c = pars[par_stem_c];
+  const S b = phylloptim::weibull_b_from_P50<S>(pars[par_stem_P50], c);
+  return b * pow(S(vulnerability_x_end), 1.0 / c);
+}
+
 template <Leaf::CostCurve K, class S>
 inline S Leaf::dry_end_at(const leaf_pars<S>& pars) const {
   if constexpr (cost_domain_ends_at_psi_crit<K>()) {
     return psi_crit_at<S>(pars);
   } else {
-    const S& c = pars[par_stem_c];
-    const S b = phylloptim::weibull_b_from_P50<S>(pars[par_stem_P50], c);
-    return b * pow(S(vulnerability_x_end), 1.0 / c);
+    return stem_curve_end_at<S>(pars);
   }
 }
 
@@ -9521,8 +9571,21 @@ inline void Leaf::optimise_psi_stem_single() {
       }
     }
   }
+  // ⚠️ A SCAN KEEPS ITS CELL WIDTH, NOT ITS CELL COUNT. Its cells span the
+  // interval, and past psi_crit the interval runs on to the end of the stem
+  // curve, 2.6x as wide at the defaults; at the old count the cells widened with
+  // it and stepped over the narrow basin a dark leaf has near its wet end
+  // (measured: JS22 and TF dropped to the wet end at lower profit on every dark
+  // energy-balance row). So the count grows with the interval against
+  // [psi_wet, psi_crit], to at most 4x.
+  int cells = basin_scan_cells();
+  if (cells > 0 && hi > psi_crit && psi_crit > psi_wet) {
+    cells = std::min(4 * cells,
+                     static_cast<int>(std::ceil(cells * (hi - psi_wet) /
+                                                (psi_crit - psi_wet))));
+  }
   opt_psi_stem_ = util::maximise_over_closed_interval_foc(
-      objective, dobjective, psi_wet, hi, basin_scan_cells(), collar_root_tol,
+      objective, dobjective, psi_wet, hi, cells, collar_root_tol,
       static_cast<size_t>(ci_niter), &profit_opt);
   // An argmax at psi_dry for a curve that is not bounded at psi_crit is the end
   // of the stem curve: the leaf transpires all the stem can carry, as on the

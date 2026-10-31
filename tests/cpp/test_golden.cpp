@@ -132,19 +132,18 @@ std::vector<Row> run_grid() {
 // ---------------------------------------------------------------------------
 //
 // `Leaf::operating_point_kind()` says which branch of the collar solve produced
-// the point, and the grid's split between those branches is already an
-// established number AT 25 C: 240 of those 288 points are feasible, of which 198 sit
-// at an interior profit maximum and 42 at a constrained optimum pinned to a bracket
-// bound (24 wet, 18 dry); the remaining 48 shut down. Those figures are quoted in
-// the developer guide and in maximise_profit_over_collar's own comment. The 40 C
-// counts were measured when the axis was added.
+// the point, and the grid's split between those branches is a measured number.
+// AT 25 C, of the 288 points 232 sit at an interior profit maximum and 56 at a
+// constrained optimum pinned to a bracket bound: 45 wet, and 11 dry, at
+// psi_soil = 6, where the leaf transpires all its stem can carry (#183). None
+// shuts down: psi_crit bounds nothing under TF24, and the grid's driest soil is
+// well short of the end of the stem curve. The 40 C counts are measured the same
+// way.
 //
-// So this asserts the classification against numbers that already exist rather
-// than inventing reference values for it. It is a cheap test with a specific
-// job: the tag must come from the branch that was TAKEN, and a plausible-looking
-// wrong implementation -- classifying by |dprofit| against a tolerance -- would
-// not reproduce this split, because dprofit's shut-down sentinel is exactly 0.0
-// and would move all 48 shutdown points into `interior`.
+// It is a cheap test with a specific job: the tag must come from the branch that
+// was TAKEN, and a plausible-looking wrong implementation -- classifying by
+// |dprofit| against a tolerance -- would not reproduce this split, because
+// dprofit's no-flow sentinel is exactly 0.0.
 //
 // Four kinds are expected to be EMPTY here, and the table below asserts each:
 // `solver-refused` and
@@ -174,12 +173,10 @@ struct TempKinds {
 //
 // The split MOVES with temperature, in a direction that is physical: a hot leaf
 // assimilates less and respires more, so it has less to gain from water and its
-// optimum presses against the WET bound instead of the dry one. The 48 shut-down
-// rows do not move, because there it is hydraulics rather than heat that forbids
-// transpiration.
+// optimum presses against the WET bound instead of the dry one.
 const TempKinds kExpectedKinds[] = {
-    {25.0, 198, 24, 18, 48},
-    {40.0, 160, 80, 0, 48},
+    {25.0, 232, 45, 11, 0},
+    {40.0, 172, 116, 0, 0},
 };
 
 int check_operating_kinds(const std::vector<Row> &rows) {
@@ -221,10 +218,10 @@ int check_operating_kinds(const std::vector<Row> &rows) {
     printf("kinds: %zu points at %zu leaf temperatures\n", rows.size(),
            sizeof kExpectedKinds / sizeof kExpectedKinds[0]);
     for (const TempKinds &e : kExpectedKinds) {
-      printf("  T = %4.1f C  %3d interior, %2d at a bound (%2d soil, %2d crit), "
+      printf("  T = %4.1f C  %3d interior, %2d at a bound (%2d soil, %2d dry), "
              "%2d shutdown\n",
-             e.leaf_temp, e.interior, e.boundary_soil + e.boundary_crit,
-             e.boundary_soil, e.boundary_crit, e.shutdown);
+             e.leaf_temp, e.interior, e.boundary_soil + e.boundary_dry,
+             e.boundary_soil, e.boundary_dry, e.shutdown);
     }
   }
   return failures == 0 ? 0 : 1;
