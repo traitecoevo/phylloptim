@@ -3646,6 +3646,21 @@ void test_single_potential() {
     threw = true;
   }
   ok(threw, "a zero series resistance is refused at the boundary");
+
+  // So is one too small for the collar route to resolve (#176), and the floor
+  // itself is accepted.
+  threw = false;
+  try {
+    drv.set_supply_resistances(fixture::series_resistance(
+        0.5 * phylloptim::SinglePotential::resistance_min));
+  } catch (const std::exception &) {
+    threw = true;
+  }
+  ok(threw, "a series resistance below resistance_min is refused");
+  drv.set_supply_resistances(
+      fixture::series_resistance(phylloptim::SinglePotential::resistance_min));
+  near(drv.resistance_, phylloptim::SinglePotential::resistance_min, 0.0,
+       "and resistance_min itself is accepted");
 }
 
 void test_root_network_from_carbon() {
