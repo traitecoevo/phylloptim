@@ -10067,12 +10067,16 @@ void test_light_compensation_corner() {
      "A's one-sided slopes stay apart: the argmax has a corner there, as #183 allows");
 }
 
-// The acceptance sweep of #183: second differences of the solved outputs and
-// of two derivative rows across the drivers, with the energy balance off and
-// on, 1 and 3 layers, and with the thermal-damage layer on. A slope jump is
-// read as a fraction of the sweep's largest slope, and asserted below 0.05
-// everywhere except across a corner: a triple of points that straddles a
-// change of kind, or that sits at the psi_crit pin step 2 of #183 removes.
+// The acceptance sweep of #183, which every PR that touches the solve runs
+// (`make -C tests/cpp smoothness`): second differences of the solved outputs
+// and of two derivative rows across psi_soil, PPFD, VPD and Tair, with the
+// energy balance off and on, 1 and 3 layers, g_min zero and positive, and the
+// thermal-damage layer on. A slope jump is read as a fraction of the sweep's
+// largest slope, and asserted below 0.05 everywhere except across the one
+// corner: a triple of points that straddles a change of kind, which on these
+// sweeps is only the stomatal corner E_s >= 0, where a leaf at its wet bound
+// meets an open one. How many triples reached the assertion is counted and
+// printed (hazard 16).
 struct SweepPoint {
   double profit, A, E, psi, lambda, row_vcmax, row_gmin;
   std::string kind;
@@ -10083,6 +10087,9 @@ struct SweepPoint {
 // independent of the step, curvature's falls with it. Every triple flagged at
 // the sweep's step is re-measured at a hundredth of it, and the refined jump
 // is what is asserted on, against the sweep's own scale.
+// Totals over every call, for the summary line.
+long g_sweep_asserted = 0, g_sweep_corner = 0;
+
 void sweep_kinks(const std::vector<double> &x, const std::vector<SweepPoint> &o,
                  double SweepPoint::*f, const char *name, const std::string &where,
                  double limit, const std::function<SweepPoint(double)> &at) {
@@ -10092,14 +10099,15 @@ void sweep_kinks(const std::vector<double> &x, const std::vector<SweepPoint> &o,
   for (double v : d1) if (std::isfinite(v)) mx = std::max(mx, std::abs(v));
   double worst = 0.0, worst_refined = 0.0;
   size_t at_i = 0, at_r = 0;
-  int excluded = 0, refined = 0;
+  int excluded = 0, refined = 0, asserted = 0;
   for (size_t i = 1; i < d1.size(); ++i) {
     // the triple (i-1, i, i+1) of points
     const std::string &k0 = o[i - 1].kind, &k1 = o[i].kind, &k2 = o[i + 1].kind;
-    const bool corner = k0 != k1 || k1 != k2 || k1 == "boundary-dry";
+    const bool corner = k0 != k1 || k1 != k2;
     if (corner) { ++excluded; continue; }
     const double k = std::abs(d1[i] - d1[i - 1]) / mx;
     if (!std::isfinite(k)) continue;
+    ++asserted;
     if (k > worst) { worst = k; at_i = i; }
     if (k <= limit) continue;
     // Refine: the same jump at a hundredth of the step, about the same point.
@@ -10148,9 +10156,12 @@ void sweep_kinks(const std::vector<double> &x, const std::vector<SweepPoint> &o,
     const double jump = std::abs(fb - fa) / range;
     if (jump > worst_jump) { worst_jump = jump; jump_at = a; }
   }
-  printf("    %-28s %-8s worst at the step %.3e of scale (x = %.3f, %s); %d refined, worst %.3e (x = %.3f); %d corner triples excluded; %d bisected, worst jump %.3e of range (x = %.6f)\n",
-         where.c_str(), name, worst, x[at_i], o[at_i].kind.c_str(), refined, worst_refined,
+  printf("    %-28s %-8s %d triples asserted; worst at the step %.3e of scale (x = %.3f, %s); %d refined, worst %.3e (x = %.3f); %d corner triples excluded; %d bisected, worst jump %.3e of range (x = %.6f)\n",
+         where.c_str(), name, asserted, worst, x[at_i], o[at_i].kind.c_str(), refined, worst_refined,
          x[at_r], excluded, bisected, worst_jump, jump_at);
+  g_sweep_asserted += asserted;
+  g_sweep_corner += excluded;
+  ok(asserted > 0, std::string(name) + " reached the assertion on at least one triple, " + where);
   ok(worst_refined < limit, std::string(name) + " has no slope jump above " + std::to_string(limit) +
                                 " of scale away from a corner once the step is refined, " + where);
   ok(worst_jump < 1e-6, std::string(name) + " has no jump away from a corner, " + where);
@@ -10158,23 +10169,37 @@ void sweep_kinks(const std::vector<double> &x, const std::vector<SweepPoint> &o,
 
 void test_smoothness_sweep() {
   printf("residual conductance: the #183 second-difference sweep\n");
-  struct Config { bool eb; int layers; bool damage; };
-  const Config configs[] = {{false, 1, false}, {false, 3, false}, {true, 1, false}, {true, 3, false}, {false, 1, true}};
+  struct Config { bool eb; int layers; bool damage; double g_min; };
+  const Config configs[] = {{false, 1, false, kGmin}, {false, 3, false, kGmin},
+                            {true, 1, false, kGmin},  {true, 3, false, kGmin},
+                            {false, 1, true, kGmin},  {true, 1, true, kGmin},
+                            {false, 1, false, 0.0}};
+  // ⚠️ NOT g_min = 0 WITH THE BALANCE ON, which has a known jump: a shut leaf
+  // with no residual conductance reports the state the collar root-find's last
+  // step off the wet bound leaves, so A and E step by 3e-6 of their range at
+  // psi_soil 5.4407 (A 2.6e-5 -> 2.7e-7, stem - collar 2.1e-5 -> 2.2e-7 MPa).
+  // Measured identical before the refusals; a positive g_min removes it, and
+  // whether the corner at g_min = 0 should be smoothed is decided separately.
+  g_sweep_asserted = g_sweep_corner = 0;
+  std::map<std::string, long> kinds;
   for (const Config &c : configs) {
     auto solve = [&](double psi0, double ppfd, double vpd, double tair) {
       Drivers d;
       d.PPFD = ppfd; d.atm_vpd = vpd; d.leaf_temp = tair;
       std::vector<double> psi_soil, depth;
       for (int i = 0; i < c.layers; ++i) { psi_soil.push_back(psi0 + 0.25 * i); depth.push_back(i + 1.0); }
-      phylloptim::Leaf l = make(d, psi_soil, depth, kGmin, c.eb, false,
+      phylloptim::Leaf l = make(d, psi_soil, depth, c.g_min, c.eb, false,
                                 std::numeric_limits<double>::quiet_NaN(),
                                 c.damage ? +[](phylloptim::Leaf &x) { x.use_thermal_damage_ = true; set_atls_inputs(x); }
                                          : static_cast<void (*)(phylloptim::Leaf &)>(nullptr));
       l.find_root_collar_psi();
       SweepPoint p{l.profit_, l.assim_colimited_, l.transpiration_, l.opt_psi_stem_,
                    l.lambda_emergent_, NAN, NAN, l.operating_point_kind_name(l.operating_point_kind())};
-      // The derivative rows, off the thermal-damage layer, which the surface refuses.
-      if (!c.damage && (l.operating_point_kind() == Kind::Interior || l.operating_point_kind() == Kind::BoundarySoil ||
+      ++kinds[p.kind];
+      // The derivative rows, off the thermal-damage layer, which the surface
+      // refuses, and with a residual conductance to differentiate.
+      if (!c.damage && c.g_min > 0.0 &&
+          (l.operating_point_kind() == Kind::Interior || l.operating_point_kind() == Kind::BoundarySoil ||
                         l.operating_point_kind() == Kind::HydraulicShutdown)) {
         p.row_vcmax = profit_row_at_current_point(l, phylloptim::par_vcmax_25);
         p.row_gmin = profit_row_at_current_point(l, phylloptim::par_g_min);
@@ -10182,7 +10207,8 @@ void test_smoothness_sweep() {
       return p;
     };
     const std::string where = std::string(c.eb ? "EB on, " : "EB off, ") + std::to_string(c.layers) +
-                              (c.damage ? " layer, damage on" : " layers");
+                              (c.damage ? " layer, damage on" : " layers") +
+                              (c.g_min > 0.0 ? "" : ", g_min 0");
     auto run = [&](const char *driver, double from, double to, double step,
                    std::function<SweepPoint(double)> at) {
       std::vector<double> x;
@@ -10194,18 +10220,24 @@ void test_smoothness_sweep() {
       sweep_kinks(x, o, &SweepPoint::E, "E", w, 0.05, at);
       sweep_kinks(x, o, &SweepPoint::psi, "psi_stem", w, 0.05, at);
       sweep_kinks(x, o, &SweepPoint::lambda, "lambda", w, 0.05, at);
-      if (!c.damage) {
+      if (!c.damage && c.g_min > 0.0) {
         sweep_kinks(x, o, &SweepPoint::row_vcmax, "d/dvcmax", w, 0.05, at);
         sweep_kinks(x, o, &SweepPoint::row_gmin, "d/dg_min", w, 0.05, at);
       }
     };
     run("psi_soil", 0.3, 6.4, 0.01, [&](double v) { return solve(v, 900.0, 2.0, 25.0); });
     run("PPFD", 0.0, 300.0, 1.0, [&](double v) { return solve(1.0, v, 2.0, 25.0); });
-    // The deficit stays below saturation at the air temperature, where the
-    // longwave term's e_a floor is a refusal step 3 of #183 adds.
-    run("VPD", 0.05, 3.0, 0.02, [&](double v) { return solve(1.0, 900.0, v, 25.0); });
+    // The deficit stays below saturation at the air temperature, past which it
+    // is refused: to 3.15 kPa at 25 C (e_s 3.17), and to 6 kPa at 40 C (7.38),
+    // which also crosses the emissivity's soft bound with the balance on.
+    run("VPD", 0.05, 3.15, 0.02, [&](double v) { return solve(1.0, 900.0, v, 25.0); });
+    run("VPD at 40 C", 0.05, 6.0, 0.02, [&](double v) { return solve(1.0, 900.0, v, 40.0); });
     run("Tair", 5.0, 48.0, 0.25, [&](double v) { return solve(1.0, 900.0, 0.5, v); });
   }
+  printf("    in all: %ld triples asserted, %ld corner triples excluded; kinds solved:",
+         g_sweep_asserted, g_sweep_corner);
+  for (const auto &kv : kinds) printf(" %s %ld", kv.first.c_str(), kv.second);
+  printf("\n");
 }
 
 // #184's first requirement from plant: a leaf forced shut -- by a dry soil, the
@@ -10492,7 +10524,13 @@ void test_rows_where_the_roots_cap_binds() {
 
 }  // namespace residual
 
-int main() {
+int main(int argc, char **argv) {
+  // `test_leaf smoothness` runs the acceptance sweep alone (make smoothness).
+  if (argc > 1 && std::string(argv[1]) == "smoothness") {
+    residual::test_smoothness_sweep();
+    printf("\n%d checks, %d failures\n", checks, failures);
+    return failures == 0 ? 0 : 1;
+  }
   test_defaults_are_unset();
   test_vulnerability_curve();
   test_vulnerability_integral_derivatives();

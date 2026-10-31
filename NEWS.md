@@ -1,3 +1,20 @@
+# phylloptim 0.22.0
+
+## Refuse rather than clamp; no corner left but the stomatal one (#183)
+
+Every site that bent a value was counted on the goldens, on #183's acceptance sweep and on 60-day damage trajectories, and each is now a refusal at the entry point, a smooth form, or a kept corner with its reason recorded.
+
+- **Drivers.** `set_physiology` (and so `set_drivers()`) refuses `atm_vpd` outside `(0, e_s(leaf_temp))`, a relative humidity outside (0, 1), on every path. The longwave term used to floor `e_a` at 1 Pa there; `vapour_pressure_min` is gone.
+- **Leaf temperature.** The `[-40, 70]` C clamp is gone, with `leaf_temp_min`/`leaf_temp_max`: a heatwave leaf shut in still air solved *at* 70.00 C, a clamp artefact. `set_physiology` refuses drivers under which a reachable leaf (from `E = 0` to `k_max G(inf)`) would pass the Tetens pole or a non-positive Q10 of `R_d` (about 119 C at the defaults).
+- **Sky emissivity** is held below 1 by a soft minimum of width `atmos_emissivity_softmin_width` (0.002) rather than a `min()`, which put a corner in every output's slope in Tair from about 39-48 C. Bit-identical wherever the Brutsaert fit is below 0.937.
+- **Prescribed potentials are refused, not projected.** `evaluate_root_collar_psi()` (and `profit_at_collar_psi`) and `evaluate_psi_stem_at()` refuse a potential outside the feasible interval with the new infeasibility code `prescribed_potential`. `leaf_gradient()`'s and `leaf_gradient_batch()`'s status `"clamped"` is now `"refused"`: with `psi` outside the interval every output but `psi` is `NA`; within one step of an end the value is reported and the gradient is `NA`, as before. C++ `gradient::Status::Clamped` is `Status::Refused`.
+- **Thermal damage.** The Arrhenius and softplus argument clamps to [-30, 30] are gone (bit-identical inside; the lower ends bound for a 619 kJ/mol species below about 25 C and for any leaf below 0 C); an overflowing rate is refused. A and I are read as themselves, `A <= -K_A`, `I < 0` and `D < 0` are refused at `set_physiology` with the infeasibility code `damage_state`, and `damage_trajectory()` refuses such initial states. The functional fraction has a soft floor of width `damage_surv_floor`, exact for `F > 2.3e-5`. Protection is signed, `k_i_baseline_ - k_i_`, where the defaults sat on a `max(0, .)` corner. Shifted optima and isokinetic temperatures outside [250, 350] K are refused.
+- **Kept.** The stomatal corner `E_s >= 0` (the one `clamp_site` left, `CLAMP_STOMATAL_FLUX`), `vpd_leaf_min` (binds at candidate points only, and at a solved point only on SOX, JW26 and LeastCost dark rows pinned at psi_crit), Medlyn's beta in [0, 1] and CF77's soil price (published forms, now said so in the registry). `CLAMP_ROOT_VULN_*`, `CLAMP_LEAF_TEMPERATURE` and `CLAMP_COLLAR_POTENTIAL` are gone.
+
+The acceptance sweep (`make -C tests/cpp smoothness`) now runs VPD to 6 kPa at 40 C, g_min zero and positive and the damage layer with the energy balance on, and prints how many triples reached the assertion: 65,465, worst refined slope jump 0.0087 of scale against 0.05. Goldens: `operating_points.tsv`'s 84 RH < 0 cells (VPD 4 kPa at 25 C) move to 3 kPa; `psi_stem_optima.tsv`'s energy-balance rows move by at most 3.6e-9 relative at 40 C and 7.4e-14 at 50 C (the emissivity); `primitives.tsv` is bit-identical. `bench_solve` is unchanged.
+
+Migration for plant: catch `prescribed_potential` and `damage_state` as step rejections (TF24f's collar no longer comes back projected; TF24t's states are refused below zero); expect `"refused"` where `"clamped"` was; any driver set with a deficit at or past saturation is now an error.
+
 # phylloptim 0.21.0
 
 ## The stem may run past psi_crit, and G is a C2 table (#183, #85)
