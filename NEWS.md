@@ -2,7 +2,7 @@
 
 ## A narrow collar bracket keeps its width when extended (#193)
 
-On a curve not bounded at psi_crit, a collar interval narrower than `find_root_psi`'s bracket tolerance (about 1e-3 MPa, reached where E times the series resistance is small) was extended to the end of the stem curve onto its own wet bound, and the leaf was reported shut while profit still rose across the interval: at psi_soil 4.8 and a series resistance of 1, profit -5.63 shut against -5.05 open. `extend_collar_bracket` now polishes a narrow extension as `prepare_collar_solve` polishes its first bracket. Measured on the single-potential path, rows open at r <= 10 over psi_soil 4.5-5.8 (profit up by as much as 1.14) and nothing moves at r >= 100; on the multi-layer path nothing moves at the default root carbon or 10x it, and six rows move by 1e-14 at 100x. The golden files are bit-identical.
+On a curve not bounded at psi_crit, a collar interval narrower than `find_root_psi`'s bracket tolerance (`bracket_tol_at`, 1.5e-4 (1 + |psi|) MPa, so about 1e-3 at these potentials; reached where E times the series resistance is small) was extended to the end of the stem curve onto its own wet bound, and the leaf was reported shut while profit still rose across the interval: at psi_soil 4.8 and a series resistance of 1, profit -5.63 shut against -5.05 open. `extend_collar_bracket` now polishes a narrow extension as `prepare_collar_solve` polishes its first bracket. Measured on the single-potential path, rows open at r <= 10 over psi_soil 4.5-5.8 (profit up by as much as 1.14) and nothing moves at r >= 100; on the multi-layer path nothing moves at the default root carbon or 10x it, and six rows move by 1e-14 at 100x. The golden files are bit-identical.
 
 # phylloptim 0.22.0
 

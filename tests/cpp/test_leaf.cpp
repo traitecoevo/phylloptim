@@ -3552,12 +3552,12 @@ void test_leaf_on_single_potential() {
      "the supply path defaults to multi-layer");
 }
 
-// A collar interval narrower than find_root_psi's bracket tolerance (~1e-3 MPa)
-// arises wherever E times the series resistance is small: a fast supply, or a dry
-// soil. The extension of the first bracket to the end of the stem curve once
-// placed its dry end on the wet bound there, and the leaf was reported shut while
-// profit still rose across the interval (psi_soil 4.8, r = 1: -5.63 against -5.05).
-// Asserted against a scan of the prescribed collar, which no solve may beat.
+// A collar interval narrower than find_root_psi's bracket tolerance
+// (bracket_tol_at, ~1e-3 MPa at these potentials) arises wherever E times the
+// series resistance is small: a fast supply, or a dry soil. Extending the first
+// bracket to the end of the stem curve must keep that interval's width, or the
+// leaf is reported shut while profit still rises across it. Asserted against a
+// scan of the prescribed collar, which no solve may beat.
 void test_narrow_extended_bracket_is_not_shut() {
   printf("a narrow extended collar bracket keeps its width\n");
   Drivers d;
@@ -3587,6 +3587,9 @@ void test_narrow_extended_bracket_is_not_shut() {
           // outside the feasible interval
         }
       }
+      ok(std::isfinite(best), "the scan reaches a feasible collar at r = " +
+                                  std::to_string(r) +
+                                  ", psi_soil = " + std::to_string(ps));
       ok(l.transpiration_ > 0.0, "the leaf opens at r = " + std::to_string(r) +
                                      ", psi_soil = " + std::to_string(ps));
       ok(l.profit_ >= best - 1e-9 * std::abs(best),
