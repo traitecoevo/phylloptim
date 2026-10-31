@@ -2965,6 +2965,13 @@ public:
                                     const PhotoCapacity<S>& cap,
                                     const S& sigma_h, const S& gc,
                                     const S& ci_h, bool collar_moves) const;
+  // Whether sigma_star is the stem held at a dry pin at the end of its curve
+  // (seat_stem_at_dry_pin). There sigma is that end as a function of the traits,
+  // and it does not move with the collar: both halves above read this.
+  bool stem_held_at_dry_pin(double sigma_star) const {
+    return operating_point_kind_ == OperatingPointKind::BoundaryDry &&
+           sigma_star == vulnerability_psi_end(stem_b, stem_c);
+  }
 
   // The stem's critical potential at any scalar. DERIVED from the trait pair, as
   // it is at double, which is what makes the old `no_gradient` question moot: it
@@ -7761,8 +7768,7 @@ inline void Leaf::held_coords_at(double sigma_star, double ci_star,
   // (seat_stem_at_dry_pin), so sigma is that end as a function of the traits,
   // not the root of T1: T1's slope there is kmax e^-40, and dividing by it hands
   // over amplified rounding (measured: forward and reverse disagreed by 0.4%).
-  if (operating_point_kind_ == OperatingPointKind::BoundaryDry &&
-      sigma_star == vulnerability_psi_end(stem_b, stem_c)) {
+  if (stem_held_at_dry_pin(sigma_star)) {
     sigma_h = stem_curve_end_at<S>(pars);
   } else {
     sigma_h = odelia::implicit_value<S>(
@@ -7886,7 +7892,17 @@ inline Leaf::CollarCoords<S> Leaf::collar_channel_at(
   const S dsigma_du =
       S(stem_curve_integral_inverse_deriv(u_at)) + (recip - S(to_passive(recip)));
   // psi_crit does not move with the collar.
-  const S V = dsigma_du * (draw.flux.slope / kmax + f_p);
+  //
+  // ⚠️ NOR DOES A STEM HELD AT A DRY PIN. sigma_h is already the end of the curve
+  // as a function of the traits, and the collar is placed to keep the stem
+  // there, so its channel is an exact zero. Formed anyway it is e^40 (the
+  // inverse's slope at the end) times terms of order e^-40 -- the cost's slope
+  // and f_sigma -- which carry no information past rounding: measured, it moved
+  // the profit rows by up to 8e-5 on macOS/arm64 and by up to 60% on Linux/x86,
+  // where a difference of the solve agrees with the held stem's rows to 1e-9.
+  const S V = stem_held_at_dry_pin(sigma_star)
+                  ? S(0.0)
+                  : dsigma_du * (draw.flux.slope / kmax + f_p);
 
   const S gc_const = S(gc_per_flux);
   const S inv = S(inv_atm);

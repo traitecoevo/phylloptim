@@ -3786,12 +3786,21 @@ void test_root_network_template_is_the_double_overload() {
 // by perturb_stem_P50. The accuracy
 // that can be asked of an inverse is its conditioning, eps * w / G'(psi), so
 // the error is read in those units; the residual in G must be rounding.
+//
+// ⚠️ THE CONDITIONING UNIT ASSUMES G IS READ TO AN ULP, which the table is not
+// where the stem has nearly nothing left to carry: there the knot differences
+// fall below an ulp of G(inf), so G is resolved to a few ulps, and psi
+// scatters by that many units with every residual still rounding. That tail is
+// the one Leaf::stem_capacity_floor already declares unresolved, and the
+// worst point there moves with the platform's libm (7.2 units on macOS/arm64,
+// 15.5 on Linux/x86, at x ~ 33). So the unit is asserted above the floor and
+// reported below it; the residual is asserted everywhere.
 void test_stem_curve_inverse_round_trips() {
   printf("the stem curve's inverse round-trips\n");
   const double eps = std::numeric_limits<double>::epsilon();
-  double worst_cond = 0.0, worst_res = 0.0, worst_cross = 0.0;
-  std::string cond_at, res_at, cross_at;
-  int compared = 0;
+  double worst_cond = 0.0, worst_tail = 0.0, worst_res = 0.0, worst_cross = 0.0;
+  std::string cond_at, tail_at, res_at, cross_at;
+  int compared = 0, resolved = 0;
   const auto check = [&](phylloptim::Leaf& l, double psi, const std::string& at) {
     const double w = l.stem_curve_integral(psi);
     const double fast = l.stem_curve_integral_inverse(w);
@@ -3801,7 +3810,14 @@ void test_stem_curve_inverse_round_trips() {
     const double cond = std::abs(fast - psi) / scale;
     const double res = std::abs(l.stem_curve_integral(fast) - w) / std::max(w, eps);
     const double cross = std::abs(fast - full) / scale;
-    if (cond > worst_cond) { worst_cond = cond; cond_at = at; }
+    const double G_inf = l.stem_curve_limit();
+    if (G_inf - w > phylloptim::Leaf::stem_capacity_floor * G_inf) {
+      ++resolved;
+      if (cond > worst_cond) { worst_cond = cond; cond_at = at; }
+    } else if (cond > worst_tail) {
+      worst_tail = cond;
+      tail_at = at;
+    }
     if (res > worst_res) { worst_res = res; res_at = at; }
     if (cross > worst_cross) { worst_cross = cross; cross_at = at; }
     ++compared;
@@ -3821,10 +3837,13 @@ void test_stem_curve_inverse_round_trips() {
                                     std::to_string(end * i / 100.0));
     }
   }
-  printf("    %d points | worst %.3g x conditioning, residual %.3g, fast-vs-full %.3g "
+  printf("    %d points, %d above the capacity floor | worst %.3g x conditioning "
+         "there (%.3g below it, not asserted), residual %.3g, fast-vs-full %.3g "
          "x conditioning\n",
-         compared, worst_cond, worst_res, worst_cross);
+         compared, resolved, worst_cond, worst_tail, worst_res, worst_cross);
   ok(compared == 2202, "every point of the round trip was compared");
+  ok(resolved >= 1800, "most of the round trip is above the capacity floor; got " +
+                           std::to_string(resolved));
   ok(worst_cond <= 8.0, "the inverse is within 8 units of its conditioning; worst" +
                             cond_at);
   ok(worst_res <= 4.0 * eps, "the residual in G is rounding; worst" + res_at);
