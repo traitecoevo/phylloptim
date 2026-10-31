@@ -9159,6 +9159,109 @@ void test_thermal_damage_bypasses_the_cache() {
      "switched off at unchanged drivers, the leaf is one never switched on");
 }
 
+// The layer has no corners left: the exponentials are the functions themselves,
+// A, I and protection are read as themselves, and F's floor is soft. Each is
+// asserted where the old clamp would have bound, and inside, where nothing may
+// have moved.
+void test_thermal_damage_has_no_corners() {
+  printf("thermal damage: no clamp, no max, a soft floor on F\n");
+  using phylloptim::damage::Dual;
+  // 1. The softplus is its plain form inside [-30, 30] and the function past it,
+  //    with a non-zero slope on both sides of each end.
+  {
+    bool inside_same = true;
+    for (double z = -30.0; z <= 30.0; z += 0.5) {
+      inside_same &= phylloptim::Leaf::softplus_(z / 2.0, 2.0) == std::log1p(std::exp(z)) / 2.0;
+    }
+    ok(inside_same, "softplus is bit-identical to log1p(exp(z))/s inside [-30, 30]");
+    near(phylloptim::Leaf::softplus_(-20.0, 2.0), std::log1p(std::exp(-40.0)) / 2.0, 1e-30,
+         "below -30 it is the function, not its value at -30");
+    near(phylloptim::Leaf::softplus_(20.0, 2.0), 20.0, 1e-15, "above 30 it is x to rounding");
+    const Dual lo = phylloptim::damage::softplus(Dual(-20.0, 1.0), Dual(2.0));
+    const Dual hi = phylloptim::damage::softplus(Dual(20.0, 1.0), Dual(2.0));
+    ok(lo.d > 0.0 && std::abs(hi.d - 1.0) < 1e-15,
+       "and its slope is the logistic's on both sides, not the clamp's zero");
+  }
+  // 2. A high-Ea species below 25 C: the impairment rate keeps falling, and its
+  //    sensitivity to Ea is the exponential's, where the clamp held both.
+  {
+    phylloptim::Leaf l;
+    l.k_i_Ea_ = 619e3;
+    const double r10 = l.damage_rates(10.0, 0.0, 0.0, 0.0)[1];
+    const double r5 = l.damage_rates(5.0, 0.0, 0.0, 0.0)[1];
+    ok(r10 > 0.0 && r5 > 0.0 && r5 < r10,
+       "a 619 kJ species' impairment keeps falling below 10 C (argument < -30)");
+    const std::vector<double> g =
+        l.damage_trajectory_gradient({0.0, 1.0}, {5.0, 5.0}, 0.0, 0.0, 0.0, {1});
+    ok(g[1 + 2] != 0.0, "and I's sensitivity to k_i_Ea_ there is not the clamp's zero");
+  }
+  // 3. F's soft floor: the plain fraction wherever the correction is below an
+  //    ulp, positive and falling through I + D = 1 (it underflows to zero only
+  //    some 700 widths past it).
+  {
+    Drivers d;
+    double prev = 0.0;
+    bool rising = true, positive = true, exact = true;
+    for (double sum : {0.0, 0.5, 0.99, 0.9999, 1.0 - 1e-5, 1.0, 1.0 + 1e-6, 1.0 + 1e-5}) {
+      phylloptim::Leaf l = make_thermal_leaf(d, {1.0}, {1.0}, false, true,
+                                             +[](phylloptim::Leaf &) {});
+      l.I_ = sum;
+      l.D_ = 0.0;
+      reseat_thermal_leaf(l, d, {1.0}, {1.0});
+      positive &= l.functional_ > 0.0;
+      if (1.0 - sum > 1e-4) exact &= l.functional_ == 1.0 - sum;
+      if (sum > 0.0) rising &= l.functional_ < prev;
+      prev = l.functional_;
+    }
+    ok(exact, "F is exactly 1 - I - D away from the floor");
+    ok(positive && rising, "and positive and strictly falling in I + D through 1");
+  }
+  // 4. Protection is signed: a leaf less protected than the baseline pays less
+  //    respiration than one at it, which pays less than a more protected one.
+  {
+    Drivers d;
+    auto rd = [&](double k_i) {
+      phylloptim::Leaf l = make_thermal_leaf(d, {1.0}, {1.0}, false, true,
+                                             +[](phylloptim::Leaf &x) { x.c_protect_maint_ = 0.01; });
+      l.k_i_ = k_i;
+      reseat_thermal_leaf(l, d, {1.0}, {1.0});
+      return l.R_d_;
+    };
+    const double base = phylloptim::Leaf().k_i_baseline_;
+    const double a = rd(base - 10.0), b = rd(base), c = rd(base + 10.0);
+    near((a - b) - (b - c), 0.0, 1e-12, "protection's cost is linear through the baseline");
+    ok(a > b && b > c, "and signed: less protection than the baseline is a saving");
+  }
+  // 5. Refusals: a negative fraction or the shift's pole, as infeasible where a
+  //    state is seated; a shifted isokinetic temperature out of range, as an error.
+  {
+    Drivers d;
+    auto seat = [&](double A, double I, double D) -> std::string {
+      phylloptim::Leaf l = make_thermal_leaf(d, {1.0}, {1.0}, false, true,
+                                             +[](phylloptim::Leaf &) {});
+      l.A_ = A; l.I_ = I; l.D_ = D;
+      try {
+        reseat_thermal_leaf(l, d, {1.0}, {1.0});
+      } catch (const phylloptim::util::infeasible_error &e) {
+        return e.what();
+      }
+      return "";
+    };
+    ok(seat(0.0, -1e-9, 0.0).find("damage_state") != std::string::npos,
+       "a negative I_ is refused as infeasible");
+    ok(seat(0.0, 0.0, -1e-9).find("damage_state") != std::string::npos,
+       "a negative D_ likewise");
+    ok(seat(-phylloptim::Leaf().K_A_, 0.0, 0.0).find("damage_state") != std::string::npos,
+       "and A_ at the shift's pole");
+    ok(seat(-1e-9, 0.0, 0.0).empty(), "a hair below zero in A_ is read as itself");
+    phylloptim::Leaf l;
+    l.k_i_Tiso_ = 90.0;
+    ok(message_of([&] { l.damage_rates(25.0, 0.0, 0.0, 0.0); }).find("[250, 350]") !=
+           std::string::npos,
+       "an isokinetic temperature outside [250, 350] K is refused, not held");
+  }
+}
+
 // The solve root-finds dprofit == 0, so with the layer on dprofit has to be the
 // derivative of the profit the solve REPORTS with the layer on. It is, because
 // both read the block update_temperature_dependent_params writes -- and on the
@@ -10527,6 +10630,7 @@ int main() {
   test_thermal_damage_gate_off_is_inert();
   test_thermal_damage_bypasses_the_cache();
   test_thermal_damage_dprofit_is_the_solves_own();
+  test_thermal_damage_has_no_corners();
   test_thermal_damage_fd_helpers_restore_the_block();
   test_thermal_damage_refusals();
   residual::test_temperature_factor();
