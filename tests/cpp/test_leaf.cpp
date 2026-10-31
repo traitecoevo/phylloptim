@@ -365,13 +365,15 @@ void test_vulnerability_table() {
   const double b = l.stem_b, c = l.stem_c;
   const double G_inf = phylloptim::cumulative_vulnerability_integral_limit(b, c);
   double worst_round = 0.0;
-  for (double psi = 0.01; psi < 12.0; psi *= 1.05) {
+  // To 8 MPa, x ~ 7: further out the inverse's own conditioning, eps w / G',
+  // passes 1e-10 of psi (test_stem_curve_inverse_round_trips measures it there).
+  for (double psi = 0.01; psi < 8.0; psi *= 1.05) {
     const double w = l.stem_curve_integral(psi);
     worst_round = std::max(worst_round,
                            std::abs(l.stem_curve_integral_inverse(w) - psi) / psi);
   }
-  printf("    worst |G^-1(G(psi)) - psi| / psi to 12 MPa: %.2g\n", worst_round);
-  near(worst_round, 0.0, 1e-10, "G^-1(G(psi)) = psi to 12 MPa");
+  printf("    worst |G^-1(G(psi)) - psi| / psi to 8 MPa: %.2g\n", worst_round);
+  near(worst_round, 0.0, 1e-10, "G^-1(G(psi)) = psi to 8 MPa");
   near(l.stem_curve_limit() / G_inf, 1.0, 1e-15, "the stem's G(inf) is the closed form");
   // Past G(inf) no potential carries the flow: infeasible, by its code.
   bool infeasible = false;
@@ -537,19 +539,34 @@ void test_multi_layer_soil() {
   ok(total > 0.0, "total soil water uptake is positive");
 }
 
+// psi_crit bounds nothing under TF24 (#183): a soil drier than it still has an
+// interval, and the leaf transpires what its stem can carry, which falls
+// smoothly towards zero as the soil dries. It shuts only past the end of the stem
+// curve, where the stem carries G(inf) to rounding and so nothing.
 void test_shutdown_when_soil_is_drier_than_psi_crit() {
-  printf("shutdown past psi_crit\n");
+  printf("past psi_crit the leaf transpires; past the end of the curve it shuts\n");
+  using Kind = phylloptim::Leaf::OperatingPointKind;
   Drivers d;
   phylloptim::Leaf l = make_leaf(d, {12.0}, {1.0});
   l.find_root_collar_psi();
-  ok(std::isfinite(l.profit_), "profit stays finite past psi_crit");
-  ok(l.profit_ <= 0.0, "profit is non-positive when shut down");
+  ok(std::isfinite(l.profit_), "profit is finite past psi_crit");
+  // At these drivers the leaf declines to open (boundary-soil); in light enough
+  // and humid enough air it transpires (the boundary-dry fixtures elsewhere).
+  ok(l.operating_point_kind() == Kind::Interior ||
+         l.operating_point_kind() == Kind::BoundarySoil ||
+         l.operating_point_kind() == Kind::BoundaryDry,
+     std::string("a soil past psi_crit is an optimum, got ") +
+         l.operating_point_kind_name(l.operating_point_kind()));
+
+  phylloptim::Leaf s = make_leaf(d, {20.0}, {1.0});
+  s.find_root_collar_psi();
+  ok(s.operating_point_kind() == Kind::HydraulicShutdown,
+     "past the end of the stem curve the leaf shuts");
+  ok(s.profit_ <= 0.0, "profit is non-positive when shut down");
   // The shut stem sits where the flux balance puts it: at the collar, which is
-  // in equilibrium with the soil (uptake zero at g_min = 0), and so past
-  // psi_crit here rather than held at it (#182, #183).
-  ok(l.opt_psi_stem_ == l.opt_root_psi_, "the shut stem sits at the collar");
-  ok(l.opt_root_psi_ > l.psi_crit, "which is in equilibrium with a soil drier than psi_crit");
-  near(l.E_up_, 0.0, 1e-12, "and draws no water from it");
+  // in equilibrium with the soil (uptake zero at g_min = 0) (#182, #183).
+  ok(s.opt_psi_stem_ == s.opt_root_psi_, "the shut stem sits at the collar");
+  near(s.E_up_, 0.0, 1e-12, "and draws no water from the soil");
 }
 
 // The shutdown path used to leak the previous solve's fluxes (plant #578/#577).
@@ -949,17 +966,21 @@ void test_gradient_reports_feasibility() {
   Drivers d;
   phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
 
-  // The bracket a root-find would search, built exactly as prepare_collar_solve
-  // does: the wet end is where uptake is zero, the dry end whichever limit binds.
+  // The bracket a root-find would search, the first one prepare_collar_solve
+  // tries: the wet end is where uptake is zero, the dry end the continuity root
+  // with the stem at psi_crit.
   const double wettest = 2.0;
   const double root_zero_E = l.find_root_psi(wettest, l.roots_.psi_soil_, 0);
   const double root_crit = l.find_root_psi(wettest, l.roots_.psi_soil_, 1);
-  const double bound_b = std::min(root_crit, l.roots_.root_psi_crit);
+  const double bound_b = root_crit;
   ok(root_zero_E < bound_b, "the bracket is non-empty");
 
-  // The wet endpoint: 0.0, and NOT a stationary point.
+  // At the wet end: 0.0, and NOT a stationary point. Taken just wetter than the
+  // zero-uptake root, where uptake is certainly negative: the root itself is
+  // placed to 1e-4 MPa and may land on either side of zero uptake.
   bool feasible = true;
-  const double at_a = l.dprofit_droot_collar_psi(root_zero_E, &feasible);
+  const double wet_side = root_zero_E - 1e-3;
+  const double at_a = l.dprofit_droot_collar_psi(wet_side, &feasible);
   ok(at_a == 0.0, "the gradient is 0.0 at the wet bracket endpoint");
   ok(!feasible, "and the endpoint is reported infeasible, so the 0.0 is a sentinel");
 
@@ -994,7 +1015,7 @@ void test_gradient_reports_feasibility() {
   // merely close: the flag is a write to a caller's bool, not arithmetic.
   ok(l.dprofit_droot_collar_psi(mid) == at_mid,
      "passing no flag returns exactly the same value");
-  ok(l.dprofit_droot_collar_psi(root_zero_E) == 0.0,
+  ok(l.dprofit_droot_collar_psi(wet_side) == 0.0,
      "and the sentinel is still 0.0 for a caller that does not ask");
 }
 
@@ -1099,7 +1120,7 @@ void test_collar_solve_satisfies_its_own_first_order_condition() {
   // bound_a moved 22 golden rows' profit DOWN by 1.44 before this was caught.
   const double root_zero_E = l.find_root_psi(2.0, l.roots_.psi_soil_, 0);
   const double bound_b =
-      std::min(l.find_root_psi(2.0, l.roots_.psi_soil_, 1), l.roots_.root_psi_crit);
+      l.find_root_psi(2.0, l.roots_.psi_soil_, 1);
   ok(l.opt_root_psi_ > root_zero_E,
      "the collar is strictly drier than the zero-uptake bound (#31)");
   ok(l.opt_root_psi_ <= bound_b, "and no drier than the binding dry limit");
@@ -1118,7 +1139,7 @@ void test_collar_solve_handles_a_pinned_optimum() {
   l.find_root_collar_psi();
   const double root_zero_E = l.find_root_psi(4.0, l.roots_.psi_soil_, 0);
   const double bound_b =
-      std::min(l.find_root_psi(4.0, l.roots_.psi_soil_, 1), l.roots_.root_psi_crit);
+      l.find_root_psi(4.0, l.roots_.psi_soil_, 1);
   ok(std::isfinite(l.profit_), "the pinned row still yields a finite profit");
   ok(l.opt_root_psi_ > root_zero_E,
      "and a collar strictly inside the zero-uptake bound, not on it (#31)");
@@ -1426,7 +1447,8 @@ void test_root_vulnerability_closed_form_past_the_curve() {
          "dG/dpsi is f_r" + at);
     prev_G = G;
   }
-  ok(r.root_vuln_integral_at(1000.0) == G_inf, "G is G(inf) past the end of the curve");
+  near(r.root_vuln_integral_at(1000.0) / G_inf, 1.0, 1e-15,
+       "G is G(inf) past the end of the curve");
   ok(r.root_vuln_at(-0.5) == 1.0, "a negative suction reads as the wet end");
   ok(std::isnan(r.root_vuln_at(std::numeric_limits<double>::quiet_NaN())),
      "and a NaN suction comes back NaN");
@@ -1641,84 +1663,17 @@ void test_signed_potentials_are_rejected() {
   ok(threw, "the constructor rejects a negative stem_b");
 }
 
-// #24 / plant #584: the dry end of the collar bracket is clamped to
-// root_psi_crit, the potential at which root conductivity is down to 5%. The clamp
-// was written as std::max against a *signed* root_psi_crit, so it could never bind
-// and the solver optimised over a collar drier than the root system can supply.
-//
-// The window is empty at this package's defaults, where psi_crit == root_psi_crit,
-// which is why the golden file does not move. It opens whenever the stem's psi_crit
-// is drier than the root's -- as it is in plant, by 1.2 MPa. Three regimes, all
-// pinned here, because the middle one is the only place a *transpiring* operating
-// point moves and the third is a behaviour the fix had to add rather than restore.
-void test_root_psi_crit_clamp_binds() {
-  printf("the collar bracket is clamped to root_psi_crit (#24)\n");
-  Drivers d;
-  const auto solve = [&](double psi_soil) {
-    phylloptim::Leaf l;
-    l.psi_crit = 5.91988;   // drier than root_psi_crit = 5.870283
-    l.setup_transpiration(100);
-    l.setup_root_vulnerability(100);
-    std::vector<double> ps{psi_soil}, depth{1.0}, root{1.0 / d.area_leaf};
-    l.set_physiology(fixture::root_network(root, depth), d.PPFD, ps, depth, d.K_s * d.theta / d.h, d.atm_vpd,
-                     d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
-    l.find_root_collar_psi();
-    return l;
-  };
 
-  // Regime 1 -- the clamp does not bind (root_crit is wetter than root_psi_crit),
-  // so nothing changes. Pinned so a future tightening cannot silently spread.
-  {
-    phylloptim::Leaf l = solve(5.80);
-    ok(l.opt_root_psi_ < l.roots_.root_psi_crit,
-       "below the window the collar stays inside the root limit anyway");
-    ok(l.transpiration_ > 0.0, "and the leaf still transpires");
-  }
-
-  // Regime 2 -- the interval is TIGHTENED but still has room. The optimum is
-  // genuinely interior here (measured 5.86989 against a bound of 5.870283, i.e.
-  // 3.9e-4 inside it -- within GSS_tol_abs), so the assertion is the invariant the
-  // clamp exists to enforce, not the boundary value: the collar no longer runs past
-  // the root limit, and the leaf goes on transpiring.
-  {
-    phylloptim::Leaf l = solve(5.86);
-    ok(l.opt_root_psi_ <= l.roots_.root_psi_crit,
-       "in the window the collar does not pass root_psi_crit");
-    ok(l.opt_root_psi_ > l.roots_.root_psi_crit - 1e-3,
-       "and it sits at the clamp, within the GSS tolerance");
-    ok(l.transpiration_ > 0.0, "and the leaf still transpires there");
-  }
-
-  // Regime 3 -- the clamp lands BELOW root_zero_E, the collar at which uptake is
-  // zero. Drawing any water would need a collar past the root limit, so there is no
-  // feasible transpiring operating point and the answer is shut-down. Nothing
-  // handled this before #24, because with the clamp dead it could not arise.
-  // The shut leaf sits at its wet bound (#182): the collar in equilibrium with
-  // the soil, the stem at the collar, no water moving -- not held at the limit.
-  {
-    phylloptim::Leaf l = solve(5.90);
-    ok(l.operating_point_kind() ==
-           phylloptim::Leaf::OperatingPointKind::HydraulicShutdown,
-       "past the window the leaf is shut down, not optimising");
-    near(l.transpiration_, 0.0, 1e-300, "and moves no water");
-    near(l.E_up_, 0.0, 1e-12, "the collar is the zero-uptake collar");
-    ok(l.opt_root_psi_ > l.roots_.root_psi_crit,
-       "which lies past the root limit, where no transpiring point can");
-    ok(l.opt_psi_stem_ == l.opt_root_psi_,
-       "with the stem at the collar, the E -> 0 limit of the open leaf");
-  }
-}
-
-// As the soil dries through the end of the collar interval, transpiration,
-// profit and the held stem move continuously into shutdown, and every open leaf
-// transpires what its roots supply. Swept at both GSS_tol_abs a caller uses.
+// As the soil dries through psi_crit, which bounds nothing (#183), and then
+// through the end of the stem curve into shutdown, transpiration, profit and the
+// held stem move continuously, and every open leaf transpires what its roots
+// supply. Swept at both GSS_tol_abs a caller uses.
 void test_collar_continuous_into_shutdown() {
-  printf("the collar solve is continuous through collapse into shutdown\n");
+  printf("the collar solve is continuous through psi_crit and into shutdown\n");
   Drivers d;
   for (double gss : {1e-3, 1e-1}) {
     const auto solve = [&](double psi_soil) {
       phylloptim::Leaf l;
-      l.psi_crit = 5.91988;   // drier than root_psi_crit = 5.870283, as in plant
       l.GSS_tol_abs = gss;
       l.setup_transpiration(100);
       l.setup_root_vulnerability(100);
@@ -1730,16 +1685,42 @@ void test_collar_continuous_into_shutdown() {
       return l;
     };
     const std::string tag = " (GSS_tol_abs " + std::to_string(gss) + ")";
+    // Through psi_crit (5.870283): no change of regime, and no jump.
+    {
+      double prev = NAN, worst = 0.0;
+      int shut = 0;
+      for (int i = 0; i <= 800; ++i) {
+        phylloptim::Leaf l = solve(5.70 + 5e-4 * i);
+        if (l.operating_point_kind() ==
+            phylloptim::Leaf::OperatingPointKind::HydraulicShutdown) ++shut;
+        if (!std::isnan(prev)) worst = std::max(worst, std::abs(l.profit_ - prev));
+        prev = l.profit_;
+      }
+      ok(shut == 0, "a soil drying through psi_crit does not shut the leaf" + tag);
+      ok(worst < 1e-2, "and its profit does not jump there" + tag);
+    }
     double worst_water = 0.0, worst_step = 0.0, last_open = NAN, first_shut = NAN;
     double prev = NAN;
     int n_open = 0, n_shut = 0;
-    for (int i = 0; i <= 8000; ++i) {
-      const double psi_soil = 5.10 + 1e-4 * i;   // to 5.90, past the shutdown
+    // Into shutdown, short of the end of the stem curve (15.439 at the
+    // defaults), where the interval closes below collar precision.
+    for (int i = 0; i <= 800; ++i) {
+      const double psi_soil = 12.0 + 5e-3 * i;   // to 16.0, past the end
       phylloptim::Leaf l = solve(psi_soil);
-      if (l.transpiration_ > 0.0) {
+      if (l.operating_point_kind() !=
+          phylloptim::Leaf::OperatingPointKind::HydraulicShutdown) {
         ++n_open;
-        worst_water = std::max(worst_water,
-                               std::abs(l.transpiration_ - l.E_up_) / l.E_up_);
+        // Against the flux's own resolution as well as relatively: the stem's
+        // flux is read to ~eps of kmax G(inf), which near shutdown is the size
+        // of the flux itself.
+        if (l.transpiration_ > 0.0) {
+          const double resolution = 64.0 * std::numeric_limits<double>::epsilon() *
+                                    l.leaf_specific_conductance_max_ *
+                                    l.stem_curve_limit();
+          worst_water = std::max(worst_water,
+                                 std::abs(l.transpiration_ - l.E_up_) /
+                                     (l.E_up_ + resolution / 1e-6));
+        }
         last_open = l.profit_;
       } else if (std::isnan(first_shut)) {
         ++n_shut;
@@ -1749,9 +1730,10 @@ void test_collar_continuous_into_shutdown() {
       prev = l.profit_;
     }
     ok(n_open > 0 && n_shut > 0, "the sweep reaches both regimes" + tag);
-    ok(worst_water < 1e-9, "a transpiring leaf transpires what its roots supply" + tag);
-    // A 1e-4 MPa step in psi_soil moves a smooth profit by ~2e-5 here.
-    ok(worst_step < 1e-3, "no jump in profit along the sweep" + tag);
+    printf("    worst |E - E_up| / E_up into shutdown: %.3g%s\n", worst_water, tag.c_str());
+    ok(worst_water < 1e-6, "a transpiring leaf transpires what its roots supply" + tag);
+    // A 5e-3 MPa step in psi_soil moves a smooth profit by ~1e-3 here.
+    ok(worst_step < 1e-2, "no jump in profit along the sweep" + tag);
     near(first_shut, last_open, 1e-3, "shutdown is the E -> 0 limit" + tag);
   }
 }
@@ -1786,14 +1768,15 @@ void test_collar_continuous_through_light_compensation() {
 }
 
 // On a layered soil the collar interval narrows below the 1e-4 MPa its bounds
-// are placed to before it closes; the solve must still reach shutdown smoothly.
+// are placed to before it closes, at the end of the stem curve; the solve must
+// still reach shutdown smoothly.
 void test_layered_soil_dries_into_shutdown() {
   printf("a layered soil dries into shutdown without a refused solve\n");
   Drivers d;
   int refused = 0, shut = 0;
   double prev = NAN, worst_step = 0.0;
   for (int i = 0; i <= 400; ++i) {
-    const double psi = 5.599 + 1e-5 * i;
+    const double psi = 12.0 + 1e-2 * i;
     phylloptim::Leaf l = make_leaf(d, {psi + 0.4, psi + 0.2, psi}, {1.0, 2.0, 3.0});
     l.find_root_collar_psi();
     const auto k = l.operating_point_kind();
@@ -2478,8 +2461,9 @@ void test_leaf_temperature_is_reported() {
     const double wet = l.Tleaf_;
     ok(std::isfinite(wet), "a wet solve reports a finite Tleaf" + what);
 
-    // Drier than psi_crit, so the collar solve takes a shut-down exit.
-    std::vector<double> root{1.0 / d.area_leaf}, dry{6.5}, depth{1.0};
+    // Drier than the end of the stem curve, so the collar solve takes a
+    // shut-down exit.
+    std::vector<double> root{1.0 / d.area_leaf}, dry{17.0}, depth{1.0};
     l.set_physiology(fixture::root_network(root, depth), d.PPFD, dry, depth,
                      d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
                      d.atm_o2_kpa, d.atm_kpa);
@@ -2539,7 +2523,7 @@ void test_shutdown_reports_one_temperature() {
   const Case cases[] = {
       // Soil drier than psi_crit: no collar potential both moves water and stays
       // inside the critical potentials. Full sun, so the leaf runs hot.
-      {"hydraulic shutdown", 6.0, 900.0,
+      {"hydraulic shutdown", 17.0, 900.0,
        Kind::HydraulicShutdown, true},
       // Wet soil, no light: gross assimilation at ci = ca cannot cover R_d, so
       // the leaf declines to open. Rn is NEGATIVE here, so this leaf is cooler
@@ -2628,7 +2612,7 @@ void test_shutdown_reports_one_temperature() {
   {
     Drivers dc = d;
     dc.PPFD = 900.0;
-    phylloptim::Leaf l = make_pm_leaf(dc, {6.0}, {1.0}, false);
+    phylloptim::Leaf l = make_pm_leaf(dc, {17.0}, {1.0}, false);
     l.find_root_collar_psi();
     ok(l.operating_point_kind() == Kind::HydraulicShutdown,
        "the prescribed path shuts down here too");
@@ -3309,7 +3293,7 @@ void test_stomatal_conductance_excludes_the_boundary_layer() {
      "a total conductance at or above g_b is refused, with the reason");
 
   // Shut: no conductance on either side of the series.
-  phylloptim::Leaf shut = make_pm_leaf(d, {6.5}, {1.0}, true);
+  phylloptim::Leaf shut = make_pm_leaf(d, {17.0}, {1.0}, true);
   shut.find_root_collar_psi();
   ok(shut.stom_cond_H2O() == 0.0 && shut.stom_cond_stomatal_H2O() == 0.0,
      "a shut leaf reports zero stomatal conductance, not a refusal");
@@ -4273,7 +4257,7 @@ void test_every_answered_point_hands_over_finite_rows() {
   std::map<std::string, int> reached;
   int draws = 0, uptakes = 0, coords = 0;
   for (int layers : {1, 3}) {
-    for (double psi0 : {0.25, 1.0, 2.0, 4.0, 6.0}) {
+    for (double psi0 : {0.25, 1.0, 2.0, 4.0, 6.0, 17.0}) {
       for (double ppfd : {1.0, 100.0, 900.0}) {
         Drivers d;
         d.PPFD = ppfd;
@@ -4773,7 +4757,7 @@ void test_surface_refuses_a_curve_or_supply_it_was_not_solved_on() {
         "supply, and this leaf is on the single path"),
      "supply_draw_at refuses the single-potential path");
 
-  phylloptim::Leaf shut = make_leaf(Drivers{}, {12.0}, {1.0});
+  phylloptim::Leaf shut = make_leaf(Drivers{}, {17.0}, {1.0});
   shut.find_root_collar_psi();
   ok(shut.operating_point_kind() == Kind::HydraulicShutdown,
      "the dry fixture is a hydraulic shutdown");
@@ -5061,7 +5045,7 @@ void test_the_root_critical_potential_bounds_nothing() {
   const std::vector<double> psi_soil{2.0}, depth{1.0};
   const std::vector<double> mrp(psi_soil.size(),
                                1.0 / double(psi_soil.size()) / d.area_leaf);
-  int past = 0, solved = 0;
+  int past = 0, refused = 0;
   for (double root_P50 : {3.4, 2.0, 1.2, 0.9, 0.7, 0.5, 0.3}) {
     phylloptim::Leaf l = make_leaf(d, psi_soil, depth);
     l.set_traits(96.0, 2.680147, 3.4, 2.680147, root_P50, 1.5, 157.44, 0.30 / 0.85, 0.7,
@@ -5071,15 +5055,15 @@ void test_the_root_critical_potential_bounds_nothing() {
                      d.atm_o2_kpa, d.atm_kpa);
     l.find_root_collar_psi();
     const Kind kind = l.operating_point_kind();
-    if (kind == Kind::Interior || kind == Kind::BoundarySoil || kind == Kind::BoundaryDry) {
-      ++solved;
-    }
+    if (kind == Kind::SolverRefused || kind == Kind::NonFiniteGradient) ++refused;
     if (l.opt_root_psi_ > l.roots_.root_psi_crit) ++past;
     printf("    root_P50=%4.2f  root_psi_crit=%7.4f  collar=%7.4f  %s\n", root_P50,
            l.roots_.root_psi_crit, l.opt_root_psi_,
            l.operating_point_kind_name(kind));
   }
-  ok(solved == 7, "every root curve solves to an ordinary kind");
+  // The driest root curve here ends (x = 40) short of the 2 MPa soil, so its
+  // roots conduct nothing and the leaf is shut: the model, not a refusal.
+  ok(refused == 0, "no root curve's solve is refused");
   ok(past > 0, "and the collar runs past the root's critical potential");
 }
 
@@ -5418,9 +5402,10 @@ void test_stem_curve_shortcut_needs_no_rebuild() {
        "the batch leaves the leaf undisplaced" + what);
   }
 
-  // The control, which is what stops the three counts above from being zero
-  // because nothing ran: with the shortcut off, the same work rebuilds. Two
-  // rebuilds per side per observation, plus the restore's own.
+  // The controls, which are what stop the three counts above from being zero
+  // because nothing ran. With the shortcut off a P50 still rebuilds nothing --
+  // the table depends on stem_c alone -- and a gradient in stem_c does rebuild,
+  // which is what shows the counter counts.
   {
     phylloptim::gradient::Settings s;
     s.fast_stem_curve = false;
@@ -5429,8 +5414,11 @@ void test_stem_curve_shortcut_needs_no_rebuild() {
     l.find_root_collar_psi();
     const long builds = l.stem_curve_builds_;
     phylloptim::gradient::batch(l, theta, 1, obs, false, pars, 1, s);
-    ok(l.stem_curve_builds_ > builds,
-       "with fast_stem_curve off, the same batch does rebuild");
+    ok(l.stem_curve_builds_ == builds,
+       "with fast_stem_curve off, a P50 batch still rebuilds nothing");
+    const int c_pars[1] = {phylloptim::gradient::par_stem_c};
+    phylloptim::gradient::batch(l, theta, 1, obs, false, c_pars, 1, s);
+    ok(l.stem_curve_builds_ > builds, "and a stem_c batch does rebuild");
     printf("  stem curve builds over 3 observations of d/dstem_P50:"
            " fast 0, slow %ld\n",
            l.stem_curve_builds_ - builds);
@@ -5738,7 +5726,7 @@ void test_gas_constant_and_arrhenius_reference_point() {
 void test_knot_grid_reaches_its_intended_domain() {
   printf("vulnerability knot grid\n");
   const double resolutions[] = {10.0, 50.0, 100.0, 200.0, 1000.0};
-  int wrong_end = 0, not_increasing = 0, wrong_limit = 0, cases = 0;
+  int wrong_end = 0, decreasing = 0, wrong_limit = 0, cases = 0;
   for (double res : resolutions) {
     for (double c : {0.4, 1.0, 2.04, 2.680147, 6.0, 12.0}) {
       const auto t = phylloptim::vulnerability_table(c, res, nullptr);
@@ -5748,7 +5736,7 @@ void test_knot_grid_reaches_its_intended_domain() {
       if (t->u_at(n) != std::pow(phylloptim::vulnerability_x_end, 1.0 / c)) ++wrong_end;
       if (t->g_at(n) != t->G_inf_over_b()) ++wrong_limit;
       for (std::size_t i = 1; i <= n; ++i) {
-        if (!(t->g_at(i) > t->g_at(i - 1))) { ++not_increasing; break; }
+        if (!(t->g_at(i) >= t->g_at(i - 1))) { ++decreasing; break; }
       }
     }
   }
@@ -5757,7 +5745,9 @@ void test_knot_grid_reaches_its_intended_domain() {
                          std::to_string(wrong_end) + " did not)");
   ok(wrong_limit == 0, "and its last knot is G(inf) (" + std::to_string(wrong_limit) +
                            " was not)");
-  ok(not_increasing == 0, "g is strictly increasing along every grid");
+  // Non-decreasing rather than increasing: near the end of the curve g moves by
+  // less than its own rounding between knots.
+  ok(decreasing == 0, "g never decreases along a grid");
 
   // A resolution below one interval is refused by name.
   const std::string msg = message_of(
@@ -5994,33 +5984,24 @@ void test_out_of_domain_names_the_spline() {
 // it. The profit functions never read it there: they seat the no-flow state at
 // or below the upstream potential, which this pins so the two decisions stay
 // apart. Equality is the shut-down state and stays legal, at exactly zero.
-// The rescaled path reports the domain in the CALLER's units, not the spline's.
-// Under perturb_stem_P50 the value handed to the spline is psi/s, so quoting the
-// spline's own endpoints would send the reader after a discrepancy that is not
-// there.
+// A perturbed P50 moves b and leaves the table alone, so there is no second
+// domain to report: the refusal below the wet end reads the same, and past the
+// end of the curve G is G(inf) at the moved curve.
 void test_out_of_domain_under_rescale() {
   Drivers d;
-  // At the LOWER end: past the upper end reads the closed form.
   phylloptim::Leaf wide = make_leaf(d, {2.0}, {1.0});
   const std::string before = message_of([&] { wide.transpiration(-1.0, -2.0); });
 
-  phylloptim::Leaf rescaled = make_leaf(d, {2.0}, {1.0});
-  rescaled.perturb_stem_P50(rescaled.stem_P50 * 2.0);
-  const std::string after =
-      message_of([&] { rescaled.transpiration(-1.0, -2.0); });
+  phylloptim::Leaf moved = make_leaf(d, {2.0}, {1.0});
+  moved.perturb_stem_P50(moved.stem_P50 * 2.0);
+  const std::string after = message_of([&] { moved.transpiration(-1.0, -2.0); });
 
-  ok(!before.empty() && !after.empty(), "both report a domain failure");
-  ok(before != after, "the rescaled domain is reported, not the spline's own");
-  ok(mentions(after, "rescaled by"),
-     "the rescale is named so the two domains are not confused");
-
-  // And past the upper end the rescaled leaf reads the closed form at ITS curve,
-  // not the spline's: the homogeneity identity holds for the closed form too.
-  const double psi = 50.0;
-  ok(rescaled.stem_curve_integral(psi) ==
-         phylloptim::cumulative_vulnerability_integral_at(psi, rescaled.stem_b,
-                                                          rescaled.stem_c),
-     "past the rescaled table G is the closed form at the perturbed curve");
+  ok(!before.empty() && before == after,
+     "a moved P50 refuses a negative potential in the same words");
+  const double psi = 100.0;
+  near(moved.stem_curve_integral(psi) /
+           phylloptim::cumulative_vulnerability_integral_limit(moved.stem_b, moved.stem_c),
+       1.0, 1e-15, "past the end of the moved curve G is its G(inf)");
 }
 
 // A stem wetter than its upstream end is refused, not integrated: transpiration
@@ -6086,7 +6067,7 @@ void test_reversed_gradient_is_refused() {
 // refuse. Energy balance and thermal cost on, so LeastCost's and ProfitMax's
 // lambdas take their flux-reading arms.
 template <phylloptim::Leaf::CostCurve K>
-void prescribed_wet_bound_answers(const char *name) {
+bool prescribed_wet_bound_answers(const char *name) {
   Drivers d;
   phylloptim::Leaf l = make_pm_leaf(d, {1.0, 1.25, 1.5, 1.75, 2.0},
                                     {1.0, 2.0, 3.0, 4.0, 5.0}, true, 2.0, 0.05,
@@ -6098,23 +6079,28 @@ void prescribed_wet_bound_answers(const char *name) {
   if constexpr (K == phylloptim::Leaf::CostCurve::ProfitMax) l.prepare_profitmax();
   double lo = 0.0, hi = 0.0;
   ok(l.prepare_collar_solve<K>(lo, hi), std::string(name) + ": the bracket is open");
-  ok(l.find_psi_stem_from_psi_root(lo, l.supply_psi_soil()) < lo,
-     std::string(name) + ": the stem at the wet bound IS wetter than the collar "
-                         "(else this test exercises nothing)");
+  // Whether the pair is reversed here depends on where the wet bound's root-find
+  // stopped, so it is counted rather than required per curve.
+  const bool reversed = l.find_psi_stem_from_psi_root(lo, l.supply_psi_soil()) < lo;
   double p = std::nan("");
   const std::string msg = message_of([&] { p = l.profit_at_collar_psi<K>(lo, lo, hi); });
   ok(msg.empty() && std::isfinite(p),
      std::string(name) + ": a prescribed collar at the wet bound answers");
+  return reversed;
 }
 
 void test_prescribed_wet_bound_reads_no_flow() {
   printf("a prescribed collar at the wet bound reads no flow\n");
   using K = phylloptim::Leaf::CostCurve;
-  prescribed_wet_bound_answers<K::TF24>("TF24");
-  prescribed_wet_bound_answers<K::CF77>("CF77");
-  prescribed_wet_bound_answers<K::TF24_floor>("TF24_floor");
-  prescribed_wet_bound_answers<K::LeastCost>("LeastCost");
-  prescribed_wet_bound_answers<K::ProfitMax>("ProfitMax");
+  int reversed = 0;
+  reversed += prescribed_wet_bound_answers<K::TF24>("TF24");
+  reversed += prescribed_wet_bound_answers<K::CF77>("CF77");
+  reversed += prescribed_wet_bound_answers<K::TF24_floor>("TF24_floor");
+  reversed += prescribed_wet_bound_answers<K::LeastCost>("LeastCost");
+  reversed += prescribed_wet_bound_answers<K::ProfitMax>("ProfitMax");
+  printf("    %d of 5 curves invert to a stem wetter than the collar there\n", reversed);
+  ok(reversed > 0, "at least one curve reaches the reversed pair (else this "
+                   "test exercises nothing)");
 }
 
 // ===========================================================================
@@ -7976,7 +7962,7 @@ void test_tf24_floor_reduces() {
   // does not break it. A tolerance would pass on a rewrite that lost the
   // property, which is the only thing this test exists to catch.
   Drivers d;
-  int compared = 0;
+  int compared = 0, cf77_pinned = 0;
   for (double ppfd : {300.0, 900.0, 1500.0}) {
     for (double vpd : {1.0, 2.0, 4.0}) {
       for (double psi_soil : {0.5, 1.0, 2.0, 3.0, 4.0}) {
@@ -8012,6 +7998,12 @@ void test_tf24_floor_reduces() {
         // trait is what leaves the price alone. `pow(1-f, beta2)` is finite
         // inside the bracket, so `0 * pow(...)` is an exact zero rather than a
         // NaN -- which is why this reduction is available at all.
+        //
+        // ⚠️ EXCEPT WHERE CF77 SITS AT psi_crit. CF77's domain ends there
+        // (cost_domain_ends_at_psi_crit) and TF24_floor's does not (#183), so
+        // where CF77 is pinned at its bound TF24_floor goes on past it, to a
+        // profit at least as high. Elsewhere both solve on [psi_soil, psi_crit]
+        // and the reduction is bit-for-bit.
         {
           phylloptim::Leaf a = make_single_leaf(d, psi_soil);
           a.TF24_cost_scale = 0.0;
@@ -8024,13 +8016,21 @@ void test_tf24_floor_reduces() {
           b.set_model(phylloptim::Leaf::CostCurve::CF77, false);
           b.optimise();
 
-          const std::vector<double> va = reported(a), vb = reported(b);
-          for (std::size_t i = 0; i < va.size(); ++i) {
-            ok(same_bits(va[i], vb[i]),
-               std::string("TF24_floor(TF24_cost_scale=0) == CF77 in ") +
-                   reported_names[i] + " at psi_soil=" +
-                   std::to_string(psi_soil) + " ppfd=" + std::to_string(ppfd) +
-                   " vpd=" + std::to_string(vpd));
+          const std::string at = " at psi_soil=" + std::to_string(psi_soil) +
+                                 " ppfd=" + std::to_string(ppfd) +
+                                 " vpd=" + std::to_string(vpd);
+          if (b.opt_psi_stem_ == b.psi_crit) {
+            ++cf77_pinned;
+            ok(a.opt_psi_stem_ >= b.opt_psi_stem_ && a.profit_ >= b.profit_,
+               "where CF77 is pinned at psi_crit, TF24_floor(TF24_cost_scale=0) "
+               "goes past it to a profit at least as high" + at);
+          } else {
+            const std::vector<double> va = reported(a), vb = reported(b);
+            for (std::size_t i = 0; i < va.size(); ++i) {
+              ok(same_bits(va[i], vb[i]),
+                 std::string("TF24_floor(TF24_cost_scale=0) == CF77 in ") +
+                     reported_names[i] + at);
+            }
           }
         }
         ++compared;
@@ -8039,9 +8039,11 @@ void test_tf24_floor_reduces() {
   }
   // ⚠️ Hazard 16: an assertion that never runs passes. Both reductions are
   // inside two loops and a refused row would silently skip one.
-  printf("    %d driver rows, both reductions, %d fields each\n", compared,
-         int(sizeof(reported_names) / sizeof(reported_names[0])));
+  printf("    %d driver rows, both reductions, %d fields each; CF77 pinned at "
+         "psi_crit on %d\n", compared,
+         int(sizeof(reported_names) / sizeof(reported_names[0])), cf77_pinned);
   ok(compared == 45, "every driver row was compared");
+  ok(cf77_pinned < compared, "and the CF77 reduction was compared bit-for-bit somewhere");
 }
 
 void test_tf24_floor_wet_end_price() {
@@ -8847,7 +8849,7 @@ void test_outputs_agree_with_the_solve() {
       {1.0}, {0.5, 1.0, 1.5}, {0.4, 0.8, 1.2, 1.6, 2.0}};
   int n_interior = 0, n_bound = 0, n_shut = 0, n_marg = 0;
   for (double T : {25.0, 40.0}) {
-    for (double psi0 : {0.5, 1.0, 2.0, 3.0, 4.0, 6.0}) {
+    for (double psi0 : {0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 17.0}) {
       for (std::size_t k = 0; k < soils.size(); ++k) {
         Drivers d;
         d.leaf_temp = T;
@@ -9550,7 +9552,7 @@ void test_water_budget_closes() {
   for (double g_min : {kGmin, 4 * kGmin}) {
     for (bool eb : {false, true}) {
       for (int layers : {1, 3}) {
-        for (double psi0 : {0.5, 2.0, 4.0, 5.5, 6.0, 7.0}) {
+        for (double psi0 : {0.5, 2.0, 4.0, 5.5, 6.0, 7.0, 17.0}) {
           for (double ppfd : {0.0, 50.0, 900.0}) {
             Drivers d;
             d.PPFD = ppfd;
@@ -9569,7 +9571,10 @@ void test_water_budget_closes() {
             ++rows;
             ok(std::isfinite(l.profit_) && std::isfinite(l.ci_),
                "the solve answers with finite profit and ci" + at);
-            ok(l.residual_flux_ > 0.0, "the cuticle loses water" + at);
+            // Except past the end of the stem curve, which carries nothing.
+            ok(l.residual_flux_ > 0.0 ||
+                   l.operating_point_kind() == Kind::HydraulicShutdown,
+               "the cuticle loses water" + at);
             const double E_s = l.transpiration_ - l.residual_flux_;
             ok(E_s >= -1e-18, "the stomatal flux is non-negative" + at);
             ok(l.stom_cond_CO2_ >= l.cuticular_cond_CO2() * (1 - 1e-12),
@@ -9727,7 +9732,7 @@ void test_rows_match_a_difference() {
   int compared = 0;
   std::map<std::string, int> seen;
   for (int layers : {1, 3}) {
-    for (double psi0 : {1.0, 3.0, 4.5, 6.0}) {
+    for (double psi0 : {1.0, 3.0, 4.5, 6.0, 17.0}) {
       for (double ppfd : {10.0, 900.0}) {
         Drivers d;
         d.PPFD = ppfd;
@@ -9756,7 +9761,9 @@ void test_rows_match_a_difference() {
         if (!std::isfinite(best)) continue;
         ok(best < 1e-4, "dprofit/dg_min row matches a difference of the solve" + at + ": " +
                             std::to_string(row) + " vs " + std::to_string(fd_best));
-        ok(row < 0.0, "and the cuticle costs the leaf carbon" + at);
+        // Past the end of the stem curve no water moves, so g_min costs nothing.
+        ok(row < 0.0 || kind == Kind::HydraulicShutdown,
+           "and the cuticle costs the leaf carbon" + at);
         ++compared;
       }
     }
@@ -9781,7 +9788,12 @@ void test_shut_leaf_sits_on_its_wet_bound() {
       phylloptim::Leaf l = make(d, psi_soil, depth, kGmin);
       l.find_root_collar_psi();
       const std::string at = " (" + std::to_string(layers) + " layers, psi " + std::to_string(psi0) + ")";
-      ok(l.operating_point_kind() == Kind::HydraulicShutdown, "the soil shuts the leaf" + at);
+      // Its stomata stay shut: at the wet bound, where a leaf with a cuticle sits
+      // as an ordinary point (boundary-soil), or shut outright.
+      ok(l.operating_point_kind() == Kind::BoundarySoil ||
+             l.operating_point_kind() == Kind::HydraulicShutdown,
+         std::string("the soil keeps the stomata shut, got ") +
+             l.operating_point_kind_name(l.operating_point_kind()) + at);
       ok(l.residual_flux_ > 0.0 && l.transpiration_ == l.residual_flux_ + (l.transpiration_ - l.residual_flux_),
          "it still loses the residual flux" + at);
       ok(std::abs(l.transpiration_ - l.residual_flux_) <= 1e-11 * l.transpiration_,
@@ -9795,11 +9807,11 @@ void test_shut_leaf_sits_on_its_wet_bound() {
            "profit == A - C at the stem" + at);
     }
   }
-  // Continuous into shutdown as the soil dries, through the pinned regime.
+  // Continuous into shutdown as the soil dries past the end of the stem curve.
   double prev = NAN, worst = 0.0;
   int shut = 0, open = 0;
   for (int i = 0; i <= 120; ++i) {
-    const double ps = 5.4 + 0.005 * i;
+    const double ps = 12.0 + 0.035 * i;
     phylloptim::Leaf l = make(d, {ps}, {1.0}, kGmin);
     l.find_root_collar_psi();
     if (l.operating_point_kind() == Kind::HydraulicShutdown) ++shut; else ++open;
@@ -9807,7 +9819,7 @@ void test_shut_leaf_sits_on_its_wet_bound() {
     prev = l.profit_;
   }
   ok(shut > 0 && open > 0, "the drying sweep reaches shutdown");
-  ok(worst < 2e-2, "and profit moves by less than 2e-2 per 0.005 MPa across it");
+  ok(worst < 2e-1, "and profit moves by less than 2e-1 per 0.035 MPa across it");
 }
 
 // The costs that read the flux charge the TOTAL (#182).
@@ -10119,12 +10131,12 @@ void test_a_shut_leaf_is_a_value_not_an_exception() {
 // loses, the leaf is smooth in psi_soil -- soft caps, not a min(). The sweep
 // runs from where the caps are inert to where they bind hard, which the
 // realised fraction r*/r reports, at a conductance large enough to get there,
-// and on through the root integral's cap to 12 MPa.
+// and on past the end of the root curve to 17 MPa.
 //
 // Two ceilings bind in turn: the stem's (what it can carry from the collar),
 // then the roots' (what they can deliver from this soil, which falls to zero
-// at the root integral's cap, #85). Past the cap no layer conducts and the
-// shut leaf sits at the wettest layer's gravity balance. The roots' ceiling
+// at the end of the root curve, where G is G(inf) to rounding; #85). Past it no
+// layer conducts and the shut leaf sits at the wettest layer's gravity balance. The roots' ceiling
 // shrinks as U (U / (U + r))^2 so the leaf reaches that balance with the
 // value AND the slope it has on the far side (residual_root_ceiling_at says
 // why); the cap is asserted on both, directly, as well as swept through.
@@ -10155,7 +10167,7 @@ void test_the_capped_regime_is_smooth_in_the_soil() {
         std::vector<double> x;
         std::vector<SweepPoint> o;
         double frac_first = NAN, frac_min = 1.0, frac_last = NAN;
-        for (double v = 4.0; v <= 12.0 + 1e-9; v += 0.01) {
+        for (double v = 4.0; v <= 17.0 + 1e-9; v += 0.01) {
           x.push_back(v);
           o.push_back(at(v));
           const phylloptim::Leaf l = solve(v);
@@ -10170,10 +10182,23 @@ void test_the_capped_regime_is_smooth_in_the_soil() {
         sweep_kinks(x, o, &SweepPoint::profit, "profit", where, 0.05, at);
         sweep_kinks(x, o, &SweepPoint::A, "A", where, 0.05, at);
         sweep_kinks(x, o, &SweepPoint::E, "E", where, 0.05, at);
-        sweep_kinks(x, o, &SweepPoint::psi, "psi_stem", where, 0.05, at);
+        // psi_stem only where the stem still resolves its flux. Past ~12 MPa a
+        // shut leaf's stem carries less than G(inf)'s rounding, so its potential
+        // is defined only to that rounding (G' ~ 1e-13 at x ~ 30): every
+        // potential there carries the same flux. A follow-up to #183 carries the
+        // tail as G(inf) - G to keep it.
+        {
+          std::vector<double> xs;
+          std::vector<SweepPoint> os;
+          for (std::size_t i = 0; i < x.size(); ++i) {
+            if (x[i] <= 12.0 + 1e-9) { xs.push_back(x[i]); os.push_back(o[i]); }
+          }
+          sweep_kinks(xs, os, &SweepPoint::psi, "psi_stem", where, 0.05, at);
+        }
 
-        // The cap itself: where the wettest layer stops conducting, bisected.
-        double open = 7.0, closed = 8.0;
+        // The end of the root curve: where the wettest layer stops conducting,
+        // bisected.
+        double open = 12.0, closed = 16.0;
         for (int k = 0; k < 60; ++k) {
           const double m = 0.5 * (open + closed);
           bool conducts = false;
@@ -10191,9 +10216,9 @@ void test_the_capped_regime_is_smooth_in_the_soil() {
         };
         const double s_wet = slope(open, -1.0, &SweepPoint::psi), s_dry = slope(closed, 1.0, &SweepPoint::psi);
         const double p_wet = slope(open, -1.0, &SweepPoint::profit), p_dry = slope(closed, 1.0, &SweepPoint::profit);
-        printf("    %s: at the roots' cap (psi_soil %.6f) psi_stem steps %.2e MPa; slopes psi_stem %.5f | %.5f, profit %.5f | %.5f\n",
+        printf("    %s: at the root curve's end (psi_soil %.6f) psi_stem steps %.2e MPa; slopes psi_stem %.5f | %.5f, profit %.5f | %.5f\n",
                where.c_str(), open, step_stem, s_wet, s_dry, p_wet, p_dry);
-        ok(step_stem < 1e-7, "the shut leaf is continuous through the roots' cap, " + where);
+        ok(step_stem < 1e-7, "the shut leaf is continuous through the root curve's end, " + where);
         ok(std::abs(s_wet - s_dry) < 1e-3 * std::max(1.0, std::abs(s_dry)) &&
                std::abs(p_wet - p_dry) < 1e-3 * std::max(0.05, std::abs(p_dry)),
            "and its slope in psi_soil is continuous there too, " + where);
@@ -10339,7 +10364,6 @@ int main() {
   test_root_vulnerability_closed_form_past_the_curve();
   test_root_rows_past_the_dry_end_match_the_table();
   test_stem_rows_past_the_dry_end_are_the_closed_forms();
-  test_root_psi_crit_clamp_binds();
   test_collar_continuous_into_shutdown();
   test_collar_continuous_through_light_compensation();
   test_layered_soil_dries_into_shutdown();

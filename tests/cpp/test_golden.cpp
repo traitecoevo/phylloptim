@@ -146,11 +146,10 @@ std::vector<Row> run_grid() {
 // not reproduce this split, because dprofit's shut-down sentinel is exactly 0.0
 // and would move all 48 shutdown points into `interior`.
 //
-// Five kinds are expected to be EMPTY here, and the table below asserts each:
+// Four kinds are expected to be EMPTY here, and the table below asserts each:
 // `solver-refused` and
 // `non-finite-gradient` because both bracket endpoints admit a usable gradient on
-// every feasible row; `boundary-root-crit` because the continuity root never
-// reaches the root's own limit at these traits; and `prescribed` and `unsolved` because
+// every feasible row; and `prescribed` and `unsolved` because
 // every row is solved rather than evaluated at a given collar.
 //
 // ⚠️ The hot end does NOT reach the compensation-point exit either, which is worth
@@ -170,7 +169,7 @@ struct KindCount {
 // One row per entry of kLeafTemps, in that order.
 struct TempKinds {
   double leaf_temp;
-  int interior, boundary_soil, boundary_crit, shutdown;
+  int interior, boundary_soil, boundary_dry, shutdown;
 };
 //
 // The split MOVES with temperature, in a direction that is physical: a hot leaf
@@ -191,12 +190,7 @@ int check_operating_kinds(const std::vector<Row> &rows) {
     const KindCount expected[] = {
         {Kind::Interior, e.interior},
         {Kind::BoundarySoil, e.boundary_soil},
-        {Kind::BoundaryCrit, e.boundary_crit},
-        // The dry end's other bound. At these traits root_psi_crit is 5.87 MPa
-        // and the continuity root never reaches it, so the arm is zero over the
-        // whole grid -- asserted rather than left out, because a kind absent from
-        // this list is a kind the golden file stops covering.
-        {Kind::BoundaryRootCrit, 0},
+        {Kind::BoundaryDry, e.boundary_dry},
         {Kind::HydraulicShutdown, e.shutdown},
         {Kind::Prescribed, 0},        {Kind::SolverRefused, 0},
         {Kind::NonFiniteGradient, 0}, {Kind::Unsolved, 0},

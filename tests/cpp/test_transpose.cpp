@@ -250,8 +250,7 @@ Arm arm_of(pl::Leaf::OperatingPointKind kind) {
     // the bounds, the shut leaf's wet bound among them.
     case pl::Leaf::OperatingPointKind::Interior:
     case pl::Leaf::OperatingPointKind::BoundarySoil:
-    case pl::Leaf::OperatingPointKind::BoundaryCrit:
-    case pl::Leaf::OperatingPointKind::BoundaryRootCrit:
+    case pl::Leaf::OperatingPointKind::BoundaryDry:
     case pl::Leaf::OperatingPointKind::HydraulicShutdown:
       return Arm::CarriesRows;
     case pl::Leaf::OperatingPointKind::Unsolved:
@@ -430,10 +429,11 @@ int main() {
     }
   }
   using K = pl::Leaf::OperatingPointKind;
-  // The two dry bounds collar_at places by different conditions -- the
-  // continuity root and the root's own critical potential.
-  check_kind({4.0, 4.25, 4.5}, 900.0, 0.5, 0.0, K::BoundaryCrit, seed += 7919);
-  check_kind({2.0}, 900.0, 2.0, 1.2, K::BoundaryRootCrit, seed += 7919);
+  // The dry pin: a soil dry enough that the leaf transpires all its stem can
+  // carry, the continuity root with the stem at the end of its curve (#183).
+  // And a soil past the end of the curve, which shuts the leaf.
+  check_kind({6.0}, 500.0, 0.5, 0.0, K::BoundaryDry, seed += 7919);
+  check_kind({16.0, 16.25, 16.5}, 900.0, 2.0, 0.0, K::HydraulicShutdown, seed += 7919);
   printf("    %d operating points compared | worst relative %.3e\n", compared,
          worst);
   // Reported because it is what the scaling above is for: a sweep that stopped
@@ -456,8 +456,8 @@ int main() {
   ok(compared >= 20, "the sweep reached at least 20 operating points");
   ok(seen_shut > 0, "the sweep reached a shut leaf");
   ok(seen_residual > 0, "the sweep reached a leaf with a residual conductance");
-  for (const char* kind : {"interior", "boundary-soil", "boundary-crit",
-                           "boundary-root-crit", "hydraulic-shutdown"}) {
+  for (const char* kind : {"interior", "boundary-soil", "boundary-dry",
+                           "hydraulic-shutdown"}) {
     ok(seen_kind[kind] > 0, std::string("the identity was checked at a ") + kind +
                                 " point");
   }

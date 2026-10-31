@@ -1785,6 +1785,20 @@ public:
   // 400, and they are shared between copies.
   static constexpr double ncontrol_default = 800.0;
 
+  // The least share of G(inf) the stem must still be able to carry from the
+  // wettest layer for the collar solve to have an interval. G is read to
+  // ~2e-16 of G(inf), so a stem whose remaining capacity G(inf) - G(psi) is
+  // 1e-11 of it carries a flux resolved to ~2e-5 of itself; below ~1e-13 every
+  // gradient is rounding, and the solve was measured refusing there (soil
+  // 13.4-14 MPa at the defaults, where x = (psi/b)^c > 27). The leaf shuts
+  // instead, at a soil of ~12.4 MPa at the defaults (x ~ 22), giving up a flux
+  // below 1e-11 of the stem's capacity: continuous to that order.
+  //
+  // ⚠️ A RESOLUTION FLOOR, NOT A MODELLED BOUND, and it binds only where psi_crit
+  // does not (the curves cost_domain_ends_at_psi_crit names leave ~1e-2 there).
+  // Carrying the curve's tail as G(inf) - G would resolve it and remove this.
+  static constexpr double stem_capacity_floor = 1e-11;
+
   // The two derivations, one place each, so a caller cannot get them
   // inconsistent. `f` is the remaining-conductivity fraction.
   // Forwards: the derivation lives in vulnerability.hpp, beside the curve it
@@ -2590,9 +2604,12 @@ public:
   // from a pinned upstream potential; the wet end of every stem route. The
   // upstream potential itself at g_min = 0.
   double stem_wet_bound(double psi_upstream);
+  // The root on [wettest, end], with the stem held at `end` for the continuity
+  // root (find_root_crit = 1) and the zero-uptake root otherwise.
   double find_root_psi(double wettest_soil_layer, const std::vector<double>& psi_soil, int find_root_crit,
-                       double f_wettest, double f_crit);
-  // The same root, taking its own endpoint values: for a caller outside the solve.
+                       double f_wettest, double f_crit, double end);
+  // The same root, taking its own endpoint values, with the stem at psi_crit:
+  // for a caller outside the solve.
   double find_root_psi(double wettest_soil_layer, const std::vector<double>& psi_soil, int find_root_crit) {
     const auto f = [&](double x) {
       return find_root_crit == 1 ? E_column(x, psi_soil, psi_crit)
@@ -2600,7 +2617,7 @@ public:
     };
     const double f_wettest = f(wettest_soil_layer);
     return find_root_psi(wettest_soil_layer, psi_soil, find_root_crit, f_wettest,
-                         f(psi_crit));
+                         f(psi_crit), psi_crit);
   }
   // A bracket bound find_root_psi placed at its 1e-4 tolerance, solved again to
   // collar_root_tol from where it stopped. Called only where the bound IS the
@@ -4342,11 +4359,11 @@ inline double Leaf::E_column_zero(double x, const std::vector<double>& psi_soil)
 // psi_stem_to_ci (Phase 6) this is a same-tolerance method swap, NOT a tolerance
 // loosening: same root, fewer evals.
 inline double Leaf::find_root_psi(double wettest_soil_layer, const std::vector<double>& psi_soil, int find_root_crit,
-                                  double f_wettest, double f_crit) {
+                                  double f_wettest, double f_crit, double end) {
   // tol and iterations copied from control defaults (for now) - changed recently to 1e-6
   if (find_root_crit == 1) {
     auto target = [&](double x) -> double {
-      return E_column(x, psi_soil, dry_end_);
+      return E_column(x, psi_soil, end);
     };
     try {
       // Ends swapped, not just renamed: a bracketing solver needs opposite signs
@@ -4359,7 +4376,7 @@ inline double Leaf::find_root_psi(double wettest_soil_layer, const std::vector<d
       // midpoint can sit up to bracket_tol past the root, where it delivers
       // more; with the dry end at the end of the stem curve, that is more than
       // G(inf), which no stem potential carries, and the inverse refuses it.
-      return util::uniroot_smooth_bracket(target, wettest_soil_layer, dry_end_,
+      return util::uniroot_smooth_bracket(target, wettest_soil_layer, end,
                                           f_wettest, f_crit, bracket_tol,
                                           ci_niter)
           .first;
@@ -4367,7 +4384,7 @@ inline double Leaf::find_root_psi(double wettest_soil_layer, const std::vector<d
       util::stop_infeasible("collar_bracket",
                  "find_root_psi(find_root_crit=1) failed: " + std::string(e.what()) +
                  "; min=" + util::to_string(wettest_soil_layer) +
-                 "; max=" + util::to_string(dry_end_));
+                 "; max=" + util::to_string(end));
     }
   }
 
@@ -4375,13 +4392,13 @@ inline double Leaf::find_root_psi(double wettest_soil_layer, const std::vector<d
     return E_column_zero(x, psi_soil);
   };
   try {
-    return util::uniroot_smooth(target, wettest_soil_layer, dry_end_, f_wettest,
+    return util::uniroot_smooth(target, wettest_soil_layer, end, f_wettest,
                                 f_crit, bracket_tol, ci_niter);
   } catch (const std::exception& e) {
     util::stop_infeasible("collar_bracket",
                "find_root_psi(find_root_crit=0) failed: " + std::string(e.what()) +
                "; min=" + util::to_string(wettest_soil_layer) +
-               "; max=" + util::to_string(dry_end_));
+               "; max=" + util::to_string(end));
   }
 
 }
@@ -4524,11 +4541,14 @@ inline double Leaf::find_wet_bound(double wettest_soil_layer,
   const double f_lo0 =
       E_up_at_wettest - residual_flux(wettest_soil_layer, E_up_at_wettest);
   double lo = wettest_soil_layer, f_lo = f_lo0;
-  // The first bracket is [wettest, dry end], whenever it is a bracket at all.
-  double hi = std::max(dry_end_, wettest_soil_layer +
+  // The first bracket is [wettest, psi_crit], whenever it is a bracket at all,
+  // whatever the dry end of this solve: the wet bound is then the same root
+  // from the same bracket on every route to it, and a replay re-takes it bit for
+  // bit. The uptake there is handed over where the caller has it.
+  double hi = std::max(psi_crit, wettest_soil_layer +
                                      bracket_tol_at(wettest_soil_layer));
-  double f_hi = (hi == dry_end_ && std::isfinite(E_up_at_crit))
-                    ? E_up_at_crit - residual_flux(dry_end_, E_up_at_crit)
+  double f_hi = (hi == psi_crit && dry_end_ == psi_crit && std::isfinite(E_up_at_crit))
+                    ? E_up_at_crit - residual_flux(psi_crit, E_up_at_crit)
                     : target(hi);
   for (int i = 0; f_hi < 0.0; ++i) {
     if (i >= 64) {
@@ -4747,6 +4767,13 @@ inline bool Leaf::prepare_collar_solve(double& bound_a, double& bound_b,
     if (wettest_soil_layer >= end) {
       return false;
     }
+    // Nor where the stem can carry less, from the wettest layer, than the curve
+    // resolves (stem_capacity_floor): no gradient there is more than rounding.
+    const double G_inf = stem_curve_limit();
+    if (!(G_inf - stem_curve_integral(wettest_soil_layer) >
+          stem_capacity_floor * G_inf)) {
+      return false;
+    }
     // Uptake at a collar held at the end is the most the soil delivers with the
     // stem short of it; below the residual flux the cuticle cannot be supplied
     // (at g_min = 0, a negative uptake).
@@ -4756,7 +4783,7 @@ inline bool Leaf::prepare_collar_solve(double& bound_a, double& bound_b,
     }
     const double root_crit = find_root_psi(
         wettest_soil_layer, supply_psi_soil(), 1,
-        E_up_at_wettest - transpiration(end, wettest_soil_layer), E_at_end);
+        E_up_at_wettest - transpiration(end, wettest_soil_layer), E_at_end, end);
     // The continuity root at or past the end: no collar is left.
     if (root_crit >= end) {
       return false;
@@ -4807,7 +4834,8 @@ inline double Leaf::extend_collar_bracket(double bound_a) {
   const double E_at_end = E_column(end, supply_psi_soil(), end);
   const double root_crit = find_root_psi(
       bracket_wettest_, supply_psi_soil(), 1,
-      bracket_E_up_at_wettest_ - transpiration(end, bracket_wettest_), E_at_end);
+      bracket_E_up_at_wettest_ - transpiration(end, bracket_wettest_), E_at_end,
+      end);
   return std::max(root_crit, bound_a);
 }
 
@@ -6954,15 +6982,21 @@ inline double Leaf::stem_curve_integral_inverse(double w, const char* caller,
   // G rises to G(inf), which it reaches to rounding at the end of the curve,
   // so a potential gives w exactly when 0 <= w <= G(inf), and G(inf) itself is
   // the end of the curve. Past G(inf) no stem potential carries the flow.
+  //
+  // ⚠️ "PAST" MEANS PAST ROUNDING. A flux the model keeps below the stem's
+  // ceiling -- the residual flux under its soft cap, a continuity root taken
+  // from its feasible side -- arrives here as w = E/kmax + G(upstream), and the
+  // sum can round a few ulps past G(inf) when the ceiling is nearly all used.
+  // That is G(inf), and the end of the curve is its potential.
   const double G_inf = stem_curve_limit();
-  if (w < 0.0 || w > G_inf) {
+  if (w < 0.0 || w > G_inf * (1.0 + 16.0 * std::numeric_limits<double>::epsilon())) {
     stem_curve_out_of_domain(0.0, G_inf, w,
                              "the cumulative xylem conductivity integral G, "
                              "INVERTED (G^-1, argument in E/K_max), whose upper "
                              "end is its limit G(inf)",
                              "E/K_max", caller);
   }
-  return vulnerability_integral_inverse(*stem_curve_, w, stem_b);
+  return vulnerability_integral_inverse(*stem_curve_, std::min(w, G_inf), stem_b);
 }
 
 inline double Leaf::stem_curve_integral_inverse_deriv(double w) const {
@@ -9445,9 +9479,12 @@ inline void Leaf::optimise_psi_stem_single() {
       set_profitmax_degenerate_state(psi_wet, psi_soil);
       return;
     }
-  } else if (psi_wet > psi_dry) {
+  } else if (psi_wet > psi_dry ||
+             !(stem_curve_limit() - stem_curve_integral(psi_soil) >
+               stem_capacity_floor * stem_curve_limit())) {
     // Drier soil than the stem can carry more than the cuticle's loss from
-    // short of its dry end: one feasible potential, and this is it.
+    // short of its dry end, or than the curve resolves a flux from
+    // (stem_capacity_floor): one feasible potential, and this is it.
     profit_ = profit_psi_stem_for<K>(psi_wet, psi_soil);
     lambda_emergent_ = lambda_for<K>(psi_wet, psi_soil);
     return;

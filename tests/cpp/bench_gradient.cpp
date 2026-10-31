@@ -392,11 +392,10 @@ int main(int argc, char **argv) {
         const auto t0 = clock_type::now();
         for (long r = 0; r < batch_reps; ++r) {
           // Vary theta per rep for the reason `perturbed()` documents -- but in
-          // `TF24_beta2`, NOT in the parameter being differentiated. Moving the base
-          // `stem_b` per rep moves it off `stem_b_spline_`, which is a rebuild the
-          // model genuinely owes and which showed up as 0.05 rebuilds/obs (one per
-          // rep over 20 observations) while reading like a leftover of the bug
-          // this arm exists to measure. `TF24_beta2` owns no spline.
+          // `TF24_beta2`, NOT in the parameter being differentiated, and not in
+          // `stem_c`, which would rebuild the stem table each rep -- a rebuild the
+          // model genuinely owes, which would read like a leftover of the bug this
+          // arm exists to measure. `TF24_beta2` owns no table.
           theta[phylloptim::gradient::par_TF24_beta2] =
               kBase.v[7] * (1.0 + double(r) * 1e-12);
           const std::vector<phylloptim::gradient::Result> g =
