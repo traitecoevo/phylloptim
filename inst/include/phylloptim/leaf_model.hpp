@@ -4933,7 +4933,18 @@ inline double Leaf::extend_collar_bracket(double bound_a) {
       bracket_wettest_, supply_psi_soil(), 1,
       bracket_E_up_at_wettest_ - transpiration(end, bracket_wettest_), E_at_end,
       end);
-  return std::max(root_crit, bound_a);
+  // ⚠️ POLISHED HERE TOO, as prepare_collar_solve's bracket polishes its own.
+  // find_root_psi places the root only to bracket_tol_at, ~1e-3 MPa, and where
+  // the whole interval is narrower than that (a small E times the series
+  // resistance) it returned the wet bound itself: the extended interval had no
+  // width and a leaf whose profit still rose was reported shut, at psi_soil 4.8
+  // and r = 1 at -5.63 against -5.05 open.
+  const double bound_b = std::max(root_crit, bound_a);
+  if (bound_b - bound_a < bracket_tol_at(bound_b)) {
+    return std::max(polish_bracket_bound(bound_b, supply_psi_soil(), 1),
+                    bound_a);
+  }
+  return bound_b;
 }
 
 // The profit-maximising collar potential, by solving the first-order condition
