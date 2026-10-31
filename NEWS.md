@@ -6,6 +6,12 @@ With the energy balance on, the leaf has a boundary layer, and the CO2 conductan
 
 `$stom_cond_CO2_` is the split conductance; `gs_H2O` is still the total to water, recovered from it, so `gs_stomatal_H2O` means what it did. Where a candidate's total conductance passes what the boundary layer can carry (a deficit on `vpd_leaf_min`), the series has a pole; a soft floor (`bl_co2_split_floor`, width `bl_co2_split_floor_width`) keeps it finite and is exact to the last bit at every physical point. Goldens: `operating_points.tsv` and `primitives.tsv` are bit-identical; `psi_stem_optima.tsv` moves on 1,002 of its 2,880 energy-balance rows and none of its others, by at most 2.6% in profit at 25 C, with no status or kind changed. The gate-off solve's cost is unchanged.
 
+# phylloptim 0.23.1
+
+## Leftovers of the 0.23.0 rename (#149)
+
+No number moves. `MultiLayerRoots::uptake_impl`'s local for a trial collar had been swept into the name `operating_collar`, which means the collar the solve placed; it is `collar_psi`. `vignette("derivative-surface")` now gives its sweep's total as the sum of its rows (1,920) and counts eight kinds, and comments that still called `SupplyDraw::E_up` "flux" use its name.
+
 # phylloptim 0.23.0
 
 ## The derivative surface's names say what they return (#149)
