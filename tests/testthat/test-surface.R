@@ -638,7 +638,7 @@ test_that("the single path refuses inputs it would otherwise ignore", {
 
   expect_error(series_resistance(0), "must be positive")
   expect_error(series_resistance(-1), "must be positive")
-  # Below 1e-2 the collar route cannot resolve the flux (#176); refused when it
+  # Below 1e-2 the collar route cannot resolve the flux; refused when it
   # reaches the leaf, not when the network is built.
   ls <- leaf_model(supply = leaf_supply_singlelayer())
   expect_error(set_drivers(ls, psi_soil = 1,
