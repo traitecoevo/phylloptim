@@ -1765,7 +1765,7 @@ equations:
     reads: [use_thermal_damage_, I_, D_, damage_surv_floor]
     writes: [functional_, vcmax_, jmax_]
     kind: closed_form
-    note: 'The states enter the benefit through capacity and never the hydraulic cost; $R_d$ is not scaled. A soft floor of width $F_\min$: exactly $F_0$ wherever $F_0 > 2.3 \times 10^{-5}$, positive and falling through $F_0 = 0$. $I < 0$ and $D < 0$ are refused, so $F_0 \le 1$.'
+    note: 'The states enter the benefit through capacity and never the hydraulic cost; $R_d$ is not scaled. A soft floor of width $F_\min$: exactly $F_0$ wherever $F_0 > 3.4 \times 10^{-5}$, positive and falling through $F_0 = 0$. $I < 0$ and $D < 0$ are refused, so $F_0 \le 1$.'
   respiration_costs:
     section: damage
     title: Maintenance costs added to respiration

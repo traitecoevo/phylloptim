@@ -188,7 +188,7 @@ YAML 1.1 reads `1e-3` as a string: write a float with a point and a signed expon
 - **The generated RcppR6 files** (old comments: "PLAN item 6c"): never hand-edit them, and keep RcppR6 undeclared.
 - **`gradient.hpp`'s arithmetic order**, which must match `R/gradient.R` bit-for-bit.
 - **`psi_stem_to_ci`'s tolerance** and **`basin_scan_cells()`'s gate**, both set by measurement.
-- **No clamp, `min`, `max` or branch on a physical quantity inside the solved range** (#183, decided). A driver or state outside the model's range is refused at its entry point, by name and limit; a reachable bound gets a smooth form with a registered width. The kept exceptions are the stomatal corner `E_s >= 0`, `vpd_leaf_min`, and the published forms (Medlyn's beta, CF77's soil price), each with its reason in the registry. `make -C tests/cpp smoothness` is the check.
+- **No clamp, `min`, `max` or branch on a physical quantity inside the solved range** (#183, decided). A driver or state outside the model's range is refused at its entry point, by name and limit; a reachable bound gets a smooth form with a registered width. The kept exceptions are the stomatal corner `E_s >= 0`, `vpd_leaf_min`, SOX's and JW26's reduction factors held at zero past psi_crit (without it a dark leaf's negative A times a negative factor reports a positive profit), and the published forms (Medlyn's beta, CF77's soil price), each with its reason in the registry. `make -C tests/cpp smoothness` is the check.
 - **The `supply_kind_` enum**, which measured free where `std::variant` did not (hazard 6).
 - **Public `Leaf` members**, which plant binds by name (hazard 7).
 - **`tsv_to_hex.c`**, which is live: `test-golden.R`'s regeneration recipe needs it.

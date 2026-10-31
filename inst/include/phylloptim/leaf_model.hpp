@@ -2370,8 +2370,9 @@ public:
   // lands, which is anywhere G rounds to G(inf). Returns whether it did.
   template <CostCurve K> bool seat_stem_at_dry_pin();
   // Evaluate the leaf at a *given* root-collar potential (positive magnitude)
-  // rather than optimising it: reuses prepare_collar_solve, clamps the target to
-  // the feasible interval, and evaluates there (no golden-section search). Leaves
+  // rather than optimising it: reuses prepare_collar_solve, refuses a target
+  // outside the feasible interval (infeasibility code `prescribed_potential`),
+  // and evaluates there (no golden-section search). Leaves
   // exactly the same outputs as find_root_collar_psi and returns profit_. Used by
   // TF24f's gradient-ascent acclimation (#525).
   double evaluate_root_collar_psi(double target_opt_root_psi);
@@ -2379,8 +2380,8 @@ public:
   double evaluate_root_collar_psi_for(double target_opt_root_psi);
   // Evaluate profit at a given root-collar potential (positive magnitude)
   // *assuming prepare_collar_solve has already run this step* (soil-side caches
-  // built, feasible interval [bound_a, bound_b] known). Clamps the target into
-  // the interval and sets the operating point (opt_psi_stem_, opt_root_psi_,
+  // built, feasible interval [bound_a, bound_b] known). Refuses a target outside
+  // the interval and otherwise sets the operating point (opt_psi_stem_, opt_root_psi_,
   // profit_), returning profit_. This is the post-prepare body of
   // evaluate_root_collar_psi, factored out so the centred finite-difference leaf
   // solve can share one prepare_collar_solve across its three profit evals (#530).
@@ -2734,7 +2735,7 @@ public:
   // psi_stem, the same no-flow rule set_leaf_states_rates_from_psi_stem applies,
   // and transpiration() otherwise. A cost or lambda that re-reads the flux after
   // that call must use this, or it refuses a point the evaluator accepted: a
-  // prescribed collar at or clamped to the wet bound puts the stem up to ~1e-9
+  // prescribed collar at the wet bound puts the stem up to ~1e-9
   // MPa wetter.
   double operating_point_flux(double psi_stem, double psi_upstream);
   // supply-side transpiration for a given water potential gradient between leaves and soil, integrated internally (return: kg h20 s^-1 m^-2 LA)
@@ -3643,7 +3644,7 @@ public:
     // leaf in the dark is an ordinary optimum, usually at the wet bound.
     HydraulicShutdown,
     // The collar potential was IMPOSED by the caller (evaluate_root_collar_psi /
-    // profit_at_collar_psi), clamped into the feasible interval, not optimised.
+    // profit_at_collar_psi) inside the feasible interval, not optimised.
     // dprofit is generally non-zero and is the whole point on that path -- it is
     // the acclimation rate, not a residual.
     Prescribed,
@@ -5284,9 +5285,9 @@ inline void Leaf::find_root_collar_psi_for(){
 }
 
 // Evaluate the operating point at a given collar potential rather than
-// optimising it (see header). Clamps the target into the feasible interval so a
-// tracked state that has drifted outside it still yields a finite operating
-// point; the gradient computed by the caller then pulls it back inside.
+// optimising it (see header). A target outside the feasible interval is refused
+// as infeasible (see profit_at_collar_psi), so a caller tracking the collar as a
+// state rejects the step rather than reading an operating point at the bound.
 inline void Leaf::find_root_collar_psi() {
   find_root_collar_psi_for<CostCurve::TF24>();
 }
@@ -6234,9 +6235,8 @@ inline double Leaf::dprofit_energy_balance_term(
   // hydraulically pinned, so its slope is -gc_s * D'(T)/D with D'(T) =
   // esat'(Tleaf) since e_air is fixed. NEGATIVE: a hotter leaf has a larger
   // deficit, so the same water flux implies a SMALLER conductance. Zero where
-  // the deficit is on its floor, for the same reason leaf_temp_from_E returns
-  // dT_dE = 0 on its clamp -- the reported value no longer responds to the
-  // input. The residual's part -- a hotter cuticle loses more, which takes
+  // the deficit is on its floor, because the reported value no longer responds
+  // to the input there. The residual's part -- a hotter cuticle loses more, which takes
   // conductance from the stomata and adds it to the cuticle -- is appended.
   const double gc_s = gc_const * E_s;
   const double dgc_dT =
@@ -6380,7 +6380,7 @@ inline void Leaf::update_temperature_dependent_params(double leaf_temp) {
     //
     // F is held above zero by a SOFT floor of width damage_surv_floor, f:
     // F + f ln(1 + e^(-F/f)), the softplus written so that F itself is kept
-    // exactly wherever the correction is below half an ulp (F > ~2.3e-5). A
+    // exactly wherever the correction is below half an ulp of F (F > ~3.4e-5). A
     // min/max floor put a corner in every output at F = f; sustained lethal
     // heat can drive F that low, and nothing below it is refused. I_ and D_
     // are refused below zero, so F <= 1 needs no cap.
@@ -8912,7 +8912,7 @@ inline double Leaf::lambda_LeastCost(double psi_stem, double psi_upstream) {
   // With the energy balance on, W's capacity term moves with E through Tleaf,
   // so dTheta/dE gains beta*Vcmax_mol'(T)*dT/dE -- the slope the first-order
   // condition takes in dprofit_energy_balance_term, as lambda_ProfitMax carries
-  // its thermal term. Zero on the leaf-temperature clamp, where dT/dE is.
+  // its thermal term.
   double dT_dE = 0.0;
   const double Tleaf =
       leaf_temp_from_E(operating_point_flux(psi_stem, psi_upstream), &dT_dE);
