@@ -308,6 +308,19 @@ bool same(double got, double want) {
 // measured empty band -- see the use site in compare_optima.
 constexpr double kOptNegligible = 1e-12;
 
+// The same idea for operating_points.tsv's water fluxes, kg H2O m^-2 s^-1. A
+// shut leaf at g_min = 0 sits on a bound polished to collar precision, and the
+// uptake there is that polish's residue: ~1e-20 in e_up and ~1e-18 summed over
+// layers, of either sign on either platform (#182). The smallest flux an open
+// leaf on the grid reports is 7.6e-12, so the floor sits in a measured empty
+// band four decades from each side. Tolerant mode only; macOS stays bit-exact.
+constexpr double kFluxNegligible = 1e-15;
+
+bool is_water_flux_field(const char* name) {
+  return std::strcmp(name, "transpiration") == 0 || std::strcmp(name, "gc") == 0 ||
+         std::strcmp(name, "e_up") == 0 || std::strcmp(name, "uptake") == 0;
+}
+
 double rel_diff(double a, double b) {
   if (std::isnan(a) && std::isnan(b)) {
     return 0.0;
@@ -436,7 +449,10 @@ int compare(Tolerance tol) {
                             {"e_up", r.e_up, g.e_up},
                             {"uptake", r.uptake, g.uptake}};
     for (const Field &fd : fields) {
-      const double rd = rel_diff(fd.got, fd.want);
+      const bool negligible = tol.argmax >= 0.0 && is_water_flux_field(fd.name) &&
+                              std::fabs(fd.got) < kFluxNegligible &&
+                              std::fabs(fd.want) < kFluxNegligible;
+      const double rd = negligible ? 0.0 : rel_diff(fd.got, fd.want);
       const bool is_max = is_maximum_field(fd.name);
       const double rtol = is_max ? tol.maximum : tol.argmax;
       // Track the worst deviation in each class over the whole grid regardless

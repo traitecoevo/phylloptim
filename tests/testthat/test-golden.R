@@ -53,12 +53,13 @@
 # at 100 umol m-2 s-1 is 0 rather than -R_d.
 #
 # Then for the residual conductance (#182), which moved the shut-down row's
-# psi_stem, opt_root_psi, assim, profit, e_up and uptake: the shut leaf sits at
-# its wet bound, the zero-uptake collar (6.34 MPa here, past psi_crit's 5.87), with
-# the stem AT it rather than held at psi_crit, so the hydraulic cost is the curve's
-# there; assim is the root of A(ci) = 0 (2.2e-16, not an assigned 0), and e_up and
-# uptake are the polished bound's residual (~1e-20) rather than assigned zeros.
-# ci and the two exact zeros (transpiration, gc) did not move.
+# psi_stem, opt_root_psi, profit, e_up and uptake: the shut leaf sits at its wet
+# bound, the zero-uptake collar (6.34 MPa here, past psi_crit's 5.87), with the
+# stem AT it rather than held at psi_crit, so the hydraulic cost is the curve's
+# there; e_up and uptake are the polished bound's residue (~1e-20) rather than
+# assigned zeros, compared against an absolute floor off macOS. assim is the root
+# of A(ci) = 0, which is zero by definition, and ci and the two exact zeros
+# (transpiration, gc) did not move.
 #
 # Before that, #92 (the indexed knot grid) moved 27, the psi_stem_to_ci tolerance
 # 18, and the collar root-find 27.
@@ -128,7 +129,7 @@ golden_rows <- list(
       psi_stem      = "0x1.960cce048d51fp+2",
       opt_root_psi  = "0x1.960cce048d51fp+2",
       ci            = "0x1.ec6f9e7580bddp+2",
-      assim         = "0x1.0000000000000p-52",
+      assim         = "0x0.0p+0",
       transpiration = "0x0.0p+0",
       gc            = "0x0.0p+0",
       profit        = "-0x1.ce1e653284966p+2",

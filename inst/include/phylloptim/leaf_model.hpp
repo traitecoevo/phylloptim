@@ -7273,7 +7273,15 @@ inline void Leaf::set_leaf_states_rates_from_psi_stem(double psi_stem, double ps
   stom_cond_CO2_ = atm_kpa_ * E_s * kg_to_mol_h2o / vpd_leaf_ / H2O_CO2_stom_diff_ratio_ +
                    cuticular_cond_CO2();
   ci_ = solve_ci(stom_cond_CO2_);
-  assim_colimited_ = std::isfinite(ci_) ? assim_colimited(ci_) : assim_saturated();
+  // With no conductance at all (g_min = 0 and the stomata shut) solve_ci's
+  // residual IS A(ci), so A at its root is zero by definition, and the root's
+  // own rounding residue (~1e-15, either sign) is not a value: the product and
+  // ratio curves' emergent lambda scales with or divides by A, and turned that
+  // residue into platform-dependent +-1e-9, +-inf and NaN. On the tape the
+  // theorem gives this A its rows through the conductance's g_min row.
+  assim_colimited_ = !std::isfinite(ci_)          ? assim_saturated()
+                     : stom_cond_CO2_ == 0.0      ? 0.0
+                                                  : assim_colimited(ci_);
 }
 
 
@@ -7811,10 +7819,19 @@ inline S Leaf::profit_at(const S& collar, const SupplyDraw<S>& draw,
   const CollarCoords<S> at = collar_coords_at<S>(opt_psi_stem_, ci_, collar,
                                                  draw, pars, cap, collar_moves);
   // A leaf with no conductance and no ci at which it nets zero reported
-  // ci = +inf and its saturated assimilation; the same here.
-  const S A = std::isfinite(ci_)
-                  ? assim_colimited_kernel<S>(at.ci.value, cap)
-                  : assim_saturated_kernel<S, S>(cap);
+  // ci = +inf and its saturated assimilation; the same here. One with no
+  // conductance and a root reported A = 0 exactly (the residual there IS A),
+  // so its value here is that zero, carrying the kernel's rows: the theorem
+  // places ci where A stays zero, so the rows are what move it off zero.
+  S A;
+  if (!std::isfinite(ci_)) {
+    A = assim_saturated_kernel<S, S>(cap);
+  } else {
+    A = assim_colimited_kernel<S>(at.ci.value, cap);
+    if (stom_cond_CO2_ == 0.0) {
+      A = A - S(odelia::util::to_passive(A));
+    }
+  }
   S cost = hydraulic_cost_TF_kernel<S>(at.sigma.value, pars);
   if constexpr (K == CostCurve::TF24_floor) {
     // TF24's own cost plus a part LINEAR IN THE FLUX: Theta(E) = Theta~(psi) +

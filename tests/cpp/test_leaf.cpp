@@ -2558,7 +2558,10 @@ void test_shutdown_reports_one_temperature() {
     const std::string what = std::string(" (") + c.name + ")";
 
     ok(std::isfinite(l.ci_), "ci is written, and finite" + what);
-    ok(l.assim_colimited_ == l.assim_colimited(l.ci_),
+    // The block's value at the reported ci -- or exactly zero where nothing
+    // conducts, since the ci solve's residual there IS A (#182).
+    ok(l.assim_colimited_ ==
+           (l.stom_cond_CO2_ == 0.0 ? 0.0 : l.assim_colimited(l.ci_)),
        "net assimilation is the block's value at the reported ci" + what);
     near(l.profit_, l.assim_colimited_ - l.hydraulic_cost_TF(l.opt_psi_stem_),
          1e-12, "profit == assimilation - hydraulic cost" + what);
@@ -2659,8 +2662,8 @@ void test_zero_E_branch_derives_its_own_block() {
     ok(l.Tleaf_ == l.leaf_temp_from_E(0.0),
        "and its temperature is the E = 0 one");
     ok(l.ci_ == l.solve_ci(0.0), "ci sits at the compensation point of this block");
-    ok(l.assim_colimited_ == l.assim_colimited(l.ci_),
-       "net assimilation is the block's value there");
+    ok(l.stom_cond_CO2_ == 0.0 && l.assim_colimited_ == 0.0,
+       "nothing conducts, so net assimilation is the root's zero exactly");
     // ci is the root of net assimilation, to the root-find's 1e-13 in ci. The
     // bit-exact statement that pins the TEMPERATURE is the next block.
     near(l.assim_colimited(l.ci_), 0.0, 1e-8,
@@ -2697,8 +2700,11 @@ void test_zero_E_branch_derives_its_own_block() {
     l.set_leaf_states_rates_from_psi_stem(1.0, 1.0);
     ok(l.assim_colimited_ == a0, "and the closure candidate is reproducible");
     l.update_temperature_dependent_params(l.leaf_temp_from_E(0.0));
-    near(a0, l.assim_colimited(l.solve_ci(0.0)), 1e-300,
-         "its carbon is the compensation-point value at the temperature E = 0 implies");
+    // Zero exactly: nothing conducts, so ci is where A is zero, at the
+    // temperature E = 0 implies -- which the root itself confirms to its tolerance.
+    ok(a0 == 0.0, "its carbon is the root's zero exactly");
+    near(l.assim_colimited(l.solve_ci(0.0)), 0.0, 1e-8,
+         "and A at the compensation point of the E = 0 temperature is zero");
 
     // And |A|max EXCLUDES it: a positive normaliser cannot be a respiration rate.
     l.prepare_profitmax();

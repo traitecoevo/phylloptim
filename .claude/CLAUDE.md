@@ -578,7 +578,12 @@ exactly where a genuinely broken value would also show up, so the check stays wh
 it is and only the reporting distinguishes the cases. The sibling file
 `psi_stem_optima.tsv` handles the same problem the other way, with an absolute floor
 (`kOptNegligible`, 1e-12) below which it declines to compare — worth knowing that
-the two files answer this differently on purpose.
+the two files answer this differently on purpose. The one exception in
+`operating_points.tsv` is the water fluxes (`kFluxNegligible`, 1e-15 kg m⁻² s⁻¹,
+mirrored in `helper-golden.R`): a shut leaf's uptake is the polished wet bound's
+residue, ~1e-20 of either sign by platform, and no relative tolerance can pass on
+that. The floor sits in a measured empty band, four decades below the smallest
+flux an open leaf reports (7.6e-12), so it cannot hide a broken open leaf.
 
 **`psi_stem_optima.tsv`'s argmax class needs the wider decade** because its worst,
 6.63e-06 at `fresh/TF/single psi_soil=0.5 ppfd=1500 T=40 eb=1 tc=0 assim`, is a
