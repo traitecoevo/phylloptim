@@ -1401,10 +1401,27 @@ satisfies `-Werror=switch` and so removes the check they exist for.
      its inputs or the reverse sweep drops its rows, which `test_transpose` sees.
      The caps are a placeholder for the regime #183 leaves to a later step; do
      not replace either with a `min()`, which kinks every output in `psi_soil`.
-     One step is left at the root integral's cap itself, the layer's gravity
-     head (~0.009 MPa in `psi_stem`, flux continuous): past it no span conducts,
-     so the wet bound is the soil rather than the gravity balance. It is the
-     root table's tail (#85), present at `g_min = 0` too.
+   - **The roots' ceiling is `U (U / (U + r))^2`, not `U`, and the shape is
+     load-bearing.** Past the root integral's cap (#85) no layer conducts and
+     the shut leaf sits at the wettest layer's gravity balance. With `U` the
+     bound converged to `psi + z / (1 - phi)` instead (a 4.9e-3 MPa step);
+     with `U^2 / (U + r)` it was continuous but its slope in `psi_soil` jumped
+     (-2.3 against 1), because `U` itself vanishes linearly at the cap. The
+     cube makes value and slope continuous; the second derivative still is not,
+     and that goes with a closed-form root tail (#85, #184 section 2).
+     `test_the_capped_regime_is_smooth_in_the_soil` asserts both at the cap.
+   - **The shut leaf's bound is bracketed by gravity balances**
+     (`find_shut_wet_bound`): every layer draws nothing or less at the lowest
+     balance among conducting layers, and at least nothing at the highest. One
+     root-find to collar precision on that bracket replaced a walk, a coarse
+     solve and a polish, and is what puts a dead soil's bound at the balance.
+     The open leaf keeps `find_wet_bound`, which is what keeps its rows
+     bit-identical at `g_min = 0`.
+   - **The `g_min == 0` test sits in the class, in front of each out-of-line
+     residual function.** A call that only returns zero cost 2.5% of an open
+     leaf's solve at the default. ⚠️ Measure before merging two residual
+     calls into one pass: doing that in `dprofit` measured 3% SLOWER at
+     `g_min > 0`, interleaved.
 
    `test_smoothness_sweep` in `test_leaf.cpp` is the guard for the epic's
    smoothness claim: it second-differences profit, `A`, `E`, `psi_stem`, `lambda`

@@ -604,6 +604,36 @@ public:
       default:                     return single_.psi_soil_vec_;
     }
   }
+  // The wet bound's floor (MultiLayerRoots::wet_floor_layer): the lowest
+  // gravity balance psi_i + z_i among the layers that still conduct, or the
+  // wettest layer's where none does. The single potential's balance is its
+  // soil plus its head, and it always conducts. `conducts` and `layer` report
+  // which case and which layer, for the derivative surface.
+  double supply_wet_floor(bool* conducts = nullptr, int* layer = nullptr) const {
+    switch (supply_kind_) {
+      case SupplyKind::MultiLayer: {
+        bool c = false;
+        const int i = roots_.wet_floor_layer(roots_.psi_soil_, c);
+        if (conducts != nullptr) *conducts = c;
+        if (layer != nullptr) *layer = i;
+        const std::size_t k = static_cast<std::size_t>(i);
+        return roots_.psi_soil_[k] + roots_.grav_head_z_[k];
+      }
+      default:
+        if (conducts != nullptr) *conducts = true;
+        if (layer != nullptr) *layer = 0;
+        return single_.psi_soil_ + single_.grav_head_;
+    }
+  }
+  // Its partner (MultiLayerRoots::wet_ceiling): the highest balance among
+  // conducting layers, where uptake is at least zero. Equal to the floor on
+  // one layer and on the single potential.
+  double supply_wet_ceiling() const {
+    switch (supply_kind_) {
+      case SupplyKind::MultiLayer: return roots_.wet_ceiling(roots_.psi_soil_);
+      default:                     return single_.psi_soil_ + single_.grav_head_;
+    }
+  }
   // Driest collar potential the supply path can be asked about, positive
   // magnitude. For roots it is the root vulnerability limit; a constant-
   // conductance path has no such limit, so the stem's psi_crit binds instead.
@@ -993,9 +1023,27 @@ public:
 
   // The temperature factor of the residual conductance, 1 at 25 C exactly, and
   // its slope in temperature.
-  double g_min_factor(double leaf_temp) const;
+  // Served from the memo when nothing it reads has moved: with the energy
+  // balance off every evaluation in a solve asks at the driver temperature,
+  // and the exp and two softpluses were a third of what a residual conductance
+  // cost the solve. Keyed on all five inputs, so a parameter changed between
+  // solves cannot be answered with the old curve; a NaN key never matches.
+  // The check is here, in the class, so it inlines (1.3% at g_min > 0).
+  double g_min_factor(double leaf_temp) const {
+    if (leaf_temp == g_min_factor_memo_[0] && g_min_k_low_ == g_min_factor_memo_[1] &&
+        g_min_k_high_ == g_min_factor_memo_[2] && g_min_T_trans_ == g_min_factor_memo_[3] &&
+        g_min_T_width_ == g_min_factor_memo_[4]) {
+      return g_min_factor_memo_[5];
+    }
+    return g_min_factor_compute(leaf_temp);
+  }
+  double g_min_factor_compute(double leaf_temp) const;
   double g_min_factor_temp_deriv(double leaf_temp) const;
-  double g_min_at(double leaf_temp) const { return g_min * g_min_factor(leaf_temp); }
+  // At g_min = 0 the factor is never formed: set_leaf_vpd seats this at every
+  // leaf temperature a solve establishes, and the exp it costs is waste there.
+  double g_min_at(double leaf_temp) const {
+    return g_min == 0.0 ? 0.0 : g_min * g_min_factor(leaf_temp);
+  }
   // The leaf-to-air deficit at a leaf temperature, as set_leaf_vpd seats it.
   double leaf_vpd_at(double leaf_temp) const;
   // The most the stem can ever carry from an upstream potential:
@@ -1006,24 +1054,66 @@ public:
   static double residual_cap(double r, double E_inf);
   static double residual_cap_ddemand(double r, double E_inf);
   static double residual_cap_dceiling(double r, double E_inf);
-  // The cap at the roots' ceiling, applied to the stem-capped flux; the
-  // identity, exactly, while that ceiling is infinite.
-  double residual_root_cap(double r1) const {
+  // The cap at the roots' ceiling, applied to the stem-capped flux r1; the
+  // identity, exactly, while that ceiling is infinite. The ceiling is not the
+  // roots' limit U itself but C = U (U / (U + r))^2, with r the cuticle's
+  // demand. C ~ U wherever the roots can deliver far more than the cuticle
+  // asks, which is every ordinary soil; as U -> 0, C ~ U^3 / r^2, so the
+  // realised flux falls much faster than the supply. Two measured reasons:
+  //
+  //   - With C = U the bound solved uptake = phi U as the last layer stopped
+  //     conducting, and converged to psi + z / (1 - phi): a step of the gravity
+  //     head (4.9e-3 MPa) against a dead soil, whose bound is the balance psi + z.
+  //     Any C shrinking faster than U closes it.
+  //   - U itself falls to zero LINEARLY at the root integral's cap (the root
+  //     table holds G(inf) past it, #85), and with C = U^2 / (U + r) the bound's
+  //     offset from the balance followed U, leaving a slope change there: the
+  //     stem's slope in psi_soil went -2.3 on one side and 1 on the other. With
+  //     the cube the offset follows U^2, and both one-sided slopes converge to
+  //     the same value (1.0000 for the stem, -0.0866 for profit).
+  //
+  // So the shut leaf is continuous with a continuous slope through the cap.
+  // Its second derivative is not, and that, like the cap itself, goes with a
+  // closed-form root tail (#85, #184 section 2).
+  static double residual_root_ceiling_at(double U, double r) {
+    const double w = U / (U + r);
+    return U * w * w;
+  }
+  double residual_root_cap(double r1, double r) const {
     return std::isinf(residual_root_ceiling_)
                ? r1
-               : residual_cap(r1, residual_root_ceiling_);
+               : residual_cap(r1, residual_root_ceiling_at(residual_root_ceiling_, r));
   }
-  double residual_root_cap_ddemand(double r1) const {
+  // Its slope in r1, and its slope in r through the ceiling.
+  double residual_root_cap_ddemand(double r1, double r) const {
     return std::isinf(residual_root_ceiling_)
                ? 1.0
-               : residual_cap_ddemand(r1, residual_root_ceiling_);
+               : residual_cap_ddemand(
+                     r1, residual_root_ceiling_at(residual_root_ceiling_, r));
+  }
+  double residual_root_cap_dceiling_dr(double r1, double r) const {
+    if (std::isinf(residual_root_ceiling_)) {
+      return 0.0;
+    }
+    const double U = residual_root_ceiling_;
+    const double w = U / (U + r);
+    const double dC_dr = -2.0 * w * w * w;
+    return residual_cap_dceiling(r1, residual_root_ceiling_at(U, r)) * dC_dr;
   }
   // The residual flux the leaf realises at an upstream potential and a TOTAL
   // flux, kg H2O m^-2 s^-1. Pure: the leaf temperature is taken from the total
   // flux on the energy-balance path and from the driver off it, so a bracket
   // root-find can ask about a collar without seating anything. Exactly zero at
   // g_min = 0.
-  double residual_flux(double psi_upstream, double E_total) const;
+  //
+  // ⚠️ THE g_min = 0 TEST IS IN THE CLASS ON PURPOSE, as for the two slopes
+  // below. The full functions are too large to inline, and these are called on
+  // every evaluation of the solve: a call returning zero cost ~2.5% of an open
+  // leaf's solve at g_min = 0 (profiled), which the default must not pay.
+  double residual_flux(double psi_upstream, double E_total) const {
+    return g_min == 0.0 ? 0.0 : residual_flux_active(psi_upstream, E_total);
+  }
+  double residual_flux_active(double psi_upstream, double E_total) const;
   // The demand before the cap, kg H2O m^-2 s^-1 at a leaf temperature, and its
   // slope in that temperature (through g_min(T) and the deficit).
   double residual_demand_at(double leaf_temp) const;
@@ -1032,9 +1122,20 @@ public:
   // at a leaf temperature; and the slope in leaf temperature of the TOTAL
   // conductance to CO2 that the residual contributes, -gc_const dr*/dT + rho
   // dg_min/dT, for the energy-balance term. Both exact zeros at g_min = 0.
-  double residual_flux_dpsi_upstream(double psi_upstream, double leaf_temp) const;
+  double residual_flux_dpsi_upstream(double psi_upstream, double leaf_temp) const {
+    return g_min == 0.0 ? 0.0
+                        : residual_flux_dpsi_upstream_active(psi_upstream, leaf_temp);
+  }
+  double residual_flux_dpsi_upstream_active(double psi_upstream,
+                                            double leaf_temp) const;
   double residual_cond_temp_deriv(double psi_upstream, double leaf_temp,
-                                  double gc_const) const;
+                                  double gc_const) const {
+    return g_min == 0.0 ? 0.0
+                        : residual_cond_temp_deriv_active(psi_upstream, leaf_temp,
+                                                          gc_const);
+  }
+  double residual_cond_temp_deriv_active(double psi_upstream, double leaf_temp,
+                                         double gc_const) const;
   // The same quantities on the tape: G(inf) with its trait rows, and the
   // realised residual flux at a collar, carrying rows in g_min, kmax and the
   // stem curve's pair. The leaf temperature and deficit are the seated
@@ -1959,6 +2060,13 @@ public:
     // g_min = 0 records nothing more than it did.
     bool has_uptake_limit = false;
     S uptake_limit{};
+    // Where no layer conducts (every rooted potential past the root integral's
+    // cap) the wet bound is the wettest layer's gravity balance, psi_i + z_i,
+    // and its rows are that layer's potential's: the residual is zero at every
+    // collar there, so the implicit function theorem has no slope to divide by.
+    // Carried only in that case.
+    bool no_conduction = false;
+    S gravity_balance{};
 
     // ⚠️ WHAT CARRIES A ROW, NAMED FOR visit_active. A shape that dispatch does
     // not open is skipped in silence, and here that arrives as an exact zero in
@@ -1974,6 +2082,9 @@ public:
       }
       if (has_uptake_limit) {
         f(uptake_limit);
+      }
+      if (no_conduction) {
+        f(gravity_balance);
       }
     }
   };
@@ -2011,6 +2122,13 @@ public:
     if (!std::isinf(residual_root_ceiling_)) {
       d.uptake_limit = roots_.template uptake_limit<S>(supply);
       d.has_uptake_limit = true;
+    }
+    bool conducts = true;
+    const int floor_layer = roots_.wet_floor_layer(roots_.psi_soil_, conducts);
+    if (!conducts) {
+      const std::size_t k = static_cast<std::size_t>(floor_layer);
+      d.no_conduction = true;
+      d.gravity_balance = supply.psi_soil[k] + S(roots_.grav_head_z_[k]);
     }
 
     // ⚠️ A KINK IS ANSWERED HERE, ONCE, so that no consumer can read the sentinel.
@@ -2497,12 +2615,16 @@ public:
   // flux, and every output from the ordinary evaluator there. See the
   // definition.
   template <CostCurve K>
-  void set_shut_state(double wettest_soil_layer, double E_up_at_wettest);
+  void set_shut_state();
   // The collar at which uptake equals the realised residual flux, on a bracket
   // that is widened past the stem's critical potential when the soil is too
   // dry to deliver it inside; the wet bound of every collar solve.
   double find_wet_bound(double wettest_soil_layer, double E_up_at_wettest,
                         double E_up_at_crit);
+  // The same bound for the shut leaf, bracketed from its floor: see the
+  // definition for why this is both cheaper and continuous through the root
+  // integral's cap.
+  double find_shut_wet_bound();
   // The stem potential at which the stem carries exactly the residual flux
   // from a pinned upstream potential; the wet end of every stem route. The
   // upstream potential itself at g_min = 0.
@@ -4393,6 +4515,68 @@ inline double Leaf::find_wet_bound(double wettest_soil_layer,
   }
 }
 
+// The shut leaf's wet bound, bracketed from below by the supply's floor
+// (supply_wet_floor): at the lowest gravity balance among conducting layers
+// every layer draws nothing or less, so uptake less the residual flux is at
+// most zero there, and above it the target rises. Two things follow:
+//
+//   - at g_min = 0 on one layer the floor IS the bound (the draw is exactly
+//     zero at the balance), and on several the bound lies between the lowest
+//     and highest balance, so ONE root-find to collar precision on that bracket
+//     replaces a walk out from the wettest soil potential, a coarse solve and
+//     a polish -- most of what made a shut solve cost 3.6x an old held one.
+//     With a residual conductance the bound lies higher, and the walk starts
+//     from the highest balance;
+//   - where no layer conducts the target is zero everywhere and the floor is
+//     returned as it stands: the wettest layer's balance, the limit the bound
+//     reaches from the wet side. Returning the soil potential instead, as the
+//     walk did, left a step of the layer's gravity head in psi_stem (#184).
+//
+// The open leaf keeps find_wet_bound and its bracket, which is what keeps its
+// rows bit-identical at g_min = 0.
+inline double Leaf::find_shut_wet_bound() {
+  const std::vector<double>& soil = supply_psi_soil();
+  auto target = [&](double x) -> double {
+    E_from_Soil_to_Root_Collar(x, soil);
+    return E_up_ - residual_flux(x, E_up_);
+  };
+  const double floor = supply_wet_floor();
+  double lo = floor, f_lo = target(lo);
+  if (!(f_lo < 0.0)) {
+    return lo;  // nothing conducts, or the floor is the bound itself
+  }
+  double hi = std::max(supply_wet_ceiling(), lo + bracket_tol_at(lo));
+  double f_hi = target(hi);
+  for (int i = 0; f_hi < 0.0; ++i) {
+    if (i >= 64) {
+      util::stop_infeasible("collar_bracket",
+                            "find_shut_wet_bound: the soil delivers less than "
+                            "the residual flux at every collar tried; floor=" +
+                            util::to_string(floor) +
+                            "; last=" + util::to_string(hi));
+    }
+    lo = hi;
+    f_lo = f_hi;
+    hi = hi + (hi - floor) + bracket_tol_at(hi);
+    f_hi = target(hi);
+  }
+  if (f_hi == 0.0) {
+    return hi;
+  }
+  // To collar precision directly, polish_bracket_bound's 1e-15, for the reason
+  // it gives: the bound IS the shut leaf's answer.
+  constexpr double shut_tol = 1e-15;
+  try {
+    return util::uniroot_smooth(target, lo, hi, f_lo, f_hi, shut_tol,
+                                static_cast<size_t>(ci_niter));
+  } catch (const std::exception& e) {
+    util::stop_infeasible("collar_bracket",
+                          "find_shut_wet_bound failed: " + std::string(e.what()) +
+                          "; min=" + util::to_string(lo) +
+                          "; max=" + util::to_string(hi));
+  }
+}
+
 // The stem potential from which the stem carries exactly the residual flux,
 // with the upstream potential pinned: the wet end of a stem route. The flux
 // through the stem rises with the stem potential towards its ceiling, and the
@@ -4448,14 +4632,11 @@ inline double Leaf::stem_wet_bound(double psi_upstream) {
 // collar potential both carries more than the residual flux and stays inside
 // the critical potentials, so there is nothing to optimise over.
 template <Leaf::CostCurve K>
-inline void Leaf::set_shut_state(double wettest_soil_layer,
-                                 double E_up_at_wettest) {
+inline void Leaf::set_shut_state() {
   const std::vector<double>& soil = supply_psi_soil();
-  // The bound IS the answer here, so it is solved to collar precision, for
-  // the reason polish_bracket_bound gives.
-  double collar = find_wet_bound(wettest_soil_layer, E_up_at_wettest,
-                                 util::na_value);
-  collar = polish_bracket_bound(collar, soil, 0);
+  // The bound IS the answer here, so find_shut_wet_bound solves it to collar
+  // precision itself, for the reason polish_bracket_bound gives.
+  const double collar = find_shut_wet_bound();
   wet_bound_root_ = collar;
   opt_root_psi_ = collar;
   E_from_Soil_to_Root_Collar(collar, soil);
@@ -4514,7 +4695,7 @@ inline bool Leaf::prepare_collar_solve(double& bound_a, double& bound_b){
   // (#183 step 2 removes it), so the first test is whether any collar inside
   // it can both supply the cuticle and leave the stem something to carry.
   if (wettest_soil_layer >= psi_crit){
-    set_shut_state<K>(wettest_soil_layer, E_up_at_wettest);
+    set_shut_state<K>();
     return false;
   }
 
@@ -4530,7 +4711,7 @@ inline bool Leaf::prepare_collar_solve(double& bound_a, double& bound_b){
 // test for a negative uptake).
 const double E_at_crit = E_column(psi_crit, supply_psi_soil(), psi_crit);
 if(E_at_crit < residual_flux(psi_crit, E_at_crit)){
-      set_shut_state<K>(wettest_soil_layer, E_up_at_wettest);
+      set_shut_state<K>();
       return false;
 }
 
@@ -4541,7 +4722,7 @@ double root_crit = find_root_psi(
 // If root crit would have to be larger than psi crit, also avoid loop as above
 
     if (root_crit >= psi_crit){
-    set_shut_state<K>(wettest_soil_layer, E_up_at_wettest);
+    set_shut_state<K>();
     return false;
   }
 
@@ -4585,7 +4766,7 @@ double root_wet = find_wet_bound(wettest_soil_layer, E_up_at_wettest, E_at_crit)
     // No collar both moves water and stays inside the critical potentials: the
     // interval has closed, or the clamp to the root's limit inverted it.
     if (bound_b - bound_a <= collar_root_tol) {
-      set_shut_state<K>(wettest_soil_layer, E_up_at_wettest);
+      set_shut_state<K>();
       return false;
     }
 
@@ -6224,17 +6405,7 @@ inline double residual_logistic(double x) {
 
 // The temperature factor on g_min: see the member. Exactly 1 at 25 C, because
 // both terms of the exponent are differences of identical expressions there.
-inline double Leaf::g_min_factor(double leaf_temp) const {
-  // Served from the memo when nothing it reads has moved: with the energy
-  // balance off every evaluation in a solve asks at the driver temperature,
-  // and the exp and two softpluses were a third of what a residual conductance
-  // cost the solve. Keyed on all five inputs, so a parameter changed between
-  // solves cannot be answered with the old curve; a NaN key never matches.
-  if (leaf_temp == g_min_factor_memo_[0] && g_min_k_low_ == g_min_factor_memo_[1] &&
-      g_min_k_high_ == g_min_factor_memo_[2] && g_min_T_trans_ == g_min_factor_memo_[3] &&
-      g_min_T_width_ == g_min_factor_memo_[4]) {
-    return g_min_factor_memo_[5];
-  }
+inline double Leaf::g_min_factor_compute(double leaf_temp) const {
   const double w = g_min_T_width_;
   if (!(w > 0.0)) {
     util::stop("g_min_T_width_ must be a positive width in K; got " +
@@ -6282,6 +6453,26 @@ inline constexpr double residual_cap_q_limit = 1e4;
 // Exact, not an approximation: the arithmetic below would give the same bits.
 inline constexpr double residual_cap_inert_qp = 0x1p-54;
 
+// (1 + q^p)^(-1/p) at p = 8, by squarings and square roots: p is a power of
+// two, so q^8 is three squarings and the eighth root three square roots, each
+// correctly rounded. Two pow() calls here were the largest single cost a
+// residual conductance added to the solve (a seventh of it, profiled). One
+// expression for the double path and the tape, so the two cannot drift.
+template <class T>
+inline T residual_cap_factor(const T& q, T* one_plus_qp = nullptr) {
+  using std::sqrt;
+  const T q2 = q * q;
+  const T q4 = q2 * q2;
+  const T s = T(1.0) + q4 * q4;
+  if (one_plus_qp != nullptr) {
+    *one_plus_qp = s;
+  }
+  return T(1.0) / sqrt(sqrt(sqrt(s)));
+}
+static_assert(Leaf::residual_cap_power == 8.0,
+              "residual_cap_factor takes the eighth root by three square roots; "
+              "another power needs another expression");
+
 inline double Leaf::residual_cap(double r, double E_inf) {
   if (r == 0.0) {
     return 0.0;
@@ -6298,8 +6489,7 @@ inline double Leaf::residual_cap(double r, double E_inf) {
   if (q4 * q4 < residual_cap_inert_qp) {
     return r;
   }
-  return r * std::pow(1.0 + std::pow(q, residual_cap_power),
-                      -1.0 / residual_cap_power);
+  return r * residual_cap_factor(q);
 }
 
 // With q = r / (phi E_inf): dr*/dr = (1 + q^p)^(-1/p - 1), and
@@ -6316,8 +6506,9 @@ inline double Leaf::residual_cap_ddemand(double r, double E_inf) {
   if (q4 * q4 < residual_cap_inert_qp) {
     return 1.0;
   }
-  return std::pow(1.0 + std::pow(q, residual_cap_power),
-                  -1.0 / residual_cap_power - 1.0);
+  double s = 0.0;
+  const double f = residual_cap_factor(q, &s);
+  return f / s;
 }
 
 inline double Leaf::residual_cap_dceiling(double r, double E_inf) {
@@ -6332,9 +6523,9 @@ inline double Leaf::residual_cap_dceiling(double r, double E_inf) {
   if (q8 < residual_cap_inert_qp) {
     return residual_cap_fraction * q8 * q;
   }
-  return residual_cap_fraction * std::pow(q, residual_cap_power + 1.0) *
-         std::pow(1.0 + std::pow(q, residual_cap_power),
-                  -1.0 / residual_cap_power - 1.0);
+  double s = 0.0;
+  const double f = residual_cap_factor(q, &s);
+  return residual_cap_fraction * q8 * q * f / s;
 }
 
 // g_min(T) D(T) / P, in kg: the cuticle's loss at a leaf temperature.
@@ -6355,17 +6546,17 @@ inline double Leaf::residual_demand_dT(double leaf_temp) const {
          atm_kpa_ / kg_to_mol_h2o;
 }
 
-inline double Leaf::residual_flux(double psi_upstream, double E_total) const {
+inline double Leaf::residual_flux_active(double psi_upstream, double E_total) const {
   if (g_min == 0.0) {
     return 0.0;
   }
   const double T = use_energy_balance_ ? leaf_temp_from_E(E_total) : leaf_temp_;
-  return residual_root_cap(
-      residual_cap(residual_demand_at(T), supply_ceiling(psi_upstream)));
+  const double r = residual_demand_at(T);
+  return residual_root_cap(residual_cap(r, supply_ceiling(psi_upstream)), r);
 }
 
-inline double Leaf::residual_flux_dpsi_upstream(double psi_upstream,
-                                                double leaf_temp) const {
+inline double Leaf::residual_flux_dpsi_upstream_active(double psi_upstream,
+                                                       double leaf_temp) const {
   if (g_min == 0.0) {
     return 0.0;
   }
@@ -6374,22 +6565,27 @@ inline double Leaf::residual_flux_dpsi_upstream(double psi_upstream,
   // slope in what the first passes it.
   const double r = residual_demand_at(leaf_temp);
   const double E_inf = supply_ceiling(psi_upstream);
-  return residual_root_cap_ddemand(residual_cap(r, E_inf)) *
+  return residual_root_cap_ddemand(residual_cap(r, E_inf), r) *
          residual_cap_dceiling(r, E_inf) *
          (-leaf_specific_conductance_max_ *
           stem_curve_integral_deriv(psi_upstream));
 }
 
-inline double Leaf::residual_cond_temp_deriv(double psi_upstream,
-                                             double leaf_temp,
-                                             double gc_const) const {
+inline double Leaf::residual_cond_temp_deriv_active(double psi_upstream,
+                                                    double leaf_temp,
+                                                    double gc_const) const {
   if (g_min == 0.0) {
     return 0.0;
   }
   const double r = residual_demand_at(leaf_temp);
   const double E_inf = supply_ceiling(psi_upstream);
-  return -gc_const * residual_root_cap_ddemand(residual_cap(r, E_inf)) *
-             residual_cap_ddemand(r, E_inf) * residual_demand_dT(leaf_temp) +
+  const double r1 = residual_cap(r, E_inf);
+  // dr*/dr: through the stem's cap into the roots', plus the roots' ceiling's
+  // own dependence on r.
+  const double drstar_dr = residual_root_cap_ddemand(r1, r) *
+                               residual_cap_ddemand(r, E_inf) +
+                           residual_root_cap_dceiling_dr(r1, r);
+  return -gc_const * drstar_dr * residual_demand_dT(leaf_temp) +
          g_min_co2_ratio_ * g_min * g_min_factor_temp_deriv(leaf_temp);
 }
 
@@ -6454,6 +6650,10 @@ inline double Leaf::solve_ci(double gc) {
   const double lo = gamma_ * umol_per_mol_to_Pa_;
   const double A_ca = assim_colimited(ca_);
   double hi = ca_;
+  // The target at ca is A(ca) exactly (the supply term is gc * 0), and it is
+  // already in hand: handed to the root-finder rather than evaluated again,
+  // which saves one assimilation kernel per ci solve, the cost the bracket
+  // choice above added. Bit-identical: x - 0.0 is x.
   if (A_ca < 0.0) {
     if (gc > 0.0) {
       hi = ca_ + 2.0 * (-A_ca) * umol_to_mol * (atm_kpa_ * kPa_to_Pa) / gc;
@@ -6469,7 +6669,11 @@ inline double Leaf::solve_ci(double gc) {
     }
   }
   try {
-    return util::uniroot_smooth(target, lo, hi, ci_root_tol, ci_niter);
+    const double f_hi = hi == ca_ ? A_ca * umol_to_mol -
+                                        (gc * (ca_ - hi) / (atm_kpa_ * kPa_to_Pa))
+                                  : target(hi);
+    return util::uniroot_smooth(target, lo, hi, target(lo), f_hi, ci_root_tol,
+                                ci_niter);
   } catch (const std::exception& e) {
     util::stop_infeasible("ci_solve", "solve_ci failed: " + std::string(e.what()) +
                "; min=" + util::to_string(lo) +
@@ -6516,16 +6720,18 @@ inline S Leaf::residual_flux_at(const S& collar, const leaf_pars<S>& pars,
                    ? E_cap
                    : inert(odelia::util::to_passive(q))
                          ? r
-                         : r * pow(S(1.0) + pow(q, residual_cap_power),
-                                   -1.0 / residual_cap_power);
+                         : r * residual_cap_factor<S>(q);
   // The roots' ceiling, the draw's, with its rows; the same limits again.
   if (!draw.has_uptake_limit) {
     return r1;
   }
-  const S U_cap = S(residual_cap_fraction) * draw.uptake_limit;
   if (!(odelia::util::to_passive(draw.uptake_limit) > 0.0)) {
     return S(0.0) * r1;
   }
+  // The ceiling shrinks as U (U / (U + r))^2, as residual_root_ceiling_at says.
+  const S& U = draw.uptake_limit;
+  const S w = U / (U + r);
+  const S U_cap = S(residual_cap_fraction) * (U * w * w);
   const S q_root = r1 / U_cap;
   if (odelia::util::to_passive(q_root) > residual_cap_q_limit) {
     return U_cap;
@@ -6533,8 +6739,7 @@ inline S Leaf::residual_flux_at(const S& collar, const leaf_pars<S>& pars,
   if (inert(odelia::util::to_passive(q_root))) {
     return r1;
   }
-  return r1 * pow(S(1.0) + pow(q_root, residual_cap_power),
-                  -1.0 / residual_cap_power);
+  return r1 * residual_cap_factor<S>(q_root);
 }
 
 // Explicit leaf energy balance (#523, #97):
@@ -7958,6 +8163,11 @@ inline S Leaf::bound_at(bool wet, double bound_x, const SupplyDraw<S>& draw,
   const double dflux_dx = to_passive(draw.flux.slope);
 
   if (wet) {
+    // Nothing conducts: the bound is the gravity balance the draw carries,
+    // with its soil row (find_shut_wet_bound placed the solve there).
+    if (draw.no_conduction) {
+      return draw.gravity_balance;
+    }
     // The residual is the draw less the residual flux: uptake meets the
     // cuticle's loss at this collar, and vanishes there at g_min = 0.
     // implicit_value evaluates at the passive bound, and the draw was taken

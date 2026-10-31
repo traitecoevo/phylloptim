@@ -874,6 +874,57 @@ public:
     return total * T(kg_per_mol_h2o);
   }
 
+  // The wet bound's floor: each layer's draw changes sign at its own gravity
+  // balance, psi_i + z_i, so at the lowest balance among the layers that still
+  // conduct every layer draws nothing or less, and the wet bound lies at or
+  // above it. Where no layer conducts (every rooted potential past the root
+  // integral's cap, #85) the uptake is zero at every collar, the wet bound has
+  // nothing to place it, and it is the balance of the wettest layer: the last
+  // to stop conducting, so the limit the bound reaches from the wet side. That
+  // is what makes a shut leaf continuous through the cap (#184). Returns the
+  // layer whose balance it is; `conducts` says which case.
+  int wet_floor_layer(const std::vector<double>& psi_soil, bool& conducts) const {
+    int lowest = -1, wettest = -1;
+    for (int i = 0; i < max_soil_layer; ++i) {
+      const double s = psi_soil[static_cast<std::size_t>(i)];
+      if (wettest < 0 || s < psi_soil[static_cast<std::size_t>(wettest)]) {
+        wettest = i;
+      }
+      if (!(root_vuln_integral_limit_ - root_vuln_integral_at(s) > 0.0)) {
+        continue;
+      }
+      const double b = s + grav_head_z_[static_cast<std::size_t>(i)];
+      if (lowest < 0 ||
+          b < psi_soil[static_cast<std::size_t>(lowest)] +
+                  grav_head_z_[static_cast<std::size_t>(lowest)]) {
+        lowest = i;
+      }
+    }
+    conducts = lowest >= 0;
+    return conducts ? lowest : wettest;
+  }
+
+  // The other end: the highest gravity balance among the layers that still
+  // conduct, at which every one of them draws water or none, so uptake is at
+  // least zero there. The bound lies between the two at g_min = 0. The floor's
+  // value where none conducts.
+  double wet_ceiling(const std::vector<double>& psi_soil) const {
+    double highest = -std::numeric_limits<double>::infinity();
+    for (int i = 0; i < max_soil_layer; ++i) {
+      const double s = psi_soil[static_cast<std::size_t>(i)];
+      if (!(root_vuln_integral_limit_ - root_vuln_integral_at(s) > 0.0)) {
+        continue;
+      }
+      highest = std::max(highest, s + grav_head_z_[static_cast<std::size_t>(i)]);
+    }
+    if (std::isinf(highest)) {
+      bool conducts = false;
+      const std::size_t k = static_cast<std::size_t>(wet_floor_layer(psi_soil, conducts));
+      return psi_soil[k] + grav_head_z_[k];
+    }
+    return highest;
+  }
+
   // The uptake, at any scalar. Upstream's function line for line, with one
   // discipline added: ⚠️ EVERY COMPARISON READS PASSIVE. std::min on two active
   // values branches on a taped comparison and manufactures a discontinuity the

@@ -9413,78 +9413,86 @@ void test_a_shut_leaf_is_a_value_not_an_exception() {
 // #184's second requirement: where the soil cannot supply what the cuticle
 // loses, the leaf is smooth in psi_soil -- soft caps, not a min(). The sweep
 // runs from where the caps are inert to where they bind hard, which the
-// realised fraction r*/r reports, at a conductance large enough to get there.
+// realised fraction r*/r reports, at a conductance large enough to get there,
+// and on through the root integral's cap to 12 MPa.
 //
-// Two ceilings bind in turn. The stem's (what it can carry from the collar)
-// binds first; then the roots' (what they can deliver from this soil, which
-// falls to zero where the root integral reaches its cap, #85). Without the
-// second the collar ran off to where the stem's ceiling underflows, ~10 MPa in
-// 0.005 of soil; with it the leaf follows the soil continuously to that point.
-// At the point itself one step is left: past it no layer conducts at any span,
-// so the wet bound is the soil itself, where on the wet side it is the gravity
-// balance. The step is the layer's gravity head and is the root table's tail,
-// not the cap's -- it is there at g_min = 0 too -- so the sweep is taken on
-// either side and the step asserted bounded by that head.
+// Two ceilings bind in turn: the stem's (what it can carry from the collar),
+// then the roots' (what they can deliver from this soil, which falls to zero
+// at the root integral's cap, #85). Past the cap no layer conducts and the
+// shut leaf sits at the wettest layer's gravity balance. The roots' ceiling
+// shrinks as U (U / (U + r))^2 so the leaf reaches that balance with the
+// value AND the slope it has on the far side (residual_root_ceiling_at says
+// why); the cap is asserted on both, directly, as well as swept through.
 void test_the_capped_regime_is_smooth_in_the_soil() {
   printf("residual conductance: smooth in psi_soil where the soil cannot supply the cuticle (#184)\n");
   for (bool eb : {false, true}) {
     for (int layers : {1, 3}) {
-      auto solve = [&](double psi0) {
-        Drivers d;
-        d.PPFD = 900.0; d.atm_vpd = 2.0; d.leaf_temp = 25.0;
-        std::vector<double> ps, dp;
-        for (int i = 0; i < layers; ++i) { ps.push_back(psi0 + 0.25 * i); dp.push_back(i + 1.0); }
-        phylloptim::Leaf l = make(d, ps, dp, 5e-3, eb);
-        l.find_root_collar_psi();
-        return l;
-      };
-      auto at = [&](double psi0) {
-        const phylloptim::Leaf l = solve(psi0);
-        return SweepPoint{l.profit_, l.assim_colimited_, l.transpiration_, l.opt_psi_stem_,
-                          l.lambda_emergent_, NAN, NAN,
-                          l.operating_point_kind_name(l.operating_point_kind())};
-      };
-      // Where the roots' ceiling closes: bisected, since it moves with the
-      // energy balance's temperature only through nothing -- it is the soil's.
-      double open = 7.0, closed = 8.0;
-      for (int k = 0; k < 50; ++k) {
-        const double m = 0.5 * (open + closed);
-        (solve(m).residual_root_ceiling_ > 0.0 ? open : closed) = m;
-      }
-      const std::string where = std::string(eb ? "EB on, " : "EB off, ") + std::to_string(layers) + " layers";
-      for (int side = 0; side < 2; ++side) {
-        const double from = side == 0 ? 4.0 : closed + 0.01, to = side == 0 ? open - 0.01 : 12.0;
+      for (double g : {5e-4, 5e-3}) {
+        auto solve = [&](double psi0) {
+          Drivers d;
+          d.PPFD = 900.0; d.atm_vpd = 2.0; d.leaf_temp = 25.0;
+          std::vector<double> ps, dp;
+          for (int i = 0; i < layers; ++i) { ps.push_back(psi0 + 0.25 * i); dp.push_back(i + 1.0); }
+          phylloptim::Leaf l = make(d, ps, dp, g, eb);
+          l.find_root_collar_psi();
+          return l;
+        };
+        auto at = [&](double psi0) {
+          const phylloptim::Leaf l = solve(psi0);
+          return SweepPoint{l.profit_, l.assim_colimited_, l.transpiration_, l.opt_psi_stem_,
+                            l.lambda_emergent_, NAN, NAN,
+                            l.operating_point_kind_name(l.operating_point_kind())};
+        };
+        char buf[64];
+        snprintf(buf, sizeof buf, ", g_min %g", g);
+        const std::string where = std::string(eb ? "EB on, " : "EB off, ") + std::to_string(layers) +
+                                  " layers" + buf;
         std::vector<double> x;
         std::vector<SweepPoint> o;
-        double frac_first = NAN, frac_last = NAN;
-        for (double v = from; v <= to + 1e-9; v += 0.01) {
+        double frac_first = NAN, frac_min = 1.0, frac_last = NAN;
+        for (double v = 4.0; v <= 12.0 + 1e-9; v += 0.01) {
           x.push_back(v);
           o.push_back(at(v));
           const phylloptim::Leaf l = solve(v);
           const double frac = l.residual_flux_ / l.residual_demand_at(l.Tleaf_);
           if (std::isnan(frac_first)) frac_first = frac;
+          frac_min = std::min(frac_min, frac);
           frac_last = frac;
         }
-        const std::string w = where + (side == 0 ? ", psi_soil 4 to the roots' cap" : ", past the roots' cap to 12");
-        printf("    %s: realised r*/r runs %.4f -> %.4f\n", w.c_str(), frac_first, frac_last);
-        if (side == 0) {
-          ok(frac_first > 0.99 && frac_last < 0.05, "the sweep runs from an inert cap into a binding one, " + w);
-        } else {
-          ok(frac_last == 0.0, "past the roots' cap the soil supplies no residual flux, " + w);
+        printf("    %s: realised r*/r runs %.4f -> %.4f\n", where.c_str(), frac_first, frac_last);
+        ok(frac_first > 0.99 && frac_last == 0.0,
+           "the sweep runs from an inert cap to a soil that supplies no residual flux, " + where);
+        sweep_kinks(x, o, &SweepPoint::profit, "profit", where, 0.05, at);
+        sweep_kinks(x, o, &SweepPoint::A, "A", where, 0.05, at);
+        sweep_kinks(x, o, &SweepPoint::E, "E", where, 0.05, at);
+        sweep_kinks(x, o, &SweepPoint::psi, "psi_stem", where, 0.05, at);
+
+        // The cap itself: where the wettest layer stops conducting, bisected.
+        double open = 7.0, closed = 8.0;
+        for (int k = 0; k < 60; ++k) {
+          const double m = 0.5 * (open + closed);
+          bool conducts = false;
+          const phylloptim::Leaf l = solve(m);
+          l.roots_.wet_floor_layer(l.roots_.psi_soil_, conducts);
+          (conducts ? open : closed) = m;
         }
-        sweep_kinks(x, o, &SweepPoint::profit, "profit", w, 0.05, at);
-        sweep_kinks(x, o, &SweepPoint::A, "A", w, 0.05, at);
-        sweep_kinks(x, o, &SweepPoint::E, "E", w, 0.05, at);
-        sweep_kinks(x, o, &SweepPoint::psi, "psi_stem", w, 0.05, at);
+        const phylloptim::Leaf wet = solve(open), dry = solve(closed);
+        const double step_stem = std::abs(dry.opt_psi_stem_ - wet.opt_psi_stem_);
+        // One-sided slopes a few uptake bands (1e-8) away, at a step where the
+        // difference is the slope: measured converged from 1e-5 down.
+        const double h = 1e-5;
+        auto slope = [&](double from, double sign, double SweepPoint::*f) {
+          return sign * ((at(from + sign * 2 * h).*f) - (at(from + sign * h).*f)) / h;
+        };
+        const double s_wet = slope(open, -1.0, &SweepPoint::psi), s_dry = slope(closed, 1.0, &SweepPoint::psi);
+        const double p_wet = slope(open, -1.0, &SweepPoint::profit), p_dry = slope(closed, 1.0, &SweepPoint::profit);
+        printf("    %s: at the roots' cap (psi_soil %.6f) psi_stem steps %.2e MPa; slopes psi_stem %.5f | %.5f, profit %.5f | %.5f\n",
+               where.c_str(), open, step_stem, s_wet, s_dry, p_wet, p_dry);
+        ok(step_stem < 1e-7, "the shut leaf is continuous through the roots' cap, " + where);
+        ok(std::abs(s_wet - s_dry) < 1e-3 * std::max(1.0, std::abs(s_dry)) &&
+               std::abs(p_wet - p_dry) < 1e-3 * std::max(0.05, std::abs(p_dry)),
+           "and its slope in psi_soil is continuous there too, " + where);
       }
-      // The step at the cap, from just either side of it.
-      const phylloptim::Leaf wet = solve(open), dry = solve(closed);
-      const double step_stem = std::abs(dry.opt_psi_stem_ - wet.opt_psi_stem_);
-      const double step_E = std::abs(dry.transpiration_ - wet.transpiration_);
-      printf("    %s: at the roots' cap (psi_soil %.6f) psi_stem steps %.3e MPa, E %.3e\n",
-             where.c_str(), open, step_stem, step_E);
-      ok(step_stem < 0.01, "at the roots' cap psi_stem steps by no more than the gravity head, " + where);
-      ok(step_E < 1e-12, "and the flux is continuous through it, " + where);
     }
   }
 }
