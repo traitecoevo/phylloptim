@@ -56,7 +56,7 @@ Family context lives in [`plant-meta`](https://github.com/traitecoevo/plant-meta
 | `closed_form.hpp` | `Leaf::optimise_closed`, out of line, legal only because `<phylloptim.hpp>` includes it after `leaf_model.hpp` |
 | `gradient.hpp` | `n_theta`, the IFT composite and `batch`, the bit-for-bit twin of `R/gradient.R` |
 
-**A member is defined in its subsystem's `leaf_*.hpp`, and a consumer includes `leaf_model.hpp`, never a part.** A part alone compiles, but a member it calls and does not define is a link error. The two solves read the cost-curve tables in `if constexpr`, so `leaf_cost_curves.hpp` comes before them; moving definitions between the parts changes no object file (measured on #PRNUM).
+**A member is defined in its subsystem's `leaf_*.hpp`, and a consumer includes `leaf_model.hpp`, never a part.** A part alone compiles, but a member it calls and does not define is a link error. The two solves read the cost-curve tables in `if constexpr`, so `leaf_cost_curves.hpp` comes before them; moving definitions between the parts changes no object file (measured on #216).
 
 `inst/include/phylloptim.hpp` is the R-free umbrella: one include is the whole model. `phylloptim.h` and the generated `RcppR6_*.hpp` are the R layer's, include Rcpp, and only `src/RcppR6.cpp` includes them; the `.h`/`.hpp` split is forced by RcppR6, which hardwires both names.
 
