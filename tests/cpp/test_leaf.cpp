@@ -8877,21 +8877,27 @@ void test_every_curve_returns_its_own_maximum() {
       if (!std::isfinite(got)) {
         continue;   // a refused row; psi_stem_optima.tsv covers the refusals
       }
+      // Fresh leaf, so the solve's own state cannot influence the oracle.
+      phylloptim::Leaf m = make_single_leaf(d, r.psi_soil);
+
       // A product objective with A <= 0 throughout has no maximum, only a
       // supremum at psi_crit, and the leaf is shut by rule rather than by its
       // objective (objective_is_product): a scan beats it there by
-      // construction. What it must do instead is sit at the wet end.
+      // construction. What it must do instead is sit at the wet end. Decided
+      // on the oracle, at psi_crit, not on the solve: a shut leaf at g_min = 0
+      // has A = 0 exactly, so testing the solve's A would excuse a light leaf
+      // the solve shut by mistake.
       const bool product =
           curve == static_cast<int>(phylloptim::Leaf::CostCurve::SOX) ||
           curve == static_cast<int>(phylloptim::Leaf::CostCurve::JW26);
-      if (product && !(l.assim_colimited_ > 0.0)) {
-        ++dark_shut;
-        dark_at_wet = dark_at_wet && l.opt_psi_stem_ == l.stem_wet_bound(r.psi_soil);
-        continue;
+      if (product) {
+        m.set_leaf_states_rates_from_psi_stem(m.psi_crit, r.psi_soil);
+        if (!(m.assim_colimited_ > 0.0)) {
+          ++dark_shut;
+          dark_at_wet = dark_at_wet && l.opt_psi_stem_ == l.stem_wet_bound(r.psi_soil);
+          continue;
+        }
       }
-
-      // Fresh leaf, so the solve's own state cannot influence the oracle.
-      phylloptim::Leaf m = make_single_leaf(d, r.psi_soil);
       m.CF77_lambda_ = 1.5e5;
       m.TF24_floor_lambda_o = kFloorLambdaO;
       m.LeastCost_beta = 146.0;
@@ -10680,6 +10686,46 @@ void test_rows_where_the_roots_cap_binds() {
 
 }  // namespace residual
 
+// SOX and JW26 on the collar route, where A <= 0 at every opening: the leaf is
+// shut at the wet bound (objective_is_product) rather than reported
+// solver-refused, on one and three layers, with and without a residual
+// conductance or the energy balance. The same leaf in light is interior, so a
+// shut that fired on light would show here.
+void test_product_curves_shut_dark_collar_leaves() {
+  printf("SOX and JW26 shut a collar-route leaf that cannot fix carbon\n");
+  using CC = phylloptim::Leaf::CostCurve;
+  using Kind = phylloptim::Leaf::OperatingPointKind;
+  int dark = 0, light = 0;
+  bool dark_shut = true, dark_finite = true, light_open = true;
+  for (CC curve : {CC::SOX, CC::JW26})
+  for (int layers : {1, 3}) for (double g : {0.0, residual::kGmin}) for (bool eb : {false, true})
+  for (double psi : {0.5, 1.5}) for (double ppfd : {0.0, 900.0}) {
+    Drivers d;
+    d.PPFD = ppfd;
+    d.leaf_temp = 25.0;
+    std::vector<double> ps, dp;
+    for (int i = 0; i < layers; ++i) { ps.push_back(psi + 0.25 * i); dp.push_back(i + 1.0); }
+    phylloptim::Leaf l = residual::make(d, ps, dp, g, eb);
+    l.set_model(curve, true);
+    l.optimise();
+    if (ppfd == 0.0) {
+      ++dark;
+      dark_shut = dark_shut && l.operating_point_kind() == Kind::BoundarySoil &&
+                  !(l.assim_colimited_ > 0.0);
+      dark_finite = dark_finite && std::isfinite(l.profit_) &&
+                    std::isfinite(l.lambda_emergent_);
+    } else {
+      ++light;
+      light_open = light_open && l.operating_point_kind() == Kind::Interior &&
+                   l.assim_colimited_ > 0.0;
+    }
+  }
+  printf("    %d dark rows, %d light rows\n", dark, light);
+  ok(dark == 32 && dark_shut, "every dark row is shut at the wet bound (boundary-soil)");
+  ok(dark_finite, "with finite profit and lambda");
+  ok(light == 32 && light_open, "and the same leaves in light are interior");
+}
+
 int main(int argc, char **argv) {
   // `test_leaf smoothness` runs the acceptance sweep alone (make smoothness).
   if (argc > 1 && std::string(argv[1]) == "smoothness") {
@@ -10823,6 +10869,7 @@ int main(int argc, char **argv) {
   test_leastcost_lambda_is_dA_dE();
   test_every_curve_returns_its_own_maximum();
   test_collar_profit_is_its_own_curve();
+  test_product_curves_shut_dark_collar_leaves();
   test_thermal_damage_gate_off_is_inert();
   test_thermal_damage_bypasses_the_cache();
   test_thermal_damage_dprofit_is_the_solves_own();

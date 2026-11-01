@@ -5102,6 +5102,9 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
   if constexpr (objective_is_product<K>()) {
     if (dark_under_product<K>(
             find_psi_stem_from_psi_root(bound_b, supply_psi_soil()), bound_b)) {
+      // Where the open path would start: the bound at g_min > 0, a step inside
+      // the no-flow sentinel at g_min = 0, should placement find no step.
+      lo = g_min > 0.0 ? bound_a : bound_a + 1e-6 * width;
       place_at_wet_bound();
       operating_point_kind_ = OperatingPointKind::BoundarySoil;
       return lo;
