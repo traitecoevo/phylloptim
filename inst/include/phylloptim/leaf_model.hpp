@@ -7088,7 +7088,7 @@ inline double Leaf::residual_cond_temp_deriv_active(double psi_upstream,
 // you re-derive the curve, build every point from one tree and interleave.
 //
 // Since 0.26.2 the table describes the TOMS748 fallback only. The Newton solve
-// below stops on a step under 1e-13, where its iterate is converged to rounding,
+// below stops on a step under 1e-13 (1 + |ci|), where its iterate is converged to rounding,
 // so it has no band to land in: ci's noise along a smooth path is ~3e-16
 // relative, the same as TOMS748's here, at under half the evaluations.
 //
@@ -7146,23 +7146,26 @@ inline double Leaf::solve_ci(double gc) {
     const double f_lo = target(lo);
     // Safeguarded Newton first. The residual is increasing and concave in ci
     // (A is a smooth minimum of two concave hyperbolas, the supply is linear), so
-    // Newton converges from either side, and the slope comes with the value for
-    // one more division. Each step that leaves the bracket bisects it instead.
-    // It stops on a step below ci_root_tol, where the iterate is converged to
-    // about the square of that, so the root is placed to rounding rather than
-    // anywhere in a band: no state-dependent noise for a caller to difference.
-    // From the secant point it takes 3-4 evaluations where TOMS748 took ~10.
-    // TOMS748 remains the fallback, with its refusals.
+    // Newton from a point where it is negative stays below the root and climbs to
+    // it, and from a point where it is positive overshoots at most once. A step
+    // that leaves the bracket is replaced by the Newton step from its lower end,
+    // which lands between that end and the root, or where that end's slope is
+    // not finite by a bisection (geometric across orders of magnitude). It stops on a step below ci_root_tol (1 + |ci|),
+    // where the iterate is converged to about the square of that, so the root is
+    // placed to rounding rather than anywhere in a band: no state-dependent noise
+    // for a caller to difference. From the secant point it takes 4-5 evaluations
+    // where TOMS748 took ~10. TOMS748 remains the fallback, with its refusals.
     if (f_lo < 0.0 && f_hi >= 0.0) {
       if (f_hi == 0.0) {
         return hi;
       }
       const PhotoCapacity<double> cap = photo_capacity<double>();
-      const double g_star = gamma_ * umol_per_mol_to_Pa_;
       const double supply_per_pa = gc / (atm_kpa_ * kPa_to_Pa);
-      // The same arithmetic as assim_colimited_kernel, so the residual is the
-      // function TOMS748 roots.
+      // The value is `target`'s, through the kernel itself, so the Newton root
+      // and TOMS748's are the same function's to the last bit. Only the slope is
+      // written out here.
       auto residual = [&](double x, double& slope) -> double {
+        const double g_star = gamma_ * umol_per_mol_to_Pa_;
         const double rk = x + km_;
         const double rubisco = (cap.vcmax * (x - g_star)) / rk;
         const double d_rubisco = cap.vcmax * (km_ + g_star) / (rk * rk);
@@ -7172,8 +7175,6 @@ inline double Leaf::solve_ci(double gc) {
         const double s = rubisco + electron;
         const double root =
             sqrt(pow(s, 2) - 4 * cap.curvature * rubisco * electron);
-        const double assim =
-            (s - root) / (2 * cap.curvature) - cap.respiration;
         const double d_root =
             (s * (d_rubisco + d_electron) -
              2 * cap.curvature * (d_rubisco * electron + rubisco * d_electron)) /
@@ -7181,9 +7182,10 @@ inline double Leaf::solve_ci(double gc) {
         slope = ((d_rubisco + d_electron) - d_root) / (2 * cap.curvature) *
                     umol_to_mol +
                 supply_per_pa;
-        return assim * umol_to_mol - (gc * (ca_ - x) / (atm_kpa_ * kPa_to_Pa));
+        return target(x);
       };
       double a = lo, b = hi;
+      double f_a = f_lo, slope_a = std::numeric_limits<double>::quiet_NaN();
       double x = lo - f_lo * (hi - lo) / (f_hi - f_lo);
       for (int i = 0; i < static_cast<int>(ci_niter); ++i) {
         double slope;
@@ -7191,7 +7193,13 @@ inline double Leaf::solve_ci(double gc) {
         if (f == 0.0) {
           return x;
         }
-        (f < 0.0 ? a : b) = x;
+        if (f < 0.0) {
+          a = x;
+          f_a = f;
+          slope_a = slope;
+        } else {
+          b = x;
+        }
         const double newton = x - f / slope;
         // ⚠️ CONVERGENCE IS TESTED BEFORE THE SAFEGUARD. At the root the step
         // rounds away and `newton` lands ON the bracket end x just became, which
@@ -7200,7 +7208,22 @@ inline double Leaf::solve_ci(double gc) {
         if (std::abs(newton - x) <= ci_root_tol * (1.0 + std::abs(x))) {
           return newton;
         }
-        x = (newton > a && newton < b) ? newton : 0.5 * (a + b);
+        if (newton > a && newton < b) {
+          x = newton;
+          continue;
+        }
+        // Overshot from above. Where hi sits far above the root (a net source
+        // with almost no conductance, hi up to ~1e100 Pa) bisecting from there
+        // took a step per halving of that distance: 325 evaluations at gc 1e-100.
+        // The step from a needs a finite slope there, which Gamma* (lo) has not,
+        // so a bracket spanning orders of magnitude is split geometrically.
+        if (!std::isfinite(slope_a)) {
+          residual(a, slope_a);
+        }
+        const double from_a = a - f_a / slope_a;
+        x = (from_a > a && from_a < b)   ? from_a
+            : (a > 0.0 && b > 4.0 * a) ? std::sqrt(a * b)
+                                       : 0.5 * (a + b);
       }
     }
     return util::uniroot_smooth(target, lo, hi, f_lo, f_hi, ci_root_tol,

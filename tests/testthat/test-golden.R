@@ -99,15 +99,15 @@ golden_rows <- list(
   list(
     inputs = list(psi_soil = 0.5, ppfd = 1500, vpd = 0.5, layers = 1L),
     expected = list(
-      psi_stem      = "0x1.709bdd973848bp+1",
-      opt_root_psi  = "0x1.066f206418756p+1",
-      ci            = "0x1.9f4d8353e5aecp+4",
-      assim         = "0x1.215ca9d9740d7p+4",
-      transpiration = "0x1.450032c3cb9c3p-16",
-      gc            = "0x1.0b2ace4d4c37fp-3",
-      profit        = "0x1.07970cd153bc2p+4",
-      e_up          = "0x1.450032c3cb9c7p-16",
-      uptake        = "0x1.19e242571d857p-10"
+      psi_stem      = "0x1.709bdd9738486p+1",
+      opt_root_psi  = "0x1.066f206418753p+1",
+      ci            = "0x1.9f4d8353e5ae6p+4",
+      assim         = "0x1.215ca9d9740dep+4",
+      transpiration = "0x1.450032c3cb9bcp-16",
+      gc            = "0x1.0b2ace4d4c37ap-3",
+      profit        = "0x1.07970cd153bcap+4",
+      e_up          = "0x1.450032c3cb9c2p-16",
+      uptake        = "0x1.19e242571d852p-10"
     )
   ),
   list(
@@ -127,15 +127,15 @@ golden_rows <- list(
   list(
     inputs = list(psi_soil = 4.0, ppfd = 500, vpd = 1.0, layers = 5L),
     expected = list(
-      psi_stem      = "0x1.806ce10231835p+2",
-      opt_root_psi  = "0x1.3917d4d02abb7p+2",
-      ci            = "0x1.0ec2d5552da82p+3",
-      assim         = "0x1.aa12ab799f061p+1",
-      transpiration = "0x1.aa2d745ec3decp-19",
-      gc            = "0x1.5e56f599ccf18p-7",
-      profit        = "-0x1.db03fa1b158efp+1",
-      e_up          = "0x1.aa2d745ec3dfbp-19",
-      uptake        = "0x1.71a34488313dep-13"
+      psi_stem      = "0x1.806ce1023184p+2",
+      opt_root_psi  = "0x1.3917d4d02abb8p+2",
+      ci            = "0x1.0ec2d5552da8ap+3",
+      assim         = "0x1.aa12ab799f089p+1",
+      transpiration = "0x1.aa2d745ec3e0dp-19",
+      gc            = "0x1.5e56f599ccf32p-7",
+      profit        = "-0x1.db03fa1b158d7p+1",
+      e_up          = "0x1.aa2d745ec3e07p-19",
+      uptake        = "0x1.71a34488313e8p-13"
     )
   ),
   list(
@@ -143,7 +143,7 @@ golden_rows <- list(
     expected = list(
       psi_stem      = "0x1.10141205bc01ap+4",
       opt_root_psi  = "0x1.10141205bc01ap+4",
-      ci            = "0x1.ec6f9e7580bdbp+2",
+      ci            = "0x1.ec6f9e7580bdcp+2",
       assim         = "0x0p+0",
       transpiration = "0x0p+0",
       gc            = "0x0p+0",
