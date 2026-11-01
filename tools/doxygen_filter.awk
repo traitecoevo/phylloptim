@@ -56,7 +56,7 @@
 #      A run only OPENS after a blank line and only on a line that is not a list
 #      item. Both conditions are load-bearing. Without the first, the hanging
 #      indent under a bullet (`  * POSITIVE magnitudes -- ...` followed by
-#      four-space continuations, all over leaf_model.hpp) is mistaken for a code
+#      four-space continuations, all over the leaf headers) is mistaken for a code
 #      block; that produced a real "'\verbatim' command is not allowed in section
 #      title" error before the condition was added. Without the second, the
 #      bulleted and numbered lists that DO follow a blank line become
