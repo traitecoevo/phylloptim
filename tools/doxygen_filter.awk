@@ -4,7 +4,7 @@
 # WHY THIS EXISTS. Doxygen only treats `///`, `//!`, `/** */` and `/*! */` as
 # documentation; an ordinary `//` comment is invisible to it. Every comment in
 # this package is an ordinary `//` comment, and they are the substantive part --
-# the FMA-contraction note in `hydraulic_cost_Sperry`, the four "do not get this
+# the FMA-contraction note in `hydraulic_cost_Sperry`, the "do not get this
 # wrong" warnings in closed_form.hpp, the two-vulnerability-curves hazard at the
 # `stem_b`/`stem_c` declarations. Rendering the API without them would render the
 # half a reader can already get from the signatures.
@@ -50,9 +50,9 @@
 #      together rather than one on each side of a paragraph. `docs.yml` asserts
 #      it, because nothing else can.
 #
-#      The `/*! \file */` block rule 2 emits is EXEMPT, and that is measured
-#      rather than assumed: closed_form.hpp's file block has carried two runs
-#      across a long green master. So the assertion counts `///` blocks only.
+#      The `/*! \file */` block rule 2 emits is EXEMPT: Doxygen 1.9 renders a
+#      file block with two runs correctly, so the assertion counts `///` blocks
+#      only.
 #
 #      A run only OPENS after a blank line and only on a line that is not a list
 #      item. Both conditions are load-bearing. Without the first, the hanging
