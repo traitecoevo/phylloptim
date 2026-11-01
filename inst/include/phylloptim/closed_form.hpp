@@ -482,7 +482,7 @@ inline void optimise_into(Leaf &l) {
 
 } // namespace closed_form
 
-// The closed-form arm of `Leaf::optimise()`, declared in `leaf_model.hpp`. Defined
+// The closed-form arm of `Leaf::optimise()`, declared in `leaf.hpp`. Defined
 // here because it needs `closed_form`, which needs the complete `Leaf`; legal only
 // because `<phylloptim.hpp>` includes this header after `leaf_model.hpp`.
 //
