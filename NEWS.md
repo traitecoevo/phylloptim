@@ -1,3 +1,7 @@
+# phylloptim 0.27.2
+
+- The collar solve walks the root uptake once per candidate collar rather than three times, so it is about 11% faster; results do not move (all three goldens bit-identical). Plan section D.
+
 # phylloptim 0.27.1
 
 - Evaluating a leaf at a stem potential you choose (`evaluate_psi_stem_at()`) now reports that point's marginal cost of water (`lambda_emergent`); it used to report the value left over from the previous solve. Nothing else changes.
