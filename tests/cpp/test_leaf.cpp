@@ -353,6 +353,34 @@ void test_vulnerability_complement_derivatives() {
       phylloptim::vulnerability_psi_end(3.898245, 2.680147) * 1.01, 3.898245, 2.680147);
   ok(past.value == 0.0 && past.db == 0.0 && past.dc == 0.0,
      "past the end of the curve Q and its rows are zero, as the table reads it");
+
+  // Below c = 1 the continued fraction's first denominator x + 1 - 1/c is zero
+  // at x = 3, c = 0.25 (psi = 81, b = 1), so the rows there come from G(inf)
+  // less G; they still match the closed form and a difference.
+  {
+    const double psi = 81.0, b = 1.0, c = 0.25, h = 1e-6;
+    const auto d = phylloptim::cumulative_vulnerability_complement_derivatives_at(psi, b, c);
+    const double Q = Q_at(psi, b, c);
+    near(d.value / Q, 1.0, 1e-12, "below c = 1, Q matches the closed form");
+    near(d.dc, (Q_at(psi, b, c * (1 + h)) - Q_at(psi, b, c * (1 - h))) / (2 * h * c),
+         1e-6 * std::abs(d.dc), "and dQ/dc a central difference");
+  }
+  // A table whose q never falls to tail_share of g before the end still ends
+  // in a tail span, so a read at the end of the curve has one to read.
+  for (const auto& [c, n] : {std::pair{25.0, 9.0}, std::pair{0.04, 800.0}}) {
+    const auto t = phylloptim::vulnerability_table(c, n, nullptr);
+    ok(t->tail_index() < t->intervals(), "the last span is a tail span at c = " +
+                                             std::to_string(c));
+    ok(std::isfinite(phylloptim::vulnerability_complement(*t, t->u_end(), 1.0, 1.0)),
+       "and Q at the end of the curve is read from it");
+  }
+  // NaN in, NaN out, through Q's inverse as through Q.
+  {
+    const auto t = phylloptim::vulnerability_table(2.680147, 800.0, nullptr);
+    ok(std::isnan(phylloptim::vulnerability_complement_inverse(
+           *t, std::numeric_limits<double>::quiet_NaN(), 3.9)),
+       "Q^-1 of NaN is NaN, not the end of the curve");
+  }
 }
 
 // The table's tail (#190): from where Q has fallen to tail_share of G to the

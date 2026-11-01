@@ -7320,6 +7320,9 @@ inline double Leaf::psi_stem_carrying(double E, double psi_upstream,
   }
   const double Q_up = stem_curve_complement(psi_upstream, caller);
   const double left = Q_up - w;
+  if (std::isnan(left)) {
+    return left;  // a NaN flux places no stem, and is not a flux out of range
+  }
   // ⚠️ "PAST" MEANS PAST A FEW ULPS OF G(inf), as in stem_curve_integral_inverse,
   // not of Q: a flux reaches here from a draw placed by a root-find in G's
   // arithmetic (a shut leaf's wet bound, a continuity root), which can overshoot
