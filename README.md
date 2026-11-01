@@ -554,7 +554,7 @@ The solver's own costs, model by model, are the table in `vignette("the-models")
 Name it in `LinkingTo` to compile against the headers, the way `BH` is used:
 
 ```
-LinkingTo: BH, odelia (>= 0.10.0), phylloptim (>= 0.10.0)
+LinkingTo: BH, odelia (>= 0.10.0), phylloptim (>= 0.16.0)
 ```
 
 `LinkingTo` is **not** transitive in R, so you must name `BH` and `odelia` yourself even though it is phylloptim that includes them — including the odelia
@@ -581,8 +581,8 @@ that was removed upstream in traitecoevo/odelia#44, so the test suite now builds
 against the real headers with nothing standing in for R at all. odelia 0.2.0 was the first release with that fix; an older odelia fails deep in
 the build with `RcppCommon.h: No such file or directory`, which does not point at
 the cause. **The floor is 0.10.0**: the leaf's supplied derivative rows are
-built on headers that first shipped in 0.7.0 (`implicit_node.hpp`, `tangent.hpp`,
-`with_slope.hpp`), and use the reverse-mode names 0.10.0 gave them.
+built on odelia's `implicit_node.hpp`, `tangent.hpp` and `with_slope.hpp`, under
+the reverse-mode names 0.10.0 gave them; phylloptim follows them from 0.16.0.
 
 Both dependencies are already required by plant, so plant pays nothing new for
 depending on this package.

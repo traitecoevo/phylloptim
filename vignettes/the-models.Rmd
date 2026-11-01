@@ -176,7 +176,7 @@ The sweep costs 64 objective evaluations before refinement begins, which is expe
 
 ### When the answer is a bound, not a stationary point
 
-Where profit is still climbing as it reaches the end of the feasible interval, `dJ/dψ` never crosses zero inside that interval and the optimum is the endpoint itself. This is a *constrained* optimum, and it is not a corner case: it happens on 42 of the 240 feasible rows of the reference grid.
+Where profit is still climbing as it reaches the end of the feasible interval, `dJ/dψ` never crosses zero inside that interval and the optimum is the endpoint itself. This is a *constrained* optimum, and it is not a corner case: it happens on 51 of the 288 feasible rows of the reference grid at 25 °C.
 
 A solver therefore has to test the derivative's sign at each end and say explicitly that the answer is a bound. Handed no sign change, a bracketing root-find cannot on its own distinguish "the answer is the endpoint" from "I failed", so the operating-point kind is what carries the distinction.
 

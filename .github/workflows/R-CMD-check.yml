@@ -102,7 +102,8 @@ jobs:
         run: |
           set -eu
           apt_opts="-o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=2"
-          sudo apt-get $apt_opts install -y doxygen
+          sudo apt-get $apt_opts update
+          sudo apt-get $apt_opts install -y doxygen graphviz
           doxygen > /dev/null
           R CMD INSTALL .
           Rscript tools/source_tree_tests.R

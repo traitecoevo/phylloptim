@@ -1260,7 +1260,7 @@ void test_collar_solve_satisfies_its_own_first_order_condition() {
   ok(l.opt_root_psi_ <= bound_b, "and no drier than the binding dry limit");
 }
 
-// A CONSTRAINED optimum, which 42 of the 240 feasible golden-grid rows are: profit
+// A CONSTRAINED optimum, which 51 of the 288 feasible golden-grid rows at 25 C are: profit
 // is still climbing at one end of the feasible interval, so dprofit never crosses
 // zero inside it. The residual is then NOT small, and that is correct rather than a
 // convergence failure -- so this pins the property that actually holds there.
@@ -4915,7 +4915,11 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
       {{3.0, 3.25, 3.5}, 900.0, 3.1, Kind::BoundarySoil},  // 3.1 < e_s(25 C)
       {{6.0}, 500.0, 0.5, Kind::BoundaryDry},
       {{1.0}, 1.0, 2.0, Kind::BoundarySoil, 5e-4},
-      {{16.0, 16.25, 16.5}, 900.0, 2.0, Kind::HydraulicShutdown}};
+      {{16.0, 16.25, 16.5}, 900.0, 2.0, Kind::HydraulicShutdown},
+      // The same kinds with a cuticle, where g_min is a regular parameter.
+      {{1.0, 1.25}, 1500.0, 2.0, Kind::Interior, 5e-4},
+      {{6.0}, 500.0, 0.5, Kind::BoundaryDry, 5e-4},
+      {{16.0, 16.25, 16.5}, 900.0, 2.0, Kind::HydraulicShutdown, 5e-4}};
   // TF24_floor at a small price, so its fixtures stay on TF24's kinds.
   const double price = 1e3;
   const auto unread = [&](int k) {
@@ -4929,8 +4933,7 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
     return k == pl::par_PPFD ? std::string("PPFD")
                              : pl::gradient::par_names()[std::size_t(k)];
   };
-  std::vector<int> per_par(pl::n_leaf_pars, 0);
-  std::map<std::string, int> per_kind;
+  std::map<std::string, std::vector<int>> per_par_kind;
   double worst_rel = 0.0, worst_abs = 0.0;
   std::string worst_rel_at, worst_abs_at, skipped_at;
   int compared = 0, skipped = 0, zero = 0, at_zero_g_min = 0;
@@ -5068,9 +5071,14 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
           worst_rel_at = at;
         }
         ++compared;
-        ++per_par[std::size_t(k)];
-        ++per_kind[name];
-        ok(err <= 1e-4 * scale + 1e-7,
+        auto& seen = per_par_kind[name];
+        seen.resize(pl::n_leaf_pars, 0);
+        ++seen[std::size_t(k)];
+        // The absolute floor is on the row times the parameter's own scale,
+        // so a parameter of order 1e3 (PPFD, the price) is not let off rows of
+        // order 1e-9 per unit.
+        const double unit = std::max(1.0, std::abs(v));
+        ok(err <= 1e-4 * scale + 1e-7 / unit,
            "the supplied row matches a difference of the solve" + at +
                ": row " + std::to_string(rows[j]) + ", difference " +
                std::to_string(fd[j]));
@@ -5078,7 +5086,11 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
     }
   }
   std::string kinds;
-  for (const auto& [kind, n] : per_kind) kinds += " " + kind + " " + std::to_string(n);
+  for (const auto& [kind, seen] : per_par_kind) {
+    int n = 0;
+    for (int c : seen) n += c;
+    kinds += " " + kind + " " + std::to_string(n);
+  }
   printf("    %s: %d rows compared (%s ), %d unread rows exactly zero,\n"
          "    g_min passed over at %d fixtures without a cuticle,\n"
          "    %d parameters skipped across a kind change:%s\n"
@@ -5086,14 +5098,16 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
          curve.c_str(), compared, kinds.c_str(), zero, at_zero_g_min, skipped,
          skipped_at.c_str(), worst_rel, worst_rel_at.c_str(), worst_abs,
          worst_abs_at.c_str());
-  // A referee that skipped a parameter everywhere would pass on what is left.
-  for (int k = 0; k < pl::n_leaf_pars; ++k) {
-    if (!unread(k)) {
-      ok(per_par[std::size_t(k)] > 0,
-         curve + ": " + par_name(k) + " was compared at some kind");
+  // A referee that skipped a parameter at a kind would pass on what is left.
+  ok(per_par_kind.size() == 4, curve + ": rows were compared at all four kinds");
+  for (const auto& [kind, seen] : per_par_kind) {
+    for (int k = 0; k < pl::n_leaf_pars; ++k) {
+      if (!unread(k)) {
+        ok(seen[std::size_t(k)] > 0,
+           curve + ": " + par_name(k) + " was compared at " + kind);
+      }
     }
   }
-  ok(per_kind.size() == 4, curve + ": rows were compared at all four kinds");
   ok(skipped <= 3, curve + ": at most three parameters were skipped across a "
                    "kind change");
   *compared_out += compared;
@@ -5106,7 +5120,7 @@ void test_supplied_rows_match_a_resolve_at_every_kind() {
   int compared = 0;
   referee_every_parameter_at_every_kind<CC::TF24>(&compared);
   referee_every_parameter_at_every_kind<CC::TF24_floor>(&compared);
-  ok(compared >= 700, "the referee compared at least 700 rows");
+  ok(compared >= 1100, "the referee compared at least 1100 rows");
 }
 
 // A shut leaf whose roots outlast its stem, so set_shut_state seats the stem at
