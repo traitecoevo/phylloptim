@@ -11,6 +11,7 @@ Read alongside:
 - **[`vignettes/the-models.Rmd`](../vignettes/the-models.Rmd)** — the nine optimality models, the cost/link framework that unifies them, the solver's per-call costs, and two appendices: **B** derives the gradients, **C** is the numerical practice (finite-difference steps, golden files, cross-platform magnitudes)
 - **[`vignettes/fitting.Rmd`](../vignettes/fitting.Rmd)** — ⚠️ read *"Fitting a different collection of parameters"* before answering anything about `pars`: what a different collection costs, which parameters return exactly zero and why, which are unreachable, and what a new study has to write itself
 - **[COMPARISON.md](../COMPARISON.md)** — how this differs from `plantecophys`, `tealeaves`, `bigleaf`
+- **[PLAN.md](../PLAN.md)** — the work queue after 0.27.0, in order, with what "done" is for each item; read it before picking up anything from the issues
 - **[issues](https://github.com/traitecoevo/phylloptim/issues)** — the work queue, and the *why* behind each open item
 
 Family context lives in [`plant-meta`](https://github.com/traitecoevo/plant-meta).
