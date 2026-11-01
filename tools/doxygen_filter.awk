@@ -67,8 +67,7 @@
 # written with Doxygen in mind: `\`, `@`, `#`, `%`, `&`, `<` and `>` all mean
 # something to Doxygen and here they never do. Without it, `#include <phylloptim.hpp>`
 # becomes a broken link to an entity called "include" followed by a swallowed
-# HTML tag, and the `\int` in the roots.hpp head-loss note becomes an unknown
-# command; both were observed before this was added. Verbatim runs are NOT
+# HTML tag, and a `\int` in a comment becomes an unknown command. Verbatim runs are NOT
 # escaped -- Doxygen reproduces them literally, so an escape would show up as a
 # stray backslash. If you genuinely want a Doxygen command, write a `///`
 # comment and rule 1 will leave it alone.

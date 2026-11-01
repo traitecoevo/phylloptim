@@ -369,8 +369,8 @@ series_resistance <- function(resistance) {
     stop("series_resistance(): `resistance` must be positive; a zero ",
          "resistance is an infinite flux", call. = FALSE)
   }
-  # Not `RootNetwork(r_R_V_sum = resistance)`, whose `Rcpp::wrap` costs ~50x a
-  # trivial `.Call`, paid per likelihood evaluation by a calibration (test-cost.R).
+  # Not `RootNetwork(r_R_V_sum = resistance)`, whose `Rcpp::wrap` is dear and
+  # would be paid per likelihood evaluation by a calibration (test-cost.R).
   # Nor a hand-written `structure()`, which could drift from the C++ struct.
   # Copy-on-write leaves the cached prototype unmutated; test-surface.R asserts it.
   out <- .root_network_prototype()
@@ -460,9 +460,9 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
 
 # --- default RootNetworks, memoised ------------------------------------------
 #
-# Materialising a RootNetwork in R costs ~50x a trivial `.Call`, nearly all of it
-# `Rcpp::wrap`; built per call it multiplies the cost of `set_drivers()` and
-# `leaf_solve()` several-fold. test-cost.R counts the crossings.
+# Materialising a RootNetwork in R is dear, nearly all of it `Rcpp::wrap`; built
+# per call it would dominate `set_drivers()` and `leaf_solve()`. test-cost.R
+# counts the crossings.
 #
 # Each memo holds one entry: a sweep holds `soil_depth` fixed, so it hits from the
 # second row on and cannot grow. Sharing one object is safe: `set_physiology`

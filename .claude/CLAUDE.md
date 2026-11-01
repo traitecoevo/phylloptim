@@ -39,7 +39,7 @@ Family context lives in [`plant-meta`](https://github.com/traitecoevo/plant-meta
 | `quadrature.hpp`, `uniroot.hpp`, `optimize.hpp` | adaptive Simpson; Boost root-finders; `maximise_over_closed_interval_foc`, the one solver |
 | `vulnerability.hpp` | `VulnerabilityTable` (the C2 table both curves read), the closed-form integral and its inverse, `vulnerability_derivatives_at` |
 | `closed_form_rows.hpp` | a table's value with the closed form's trait rows, for both curves |
-| `roots.hpp` | `RootNetwork`, `root_network_from_carbon`, `SupplyInputs`, `CollarConductance`, `MultiLayerRoots` (the one uptake walk), `layer_thickness()` (the dz both sides share). Nothing here calls `root_network_from_carbon`: since #33 the caller runs the root model and hands `set_physiology` the resistances |
+| `roots.hpp` | `RootNetwork`, `root_network_from_carbon`, `SupplyInputs`, `CollarConductance`, `MultiLayerRoots` (the one uptake walk), `layer_thicknesses()` (soil depths to layer widths). Nothing here calls `root_network_from_carbon`: since #33 the caller runs the root model and hands `set_physiology` the resistances |
 | `single_potential.hpp` | `SinglePotential`, the other supply path |
 | `leaf_model.hpp` | the `par_*` enumeration and `leaf_pars`, `Leaf`, `CostCurve`, `OperatingPointKind`, the solve, and the derivative surface (`supply_draw_at`, `operating_collar`, `billed_outputs_at`) |
 | `closed_form.hpp` | `Leaf::optimise_closed`, out of line, legal only because `<phylloptim.hpp>` includes it after `leaf_model.hpp` |
@@ -239,6 +239,8 @@ The same reader meets the code's comments and NEWS, so two more rules hold there
 
 - **A comment in code states what must hold and what breaks if it does not**: a contract, a unit or a hazard, in one to three lines. A derivation that needs more goes in a vignette or `hazards.md`, linked by name. No history (what a line used to be, when a slot was inserted, which probe sat here), no retracted claims and no issue numbers: the PR holds them. Keep ⚠️ for a mistake the reader is about to make that the hazard list names, and cite the hazard by number. No timings: where a choice is made for cost, say so in words and name the bench that shows it; the figures live at the entry points, in the solver table of `vignette("the-models")` and README's "Performance from R", because a figure per element churns with every change.
 - **A NEWS entry is one to five one-line bullets per release**: what changed for a user, whether results move and roughly by how much, and the PR. Tolerances, row counts, golden-file moves and timings belong in the PR.
+
+`tools/check_lengths.sh`, run by `cpp-tests.yml`, holds both: a NEWS entry is at most 12 non-blank lines, and in a code file of 200 non-blank lines or more comments are at most 40% of them.
 
 ## Writing commits here
 

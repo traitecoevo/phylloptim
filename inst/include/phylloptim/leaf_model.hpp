@@ -4179,7 +4179,8 @@ inline double Leaf::vcmax_temp_deriv(double leaf_temp) {
 // (gc*inv_atm)/g_ci lies in (0,1); tau < 0, so above the thermal optimum
 // (A_T < 0) the optimum moves drier, toward evaporative cooling. dgc_dT is not
 // zero: a form putting it under A_T rather than A_prime passes every test at
-// dgc_dT = 0 and is wrong.
+// dgc_dT = 0 and is wrong. Derived in vignette("the-models"), Appendix B, "The
+// energy-balance term".
 template <Leaf::CostCurve K>
 inline double Leaf::dprofit_energy_balance_term(
     double ci, double gc, double g_ci, double inv_atm, double gc_const,
