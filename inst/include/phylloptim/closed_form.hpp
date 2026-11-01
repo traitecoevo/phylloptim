@@ -3,8 +3,8 @@
 #define PHYLLOPTIM_CLOSED_FORM_HPP_
 
 // The closed form: an alternative method for the stem-route optimum, seated with
-// `set_model(curve, "stem", "closed")` and run by `optimise()`. Its realised gain
-// over the exact stem solve is about 2x, fallbacks included (`bench_solve`).
+// `set_model(curve, "stem", "closed")` and run by `optimise()`. It exists for
+// speed; `bench_solve` prices it against the exact stem solve, fallbacks included.
 //
 // Every curve here satisfies dA/dE = lambda at the optimum, and given lambda the
 // optimum is the Medlyn USO form
