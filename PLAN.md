@@ -18,7 +18,7 @@ Written for: agents picking up work on this package. Each item names what to cha
 3. Shorter comments and NEWS (section C, #206 options 1 and 2). The largest reduction, no behaviour change, and it makes every later item's diff readable. Do it before the speed and design work, not after, so those diffs are not buried in comment churn.
 4. The measured speed win (section D).
 5. Split the header (section E, #206 option 3). No lines saved, but the design pass in F reads one subsystem at a time.
-6. One roof for models and gradients (section F), which holds #206 options 4 and 5 and the audit's infrastructure findings. Its design is written below and needs the owner's approval, including the decisions at its end, before any code.
+6. One roof for models and gradients (section F), which holds #206 options 4 and 5 and the audit's infrastructure findings. Its design is written below, with the decisions the owner agreed; the code follows its order.
 
 **One PR per group, not per item** (decided 2026-11-02): A; B1–B4, B6 and C4; C1–C3, C5 and B5 (one commit per file for C1, still no code change, shown bit-identical as a whole); D; E; F's design; then one per step of F's order. Each group opens one issue naming its items, and a group whose predecessor has not merged is stacked on it.
 
@@ -70,9 +70,9 @@ Written for: agents picking up work on this package. Each item names what to cha
 
 One header holds the collar solve, the nine stem routes, thermal damage, the energy balance, Medlyn, the cost-curve tables and the derivative surface. Most members are already defined out of line, so the move is mechanical: one header per subsystem under `inst/include/phylloptim/`, `phylloptim.hpp` including them in the order they need, and the include-order dependency of `closed_form.hpp` kept. No lines are saved and no number moves: compiled objects and goldens bit-identical, `R CMD check` and the C++ suite green on all four CI compilers. Do it after C1, so the moved text is the short version.
 
-## F. One roof for models and gradients — design proposed, awaiting approval
+## F. One roof for models and gradients — designed (#222); code in the order below
 
-This was #206's options 4 and 5, its further candidates, and the audit's findings on where a model or a gradient is bespoke rather than generic. The design below replaces the item list that stood here; the labels F1 to F11 are kept so references to them still resolve. No code is written for F until the owner approves this section, including the decisions at its end.
+This was #206's options 4 and 5, its further candidates, and the audit's findings on where a model or a gradient is bespoke rather than generic. The design below replaces the item list that stood here; the labels F1 to F11 are kept so references to them still resolve. The owner agreed the design's decisions, D1 to D5 at its end, on 2026-11-02.
 
 **Decided before the design pass** (2026-11-02, by the package owner). These are requirements, not options for the design to weigh:
 
@@ -140,13 +140,13 @@ One PR each, stacked when the predecessor is unmerged. Each keeps all three gold
 
 F7 needs no step: both routes stay for every curve, as decided.
 
-### Decisions for the owner
+### Decisions (agreed by the owner, 2026-11-02)
 
-- **D1. The closed form (F6).** (a) Keep it, frozen: its three curves carry "has a closed form" in their definitions, no new curve needs one, and it stays outside every gradient. (b) Delete it: no consumer outside this repository uses it, and it is 531 lines plus its tests and bench arms. Recommendation: (a), since keeping it frozen costs one property and deleting it is the harder change to undo; (b) if nothing is meant to use it.
-- **D2. Medlyn (F8).** It cannot be a curve as written: the USO form is an empirical conductance, not a cost the solve maximises, and no λ maps onto `g1`. (a) Keep it outside the curve dispatch as an empirical-conductance diagnostic, say so in the registry, and move `g1_eff` (which reads none of it) out of its header. (b) Delete it, which needs a plant change, since plant binds its fields and passes `ci_abs_tol` to the constructor. Recommendation: (a).
-- **D3. How R names a route.** Add a `route` argument to `leaf_solve()`, `leaf_gradient()` and `leaf_batch()`, with `model = "collar"` kept as TF24 on the collar route and a curve name keeping its stem-route default, so no existing call changes. Recommendation: yes.
-- **D4. `$lambda`, `$lambda_molar` and `$lambda_multilayer`.** They return TF24's λ whatever curve is seated. (a) Make them the seated curve's, a breaking change with a NEWS entry. (b) Keep TF24's and document it. Recommendation: (a).
-- **D5. The shorthand (F3, step 1).** `find_root_collar_psi()` solves the seated curve. Breaking only for a script that seats another curve and relies on getting TF24, which is #219's trap. Recommendation: yes.
+- **D1. The closed form (F6) stays, frozen.** Its three curves carry "has a closed form" in their definitions, no new curve needs one, and it stays outside every gradient.
+- **D2. Medlyn (F8) stays outside the curve dispatch**, as an empirical-conductance diagnostic. It cannot be a curve as written: the USO form is not a cost the solve maximises, and no λ maps onto `g1`. The registry says so, and `g1_eff`, which reads none of it, moves out of its header.
+- **D3. R names a route with a `route` argument** to `leaf_solve()`, `leaf_gradient()` and `leaf_batch()`. `model = "collar"` stays TF24 on the collar route and a curve name keeps its stem-route default, so no existing call changes (step 6).
+- **D4. `$lambda`, `$lambda_molar` and `$lambda_multilayer` report the seated curve's λ**, not TF24's whatever is seated: a breaking change, with a NEWS entry (step 5).
+- **D5. `find_root_collar_psi()` solves the seated curve** (step 1): breaking only for a script that seats another curve and relies on getting TF24, which is #219's trap.
 
 ## Done
 
