@@ -185,6 +185,21 @@ test_that("the batch matches leaf_gradient() with the stem curve rebuilt", {
   }
 })
 
+test_that("the batch's finite-difference arm takes a step the caller names", {
+  # leaf_gradient() differences with a named step and with the route's otherwise;
+  # the batch must too, or the two disagree only when a step is named, which the
+  # default-step comparisons above cannot see.
+  p <- c("vcmax_25", "stem_P50")
+  ref <- leaf_gradient(psi_soil = 1.0, PPFD = 900, pars = p, method = "fd",
+                       step = 1e-3)
+  b <- leaf_batch(psi_soil = 1.0, PPFD = 900)
+  got <- one_row(leaf_gradient_batch(b, pars = p, method = "fd", step = 1e-3))
+  expect_identical(as.vector(got$gradient), as.vector(ref$gradient))
+  # The named step reached the arm: it moves the answer off the default's.
+  default <- one_row(leaf_gradient_batch(b, pars = p, method = "fd"))
+  expect_false(identical(as.vector(default$gradient), as.vector(got$gradient)))
+})
+
 test_that("the recorded gradients have not moved", {
   # The guard the bit-for-bit comparisons above cannot be: they would pass a
   # change applied to BOTH implementations. See this file's header, and

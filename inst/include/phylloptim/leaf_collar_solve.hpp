@@ -732,10 +732,10 @@ inline void Leaf::find_root_collar_psi_for(){
     }
 }
 
-// The collar solve on TF24 whatever curve is seated; optimise() solves the
-// seated model.
+// The collar solve on the seated curve, whatever route is seated; optimise()
+// solves the seated curve on its own route.
 inline void Leaf::find_root_collar_psi() {
-  find_root_collar_psi_for<CostCurve::TF24>();
+  with_curve(cost_curve_, [&](auto tag) { find_root_collar_psi_for<tag.value>(); });
 }
 
 // The operating point at a prescribed collar, on the seated curve. A collar

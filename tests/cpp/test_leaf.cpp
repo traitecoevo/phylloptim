@@ -9598,6 +9598,52 @@ void test_collar_profit_is_its_own_curve() {
   ok(distinct >= 4, "and their profits genuinely differ, so the check has teeth");
 }
 
+// find_root_collar_psi() solves the seated curve, so a leaf seated on K and solved
+// through it is bit-identical to find_root_collar_psi_for<K>(). A shorthand fixed
+// to one curve hands a gradient on another curve a point that curve did not
+// choose, which the gradient then reads as pinned.
+void test_collar_shorthand_solves_the_seated_curve() {
+  printf("find_root_collar_psi() solves the seated curve\n");
+  Drivers d;
+  d.PPFD = 900.0;
+  int checked = 0, distinct = 0;
+  double tf_collar = 0.0;
+  for (int c = 0; c < phylloptim::Leaf::n_cost_curves; ++c) {
+    const auto K = static_cast<phylloptim::Leaf::CostCurve>(c);
+    phylloptim::Leaf a = make_single_leaf(d, 1.0);
+    phylloptim::Leaf b = make_single_leaf(d, 1.0);
+    for (phylloptim::Leaf* l : {&a, &b}) {
+      l->CF77_lambda_ = 1.5e5;
+      l->TF24_floor_lambda_o = kFloorLambdaO;
+      l->LeastCost_beta = 146.0;
+      l->set_model(K, true);
+    }
+    try {
+      a.find_root_collar_psi();
+      phylloptim::Leaf::with_curve(K, [&](auto tag) {
+        b.find_root_collar_psi_for<tag.value>();
+      });
+    } catch (const std::exception&) {
+      continue;   // a curve that refuses this configuration says so elsewhere
+    }
+    const std::string name = phylloptim::Leaf::curve_name(c);
+    ok(same_bits(a.opt_root_psi_, b.opt_root_psi_) &&
+           same_bits(a.opt_psi_stem_, b.opt_psi_stem_) &&
+           same_bits(a.profit_, b.profit_) &&
+           same_bits(a.lambda_emergent_, b.lambda_emergent_) &&
+           a.operating_point_kind() == b.operating_point_kind(),
+       "the shorthand on " + name + " is find_root_collar_psi_for<" + name + ">");
+    ++checked;
+    if (c == 0) { tf_collar = a.opt_root_psi_; }
+    if (c > 0 && a.opt_root_psi_ != tf_collar) { ++distinct; }
+  }
+  // The premise: the curves must place different collars here, or a shorthand
+  // that solved TF24 on every curve would pass.
+  printf("    %d curves solved | %d at a collar other than TF24's\n", checked, distinct);
+  ok(checked >= 5, "most curves solve on the collar route at these drivers");
+  ok(distinct >= 4, "and their collars differ, so the check has teeth");
+}
+
 void benchmark() {
   printf("\ntiming\n");
   Drivers d;
@@ -11457,6 +11503,7 @@ int main(int argc, char **argv) {
   test_leastcost_lambda_is_dA_dE();
   test_every_curve_returns_its_own_maximum();
   test_collar_profit_is_its_own_curve();
+  test_collar_shorthand_solves_the_seated_curve();
   test_product_curves_shut_dark_collar_leaves();
   test_thermal_damage_gate_off_is_inert();
   test_thermal_damage_bypasses_the_cache();

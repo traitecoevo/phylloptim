@@ -1,3 +1,9 @@
+# phylloptim 0.27.3
+
+- `$find_root_collar_psi()` solves the collar route for the curve the leaf is set to; it used to solve TF24 whatever curve was set. A leaf on the default model is unchanged.
+- `leaf_gradient(model = "collar")` on a reused leaf set to another curve gives the same gradient as a fresh leaf; it used to solve TF24 there and report the point as pinned. A reused leaf is left solved on the route the gradient used.
+- `leaf_gradient_batch(method = "fd")` uses a `step` you name, as `leaf_gradient()` does; it used to ignore it ([#219](https://github.com/traitecoevo/phylloptim/issues/219)).
+
 # phylloptim 0.27.2
 
 - The leaf solve is about 11% faster, and plant's seasonal stand about 15%: the solver no longer recomputes the roots' water uptake three times for each candidate. Results do not change ([#214](https://github.com/traitecoevo/phylloptim/issues/214)).

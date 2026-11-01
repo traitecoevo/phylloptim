@@ -69,8 +69,9 @@ for the model and for how it differs from \code{plantecophys}, \code{tealeaves} 
 Set the drivers with \verb{$set_physiology()}, solve with \verb{$optimise()}, then
 read the operating point off the object: \verb{$opt_psi_stem_}, \verb{$profit_},
 \verb{$assim_colimited_}, \verb{$transpiration_}, \verb{$lambda}, \verb{$g1_eff}.
-\verb{$find_root_collar_psi()} is the same solve under the default model, kept
-because that is what \code{plant}'s own sources spell.
+\verb{$find_root_collar_psi()} is the seated curve's collar solve, the same
+solve under the default model, kept because that is what \code{plant}'s own
+sources spell.
 
 \strong{Which model is configuration, not a call argument.} \verb{$set_model(curve, route)} seats it and \verb{$optimise()} takes nothing, because the curves'
 constants already live on the object -- \verb{$CF77_lambda_} and
