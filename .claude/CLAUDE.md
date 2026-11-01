@@ -235,6 +235,11 @@ These files are read at the start of every agent session, as current instruction
 - Point to where a value lives (`DESCRIPTION`, a header, a Makefile target, `tools/cost-baseline.tsv`) rather than copying the value, and leave out anything a fresh clone cannot resolve, such as local paths or notes from one session.
 - Write in complete sentences that say what happens and what it causes, using names that already exist in the code.
 
+The same reader meets the code's comments and NEWS, so two more rules hold there:
+
+- **A comment in code states what must hold and what breaks if it does not**: a contract, a unit or a hazard, in one to three lines. A derivation that needs more goes in a vignette or `hazards.md`, linked by name. No history (what a line used to be, when a slot was inserted, which probe sat here), no retracted claims and no issue numbers: the PR holds them. Keep ⚠️ for a mistake the reader is about to make that the hazard list names, and cite the hazard by number.
+- **A NEWS entry is one to five one-line bullets per release**: what changed for a user, whether results move and roughly by how much, and the PR. Tolerances, row counts, golden-file moves and timings belong in the PR.
+
 ## Writing commits here
 
 **State the measurement, not the intention** — that part of the old rule here stands. What has changed is *where* the rest of it goes.
