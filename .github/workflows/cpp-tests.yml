@@ -33,6 +33,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The length limits of .claude/CLAUDE.md, "Writing in this guide": each NEWS
+  # entry and each code file's comment share. Plain awk, no R.
+  lengths:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: NEWS entry length and comment share
+        run: tools/check_lengths.sh
+
   test:
     runs-on: ${{ matrix.os }}
     strategy:
