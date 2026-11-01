@@ -4,8 +4,8 @@
 
 // The cost curves: each one's cost, profit and lambda, and the per-curve
 // tables the solves dispatch on. A new curve needs an arm in every table
-// here that ends in static_assert(..., "unhandled CostCurve"), in
-// curve_name() here, and in with_curve() in leaf.hpp.
+// here (each ends in a static_assert that names it), in curve_name() here,
+// in with_curve() in leaf.hpp, and in closed_form::optimise_into.
 //
 // Part of `Leaf`: include <phylloptim/leaf_model.hpp>, which includes every
 // part in order.
@@ -576,11 +576,6 @@ inline double Leaf::lambda_LeastCost(double psi_stem, double psi_upstream) {
   }
   return assim_colimited_ * dW_dE / leastcost_flux(psi_stem, psi_upstream);
 }
-
-// A single-layer optimiser maximises over the CLOSED interval from the wet bound
-// to dry_end<K>(), endpoints included, through
-// util::maximise_over_closed_interval_foc (hazard 11); maximise_profit_over_collar
-// tests the gradient's sign at each end instead.
 
 // ===========================================================================
 // Sperry et al. (2017) ProfitMax, as Sicangco et al. (2026) implement it

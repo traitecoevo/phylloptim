@@ -39,10 +39,11 @@
 // left in members (opt_root_psi_, opt_psi_stem_, ci_, profit_, E_up_, ...). The
 // cost curves share that solve and differ only in their cost (see CostCurve).
 //
-// The class and its construction are here; every other member is defined in
-// a leaf_*.hpp header by subsystem. Include <phylloptim/leaf_model.hpp>,
-// which includes them all in order: a member used and not defined in a
-// translation unit is a link error.
+// The class and its construction are here; the other members are defined
+// in the leaf_*.hpp headers by subsystem, and optimise_closed in
+// closed_form.hpp. Include <phylloptim/leaf_model.hpp>, which includes the
+// leaf_*.hpp headers: a member used and not defined in a translation unit is
+// a link error.
 
 // ===========================================================================
 // ONE REPRESENTATION FOR WATER POTENTIAL (hazard 2)

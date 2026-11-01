@@ -30,7 +30,7 @@
 #   4. INDENTED RUNS BECOME `\verbatim`. This matters more than it sounds. These
 #      comments are full of indented ASCII tables, benchmark numbers and usage
 #      examples, and Markdown reflows anything indented by less than four spaces
-#      into a paragraph -- turning the usage example at the top of leaf.hpp into
+#      into a paragraph -- turning the usage example at the top of phylloptim.hpp into
 #      one unreadable line. A run of lines indented relative to the surrounding
 #      prose is reproduced exactly instead.
 #

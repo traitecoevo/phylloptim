@@ -170,6 +170,11 @@ inline void Leaf::clear_collar_solve_state() {
   soil_consumption_.assign(soil_consumption_.size(), util::na_value);
 }
 
+// A single-layer optimiser maximises over the CLOSED interval from the wet bound
+// to dry_end<K>(), endpoints included, through
+// util::maximise_over_closed_interval_foc (hazard 11); maximise_profit_over_collar
+// tests the gradient's sign at each end instead.
+
 // The route is checked, not just the curve: these pin the upstream potential at
 // psi_soil, so on a collar-route leaf they would answer for a different model
 // than `model_route()` reports (hazard 11).
