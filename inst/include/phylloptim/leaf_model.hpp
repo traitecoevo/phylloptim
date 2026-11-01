@@ -7087,6 +7087,11 @@ inline double Leaf::residual_cond_temp_deriv_active(double psi_upstream,
 // and code-layout luck moves this benchmark by ~2%, the size of the effect. If
 // you re-derive the curve, build every point from one tree and interleave.
 //
+// Since 0.26.2 the table describes the TOMS748 fallback only. The Newton solve
+// below stops on a step under 1e-13, where its iterate is converged to rounding,
+// so it has no band to land in: ci's noise along a smooth path is ~3e-16
+// relative, the same as TOMS748's here, at under half the evaluations.
+//
 // ⚠️ **What chose 1e-13 over 1e-10 is a consumer that differences the solve
 // (#172).** Where TOMS748 stops inside its band depends on the state, so at
 // 1e-10 the reported outputs are noisy along any smooth path through the
@@ -7138,7 +7143,67 @@ inline double Leaf::solve_ci(double gc) {
     const double f_hi = hi == ca_ ? A_ca * umol_to_mol -
                                         (gc * (ca_ - hi) / (atm_kpa_ * kPa_to_Pa))
                                   : target(hi);
-    return util::uniroot_smooth(target, lo, hi, target(lo), f_hi, ci_root_tol,
+    const double f_lo = target(lo);
+    // Safeguarded Newton first. The residual is increasing and concave in ci
+    // (A is a smooth minimum of two concave hyperbolas, the supply is linear), so
+    // Newton converges from either side, and the slope comes with the value for
+    // one more division. Each step that leaves the bracket bisects it instead.
+    // It stops on a step below ci_root_tol, where the iterate is converged to
+    // about the square of that, so the root is placed to rounding rather than
+    // anywhere in a band: no state-dependent noise for a caller to difference.
+    // From the secant point it takes 3-4 evaluations where TOMS748 took ~10.
+    // TOMS748 remains the fallback, with its refusals.
+    if (f_lo < 0.0 && f_hi >= 0.0) {
+      if (f_hi == 0.0) {
+        return hi;
+      }
+      const PhotoCapacity<double> cap = photo_capacity<double>();
+      const double g_star = gamma_ * umol_per_mol_to_Pa_;
+      const double supply_per_pa = gc / (atm_kpa_ * kPa_to_Pa);
+      // The same arithmetic as assim_colimited_kernel, so the residual is the
+      // function TOMS748 roots.
+      auto residual = [&](double x, double& slope) -> double {
+        const double rk = x + km_;
+        const double rubisco = (cap.vcmax * (x - g_star)) / rk;
+        const double d_rubisco = cap.vcmax * (km_ + g_star) / (rk * rk);
+        const double ek = x + 2 * g_star;
+        const double electron = cap.transport / 4 * ((x - g_star) / ek);
+        const double d_electron = cap.transport / 4 * (3 * g_star) / (ek * ek);
+        const double s = rubisco + electron;
+        const double root =
+            sqrt(pow(s, 2) - 4 * cap.curvature * rubisco * electron);
+        const double assim =
+            (s - root) / (2 * cap.curvature) - cap.respiration;
+        const double d_root =
+            (s * (d_rubisco + d_electron) -
+             2 * cap.curvature * (d_rubisco * electron + rubisco * d_electron)) /
+            root;
+        slope = ((d_rubisco + d_electron) - d_root) / (2 * cap.curvature) *
+                    umol_to_mol +
+                supply_per_pa;
+        return assim * umol_to_mol - (gc * (ca_ - x) / (atm_kpa_ * kPa_to_Pa));
+      };
+      double a = lo, b = hi;
+      double x = lo - f_lo * (hi - lo) / (f_hi - f_lo);
+      for (int i = 0; i < static_cast<int>(ci_niter); ++i) {
+        double slope;
+        const double f = residual(x, slope);
+        if (f == 0.0) {
+          return x;
+        }
+        (f < 0.0 ? a : b) = x;
+        const double newton = x - f / slope;
+        // ⚠️ CONVERGENCE IS TESTED BEFORE THE SAFEGUARD. At the root the step
+        // rounds away and `newton` lands ON the bracket end x just became, which
+        // the safeguard would read as leaving the bracket and bisect: forty
+        // halvings from wherever the other end is, stopping ~1e-12 off.
+        if (std::abs(newton - x) <= ci_root_tol * (1.0 + std::abs(x))) {
+          return newton;
+        }
+        x = (newton > a && newton < b) ? newton : 0.5 * (a + b);
+      }
+    }
+    return util::uniroot_smooth(target, lo, hi, f_lo, f_hi, ci_root_tol,
                                 ci_niter);
   } catch (const std::exception& e) {
     util::stop_infeasible("ci_solve", "solve_ci failed: " + std::string(e.what()) +

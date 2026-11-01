@@ -72,6 +72,10 @@
 # row's deficit from 4 to 3 kPa (e_s is 3.17 kPa at 25 C) and none of its
 # values: a leaf shut at psi_soil 17 reads no deficit.
 #
+# Then for solving ci by safeguarded Newton, which places the root to rounding
+# rather than anywhere in TOMS748's 1e-13 band: values moved by up to ~1e-13
+# relative.
+#
 # Before that, #92 (the indexed knot grid) moved 27, the psi_stem_to_ci tolerance
 # 18, and the collar root-find 27.
 
@@ -97,11 +101,11 @@ golden_rows <- list(
     expected = list(
       psi_stem      = "0x1.709bdd973848bp+1",
       opt_root_psi  = "0x1.066f206418756p+1",
-      ci            = "0x1.9f4d8353e5aeap+4",
-      assim         = "0x1.215ca9d9740dcp+4",
+      ci            = "0x1.9f4d8353e5aecp+4",
+      assim         = "0x1.215ca9d9740d7p+4",
       transpiration = "0x1.450032c3cb9c3p-16",
       gc            = "0x1.0b2ace4d4c37fp-3",
-      profit        = "0x1.07970cd153bc7p+4",
+      profit        = "0x1.07970cd153bc2p+4",
       e_up          = "0x1.450032c3cb9c7p-16",
       uptake        = "0x1.19e242571d857p-10"
     )
@@ -109,29 +113,29 @@ golden_rows <- list(
   list(
     inputs = list(psi_soil = 2.0, ppfd = 900, vpd = 2.0, layers = 3L),
     expected = list(
-      psi_stem      = "0x1.b1bea0a2f445ap+1",
-      opt_root_psi  = "0x1.821841efd3748p+1",
-      ci            = "0x1.0de7939a33b56p+3",
-      assim         = "0x1.b2e0241264c9fp+1",
-      transpiration = "0x1.b29d0f355e608p-18",
-      gc            = "0x1.654643c265babp-7",
-      profit        = "0x1.8a7e20d88db48p-1",
-      e_up          = "0x1.b29d0f355e6p-18",
-      uptake        = "0x1.78f45d1fcb361p-12"
+      psi_stem      = "0x1.b1bea0a2f4464p+1",
+      opt_root_psi  = "0x1.821841efd374ep+1",
+      ci            = "0x1.0de7939a33b5ap+3",
+      assim         = "0x1.b2e0241264cb3p+1",
+      transpiration = "0x1.b29d0f355e619p-18",
+      gc            = "0x1.654643c265bb9p-7",
+      profit        = "0x1.8a7e20d88db3cp-1",
+      e_up          = "0x1.b29d0f355e618p-18",
+      uptake        = "0x1.78f45d1fcb376p-12"
     )
   ),
   list(
     inputs = list(psi_soil = 4.0, ppfd = 500, vpd = 1.0, layers = 5L),
     expected = list(
-      psi_stem      = "0x1.806ce1023184p+2",
-      opt_root_psi  = "0x1.3917d4d02abb8p+2",
-      ci            = "0x1.0ec2d5552da88p+3",
-      assim         = "0x1.aa12ab799f077p+1",
-      transpiration = "0x1.aa2d745ec3e0dp-19",
-      gc            = "0x1.5e56f599ccf32p-7",
-      profit        = "-0x1.db03fa1b158e9p+1",
-      e_up          = "0x1.aa2d745ec3e07p-19",
-      uptake        = "0x1.71a34488313e8p-13"
+      psi_stem      = "0x1.806ce10231835p+2",
+      opt_root_psi  = "0x1.3917d4d02abb7p+2",
+      ci            = "0x1.0ec2d5552da82p+3",
+      assim         = "0x1.aa12ab799f061p+1",
+      transpiration = "0x1.aa2d745ec3decp-19",
+      gc            = "0x1.5e56f599ccf18p-7",
+      profit        = "-0x1.db03fa1b158efp+1",
+      e_up          = "0x1.aa2d745ec3dfbp-19",
+      uptake        = "0x1.71a34488313dep-13"
     )
   ),
   list(
@@ -139,7 +143,7 @@ golden_rows <- list(
     expected = list(
       psi_stem      = "0x1.10141205bc01ap+4",
       opt_root_psi  = "0x1.10141205bc01ap+4",
-      ci            = "0x1.ec6f9e7580bddp+2",
+      ci            = "0x1.ec6f9e7580bdbp+2",
       assim         = "0x0p+0",
       transpiration = "0x0p+0",
       gc            = "0x0p+0",
@@ -226,11 +230,11 @@ golden_rows_40 <- list(
     expected = list(
       psi_stem      = "0x1.3c43d2872d74ep+1",
       opt_root_psi  = "0x1.27d38b4c6d6a5p+1",
-      ci            = "0x1.a8bad8ee963e6p+4",
-      assim         = "0x1.b63a5431b6154p-1",
+      ci            = "0x1.a8bad8ee963ep+4",
+      assim         = "0x1.b63a5431b611cp-1",
       transpiration = "0x1.00e0c211f2c13p-18",
       gc            = "0x1.a65564b23bf9dp-8",
-      profit        = "-0x1.c63090c20abf8p-4",
+      profit        = "-0x1.c63090c20adb8p-4",
       e_up          = "0x1.00e0c211f2c2ap-18",
       uptake        = "0x1.bd98ec0988d45p-13"
     )
