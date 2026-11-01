@@ -8850,6 +8850,8 @@ void test_every_curve_returns_its_own_maximum() {
   int min_rows_per_curve = std::numeric_limits<int>::max();
   double worst_shortfall = 0.0;
   std::string worst_where;
+  int dark_shut = 0;
+  bool dark_at_wet = true;
   for (int curve = 0; curve < n_curves; ++curve) {
     double curve_worst = 0.0;
     int interior = 0, pinned = 0, curve_rows = 0;
@@ -8874,6 +8876,18 @@ void test_every_curve_returns_its_own_maximum() {
       const double got = l.profit_;
       if (!std::isfinite(got)) {
         continue;   // a refused row; psi_stem_optima.tsv covers the refusals
+      }
+      // A product objective with A <= 0 throughout has no maximum, only a
+      // supremum at psi_crit, and the leaf is shut by rule rather than by its
+      // objective (objective_is_product): a scan beats it there by
+      // construction. What it must do instead is sit at the wet end.
+      const bool product =
+          curve == static_cast<int>(phylloptim::Leaf::CostCurve::SOX) ||
+          curve == static_cast<int>(phylloptim::Leaf::CostCurve::JW26);
+      if (product && !(l.assim_colimited_ > 0.0)) {
+        ++dark_shut;
+        dark_at_wet = dark_at_wet && l.opt_psi_stem_ == l.stem_wet_bound(r.psi_soil);
+        continue;
       }
 
       // Fresh leaf, so the solve's own state cannot influence the oracle.
@@ -8938,6 +8952,9 @@ void test_every_curve_returns_its_own_maximum() {
      "and the rows span both the interior and the pinned regime");
   ok(worst_shortfall < 1e-6,
      "no curve's solver is beaten by a 20001-point scan of its own objective");
+  printf("    %d SOX/JW26 rows with A <= 0 throughout, shut by rule\n", dark_shut);
+  ok(dark_shut > 0 && dark_at_wet,
+     "a product objective's dark rows sit at the wet end, not at psi_crit");
 }
 
 // Each curve's reported `profit_` is ITS OWN objective at the point it returned.
