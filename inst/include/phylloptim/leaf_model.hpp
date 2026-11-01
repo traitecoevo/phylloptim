@@ -1370,107 +1370,54 @@ public:
                             bool first_bracket = false);
   // Move the bracket's dry end from psi_crit to the end of the stem curve.
   double extend_collar_bracket(double bound_a);
-  // At a dry pin of a curve psi_crit does not bound, the stem is held at the end
-  // of its curve, which carries the uptake (G(inf) - G(collar), to the
-  // continuity root's precision): seat it there, rather than where the inverse
-  // lands, which is anywhere G rounds to G(inf). Returns whether it did.
+  // At a dry pin of a curve psi_crit does not bound, seat the stem at the end of
+  // its curve, which carries the uptake, rather than where the inverse lands
+  // (anywhere G rounds to G(inf)). Returns whether it did.
   template <CostCurve K> bool seat_stem_at_dry_pin();
-  // Evaluate the leaf at a *given* root-collar potential (positive magnitude)
-  // rather than optimising it: reuses prepare_collar_solve, refuses a target
-  // outside the feasible interval (infeasibility code `prescribed_potential`),
-  // and evaluates there (no golden-section search). Leaves
-  // exactly the same outputs as find_root_collar_psi and returns profit_. Used by
-  // TF24f's gradient-ascent acclimation (#525).
+  // The leaf at a prescribed collar potential (MPa, positive magnitude) instead
+  // of the optimum: refuses a target outside the feasible interval (code
+  // `prescribed_potential`), writes find_root_collar_psi's outputs, returns profit_.
   double evaluate_root_collar_psi(double target_opt_root_psi);
   template <CostCurve K>
   double evaluate_root_collar_psi_for(double target_opt_root_psi);
-  // Evaluate profit at a given root-collar potential (positive magnitude)
-  // *assuming prepare_collar_solve has already run this step* (soil-side caches
-  // built, feasible interval [bound_a, bound_b] known). Refuses a target outside
-  // the interval and otherwise sets the operating point (opt_psi_stem_, opt_root_psi_,
-  // profit_), returning profit_. This is the post-prepare body of
-  // evaluate_root_collar_psi, factored out so the centred finite-difference leaf
-  // solve can share one prepare_collar_solve across its three profit evals (#530).
+  // evaluate_root_collar_psi once prepare_collar_solve has run this step, so
+  // evaluations share one prepare; refuses a target outside [bound_a, bound_b].
   template <CostCurve K>
   double profit_at_collar_psi(double target_opt_root_psi,
                               double bound_a, double bound_b);
-  // Exact d(profit)/d(opt_root_psi) at a given root-collar potential (positive
-  // magnitude), for TF24f's acclimation tracking (#525/#527). Combines
-  // forward-mode AD for the analytic photosynthesis/cost algebra, the
-  // implicit-function theorem at the psi_stem_to_ci root-find, and the
-  // vulnerability tables' own slopes for the smooth transport. Replaces
-  // the noisy finite-difference gradient. Seats the soil-side caches itself, so a
-  // solve need not have run first.
-  //
-  // ⚠️ **The 0.0 returned on the shut-down / reversed-gradient exits is a
-  // SENTINEL, not a stationary point**, and the distinction only became load
-  // bearing because the collar solve root-finds on `dprofit == 0`. It matters
-  // because the sentinel fires at `prepare_collar_solve`'s WET bracket endpoint
-  // -- at `root_zero_E` uptake is zero by construction, so `psi >= psi_stem` --
-  // which is the first point a bracketing solver evaluates when it checks that
-  // its bracket brackets. Measured at the default operating point: profit there
-  // is -1.897 against 2.516 at the true optimum, so a solver that reads the
-  // sentinel as a root returns the zero-transpiration point as the answer. The
-  // region is narrow (at most 3.46e-07 MPa into the bracket over the golden grid,
-  // median 1.22e-08), which is exactly why it would survive casual testing.
-  //
-  // `feasible`, when non-null, reports whether the point admits an informative
-  // gradient at all, so a caller searching for a zero can tell the two kinds of
-  // 0.0 apart. The out-parameter rather than a NaN return is deliberate three
-  // ways: TF24f consumes the return value directly as an ODE rate
-  // (`dpsi/dt = k_acclim * dprofit`, plant/src/tf24f_strategy.cpp), so a NaN
-  // would propagate into plant's state vector where 0.0 correctly means "do not
-  // acclimate this step"; NaN already carries a *different* contract on the
-  // neighbouring derivative (hazard 6: `duptake_dpsi` returning NaN means "fall
-  // back to finite differences"), and overloading it would make the two
-  // indistinguishable; and defaulting to nullptr leaves every existing call site
-  // and the generated R binding untouched.
+  // Exact d(profit)/d(collar) at a given collar (MPa, positive magnitude), by
+  // forward-mode AD and the implicit-function theorem; seats its own caches.
+  // The 0.0 on the shut and reversed-gradient exits is a sentinel, not a
+  // stationary point, and sits at the wet bracket end a root-find tries first;
+  // `feasible`, when non-null, is false there. Not NaN: plant integrates the
+  // return as a rate where 0 means "do not acclimate", and NaN means "use finite
+  // differences" on duptake_dpsi (hazard 6).
   double dprofit_droot_collar_psi(double opt_root_psi, bool* feasible = nullptr);
   template <CostCurve K>
   double dprofit_droot_collar_psi_for(double opt_root_psi,
                                       bool* feasible = nullptr);
-  // The same, with the flag as a return rather than an out-parameter, because
-  // R cannot reach a `bool*` -- RcppR6 has no form for one, so the generated
-  // binding drops it and every R-side composite silently gets the "a composite
-  // that ignores it inherits the bug" case this header warns about above.
-  // `{dprofit, feasible}`, in that order.
+  // The same, returning `{dprofit, feasible}`, because R cannot reach a `bool*`:
+  // RcppR6 drops the argument, and an R caller would lose the sentinel's flag.
   std::vector<double> dprofit_droot_collar_psi_checked(double opt_root_psi);
-  // Post-prepare body of dprofit_droot_collar_psi, with the same `feasible`
-  // contract. Assumes the supply path's per-solve caches are already seated, so
-  // the collar solve can share ONE supply_begin_solve across all ~10 of its
-  // gradient evaluations instead of re-seating per call -- the same saving #530
-  // made for the finite-difference path, and it matters here because
-  // begin_solve() is a vulnerability read per soil layer.
+  // dprofit_droot_collar_psi with the supply path's per-solve caches already
+  // seated, so the collar solve seats them once for all its evaluations.
   template <CostCurve K>
   double dprofit_at_collar_psi(double opt_root_psi, bool* feasible = nullptr);
 
 
-  // dprofit/dpsi_stem for the solvers that optimise psi_stem directly with the
-  // upstream potential held fixed.
-  //
-  // The same chain as dprofit_at_collar_psi, and strictly simpler: there is no
-  // collar-to-stem map, so dpsi_stem/dx is 1 and every term in the upstream
-  // potential drops out. A template rather than a runtime switch because it is
-  // called inside a root-find, and because a compile-time choice cannot disagree
-  // with the objective the caller is maximising.
-  //
-  // ⚠️ `feasible` carries the same contract as the collar version: false means
-  // "no informative gradient here", and the 0.0 returned alongside it is a
-  // SENTINEL rather than a stationary point. A caller that ignores it and hands
-  // the zero to a root-find gets the shut-down state reported as the optimum.
+  // dprofit/dpsi_stem with the upstream potential held, for the stem routes:
+  // dprofit_at_collar_psi with dpsi_stem/dx = 1. `feasible` false means the 0.0
+  // returned is a sentinel, not a stationary point.
   template <CostCurve K>
   double dprofit_dpsi_stem(double psi_stem, double psi_upstream,
                            bool* feasible = nullptr);
 
   static std::string curve_name(int curve);
 
-  // ⚠️ THE DERIVATIVE SURFACE READ ON ANOTHER CURVE IS A WRONG NUMBER, like a
-  // draw from another collar (check_draw): operating_collar and billed_outputs_at evaluate
-  // whatever K names at the solve's collar, and every value stays finite.
-  // Checked against the SEATED curve, which is what optimise() and
-  // replay_operating_point() solve. find_root_collar_psi() is the exception --
-  // it solves TF24 whatever is seated -- so a leaf seated on another curve and
-  // solved through it passes this check for the wrong reason.
+  // ⚠️ Hazard 17: the derivative surface read on another curve is a wrong,
+  // finite number. Checked against the SEATED curve; find_root_collar_psi()
+  // solves TF24 whatever is seated, so a leaf solved through it on another curve
+  // passes this check wrongly.
   template <CostCurve K>
   void check_surface_curve(const char* who) const {
     if (K != cost_curve_) {
@@ -1481,18 +1428,10 @@ public:
     }
   }
 
-  // ⚠️ THE ONLY RUNTIME CURVE DISPATCH IN THE CLASS, and the reason it is a
-  // template rather than four switches. Calls `f(tag)` where `tag` is an
-  // `std::integral_constant<CostCurve, K>`, so the body it hands back is
-  // COMPILE-TIME specialised on the curve -- the same instantiation the hot path
-  // gets -- while the choice is made at run time.
-  //
-  // There were four of these switches (solve-collar, solve-stem, evaluate-stem,
-  // dprofit-stem), all with the same seven arms, so adding a curve meant
-  // remembering six places. Now it is two: an arm here and an arm in
-  // `curve_name`. Both are switches over the enum with no `default`, so
-  // `-Werror=switch` makes a forgotten curve a build failure -- which is the
-  // whole reason neither is an `if`/`else` chain.
+  // The only runtime curve dispatch: calls `f(tag)` with `tag` an
+  // `std::integral_constant<CostCurve, K>`, so the body is compiled per curve.
+  // A new curve needs an arm here and in curve_name(); neither switch has a
+  // `default:`, so `-Werror=switch` makes a forgotten curve a build failure.
   template <typename F>
   static decltype(auto) with_curve(CostCurve curve, F&& f) {
     switch (curve) {
@@ -1515,43 +1454,29 @@ public:
       case CostCurve::LeastCost:
         return f(std::integral_constant<CostCurve, CostCurve::LeastCost>{});
     }
-    // Unreachable for any enumerator, and not a `default:` arm -- a `default`
-    // would satisfy `-Werror=switch` and so remove the check this exists for.
+    // Unreachable, and not a `default:` arm, which would satisfy -Werror=switch.
     util::stop("unknown cost curve index " +
                util::to_string(static_cast<int>(curve)));
     return f(std::integral_constant<CostCurve, CostCurve::TF24>{});
   }
-  // Evaluate the leaf at a prescribed psi_stem under the SEATED cost curve (see
-  // set_model). Returns profit_.
-  //
-  // ⚠️ NO CURVE ARGUMENT, deliberately, and it used to take an integer INDEX.
-  // The curve's own constants live on the object, so naming it at the call site
-  // configured half a model in each place -- and an index silently means a
-  // different model the moment the enumeration grows. Seat the model once with
-  // set_model(), then call this.
+  // The leaf at a prescribed psi_stem under the curve set_model() seated; returns
+  // profit_. No curve argument: the curve's constants live on the object.
   double evaluate_psi_stem_at(double target_psi_stem);
   // Refuse a stem-route method on a leaf seated on the collar route. See the
   // definition for why the route and not only the curve has to be checked.
   void require_stem_route(const char* who) const;
-  // ⚠️ NO `psi_upstream` ARGUMENT, deliberately. On a stem route the upstream
-  // potential is ALWAYS psi_soil -- that is what "non-root-based" means -- so it is
-  // read here through the same accessor `optimise_psi_stem_single` uses. Taking it
-  // from the caller invited a mismatch, and the first caller got it wrong: R read
-  // `psi_soil_`, which is the MULTI-LAYER roots' vector and is empty on the single
-  // path, so the subscript was out of bounds rather than merely inconsistent.
-  //
-  // The CURVE is read from the seated model too, for the reason
-  // `evaluate_psi_stem_at` gives.
+  // Returns {dprofit, feasible}. No `psi_upstream` argument: on a stem route it
+  // is always psi_soil, read through the accessor optimise_psi_stem_single uses
+  // (R's `psi_soil_` is the multi-layer vector, empty on the single path). The
+  // curve is the seated one, as for evaluate_psi_stem_at.
   std::vector<double> dprofit_dpsi_stem_checked(double psi_stem);
 
   template <CostCurve K> static constexpr BenefitLink benefit_link();
   template <CostCurve K> double benefit_link_deriv(double A) const;
   template <CostCurve K> void optimise_psi_stem_single();
-  // ProfitMax's shut state. Its objective is A/|A|max minus a normalised cost,
-  // so with |A|max <= 0 there is nothing to evaluate -- unlike every other curve,
-  // whose objective is defined everywhere. The objective is zeroed; the leaf's
-  // own state (its fluxes, conductance, ci and carbon) is the evaluator's at
-  // the wet end, so it is written rather than left stale (hazard 8).
+  // ProfitMax's shut state: with |A|max <= 0 its objective A/|A|max is undefined,
+  // so it is zeroed, and the leaf's own state is the evaluator's at the wet end,
+  // written rather than left stale (hazard 8).
   void set_profitmax_degenerate_state(double psi_stem, double psi_upstream);
   template <CostCurve K> void check_cost_parameters();
   template <CostCurve K> double cost_deriv(double psi_stem,
@@ -1580,26 +1505,17 @@ public:
   template <CostCurve K>
   double evaluate_psi_stem(double target_psi_stem);
   // d/dTleaf of what `read` takes from the temperature block, by a central
-  // difference of the block. ⚠️ It restores every member the block writes; a
+  // difference of the block. It restores every member the block writes; a
   // member added to update_temperature_dependent_params must be added here and
   // to dprofit_energy_balance_term, or the leaf stays 1e-3 degrees off.
   template <class F> double temp_deriv(double leaf_temp, F read);
-  // dVcmax/dTleaf, the same way and with the same save-and-restore. LeastCost's
-  // capacity cost reads `vcmax_`, so `lambda_LeastCost` needs this slope with the
-  // energy balance on. dprofit_energy_balance_term reads the same two
-  // evaluations inline, beside A_T.
+  // dVcmax/dTleaf, the same way and with the same restore, for lambda_LeastCost
+  // with the energy balance on (LeastCost's capacity cost reads vcmax_).
   double vcmax_temp_deriv(double leaf_temp);
-  // The energy-balance contribution to dJ/dpsi, zero when the gate is off: the
-  // benefit's motion through Tleaf(E(psi)) under the curve's link, plus the
-  // cost's for the two curves whose cost reads Tleaf (ProfitMax's thermal cost,
-  // LeastCost's Vcmax). Kept out of line so that adding it cannot
-  // change FMA contraction in the inlined gate-off path; the derivation and the
-  // two sign checks are at the definition.
-  //
-  // `E_s` and `r_star` are the stomatal and the residual flux at the point,
-  // `drstar_dpsi` the residual's slope in the collar (zero on a stem route),
-  // and `dgc_dT_residual` the residual's contribution to dgc/dTleaf; see the
-  // definition for where each enters. All four are exact zeros at g_min = 0.
+  // The energy-balance contribution to dJ/dpsi through Tleaf(E(psi)), zero with
+  // the gate off; out of line so it cannot change FMA contraction on the gate-off
+  // path. `E_s`, `r_star`, `drstar_dpsi` and `dgc_dT_residual` are the residual
+  // conductance's terms, exact zeros at g_min = 0; derivation at the definition.
   template <CostCurve K>
   double dprofit_energy_balance_term(double ci, double gc, double g_ci,
                                      double inv_atm, double gc_const,
@@ -1608,19 +1524,13 @@ public:
                                      double dT_dE, double Tleaf, double E_s,
                                      double r_star, double drstar_dpsi,
                                      double dgc_dT_residual, double bl_slope);
-  // The profit-maximising collar potential within [bound_a, bound_b], by a
-  // safeguarded root-find on dprofit == 0. Returns a bound when the
-  // optimum is pinned to it, which is the case on 42 of the 240 feasible
-  // golden-grid rows and so is a branch that has to be written rather than a
-  // corner. Falls back to golden section if either endpoint has no usable
-  // gradient -- see the definition for why that fallback should never fire.
+  // The profit-maximising collar in [bound_a, bound_b] by a safeguarded root-find
+  // on dprofit == 0, or a bound when the optimum is pinned there; golden section
+  // if an endpoint has no usable gradient.
   template <CostCurve K>
   double maximise_profit_over_collar(double bound_a, double bound_b);
-  // Analytic d(E_up_)/d(collar suction) -- a CONDUCTANCE, positive by
-  // construction now that both sides are magnitudes (#25). Thin forwarder to
-  // roots_.duptake_dpsi; see there for the derivation and for the NaN-at-a-kink
-  // contract. Used only on the TF24f acclimation gradient path, not the base
-  // TF24 value path.
+  // d(E_up_)/d(collar), a conductance, positive. Forwards to the supply path's
+  // duptake_dpsi, which returns NaN at a kink (hazard 6).
   double dE_from_soil_dpsi_collar(double T_collar, const std::vector<double>& psi_soil) {
     require_suction_vector(psi_soil, "dE_from_soil_dpsi_collar");
     switch (supply_kind_) {
@@ -1631,30 +1541,24 @@ public:
     }
   }
   // The shut operating point the collar solve's early exits place: the collar
-  // at which uptake meets the residual flux, the stem where it carries that
-  // flux, and every output from the ordinary evaluator there. See the
-  // definition.
+  // where uptake meets the residual flux, the stem where it carries it, and every
+  // output from the ordinary evaluator there (hazard 18).
   template <CostCurve K>
   void set_shut_state();
-  // The collar at which uptake equals the realised residual flux, on a bracket
-  // that is widened past the stem's critical potential when the soil is too
-  // dry to deliver it inside; the wet bound of every collar solve.
+  // The wet bound of every collar solve: the collar where uptake equals the
+  // realised residual flux, bracket widened past psi_crit for a dry soil.
   double find_wet_bound(double wettest_soil_layer, double E_up_at_wettest,
                         double E_up_at_crit);
-  // The same bound for the shut leaf, bracketed from its floor: see the
-  // definition for why this is both cheaper and continuous through the root
-  // integral's cap.
+  // The same bound for the shut leaf, bracketed from its floor (hazard 18).
   double find_shut_wet_bound();
-  // The stem potential at which the stem carries exactly the residual flux
-  // from a pinned upstream potential; the wet end of every stem route. The
-  // upstream potential itself at g_min = 0.
+  // The wet end of every stem route: the stem potential carrying the residual
+  // flux from a pinned upstream potential (that potential at g_min = 0).
   double stem_wet_bound(double psi_upstream);
   // The root on [wettest, end], with the stem held at `end` for the continuity
   // root (find_root_crit = 1) and the zero-uptake root otherwise.
   double find_root_psi(double wettest_soil_layer, const std::vector<double>& psi_soil, int find_root_crit,
                        double f_wettest, double f_crit, double end);
-  // The same root, taking its own endpoint values, with the stem at psi_crit:
-  // for a caller outside the solve.
+  // The same root with the stem at psi_crit, for a caller outside the solve.
   double find_root_psi(double wettest_soil_layer, const std::vector<double>& psi_soil, int find_root_crit) {
     const auto f = [&](double x) {
       return find_root_crit == 1 ? E_column(x, psi_soil, psi_crit)
@@ -1664,70 +1568,41 @@ public:
     return find_root_psi(wettest_soil_layer, psi_soil, find_root_crit, f_wettest,
                          f(psi_crit), psi_crit);
   }
-  // A bracket bound find_root_psi placed at its 1e-4 tolerance, solved again to
-  // collar_root_tol from where it stopped. Called only where the bound IS the
-  // answer; see its definition for why the answer needs it.
+  // A bracket bound find_root_psi placed at its 1e-4 tolerance, re-solved to
+  // collar_root_tol; called only where the bound is the answer.
   double polish_bracket_bound(double x0, const std::vector<double>& psi_soil,
                               int find_root_crit);
   double find_psi_stem_from_psi_root(double psi_root, const std::vector<double>& psi_soil);
   double E_column(double x, const std::vector<double>& psi_soil, double psi_leaf);
   double E_column_zero(double x, const std::vector<double>& psi_soil);
   
-  // The two temperature responses, at any scalar. Both are exactly LINEAR in
-  // ref_value and every other argument is fixed physiology, so on the active path
-  // the response is a passive factor and the reference value is what carries the
-  // row. Templated rather than factored into that product because the operation
-  // order is what keeps the double instantiation bit-identical to the member it
-  // replaced.
-  // ⚠️ ONLY `ref_value` IS TEMPLATED, AND THE REST ARE double BECAUSE THEY DO
-  // NOT MOVE. An activation energy, a leaf temperature and the two deactivation
-  // constants are the block's own numbers, not the caller's traits -- lifting
-  // one into T gives it a derivative vector of zeros that every operation then
-  // carries. Measured at a nested tangent, the two curves below were 25.7% of
-  // the leaf's instructions with the constants lifted and are a single active
-  // multiply without.
+  // The two temperature responses, exactly linear in ref_value. Only ref_value
+  // is templated: the other arguments do not move, and lifting one to T makes
+  // every operation carry a derivative vector of zeros. The operation order is
+  // load-bearing: reordering moves the double results by an ULP.
   template <typename T>
   T arrh_curve(double Ea, const T& ref_value, double leaf_temp) const;
   template <typename T>
   T peak_arrh_curve(double Ea, const T& ref_value, double leaf_temp, double H_d,
                     double d_S) const;
 
-  // --- Penman-Monteith leaf energy balance (minimal core; #523) ---------------
+  // --- Penman-Monteith leaf energy balance (minimal core) ---------------------
   // Recompute the temperature-dependent photosynthetic parameters (vcmax_,
-  // jmax_, gamma_, ko_, kc_, R_d_, km_, electron_transport_, and the
-  // thermal-damage layer's k_imp_eff_, k_rec_eff_ and functional_) at a given leaf
-  // temperature. Extracted verbatim from the inline block in set_physiology so
-  // the non-PM path is bit-identical; on the PM path it is called per
-  // operating point with the energy-balance Tleaf (defeating the photo_temp
-  // cache, as intended).
+  // jmax_, gamma_, ko_, kc_, R_d_, km_, electron_transport_, and the damage
+  // layer's k_imp_eff_, k_rec_eff_, functional_) at a leaf temperature. With the
+  // energy balance on it runs per operating point, bypassing the photo_temp cache.
   void update_temperature_dependent_params(double leaf_temp);
-  // Saturation vapour pressure es(T) (kPa) and its slope Delta(T) (kPa K^-1),
-  // Tetens formula. Not wired into the minimal-cut solve (prescribed atm_vpd is
-  // kept); provided and unit-tested for the leaf-to-air VPD in the full cut.
+  // Saturation vapour pressure es(T) (kPa) and its slope (kPa K^-1), Tetens.
   double saturation_vapour_pressure(double temp) const;
   double saturation_vapour_pressure_slope(double temp) const;
 
-  // Seat `vpd_leaf_` at a leaf temperature. THE ONE PLACE the leaf-to-air deficit
-  // is defined, called wherever a leaf temperature is established: set_physiology
-  // (at Tair, so off-path callers get atm_vpd_ back exactly),
-  // set_leaf_states_rates_from_psi_stem, and dprofit_at_collar_psi.
-  //
-  // ⚠️ NOT folded into update_temperature_dependent_params, even though that is
-  // the other function taking a leaf temperature. The two finite-difference
-  // blocks call that one at T +/- h and restore the photosynthesis members by
-  // assignment; `vpd_leaf_` must NOT move with them, because dA/dTleaf there is
-  // taken at fixed ci and assim_colimited() reads no VPD at all. The VPD route
-  // into the derivative is carried separately, by dgc_dT.
+  // Seat `vpd_leaf_` at a leaf temperature: the one place the leaf-to-air deficit
+  // is defined. Not in update_temperature_dependent_params, whose differences at
+  // T +/- h must not move it; the VPD route into the derivative is dgc_dT's.
   void set_leaf_vpd(double leaf_temp);
-  // Explicit leaf energy balance:
-  // Tleaf = Tair + (Rn - lambda*E) / (rho*cp/ra + g_rad), with Rn the ISOTHERMAL
-  // net radiation and g_rad the linearised longwave (constants.hpp).
-  // E is the hydraulically-pinned transpiration (kg H2O m^-2 s^-1); no PM
-  // inversion and no A->E feedback, so this is a single algebraic forward pass.
-  // `dT_dE`, when non-null, receives dTleaf/dE at the same point: one constant,
-  // since the balance is affine in E. Nothing clamps the result; set_physiology
-  // refuses drivers under which the leaf could leave the model's range
-  // (check_leaf_temperature_range), so every E the solve can reach is inside it.
+  // Explicit energy balance, Tleaf = Tair + (Rn - lambda*E) / (rho*cp/ra + g_rad),
+  // E in kg H2O m^-2 s^-1: affine in E, so `dT_dE` (when non-null) is a constant.
+  // Not clamped: check_leaf_temperature_range refuses drivers that would need it.
   double leaf_temp_from_E(double E, double* dT_dE = nullptr) const;
   // Refuses a leaf whose temperature can run, over the fluxes the solve can
   // reach, from `coldest` to `hottest` deg C, if either end is past what the
@@ -1739,40 +1614,30 @@ public:
   // proportion of conductivity in xylem at a given water potential (return: unitless)
   double proportion_of_conductivity(double psi) const;
 
-  // supply-side transpiration for a given water potential gradient between leaves and soil, 
-  // references setup_transpiraiton for values (return: kg h20 s^-1 m^-2 LA)
-  // should be renamed to reflect supply-side
-  // Stops on psi_stem < psi_upstream, a flow from the leaf to the soil.
+  // Supply-side transpiration through the stem (kg H2O s^-1 m^-2 LA). Refuses
+  // psi_stem < psi_upstream, a flow from the leaf to the soil.
   double transpiration(double psi_stem, double psi_upstream);
-  // The flux an OPERATING-POINT evaluation uses: zero where psi_upstream >=
-  // psi_stem, the same no-flow rule set_leaf_states_rates_from_psi_stem applies,
-  // and transpiration() otherwise. A cost or lambda that re-reads the flux after
-  // that call must use this, or it refuses a point the evaluator accepted: a
-  // prescribed collar at the wet bound puts the stem up to ~1e-9
-  // MPa wetter.
+  // The flux an operating point uses: zero where psi_upstream >= psi_stem, else
+  // transpiration(). A cost or lambda that re-reads the flux must use this, or it
+  // refuses a point the evaluator accepted (a prescribed collar at the wet bound).
   double operating_point_flux(double psi_stem, double psi_upstream);
-  // supply-side transpiration for a given water potential gradient between leaves and soil, integrated internally (return: kg h20 s^-1 m^-2 LA)
-  // should be renamed to reflect supply-side
+  // Supply-side transpiration, integrated internally (kg H2O s^-1 m^-2 LA).
   double transpiration_full_integration(double psi_stem, double psi_upstream);                    
-  // stomatal conductance rate of c02 (return: mol CO2 m^-2 s^-1)
-  double stom_cond_CO2(double psi_stem, double psi_upstream); // define as a constant
-  // converts transpiration in kg h20 s^-1 m^-2 LA to psi_stem (return: -MPa)
+  // stomatal conductance to CO2 (mol CO2 m^-2 s^-1)
+  double stom_cond_CO2(double psi_stem, double psi_upstream);
+  // the stem potential carrying a transpiration rate (MPa, positive magnitude)
   double transpiration_to_psi_stem(double transpiration_, double psi_upstream);
   
   // assimilation functions
 
-  //
   double assim_rubisco_limited(double ci_);
   double electron_transport();
   double assim_electron_limited(double ci_);
   double assim_colimited(double ci_);
 
-  // Photosynthesis at this leaf's temperature and light, as the assimilation
-  // kernel reads it: the two limiting capacities, the curvature that colimits
-  // them, and the dark respiration. Nothing in it moves with intercellular CO2,
-  // which is what makes dA/dci a slope in FOUR directions rather than in one per
-  // pack slot -- and the chain from these back to the traits is the tape's,
-  // because they are recorded before the slope is taken.
+  // Photosynthetic capacity at this leaf's temperature and light: the two
+  // limiting capacities, the colimiting curvature and dark respiration. None
+  // moves with ci, so dA/dci walks four directions rather than one per pack slot.
   template <class T>
   struct PhotoCapacity {
     T vcmax;
@@ -1780,9 +1645,8 @@ public:
     T curvature;
     T respiration;
 
-    // ⚠️ WHAT CARRIES A ROW, NAMED FOR visit_active -- see SupplyDraw. A shape
-    // dispatch does not open is skipped in silence, and the ci residual reads
-    // every one of these. The member count is asserted below this struct.
+    // ⚠️ Hazard 17: every member that carries a row is visited here, or its
+    // columns read exactly zero. The member count is asserted below.
     template <class F>
     void for_each_active(F&& f) const {
       f(vcmax);
@@ -1795,19 +1659,10 @@ public:
                 "PhotoCapacity gained or lost a member: update for_each_active, "
                 "then this count");
 
-  // The coordinates at an interior collar, held, as operating_collar placed them: the
-  // capacity, the stem potential sigma, the stem's flux and ci, each carrying
-  // its rows in the traits and the soil. billed_outputs_at reads them rather than
-  // solving sigma and ci again. The caller owns them, as it owns the draw.
-  //
-  // ⚠️ THEY LIVE ON THE CALLER'S TAPE, SO THEIR LIFETIME IS THE DRAW'S. They are
-  // recorded before operating_collar's residual is rewound, which is why they survive
-  // it; a tape reset or a new recording between operating_collar and billed_outputs_at
-  // leaves them pointing at slots that no longer hold them.
-  //
-  // `at` is the collar they were placed at, NaN until operating_collar places them.
-  // operating_collar places them only at an interior point and only at an active
-  // scalar, so at double and at every other kind billed_outputs_at solves its own.
+  // The coordinates operating_collar placed at an interior collar, with their
+  // rows, for billed_outputs_at to read instead of solving again. They live on
+  // the caller's tape: a reset or new recording in between leaves them dangling.
+  // `at` is the collar they were placed at; NaN at double and any kind but interior.
   template <class S>
   struct HeldCoords {
     double at = std::numeric_limits<double>::quiet_NaN();
@@ -1818,9 +1673,8 @@ public:
 
     bool placed() const { return !std::isnan(at); }
 
-    // ⚠️ WHAT CARRIES A ROW, NAMED FOR visit_active -- see SupplyDraw. The
-    // marginal's residual reads every one of these, and one left out is a
-    // column of exact zeros in the collar's row.
+    // ⚠️ Hazard 17: the marginal's residual reads every one of these, and one
+    // left out is a column of exact zeros in the collar's row.
     template <class F>
     void for_each_active(F&& f) const {
       cap.for_each_active(f);
@@ -1831,69 +1685,33 @@ public:
   };
 
   // --- the scalar-generic cores -------------------------------------------
-  //
-  // These are the SINGLE definition of the photosynthesis and cost algebra. The
-  // five `double` entry points above and beside them are `T = double`
-  // instantiations, and `dprofit_droot_collar_psi` differentiates the same code
-  // with `T = xad::fwd<double>::active_type`. So the forward model and its
-  // derivative cannot disagree: there is one body, not two.
-  //
-  // ⚠️ **They replace a hand-maintained `namespace detail`, which HAD ALREADY
-  // DRIFTED** -- the deleted `assim_colimited_ad` associated the electron-limited
-  // term left-to-right where `assim_electron_limited` divides the bracket first,
-  // and used `s*s` where `assim_colimited` uses `pow(s, 2)`. Both are pure
-  // reassociation, so the two functions were mathematically identical and
-  // numerically not: the AD derivative was the derivative of a *slightly
-  // different function* than the model evaluated. Harmless while the gradient only
-  // set TF24f's acclimation rate; load-bearing because the collar solve
-  // root-find on it. Measured cost of the fix: 4.98e-07 on the golden grid.
-  //
-  // ⚠️ A KERNEL TAKES THE SCALARS THAT MOVE, AS ARGUMENTS. That is what makes the
-  // read set checkable: the parameter list IS the declaration of what the kernel
-  // differentiates against, so a row cannot go missing because someone maintained
-  // a list wrongly, and a slope through the kernel walks as many directions as it
-  // has arguments rather than as many as the pack is wide. Fixed physiology that
-  // no trait reaches -- `gamma_`, `km_`, the atmosphere -- stays a member, because
-  // nothing differentiates it.
-  //
-  // Keep them PURE -- no writes to members. `hydraulic_cost_TF` caches into
-  // `hydraulic_cost_`; its kernel must not, or the AD pass would write model state
-  // while probing.
+  // The single definition of the photosynthesis and cost algebra, instantiated
+  // at double for the model and at AD types for its derivative, so the two
+  // cannot disagree. A kernel's arguments are its read set (fixed physiology
+  // stays a member), and it must not write a member, or an AD probe moves the model.
   template <typename T, typename U> T assim_rubisco_limited_kernel(const T& ci, const U& vcmax) const;
   template <typename T, typename U> T assim_electron_limited_kernel(const T& ci, const U& transport) const;
   template <typename T, typename U> T assim_colimited_kernel(const T& ci,
                                                  const PhotoCapacity<U>& cap) const;
-  // The curve parameters take their own scalar U: the forward model and its
-  // tangents pass the members as plain doubles, and pow(tangent, double) needs
-  // no log where pow(tangent, tangent) differentiates the exponent too.
+  // The curve parameters take their own scalar U, so pow(tangent, double) pays
+  // no log for an exponent that does not move.
   template <typename T, typename U> T proportion_of_conductivity_kernel(
       const T& psi, const U& b, const U& c) const;
   template <typename T, typename U> T hydraulic_cost_TF_kernel(
       const T& psi_stem, const U& scale, const U& b, const U& c,
       const U& beta2) const;
 
-  // The same kernels reading the members, for the forward model, which has one
-  // set of these and no reason to thread them through every call.
+  // The same kernels reading the members, for the forward model.
   template <typename T> T assim_rubisco_limited_kernel(T ci) const;
   template <typename T> T assim_electron_limited_kernel(T ci) const;
   template <typename T> T assim_colimited_kernel(T ci) const;
   template <typename T> T proportion_of_conductivity_kernel(T psi) const;
   template <typename T> T hydraulic_cost_TF_kernel(T psi_stem) const;
 
-  // The kernels' arguments, read off a caller's parameter pack, for the path
-  // that needs rows in the traits.
-  //
-  // ⚠️ FROM THE PACK, NOT THE MEMBERS. At double the two are the same numbers, so
-  // a member read answers correctly and differentiates to a silent ZERO in every
-  // trait it touches -- which is a plausible gradient, in every column at once.
-  // The atmospheric constants and the fixed physiology stay members, because
-  // nothing differentiates them.
-  //
-  // The temperature responses are re-run rather than read off vcmax_ / jmax_ /
-  // R_d_, and that is what carries a trait's row from its reference value at 25 C
-  // to the value at this leaf's temperature. Each is exactly linear in that
-  // reference value, so the response contributes a factor and the trait carries
-  // the row.
+  // The kernels' arguments read off a caller's parameter pack. From the pack,
+  // never the members: at double they hold the same numbers, so a member read is
+  // right in value and a silent zero in every trait's row. The temperature
+  // responses are re-run, linear in the 25 C reference, which carries the row.
   template <typename T> T vcmax_at(const leaf_pars<T>& pars) const;
   template <typename T> T jmax_at(const leaf_pars<T>& pars) const;
   template <typename T> T respiration_at(const leaf_pars<T>& pars) const;
@@ -1902,63 +1720,34 @@ public:
   // The one place that says which pack slots each kernel reads.
   template <typename T> PhotoCapacity<T> photo_capacity_at(const leaf_pars<T>& pars) const;
   template <typename T> PhotoCapacity<T> photo_capacity() const;
-  // Net assimilation as c_i -> infinity on the capacity `cap`: the colimited
-  // capacity less respiration, which is what a leaf with no conductance nets
-  // where it cannot reach zero at any c_i (the g_min = 0 limit of a shut leaf
-  // in the dark). At any scalar, so the tape differentiates it too.
+  // Net assimilation as ci -> infinity: the colimited capacity less respiration,
+  // what a leaf with no conductance nets where A reaches zero at no ci (the
+  // g_min = 0 limit of a shut leaf in the dark). At any scalar.
   template <typename T, typename U>
   T assim_saturated_kernel(const PhotoCapacity<U>& cap) const;
   template <typename T>
   T hydraulic_cost_TF_kernel(const T& psi_stem, const leaf_pars<T>& pars) const;
 
-  // The slope of a kernel in its first argument, carrying rows.
-  //
-  // A slope like dA/dci is SECOND order in the traits, and taking it at the
-  // caller's scalar means nesting a tangent above an adjoint -- which
-  // `odelia/tangent.hpp` forbids by name, and which measures 521 tape statements
-  // against the 17 of the kernel it differentiates. Taken here through the
-  // kernel alone, over a tangent of a tangent at double, and handed over as
-  // supplied rows: nothing is recorded, and the slope still cannot disagree with
-  // the function because it IS a tangent through it.
-  //
-  // ⚠️ ONE DIRECTION PER ARGUMENT, AND THE ARGUMENTS ARE THE WHOLE READ SET. The
-  // walk costs the kernel's arithmetic times the direction count, so handing it
-  // a twenty-slot pack to read four numbers out of prices seventeen columns of
-  // structural zero: measured, the pack walk was 34.7% of the boundary's
-  // instructions and `xad::FReal`'s constructor alone was 18.9% of the run. Every
-  // argument's row is supplied whether or not it came back non-zero, because a
-  // slot the kernel cannot read is a slot it cannot be handed.
-  //
-  // ⚠️ THE ROW AGAINST `x` IS AS REAL AS THE OTHERS. The slope is read at a point
-  // that MOVES with the traits, so the kernel's second derivative in its own
-  // argument is a first-order channel exactly like every argument's. Left out, it
-  // is an exact zero in a column rather than an error.
-  //
-  // `kernel` must DECLARE its return type (`-> U`): a deduced one hands back an
-  // XAD expression template over temporaries that are dead on return.
+  // The slope of a kernel in its first argument, carrying rows: a tangent of a
+  // tangent at double through the kernel alone, supplied as rows, since nesting
+  // a tangent above the caller's adjoint is forbidden. One direction per argument,
+  // including `x`, whose point moves with the traits. `kernel` must declare its
+  // return type (`-> U`): a deduced one returns an XAD expression over dead temporaries.
   template <class S, class Kernel, std::same_as<S>... Args>
   S kernel_slope_at(Kernel&& kernel, const char* what, const S& x,
                     const Args&... args) const;
 
-  // dA/dci and dC/dsigma, each a tangent through its own kernel rather than a
-  // slope written out beside it: a hand-written twin is a second definition of
-  // one function, free to disagree with it by an amount that stays finite and
-  // plausible in every column.
+  // dA/dci and dC/dsigma, each a tangent through its own kernel, never a
+  // hand-written twin that could disagree with it by a finite, plausible amount.
   template <typename T>
   T assim_slope_at(const T& ci, const PhotoCapacity<T>& cap) const;
   template <typename T>
   T cost_slope_at(const T& sigma, const leaf_pars<T>& pars) const;
 
-  // The STEM's flux at a held stem potential and collar: kmax * (G(sigma) -
-  // G(collar)), which is upstream's `transpiration()` given its parameters.
-  //
-  // ⚠️ THIS IS NOT THE SOIL DRAW, and the difference is the whole reason ci has
-  // to read this one. T1 says the stem carries what the soil delivers, but the
-  // collar solve satisfies it only to its own tolerance -- measured 6.7e-04
-  // apart at a converged interior point -- and the model places ci from
-  // stom_cond_CO2, which is built from THIS flux. Differentiating a residual
-  // the model did not solve returns a number rather than an error, and the
-  // number was 3 to 10 per cent wrong in dci/dcollar with every value finite.
+  // The STEM's flux at a held stem potential and collar, kmax * (G(sigma) -
+  // G(collar)). Not the soil draw: the collar solve meets T1 only to its
+  // tolerance, and the model places ci from this flux, so a ci derived from the
+  // draw differentiates a residual the model did not solve (finite, and wrong).
   template <typename T>
   T transpiration_at(const T& sigma, const T& collar,
                      const leaf_pars<T>& pars) const;
@@ -1972,21 +1761,13 @@ public:
   template <class S>
   S stem_complement_at(const S& psi, const leaf_pars<S>& pars) const;
 
-  // The two conditions that place the operating point at a held collar, and both
-  // halves of each coordinate.
+  // The two conditions that place the operating point at a held collar:
   //
   //   T1  kmax * (G(sigma) - G(collar)) - E_up = 0   places the stem potential
   //   T2  A(ci) * k1 - gc * (ca - ci) * k2   = 0     places the intercellular CO2
   //
-  // gc is proportional to the flux, so it is derived from the draw here rather
-  // than passed: two spellings of one fact is a place they can disagree. The DRAW
-  // rather than a bare flux, so a flux and a slope from different collars cannot
-  // be paired -- check_draw refuses that before anything reads it.
-  //
-  // `collar_moves` says whether profit carries the collar's channel here. At an
-  // interior point it does not -- billed_outputs_at evaluates profit at a HELD collar,
-  // which is the envelope omission -- and the slopes are then absent rather than
-  // zero. dprofit_dcollar_at, the only reader of a slope, passes true.
+  // gc is derived from the draw. `collar_moves` is false at an interior point
+  // (the envelope theorem), and the slopes are then absent rather than zero.
   template <class S>
   CollarCoords<S> collar_coords_at(double sigma_star, double ci_star,
                                    const S& collar, const SupplyDraw<S>& draw,
@@ -1994,10 +1775,8 @@ public:
                                    const PhotoCapacity<S>& cap,
                                    bool collar_moves) const;
 
-  // collar_coords_at in its two halves, so a caller holding the first can add
-  // the second without solving sigma and ci again: the coordinates at the HELD
-  // collar, carrying the trait and soil rows, and then the collar's channel on
-  // top of them. collar_coords_at is exactly the one followed by the other.
+  // collar_coords_at in two halves, the coordinates at the held collar and then
+  // the collar's channel, so a caller holding the first need not solve again.
   template <class S>
   void held_coords_at(double sigma_star, double ci_star, const S& collar,
                       const SupplyDraw<S>& draw, const leaf_pars<S>& pars,
@@ -2011,25 +1790,20 @@ public:
                                     const S& sigma_h, const S& gc,
                                     const S& ci_h, bool collar_moves) const;
   // Whether sigma_star is the stem held at a dry pin at the end of its curve
-  // (seat_stem_at_dry_pin). There sigma is that end as a function of the traits,
-  // and it does not move with the collar: both halves above read this.
+  // (seat_stem_at_dry_pin), where sigma is a function of the traits, not the collar.
   bool stem_held_at_dry_pin(double sigma_star) const {
     return operating_point_kind_ == OperatingPointKind::BoundaryDry &&
            sigma_star == vulnerability_psi_end(stem_b, stem_c);
   }
-  // Whether sigma_star is a shut leaf's stem seated AT its collar, which
-  // set_shut_state does wherever the residual flux is zero or the wet bound
-  // leaves the uptake at or below zero. There sigma is the collar, rows and
-  // all, and both halves above read this.
+  // Whether sigma_star is a shut leaf's stem seated at its collar
+  // (set_shut_state). There sigma is the collar, rows and all.
   bool stem_held_at_collar(double sigma_star, double collar) const {
     return operating_point_kind_ == OperatingPointKind::HydraulicShutdown &&
            sigma_star == collar;
   }
 
-  // The stem's critical potential at any scalar. DERIVED from the trait pair, as
-  // it is at double, which is what makes the old `no_gradient` question moot: it
-  // is an ordinary expression the chain differentiates, not a parameter that has
-  // to be declared not to move.
+  // The stem's critical potential at any scalar, derived from the trait pair as
+  // at double, so the chain differentiates it.
   template <class S>
   S psi_crit_at(const leaf_pars<S>& pars) const;
   // dry_end<K>() at any scalar: psi_crit_at for a curve bounded there, and the
@@ -2040,39 +1814,30 @@ public:
   S stem_curve_end_at(const leaf_pars<S>& pars) const;
 
   // The objective at a placed operating point, and everything plant reads.
-  //
-  // ⚠️ TEMPLATED ON THE CURVE, IMPLEMENTED FOR TF24 AND TF24_floor. A
-  // static_assert refuses the other seven, so another curve is a branch here rather
-  // than a redesign -- and until something differentiates one, a branch written
-  // for it would have no caller and no reference to check it against.
+  // Implemented for TF24 and TF24_floor; a static_assert refuses the rest.
   template <CostCurve K, class S>
   S profit_at(const S& collar, const SupplyDraw<S>& draw,
               const leaf_pars<S>& pars, bool collar_moves) const;
-  // The objective at coordinates already placed, which is all profit_at does
-  // once it has them.
+  // The objective at coordinates already placed.
   template <CostCurve K, class S>
   S profit_from_coords(const S& collar, const leaf_pars<S>& pars,
                        const PhotoCapacity<S>& cap, const S& sigma,
                        const S& ci) const;
 
   // `placed`, when operating_collar placed it at this point, is read instead of
-  // solving sigma and ci again; otherwise, and when it is null, this solves its
-  // own. ⚠️ Placed coordinates are refused at any kind but interior and at any
-  // collar but the one they were placed at, because either means the leaf has
-  // moved.
+  // solving sigma and ci again. Refused at any kind but interior or at any other
+  // collar, either of which means the leaf has moved (hazard 17).
   template <CostCurve K, class S>
   BilledOutputs<S> billed_outputs_at(const S& collar, const SupplyDraw<S>& draw,
                                      const leaf_pars<S>& pars,
                                      const HeldCoords<S>* placed = nullptr) const;
 
-  // M = dprofit/dcollar, as a SCALAR. What used to travel beside it -- the two
-  // collar responses -- are the coordinates' own slope halves now, so there is
-  // nothing left to return with it.
+  // M = dprofit/dcollar, a scalar; the collar responses are the coordinates'
+  // own slope halves.
   template <CostCurve K, class S>
   S dprofit_dcollar_at(const S& collar, const SupplyDraw<S>& draw,
                        const leaf_pars<S>& pars) const;
-  // The same marginal on coordinates operating_collar has already placed, adding only
-  // the collar's channel.
+  // The same marginal on coordinates operating_collar placed, adding the collar's channel.
   template <CostCurve K, class S>
   S dprofit_dcollar_at(const S& collar, const SupplyDraw<S>& draw,
                        const leaf_pars<S>& pars, const HeldCoords<S>& held) const;
@@ -2081,69 +1846,31 @@ public:
                                 const PhotoCapacity<S>& cap,
                                 const CollarCoords<S>& at) const;
 
-  // dM/dp at the operating point the solve placed -- the curvature the interior
-  // derivation divides by. A FIRST difference of the marginal, which is what this
-  // has always meant: the failure it replaces was a SECOND difference of the
-  // OBJECTIVE, whose second-order content was two hand-written Taylor
-  // coefficients and which put a POSITIVE curvature at an interior maximum on a
-  // century stand.
-  //
-  // ⚠️ NOT A TANGENT THROUGH dprofit_dcollar_at, AND THE REASON IS CONDITIONING RATHER
-  // THAN EFFORT. dci/dcollar is a cancellation of two terms of 8.1e+04 that
-  // leaves 0.64, and its collar derivative is dominated by dci/dsigma * dV/dp
-  // where dV/dp is ITSELF a cancellation -- 0.50 against 0.50, leaving -1.1e-04.
-  // So an assembly has to hold four significant digits through that, and then
-  // multiply by 8.1e+04. It cannot: the conductivity's VALUE is the table's and
-  // its response is the curve's, and those disagree by the fit error, which is
-  // larger than the residual being cancelled to. A tangent returns an eighth of
-  // the answer, with the right sign.
-  //
-  // The difference does not have that problem, because M itself is O(1) away
-  // from the optimum and is not formed by cancelling anything. Measured over
-  // three decades of step it is stable to SEVEN significant figures.
-  //
-  // ⚠️ NOT const: it drives the model to two neighbouring collars and restores
-  // the operating point afterwards. Leaving it at p0 +/- h would break the rule
-  // that every path out of the solve writes its own rates, and this is a path out.
+  // dM/dp at the solved point, the curvature the interior derivation divides by,
+  // as a first difference of M: a tangent is wrong by a factor of eight, because
+  // dci/dcollar cancels below the table's fit error. Not const: it moves the
+  // model to p0 +/- h and restores the operating point (hazard 8).
   template <CostCurve K>
   double profit_curvature_at_collar();
 
-  // The collar this solve left, at whatever scalar the caller wants, from
-  // whatever pins it. The kind chooses which condition closes the system and
-  // nothing else.
-  //
-  // A caller that has already taken profit_curvature_at_collar() -- to refuse on a
-  // curvature it cannot divide by -- passes it as `interior_curvature` rather
-  // than letting this take it again: it is the same call with the same argument,
-  // and it costs two model evaluations.
-  // NOT const. The interior arm takes the curvature by differencing, which
-  // drives the model off the operating point and puts it back -- so this mutates
-  // the leaf even though it leaves it where it found it. Declared const it
-  // const_cast itself, which hid that from every caller.
-  //
-  // `placed`, when given, receives the coordinates the interior arm solved,
-  // for billed_outputs_at to read instead of solving them again. It is left unplaced
-  // at double and at every other kind, which have none to hand over.
+  // The collar this solve left, at the caller's scalar; the kind chooses which
+  // condition closes the system. Not const: the interior arm takes the curvature
+  // by moving the model and back, unless passed as `interior_curvature`. `placed`
+  // receives the interior arm's coordinates for billed_outputs_at.
   template <CostCurve K, class S>
   S operating_collar(const SupplyDraw<S>& draw, const leaf_pars<S>& pars,
                      double interior_curvature =
                          std::numeric_limits<double>::quiet_NaN(),
                      HeldCoords<S>* placed = nullptr);
 
-  // The smallest |dM/dp| operating_collar's interior arm divides by. Every collar row
-  // there is a quotient over the curvature, so one near zero returns
-  // amplification rather than a derivative -- finite, and huge. The value is
-  // plant's default gradient_curvature_floor, so plant's own guard and this one
-  // refuse the same points at its defaults; the smallest |curvature| on
-  // test_transpose's grid is 0.14.
+  // The smallest |dM/dp| operating_collar's interior arm divides by; nearer
+  // zero, every collar row is amplification. Equal to plant's default
+  // gradient_curvature_floor, so the two guards refuse the same points.
   static constexpr double interior_curvature_floor = 1e-3;
 
-  // The conditions that pin a collar, one function per bound. Neither is a
-  // second derivative, so each is an ordinary implicit value: the residual's own
-  // slope at the bound, and the residual at S for the rest.
-  //
-  // The wet bound: the collar at which uptake meets the residual flux (at
-  // g_min = 0, where uptake is zero). It reads no cost, so it takes no curve.
+  // The conditions that pin a collar, one per bound, each an ordinary implicit
+  // value. The wet bound: the collar where uptake meets the residual flux (zero
+  // uptake at g_min = 0); it reads no cost, so it takes no curve.
   template <class S>
   S wet_bound_at(double bound_x, const SupplyDraw<S>& draw,
                  const leaf_pars<S>& pars) const;
@@ -2154,9 +1881,8 @@ public:
                       const leaf_pars<S>& pars) const;
 
 
-  // The pack as this leaf currently stands. The double path passes this where the
-  // active path passes a copy carrying directions, so both reach the kernels the same way and
-  // there is one call convention rather than a member-reading twin.
+  // The pack as this leaf stands, so the double path reaches the kernels the way
+  // the active path does, with one calling convention.
   leaf_pars<double> passive_pars() const;
   double assim_minus_stom_cond_CO2(double x, double psi_stem, double psi_upstream);
   double psi_stem_to_ci(double psi_stem, double psi_upstream);
@@ -2164,217 +1890,95 @@ public:
 
 
 // --- Marginal cost of water ------------------------------------------------
-// lambda = dA/dE, the marginal carbon gain per unit water lost. This is the
-// quantity that unifies the stomatal optimality models: they all maximise a
-// profit, so they all satisfy dA/dE = lambda at the optimum and differ only in
-// lambda(state). Reporting it makes this model directly comparable to the
-// others, and to fitted Medlyn g1 values via g1_eff() below.
-//
-// Deliberately accessors rather than stored state: they are wanted once per
-// solve, not once per candidate potential, and computing them inside
-// set_leaf_states_rates_from_psi_stem would put a pow() on a path that runs
-// ~10^3 times per solve.
-//
-// NOTE the distinction to be careful of: the member `CF77_lambda_` is an *input*, the
-// Cowan-Farquhar marginal value of water, never set by set_physiology. The lambda
-// here is an *emergent output* -- the marginal cost the operating point implies.
+// lambda = dA/dE: every stomatal optimality model satisfies dA/dE = lambda at
+// its optimum and differs only in lambda(state). Accessors, not stored state
+// (hazard 5). CF77_lambda_ is an input; these are emergent outputs.
 
-  // lambda at an arbitrary stem water potential (positive magnitude, MPa), in
-  // umol CO2 (kg H2O)^-1. Analytic, from the TF24 cost function:
-  //
-  //   C(psi)   = TF24_cost_scale * (1 - f)^TF24_beta2,   f(psi) = exp(-(psi/stem_b)^stem_c)
-  //   dC/dpsi  = TF24_cost_scale * TF24_beta2 * (1-f)^(TF24_beta2-1) *
-  //              (stem_c/stem_b)(psi/stem_b)^(stem_c-1) * f
-  //   E(psi)     = kmax * integral of f,  so  dE/dpsi = kmax * f
-  //   lambda     = (dC/dpsi) / (dE/dpsi)
-  //
-  // The f cancels exactly; it is cancelled here rather than divided out, so the
-  // expression stays finite as psi -> psi_crit where f -> 0.
-  //
-  // Caveat: with TF24_beta2 < 1 the (1-f)^(TF24_beta2-1) factor diverges as psi -> 0
-  // (f -> 1), which is a property of the cost function, not of this code.
+  // (dC/dpsi) / (dE/dpsi) for TF24 at a stem potential (MPa), umol CO2 (kg H2O)^-1,
+  // with the conductivity cancelled analytically so it stays finite at psi_crit.
+  // With TF24_beta2 < 1 it diverges as psi -> 0, a property of the cost.
   double lambda_TF24(double psi_stem) const;
-  // ⚠️ TAKES BOTH POTENTIALS, where lambda_TF24 takes one. That is not a
-  // convenience: JS22's cost is a function of the DROP, so its marginal cost
-  // genuinely depends on the upstream potential, and no `f` cancels out of the
-  // ratio the way it does for TF24.
+  // Takes both potentials: JS22's cost is a function of the drop, so its
+  // marginal cost depends on the upstream potential.
   double lambda_JS22(double psi_stem, double psi_upstream) const;
   // Also both potentials, but only because `E` is measured from the upstream one --
   // the COST here is a function of the absolute potential, unlike JS22's.
   double lambda_CMax(double psi_stem, double psi_upstream) const;
-  // ⚠️ THE ONE lambda IN THIS CLASS THAT DOES NOT VANISH AT THE WET END, and that
-  // is the whole content of the TF24_floor curve. It is `lambda_TF24` plus a constant:
-  //
-  //     lambda = lambda_TF24(psi) + lambda_o
-  //
-  // so as the drop closes the first term goes to zero and the price does not.
-  // Every conductance-loss curve here has `lambda -> 0` there by construction,
-  // which prices water as free precisely when it is abundant; this is the repair.
-  //
-  // ⚠️ ONE ARGUMENT, like `lambda_TF24` and unlike `lambda_JS22`, because the
-  // hydraulic half reads the ABSOLUTE potential. `lambda_for<TF24_floor>` discards
-  // the upstream potential accordingly.
+  // lambda_TF24(psi) + lambda_o: the one lambda here that does not vanish at the
+  // wet end. One argument, because the hydraulic half reads the absolute
+  // potential; lambda_for<TF24_floor> discards the upstream one.
   double lambda_TF24_floor(double psi_stem) const;
 
   // --- the product-objective family --------------------------------
-  //
-  // Eller (2018, 2020)'s SOX maximises `A * g(psi)` rather than `A - C(psi)`, with
-  // `g` the conductivity fraction rescaled onto [0, 1]. Sabot's `TractLSM` calls it
-  // `kcost` and Jones et al. (2026) is the same objective with a different `g`.
-  //
-  // ⚠️ IT TAKES NO NEW PARAMETER. `g` is built from `proportion_of_conductivity`
-  // and `k_crit_fraction`, both of which the object already has, which is why this
-  // curve is cheaper than every subtracted one.
+  // SOX (Eller 2018, 2020) maximises `A * g(psi)` rather than `A - C(psi)`, with
+  // `g` the conductivity fraction rescaled onto [0, 1] (TractLSM's `kcost`). No
+  // new parameter: `g` reads proportion_of_conductivity and k_crit_fraction.
   double sox_reduction(double psi_stem) const;
   double sox_reduction_deriv(double psi_stem) const;
   double profit_psi_stem_SOX(double psi_stem, double psi_upstream);
   double lambda_SOX(double psi_stem, double psi_upstream) const;
 
-  // Jones et al. (2026): the same product objective with a LINEAR reduction factor,
-  // `1 - psi/psi_crit`, where SOX's follows the vulnerability curve. Sabot's
-  // `TractLSM` has this one too, as `phiLWP`, crediting Dewar.
-  //
-  // ⚠️ ALSO TAKES NO PARAMETER, because `psi_crit` is DERIVED here -- the 95%
-  // quantile of the stem curve, from `stem_P50` and `stem_c`. The paper supplies its
-  // own `Pcrit`; deriving it instead is what makes this and SOX two interpolations
-  // between the SAME two anchors (1 at zero tension, 0 at `psi_crit`) and so
-  // comparable by construction rather than by matching a parameter.
   // --- least-cost / cost-per-unit-carbon --------------------------------------
-  //
-  // Prentice et al. (2014) and Dong et al. (2017) minimise the cost of acquiring a
-  // unit of carbon, `C_P = (c_E*E + c_V*Vcmax)/A`, rather than maximising a
-  // difference. Minimising a ratio is maximising its reciprocal, and `log` turns
-  // that into `log A - log(c_E*E + c_V*Vcmax)` -- the same benefit link SOX and
-  // JW26 use, with the penalty now carrying CAPACITY as well as flux. That is the
-  // reduction written out in S1.4 of the theory manuscript; the family form is
-  // `h = log`, `Theta = log(c_E*E + c_V*Vcmax)`.
-  //
-  // ⚠️ THE ONLY CURVE HERE WHOSE PENALTY CARRIES SOMETHING OTHER THAN WATER. Every
-  // other cost in this class is a function of psi (or of E) alone; this one weighs
-  // photosynthetic capacity against transpiration, which is why its first-order
-  // condition reproduces Prentice et al.'s `chi = xi/(xi + sqrt(D))` and why a
-  // light sweep on it measures acclimation rather than the price of water.
+  // Prentice et al. (2014) and Dong et al. (2017) minimise the cost per unit
+  // carbon, `(c_E*E + c_V*Vcmax)/A`; its log reciprocal is `log A - log(c_E*E +
+  // c_V*Vcmax)`, the log benefit link of SOX and JW26 with a penalty on capacity
+  // as well as flux (theory manuscript S1.4). The only penalty here carrying
+  // something other than water.
 
-  // The weighted resource use `W = E_mol + beta*Vcmax_mol`, mol m^-2 s^-1, and the
-  // ONE place the two unit conversions live -- E from kg to mol, Vcmax from umol to
-  // mol. The cost is `log W`, its derivative `W'/W`, the objective `A/W` and the
-  // price `A*kg_to_mol_h2o/W`, so all four read this and cannot disagree about the
-  // units beta is dimensionless in.
+  // The weighted resource use `W = E_mol + beta*Vcmax_mol`, mol m^-2 s^-1: the
+  // one place both unit conversions live, read by the cost, its derivative, the
+  // objective and the price so they agree on the units beta is dimensionless in.
   double leastcost_flux(double psi_stem, double psi_upstream);
 
-  // ⚠️ A RATIO, so what comes back is NOT in carbon units -- the same caveat
-  // `profit_psi_stem_SOX` carries, and for a related reason. It is `A/W`, umol C
-  // per mol of weighted resource, and it is `c_E/C_P`: the reciprocal of the
-  // published cost per unit carbon, times a constant this curve does not carry
-  // (see `LeastCost_beta`). Monotone in `-C_P`, so the argmax is the published
-  // model's, and the VALUE must not be compared with a TF24 profit.
+  // A ratio, `A/W` (umol C per mol of weighted resource), not a carbon flux:
+  // monotone in the published cost per unit carbon, so the argmax is the
+  // published model's, but the value is not comparable with a TF24 profit.
   double profit_psi_stem_LeastCost(double psi_stem, double psi_upstream);
 
-  // The marginal cost of water this curve implies, umol C (kg H2O)^-1, on the same
-  // axis as every other `lambda_*` here:
-  //
-  //     lambda = h'(A)^-1 * dTheta/dE = A * kg_to_mol_h2o / W
-  //
-  // at a fixed leaf temperature. With the energy balance on, Vcmax moves with E
-  // through Tleaf and dTheta/dE gains `beta*umol_to_mol*dVcmax/dT*dT/dE / W`.
-  //
-  // which is eq. S1.4 of the theory manuscript, `lambda = c_E*A/(c_E*E +
-  // c_V*Vcmax)`, with `c_E` cancelled and the kg-to-mol factor supplied.
-  //
-  // ⚠️ IT DOES NOT VANISH AT THE WET END, and it is the only LOG-link curve here of
-  // which that is true. As E -> 0 this tends to `A*kg_to_mol_h2o/(beta*Vcmax_mol)`,
-  // finite and set by the capacity term; SOX's and JW26's both carry `A` to zero
-  // through their own `g`. It does carry `A`, so it still falls as assimilation
-  // does -- the wet end is finite in psi, not in light.
+  // The marginal cost of water, umol C (kg H2O)^-1, `A * kg_to_mol_h2o / W` (eq.
+  // S1.4), plus `beta*umol_to_mol*dVcmax/dT*dT/dE / W` with the energy balance
+  // on. Unlike SOX's and JW26's, it does not vanish as E -> 0.
   double lambda_LeastCost(double psi_stem, double psi_upstream);
 
+  // Jones et al. (2026): the same product objective with a linear reduction,
+  // `1 - psi/psi_crit` (TractLSM's `phiLWP`). No parameter: psi_crit is derived
+  // from stem_P50 and stem_c, so this and SOX interpolate between the same two
+  // anchors (1 at zero tension, 0 at psi_crit).
   double jw26_reduction(double psi_stem) const;
   double jw26_reduction_deriv(double psi_stem) const;
   double profit_psi_stem_JW26(double psi_stem, double psi_upstream);
   double lambda_JW26(double psi_stem, double psi_upstream) const;
 
-  // The marginal cost of water the ProfitMax cost implies at `psi_stem`, in the
-  // same umol C (kg H2O)^-1 as lambda_TF24 -- so the two are comparable.
-  //
-  // The normalised objective is dimensionless, so its own dC/dE is not in carbon
-  // units; multiplying by |A|max restores them, which is the same scaling that
-  // makes the objective a constant-lambda one. Requires prepare_profitmax() to
-  // have seeded the normalisers.
+  // ProfitMax's marginal cost of water, umol C (kg H2O)^-1: the normalised dC/dE
+  // times |A|max. Requires prepare_profitmax() to have seeded the normalisers.
   double lambda_ProfitMax(double psi_stem);
 
-  // lambda at the current operating point. This is the single-layer value: it is
-  // the marginal cost seen by the stem, and equals dA/dE only when the collar
-  // potential is fixed (i.e. for the optimise_psi_stem_* solvers).
+  // lambda at the operating point as the stem sees it: dA/dE only with the
+  // collar fixed (the optimise_psi_stem_* solvers).
   double marginal_cost_water() const;
 
-  // The same in molar units, mol CO2 (mol H2O)^-1, which is the convention the
-  // optimality literature states lambda in.
+  // The same in mol CO2 (mol H2O)^-1, the optimality literature's units.
   double marginal_cost_water_molar() const;
 
-  // lambda including the root-network series resistance, which is what
-  // find_root_collar_psi actually equalises because it optimises over the collar
-  // potential with the stem following from continuity:
-  //
-  //   lambda_multi = lambda_TF24 * [1 + kmax*f(psi_r)/S],    S = dE_up/dpsi_r
-  //
-  // S comes from dE_from_soil_dpsi_collar. The bracket is >= 1, so the
-  // single-layer lambda always UNDERSTATES the true marginal cost. Returns the
-  // NA sentinel where S is unavailable (the branch kinks that
-  // dE_from_soil_dpsi_collar reports as NaN) or zero.
-  //
-  // Requires that a collar solve has run, so that the supply path's per-solve
-  // caches are current.
+  // lambda with the root network's series resistance, which find_root_collar_psi
+  // equalises: lambda_TF24 * [1 + kmax*f(psi_r)/S], S = dE_up/dpsi_r. NA where S
+  // is NaN (a kink) or zero. Requires a collar solve to have seated the caches.
   double marginal_cost_water_multilayer();
 
-  // Equivalent Medlyn USO slope implied by the operating point, in kPa^0.5.
-  // Defined operationally from the solved chi = ci/ca, by inverting the USO
-  // relation chi = g1/(g1 + sqrt(D)):
-  //
-  //   g1_eff = chi * sqrt(D) / (1 - chi)
-  //
-  // Operational rather than predicted-from-lambda on purpose: this form is exact
-  // by construction and free of unit conventions, and it is directly comparable
-  // to g1 values fitted by plantecophys::fitBB or tabulated by Lin et al. (2015).
-  // Reconciling it against the theoretical sqrt(3*Gstar*P/(1.6*lambda)) is the
-  // companion manuscript's job, not this header's.
+  // Equivalent Medlyn USO slope, kPa^0.5: chi * sqrt(D) / (1 - chi) from the
+  // solved chi = ci/ca, comparable with fitted g1 (plantecophys::fitBB).
   double g1_eff() const;
 
-  // THE PART OF THE COST THAT IS A PRICE RATHER THAN A REALISED CARBON LOSS, in
-  // umol C m^-2 s^-1. `TF24_floor_lambda_o * E` on that curve and exactly zero on
-  // every other one.
-  //
-  // ⚠️ ZERO IS NOT A CLAIM THAT THE CURVE'S COST IS ALL REALISED CARBON. It says
-  // the curve does not separate the two. CF77 is the case that matters: its whole
-  // cost is `lambda * E`, and reading that as a shadow price is a perfectly
-  // ordinary thing to do -- but the model supplies ONE number and nothing to
-  // attribute it with, so it behaves identically whether that number is read as
-  // carbon lost to water already taken or as the value of water withheld for
-  // later. Reporting it as all-shadow would ship one reading as a fact; reporting
-  // it as zero-shadow ships the other. Zero plus this comment is the honest
-  // choice, because the field is defined only where the CURVE defines it.
-  //
-  // That is also the argument for the two-term form: it is the first curve here in
-  // which the question "is lambda a cost to deduct, or a price that only shapes
-  // behaviour?" can be posed at all.
-  //
-  // Reads `transpiration_` rather than recomputing it, so
-  // `shadow_cost == TF24_floor_lambda_o * E` holds bit-exactly against the
-  // reported `E` -- which is the identity a caller checks.
-  //
-  // An accessor, not stored state (hazard 5), and it deliberately does NOT touch
-  // `hydraulic_cost_`: that member is the cost the OBJECTIVE subtracted, its
-  // expression carries the two bit-exact reductions, and splitting it would
-  // reassociate the arithmetic those depend on.
+  // The part of the cost that is a price, not a realised carbon loss, umol C
+  // m^-2 s^-1: `TF24_floor_lambda_o * E` on that curve, bit-exact against the
+  // reported E, and zero on every other. Zero says the curve does not separate
+  // the two, not that its cost is all realised carbon (CF77 could be read either way).
   double shadow_cost() const;
 
-  // Stomatal conductance to WATER VAPOUR, mol H2O m^-2 s^-1 (#56). The model solves
-  // for conductance to CO2; every data source and the g1 literature record it to
-  // water, so the conversion belongs here rather than in each caller.
-  //
-  // An ACCESSOR, not a member, per hazard 5: nothing in the solve reads it, so it
-  // does not earn storage.
-  // With the energy balance on, stom_cond_CO2_ is past the boundary layer's
-  // split (#122), so the total is recovered from it, g_c,hat = g_c / (1 + k g_c).
+  // Conductance to water vapour, mol H2O m^-2 s^-1, from the solved CO2
+  // conductance; an accessor (hazard 5). With the energy balance on it is the
+  // total leaf-to-air conductance, recovered past the boundary layer's split as
+  // g_c / (1 + k g_c): compare a measured gs with stom_cond_stomatal_H2O().
   double stom_cond_H2O() const {
     if (!use_energy_balance_) {
       return stom_cond_CO2_ * H2O_CO2_stom_diff_ratio_;
@@ -2383,84 +1987,34 @@ public:
            (1.0 + boundary_layer_co2_excess() * stom_cond_CO2_) *
            H2O_CO2_stom_diff_ratio_;
   }
-  // ⚠️ ON THE ENERGY-BALANCE PATH stom_cond_H2O() IS THE TOTAL LEAF-TO-AIR
-  // CONDUCTANCE, not a stomatal one. It is E*P/D_leaf, and E crosses the leaf
-  // boundary layer as well as the stoma, so comparing it with a measured gs
-  // compares different quantities. The two accessors below separate them (#122).
-  //
-  // Boundary-layer conductance to WATER VAPOUR, mol H2O m^-2 s^-1: the molar form
-  // of the heat resistance ra_ the energy balance reads, at air temperature,
-  // scaled by bl_vapour_heat_ratio. +Inf off the energy-balance path, where the
-  // leaf is at air temperature and coupled to it perfectly, and where ra_ is a
-  // fallback nothing validates.
+  // Boundary-layer conductance to water vapour, mol H2O m^-2 s^-1: the molar
+  // form of ra_ at air temperature, scaled by bl_vapour_heat_ratio. +Inf off
+  // the energy-balance path, where ra_ is a fallback nothing validates.
   double boundary_layer_cond_H2O() const;
-  // The boundary layer's share of the CO2 path (#122). Fick's law on E gives a
-  // total leaf-to-air conductance g_c,hat that treats the whole path as stomatal
-  // (ratio r_s). The boundary layer's share diffuses at r_b = r_s^(2/3), the
-  // laminar-layer scaling of Sabot et al. (2022) eq 10 (their 1.35 = 1.57^(2/3)),
-  // so re-splitting the series gives
-  //
-  //   1/g_c = 1/g_c,hat - (r_s - r_b)/g_bw,   i.e.   g_c = g_c,hat / d,
-  //   d = 1 - k g_c,hat,   k = (r_s - r_b)/g_bw,
-  //
-  // under the soft floor bl_co2_split_floor. Returns g_c and dg_c/dg_c,hat, which
-  // is 1/d^2 above the floor; g_bw reads only drivers, so every partial of g_c is
-  // that slope times the same partial of g_c,hat. E is untouched: it is set by
-  // the hydraulics, and the boundary layer changes only what E says about CO2.
-  //
-  // ⚠️ CALLED ONLY WITH THE ENERGY BALANCE ON. Off it g_bw is infinite and the
-  // split is an identity, but every caller gates on use_energy_balance_ and keeps
-  // its old expression, so the gate-off path stays bit-identical.
+  // The boundary layer's share of the CO2 path, diffusing at r_b = r_s^(2/3)
+  // (Sabot et al. 2022 eq 10): g_c = g_c,hat / (1 - k g_c,hat), k = (r_s - r_b)/g_bw,
+  // under bl_co2_split_floor; the split returns g_c and dg_c/dg_c,hat. Called
+  // only with the energy balance on, so the gate-off path stays bit-identical.
   double boundary_layer_co2_excess() const;
   template <class T> std::pair<T, T> boundary_layer_split_CO2(const T& gc_hat) const;
-  // The split's slope at a SOLVED conductance, (1 + k g_c)^2, for the derivative
-  // surface, which holds g_c rather than g_c,hat. Exact above the floor, which
-  // every solved point is; refused below it.
+  // The split's slope at a solved conductance, (1 + k g_c)^2, for the derivative
+  // surface; exact above the floor, where every solved point is, refused below.
   template <class T> T boundary_layer_split_slope_at(const T& gc) const;
-  // Stomatal conductance to water vapour with the boundary layer taken out in
-  // series, 1/g_s = 1/g_total - 1/g_b, mol H2O m^-2 s^-1. Exactly
-  // stom_cond_H2O() off the energy-balance path.
-  //
-  // ⚠️ REFUSES where g_total >= g_b. Then E is more than the boundary layer can
-  // carry at this deficit whatever the stoma does, and no finite g_s exists.
-  // Hydraulics set E here, so nothing in the solve prevents it; the refusal sits
-  // in this accessor rather than in the solve so that it cannot abort a plant
-  // run, and test_boundary_layer_bounds_the_total_conductance measures how far
-  // a realistic driver grid stays from it.
+  // Stomatal conductance to water vapour, 1/g_s = 1/g_total - 1/g_b, mol H2O
+  // m^-2 s^-1. Refuses where g_total >= g_b; the refusal is here, not in the
+  // solve, so it cannot abort a plant run.
   double stom_cond_stomatal_H2O() const;
 
-  // Read-only on purpose: a settable one would be a way to disagree with the
-  // operating point it is derived from.
+  // Read-only: it is derived from the operating point.
   double lambda_emergent() const { return lambda_emergent_; }
   // ProfitMax's normalisers, so a caller can form its equivalence ratio without
   // this class pretending that ratio is a lambda.
   double profitmax_A_max() const { return profitmax_A_max_; }
   double profitmax_k_span() const { return profitmax_k_span_; }
 
-  // Every reported output of a solved point, in one call.
-  //
-  // ⚠️ THIS EXISTS FOR THE R BOUNDARY AND FOR NOTHING ELSE. A C++ caller should
-  // read the members; they are public and free. From R each read is a separate
-  // call through an RcppR6 active binding at ~1.1 us, so the thirteen of them cost
-  // ~15 us against a ~3 us solve -- five times the model, to report it (#39).
-  // One call is ~1.5 us. That is the whole justification, and it is why this is
-  // a flat vector rather than a struct: it crosses the boundary as a numeric
-  // vector with no glue.
-  //
-  // The ORDER is the interface. R's .operating_point_names names these positions
-  // and test-surface.R checks the two agree by reading all thirteen fields
-  // individually and comparing -- so a field inserted here without a
-  // corresponding R change fails rather than silently shifting a column.
-  //
-  // ⚠️ APPEND, NEVER INSERT. `Tleaf` was added at the END for that reason, even
-  // though it reads more naturally beside the other state variables: R names
-  // these by POSITION, and anything already reading position 6 as `profit`
-  // includes the golden comparison and every consumer's saved output.
-  //
-  // Index 9 is the total soil uptake, summed over FINITE layers only: before a
-  // solve the layers hold the NA sentinel, and R's own reader did the same
-  // filtering. Everything else is read as-is, sentinels included, because
-  // "unsolved" is a state the caller is entitled to see.
+  // Every reported output in one call, for the R boundary. R's
+  // .operating_point_names names these by position (test-surface.R), so append,
+  // never insert. Index 9 sums finite layers; the rest is as-is, sentinels included.
   std::vector<double> operating_point_values() const {
     double uptake = 0.0;
     for (double c : soil_consumption_) {
@@ -2480,41 +2034,27 @@ public:
             uptake,
             marginal_cost_water(),
             g1_eff(),
-            Tleaf_,          // deg C -- APPENDED, see below
-            shadow_cost(),   // APPENDED likewise, for the same reason
-            // THE SEATED CURVE'S marginal cost of water, as against `lambda`
-            // above, which is TF24's whatever ran. Appended rather than placed
-            // beside its namesake, because these names are positions.
+            Tleaf_,          // deg C
+            shadow_cost(),
+            // The seated curve's marginal cost of water; `lambda` above is TF24's.
             lambda_emergent(),
-            // The residual (cuticular) flux the leaf realised, kg H2O m^-2
-            // s^-1 (#182). APPENDED: `E` above stays the TOTAL, and the
-            // stomatal flux is their difference.
+            // The realised residual flux, kg H2O m^-2 s^-1; `E` above is the total.
             residual_flux_};
   }
 
 // leaf economics functions
   double hydraulic_cost_TF(double psi_stem);
 
-  // Cowan & Farquhar (1977): the cost of water is the water itself, priced at a
-  // constant marginal value. `CF77_lambda_ * E`, in umol C m^-2 s^-1 -- a carbon flux,
-  // because `CF77_lambda_` is carbon per unit transpiration and E is a mass flux.
-  //
-  // This is the model `CF77_lambda_`'s units belong to, and the reason its first-order
-  // condition is the one the whole optimality literature is written in:
-  // maximising `A - lambda*E` over psi_stem gives dA/dE == lambda at the optimum.
-  // `marginal_cost_water()` reports the same quantity for the OTHER cost curves,
-  // which is what puts them all on one axis.
+  // Cowan & Farquhar (1977): `CF77_lambda_ * E`, umol C m^-2 s^-1, water priced
+  // at a constant marginal value; maximising `A - lambda*E` gives dA/dE == lambda.
   double hydraulic_cost_CF77(double psi_stem, double psi_upstream);
 
-  // THE CF77 PRICE, and the only place the soil-beta option is applied. All three
-  // CF77 arms read it -- the cost, its derivative, and lambda_for -- so the value,
-  // the marginal value, and the reported lambda cannot disagree about whether the
-  // option is on. Same units as `CF77_lambda_`: umol C (kg H2O)^-1.
+  // The CF77 price, umol C (kg H2O)^-1, and the only place the soil-beta option
+  // is applied: the cost, its derivative and lambda_for all read it, so they agree.
   double cf77_price() const;
 
-  // Joshi & Stocker (2022)'s hydraulic term, `gamma*(dpsi)^2`, quadratic in the
-  // soil-to-leaf DROP where the other two curves are functions of the absolute
-  // potential. See `JS22_gamma` for what is missing from it.
+  // Joshi & Stocker (2022): `gamma*(dpsi)^2`, quadratic in the soil-to-leaf drop.
+  // See `JS22_gamma` for what is missing from it.
   double hydraulic_cost_JS22(double psi_stem, double psi_upstream);
 
   double profit_psi_stem_TF(double psi_stem, double psi_upstream);
@@ -2526,9 +2066,8 @@ public:
   double hydraulic_cost_CMax(double psi_stem, double psi_upstream);
   double profit_psi_stem_CMax(double psi_stem, double psi_upstream);
 
-  // The TF24_floor cost: TF24's `gamma*(1-f)^beta2` plus CF77's `lambda_o*E`, in
-  // carbon units like both of them and so written into `hydraulic_cost_` on the
-  // same footing.
+  // The TF24_floor cost, TF24's `gamma*(1-f)^beta2` plus `lambda_o*E`, in carbon
+  // units and written into `hydraulic_cost_` like both.
   double hydraulic_cost_TF24_floor(double psi_stem, double psi_upstream);
   double profit_psi_stem_TF24_floor(double psi_stem, double psi_upstream);
 
@@ -2551,9 +2090,8 @@ public:
   double d_S_shifted(double Ea, double H_d, double d_S_base,
                      double delta_topt) const;
   // The impairment rate, functional -> impaired, day^-1: k_i_ at the isokinetic
-  // temperature k_i_Tiso_ moved by delta_impair degrees (refused outside
-  // [250, 350] K).
-  // Its own parameters: it reads nothing of the Vcmax or Jmax curves.
+  // temperature k_i_Tiso_ moved by delta_impair degrees. Reads nothing of the
+  // Vcmax or Jmax curves.
   double k_imp_eff(double leaf_temp, double delta_impair) const;
   // The repair rate, impaired -> functional, day^-1.
   double k_rec_eff(double leaf_temp) const;
@@ -2570,166 +2108,84 @@ public:
   // The names of damage_trajectory_gradient()'s inputs, in index order: the
   // fourteen dynamics parameters, then the three initial states.
   std::vector<std::string> damage_par_names() const;
-  // d(state)/d(input) along the trajectory, exact by forward-mode differentiation
-  // of the same RK4: 3 * times.size() * which.size() numbers, time fastest, then
-  // state (A, I, D), then input. `which` indexes damage_par_names().
+  // d(state)/d(input) along the trajectory, forward-mode through the same RK4:
+  // time fastest, then state (A, I, D), then input (indexing damage_par_names()).
   std::vector<double> damage_trajectory_gradient(
       const std::vector<double>& times, const std::vector<double>& leaf_temp,
       double A0, double I0, double D0, const std::vector<int>& which) const;
 
-  // THE LAYER'S DYNAMICS, per DAY, at a leaf temperature and a state:
-  // {dA/dt, dI/dt, dD/dt}. Reads the layer's parameters and nothing of the
-  // members A_, I_, D_ or the drivers, and does not need set_physiology, so a
-  // caller can evaluate it at a measured leaf temperature. dD/dt is maturation
-  // only: a caller whose leaf area turns over (plant) subtracts that dilution
-  // itself. Does not read the gate either: asking for the rates is the request.
+  // {dA/dt, dI/dt, dD/dt} per day at a leaf temperature and state, from the
+  // layer's parameters alone (no set_physiology, members or gate). dD/dt is
+  // maturation only; a caller whose leaf area turns over subtracts the dilution.
   std::vector<double> damage_rates(double leaf_temp, double A, double I,
                                    double D) const;
-  // Integrates damage_rates over a leaf-temperature series, linear between the
-  // given times (days, strictly increasing), from (A0, I0, D0) at times[0]. Fixed-
-  // step RK4, with each interval cut so that the fastest rate times the step stays
-  // below 0.1 and the temperature moves at most 0.25 K per step. Returns the
-  // states at every time, column-major (A, I, D): 3 * times.size() numbers.
+  // damage_rates integrated by RK4 over a temperature series linear between the
+  // times (days, increasing) from (A0, I0, D0), with rate*step < 0.1 and at most
+  // 0.25 K per step. Returns 3 * times.size() states, column-major (A, I, D).
   std::vector<double> damage_trajectory(const std::vector<double>& times,
                                         const std::vector<double>& leaf_temp,
                                         double A0, double I0, double D0) const;
-  // Throws, naming `who`, when use_thermal_damage_ is on. Called by every path
-  // that reads the capacities off the parameter pack (vcmax_at and the rest),
-  // which do not apply the layer.
+  // Throws, naming `who`, when use_thermal_damage_ is on: the paths that read
+  // capacities off the parameter pack (vcmax_at and the rest) do not apply it.
   void refuse_thermal_damage(const char* who) const;
 
-  // Sperry (2017) ProfitMax, with BOTH terms normalised as the paper defines them
-  // -- see the ProfitMax notes above optimise_psi_stem_single for what that buys
-  // over the lambda form.
-  // Seeds |A|max and the conductance span; the two below read what it seeds.
+  // Sperry (2017) ProfitMax, both terms normalised as the paper defines them
+  // (notes above optimise_psi_stem_single): seeds |A|max and the conductance span.
   void prepare_profitmax();
 
-  // The conductance normalisers alone: `k(psi_soil)` and the span down to
-  // `k_crit`. Both are analytic in the traits, so they are differentiable and must
-  // be refreshed whenever the traits move.
+  // The conductance normalisers alone, `k(psi_soil)` and the span to `k_crit`:
+  // analytic in the traits, so refreshed whenever the traits move.
   double profitmax_reference_psi();
   void prepare_profitmax_norms();
 
-  // ⚠️ THE SAME PREPARATION WITH `|A|max` SUPPLIED RATHER THAN SCANNED, and the
-  // reason it exists is a gradient.
-  //
-  // `prepare_profitmax()` finds `|A|max` by scanning the supply stream, so its
-  // argmax is piecewise constant in the traits: the derivative is a sequence of
-  // zeros and jumps, and a total derivative through it is not a quantity worth
-  // computing. What IS well defined is the PARTIAL at fixed normaliser, which is
-  // what this package reports and what the code already computes elsewhere.
-  //
-  // A gradient's perturbation loop calls `set_traits` + `set_physiology`, which
-  // clears the whole profitmax block -- measured, `|A|max` goes from 16.757 to
-  // NaN. So a perturbation must refresh the analytic normalisers and HOLD `|A|max`
-  // at the base point. Passing it in makes that pinning visible in the signature
-  // instead of a field write somebody has to notice.
+  // The same with |A|max supplied, not scanned: the scan is piecewise constant
+  // in the traits, so a gradient holds |A|max at the base point and refreshes
+  // only the analytic normalisers after set_traits clears them.
   void prepare_profitmax_at(double A_max);
   double profit_psi_stem_ProfitMax(double psi_stem, double psi_upstream);
 
-  // The whole cost/gain/profit curve over [psi_soil, psi_crit] in ONE crossing of
-  // the R boundary: n rows of (psi, CG, HC, TC, profit), flattened column-major.
-  // This is Sicangco et al.'s Figures 2, 3 and S4, and building it row by row from
-  // R would pay ~1.8 us of call overhead against a ~3 us model evaluation.
+  // The cost/gain/profit curve over [psi_soil, psi_crit] in one R crossing: n
+  // rows of (psi, CG, HC, TC, profit), column-major (Sicangco et al. Figs 2, 3, S4).
   std::vector<double> profitmax_curve(int n);
 
-  // Clear the outputs a single-layer optimiser does NOT write. Hazard 8: these
-  // three describe a ROOT-COLLAR solve, and optimise_psi_stem_* never runs one,
-  // so leaving the last find_root_collar_psi()'s values standing reports an
-  // operating point whose parts came from two different solves. Measured before
-  // this existed: E = 9.216e-5 from the Sperry solve sitting beside E_up =
-  // 2.626e-5 from a collar solve several calls earlier.
+  // Clear the collar-solve outputs a single-layer optimiser does not write, which
+  // would otherwise report a point assembled from two solves (hazard 8).
   void clear_collar_solve_state();
 
   // --- WHICH KIND of operating point the collar solve found -------------------
-  //
-  // The operating point is not one kind of thing, and which kind it is changes
-  // what a derivative taken from it means. Along one drydown the leaf passes
-  // through these in order: an interior profit maximum while the soil is wet,
-  // then a constrained optimum pinned against a hydraulic limit, then shutdown.
-  // At an interior optimum a trait moves a FREE optimum; at a pin it moves the
-  // LIMIT itself; at shutdown the water response is zero while the carbon
-  // response is not. A consumer of `dprofit_droot_collar_psi` needs to know
-  // which of those it is holding, and nothing in the returned numbers says.
-  //
-  // ⚠️ **This is recorded by the branch that was TAKEN, never inferred after the
-  // fact from a residual**, and that is the whole point of it.
-  // `dprofit_at_collar_psi` returns a hard 0.0 SENTINEL in the no-flow /
-  // infeasible state (see its `feasible` out-parameter). So a classifier of the
-  // form "|dprofit| within tolerance => interior optimum" records such a state as
-  // a stationary point, and then reads a curvature of zero off the same
-  // sentinel -- twice-confirmed and wrong. No residual test can separate the two,
-  // because the two return the same number.
+  // The kind changes what a derivative there means. Recorded by the branch
+  // TAKEN, never inferred from a residual: dprofit_at_collar_psi's 0.0 sentinel
+  // is indistinguishable from a stationary point.
   enum class OperatingPointKind {
-    // No solve has run on this object since it was constructed, re-traited, or
-    // driven through one of the off-path psi_stem optimisers. Reading an
-    // operating point in this state reads NA sentinels.
+    // No solve since construction, set_traits, or an off-path psi_stem
+    // optimiser; the operating point reads NA sentinels.
     Unsolved,
-    // Interior profit maximum: dprofit == 0 was solved for, strictly inside the
-    // feasible collar interval. 232 of the 336 golden grid points at 25 C -- 172 of
-    // them at 40 C, where the optimum presses against the WET bound instead.
+    // Interior profit maximum: dprofit == 0 strictly inside the feasible interval.
     Interior,
-    // Constrained optimum at the psi_soil end of the feasible interval, just
-    // inside root_zero_E (the collar at which uptake is exactly zero). The
-    // objective is still climbing toward that bound, so the bound is the answer:
-    // the leaf declines to open. 45 golden points at 25 C. The gradient here is
-    // genuinely non-zero.
-    //
-    // ⚠️ THESE TWO ARE NAMED FOR THE BOUND THAT BINDS, NOT FOR THE CONDITIONS,
-    // and an earlier `PinnedWet`/`PinnedDry` pair got read backwards for exactly
-    // that reason. `psi_stem == psi_soil` is the least-tension end of the
-    // bracket, so it reads as the comfortable case -- but it is what a leaf does
-    // under STRESS, when no interior point earns its water. The golden grid says
-    // so: 45 -> 116 rows as the leaf goes 25 -> 40 C, while the dry end goes
-    // 11 -> 0. Warming drives this one and removes the other. Do not reintroduce
-    // a name whose reading inverts with temperature.
+    // Constrained optimum at the wet (psi_soil) end, just inside the collar of
+    // zero uptake, with a non-zero gradient. Named for the bound that binds, not
+    // the conditions: a stressed leaf declines to open here.
     BoundarySoil,
-    // Constrained optimum at the dry end: the continuity root with the stem
-    // held at dry_end<K>(). For a curve whose own domain ends at psi_crit
-    // (cost_domain_ends_at_psi_crit) that is psi_crit, the most tension its
-    // form allows. For every other curve psi_crit bounds nothing (#183), and
-    // the dry end is the end of the stem curve: profit still rising AT that
-    // end, solved to collar precision, means the leaf transpires all the stem
-    // can carry, to within e^-40 -- a dry soil where A climbs steeply at the
-    // little flux left. A stationary point within dry_pin_resolution of the
-    // end is reported here too. Named for the end, not
-    // for psi_crit, because for most curves psi_crit is not where it is.
+    // Constrained optimum at the dry end, the continuity root with the stem at
+    // dry_end<K>(), including a stationary point within dry_pin_resolution of it
+    // (hazard 19).
     BoundaryDry,
-    // Shutdown on water: no collar potential both carries more than the
-    // residual flux and keeps the stem short of its dry end, so there is no
-    // interval to optimise over. The leaf sits at the wet bound -- the collar at
-    // which uptake equals the residual flux, the stem where it carries it --
-    // with its stomata shut and every output from the ordinary evaluator there.
-    // For a curve bounded at psi_crit this is a soil drier than psi_crit can
-    // supply; for every other curve the dry end is the end of the stem curve,
-    // where it carries G(inf) to rounding, so a leaf reaches this only when the
-    // soil is drier than that and its flux is zero to rounding anyway -- the
-    // shutdown is asymptotic. Light and heat do not shut a leaf: with the
-    // cuticle's CO2 pathway the residual has a root for every leaf (#183), and a
-    // leaf in the dark is an ordinary optimum, usually at the wet bound.
+    // Shutdown on water: no collar both carries more than the residual flux and
+    // keeps the stem short of its dry end, so the leaf sits shut at the wet bound
+    // (hazard 18). Light and heat never shut a leaf.
     HydraulicShutdown,
-    // The collar potential was IMPOSED by the caller (evaluate_root_collar_psi /
-    // profit_at_collar_psi) inside the feasible interval, not optimised.
-    // dprofit is generally non-zero and is the whole point on that path -- it is
-    // the acclimation rate, not a residual.
+    // The collar was imposed (evaluate_root_collar_psi / profit_at_collar_psi),
+    // not optimised; dprofit there is the acclimation rate, not a residual.
     Prescribed,
-    // The solver could not move, and NO PLANT IS DESCRIBED. Either an endpoint
-    // admitted no feasible gradient (so the golden-section fallback ran), or the
-    // gradient was non-positive at the wet end AND non-negative at the dry end,
-    // which makes the interior stationary point a MINIMUM and leaves the maximum
-    // at one of the two ends with nothing to say which. This is deliberately NOT
-    // reported as a pin: attributing it to whichever bound is nearer would return
-    // a plausible, finite, wrong answer.
+    // The solver could not move: an endpoint had no feasible gradient, or the
+    // stationary point is a minimum. Not a pin, which would be plausible and wrong.
     SolverRefused,
-    // A partial derivative came back non-finite where feasibility said it should
-    // not have. Distinct from SolverRefused because it is a different fault, and
-    // there is nowhere downstream to put the test.
+    // A partial derivative came back non-finite where feasibility said it could not.
     NonFiniteGradient,
   };
 
-  // This leaf's own sites plus the supply model's, which are ONE list. Summed on
-  // read rather than shared on construction, so rebuilding the root network
-  // cannot silently detach the tally.
+  // This leaf's clamp sites plus the supply model's, one list, summed on read so
+  // that rebuilding the root network cannot detach the tally.
   std::vector<std::size_t> clamp_counts() const {
     std::vector<std::size_t> out = *clamps.counts;
     const std::vector<std::size_t>& supply = *roots_.clamps.counts;
@@ -2746,39 +2202,20 @@ public:
     roots_.clamps.clear();
   }
 
-  // How many kinds there are, counted from the LAST enumerator so a kind added
-  // to the list is inside this by construction. A consumer tallying by kind
-  // sizes its array from here; a number repeated on that side would silently
-  // drop the new one.
+  // Counted from the last enumerator, so an appended kind is inside it; size a
+  // per-kind tally from here, never from a repeated literal.
   static constexpr std::size_t operating_point_kind_count =
       static_cast<std::size_t>(OperatingPointKind::NonFiniteGradient) + 1;
 
-  // Read-only on purpose: the kind is an output of the solve, and a settable one
-  // would be a way to disagree with it. replay_operating_point is the one way to
-  // put a recorded kind back.
+  // Read-only: the kind is an output of the solve; replay_operating_point is the
+  // one way to put a recorded kind back.
   OperatingPointKind operating_point_kind() const {
     return operating_point_kind_;
   }
-  // Put back an operating point a previous pass found: the collar it placed, and
-  // the ARM it placed it on.
-  //
-  // ⚠️ BOTH, IN ONE CALL, BECAUSE evaluate_root_collar_psi RESTORES EVERY NUMBER
-  // AND THEN TAGS THE POINT `prescribed`. That is correct from its side -- a
-  // caller handed it a target -- and it is wrong for a replay, where the recorded
-  // arm is what a replay needs: operating_collar switches on the kind, so a replayed
-  // interior point tagged `prescribed` has no condition to place it at. Splitting
-  // this into two calls is the mistake, and it costs a throw in a caller that
-  // never asked for a collar.
-  //
-  // This is the replay half of a recorded decision: the collar MOVES and is
-  // re-derived from, the arm SELECTS and is put back. Differentiating the choice
-  // would manufacture a jump the model does not have.
-  //
-  // A BoundarySoil point also needs the polished root of its zero-flux bound,
-  // which wet_bound_at's step-back correction reads (wet_bound_root_). The solve
-  // finds it inside the optimiser, which a replay does not run, so the replay
-  // re-takes the same polish from the same bracket: the rows it hands over are
-  // then the fresh solve's, bit for bit.
+  // Put back a recorded operating point, collar and kind in one call:
+  // evaluate_root_collar_psi alone tags it `prescribed`, and operating_collar
+  // switches on the kind. A BoundarySoil point re-takes the polish of its
+  // zero-flux bound, so the rows are the fresh solve's bit for bit (hazard 17).
   double replay_operating_point(double collar, OperatingPointKind kind) {
     return with_curve(cost_curve_, [&](auto tag) {
       return replay_operating_point_for<tag.value>(collar, kind);
@@ -2789,41 +2226,30 @@ public:
   static const char* operating_point_kind_name(OperatingPointKind kind);
 
 private:
-  // Where this model replaces a value by a bound. A row severed that way and a
-  // row that is honestly zero are the same number, and a consumer DIFFERENCING
-  // through a clamp gets a finite value with no response in it and nothing to
-  // notice by -- so the derivative kill is invisible unless it is counted.
+  // Where this model replaces a value by a bound: a row severed by a clamp and an
+  // honest zero are the same number, so the only way to see one is to count it.
   clamp_counter clamps;
 
-  // Written by every path out of the collar solve, and reset to Unsolved at the
-  // top of prepare_collar_solve. A `Leaf` is often reused for one solve after
-  // another, so a branch that declined to write this would leave the PREVIOUS
-  // solve's kind: a plausible answer about a different point. Resetting to
-  // Unsolved means a path that forgets reports "unclassified" instead.
+  // Written by every path out of the collar solve and reset to Unsolved at the
+  // top of prepare_collar_solve, so a path that forgets reports "unsolved"
+  // rather than the previous solve's kind (hazard 8).
   OperatingPointKind operating_point_kind_ = OperatingPointKind::Unsolved;
-  // The stem's dry end for the solve in progress, dry_end<K>() of the seated
-  // curve: psi_crit for a curve bounded there, the end of the stem curve for
-  // every other. Seated at the top of prepare_collar_solve, so the bracket
-  // helpers that are not templated on the curve read the same number.
+  // dry_end<K>() of the seated curve for the solve in progress, seated at the
+  // top of prepare_collar_solve for the bracket helpers not templated on K.
   double dry_end_ = std::numeric_limits<double>::quiet_NaN();
-  // Whether dry_end_ is psi_crit standing in as a FIRST bracket for a curve it
-  // does not bound (prepare_collar_solve's first_bracket), so the dry end of the
-  // bracket is not yet the dry end of the domain.
+  // Whether dry_end_ is psi_crit standing in as a first bracket for a curve it
+  // does not bound (prepare_collar_solve's first_bracket).
   bool dry_end_provisional_ = false;
   // The wettest rooted layer and the uptake there, from the top of
   // prepare_collar_solve, for extend_collar_bracket.
   double bracket_wettest_ = std::numeric_limits<double>::quiet_NaN();
   double bracket_E_up_at_wettest_ = std::numeric_limits<double>::quiet_NaN();
-  // The zero-flux collar a wet pin was solved against, to collar precision, or NaN
-  // where no solve placed one. A pinned solve returns a point a step INSIDE it,
-  // and wet_bound_at reads the flux at that point; knowing the root lets it correct
-  // the residual back to the root, so the row is the root's derivative rather
-  // than one proportional to the step.
+  // The zero-flux collar a wet pin was solved against, to collar precision, or
+  // NaN. wet_bound_at corrects the residual from the pinned point (a step
+  // inside) back to it, so the row is the root's derivative, not the step's.
   double wet_bound_root_ = std::numeric_limits<double>::quiet_NaN();
-  // The dry end of the collar interval solved to collar precision, where the
-  // solve read it: the continuity root with the stem at its dry end. NaN where
-  // no solve polished one. profit_curvature_at_collar measures its difference
-  // from it, because the marginal steepens toward it.
+  // The dry end polished to collar precision where the solve read it, or NaN.
+  // profit_curvature_at_collar measures from it, as the marginal steepens there.
   double dry_bound_root_ = std::numeric_limits<double>::quiet_NaN();
 };
 
@@ -2844,12 +2270,6 @@ inline const char* Leaf::operating_point_kind_name(OperatingPointKind kind) {
 }
 
 
-// `namespace detail` used to live here, holding templated REPLICAS of the profit
-// algebra whose comment claimed they "mirror Leaf::assim_colimited and
-// Leaf::hydraulic_cost_TF exactly". One of them did not -- see the `_kernel`
-// declarations in the class. They are deleted: the real functions are now
-// templated on their scalar type, so AD differentiates the model itself and the
-// mirror cannot drift because there is no mirror.
 inline Leaf::Leaf()
     :
     vcmax_25(96), // umol m^-2 s^-1 
@@ -2859,26 +2279,18 @@ inline Leaf::Leaf()
     jmax_25(157.44), // maximum electron transport rate umol m^-2 s^-1
     phi_J(0.30 / 0.85), // quantum yield of electron transport per ABSORBED photon (mol mol^-1); 0.30 per incident photon at alpha_PAR_ = 0.85
     curv_fact_elec_trans(0.7), //curvature factor for the light response curve (unitless)
-    curv_fact_colim(0.99), //curvature factor for the colimited photosythnthesis equatiom
+    curv_fact_colim(0.99), //curvature factor for the colimited photosynthesis equation
     GSS_tol_abs(1e-3),
     vulnerability_curve_ncontrol(ncontrol_default),
     ci_abs_tol(1e-3),
     ci_niter(1000),
     TF24_cost_scale(7.5) //cost parameter for TF24 profit model umol m^-2 s^-1
    {
-      // The root traits (root_c/root_P50) and the two beta_R_* resistance
-      // constants keep their defaults in MultiLayerRoots, which owns them --
-      // including the root's own derived root_b/root_psi_crit. Deliberately not
-      // restated here: a second copy of the root Weibull pair is the exact shape
-      // of hazard 1 in the developer guide.
+      // The root traits and the beta_R_* constants keep their defaults in
+      // MultiLayerRoots, which owns them; a second copy here is hazard 1.
       derive_vulnerability_curves_from_P50();
-      // ⚠️ THE MEMBER, NEVER A LITERAL. Both of these were literal `100` while
-      // ncontrol_default was 100, so a default-constructed leaf built its curves
-      // at one resolution and let `set_traits` rebuild them at another the moment
-      // the default moved. Raising it to 400 put the two 4x apart and the
-      // rescale-against-rebuild identity, asserted to 1e-08, came apart at
-      // 1.4e-07 on 52 checks -- at 200, 400 and 800 knots alike, which is the
-      // signature of a resolution mismatch rather than of interpolation error.
+      // The member, never a literal: set_traits rebuilds at the member's resolution,
+      // and curves built at another break the rescale-against-rebuild identity.
       setup_transpiration(vulnerability_curve_ncontrol);
       setup_root_vulnerability(vulnerability_curve_ncontrol);
       setup_clean_leaf();
@@ -2901,23 +2313,18 @@ inline Leaf::Leaf(double vcmax_25, double stem_c, double stem_P50,
     jmax_25(jmax_25), // maximum electron transport rate umol m^-2 s^-1
     phi_J(phi_J), // quantum yield of electron transport per ABSORBED photon (mol mol^-1)
     curv_fact_elec_trans(curv_fact_elec_trans), //curvature factor for the light response curve (unitless)
-    curv_fact_colim(curv_fact_colim), //curvature factor for the colimited photosythnthesis equation
+    curv_fact_colim(curv_fact_colim), //curvature factor for the colimited photosynthesis equation
     GSS_tol_abs(GSS_tol_abs),
     vulnerability_curve_ncontrol(vulnerability_curve_ncontrol),
     ci_abs_tol(ci_abs_tol),
     ci_niter(ci_niter),
     TF24_cost_scale(TF24_cost_scale) //cost parameter for TF24 profit model umol m^-2 s^-1
    {
-      // The single convention, asserted at the one place it enters (#25). Before
-      // there was no global statement about psi's sign to assert -- psi_soil_ was
-      // >= 0, psi_soil_inverted_ was <= 0, psi_crit was >= 0 and the collar was
-      // <= 0 -- which is precisely why the convention had to live in comments.
-      // Now it is checkable, so it is checked. set_traits shares this check.
+      // Every psi is a positive magnitude (hazard 2); set_traits shares this check.
       check_psi_magnitudes(stem_P50, stem_c, root_P50, root_c);
 
-      // The root traits belong to the supply path, so hand them over before its
-      // vulnerability curve is built. Its root_b and root_psi_crit are DERIVED
-      // from the pair below, in the one place that derivation lives.
+      // The root traits belong to the supply path, handed over before its curve is
+      // built; root_b and root_psi_crit derive from them there.
       roots_.root_c = root_c;      //unitless
       roots_.root_P50 = root_P50;  // MPa, positive magnitude
       derive_vulnerability_curves_from_P50();
@@ -2929,8 +2336,7 @@ inline Leaf::Leaf(double vcmax_25, double stem_c, double stem_P50,
 
 inline void Leaf::check_psi_magnitudes(double stem_P50, double stem_c,
                                       double root_P50, double root_c) {
-  // Every psi here is a POSITIVE magnitude in MPa. There is one representation, so
-  // this can be asserted globally rather than described in comments.
+  // Every psi is a positive magnitude in MPa (hazard 2).
   if (!(stem_P50 > 0.0)) {
     util::stop("stem_P50 must be a positive magnitude in MPa; got " +
                util::to_string(stem_P50));
@@ -2939,9 +2345,8 @@ inline void Leaf::check_psi_magnitudes(double stem_P50, double stem_c,
     util::stop("root_P50 must be a positive magnitude in MPa; got " +
                util::to_string(root_P50));
   }
-  // The shape parameters set how steeply conductivity is lost. Below about 1 there
-  // is no safe plateau at all, which usually flags a measurement artefact rather
-  // than a species trait -- but it is representable, so only the sign is refused.
+  // A shape below about 1 (no safe plateau) usually flags a measurement
+  // artefact, but it is representable, so only the sign is refused.
   if (!(stem_c > 0.0)) {
     util::stop("stem_c must be positive; got " + util::to_string(stem_c));
   }
@@ -2951,7 +2356,7 @@ inline void Leaf::check_psi_magnitudes(double stem_P50, double stem_c,
 }
 
 
-// See the header for why this exists rather than fourteen settable fields.
+// The one route to change traits (hazard 10).
 inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_P50_,
                              double root_c_, double root_P50_, double TF24_beta2_,
                              double jmax_25_, double phi_J_,
@@ -2968,8 +2373,7 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_P50_,
                "mol H2O m^-2 s^-1; got " + util::to_string(g_min_));
   }
 
-  // Both scale parameters and both critical potentials fall out of the traits, so
-  // there is nothing left for a consistency check to police.
+  // Both scale parameters and both critical potentials derive from the traits.
   const double stem_b_ = weibull_b_from_P50(stem_P50_, stem_c_);
   const double root_b_ = weibull_b_from_P50(root_P50_, root_c_);
   const double psi_crit_ =
@@ -2977,13 +2381,9 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_P50_,
   const double root_psi_crit_ =
       weibull_psi_at_fraction(root_b_, root_c_, k_crit_fraction);
 
-  // Which tables have to be rebuilt, decided BEFORE the assignment. A table
-  // depends on its curve's c alone (VulnerabilityTable), so a P50 moves nothing.
-  // Exact equality is the right test and not a sloppy one: the table is a pure
-  // function of c, so an unchanged c gives a bit-identical table and rebuilding
-  // it is pure cost. A trait perturbed by a relative 1e-08 -- what a gradient
-  // loop does -- compares unequal and rebuilds, which is the case that must not
-  // be missed.
+  // Which tables to rebuild, decided before the assignment. A table depends on
+  // its curve's c alone, so exact equality is right: an unchanged c gives a
+  // bit-identical table, and a gradient's 1e-08 perturbation compares unequal.
   const bool stem_curve_moved = (stem_c_ != stem_c);
   const bool root_curve_moved = (root_c_ != roots_.root_c);
 
@@ -3016,39 +2416,24 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_P50_,
     setup_root_vulnerability(vulnerability_curve_ncontrol);
   }
 
-  // Last, and it is the whole safety argument: back to the just-constructed
-  // state. Clears the solved operating point to the NA sentinels (hazard 8: an
-  // output left unwritten becomes the previous solve's value), and resets both
-  // the transpiration memo and the photosynthesis temperature cache -- the one
-  // that would otherwise hand back the old vcmax_.
-  //
-  // "The just-constructed state" is exact for the derived state and the outputs,
-  // which is all of it bar `CF77_lambda_`, `TF24_floor_lambda_o` and
-  // `LeastCost_beta` -- caller inputs, left standing on purpose (#96, see their
-  // declarations).
+  // Last: back to the just-constructed state, outputs NA and both caches reset
+  // (hazards 8 and 10). The caller inputs CF77_lambda_, TF24_floor_lambda_o and
+  // LeastCost_beta stay standing.
   setup_clean_leaf();
 }
 
 
 
-// ⚠️ THE ROWS ARE IN (P50, c), NOT (b, c). stem_b is derived, so a row in it
-// describes a parameter this model does not have -- and set_traits re-derives b
-// from P50 on every call, so a direction in b reaches nothing at all. The chain is
-// exact: with L = ln 2 and b = P50 * L^(-1/c),
+// ⚠️ Hazard 1: the rows are in (P50, c), not (b, c); stem_b is derived, so a
+// row in b reaches nothing. With L = ln 2 and b = P50 * L^(-1/c),
 //
 //     db/dP50 = b / P50            db/dc = b * ln(L) / c^2
 //
-// so dG/dP50 is dG/db times the first, and dG/dc is the partial at fixed b plus
-// dG/db times the second.
-//
-// The VALUE is the table's, not the closed form's: the solve ran on the table, so
-// a value from the curve would place the operating point somewhere else. Every
-// bracket below is exactly zero at the recording point, so the number is
-// untouched and only the tape sees the rows.
+// The value is the table's, which the solve ran on; the closed form gives only
+// the rows.
 template <class S>
 inline S Leaf::stem_integral_at(const S& psi, const leaf_pars<S>& pars) const {
-  // The value is the stem table's; the rows are the closed form's. One site
-  // serves both curves -- see closed_form_rows.hpp for why that is not a convenience.
+  // One site serves both curves (closed_form_rows.hpp).
   const double at = odelia::util::to_passive(psi);
   return integral_with_closed_form_rows<S>(
       stem_curve_integral(at, "Leaf::stem_integral_at"),
@@ -3084,8 +2469,7 @@ inline leaf_pars<double> Leaf::passive_pars() const {
   p[par_CMax_b] = CMax_b;
   p[par_g_min] = g_min;
   p[par_kmax] = leaf_specific_conductance_max_;
-  // The single-potential path's series resistance. Empty on the layered route,
-  // where the resistances are per layer and this slot has no scalar to hold.
+  // The single path's series resistance; NA on the layered route (per layer).
   p[par_resistance] = roots_.network_.r_R_V_sum.empty() ? util::na_value
                                     : roots_.network_.r_R_V_sum.front();
   p[par_CF77_lambda] = CF77_lambda_;
@@ -3109,7 +2493,7 @@ inline leaf_pars<double> Leaf::passive_pars() const {
   return p;
 }
 
-// set various states and physiology parameters obtained from TF24 to NA to clean leaf object
+// Reset every derived state and output to the NA sentinel (hazard 8).
 inline void Leaf::setup_clean_leaf() {
   ci_ = util::na_value; // Pa
   stom_cond_CO2_= util::na_value; //mol Co2 m^-2 s^-1 
@@ -3119,10 +2503,8 @@ inline void Leaf::setup_clean_leaf() {
   g_min_leaf_ = util::na_value;    // mol m^-2 s^-1, seated with the deficit
   residual_root_ceiling_ = std::numeric_limits<double>::infinity();
   profit_= util::na_value; // umol C m^-2 s^-1
-  // CF77_lambda_, TF24_floor_lambda_o and LeastCost_beta are deliberately NOT
-  // here: they are the caller's inputs, not derived state, and carry their NA
-  // defaults at the declarations instead (#96). Adding any back makes a
-  // prescribed price survive set_drivers() and vanish on set_traits().
+  // Not CF77_lambda_, TF24_floor_lambda_o or LeastCost_beta: caller inputs, which
+  // a reset here would make survive set_drivers() and vanish on set_traits().
   carbon_gain_= util::na_value;
   hydraulic_cost_norm_= util::na_value;
   thermal_cost_= util::na_value;
@@ -3137,11 +2519,10 @@ inline void Leaf::setup_clean_leaf() {
   km_= util::na_value;
   R_d_= util::na_value;
   leaf_specific_conductance_max_= util::na_value; //kg m^-2 s^-1 MPa^-1 
-  vcmax_= util::na_value; //kg m^-3
-  jmax_= util::na_value; //kg m^-3
+  vcmax_= util::na_value; // umol m^-2 s^-1
+  jmax_= util::na_value; // umol m^-2 s^-1
   opt_root_psi_ = util::na_value; // MPa, positive magnitude
-  // The NA sentinel's counterpart for the operating-point classification: no
-  // solve has run, so there is no kind of point to report.
+  // No solve has run, so there is no kind of point to report.
   operating_point_kind_ = OperatingPointKind::Unsolved;
   leaf_temp_= util::na_value; // deg C
   photo_temp_= util::na_value; // deg C -- no block seated yet
@@ -3157,21 +2538,17 @@ inline void Leaf::setup_clean_leaf() {
   atm_kpa_= util::na_value; // kPa
   umol_per_mol_to_Pa_ = util::na_value;
   ca_= util::na_value; //Pa
-  opt_psi_stem_= util::na_value; //-MPa 
+  opt_psi_stem_= util::na_value; // MPa, positive magnitude
   opt_ci_= util::na_value; //Pa
   E_up_ = util::na_value;
-  medlyn_model_gs_ = util::na_value; // mol CO2 m^-2 s^-1 (Medlyn model, develop #450)
+  medlyn_model_gs_ = util::na_value; // mol CO2 m^-2 s^-1 (Medlyn model)
   theta_w_ = util::na_value;
   theta_fc_ = util::na_value;
   theta_ = util::na_value;
   roots_.clear(); // soil state, geometry and the root resistance network
-  // BOTH supply paths, not just the active one. Hazard 8 is that an output a
-  // code path declines to write becomes the previous solve's value, and a Leaf
-  // that has been switched between paths (set_supply_single / _multilayer) is
-  // exactly the case where the inactive one's stale soil state could come back.
-  // clear() leaves grav_head_ alone -- it is the single path's one remaining piece
-  // of configuration, and wiping it here would make set_supply_single
-  // order-dependent. resistance_ IS cleared, because it is a driver now.
+  // Both supply paths, or a Leaf switched between them gets stale soil state back
+  // (hazard 8). single_.clear() keeps grav_head_ (configuration, so
+  // set_supply_single is not order-dependent) and clears resistance_ (a driver).
   single_.clear();
   soil_consumption_.clear(); // soil consumption mol  m^-2 s^-1;
 
@@ -3179,27 +2556,9 @@ inline void Leaf::setup_clean_leaf() {
   photo_temp_cached_ = false;    // members above set to NA; force recompute
 }
 
-// Set the per-individual, per-timestep physiology that stays constant during
-// the subsequent root-collar/stem optimisation.
-//
-// Two groups of quantities are computed here:
-//   1. Temperature-dependent photosynthetic parameters (vcmax_, jmax_,
-//      electron_transport_, gamma_, ko_, kc_, km_, R_d_) via Arrhenius/peaked
-//      Arrhenius functions, plus assim_max_ (assimilation at ci = ca).
-//   2. The soil state and the root hydraulic-resistance network, both of which
-//      now belong to roots_ (MultiLayerRoots::set_soil_state and
-//      ::set_root_network). The two calls are left at their original positions
-//      in this function, straddling the temperature block, rather than merged:
-//      the blocks are numerically independent, but keeping the order means the
-//      only thing this refactor has to argue about is where the code lives.
-//
-// NOTE: the temperature-dependent block (group 1) is a function of one
-// temperature, recorded in photo_temp_. Off the energy-balance path that is
-// leaf_temp_ and constant across the run in the current driver setup, which is
-// what the cache below exploits; on it the block is re-seated per candidate psi
-// at the leaf's own temperature and the cache is bypassed.
-//
-//sets various parameters which are constant for a given node at a given time
+// Seat the per-timestep physiology that stays constant through the collar or
+// stem optimisation: temperature-dependent parameters, assim_max_ (ci = ca),
+// the soil state and the supply resistances.
 inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double leaf_temp, double atm_o2_kpa, double atm_kpa) {
   if (psi_soil.size() != soil_depth.size()) {
     util::stop("soil_depth and psi_soil must have the same number of elements");
@@ -3210,12 +2569,9 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
       !std::isfinite(atm_o2_kpa) || !std::isfinite(atm_kpa)) {
     util::stop("set_physiology received non-finite scalar input");
   }
-  // The deficit of a real atmosphere: positive, and short of saturation at the
-  // air temperature, so the actual vapour pressure e_s(Tair) - D is positive.
-  // Refused rather than floored: the longwave term used to floor e_a at
-  // 1 Pa, which bent the leaf temperature by 1.5 C across RH = 0 and was reached
-  // only by deficits past saturation. Off the energy balance leaf_temp IS the
-  // air temperature the deficit is stated at.
+  // A real atmosphere's deficit: positive and short of saturation at the air
+  // temperature (off the energy balance, leaf_temp), so e_s(Tair) - D > 0.
+  // Refused rather than floored, which would bend the leaf temperature.
   if (!(atm_vpd > 0.0) || !(atm_vpd < saturation_vapour_pressure(leaf_temp))) {
     util::stop("set_physiology: atm_vpd must lie in (0, e_s(T_air)), a relative "
                "humidity between 0 and 1; got atm_vpd = " +
@@ -3223,12 +2579,9 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
                util::format_double(saturation_vapour_pressure(leaf_temp)) +
                " kPa at " + util::format_double(leaf_temp) + " C");
   }
-  // The thermal-damage states the caller seated. The model reads A_ and I_ as
-  // themselves, so a hair outside their range is smooth; what is refused is a
-  // negative fraction of leaf area and the acclimation shift's pole. Infeasible
-  // rather than a plain error: a consumer integrating these states reaches them
-  // from a trial stage, and can reject the step. A NaN passes, to poison the
-  // outputs where a test can see it.
+  // The thermal-damage states: a negative fraction of leaf area or the
+  // acclimation shift's pole is refused as infeasible, so an integrating
+  // consumer can reject the trial step; a NaN passes to poison the outputs.
   if (use_thermal_damage_ && (I_ < 0.0 || D_ < 0.0 || A_ <= -K_A_)) {
     util::stop_infeasible(
         "damage_state",
@@ -3242,9 +2595,8 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
       util::stop("set_physiology received non-finite psi_soil at layer=" + std::to_string(i) +
                  "; psi_soil=" + util::to_string(psi_soil[i]));
     }
-    // The input boundary for the one representation (#25). A caller that still
-    // has the pre-#25 signed vector fails here rather than silently running a
-    // model with the soil and the collar on opposite sides of zero.
+    // Hazard 2: a signed potential fails here rather than running with the soil
+    // and the collar on opposite sides of zero.
     if (psi_soil[i] < 0.0) {
       util::stop("set_physiology: psi_soil must be positive magnitudes in MPa, "
                  "not signed potentials (#25); got psi_soil[" +
@@ -3255,11 +2607,8 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
                  "; soil_depth=" + util::to_string(soil_depth[i]));
     }
   }
-  // The root network is NOT validated here. It is checked in set_root_network
-  // below, which is where the length agreement with the soil profile can actually
-  // be tested -- the network is sized to the deepest ROOTED layer, so it is
-  // shorter than psi_soil whenever the plant is shallower than the soil, and a
-  // check up here would have to duplicate that rule.
+  // The root network is validated in set_root_network below, against the soil
+  // profile: it is sized to the deepest rooted layer, which may be shallower.
    atm_vpd_ = atm_vpd;
    leaf_temp_ = leaf_temp;
    atm_kpa_ = atm_kpa;
@@ -3271,9 +2620,8 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
        roots_.set_soil_state(psi_soil, soil_depth);
        break;
      default:
-       // One potential; the depth profile and the root-mass profile are not
-       // this path's business, and the caller's vectors are simply not read
-       // beyond element 0.
+       // One potential: the depth and root-mass profiles are not read, nor any
+       // element of psi_soil past the first.
        single_.set_soil_state(psi_soil[0]);
        break;
    }
@@ -3282,11 +2630,8 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
    // conductance changed -> invalidate the transpiration() memo
    transpiration_cached_ = false;
    ca_ = ca;
-   // Penman-Monteith leaf energy-balance inputs (#523). Reinterpret the incoming
-   // leaf_temp driver as air temperature. The isothermal net radiation is the
-   // ABSORBED shortwave -- each intercepted band times its own absorptance, the
-   // PAR band converted from photons to W m^-2 at the daylight ratio -- less the
-   // sky's longwave (#97). Only read on the use_energy_balance_ path.
+   // Energy-balance inputs: the leaf_temp driver is the air temperature, and Rn_
+   // is the absorbed shortwave of both bands less the sky's longwave.
    if (use_energy_balance_ && !std::isfinite(NIR_int_)) {
      util::stop("set_physiology: non-finite NIR_int_ on the energy-balance path. "
                 "Set the intercepted near-infrared (W m^-2) before set_physiology: "
@@ -3295,26 +2640,15 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
    }
    Tair_ = leaf_temp_;
    {
-     // Isothermal net radiation and the radiative conductance (#97). Both depend
-     // only on the DRIVERS, so both are seated once here rather than per candidate
-     // potential -- Tleaf enters the balance linearly through g_rad_ and not
-     // through either of these.
+     // Rn_ and g_rad_ depend only on the drivers, so they are seated once here;
+     // Tleaf enters the balance linearly through g_rad_.
      const double Tair_K = Tair_ + C_to_K;
-     // Actual vapour pressure, IN PASCALS as the emissivity coefficient requires
-     // (constants.hpp). atm_vpd_ and esat are both kPa, hence the 1000. Positive:
-     // a deficit at or past saturation is refused above.
+     // Actual vapour pressure in Pa, as the emissivity coefficient requires;
+     // positive because a deficit at or past saturation is refused above.
      const double ea_Pa = 1000.0 * (saturation_vapour_pressure(Tair_) - atm_vpd_);
-     // ⚠️ HELD BELOW 1, A PHYSICAL BOUND AND NOT PADDING. Brutsaert's fit
-     // extrapolates past unity once ea > 22.25 Pa/K * Tair_K (about 7 kPa): above
-     // Tair 38.9 C in saturated air, 43.9 C at a 2 kPa deficit, 48.0 C at 4 kPa.
-     // Unbounded, the isothermal longwave turns POSITIVE there (+100 W m^-2 by
-     // Tair 60 at 2 kPa): a sky brighter than a blackbody heating the leaf, the
-     // right order of magnitude with the wrong sign. The bound is a SOFT minimum:
-     // a min() at 1 put a corner in every output's slope in Tair and
-     // humidity on a heatwave sweep. Past the fit's unity the term tends to 0,
-     // the limit for a sky radiating as a blackbody at Tair, and Rn_ responds to
-     // Tair and humidity only weakly there. It is computed once per call, so the
-     // soft form costs nothing per candidate.
+     // Emissivity held below 1 by a soft minimum: Brutsaert's fit passes unity
+     // once ea > 22.25 Pa/K * Tair_K, and a hard min() puts a corner in every
+     // output's slope in Tair and humidity.
      const double ema_fit =
          atmos_emissivity_coef *
          std::pow(ea_Pa / Tair_K, atmos_emissivity_exponent);
@@ -3326,12 +2660,9 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
                         Tair_K;
      g_rad_ = 4.0 * leaf_emissivity * stefan_boltzmann * Tair_K * Tair_K * Tair_K;
    }
-   // Aerodynamic resistance from leaf boundary-layer theory: ra = C_ra*sqrt(d/U)
-   // (doc 4.1), with the per-strategy leaf dimension d_ and the above-canopy wind
-   // wind_speed_. On the PM path a non-finite wind_speed_/d_ is a broken driver /
-   // unset trait, not a modelling choice, so fail fast rather than silently using
-   // the fixed fallback (review: itowers1). Zero wind or zero d (physically
-   // ra -> infinity) is a legitimate case and falls back to the fixed ra.
+   // Aerodynamic resistance ra = C_ra*sqrt(d/U). On the energy-balance path a
+   // non-finite wind_speed_ or d_ is a broken driver and is refused; zero wind
+   // or d (ra -> infinity) falls back to the fixed ra.
    if (use_energy_balance_ &&
        (!std::isfinite(wind_speed_) || !std::isfinite(d_))) {
      util::stop("set_physiology: non-finite wind_speed_/d_ on the energy-balance "
@@ -3342,10 +2673,8 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
           d_ > 0.0 && wind_speed_ > 0.0)
              ? aerodynamic_resistance_coef * std::sqrt(d_ / wind_speed_)
              : aerodynamic_resistance_fixed;
-   // The leaf temperatures the solve can reach. With the balance on, Tleaf is
-   // affine in E, so the range runs from the shut leaf (E = 0, the hottest) to
-   // the most the stem can carry, k_max G(inf) (the coolest; every supply path
-   // carries less, because G >= 0 upstream). Off it the driver is the leaf's.
+   // The leaf temperatures the solve can reach: with the balance on, from the
+   // shut leaf (E = 0, hottest) to k_max G(inf) (coolest); off it, the driver.
    if (use_energy_balance_) {
      const double E_most = stem_curve_
                                ? leaf_specific_conductance_max_ * stem_curve_limit()
@@ -3355,30 +2684,19 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
      check_leaf_temperature_range(leaf_temp_, leaf_temp_);
    }
 
-   // The diffusion deficit at the baseline temperature. On the PM path the solve
-   // re-seats this per candidate psi; here it makes assim_max_ and any bare
-   // stom_cond_CO2() call well defined before one has run.
+   // The deficit at the baseline temperature, so assim_max_ and a bare
+   // stom_cond_CO2() are defined before a solve re-seats it.
    set_leaf_vpd(leaf_temp_);
 
-   // Temperature/O2-dependent block. Off the PM path this is recomputed only
-   // when (leaf_temp_, atm_o2_kpa_) changes from the previous call (see
-   // photo_temp_cache_ in the header); same inputs -> bit-identical outputs, so
-   // reusing is exact. On the PM path the cache is bypassed: leaf_temp_ here is
-   // only Tair, and the operating-point Tleaf (hence these params) is set per
-   // candidate psi in set_leaf_states_rates_from_psi_stem, so we always recompute
-   // the Tair baseline (reported as assim_max_) and let the solve
-   // override it.
-   //
-   // ⚠️ AND IT IS BYPASSED WITH THE THERMAL-DAMAGE GATE ON. The block then reads
-   // A_, I_ and D_, which a caller moves between calls and which the key
-   // does not hold (see photo_temp_key).
+   // Temperature/O2 block, cached on photo_temp_key() (hazard 10). Bypassed with
+   // the energy balance on (re-seated per candidate at Tleaf) and with the damage
+   // gate on (it reads A_, I_ and D_, which the key does not hold).
    const std::array<double, photo_temp_key_size> photo_key = photo_temp_key();
    if (!use_energy_balance_ &&
        !use_thermal_damage_ &&
        photo_temp_cached_ &&
        photo_key == photo_temp_cache_key_) {
-     // Cache hit (non-PM): every input unchanged; only electron_transport_
-     // depends on the per-call PPFD_, so refresh just that (as before).
+     // Cache hit: only electron_transport_ reads the per-call PPFD_.
      electron_transport_ = electron_transport();
    } else {
      update_temperature_dependent_params(leaf_temp_);
@@ -3386,15 +2704,9 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
      photo_temp_cached_ = true;
    }
 
-  // The supply resistances, handed over as given. #33 moved the carbon ->
-  // resistance step out to the caller, so this is a validated copy rather than a
-  // model evaluation. BOTH paths are served from the one argument: the
-  // single-potential path reads `r_R_V_sum[0]` as its series resistance, which is
-  // that field's own meaning with one layer and no horizontal term. That is what
-  // makes the calling convention independent of which path is in force.
-  //
-  // It stays HERE, after set_soil_state, because the multi-layer length check
-  // needs the soil profile seated first.
+  // The supply resistances, a validated copy. Both paths read the one argument:
+  // the single path takes `r_R_V_sum[0]` as its series resistance. After
+  // set_soil_state, because the multi-layer length check needs the soil profile.
   switch (supply_kind_) {
     case SupplyKind::MultiLayer:
       roots_.set_root_network(root_network);
@@ -3404,19 +2716,13 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
       break;
   }
 
-  // Set up vector of root water uptake from layer. Stays on Leaf: plant writes
-  // the crown-integrated value back into leaf.soil_consumption_ by name.
-  //
-  // .assign, not .resize: the uptake loop writes only up to the deepest *rooted*
-  // layer, and resize's fill reaches only newly added elements, so a solve with
-  // fewer rooted layers than the last one on this Leaf would leave the tail
-  // holding the previous plant's values -- which plant then bills to the patch
-  // water balance.
+  // Root water uptake per layer; plant writes the crown-integrated value back by
+  // name. `.assign`, not `.resize`, so a shallower-rooted plant does not inherit
+  // the previous one's deep-layer uptake (hazard 8).
   soil_consumption_.assign(supply_n_layers(), 0.0);
 
-  // Soil-moisture state for the Medlyn beta_ stress factor (develop #450). The
-  // root-water compute path does not use these; they make the standalone,
-  // R-callable Medlyn methods well-defined with the default soil-moisture values.
+  // Soil moisture for the Medlyn beta_ stress factor, so the standalone Medlyn
+  // methods are defined; the root-water path does not read these.
   theta_w_ = theta_w;
   theta_fc_ = theta_fc;
   theta_ = theta;
