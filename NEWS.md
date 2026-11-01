@@ -1,3 +1,15 @@
+# phylloptim 0.27.0
+
+## A dry pin is decided at the end of the collar interval, and the pinned and interior answers meet continuously
+
+On a curve `psi_crit` does not bound, the collar solve decided a dry pin by the sign of the marginal read a step inside the dry end, and that end was placed only to the bracket's tolerance (`bracket_tol`, 1e-4). A stationary point sitting between the probe and the true end was then reported at the end, solved to collar precision, past its maximum: 2.4e-4 MPa in the collar and 6e-7 in profit at one of plant's seasonal-stand leaves, where the two sides of the decision were a change of 4e-6 in lma apart. A stand carries thousands of such leaves, and a difference of a whole run integrated the jumps as an offset that no step size removed (plant's sweep read 0.368 against differences converging on 0.21, traitecoevo/phylloptim#204).
+
+The solve now reads the marginal at the end itself, solved to collar precision (`dry_bound_root_`): falling there, the maximum is interior, root-found between the deepest probe and the end, however close it sits; rising, the leaf is pinned. A stationary point the collar cannot tell from the end, where seating the stem at the end moves the flux by under `dry_pin_seat_tolerance` (1e-10) of it, is reported as the pin, which moves the value by the marginal times that hair. An interior point within `dry_end_neighbourhood` (1e-4 MPa) of the end takes its curvature from a difference in the logarithm of its distance to the end, where the marginal is close to linear (0.3 per decade at the default traits); a step in potential across that distance read a slope of the wrong decade, which put the implicit-function rows off by up to 9%. A replayed point seats the polished end the same way, and a prescribed collar is accepted up to it.
+
+On plant's seasonal stand the sweep now reads 0.2170 against pinned differences of 0.2179 (step 1e-5) and 0.2116 (1e-6), and every one of the 12,390 solves the old decision pinned re-solves as the same point to within what it resolves. The leaf's rows are unchanged where the kind is: at plant's own recorded points every tangent row matches a difference of the solve to 1e-6 and every adjoint row the tangent to 1e-13. Goldens: `operating_points.tsv` moves on 4 of 672 rows, all at psi_soil 6 and 25 C, profit by at most 2.6e-9 relative, the collar by 5.4e-8 MPa and the fluxes by 5.9e-7; each was a `boundary-dry` pin decided a step inside the end and is now an `interior` point whose stem is the inverse's (11.2 to 13.1 MPa) where the end of the curve (15.4) was reported, so the 25 C grid counts 239 interior and 7 dry where it counted 235 and 11. `primitives.tsv` and `psi_stem_optima.tsv` are bit-identical. The collar solve costs 8% more on the golden grid (3.44 to 3.71 us, interleaved), all of it the end solved to collar precision and the marginal read there on the solves whose first probe reads a rising profit.
+
+Migration for plant: recapture the reference gradients; the `drought` and `seasonal` regimes' sweeps move with the forward model, by 1% on `theta`.
+
 # phylloptim 0.26.2
 
 ## The ci root-find is a safeguarded Newton solve

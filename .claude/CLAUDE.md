@@ -2,7 +2,7 @@
 
 A header-only C++ leaf gas-exchange model in which stomatal behaviour emerges from hydraulics, with an R package on top. Extracted from the TF24 strategy in [traitecoevo/plant](https://github.com/traitecoevo/plant).
 
-The guide is three files. **This one holds the standing rules** and is read at the start of every session. **[hazards.md](hazards.md)** holds the eighteen numbered hazards as narratives with their measurements, plus the long form of "One solver". **[measurements.md](measurements.md)** holds the golden files' cross-platform record, the floating-point findings that recur, and the benchmark method. A rule appears here once, as a line with its reason; its evidence lives there.
+The guide is three files. **This one holds the standing rules** and is read at the start of every session. **[hazards.md](hazards.md)** holds the nineteen numbered hazards as narratives with their measurements, plus the long form of "One solver". **[measurements.md](measurements.md)** holds the golden files' cross-platform record, the floating-point findings that recur, and the benchmark method. A rule appears here once, as a line with its reason; its evidence lives there.
 
 Read alongside:
 
@@ -145,6 +145,7 @@ Each has cost someone real numbers; the narrative and its measurements are in [h
 16. **Print how many rows reached an assertion**; a test whose rows all pinned passed without evaluating anything.
 17. **The derivative surface fails silently**: unvisited `for_each_active` members, unchecked seating assumptions, and a replay that must go through `replay_operating_point`.
 18. **A shut leaf is the ordinary evaluator at its wet bound**, where uptake meets the cuticle's residual flux (#182): append residual terms, never interleave them, so `g_min = 0` stays bit-identical; never replace a soft cap with a `min()`; and list every active input a wet-bound `implicit_value` reads.
+19. **A bound is decided on the bound itself, solved to the precision it is reported at**; decided a step inside it, the solve jumped where the decision flipped and a difference of a whole run integrated the jumps into an offset no step size removed.
 
 ## Golden files
 
