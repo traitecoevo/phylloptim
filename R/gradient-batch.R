@@ -165,12 +165,22 @@ leaf_batch <- function(psi_soil,
     rep(NA_real_, n)
   }
 
-  # One row of `theta` when every observation shares these two, n rows when they
-  # do not. Not an optimisation of the arithmetic -- the C++ side handles either
-  # -- but of the matrix R builds per likelihood evaluation.
+  prices <- list(CF77_lambda = CF77_lambda,
+                 TF24_floor_lambda_o = TF24_floor_lambda_o,
+                 LeastCost_beta = LeastCost_beta)
+  prices <- lapply(names(prices), function(nm) {
+    .recycle_to(as.numeric(prices[[nm]]), n, nm)
+  })
+  names(prices) <- c("CF77_lambda", "TF24_floor_lambda_o", "LeastCost_beta")
+
+  # One row of `theta` when every observation shares these two and the prices,
+  # n rows when they do not. Not an optimisation of the arithmetic -- the C++
+  # side handles either -- but of the matrix R builds per likelihood evaluation.
   shared <- n == 1L ||
     (all(kmax == kmax[[1L]]) &&
-       (!single || all(resistance == resistance[[1L]])))
+       (!single || all(resistance == resistance[[1L]])) &&
+       all(vapply(prices, function(x) length(unique(x)) == 1L, logical(1))))
+  one_or_all <- function(x) if (shared) x[[1L]] else x
 
   structure(
     list(leaf = l,
@@ -184,11 +194,11 @@ leaf_batch <- function(psi_soil,
          n = n,
          supply_kind = l$supply_kind,
          traits = traits,
-         kmax = if (shared) kmax[[1L]] else kmax,
-         resistance = if (shared) resistance[[1L]] else resistance,
-         CF77_lambda = CF77_lambda,
-         TF24_floor_lambda_o = TF24_floor_lambda_o,
-         LeastCost_beta = LeastCost_beta,
+         kmax = one_or_all(kmax),
+         resistance = one_or_all(resistance),
+         CF77_lambda = one_or_all(prices$CF77_lambda),
+         TF24_floor_lambda_o = one_or_all(prices$TF24_floor_lambda_o),
+         LeastCost_beta = one_or_all(prices$LeastCost_beta),
          theta_nrow = if (shared) 1L else n),
     class = "leaf_batch")
 }
@@ -341,6 +351,10 @@ leaf_gradient_batch <- function(batch,
     pars <- .gradient_available_pars(single, model, damage)
   }
   .gradient_check_pars(pars, single, model, damage)
+  # The refusal leaf_solve() gives, on the prices the batch was built with: the
+  # model is named only here, so this is the first place they can be checked.
+  .check_prices(model, batch$CF77_lambda, batch$TF24_floor_lambda_o,
+                batch$LeastCost_beta)
 
   # ⚠️ THE SAME ROUTE OBJECT `leaf_gradient()` USES, on the batch's own leaf, so
   # the two entry points cannot disagree about which model a name selects, which
@@ -378,6 +392,8 @@ leaf_gradient_batch <- function(batch,
     theta <- .gradient_fill_level_defaults(
       .gradient_check_theta(theta, batch, par_names), model, par_names)
   }
+
+  .gradient_check_owned_set(theta, model, par_names)
 
   psi <- .gradient_check_psi_batch(psi, batch$n, method)
   dpsi_dtheta <- .gradient_dpsi_dtheta_batch(dpsi_dtheta, pars, batch$n,
@@ -560,4 +576,20 @@ leaf_gradient_batch <- function(batch,
     }
   }
   m
+}
+
+# The owned field of a model with no default must be set on every row, as
+# leaf_solve() requires. Left to C++, each such row comes back as a per-row
+# error, which a fit reads as observations that failed to solve.
+.gradient_check_owned_set <- function(m, model, par_names) {
+  if (!model %in% names(.solve_price_fields)) {
+    return(invisible(m))
+  }
+  field <- .solve_price_fields[[model]]
+  if (anyNA(m[, match(field, par_names)])) {
+    stop("the ", model, " cost curve needs ", field, " set on every ",
+         "observation: pass `", field, " =` to leaf_batch(), or fill that ",
+         "column of `theta`; it has no default.", call. = FALSE)
+  }
+  invisible(m)
 }

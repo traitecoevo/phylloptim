@@ -395,6 +395,8 @@ void check_kind(const std::vector<double>& psi_soil, double ppfd, double vpd,
     root.push_back(1.0 / 0.05 / double(psi_soil.size()));
   }
   if (root_P50 > 0.0) {
+    // stem_P50 is not the default 3.4: 3.4287 puts psi_crit (5.920 MPa) drier
+    // than root_psi_crit (5.870 at root_P50 3.4), off the tie the defaults sit on.
     l.set_traits(96.0, 2.680147, 3.4287, 2.680147, root_P50, 1.5, 157.44, 0.30,
                  0.7, 0.99, 7.5, 1.44, 1.0, 0.6, 0.0, /*g_min=*/0.0);
   }
