@@ -489,6 +489,18 @@ public:
     return conductance_scratch_.total;
   }
 
+  // The uptake and its collar slope from one walk, each bit for bit what
+  // uptake_at and duptake_dpsi return: the cached reads are the same table
+  // reads, and the slope does not change the uptake's arithmetic.
+  double uptake_and_slope_at(double T_collar, const std::vector<double>& psi_soil,
+                             std::vector<double>& soil_consumption,
+                             double& E_up) const {
+    conductance_scratch_.keep_per_layer = false;
+    uptake_at<double>(T_collar, supply_over(psi_soil), soil_consumption, E_up,
+                      &conductance_scratch_);
+    return conductance_scratch_.total;
+  }
+
   double duptake_dpsi(double T_collar, const std::vector<double>& psi_soil,
                       std::vector<double>& per_layer) const {
     double E_up = 0.0;
