@@ -99,29 +99,29 @@ golden_rows <- list(
   list(
     inputs = list(psi_soil = 0.5, ppfd = 1500, vpd = 0.5, layers = 1L),
     expected = list(
-      psi_stem      = "0x1.709bdd9738486p+1",
-      opt_root_psi  = "0x1.066f206418753p+1",
-      ci            = "0x1.9f4d8353e5ae6p+4",
-      assim         = "0x1.215ca9d9740dep+4",
-      transpiration = "0x1.450032c3cb9bcp-16",
-      gc            = "0x1.0b2ace4d4c37ap-3",
-      profit        = "0x1.07970cd153bcap+4",
-      e_up          = "0x1.450032c3cb9c2p-16",
-      uptake        = "0x1.19e242571d852p-10"
+      psi_stem      = "0x1.709bdd973848bp+1",
+      opt_root_psi  = "0x1.066f206418756p+1",
+      ci            = "0x1.9f4d8353e5aeep+4",
+      assim         = "0x1.215ca9d9740e1p+4",
+      transpiration = "0x1.450032c3cb9c3p-16",
+      gc            = "0x1.0b2ace4d4c37fp-3",
+      profit        = "0x1.07970cd153bccp+4",
+      e_up          = "0x1.450032c3cb9c7p-16",
+      uptake        = "0x1.19e242571d857p-10"
     )
   ),
   list(
     inputs = list(psi_soil = 2.0, ppfd = 900, vpd = 2.0, layers = 3L),
     expected = list(
-      psi_stem      = "0x1.b1bea0a2f4464p+1",
-      opt_root_psi  = "0x1.821841efd374ep+1",
-      ci            = "0x1.0de7939a33b5ap+3",
-      assim         = "0x1.b2e0241264cb3p+1",
-      transpiration = "0x1.b29d0f355e619p-18",
-      gc            = "0x1.654643c265bb9p-7",
-      profit        = "0x1.8a7e20d88db3cp-1",
-      e_up          = "0x1.b29d0f355e618p-18",
-      uptake        = "0x1.78f45d1fcb376p-12"
+      psi_stem      = "0x1.b1bea0a2f4461p+1",
+      opt_root_psi  = "0x1.821841efd374cp+1",
+      ci            = "0x1.0de7939a33b55p+3",
+      assim         = "0x1.b2e0241264c97p+1",
+      transpiration = "0x1.b29d0f355e608p-18",
+      gc            = "0x1.654643c265babp-7",
+      profit        = "0x1.8a7e20d88dae8p-1",
+      e_up          = "0x1.b29d0f355e61p-18",
+      uptake        = "0x1.78f45d1fcb36fp-12"
     )
   ),
   list(
@@ -143,7 +143,7 @@ golden_rows <- list(
     expected = list(
       psi_stem      = "0x1.10141205bc01ap+4",
       opt_root_psi  = "0x1.10141205bc01ap+4",
-      ci            = "0x1.ec6f9e7580bdcp+2",
+      ci            = "0x1.ec6f9e7580bdbp+2",
       assim         = "0x0p+0",
       transpiration = "0x0p+0",
       gc            = "0x0p+0",

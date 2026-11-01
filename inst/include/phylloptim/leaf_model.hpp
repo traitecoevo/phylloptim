@@ -7161,27 +7161,11 @@ inline double Leaf::solve_ci(double gc) {
       }
       const PhotoCapacity<double> cap = photo_capacity<double>();
       const double supply_per_pa = gc / (atm_kpa_ * kPa_to_Pa);
-      // The value is `target`'s, through the kernel itself, so the Newton root
-      // and TOMS748's are the same function's to the last bit. Only the slope is
-      // written out here.
+      // The value is `target`'s and the slope is the kernel's own tangent
+      // (assim_slope_at), so the Newton root and TOMS748's are the same
+      // function's to the last bit and the slope cannot drift from it.
       auto residual = [&](double x, double& slope) -> double {
-        const double g_star = gamma_ * umol_per_mol_to_Pa_;
-        const double rk = x + km_;
-        const double rubisco = (cap.vcmax * (x - g_star)) / rk;
-        const double d_rubisco = cap.vcmax * (km_ + g_star) / (rk * rk);
-        const double ek = x + 2 * g_star;
-        const double electron = cap.transport / 4 * ((x - g_star) / ek);
-        const double d_electron = cap.transport / 4 * (3 * g_star) / (ek * ek);
-        const double s = rubisco + electron;
-        const double root =
-            sqrt(pow(s, 2) - 4 * cap.curvature * rubisco * electron);
-        const double d_root =
-            (s * (d_rubisco + d_electron) -
-             2 * cap.curvature * (d_rubisco * electron + rubisco * d_electron)) /
-            root;
-        slope = ((d_rubisco + d_electron) - d_root) / (2 * cap.curvature) *
-                    umol_to_mol +
-                supply_per_pa;
+        slope = assim_slope_at<double>(x, cap) * umol_to_mol + supply_per_pa;
         return target(x);
       };
       double a = lo, b = hi;

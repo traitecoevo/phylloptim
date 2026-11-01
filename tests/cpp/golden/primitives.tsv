@@ -531,11 +531,11 @@ spline	stom_cond_CO2	5.5	0	0.18029877428456831
 spline	hydraulic_cost_TF	5.5	0	6.6095780494649548
 iterative	psi_stem_to_ci	0.25	0	9.0207638165274862
 iterative	psi_stem_to_ci	0.5	0	12.135395889158257
-iterative	psi_stem_to_ci	0.75	0	14.866750850109069
+iterative	psi_stem_to_ci	0.75	0	14.866750850109076
 iterative	psi_stem_to_ci	1	0	17.252320209531781
 iterative	psi_stem_to_ci	1.25	0	19.328111884762478
 iterative	psi_stem_to_ci	1.5	0	21.121438601931892
-iterative	psi_stem_to_ci	1.75	0	22.655021201953215
+iterative	psi_stem_to_ci	1.75	0	22.6550212019532
 iterative	psi_stem_to_ci	2	0	23.953373592393426
 iterative	psi_stem_to_ci	2.25	0	25.044042286780481
 iterative	psi_stem_to_ci	2.5	0	25.955205653068806
