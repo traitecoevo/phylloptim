@@ -61,16 +61,20 @@
 ##' @inheritParams leaf_solve
 ##'
 ##' @param CF77_lambda Cowan-Farquhar's prescribed marginal value of water, in
-##'   umol C (kg H2O)^-1, one per observation. Only `model = "CF77"` reads it;
-##'   `NA_real_` (the default) uses its aligned default (see [align_curves()]).
+##'   umol C (kg H2O)^-1, one per observation. Only `model = "CF77"` reads it,
+##'   and [leaf_gradient_batch()] refuses it under any other model, as
+##'   [leaf_solve()] does; `NA_real_` (the default) uses its aligned default
+##'   (see [align_curves()]).
 ##' @param TF24_floor_lambda_o the `TF24_floor` curve's price of water as transpiration
 ##'   goes to zero, same units, one per observation. Only `model = "TF24_floor"`
-##'   reads it; `NA_real_` (the default) leaves it unset. That curve refuses to
-##'   solve without one, deliberately: at zero it is `TF24`.
+##'   reads it, and it is refused under any other model; `NA_real_` (the
+##'   default) leaves it unset, and [leaf_gradient_batch()] refuses that model
+##'   without one, deliberately: at zero it is `TF24`.
 ##' @param LeastCost_beta least-cost theory's unit-cost ratio (Prentice et al.
 ##'   2014's beta): the cost of maintaining carboxylation capacity relative to the
 ##'   cost of transpiration, dimensionless, one per observation. Only
-##'   `model = "LeastCost"` reads it; `NA_real_` (the default) uses its aligned
+##'   `model = "LeastCost"` reads it, and it is refused under any other model;
+##'   `NA_real_` (the default) uses its aligned
 ##'   default (see [align_curves()]). Zero is refused, since at
 ##'   zero the capacity term vanishes and what is left is water-use efficiency,
 ##'   which rises without bound as transpiration falls. The published value is 146.
@@ -351,10 +355,6 @@ leaf_gradient_batch <- function(batch,
     pars <- .gradient_available_pars(single, model, damage)
   }
   .gradient_check_pars(pars, single, model, damage)
-  # The refusal leaf_solve() gives, on the prices the batch was built with: the
-  # model is named only here, so this is the first place they can be checked.
-  .check_prices(model, batch$CF77_lambda, batch$TF24_floor_lambda_o,
-                batch$LeastCost_beta)
 
   # ⚠️ THE SAME ROUTE OBJECT `leaf_gradient()` USES, on the batch's own leaf, so
   # the two entry points cannot disagree about which model a name selects, which
@@ -393,7 +393,7 @@ leaf_gradient_batch <- function(batch,
       .gradient_check_theta(theta, batch, par_names), model, par_names)
   }
 
-  .gradient_check_owned_set(theta, model, par_names)
+  .gradient_check_theta_prices(theta, model, par_names)
 
   psi <- .gradient_check_psi_batch(psi, batch$n, method)
   dpsi_dtheta <- .gradient_dpsi_dtheta_batch(dpsi_dtheta, pars, batch$n,
@@ -578,10 +578,16 @@ leaf_gradient_batch <- function(batch,
   m
 }
 
-# The owned field of a model with no default must be set on every row, as
-# leaf_solve() requires. Left to C++, each such row comes back as a per-row
-# error, which a fit reads as observations that failed to solve.
-.gradient_check_owned_set <- function(m, model, par_names) {
+# The prices in the columns the solve will read, checked as leaf_solve() checks
+# its arguments: a price the model does not read is refused, and the owned field
+# of a model with no default must be set on every row. The model is named only
+# in leaf_gradient_batch(), so this is the first place either can be checked;
+# left to C++, a missing price is a per-row error, which a fit reads as
+# observations that failed to solve.
+.gradient_check_theta_prices <- function(m, model, par_names) {
+  col <- function(field) m[, match(field, par_names)]
+  .check_prices(model, col("CF77_lambda_"), col("TF24_floor_lambda_o"),
+                col("LeastCost_beta"))
   if (!model %in% names(.solve_price_fields)) {
     return(invisible(m))
   }

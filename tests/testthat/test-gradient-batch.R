@@ -705,7 +705,7 @@ test_that("the batch validates psi and dpsi_dtheta by shape", {
                    matrix(c(0.1, 0.1, 0.1, 0.2, 0.2, 0.2), 3, 2))
 })
 
-test_that("the batch refuses the prices leaf_solve() refuses", {
+test_that("the batch refuses a price its model does not read, and a missing one, as leaf_solve() does", {
   net <- series_resistance(1e4)
   single <- leaf_supply_singlelayer()
   solve_error <- function(...) {
@@ -733,8 +733,8 @@ test_that("the batch refuses the prices leaf_solve() refuses", {
                  pars = "vcmax_25", model = "collar"),
                "model = \"collar\" does not read it")
 
-  # A price the model needs and has no default for: refused before the solve,
-  # where it used to come back as a per-row error.
+  # A price the model needs and has no default for is refused before the solve,
+  # not returned as a per-row error.
   expect_match(solve_error(supply = single, root_network = net,
                            model = "TF24_floor"),
                "needs TF24_floor_lambda_o set")
@@ -744,8 +744,8 @@ test_that("the batch refuses the prices leaf_solve() refuses", {
                            TF24_floor_lambda_o = c(1.5e5, NA)),
                "needs TF24_floor_lambda_o set")
 
-  # A price that varies by observation reaches its own row, with kmax and the
-  # resistance shared: it used to fail building a one-row theta.
+  # A price that varies by observation reaches its own row while kmax and the
+  # resistance are shared, so theta has a row per observation.
   run <- function(price) {
     b <- leaf_batch(psi_soil = 1.5, PPFD = 1500, supply = single,
                     root_network = net, CF77_lambda = price)
@@ -758,6 +758,29 @@ test_that("the batch refuses the prices leaf_solve() refuses", {
   expect_identical(both$value[, "A"],
                    unname(c(run(1e5)$value[, "A"], run(3e5)$value[, "A"])))
   expect_false(both$value[1, "A"] == both$value[2, "A"])
+
+  # The check reads the columns the solve reads, so a supplied theta is held to
+  # it too, and a batch built with one curve's price can be differentiated
+  # under another once that column is NA.
+  b <- leaf_batch(psi_soil = c(1.0, 1.5), PPFD = 1500, supply = single,
+                  root_network = net, CF77_lambda = 1.5e5)
+  th <- .gradient_theta_matrix(b, leaf_traits(), model = "CF77")
+  colnames(th) <- gradient_par_names()
+  expect_error(leaf_gradient_batch(b, pars = "vcmax_25", model = "TF24"),
+               "CF77 curve's prescribed price")
+  expect_error(leaf_gradient_batch(b, pars = "vcmax_25", model = "TF24",
+                                   theta = th),
+               "CF77 curve's prescribed price")
+  th[, "CF77_lambda_"] <- NA_real_
+  expect_identical(
+    leaf_gradient_batch(b, pars = "vcmax_25", model = "TF24", theta = th)$status,
+    c("interior", "interior"))
+
+  # leaf_solve() seats one price for every row
+  expect_error(leaf_solve(psi_soil = 1.5, PPFD = 1500, supply = single,
+                          root_network = net, model = "CF77",
+                          CF77_lambda = c(1e5, 3e5)),
+               "must be a single number")
 })
 
 test_that("the batch reproduces leaf_gradient() on every model, bit-for-bit", {

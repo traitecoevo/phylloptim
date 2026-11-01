@@ -2354,9 +2354,17 @@ void check_prescribed_stem_writes_every_output(const Drivers &d, int *rows,
     seat(reused);
     reused.optimise();
     const double poison = -12345.0;
-    reused.lambda_emergent_ = poison;
-    reused.profit_ = poison;
-    reused.opt_psi_stem_ = poison;
+    for (double* f : {&reused.opt_psi_stem_, &reused.ci_, &reused.assim_colimited_,
+                      &reused.transpiration_, &reused.stom_cond_CO2_,
+                      &reused.profit_, &reused.Tleaf_, &reused.lambda_emergent_,
+                      &reused.residual_flux_}) {
+      *f = poison;
+    }
+    // ProfitMax's stem routes do not write hydraulic_cost_, a defect
+    // psi_stem_optima.tsv records; every other curve's is checked.
+    if constexpr (K != phylloptim::Leaf::CostCurve::ProfitMax) {
+      reused.hydraulic_cost_ = poison;
+    }
     reused.template evaluate_psi_stem<K>(target);
 
     const std::vector<double> a = fresh.operating_point_values();
@@ -4885,7 +4893,7 @@ void test_supplied_rows_match_a_resolve_at_every_kind() {
   namespace pl = phylloptim;
   struct Fixture {
     std::vector<double> psi_soil;
-    double ppfd, vpd, root_P50;
+    double ppfd, vpd;
     Kind want;
     double g_min = 0.0;
   };
@@ -4897,12 +4905,12 @@ void test_supplied_rows_match_a_resolve_at_every_kind() {
   // dry pin at the end of the stem curve, #183), a soil past the end of the
   // curve (shut), and an interior control.
   const std::vector<Fixture> fixtures{
-      {{1.0, 1.25}, 1500.0, 2.0, 0.0, Kind::Interior},
-      {{4.0, 4.25, 4.5, 4.75, 5.0}, 900.0, 2.0, 0.0, Kind::BoundarySoil},
-      {{3.0, 3.25, 3.5}, 900.0, 3.1, 0.0, Kind::BoundarySoil},  // 3.1 < e_s(25 C)
-      {{6.0}, 500.0, 0.5, 0.0, Kind::BoundaryDry},
-      {{1.0}, 1.0, 2.0, 0.0, Kind::BoundarySoil, 5e-4},
-      {{16.0, 16.25, 16.5}, 900.0, 2.0, 0.0, Kind::HydraulicShutdown}};
+      {{1.0, 1.25}, 1500.0, 2.0, Kind::Interior},
+      {{4.0, 4.25, 4.5, 4.75, 5.0}, 900.0, 2.0, Kind::BoundarySoil},
+      {{3.0, 3.25, 3.5}, 900.0, 3.1, Kind::BoundarySoil},  // 3.1 < e_s(25 C)
+      {{6.0}, 500.0, 0.5, Kind::BoundaryDry},
+      {{1.0}, 1.0, 2.0, Kind::BoundarySoil, 5e-4},
+      {{16.0, 16.25, 16.5}, 900.0, 2.0, Kind::HydraulicShutdown}};
   const std::vector<int> pars{
       pl::par_vcmax_25, pl::par_stem_c, pl::par_stem_P50, pl::par_root_c,
       pl::par_root_P50, pl::par_TF24_beta2, pl::par_jmax_25, pl::par_phi_J,
@@ -4937,17 +4945,6 @@ void test_supplied_rows_match_a_resolve_at_every_kind() {
                         fx.vpd, 40.0, 25.0, 21.0, 101.3);
     pl::leaf_pars<double> p0 = base.passive_pars();
     p0[pl::par_g_min] = fx.g_min;
-    if (fx.root_P50 > 0.0) {
-      // The transpose test's traits for its root-limited fixtures. stem_P50 is
-      // not the default 3.4: 3.4287 puts psi_crit (5.920 MPa) drier than
-      // root_psi_crit (5.870 at root_P50 3.4), off the tie the defaults sit on.
-      p0[pl::par_stem_P50] = 3.4287;
-      p0[pl::par_root_P50] = fx.root_P50;
-      p0[pl::par_phi_J] = 0.30;
-      p0[pl::par_JS22_gamma] = 1.0;
-      p0[pl::par_CMax_a] = 0.6;
-      p0[pl::par_CMax_b] = 0.0;
-    }
     pl::Leaf l = solve(p0);
     const std::string name = l.operating_point_kind_name(fx.want);
     ok(l.operating_point_kind() == fx.want,

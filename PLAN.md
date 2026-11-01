@@ -89,4 +89,4 @@ These are #206's options 4 and 5, its further candidates, and the audit's findin
 ## Done
 
 - 0.27.0: the dry-end decision is made on the end solved to collar precision, on the collar's own distance; `boundary-dry` and `interior` meet continuously; plant's sweep agrees with a tangent of the run to 7e-8. Measurements on [phylloptim#205](https://github.com/traitecoevo/phylloptim/pull/205).
-- 0.27.1 (A1–A3, #207): a prescribed stem point writes `lambda_emergent_`; the batch refuses the prices `leaf_solve()` refuses and accepts per-observation prices; the 3.4287 fixtures say why they are not the default.
+- 0.27.1 (A1–A3, #207): a prescribed stem point writes `lambda_emergent_`; the batch refuses the prices `leaf_solve()` refuses and accepts per-observation prices; the 3.4287 fixtures were dead branches (their root-limited fixtures went in #188) and are gone, and the stem-curve test reads the default.
