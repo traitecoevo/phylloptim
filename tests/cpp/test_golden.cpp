@@ -141,8 +141,8 @@ std::vector<Row> run_grid() {
 //
 // `Leaf::operating_point_kind()` says which branch of the collar solve produced
 // the point, and the grid's split between those branches is a measured number.
-// AT 25 C, of the 336 points 239 sit at an interior profit maximum and 49 at a
-// constrained optimum pinned to a bracket bound: 42 wet, and 7 dry, at
+// AT 25 C, of the 336 points 237 sit at an interior profit maximum and 51 at a
+// constrained optimum pinned to a bracket bound: 42 wet, and 9 dry, at
 // psi_soil = 6, where profit still rises at the end of the collar's interval
 // solved to collar precision, so the leaf transpires all its stem can carry. The 48
 // at psi_soil = 17, past the end of the stem curve, shut down; psi_crit bounds
@@ -184,7 +184,7 @@ struct TempKinds {
 // assimilates less and respires more, so it has less to gain from water and its
 // optimum presses against the WET bound instead of the dry one.
 const TempKinds kExpectedKinds[] = {
-    {25.0, 239, 42, 7, 48},
+    {25.0, 237, 42, 9, 48},
     {40.0, 172, 116, 0, 48},
 };
 

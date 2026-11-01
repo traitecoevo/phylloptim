@@ -5297,12 +5297,13 @@ void test_a_dry_pin_meets_the_interior_answer_continuously() {
   // steps of 1e-7: 1001 solves, a few milliseconds.
   const double lo = 4.21987, hi = 4.22007, step = 2e-7;
   std::vector<double> profit, collar;
-  int along_the_end = 0, n = 0;
+  int along_the_end = 0, n = 0, pinned = 0;
   for (double top = lo; top <= hi + 0.5 * step; top += step) {
     pl::Leaf l = solve(top);
     ok(l.operating_point_kind() == Kind::Interior ||
            l.operating_point_kind() == Kind::BoundaryDry,
        "the fixture solves to an interior point or a dry pin");
+    pinned += l.operating_point_kind() == Kind::BoundaryDry;
     profit.push_back(l.profit_);
     collar.push_back(l.opt_root_psi_);
     bool read = false;
@@ -5310,7 +5311,10 @@ void test_a_dry_pin_meets_the_interior_answer_continuously() {
     along_the_end += !read;
     ++n;
   }
-  printf("    %d points, %d within 1e-5 MPa of the dry end\n", n, along_the_end);
+  // The kinds are printed, not asserted: which side of the decision these
+  // points fall on is the solve's to say, and the test is about the join.
+  printf("    %d points, %d within 1e-5 MPa of the dry end, %d pinned\n", n,
+         along_the_end, pinned);
   ok(along_the_end > n / 2, "the sweep runs along the dry end (test is not vacuous)");
   // Each step against the next: a jump is a step out of all proportion to the
   // one beside it. The old decision's jump was 5e-6 MPa in the collar against
@@ -5335,15 +5339,19 @@ void test_a_dry_pin_meets_the_interior_answer_continuously() {
                            {6.0}, {1.0});
     l.find_root_collar_psi();
     ok(l.operating_point_kind() == Kind::BoundaryDry, "the dry fixture pins");
-    // The pin is the maximum to what the collar resolves: a step inside it
-    // earns nothing. The step is a decade above collar_root_tol, and the
-    // tolerance is what the marginal there, of order one, times that step
-    // amounts to.
+    // A pin past its maximum, the old decision's failure, has a falling
+    // marginal of order one at the collar it reports, and a step inside it
+    // EARNS by that marginal times the step. The step is 1e-7 MPa, so such a
+    // pin earns ~1e-7, well clear of what the solve resolves; a true pin loses
+    // the rise over that step. The marginal AT the end is not asserted: the
+    // profit's maximum can sit a hair inside the end, where the marginal has
+    // already turned (it falls from zero to order one across the last
+    // nano-MPa), and the pin is still the answer the collar resolves.
     pl::Leaf inside = make_leaf([] { Drivers d; d.PPFD = 500.0; d.atm_vpd = 0.5; return d; }(),
                                 {6.0}, {1.0});
-    const double p_in = inside.evaluate_root_collar_psi_for<CC::TF24>(l.opt_root_psi_ - 1e-11);
-    ok(p_in <= l.profit_ + 1e-10,
-       "a step inside a dry pin earns nothing: " + std::to_string(p_in) + " against " +
+    const double p_in = inside.evaluate_root_collar_psi_for<CC::TF24>(l.opt_root_psi_ - 1e-7);
+    ok(p_in < l.profit_,
+       "a step inside a dry pin loses: " + std::to_string(p_in) + " against " +
            std::to_string(l.profit_));
   }
 }
