@@ -1,6 +1,6 @@
 # phylloptim 0.27.2
 
-- The collar solve walks the root uptake once per candidate collar rather than three times, so it is about 11% faster; results do not move (all three goldens bit-identical). Plan section D.
+- The collar solve walks the root uptake once per candidate collar rather than three times, so it is about 11% faster; results do not move, and plant's seasonal stand runs about 15% faster ([#214](https://github.com/traitecoevo/phylloptim/issues/214)).
 
 # phylloptim 0.27.1
 
