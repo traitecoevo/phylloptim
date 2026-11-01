@@ -4,8 +4,7 @@
 # WHY THIS EXISTS. Doxygen only treats `///`, `//!`, `/** */` and `/*! */` as
 # documentation; an ordinary `//` comment is invisible to it. Every comment in
 # this package is an ordinary `//` comment, and they are the substantive part --
-# the FMA-contraction note in `hydraulic_cost_Sperry`, the "do not get this
-# wrong" warnings in closed_form.hpp, the two-vulnerability-curves hazard at the
+# the FMA-contraction notes, the "do not get this wrong" warnings in closed_form.hpp, the two-vulnerability-curves hazard at the
 # `stem_b`/`stem_c` declarations. Rendering the API without them would render the
 # half a reader can already get from the signatures.
 #

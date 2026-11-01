@@ -28,7 +28,7 @@ for f in inst/include/phylloptim/*.hpp R/*.R; do
   awk -v max="$COMMENT_MAX" -v min="$MIN_LINES" -v f="$f" '
     /^[ \t]*#+'"'"'/ { next }
     NF { n++ }
-    /^[ \t]*(\/\/|#)/ { c++ }
+    (f ~ /\.R$/ && /^[ \t]*#/) || (f !~ /\.R$/ && /^[ \t]*\/\//) { c++ }
     END {
       if (n >= min && c / n > max) {
         printf "%s: comments are %.0f%% of its lines; the limit is %.0f%%\n", f, 100 * c / n, 100 * max

@@ -1018,7 +1018,7 @@ Because it is an optimum, there are two things `dY/dθ` could mean for this curv
 
 ## The energy-balance term
 
-With the energy balance on, ψ reaches profit by two routes beyond the two the gate-off derivative already carries, both through the leaf temperature: directly, ψ → ψ_stem → E → T_leaf → the temperature responses → A; and indirectly, through the c_i root-find, whose residual reads the temperature-dependent members and so gains an explicit T argument. `dprofit_energy_balance_term()` adds both; `dprofit_dpsi_stem()` and `dprofit_at_collar_psi()` call it, and it is exactly zero with the gate off.
+With the energy balance on, ψ reaches profit by two routes beyond the two the gate-off derivative already carries, both through the leaf temperature: directly, ψ → ψ_stem → E → T_leaf → the temperature responses → A; and indirectly, through the c_i root-find, whose residual reads the temperature-dependent members and so gains an explicit T argument. `dprofit_energy_balance_term()` adds both, and subtracts the temperature slope of the two costs that read the leaf temperature (ProfitMax's thermal cost and LeastCost's capacity term); `dprofit_dpsi_stem()` and `dprofit_at_collar_psi()` call it, and it is exactly zero with the gate off. Below, $A_T=\partial A/\partial T$ at fixed $c_i$ and $A'=\partial A/\partial c_i$ at fixed temperature (not the $d A/d\psi$ written $A'$ earlier on this page).
 
 The c_i solve finds the root of
 

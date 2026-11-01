@@ -514,8 +514,8 @@ public:
   // Tolerance on the collar for the profit-maximising root-find, fixed by the solve:
   // ~8 orders below the 1e-4 at which this package calls a difference real.
   static constexpr double collar_root_tol = 1e-12;
-  // Tolerance on ci for every supply == demand root-find; psi_stem_to_ci says
-  // why it is 1e-13.
+  // Tolerance on ci for every supply == demand root-find; solve_ci says why it
+  // is 1e-13.
   static constexpr double ci_root_tol = 1e-13;
   // Tolerance to which find_root_psi places the collar interval's two bounds,
   // and that tolerance at x, absolute plus relative.
@@ -4309,7 +4309,8 @@ inline std::array<double, Leaf::photo_temp_key_size> Leaf::photo_temp_key() cons
           // The thermal cost reaches jmax_; a bool widens to 0.0/1.0.
           double(use_thermal_cost_), T50_, Tcrit_,
           // The thermal-damage gate is here and its inputs (A_, I_, D_) are not:
-          // set_physiology bypasses this cache with the gate on. Without the gate,
+          // set_physiology bypasses this cache with the gate on; drop that bypass
+          // and every input the block reads must join this key. Without the gate,
           // switching it off would be served the gate-on block.
           double(use_thermal_damage_)};
 }

@@ -30,11 +30,11 @@ source read at 1.0.6.1). All three are **pure R with no compiled code**.
 | Profit / gain-risk optimisation | **yes** | Cowan-Farquhar with fixed λ | no | no |
 | Thermal acclimation or damage | yes — an instantaneous thermal cost (Sicangco et al. 2026) and a damage layer, both default off | no | no | no |
 | Fits to measured data | exact trait gradients for a likelihood you write (`vignette("fitting")`); no packaged fit | yes (A-Ci, Ball-Berry) | no | yes (that's the point) |
-| Swappable *empirical* gs schemes | Medlyn's slope reported (`g1_eff`), not a scheme | **yes — 4, plus Tuzet** | n/a | n/a |
+| Swappable *empirical* gs schemes | one, Medlyn's USO, as a separate route (`medlyn_model_gs`), outside the optimality solver | **yes — 4, plus Tuzet** | n/a | n/a |
 | Swappable *hydraulic optimality* schemes | **nine, through one solver at identical drivers** (`vignette("the-models")`) | no (none are hydraulic) | no | no |
-| Exact derivatives | **yes — of the operating point in every trait (implicit function theorem, XAD)** | no | no | no |
+| Exact derivatives | **trait gradients through the implicit function theorem; exact rows for plant's TF24 runs (XAD)** | no | no | no |
 | Language | C++ header-only | R | R | R |
-| Cost per solve | a few µs (the solver table in `vignette("the-models")`) | not measured; `mapply` over scalars | one `uniroot` per leaf | vectorised over time series |
+| Cost per solve | a few µs (README, "Performance from R") | not measured; `mapply` over scalars | one `uniroot` per leaf | vectorised over time series |
 | Licence | AGPL-3+ | GPL | MIT | GPL-2+ |
 
 ---
@@ -57,8 +57,9 @@ conductance, and — its distinguishing strength — **A-Ci curve fitting**.
   outputs in the traits, and `vignette("fitting")` shows how to write the fit.
 - **Interchangeable stomatal models as first-class options.** `gsmodel=` selects
   Medlyn/USO (generalised with Duursma's `gk` exponent), Leuning, Ball-Berry, or
-  a user-supplied multiplier. phylloptim reports the Medlyn slope its optimum
-  implies (`g1_eff`) but does not offer Medlyn as a scheme.
+  a user-supplied multiplier. phylloptim has Medlyn's USO as one empirical route
+  beside its optimality curves, and reports the Medlyn slope each optimum implies
+  (`g1_eff`).
 - **A working leaf energy balance.** `PhotosynEB` solves Tleaf with the full
   gs↔Tleaf feedback: an inner `uniroot` on the energy-balance residual for a
   given gs, wrapped in an outer `optimize` that closes the loop because gs itself
@@ -208,7 +209,7 @@ Two things follow.
 
 **It compares hydraulic optimality theories through one numerical core.** `plantecophys` already compares *empirical* stomatal schemes well (`gsmodel=`, `PhotosynTuzet`, `FARAO`). What none of the three can compare is hydraulically explicit formulations, which is where the live argument sits: gain-risk against least-cost against carbon-maximisation variants. phylloptim runs nine of them through one solver at identical drivers. A companion manuscript (`Falster-stomatal_analytical_analysis`) shows that these models all satisfy `dA/dE = λ` and differ only in λ(state), the marginal cost of water, so a shared core makes the comparison like for like by construction (`vignette("the-models")`).
 
-**It is fast and differentiable.** None of the three has automatic differentiation; all of them difference or grid-search when they need gradients (`fitaci`'s 25×25 start grid exists because `nls` on this objective is fragile). phylloptim returns the operating point's exact derivatives in every trait, through the implicit function theorem at the converged point (`leaf_gradient()`, `leaf_gradient_batch()`), and plant differentiates whole runs through the same rows.
+**It is fast and differentiable.** None of the three has automatic differentiation; all of them difference or grid-search when they need gradients (`fitaci`'s 25×25 start grid exists because `nls` on this objective is fragile). phylloptim returns trait gradients of the operating point through the implicit function theorem at the converged point (`leaf_gradient()`, `leaf_gradient_batch()`; the curvature terms are differences of an analytic first derivative, and a pinned point falls back to a difference of the solve), and exact derivative rows for the TF24 curves, through which plant differentiates whole runs.
 
 The gaps run the other way just as clearly:
 

@@ -25,9 +25,9 @@
 ##' `leaf$vcmax_25 <- x` could not be made correct. Three separate pieces of
 ##' derived state go stale on a bare trait write: the two pre-integrated
 ##' vulnerability tables, the solved operating point, and -- least visibly --
-##' `vcmax_`/`jmax_`/`R_d_`, which `set_physiology()` computes behind a cache keyed
-##' on leaf temperature and O2 alone. That last one means the obvious repair,
-##' "change the trait and then set the drivers again", silently does not work.
+##' `vcmax_`/`jmax_`/`R_d_`, which `set_physiology()` computes behind a cache. The
+##' cache is keyed on the traits it reads, so setting the drivers again refreshes
+##' it, but nothing short of `set_traits()` refreshes the tables or the solved point.
 ##'
 ##' @param x a `Leaf`, from [leaf_model()]
 ##' @param traits a [leaf_traits()] object
@@ -135,8 +135,8 @@ set_traits <- function(x, traits) {
 ##' no argmax is involved and `M` is a first difference of an exact quantity. It is
 ##' stable to seven significant figures across five decades of step size.
 ##'
-##' The second term is not a correction. For `TF24_cost_scale`, `TF24_beta2`, `stem_b`
-##' and `stem_c` it is 100% of the answer, and for `vcmax_25` 52%.
+##' The second term is not a correction. For `TF24_cost_scale`, `TF24_beta2` and
+##' `stem_c` it is 100% of the answer, and for `vcmax_25` 52%.
 ##'
 ##' @section profit, which is the one output the envelope theorem reaches:
 ##' The first four outputs are what a gas-exchange calibration observes. `profit`
