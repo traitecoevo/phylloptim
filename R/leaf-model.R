@@ -827,8 +827,14 @@ operating_point <- function(x) {
 ##' @param model which optimality model to solve, as in [leaf_gradient()]:
 ##'   `"collar"` (the default, the production path -- the TF24 cost maximised over
 ##'   the root-collar potential) or any name from [cost_curve_names()], which
-##'   solves that curve's **stem** optimum instead: `psi_stem` with the upstream
-##'   potential pinned at `psi_soil`, which needs `leaf_supply_singlelayer()`.
+##'   solves that curve on `route`.
+##' @param route which potential the curve is maximised over: `"collar"`, the
+##'   root-collar potential, on either supply path; or `"stem"`, `psi_stem` with
+##'   the upstream potential pinned at `psi_soil`, which needs
+##'   `leaf_supply_singlelayer()`. `NULL` (the default) is the collar route for
+##'   `model = "collar"` and the stem route for a curve name, so a call that
+##'   names no route means what it always has. `model = "collar"` is TF24 on the
+##'   collar route, so it takes no `route = "stem"`: that is `model = "TF24"`.
 ##'
 ##'   ⚠️ **`"collar"` and `"TF24"` are different models, not two ways of asking
 ##'   one question**, even though both use the TF24 cost. They optimise different
@@ -905,10 +911,11 @@ leaf_solve <- function(psi_soil,
                        supply = leaf_supply_multilayer(),
                        reuse = TRUE,
                        model = "collar",
+                       route = NULL,
                        CF77_lambda = NA_real_,
                        TF24_floor_lambda_o = NA_real_,
                        LeastCost_beta = NA_real_) {
-  .check_model(model, supply)
+  m <- .resolve_model(model, route, supply$kind)
   # One price for every row: the price is seated once per Leaf.
   given <- .owned_arguments(environment())
   long <- vapply(given, length, integer(1)) != 1L
@@ -947,7 +954,7 @@ leaf_solve <- function(psi_soil,
     .recycle_to(root_network, n, "root_network")
   }
 
-  shared <- if (reuse) .seat_model(leaf_model(traits, control, supply), model,
+  shared <- if (reuse) .seat_model(leaf_model(traits, control, supply), m,
                                    prices)
             else NULL
 
@@ -963,7 +970,7 @@ leaf_solve <- function(psi_soil,
   with_phylloptim_conditions(
   for (i in seq_len(n)) {
     l <- if (reuse) shared else .seat_model(leaf_model(traits, control, supply),
-                                            model, prices)
+                                            m, prices)
     set_drivers(l,
                 psi_soil = layered[[i]],
                 PPFD = scalars$PPFD[[i]],
@@ -995,10 +1002,14 @@ leaf_solve <- function(psi_soil,
 
 # --- internals ---------------------------------------------------------------
 
-# Validate a model name against the supply path, before a Leaf is built. The
-# names come from `.gradient_models()`, which `leaf_gradient()` also uses, so a
-# curve added in C++ is solvable here and the two entry points cannot disagree.
-.check_model <- function(model, supply) {
+# A model is a (curve, route) pair, resolved from `model` and `route` and
+# validated against the supply path before a Leaf is built. `model = "collar"`
+# is TF24 on the collar route and a curve name defaults to its stem route
+# (decision D3), so a call naming no route means what it did before routes
+# could be named. leaf_solve(), leaf_gradient() and leaf_gradient_batch() all
+# resolve here, from `.gradient_models()`, so a curve added in C++ is reachable
+# from each and they cannot disagree about what a name selects.
+.resolve_model <- function(model, route, supply_kind) {
   if (!(is.character(model) && length(model) == 1L)) {
     stop("`model` must be a single model name; see cost_curve_names()",
          call. = FALSE)
@@ -1007,21 +1018,36 @@ leaf_solve <- function(psi_soil,
     stop("unknown model \"", model, "\". Available: ",
          paste(.gradient_models(), collapse = ", "), ".", call. = FALSE)
   }
-  if (!identical(model, "collar") && !identical(supply$kind, "single")) {
+  if (!is.null(route) &&
+      !(is.character(route) && length(route) == 1L &&
+        route %in% c("collar", "stem"))) {
+    stop("`route` must be \"collar\", \"stem\" or NULL", call. = FALSE)
+  }
+  if (identical(model, "collar")) {
+    if (identical(route, "stem")) {
+      stop("model = \"collar\" is TF24 on the collar route; for TF24's stem ",
+           "route pass model = \"TF24\".", call. = FALSE)
+    }
+    curve <- "TF24"
+    route <- "collar"
+  } else {
+    curve <- model
+    if (is.null(route)) route <- "stem"
+  }
+  if (identical(route, "stem") && !identical(supply_kind, "single")) {
     stop("the stem routes optimise `psi_stem` with the upstream potential ",
          "pinned at `psi_soil`, so they need the single-potential supply path; ",
-         "got the multi-layer one. Use model = \"collar\" for a root network.",
+         "got the multi-layer one. Use route = \"collar\" for a root network.",
          call. = FALSE)
   }
-  invisible(model)
+  list(model = model, curve = curve, route = route)
 }
 
 # The model and its prescribed prices are configuration that survives
 # set_drivers() and set_traits(), so this runs once per Leaf, not per row. It is
 # `leaf_solve()`'s only route to the price fields, which `leaf_traits()` cannot carry.
-.seat_model <- function(x, model, prices = NULL) {
-  x$set_model(if (identical(model, "collar")) "TF24" else model,
-              if (identical(model, "collar")) "collar" else "stem")
+.seat_model <- function(x, m, prices = NULL) {
+  x$set_model(m$curve, m$route)
   for (nm in names(prices)) {
     if (!is.na(prices[[nm]])) {
       x[[nm]] <- prices[[nm]]
@@ -1075,9 +1101,8 @@ leaf_solve <- function(psi_soil,
 }
 
 # The value an owned field takes in a gradient's theta: off the leaf when there
-# is one, its default when there is not, and NA on every route that does not own
-# it. The NA is what keeps the R reference from writing the field once per
-# perturbation on routes that never read it -- a crossing `test-cost.R` counts.
+# is one, its default when there is not, and NA on every model that does not own
+# it, which `gradient::apply()` then leaves unwritten.
 .owned_value <- function(model, field, x = NULL) {
   if (!.owns_field(model, field)) {
     return(NA_real_)

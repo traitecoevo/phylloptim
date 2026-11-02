@@ -4137,8 +4137,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // gradient_batch_run
-Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, SEXP drivers, Rcpp::NumericMatrix theta, Rcpp::IntegerVector pars, double step, double stationarity_tol, std::string method, bool fast_stem_curve, SEXP psi, SEXP dpsi_dtheta, int curve, double fd_step, double pinned_A_max);
-RcppExport SEXP _phylloptim_gradient_batch_run(SEXP obj_SEXP, SEXP driversSEXP, SEXP thetaSEXP, SEXP parsSEXP, SEXP stepSEXP, SEXP stationarity_tolSEXP, SEXP methodSEXP, SEXP fast_stem_curveSEXP, SEXP psiSEXP, SEXP dpsi_dthetaSEXP, SEXP curveSEXP, SEXP fd_stepSEXP, SEXP pinned_A_maxSEXP) {
+Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, SEXP drivers, Rcpp::NumericMatrix theta, Rcpp::IntegerVector pars, double step, double stationarity_tol, std::string method, bool fast_stem_curve, SEXP psi, SEXP dpsi_dtheta, int curve, bool collar, double fd_step);
+RcppExport SEXP _phylloptim_gradient_batch_run(SEXP obj_SEXP, SEXP driversSEXP, SEXP thetaSEXP, SEXP parsSEXP, SEXP stepSEXP, SEXP stationarity_tolSEXP, SEXP methodSEXP, SEXP fast_stem_curveSEXP, SEXP psiSEXP, SEXP dpsi_dthetaSEXP, SEXP curveSEXP, SEXP collarSEXP, SEXP fd_stepSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -4153,9 +4153,9 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< SEXP >::type psi(psiSEXP);
     Rcpp::traits::input_parameter< SEXP >::type dpsi_dtheta(dpsi_dthetaSEXP);
     Rcpp::traits::input_parameter< int >::type curve(curveSEXP);
+    Rcpp::traits::input_parameter< bool >::type collar(collarSEXP);
     Rcpp::traits::input_parameter< double >::type fd_step(fd_stepSEXP);
-    Rcpp::traits::input_parameter< double >::type pinned_A_max(pinned_A_maxSEXP);
-    rcpp_result_gen = Rcpp::wrap(gradient_batch_run(obj_, drivers, theta, pars, step, stationarity_tol, method, fast_stem_curve, psi, dpsi_dtheta, curve, fd_step, pinned_A_max));
+    rcpp_result_gen = Rcpp::wrap(gradient_batch_run(obj_, drivers, theta, pars, step, stationarity_tol, method, fast_stem_curve, psi, dpsi_dtheta, curve, collar, fd_step));
     return rcpp_result_gen;
 END_RCPP
 }

@@ -1,14 +1,11 @@
 # Trait gradients over many observations in one crossing: leaf_batch() and
 # leaf_gradient_batch().
 #
-# The composite is transcribed into inst/include/phylloptim/gradient.hpp and
-# looped over observations there; this file gets a parameter matrix in and the
-# arrays out. The likelihood and the parameterisation Jacobian stay with the
-# caller, in R: a fit with P_fit > P_model applies its own chain rule.
-#
-# R/gradient.R is the reference, and the C++ composite must agree with it
-# bit-for-bit; test-gradient-batch.R holds that, and R/gradient.R's header says
-# what it constrains.
+# The composite is inst/include/phylloptim/gradient.hpp, looped over
+# observations there; this file gets a parameter matrix in and the arrays out.
+# leaf_gradient() is the same call with one observation. The likelihood and the
+# parameterisation Jacobian stay with the caller, in R: a fit with
+# P_fit > P_model applies its own chain rule.
 
 ##' The observations a batch gradient is taken over
 ##'
@@ -161,13 +158,7 @@ leaf_batch <- function(psi_soil,
 
   structure(
     list(leaf = l,
-         drivers = gradient_batch_prepare(
-           root_network = lapply(resolved, `[[`, "root_network"),
-           psi_soil = lapply(resolved, `[[`, "psi_soil"),
-           soil_depth = lapply(resolved, `[[`, "soil_depth"),
-           PPFD = pick("PPFD"), atm_vpd = pick("atm_vpd"), ca = pick("ca"),
-           leaf_temp = pick("leaf_temp"), atm_o2_kpa = pick("atm_o2_kpa"),
-           atm_kpa = pick("atm_kpa")),
+         drivers = .gradient_prepare(resolved),
          n = n,
          supply_kind = l$supply_kind,
          traits = traits,
@@ -207,11 +198,11 @@ print.leaf_batch <- function(x, ...) {
 ##'
 ##' @section What it computes, and where the maths is written down:
 ##' The same five derivatives at the same solved operating point, by the same two
-##' routes, with the same active-set test deciding between them. **Read
+##' methods, with the same active-set test deciding between them. **Read
 ##' [leaf_gradient()]'s documentation for all of it** — the implicit function
 ##' theorem, why the second term is not a correction, why the premise is tested
-##' rather than assumed, and what `status` means. Nothing here differs; this is a
-##' transcription, and it is required to agree with the R version bit-for-bit.
+##' rather than assumed, and what `status` means. Nothing here differs:
+##' [leaf_gradient()] is this function with one observation.
 ##'
 ##' @section Speed, and which side of the boundary the figure belongs to:
 ##' Through [leaf_gradient()], almost all of a four-parameter gradient's cost per
@@ -251,8 +242,9 @@ print.leaf_batch <- function(x, ...) {
 ##' @param traits a [leaf_traits()] object: the point in trait space to
 ##'   differentiate at. Defaults to the one `batch` was built with. Ignored when
 ##'   `theta` is given.
-##' @param model which optimality model to differentiate, as in
-##'   [leaf_gradient()]: `"collar"` by default, or any [cost_curve_names()] entry.
+##' @param model,route which optimality model to differentiate, and on which
+##'   route, as in [leaf_gradient()]: `"collar"` by default, or any
+##'   [cost_curve_names()] entry, on its stem route unless `route = "collar"`.
 ##' @param pars what to differentiate with respect to, as in [leaf_gradient()].
 ##'   ⚠️ **Always pass it.** It is `P_model`, so the default — all of them — is
 ##'   the most expensive thing you can ask for.
@@ -295,7 +287,8 @@ leaf_gradient_batch <- function(batch,
                                 stationarity_tol = 1e-8,
                                 method = c("auto", "ift", "fd"),
                                 fast_stem_curve = TRUE,
-                                model = "collar") {
+                                model = "collar",
+                                route = NULL) {
   if (!inherits(batch, "leaf_batch")) {
     stop("`batch` must come from leaf_batch(); got ", class(batch)[[1]],
          call. = FALSE)
@@ -312,6 +305,9 @@ leaf_gradient_batch <- function(batch,
   # The supply path from the batch's record, not `batch$leaf`, which would be a
   # pointer read before the check above. It was taken off the leaf at build time.
   single <- identical(batch$supply_kind, "single")
+  # The same resolution leaf_gradient() and leaf_solve() make, so the three
+  # cannot disagree about what a model name and route select.
+  m <- .resolve_model(model, route, batch$supply_kind)
   # The thermal-damage inputs are parameters only with the batch leaf's gate on.
   damage <- isTRUE(batch$leaf$use_thermal_damage_)
   par_names <- .gradient_par_names()
@@ -320,24 +316,9 @@ leaf_gradient_batch <- function(batch,
   }
   .gradient_check_pars(pars, single, model, damage)
 
-  # The same route object leaf_gradient() uses, so the two cannot disagree about
-  # what a model name selects, its `fd_step` or the supply path it needs. Built
-  # for those; it seats the batch's leaf too, which C++ re-seats for every row
-  # (`gradient::route_seat`).
-  route <- .gradient_route(batch$leaf, model, list(kind = batch$supply_kind))
-  # The curve as an index into cost_curve_names(), -1 for the collar route:
-  # C++'s `gradient::Settings::curve`, never seen by an R caller.
-  curve <- if (identical(model, .GRADIENT_COLLAR_ROUTE)) {
-    -1L
-  } else {
-    as.integer(match(model, cost_curve_names()) - 1L)
-  }
   # The finite-difference arm's step: the caller's if named, as in
-  # leaf_gradient(), otherwise the route's, which clears the solver's resolution.
-  fd_step <- if (missing(step)) route$fd_step else step
-  # ProfitMax's normaliser is cleared at every perturbation, so C++ re-solves it,
-  # as `.gradient_route()` does in R. A boolean passed as a double.
-  reseat_profitmax <- if (identical(model, "ProfitMax")) 1 else 0
+  # leaf_gradient(), otherwise the one that clears the solver's resolution.
+  fd_step <- if (missing(step)) .gradient_fd_step else step
 
   if (is.null(theta)) {
     if (is.null(traits)) {
@@ -362,19 +343,10 @@ leaf_gradient_batch <- function(batch,
   dpsi_dtheta <- .gradient_dpsi_dtheta_batch(dpsi_dtheta, pars, batch$n,
                                              !is.null(psi))
 
-  # One crossing, one condition wrapper: per-row failures come back as `status`,
-  # so this catches only what takes the whole call down.
-  res <- with_phylloptim_conditions(gradient_batch_run(batch$leaf, batch$drivers, theta,
-                            match(pars, par_names) - 1L, step,
-                            stationarity_tol, method, fast_stem_curve,
-                            psi, dpsi_dtheta, curve, fd_step,
-                            reseat_profitmax))
-
-  dimnames(res$gradient) <- list(NULL, pars, .gradient_output_names())
-  dimnames(res$value) <- list(NULL, .gradient_output_names())
-  dimnames(res$M) <- list(NULL, pars)
-  dimnames(res$dY_dpsi) <- list(NULL, .gradient_output_names())
-  res
+  # One crossing: per-row failures come back as `status`, so its condition
+  # wrapper catches only what takes the whole call down.
+  .gradient_run(batch$leaf, batch$drivers, theta, pars, step, fd_step,
+                stationarity_tol, method, fast_stem_curve, psi, dpsi_dtheta, m)
 }
 
 # --- internals ---------------------------------------------------------------

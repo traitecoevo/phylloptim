@@ -213,18 +213,19 @@ SEXP gradient_batch_prepare(Rcpp::List root_network, Rcpp::List psi_soil,
 // [[Rcpp::export]]
 void gradient_batch_check(SEXP drivers) { checked(drivers); }
 
-// The hot path. `theta` is n x 15 (or 1 x 15, shared), `pars` is ZERO-BASED
-// positions into `gradient_par_names()`, and the supply path is read off the
-// leaf rather than passed, so the caller cannot name one path while handing over
-// a leaf built on the other.
+// The hot path. `theta` is n x n_theta (or 1 x n_theta, shared), `pars` is
+// ZERO-BASED positions into `gradient_par_names()`, `curve` indexes
+// `cost_curve_names()` and `collar` names the route. The supply path is read off
+// the leaf rather than passed, so the caller cannot name one path while handing
+// over a leaf built on the other.
 // [[Rcpp::export]]
 Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_,
                               SEXP drivers, Rcpp::NumericMatrix theta,
                               Rcpp::IntegerVector pars, double step,
                               double stationarity_tol, std::string method,
                               bool fast_stem_curve, SEXP psi,
-                              SEXP dpsi_dtheta, int curve, double fd_step,
-                              double pinned_A_max) {
+                              SEXP dpsi_dtheta, int curve, bool collar,
+                              double fd_step) {
   DriverBatch* batch_drivers = checked(drivers);
   const std::size_t n = batch_drivers->size();
   const std::size_t npars = static_cast<std::size_t>(pars.size());
@@ -248,9 +249,13 @@ Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_,
   settings.step = step;
   settings.stationarity_tol = stationarity_tol;
   settings.fast_stem_curve = fast_stem_curve;
-  settings.curve = curve;
+  if (curve < 0 || curve >= phylloptim::Leaf::n_cost_curves) {
+    Rcpp::stop("gradient_batch_run(): `curve` is out of range");
+  }
+  settings.model.curve = static_cast<phylloptim::Leaf::CostCurve>(curve);
+  settings.model.route = collar ? phylloptim::gradient::Route::Collar
+                                : phylloptim::gradient::Route::Stem;
   settings.fd_step = fd_step;
-  settings.resolve_profitmax = pinned_A_max > 0.0;
   if (method == "auto") {
     settings.method = phylloptim::gradient::Method::Auto;
   } else if (method == "ift") {
