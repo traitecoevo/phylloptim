@@ -86,8 +86,8 @@ Water reaches the leaf through soil, then roots, then the **root collar** — th
 
 | route | what is optimised | what supplies it |
 |---|---|---|
-| the **stem route**, `"stem"` | the stem potential `ψ_stem`, with the potential upstream of it held at `ψ_soil` | the soil-to-collar path is ignored entirely |
-| the **collar route**, `"collar"` (the default) | the collar potential, which is then mapped to a stem potential | the root path in series |
+| the **stem route**, `"stem"` (the default) | the stem potential `ψ_stem`, with the potential upstream of it held at `ψ_soil` | the soil-to-collar path is ignored entirely |
+| the **collar route**, `"collar"` | the collar potential, which is then mapped to a stem potential | the root path in series |
 
 Those names are used throughout this page. The literature calls the first "non-root-based", which is also what the package's refusal message means by the term, and `find_root_collar_psi()` is the second under its own name.
 
@@ -645,7 +645,7 @@ The published models map onto that space as follows.
 |---|---|---|
 | @cowan1977 | `CF77` | the `λE` cost, with λ prescribed. Any topology. |
 | @sperry2017 | `ProfitMax` | the normalised gain-risk cost, with λ derived per operating point. Their own formulation is single-supply. |
-| @towers2024 | `TF24` | the carbon cost, solved over the collar potential with a multi-layer root network. The default here, and what `plant` consumes. |
+| @towers2024 | `TF24` | the carbon cost, solved over the collar potential with a multi-layer root network. What `plant` consumes; the default model, `TF24_floor`, is it at a price of 0. |
 | @joshi2022 | `JS22` | the `γ_J(Δψ)²` cost, the only one priced on the drop. Their hydraulic term only; see below. |
 | @wolf2016 | `CMax` | a marginal cost linear in the absolute potential, `CMax_a·ψ + CMax_b`, in the form Anderegg et al. (2018) gave it. |
 | @eller2020 | `SOX` | the product objective. Takes no parameter of its own. |

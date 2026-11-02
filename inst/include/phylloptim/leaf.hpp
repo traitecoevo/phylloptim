@@ -185,8 +185,11 @@ public:
   // Two entry points rather than a settable tag, which would leave the other path's
   // state configured, ignored and then stale. Each leaves tag and supply agreeing
   // and clears the solved state, so call set_physiology() again.
+  // A root network has no single upstream potential to pin, so this seats the
+  // collar route as well; the curve is left as it is.
   void set_supply_multilayer() {
     supply_kind_ = SupplyKind::MultiLayer;
+    route_is_collar_ = true;
     single_.clear();
     setup_clean_leaf();
   }

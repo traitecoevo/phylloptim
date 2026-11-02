@@ -3894,10 +3894,12 @@ void test_leaf_on_single_potential() {
   tight.find_root_collar_psi();
   ok(tight.profit_ <= l.profit_, "a higher series resistance does not help");
 
-  // And the default is unchanged: a Leaf nobody configures is multi-layer.
-  phylloptim::Leaf plain = fixture::multilayer_leaf();
-  ok(plain.supply_kind_ == phylloptim::Leaf::SupplyKind::MultiLayer,
-     "the supply path defaults to multi-layer");
+  // Asking for the root network seats the collar route, the only one it has.
+  phylloptim::Leaf plain;
+  plain.set_supply_multilayer();
+  ok(plain.supply_kind_ == phylloptim::Leaf::SupplyKind::MultiLayer &&
+         plain.model_route() == "collar",
+     "set_supply_multilayer() seats the collar route");
 }
 
 // A collar interval narrower than find_root_psi's bracket tolerance
