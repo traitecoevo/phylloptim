@@ -9024,32 +9024,36 @@ void test_tf24_floor_kmax_vpd_invariance() {
   }
 }
 
-void test_tf24_floor_refuses_an_unset_price() {
-  printf("TF24_floor refuses an unset price, and says why\n");
+void test_tf24_floor_defaults_to_tf24() {
+  printf("TF24_floor's price defaults to 0, where it is TF24; a cleared one is refused\n");
   Drivers d;
   {
-    phylloptim::Leaf l = make_single_leaf(d, 1.0);
-    l.set_model(phylloptim::Leaf::CostCurve::TF24_floor, false);
-    ok(throws_with([&] { l.optimise(); },
-                   "needs TF24_floor_lambda_o set"),
-       "an unset lambda_o is refused rather than optimised as a NaN objective");
-    // ⚠️ AND THE MESSAGE HAS TO NAME TF24, or the obvious repair -- set it to
-    // zero -- silently substitutes the production model for the one the caller
-    // asked for.
-    ok(throws_with([&] { l.optimise(); }, "would silently make this curve TF24"),
-       "and says why there is no default");
-    // It also has to say where a price can be SET FROM, since the field is not
-    // reachable through leaf_traits(). That gap is what made this curve
-    // unusable through leaf_solve() when it was first added.
-    ok(throws_with([&] { l.optimise(); }, "leaf_solve()"),
-       "and names a route that can supply one");
+    // The default is plant's, so a leaf that seats TF24_floor and sets nothing
+    // solves TF24, bit for bit (test_tf24_floor_reduces says why exactly).
+    phylloptim::Leaf a = make_single_leaf(d, 1.0);
+    ok(a.TF24_floor_lambda_o == 0.0, "a fresh leaf's lambda_o is 0");
+    a.set_model(phylloptim::Leaf::CostCurve::TF24_floor, false);
+    a.optimise();
+    phylloptim::Leaf b = make_single_leaf(d, 1.0);
+    b.set_model(phylloptim::Leaf::CostCurve::TF24, false);
+    b.optimise();
+    const std::vector<double> va = reported(a), vb = reported(b);
+    for (std::size_t i = 0; i < va.size(); ++i) {
+      ok(same_bits(va[i], vb[i]),
+         std::string("the default TF24_floor is TF24 in ") + reported_names[i]);
+    }
   }
   {
     phylloptim::Leaf l = make_single_leaf(d, 1.0);
-    l.TF24_floor_lambda_o = 0.0;
+    l.TF24_floor_lambda_o = phylloptim::util::na_value;
     l.set_model(phylloptim::Leaf::CostCurve::TF24_floor, false);
-    l.optimise();
-    ok(std::isfinite(l.profit_), "an explicit lambda_o = 0 solves");
+    ok(throws_with([&] { l.optimise(); },
+                   "needs TF24_floor_lambda_o set"),
+       "a cleared lambda_o is refused rather than optimised as a NaN objective");
+    // It has to say where a price can be SET FROM, since the field is not
+    // reachable through leaf_traits().
+    ok(throws_with([&] { l.optimise(); }, "leaf_solve()"),
+       "and names a route that can supply one");
   }
   {
     phylloptim::Leaf l = make_single_leaf(d, 1.0);
@@ -11600,7 +11604,7 @@ int main(int argc, char **argv) {
   test_tf24_floor_wet_end_price();
   test_tf24_floor_emergent_lambda();
   test_tf24_floor_kmax_vpd_invariance();
-  test_tf24_floor_refuses_an_unset_price();
+  test_tf24_floor_defaults_to_tf24();
   test_tf24_floor_closed_form();
   test_leastcost_matches_prentice_closed_form();
   test_leastcost_refuses_an_unset_or_degenerate_beta();

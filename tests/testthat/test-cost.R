@@ -267,15 +267,15 @@ test_that("leaf_solve() reports the seated curve's lambda, not TF24's", {
   # ⚠️ CF77 PINS IT, its lambda being known independently of the solve: the
   # curve prices water at a prescribed constant, so this must return it.
   cf <- leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = "CF77",
-                   CF77_lambda = price, supply = sp)
+                   route = "stem", CF77_lambda = price, supply = sp)
   expect_equal(cf$lambda, price, tolerance = 1e-8)
   expect_false("lambda_emergent" %in% names(cf))
 
   # TF24's is its lambda at the optimum, and TF24_floor's is that plus the floor
   tf <- leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = "TF24",
-                   supply = sp)
+                   route = "stem", supply = sp)
   fl <- leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = "TF24_floor",
-                   TF24_floor_lambda_o = price, supply = sp)
+                   route = "stem", TF24_floor_lambda_o = price, supply = sp)
   l <- leaf_model(supply = sp)
   set_drivers(l, psi_soil = 1.0, PPFD = 900, atm_vpd = 2)
   expect_identical(tf$lambda, l$lambda_TF24(tf$psi_stem))

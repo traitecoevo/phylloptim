@@ -721,37 +721,36 @@ test_that("the batch refuses a price its model does not read, and a missing one,
                 CF77_lambda = 1.5e5),
     solve_error(supply = single, root_network = net, model = "TF24_floor",
                 CF77_lambda = 1.5e5))
-  expect_identical(batch_error("collar", TF24_floor_lambda_o = 1.5e5),
-                   solve_error(TF24_floor_lambda_o = 1.5e5))
+  expect_identical(batch_error("TF24", TF24_floor_lambda_o = 1.5e5),
+                   solve_error(model = "TF24", TF24_floor_lambda_o = 1.5e5))
   # given on one observation of several is still given
   expect_error(leaf_gradient_batch(
                  leaf_batch(psi_soil = c(1.0, 1.5), PPFD = 1500,
                             LeastCost_beta = c(NA, 146)),
-                 pars = "vcmax_25", model = "collar"),
-               "model = \"collar\" does not read it")
+                 pars = "vcmax_25", model = "TF24"),
+               "model = \"TF24\" does not read it")
 
-  # A price the model needs and has no default for is refused before the solve,
-  # not returned as a per-row error.
-  expect_match(solve_error(supply = single, root_network = net,
-                           model = "TF24_floor"),
-               "needs TF24_floor_lambda_o set")
-  expect_match(batch_error("TF24_floor", supply = single, root_network = net),
-               "needs TF24_floor_lambda_o set")
-  expect_match(batch_error("TF24_floor", supply = single, root_network = net,
-                           TF24_floor_lambda_o = c(1.5e5, NA)),
-               "needs TF24_floor_lambda_o set")
+  # An unset price is the curve's default, on every observation it is unset on:
+  # TF24_floor's is 0.
+  floor_at <- function(price) {
+    b <- leaf_batch(psi_soil = c(1.0, 1.5), PPFD = 1500,
+                    TF24_floor_lambda_o = price)
+    leaf_gradient_batch(b, pars = "vcmax_25", model = "TF24_floor")$gradient
+  }
+  expect_identical(floor_at(NA), floor_at(0))
+  expect_identical(floor_at(c(1.5e5, NA))[2, , ], floor_at(0)[2, , ])
 
   # A price that varies by observation reaches its own row while kmax and the
   # resistance are shared, so theta has a row per observation.
   run <- function(price) {
     b <- leaf_batch(psi_soil = 1.5, PPFD = 1500, supply = single,
                     root_network = net, CF77_lambda = price)
-    leaf_gradient_batch(b, pars = "vcmax_25", model = "CF77")
+    leaf_gradient_batch(b, pars = "vcmax_25", model = "CF77", route = "stem")
   }
   both <- leaf_gradient_batch(
     leaf_batch(psi_soil = c(1.5, 1.5), PPFD = 1500, supply = single,
                root_network = net, CF77_lambda = c(1e5, 3e5)),
-    pars = "vcmax_25", model = "CF77")
+    pars = "vcmax_25", model = "CF77", route = "stem")
   expect_identical(both$value[, "A"],
                    unname(c(run(1e5)$value[, "A"], run(3e5)$value[, "A"])))
   expect_false(both$value[1, "A"] == both$value[2, "A"])
@@ -795,7 +794,8 @@ test_that("leaf_gradient() is the batch's one observation on every model", {
            # from theta, or the column is an exact zero that no finiteness
            # check sees (test-gradient-referee.R).
            LeastCost = "LeastCost_beta")
-  for (m in names(own)) {
+  routes <- function(m) if (m == "collar") "collar" else c("collar", "stem")
+  for (m in names(own)) for (rt in routes(m)) {
     p <- own[[m]]
     # Each model's batch carries its own price only: a price the model does not
     # read is refused, as it is by leaf_solve(). The single-observation leaf
@@ -808,15 +808,16 @@ test_that("leaf_gradient() is the batch's one observation on every model", {
                     CF77_lambda = priced("CF77_lambda_", 1.5e5),
                     TF24_floor_lambda_o = priced("TF24_floor_lambda_o", 1.5e5),
                     LeastCost_beta = priced("LeastCost_beta", 146))
-    gb <- leaf_gradient_batch(b, pars = p, model = m)
+    gb <- leaf_gradient_batch(b, pars = p, model = m, route = rt)
     one <- vapply(psv, function(ps) {
       l <- leaf_model(tr, leaf_control(), leaf_supply_singlelayer())
       l$CF77_lambda_ <- 1.5e5
       l$TF24_floor_lambda_o <- 1.5e5
       l$LeastCost_beta <- 146
       leaf_gradient(psi_soil = ps, PPFD = 1500, root_network = net, x = l,
-                    traits = tr, pars = p, model = m)$gradient[1, "A"]
+                    traits = tr, pars = p, model = m, route = rt)$gradient[1, "A"]
     }, numeric(1))
-    expect_identical(unname(gb$gradient[, 1, "A"]), unname(one), label = m)
+    expect_identical(unname(gb$gradient[, 1, "A"]), unname(one),
+                     label = paste(m, rt))
   }
 })

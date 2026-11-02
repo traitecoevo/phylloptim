@@ -19,7 +19,7 @@ leaf_solve(
   control = leaf_control(),
   supply = leaf_supply_multilayer(),
   reuse = TRUE,
-  model = "collar",
+  model = "TF24_floor",
   route = NULL,
   CF77_lambda = NA_real_,
   TF24_floor_lambda_o = NA_real_,
@@ -78,22 +78,20 @@ vulnerability tables are built once, and it is safe -- every exit from the
 solve writes its own outputs. \code{FALSE} exists so that can be checked rather
 than assumed, and the package's tests do check it.}
 
-\item{model}{which optimality model to solve, as in \code{\link[=leaf_gradient]{leaf_gradient()}}:
-\code{"collar"} (the default, the production path -- the TF24 cost maximised over
-the root-collar potential) or any name from \code{\link[=cost_curve_names]{cost_curve_names()}}, which
-solves that curve on \code{route}.}
+\item{model}{which optimality model to solve, as in \code{\link[=leaf_gradient]{leaf_gradient()}}: any
+name from \code{\link[=cost_curve_names]{cost_curve_names()}}, solved on \code{route}. The default,
+\code{"TF24_floor"}, is plant's default model; at its default price,
+\code{TF24_floor_lambda_o = 0}, it is TF24. \code{"collar"} is a deprecated alias for
+\verb{model = "TF24", route = "collar"}.}
 
-\item{route}{which potential the curve is maximised over: \code{"collar"}, the
-root-collar potential, on either supply path; or \code{"stem"}, \code{psi_stem} with
-the upstream potential pinned at \code{psi_soil}, which needs
-\code{leaf_supply_singlelayer()}. \code{NULL} (the default) is the collar route for
-\code{model = "collar"} and the stem route for a curve name, so a call that
-names no route means what it always has. \code{model = "collar"} is TF24 on the
-collar route, so it takes no \code{route = "stem"}: that is \code{model = "TF24"}.
+\item{route}{which potential the curve is maximised over: \code{"collar"} (the
+default), the root-collar potential, on either supply path; or \code{"stem"},
+\code{psi_stem} with the upstream potential pinned at \code{psi_soil}, which needs
+\code{leaf_supply_singlelayer()}. \code{NULL} is the collar route.
 
-⚠️ \strong{\code{"collar"} and \code{"TF24"} are different models, not two ways of asking
-one question}, even though both use the TF24 cost. They optimise different
-variables over different supply topologies and disagree on 20 of 30 driver
+⚠️ \strong{The two routes are different models, not two ways of asking one
+question}, even for one curve. They optimise different variables over
+different supply topologies, and for TF24 disagree on 20 of 30 driver
 rows.
 
 ⚠️ \strong{On a stem route the \code{collar} column comes back non-finite}, because
@@ -103,13 +101,13 @@ left behind.
 
 Two curves take a PRESCRIBED price of water rather than deriving one:
 \code{CF77} reads \code{CF77_lambda} and \code{TF24_floor} reads \code{TF24_floor_lambda_o},
-both below. \code{CF77}'s has a default, aligned to TF24 by \code{\link[=align_curves]{align_curves()}};
-\code{TF24_floor}'s has none, and that curve refuses to solve without one.}
+both below. \code{CF77}'s default is aligned to TF24 by \code{\link[=align_curves]{align_curves()}};
+\code{TF24_floor}'s is 0, where that curve is TF24.}
 
 \item{CF77_lambda, TF24_floor_lambda_o}{the prescribed marginal value of water
 for the two curves that take one, in umol C (kg H2O)^-1. \code{NA_real_} (the
 default) leaves the field as it is: \code{CF77}'s aligned default (see
-\code{\link[=align_curves]{align_curves()}}), or unset for \code{TF24_floor}, which refuses to solve.
+\code{\link[=align_curves]{align_curves()}}), or \code{TF24_floor}'s 0, where that curve is TF24.
 
 ⚠️ \strong{Their scale is set by the leaf, not chosen freely.} At this package's
 defaults the leaf's own marginal cost of water runs 9e4 to 3e5, and a price

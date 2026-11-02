@@ -78,8 +78,7 @@ and \code{\link[=leaf_gradient_batch]{leaf_gradient_batch()}} refuses it under a
 \item{TF24_floor_lambda_o}{the \code{TF24_floor} curve's price of water as transpiration
 goes to zero, same units, one per observation. Only \code{model = "TF24_floor"}
 reads it, and it is refused under any other model; \code{NA_real_} (the
-default) leaves it unset, and \code{\link[=leaf_gradient_batch]{leaf_gradient_batch()}} refuses that model
-without one, deliberately: at zero it is \code{TF24}.}
+default) uses its default, 0, where that curve is \code{TF24}.}
 
 \item{LeastCost_beta}{least-cost theory's unit-cost ratio (Prentice et al.
 2014's beta): the cost of maintaining carboxylation capacity relative to the

@@ -26,7 +26,7 @@ leaf_gradient(
   stationarity_tol = 1e-08,
   method = c("auto", "ift", "fd"),
   fast_stem_curve = TRUE,
-  model = "collar",
+  model = "TF24_floor",
   route = NULL
 )
 }
@@ -149,15 +149,13 @@ stem's vulnerability table, which depends on \code{stem_c} alone; \code{FALSE} e
 so the equivalence is checkable rather than assumed, and the package's tests
 require the two routes to agree.}
 
-\item{model}{which optimality model to differentiate: \code{"collar"} (the
-default, the production path: TF24 on the collar route) or any name from
-\code{\link[=cost_curve_names]{cost_curve_names()}}, on \code{route}. See \emph{Choosing which model to
-differentiate}.}
+\item{model}{which optimality model to differentiate: any name from
+\code{\link[=cost_curve_names]{cost_curve_names()}}, on \code{route}; \code{"TF24_floor"} by default. See \emph{Choosing
+which model to differentiate}.}
 
 \item{route}{\code{"collar"} or \code{"stem"}, the potential the curve is maximised
-over; \code{NULL} (the default) is the collar route for \code{model = "collar"} and
-the stem route for a curve name. See \emph{Choosing which model to
-differentiate}.}
+over; \code{NULL} (the default) is the collar route. See \emph{Choosing which model
+to differentiate}.}
 }
 \value{
 A list with
@@ -200,19 +198,19 @@ A model is a cost curve and a route, and every curve has a gradient on both
 routes. \code{model} names the curve and \code{route} the potential it is maximised
 over: \code{"collar"}, the root-collar potential, on either supply path; or
 \code{"stem"}, \code{psi_stem} with the upstream potential pinned at \code{psi_soil}, which
-needs the single-potential supply path. \code{model = "collar"}, the default, is
-TF24 on the collar route -- the production path. A curve name from
-\code{cost_curve_names()} with no \code{route} is that curve's stem route, so a call
-that names no route means what it always has.
+needs the single-potential supply path. With no \code{route}, a curve is
+maximised over the collar. The default model, \code{"TF24_floor"}, is plant's; at
+its default price, \code{TF24_floor_lambda_o = 0}, it is TF24. \code{model = "collar"}
+is a deprecated alias for TF24 on the collar route.
 
 The product objectives, \code{SOX} and \code{JW26}, need no special case. They maximise
 \code{A * g(psi)}, which is the \code{Log} benefit link applied to the same
 difference form everything else uses: \verb{d/dpsi[h(A) - C] = h'(A) * dA/dpsi - dC/dpsi} with \verb{h' = 1/A}. One derivative serves all nine.
 
-⚠️ \strong{\code{"collar"} and \code{"TF24"} are different models, not two ways of asking one
-question}, even though both use the TF24 cost. They optimise different
-variables over different supply topologies, disagree on 20 of 30 driver rows,
-and the gap does not close as the root resistance goes to zero.
+⚠️ \strong{The two routes are different models, not two ways of asking one
+question}, even for one curve. They optimise different variables over
+different supply topologies, for TF24 disagree on 20 of 30 driver rows, and
+the gap does not close as the root resistance goes to zero.
 
 ⚠️ \strong{\code{model} SEATS the leaf, including one you passed as \code{x}.} The curve
 and route are applied with \verb{$set_model()} and left there when this returns,

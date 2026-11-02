@@ -68,20 +68,20 @@ set_traits <- function(x, traits) {
 ##' routes. `model` names the curve and `route` the potential it is maximised
 ##' over: `"collar"`, the root-collar potential, on either supply path; or
 ##' `"stem"`, `psi_stem` with the upstream potential pinned at `psi_soil`, which
-##' needs the single-potential supply path. `model = "collar"`, the default, is
-##' TF24 on the collar route -- the production path. A curve name from
-##' `cost_curve_names()` with no `route` is that curve's stem route, so a call
-##' that names no route means what it always has.
+##' needs the single-potential supply path. With no `route`, a curve is
+##' maximised over the collar. The default model, `"TF24_floor"`, is plant's; at
+##' its default price, `TF24_floor_lambda_o = 0`, it is TF24. `model = "collar"`
+##' is a deprecated alias for TF24 on the collar route.
 ##'
 ##' The product objectives, `SOX` and `JW26`, need no special case. They maximise
 ##' `A * g(psi)`, which is the `Log` benefit link applied to the same
 ##' difference form everything else uses: `d/dpsi[h(A) - C] =
 ##' h'(A) * dA/dpsi - dC/dpsi` with `h' = 1/A`. One derivative serves all nine.
 ##'
-##' ⚠️ **`"collar"` and `"TF24"` are different models, not two ways of asking one
-##' question**, even though both use the TF24 cost. They optimise different
-##' variables over different supply topologies, disagree on 20 of 30 driver rows,
-##' and the gap does not close as the root resistance goes to zero.
+##' ⚠️ **The two routes are different models, not two ways of asking one
+##' question**, even for one curve. They optimise different variables over
+##' different supply topologies, for TF24 disagree on 20 of 30 driver rows, and
+##' the gap does not close as the root resistance goes to zero.
 ##'
 ##' ⚠️ **`model` SEATS the leaf, including one you passed as `x`.** The curve
 ##' and route are applied with `$set_model()` and left there when this returns,
@@ -353,14 +353,12 @@ set_traits <- function(x, traits) {
 ##' @param control a [leaf_control()] object
 ##' @param supply how water reaches the root collar: [leaf_supply_multilayer()]
 ##'   (the default) or [leaf_supply_singlelayer()]
-##' @param model which optimality model to differentiate: `"collar"` (the
-##'   default, the production path: TF24 on the collar route) or any name from
-##'   [cost_curve_names()], on `route`. See *Choosing which model to
-##'   differentiate*.
+##' @param model which optimality model to differentiate: any name from
+##'   [cost_curve_names()], on `route`; `"TF24_floor"` by default. See *Choosing
+##'   which model to differentiate*.
 ##' @param route `"collar"` or `"stem"`, the potential the curve is maximised
-##'   over; `NULL` (the default) is the collar route for `model = "collar"` and
-##'   the stem route for a curve name. See *Choosing which model to
-##'   differentiate*.
+##'   over; `NULL` (the default) is the collar route. See *Choosing which model
+##'   to differentiate*.
 ##' @param pars what to differentiate with respect to. Any of the sixteen
 ##'   [leaf_traits()] names, plus `"leaf_specific_conductance_max"`, on the
 ##'   single-potential path only `"resistance"`, on `model = "CF77"` only
@@ -488,7 +486,7 @@ leaf_gradient <- function(psi_soil,
                           stationarity_tol = 1e-8,
                           method = c("auto", "ift", "fd"),
                           fast_stem_curve = TRUE,
-                          model = "collar",
+                          model = "TF24_floor",
                           route = NULL) {
   method <- match.arg(method)
   if (!inherits(traits, "leaf_traits")) {
@@ -734,7 +732,7 @@ leaf_gradient <- function(psi_soil,
   unname(owned[names(owned) != model])
 }
 
-.gradient_available_pars <- function(single, model = "collar", damage = FALSE) {
+.gradient_available_pars <- function(single, model = "TF24_floor", damage = FALSE) {
   nms <- .gradient_par_names()
   if (!single) nms <- setdiff(nms, "resistance")
   if (!damage) nms <- setdiff(nms, .gradient_damage_pars)
@@ -746,7 +744,7 @@ leaf_gradient <- function(psi_soil,
   setdiff(nms, excluded)
 }
 
-.gradient_check_pars <- function(pars, single, model = "collar", damage = FALSE) {
+.gradient_check_pars <- function(pars, single, model = "TF24_floor", damage = FALSE) {
   unknown <- setdiff(pars, .gradient_available_pars(single, model, damage))
   if (length(unknown)) {
     off <- intersect(unknown, .gradient_damage_pars)

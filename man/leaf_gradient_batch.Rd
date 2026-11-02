@@ -15,7 +15,7 @@ leaf_gradient_batch(
   stationarity_tol = 1e-08,
   method = c("auto", "ift", "fd"),
   fast_stem_curve = TRUE,
-  model = "collar",
+  model = "TF24_floor",
   route = NULL
 )
 }
@@ -71,8 +71,8 @@ so the equivalence is checkable rather than assumed, and the package's tests
 require the two routes to agree.}
 
 \item{model, route}{which optimality model to differentiate, and on which
-route, as in \code{\link[=leaf_gradient]{leaf_gradient()}}: \code{"collar"} by default, or any
-\code{\link[=cost_curve_names]{cost_curve_names()}} entry, on its stem route unless \code{route = "collar"}.}
+route, as in \code{\link[=leaf_gradient]{leaf_gradient()}}: any \code{\link[=cost_curve_names]{cost_curve_names()}} entry,
+\code{"TF24_floor"} by default, on its collar route unless \code{route = "stem"}.}
 }
 \value{
 A list with

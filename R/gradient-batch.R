@@ -45,8 +45,7 @@
 ##' @param TF24_floor_lambda_o the `TF24_floor` curve's price of water as transpiration
 ##'   goes to zero, same units, one per observation. Only `model = "TF24_floor"`
 ##'   reads it, and it is refused under any other model; `NA_real_` (the
-##'   default) leaves it unset, and [leaf_gradient_batch()] refuses that model
-##'   without one, deliberately: at zero it is `TF24`.
+##'   default) uses its default, 0, where that curve is `TF24`.
 ##' @param LeastCost_beta least-cost theory's unit-cost ratio (Prentice et al.
 ##'   2014's beta): the cost of maintaining carboxylation capacity relative to the
 ##'   cost of transpiration, dimensionless, one per observation. Only
@@ -243,8 +242,8 @@ print.leaf_batch <- function(x, ...) {
 ##'   differentiate at. Defaults to the one `batch` was built with. Ignored when
 ##'   `theta` is given.
 ##' @param model,route which optimality model to differentiate, and on which
-##'   route, as in [leaf_gradient()]: `"collar"` by default, or any
-##'   [cost_curve_names()] entry, on its stem route unless `route = "collar"`.
+##'   route, as in [leaf_gradient()]: any [cost_curve_names()] entry,
+##'   `"TF24_floor"` by default, on its collar route unless `route = "stem"`.
 ##' @param pars what to differentiate with respect to, as in [leaf_gradient()].
 ##'   ⚠️ **Always pass it.** It is `P_model`, so the default — all of them — is
 ##'   the most expensive thing you can ask for.
@@ -287,7 +286,7 @@ leaf_gradient_batch <- function(batch,
                                 stationarity_tol = 1e-8,
                                 method = c("auto", "ift", "fd"),
                                 fast_stem_curve = TRUE,
-                                model = "collar",
+                                model = "TF24_floor",
                                 route = NULL) {
   if (!inherits(batch, "leaf_batch")) {
     stop("`batch` must come from leaf_batch(); got ", class(batch)[[1]],
@@ -498,19 +497,10 @@ leaf_gradient_batch <- function(batch,
 }
 
 # The owned columns, checked as leaf_solve() checks its arguments: a price the
-# model does not read is refused, and the owned field of a model with no default
-# must be set on every row. Left to C++, a missing one is a per-row error, which
-# a fit reads as observations that failed to solve.
+# model does not read is refused.
 .gradient_check_theta_prices <- function(m, model, par_names) {
   owned <- .owned_fields()
   .check_prices(model, lapply(stats::setNames(owned, owned),
                               function(field) m[, match(field, par_names)]))
-  for (field in owned[names(owned) == model]) {
-    if (anyNA(m[, match(field, par_names)])) {
-      stop("the ", model, " cost curve needs ", field, " set on every ",
-           "observation: pass `", field, " =` to leaf_batch(), or fill that ",
-           "column of `theta`; it has no default.", call. = FALSE)
-    }
-  }
   invisible(m)
 }

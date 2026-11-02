@@ -53,7 +53,7 @@ gradient_golden_cases <- function() {
          supply = leaf_supply_singlelayer(),
          root_network = series_resistance(1e4))
   }
-  case <- function(args, pars, model = "collar", route = NULL, psi = NULL,
+  case <- function(args, pars, model = "TF24", route = "collar", psi = NULL,
                    dpsi_dtheta = NULL, setup = NULL) {
     list(args = args, pars = pars, model = model, route = route, psi = psi,
          dpsi_dtheta = dpsi_dtheta, setup = setup)
@@ -113,7 +113,7 @@ gradient_golden_cases <- function() {
     batch_drivers(1.0), c("vcmax_25", "stem_P50"), "ProfitMax", "collar",
     psi = 2.0)
   cases[["prescribed-JS22-stem"]] <- case(
-    single(1.0), c("vcmax_25", "stem_P50", "JS22_gamma"), "JS22", psi = 2.0)
+    single(1.0), c("vcmax_25", "stem_P50", "JS22_gamma"), "JS22", "stem", psi = 2.0)
   cases
 }
 

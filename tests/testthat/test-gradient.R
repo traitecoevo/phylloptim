@@ -784,7 +784,7 @@ test_that("a stem-route gradient leaves the caller's leaf solved on that route",
   l$optimise()
   before <- operating_point(l)
   leaf_gradient(psi_soil = 1.0, PPFD = 900, x = l, traits = tr, model = "TF24",
-                pars = "vcmax_25")
+                route = "stem", pars = "vcmax_25")
   expect_identical(operating_point(l), before)
 })
 
@@ -1092,7 +1092,7 @@ test_that("CF77_lambda_ is in the enumeration and refused by other models", {
   # and an optimiser handed a zero would read the parameter as inert and converge.
   expect_error(leaf_gradient(psi_soil = 2.0, PPFD = 900,
                              pars = "CF77_lambda_"),
-               "not a parameter of the collar model")
+               "not a parameter of the TF24_floor model")
   # And the message names the axis that ruled it out, so a caller is not left
   # looking at the supply path.
   expect_error(leaf_gradient(psi_soil = 2.0, PPFD = 900,
@@ -1101,7 +1101,7 @@ test_that("CF77_lambda_ is in the enumeration and refused by other models", {
 
   # The default must not offer what it would then refuse.
   expect_false("CF77_lambda_" %in%
-                 phylloptim:::.gradient_available_pars(TRUE, "collar"))
+                 phylloptim:::.gradient_available_pars(TRUE, "TF24_floor"))
   expect_true("CF77_lambda_" %in%
                 phylloptim:::.gradient_available_pars(TRUE, "CF77"))
 
@@ -1123,15 +1123,15 @@ test_that("TF24_floor_lambda_o is the second model-owned price, and refused else
   # from that curve's own parameters rather than set.
   expect_true("TF24_floor_lambda_o" %in% gradient_par_names())
 
-  expect_error(leaf_gradient(psi_soil = 2.0, PPFD = 900,
+  expect_error(leaf_gradient(psi_soil = 2.0, PPFD = 900, model = "TF24",
                              pars = "TF24_floor_lambda_o"),
-               "not a parameter of the collar model")
-  expect_error(leaf_gradient(psi_soil = 2.0, PPFD = 900,
+               "not a parameter of the TF24 model")
+  expect_error(leaf_gradient(psi_soil = 2.0, PPFD = 900, model = "TF24",
                              pars = "TF24_floor_lambda_o"),
                "emergent")
   # And the refusal names the OWNER, so a caller is told what to pass rather than
   # only what is wrong.
-  expect_error(leaf_gradient(psi_soil = 2.0, PPFD = 900,
+  expect_error(leaf_gradient(psi_soil = 2.0, PPFD = 900, model = "TF24",
                              pars = "TF24_floor_lambda_o"),
                "TF24_floor")
 
@@ -1242,7 +1242,8 @@ test_that("every additive curve's IFT gradient matches differencing its solve", 
     p <- case[[2]]
     g <- function(meth) {
       leaf_gradient(psi_soil = 1.5, PPFD = 1500, root_network = net, x = mk(),
-                    traits = tr, pars = p, model = m, method = meth)
+                    traits = tr, pars = p, model = m, route = "stem",
+                    method = meth)
     }
     ift <- g("ift")
     fd <- g("fd")
@@ -1273,12 +1274,14 @@ test_that("the decision variable follows the route", {
   net <- series_resistance(1e4)
   l <- leaf_model(tr, leaf_control(), leaf_supply_singlelayer())
 
-  collar <- leaf_gradient(psi_soil = 1.5, PPFD = 1500, pars = "TF24_cost_scale")
+  collar <- leaf_gradient(psi_soil = 1.5, PPFD = 1500, pars = "TF24_cost_scale",
+                          model = "TF24")
   stem <- leaf_gradient(psi_soil = 1.5, PPFD = 1500, root_network = net, x = l,
-                        traits = tr, pars = "TF24_cost_scale", model = "TF24")
+                        traits = tr, pars = "TF24_cost_scale", model = "TF24",
+                        route = "stem")
 
   # On the collar route `collar` IS psi*, so its derivative is assigned.
-  expect_identical(collar$model, "collar")
+  expect_identical(collar$route, "collar")
   expect_true(is.finite(collar$gradient[1, "collar"]))
   # On a stem route the collar is never solved for, so NOT finite is the truthful
   # answer -- reading a number there would be reading stale or absent state.
@@ -1319,7 +1322,7 @@ test_that("a product objective's gradient survives an h-sweep", {
       fd <- (solve_at(base + h) - solve_at(base - h)) / (2 * h)
       g <- leaf_gradient(psi_soil = 1.5, PPFD = 1500, root_network = net,
                          x = mk(96, 3.4), traits = tr, pars = par, model = m,
-                         method = "ift")
+                         route = "stem", method = "ift")
       expect_equal(g$gradient[par, "A"], fd, tolerance = 1e-2,
                    label = paste(m, par))
       n_checked <- n_checked + 1L
@@ -1333,7 +1336,8 @@ test_that("the remaining route restrictions are the topological ones", {
   # A stem route needs the single-potential path, and says so rather than
   # returning a number from the wrong topology.
   expect_error(leaf_gradient(psi_soil = 1.5, PPFD = 1500,
-                             pars = "TF24_cost_scale", model = "TF24"),
+                             pars = "TF24_cost_scale", model = "TF24",
+                             route = "stem"),
                "single-potential supply path")
   expect_error(leaf_gradient(psi_soil = 1.5, PPFD = 1500,
                              pars = "TF24_cost_scale", model = "Medlyn"),
@@ -1351,7 +1355,7 @@ test_that("ProfitMax's normaliser follows the traits, so the composite is a tota
   g <- function(meth) {
     leaf_gradient(psi_soil = 1.5, PPFD = 1500, root_network = net, x = mkv(96),
                   traits = leaf_traits(), pars = "vcmax_25", model = "ProfitMax",
-                  method = meth)
+                  route = "stem", method = meth)
   }
   # ⚠️ IT USED TO BE NaN, THEN A PARTIAL, AND IS NOW A TOTAL -- three states, and
   # the middle one is worth knowing about. `|A|max` is state a perturbation
@@ -1390,23 +1394,26 @@ test_that("`route` names the potential a curve is maximised over (decision D3)",
   sp <- leaf_supply_singlelayer()
   net <- series_resistance(1e4)
   outs <- c("A", "gc", "psi_stem", "collar", "profit")
-  # Named no route, a call means what it always has: model = "collar" is TF24 on
-  # the collar route, and a curve name is that curve's stem route.
-  expect_identical(leaf_gradient(1.5, pars = "vcmax_25")$route, "collar")
-  stem <- leaf_gradient(1.5, supply = sp, root_network = net, pars = "vcmax_25",
-                        model = "SOX")
-  expect_identical(stem$route, "stem")
+  # Named no route, every curve is maximised over the collar, and the default
+  # model is TF24_floor, plant's.
+  g0 <- leaf_gradient(1.5, pars = "vcmax_25")
+  expect_identical(c(g0$model, g0$route), c("TF24_floor", "collar"))
+  expect_identical(leaf_gradient(1.5, supply = sp, root_network = net,
+                                 pars = "vcmax_25", model = "SOX")$route,
+                   "collar")
   expect_identical(leaf_solve(1.5, supply = sp, root_network = net,
                               model = "SOX"),
                    leaf_solve(1.5, supply = sp, root_network = net,
-                              model = "SOX", route = "stem"))
-  # TF24 named on the collar route IS model = "collar".
-  expect_identical(leaf_solve(1.5, model = "TF24", route = "collar"),
-                   leaf_solve(1.5))
+                              model = "SOX", route = "collar"))
+  # At its default price, 0, TF24_floor is TF24, to the bit; and the deprecated
+  # alias model = "collar" is TF24 on the collar route.
+  tf24 <- leaf_solve(1.5, model = "TF24", route = "collar")
+  expect_identical(leaf_solve(1.5), tf24)
+  expect_identical(leaf_solve(1.5, model = "collar"), tf24)
   expect_identical(
+    g0$gradient,
     leaf_gradient(1.5, pars = "vcmax_25", model = "TF24",
-                  route = "collar")$gradient,
-    leaf_gradient(1.5, pars = "vcmax_25")$gradient)
+                  route = "collar")$gradient)
   # A curve on the collar route, on the multi-layer supply: the gradient is
   # taken at the point leaf_solve() solves, and the collar is its decision.
   for (m in c("JS22", "SOX", "ProfitMax")) {
@@ -1423,12 +1430,15 @@ test_that("`route` names the potential a curve is maximised over (decision D3)",
                    c("interior", "interior"))
   # Refused by name: TF24's stem route is model = "TF24"; a stem route needs the
   # single potential; and a route is one of two.
-  expect_error(leaf_gradient(1.5, pars = "vcmax_25", route = "stem"),
+  expect_error(leaf_gradient(1.5, pars = "vcmax_25", model = "collar",
+                             route = "stem"),
                "model = \"TF24\"")
-  expect_error(leaf_solve(1.5, model = "SOX"), "route = \"collar\"")
+  expect_error(leaf_solve(1.5, model = "SOX", route = "stem"),
+               "route = \"collar\"")
   expect_error(leaf_solve(1.5, model = "SOX", route = "root"),
                "`route` must be")
-  expect_error(leaf_gradient_batch(b, pars = "vcmax_25", model = "SOX"),
+  expect_error(leaf_gradient_batch(b, pars = "vcmax_25", model = "SOX",
+                                   route = "stem"),
                "single-potential supply path")
 })
 

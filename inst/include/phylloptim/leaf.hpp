@@ -343,9 +343,9 @@ public:
   // CF77 rows), so cf77_price() then returns CF77_lambda_ rather than dividing by 1.
   bool CF77_soil_beta_ = false;
   // TF24_floor's price of water as transpiration goes to zero, and its only
-  // parameter: an input like `CF77_lambda_`, with no default. Unset is refused,
-  // because at zero the curve is TF24 under another name. Its scale is the leaf's
-  // lambda, 9e4-3e5 at the defaults; far outside it the optimum pins (hazard 16).
+  // parameter: an input like `CF77_lambda_`. Its default is 0, plant's, where the
+  // curve is TF24. Its scale is the leaf's lambda, 9e4-3e5 at the defaults; far
+  // outside it the optimum pins (hazard 16).
   double TF24_floor_lambda_o =
       curve_default<CostCurve::TF24_floor, par_TF24_floor_lambda_o>();  // umol C (kg H2O)^-1
   // Least-cost's unit-cost ratio beta = c_V / c_E (Prentice et al. 2014), the curve's

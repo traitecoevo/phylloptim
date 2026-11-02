@@ -259,11 +259,12 @@ inline double step_for(int par, double value, double step) {
   return std::max(std::abs(value), floor) * step;
 }
 
-// Where the stencil is centred: on the value, except that `g_min` is refused
-// below zero and defaults to zero, so there the stencil shifts up one step and
-// differentiates at g_min = h.
+// Where the stencil is centred: on the value, except that `g_min` and
+// TF24_floor's price are refused below zero and default to zero, so there the
+// stencil shifts up one step and differentiates at h.
 inline double centre_for(int par, double value, double h) {
-  return (par == par_g_min && value - h < 0.0) ? value + h : value;
+  const bool non_negative = par == par_g_min || par == par_TF24_floor_lambda_o;
+  return (non_negative && value - h < 0.0) ? value + h : value;
 }
 
 // --- one observation's drivers ------------------------------------------------

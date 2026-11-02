@@ -824,21 +824,19 @@ operating_point <- function(x) {
 ##'   (the default) or [leaf_supply_singlelayer()]. On the single-potential path
 ##'   `soil_depth` and `root_network` must be omitted, and each `psi_soil` is one
 ##'   value rather than a profile.
-##' @param model which optimality model to solve, as in [leaf_gradient()]:
-##'   `"collar"` (the default, the production path -- the TF24 cost maximised over
-##'   the root-collar potential) or any name from [cost_curve_names()], which
-##'   solves that curve on `route`.
-##' @param route which potential the curve is maximised over: `"collar"`, the
-##'   root-collar potential, on either supply path; or `"stem"`, `psi_stem` with
-##'   the upstream potential pinned at `psi_soil`, which needs
-##'   `leaf_supply_singlelayer()`. `NULL` (the default) is the collar route for
-##'   `model = "collar"` and the stem route for a curve name, so a call that
-##'   names no route means what it always has. `model = "collar"` is TF24 on the
-##'   collar route, so it takes no `route = "stem"`: that is `model = "TF24"`.
+##' @param model which optimality model to solve, as in [leaf_gradient()]: any
+##'   name from [cost_curve_names()], solved on `route`. The default,
+##'   `"TF24_floor"`, is plant's default model; at its default price,
+##'   `TF24_floor_lambda_o = 0`, it is TF24. `"collar"` is a deprecated alias for
+##'   `model = "TF24", route = "collar"`.
+##' @param route which potential the curve is maximised over: `"collar"` (the
+##'   default), the root-collar potential, on either supply path; or `"stem"`,
+##'   `psi_stem` with the upstream potential pinned at `psi_soil`, which needs
+##'   `leaf_supply_singlelayer()`. `NULL` is the collar route.
 ##'
-##'   ⚠️ **`"collar"` and `"TF24"` are different models, not two ways of asking
-##'   one question**, even though both use the TF24 cost. They optimise different
-##'   variables over different supply topologies and disagree on 20 of 30 driver
+##'   ⚠️ **The two routes are different models, not two ways of asking one
+##'   question**, even for one curve. They optimise different variables over
+##'   different supply topologies, and for TF24 disagree on 20 of 30 driver
 ##'   rows.
 ##'
 ##'   ⚠️ **On a stem route the `collar` column comes back non-finite**, because
@@ -848,8 +846,8 @@ operating_point <- function(x) {
 ##'
 ##'   Two curves take a PRESCRIBED price of water rather than deriving one:
 ##'   `CF77` reads `CF77_lambda` and `TF24_floor` reads `TF24_floor_lambda_o`,
-##'   both below. `CF77`'s has a default, aligned to TF24 by [align_curves()];
-##'   `TF24_floor`'s has none, and that curve refuses to solve without one.
+##'   both below. `CF77`'s default is aligned to TF24 by [align_curves()];
+##'   `TF24_floor`'s is 0, where that curve is TF24.
 ##' @param LeastCost_beta the `LeastCost` curve's unit-cost ratio (Prentice et
 ##'   al. 2014's beta): the cost of maintaining carboxylation capacity relative to
 ##'   the cost of transpiration, dimensionless. Only `model = "LeastCost"` reads
@@ -862,7 +860,7 @@ operating_point <- function(x) {
 ##' @param CF77_lambda,TF24_floor_lambda_o the prescribed marginal value of water
 ##'   for the two curves that take one, in umol C (kg H2O)^-1. `NA_real_` (the
 ##'   default) leaves the field as it is: `CF77`'s aligned default (see
-##'   [align_curves()]), or unset for `TF24_floor`, which refuses to solve.
+##'   [align_curves()]), or `TF24_floor`'s 0, where that curve is TF24.
 ##'
 ##'   ⚠️ **Their scale is set by the leaf, not chosen freely.** At this package's
 ##'   defaults the leaf's own marginal cost of water runs 9e4 to 3e5, and a price
@@ -910,7 +908,7 @@ leaf_solve <- function(psi_soil,
                        control = leaf_control(),
                        supply = leaf_supply_multilayer(),
                        reuse = TRUE,
-                       model = "collar",
+                       model = "TF24_floor",
                        route = NULL,
                        CF77_lambda = NA_real_,
                        TF24_floor_lambda_o = NA_real_,
@@ -1003,10 +1001,10 @@ leaf_solve <- function(psi_soil,
 # --- internals ---------------------------------------------------------------
 
 # A model is a (curve, route) pair, resolved from `model` and `route` and
-# validated against the supply path before a Leaf is built. `model = "collar"`
-# is TF24 on the collar route and a curve name defaults to its stem route
-# (decision D3), so a call naming no route means what it did before routes
-# could be named. leaf_solve(), leaf_gradient() and leaf_gradient_batch() all
+# validated against the supply path before a Leaf is built. Every curve takes
+# the collar solve, so a curve name defaults to its collar route (decision D3);
+# `model = "collar"` is a deprecated alias for TF24 on the collar route.
+# leaf_solve(), leaf_gradient() and leaf_gradient_batch() all
 # resolve here, from `.gradient_models()`, so a curve added in C++ is reachable
 # from each and they cannot disagree about what a name selects.
 .resolve_model <- function(model, route, supply_kind) {
@@ -1032,7 +1030,7 @@ leaf_solve <- function(psi_soil,
     route <- "collar"
   } else {
     curve <- model
-    if (is.null(route)) route <- "stem"
+    if (is.null(route)) route <- "collar"
   }
   if (identical(route, "stem") && !identical(supply_kind, "single")) {
     stop("the stem routes optimise `psi_stem` with the upstream potential ",

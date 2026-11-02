@@ -21,11 +21,10 @@ leaf <- leaf_model()
                                "residual_cap_fraction")
 
 # Inputs with no default by design: an unset one reads NaN and the code refuses
-# it where it is used (TF24_floor's price, the energy balance's near-infrared),
-# or it is seated only by a supply network. The other two model-owned
-# parameters have aligned defaults (#156).
-.registry_no_default <- c("NIR_int_", "TF24_floor_lambda_o",
-                          "single_resistance")
+# it where it is used (the energy balance's near-infrared), or it is seated only
+# by a supply network. Two model-owned parameters have aligned defaults (#156),
+# and TF24_floor's price defaults to 0, where that curve is TF24.
+.registry_no_default <- c("NIR_int_", "single_resistance")
 
 test_that("the registry parses and validates", {
   expect_s3_class(registry, "model_registry")

@@ -326,9 +326,10 @@ l$lambda             # marginal cost of water, dA/dE
 
 **Which model is configuration, not a call argument.** `$set_model()` seats a cost
 curve, a route and a method; `$optimise()` takes nothing, because the curves'
-constants are already on the object. The defaults are `"TF24"`, `"collar"` and
-`"exact"`, the production path, so an existing caller that never sets a model is
-unaffected — `$find_root_collar_psi()` is that solve under its own name, which is
+constants are already on the object. The object's defaults are `"TF24"`,
+`"collar"` and `"exact"`; `leaf_solve()` and the gradients default to
+`"TF24_floor"`, plant's model, which at its default price is TF24. An existing
+caller that never sets a model is unaffected — `$find_root_collar_psi()` is that solve under its own name, which is
 what plant's sources spell.
 
 ```r
@@ -401,10 +402,11 @@ g <- leaf_gradient(psi_soil = 2.0, PPFD = 900,
 g$gradient   # rows: parameters.  columns: A, gc, psi_stem, collar, profit
 g$method     # "ift" or "fd" -- see below
 
-# any of the nine models, on either route -- and `leaf_solve()` takes both too
-leaf_gradient(psi_soil = 2.0, PPFD = 900, model = "JS22", route = "collar",
+# any of the nine models, on either route -- and `leaf_solve()` takes both too.
+# The default model is TF24_floor, plant's, and the default route the collar.
+leaf_gradient(psi_soil = 2.0, PPFD = 900, model = "JS22",
               pars = c("vcmax_25", "JS22_gamma"))
-leaf_gradient(psi_soil = 2.0, PPFD = 900, model = "JS22",   # its stem route
+leaf_gradient(psi_soil = 2.0, PPFD = 900, model = "JS22", route = "stem",
               supply = leaf_supply_singlelayer(), pars = c("vcmax_25", "JS22_gamma"))
 ```
 

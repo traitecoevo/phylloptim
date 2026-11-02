@@ -52,7 +52,7 @@ argument or trait that carries it: \code{CF77_lambda}, \code{JS22_gamma}, \code{
 \code{LeastCost_beta}. Attribute \code{"target"} holds the conductance matched.
 }
 \description{
-Solves each curve's level parameter so that its stem optimum has the same
+Solves each curve's level parameter so that its stem-route optimum has the same
 stomatal conductance as a target, under one reference environment. Aligned
 curves agree at the reference and differ only in how their optimum moves
 away from it, so a comparison across curves measures how each RESPONDS to
@@ -78,7 +78,7 @@ sets their optimum, and matching them through \code{kmax} would mean they no
 longer share the supply every other curve uses.
 \item \code{TF24_floor} reads TF24's own cost and adds a price \code{lambda_o} on top, so
 the only \code{lambda_o} that reaches TF24's conductance is zero, where the
-curve is TF24. It keeps no default and still refuses to solve without one.
+curve is TF24. That zero is its default.
 }
 
 \code{CF77} aligned to TF24 is an identity rather than a fit: at TF24's emergent
@@ -90,13 +90,13 @@ curve is TF24. It keeps no default and still refuses to solve without one.
 a <- align_curves()
 a
 # The defaults are this answer, so these two agree:
-leaf_solve(psi_soil = 1, model = "JS22",
+leaf_solve(psi_soil = 1, model = "JS22", route = "stem",
            supply = leaf_supply_singlelayer())$gc
 attr(a, "target")
 
 # Align to a wetter reference instead, and use the result:
 w <- align_curves(psi_soil = 0.5)
-leaf_solve(psi_soil = 0.5, model = "CMax",
+leaf_solve(psi_soil = 0.5, model = "CMax", route = "stem",
            supply = leaf_supply_singlelayer(),
            traits = leaf_traits(CMax_a = w[["CMax_a"]]))$gc
 }

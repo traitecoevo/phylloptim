@@ -447,7 +447,7 @@ cat(sprintf("at psi = 1e-06 MPa:  TF24 %10.3e    TF24_floor %9.1f\n",
             l$lambda_TF24_floor(1e-6)))
 ```
 
-`λ_o` has `CF77_lambda_`'s units and meaning — carbon per unit transpiration — but, unlike it, no default: at `λ_o = 0` this curve *is* `TF24`, so a caller who omitted it would be running the production model under the new model's name. The solve refuses rather than defaults. An explicit zero is accepted, and is the reduction test's own case. [leaf_solve()] and [leaf_batch()] take it as an argument; on a bare `Leaf`, assign the field.
+`λ_o` has `CF77_lambda_`'s units and meaning — carbon per unit transpiration. Its default is 0, as in plant, where this curve *is* `TF24` bit for bit, so `TF24_floor` is the default model of [leaf_solve()] and the gradients without changing a number. [leaf_solve()] and [leaf_batch()] take it as an argument; on a bare `Leaf`, assign the field.
 
 ### Pricing the drop is not pricing the potential
 
@@ -690,7 +690,7 @@ print(signif(gc, 3))
 The first five columns agree at `psi_soil` 1 and part either side of it, which is the comparison an alignment is for. Four curves are left unaligned:
 
 - `SOX`, `JW26` and `ProfitMax` have no level parameter; the supply puts their optimum. Matching them through `kmax` would work, but they would then no longer share the one supply every other curve uses.
-- `TF24_floor` adds a price to TF24's own cost at TF24's own traits, so the only `λ_o` that reaches TF24's conductance is zero, where the curve is TF24. It keeps no default.
+- `TF24_floor` adds a price to TF24's own cost at TF24's own traits, so the only `λ_o` that reaches TF24's conductance is zero, where the curve is TF24. That zero is its default.
 
 Call [align_curves()] with a different reference or `target` to align for a different study, and pass its answer back as traits (`JS22_gamma`, `CMax_a`) or as [leaf_solve()] arguments (`CF77_lambda`, `LeastCost_beta`).
 

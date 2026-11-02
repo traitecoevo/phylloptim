@@ -897,7 +897,7 @@ test_that("TF24_floor_lambda_o is a caller input on CF77_lambda_'s footing (#96)
   # the caller supplies, not derived state, so re-driving and re-traiting must both
   # leave it standing while clearing everything around it.
   l <- leaf_model(supply = leaf_supply_singlelayer())
-  expect_true(is.na(l$TF24_floor_lambda_o))
+  expect_identical(l$TF24_floor_lambda_o, 0)
 
   l$TF24_floor_lambda_o <- 1.5e5
   set_drivers(l, psi_soil = 1.5, root_network = series_resistance(1500))
@@ -980,15 +980,13 @@ test_that("TF24_floor is TF24 plus a price, and reduces to each of them", {
   expect_lt(l$lambda_TF24(1e-6), 1)
 })
 
-test_that("TF24_floor refuses an unset price at the R surface too", {
+test_that("TF24_floor refuses a cleared price at the R surface too", {
   l <- leaf_model(supply = leaf_supply_singlelayer())
   set_drivers(l, psi_soil = 1.5, PPFD = 1500,
               root_network = series_resistance(1e4))
+  l$TF24_floor_lambda_o <- NA
   l$set_model("TF24_floor", "stem")
   expect_error(l$optimise(), "needs TF24_floor_lambda_o set")
-  # The message has to say why there is no default, or the obvious repair -- set it
-  # to zero -- silently substitutes TF24 for the model the caller asked for.
-  expect_error(l$optimise(), "TF24")
 })
 
 test_that("the prescribed prices are reachable from leaf_solve() (#132)", {
@@ -1002,7 +1000,8 @@ test_that("the prescribed prices are reachable from leaf_solve() (#132)", {
   one <- leaf_solve(psi_soil = 1.5, PPFD = 1500,
                     supply = leaf_supply_singlelayer(),
                     root_network = series_resistance(1e4),
-                    model = "TF24_floor", TF24_floor_lambda_o = 1.5e5)
+                    model = "TF24_floor", route = "stem",
+                    TF24_floor_lambda_o = 1.5e5)
   expect_true(is.finite(one$psi_stem))
 
   # The same answer the stateful route gives, to the bit.
@@ -1018,15 +1017,20 @@ test_that("the prescribed prices are reachable from leaf_solve() (#132)", {
   expect_true(is.finite(leaf_solve(psi_soil = 1.5, PPFD = 1500,
                                    supply = leaf_supply_singlelayer(),
                                    root_network = series_resistance(1e4),
-                                   model = "CF77",
+                                   model = "CF77", route = "stem",
                                    CF77_lambda = 1.5e5)$psi_stem))
 
-  # Without one, the curve's own refusal reaches the caller rather than a NaN.
-  expect_error(leaf_solve(psi_soil = 1.5, PPFD = 1500,
-                          supply = leaf_supply_singlelayer(),
-                          root_network = series_resistance(1e4),
-                          model = "TF24_floor"),
-               "needs TF24_floor_lambda_o set")
+  # Without one, the default 0, where the curve is TF24, to the bit.
+  floor0 <- leaf_solve(psi_soil = 1.5, PPFD = 1500,
+                       supply = leaf_supply_singlelayer(),
+                       root_network = series_resistance(1e4),
+                       model = "TF24_floor", route = "stem")
+  tf24 <- leaf_solve(psi_soil = 1.5, PPFD = 1500,
+                     supply = leaf_supply_singlelayer(),
+                     root_network = series_resistance(1e4),
+                     model = "TF24", route = "stem")
+  expect_identical(floor0$psi_stem, tf24$psi_stem)
+  expect_identical(floor0$profit, tf24$profit)
 
   # ⚠️ A PRICE THE SEATED MODEL DOES NOT READ IS REFUSED, NOT IGNORED. Silently
   # ignoring it is how someone spends an afternoon wondering why their lambda had
@@ -1036,9 +1040,9 @@ test_that("the prescribed prices are reachable from leaf_solve() (#132)", {
                           root_network = series_resistance(1e4),
                           model = "TF24_floor", CF77_lambda = 1.5e5),
                "CF77 curve's prescribed price")
-  expect_error(leaf_solve(psi_soil = 2.0, PPFD = 900,
+  expect_error(leaf_solve(psi_soil = 2.0, PPFD = 900, model = "TF24",
                           TF24_floor_lambda_o = 1.5e5),
-               "model = \"collar\" does not read it")
+               "model = \"TF24\" does not read it")
 
   # And it survives the `reuse = FALSE` path, which builds a Leaf per row and so
   # applies the price through a different call.
