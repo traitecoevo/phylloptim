@@ -8,7 +8,7 @@ The numerical record that the standing rules in [CLAUDE.md](CLAUDE.md) rest on: 
 
 ⚠️ **A grid at one leaf temperature is blind to every temperature response in the model**, because every reference value is *defined* at 25 °C and a change to any response curve is inert there **by construction**. Hence the second temperature, and hence the classification being printed per temperature: points move between branches as the leaf warms (boundary-dry 9 → 0, boundary-soil 42 → 116). Temperature is the OUTERMOST loop, which is what lets a regeneration that adds one be checked as an addition — the 25 °C block must come out byte-identical.
 
-The three files answer different questions, and the layout in CLAUDE.md says which: `operating_points.tsv` says *whether* anything moved and is blind to every stem route; `primitives.tsv` says *which* function moved (the lowest tier that changed is the cause); `psi_stem_optima.tsv` covers every curve on both routes, records today's known defects on purpose (read its header before reading a row as intended behaviour), and reuses one `Leaf` with poisoned outputs so stale state is visible.
+The three files answer different questions, and the layout in CLAUDE.md says which: `operating_points.tsv` says *whether* anything moved and is blind to every stem route; `primitives.tsv` says *which* function moved (the lowest tier that changed is the cause); `psi_stem_optima.tsv` covers every curve on both routes, solved and at a prescribed point, records today's known defects on purpose (read its header before reading a row as intended behaviour), and reuses one `Leaf` with poisoned outputs so stale state is visible.
 
 ### Magnitudes: what a difference means
 
