@@ -2393,12 +2393,13 @@ void test_evaluate_psi_leaf_prescribes_rather_than_optimises() {
        "the TF24 arm agrees with its own objective at that point");
 }
 
-// ProfitMax's solve on a reused leaf writes hydraulic_cost_, as NA, on every
-// exit: its objective is unitless, so the field holds no cost of its own, and
-// left alone it reports the last curve's (hazard 8). The dark leaf takes the
-// degenerate exit, which writes its outputs by hand.
-void test_profitmax_writes_hydraulic_cost_on_every_exit() {
-  printf("ProfitMax writes hydraulic_cost_ on a reused leaf, on every exit\n");
+// ProfitMax's solve on a reused leaf writes hydraulic_cost_, as NA, through both
+// places its outputs are written: the profit evaluation and the degenerate exit
+// a dark leaf takes on the leaf route, which writes them by hand. Its objective
+// is unitless, so the field holds no cost of its own, and left alone it reports
+// the last curve's (hazard 8).
+void test_profitmax_writes_hydraulic_cost_on_both_paths() {
+  printf("ProfitMax writes hydraulic_cost_ on a reused leaf, solved or degenerate\n");
   for (double ppfd : {0.0, 900.0}) {
     for (bool collar : {false, true}) {
       Drivers d;
@@ -2411,9 +2412,13 @@ void test_profitmax_writes_hydraulic_cost_on_every_exit() {
       l.optimise();
       const std::string at = std::string(collar ? " (collar" : " (leaf") +
                              " route, PPFD " + std::to_string(int(ppfd)) + ")";
-      if (ppfd == 0.0 && !collar) {
-        ok(l.operating_point_kind() == phylloptim::Leaf::OperatingPointKind::Unsolved,
-           "the dark leaf takes the degenerate exit" + at);
+      // Only the degenerate exit leaves lambda NA on the leaf route; a solve
+      // writes the curve's lambda. (The leaf route does not classify its point,
+      // so operating_point_kind() cannot tell the two apart.)
+      if (!collar) {
+        ok(std::isnan(l.lambda_emergent_) == (ppfd == 0.0),
+           std::string(ppfd == 0.0 ? "the dark leaf takes the degenerate exit"
+                                   : "the lit leaf is solved") + at);
       }
       ok(std::isnan(l.hydraulic_cost_), "ProfitMax reports hydraulic_cost_ as NA" + at);
     }
@@ -11688,7 +11693,7 @@ int main(int argc, char **argv) {
   test_perturb_stem_P50_matches_a_rebuild();
   test_stem_curve_shortcut_needs_no_rebuild();
   test_a_restored_c_reuses_its_table();
-  test_profitmax_writes_hydraulic_cost_on_every_exit();
+  test_profitmax_writes_hydraulic_cost_on_both_paths();
   test_water_mass_conversions_are_reciprocal();
   test_gas_constant_and_arrhenius_reference_point();
   test_knot_grid_reaches_its_intended_domain();

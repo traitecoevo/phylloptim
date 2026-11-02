@@ -2405,7 +2405,7 @@ equations:
     reads: []
     writes: []
     kind: closed_form
-    note: 'The value `profit_` reports. The product and ratio curves are evaluated in that form, not as $\log A \pm \log(\cdot)$, because at closure $A \le 0$ can hold (a net source, or zero in light at $g_\min = 0$) and the endpoint must stay a candidate; `log` is monotone so the argmax is shared. Only the five difference curves are carbon fluxes; the product, ratio and normalised values must not be compared with them. Each curve states its shape (`ObjectiveShape`) and supplies the factor that shape composes with $A$; the product and ratio curves set `hydraulic_cost_` to NA.'
+    note: 'The value `profit_` reports. The product and ratio curves are evaluated in that form, not as $\log A \pm \log(\cdot)$, because at closure $A \le 0$ can hold (a net source, or zero in light at $g_\min = 0$) and the endpoint must stay a candidate; `log` is monotone so the argmax is shared. Only the five difference curves are carbon fluxes; the product, ratio and normalised values must not be compared with them. Each curve states its shape (`ObjectiveShape`) and supplies the factor that shape composes with $A$; the product, ratio and normalised curves set `hydraulic_cost_` to NA.'
   benefit_link_deriv:
     section: costs
     title: Slope of the benefit link

@@ -609,10 +609,11 @@ int compare(Tolerance tol) {
 // PURPOSE. Do not read a row as a statement about what the model SHOULD do.
 // Specifically recorded here as-is:
 //   * two different degenerate conventions -- `_TF` and `_CF77`
-//     evaluate the real objective at the closed point, `_ProfitMax` zeroes seven
-//     fields instead;
-//   * `hydraulic_cost_` written in carbon units by `_TF` and `_CF77`, and NA
-//     under every curve with no subtracted carbon cost, `_ProfitMax` included;
+//     evaluate the real objective at the closed point, `_ProfitMax` zeroes its
+//     profit and three normalised fields and sets lambda and hydraulic_cost_
+//     to NA instead;
+//   * `hydraulic_cost_` in carbon units under the five difference curves and NA
+//     under the rest, which subtract no carbon cost;
 //   * `at_ProfitMax` evaluated where the solve takes its degenerate exit (a dark
 //     leaf, a wet end past psi_crit): the leaf route's prescribed evaluation
 //     seeds the normalisers but has no such exit.
