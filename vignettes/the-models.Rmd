@@ -110,7 +110,7 @@ Fix any one of these and the rest follow. Because each map is monotone, it carri
 
 This package solves in water potential, because that is the coordinate in which the hydraulic supply constraint is simplest to state. That is an implementation choice and nothing more. What actually distinguishes the models is the cost function, which is the next section.
 
-The maps are monotone but not linear, and that limits how far the equivalence goes. A *derivative* does depend on the coordinate. `dA/dE` and `dA/dψ` are different numbers, related by `dE/dψ`. So a marginal cost only means something once you say what it is per unit of, and comparing a λ from one paper with a λ from another means checking that they share a denominator. `marginal_cost_water()` reports per unit `E`, which is the convention the λ literature uses.
+The maps are monotone but not linear, and that limits how far the equivalence goes. A *derivative* does depend on the coordinate. `dA/dE` and `dA/dψ` are different numbers, related by `dE/dψ`. So a marginal cost only means something once you say what it is per unit of, and comparing a λ from one paper with a λ from another means checking that they share a denominator. A leaf's `$lambda` is per unit `E`, which is the convention the λ literature uses.
 
 ### Solving for the optimum by its first-order condition
 

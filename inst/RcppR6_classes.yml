@@ -524,8 +524,10 @@ Leaf:
     # umol C (kg H2O)^-1, on the route the solve used (along the collar path on the
     # collar route) -- the one output every cost curve reports on the same axis,
     # and in the same units as the `$CF77_lambda_` INPUT so the two are directly
-    # comparable. Cowan-Farquhar prices water at a constant, so its lambda IS that
-    # constant; every other curve's moves with the drivers. `lambda_molar` is the
+    # comparable. Cowan-Farquhar prices water at a constant, so its lambda is that
+    # constant, to the stem table's accuracy; every other curve's moves with the
+    # drivers. NA where the curve's link has no slope (a product or LeastCost at
+    # A <= 0). `lambda_molar` is the
     # same in mol CO2 (mol H2O)^-1.
     #
     # Read-only: a settable one would be a way to disagree with the operating point

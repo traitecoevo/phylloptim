@@ -145,16 +145,9 @@ align_curves <- function(models = NULL,
   out
 }
 
-# The curves with an aligned parameter, in cost_curve_names() order: the
-# definitions say which (cost_curve_parameters()'s `aligned`).
-.align_curves <- function() {
-  cp <- .curve_tables()$parameters
-  unique(cp$curve[cp$aligned])
-}
-
 # Each alignable curve's level parameter, from its definition: its name as a
 # leaf_traits() argument or a leaf_solve() argument, which of the two it is, and
-# the bracket below.
+# the bracket below. One per curve, which test-curve-definition.R holds.
 .align_levels <- function() {
   cp <- .curve_tables()$parameters
   cp <- cp[cp$aligned, , drop = FALSE]

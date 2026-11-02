@@ -910,17 +910,14 @@ leaf_solve <- function(psi_soil,
                        LeastCost_beta = NA_real_) {
   .check_model(model, supply)
   # One price for every row: the price is seated once per Leaf.
-  long <- c(CF77_lambda = length(CF77_lambda),
-            TF24_floor_lambda_o = length(TF24_floor_lambda_o),
-            LeastCost_beta = length(LeastCost_beta)) != 1L
+  given <- .owned_arguments(environment())
+  long <- vapply(given, length, integer(1)) != 1L
   if (any(long)) {
-    stop("`", names(long)[long][[1]], "` must be a single number (or NA): ",
-         "leaf_solve() seats one price for every row. For a price per ",
-         "observation, use leaf_batch().", call. = FALSE)
+    stop("`", .owned_argument(names(given)[long][[1]]), "` must be a single ",
+         "number (or NA): leaf_solve() seats one price for every row. For a ",
+         "price per observation, use leaf_batch().", call. = FALSE)
   }
-  prices <- .check_prices(model, list(CF77_lambda_ = CF77_lambda,
-                                     TF24_floor_lambda_o = TF24_floor_lambda_o,
-                                     LeastCost_beta = LeastCost_beta))
+  prices <- .check_prices(model, given)
   layered <- .as_layer_list(psi_soil, "psi_soil")
   scalars <- list(PPFD = PPFD, atm_vpd = atm_vpd, ca = ca,
                   leaf_temp = leaf_temp, atm_o2_kpa = atm_o2_kpa,
@@ -1063,6 +1060,14 @@ leaf_solve <- function(psi_soil,
 # The argument leaf_solve() and leaf_batch() take for an owned field: its name
 # without the trailing underscore.
 .owned_argument <- function(field) sub("_$", "", field)
+
+# Every owned field's argument, read out of the calling function's frame and
+# named by field. A curve parameter with no argument fails here, by name.
+.owned_arguments <- function(frame) {
+  fields <- unname(.owned_fields())
+  stats::setNames(mget(.owned_argument(fields), envir = frame, inherits = FALSE),
+                  fields)
+}
 
 .owns_field <- function(model, field) {
   owned <- .owned_fields()

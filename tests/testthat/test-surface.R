@@ -945,7 +945,7 @@ test_that("TF24_floor is TF24 plus a price, and reduces to each of them", {
   # is about what a curve can attribute, not about what a leaf does.
   cols <- setdiff(names(cf77), "shadow_cost")
   expect_identical(no_hydraulic[cols], cf77[cols])
-  expect_identical(cf77$lambda, 1.5e5)
+  expect_equal(cf77$lambda, 1.5e5, tolerance = 1e-8)
   expect_gt(no_hydraulic$shadow_cost, 0)
   expect_identical(cf77$shadow_cost, 0)
 

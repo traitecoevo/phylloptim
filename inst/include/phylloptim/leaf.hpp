@@ -1293,9 +1293,8 @@ public:
                                            double psi_upstream);
   // The collar route's lambda_emergent, for the seated curve. See the definition.
   template <CostCurve K> double lambda_collar_for();
-  // What lambda_for and lambda_collar_for compose: 1/h'(A), and a cost's slope in
-  // E through leaf temperature. See the definitions.
-  template <CostCurve K> double lambda_carbon_scale() const;
+  // A cost's slope in E through leaf temperature, which lambda_for and
+  // lambda_collar_for add. See the definition.
   template <CostCurve K> double lambda_temperature_slope(double psi_stem,
                                                          double psi_upstream);
   // The C in J = h(A) - C at a stem potential, in the link's units.
@@ -1312,8 +1311,8 @@ public:
   // member added to update_temperature_dependent_params must be added here and
   // to dprofit_energy_balance_term, or the leaf stays 1e-3 degrees off.
   template <class F> double temp_deriv(double leaf_temp, F read);
-  // dVcmax/dTleaf, the same way and with the same restore, for lambda_LeastCost
-  // with the energy balance on (LeastCost's capacity cost reads vcmax_).
+  // dVcmax/dTleaf, the same way and with the same restore (LeastCost's capacity
+  // cost reads vcmax_, so its slope in Tleaf does).
   double vcmax_temp_deriv(double leaf_temp);
   // What a cost reading leaf temperature needs from dprofit_energy_balance_term:
   // the leaf temperature, its slope tau = dT/dpsi, the difference step and

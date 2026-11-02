@@ -145,9 +145,7 @@ leaf_batch <- function(psi_soil,
   }
 
   # Each owned field's argument, by field.
-  prices <- list(CF77_lambda_ = CF77_lambda,
-                 TF24_floor_lambda_o = TF24_floor_lambda_o,
-                 LeastCost_beta = LeastCost_beta)
+  prices <- .owned_arguments(environment())
   prices <- lapply(stats::setNames(names(prices), names(prices)), function(f) {
     .recycle_to(as.numeric(prices[[f]]), n, .owned_argument(f))
   })

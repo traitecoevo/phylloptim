@@ -100,7 +100,7 @@ test_that("dA/dE equals lambda/beta at the optimum", {
   expect_equal(fd_dassim_dtransp, lambda / beta, tolerance = 1e-4)
   # And the reported lambda agrees with the prescribed price, which is what puts
   # this curve on the same axis as the others.
-  expect_equal(l$lambda, lambda / beta, tolerance = 1e-10)
+  expect_equal(l$lambda, lambda / beta, tolerance = 1e-8)
 })
 
 test_that("drying the soil closes stomata, which plain CF77 will not do", {

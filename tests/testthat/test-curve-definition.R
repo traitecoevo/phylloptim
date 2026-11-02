@@ -43,9 +43,11 @@ test_that("every curve parameter is bound, in the R lists, and at its default", 
   expect_identical(phylloptim:::.owned_fields(),
                    stats::setNames(owned$parameter, owned$curve))
 
-  # An aligned default has a bracket for align_curves() to solve it in.
+  # An aligned default has a bracket for align_curves() to solve it in, and a
+  # curve has at most one, which align_curves() reports under the curve's name.
   expect_setequal(names(phylloptim:::.align_brackets),
                   cp$parameter[cp$aligned])
+  expect_false(anyDuplicated(cp$curve[cp$aligned]) > 0)
 })
 
 test_that("every curve parameter is registered", {
@@ -91,5 +93,31 @@ test_that("the by-name methods cover every curve, and are each curve's own", {
     expect_identical(l$curve_lambda(curve, ps, pu),
                      l[[paste0("lambda_", curve)]](ps, pu), info = curve)
   }
-  expect_identical(l$curve_lambda("CF77", ps, pu), l$CF77_lambda_)
+  # CF77's is its price, to the stem table's slope accuracy.
+  expect_equal(l$curve_lambda("CF77", ps, pu), l$CF77_lambda_, tolerance = 1e-8)
+})
+
+test_that("every curve's lambda is its cost's slope over E's, in carbon", {
+  # An independent referee for curve_lambda(): a central difference of
+  # curve_cost() over one of transpiration(), divided by the link's slope h'(A),
+  # which is 1, 1/A or 1/|A|max. It reaches every shape's cost.
+  l <- leaf_model(supply = leaf_supply_singlelayer())
+  l$TF24_floor_lambda_o <- 1.5e5
+  set_drivers(l, psi_soil = 1, PPFD = 900)
+  l$prepare_profitmax()
+  ps <- 1.6
+  pu <- 1
+  h <- 1e-5
+  link <- c(TF24 = "1", CF77 = "1", JS22 = "1", CMax = "1", SOX = "A", JW26 = "A",
+            ProfitMax = "Amax", TF24_floor = "1", LeastCost = "A")
+  expect_setequal(names(link), cost_curve_names())
+  for (curve in cost_curve_names()) {
+    dC <- l$curve_cost(curve, ps + h, pu) - l$curve_cost(curve, ps - h, pu)
+    dE <- l$transpiration(ps + h, pu) - l$transpiration(ps - h, pu)
+    l$curve_profit(curve, ps, pu)
+    scale <- switch(link[[curve]], "1" = 1, A = l$assim_colimited_,
+                    Amax = l$profitmax_A_max)
+    expect_equal(l$curve_lambda(curve, ps, pu), dC / dE * scale,
+                 tolerance = 1e-6, info = curve)
+  }
 })

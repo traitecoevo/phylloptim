@@ -1,9 +1,9 @@
 # phylloptim 0.28.0
 
 - **Breaking:** `$lambda`, `$lambda_molar` and the `lambda` column of `operating_point()` and `leaf_solve()` report the marginal cost of water of the curve the leaf is set to, on the route it was solved; they used to report TF24's whatever curve was set. `$lambda_emergent` and the `lambda_emergent` column, which held that number, are gone: read `lambda`. `$lambda_multilayer` is gone too: on the collar route `$lambda` is that number, for every curve.
-- One generic form, the cost's slope over the transpiration's, now gives six curves' marginal cost of water (TF24, JS22, CMax, SOX, JW26, ProfitMax); their `lambda` moves by at most about 1e-14 relative. CF77, TF24_floor and LeastCost keep their own, which the generic form would compute less accurately. Nothing else moves.
+- One form, the cost's slope over the transpiration's in carbon, now gives every curve's marginal cost of water. It moves by rounding for six curves, and by the stem table's accuracy (about 1e-12 at the default curve) for CF77, TF24_floor and LeastCost, whose λ was their price or closed form exactly. Under SOX, JW26 and LeastCost a leaf that cannot fix carbon reports `lambda` as `NA`, as it does at a shut collar, where it used to report a negative number. Nothing else moves.
 - `cost_curve_parameters()` lists each curve's parameters and defaults from the curves' definitions, which the package's own parameter tables now read; `$curve_cost()`, `$curve_profit()` and `$curve_lambda()` evaluate any curve by name at a stem potential, whatever the leaf is set to.
-- For C++ users, `marginal_cost_water()` and `marginal_cost_water_multilayer()` are removed and `marginal_cost_water_molar()` is `lambda_molar()`: `lambda_emergent()` is the one λ a leaf reports. A curve's `Curve<K>` states `own_lambda`, and its parameters whether their defaults are aligned ([#230](https://github.com/traitecoevo/phylloptim/issues/230)).
+- For C++ users, `marginal_cost_water()` and `marginal_cost_water_multilayer()` are removed and `marginal_cost_water_molar()` is `lambda_molar()`: `lambda_emergent()` is the one λ a leaf reports. A curve's `Curve<K>` no longer holds λ, and its parameters state whether their defaults are aligned ([#230](https://github.com/traitecoevo/phylloptim/issues/230)).
 
 # phylloptim 0.27.5
 
