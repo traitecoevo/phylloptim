@@ -548,12 +548,14 @@ Four things follow:
   exists, and why construction is about four-fifths of a one-parameter
   `leaf_gradient()` on a fresh leaf.
 
-One C++ cost is worth knowing because it surprises people, and batching cannot
-help with it: **`set_traits()` is almost free unless you change `stem_c` or
-`root_c`, and then costs about 17 C++ solves**, because each curve's vulnerability
-table depends on its `c` alone and it rebuilds one. Most of that is the incomplete
-gamma function seeding the knots, not the table machinery. A P50 moves nothing in
-a table, so changing one costs nothing beyond the re-drive.
+One C++ cost is worth knowing because it surprises people: **`set_traits()` is
+almost free unless it moves `stem_c` or `root_c` to a value the leaf has not seen
+recently, and then costs about 17 C++ solves**, because each curve's vulnerability
+table depends on its `c` alone and a new `c` needs a new table. Most of that is the
+incomplete gamma function seeding the knots, not the table machinery. A leaf keeps
+the last eight tables it built, so a gradient's perturbations of `c` build each
+table once per batch rather than once per observation, and a P50 moves nothing in
+a table.
 
 The solver's own costs, model by model, are the table in `vignette("the-models")`.
 

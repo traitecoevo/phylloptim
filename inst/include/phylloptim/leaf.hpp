@@ -164,9 +164,17 @@ public:
   std::shared_ptr<const VulnerabilityTable> stem_curve_;
   InverseScale stem_inv_b_;
 
-  // Instrumentation: how many times the stem curve has been built, never reset, so
-  // a caller takes differences. A rebuild is otherwise invisible: it is bit-identical.
+  // Instrumentation: how many stem tables this leaf has built, never reset, so a
+  // caller takes differences. A rebuild is otherwise invisible: it is bit-identical.
   long stem_curve_builds_ = 0;
+
+  // The tables this leaf built most recently, for both curves, so that moving a `c`
+  // and restoring it (a gradient's perturbation) finds its table instead of
+  // building it again: a build costs many solves. A table depends on (c,
+  // resolution) alone, so a reused one is bit-identical to a rebuild. Eight covers
+  // one observation's perturbations of stem_c and root_c (six tables) with room.
+  // The ring itself is the last member, so adding it moved no other member's offset.
+  static constexpr std::size_t recent_tables_size = 8;
 
   // The soil -> root-collar supply. Held by value because Leaf must stay copyable,
   // and public because plant's RcppR6 bindings reach its fields (hazard 7).
@@ -839,6 +847,10 @@ public:
                                    double root_P50, double root_c);
 
   void setup_transpiration(double resolution);
+  // The table at (c, resolution): the stem's or the root's current one, or one
+  // of recent_tables_, else a new one, remembered there. `built` says which.
+  std::shared_ptr<const VulnerabilityTable> table_for(double c, double resolution,
+                                                      bool& built);
 
   // The four operations on the stem's G; every read goes through these. G and G'
   // come from one polynomial, G^-1 is Newton on that pair, (G^-1)' is 1/G' there.
@@ -873,7 +885,8 @@ public:
   void setup_root_vulnerability(double resolution) {
     // Recorded because set_traits rebuilds both curves at this resolution.
     vulnerability_curve_ncontrol = resolution;
-    roots_.setup_vulnerability(resolution, stem_curve_);
+    bool built = false;
+    roots_.setup_vulnerability(resolution, table_for(roots_.root_c, resolution, built));
   }
   void setup_clean_leaf();
 
@@ -2079,6 +2092,9 @@ private:
   // The dry end polished to collar precision where the solve read it, or NaN.
   // profit_curvature_at_collar measures from it, as the marginal steepens there.
   double dry_bound_root_ = std::numeric_limits<double>::quiet_NaN();
+  // table_for's ring (recent_tables_size, above). Kept last: see there.
+  std::array<std::shared_ptr<const VulnerabilityTable>, recent_tables_size> recent_tables_;
+  std::size_t recent_tables_next_ = 0;
 };
 
 // Everything about one cost curve, specialised for each in leaf_cost_curves.hpp.

@@ -6059,6 +6059,72 @@ void test_perturb_stem_P50_matches_a_rebuild() {
   }
 }
 
+// A leaf remembers the tables it built recently (Leaf::recent_tables_), so a
+// trait gradient's perturbation of stem_c or root_c, which moves a `c` and puts
+// it back, builds each table once rather than once per observation. COUNTED, as
+// the test below is: a reused table is the same object, so the leaf is
+// bit-identical to one that rebuilt, and only the count can see the difference.
+void test_a_restored_c_reuses_its_table() {
+  printf("a curve's c moved and put back reuses its table\n");
+  Drivers d;
+  std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
+  const double c0 = 2.680147, P50 = 3.4, up = c0 * (1.0 + 1e-6),
+               dn = c0 * (1.0 - 1e-6);
+  const auto retrait = [&](phylloptim::Leaf& l, double stem_c, double root_c) {
+    l.set_traits(96.0, stem_c, P50, root_c, P50, 1.5, 157.44, 0.30 / 0.85, 0.7,
+                 0.99, 7.5, kRd25, kGammaJS22, kCMaxA, kCMaxB, 0.0);
+  };
+  const auto solve = [&](phylloptim::Leaf& l) {
+    l.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth,
+                     d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                     d.atm_o2_kpa, d.atm_kpa);
+    l.find_root_collar_psi();
+  };
+  // One observation's perturbations, in the order gradient::batch makes them.
+  const auto observation = [&](phylloptim::Leaf& l) {
+    retrait(l, up, c0); retrait(l, dn, c0); retrait(l, c0, c0);
+    retrait(l, c0, up); retrait(l, c0, dn); retrait(l, c0, c0);
+  };
+
+  phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
+  const auto base = l.stem_curve_;
+  const long b0 = l.stem_curve_builds_;
+  observation(l);
+  ok(l.stem_curve_builds_ - b0 == 2,
+     "the first observation builds the stem's two perturbed tables");
+  ok(l.stem_curve_ == base && l.roots_.vulnerability_ == base,
+     "putting both c back reuses the base table");
+  retrait(l, c0, up);
+  const auto root_up = l.roots_.vulnerability_;
+  retrait(l, up, c0);
+  ok(l.stem_curve_ == root_up,
+     "the root's perturbed table is the stem's, where their c agree");
+  retrait(l, c0, c0);
+  const long b1 = l.stem_curve_builds_;
+  for (int k = 0; k < 5; ++k) observation(l);
+  ok(l.stem_curve_builds_ == b1, "later observations build nothing");
+
+  // Bounded: a ring of recent_tables_size, so a table pushed out by that many
+  // newer ones is built again.
+  const long b2 = l.stem_curve_builds_;
+  for (std::size_t k = 1; k <= phylloptim::Leaf::recent_tables_size; ++k) {
+    retrait(l, c0 * (1.0 + 1e-3 * double(k)), c0 * (1.0 + 1e-3 * double(k)));
+  }
+  ok(l.stem_curve_builds_ - b2 == long(phylloptim::Leaf::recent_tables_size),
+     "each new c builds once");
+  retrait(l, up, c0);
+  ok(l.stem_curve_builds_ - b2 == long(phylloptim::Leaf::recent_tables_size) + 1,
+     "a table pushed out of the ring is built again");
+
+  retrait(l, c0, c0);
+  solve(l);
+  phylloptim::Leaf fresh = make_leaf(d, {2.0}, {1.0});
+  solve(fresh);
+  ok(l.opt_root_psi_ == fresh.opt_root_psi_ && l.opt_psi_leaf_ == fresh.opt_psi_leaf_ &&
+         l.profit_ == fresh.profit_ && l.transpiration_ == fresh.transpiration_,
+     "the operating point is bit-identical to a fresh leaf's");
+}
+
 // The other half of the shortcut: what it costs to STOP using it (#74).
 //
 // `set_traits()` is the way back, and it gets there by rebuilding -- which is
@@ -11585,6 +11651,7 @@ int main(int argc, char **argv) {
   test_profitmax_emergent_lambda_matches_a_finite_difference();
   test_perturb_stem_P50_matches_a_rebuild();
   test_stem_curve_shortcut_needs_no_rebuild();
+  test_a_restored_c_reuses_its_table();
   test_water_mass_conversions_are_reciprocal();
   test_gas_constant_and_arrhenius_reference_point();
   test_knot_grid_reaches_its_intended_domain();

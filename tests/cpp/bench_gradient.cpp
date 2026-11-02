@@ -373,7 +373,7 @@ int main(int argc, char **argv) {
         {"vcmax_25 (no table anywhere)", 0, true},
         {"stem_P50, fast_stem_curve on", phylloptim::gradient::par_stem_P50, true},
         {"stem_P50, fast_stem_curve off", phylloptim::gradient::par_stem_P50, false},
-        {"stem_c (rebuilds its table)", phylloptim::gradient::par_stem_c, true}};
+        {"stem_c (reuses its tables)", phylloptim::gradient::par_stem_c, true}};
 
     printf("\n%-32s %10s %12s\n", "pars", "us/obs", "rebuilds/obs");
     const long batch_reps = std::max(1L, per_round / 20);
