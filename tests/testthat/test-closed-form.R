@@ -29,7 +29,7 @@ cf_leaf <- function(psi_soil = 0.5, PPFD = 1500, atm_vpd = 1.0,
   set_drivers(l, psi_soil = psi_soil, PPFD = PPFD, atm_vpd = atm_vpd,
               leaf_temp = leaf_temp,
               root_network = series_resistance(1500))
-  l$set_model(curve, "stem", method)
+  l$set_model(curve, "leaf", method)
   l
 }
 
@@ -40,19 +40,19 @@ test_that("the method defaults to exact and a two-argument seat works", {
   l <- leaf_model(supply = leaf_supply_singlelayer())
   expect_identical(l$model_method(), "exact")
 
-  l$set_model("TF24", "stem")
+  l$set_model("TF24", "leaf")
   expect_identical(l$model_method(), "exact")
-  expect_identical(l$model_route(), "stem")
+  expect_identical(l$model_route(), "leaf")
   expect_identical(l$model_curve(), "TF24")
 
   # And it is settable back and forth, because it is configuration like the
   # other two axes rather than a property of a solve.
-  l$set_model("TF24", "stem", "closed")
+  l$set_model("TF24", "leaf", "closed")
   expect_identical(l$model_method(), "closed")
-  l$set_model("TF24", "stem")
+  l$set_model("TF24", "leaf")
   expect_identical(l$model_method(), "exact")
 
-  expect_error(l$set_model("TF24", "stem", "fast"), "unknown method")
+  expect_error(l$set_model("TF24", "leaf", "fast"), "unknown method")
 })
 
 test_that("seating exact is bit-identical to not seating a method at all", {
@@ -65,10 +65,10 @@ test_that("seating exact is bit-identical to not seating a method at all", {
   b <- leaf_model(supply = leaf_supply_singlelayer())
   set_drivers(b, psi_soil = 0.5, PPFD = 1500, atm_vpd = 1.0,
               root_network = series_resistance(1500))
-  b$set_model("TF24", "stem")
+  b$set_model("TF24", "leaf")
   b$optimise()
 
-  expect_identical(a$opt_psi_stem_, b$opt_psi_stem_)
+  expect_identical(a$opt_psi_leaf_, b$opt_psi_leaf_)
   expect_identical(a$ci_, b$ci_)
   expect_identical(a$assim_colimited_, b$assim_colimited_)
   expect_identical(a$transpiration_, b$transpiration_)
@@ -88,26 +88,26 @@ test_that("the closed form writes every output the exact solve writes", {
   l$optimise()                       # seat a collar solve's outputs
   poison <- -12345
   for (f in c("ci_", "assim_colimited_", "transpiration_", "stom_cond_CO2_",
-              "hydraulic_cost_", "profit_", "opt_psi_stem_")) {
+              "hydraulic_cost_", "profit_", "opt_psi_leaf_")) {
     l[[f]] <- poison
   }
-  l$set_model("TF24", "stem", "closed")
+  l$set_model("TF24", "leaf", "closed")
   l$optimise()
 
   expect_false(l$last_solve_fell_back_)
   for (f in c("ci_", "assim_colimited_", "transpiration_", "stom_cond_CO2_",
-              "hydraulic_cost_", "profit_", "opt_psi_stem_")) {
+              "hydraulic_cost_", "profit_", "opt_psi_leaf_")) {
     expect_false(identical(l[[f]], poison), info = f)
     expect_true(is.finite(l[[f]]), info = f)
   }
   # The collar-route outputs describe a different solve and are cleared, exactly
-  # as the exact stem route clears them.
+  # as the exact leaf route clears them.
   expect_false(is.finite(l$opt_root_psi_))
   expect_false(is.finite(l$E_up_))
 
   # The identity that ties the written fields to each other rather than to a
   # recorded number: profit IS the objective at the reported potential. A path
-  # that took psi_stem from the closed form and the rates from anywhere else
+  # that took psi_leaf from the closed form and the rates from anywhere else
   # would fail this.
   expect_equal(l$profit_, l$assim_colimited_ - l$hydraulic_cost_,
                tolerance = 1e-12)
@@ -125,7 +125,7 @@ test_that("a fallback IS the exact solve, bit for bit", {
   b$optimise()
 
   expect_true(b$last_solve_fell_back_)
-  expect_identical(b$opt_psi_stem_, a$opt_psi_stem_)
+  expect_identical(b$opt_psi_leaf_, a$opt_psi_leaf_)
   expect_identical(b$assim_colimited_, a$assim_colimited_)
   expect_identical(b$profit_, a$profit_)
   expect_identical(b$closed_form_fallback_fraction(), 1)
@@ -139,7 +139,7 @@ test_that("the fallback fraction is measurable, which it was not before", {
   # NA, not 0: "never asked" and "never fell back" are different answers.
   expect_true(is.na(l$closed_form_fallback_fraction()))
 
-  l$set_model("TF24", "stem", "closed")
+  l$set_model("TF24", "leaf", "closed")
   soils <- seq(0.25, 5.0, length.out = 20)
   for (p in soils) {
     set_drivers(l, psi_soil = p, PPFD = 1500, atm_vpd = 1.0,
@@ -181,12 +181,12 @@ test_that("CF77 is the n = 0 arm, so its lambda is the price", {
   m$theta <- theta
   set_drivers(m, psi_soil = 0.5, PPFD = 1500, atm_vpd = 1.0,
               root_network = series_resistance(1500))
-  m$set_model("CF77", "stem", "closed")
+  m$set_model("CF77", "leaf", "closed")
   m$optimise()
   beta <- (theta - m$theta_w_) / (m$theta_fc_ - m$theta_w_)
   expect_equal(m$lambda, lambda / beta, tolerance = 1e-8)
   # And the behaviour that follows: a dearer price closes the stomata.
-  expect_lt(m$opt_psi_stem_, l$opt_psi_stem_)
+  expect_lt(m$opt_psi_leaf_, l$opt_psi_leaf_)
 })
 
 test_that("CF77's potential carries the transpiration the USO collapse gives at its price", {
@@ -217,7 +217,7 @@ test_that("CF77's potential carries the transpiration the USO collapse gives at 
     xi <- sqrt(3 * gstar_Pa * kg_to_mol / (ratio * 1e-3) / g$lambda[i])
     ci <- l$ca_ * xi / (xi + sqrt(l$vpd_leaf_))
     E <- ratio * 1e-3 * l$assim_colimited(ci) * l$vpd_leaf_ / ((l$ca_ - ci) * kg_to_mol)
-    expect_equal(l$transpiration(l$opt_psi_stem_, g$psi_soil[i]), E, tolerance = 1e-9,
+    expect_equal(l$transpiration(l$opt_psi_leaf_, g$psi_soil[i]), E, tolerance = 1e-9,
                  info = paste(names(g), g[i, ], collapse = " "))
   }
   # Hazard 16: the identity was reached.
@@ -232,7 +232,7 @@ test_that("the reported potential is the one whose supply carries its E", {
   # withdrawn -- this is the assertion that keeps it withdrawn.
   l <- cf_leaf(curve = "CF77")
   l$optimise()
-  psi <- l$opt_psi_stem_
+  psi <- l$opt_psi_leaf_
   psi_soil <- l$single_psi_soil_
 
   expect_gt(psi, psi_soil)
@@ -254,12 +254,12 @@ test_that("dA/dE equals lambda at the closed form's own operating point", {
   # claim about the method that the method does not make.
   l <- cf_leaf(curve = "CF77")
   l$optimise()
-  psi <- l$opt_psi_stem_
+  psi <- l$opt_psi_leaf_
   expect_false(l$last_solve_fell_back_)
 
   h <- 1e-5
   at <- function(p) {
-    l$evaluate_psi_stem_at(p)
+    l$evaluate_psi_leaf_at(p)
     c(A = l$assim_colimited_, E = l$transpiration_)
   }
   hi <- at(psi + h)
@@ -308,7 +308,7 @@ test_that("accuracy against the exact solve degrades as ci/ca falls", {
                # figures fell into.
                err = abs(cl$assim_colimited_ - ex$assim_colimited_) /
                  max(1, abs(ex$assim_colimited_)),
-               dpsi = abs(cl$opt_psi_stem_ - ex$opt_psi_stem_))
+               dpsi = abs(cl$opt_psi_leaf_ - ex$opt_psi_leaf_))
   })
   res <- do.call(rbind, rows)
   res <- res[is.finite(res$frac) & is.finite(res$err), ]
@@ -366,7 +366,7 @@ test_that("everything the closed form cannot do is refused, with the reason", {
   # about.
   collar <- cf_leaf()
   collar$set_model("TF24", "collar", "closed")
-  expect_error(collar$optimise(), "STEM-route method")
+  expect_error(collar$optimise(), "LEAF-route method")
 
   # Multi-layer: the closed form for it does not exist, so it is refused rather
   # than run on layer zero.
@@ -374,7 +374,7 @@ test_that("everything the closed form cannot do is refused, with the reason", {
   set_drivers(ml, psi_soil = c(0.5, 0.75, 1.0), soil_depth = c(1, 2, 3),
               root_network = root_network_from_carbon(rep(1 / 3, 3),
                                                    c(1, 2, 3)))
-  ml$set_model("TF24", "stem", "closed")
+  ml$set_model("TF24", "leaf", "closed")
   expect_error(ml$optimise(), "single-layer only")
 
   # #116: with the energy balance on, the deficit Fick's law divides by depends
@@ -386,11 +386,11 @@ test_that("everything the closed form cannot do is refused, with the reason", {
   eb$NIR_int_ <- 1500 / 4.57  # daylight
   set_drivers(eb, psi_soil = 0.5, PPFD = 1500, atm_vpd = 1.0,
               root_network = series_resistance(1500))
-  eb$set_model("TF24", "stem", "closed")
+  eb$set_model("TF24", "leaf", "closed")
   expect_error(eb$optimise(), "not closed")
   # And the exact solve on the same leaf is untouched, so the refusal is the
   # method's and not the leaf's.
-  eb$set_model("TF24", "stem", "exact")
+  eb$set_model("TF24", "leaf", "exact")
   expect_silent(eb$optimise())
 })
 
@@ -404,14 +404,14 @@ test_that("the gradient differentiates the exact solve whatever is seated", {
   # crosses it). A gradient through that is not a gradient. This test pins the
   # silent part.
   l <- leaf_model(supply = leaf_supply_singlelayer())
-  l$set_model("TF24", "stem", "closed")
+  l$set_model("TF24", "leaf", "closed")
   expect_identical(l$model_method(), "closed")
 
   g <- leaf_gradient(psi_soil = 0.5, PPFD = 1500, x = l,
-                     traits = leaf_traits(), model = "TF24", route = "stem",
+                     traits = leaf_traits(), model = "TF24", route = "leaf",
                      root_network = series_resistance(1500),
                      pars = "vcmax_25")
-  # `collar` is NaN on a stem route by construction, so the column that says the
+  # `collar` is NaN on a leaf route by construction, so the column that says the
   # gradient ran is `A`.
   expect_true(is.finite(g$gradient[1, "A"]))
   expect_identical(g$status, "interior")

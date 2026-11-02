@@ -31,7 +31,7 @@ function of assimilation, VPD and CO₂. Ball-Berry, Medlyn and their descendant
 all work that way. This model has no such function.
 
 Instead it builds an explicit hydraulic path from the soil, through the roots and
-the root collar, up the stem to the leaf. Then it asks which stem water potential
+the root collar, up the stem to the leaf. Then it asks which leaf water potential
 maximises profit, where profit is assimilation minus a hydraulic cost that rises
 as the xylem loses conductivity. Conductance is whatever falls out of the answer.
 
@@ -63,8 +63,8 @@ leaf_solve(psi_soil = 2.0, PPFD = 900) |>
 
 Drivers in, operating point out. `psi_soil` is a positive magnitude in MPa, which
 a later section covers. The defaults are `plant`'s model, `TF24_floor`, which at
-its default price is TF24, maximised over the stem potential with the potential
-upstream of the stem held at `psi_soil` (the *stem route*). `collar` is `NaN`
+its default price is TF24, maximised over the leaf potential with the potential
+upstream of the stem held at `psi_soil` (the *leaf route*). `collar` is `NaN`
 because that route never solves for a collar potential; the root network `plant`
 uses, and the *collar route* that solves for one, come later.
 
@@ -155,7 +155,7 @@ bind_rows(
   vulnerable = leaf_solve(psi_soil = 3.0, PPFD = 900, traits = vulnerable),
   .id = "traits"
 ) |>
-  select(traits, psi_stem, A, gc, g1_eff)
+  select(traits, psi_leaf, A, gc, g1_eff)
 ```
 
 `stem_P50`/`stem_c` and `root_P50`/`root_c` are two different vulnerability
@@ -169,17 +169,17 @@ Tolerances go the other way, through `leaf_control()`:
 ```{r}
 tibble(
   setting = c("default", "tight"),
-  psi_stem = c(
-    leaf_solve(psi_soil = 2.0, PPFD = 900)$psi_stem,
+  psi_leaf = c(
+    leaf_solve(psi_soil = 2.0, PPFD = 900)$psi_leaf,
     leaf_solve(psi_soil = 2.0, PPFD = 900,
-               control = leaf_control(GSS_tol_abs = 1e-5))$psi_stem
+               control = leaf_control(GSS_tol_abs = 1e-5))$psi_leaf
   )
 )
 ```
 
 Those two are identical, because the solve root-finds its own first-order
 condition rather than searching profit, to about 1e-12. `GSS_tol_abs` does not
-reach the stem route at all.
+reach the leaf route at all.
 
 It is read in two places, both on the collar route: the threshold below which the
 feasible collar interval is treated as a single point, and the tolerance of a
@@ -213,7 +213,7 @@ soil-to-collar journey into one series resistance. The other path is the
 multi-layer root network that `plant` uses. Both are driven through the same
 `root_network` argument, because both take their resistances as a per-call driver.
 
-On the stem route that resistance never reaches the solve: the potential upstream
+On the leaf route that resistance never reaches the solve: the potential upstream
 of the stem is pinned at `psi_soil`. The **collar route** maximises over the
 root-collar potential instead, so water has to be pulled through the roots, and
 the resistance costs the leaf. Every cost curve takes either route; the collar
@@ -223,7 +223,7 @@ route is the only one on the multi-layer supply.
 leaf_solve(psi_soil = 1.5, PPFD = 900, route = "collar",
            root_network = series_resistance(1e3)) |>
   as_tibble() |>
-  select(psi_soil, psi_stem, collar, A, gc, g1_eff)
+  select(psi_soil, psi_leaf, collar, A, gc, g1_eff)
 ```
 
 The resistance is per unit leaf area, because nothing in this model is allowed to
@@ -311,24 +311,24 @@ tibble(psi = seq(0, 6, length.out = 200)) |>
 ```
 
 The profit function is not defined everywhere. Water flows from the soil to the
-leaf, so `psi_stem` must be at least the upstream potential. Below it the leaf
+leaf, so `psi_leaf` must be at least the upstream potential. Below it the leaf
 would be wetter than the soil, so `transpiration()`, `stom_cond_CO2()` and
-`psi_stem_to_ci()` stop with an error rather than return a negative flux.
-`profit_psi_stem_TF()` reads that pair as zero flux, as the solve's evaluator
+`psi_leaf_to_ci()` stop with an error rather than return a negative flux.
+`profit_psi_leaf_TF()` reads that pair as zero flux, as the solve's evaluator
 does, so it returns a number, but not one on the curve the solve maximises.
-`psi_stem` equal to the upstream potential is the shut stomata's state, with no
+`psi_leaf` equal to the upstream potential is the shut stomata's state, with no
 stomatal flux. Plot the domain the solve actually searches:
 
 ```{r, fig.height = 3.4}
 psi_upstream <- 2.0
 
 tibble(psi = seq(psi_upstream, 6, length.out = 200)) |>
-  mutate(profit = vapply(psi, l$profit_psi_stem_TF, numeric(1),
+  mutate(profit = vapply(psi, l$profit_psi_leaf_TF, numeric(1),
                          psi_upstream = psi_upstream)) |>
   ggplot(aes(psi, profit)) +
   geom_line(linewidth = 0.8, colour = "darkgreen") +
-  geom_vline(xintercept = l$opt_psi_stem_, linetype = 2, colour = "grey40") +
-  labs(x = expression(psi[stem]~(MPa)), y = "profit",
+  geom_vline(xintercept = l$opt_psi_leaf_, linetype = 2, colour = "grey40") +
+  labs(x = expression(psi[leaf]~(MPa)), y = "profit",
        title = "the function being maximised")
 ```
 
@@ -363,9 +363,10 @@ rownames(leaf_gradient(psi_soil = 2.0, PPFD = 900)$gradient)
 
 That is `r length(leaf_traits())` traits from `leaf_traits()`, plus
 `leaf_specific_conductance_max`, which is not a trait but is fitted like one,
-`resistance`, the single-potential path's series resistance, and
-`TF24_floor_lambda_o`, the default model's price of water:
-`r length(leaf_traits()) + 3L` in all. The multi-layer path drops `resistance`;
+and `TF24_floor_lambda_o`, the default model's price of water:
+`r length(leaf_traits()) + 2L` in all. The collar route over the
+single-potential path adds `resistance`, its series resistance, which the leaf
+route never reads;
 `model = "TF24"` drops the price, and `model = "CF77"` swaps in `CF77_lambda_`,
 that curve's prescribed marginal value of water. These counts are
 computed rather than written out, for the reason the hidden chunk below records.
@@ -404,7 +405,7 @@ So in a calibration, name only the parameters you are fitting. Asking for all of
 them when you fit three is several times the work.
 
 The five outputs are not selectable. Every call returns the derivative of `A`,
-`gc`, `psi_stem`, `collar` and `profit` with respect to each requested parameter,
+`gc`, `psi_leaf`, `collar` and `profit` with respect to each requested parameter,
 because they are read off the same solve and cost nothing extra. `pars` chooses
 the rows of that matrix, never the columns.
 
@@ -494,7 +495,7 @@ ggplot(sweep, aes(psi_soil, dA_dstem_P50)) +
        title = "sensitivity to stem vulnerability, and where the optimum pins")
 ```
 
-On the stem route this sweep stays interior throughout: the potential upstream of
+On the leaf route this sweep stays interior throughout: the potential upstream of
 the stem is pinned at `psi_soil`, so there is no collar interval to pin against.
 
 Read that left to right. In wet soil, a less vulnerable stem is worth about two
@@ -537,9 +538,9 @@ cf <- leaf_model(supply = leaf_supply_singlelayer())
 set_drivers(cf, psi_soil = 0.5, PPFD = 1500, atm_vpd = 1,
             root_network = series_resistance(1500))
 
-cf$set_model("TF24", "stem", "closed")
+cf$set_model("TF24", "leaf", "closed")
 cf$optimise()
-tibble(method = cf$model_method(), psi_stem = cf$opt_psi_stem_,
+tibble(method = cf$model_method(), psi_leaf = cf$opt_psi_leaf_,
        A = cf$assim_colimited_, fell_back = cf$last_solve_fell_back_)
 ```
 
@@ -570,7 +571,7 @@ refusals carry their reasons:
   default 7.5. The `ci/ca` guard does not catch that, because it reads the closed
   form's own `lambda` and stays plausible while `psi*` is wrong — so on this curve
   the fast arm is a measurement tool rather than a production path.
-- **The stem route only, and one soil layer only.** The inversion is against a
+- **The leaf route only, and one soil layer only.** The inversion is against a
   supply measured from `psi_soil`; it says nothing about the soil-to-collar path,
   and the multi-layer closed form does not exist.
 - **Not with the energy balance on.** Fick's law divides by the leaf-to-air
@@ -578,11 +579,11 @@ refusals carry their reasons:
   which is what the inversion solves for. So `D` is not known at the moment of
   inversion and the form is not closed. This is a statement about the form rather
   than about its accuracy: measured with the refusal bypassed, the error reaches
-  2.3 MPa in `psi_stem` even in the wettest bin, against 0.04 MPa on the
+  2.3 MPa in `psi_leaf` even in the wettest bin, against 0.04 MPa on the
   prescribed-temperature path.
 
 ```{r, error = TRUE}
-cf$set_model("SOX", "stem", "closed")
+cf$set_model("SOX", "leaf", "closed")
 cf$optimise()
 ```
 
@@ -611,7 +612,7 @@ taking the grid's:
 
 ```{r}
 sweep_leaf <- leaf_model(supply = leaf_supply_singlelayer())
-sweep_leaf$set_model("TF24", "stem", "closed")
+sweep_leaf$set_model("TF24", "leaf", "closed")
 for (p in seq(0.25, 5, length.out = 20)) {
   set_drivers(sweep_leaf, psi_soil = p, PPFD = 1500, atm_vpd = 1,
               root_network = series_resistance(1500))
@@ -639,7 +640,7 @@ solve_both <- function(psi_soil, PPFD, atm_vpd) {
     l <- leaf_model(supply = leaf_supply_singlelayer())
     set_drivers(l, psi_soil = psi_soil, PPFD = PPFD, atm_vpd = atm_vpd,
                 root_network = series_resistance(1500))
-    l$set_model("TF24", "stem", method)
+    l$set_model("TF24", "leaf", method)
     l$optimise()
     l
   }
@@ -648,7 +649,7 @@ solve_both <- function(psi_soil, PPFD, atm_vpd) {
   tibble(ci_ca = ex$ci_ / ex$ca_, fell_back = cl$last_solve_fell_back_,
          err_A = abs(cl$assim_colimited_ - ex$assim_colimited_) /
            max(1, abs(ex$assim_colimited_)),
-         err_psi = abs(cl$opt_psi_stem_ - ex$opt_psi_stem_))
+         err_psi = abs(cl$opt_psi_leaf_ - ex$opt_psi_leaf_))
 }
 
 res <- Map(solve_both, grid$psi_soil, grid$PPFD, grid$atm_vpd) |>
@@ -682,7 +683,7 @@ is worth reading if you are going to trust an individual row.
 `plant` differentiates the operating point with respect to plant state, and that
 needs the argmax to vary *smoothly* with its inputs. Sweeping `kmax` — which is
 how height reaches the leaf — over ±30% and taking the mean absolute second
-difference of `opt_psi_stem_`:
+difference of `opt_psi_leaf_`:
 
 | the sweep | exact | closed |
 |---|---|---|

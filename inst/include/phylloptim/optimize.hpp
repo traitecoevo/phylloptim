@@ -177,7 +177,7 @@ double maximise_over_closed_interval_foc(Function f, Deriv df, double lo, double
   }
 
   // `n < 2` means no basin scan, not no search: the cell is the whole interval,
-  // endpoints plus a root-find, which is all a unimodal objective needs. The stem
+  // endpoints plus a root-find, which is all a unimodal objective needs. The leaf
   // routes pass `Leaf::basin_scan_cells()`, 0 unless the energy balance is on.
   double a = lo, b = hi;
   if (n >= 2) {

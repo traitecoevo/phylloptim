@@ -227,7 +227,7 @@ test_that("a pinned optimum takes the fallback, and the composite would be wrong
     expect_true(dry$gradient[p, "A"] != 0, label = p)
   }
   tr <- leaf_traits()
-  expect_equal(dry$gradient["stem_P50", "psi_stem"],
+  expect_equal(dry$gradient["stem_P50", "psi_leaf"],
                (40 / log(2))^(1 / tr$stem_c), tolerance = 1e-6)
 })
 
@@ -263,10 +263,10 @@ test_that("at a pinned optimum the moving BOUND carries part of the gradient", {
   pinned <- grid_gradient(6, ppfd = 500, vpd = 0.5, layers = 1L, pars = "stem_P50")
   expect_identical(pinned$status, "pinned")
   expect_identical(pinned$method, "fd")
-  expect_equal(pinned$gradient["stem_P50", "psi_stem"],
+  expect_equal(pinned$gradient["stem_P50", "psi_leaf"],
                (40 / log(2))^(1 / tr$stem_c), tolerance = 1e-6)
-  expect_false(isTRUE(all.equal(pinned$gradient["stem_P50", "psi_stem"],
-                                interior$gradient["stem_P50", "psi_stem"],
+  expect_false(isTRUE(all.equal(pinned$gradient["stem_P50", "psi_leaf"],
+                                interior$gradient["stem_P50", "psi_leaf"],
                                 tolerance = 1e-3)))
   expect_gt(pinned$gradient["stem_P50", "collar"], 0)
 })
@@ -305,10 +305,10 @@ test_that("a shut-down operating point reports no gradient and still differences
   # decision 1). So neither curve's P50 moves it, and the stem-curve P50 reaches
   # profit only through the cost of a stem at that potential, which falls as the
   # stem gets harder to embolise.
-  expect_identical(l$opt_psi_stem_, l$opt_root_psi_)
-  expect_lt(abs(l$opt_psi_stem_ - 16.0), 0.01)
-  expect_identical(g$gradient["stem_P50", "psi_stem"], 0)
-  expect_identical(g$gradient["root_P50", "psi_stem"], 0)
+  expect_identical(l$opt_psi_leaf_, l$opt_root_psi_)
+  expect_lt(abs(l$opt_psi_leaf_ - 16.0), 0.01)
+  expect_identical(g$gradient["stem_P50", "psi_leaf"], 0)
+  expect_identical(g$gradient["root_P50", "psi_leaf"], 0)
   expect_identical(g$gradient["root_P50", "profit"], 0)
   # And past the end of the curve the hydraulic cost has saturated, so not even
   # profit sees the stem trait: a re-solve agrees.
@@ -469,7 +469,7 @@ test_that("the two non-trait parameters agree with a resolved reference", {
       a[[par]] <- value
     }
     x <- do.call(grid_leaf_solve, a)
-    c(A = x$A, gc = x$gc, psi_stem = x$psi_stem, collar = x$collar,
+    c(A = x$A, gc = x$gc, psi_leaf = x$psi_leaf, collar = x$collar,
       profit = x$profit)
   }
 
@@ -601,15 +601,15 @@ test_that("the gradient is reported for every output the fit needs", {
   # -- the calibration set -- were disjoint from plant's (#87).
   g <- grid_gradient(2.0, pars = "vcmax_25")
   expect_identical(colnames(g$gradient),
-                   c("A", "gc", "psi_stem", "collar", "profit"))
+                   c("A", "gc", "psi_leaf", "collar", "profit"))
   expect_identical(names(g$value),
-                   c("A", "gc", "psi_stem", "collar", "profit"))
+                   c("A", "gc", "psi_leaf", "collar", "profit"))
   expect_true(all(is.finite(g$gradient)))
   # Raising vcmax_25 raises assimilation and opens the stomata, and the leaf pays
   # for it with a more negative water potential (a larger positive magnitude).
   expect_gt(g$gradient["vcmax_25", "A"], 0)
   expect_gt(g$gradient["vcmax_25", "gc"], 0)
-  expect_gt(g$gradient["vcmax_25", "psi_stem"], 0)
+  expect_gt(g$gradient["vcmax_25", "psi_leaf"], 0)
   # More photosynthetic capacity is worth having: profit is A minus the hydraulic
   # cost, and the extra carbon exceeds the extra cost. It is BELOW dA/dvcmax_25,
   # which is the statement that the cost is not zero -- the cheapest available
@@ -798,18 +798,18 @@ test_that("a reused leaf is differentiated on the route's model, not the one it 
   expect_identical(operating_point(seated), operating_point(tf))
 })
 
-test_that("a stem-route gradient leaves the caller's leaf solved on that route", {
+test_that("a leaf-route gradient leaves the caller's leaf solved on that route", {
   # The base point is restored on the route's own model: a collar solve here would
-  # hand back a stem-route leaf holding a different operating point.
+  # hand back a leaf on the leaf route holding a different operating point.
   tr <- leaf_traits()
   sup <- leaf_supply_singlelayer()
   l <- leaf_model(traits = tr, supply = sup)
   set_drivers(l, psi_soil = 1.0, PPFD = 900)
-  l$set_model("TF24", "stem")
+  l$set_model("TF24", "leaf")
   l$optimise()
   before <- operating_point(l)
   leaf_gradient(psi_soil = 1.0, PPFD = 900, x = l, traits = tr, model = "TF24",
-                route = "stem", pars = "vcmax_25")
+                route = "leaf", pars = "vcmax_25")
   expect_identical(operating_point(l), before)
 })
 
@@ -1056,7 +1056,7 @@ test_that("psi and dpsi_dtheta are validated together", {
   # composite is `direct + dY_dpsi * dpsi_dtheta`, so four columns come back
   # +-Inf -- but `profit` is ASSIGNED from the direct term at a stationary psi
   # rather than multiplied through, so it came back finite and plausible beside
-  # them. Measured at `psi = psi*` with `dpsi_dtheta = Inf`: A, gc, psi_stem and
+  # them. Measured at `psi = psi*` with `dpsi_dtheta = Inf`: A, gc, psi_leaf and
   # collar all Inf, profit 0.0105. Reading `profit` alone is plant's own case
   # (#87), so the one surviving column was the one most likely to be believed.
   #
@@ -1134,6 +1134,22 @@ test_that("CF77_lambda_ is in the enumeration and refused by other models", {
   multi <- phylloptim:::.gradient_available_pars(FALSE, "CF77")
   expect_false("resistance" %in% multi)
   expect_true("CF77_lambda_" %in% multi)
+
+  # So does the route: the leaf route pins the stem's upstream end at psi_soil
+  # and never reads the soil-to-collar resistance, so it offers no row for it,
+  # and naming it says which route does.
+  expect_false("resistance" %in%
+                 phylloptim:::.gradient_available_pars(TRUE, "TF24_floor"))
+  expect_true("resistance" %in%
+                phylloptim:::.gradient_available_pars(TRUE, "TF24_floor",
+                                                      route = "collar"))
+  expect_false("resistance" %in% rownames(
+    leaf_gradient(psi_soil = 2.0, PPFD = 900)$gradient))
+  expect_error(leaf_gradient(psi_soil = 2.0, PPFD = 900, pars = "resistance"),
+               "reaches only the collar route")
+  b <- leaf_batch(psi_soil = 2.0, PPFD = 900)
+  expect_error(leaf_gradient_batch(b, pars = "resistance"),
+               "reaches only the collar route")
 
   # An unknown model is refused rather than silently offering everything.
   expect_error(phylloptim:::.gradient_available_pars(TRUE, "Medlyn"),
@@ -1218,10 +1234,10 @@ test_that("the curve registry is read from C++, not restated in R", {
   # the leaf is seated on, with no curve index anywhere.
   l <- leaf_model(supply = leaf_supply_singlelayer())
   set_drivers(l, psi_soil = 1.5, PPFD = 900)
-  l$set_model("SOX", "stem"); l$optimise()
+  l$set_model("SOX", "leaf"); l$optimise()
   expect_identical(l$model_curve(), "SOX")
-  expect_identical(l$model_route(), "stem")
-  d <- l$dprofit_dpsi_stem_checked(l$opt_psi_stem_)
+  expect_identical(l$model_route(), "leaf")
+  d <- l$dprofit_dpsi_leaf_checked(l$opt_psi_leaf_)
   expect_length(d, 2L)
   expect_true(is.finite(d[[1]]))
 
@@ -1230,11 +1246,11 @@ test_that("the curve registry is read from C++, not restated in R", {
   # make unrepresentable-by-accident: an index said which curve, and nothing said
   # which route.
   l$set_model("SOX", "collar")
-  expect_error(l$dprofit_dpsi_stem_checked(l$opt_psi_stem_), "STEM-route")
-  expect_error(l$evaluate_psi_stem_at(2.0), "STEM-route")
+  expect_error(l$dprofit_dpsi_leaf_checked(l$opt_psi_leaf_), "LEAF-route")
+  expect_error(l$evaluate_psi_leaf_at(2.0), "LEAF-route")
 })
 
-# --- differentiating a stem model's optimum (plan item 5) --------------------
+# --- differentiating a leaf-route model's optimum (plan item 5) --------------------
 
 test_that("every additive curve's IFT gradient matches differencing its solve", {
   # ⚠️ The IFT is the EXACT one and the finite difference is the noisy one -- a
@@ -1267,25 +1283,25 @@ test_that("every additive curve's IFT gradient matches differencing its solve", 
     p <- case[[2]]
     g <- function(meth) {
       leaf_gradient(psi_soil = 1.5, PPFD = 1500, root_network = net, x = mk(),
-                    traits = tr, pars = p, model = m, route = "stem",
+                    traits = tr, pars = p, model = m, route = "leaf",
                     method = meth)
     }
     ift <- g("ift")
     fd <- g("fd")
     expect_identical(ift$model, m)
     # ⚠️ THIS ASSERTED `"pinned"` AND A RESIDUAL ABOVE 1e-09, AND IT FAILED ON
-    # PURPOSE. It was written to fail the day a stem route gained a
+    # PURPOSE. It was written to fail the day a leaf route gained a
     # first-order-condition polish, and that is what happened: the stem entry
     # points now root-find dJ/dpsi == 0 through the same solver the collar route
     # uses, so an interior point is CLASSIFIED interior instead of being read as a
     # bound by its own solver residual.
     expect_identical(ift$status, "interior")
     expect_lt(ift$stationarity, 1e-9)
-    # And `method = "auto"` therefore reaches the composite on a stem route rather
+    # And `method = "auto"` therefore reaches the composite on a leaf route rather
     # than falling back to differencing the solve. Still forced here so the arm
     # under test cannot change silently.
     expect_identical(ift$method, "ift")
-    for (out in c("A", "gc", "psi_stem")) {
+    for (out in c("A", "gc", "psi_leaf")) {
       expect_equal(ift$gradient[p, out], fd$gradient[p, out],
                    tolerance = 5e-3, label = paste(m, out))
     }
@@ -1304,15 +1320,15 @@ test_that("the decision variable follows the route", {
                           supply = leaf_supply_multilayer())
   stem <- leaf_gradient(psi_soil = 1.5, PPFD = 1500, root_network = net, x = l,
                         traits = tr, pars = "TF24_cost_scale", model = "TF24",
-                        route = "stem")
+                        route = "leaf")
 
   # On the collar route `collar` IS psi*, so its derivative is assigned.
   expect_identical(collar$route, "collar")
   expect_true(is.finite(collar$gradient[1, "collar"]))
-  # On a stem route the collar is never solved for, so NOT finite is the truthful
+  # On a leaf route the collar is never solved for, so NOT finite is the truthful
   # answer -- reading a number there would be reading stale or absent state.
   expect_false(is.finite(stem$gradient[1, "collar"]))
-  expect_true(is.finite(stem$gradient[1, "psi_stem"]))
+  expect_true(is.finite(stem$gradient[1, "psi_leaf"]))
 
   # ⚠️ And they are DIFFERENT MODELS, not one restricted to the other: same
   # drivers, same cost curve, different optimum.
@@ -1340,7 +1356,7 @@ test_that("a product objective's gradient survives an h-sweep", {
       base <- if (par == "vcmax_25") 96 else 3.4
       solve_at <- function(x) {
         l <- if (par == "vcmax_25") mk(x, 3.4) else mk(96, x)
-        l$set_model(if (m == "TF") "TF24" else m, "stem")
+        l$set_model(if (m == "TF") "TF24" else m, "leaf")
         l$optimise()
         l$assim_colimited_
       }
@@ -1348,7 +1364,7 @@ test_that("a product objective's gradient survives an h-sweep", {
       fd <- (solve_at(base + h) - solve_at(base - h)) / (2 * h)
       g <- leaf_gradient(psi_soil = 1.5, PPFD = 1500, root_network = net,
                          x = mk(96, 3.4), traits = tr, pars = par, model = m,
-                         route = "stem", method = "ift")
+                         route = "leaf", method = "ift")
       expect_equal(g$gradient[par, "A"], fd, tolerance = 1e-2,
                    label = paste(m, par))
       n_checked <- n_checked + 1L
@@ -1359,11 +1375,11 @@ test_that("a product objective's gradient survives an h-sweep", {
 
 test_that("the remaining route restrictions are the topological ones", {
   tr <- leaf_traits()
-  # A stem route needs the single-potential path, and says so rather than
+  # A leaf route needs the single-potential path, and says so rather than
   # returning a number from the wrong topology.
   expect_error(leaf_gradient(psi_soil = 1.5, PPFD = 1500,
                              pars = "TF24_cost_scale", model = "TF24",
-                             route = "stem", supply = leaf_supply_multilayer()),
+                             route = "leaf", supply = leaf_supply_multilayer()),
                "single-potential supply path")
   expect_error(leaf_gradient(psi_soil = 1.5, PPFD = 1500,
                              pars = "TF24_cost_scale", model = "Medlyn", supply = leaf_supply_multilayer()),
@@ -1381,7 +1397,7 @@ test_that("ProfitMax's normaliser follows the traits, so the composite is a tota
   g <- function(meth) {
     leaf_gradient(psi_soil = 1.5, PPFD = 1500, root_network = net, x = mkv(96),
                   traits = leaf_traits(), pars = "vcmax_25", model = "ProfitMax",
-                  route = "stem", method = meth)
+                  route = "leaf", method = meth)
   }
   # ⚠️ IT USED TO BE NaN, THEN A PARTIAL, AND IS NOW A TOTAL -- three states, and
   # the middle one is worth knowing about. `|A|max` is state a perturbation
@@ -1403,7 +1419,7 @@ test_that("ProfitMax's normaliser follows the traits, so the composite is a tota
   h <- 96 * 1e-2
   solve_A <- function(v) {
     l <- mkv(v)
-    l$set_model("ProfitMax", "stem"); l$optimise()
+    l$set_model("ProfitMax", "leaf"); l$optimise()
     l$assim_colimited_
   }
   swept <- (solve_A(96 + h) - solve_A(96 - h)) / (2 * h)
@@ -1420,16 +1436,16 @@ test_that("`route` names the potential a curve is maximised over (decision D3)",
   sp <- leaf_supply_singlelayer()
   multi <- leaf_supply_multilayer()
   net <- series_resistance(1e4)
-  outs <- c("A", "gc", "psi_stem", "collar", "profit")
-  # One set of defaults: TF24_floor on the stem route over the single potential.
+  outs <- c("A", "gc", "psi_leaf", "collar", "profit")
+  # One set of defaults: TF24_floor on the leaf route over the single potential.
   g0 <- leaf_gradient(1.5, pars = "vcmax_25")
-  expect_identical(c(g0$model, g0$route), c("TF24_floor", "stem"))
+  expect_identical(c(g0$model, g0$route), c("TF24_floor", "leaf"))
   expect_false(is.finite(g0$gradient["vcmax_25", "collar"]))
   expect_identical(leaf_gradient(1.5, root_network = net, pars = "vcmax_25",
-                                 model = "SOX")$route, "stem")
+                                 model = "SOX")$route, "leaf")
   expect_identical(leaf_solve(1.5, root_network = net, model = "SOX"),
                    leaf_solve(1.5, supply = sp, root_network = net,
-                              model = "SOX", route = "stem"))
+                              model = "SOX", route = "leaf"))
   # At its default price, 0, TF24_floor is TF24, to the bit.
   expect_identical(leaf_solve(1.5), leaf_solve(1.5, model = "TF24"))
   expect_identical(
@@ -1450,7 +1466,7 @@ test_that("`route` names the potential a curve is maximised over (decision D3)",
   expect_identical(leaf_gradient_batch(b, pars = "vcmax_25", model = "SOX",
                                        route = "collar")$status,
                    c("interior", "interior"))
-  # Refused by name: "collar" is a route, not a model; a stem route, the
+  # Refused by name: "collar" is a route, not a model; a leaf route, the
   # default, needs the single potential; and a route is one of two.
   expect_error(leaf_gradient(1.5, pars = "vcmax_25", model = "collar"),
                "unknown model \"collar\"")
@@ -1466,7 +1482,7 @@ test_that("leaf_gradient() checks what C++ would otherwise read silently", {
   # An empty request is a 0 x 5 gradient, as the batch's is 1 x 0 x 5.
   g <- leaf_gradient(2, pars = character(0), supply = leaf_supply_multilayer(), model = "TF24", route = "collar")
   expect_identical(dim(g$gradient), c(0L, 5L))
-  expect_identical(colnames(g$gradient), c("A", "gc", "psi_stem", "collar",
+  expect_identical(colnames(g$gradient), c("A", "gc", "psi_leaf", "collar",
                                            "profit"))
   # An NA tolerance would class every point interior, and an NA bool reads as
   # TRUE, so both are refused by name, by both entry points.

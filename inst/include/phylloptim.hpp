@@ -14,7 +14,7 @@
 //   l.set_physiology(root_network, PPFD, psi_soil, soil_depth,
 //                    leaf_specific_conductance_max, atm_vpd, ca,
 //                    leaf_temp, atm_o2_kpa, atm_kpa);
-//   l.find_root_collar_psi();           // solve; results in l.opt_psi_stem_ etc.
+//   l.find_root_collar_psi();           // solve; results in l.opt_psi_leaf_ etc.
 //
 // `root_network` is a phylloptim::RootNetwork of per-layer root resistances per
 // unit leaf area (hazard 4). phylloptim::root_network_from_carbon builds one from

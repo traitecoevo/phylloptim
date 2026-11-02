@@ -15,12 +15,12 @@ test_that("LeastCost is in the registry and solves through leaf_solve()", {
   sp <- leaf_supply_singlelayer()
   r <- leaf_solve(psi_soil = 0.1, PPFD = 3000, atm_vpd = 2, ca = 40,
                   leaf_temp = 25, supply = sp, model = "LeastCost",
-                  route = "stem", LeastCost_beta = 146)
+                  route = "leaf", LeastCost_beta = 146)
   expect_true(is.finite(r$A))
   expect_true(is.finite(r$ci))
   expect_true(is.finite(r$lambda))
   # A ratio objective, so `profit` is not a carbon flux -- see
-  # `profit_psi_stem_LeastCost`. Finiteness is all that is asserted of it.
+  # `profit_psi_leaf_LeastCost`. Finiteness is all that is asserted of it.
   expect_true(is.finite(r$profit))
   # chi between the compensation point and one, which is the only statement
   # about the answer that needs no closed form.
@@ -48,7 +48,7 @@ test_that("the solved chi is Prentice et al.'s first-order condition", {
   for (vpd in c(1, 2, 3)) {
     r <- leaf_solve(psi_soil = 0.1, PPFD = 3000, atm_vpd = vpd, ca = ca,
                     leaf_temp = 25, supply = sp, model = "LeastCost",
-                    route = "stem",
+                    route = "leaf",
                     # `kmax` raised so the optimum stays interior: least-cost has
                     # no vulnerability curve, so a solve pinned on `psi_crit` is
                     # answering a different question.
@@ -87,7 +87,7 @@ test_that("LeastCost refuses a cleared, zero or negative beta", {
   sp <- leaf_supply_singlelayer()
   solve_at <- function(...) {
     leaf_solve(psi_soil = 0.1, PPFD = 900, atm_vpd = 2, supply = sp,
-               model = "LeastCost", route = "stem", ...)
+               model = "LeastCost", route = "leaf", ...)
   }
   # Unset takes the aligned default (#156) ...
   expect_identical(solve_at(), solve_at(LeastCost_beta =
@@ -97,7 +97,7 @@ test_that("LeastCost refuses a cleared, zero or negative beta", {
   # this package's kg H2O and umol CO2 rather than mol and mol is out by 5.6e7
   # and would solve to something entirely plausible.
   cleared <- leaf_model(supply = sp)
-  cleared$set_model("LeastCost", "stem")
+  cleared$set_model("LeastCost", "leaf")
   cleared$LeastCost_beta <- NA_real_
   set_drivers(cleared, psi_soil = 0.1, PPFD = 900, atm_vpd = 2)
   expect_error(cleared$optimise(), "needs LeastCost_beta set")
@@ -155,7 +155,7 @@ test_that("LeastCost_beta is differentiated, and the composite agrees with its F
     leaf_gradient(psi_soil = 0.5, PPFD = 1500, atm_vpd = 2,
                   leaf_specific_conductance_max = 6.3e-3,
                   root_network = net, x = mk(), traits = tr,
-                  pars = "LeastCost_beta", model = "LeastCost", route = "stem",
+                  pars = "LeastCost_beta", model = "LeastCost", route = "leaf",
                   method = meth)
   }
   ift <- g("ift")
@@ -163,7 +163,7 @@ test_that("LeastCost_beta is differentiated, and the composite agrees with its F
   expect_identical(ift$model, "LeastCost")
   expect_identical(ift$status, "interior")
   expect_gt(ift$gradient["LeastCost_beta", "A"], 0)
-  for (out in c("A", "gc", "psi_stem")) {
+  for (out in c("A", "gc", "psi_leaf")) {
     expect_equal(ift$gradient["LeastCost_beta", out],
                  fd$gradient["LeastCost_beta", out],
                  tolerance = 5e-3, label = out)
@@ -183,6 +183,6 @@ test_that("the closed form is refused for LeastCost, and says why", {
   # asserting nothing.
   l <- leaf_model(leaf_traits(), leaf_control(), sp)
   l$LeastCost_beta <- 146
-  l$set_model("LeastCost", "stem", "closed")
+  l$set_model("LeastCost", "leaf", "closed")
   expect_error(l$optimise(), "closed form does not exist")
 })

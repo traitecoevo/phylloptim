@@ -46,7 +46,7 @@ struct Row {
   double psi_soil, ppfd, vpd, leaf_temp;
   int layers;
   // outputs
-  double psi_stem, opt_root_psi, ci, assim, transpiration, gc, profit, e_up, uptake;
+  double psi_leaf, opt_root_psi, ci, assim, transpiration, gc, profit, e_up, uptake;
   // WHICH KIND of operating point the solve found. Deliberately NOT written to
   // the golden file: the file is compared bit-exactly and a new column would
   // force a regeneration, which is the one thing this file must not need for a
@@ -95,7 +95,7 @@ Row solve(double psi_soil, double ppfd, double vpd, int layers,
     }
   }
   return Row{psi_soil,        ppfd,   vpd,        leaf_temp,  layers,
-             l.opt_psi_stem_,
+             l.opt_psi_leaf_,
              l.opt_root_psi_, l.ci_, l.assim_colimited_, l.transpiration_,
              l.stom_cond_CO2_,   l.profit_, l.E_up_,        uptake,
              l.operating_point_kind()};
@@ -237,13 +237,13 @@ int check_operating_kinds(const std::vector<Row> &rows) {
 }
 
 const char *kHeader =
-    "psi_soil\tppfd\tvpd\tleaf_temp\tlayers\tpsi_stem\topt_root_psi\tci\tassim\t"
+    "psi_soil\tppfd\tvpd\tleaf_temp\tlayers\tpsi_leaf\topt_root_psi\tci\tassim\t"
     "transpiration\tgc\tprofit\te_up\tuptake\n";
 
 void write_row(FILE *f, const Row &r) {
   fprintf(f, "%.17g\t%.17g\t%.17g\t%.17g\t%d", r.psi_soil, r.ppfd, r.vpd,
           r.leaf_temp, r.layers);
-  for (double v : {r.psi_stem, r.opt_root_psi, r.ci, r.assim, r.transpiration, r.gc,
+  for (double v : {r.psi_leaf, r.opt_root_psi, r.ci, r.assim, r.transpiration, r.gc,
                    r.profit, r.e_up, r.uptake}) {
     fprintf(f, "\t%.17g", v);
   }
@@ -303,7 +303,7 @@ bool same(double got, double want) {
 // Relative difference, used both to decide the tolerant comparison and to report
 // how far apart the two builds actually are. Returns 0 for the NaN/NaN and
 // exactly-equal cases, and infinity when one side is NaN and the other is not.
-// Below this, a value in psi_stem_optima.tsv is zero in every sense that
+// Below this, a value in psi_leaf_optima.tsv is zero in every sense that
 // matters and a relative comparison against it is meaningless. Justified by a
 // measured empty band -- see the use site in compare_optima.
 constexpr double kOptNegligible = 1e-12;
@@ -354,10 +354,10 @@ const Tolerance kExact{-1.0, -1.0};
 //   operating_points.tsv
 //     profit                 2.13e-11        1e-9         47x
 //     argmax-derived         8.6e-8          5e-6         58x
-//   psi_stem_optima.tsv, the original ten solvers
+//   psi_leaf_optima.tsv, the original ten solvers
 //     profit                 3.87e-12        1e-10        26x
 //     argmax-derived         1.24e-9         1e-7         81x
-//   psi_stem_optima.tsv, the solvers appended from CollarProfitMax on
+//   psi_leaf_optima.tsv, the solvers appended from CollarProfitMax on
 //     profit                 2.42e-9         1e-7         41x
 //     argmax-derived         1.97e-7         1e-5         51x
 //
@@ -367,13 +367,13 @@ const Tolerance kExact{-1.0, -1.0};
 // but shut in a hot, dark, dry soil with the energy balance on (collar_JS22, 3
 // layers), whose flux is ~1e-10.
 //
-// The psi_stem argmax class was 6.63e-6 until 0.19.0: its worst cells were a
+// The psi_leaf argmax class was 6.63e-6 until 0.19.0: its worst cells were a
 // shut leaf's `assim`, a root-find's residue around zero that cancelled in the
 // relative metric. Since #182 that A is zero by definition and reported as an
 // exact zero, so the class sits at the solver floor like the rest. Where a
 // near-zero value still cancels, read the absolute line printed beside each.
 //
-// ⚠️ THESE FIGURES ARE SET BY `psi_stem_to_ci`'S 1e-13 TOLERANCE, NOT BY libm.
+// ⚠️ THESE FIGURES ARE SET BY `psi_leaf_to_ci`'S 1e-13 TOLERANCE, NOT BY libm.
 // At 1e-10 they were ~100-1000x larger. Loosen that root-find and these must be
 // re-measured off the summary lines, not widened until they pass.
 const Tolerance kCrossPlatform{1e-9, 5e-6};
@@ -447,7 +447,7 @@ int compare(Tolerance tol) {
     const int n = sscanf(
         line,
         "%lg\t%lg\t%lg\t%lg\t%d\t%lg\t%lg\t%lg\t%lg\t%lg\t%lg\t%lg\t%lg\t%lg",
-        &g.psi_soil, &g.ppfd, &g.vpd, &g.leaf_temp, &g.layers, &g.psi_stem,
+        &g.psi_soil, &g.ppfd, &g.vpd, &g.leaf_temp, &g.layers, &g.psi_leaf,
         &g.opt_root_psi, &g.ci, &g.assim, &g.transpiration, &g.gc, &g.profit,
         &g.e_up, &g.uptake);
     if (n != 14) {
@@ -460,7 +460,7 @@ int compare(Tolerance tol) {
       const char *name;
       double got, want;
     };
-    const Field fields[] = {{"psi_stem", r.psi_stem, g.psi_stem},
+    const Field fields[] = {{"psi_leaf", r.psi_leaf, g.psi_leaf},
                             {"opt_root_psi", r.opt_root_psi, g.opt_root_psi},
                             {"ci", r.ci, g.ci},
                             {"assim", r.assim, g.assim},
@@ -594,11 +594,11 @@ int compare(Tolerance tol) {
 }
 
 // ===========================================================================
-// The psi_stem optimiser fixture (golden/psi_stem_optima.tsv)
+// The psi_leaf optimiser fixture (golden/psi_leaf_optima.tsv)
 // ---------------------------------------------------------------------------
 // WHY A SECOND FILE. `operating_points.tsv` above solves with
 // `find_root_collar_psi()` and nothing else, so it is blind BY CONSTRUCTION to
-// the three `optimise_psi_stem_*` entry points -- and so is the R suite, whose
+// the three `optimise_psi_leaf_*` entry points -- and so is the R suite, whose
 // 112 test_that blocks call none of them. Every existing C++ test that touches
 // them asserts a RELATION (a first-order condition, a monotonicity, a thrown
 // message) at spot-checked settings; not one records a number. So today it is
@@ -614,7 +614,7 @@ int compare(Tolerance tol) {
 //   * `hydraulic_cost_` written in carbon units by `_TF` and `_CF77`
 //     and left STALE by `_ProfitMax`, which does not write it;
 //   * `at_ProfitMax` evaluated where the solve takes its degenerate exit (a dark
-//     leaf, a wet end past psi_crit): the stem route's prescribed evaluation
+//     leaf, a wet end past psi_crit): the leaf route's prescribed evaluation
 //     seeds the normalisers but has no such exit.
 //
 // ⚠️ ADDING A SOLVER IS AN ADDITION IN THE "fresh" PASS AND NOT IN THE "reuse"
@@ -639,7 +639,7 @@ int compare(Tolerance tol) {
 // The two axes that make a different MODEL rather than a different driver:
 //   solver    which objective, and which variable it optimises. `collar`
 //             optimises the COLLAR potential with the root path in series;
-//             the other three optimise psi_stem with upstream pinned at
+//             the other three optimise psi_leaf with upstream pinned at
 //             psi_soil, ignoring that path -- which is what their own refusal
 //             message means by "non-root-based". These are different problems,
 //             and the gap does not close as the root resistance goes to zero,
@@ -651,11 +651,11 @@ int compare(Tolerance tol) {
 //             `collar_at_<curve>` evaluate each curve at a prescribed point
 //             instead, the only rows that reach the prescribed evaluators.
 //   topology  single-potential supply, or a multi-layer profile at 1 or 3
-//             layers. The three psi_stem solvers refuse 3 layers; the refusal
+//             layers. The three psi_leaf solvers refuse 3 layers; the refusal
 //             is RECORDED rather than skipped, so a change that lifts it shows
 //             up as a row that stopped throwing.
 
-const char *kOptimaPath = "golden/psi_stem_optima.tsv";
+const char *kOptimaPath = "golden/psi_leaf_optima.tsv";
 
 // A value no solve should ever produce, written into every stale-prone output
 // before each solve in the reuse pass. If it comes back, the path under test did
@@ -683,7 +683,7 @@ const double kLambdaFloorO = 1.5e5;
 // rather than mol and mol would be out by 5.6e7 and would still solve.
 const double kBetaLeastCost = 146.0;
 // A second beta, at which LeastCost's optimum is interior on the wet soils: at
-// 146 no collar-route row is interior and only a few stem rows lie inside
+// 146 no collar-route row is interior and only a few leaf-route rows lie inside
 // psi_crit, so those rows can barely see a wrong LeastCost slope.
 const double kBetaLeastCostInterior = 2.0;
 // JS22's and CMax's level parameters, at the class defaults these rows were
@@ -714,7 +714,7 @@ enum class Solver { TF, ProfitMax, CF77, Collar, JS22, CMax, SOX, JW26, TF24_flo
                     CollarJW26, CollarTF24_floor, CollarLeastCost,
                     // LeastCost at the beta that leaves it interior, on each route.
                     LeastCostInterior, CollarLeastCostInterior,
-                    // Each curve at a prescribed point, on the stem route and then
+                    // Each curve at a prescribed point, on the leaf route and then
                     // on the collar route (evaluate_at_quarter).
                     AtTF24, AtProfitMax, AtCF77, AtJS22, AtCMax, AtSOX, AtJW26,
                     AtTF24_floor, AtLeastCost,
@@ -802,7 +802,7 @@ struct OptRow {
   const char *status; // "ok" or "threw"
   const char *kind;   // operating_point_kind_name
   // outputs
-  double opt_psi_stem, opt_root_psi, profit, ci, assim, transpiration, gc,
+  double opt_psi_leaf, opt_root_psi, profit, ci, assim, transpiration, gc,
       hydraulic_cost, lambda, lambda_emergent, tleaf, carbon_gain,
       hydraulic_cost_norm, thermal_cost_out;
 };
@@ -846,7 +846,7 @@ void poison(phylloptim::Leaf &l) {
   l.transpiration_ = kPoison;
   l.stom_cond_CO2_ = kPoison;
   l.hydraulic_cost_ = kPoison;
-  l.opt_psi_stem_ = kPoison;
+  l.opt_psi_leaf_ = kPoison;
   l.profit_ = kPoison;
   l.carbon_gain_ = kPoison;
   l.hydraulic_cost_norm_ = kPoison;
@@ -855,7 +855,7 @@ void poison(phylloptim::Leaf &l) {
 
 void read_outputs(const phylloptim::Leaf &l, OptRow &r) {
   r.kind = phylloptim::Leaf::operating_point_kind_name(l.operating_point_kind());
-  r.opt_psi_stem = l.opt_psi_stem_;
+  r.opt_psi_leaf = l.opt_psi_leaf_;
   r.opt_root_psi = l.opt_root_psi_;
   r.profit = l.profit_;
   r.ci = l.ci_;
@@ -874,7 +874,7 @@ void read_outputs(const phylloptim::Leaf &l, OptRow &r) {
 void blank_outputs(OptRow &r) {
   const double n = std::numeric_limits<double>::quiet_NaN();
   r.kind = "-";
-  r.opt_psi_stem = r.opt_root_psi = r.profit = r.ci = r.assim = n;
+  r.opt_psi_leaf = r.opt_root_psi = r.profit = r.ci = r.assim = n;
   r.transpiration = r.gc = r.hydraulic_cost = r.lambda = n;
   r.lambda_emergent = r.tleaf = n;
   r.carbon_gain = r.hydraulic_cost_norm = r.thermal_cost_out = n;
@@ -883,8 +883,8 @@ void blank_outputs(OptRow &r) {
 // A prescribed row's point: a quarter of the way from the wet end of the curve's
 // own interval on that route. It is placed on a copy, so the leaf under test is
 // written by the evaluator alone and the reuse pass's poison still shows what it
-// leaves stale. With no interval (a shut leaf on the collar route, or the stem
-// route on layers) the target is NaN, and a stem-route leaf whose wet end is past
+// leaves stale. With no interval (a shut leaf on the collar route, or the leaf
+// route on layers) the target is NaN, and a leaf on the leaf route whose wet end is past
 // its dry end gets one outside it; the evaluator ignores or refuses either.
 template <phylloptim::Leaf::CostCurve K>
 void evaluate_at_quarter(phylloptim::Leaf &l, bool collar) {
@@ -898,10 +898,10 @@ void evaluate_at_quarter(phylloptim::Leaf &l, bool collar) {
     l.evaluate_root_collar_psi_for<K>(target);
   } else {
     if (probe.supply_is_single_layer()) {
-      const double wet = probe.stem_wet_bound(probe.supply_psi_soil_scalar());
+      const double wet = probe.leaf_wet_bound(probe.supply_psi_soil_scalar());
       target = wet + 0.25 * (probe.dry_end<K>() - wet);
     }
-    l.evaluate_psi_stem<K>(target);
+    l.evaluate_psi_leaf<K>(target);
   }
 }
 
@@ -910,35 +910,35 @@ void evaluate_at_quarter(phylloptim::Leaf &l, bool collar) {
 void dispatch(phylloptim::Leaf &l, Solver s) {
   using CostCurve = phylloptim::Leaf::CostCurve;
   switch (s) {
-    case Solver::TF:        l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::TF24>();        break;
-    case Solver::ProfitMax: l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::ProfitMax>(); break;
+    case Solver::TF:        l.optimise_psi_leaf_single<phylloptim::Leaf::CostCurve::TF24>();        break;
+    case Solver::ProfitMax: l.optimise_psi_leaf_single<phylloptim::Leaf::CostCurve::ProfitMax>(); break;
     case Solver::CF77:
                             l.CF77_lambda_ = kLambdaCF77;
-                            l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::CF77>(); break;
+                            l.optimise_psi_leaf_single<phylloptim::Leaf::CostCurve::CF77>(); break;
     case Solver::Collar:    l.find_root_collar_psi();        break;
     case Solver::JS22:
                             l.JS22_gamma = kGammaJS22;
-                            l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::JS22>();      break;
+                            l.optimise_psi_leaf_single<phylloptim::Leaf::CostCurve::JS22>();      break;
     case Solver::CMax:
                             l.CMax_a = kCMaxA;
-                            l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::CMax>();      break;
+                            l.optimise_psi_leaf_single<phylloptim::Leaf::CostCurve::CMax>();      break;
     // These two need nothing set: neither has a level parameter.
-    case Solver::SOX:       l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::SOX>();       break;
-    case Solver::JW26:      l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::JW26>();      break;
+    case Solver::SOX:       l.optimise_psi_leaf_single<phylloptim::Leaf::CostCurve::SOX>();       break;
+    case Solver::JW26:      l.optimise_psi_leaf_single<phylloptim::Leaf::CostCurve::JW26>();      break;
     // ⚠️ ONE PARAMETER, AND IT IS AN INPUT WITH NO DEFAULT, like CF77_lambda_
     // above: this curve refuses to solve without it. The hydraulic half reads
     // TF24's own traits, so these rows differ from the TF row above by the price
     // alone.
     case Solver::TF24_floor:
                             l.TF24_floor_lambda_o = kLambdaFloorO;
-                            l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::TF24_floor>(); break;
+                            l.optimise_psi_leaf_single<phylloptim::Leaf::CostCurve::TF24_floor>(); break;
     // ⚠️ ALSO AN INPUT WITH NO DEFAULT, and refused at zero as well as unset --
     // zero is not a limiting case here but deletes the capacity term. The only
     // curve in this corpus whose penalty weighs something other than water.
     case Solver::LeastCost:
                             l.LeastCost_beta = kBetaLeastCost;
-                            l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::LeastCost>(); break;
-    // The collar route, each with the input its stem arm sets: the same values,
+                            l.optimise_psi_leaf_single<phylloptim::Leaf::CostCurve::LeastCost>(); break;
+    // The collar route, each with the input its leaf-route arm sets: the same values,
     // so the reuse pass sees nothing it did not see before these were appended.
     case Solver::CollarProfitMax:
                             l.find_root_collar_psi_for<phylloptim::Leaf::CostCurve::ProfitMax>(); break;
@@ -963,7 +963,7 @@ void dispatch(phylloptim::Leaf &l, Solver s) {
                             l.find_root_collar_psi_for<phylloptim::Leaf::CostCurve::LeastCost>(); break;
     case Solver::LeastCostInterior:
                             l.LeastCost_beta = kBetaLeastCostInterior;
-                            l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::LeastCost>(); break;
+                            l.optimise_psi_leaf_single<phylloptim::Leaf::CostCurve::LeastCost>(); break;
     case Solver::CollarLeastCostInterior:
                             l.LeastCost_beta = kBetaLeastCostInterior;
                             l.find_root_collar_psi_for<phylloptim::Leaf::CostCurve::LeastCost>(); break;
@@ -1106,7 +1106,7 @@ std::vector<OptRow> run_optima_grid() {
 
 const char *kOptimaHeader =
     "pass\tsolver\ttopology\tpsi_soil\tppfd\tleaf_temp\teb\ttc\tstatus\tkind\t"
-    "opt_psi_stem\topt_root_psi\tprofit\tci\tassim\ttranspiration\tgc\t"
+    "opt_psi_leaf\topt_root_psi\tprofit\tci\tassim\ttranspiration\tgc\t"
     "hydraulic_cost\tlambda\tlambda_emergent\ttleaf\tcarbon_gain\t"
     "hydraulic_cost_norm\tthermal_cost\n";
 
@@ -1115,7 +1115,7 @@ void write_opt_row(FILE *f, const OptRow &r) {
           r.reuse_pass ? "reuse" : "fresh", solver_name(r.solver),
           topology_name(r.topology), r.psi_soil, r.ppfd, r.leaf_temp,
           r.energy_balance ? 1 : 0, r.thermal_cost ? 1 : 0, r.status, r.kind);
-  for (double v : {r.opt_psi_stem, r.opt_root_psi, r.profit, r.ci, r.assim,
+  for (double v : {r.opt_psi_leaf, r.opt_root_psi, r.profit, r.ci, r.assim,
                    r.transpiration, r.gc, r.hydraulic_cost, r.lambda,
                    r.lambda_emergent, r.tleaf, r.carbon_gain,
                    r.hydraulic_cost_norm, r.thermal_cost_out}) {
@@ -1142,12 +1142,12 @@ int generate_optima() {
 
 // The thirteen numeric outputs, in the order write_opt_row emits them.
 const char *kOptFieldNames[] = {
-    "opt_psi_stem", "opt_root_psi", "profit", "ci", "assim", "transpiration",
+    "opt_psi_leaf", "opt_root_psi", "profit", "ci", "assim", "transpiration",
     "gc", "hydraulic_cost", "lambda", "lambda_emergent", "tleaf",
     "carbon_gain", "hydraulic_cost_norm", "thermal_cost"};
 
 void opt_row_values(const OptRow &r, double *out) {
-  out[0] = r.opt_psi_stem;   out[1] = r.opt_root_psi;
+  out[0] = r.opt_psi_leaf;   out[1] = r.opt_root_psi;
   out[2] = r.profit;         out[3] = r.ci;
   out[4] = r.assim;          out[5] = r.transpiration;
   out[6] = r.gc;             out[7] = r.hydraulic_cost;
@@ -1187,7 +1187,7 @@ int compare_optima(Tolerance tol) {
   FILE *f = fopen(kOptimaPath, "r");
   if (f == nullptr) {
     fprintf(stderr,
-            "FAIL: %s is missing. Generate it with `make psi-stem-golden` and "
+            "FAIL: %s is missing. Generate it with `make psi-leaf-golden` and "
             "commit it.\n",
             kOptimaPath);
     return 1;
@@ -1313,7 +1313,7 @@ int compare_optima(Tolerance tol) {
   fclose(f);
 
   if (failures == 0) {
-    printf("psi_stem optima: %zu rows, all %s\n", rows.size(),
+    printf("psi_leaf optima: %zu rows, all %s\n", rows.size(),
            exact_mode ? "bit-identical"
                       : "within cross-platform tolerance");
     // ⚠️ PRINTED ON SUCCESS TOO, AND ON PURPOSE. This line is where the
@@ -1337,7 +1337,7 @@ int compare_optima(Tolerance tol) {
     }
     return 0;
   }
-  fprintf(stderr, "\npsi_stem optima: %d mismatches over %zu rows.\n",
+  fprintf(stderr, "\npsi_leaf optima: %d mismatches over %zu rows.\n",
           failures, rows.size());
   print_optima_worst(stderr, worst_max, tol.maximum,
                      "profit  (the maximum)    ");
@@ -1351,7 +1351,7 @@ int compare_optima(Tolerance tol) {
   }
   if (exact_mode) {
     fprintf(stderr,
-            "If this change was intended, regenerate with `make psi-stem-golden` "
+            "If this change was intended, regenerate with `make psi-leaf-golden` "
             "and say what moved in the commit message.\n");
   }
   return 1;
@@ -1431,7 +1431,7 @@ void report_optima_shape(const std::vector<OptRow> &rows) {
 // two worsts occur at different operating points, and the argmax is pinned by a
 // root-find of dprofit == 0 rather than by a search on profit.
 //
-// What sets both classes is the loosest tolerance in the solve, `psi_stem_to_ci`'s
+// What sets both classes is the loosest tolerance in the solve, `psi_leaf_to_ci`'s
 // root-find, not the platform's libm. So the tolerances are per file and per
 // class, each with ~50x headroom over its measured worst and all at or below the
 // ~1e-4 scale at which a real behavioural change shows; the mode reports the
@@ -1466,7 +1466,7 @@ int main(int argc, char **argv) {
   // which costs ~4 ms.
   const int golden_status = compare(tol);
   const int kind_status = check_operating_kinds(run_grid());
-  // The psi_stem optimiser fixture is a third INDEPENDENT check, and it runs
+  // The psi_leaf optimiser fixture is a third INDEPENDENT check, and it runs
   // even when the two above fail: the collar grid and the optimiser grid have
   // disjoint causes, so seeing only one of them is how a mixed diff gets
   // misread. See the block above kOptimaPath for what this file is and is not.

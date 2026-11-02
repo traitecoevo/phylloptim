@@ -341,9 +341,9 @@ test_that("on the energy-balance path impairment is taken at the operating Tleaf
     l
   }
   lo <- pm_leaf(TRUE)
-  lo$set_leaf_states_rates_from_psi_stem(1.0, 0.2)
+  lo$set_leaf_states_rates_from_psi_leaf(1.0, 0.2)
   hi <- pm_leaf(TRUE)
-  hi$set_leaf_states_rates_from_psi_stem(3.5, 0.2)
+  hi$set_leaf_states_rates_from_psi_leaf(3.5, 0.2)
   expect_gt(hi$transpiration_, lo$transpiration_)
   expect_lt(hi$Tleaf_, lo$Tleaf_)
   expect_lt(hi$k_imp_eff_, lo$k_imp_eff_)
@@ -352,7 +352,7 @@ test_that("on the energy-balance path impairment is taken at the operating Tleaf
   expect_equal(lo$k_imp_eff_, k_imp_ref(lo$Tleaf_), tolerance = 1e-12)
 
   off <- pm_leaf(FALSE)
-  off$set_leaf_states_rates_from_psi_stem(3.5, 0.2)
+  off$set_leaf_states_rates_from_psi_leaf(3.5, 0.2)
   expect_identical(off$k_imp_eff_, 0)
 })
 
@@ -822,11 +822,11 @@ test_that("a temperature response with no optimum to move is refused", {
 test_that("the closed form refuses a leaf with the layer on", {
   l <- thermal_leaf()
   drive_at(l, 25)
-  l$set_model("TF24", "stem", "closed")
+  l$set_model("TF24", "leaf", "closed")
   l$use_thermal_damage_ <- TRUE
   expect_error(l$optimise(), "closed form is refused with use_thermal_damage_")
   # The exact method on the same leaf solves.
-  l$set_model("TF24", "stem")
+  l$set_model("TF24", "leaf")
   l$optimise()
   expect_true(is.finite(l$profit_))
 })

@@ -253,13 +253,13 @@ test_that("the recorded gradients have not moved", {
     expect_identical(g$status[[1]], rows$status[[1]], label = nm)
     expect_identical(g$method[[1]], rows$method[[1]], label = nm)
     for (i in seq_len(nrow(rows))) {
-      for (out in c("A", "gc", "psi_stem", "collar", "profit")) {
+      for (out in c("A", "gc", "psi_leaf", "collar", "profit")) {
         got <- g$gradient[1, rows$par[[i]], out]
         expect_golden(got, rows[[out]][[i]], out,
                       paste(nm, rows$par[[i]]),
                       tolerance = gradient_golden_tolerance())
         ref <- as.numeric(rows[[out]][[i]])
-        # A stem route's `collar` is NaN: it is not solved for.
+        # A leaf route's `collar` is NaN: it is not solved for.
         if (is.finite(ref) && ref != 0) {
           worst <- max(worst, abs(got - ref) / abs(ref))
         }
@@ -271,7 +271,7 @@ test_that("the recorded gradients have not moved", {
               if (golden_bit_exact_platform()) "bit-exact platform" else
                 "compared with tolerance"))
   # And the claim the choice of rows exists to make, stated rather than left
-  # implicit in the hex. Where the optimum is pinned at the dry end, psi_stem IS
+  # implicit in the hex. Where the optimum is pinned at the dry end, psi_leaf IS
   # the end of the stem curve, b x_end^(1/c) with x_end = 40 (#183) -- and that
   # moves with stem_P50 by a factor that depends only on stem_c:
   #
@@ -283,10 +283,10 @@ test_that("the recorded gradients have not moved", {
   # makes the comparison a test of the routes rather than of the algebra.
   ratio <- (40 / log(2))^(1 / leaf_traits()$stem_c)
   row <- gold[gold$case == "pinned-dry-1layer" & gold$par == "stem_P50", ]
-  expect_equal(as.numeric(row$psi_stem), ratio, tolerance = 1e-6,
-               label = "dpsi_stem/dstem_P50 at pinned-dry-1layer")
+  expect_equal(as.numeric(row$psi_leaf), ratio, tolerance = 1e-6,
+               label = "dpsi_leaf/dstem_P50 at pinned-dry-1layer")
   interior <- gold[gold$case == "interior-1layer" & gold$par == "stem_P50", ]
-  expect_false(isTRUE(all.equal(as.numeric(interior$psi_stem), ratio,
+  expect_false(isTRUE(all.equal(as.numeric(interior$psi_leaf), ratio,
                                 tolerance = 1e-3)))
 
   # The shut-down row sits at its wet bound, the zero-uptake collar, which no
@@ -295,7 +295,7 @@ test_that("the recorded gradients have not moved", {
   # has saturated too, so nothing reaches profit either (#183).
   shut <- gold[gold$case == "shutdown-1layer" & gold$par == "stem_P50", ]
   expect_identical(as.numeric(shut$A), 0)
-  expect_identical(as.numeric(shut$psi_stem), 0)
+  expect_identical(as.numeric(shut$psi_leaf), 0)
   expect_identical(as.numeric(shut$collar), 0)
   expect_identical(as.numeric(shut$profit), 0)
 })
@@ -496,10 +496,10 @@ test_that("the result is shaped and named for a caller applying a Jacobian", {
   expect_identical(dim(g$gradient), c(4L, 3L, 5L))
   expect_identical(dimnames(g$gradient)[[2]], pars)
   expect_identical(dimnames(g$gradient)[[3]],
-                   c("A", "gc", "psi_stem", "collar", "profit"))
+                   c("A", "gc", "psi_leaf", "collar", "profit"))
   expect_identical(dim(g$value), c(4L, 5L))
   expect_identical(colnames(g$value),
-                   c("A", "gc", "psi_stem", "collar", "profit"))
+                   c("A", "gc", "psi_leaf", "collar", "profit"))
   for (f in c("status", "method", "message")) {
     expect_length(g[[f]], 4L)
   }
@@ -845,12 +845,12 @@ test_that("the batch refuses a price its model does not read, and a missing one,
   run <- function(price) {
     b <- leaf_batch(psi_soil = 1.5, PPFD = 1500, supply = single,
                     root_network = net, CF77_lambda = price)
-    leaf_gradient_batch(b, pars = "vcmax_25", model = "CF77", route = "stem")
+    leaf_gradient_batch(b, pars = "vcmax_25", model = "CF77", route = "leaf")
   }
   both <- leaf_gradient_batch(
     leaf_batch(psi_soil = c(1.5, 1.5), PPFD = 1500, supply = single,
                root_network = net, CF77_lambda = c(1e5, 3e5)),
-    pars = "vcmax_25", model = "CF77", route = "stem")
+    pars = "vcmax_25", model = "CF77", route = "leaf")
   expect_identical(both$value[, "A"],
                    unname(c(run(1e5)$value[, "A"], run(3e5)$value[, "A"])))
   expect_false(both$value[1, "A"] == both$value[2, "A"])
@@ -896,7 +896,7 @@ test_that("leaf_gradient() is the batch's one observation on every model", {
            # from theta, or the column is an exact zero that no finiteness
            # check sees (test-gradient-referee.R).
            LeastCost = "LeastCost_beta")
-  for (m in names(own)) for (rt in c("collar", "stem")) {
+  for (m in names(own)) for (rt in c("collar", "leaf")) {
     p <- own[[m]]
     # Each model's batch carries its own price only: a price the model does not
     # read is refused, as it is by leaf_solve(). The single-observation leaf

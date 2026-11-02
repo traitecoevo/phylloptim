@@ -67,7 +67,7 @@ set.seed(sum(utf8ToInt("phylloptim-fitting")))
 
 truth <- leaf_traits(vcmax_25 = 85, jmax_25 = 140, TF24_cost_scale = 40)
 # plant's configuration throughout: TF24 on the collar route over the
-# multi-layer root network. The package defaults to the stem route instead.
+# multi-layer root network. The package defaults to the leaf route instead.
 ML <- leaf_supply_multilayer()
 
 drivers <- expand.grid(
@@ -80,15 +80,15 @@ obs <- leaf_solve(psi_soil = drivers$psi_soil, PPFD = drivers$PPFD,
                   atm_vpd = drivers$atm_vpd, traits = truth,
                   supply = ML, model = "TF24", route = "collar")
 
-sigma <- c(A = 0.4, gc = 0.0015, psi_stem = 0.08)
+sigma <- c(A = 0.4, gc = 0.0015, psi_leaf = 0.08)
 obs$A_obs <- obs$A + rnorm(nrow(obs), 0, sigma[["A"]])
 obs$gc_obs <- obs$gc + rnorm(nrow(obs), 0, sigma[["gc"]])
-obs$psi_obs <- obs$psi_stem + rnorm(nrow(obs), 0, sigma[["psi_stem"]])
+obs$psi_obs <- obs$psi_leaf + rnorm(nrow(obs), 0, sigma[["psi_leaf"]])
 
 nrow(obs)
 ```
 
-Three responses, because they constrain different parts of the model: `psi_stem`
+Three responses, because they constrain different parts of the model: `psi_leaf`
 pins the hydraulic path, `A` and `gc` pin the carbon side. Fitting `A` alone
 leaves the two trading off against each other.
 
@@ -103,7 +103,7 @@ predict_at <- function(theta, l) {
     set_drivers(l, psi_soil = obs$psi_soil[i], PPFD = obs$PPFD[i],
                 atm_vpd = obs$atm_vpd[i])
     l$find_root_collar_psi()
-    c(l$assim_colimited_, l$stom_cond_CO2_, l$opt_psi_stem_)
+    c(l$assim_colimited_, l$stom_cond_CO2_, l$opt_psi_leaf_)
   }, numeric(3))
   list(A = out[1, ], gc = out[2, ], psi = out[3, ])
 }
@@ -112,7 +112,7 @@ ssq <- function(theta, l) {
   p <- predict_at(theta, l)
   sum(((obs$A_obs - p$A) / sigma[["A"]])^2) +
     sum(((obs$gc_obs - p$gc) / sigma[["gc"]])^2) +
-    sum(((obs$psi_obs - p$psi) / sigma[["psi_stem"]])^2)
+    sum(((obs$psi_obs - p$psi) / sigma[["psi_leaf"]])^2)
 }
 ```
 
@@ -164,7 +164,7 @@ data.frame(
 gradient follows by the chain rule, with no differencing of the solve.
 
 This fit names three of the five columns, which is the normal case here. `A`, `gc`
-and `psi_stem` are measured; `collar` and `profit` are not. `profit` is in the
+and `psi_leaf` are measured; `collar` and `profit` are not. `profit` is in the
 matrix for a demographic consumer rather than a calibration one, since `plant`
 bills carbon from it, so a fit against gas exchange simply ignores that column. It
 costs nothing to leave there, because the whole row is read off one solve.
@@ -179,10 +179,10 @@ ssq_grad <- function(theta, l) {
     v <- gi$value
     r <- c((v[["A"]] - obs$A_obs[i]) / sigma[["A"]]^2,
            (v[["gc"]] - obs$gc_obs[i]) / sigma[["gc"]]^2,
-           (v[["psi_stem"]] - obs$psi_obs[i]) / sigma[["psi_stem"]]^2)
+           (v[["psi_leaf"]] - obs$psi_obs[i]) / sigma[["psi_leaf"]]^2)
     2 * (gi$gradient[FIT, "A"] * r[1] +
            gi$gradient[FIT, "gc"] * r[2] +
-           gi$gradient[FIT, "psi_stem"] * r[3])
+           gi$gradient[FIT, "psi_leaf"] * r[3])
   }, numeric(length(FIT)))
   rowSums(g) * exp(theta)   # chain rule for the log parameterisation
 }
@@ -271,11 +271,11 @@ ssq_at <- function(theta, l, nm) {
     set_drivers(l, psi_soil = obs$psi_soil[i], PPFD = obs$PPFD[i],
                 atm_vpd = obs$atm_vpd[i])
     l$find_root_collar_psi()
-    c(l$assim_colimited_, l$stom_cond_CO2_, l$opt_psi_stem_)
+    c(l$assim_colimited_, l$stom_cond_CO2_, l$opt_psi_leaf_)
   }, numeric(3))
   sum(((obs$A_obs - out[1, ]) / sigma[["A"]])^2) +
     sum(((obs$gc_obs - out[2, ]) / sigma[["gc"]])^2) +
-    sum(((obs$psi_obs - out[3, ]) / sigma[["psi_stem"]])^2)
+    sum(((obs$psi_obs - out[3, ]) / sigma[["psi_leaf"]])^2)
 }
 fd_n <- function(pars, l) {
   th <- log(unlist(truth[pars]))
@@ -520,9 +520,9 @@ than about the solver.
 
 ### Not everything is reachable
 
-`resistance` exists only on the single-potential supply path; ask for it on the
-multi-layer path and you get an error naming the path rather than "unknown
-parameter". `beta_R_H` and `beta_R_V` left with the root-architecture model
+`resistance` exists only on the single-potential supply path's collar route;
+ask for it on the multi-layer path or the leaf route and you get an error naming
+why rather than "unknown parameter". `beta_R_H` and `beta_R_V` left with the root-architecture model
 entirely, so a fit that needs them has to difference `root_network_from_carbon()`
 itself, which is cheap to perturb (it is homogeneous of degree 1 in each) but still
 costs two solves.

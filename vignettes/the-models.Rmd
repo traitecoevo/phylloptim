@@ -42,16 +42,16 @@ Several counts below are quoted against the **reference grid**, which is worth n
 
 A leaf with open stomata takes up CO₂ and loses water. Opening further buys more carbon, but the water then has to be pulled through the plant at greater tension, and that tension is not free. Somewhere between shut and wide open there is a best place to sit. Locating it is what all the models on this page do.
 
-To see the trade-off, put both effects on one axis. Take the stem water potential as the dial, with more tension to the right and the stomata wider open, then plot what the leaf gains and what it gives up. That is panel (a) below. The other three panels summarise the rest of this page.
+To see the trade-off, put both effects on one axis. Take the leaf water potential as the dial, with more tension to the right and the stomata wider open, then plot what the leaf gains and what it gives up. That is panel (a) below. The other three panels summarise the rest of this page.
 
 ```{r fig-overview, fig.width = 11, fig.height = 6.6, out.width = "100%", dpi = 150}
 l0 <- leaf_model()
 set_drivers(l0, psi_soil = 1.0, PPFD = 1500)
 plot_model_overview(l0)
 
-l0$set_model("TF24", "stem"); l0$optimise()
+l0$set_model("TF24", "leaf"); l0$optimise()
 cat(sprintf("best operating point: %.3f MPa, profit %.3f\n",
-            l0$opt_psi_stem_, l0$profit_))
+            l0$opt_psi_leaf_, l0$profit_))
 ```
 
 Each panel answers a different question.
@@ -86,8 +86,8 @@ Water reaches the leaf through soil, then roots, then the **root collar** — th
 
 | route | what is optimised | what supplies it |
 |---|---|---|
-| the **stem route**, `"stem"` (the default) | the stem potential `ψ_stem`, with the potential upstream of it held at `ψ_soil` | the soil-to-collar path is ignored entirely |
-| the **collar route**, `"collar"` | the collar potential, which is then mapped to a stem potential | the root path in series |
+| the **leaf route**, `"leaf"` (the default) | the leaf potential `ψ_leaf`, with the potential upstream of it held at `ψ_soil` | the soil-to-collar path is ignored entirely |
+| the **collar route**, `"collar"` | the collar potential, which is then mapped to a leaf potential | the root path in series |
 
 Those names are used throughout this page. The literature calls the first "non-root-based", which is also what the package's refusal message means by the term, and `find_root_collar_psi()` is the second under its own name.
 
@@ -106,7 +106,7 @@ The reason is that, given the drivers, the quantities are not independent. They 
 $$\psi \;\xrightarrow{\;\text{supply}\;}\; E \;\xrightarrow{\;\text{diffusion}\;}\; g_c
 \;\xrightarrow{\;\text{supply}=\text{demand}\;}\; c_i \;\xrightarrow{\;A(\cdot)\;}\; A$$
 
-Fix any one of these and the rest follow. Because each map is monotone, it carries the maximum to the maximum, so an optimum located in one coordinate *is* the optimum in all of them. "Optimise over stem potential", "optimise over stomatal conductance" and "optimise over `c_i`" therefore name one problem written three ways, and a model's operating point does not depend on which was chosen.
+Fix any one of these and the rest follow. Because each map is monotone, it carries the maximum to the maximum, so an optimum located in one coordinate *is* the optimum in all of them. "Optimise over leaf potential", "optimise over stomatal conductance" and "optimise over `c_i`" therefore name one problem written three ways, and a model's operating point does not depend on which was chosen.
 
 This package solves in water potential, because that is the coordinate in which the hydraulic supply constraint is simplest to state. That is an implementation choice and nothing more. What actually distinguishes the models is the cost function, which is the next section.
 
@@ -167,10 +167,10 @@ The sweep costs 64 objective evaluations before refinement begins, which is expe
 
 | entry point | cost per call, relative to `TF24` |
 |---|---:|
-| stem route, `TF24` | 1 |
-| stem route, `CF77` | 1.05 |
-| stem route, `TF24_floor` | 1.4 |
-| stem route, `ProfitMax` | 2.1 |
+| leaf route, `TF24` | 1 |
+| leaf route, `CF77` | 1.05 |
+| leaf route, `TF24_floor` | 1.4 |
+| leaf route, `ProfitMax` | 2.1 |
 
 : Cost per call on a single soil layer, from `bench_solve` at 0.16.2, best of 2000, all arms in one process, gate off and so no scan. Ratios rather than microseconds because ratios travel between machines. `ProfitMax` costs about twice the others because it solves for its own `\|A\|max` normaliser before it can evaluate its objective at all. This table is the one place these figures are quoted.
 
@@ -185,8 +185,8 @@ The feasible interval runs from the wet bound, where the stomata are closed and 
 | kind | where | what it means |
 |---|---|---|
 | `interior` | strictly inside | `dJ/dψ = 0`, the stationary case |
-| `boundary-soil` | `ψ_stem` at the wet bound | no interior point earns its water, and the leaf declines to open; a leaf in the dark, or too hot to fix carbon, lands here too |
-| `boundary-dry` | `ψ_stem` at the dry end | still worth pulling harder: at `ψ_crit` for the four curves bounded there; for the rest, a dry soil where the leaf transpires all its stem can carry |
+| `boundary-soil` | `ψ_leaf` at the wet bound | no interior point earns its water, and the leaf declines to open; a leaf in the dark, or too hot to fix carbon, lands here too |
+| `boundary-dry` | `ψ_leaf` at the dry end | still worth pulling harder: at `ψ_crit` for the four curves bounded there; for the rest, a dry soil where the leaf transpires all its stem can carry |
 | `hydraulic-shutdown` | no interval exists | the soil is drier than the dry end (or than the stem curve resolves), so nothing is optimised and the leaf sits shut at its wet bound |
 
 : The four kinds of operating point the reference grid reaches, and what each says about the leaf.
@@ -384,10 +384,10 @@ set_drivers(l, psi_soil = psi_soil, PPFD = 900)
 f      <- function(p) 2^-((p / tr$stem_P50)^tr$stem_c)
 fprime <- function(p) -f(p) * log(2) * tr$stem_c * p^(tr$stem_c - 1) / tr$stem_P50^tr$stem_c
 model <- list(
-  SOX  = list(P  = function(p) l$profit_psi_stem_SOX(p, psi_soil),
+  SOX  = list(P  = function(p) l$profit_psi_leaf_SOX(p, psi_soil),
               g  = function(p) (f(p) - 0.05) / 0.95,
               gp = function(p) fprime(p) / 0.95),
-  JW26 = list(P  = function(p) l$profit_psi_stem_JW26(p, psi_soil),
+  JW26 = list(P  = function(p) l$profit_psi_leaf_JW26(p, psi_soil),
               g  = function(p) 1 - p / l$psi_crit,
               gp = function(p) -1 / l$psi_crit))
 
@@ -399,10 +399,10 @@ for (nm in names(model)) {
     A  <- l$assim_colimited_
     # The derivative reads whichever model is seated, so the seat moves with the
     # curve being checked. No index anywhere: a name in, a name out.
-    l$set_model(nm, "stem")
-    lhs <- l$dprofit_dpsi_stem_checked(q)[1] * P
-    l$set_model("JS22", "stem")
-    Ap  <- l$dprofit_dpsi_stem_checked(q)[1]
+    l$set_model(nm, "leaf")
+    lhs <- l$dprofit_dpsi_leaf_checked(q)[1] * P
+    l$set_model("JS22", "leaf")
+    Ap  <- l$dprofit_dpsi_leaf_checked(q)[1]
     rhs <- Ap * m$g(q) + A * m$gp(q)
     cat(sprintf("%-5s %6.1f %14.6f %14.6f %9.1e\n", nm, q, lhs, rhs,
                 abs(lhs - rhs) / max(abs(Ap * m$g(q)), abs(A * m$gp(q)))))
@@ -458,15 +458,15 @@ cat(sprintf("at psi = 1e-06 MPa:  TF24 %10.3e    TF24_floor %9.1f\n",
 out <- do.call(rbind, lapply(c(0.5, 1, 1.5, 2, 3), function(ps) {
   l <- leaf_model()
   set_drivers(l, psi_soil = ps, PPFD = 1500)
-  l$set_model("TF24", "stem"); l$optimise()
-  dpsi <- l$opt_psi_stem_ - ps
-  data.frame(psi_soil = ps, psi_stem = l$opt_psi_stem_, dpsi = dpsi,
+  l$set_model("TF24", "leaf"); l$optimise()
+  dpsi <- l$opt_psi_leaf_ - ps
+  data.frame(psi_soil = ps, psi_leaf = l$opt_psi_leaf_, dpsi = dpsi,
              cost_TF24 = l$hydraulic_cost_,
              # JS22 prices the DROP: C = gamma_J * dpsi^2.
              gamma_J = l$hydraulic_cost_ / dpsi^2,
              # CMax prices the ABSOLUTE potential, so with CMax_b = 0 the
              # matching slope solves C = CMax_a*(psi^2 - psi_soil^2)/2.
-             CMax_a = 2 * l$hydraulic_cost_ / (l$opt_psi_stem_^2 - ps^2))
+             CMax_a = 2 * l$hydraulic_cost_ / (l$opt_psi_leaf_^2 - ps^2))
 }))
 print(out, row.names = FALSE, digits = 4)
 spread <- function(x) max(x) / min(x)
@@ -490,7 +490,7 @@ Divide any model's marginal cost by the marginal water use and you get the same 
 
 $$\lambda(\psi)=\frac{dC/d\psi}{dE/d\psi},$$
 
-and a solved leaf's `$lambda` reports it for the curve in force, at its operating point (`$curve_lambda()` evaluates any curve at any stem potential). It is the axis on which otherwise incomparable models can be compared, and it is the whole content of the family resemblance between them.
+and a solved leaf's `$lambda` reports it for the curve in force, at its operating point (`$curve_lambda()` evaluates any curve at any leaf potential). It is the axis on which otherwise incomparable models can be compared, and it is the whole content of the family resemblance between them.
 
 For Cowan-Farquhar, λ is by construction the prescribed constant, because that model's first-order condition is exactly the classical `dA/dE = λ`. For ProfitMax it is derived, `λ* = |A|max / [k(ψ_s) − k_crit]`, and it is a function of the drivers: as the soil dries, `k(ψ_s)` falls, the denominator shrinks, and water automatically gets dearer.
 
@@ -500,7 +500,7 @@ That contrast is the difference between the two models. A prescribed constant an
 implied <- vapply(c(0.5, 1, 2, 3), function(ps) {
   x <- leaf_model()
   set_drivers(x, psi_soil = ps, PPFD = 1500)
-  x$set_model("TF24", "stem"); x$optimise()
+  x$set_model("TF24", "leaf"); x$optimise()
   x$lambda
 }, numeric(1))
 cat(sprintf(paste0("implied lambda over psi_soil 0.5-3 MPa: ",
@@ -515,17 +515,17 @@ Because both optima satisfy `dA/dE = λ`, handing Cowan-Farquhar the λ that TF2
 ```{r}
 ref <- leaf_model()
 set_drivers(ref, psi_soil = 1.0, PPFD = 1500)
-ref$set_model("TF24", "stem"); ref$optimise()
+ref$set_model("TF24", "leaf"); ref$optimise()
 
 cf <- leaf_model()
 set_drivers(cf, psi_soil = 1.0, PPFD = 1500)
 cf$CF77_lambda_ <- ref$lambda
-cf$set_model("CF77", "stem"); cf$optimise()
+cf$set_model("CF77", "leaf"); cf$optimise()
 
 cat(sprintf(paste0("TF24 optimum %.6f MPa; Cowan-Farquhar at its implied ",
                    "lambda %.6f MPa (gap %.2e)\n"),
-            ref$opt_psi_stem_, cf$opt_psi_stem_,
-            abs(cf$opt_psi_stem_ - ref$opt_psi_stem_)))
+            ref$opt_psi_leaf_, cf$opt_psi_leaf_,
+            abs(cf$opt_psi_leaf_ - ref$opt_psi_leaf_)))
 ```
 
 ### λ is not water use efficiency
@@ -542,7 +542,7 @@ cat(" psi_soil   lambda      A/E (WUE)   lambda/WUE\n")
 for (ps in c(0.5, 1, 2, 3)) {
   lw <- leaf_model()
   set_drivers(lw, psi_soil = ps, PPFD = 1500)
-  lw$set_model("TF24", "stem"); lw$optimise()
+  lw$set_model("TF24", "leaf"); lw$optimise()
   cat(sprintf(" %7.1f  %10.4g  %10.4g  %9.3f\n", ps, lw$lambda,
               lw$assim_colimited_ / lw$transpiration_,
               lw$lambda / (lw$assim_colimited_ / lw$transpiration_)))
@@ -585,9 +585,9 @@ shift <- function(method, kappa) {
   l <- leaf_model(leaf_traits(vcmax_25 = 96 * kappa, jmax_25 = 157.44 * kappa),
                   supply = leaf_supply_singlelayer())
   set_drivers(l, psi_soil = 1.5, PPFD = 1500)
-  l$set_model(if (method == "TF") "TF24" else method, "stem")
+  l$set_model(if (method == "TF") "TF24" else method, "leaf")
   l$optimise()
-  l$opt_psi_stem_
+  l$opt_psi_leaf_
 }
 for (m in c("SOX", "TF", "CMax")) {
   lo <- shift(m, 1)
@@ -611,7 +611,7 @@ The thermal cost is inert on its own, without the energy balance. With a prescri
 
 ## When the leaf cannot transpire
 
-Where the soil is drier than the stem's critical potential there is no interval to optimise over, and the leaf sits at its wet bound with its stomata shut: the stem potential at which the supply delivers exactly what the cuticle loses. The package evaluates the objective there with the same expressions as an open leaf, so every output describes one consistent state and the shut leaf cannot disagree with the open one next to it.
+Where the soil is drier than the stem's critical potential there is no interval to optimise over, and the leaf sits at its wet bound with its stomata shut: the leaf potential at which the supply delivers exactly what the cuticle loses. The package evaluates the objective there with the same expressions as an open leaf, so every output describes one consistent state and the shut leaf cannot disagree with the open one next to it.
 
 What the shut leaf nets depends on its residual conductance `g_min` (a trait, default 0). With `g_min > 0` the cuticle still passes CO₂, at `ρ g_min` with `ρ` = 0.05, so `c_i` is an ordinary root of the supply–demand balance: below `c_a` in light, above it in the dark or when too hot to fix carbon, where the CO₂ the leaf respires leaves through its cuticle. At `g_min = 0` there is no conductance, and the shut leaf takes the `g_min → 0` limit of that: the root of `A(c_i) = 0`, which is zero in light, as a transpiring leaf tends to as `E → 0`; and, where `A` has no root, its value as `c_i → ∞`, which is `−R_d` in the dark. For Cowan-Farquhar at `g_min = 0` the result is exactly predictable: `E` is zero, so the cost is zero, so in light profit is zero whatever λ is.
 
@@ -619,7 +619,7 @@ What the shut leaf nets depends on its residual conductance `g_min` (a trait, de
 d <- leaf_model()                       # psi_soil drier than psi_crit
 set_drivers(d, psi_soil = 6.0, PPFD = 1500)
 d$CF77_lambda_ <- 1.5e5
-d$set_model("CF77", "stem"); d$optimise()
+d$set_model("CF77", "leaf"); d$optimise()
 cat(sprintf("E = %.1e, cost = %.1e, A = %.6f, profit = %.6f\n",
             d$transpiration_, d$hydraulic_cost_, d$assim_colimited_, d$profit_))
 ```
@@ -670,7 +670,7 @@ Both constraints on the log form are stated where they arise. `log A` needs `A >
 
 ### Comparable at their defaults
 
-A comparison across curves at each curve's own published defaults mixes two things: how each curve *responds* to the environment, and where its parameters happen to *sit*. So the defaults here are aligned. Each curve with a level parameter takes the value at which its stem optimum has TF24's conductance at one reference environment: a single soil potential of 1 MPa, PPFD 900, a 2 kPa deficit, 25 °C with the energy balance off, and every trait at its default. TF24 is the anchor and does not move. Because the supply is shared, matching the conductance there also matches `ψ_stem`, `E`, `A` and `ci`.
+A comparison across curves at each curve's own published defaults mixes two things: how each curve *responds* to the environment, and where its parameters happen to *sit*. So the defaults here are aligned. Each curve with a level parameter takes the value at which its leaf optimum has TF24's conductance at one reference environment: a single soil potential of 1 MPa, PPFD 900, a 2 kPa deficit, 25 °C with the energy balance off, and every trait at its default. TF24 is the anchor and does not move. Because the supply is shared, matching the conductance there also matches `ψ_leaf`, `E`, `A` and `ci`.
 
 [align_curves()] does the alignment, and the defaults are its answer at its own defaults. Four curves have a level parameter: `CF77` (its price), `JS22` (`JS22_gamma`), `CMax` (`CMax_a`) and `LeastCost` (`LeastCost_beta`). `CF77` aligned to TF24 is an identity rather than a fit, since at TF24's emergent `λ` the two first-order conditions coincide.
 
@@ -681,7 +681,7 @@ sp <- leaf_supply_singlelayer()
 curves <- c("TF24", "CF77", "JS22", "CMax", "LeastCost", "SOX", "JW26",
             "ProfitMax")
 gc <- sapply(curves, function(m) {
-  leaf_solve(psi_soil = c(0.5, 1, 2, 3), model = m, route = "stem",
+  leaf_solve(psi_soil = c(0.5, 1, 2, 3), model = m, route = "leaf",
              supply = sp)$gc
 })
 rownames(gc) <- paste("psi_soil", c(0.5, 1, 2, 3))
@@ -761,7 +761,7 @@ solved over `[Γ*, c_a]` by a bracketing method. This is the innermost loop of t
 # The residual really is zero at the solved ci -- the statement above, checked.
 l2 <- leaf_model()
 set_drivers(l2, psi_soil = 1.0, PPFD = 1500)
-l2$set_model("TF24", "stem"); l2$optimise()
+l2$set_model("TF24", "leaf"); l2$optimise()
 ci <- l2$ci_
 gc <- l2$stom_cond_CO2_
 resid <- l2$assim_colimited(ci) * 1e-6 - gc * (l2$ca_ - ci) / (l2$atm_kpa_ * 1000)
@@ -771,7 +771,7 @@ cat(sprintf("ci = %.4f Pa, supply-demand residual = %.2e mol m-2 s-1\n",
 
 ### 5. Hydraulic supply, and why the problem is non-trivial
 
-Water arrives through a path whose conductivity *falls* as tension rises — the Weibull vulnerability curve of Appendix A. Transpiration at a given stem potential is that curve integrated along the path:
+Water arrives through a path whose conductivity *falls* as tension rises — the Weibull vulnerability curve of Appendix A. Transpiration at a given leaf potential is that curve integrated along the path:
 
 $$E(\psi_{\rm stem};\psi_{\rm up})=k_{\max}\int_{\psi_{\rm up}}^{\psi_{\rm stem}}\! f(u)\,du$$
 
@@ -824,7 +824,7 @@ Every model simplifies. The assumptions that matter most when interpreting outpu
 | **Cost curve** | The `C(ψ)` that distinguishes one published model from another |
 | **Benefit link** `h` | A transform applied to assimilation before the cost is subtracted: identity, `log`, or scaled |
 | **Root collar** | Where the root system joins the stem, and the point the collar route optimises the potential at |
-| **Route** | Which potential is optimised. The *stem route* takes `ψ_stem` with the upstream potential held at `ψ_soil`; the *collar route* takes the collar potential with the root path in series |
+| **Route** | Which potential is optimised. The *leaf route* takes `ψ_leaf` with the upstream potential held at `ψ_soil`; the *collar route* takes the collar potential with the root path in series |
 | **Reference grid** | The package's 672-point regression baseline: 7 soil potentials × 4 light levels × 4 deficits × 3 layer counts, at two leaf temperatures |
 | **Operating point** | The solved state: `ψ*` and every output evaluated there |
 | **Operating-point kind** | Which branch produced the answer: interior, at either bound, or hydraulic shutdown |
@@ -966,7 +966,7 @@ The root curve obeys the identical homogeneity identity and takes the same `(roo
 
 # Appendix B — gradients
 
-`leaf_gradient()` and `leaf_gradient_batch()` return exact derivatives of a solved operating point with respect to the parameters. `model` and `route` select which optimum is differentiated: every curve in the table above, on the collar route or the stem route. `leaf_gradient()` is the batch with one observation.
+`leaf_gradient()` and `leaf_gradient_batch()` return exact derivatives of a solved operating point with respect to the parameters. `model` and `route` select which optimum is differentiated: every curve in the table above, on the collar route or the leaf route. `leaf_gradient()` is the batch with one observation.
 
 ## The composite
 
@@ -1019,7 +1019,7 @@ Because it is an optimum, there are two things `dY/dθ` could mean for this curv
 
 ## The energy-balance term
 
-With the energy balance on, ψ reaches profit by two routes beyond the two the gate-off derivative already carries, both through the leaf temperature: directly, ψ → ψ_stem → E → T_leaf → the temperature responses → A; and indirectly, through the c_i root-find, whose residual reads the temperature-dependent members and so gains an explicit T argument. `dprofit_energy_balance_term()` adds both, and subtracts the temperature slope of the two costs that read the leaf temperature (ProfitMax's thermal cost and LeastCost's capacity term); `dprofit_dpsi_stem()` and `dprofit_at_collar_psi()` call it, and it is exactly zero with the gate off. Below, $A_T=\partial A/\partial T$ at fixed $c_i$ and $A'=\partial A/\partial c_i$ at fixed temperature (not the $d A/d\psi$ written $A'$ earlier on this page).
+With the energy balance on, ψ reaches profit by two routes beyond the two the gate-off derivative already carries, both through the leaf temperature: directly, ψ → ψ_leaf → E → T_leaf → the temperature responses → A; and indirectly, through the c_i root-find, whose residual reads the temperature-dependent members and so gains an explicit T argument. `dprofit_energy_balance_term()` adds both, and subtracts the temperature slope of the two costs that read the leaf temperature (ProfitMax's thermal cost and LeastCost's capacity term); `dprofit_dpsi_leaf()` and `dprofit_at_collar_psi()` call it, and it is exactly zero with the gate off. Below, $A_T=\partial A/\partial T$ at fixed $c_i$ and $A'=\partial A/\partial c_i$ at fixed temperature (not the $d A/d\psi$ written $A'$ earlier on this page).
 
 The c_i solve finds the root of
 

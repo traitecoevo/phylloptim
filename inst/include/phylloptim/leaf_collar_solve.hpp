@@ -5,7 +5,7 @@
 // MASTER SOLVER: optimal root-collar (and stem) water potential
 //
 // find_root_collar_psi solves soil -> root -> stem -> leaf once per call and
-// stores the operating point in opt_psi_stem_, opt_root_psi_ and profit_. The
+// stores the operating point in opt_psi_leaf_, opt_root_psi_ and profit_. The
 // inner level is CONTINUITY (find_root_psi on E_column: soil uptake equals the
 // stem's flux); the outer is OPTIMISATION, a root-find of dprofit/dcollar = 0
 // over [wet bound, collar_at_dry_end] (maximise_profit_over_collar). Where no
@@ -49,7 +49,7 @@ inline double Leaf::find_root_psi(double wettest_soil_layer, const std::vector<d
     try {
       // The wet end of the final bracket, not its midpoint: the target rises
       // with the collar, and past the root the soil can deliver more than
-      // G(inf), which no stem potential carries and the inverse refuses.
+      // G(inf), which no leaf potential carries and the inverse refuses.
       return util::uniroot_smooth_bracket(target, wettest_soil_layer, end,
                                           f_wettest, f_crit, bracket_tol,
                                           ci_niter)
@@ -96,7 +96,7 @@ inline double Leaf::polish_bracket_bound(double x0,
     return up - residual_flux(x, up);
   };
   // Tighter than collar_root_tol (~6e-12 at a 5 MPa collar): near the dry end
-  // the steep stem curve turns that into ~2e-11 of psi_stem, a 2e-6 row error
+  // the steep stem curve turns that into ~2e-11 of psi_leaf, a 2e-6 row error
   // to a finite difference at a 1e-6 step.
   constexpr double polish_tol = 1e-15;
   const double f0 = target(x0);
@@ -134,12 +134,12 @@ inline double Leaf::polish_bracket_bound(double x0,
   return x0;
 }
 
-// The stem potential that carries the soil's uptake at collar `psi_root`.
-inline double Leaf::find_psi_stem_from_psi_root(double psi_root, const std::vector<double>& psi_soil){
+// The leaf potential that carries the soil's uptake at collar `psi_root`.
+inline double Leaf::find_psi_leaf_from_psi_root(double psi_root, const std::vector<double>& psi_soil){
   E_from_Soil_to_Root_Collar(psi_root, psi_soil);
 
-  double psi_stem = transpiration_to_psi_stem(E_up_, psi_root);
-  return psi_stem;
+  double psi_leaf = transpiration_to_psi_leaf(E_up_, psi_root);
+  return psi_leaf;
 }
 
 // find_wet_bound: the collar at which soil uptake equals the residual flux the
@@ -195,7 +195,7 @@ inline double Leaf::find_wet_bound(double wettest_soil_layer,
 // lowest gravity balance among conducting layers: the target is <= 0 there and
 // rises above, so one root-find to collar precision places it. Where no layer
 // conducts the floor is returned, the bound's limit from the wet side; the soil
-// potential instead would leave a step of the gravity head in psi_stem. The
+// potential instead would leave a step of the gravity head in psi_leaf. The
 // open leaf keeps find_wet_bound, whose bracket keeps g_min = 0 bit-identical.
 inline double Leaf::find_shut_wet_bound() {
   const std::vector<double>& soil = supply_psi_soil();
@@ -239,12 +239,12 @@ inline double Leaf::find_shut_wet_bound() {
   }
 }
 
-// The stem potential carrying exactly the residual flux from `psi_upstream`:
-// the wet end of a stem route. It exists because the residual flux is strictly
+// The leaf potential carrying exactly the residual flux from `psi_upstream`:
+// the wet end of a leaf route. It exists because the residual flux is strictly
 // below the stem's ceiling, and may lie past psi_crit. Solved to 1e-15 because
 // a leaf that declines to open sits exactly here.
-inline double Leaf::stem_wet_bound(double psi_upstream) {
-  // A stem route has no roots upstream of psi_soil, so it clears the roots'
+inline double Leaf::leaf_wet_bound(double psi_upstream) {
+  // A leaf route has no roots upstream of psi_soil, so it clears the roots'
   // ceiling a previous collar solve seated.
   residual_root_ceiling_ = std::numeric_limits<double>::infinity();
   if (g_min == 0.0) {
@@ -259,7 +259,7 @@ inline double Leaf::stem_wet_bound(double psi_upstream) {
   double f_hi = target(hi);
   for (int i = 0; f_hi < 0.0; ++i) {
     if (i >= 64) {
-      util::stop_infeasible("stem_wet_bound",
+      util::stop_infeasible("leaf_wet_bound",
                             "the stem cannot carry the residual flux from "
                             "psi_upstream=" + util::to_string(psi_upstream));
     }
@@ -289,10 +289,10 @@ inline void Leaf::set_shut_state() {
   // root-find leaves it at or below zero (a ~1e-50 residual flux at the end of
   // the stem curve), the stem sits at the collar, the flux's limit from above:
   // inverting a negative flux would put the stem wetter than the collar.
-  opt_psi_stem_ = (residual_flux(collar, E_up_) == 0.0 || !(E_up_ > 0.0))
+  opt_psi_leaf_ = (residual_flux(collar, E_up_) == 0.0 || !(E_up_ > 0.0))
                       ? collar
-                      : find_psi_stem_from_psi_root(collar, soil);
-  profit_ = profit_psi_stem_for<K>(opt_psi_stem_, collar);
+                      : find_psi_leaf_from_psi_root(collar, soil);
+  profit_ = profit_psi_leaf_for<K>(opt_psi_leaf_, collar);
   // NA where the supply's conductance is unavailable (a one-layer wet bound is
   // its gravity-balance kink).
   lambda_emergent_ = lambda_collar_for<K>();
@@ -301,7 +301,7 @@ inline void Leaf::set_shut_state() {
     util::stop_infeasible("collar_solve",
                           "profit is not finite at the shut state; collar=" +
                               util::to_string(collar) +
-                              "; psi_stem=" + util::to_string(opt_psi_stem_));
+                              "; psi_leaf=" + util::to_string(opt_psi_leaf_));
   }
 }
 
@@ -387,14 +387,14 @@ inline bool Leaf::prepare_collar_solve(double& bound_a, double& bound_b,
 }
 
 template <Leaf::CostCurve K>
-inline bool Leaf::seat_stem_at_dry_pin() {
+inline bool Leaf::seat_leaf_at_dry_pin() {
   if constexpr (cost_domain_ends_at_psi_crit<K>()) {
     return false;
   } else {
     if (operating_point_kind_ != OperatingPointKind::BoundaryDry) {
       return false;
     }
-    opt_psi_stem_ = vulnerability_psi_end(stem_b, stem_c);
+    opt_psi_leaf_ = vulnerability_psi_end(stem_b, stem_c);
     return true;
   }
 }
@@ -458,7 +458,7 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
       const double limit = 0.5 * (bound_b - a);
       for (double frac = 1e-6; frac * scale < limit; frac *= 10.0) {
         const double x = a + frac * scale;
-        const double s = find_psi_stem_from_psi_root(x, supply_psi_soil());
+        const double s = find_psi_leaf_from_psi_root(x, supply_psi_soil());
         if (std::isfinite(s) && x < s) {
           lo = x;
           break;
@@ -472,7 +472,7 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
   // read: through the log link at a negative A they say nothing.
   if constexpr (objective_is_product<K>()) {
     if (dark_under_product<K>(
-            find_psi_stem_from_psi_root(bound_b, supply_psi_soil()), bound_b)) {
+            find_psi_leaf_from_psi_root(bound_b, supply_psi_soil()), bound_b)) {
       // Where the open path would start: the bound at g_min > 0, a step inside
       // the no-flow sentinel at g_min = 0, should placement find no step.
       lo = g_min > 0.0 ? bound_a : bound_a + 1e-6 * width;
@@ -594,9 +594,9 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
             : OperatingPointKind::SolverRefused;
     return util::golden_section_max(
         [&](double bound) {
-          const double psi_stem =
-              find_psi_stem_from_psi_root(bound, supply_psi_soil());
-          return profit_psi_stem_for<K>(psi_stem, bound);
+          const double psi_leaf =
+              find_psi_leaf_from_psi_root(bound, supply_psi_soil());
+          return profit_psi_leaf_for<K>(psi_leaf, bound);
         },
         bound_a, bound_b, GSS_tol_abs);
   }
@@ -624,10 +624,10 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
 
   if (f_lo <= 0.0 && f_hi >= 0.0) {
     operating_point_kind_ = OperatingPointKind::SolverRefused;
-    const double p_lo = profit_psi_stem_for<K>(
-        find_psi_stem_from_psi_root(lo, supply_psi_soil()), lo);
-    const double p_hi = profit_psi_stem_for<K>(
-        find_psi_stem_from_psi_root(hi, supply_psi_soil()), hi);
+    const double p_lo = profit_psi_leaf_for<K>(
+        find_psi_leaf_from_psi_root(lo, supply_psi_soil()), lo);
+    const double p_hi = profit_psi_leaf_for<K>(
+        find_psi_leaf_from_psi_root(hi, supply_psi_soil()), hi);
     if (!std::isfinite(p_hi)) {
       return lo;
     }
@@ -696,7 +696,7 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
 
 template <Leaf::CostCurve K>
 inline void Leaf::find_root_collar_psi_for(){
-  // The stem route's parameter check: without it CF77 with an unset lambda
+  // The leaf route's parameter check: without it CF77 with an unset lambda
   // maximises a NaN objective and returns a bracket end as an operating point.
   check_cost_parameters<K>();
   // A normalised curve seeds its normalisers before searching, on either
@@ -712,17 +712,17 @@ inline void Leaf::find_root_collar_psi_for(){
 
     const double opt_root_psi = maximise_profit_over_collar<K>(bound_a, bound_b);
 
-    opt_psi_stem_ = find_psi_stem_from_psi_root(opt_root_psi, supply_psi_soil());
-    seat_stem_at_dry_pin<K>();
+    opt_psi_leaf_ = find_psi_leaf_from_psi_root(opt_root_psi, supply_psi_soil());
+    seat_leaf_at_dry_pin<K>();
 
     opt_root_psi_ = opt_root_psi;
-    profit_ = profit_psi_stem_for<K>(opt_psi_stem_, opt_root_psi);
+    profit_ = profit_psi_leaf_for<K>(opt_psi_leaf_, opt_root_psi);
     // On the single-layer solvers' axis: the collar is the free variable, so the
     // marginal cost carries the soil-to-collar series-resistance correction.
     lambda_emergent_ = lambda_collar_for<K>();
 
     if(!std::isfinite(profit_)){
-        util::stop_infeasible("collar_solve", "non-finite profit; opt_psi_stem_=" + util::to_string(opt_psi_stem_) +
+        util::stop_infeasible("collar_solve", "non-finite profit; opt_psi_leaf_=" + util::to_string(opt_psi_leaf_) +
              "; opt_root_psi_=" + util::to_string(opt_root_psi_) +
              "; bound_a=" + util::to_string(bound_a) +
              "; bound_b=" + util::to_string(bound_b) +
@@ -807,8 +807,8 @@ inline double Leaf::replay_operating_point_for(double collar,
                                     std::max(bound_b, collar));
     }
     operating_point_kind_ = kind;
-    if (seat_stem_at_dry_pin<K>()) {
-      profit_ = profit_psi_stem_for<K>(opt_psi_stem_, opt_root_psi_);
+    if (seat_leaf_at_dry_pin<K>()) {
+      profit_ = profit_psi_leaf_for<K>(opt_psi_leaf_, opt_root_psi_);
       lambda_emergent_ = lambda_collar_for<K>();
       out = profit_;
     }
@@ -834,9 +834,9 @@ inline double Leaf::profit_at_collar_psi(double target_opt_root_psi,
     }
     const double opt_root_psi = target_opt_root_psi;
 
-    opt_psi_stem_ = find_psi_stem_from_psi_root(opt_root_psi, supply_psi_soil());
+    opt_psi_leaf_ = find_psi_leaf_from_psi_root(opt_root_psi, supply_psi_soil());
     opt_root_psi_ = opt_root_psi;
-    profit_ = profit_psi_stem_for<K>(opt_psi_stem_, opt_root_psi);
+    profit_ = profit_psi_leaf_for<K>(opt_psi_leaf_, opt_root_psi);
     // dC/dE is a property of the point, defined off the optimum, where it is not dA/dE.
     lambda_emergent_ = lambda_collar_for<K>();
     // Here a non-zero dprofit is the answer (TF24f's acclimation rate), not a
@@ -854,7 +854,7 @@ inline double Leaf::profit_at_collar_psi(double target_opt_root_psi,
     return profit_;
 }
 
-// Exact d(profit)/d(collar): A'(ci) dci/dpsi - C'(psi_stem) dpsi_stem/dpsi,
+// Exact d(profit)/d(collar): A'(ci) dci/dpsi - C'(psi_leaf) dpsi_leaf/dpsi,
 // with dci/dpsi from the implicit-function theorem on the ci residual and A', C'
 // by forward AD of the model's own kernels; vignette("the-models"), "The
 // benefit, and the root-find inside it". This wrapper seats the supply caches on
@@ -885,24 +885,24 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
   // Past the continuity root with the stem at the end of its curve the soil
   // delivers more than the stem can carry: no operating point, reported like the
   // other no-gradient exits rather than thrown (a difference across a dry pin reaches it).
-  // The uptake's collar slope comes from the same walk (dpsi_stem/dpsi below).
+  // The uptake's collar slope comes from the same walk (dpsi_leaf/dpsi below).
   const double dEup_dpsi = E_and_slope_from_soil(psi, supply_psi_soil());
   if (!stem_carries(E_up_, psi)) {
     return 0.0;
   }
-  const double psi_stem = transpiration_to_psi_stem(E_up_, psi);
-  // psi >= psi_stem is the no-flow / reversed case, caught before the ci solve:
-  // there psi_stem_to_ci throws (transpiration() refuses the pair) rather than
+  const double psi_leaf = transpiration_to_psi_leaf(E_up_, psi);
+  // psi >= psi_leaf is the no-flow / reversed case, caught before the ci solve:
+  // there psi_leaf_to_ci throws (transpiration() refuses the pair) rather than
   // returning non-finite, and the throw would end a consumer's run.
-  if (!std::isfinite(psi_stem) || psi >= psi_stem) {
+  if (!std::isfinite(psi_leaf) || psi >= psi_leaf) {
     return 0.0;  // shut-down / infeasible: no informative gradient
   }
 
   // With the energy balance on, the temperature parameters are seated at this
   // candidate's Tleaf(E), as the objective is: otherwise this is the first-order
   // condition of the air-temperature model. Same order as
-  // set_leaf_states_rates_from_psi_stem: transpiration, temperature, ci solve.
-  const double E = transpiration(psi_stem, psi);
+  // set_leaf_states_rates_from_psi_leaf: transpiration, temperature, ci solve.
+  const double E = transpiration(psi_leaf, psi);
   double dT_dE = 0.0;
   double Tleaf_here = leaf_temp_;
   if (use_energy_balance_) {
@@ -921,25 +921,25 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
     return 0.0;
   }
 
-  const double ci = psi_stem_to_ci(psi_stem, psi);
+  const double ci = psi_leaf_to_ci(psi_leaf, psi);
   if (!std::isfinite(ci)) {
     return 0.0;
   }
 
-  // dpsi_stem/dpsi, shared by both branches below.
-  double dpsistem_dpsi;
+  // dpsi_leaf/dpsi, shared by both branches below.
+  double dpsileaf_dpsi;
   if (std::isfinite(dEup_dpsi)) {
-    const double dEpsistem_dpsi =
+    const double dEpsileaf_dpsi =
         dEup_dpsi / leaf_specific_conductance_max_ + stem_curve_integral_deriv(psi);
-    // dpsi_stem/dE_psi_stem = 1/G'(psi_stem), at the psi_stem inverted above
+    // dpsi_leaf/dE_psi_leaf = 1/G'(psi_leaf), at the psi_leaf inverted above
     // from the same E_up_ and psi.
-    dpsistem_dpsi = (1.0 / stem_curve_integral_deriv(psi_stem)) * dEpsistem_dpsi;
+    dpsileaf_dpsi = (1.0 / stem_curve_integral_deriv(psi_leaf)) * dEpsileaf_dpsi;
   } else {
     // NaN from the supply means "use finite differences" (hazard 6).
     const double h = 1e-6;
-    dpsistem_dpsi =
-        (find_psi_stem_from_psi_root(psi + h, supply_psi_soil()) -
-         find_psi_stem_from_psi_root(psi - h, supply_psi_soil())) / (2.0 * h);
+    dpsileaf_dpsi =
+        (find_psi_leaf_from_psi_root(psi + h, supply_psi_soil()) -
+         find_psi_leaf_from_psi_root(psi - h, supply_psi_soil())) / (2.0 * h);
   }
 
 
@@ -953,16 +953,16 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
   // the derivative of the function evaluated, not of a hand-kept mirror.
   AD ci_ad = ci;            xad::derivative(ci_ad) = 1.0;
   const double A_prime = xad::derivative(assim_colimited_kernel(ci_ad));
-  const double C_prime = cost_deriv<K>(psi_stem, psi);
+  const double C_prime = cost_deriv<K>(psi_leaf, psi);
 
   // gc and its partials, on the stem table's own slope. The residual flux reads
-  // psi_stem only through Tleaf (the energy-balance term) and the collar through
+  // psi_leaf only through Tleaf (the energy-balance term) and the collar through
   // its ceiling (below); both are exact zeros at g_min = 0.
   const double gc_const =
       atm_kpa_ * kg_to_mol_h2o / vpd_leaf_ / H2O_CO2_stom_diff_ratio_;
   double gc = gc_const * E_s + cuticle;
-  double dgc_dpsistem =
-      gc_const * leaf_specific_conductance_max_ * stem_curve_integral_deriv(psi_stem);
+  double dgc_dpsileaf =
+      gc_const * leaf_specific_conductance_max_ * stem_curve_integral_deriv(psi_leaf);
   double dgc_dpsi =
       gc_const * leaf_specific_conductance_max_ * (-stem_curve_integral_deriv(psi));
   const double drstar_dpsi = residual_flux_dpsi_upstream(psi, Tleaf_here);
@@ -975,26 +975,26 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
     const std::pair<double, double> split = boundary_layer_split_CO2(gc);
     gc = split.first;
     bl_slope = split.second;
-    dgc_dpsistem *= bl_slope;
+    dgc_dpsileaf *= bl_slope;
     dgc_dpsi *= bl_slope;
   }
 
-  // IFT on g(ci; psi_stem, psi): dci/dp = -(dg/dp)/(dg/dci).
+  // IFT on g(ci; psi_leaf, psi): dci/dp = -(dg/dp)/(dg/dci).
   const double inv_atm = 1.0 / (atm_kpa_ * kPa_to_Pa);
   const double g_ci = A_prime * umol_to_mol + gc * inv_atm;      // dg/dci
-  const double dci_dpsistem = -(-dgc_dpsistem * (ca_ - ci) * inv_atm) / g_ci;
+  const double dci_dpsileaf = -(-dgc_dpsileaf * (ca_ - ci) * inv_atm) / g_ci;
   const double dci_dpsi_expl = -(-dgc_dpsi * (ca_ - ci) * inv_atm) / g_ci;
 
 
-  const double dci_dpsi = dci_dpsistem * dpsistem_dpsi + dci_dpsi_expl;
+  const double dci_dpsi = dci_dpsileaf * dpsileaf_dpsi + dci_dpsi_expl;
   // The identity arm keeps every difference objective's operation order, which
   // the golden files pin; only a non-identity link takes the general path.
   double base;
   if constexpr (benefit_link<K>() == BenefitLink::Identity) {
-    base = A_prime * dci_dpsi - C_prime * dpsistem_dpsi;
+    base = A_prime * dci_dpsi - C_prime * dpsileaf_dpsi;
   } else {
     const double A = assim_colimited_kernel(ci);
-    base = benefit_link_deriv<K>(A) * (A_prime * dci_dpsi) - C_prime * dpsistem_dpsi;
+    base = benefit_link_deriv<K>(A) * (A_prime * dci_dpsi) - C_prime * dpsileaf_dpsi;
     // A log link has no derivative where the leaf is a net source (A <= 0), an
     // ordinary point once the cuticle conducts CO2: reported as absent, never NaN.
     if (!std::isfinite(base)) {
@@ -1007,7 +1007,7 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
   // The cost's direct dependence on the collar, appended so a curve that does not
   // read upstream keeps the arm above operation for operation.
   if constexpr (cost_reads_upstream<K>()) {
-    base = base - cost_deriv_upstream<K>(psi_stem, psi);
+    base = base - cost_deriv_upstream<K>(psi_leaf, psi);
   }
   // Gated at the CALL SITE, not just inside the callee: the block is out of line
   // (deliberately, so adding it cannot change FMA contraction in this inlined
@@ -1016,8 +1016,8 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
     return base;
   }
   return base + dprofit_energy_balance_term<K>(
-                    ci, gc, g_ci, inv_atm, gc_const, A_prime, dgc_dpsistem,
-                    dgc_dpsi, dpsistem_dpsi, dT_dE, Tleaf_here, E_s, r_star,
+                    ci, gc, g_ci, inv_atm, gc_const, A_prime, dgc_dpsileaf,
+                    dgc_dpsi, dpsileaf_dpsi, dT_dE, Tleaf_here, E_s, r_star,
                     drstar_dpsi,
                     residual_cond_temp_deriv(psi, Tleaf_here, gc_const), bl_slope);
 }

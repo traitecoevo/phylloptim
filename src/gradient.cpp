@@ -149,7 +149,7 @@ double leaf_ncontrol_default() {
 
 //' The differentiated outputs, in the order C++ indexes them
 //'
-//' `A`, `gc`, `psi_stem`, `collar` and `profit`. Unlike [gradient_par_names()],
+//' `A`, `gc`, `psi_leaf`, `collar` and `profit`. Unlike [gradient_par_names()],
 //' which R holds its own copy of and a test compares, R **reads** this one — so
 //' the list exists once and adding an output is one edit rather than two that
 //' can disagree.
@@ -254,7 +254,7 @@ Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_,
   }
   settings.model.curve = static_cast<phylloptim::Leaf::CostCurve>(curve);
   settings.model.route = collar ? phylloptim::gradient::Route::Collar
-                                : phylloptim::gradient::Route::Stem;
+                                : phylloptim::gradient::Route::Leaf;
   settings.fd_step = fd_step;
   if (method == "auto") {
     settings.method = phylloptim::gradient::Method::Auto;

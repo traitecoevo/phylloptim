@@ -75,7 +75,7 @@
 ##'   an exactly zero gradient on every other one.
 ##'
 ##'   ⚠️ **The default is not a literature value.** It is aligned to TF24 by
-##'   [align_curves()]: the value at which the JS22 stem optimum has TF24's
+##'   [align_curves()]: the value at which the JS22 leaf optimum has TF24's
 ##'   conductance at that function's reference environment. No single value matches more
 ##'   than one soil potential: the `JS22_gamma` reproducing TF24's cost at its own
 ##'   optimum runs 0.287 at `psi_soil` 0.5 MPa to 1.761 at 3.0 MPa. TF24's cost
@@ -190,10 +190,10 @@ leaf_traits <- function(vcmax_25 = 96,
 ##'   either bracket endpoint has no usable gradient (no driver sweep has reached
 ##'   that fallback).
 ##'
-##'   ⚠️ **It does not reach the stem route at all.** That refines by a root-find
+##'   ⚠️ **It does not reach the leaf route at all.** That refines by a root-find
 ##'   on `dJ/dpsi == 0` at a hardcoded tolerance; the `(cell width) * 1e-4` figure
 ##'   is its own golden-section fallback, not its normal path. Tightening this to
-##'   sharpen a stem-route argmax does nothing.
+##'   sharpen a leaf-route argmax does nothing.
 ##' @param vulnerability_curve_ncontrol number of knot intervals in each Weibull
 ##'   vulnerability curve's table (a C2 quintic of its cumulative integral).
 ##'   Higher is more accurate and slower to construct; it does not affect solve
@@ -338,7 +338,7 @@ leaf_supply_singlelayer <- function(gravity_head = 0) {
 ##'   zero resistance is an infinite flux. Per unit leaf area because the leaf is
 ##'   purely intensive — nothing here may scale with plant size. [set_drivers()]
 ##'   refuses one below 1e-2, where the collar route can no longer resolve the
-##'   flux; the stem routes are the zero-resistance model.
+##'   flux; the leaf routes are the zero-resistance model.
 ##'
 ##' @return A [RootNetwork()] with one entry in `r_R_V_sum`.
 ##' @seealso [leaf_supply_singlelayer()], [root_network_from_carbon()], [set_drivers()]
@@ -739,7 +739,7 @@ operating_point <- function(x) {
 # types do not enforce: append, never insert, or saved outputs shift. test-surface.R
 # checks each against its own binding; test-golden.R checks leaf_solve() bit-exactly.
 .operating_point_names <- c(
-  "psi_stem",       # MPa, positive magnitude
+  "psi_leaf",       # MPa, positive magnitude
   "collar",         # MPa, positive magnitude
   "ci",             # Pa
   "A",              # umol C m^-2 s^-1
@@ -833,18 +833,18 @@ operating_point <- function(x) {
 ##'   name from [cost_curve_names()], solved on `route`. The default,
 ##'   `"TF24_floor"`, is plant's default model; at its default price,
 ##'   `TF24_floor_lambda_o = 0`, it is TF24.
-##' @param route which potential the curve is maximised over: `"stem"` (the
-##'   default), `psi_stem` with the upstream potential pinned at `psi_soil`,
+##' @param route which potential the curve is maximised over: `"leaf"` (the
+##'   default), `psi_leaf` with the upstream potential pinned at `psi_soil`,
 ##'   which needs `leaf_supply_singlelayer()`; or `"collar"`, the root-collar
 ##'   potential, on either supply path, and the only route on
-##'   `leaf_supply_multilayer()`. `NULL` is the stem route.
+##'   `leaf_supply_multilayer()`. `NULL` is the leaf route.
 ##'
 ##'   ⚠️ **The two routes are different models, not two ways of asking one
 ##'   question**, even for one curve. They optimise different variables over
 ##'   different supply topologies, and for TF24 disagree on 20 of 30 driver
 ##'   rows.
 ##'
-##'   ⚠️ **On a stem route the `collar` column comes back non-finite**, because
+##'   ⚠️ **On a leaf route the `collar` column comes back non-finite**, because
 ##'   the collar is not solved for at all. An absent number is the truthful answer
 ##'   rather than a gap -- reading one would be reading whatever the last solve
 ##'   left behind.
@@ -860,7 +860,7 @@ operating_point <- function(x) {
 ##'   by [align_curves()]. Zero is refused, since at zero the capacity term
 ##'   vanishes and what is left is water-use efficiency, which rises without bound
 ##'   as transpiration falls. The published value is 146, which at this
-##'   package's default leaf pins the stem optimum at `psi_crit` from the
+##'   package's default leaf pins the leaf optimum at `psi_crit` from the
 ##'   reference `psi_soil` of 1 MPa drier.
 ##' @param CF77_lambda,TF24_floor_lambda_o the prescribed marginal value of water
 ##'   for the two curves that take one, in umol C (kg H2O)^-1. `NA_real_` (the
@@ -1007,7 +1007,7 @@ leaf_solve <- function(psi_soil,
 
 # A model is a (curve, route) pair, resolved from `model` and `route` and
 # validated against the supply path before a Leaf is built. Every curve takes
-# both routes; with none named it is the stem route (decision D3).
+# both routes; with none named it is the leaf route (decision D3).
 # leaf_solve(), leaf_gradient() and leaf_gradient_batch() all resolve here, from
 # `cost_curve_names()`, so a curve added in C++ is reachable from each and they
 # cannot disagree about what a name selects.
@@ -1022,12 +1022,12 @@ leaf_solve <- function(psi_soil,
   }
   if (!is.null(route) &&
       !(is.character(route) && length(route) == 1L &&
-        route %in% c("collar", "stem"))) {
-    stop("`route` must be \"collar\", \"stem\" or NULL", call. = FALSE)
+        route %in% c("collar", "leaf"))) {
+    stop("`route` must be \"collar\", \"leaf\" or NULL", call. = FALSE)
   }
-  if (is.null(route)) route <- "stem"
-  if (identical(route, "stem") && !identical(supply_kind, "single")) {
-    stop("the stem routes optimise `psi_stem` with the upstream potential ",
+  if (is.null(route)) route <- "leaf"
+  if (identical(route, "leaf") && !identical(supply_kind, "single")) {
+    stop("the leaf routes optimise `psi_leaf` with the upstream potential ",
          "pinned at `psi_soil`, so they need the single-potential supply path; ",
          "got the multi-layer one. Use route = \"collar\" for a root network.",
          call. = FALSE)

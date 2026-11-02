@@ -38,14 +38,14 @@
 # Last regenerated for the (P50, c) reparameterisation, which moved 30 of these 36
 # values by ~1e-08 relative. The six that did not are the shut-down row's four
 # exact zeros plus its ci and assim: that row never reaches the collar solve, so
-# nothing it reports depends on the vulnerability curve -- except psi_stem, which
+# nothing it reports depends on the vulnerability curve -- except psi_leaf, which
 # IS psi_crit and moves with it. That split is why the row is here.
 #
 # Then for phi_J (0.13.0), which moved 8 of the first row's values by a few ULP
 # (rebasing the quantum yield onto absorbed light reassociates J) and none of the
 # other three rows.
 #
-# Then for psi_stem_to_ci's tolerance going 1e-10 -> 1e-13 (#172), which moved 23
+# Then for psi_leaf_to_ci's tolerance going 1e-10 -> 1e-13 (#172), which moved 23
 # of the 54 values by up to 2.6e-14 relative.
 #
 # Then for the continuous no-flow value (#175), which moved the shut-down row's
@@ -53,7 +53,7 @@
 # at 100 umol m-2 s-1 is 0 rather than -R_d.
 #
 # Then for the residual conductance (#182), which moved the shut-down row's
-# psi_stem, opt_root_psi, profit, e_up and uptake: the shut leaf sits at its wet
+# psi_leaf, opt_root_psi, profit, e_up and uptake: the shut leaf sits at its wet
 # bound, the zero-uptake collar (6.34 MPa here, past psi_crit's 5.87), with the
 # stem AT it rather than held at psi_crit, so the hydraulic cost is the curve's
 # there; e_up and uptake are the polished bound's residue (~1e-20) rather than
@@ -76,14 +76,14 @@
 # rather than anywhere in TOMS748's 1e-13 band: values moved by up to ~1e-13
 # relative.
 #
-# Before that, #92 (the indexed knot grid) moved 27, the psi_stem_to_ci tolerance
+# Before that, #92 (the indexed knot grid) moved 27, the psi_leaf_to_ci tolerance
 # 18, and the collar root-find 27.
 
 # Four points, chosen to exercise different parts of the model rather than to
 # sample the grid evenly:
 #
 #   1 layer          the single-layer path, which is also the one the
-#                    optimise_psi_stem_* solvers require
+#                    optimise_psi_leaf_* solvers require
 #   3 and 5 layers   the multi-layer supply path, where the R side has to get a
 #                    whole vector across in the right order -- a transposed or
 #                    reversed soil profile is invisible at one layer
@@ -99,7 +99,7 @@ golden_rows <- list(
   list(
     inputs = list(psi_soil = 0.5, ppfd = 1500, vpd = 0.5, layers = 1L),
     expected = list(
-      psi_stem      = "0x1.709bdd973848bp+1",
+      psi_leaf      = "0x1.709bdd973848bp+1",
       opt_root_psi  = "0x1.066f206418756p+1",
       ci            = "0x1.9f4d8353e5aeep+4",
       assim         = "0x1.215ca9d9740e1p+4",
@@ -113,7 +113,7 @@ golden_rows <- list(
   list(
     inputs = list(psi_soil = 2.0, ppfd = 900, vpd = 2.0, layers = 3L),
     expected = list(
-      psi_stem      = "0x1.b1bea0a2f4461p+1",
+      psi_leaf      = "0x1.b1bea0a2f4461p+1",
       opt_root_psi  = "0x1.821841efd374cp+1",
       ci            = "0x1.0de7939a33b55p+3",
       assim         = "0x1.b2e0241264c97p+1",
@@ -127,7 +127,7 @@ golden_rows <- list(
   list(
     inputs = list(psi_soil = 4.0, ppfd = 500, vpd = 1.0, layers = 5L),
     expected = list(
-      psi_stem      = "0x1.806ce1023184p+2",
+      psi_leaf      = "0x1.806ce1023184p+2",
       opt_root_psi  = "0x1.3917d4d02abb8p+2",
       ci            = "0x1.0ec2d5552da8ap+3",
       assim         = "0x1.aa12ab799f089p+1",
@@ -141,7 +141,7 @@ golden_rows <- list(
   list(
     inputs = list(psi_soil = 17.0, ppfd = 100, vpd = 3.0, layers = 5L),
     expected = list(
-      psi_stem      = "0x1.10141205bc01ap+4",
+      psi_leaf      = "0x1.10141205bc01ap+4",
       opt_root_psi  = "0x1.10141205bc01ap+4",
       ci            = "0x1.ec6f9e7580bdbp+2",
       assim         = "0x0p+0",
@@ -229,7 +229,7 @@ golden_rows_40 <- list(
     inputs = list(psi_soil = 2.0, ppfd = 900, vpd = 2.0, layers = 1L,
                   leaf_temp = 40.0),
     expected = list(
-      psi_stem      = "0x1.3c43d2872d74ep+1",
+      psi_leaf      = "0x1.3c43d2872d74ep+1",
       opt_root_psi  = "0x1.27d38b4c6d6a5p+1",
       ci            = "0x1.a8bad8ee963ep+4",
       assim         = "0x1.b63a5431b611cp-1",
@@ -244,7 +244,7 @@ golden_rows_40 <- list(
     inputs = list(psi_soil = 0.5, ppfd = 1500, vpd = 0.5, layers = 3L,
                   leaf_temp = 40.0),
     expected = list(
-      psi_stem      = "0x1.ca0d19a92a8a3p+0",
+      psi_leaf      = "0x1.ca0d19a92a8a3p+0",
       opt_root_psi  = "0x1.8cdab5adcbb34p+0",
       ci            = "0x1.1428b22905327p+5",
       assim         = "0x1.3ba438c0f6b7dp+1",
@@ -299,7 +299,7 @@ test_that("the 40 C block is a different operating point from the 25 C block", {
   cool <- golden_solve(psi_soil = 2.0, ppfd = 900, vpd = 2.0, layers = 1L)
   expect_false(isTRUE(all.equal(hot$assim, cool$assim)))
   expect_lt(hot$assim, cool$assim)     # past the thermal optimum at 40 C
-  expect_gt(hot$psi_stem, 0)
+  expect_gt(hot$psi_leaf, 0)
 })
 
 test_that("a shut-down point writes every output, not just the ones it changed", {

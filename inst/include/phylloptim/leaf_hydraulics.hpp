@@ -298,7 +298,7 @@ inline double Leaf::stem_curve_limit() const {
 }
 
 // A NaN fails the comparison and falls through to the read, which returns NaN:
-// plant's profit_psi_stem_TF(NA, .) -> NA contract rests on this.
+// plant's profit_psi_leaf_TF(NA, .) -> NA contract rests on this.
 inline double Leaf::stem_curve_integral(double psi, const char* caller) const {
   if (psi < 0.0) {
     stem_curve_out_of_domain(0.0, std::numeric_limits<double>::infinity(), psi,
@@ -366,7 +366,7 @@ inline bool Leaf::stem_carries(double E, double psi_upstream) const {
          stem_curve_limit() * (slack - 1.0);
 }
 
-inline double Leaf::psi_stem_carrying(double E, double psi_upstream,
+inline double Leaf::psi_leaf_carrying(double E, double psi_upstream,
                                       const char* caller) const {
   const double w = E / leaf_specific_conductance_max_;
   if (!stem_curve_in_tail(psi_upstream)) {
@@ -405,34 +405,34 @@ inline void Leaf::perturb_stem_P50(double stem_P50_new) {
 // Direct quadrature of the vulnerability curve: an independent check on the table
 // transpiration() reads, not used in production. Convergent with plant's QAG, not
 // bit-identical; see quadrature.hpp.
-inline double Leaf::transpiration_full_integration(double psi_stem, double psi_upstream) {
+inline double Leaf::transpiration_full_integration(double psi_leaf, double psi_upstream) {
   const auto f = [&](double psi) -> double {
     return proportion_of_conductivity(psi);
   };
   return leaf_specific_conductance_max_ *
-         quadrature::adaptive_simpson(f, psi_upstream, psi_stem,
+         quadrature::adaptive_simpson(f, psi_upstream, psi_leaf,
                                       integration_tol_);
 }
 
 // transpiration()'s refusal, cold and out of line: its string building inlined
 // into that hot path cost the solve measurably.
 [[noreturn, gnu::cold, gnu::noinline]] inline void
-stop_reversed_flow(double psi_stem, double psi_upstream) {
-  util::stop("Leaf::transpiration: psi_stem = " + util::format_double(psi_stem) +
+stop_reversed_flow(double psi_leaf, double psi_upstream) {
+  util::stop("Leaf::transpiration: psi_leaf = " + util::format_double(psi_leaf) +
              " MPa is wetter than psi_upstream = " +
              util::format_double(psi_upstream) +
              " MPa, which would move water from the leaf to the soil; "
-             "psi_stem must be at least psi_upstream");
+             "psi_leaf must be at least psi_upstream");
 }
 
 // Supply-side transpiration through the stem, kg H2O s^-1 m^-2 LA, from two
 // positive magnitudes in MPa.
-inline double Leaf::transpiration(double psi_stem, double psi_upstream) {
+inline double Leaf::transpiration(double psi_leaf, double psi_upstream) {
 
   // One-entry memo: a profit evaluation asks for the same pair several times.
   // Anything that changes the curve must clear it.
   if (transpiration_cached_ &&
-      psi_stem == transpiration_cache_psi_stem_ &&
+      psi_leaf == transpiration_cache_psi_leaf_ &&
       psi_upstream == transpiration_cache_psi_upstream_) {
     return transpiration_cache_value_;
   }
@@ -443,9 +443,9 @@ inline double Leaf::transpiration(double psi_stem, double psi_upstream) {
           ? leaf_specific_conductance_max_ *
                 (stem_curve_complement(psi_upstream,
                                        "Leaf::transpiration, at psi_upstream") -
-                 stem_curve_complement(psi_stem, "Leaf::transpiration, at psi_stem"))
+                 stem_curve_complement(psi_leaf, "Leaf::transpiration, at psi_leaf"))
           : leaf_specific_conductance_max_ *
-                (stem_curve_integral(psi_stem, "Leaf::transpiration, at psi_stem") -
+                (stem_curve_integral(psi_leaf, "Leaf::transpiration, at psi_leaf") -
                  stem_curve_integral(psi_upstream,
                                      "Leaf::transpiration, at psi_upstream"));
 
@@ -453,24 +453,24 @@ inline double Leaf::transpiration(double psi_stem, double psi_upstream) {
   // operating_point_flux) that would yield a negative conductance; equality is
   // shut-down and legal. Tested after the lookups, so a negative potential gets
   // the table's message, and before the memo, so the memo never holds one.
-  if (psi_stem < psi_upstream) [[unlikely]] {
-    stop_reversed_flow(psi_stem, psi_upstream);
+  if (psi_leaf < psi_upstream) [[unlikely]] {
+    stop_reversed_flow(psi_leaf, psi_upstream);
   }
 
-  transpiration_cache_psi_stem_ = psi_stem;
+  transpiration_cache_psi_leaf_ = psi_leaf;
   transpiration_cache_psi_upstream_ = psi_upstream;
   transpiration_cache_value_ = E;
   transpiration_cached_ = true;
   return E;
 }
 
-inline double Leaf::operating_point_flux(double psi_stem, double psi_upstream) {
-  return psi_upstream >= psi_stem ? 0.0 : transpiration(psi_stem, psi_upstream);
+inline double Leaf::operating_point_flux(double psi_leaf, double psi_upstream) {
+  return psi_upstream >= psi_leaf ? 0.0 : transpiration(psi_leaf, psi_upstream);
 }
 
-// The inverse of transpiration(): the psi_stem that carries a known flux from
+// The inverse of transpiration(): the psi_leaf that carries a known flux from
 // psi_upstream, both positive magnitudes.
-inline double Leaf::transpiration_to_psi_stem(double transpiration_, double psi_upstream) {
+inline double Leaf::transpiration_to_psi_leaf(double transpiration_, double psi_upstream) {
   // Past the end of the curve G^-1 cannot place the stem: a zero flux has it AT
   // the upstream potential, and any positive flux there is infeasible.
   if (transpiration_ == 0.0 &&
@@ -479,10 +479,10 @@ inline double Leaf::transpiration_to_psi_stem(double transpiration_, double psi_
   }
 
   // A refusal below the table's lower end means a NEGATIVE demanded flux: no
-  // stem potential carries it, so the caller should not ask, and widening the
+  // leaf potential carries it, so the caller should not ask, and widening the
   // domain is not the fix. The message names E/K_max so that reads.
-  return psi_stem_carrying(transpiration_, psi_upstream,
-                           "Leaf::transpiration_to_psi_stem, inverting for psi_stem");
+  return psi_leaf_carrying(transpiration_, psi_upstream,
+                           "Leaf::transpiration_to_psi_leaf, inverting for psi_leaf");
 }
 
 // ⚠️ Hazard 1: the rows are in (P50, c), not (b, c); stem_b is derived, so a

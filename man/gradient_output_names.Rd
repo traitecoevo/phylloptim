@@ -10,7 +10,7 @@ gradient_output_names()
 A character vector of five names.
 }
 \description{
-\code{A}, \code{gc}, \code{psi_stem}, \code{collar} and \code{profit}. Unlike \code{\link[=gradient_par_names]{gradient_par_names()}},
+\code{A}, \code{gc}, \code{psi_leaf}, \code{collar} and \code{profit}. Unlike \code{\link[=gradient_par_names]{gradient_par_names()}},
 which R holds its own copy of and a test compares, R \strong{reads} this one — so
 the list exists once and adding an output is one edit rather than two that
 can disagree.

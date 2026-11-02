@@ -81,7 +81,8 @@ differentiate at}
 
 \item{pars}{what to differentiate with respect to. Any of the sixteen
 \code{\link[=leaf_traits]{leaf_traits()}} names, plus \code{"leaf_specific_conductance_max"}, on the
-single-potential path only \code{"resistance"}, on \code{model = "CF77"} only
+single-potential path's collar route only \code{"resistance"} (the leaf route
+never reads it), on \code{model = "CF77"} only
 \code{"CF77_lambda_"}, on \code{model = "TF24_floor"} only \code{"TF24_floor_lambda_o"},
 and on \code{model = "LeastCost"} only \code{"LeastCost_beta"}.
 On a reused leaf \code{x} with \code{use_thermal_damage_} on, also the layer's inputs
@@ -153,15 +154,15 @@ require the two routes to agree.}
 \code{\link[=cost_curve_names]{cost_curve_names()}}, on \code{route}; \code{"TF24_floor"} by default. See \emph{Choosing
 which model to differentiate}.}
 
-\item{route}{\code{"collar"} or \code{"stem"}, the potential the curve is maximised
-over; \code{NULL} (the default) is the stem route. See \emph{Choosing which model
+\item{route}{\code{"collar"} or \code{"leaf"}, the potential the curve is maximised
+over; \code{NULL} (the default) is the leaf route. See \emph{Choosing which model
 to differentiate}.}
 }
 \value{
 A list with
 \describe{
 \item{\code{gradient}}{a matrix, one row per trait in \code{pars}, with columns
-\code{A} (umol C m^-2 s^-1 per trait unit), \code{gc}, \code{psi_stem}, \code{collar} and
+\code{A} (umol C m^-2 s^-1 per trait unit), \code{gc}, \code{psi_leaf}, \code{collar} and
 \code{profit} (also umol C m^-2 s^-1 per trait unit)}
 \item{\code{value}}{the solved outputs the gradient is taken at}
 \item{\code{method}}{\code{"ift"} if the implicit-function composite was used,
@@ -185,11 +186,11 @@ or not}
 }
 
 An entry that is not determined, such as a refused point's gradient or a
-stem route's \code{collar}, is \code{NaN}.
+leaf route's \code{collar}, is \code{NaN}.
 }
 \description{
 The derivatives of the solved outputs with respect to the traits:
-\code{dA/dtheta}, \code{dgc/dtheta}, \code{dpsi_stem/dtheta}, \code{dcollar/dtheta} and
+\code{dA/dtheta}, \code{dgc/dtheta}, \code{dpsi_leaf/dtheta}, \code{dcollar/dtheta} and
 \code{dprofit/dtheta}, at one operating point.
 }
 \section{Choosing which model to differentiate}{
@@ -197,10 +198,10 @@ The derivatives of the solved outputs with respect to the traits:
 A model is a cost curve and a route, and every curve has a gradient on both
 routes. \code{model} names the curve and \code{route} the potential it is maximised
 over: \code{"collar"}, the root-collar potential, on either supply path; or
-\code{"stem"}, \code{psi_stem} with the upstream potential pinned at \code{psi_soil}, which
+\code{"leaf"}, \code{psi_leaf} with the upstream potential pinned at \code{psi_soil}, which
 needs the single-potential supply path. The defaults are one set,
 everywhere: \code{"TF24_floor"} (plant's model; at its default price,
-\code{TF24_floor_lambda_o = 0}, it is TF24) on the stem route over the
+\code{TF24_floor_lambda_o = 0}, it is TF24) on the leaf route over the
 single-potential supply. The collar route and the multi-layer supply are
 asked for.
 
@@ -219,7 +220,7 @@ alongside the base-point traits and solve. A loop that alternates models on one 
 a loop that takes a gradient and then reads \verb{$optimise()} off the same object
 expecting the default is not.
 
-⚠️ \strong{On a stem route the decision variable is \code{psi_stem}, so \code{collar} comes
+⚠️ \strong{On a leaf route the decision variable is \code{psi_leaf}, so \code{collar} comes
 back non-finite.} The collar is not solved for at all there, and an absent
 number is the truthful answer rather than a gap -- reading one would be reading
 state from whichever solve ran last.
@@ -406,7 +407,7 @@ pinned optima in general.
 \section{Two of these are not traits}{
 
 \code{pars} also accepts \code{leaf_specific_conductance_max} and, on the
-single-potential path, \code{resistance}. They are here because a calibration fits
+single-potential path's collar route, \code{resistance}. They are here because a calibration fits
 them: of a companion calibration study's four free parameters two are traits and two are
 these, so restricting \code{pars} to \code{\link[=leaf_traits]{leaf_traits()}} left half of that fit without
 an exact gradient.

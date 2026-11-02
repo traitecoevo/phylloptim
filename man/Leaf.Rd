@@ -47,7 +47,7 @@ Leaf(
 FALLBACK, and for the width below which it treats the feasible collar
 interval as a single point. ⚠️ It does NOT set how well the operating
 point is determined -- the collar solve root-finds its own first-order
-condition -- and it does NOT reach the stem route at all.}
+condition -- and it does NOT reach the leaf route at all.}
 
 \item{vulnerability_curve_ncontrol}{number of control points for the pre-computed vulnerability curves}
 
@@ -67,7 +67,7 @@ for the model and for how it differs from \code{plantecophys}, \code{tealeaves} 
 }
 \details{
 Set the drivers with \verb{$set_physiology()}, solve with \verb{$optimise()}, then
-read the operating point off the object: \verb{$opt_psi_stem_}, \verb{$profit_},
+read the operating point off the object: \verb{$opt_psi_leaf_}, \verb{$profit_},
 \verb{$assim_colimited_}, \verb{$transpiration_}, \verb{$lambda}, \verb{$g1_eff}.
 \verb{$find_root_collar_psi()} solves the seated curve on the collar route,
 whatever route and method are seated: on the default model, the same solve
@@ -79,16 +79,16 @@ constants already live on the object -- \verb{$CF77_lambda_} and
 \verb{$TF24_floor_lambda_o} are fields, and \code{JS22_gamma}, \code{CMax_a} and \code{CMax_b}
 are traits. \code{curve} is any name from
 \code{\link[=cost_curve_names]{cost_curve_names()}}; \code{route} is \code{"collar"} (the full soil-to-collar path,
-any supply) or \code{"stem"} (psi_stem with the upstream potential pinned at
+any supply) or \code{"leaf"} (psi_leaf with the upstream potential pinned at
 \code{psi_soil}, single soil layer only). A third argument, \code{method}, chooses HOW
 the operating point is reached: \code{"exact"} (the default, a root-find of the
 first-order condition) or \code{"closed"} (the closed form, for \code{TF24}, \code{CF77}
-and \code{TF24_floor} on the stem route only). \verb{$model_curve()}, \verb{$model_route()} and
+and \code{TF24_floor} on the leaf route only). \verb{$model_curve()}, \verb{$model_route()} and
 \verb{$model_method()} report what is seated. The defaults are \code{"TF24_floor"},
-\code{"stem"} and \code{"exact"}, on the single-potential supply, as in R's
+\code{"leaf"} and \code{"exact"}, on the single-potential supply, as in R's
 functions.
 
-\if{html}{\out{<div class="sourceCode r">}}\preformatted{l$set_model("ProfitMax", "stem")
+\if{html}{\out{<div class="sourceCode r">}}\preformatted{l$set_model("ProfitMax", "leaf")
 l$optimise()
 }\if{html}{\out{</div>}}
 
@@ -106,7 +106,7 @@ argmax is. \verb{$lambda}, the seated curve's marginal cost of water at its
 operating point, is the one output every curve reports on the same axis.
 
 \verb{$curve_cost()}, \verb{$curve_profit()} and \verb{$curve_lambda()} evaluate any
-curve by name at a stem potential, whatever is seated; the per-curve
+curve by name at a leaf potential, whatever is seated; the per-curve
 methods (\verb{$hydraulic_cost_CF77()}, \verb{$lambda_SOX()} and the rest) are the
 same numbers, kept for existing code.
 

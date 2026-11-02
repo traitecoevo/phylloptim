@@ -72,13 +72,13 @@ require the two routes to agree.}
 
 \item{model, route}{which optimality model to differentiate, and on which
 route, as in \code{\link[=leaf_gradient]{leaf_gradient()}}: any \code{\link[=cost_curve_names]{cost_curve_names()}} entry,
-\code{"TF24_floor"} by default, on its stem route unless \code{route = "collar"}.}
+\code{"TF24_floor"} by default, on its leaf route unless \code{route = "collar"}.}
 }
 \value{
 A list with
 \describe{
 \item{\code{gradient}}{an \code{n} × \code{length(pars)} × 5 array, the last dimension
-being \code{A}, \code{gc}, \code{psi_stem}, \code{collar} and \code{profit}}
+being \code{A}, \code{gc}, \code{psi_leaf}, \code{collar} and \code{profit}}
 \item{\code{value}}{an \code{n} × 5 matrix of the solved outputs}
 \item{\code{method}}{\code{"ift"}, \code{"fd"} or \code{"prescribed"} per observation}
 \item{\code{status}}{\code{"interior"}, \code{"pinned"}, \code{"no-gradient"}, \code{"error"},

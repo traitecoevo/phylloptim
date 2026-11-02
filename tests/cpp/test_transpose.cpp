@@ -166,7 +166,7 @@ double forward_side(pl::Leaf l, const std::vector<double>& u,
                v[3] * odelia::ode::derivative_along(o.profit);
   if (has_coords) {
     const auto co =
-        l.collar_coords_at<T>(l.opt_psi_stem_, l.ci_, collar, draw, in.pars,
+        l.collar_coords_at<T>(l.opt_psi_leaf_, l.ci_, collar, draw, in.pars,
                               l.photo_capacity_at<T>(in.pars), true);
     acc += v[0] * odelia::ode::derivative_along(co.sigma.value) +
            v[1] * odelia::ode::derivative_along(co.ci.value);
@@ -204,7 +204,7 @@ Pairing reverse_side(pl::Leaf l, const std::vector<double>& u,
   auto o = l.billed_outputs_at<pl::Leaf::CostCurve::TF24, A>(collar, draw, in.pars, h);
 
   if (has_coords) {
-    auto co = l.collar_coords_at<A>(l.opt_psi_stem_, l.ci_, collar, draw,
+    auto co = l.collar_coords_at<A>(l.opt_psi_leaf_, l.ci_, collar, draw,
                                     in.pars, l.photo_capacity_at<A>(in.pars),
                                     true);
     tape.registerOutput(co.sigma.value);

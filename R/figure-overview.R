@@ -120,14 +120,14 @@
     l$psi_soil_[1]
   psi <- seq(wet, l$psi_crit, length.out = n)
   benefit <- vapply(psi, function(p) {
-    l$profit_psi_stem_TF(p, 1.0)
+    l$profit_psi_leaf_TF(p, 1.0)
     l$assim_colimited_
   }, numeric(1))
   cost <- vapply(psi, l$hydraulic_cost_TF, numeric(1))
   profit <- benefit - cost
 
-  l$set_model("TF24", "stem"); l$optimise()
-  star <- l$opt_psi_stem_
+  l$set_model("TF24", "leaf"); l$optimise()
+  star <- l$opt_psi_leaf_
   jstar <- l$profit_
 
   par(mar = c(3.4, 3.6, 2.0, 0.8), mgp = c(2.1, 0.6, 0), tcl = -0.3,
@@ -170,7 +170,7 @@
 ## rising, diffusive supply falling, and the operating point where they cross.
 
 .fig_aci_panel <- function(l, n = 200, cex = 1) {
-  l$set_model("TF24", "stem"); l$optimise()
+  l$set_model("TF24", "leaf"); l$optimise()
   gc <- l$stom_cond_CO2_
   ca <- l$ca_
   P <- l$atm_kpa_ * 1000
@@ -241,7 +241,7 @@
   ## the dial, spanning both columns because it feeds both
   .fig_box(lx0, rx1, 88.5, 7,
            expression(psi ~ "-- the single decision variable"),
-           "stem potential, or the root collar",
+           "leaf potential, or the root collar",
            fill = .fig_col$profit_fill, cex = cex)
 
   ## benefit branch --------------------------------------------------------
@@ -358,7 +358,7 @@
   th <- seq(0, 2 * pi, length.out = 120)
   polygon(xs + 13 * cos(th), 91 + 13 * 0.40 * k * sin(th), col = "#e8f0e6",
           border = .fig_col$benefit, lwd = 1.2)
-  text(xs, 91, expression(psi[stem]), cex = 0.70 * cex)
+  text(xs, 91, expression(psi[leaf]), cex = 0.70 * cex)
 
   ## the fluxes at the leaf surface: water out, CO2 in, radiation in
   .fig_arrow(xs + 7, 93.4, xs + 14, 98, col = .fig_col$supply, lty = 2)
