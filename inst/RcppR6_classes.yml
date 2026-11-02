@@ -94,8 +94,9 @@ Leaf:
       the operating point is reached: `"exact"` (the default, a root-find of the
       first-order condition) or `"closed"` (the closed form, for `TF24`, `CF77`
       and `TF24_floor` on the stem route only). `$model_curve()`, `$model_route()` and
-      `$model_method()` report what is seated. The defaults are `"TF24"`,
-      `"collar"` and `"exact"`, which is the production path.
+      `$model_method()` report what is seated. The defaults are `"TF24_floor"`,
+      `"stem"` and `"exact"`, on the single-potential supply, as in R's
+      functions.
 
       ```r
       l$set_model("ProfitMax", "stem")
@@ -882,11 +883,11 @@ Leaf:
         fields, and `JS22_gamma`, `CMax_a` and `CMax_b` are traits. Seat the
         model, set whatever constants it needs, then call `optimise()`.
 
-        `route = "collar"` is the production formulation -- the full
+        `route = "stem"` optimises `psi_stem` with the upstream potential pinned
+        at `psi_soil`, the form the published models are written in, and needs a
+        single soil potential. `route = "collar"` is the full
         soil-to-collar-to-stem path, with a root network or with a single soil
-        potential carrying a series resistance. `route = "stem"` optimises
-        `psi_stem` with the upstream potential pinned at `psi_soil`, the form the
-        published models are written in, and needs a single soil potential.
+        potential carrying a series resistance; it is what plant runs.
 
         `method` is the third axis, and it selects HOW the operating point is
         reached rather than WHAT is being optimised. `"exact"` root-finds the
@@ -908,8 +909,8 @@ Leaf:
         transpiration being solved for. Where its validity guard fails it falls
         back to the exact solve — see `$closed_form_fallback_fraction()`.
 
-        Defaults to `"TF24"`, `"collar"` and `"exact"`, so a caller that never sets
-        a model gets the production path.
+        Defaults to `"TF24_floor"`, `"stem"` and `"exact"`, as R's functions do;
+        at its default price TF24_floor is TF24.
         @param curve cost curve name, from \code{\link{cost_curve_names}}
         @param route `"collar"` or `"stem"`
         @param method `"exact"` (default) or `"closed"`

@@ -14,7 +14,14 @@
 # past `profit`'s tolerance below, but inside the argmax class's. What holds THAT
 # default to the C++ one is that leaf_control() reads it from
 # `Leaf::ncontrol_default`, which test-surface.R asserts.
-default_leaf <- function() leaf_model()
+#
+# The golden points are TF24 on the collar route over the multi-layer supply,
+# which is plant's configuration and not the package default, so it is named.
+default_leaf <- function() {
+  l <- leaf_model(supply = leaf_supply_multilayer())
+  l$set_model("TF24", "collar")
+  l
+}
 
 # --- how exactly to compare -------------------------------------------------
 #

@@ -17,7 +17,7 @@ leaf_solve(
   atm_kpa = 101.3,
   traits = leaf_traits(),
   control = leaf_control(),
-  supply = leaf_supply_multilayer(),
+  supply = leaf_supply_singlelayer(),
   reuse = TRUE,
   model = "TF24_floor",
   route = NULL,
@@ -67,10 +67,11 @@ assimilation by percent, not by rounding.}
 
 \item{control}{a \code{\link[=leaf_control]{leaf_control()}} object}
 
-\item{supply}{how water reaches the root collar: \code{\link[=leaf_supply_multilayer]{leaf_supply_multilayer()}}
-(the default) or \code{\link[=leaf_supply_singlelayer]{leaf_supply_singlelayer()}}. On the single-potential path
-\code{soil_depth} and \code{root_network} must be omitted, and each \code{psi_soil} is one
-value rather than a profile.}
+\item{supply}{how water reaches the root collar: \code{\link[=leaf_supply_singlelayer]{leaf_supply_singlelayer()}}
+(the default) or \code{\link[=leaf_supply_multilayer]{leaf_supply_multilayer()}}. On the single-potential path
+\code{soil_depth} must be omitted, \code{root_network} is a \code{\link[=series_resistance]{series_resistance()}}
+(defaulted if omitted), and each \code{psi_soil} is one value rather than a
+profile.}
 
 \item{reuse}{solve every row with one \code{Leaf} object (\code{TRUE}) or construct a
 fresh one per row (\code{FALSE}, the default). Reuse is faster because the
@@ -81,13 +82,13 @@ than assumed, and the package's tests do check it.}
 \item{model}{which optimality model to solve, as in \code{\link[=leaf_gradient]{leaf_gradient()}}: any
 name from \code{\link[=cost_curve_names]{cost_curve_names()}}, solved on \code{route}. The default,
 \code{"TF24_floor"}, is plant's default model; at its default price,
-\code{TF24_floor_lambda_o = 0}, it is TF24. \code{"collar"} is a deprecated alias for
-\verb{model = "TF24", route = "collar"}.}
+\code{TF24_floor_lambda_o = 0}, it is TF24.}
 
-\item{route}{which potential the curve is maximised over: \code{"collar"} (the
-default), the root-collar potential, on either supply path; or \code{"stem"},
-\code{psi_stem} with the upstream potential pinned at \code{psi_soil}, which needs
-\code{leaf_supply_singlelayer()}. \code{NULL} is the collar route.
+\item{route}{which potential the curve is maximised over: \code{"stem"} (the
+default), \code{psi_stem} with the upstream potential pinned at \code{psi_soil},
+which needs \code{leaf_supply_singlelayer()}; or \code{"collar"}, the root-collar
+potential, on either supply path, and the only route on
+\code{leaf_supply_multilayer()}. \code{NULL} is the stem route.
 
 ⚠️ \strong{The two routes are different models, not two ways of asking one
 question}, even for one curve. They optimise different variables over

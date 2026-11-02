@@ -74,7 +74,7 @@ leaf_batch <- function(psi_soil,
                        atm_kpa = 101.3,
                        traits = leaf_traits(),
                        control = leaf_control(),
-                       supply = leaf_supply_multilayer(),
+                       supply = leaf_supply_singlelayer(),
                        CF77_lambda = NA_real_,
                        TF24_floor_lambda_o = NA_real_,
                        LeastCost_beta = NA_real_) {
@@ -243,7 +243,7 @@ print.leaf_batch <- function(x, ...) {
 ##'   `theta` is given.
 ##' @param model,route which optimality model to differentiate, and on which
 ##'   route, as in [leaf_gradient()]: any [cost_curve_names()] entry,
-##'   `"TF24_floor"` by default, on its collar route unless `route = "stem"`.
+##'   `"TF24_floor"` by default, on its stem route unless `route = "collar"`.
 ##' @param pars what to differentiate with respect to, as in [leaf_gradient()].
 ##'   ⚠️ **Always pass it.** It is `P_model`, so the default — all of them — is
 ##'   the most expensive thing you can ask for.

@@ -9,6 +9,15 @@
 # pin the friendly path against the raw one, so the chain reaches the golden
 # file from both.
 
+# The configuration plant runs, which is not the default: TF24 on the collar
+# route over the multi-layer supply. Tests of layer profiles and of the collar
+# solve name it through this.
+plant_leaf <- function(traits = leaf_traits(), control = leaf_control()) {
+  l <- leaf_model(traits, control, leaf_supply_multilayer())
+  l$set_model("TF24", "collar")
+  l
+}
+
 test_that("leaf_traits() and leaf_control() partition the C++ constructor", {
   # Between them they must cover the 19 constructor arguments exactly once --
   # no argument silently dropped (which would leave it at whatever the
@@ -151,7 +160,7 @@ test_that("the H2O:CO2 diffusion ratio is settable, and 1.67 changes nothing (#5
   expect_identical(leaf_model()$H2O_CO2_stom_diff_ratio_, 1.67)
 
   solve_at <- function(ratio) {
-    l <- leaf_model()
+    l <- plant_leaf()
     l$H2O_CO2_stom_diff_ratio_ <- ratio
     set_drivers(l, psi_soil = 2.0, PPFD = 900)
     l$find_root_collar_psi()
@@ -159,7 +168,7 @@ test_that("the H2O:CO2 diffusion ratio is settable, and 1.67 changes nothing (#5
   }
 
   # The default must stay bit-identical to not touching the field at all.
-  base <- leaf_model()
+  base <- plant_leaf()
   set_drivers(base, psi_soil = 2.0, PPFD = 900)
   base$find_root_collar_psi()
   expect_identical(solve_at(1.67)$profit_, base$profit_)
@@ -188,7 +197,9 @@ test_that("leaf_model() and the raw Leaf() constructor agree", {
               1.5, 157.44, 0.30 / 0.85, 0.7, 0.99, 1e-3,
               leaf_control()$vulnerability_curve_ncontrol, 1e-3, 1000, 7.5)
   raw$initialize_integrator(21, 1e-8)
-  friendly <- leaf_model()
+  raw$set_supply_multilayer()
+  raw$set_model("TF24", "collar")
+  friendly <- plant_leaf()
 
   net <- root_network_from_carbon(20, soil_depth = 1.0)
   for (l in list(raw, friendly)) {
@@ -246,14 +257,14 @@ test_that("a control setting reaches the model and is not treated as a trait", {
 })
 
 test_that("set_drivers() agrees with a positional set_physiology()", {
-  raw <- leaf_model()
+  raw <- plant_leaf()
   raw$set_physiology(
     root_network_from_carbon(rep(20 / 3, 3), soil_depth = c(1, 2, 3)),
     900, c(1, 1.25, 1.5), c(1, 2, 3),
     golden_kmax, 2.0, 40.0, 25, 21, 101.3)
   raw$find_root_collar_psi()
 
-  friendly <- leaf_model()
+  friendly <- plant_leaf()
   set_drivers(friendly, psi_soil = c(1, 1.25, 1.5), PPFD = 900,
               leaf_specific_conductance_max = golden_kmax)
   friendly$find_root_collar_psi()
@@ -276,7 +287,7 @@ test_that("set_drivers() keeps the signed-psi_soil rejection", {
 })
 
 test_that("set_drivers() rejects mismatched layer counts", {
-  l <- leaf_model()
+  l <- plant_leaf()
   expect_error(set_drivers(l, psi_soil = c(1, 2), soil_depth = 1),
                "one entry per soil layer")
   # A network deeper than the soil profile is an out-of-bounds read in uptake(),
@@ -300,13 +311,15 @@ test_that("leaf_traits() and leaf_control() reject non-scalars", {
 })
 
 test_that("leaf_solve() reproduces the stateful path exactly", {
-  stateful <- leaf_model()
+  stateful <- plant_leaf()
   set_drivers(stateful, psi_soil = 2.0, PPFD = 900,
               leaf_specific_conductance_max = golden_kmax)
   stateful$find_root_collar_psi()
 
   one_call <- leaf_solve(psi_soil = 2.0, PPFD = 900,
-                         leaf_specific_conductance_max = golden_kmax)
+                         leaf_specific_conductance_max = golden_kmax,
+                         supply = leaf_supply_multilayer(), model = "TF24",
+                         route = "collar")
   expect_identical(one_call[, names(operating_point(stateful))],
                    operating_point(stateful))
 })
@@ -359,7 +372,7 @@ test_that("operating_point_values() returns the fifteen fields, in that order", 
   # ~1.5 us), and R names its positions in .operating_point_names. A field
   # inserted on one side and not the other would shift a column and keep
   # returning plausible numbers, so it is checked rather than commented.
-  l <- leaf_model()
+  l <- plant_leaf()
 
   # Unsolved FIRST, because that is the case a test written after a solve would
   # miss: every output is the NA sentinel and soil_consumption_ is empty, so the
@@ -384,7 +397,7 @@ test_that("operating_point_values() returns the fifteen fields, in that order", 
   expect_identical(l$transpiration_, 0)
 
   # Multi-layer, so the uptake sum has more than one term to get wrong.
-  ml <- leaf_model()
+  ml <- plant_leaf()
   set_drivers(ml, psi_soil = c(1.0, 2.0, 3.0), PPFD = 900,
               soil_depth = c(0.3, 0.6, 1.0),
               root_network = root_network_from_carbon(
@@ -507,7 +520,9 @@ test_that("leaf_solve() vectorises and recycles", {
 })
 
 test_that("leaf_solve() takes a list for multi-layer profiles", {
-  d <- leaf_solve(psi_soil = list(c(1, 1.5, 2), c(3, 3.5, 4)), PPFD = 900)
+  d <- leaf_solve(psi_soil = list(c(1, 1.5, 2), c(3, 3.5, 4)), PPFD = 900,
+                  supply = leaf_supply_multilayer(), model = "TF24",
+                  route = "collar")
   expect_identical(nrow(d), 2L)
   expect_identical(d$layers, c(3L, 3L))
   # psi_soil is reported as the wettest layer, so the column stays numeric.
@@ -553,7 +568,10 @@ test_that("operating_point() reports lambda and g1_eff from the solved state", {
 })
 
 test_that("the supply path can be chosen, and reports which is in force", {
-  expect_identical(leaf_model()$supply_kind, "multilayer")
+  # The default is the single potential; the multi-layer supply is asked for.
+  expect_identical(leaf_model()$supply_kind, "single")
+  expect_identical(leaf_model(supply = leaf_supply_multilayer())$supply_kind,
+                   "multilayer")
 
   single <- leaf_model(supply = leaf_supply_singlelayer(gravity_head = 0.05))
   expect_identical(single$supply_kind, "single")
@@ -588,9 +606,11 @@ test_that("there is no state in which the tag and the supply disagree", {
 })
 
 test_that("the single-potential path solves, and responds to its resistance", {
+  # The collar route: on the stem route the upstream potential is pinned at
+  # psi_soil, so the resistance does not reach the solve.
   solve_at <- function(r) {
     leaf_solve(psi_soil = 1.5, PPFD = 900,
-               supply = leaf_supply_singlelayer(),
+               supply = leaf_supply_singlelayer(), route = "collar",
                root_network = series_resistance(r))
   }
   easy <- solve_at(1e3)
@@ -650,11 +670,14 @@ test_that("the single path refuses inputs it would otherwise ignore", {
 })
 
 test_that("gravity_head costs the leaf water, on the single path", {
+  # The collar route: the stem route pins the upstream potential at psi_soil,
+  # upstream of the head.
   flat <- leaf_solve(psi_soil = 1.5, PPFD = 900,
-                     supply = leaf_supply_singlelayer(),
+                     supply = leaf_supply_singlelayer(), route = "collar",
                      root_network = series_resistance(1e3))
   uphill <- leaf_solve(psi_soil = 1.5, PPFD = 900,
                        supply = leaf_supply_singlelayer(gravity_head = 0.5),
+                       route = "collar",
                        root_network = series_resistance(1e3))
   expect_lt(uphill$A, flat$A)
 })
@@ -750,7 +773,7 @@ test_that("a hand-built RootNetwork needs only the two load-bearing vectors", {
   # The R-user argument for #33: someone with a measured or fitted series
   # resistance has no carbon profile, no layer thickness and no opinion about
   # beta_R_V. They should be able to state the resistances and solve.
-  l <- leaf_model()
+  l <- plant_leaf()
   set_drivers(l, psi_soil = 1.5,
               root_network = RootNetwork(r_R_H_min = 25.5, r_R_V_sum = 1410))
   l$find_root_collar_psi()
@@ -762,7 +785,7 @@ test_that("a hand-built RootNetwork needs only the two load-bearing vectors", {
   expect_equal(from_carbon$r_R_H_min, 25.5)
   expect_equal(from_carbon$r_R_V_sum, 1410)
 
-  ref <- leaf_model()
+  ref <- plant_leaf()
   set_drivers(ref, psi_soil = 1.5, root_network = from_carbon)
   ref$find_root_collar_psi()
   expect_identical(operating_point(l), operating_point(ref))
@@ -773,7 +796,7 @@ test_that("the root network is rejected when it cannot be read safely", {
   # network longer than the soil profile is an out-of-bounds read rather than a
   # wrong number. Before #33 the agreement came for free from a length check on
   # root carbon; now it has to be asserted where the network arrives.
-  l <- leaf_model()
+  l <- plant_leaf()
   expect_error(
     set_drivers(l, psi_soil = 1,
                 root_network = RootNetwork(r_R_H_min = c(1, 2),
@@ -798,7 +821,7 @@ test_that("the default-root-network memo cannot go stale", {
   # resistances -- a wrong number with nothing to signal it, since both are
   # plausible.
   op <- function(depth) {
-    l <- leaf_model()
+    l <- plant_leaf()
     set_drivers(l, psi_soil = rep(1.5, length(depth)), soil_depth = depth)
     l$find_root_collar_psi()
     list(point = operating_point(l), r_R_V_sum = l$r_R_V_sum)

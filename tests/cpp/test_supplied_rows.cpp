@@ -71,7 +71,7 @@ struct Drivers {
 
 pl::Leaf make_leaf(const Drivers& d, const std::vector<double>& psi_soil,
                    const std::vector<double>& soil_depth, std::size_t rooted) {
-  pl::Leaf l;
+  pl::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
   std::vector<double> mass(psi_soil.size(),

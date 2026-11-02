@@ -18,7 +18,7 @@ leaf_gradient(
   x = NULL,
   traits = leaf_traits(),
   control = leaf_control(),
-  supply = leaf_supply_multilayer(),
+  supply = leaf_supply_singlelayer(),
   pars = NULL,
   psi = NULL,
   dpsi_dtheta = NULL,
@@ -76,8 +76,8 @@ differentiate at}
 
 \item{control}{a \code{\link[=leaf_control]{leaf_control()}} object}
 
-\item{supply}{how water reaches the root collar: \code{\link[=leaf_supply_multilayer]{leaf_supply_multilayer()}}
-(the default) or \code{\link[=leaf_supply_singlelayer]{leaf_supply_singlelayer()}}}
+\item{supply}{how water reaches the root collar: \code{\link[=leaf_supply_singlelayer]{leaf_supply_singlelayer()}}
+(the default) or \code{\link[=leaf_supply_multilayer]{leaf_supply_multilayer()}}}
 
 \item{pars}{what to differentiate with respect to. Any of the sixteen
 \code{\link[=leaf_traits]{leaf_traits()}} names, plus \code{"leaf_specific_conductance_max"}, on the
@@ -154,7 +154,7 @@ require the two routes to agree.}
 which model to differentiate}.}
 
 \item{route}{\code{"collar"} or \code{"stem"}, the potential the curve is maximised
-over; \code{NULL} (the default) is the collar route. See \emph{Choosing which model
+over; \code{NULL} (the default) is the stem route. See \emph{Choosing which model
 to differentiate}.}
 }
 \value{
@@ -198,10 +198,11 @@ A model is a cost curve and a route, and every curve has a gradient on both
 routes. \code{model} names the curve and \code{route} the potential it is maximised
 over: \code{"collar"}, the root-collar potential, on either supply path; or
 \code{"stem"}, \code{psi_stem} with the upstream potential pinned at \code{psi_soil}, which
-needs the single-potential supply path. With no \code{route}, a curve is
-maximised over the collar. The default model, \code{"TF24_floor"}, is plant's; at
-its default price, \code{TF24_floor_lambda_o = 0}, it is TF24. \code{model = "collar"}
-is a deprecated alias for TF24 on the collar route.
+needs the single-potential supply path. The defaults are one set,
+everywhere: \code{"TF24_floor"} (plant's model; at its default price,
+\code{TF24_floor_lambda_o = 0}, it is TF24) on the stem route over the
+single-potential supply. The collar route and the multi-layer supply are
+asked for.
 
 The product objectives, \code{SOX} and \code{JW26}, need no special case. They maximise
 \code{A * g(psi)}, which is the \code{Log} benefit link applied to the same
@@ -494,9 +495,11 @@ g <- leaf_gradient(psi_soil = 2.0, PPFD = 900)
 g$method
 g$gradient[c("vcmax_25", "stem_P50"), ]
 
-# In dry soil at high VPD the optimum pins against the edge of the feasible
-# range, the composite's premise fails, and the fallback is used instead.
-dry <- leaf_gradient(psi_soil = 4.5, PPFD = 900, atm_vpd = 3.0)
+# On the collar route, in dry soil at high VPD, the optimum pins against the
+# edge of the feasible range, the composite's premise fails, and the fallback
+# is used instead.
+dry <- leaf_gradient(psi_soil = 4.5, PPFD = 900, atm_vpd = 3.0,
+                     supply = leaf_supply_multilayer(), route = "collar")
 dry$method       # "fd"
 dry$status       # "pinned"
 dry$stationarity # how far from stationary the optimum is, in MPa

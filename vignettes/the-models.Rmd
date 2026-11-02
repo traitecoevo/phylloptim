@@ -681,7 +681,8 @@ sp <- leaf_supply_singlelayer()
 curves <- c("TF24", "CF77", "JS22", "CMax", "LeastCost", "SOX", "JW26",
             "ProfitMax")
 gc <- sapply(curves, function(m) {
-  leaf_solve(psi_soil = c(0.5, 1, 2, 3), model = m, supply = sp)$gc
+  leaf_solve(psi_soil = c(0.5, 1, 2, 3), model = m, route = "stem",
+             supply = sp)$gc
 })
 rownames(gc) <- paste("psi_soil", c(0.5, 1, 2, 3))
 print(signif(gc, 3))

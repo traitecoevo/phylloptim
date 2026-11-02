@@ -99,7 +99,9 @@
 ##' @export
 plot_solver_convergence <- function(psi_soil = 1.0, PPFD = 1500,
                                     atm_vpd = 1.5, n_eval = 60) {
-  l <- leaf_model()
+  # The collar solve's figure, so the multi-layer supply it runs on.
+  l <- leaf_model(supply = leaf_supply_multilayer())
+  l$set_model("TF24", "collar")
   set_drivers(l, psi_soil = psi_soil, PPFD = PPFD, atm_vpd = atm_vpd)
 
   br <- .sc_bracket(l)

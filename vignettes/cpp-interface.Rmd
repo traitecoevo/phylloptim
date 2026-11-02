@@ -75,6 +75,10 @@ failing `test_golden` by ~1e-15 has found nothing.
 
 int main() {
   phylloptim::Leaf l;                    // default Eucalyptus saligna traits
+  // A Leaf defaults to TF24_floor on the stem route over one soil potential;
+  // a root network and the collar solve, as plant runs them, are seated.
+  l.set_supply_multilayer();
+  l.set_model(phylloptim::Leaf::CostCurve::TF24, /*collar_route=*/true);
 
   std::vector<double> psi_soil{2.0};     // positive magnitudes, MPa
   std::vector<double> soil_depth{1.0};   // m
@@ -122,8 +126,11 @@ double theta[g::n_theta] = {/* 16 traits, then kmax, resistance, the three model
 const int pars[1] = {0};                       // g::par_names()[0] == "vcmax_25"
 
 phylloptim::Leaf l;
+l.set_supply_multilayer();
+g::Settings s;                                 // the Leaf's defaults, unless set:
+s.model = {phylloptim::Leaf::CostCurve::TF24, g::Route::Collar};
 const std::vector<g::Result> out =
-  g::batch(l, theta, 1, {d, d}, /*single=*/false, pars, 1, g::Settings());
+  g::batch(l, theta, 1, {d, d}, /*single=*/false, pars, 1, s);
 // out[i].grad[k * g::n_outputs + j] is d(output j)/d(pars[k])
 // out[i].status is Interior / Pinned / NoGradient / Error
 ```
@@ -135,7 +142,7 @@ observation, and optionally an `n × npars` column-major `dpsi_dtheta`:
 ```cpp
 const double psi[2] = {2.7, 2.8};              // positive magnitudes, MPa
 const std::vector<g::Result> out =
-  g::batch(l, theta, 1, {d, d}, /*single=*/false, pars, 1, g::Settings(),
+  g::batch(l, theta, 1, {d, d}, /*single=*/false, pars, 1, s,
            psi, /*dpsi_dtheta=*/nullptr);      // null here means ZERO...
 // out[i].status is now Prescribed or Refused
 // out[i].M / out[i].H are the coefficients of ds/dt = k(M + H s)
@@ -184,7 +191,7 @@ Three things the free function gives you that a hand-rolled loop would not:
 
 **It is every trait gradient the package gives**: `leaf_gradient()` and
 `leaf_gradient_batch()` both call it. `Settings::model` names the curve and the
-route, TF24 on the collar route by default. `tests/testthat/test-gradient-referee.R`
+route, the `Leaf`'s default (TF24_floor on the stem route) unless set. `tests/testthat/test-gradient-referee.R`
 checks it against a difference of the solve for every curve on both routes. If
 you modify it, read its header first: every difference names its two halves,
 because the evaluations mutate the leaf and C++ does not sequence `f(a) - f(b)`.

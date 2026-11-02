@@ -685,18 +685,20 @@ gradient_leaf <- function(supply = leaf_supply_multilayer()) {
 test_that("the layer's inputs are gradient parameters only with its gate on", {
   off <- thermal_leaf(leaf_supply_multilayer())
   expect_error(leaf_gradient(psi_soil = c(1, 2, 3), soil_depth = c(.5, 1, 1.5),
-                             x = off, traits = leaf_traits(), pars = "I_"),
+                             x = off, traits = leaf_traits(), pars = "I_",
+                             model = "TF24", route = "collar"),
                "input of the thermal-damage layer, which is off")
   on <- gradient_leaf()
   on$use_thermal_damage_ <- TRUE
   g <- leaf_gradient(psi_soil = c(1, 2, 3), soil_depth = c(.5, 1, 1.5),
-                     PPFD = 1500, leaf_temp = 35, x = on, traits = leaf_traits())
+                     PPFD = 1500, leaf_temp = 35, x = on, traits = leaf_traits(),
+                     model = "TF24", route = "collar")
   expect_true(all(damage_gradient_pars %in% rownames(g$gradient)))
   # Its DYNAMICS parameters reach no solved output and are not offered.
   expect_false(any(c("k_i_Ea_", "k_mat_", "acclim_beta_") %in%
                      rownames(g$gradient)))
   expect_error(leaf_gradient(psi_soil = 2, x = on, traits = leaf_traits(),
-                             pars = "k_mat_"),
+                             pars = "k_mat_", model = "TF24", route = "collar"),
                "cannot differentiate")
 })
 
@@ -710,10 +712,11 @@ test_that("with the gate on, the composite agrees with differencing the solve", 
     pars <- c("vcmax_25", damage_gradient_pars)
     a <- leaf_gradient(psi_soil = psi, soil_depth = depth, PPFD = 1500,
                        leaf_temp = 35, x = l, traits = leaf_traits(), pars = pars,
-                       method = "ift")
+                       method = "ift", model = "TF24", route = "collar")
     b <- leaf_gradient(psi_soil = psi, soil_depth = depth, PPFD = 1500,
                        leaf_temp = 35, x = l, traits = leaf_traits(), pars = pars,
-                       method = "fd", step = 1e-5)
+                       method = "fd", step = 1e-5,
+                       model = "TF24", route = "collar")
     expect_identical(a$status, "interior", info = supply$kind)
     rel <- abs(a$gradient - b$gradient) / pmax(1, abs(a$gradient))
     expect_lt(max(rel), 1e-6, label = paste(supply$kind, "worst", max(rel)))
@@ -731,18 +734,20 @@ test_that("with the gate on, leaf_gradient() is the batch's one observation", {
   pars <- c("vcmax_25", "I_", "A_", "topt_offset_", "c_repair_flux_")
   psis <- c(0.5, 1.5, 2.5)
   b <- leaf_batch(psi_soil = lapply(psis, function(p) p + c(0, 0.5, 1)),
-                  soil_depth = list(c(.5, 1, 1.5)), PPFD = 1500, leaf_temp = 35)
+                  soil_depth = list(c(.5, 1, 1.5)), PPFD = 1500, leaf_temp = 35,
+                  supply = leaf_supply_multilayer())
   set_inputs(b$leaf, atls_inputs[damage_gradient_pars])
   b$leaf$use_thermal_damage_ <- TRUE
   for (method in c("ift", "fd")) {
-    g <- leaf_gradient_batch(b, pars = pars, method = method)
+    g <- leaf_gradient_batch(b, pars = pars, method = method,
+                             model = "TF24", route = "collar")
     for (i in seq_along(psis)) {
       l <- gradient_leaf()
       l$use_thermal_damage_ <- TRUE
       r <- leaf_gradient(psi_soil = psis[i] + c(0, 0.5, 1),
                          soil_depth = c(.5, 1, 1.5), PPFD = 1500, leaf_temp = 35,
                          x = l, traits = leaf_traits(), pars = pars,
-                         method = method)
+                         method = method, model = "TF24", route = "collar")
       expect_identical(g$gradient[i, , ], r$gradient,
                        info = paste(method, "row", i))
       expect_identical(g$status[i], r$status, info = paste(method, "row", i))
@@ -753,7 +758,8 @@ test_that("with the gate on, leaf_gradient() is the batch's one observation", {
                nrow = 1)
   th <- th[rep(1, 3), , drop = FALSE]
   th[, match("I_", gradient_par_names())] <- c(0.05, 0.2, 0.4)
-  g3 <- leaf_gradient_batch(b, pars = "vcmax_25", theta = th)
+  g3 <- leaf_gradient_batch(b, pars = "vcmax_25", theta = th,
+                            model = "TF24", route = "collar")
   expect_true(all(g3$status %in% c("interior", "pinned")))
   expect_false(isTRUE(all.equal(g3$value[1, "A"], g3$value[3, "A"])))
 })

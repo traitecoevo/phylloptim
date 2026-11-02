@@ -23,7 +23,8 @@ Two supply paths, and the choice belongs with the model rather than with the
 drivers, so it is made once in \code{\link[=leaf_model]{leaf_model()}}.
 }
 \details{
-\code{leaf_supply_multilayer()} is the default and is what plant uses: a soil
+\code{leaf_supply_singlelayer()} is the default. \code{leaf_supply_multilayer()} is
+what plant uses: a soil
 profile of one or more layers, each with its own water potential, feeding a
 root network whose resistances are derived from a root carbon profile.
 

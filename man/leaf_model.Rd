@@ -7,7 +7,7 @@
 leaf_model(
   traits = leaf_traits(),
   control = leaf_control(),
-  supply = leaf_supply_multilayer()
+  supply = leaf_supply_singlelayer()
 )
 }
 \arguments{
@@ -15,8 +15,8 @@ leaf_model(
 
 \item{control}{a \code{\link[=leaf_control]{leaf_control()}} object}
 
-\item{supply}{how water reaches the root collar: \code{\link[=leaf_supply_multilayer]{leaf_supply_multilayer()}}
-(the default) or \code{\link[=leaf_supply_singlelayer]{leaf_supply_singlelayer()}}}
+\item{supply}{how water reaches the root collar: \code{\link[=leaf_supply_singlelayer]{leaf_supply_singlelayer()}}
+(the default) or \code{\link[=leaf_supply_multilayer]{leaf_supply_multilayer()}}}
 }
 \value{
 A \code{Leaf} R6 object.

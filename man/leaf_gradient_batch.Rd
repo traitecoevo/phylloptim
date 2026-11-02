@@ -72,7 +72,7 @@ require the two routes to agree.}
 
 \item{model, route}{which optimality model to differentiate, and on which
 route, as in \code{\link[=leaf_gradient]{leaf_gradient()}}: any \code{\link[=cost_curve_names]{cost_curve_names()}} entry,
-\code{"TF24_floor"} by default, on its collar route unless \code{route = "stem"}.}
+\code{"TF24_floor"} by default, on its stem route unless \code{route = "collar"}.}
 }
 \value{
 A list with

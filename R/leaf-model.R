@@ -183,7 +183,7 @@ leaf_traits <- function(vcmax_25 = 96,
 ##'   dates from a golden-section search the solve no longer uses. ⚠️ **This does not set how well the operating point is
 ##'   determined.** Every solver in the package now root-finds its own first-order
 ##'   condition instead of searching the objective, so changing this leaves the
-##'   answer bit-identical on the production path. What it still does, and it is
+##'   answer bit-identical. What it still does, and it is
 ##'   less than the name suggests: it is read in exactly two places, both on the
 ##'   COLLAR route -- the width below which the feasible collar interval is treated
 ##'   as a single point, and the tolerance of the golden-section FALLBACK used when
@@ -239,7 +239,8 @@ leaf_control <- function(GSS_tol_abs = 1e-3,
 ##' Two supply paths, and the choice belongs with the model rather than with the
 ##' drivers, so it is made once in [leaf_model()].
 ##'
-##' `leaf_supply_multilayer()` is the default and is what plant uses: a soil
+##' `leaf_supply_singlelayer()` is the default. `leaf_supply_multilayer()` is
+##' what plant uses: a soil
 ##' profile of one or more layers, each with its own water potential, feeding a
 ##' root network whose resistances are derived from a root carbon profile.
 ##'
@@ -382,8 +383,8 @@ leaf_supply_multilayer <- function() {
 ##'
 ##' @param traits a [leaf_traits()] object
 ##' @param control a [leaf_control()] object
-##' @param supply how water reaches the root collar: [leaf_supply_multilayer()]
-##'   (the default) or [leaf_supply_singlelayer()]
+##' @param supply how water reaches the root collar: [leaf_supply_singlelayer()]
+##'   (the default) or [leaf_supply_multilayer()]
 ##'
 ##' @return A `Leaf` R6 object.
 ##' @seealso [leaf_traits()], [leaf_control()], [leaf_supply_singlelayer()],
@@ -395,7 +396,7 @@ leaf_supply_multilayer <- function() {
 ##' operating_point(l)
 ##' @export
 leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
-                       supply = leaf_supply_multilayer()) {
+                       supply = leaf_supply_singlelayer()) {
   if (!inherits(traits, "leaf_traits")) {
     stop("`traits` must come from leaf_traits()", call. = FALSE)
   }
@@ -437,6 +438,8 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
   # clears the solved state) leaving the integrator tolerance alone.
   if (identical(supply$kind, "single")) {
     l$set_supply_single(supply$gravity_head)
+  } else {
+    l$set_supply_multilayer()
   }
   l
 }
@@ -820,19 +823,20 @@ operating_point <- function(x) {
 ##' @inheritParams set_drivers
 ##' @param traits a [leaf_traits()] object
 ##' @param control a [leaf_control()] object
-##' @param supply how water reaches the root collar: [leaf_supply_multilayer()]
-##'   (the default) or [leaf_supply_singlelayer()]. On the single-potential path
-##'   `soil_depth` and `root_network` must be omitted, and each `psi_soil` is one
-##'   value rather than a profile.
+##' @param supply how water reaches the root collar: [leaf_supply_singlelayer()]
+##'   (the default) or [leaf_supply_multilayer()]. On the single-potential path
+##'   `soil_depth` must be omitted, `root_network` is a [series_resistance()]
+##'   (defaulted if omitted), and each `psi_soil` is one value rather than a
+##'   profile.
 ##' @param model which optimality model to solve, as in [leaf_gradient()]: any
 ##'   name from [cost_curve_names()], solved on `route`. The default,
 ##'   `"TF24_floor"`, is plant's default model; at its default price,
-##'   `TF24_floor_lambda_o = 0`, it is TF24. `"collar"` is a deprecated alias for
-##'   `model = "TF24", route = "collar"`.
-##' @param route which potential the curve is maximised over: `"collar"` (the
-##'   default), the root-collar potential, on either supply path; or `"stem"`,
-##'   `psi_stem` with the upstream potential pinned at `psi_soil`, which needs
-##'   `leaf_supply_singlelayer()`. `NULL` is the collar route.
+##'   `TF24_floor_lambda_o = 0`, it is TF24.
+##' @param route which potential the curve is maximised over: `"stem"` (the
+##'   default), `psi_stem` with the upstream potential pinned at `psi_soil`,
+##'   which needs `leaf_supply_singlelayer()`; or `"collar"`, the root-collar
+##'   potential, on either supply path, and the only route on
+##'   `leaf_supply_multilayer()`. `NULL` is the stem route.
 ##'
 ##'   ⚠️ **The two routes are different models, not two ways of asking one
 ##'   question**, even for one curve. They optimise different variables over
@@ -906,7 +910,7 @@ leaf_solve <- function(psi_soil,
                        atm_kpa = 101.3,
                        traits = leaf_traits(),
                        control = leaf_control(),
-                       supply = leaf_supply_multilayer(),
+                       supply = leaf_supply_singlelayer(),
                        reuse = TRUE,
                        model = "TF24_floor",
                        route = NULL,
@@ -1002,11 +1006,10 @@ leaf_solve <- function(psi_soil,
 
 # A model is a (curve, route) pair, resolved from `model` and `route` and
 # validated against the supply path before a Leaf is built. Every curve takes
-# the collar solve, so a curve name defaults to its collar route (decision D3);
-# `model = "collar"` is a deprecated alias for TF24 on the collar route.
-# leaf_solve(), leaf_gradient() and leaf_gradient_batch() all
-# resolve here, from `.gradient_models()`, so a curve added in C++ is reachable
-# from each and they cannot disagree about what a name selects.
+# both routes; with none named it is the stem route (decision D3).
+# leaf_solve(), leaf_gradient() and leaf_gradient_batch() all resolve here, from
+# `cost_curve_names()`, so a curve added in C++ is reachable from each and they
+# cannot disagree about what a name selects.
 .resolve_model <- function(model, route, supply_kind) {
   if (!(is.character(model) && length(model) == 1L)) {
     stop("`model` must be a single model name; see cost_curve_names()",
@@ -1021,24 +1024,14 @@ leaf_solve <- function(psi_soil,
         route %in% c("collar", "stem"))) {
     stop("`route` must be \"collar\", \"stem\" or NULL", call. = FALSE)
   }
-  if (identical(model, "collar")) {
-    if (identical(route, "stem")) {
-      stop("model = \"collar\" is TF24 on the collar route; for TF24's stem ",
-           "route pass model = \"TF24\".", call. = FALSE)
-    }
-    curve <- "TF24"
-    route <- "collar"
-  } else {
-    curve <- model
-    if (is.null(route)) route <- "collar"
-  }
+  if (is.null(route)) route <- "stem"
   if (identical(route, "stem") && !identical(supply_kind, "single")) {
     stop("the stem routes optimise `psi_stem` with the upstream potential ",
          "pinned at `psi_soil`, so they need the single-potential supply path; ",
          "got the multi-layer one. Use route = \"collar\" for a root network.",
          call. = FALSE)
   }
-  list(model = model, curve = curve, route = route)
+  list(model = model, curve = model, route = route)
 }
 
 # The model and its prescribed prices are configuration that survives
@@ -1071,7 +1064,7 @@ leaf_solve <- function(psi_soil,
         # traits, named by their curve. A price the seated model does not read
         # is refused, not ignored; an omitted one is reported by the curve.
         owned = stats::setNames(owned$parameter, owned$curve),
-        # The owned fields' defaults, where they have one (align_curves()'s).
+        # The owned fields' defaults: align_curves()'s, and TF24_floor's 0.
         level_defaults = stats::setNames(levels$default, levels$parameter))
     }
     tables

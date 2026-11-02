@@ -164,8 +164,9 @@ test_that("R's hex parser is exact, which is what the expected values rely on", 
 })
 
 test_that("leaf_model()'s defaults are the C++ default constructor's", {
-  # tests/cpp/test_golden.cpp solves with a default-constructed phylloptim::Leaf, and
-  # every comparison below goes through leaf_model(). So for a TRAIT the golden
+  # tests/cpp/test_golden.cpp solves with a default-constructed phylloptim::Leaf
+  # seated on the multi-layer collar route, and every comparison below goes
+  # through leaf_model(). So for a TRAIT the golden
   # rows are already the strong form of this check -- see helper-golden.R for the
   # measurement that says leaf_control()'s settings are not covered by it. This is
   # the cheap, legible form that says which thing broke when they fail: the stem

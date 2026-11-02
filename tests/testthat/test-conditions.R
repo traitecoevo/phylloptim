@@ -65,7 +65,9 @@ test_that("an infeasible exit is catchable by class and carries its code", {
   # than a caller error, which is exactly the distinction being tested.
   starved <- leaf_control(ci_niter = 3)
   caught <- tryCatch(
-    leaf_solve(psi_soil = 2.0, PPFD = 900, control = starved),
+    leaf_solve(psi_soil = 2.0, PPFD = 900, control = starved,
+               supply = leaf_supply_multilayer(), model = "TF24",
+               route = "collar"),
     condition = function(e) e)
 
   expect_s3_class(caught, "phylloptim_infeasible")
@@ -77,7 +79,9 @@ test_that("an infeasible exit is catchable by class and carries its code", {
   # ⚠️ leaf_solve() classifies WITHOUT the caller wrapping anything -- it routes
   # through the wrapper itself. That is the property a fit depends on.
   expect_identical(
-    tryCatch(leaf_solve(psi_soil = 2.0, PPFD = 900, control = starved),
+    tryCatch(leaf_solve(psi_soil = 2.0, PPFD = 900, control = starved,
+                        supply = leaf_supply_multilayer(), model = "TF24",
+                        route = "collar"),
              phylloptim_infeasible = function(e) e$code),
     "collar_bracket")
 

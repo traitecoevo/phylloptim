@@ -40,8 +40,11 @@ one_row <- function(g) {
        stationarity = g$stationarity[[1]])
 }
 
+# TF24 on the collar route, the grid's model, unless `args` names one.
 expect_entry_points_agree <- function(args, pars, method, label) {
-  batch_args <- args
+  if (is.null(args$model)) args$model <- "TF24"
+  if (is.null(args$route)) args$route <- "collar"
+  batch_args <- args[setdiff(names(args), c("model", "route"))]
   ref <- tryCatch(
     do.call(leaf_gradient, c(args, list(pars = pars, method = method))),
     error = function(e) conditionMessage(e))
@@ -52,7 +55,8 @@ expect_entry_points_agree <- function(args, pars, method, label) {
     }
   }
   b <- do.call(leaf_batch, batch_args)
-  got <- one_row(leaf_gradient_batch(b, pars = pars, method = method))
+  got <- one_row(leaf_gradient_batch(b, pars = pars, method = method,
+                                     model = args$model, route = args$route))
 
   if (is.character(ref)) {
     # leaf_gradient() stops; the batch reports the same refusal per row rather
@@ -166,10 +170,12 @@ test_that("leaf_gradient() is the batch's one observation with the stem curve re
       args <- batch_drivers(psi_soil)
       ref <- do.call(leaf_gradient, c(grid_drivers(psi_soil),
                                       list(pars = "stem_P50", method = method,
-                                           fast_stem_curve = FALSE)))
+                                           fast_stem_curve = FALSE,
+                                           model = "TF24", route = "collar")))
       b <- do.call(leaf_batch, args)
       got <- leaf_gradient_batch(b, pars = "stem_P50", method = method,
-                                 fast_stem_curve = FALSE)
+                                 fast_stem_curve = FALSE,
+                                 model = "TF24", route = "collar")
       expect_identical(as.vector(got$gradient[1, , ]),
                        as.vector(ref$gradient),
                        label = sprintf("psi_soil=%g method=%s", psi_soil,
@@ -184,21 +190,29 @@ test_that("the batch's finite-difference arm takes a step the caller names", {
   # default-step comparisons above cannot see.
   p <- c("vcmax_25", "stem_P50")
   ref <- leaf_gradient(psi_soil = 1.0, PPFD = 900, pars = p, method = "fd",
-                       step = 1e-3)
-  b <- leaf_batch(psi_soil = 1.0, PPFD = 900)
-  got <- one_row(leaf_gradient_batch(b, pars = p, method = "fd", step = 1e-3))
+                       step = 1e-3,
+                       supply = leaf_supply_multilayer(), model = "TF24",
+                       route = "collar")
+  b <- leaf_batch(psi_soil = 1.0, PPFD = 900, supply = leaf_supply_multilayer())
+  got <- one_row(leaf_gradient_batch(b, pars = p, method = "fd", step = 1e-3,
+                                     model = "TF24", route = "collar"))
   expect_identical(as.vector(got$gradient), as.vector(ref$gradient))
   # The named step reached the arm: it moves the answer off the default's.
-  default <- one_row(leaf_gradient_batch(b, pars = p, method = "fd"))
+  default <- one_row(leaf_gradient_batch(b, pars = p, method = "fd",
+                                         model = "TF24", route = "collar"))
   expect_false(identical(as.vector(default$gradient), as.vector(got$gradient)))
 
   # Under the default "auto" a pinned row takes the same arm, so the named step
   # reaches it there too.
-  pinned <- list(psi_soil = 4.5, PPFD = 900, atm_vpd = 3)
-  ref_auto <- do.call(leaf_gradient, c(pinned, list(pars = p, step = 1e-3)))
+  pinned <- list(psi_soil = 4.5, PPFD = 900, atm_vpd = 3,
+                 supply = leaf_supply_multilayer())
+  ref_auto <- do.call(leaf_gradient, c(pinned, list(pars = p, step = 1e-3,
+                                                    model = "TF24",
+                                                    route = "collar")))
   expect_identical(ref_auto$status, "pinned")
   got_auto <- one_row(leaf_gradient_batch(do.call(leaf_batch, pinned), pars = p,
-                                          step = 1e-3))
+                                          step = 1e-3,
+                                          model = "TF24", route = "collar"))
   expect_identical(as.vector(got_auto$gradient), as.vector(ref_auto$gradient))
 })
 
@@ -300,9 +314,11 @@ test_that("a forced method = \"ift\" at a pinned row is refused by name (#147)",
     lab <- sprintf("psi_soil=%g vpd=%g layers=%d", p$psi_soil, p$vpd, p$layers)
     b <- do.call(leaf_batch, batch_drivers(p$psi_soil, ppfd = p$ppfd,
                                            vpd = p$vpd, layers = p$layers))
-    auto <- leaf_gradient_batch(b, pars = pars)
+    auto <- leaf_gradient_batch(b, pars = pars,
+                                model = "TF24", route = "collar")
     expect_identical(auto$status, "pinned", label = lab)
-    ift <- leaf_gradient_batch(b, pars = pars, method = "ift")
+    ift <- leaf_gradient_batch(b, pars = pars, method = "ift",
+                               model = "TF24", route = "collar")
     expect_identical(ift$status, "error", label = lab)
     expect_match(ift$message, "pinned optimum", label = lab)
     expect_true(all(is.na(ift$gradient)), label = lab)
@@ -316,8 +332,10 @@ test_that("an unsolvable row costs that row and not the batch", {
   # evaluation for one observation would take out the draw.
   pars <- c("vcmax_25", "stem_P50")
   ok <- c(1.5, 2.0, 2.5)
-  b <- leaf_batch(psi_soil = c(ok[[1]], 6.5, ok[[2]], 7.5, ok[[3]]), PPFD = 900)
-  g <- leaf_gradient_batch(b, pars = pars, method = "ift")
+  b <- leaf_batch(psi_soil = c(ok[[1]], 6.5, ok[[2]], 7.5, ok[[3]]), PPFD = 900,
+                  supply = leaf_supply_multilayer())
+  g <- leaf_gradient_batch(b, pars = pars, method = "ift",
+                           model = "TF24", route = "collar")
 
   expect_identical(g$status, c("interior", "error", "interior", "error",
                                "interior"))
@@ -326,8 +344,11 @@ test_that("an unsolvable row costs that row and not the batch", {
   # displaced stem-vulnerability spline `perturb_stem_P50()` leaves behind is
   # exactly the kind of thing that would show up here and nowhere else.
   solo <- vapply(ok, function(p) {
-    as.vector(leaf_gradient_batch(leaf_batch(psi_soil = p, PPFD = 900),
-                                  pars = pars, method = "ift")$gradient[1, , ])
+    as.vector(leaf_gradient_batch(leaf_batch(psi_soil = p, PPFD = 900,
+                                             supply = leaf_supply_multilayer()),
+                                  pars = pars, method = "ift",
+                                  model = "TF24",
+                                  route = "collar")$gradient[1, , ])
   }, numeric(length(pars) * dim(g$gradient)[[3]]))
   for (i in seq_along(ok)) {
     expect_identical(as.vector(g$gradient[2 * i - 1, , ]), solo[, i],
@@ -354,11 +375,16 @@ test_that("a batch that failed on the fast stem_b path leaves a usable leaf", {
   # skipped the restore, so the batch does it in the handler -- and the LAST row
   # is the case that needs it, because there is no next row whose own
   # `set_traits()` would have covered for it (hazard 8).
-  b <- leaf_batch(psi_soil = c(2.0, 7.5), PPFD = 900)
-  invisible(leaf_gradient_batch(b, pars = "stem_P50", method = "ift"))
-  after <- leaf_gradient_batch(b, pars = "stem_P50")
-  fresh <- leaf_gradient_batch(leaf_batch(psi_soil = c(2.0, 7.5), PPFD = 900),
-                               pars = "stem_P50")
+  b <- leaf_batch(psi_soil = c(2.0, 7.5), PPFD = 900,
+                  supply = leaf_supply_multilayer())
+  invisible(leaf_gradient_batch(b, pars = "stem_P50", method = "ift",
+                                model = "TF24", route = "collar"))
+  after <- leaf_gradient_batch(b, pars = "stem_P50",
+                               model = "TF24", route = "collar")
+  fresh <- leaf_gradient_batch(leaf_batch(psi_soil = c(2.0, 7.5), PPFD = 900,
+                                          supply = leaf_supply_multilayer()),
+                               pars = "stem_P50",
+                               model = "TF24", route = "collar")
   expect_identical(after$gradient, fresh$gradient)
   expect_identical(after$value, fresh$value)
 
@@ -368,7 +394,9 @@ test_that("a batch that failed on the fast stem_b path leaves a usable leaf", {
   set_drivers(b$leaf, psi_soil = 1.5, PPFD = 900)
   b$leaf$find_root_collar_psi()
   expect_identical(operating_point(b$leaf),
-                   leaf_solve(psi_soil = 1.5, PPFD = 900)[
+                   leaf_solve(psi_soil = 1.5, PPFD = 900,
+                              supply = leaf_supply_multilayer(), model = "TF24",
+                              route = "collar")[
                      , names(operating_point(b$leaf))])
 })
 
@@ -385,7 +413,7 @@ test_that("per-observation theta differentiates each row at its own parameters",
     leaf_traits(vcmax_25 = v, stem_P50 = 3.7)
   })
 
-  b <- leaf_batch(psi_soil = psv, PPFD = 900)
+  b <- leaf_batch(psi_soil = psv, PPFD = 900, supply = leaf_supply_multilayer())
   # ⚠️ THE TRAIT COUNT IS DERIVED, not written down. It was `[1:15]` and a literal
   # `numeric(18)`, both of which had to be found by hand when a trait was added.
   n_traits <- length(leaf_traits())
@@ -394,11 +422,14 @@ test_that("per-observation theta differentiates each row at its own parameters",
     unname(c(unlist(tr)[gradient_par_names()[seq_len(n_traits)]], 3.14e-5,
              rep(NA_real_, n_pars - n_traits - 1L)))
   }, numeric(n_pars)))
-  g <- leaf_gradient_batch(b, theta = theta, pars = pars)
+  g <- leaf_gradient_batch(b, theta = theta, pars = pars,
+                           model = "TF24", route = "collar")
 
   for (i in seq_along(psv)) {
     ref <- leaf_gradient(psi_soil = psv[[i]], PPFD = 900, traits = traits[[i]],
-                         pars = pars)
+                         pars = pars,
+                         supply = leaf_supply_multilayer(), model = "TF24",
+                         route = "collar")
     expect_identical(as.vector(g$gradient[i, , ]), as.vector(ref$gradient),
                      label = paste("row", i))
     expect_identical(unname(g$value[i, ]), unname(ref$value),
@@ -407,8 +438,10 @@ test_that("per-observation theta differentiates each row at its own parameters",
 
   # A one-row theta is shared by every observation, which is the other half of the
   # recycling rule and the shape the default takes.
-  shared <- leaf_gradient_batch(b, theta = theta[2, , drop = FALSE], pars = pars)
-  all_at_2 <- leaf_gradient_batch(b, traits = traits[[2]], pars = pars)
+  shared <- leaf_gradient_batch(b, theta = theta[2, , drop = FALSE], pars = pars,
+                                model = "TF24", route = "collar")
+  all_at_2 <- leaf_gradient_batch(b, traits = traits[[2]], pars = pars,
+                                  model = "TF24", route = "collar")
   expect_identical(shared$gradient, all_at_2$gradient)
 })
 
@@ -420,25 +453,33 @@ test_that("the default theta describes the point the batch was built at", {
   # report plausible numbers.
   kmax <- 5e-5
   b <- leaf_batch(psi_soil = 1.5, PPFD = 900,
-                  leaf_specific_conductance_max = kmax)
+                  leaf_specific_conductance_max = kmax,
+                  supply = leaf_supply_multilayer())
   g <- leaf_gradient_batch(b, pars = c("vcmax_25",
-                                       "leaf_specific_conductance_max"))
+                                       "leaf_specific_conductance_max"),
+                                       model = "TF24", route = "collar")
   ref <- leaf_gradient(psi_soil = 1.5, PPFD = 900,
                        leaf_specific_conductance_max = kmax,
-                       pars = c("vcmax_25", "leaf_specific_conductance_max"))
+                       pars = c("vcmax_25", "leaf_specific_conductance_max"),
+                       supply = leaf_supply_multilayer(), model = "TF24",
+                       route = "collar")
   expect_identical(as.vector(g$gradient[1, , ]), as.vector(ref$gradient))
 
   # Non-shared conductances take the n-row path, which is a different branch in
   # `.gradient_theta_matrix()` and has to produce the same answers.
   kv <- c(3.14e-5, 5e-5)
   b2 <- leaf_batch(psi_soil = c(1.5, 1.5), PPFD = 900,
-                   leaf_specific_conductance_max = kv)
+                   leaf_specific_conductance_max = kv,
+                   supply = leaf_supply_multilayer())
   expect_identical(b2$theta_nrow, 2L)
-  g2 <- leaf_gradient_batch(b2, pars = "leaf_specific_conductance_max")
+  g2 <- leaf_gradient_batch(b2, pars = "leaf_specific_conductance_max",
+                            model = "TF24", route = "collar")
   for (i in 1:2) {
     ref2 <- leaf_gradient(psi_soil = 1.5, PPFD = 900,
                           leaf_specific_conductance_max = kv[[i]],
-                          pars = "leaf_specific_conductance_max")
+                          pars = "leaf_specific_conductance_max",
+                          supply = leaf_supply_multilayer(), model = "TF24",
+                          route = "collar")
     expect_identical(as.vector(g2$gradient[i, , ]), as.vector(ref2$gradient),
                      label = paste("row", i))
   }
@@ -449,8 +490,9 @@ test_that("the result is shaped and named for a caller applying a Jacobian", {
   # parameterisation chain rule, vectorised over observations. That only works if
   # the array's dimensions are labelled, so it is asserted rather than assumed.
   pars <- c("vcmax_25", "stem_P50", "TF24_cost_scale")
-  b <- leaf_batch(psi_soil = c(1.0, 1.5, 2.0, 2.5), PPFD = 900)
-  g <- leaf_gradient_batch(b, pars = pars)
+  b <- leaf_batch(psi_soil = c(1.0, 1.5, 2.0, 2.5), PPFD = 900,
+                  supply = leaf_supply_multilayer())
+  g <- leaf_gradient_batch(b, pars = pars, model = "TF24", route = "collar")
   expect_identical(dim(g$gradient), c(4L, 3L, 5L))
   expect_identical(dimnames(g$gradient)[[2]], pars)
   expect_identical(dimnames(g$gradient)[[3]],
@@ -467,7 +509,8 @@ test_that("the result is shaped and named for a caller applying a Jacobian", {
   # `pars` selects, and its ORDER is the array's order -- a fit reads columns by
   # position after this, so a permuted request has to come back permuted rather
   # than in the enumeration's order.
-  rev_g <- leaf_gradient_batch(b, pars = rev(pars))
+  rev_g <- leaf_gradient_batch(b, pars = rev(pars),
+                               model = "TF24", route = "collar")
   expect_identical(dimnames(rev_g$gradient)[[2]], rev(pars))
   expect_identical(g$gradient[, "vcmax_25", ], rev_g$gradient[, "vcmax_25", ])
 })
@@ -489,19 +532,23 @@ test_that("`pars` order does not change any gradient (#72)", {
   # parameter -- rather than as "stem_b is now reseated". `root_b` obeys the same
   # homogeneity identity and would get the same shortcut, and a stem_b-shaped
   # test would silently stop covering the case it was written for.
-  b <- leaf_batch(psi_soil = 1.5, PPFD = 900)
+  b <- leaf_batch(psi_soil = 1.5, PPFD = 900, supply = leaf_supply_multilayer())
   pars <- c("vcmax_25", "stem_c", "phi_J", "stem_P50", "TF24_cost_scale", "root_P50")
 
   for (method in c("auto", "fd")) {
     for (fast in c(TRUE, FALSE)) {
       lab <- paste(method, "fast =", fast)
       ref <- leaf_gradient_batch(b, pars = pars, method = method,
-                                 fast_stem_curve = fast)$gradient[1, , ]
+                                 fast_stem_curve = fast,
+                                 model = "TF24",
+                                 route = "collar")$gradient[1, , ]
       # Reversed, and rotated, so the claim is not "one other ordering agrees".
       for (perm in list(rev(pars), pars[c(4, 1, 6, 2, 5, 3)],
                         c("stem_P50", setdiff(pars, "stem_P50")))) {
         got <- leaf_gradient_batch(b, pars = perm, method = method,
-                                   fast_stem_curve = fast)$gradient[1, , ]
+                                   fast_stem_curve = fast,
+                                   model = "TF24",
+                                   route = "collar")$gradient[1, , ]
         expect_identical(got[pars, ], ref[pars, ],
                          label = paste(lab, paste(perm, collapse = ",")))
       }
@@ -513,26 +560,37 @@ test_that("`pars` order does not change any gradient (#72)", {
   # 1e-6 step floor rather than a relative step, and `stem_c`'s perturbation
   # REBUILDS the very curve the `stem_b` shortcut then rescales. Every trait is
   # checked as a predecessor rather than a sample of them.
-  solo <- leaf_gradient_batch(b, pars = "stem_P50")$gradient[1, "stem_P50", ]
+  solo <- leaf_gradient_batch(b, pars = "stem_P50",
+                              model = "TF24",
+                              route = "collar")$gradient[1, "stem_P50", ]
   for (p in setdiff(names(leaf_traits()), "stem_P50")) {
-    got <- leaf_gradient_batch(b, pars = c(p, "stem_P50"))$gradient[1, "stem_P50", ]
+    got <- leaf_gradient_batch(b, pars = c(p, "stem_P50"),
+                               model = "TF24",
+                               route = "collar")$gradient[1, "stem_P50", ]
     expect_identical(got, solo, label = paste("after", p))
   }
 
   # And leaf_gradient(), the same composite, agrees.
   r_ref <- leaf_gradient(psi_soil = 1.5, PPFD = 900,
-                         pars = c("TF24_cost_scale", "stem_P50"))
-  batch <- leaf_gradient_batch(b, pars = c("TF24_cost_scale", "stem_P50"))
+                         pars = c("TF24_cost_scale", "stem_P50"),
+                         supply = leaf_supply_multilayer(), model = "TF24",
+                         route = "collar")
+  batch <- leaf_gradient_batch(b, pars = c("TF24_cost_scale", "stem_P50"),
+                               model = "TF24", route = "collar")
   expect_identical(as.vector(batch$gradient[1, , ]), as.vector(r_ref$gradient))
 })
 
 test_that("leaf_batch() recycles its drivers the way leaf_solve() does", {
   # Same helpers, so the rules cannot drift -- but that is only true while both
   # actually call them, which is what this checks.
-  b <- leaf_batch(psi_soil = c(1.0, 1.5, 2.0), PPFD = 900)
+  b <- leaf_batch(psi_soil = c(1.0, 1.5, 2.0), PPFD = 900,
+                  supply = leaf_supply_multilayer())
   expect_identical(b$n, 3L)
-  g <- leaf_gradient_batch(b, pars = "vcmax_25")
-  solved <- leaf_solve(psi_soil = c(1.0, 1.5, 2.0), PPFD = 900)
+  g <- leaf_gradient_batch(b, pars = "vcmax_25",
+                           model = "TF24", route = "collar")
+  solved <- leaf_solve(psi_soil = c(1.0, 1.5, 2.0), PPFD = 900,
+                       supply = leaf_supply_multilayer(), model = "TF24",
+                       route = "collar")
   expect_identical(g$value[, "A"], solved$A)
   expect_identical(g$value[, "collar"], solved$collar)
 
@@ -540,49 +598,65 @@ test_that("leaf_batch() recycles its drivers the way leaf_solve() does", {
   # multi-layer observation each. Getting that backwards is the easiest mistake to
   # make with this function, and it fails loudly rather than silently, because the
   # network and the profile then disagree in length.
-  expect_identical(leaf_batch(psi_soil = list(c(1, 1.5, 2)), PPFD = 900)$n, 1L)
+  expect_identical(leaf_batch(psi_soil = list(c(1, 1.5, 2)), PPFD = 900,
+                              supply = leaf_supply_multilayer())$n, 1L)
   expect_length(leaf_gradient_batch(
-    leaf_batch(psi_soil = list(c(1, 1.5, 2)), PPFD = 900),
-    pars = "vcmax_25")$status, 1L)
+    leaf_batch(psi_soil = list(c(1, 1.5, 2)), PPFD = 900,
+               supply = leaf_supply_multilayer()),
+    pars = "vcmax_25", model = "TF24", route = "collar")$status, 1L)
 })
 
 test_that("leaf_gradient_batch() rejects what it cannot do", {
-  b <- leaf_batch(psi_soil = 1.5, PPFD = 900)
+  b <- leaf_batch(psi_soil = 1.5, PPFD = 900, supply = leaf_supply_multilayer())
   s <- leaf_batch(psi_soil = 1.5, supply = leaf_supply_singlelayer())
 
-  expect_error(leaf_gradient_batch(b, pars = "not_a_trait"),
+  expect_error(leaf_gradient_batch(b, pars = "not_a_trait",
+                                   model = "TF24", route = "collar"),
                "cannot differentiate")
   # The same message `leaf_gradient()` gives, from the same function: `resistance`
   # is a real parameter on the other supply path, so saying "unknown" would be
   # misleading rather than merely unhelpful.
-  expect_error(leaf_gradient_batch(b, pars = "resistance"),
+  expect_error(leaf_gradient_batch(b, pars = "resistance",
+                                   model = "TF24", route = "collar"),
                "single-potential path only")
-  expect_true(is.finite(leaf_gradient_batch(s, pars = "resistance")$gradient[
+  expect_true(is.finite(leaf_gradient_batch(s, pars = "resistance",
+                                            model = "TF24",
+                                            route = "collar")$gradient[
     1, 1, "A"]))
 
-  expect_error(leaf_gradient_batch(b, step = -1), "positive number")
-  expect_error(leaf_gradient_batch(b, method = "magic"))
+  expect_error(leaf_gradient_batch(b, step = -1,
+                                   model = "TF24",
+                                   route = "collar"), "positive number")
+  expect_error(leaf_gradient_batch(b, method = "magic",
+                                   model = "TF24", route = "collar"))
   expect_error(leaf_gradient_batch(leaf_traits()), "must come from leaf_batch")
-  expect_error(leaf_batch(psi_soil = 1.5, traits = list(vcmax_25 = 96)),
+  expect_error(leaf_batch(psi_soil = 1.5, traits = list(vcmax_25 = 96),
+                          supply = leaf_supply_multilayer()),
                "leaf_traits")
 
   # `traits` and `theta` both say where the gradient is taken, so passing both is
   # refused rather than resolved in favour of one of them.
   th <- matrix(1, nrow = 1, ncol = length(gradient_par_names()))
-  expect_error(leaf_gradient_batch(b, traits = leaf_traits(), theta = th),
+  expect_error(leaf_gradient_batch(b, traits = leaf_traits(), theta = th,
+                                   model = "TF24", route = "collar"),
                "pass one")
-  expect_error(leaf_gradient_batch(b, theta = matrix(1, 1, 13)),
+  expect_error(leaf_gradient_batch(b, theta = matrix(1, 1, 13),
+                                   model = "TF24", route = "collar"),
                paste(length(gradient_par_names()), "columns"))
-  expect_error(leaf_gradient_batch(b, theta = th[rep(1, 3), , drop = FALSE]),
+  expect_error(leaf_gradient_batch(b, theta = th[rep(1, 3), , drop = FALSE],
+                                   model = "TF24", route = "collar"),
                "1 row or one per observation")
-  expect_error(leaf_gradient_batch(b, theta = as.data.frame(th)),
+  expect_error(leaf_gradient_batch(b, theta = as.data.frame(th),
+                                   model = "TF24", route = "collar"),
                "numeric matrix")
   # ⚠️ Column names are checked against the enumeration ORDER, because C++
   # indexes by position: a reordered matrix would differentiate the wrong
   # parameters and return plausible numbers rather than fail.
   bad <- th
   colnames(bad) <- rev(gradient_par_names())
-  expect_error(leaf_gradient_batch(b, theta = bad), "in that order")
+  expect_error(leaf_gradient_batch(b, theta = bad,
+                                   model = "TF24",
+                                   route = "collar"), "in that order")
 })
 
 test_that("a batch that has lost its C++ pointer says so rather than crashing", {
@@ -593,15 +667,18 @@ test_that("a batch that has lost its C++ pointer says so rather than crashing", 
   # someone to try, and "external pointer is not valid" -- what the first read of
   # either would otherwise report, from whichever one Rcpp unwrapped first -- is
   # true and gives no hint that the fix is to rebuild.
-  b <- leaf_batch(psi_soil = 1.5, PPFD = 900)
+  b <- leaf_batch(psi_soil = 1.5, PPFD = 900, supply = leaf_supply_multilayer())
   f <- tempfile(fileext = ".rds")
   on.exit(unlink(f), add = TRUE)
   saveRDS(b, f)
-  expect_error(leaf_gradient_batch(readRDS(f), pars = "vcmax_25"),
+  expect_error(leaf_gradient_batch(readRDS(f), pars = "vcmax_25",
+                                   model = "TF24", route = "collar"),
                "does not survive")
   # The live one still works afterwards: the check is on the handle, not a flag
   # set by serialising, so `saveRDS()` does not poison the object it copied.
-  expect_true(is.finite(leaf_gradient_batch(b, pars = "vcmax_25")$gradient[
+  expect_true(is.finite(leaf_gradient_batch(b, pars = "vcmax_25",
+                                            model = "TF24",
+                                            route = "collar")$gradient[
     1, 1, "A"]))
   # Something that was never a handle at all, which the same check has to catch:
   # dereferencing a double as a pointer is not an error the session survives.
@@ -616,12 +693,14 @@ test_that("the batch's prescribed psi agrees with leaf_gradient()", {
   # both entry points' handling of `psi` and `dpsi_dtheta`.
   pars <- c("vcmax_25", "stem_P50", "TF24_cost_scale")
   soils <- c(1.0, 2.0, 3.0)
-  b <- leaf_batch(psi_soil = soils, PPFD = 900)
-  a <- leaf_gradient_batch(b, pars = pars)
+  b <- leaf_batch(psi_soil = soils, PPFD = 900,
+                  supply = leaf_supply_multilayer())
+  a <- leaf_gradient_batch(b, pars = pars, model = "TF24", route = "collar")
   expect_true(all(a$status == "interior"))
 
   g <- leaf_gradient_batch(b, pars = pars, psi = a$psi,
-                           dpsi_dtheta = -a$M / a$H)
+                           dpsi_dtheta = -a$M / a$H,
+                           model = "TF24", route = "collar")
   expect_true(all(g$status == "prescribed"))
   expect_true(all(g$method == "prescribed"))
   expect_identical(g$gradient, a$gradient)
@@ -629,10 +708,13 @@ test_that("the batch's prescribed psi agrees with leaf_gradient()", {
   expect_identical(g$dY_dpsi, a$dY_dpsi)
 
   off <- a$psi + 0.2
-  h <- leaf_gradient_batch(b, pars = pars, psi = off)
+  h <- leaf_gradient_batch(b, pars = pars, psi = off,
+                           model = "TF24", route = "collar")
   for (i in seq_along(soils)) {
     r <- leaf_gradient(psi_soil = soils[[i]], PPFD = 900, pars = pars,
-                       psi = off[[i]])
+                       psi = off[[i]],
+                       supply = leaf_supply_multilayer(), model = "TF24",
+                       route = "collar")
     expect_identical(as.vector(h$gradient[i, , ]), as.vector(r$gradient),
                      label = paste("row", i))
     expect_identical(as.vector(h$M[i, ]), unname(r$M), label = paste("M", i))
@@ -649,10 +731,12 @@ test_that("a refused row costs that row and not the batch", {
   # evaluation for one of them would take out the draw.
   pars <- c("vcmax_25", "stem_P50")
   soils <- c(1.0, 2.0, 3.0)
-  b <- leaf_batch(psi_soil = soils, PPFD = 900)
-  a <- leaf_gradient_batch(b, pars = pars)
+  b <- leaf_batch(psi_soil = soils, PPFD = 900,
+                  supply = leaf_supply_multilayer())
+  a <- leaf_gradient_batch(b, pars = pars, model = "TF24", route = "collar")
 
-  g <- leaf_gradient_batch(b, pars = pars, psi = c(99, a$psi[2:3]))
+  g <- leaf_gradient_batch(b, pars = pars, psi = c(99, a$psi[2:3]),
+                           model = "TF24", route = "collar")
   expect_identical(g$status, c("refused", "prescribed", "prescribed"))
   expect_true(all(is.na(g$gradient[1, , ])))
   expect_true(all(is.na(g$M[1, ])))
@@ -662,8 +746,10 @@ test_that("a refused row costs that row and not the batch", {
   expect_identical(g$psi[[1]], 99)
   expect_true(all(is.na(g$value[1, ])))
   for (i in 2:3) {
-    solo <- leaf_gradient_batch(leaf_batch(psi_soil = soils[[i]], PPFD = 900),
-                                pars = pars, psi = a$psi[[i]])
+    solo <- leaf_gradient_batch(leaf_batch(psi_soil = soils[[i]], PPFD = 900,
+                                           supply = leaf_supply_multilayer()),
+                                pars = pars, psi = a$psi[[i]],
+                                model = "TF24", route = "collar")
     expect_identical(as.vector(g$gradient[i, , ]),
                      as.vector(solo$gradient[1, , ]),
                      label = paste("row", i))
@@ -672,18 +758,24 @@ test_that("a refused row costs that row and not the batch", {
 
 test_that("the batch validates psi and dpsi_dtheta by shape", {
   pars <- c("vcmax_25", "stem_P50")
-  b <- leaf_batch(psi_soil = c(1.0, 2.0, 3.0), PPFD = 900)
-  expect_error(leaf_gradient_batch(b, pars = pars, psi = 2.0),
+  b <- leaf_batch(psi_soil = c(1.0, 2.0, 3.0), PPFD = 900,
+                  supply = leaf_supply_multilayer())
+  expect_error(leaf_gradient_batch(b, pars = pars, psi = 2.0,
+                                   model = "TF24", route = "collar"),
                "one collar potential per observation")
-  expect_error(leaf_gradient_batch(b, pars = pars, psi = rep(-1, 3)),
+  expect_error(leaf_gradient_batch(b, pars = pars, psi = rep(-1, 3),
+                                   model = "TF24", route = "collar"),
                "finite and positive")
   expect_error(leaf_gradient_batch(b, pars = pars, psi = rep(2, 3),
-                                   method = "fd"),
+                                   method = "fd",
+                                   model = "TF24", route = "collar"),
                "cannot be given with `psi`")
-  expect_error(leaf_gradient_batch(b, pars = pars, dpsi_dtheta = c(1, 2)),
+  expect_error(leaf_gradient_batch(b, pars = pars, dpsi_dtheta = c(1, 2),
+                                   model = "TF24", route = "collar"),
                "needs `psi`")
   expect_error(leaf_gradient_batch(b, pars = pars, psi = rep(2, 3),
-                                   dpsi_dtheta = matrix(0, 2, 2)),
+                                   dpsi_dtheta = matrix(0, 2, 2),
+                                   model = "TF24", route = "collar"),
                "3 x 2")
 
   # A vector is one value per parameter, shared by every observation -- and it
@@ -691,12 +783,16 @@ test_that("the batch validates psi and dpsi_dtheta by shape", {
   # row is given its OWN psi* so none of them is refused; a shared psi across
   # three soil potentials could be, and then the columns compared here would be
   # NA.
-  psi <- leaf_gradient_batch(b, pars = pars)$psi
+  psi <- leaf_gradient_batch(b, pars = pars,
+                             model = "TF24", route = "collar")$psi
   shared <- leaf_gradient_batch(b, pars = pars, psi = psi,
-                                dpsi_dtheta = c(0.1, 0.2))
+                                dpsi_dtheta = c(0.1, 0.2),
+                                model = "TF24", route = "collar")
   spelt <- leaf_gradient_batch(b, pars = pars, psi = psi,
                                dpsi_dtheta = matrix(c(0.1, 0.1, 0.1,
-                                                      0.2, 0.2, 0.2), 3, 2))
+                                                      0.2, 0.2, 0.2), 3, 2),
+                                                      model = "TF24",
+                                                      route = "collar")
   expect_identical(shared$gradient, spelt$gradient)
   expect_identical(unname(shared$gradient[, , "collar"]),
                    matrix(c(0.1, 0.1, 0.1, 0.2, 0.2, 0.2), 3, 2))
@@ -711,7 +807,8 @@ test_that("the batch refuses a price its model does not read, and a missing one,
   }
   batch_error <- function(model, ...) {
     b <- leaf_batch(psi_soil = c(1.0, 1.5), PPFD = 1500, ...)
-    tryCatch(leaf_gradient_batch(b, pars = "vcmax_25", model = model),
+    tryCatch(leaf_gradient_batch(b, pars = "vcmax_25", model = model,
+                                 route = "collar"),
              error = conditionMessage)
   }
 
@@ -726,16 +823,19 @@ test_that("the batch refuses a price its model does not read, and a missing one,
   # given on one observation of several is still given
   expect_error(leaf_gradient_batch(
                  leaf_batch(psi_soil = c(1.0, 1.5), PPFD = 1500,
-                            LeastCost_beta = c(NA, 146)),
-                 pars = "vcmax_25", model = "TF24"),
+                            LeastCost_beta = c(NA, 146),
+                            supply = leaf_supply_multilayer()),
+                 pars = "vcmax_25", model = "TF24", route = "collar"),
                "model = \"TF24\" does not read it")
 
   # An unset price is the curve's default, on every observation it is unset on:
   # TF24_floor's is 0.
   floor_at <- function(price) {
     b <- leaf_batch(psi_soil = c(1.0, 1.5), PPFD = 1500,
-                    TF24_floor_lambda_o = price)
-    leaf_gradient_batch(b, pars = "vcmax_25", model = "TF24_floor")$gradient
+                    TF24_floor_lambda_o = price,
+                    supply = leaf_supply_multilayer())
+    leaf_gradient_batch(b, pars = "vcmax_25", model = "TF24_floor",
+                        route = "collar")$gradient
   }
   expect_identical(floor_at(NA), floor_at(0))
   expect_identical(floor_at(c(1.5e5, NA))[2, , ], floor_at(0)[2, , ])
@@ -762,20 +862,22 @@ test_that("the batch refuses a price its model does not read, and a missing one,
                   root_network = net, CF77_lambda = 1.5e5)
   th <- .gradient_theta_matrix(b, leaf_traits(), model = "CF77")
   colnames(th) <- gradient_par_names()
-  expect_error(leaf_gradient_batch(b, pars = "vcmax_25", model = "TF24"),
+  expect_error(leaf_gradient_batch(b, pars = "vcmax_25",
+                                   model = "TF24", route = "collar"),
                "CF77 curve's prescribed price")
   expect_error(leaf_gradient_batch(b, pars = "vcmax_25", model = "TF24",
-                                   theta = th),
+                                   theta = th, route = "collar"),
                "CF77 curve's prescribed price")
   th[, "CF77_lambda_"] <- NA_real_
   expect_identical(
-    leaf_gradient_batch(b, pars = "vcmax_25", model = "TF24", theta = th)$status,
+    leaf_gradient_batch(b, pars = "vcmax_25",
+                        model = "TF24", theta = th, route = "collar")$status,
     c("interior", "interior"))
 
   # leaf_solve() seats one price for every row
   expect_error(leaf_solve(psi_soil = 1.5, PPFD = 1500, supply = single,
                           root_network = net, model = "CF77",
-                          CF77_lambda = c(1e5, 3e5)),
+                          CF77_lambda = c(1e5, 3e5), route = "collar"),
                "must be a single number")
 })
 
@@ -786,7 +888,7 @@ test_that("leaf_gradient() is the batch's one observation on every model", {
   tr <- leaf_traits()
   net <- series_resistance(1e4)
   psv <- c(1.0, 1.5, 2.0)
-  own <- c(collar = "TF24_cost_scale", TF24 = "TF24_cost_scale",
+  own <- c(TF24 = "TF24_cost_scale",
            CF77 = "CF77_lambda_", JS22 = "JS22_gamma", CMax = "CMax_a",
            SOX = "vcmax_25", JW26 = "vcmax_25", ProfitMax = "vcmax_25",
            TF24_floor = "TF24_floor_lambda_o",
@@ -794,8 +896,7 @@ test_that("leaf_gradient() is the batch's one observation on every model", {
            # from theta, or the column is an exact zero that no finiteness
            # check sees (test-gradient-referee.R).
            LeastCost = "LeastCost_beta")
-  routes <- function(m) if (m == "collar") "collar" else c("collar", "stem")
-  for (m in names(own)) for (rt in routes(m)) {
+  for (m in names(own)) for (rt in c("collar", "stem")) {
     p <- own[[m]]
     # Each model's batch carries its own price only: a price the model does not
     # read is refused, as it is by leaf_solve(). The single-observation leaf

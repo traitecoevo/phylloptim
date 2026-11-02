@@ -89,7 +89,7 @@ const double kTheta = 0.5, kKs = 2.0, kH = 5.0, kAreaLeaf = 1.0;
 
 pl::Leaf set_up(int layers, double psi0, double ppfd, double leaf_temp,
                 double g_min = 0.0) {
-  pl::Leaf l;
+  pl::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
   // The residual conductance is a trait (#182): seated through set_traits so
@@ -384,7 +384,7 @@ void check(int layers, double psi0, double ppfd, double leaf_temp,
 // another kind would narrow the check without failing it.
 void check_kind(const std::vector<double>& psi_soil, double ppfd, double vpd,
                 pl::Leaf::OperatingPointKind want, unsigned long seed) {
-  pl::Leaf l;
+  pl::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
   std::vector<double> depth, root;

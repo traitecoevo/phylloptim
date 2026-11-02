@@ -126,7 +126,7 @@ const double kAreaLeaf = 0.05;
 const double kCa = 40.0, kO2 = 21.0, kTleaf = 25.0, kPatm = 101.3;
 
 phylloptim::Leaf fixture_leaf() {
-  phylloptim::Leaf l;
+  phylloptim::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
   // ONE single-layer configuration at psi_soil = 2 MPa. Single-layer on purpose:

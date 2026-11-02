@@ -370,7 +370,7 @@ test_that("everything the closed form cannot do is refused, with the reason", {
 
   # Multi-layer: the closed form for it does not exist, so it is refused rather
   # than run on layer zero.
-  ml <- leaf_model()
+  ml <- leaf_model(supply = leaf_supply_multilayer())
   set_drivers(ml, psi_soil = c(0.5, 0.75, 1.0), soil_depth = c(1, 2, 3),
               root_network = root_network_from_carbon(rep(1 / 3, 3),
                                                    c(1, 2, 3)))
@@ -408,7 +408,7 @@ test_that("the gradient differentiates the exact solve whatever is seated", {
   expect_identical(l$model_method(), "closed")
 
   g <- leaf_gradient(psi_soil = 0.5, PPFD = 1500, x = l,
-                     traits = leaf_traits(), model = "TF24",
+                     traits = leaf_traits(), model = "TF24", route = "stem",
                      root_network = series_resistance(1500),
                      pars = "vcmax_25")
   # `collar` is NaN on a stem route by construction, so the column that says the

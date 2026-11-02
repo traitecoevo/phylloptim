@@ -140,13 +140,13 @@ inline const std::vector<std::string>& output_names() {
 // A model is a (curve, route) pair, and every curve runs on both routes. The
 // collar route maximises over the root-collar potential; a stem route over
 // psi_stem with the upstream potential pinned at psi_soil, which is a different
-// model, not a restriction of the collar one (hazard 11). The default, TF24 on
-// the collar route, is the production path.
+// model, not a restriction of the collar one (hazard 11). The default is the
+// Leaf's: TF24_floor on the stem route.
 enum class Route { Collar, Stem };
 
 struct Model {
-  Leaf::CostCurve curve = Leaf::CostCurve::TF24;
-  Route route = Route::Collar;
+  Leaf::CostCurve curve = Leaf::CostCurve::TF24_floor;
+  Route route = Route::Stem;
   bool collar() const { return route == Route::Collar; }
 };
 
@@ -312,8 +312,8 @@ struct Settings {
   double stationarity_tol = 1e-8;
   Method method = Method::Auto;
   bool fast_stem_curve = true;
-  // Which model's optimum to differentiate: TF24 on the collar route, the
-  // production path, by default.
+  // Which model's optimum to differentiate: the Leaf's default, TF24_floor on
+  // the stem route, unless set.
   Model model;
   // The finite-difference arm's step, separate from `step`: that arm re-solves,
   // so its step must clear the solver's resolution (hazard 15). `step` drives

@@ -51,7 +51,7 @@ test_that("set_drivers() does not build a supply network per call", {
   # goes through `series_resistance()` and so through the RcppR6-generated
   # `RootNetwork__ctor`. Counting the constructor on the multi-layer path returns 0
   # whatever happens, because the constructor is not on that path at all.
-  l <- leaf_model()
+  l <- leaf_model(supply = leaf_supply_multilayer())
   set_drivers(l, psi_soil = 2.0)                      # warm the memo
   n <- count_calls("root_network_from_carbon",
                    for (i in 1:20) set_drivers(l, psi_soil = 2.0))

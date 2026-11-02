@@ -116,7 +116,9 @@
 ## other part of the model is in service of, which is why it is top-left.
 
 .fig_profit_panel <- function(l, n = 300, cex = 1) {
-  psi <- seq(l$psi_soil_[1], l$psi_crit, length.out = n)
+  wet <- if (identical(l$supply_kind, "single")) l$single_psi_soil_ else
+    l$psi_soil_[1]
+  psi <- seq(wet, l$psi_crit, length.out = n)
   benefit <- vapply(psi, function(p) {
     l$profit_psi_stem_TF(p, 1.0)
     l$assim_colimited_

@@ -176,8 +176,9 @@ public:
   // a branch, not a std::variant, which measured slower (hazard 6).
   SinglePotential single_;
   enum class SupplyKind { MultiLayer, SinglePotential };
-  // MultiLayer by default, which is what plant runs.
-  SupplyKind supply_kind_ = SupplyKind::MultiLayer;
+  // SinglePotential by default, with TF24_floor on the stem route: one set of
+  // defaults, here and in R. plant seats the multi-layer path itself.
+  SupplyKind supply_kind_ = SupplyKind::SinglePotential;
 
   // --- choosing the supply path ----------------------------------------------
   //
@@ -1102,9 +1103,9 @@ public:
   template <CostCurve K, int Slot> static constexpr double curve_default();
 
   // The model is configuration, because its parameters already are: set_model()
-  // seats it and optimise() takes nothing. TF24 on the collar route by default.
-  CostCurve cost_curve_ = CostCurve::TF24;
-  bool route_is_collar_ = true;
+  // seats it and optimise() takes nothing. TF24_floor on the stem route by default.
+  CostCurve cost_curve_ = CostCurve::TF24_floor;
+  bool route_is_collar_ = false;
   // The method: exact (the root-find of the first-order condition) or the closed
   // form in closed_form.hpp. A method, not a model: the two must agree where the
   // closed form is valid, which `test-closed-form.R` measures.

@@ -9,10 +9,13 @@
 # file gets its own environment -- a second copy of these drivers would be free
 # to drift, and then the two files would be pinning different operating points
 # while appearing to pin the same ones.
+# The grid is the multi-layer supply, so it is named: the default is the single
+# potential.
 grid_drivers <- function(psi_soil, ppfd = 900, vpd = 2.0, layers = 1L) {
   theta <- 0.000157
   area_leaf <- 0.05
-  list(psi_soil = psi_soil + 0.25 * (seq_len(layers) - 1),
+  list(supply = leaf_supply_multilayer(),
+       psi_soil = psi_soil + 0.25 * (seq_len(layers) - 1),
        PPFD = ppfd,
        soil_depth = 1.0 * seq_len(layers),
        root_network = root_network_from_carbon(
@@ -23,8 +26,12 @@ grid_drivers <- function(psi_soil, ppfd = 900, vpd = 2.0, layers = 1L) {
        atm_kpa = 101.3)
 }
 
+# TF24 on the collar route, the grid's model, unless the call names one.
 grid_gradient <- function(psi_soil, ppfd = 900, vpd = 2.0, layers = 1L, ...) {
-  do.call(leaf_gradient, c(grid_drivers(psi_soil, ppfd, vpd, layers), list(...)))
+  args <- c(grid_drivers(psi_soil, ppfd, vpd, layers), list(...))
+  if (is.null(args$model)) args$model <- "TF24"
+  if (is.null(args$route)) args$route <- "collar"
+  do.call(leaf_gradient, args)
 }
 
 # The same drivers as ONE observation of a leaf_batch().

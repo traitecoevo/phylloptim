@@ -133,6 +133,7 @@ There is nothing to link against — one include is the whole library.
 #include <phylloptim.hpp>
 
 phylloptim::Leaf l;                   // default Eucalyptus saligna traits
+l.set_supply_multilayer();            // a root network; the default is one soil potential
 l.setup_transpiration(phylloptim::Leaf::ncontrol_default);   // the xylem vulnerability tables, 800 knot intervals
 l.setup_root_vulnerability(phylloptim::Leaf::ncontrol_default);
 
@@ -231,6 +232,7 @@ namespace py = pybind11;
 PYBIND11_MODULE(pyleaf, m) {
   py::class_<phylloptim::Leaf>(m, "Leaf")
       .def(py::init<>())
+      .def("set_supply_multilayer", &phylloptim::Leaf::set_supply_multilayer)
       .def("set_physiology", &phylloptim::Leaf::set_physiology)
       .def("find_root_collar_psi", &phylloptim::Leaf::find_root_collar_psi)
       .def_readonly("profit", &phylloptim::Leaf::profit_)
@@ -249,11 +251,12 @@ target_link_libraries(pyleaf PRIVATE phylloptim::phylloptim)
 ```python
 >>> import pyleaf
 >>> l = pyleaf.Leaf()
+>>> l.set_supply_multilayer()
 >>> roots = pyleaf.root_network_from_carbon([20.0], [1.0], 340.0, 9400.0)
 >>> l.set_physiology(roots, 900, [2.0], [1.0], 3.14e-5, 2.0, 40.0, 25.0, 21.0, 101.3)
 >>> l.find_root_collar_psi()
 >>> l.profit
-2.5171574542596087
+2.517157453707453
 ```
 
 `set_physiology` takes a `RootNetwork`, so the binding above needs it exposed too:
@@ -287,10 +290,10 @@ curve is one call:
 library(phylloptim)
 
 leaf_solve(psi_soil = 2.0, PPFD = 900)
-#>   psi_soil layers PPFD atm_vpd ca leaf_temp atm_kpa psi_stem   collar       ci
-#> 1        2      1  900       2 40        25   101.3 3.595348 2.920437 10.48887
-#>          A            E         gc   profit ...   lambda    g1_eff
-#> 1 5.601051 1.141996e-05 0.01922619 2.517157 ... 159896.1 0.5026412
+#>   psi_soil layers PPFD atm_vpd ca leaf_temp atm_kpa psi_stem collar       ci
+#> 1        2      1  900       2 40        25   101.3 3.864854    NaN 18.71375
+#>         A            E        gc   profit ...   lambda   g1_eff
+#> 1 12.8818 3.641312e-05 0.0613037 9.188099 ... 191735.2 1.243302
 
 # a drought response
 leaf_solve(psi_soil = seq(0.5, 5, length.out = 20), PPFD = 900)
@@ -326,14 +329,14 @@ l$lambda             # marginal cost of water, dA/dE
 
 **Which model is configuration, not a call argument.** `$set_model()` seats a cost
 curve, a route and a method; `$optimise()` takes nothing, because the curves'
-constants are already on the object. The object's defaults are `"TF24"`,
-`"collar"` and `"exact"`; `leaf_solve()` and the gradients default to
-`"TF24_floor"`, plant's model, which at its default price is TF24. An existing
-caller that never sets a model is unaffected — `$find_root_collar_psi()` is that solve under its own name, which is
-what plant's sources spell.
+constants are already on the object. The defaults, here and in every R
+function, are `"TF24_floor"` (plant's model, which at its default price is TF24),
+`"stem"` and `"exact"`, over the single-potential supply; the collar route and the
+multi-layer supply are asked for. `$find_root_collar_psi()` is the collar solve
+under the name plant's sources spell.
 
 ```r
-l <- leaf_model(supply = leaf_supply_singlelayer())
+l <- leaf_model()
 set_drivers(l, psi_soil = 1.5, PPFD = 900)
 l$set_model("SOX", "stem")     # any of cost_curve_names(); "collar" or "stem"
 l$optimise()
@@ -349,7 +352,7 @@ exact solve where its validity guard fails — about 2x realised on a mixed driv
 grid, at a few percent error in wet soil and none at all on a fallback row.
 
 ```r
-c <- leaf_model(supply = leaf_supply_singlelayer())
+c <- leaf_model()
 c$CF77_lambda_ <- 1.5e5
 set_drivers(c, psi_soil = 0.5, PPFD = 1500, atm_vpd = 1)
 c$set_model("CF77", "stem", "closed")
@@ -366,28 +369,28 @@ versus tolerances, and the missing four assigned, and is what you should use.
 throughout, and it is asserted rather than documented — a negative `psi_soil` is
 an error, not a sign convention the model quietly accepts.
 
-A bare leaf needs no root carbon profile at all — collapse the whole
-soil-to-collar path to one resistance:
+By default a leaf needs no root carbon profile at all: the single-potential
+supply collapses the whole soil-to-collar path to one resistance.
 
 ```r
 leaf_solve(psi_soil = 1.5, PPFD = 900,
-           supply = leaf_supply_singlelayer(),
            root_network = series_resistance(1e3))
 ```
 
 The path is chosen when the leaf is built and cannot be flipped afterwards: a
 settable tag would leave the other path's state configured and silently ignored.
 
-On the **multi-layer** path the leaf takes the per-layer resistances, so a caller
-with measured or fitted ones can state them directly:
+On the **multi-layer** path, which plant uses and which takes the collar route,
+the leaf takes the per-layer resistances, so a caller with measured or fitted ones
+can state them directly:
 
 ```r
-l <- leaf_model()
+l <- leaf_model(supply = leaf_supply_multilayer())
 set_drivers(l, psi_soil = 1.5,
             root_network = RootNetwork(r_R_H_min = 25.5, r_R_V_sum = 1410))
 ```
 
-⚠️ The default `root_network` is a nominal 20 kg C m^-2 leaf put through
+⚠️ The multi-layer path's default `root_network` is a nominal 20 kg C m^-2 leaf put through
 `root_network_from_carbon()` — a stand-in rather than a recommendation. It is
 written out in `set_drivers()`' body so it can be seen and replaced.
 
@@ -403,11 +406,11 @@ g$gradient   # rows: parameters.  columns: A, gc, psi_stem, collar, profit
 g$method     # "ift" or "fd" -- see below
 
 # any of the nine models, on either route -- and `leaf_solve()` takes both too.
-# The default model is TF24_floor, plant's, and the default route the collar.
+# The default is TF24_floor, plant's model, on the stem route.
 leaf_gradient(psi_soil = 2.0, PPFD = 900, model = "JS22",
               pars = c("vcmax_25", "JS22_gamma"))
-leaf_gradient(psi_soil = 2.0, PPFD = 900, model = "JS22", route = "stem",
-              supply = leaf_supply_singlelayer(), pars = c("vcmax_25", "JS22_gamma"))
+leaf_gradient(psi_soil = 2.0, PPFD = 900, model = "JS22", route = "collar",
+              supply = leaf_supply_multilayer(), pars = c("vcmax_25", "JS22_gamma"))
 ```
 
 The first four columns are what a gas-exchange calibration observes. `profit` is

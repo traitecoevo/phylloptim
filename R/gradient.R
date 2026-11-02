@@ -68,10 +68,11 @@ set_traits <- function(x, traits) {
 ##' routes. `model` names the curve and `route` the potential it is maximised
 ##' over: `"collar"`, the root-collar potential, on either supply path; or
 ##' `"stem"`, `psi_stem` with the upstream potential pinned at `psi_soil`, which
-##' needs the single-potential supply path. With no `route`, a curve is
-##' maximised over the collar. The default model, `"TF24_floor"`, is plant's; at
-##' its default price, `TF24_floor_lambda_o = 0`, it is TF24. `model = "collar"`
-##' is a deprecated alias for TF24 on the collar route.
+##' needs the single-potential supply path. The defaults are one set,
+##' everywhere: `"TF24_floor"` (plant's model; at its default price,
+##' `TF24_floor_lambda_o = 0`, it is TF24) on the stem route over the
+##' single-potential supply. The collar route and the multi-layer supply are
+##' asked for.
 ##'
 ##' The product objectives, `SOX` and `JW26`, need no special case. They maximise
 ##' `A * g(psi)`, which is the `Log` benefit link applied to the same
@@ -351,13 +352,13 @@ set_traits <- function(x, traits) {
 ##' @param traits a [leaf_traits()] object: the point in trait space to
 ##'   differentiate at
 ##' @param control a [leaf_control()] object
-##' @param supply how water reaches the root collar: [leaf_supply_multilayer()]
-##'   (the default) or [leaf_supply_singlelayer()]
+##' @param supply how water reaches the root collar: [leaf_supply_singlelayer()]
+##'   (the default) or [leaf_supply_multilayer()]
 ##' @param model which optimality model to differentiate: any name from
 ##'   [cost_curve_names()], on `route`; `"TF24_floor"` by default. See *Choosing
 ##'   which model to differentiate*.
 ##' @param route `"collar"` or `"stem"`, the potential the curve is maximised
-##'   over; `NULL` (the default) is the collar route. See *Choosing which model
+##'   over; `NULL` (the default) is the stem route. See *Choosing which model
 ##'   to differentiate*.
 ##' @param pars what to differentiate with respect to. Any of the sixteen
 ##'   [leaf_traits()] names, plus `"leaf_specific_conductance_max"`, on the
@@ -458,9 +459,11 @@ set_traits <- function(x, traits) {
 ##' g$method
 ##' g$gradient[c("vcmax_25", "stem_P50"), ]
 ##'
-##' # In dry soil at high VPD the optimum pins against the edge of the feasible
-##' # range, the composite's premise fails, and the fallback is used instead.
-##' dry <- leaf_gradient(psi_soil = 4.5, PPFD = 900, atm_vpd = 3.0)
+##' # On the collar route, in dry soil at high VPD, the optimum pins against the
+##' # edge of the feasible range, the composite's premise fails, and the fallback
+##' # is used instead.
+##' dry <- leaf_gradient(psi_soil = 4.5, PPFD = 900, atm_vpd = 3.0,
+##'                      supply = leaf_supply_multilayer(), route = "collar")
 ##' dry$method       # "fd"
 ##' dry$status       # "pinned"
 ##' dry$stationarity # how far from stationary the optimum is, in MPa
@@ -478,7 +481,7 @@ leaf_gradient <- function(psi_soil,
                           x = NULL,
                           traits = leaf_traits(),
                           control = leaf_control(),
-                          supply = leaf_supply_multilayer(),
+                          supply = leaf_supply_singlelayer(),
                           pars = NULL,
                           psi = NULL,
                           dpsi_dtheta = NULL,
@@ -616,14 +619,9 @@ leaf_gradient <- function(psi_soil,
 # A (curve, route) pair, resolved by `.resolve_model()`. On the collar route the
 # decision variable is the collar; on a stem route it is `psi_stem`, `collar` is
 # not solved for, and its NA gradient is the truthful answer (hazard 11).
-.GRADIENT_COLLAR_ROUTE <- "collar"
-
-# Every model name: the collar route's (TF24) plus every cost curve, each of
-# which takes either route. The one list `.gradient_model_pars()` and
-# `.resolve_model()` validate against.
-.gradient_models <- function() {
-  c(.GRADIENT_COLLAR_ROUTE, cost_curve_names())
-}
+# Every model name: the cost curves, each of which takes either route. The one
+# list `.gradient_model_pars()` and `.resolve_model()` validate against.
+.gradient_models <- function() cost_curve_names()
 
 # The finite-difference arm's step when the caller names none. Both routes
 # root-find dprofit == 0, so psi* is stationary to ~1e-15 and a 1e-06 parameter
@@ -653,7 +651,7 @@ leaf_gradient <- function(psi_soil,
     l, drivers, theta, match(pars, .gradient_par_names()) - 1L, step,
     stationarity_tol, method, fast_stem_curve, psi, dpsi_dtheta,
     match(m$curve, cost_curve_names()) - 1L,
-    identical(m$route, .GRADIENT_COLLAR_ROUTE), fd_step))
+    identical(m$route, "collar"), fd_step))
   dimnames(res$gradient) <- list(NULL, pars, .gradient_output_names())
   dimnames(res$value) <- list(NULL, .gradient_output_names())
   dimnames(res$M) <- list(NULL, pars)
