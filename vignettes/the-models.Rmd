@@ -965,7 +965,7 @@ The root curve obeys the identical homogeneity identity and takes the same `(roo
 
 # Appendix B — gradients
 
-`leaf_gradient()` and `leaf_gradient_batch()` return exact derivatives of a solved operating point with respect to the parameters. `model` selects which model's optimum is differentiated; every curve in the table above is available, and the batch reproduces the one-observation route bit-for-bit.
+`leaf_gradient()` and `leaf_gradient_batch()` return exact derivatives of a solved operating point with respect to the parameters. `model` and `route` select which optimum is differentiated: every curve in the table above, on the collar route or the stem route. `leaf_gradient()` is the batch with one observation.
 
 ## The composite
 

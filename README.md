@@ -401,8 +401,10 @@ g <- leaf_gradient(psi_soil = 2.0, PPFD = 900,
 g$gradient   # rows: parameters.  columns: A, gc, psi_stem, collar, profit
 g$method     # "ift" or "fd" -- see below
 
-# any of the nine models, same call -- and `leaf_solve()` takes `model` too
-leaf_gradient(psi_soil = 2.0, PPFD = 900, model = "JS22",
+# any of the nine models, on either route -- and `leaf_solve()` takes both too
+leaf_gradient(psi_soil = 2.0, PPFD = 900, model = "JS22", route = "collar",
+              pars = c("vcmax_25", "JS22_gamma"))
+leaf_gradient(psi_soil = 2.0, PPFD = 900, model = "JS22",   # its stem route
               supply = leaf_supply_singlelayer(), pars = c("vcmax_25", "JS22_gamma"))
 ```
 
@@ -465,10 +467,10 @@ which is where this route wins; `vignette("fitting")` measures both regimes and
 `?leaf_gradient` has the cost model. ⚠️ **Always pass `pars`** — the default is all
 sixteen on the multi-layer path, which is the most expensive request there is.
 
-**For a fit, use `leaf_gradient_batch()`.** It is the same gradient, composed in C++
-and vectorised over observations, so a likelihood evaluation crosses the R boundary
-once instead of 112 times per observation; what that saves against a loop over
-`leaf_gradient()` is in [Performance from R](#performance-from-r).
+**For a fit, use `leaf_gradient_batch()`.** `leaf_gradient()` is the same call
+with one observation, so a loop over it crosses the R boundary once per
+observation where the batch crosses it once per likelihood evaluation; what that
+saves is in [Performance from R](#performance-from-r).
 
 ```r
 b <- leaf_batch(psi_soil = obs$psi_soil, PPFD = obs$PPFD)   # once per fit
@@ -502,21 +504,21 @@ This section is the one place the package quotes what things cost; the
 vignettes, the help pages and the developer guide link here. The figures are
 **ratios to a trivial `.Call`** (reading one field of a `Leaf`) measured in the
 same process, because a ratio travels between machines and runs and a
-microsecond figure does not. They come from the newest row of
-[`tools/cost-baseline.tsv`](tools/cost-baseline.tsv), written by
-`tools/bench_history.sh` at 0.16.2, plus `tests/cpp/bench_gradient` for the C++
-row; re-run those rather than editing a number here.
+microsecond figure does not. They come from `tools/bench_user_cost.R` at 0.29.0
+(`tools/bench_history.sh` runs it per commit into
+[`tools/cost-baseline.tsv`](tools/cost-baseline.tsv)); re-run it rather than
+editing a number here.
 
 | one call, from R | × a trivial `.Call` |
 |---|---:|
 | `$find_root_collar_psi()`: one crossing around the whole C++ solve | **2.9** |
-| driving one leaf by hand: `set_drivers()`, solve, read three fields | 13 |
-| one row of a vectorised `leaf_solve()` | 23 |
-| constructing a `Leaf` with `leaf_model()` | **~275** |
-| `leaf_gradient()`, one parameter, fresh leaf | 410 |
-| `leaf_gradient()`, one parameter, reusing a leaf (`x =`) | 130 |
-| `leaf_gradient_batch()`, per observation, four parameters | **9.9** |
-| the same gradient as an R loop over `leaf_gradient()`, reusing a leaf | 245 |
+| driving one leaf by hand: `set_drivers()`, solve, read three fields | 12 |
+| one row of a vectorised `leaf_solve()` | 22 |
+| constructing a `Leaf` with `leaf_model()` | **~260** |
+| `leaf_gradient()`, one parameter, fresh leaf | 320 |
+| `leaf_gradient()`, one parameter, reusing a leaf (`x =`) | 67 |
+| `leaf_gradient_batch()`, per observation, four parameters | **8.0** |
+| the same gradient as an R loop over `leaf_gradient()`, reusing a leaf | 78 |
 
 Four things follow:
 
@@ -530,14 +532,14 @@ Four things follow:
   interface is the one to reach for in an inner loop.
 - **The lever is making fewer R calls per row.** If you need a fit's inner loop
   faster than this, the thing to remove is the boundary — which means C++, or
-  `leaf_gradient_batch()`, which crosses it once per call and is about 25× the
+  `leaf_gradient_batch()`, which crosses it once per call and is about 10× the
   R loop per observation.
 - **Construct once and reuse.** Constructing a `Leaf` costs about as much as a
   hundred solves from R, and most of it is R-side object construction over the
   active bindings rather than the vulnerability tables. Re-traiting and
   re-driving an existing leaf costs about four solves, which is why
   `leaf_solve(reuse = TRUE)` is the default, why [`set_traits()`](#trait-gradients)
-  exists, and why construction is about two-thirds of a one-parameter
+  exists, and why construction is about four-fifths of a one-parameter
   `leaf_gradient()` on a fresh leaf.
 
 One C++ cost is worth knowing because it surprises people, and batching cannot

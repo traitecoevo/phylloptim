@@ -20,6 +20,7 @@ leaf_solve(
   supply = leaf_supply_multilayer(),
   reuse = TRUE,
   model = "collar",
+  route = NULL,
   CF77_lambda = NA_real_,
   TF24_floor_lambda_o = NA_real_,
   LeastCost_beta = NA_real_
@@ -80,8 +81,15 @@ than assumed, and the package's tests do check it.}
 \item{model}{which optimality model to solve, as in \code{\link[=leaf_gradient]{leaf_gradient()}}:
 \code{"collar"} (the default, the production path -- the TF24 cost maximised over
 the root-collar potential) or any name from \code{\link[=cost_curve_names]{cost_curve_names()}}, which
-solves that curve's \strong{stem} optimum instead: \code{psi_stem} with the upstream
-potential pinned at \code{psi_soil}, which needs \code{leaf_supply_singlelayer()}.
+solves that curve on \code{route}.}
+
+\item{route}{which potential the curve is maximised over: \code{"collar"}, the
+root-collar potential, on either supply path; or \code{"stem"}, \code{psi_stem} with
+the upstream potential pinned at \code{psi_soil}, which needs
+\code{leaf_supply_singlelayer()}. \code{NULL} (the default) is the collar route for
+\code{model = "collar"} and the stem route for a curve name, so a call that
+names no route means what it always has. \code{model = "collar"} is TF24 on the
+collar route, so it takes no \code{route = "stem"}: that is \code{model = "TF24"}.
 
 ⚠️ \strong{\code{"collar"} and \code{"TF24"} are different models, not two ways of asking
 one question}, even though both use the TF24 cost. They optimise different

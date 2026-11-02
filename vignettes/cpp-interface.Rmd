@@ -182,11 +182,12 @@ Three things the free function gives you that a hand-rolled loop would not:
 * **per-row status rather than an exception**, so a proposal that reaches an
   unsolvable point costs that row and not the batch.
 
-**It is required to reproduce `R/gradient.R` bit-for-bit**, which is what
-`tests/testthat/test-gradient-batch.R` asserts. If you modify it, read its header
-first: the arithmetic order is literal, there is a deliberate barrier against fused
-multiply-add, and every difference names its two halves because C++ does not
-sequence `f(a) - f(b)` and R does.
+**It is every trait gradient the package gives**: `leaf_gradient()` and
+`leaf_gradient_batch()` both call it. `Settings::model` names the curve and the
+route, TF24 on the collar route by default. `tests/testthat/test-gradient-referee.R`
+checks it against a difference of the solve for every curve on both routes. If
+you modify it, read its header first: every difference names its two halves,
+because the evaluations mutate the leaf and C++ does not sequence `f(a) - f(b)`.
 
 The ingredients are public, if you want to compose something else:
 

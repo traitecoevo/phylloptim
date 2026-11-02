@@ -303,14 +303,14 @@ Both are linear, and the two coefficients are the whole story:
 
 - **the finite difference is pure slope.** Its intercept is about 0 and its slope is
   `2 ×` one objective evaluation, because that is literally what it does;
-- **the exact gradient has a large intercept and a slope too.** The intercept is
-  the per-observation `Leaf` construction and solve, paid once whatever you ask
-  for. The slope is `2` evaluations per parameter per observation.
+- **the exact gradient is nearly all intercept.** The intercept is the
+  per-observation `Leaf` construction, solve and R call, paid once whatever you
+  ask for. Its slope is `2` evaluations per parameter per observation in C++,
+  which is close to free; most of what slope there is comes from `stem_c` and
+  `root_c`, whose perturbations rebuild a vulnerability table.
 
-Here the exact route's *slope* is the larger of the two, so **growing the parameter
-count in this design never makes it win.** The ratio improves but does not reach 1.
-Each extra parameter costs it two more R calls per observation, and from R a call
-costs more than the C++ work it wraps.
+So the ratio improves with every parameter, but in this design the intercept is
+large enough that **it does not reach 1 at any count fitted here.**
 
 ### What reverses it is more *fitted* parameters per *model* parameter
 
@@ -400,15 +400,10 @@ data.frame(
 )
 ```
 
-The third row is most of the intercept. `leaf_gradient()` constructs a fresh model
-on every call, and there is no argument for handing it one you already have, so a
-gradient over `n` observations pays `n` constructions.
-
-The rest is the R call boundary itself. The composite replaces one solve with a
-handful of much cheaper evaluations, but each of those is an R call into C++, and an
-R call costs more than the C++ work it wraps. The theorem does less arithmetic and
-more crossing. That is also why the exact route has a slope in `P_model` at all,
-rather than the near-free one the C++ benchmarks show.
+The third row is most of the intercept. `leaf_gradient()` as called here
+constructs a fresh model on every call, so a gradient over `n` observations pays
+`n` constructions. The rest is one R call per observation, around a composite
+that runs in C++.
 
 Four things follow:
 
@@ -419,15 +414,13 @@ Four things follow:
   vignette naturally demonstrates because fitting traits directly is the simplest
   thing to show. Real fits are usually not that case.
 - **Reuse the model object.** `leaf_gradient(x = )` takes a `Leaf` you already
-  have, which removes the construction cost from the intercept. In
-  that study, model construction was 29% of the exact gradient. It does not make the
-  composite the faster arm in *this* design, because here the problem is the slope
-  rather than the intercept.
-- **Use the batch entry point, which removes the slope.**
-  `leaf_gradient_batch()` composes the theorem in C++ and loops over observations
-  there, so the boundary is crossed once per call instead of 112 times per
-  observation: **over an order of magnitude cheaper per observation** than the R
-  loop at `length(pars)` = 4 ([measured](https://github.com/traitecoevo/phylloptim#performance-from-r)).
+  have, which removes the construction cost from the intercept, most of it in
+  this design.
+- **Use the batch entry point, which removes the rest of the intercept.**
+  `leaf_gradient()` is `leaf_gradient_batch()` with one observation, so a loop
+  over it crosses the boundary once per observation; the batch crosses it once
+  per call, and is **about ten times cheaper per observation** than that loop at
+  `length(pars)` = 4 ([measured](https://github.com/traitecoevo/phylloptim#performance-from-r)).
 
 Read the table above as what the R boundary costs, not as the fastest this can
 go. The cost *model* is the thing to reason with, and `P_fit` against `P_model` is

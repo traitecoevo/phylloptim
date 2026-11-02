@@ -26,7 +26,8 @@ leaf_gradient(
   stationarity_tol = 1e-08,
   method = c("auto", "ift", "fd"),
   fast_stem_curve = TRUE,
-  model = "collar"
+  model = "collar",
+  route = NULL
 )
 }
 \arguments{
@@ -149,9 +150,14 @@ so the equivalence is checkable rather than assumed, and the package's tests
 require the two routes to agree.}
 
 \item{model}{which optimality model to differentiate: \code{"collar"} (the
-default, the production path) or any name from \code{\link[=cost_curve_names]{cost_curve_names()}}, which
-differentiates that curve's stem optimum instead. See \emph{Choosing which model
-to differentiate}.}
+default, the production path: TF24 on the collar route) or any name from
+\code{\link[=cost_curve_names]{cost_curve_names()}}, on \code{route}. See \emph{Choosing which model to
+differentiate}.}
+
+\item{route}{\code{"collar"} or \code{"stem"}, the potential the curve is maximised
+over; \code{NULL} (the default) is the collar route for \code{model = "collar"} and
+the stem route for a curve name. See \emph{Choosing which model to
+differentiate}.}
 }
 \value{
 A list with
@@ -177,7 +183,11 @@ entry is the analytic zero at a stationary point and the exact
 \item{\code{psi}}{the collar the outputs were evaluated at: \verb{psi*} on the
 solving path, and the \code{psi} argument on the prescribed path, refused
 or not}
+\item{\code{model}, \code{route}}{the model differentiated and its route}
 }
+
+An entry that is not determined, such as a refused point's gradient or a
+stem route's \code{collar}, is \code{NaN}.
 }
 \description{
 The derivatives of the solved outputs with respect to the traits:
@@ -186,12 +196,14 @@ The derivatives of the solved outputs with respect to the traits:
 }
 \section{Choosing which model to differentiate}{
 
-\code{model} selects it, and every model in the package has a route. \code{"collar"},
-the default, is the TF24 cost maximised over the root-collar potential -- the
-production path. Naming any of the nine cost curves
-(\code{cost_curve_names()}) differentiates the corresponding \strong{stem} optimum
-instead: \code{psi_stem} with the upstream potential pinned at \code{psi_soil}, which
-needs the single-potential supply path.
+A model is a cost curve and a route, and every curve has a gradient on both
+routes. \code{model} names the curve and \code{route} the potential it is maximised
+over: \code{"collar"}, the root-collar potential, on either supply path; or
+\code{"stem"}, \code{psi_stem} with the upstream potential pinned at \code{psi_soil}, which
+needs the single-potential supply path. \code{model = "collar"}, the default, is
+TF24 on the collar route -- the production path. A curve name from
+\code{cost_curve_names()} with no \code{route} is that curve's stem route, so a call
+that names no route means what it always has.
 
 The product objectives, \code{SOX} and \code{JW26}, need no special case. They maximise
 \code{A * g(psi)}, which is the \code{Log} benefit link applied to the same
@@ -202,9 +214,9 @@ question}, even though both use the TF24 cost. They optimise different
 variables over different supply topologies, disagree on 20 of 30 driver rows,
 and the gap does not close as the root resistance goes to zero.
 
-⚠️ \strong{\code{model} SEATS the leaf, including one you passed as \code{x}.} The route is
-applied with \verb{$set_model()} and is left there when this returns, alongside the
-base-point traits and solve. A loop that alternates models on one \code{x} is fine;
+⚠️ \strong{\code{model} SEATS the leaf, including one you passed as \code{x}.} The curve
+and route are applied with \verb{$set_model()} and left there when this returns,
+alongside the base-point traits and solve. A loop that alternates models on one \code{x} is fine;
 a loop that takes a gradient and then reads \verb{$optimise()} off the same object
 expecting the default is not.
 
@@ -442,8 +454,7 @@ A companion calibration study has \code{N = 1327}, \code{P_fit = 40},
 thing you can ask for, and a fit that reads four of them pays for the rest.
 
 The intercept is a fresh \code{Leaf} per call. Pass \code{x} to reuse one across calls
-(#52); without it, construction is 29\% of the exact gradient in the study
-above.
+(#52); without it, construction is most of a one-observation gradient.
 }
 
 \section{Precision}{
@@ -476,8 +487,7 @@ is an error rather than silently resolved.
 
 \strong{\code{x} is left solved at the base point}, not at the last perturbation — the
 state this function seats it in, restored on the way out including on an error.
-The restore costs one re-trait and one solve, a small fraction of the
-construction it saves.
+The restore costs one solve, a small fraction of the construction it saves.
 }
 
 \examples{

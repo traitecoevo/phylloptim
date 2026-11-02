@@ -1,3 +1,10 @@
+# phylloptim 0.29.0
+
+- Every cost curve has a trait gradient on both routes. `leaf_gradient()`, `leaf_gradient_batch()` and `leaf_solve()` take `route = "collar"` or `"stem"`; with no `route`, `model = "collar"` is TF24 on the collar route and a curve name its stem route, as before, so no existing call changes.
+- `leaf_gradient()` is `leaf_gradient_batch()` with one observation: it crosses into C++ once rather than over a hundred times, and its result names its `route`. An entry it cannot determine (a refused point's gradient, a stem route's `collar`) is `NaN`, as the batch's always was, where it was `NA`.
+- Gradients can move in the last bit: the composite now lets the compiler fuse one multiply-add it used to round twice to match an R twin that is gone. 21 of the 565 recorded cells move, all by rounding.
+- ProfitMax at a prescribed collar potential (`$evaluate_root_collar_psi()`) seeds its normalisers, as its solve does; on a leaf whose drivers were just set it used to fail with a non-finite profit ([#232](https://github.com/traitecoevo/phylloptim/issues/232)).
+
 # phylloptim 0.28.0
 
 - **Breaking:** `$lambda`, `$lambda_molar` and the `lambda` column of `operating_point()` and `leaf_solve()` report the marginal cost of water of the curve the leaf is set to, on the route it was solved; they used to report TF24's whatever curve was set. `$lambda_emergent` and the `lambda_emergent` column, which held that number, are gone: read `lambda`. `$lambda_multilayer` is gone too: on the collar route `$lambda` is that number, for every curve.
