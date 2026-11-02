@@ -573,8 +573,9 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
 ##' @examples
 ##' l <- leaf_model()
 ##' set_drivers(l, psi_soil = 2.0, PPFD = 900, atm_vpd = 1.5)
-##' # three drying layers
-##' set_drivers(l, psi_soil = c(1.0, 1.5, 2.0), PPFD = 900)
+##' # three drying layers, on a root network
+##' ml <- leaf_model(supply = leaf_supply_multilayer())
+##' set_drivers(ml, psi_soil = c(1.0, 1.5, 2.0), PPFD = 900)
 ##' @export
 set_drivers <- function(x,
                         psi_soil,
@@ -891,12 +892,12 @@ operating_point <- function(x) {
 ##' d <- leaf_solve(psi_soil = seq(0.5, 5, length.out = 6), PPFD = 900)
 ##' d[, c("psi_soil", "A", "gc", "g1_eff")]
 ##'
-##' # two three-layer profiles
-##' leaf_solve(psi_soil = list(c(1, 1.5, 2), c(3, 3.5, 4)), PPFD = 900)
+##' # two three-layer profiles, on a root network and the collar route
+##' leaf_solve(psi_soil = list(c(1, 1.5, 2), c(3, 3.5, 4)), PPFD = 900,
+##'            supply = leaf_supply_multilayer(), route = "collar")
 ##'
-##' # a different optimality model, on the single-potential path it needs
-##' leaf_solve(psi_soil = 1.5, PPFD = 900, model = "SOX",
-##'            supply = leaf_supply_singlelayer())
+##' # a different optimality model
+##' leaf_solve(psi_soil = 1.5, PPFD = 900, model = "SOX")
 ##' @export
 leaf_solve <- function(psi_soil,
                        PPFD = 900,

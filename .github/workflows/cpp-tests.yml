@@ -193,6 +193,9 @@ jobs:
           #include <vector>
           int main() {
             phylloptim::Leaf l;
+            // A Leaf defaults to the single-potential supply; a root network is
+            // asked for, and seats the collar route.
+            l.set_supply_multilayer();
             // The root RESISTANCES, via the architecture model (#33). Exercising
             // root_network_from_carbon and layer_thicknesses here is deliberate: a
             // consumer with a carbon profile has to be able to reach both from the
@@ -261,11 +264,13 @@ jobs:
             static_assert(phylloptim::gradient::n_theta == 35,
                           "theta above is written out element by element; update "
                           "it and this assertion together");
+            phylloptim::gradient::Settings s;  // the Leaf's defaults, unless set
+            s.model = {phylloptim::Leaf::CostCurve::TF24,
+                       phylloptim::gradient::Route::Collar};
             const int pars[1] = {0};  // vcmax_25
             const std::vector<phylloptim::gradient::Drivers> obs{d, d};
             const std::vector<phylloptim::gradient::Result> g =
-                phylloptim::gradient::batch(l, theta, 1, obs, false, pars, 1,
-                                            phylloptim::gradient::Settings());
+                phylloptim::gradient::batch(l, theta, 1, obs, false, pars, 1, s);
             std::printf("dA/dvcmax = %.17g  status = %s\n", g[0].grad[0],
                         phylloptim::gradient::status_name(g[0].status).c_str());
             // Both observations are the same point, so a per-row loop that leaked

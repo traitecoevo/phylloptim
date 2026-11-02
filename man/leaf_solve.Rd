@@ -204,12 +204,12 @@ leaf_solve(psi_soil = 1.0, PPFD = seq(100, 1800, length.out = 6))
 d <- leaf_solve(psi_soil = seq(0.5, 5, length.out = 6), PPFD = 900)
 d[, c("psi_soil", "A", "gc", "g1_eff")]
 
-# two three-layer profiles
-leaf_solve(psi_soil = list(c(1, 1.5, 2), c(3, 3.5, 4)), PPFD = 900)
+# two three-layer profiles, on a root network and the collar route
+leaf_solve(psi_soil = list(c(1, 1.5, 2), c(3, 3.5, 4)), PPFD = 900,
+           supply = leaf_supply_multilayer(), route = "collar")
 
-# a different optimality model, on the single-potential path it needs
-leaf_solve(psi_soil = 1.5, PPFD = 900, model = "SOX",
-           supply = leaf_supply_singlelayer())
+# a different optimality model
+leaf_solve(psi_soil = 1.5, PPFD = 900, model = "SOX")
 }
 \seealso{
 \code{\link[=leaf_model]{leaf_model()}} for the stateful interface.

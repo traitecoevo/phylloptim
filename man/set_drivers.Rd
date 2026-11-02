@@ -117,8 +117,9 @@ remaining asymmetry between the two paths, and why it is left in place.
 \examples{
 l <- leaf_model()
 set_drivers(l, psi_soil = 2.0, PPFD = 900, atm_vpd = 1.5)
-# three drying layers
-set_drivers(l, psi_soil = c(1.0, 1.5, 2.0), PPFD = 900)
+# three drying layers, on a root network
+ml <- leaf_model(supply = leaf_supply_multilayer())
+set_drivers(ml, psi_soil = c(1.0, 1.5, 2.0), PPFD = 900)
 }
 \seealso{
 \code{\link[=leaf_model]{leaf_model()}}, \code{\link[=leaf_solve]{leaf_solve()}}
