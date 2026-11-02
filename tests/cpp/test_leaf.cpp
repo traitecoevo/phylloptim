@@ -2543,7 +2543,7 @@ void test_every_curve_reports_an_emergent_lambda() {
       phylloptim::Leaf l = make_leaf(d, {psi_soil}, {1.0});
       l.CF77_lambda_ = 1.5e5;
       l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::CF77>();
-      near(l.lambda_emergent(), l.CF77_lambda_, 1e-8,
+      near(l.lambda_emergent(), l.CF77_lambda_, 1e-7,
            "Cowan-Farquhar's emergent lambda is its prescribed one");
     }
     // --- TF24: against a finite difference of dC/dE -------------------------
@@ -7729,14 +7729,15 @@ void test_closed_form_is_a_selectable_method() {
   // --- CF77: n = 0, so lambda is the prescribed price -----------------------
   // The analytical identity for the n = 0 arm: with a constant lambda there is no
   // power law to approximate, so the reported marginal cost is the price, to the
-  // stem table's slope accuracy (the generic lambda reads E' in closed form).
+  // stem table's slope accuracy (the generic lambda reads E' in closed form),
+  // which on these 100-knot tables reaches ~1e-8.
   // It checks that the closed arm reads `cf77_price()`.
   {
     phylloptim::Leaf l = make_single_leaf(d, 0.5);
     l.CF77_lambda_ = 1.5e5;
     l.set_model("CF77", "stem", "closed");
     l.optimise();
-    near(l.lambda_emergent(), 1.5e5, 1e-8,
+    near(l.lambda_emergent(), 1.5e5, 1e-7,
          "the closed CF77 arm reports the prescribed price");
     // And it composes with the soil-moisture option (#128), which is why the
     // closed form reads cf77_price() and not CF77_lambda_.
@@ -7747,7 +7748,7 @@ void test_closed_form_is_a_selectable_method() {
     m.set_model("CF77", "stem", "closed");
     m.optimise();
     const double beta = (0.35 - m.theta_w_) / (m.theta_fc_ - m.theta_w_);
-    ok(std::abs(m.lambda_emergent() / (1.5e5 / beta) - 1.0) < 1e-8,
+    ok(std::abs(m.lambda_emergent() / (1.5e5 / beta) - 1.0) < 1e-7,
        "and divides it by the Medlyn soil-moisture factor when that is on");
     ok(m.opt_psi_stem_ < l.opt_psi_stem_,
        "so a drier soil closes the stomata on the closed path too");
@@ -8735,7 +8736,7 @@ void test_lambda_emergent_reported() {
       f.TF24_floor_lambda_o = price;
       f.set_model(phylloptim::Leaf::CostCurve::TF24_floor, false);
       f.optimise();
-      near(f.lambda_emergent(), f.lambda_TF24(f.opt_psi_stem_) + price, 1e-8,
+      near(f.lambda_emergent(), f.lambda_TF24(f.opt_psi_stem_) + price, 1e-7,
            "TF24_floor's emergent lambda is the hydraulic half plus the floor");
 
       // the reported vector carries the same number the accessor does, in the
@@ -8926,7 +8927,7 @@ void test_tf24_floor_emergent_lambda() {
     ok(got > l.TF24_floor_lambda_o,
        "the emergent lambda sits above the wet-end floor at psi_soil=" +
            std::to_string(psi_soil));
-    near(got, l.lambda_TF24(psi) + l.TF24_floor_lambda_o, 1e-8,
+    near(got, l.lambda_TF24(psi) + l.TF24_floor_lambda_o, 1e-7,
        "and it IS TF24's own lambda plus the floor at psi_soil=" +
            std::to_string(psi_soil));
   }

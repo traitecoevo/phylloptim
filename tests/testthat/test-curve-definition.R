@@ -121,3 +121,32 @@ test_that("every curve's lambda is its cost's slope over E's, in carbon", {
                  tolerance = 1e-6, info = curve)
   }
 })
+
+test_that("with the energy balance on, lambda takes the cost's path through Tleaf", {
+  # LeastCost's capacity term and ProfitMax's thermal cost read leaf
+  # temperature, which E moves. Each stencil point is evaluated, so Tleaf, and
+  # the vcmax_ and thermal cost read at it, follow E as they do at a solve.
+  for (curve in c("LeastCost", "ProfitMax")) {
+    l <- leaf_model(supply = leaf_supply_singlelayer())
+    l$use_energy_balance_ <- TRUE
+    l$use_thermal_cost_ <- identical(curve, "ProfitMax")
+    l$NIR_int_ <- 1500 / 4.57  # daylight
+    set_drivers(l, psi_soil = 1, PPFD = 1500, leaf_temp = 35, atm_vpd = 2)
+    l$prepare_profitmax()
+    ps <- 1.8
+    pu <- 1
+    h <- 1e-5
+    at <- function(psi) {
+      l$curve_profit(curve, psi, pu)
+      c(C = l$curve_cost(curve, psi, pu), E = l$transpiration_)
+    }
+    hi <- at(ps + h)
+    lo <- at(ps - h)
+    l$curve_profit(curve, ps, pu)
+    scale <- if (identical(curve, "ProfitMax")) l$profitmax_A_max else l$assim_colimited_
+    lambda <- l$curve_lambda(curve, ps, pu)
+    expect_true(is.finite(lambda), info = curve)
+    expect_equal(lambda, (hi[["C"]] - lo[["C"]]) / (hi[["E"]] - lo[["E"]]) * scale,
+                 tolerance = 1e-5, info = curve)
+  }
+})

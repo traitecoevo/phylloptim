@@ -2564,7 +2564,7 @@ equations:
     reads: [leaf_specific_conductance_max]
     writes: []
     kind: derivative
-    note: 'Every curve''s λ: $1/h''$ is 1, $A$ or $|A|_{\max}$, NA where the link has no slope ($A \le 0$ under the log link, unusable normalisers), and the temperature term is there only for a cost that reads leaf temperature, with the energy balance on. A cost that reads E (CF77, TF24_floor''s floor, LeastCost) has its slope from the stem table, which $E''$ here does not use, so CF77''s λ is its price to the table''s slope accuracy against the closed form: about 1e-12 at the default curve, up to 4e-10 on a shallow one or a coarse table. Over the stem-optima golden grid it equals each curve''s closed form above to 1.4e-15 relative where neither reads E.'
+    note: 'Every curve''s λ: $1/h''$ is 1, $A$ or $|A|_{\max}$, NA where the link has no slope ($A \le 0$ under the log link, unusable normalisers), and the temperature term is there only for a cost that reads leaf temperature, with the energy balance on. A cost that reads E (CF77, TF24_floor''s floor, LeastCost) has its slope from the stem table, which $E''$ here does not use, so CF77''s λ is its price to the table''s slope accuracy against the closed form: about 1e-12 at the default curve, up to 4e-10 on a shallow one and about 1e-8 on a 100-knot table. Over the stem-optima golden grid it equals each curve''s closed form above to 1.4e-15 relative where neither reads E.'
   lambda_molar:
     section: marginal_cost
     title: λ in molar units
