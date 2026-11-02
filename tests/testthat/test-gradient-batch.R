@@ -210,34 +210,17 @@ test_that("the batch's finite-difference arm takes a step the caller names", {
 })
 
 test_that("the recorded gradients have not moved", {
-  # The guard the bit-for-bit comparisons above cannot be: they would pass a
-  # change applied to BOTH implementations. See this file's header, and
-  # tools/gradient_golden.R for how to regenerate -- deliberately.
+  # The guard the finite-difference referee cannot be: it would pass a change
+  # that moves every number by less than the solver's floor. See this file's
+  # header, and tools/gradient_golden.R for how to regenerate -- deliberately.
   #
   # ⚠️ Hex floats, read exactly. Do not convert them to decimals: R's decimal
   # parser is not correctly rounded and about 18% of full-precision values come
   # back one ULP out (#13).
   gold <- utils::read.delim(test_path("gradient_golden.tsv"),
                            stringsAsFactors = FALSE)
-  pars_grid <- c("vcmax_25", "stem_P50", "stem_c", "R_d_25")
-  cases <- list(
-    "interior-1layer" = list(args = batch_drivers(2.0), pars = pars_grid),
-    "interior-5layer" = list(args = batch_drivers(0.5, vpd = 0.5, layers = 5L),
-                             pars = pars_grid),
-    # The leaf transpires all its stem can carry: a dry pin at the end of the
-    # stem curve (#183) -- see tools/gradient_golden.R.
-    "pinned-dry-1layer" = list(args = batch_drivers(6.0, ppfd = 500, vpd = 0.5),
-                               pars = pars_grid),
-    # A soil past the end of the stem curve, which shuts the leaf.
-    "shutdown-1layer" = list(args = c(batch_drivers(16.0),
-                                      list(traits = leaf_traits(root_P50 = 4.0))),
-                             pars = pars_grid),
-    "single-potential" = list(
-      args = list(psi_soil = 1.5, PPFD = 900, atm_vpd = 2.0,
-                  supply = leaf_supply_singlelayer(),
-                  root_network = series_resistance(1e4)),
-      pars = c("vcmax_25", "leaf_specific_conductance_max", "resistance",
-               "R_d_25")))
+  # The one list tools/gradient_golden.R wrote the file from.
+  cases <- gradient_golden_cases()
 
   expect_setequal(unique(gold$case), names(cases))
   # ⚠️ BIT-EXACT ONLY ON THE PLATFORM THAT GENERATED IT, macOS/arm64, exactly as
@@ -258,8 +241,8 @@ test_that("the recorded gradients have not moved", {
   for (nm in names(cases)) {
     cs <- cases[[nm]]
     rows <- gold[gold$case == nm, ]
-    b <- do.call(leaf_batch, cs$args)
-    g <- leaf_gradient_batch(b, pars = cs$pars)
+    expect_identical(rows$par, cs$pars, label = nm)
+    g <- gradient_golden_run(cs)
     expect_identical(g$status[[1]], rows$status[[1]], label = nm)
     expect_identical(g$method[[1]], rows$method[[1]], label = nm)
     for (i in seq_len(nrow(rows))) {
@@ -269,7 +252,8 @@ test_that("the recorded gradients have not moved", {
                       paste(nm, rows$par[[i]]),
                       tolerance = gradient_golden_tolerance())
         ref <- as.numeric(rows[[out]][[i]])
-        if (ref != 0) {
+        # A stem route's `collar` is NaN: it is not solved for.
+        if (is.finite(ref) && ref != 0) {
           worst <- max(worst, abs(got - ref) / abs(ref))
         }
       }

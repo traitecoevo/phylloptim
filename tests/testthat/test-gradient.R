@@ -1340,7 +1340,7 @@ test_that("the remaining route restrictions are the topological ones", {
                "single-potential supply path")
   expect_error(leaf_gradient(psi_soil = 1.5, PPFD = 1500,
                              pars = "TF24_cost_scale", model = "Medlyn"),
-               "no gradient route")
+               "unknown model")
 })
 
 test_that("ProfitMax's normaliser follows the traits, so the composite is a total", {

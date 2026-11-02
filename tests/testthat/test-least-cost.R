@@ -130,7 +130,7 @@ test_that("LeastCost_beta is in the gradient enumeration, owned by one curve", {
   # and `TF24_floor_lambda_o` get.
   expect_error(
     leaf_gradient(psi_soil = 1.0, PPFD = 900, pars = "LeastCost_beta",
-                  model = "TF24"),
+                  model = "TF24", route = "collar"),
     "LeastCost")
 })
 

@@ -40,3 +40,87 @@ batch_drivers <- function(psi_soil, ppfd = 900, vpd = 2.0, layers = 1L) {
   d$soil_depth <- list(d$soil_depth)
   d
 }
+
+# The rows gradient_golden.tsv records: tools/gradient_golden.R writes them and
+# test-gradient-batch.R reads them back, both from this one list. Each case is a
+# one-observation leaf_batch() (`args`) differentiated in `pars` on (`model`,
+# `route`), at a prescribed `psi` where one is given, after `setup` has been
+# applied to the batch's leaf. Append, never edit: a case's rows are its record.
+gradient_golden_cases <- function() {
+  grid <- c("vcmax_25", "stem_P50", "stem_c", "R_d_25")
+  single <- function(psi_soil) {
+    list(psi_soil = psi_soil, PPFD = 900, atm_vpd = 2.0,
+         supply = leaf_supply_singlelayer(),
+         root_network = series_resistance(1e4))
+  }
+  case <- function(args, pars, model = "collar", route = NULL, psi = NULL,
+                   dpsi_dtheta = NULL, setup = NULL) {
+    list(args = args, pars = pars, model = model, route = route, psi = psi,
+         dpsi_dtheta = dpsi_dtheta, setup = setup)
+  }
+  cases <- list(
+    "interior-1layer" = case(batch_drivers(2.0), grid),
+    "interior-5layer" = case(batch_drivers(0.5, vpd = 0.5, layers = 5L), grid),
+    # A dry pin: psi_crit bounds nothing under TF24 (#183), so the leaf pins dry
+    # only where it transpires all its stem can carry -- a dry soil in humid
+    # air, with the stem held at the end of its curve.
+    "pinned-dry-1layer" = case(batch_drivers(6.0, ppfd = 500, vpd = 0.5), grid),
+    # A shut leaf: a soil past the end of the stem curve (15.44 MPa at the
+    # defaults), where the stem carries nothing.
+    "shutdown-1layer" = case(c(batch_drivers(16.0),
+                               list(traits = leaf_traits(root_P50 = 4.0))),
+                             grid),
+    "single-potential" = case(single(1.5),
+                              c("vcmax_25", "leaf_specific_conductance_max",
+                                "resistance", "R_d_25")))
+
+  # Every curve on both routes, in its own parameters and three every curve
+  # reads. The prices leave the collar route's optimum interior: at their
+  # aligned defaults CF77 and LeastCost pin it at the dry end, where the rows
+  # would come from the finite-difference arm the cases above already pin.
+  cp <- cost_curve_parameters()
+  prices <- list(CF77 = list(CF77_lambda = 3e5),
+                 TF24_floor = list(TF24_floor_lambda_o = 1.5e5),
+                 LeastCost = list(LeastCost_beta = 5))
+  for (cv in cost_curve_names()) {
+    own <- cp$parameter[cp$curve == cv]
+    for (route in c("collar", "stem")) {
+      args <- c(if (route == "collar") batch_drivers(1.0) else single(1.0),
+                prices[[cv]])
+      pars <- c("vcmax_25", "stem_P50", "R_d_25", own,
+                if (route == "stem") "resistance")
+      cases[[paste0(cv, "-", route)]] <- case(args, pars, cv, route)
+    }
+  }
+
+  # The thermal-damage layer, on: its inputs are parameters only then.
+  hot <- batch_drivers(1.0)
+  hot$leaf_temp <- 38
+  cases[["damage-collar"]] <- case(
+    hot,
+    c("vcmax_25", "A_", "D_", "topt_offset_", "c_repair_maint_"),
+    setup = function(l) {
+      l$use_thermal_damage_ <- TRUE
+      l$A_ <- 0.1
+      l$D_ <- 0.05
+    })
+  # A prescribed point on each route, off the optimum, with the caller's own
+  # dpsi/dtheta; ProfitMax's collar is the one whose normalisers the prescribed
+  # evaluation must seed.
+  cases[["prescribed-collar"]] <- case(batch_drivers(1.0), grid, psi = 2.0,
+                                       dpsi_dtheta = c(0.1, -0.2, 0.3, 0))
+  cases[["prescribed-ProfitMax-collar"]] <- case(
+    batch_drivers(1.0), c("vcmax_25", "stem_P50"), "ProfitMax", "collar",
+    psi = 2.0)
+  cases[["prescribed-JS22-stem"]] <- case(
+    single(1.0), c("vcmax_25", "stem_P50", "JS22_gamma"), "JS22", psi = 2.0)
+  cases
+}
+
+# One golden case's gradient, through the batch.
+gradient_golden_run <- function(cs) {
+  b <- do.call(leaf_batch, cs$args)
+  if (!is.null(cs$setup)) cs$setup(b$leaf)
+  leaf_gradient_batch(b, pars = cs$pars, model = cs$model, route = cs$route,
+                      psi = cs$psi, dpsi_dtheta = cs$dpsi_dtheta)
+}
