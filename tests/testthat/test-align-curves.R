@@ -110,7 +110,7 @@ test_that("an unset owned price takes the default, and only on its own route", {
                      pars = "CF77_lambda_")
   expect_true(all(is.finite(g$gradient[, c("A", "gc", "psi_stem")])))
   expect_lt(g$gradient[, "gc"], 0)  # a dearer price of water closes the leaf
-  # ... and NA everywhere else, so the R reference writes nothing there.
+  # ... and NA everywhere else, so the gradient writes nothing there.
   expect_true(is.na(.owned_value("TF24", "CF77_lambda_")))
   expect_true(is.na(.owned_value("collar", "LeastCost_beta")))
   expect_true(is.na(.owned_value("TF24_floor", "TF24_floor_lambda_o")))

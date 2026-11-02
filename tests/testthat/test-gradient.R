@@ -834,13 +834,11 @@ test_that("leaf_gradient() refuses the combinations that would disagree", {
 })
 
 test_that("the setter's positional trait call cannot drift in arity", {
-  # `.gradient_setter()` applies traits POSITIONALLY, straight onto the object, to
-  # skip rebuilding a leaf_traits per perturbation. It used to name a fixed number
-  # of subscripts, and a trait added to leaf_traits() and to the C++ setter would
-  # silently pass the wrong value for every argument after the new one -- so this
-  # test asserted the arity. It is a `do.call` over the derived trait vector now,
-  # which cannot drift; what is still worth asserting is that the three lists agree
-  # with each other, since the setter takes its ORDER from the C++ enumeration.
+  # Traits are applied POSITIONALLY (hazard 13): set_traits() and C++'s
+  # `gradient::apply()` pass them in the C++ setter's argument order, and the
+  # gradient's slots take their order from the C++ enumeration. A trait added to
+  # one list and not the others would silently pass the wrong value for every
+  # argument after it, so the three lists are asserted to agree.
   expect_length(leaf_traits(), 16L)
   expect_length(formals(leaf_model()$set_traits), 16L)
   expect_identical(names(leaf_traits()), names(formals(leaf_model()$set_traits)))
@@ -852,7 +850,7 @@ test_that("the setter's positional trait call cannot drift in arity", {
 
 test_that("a prescribed psi at psi* reproduces the solving path bit-for-bit", {
   # ⚠️ THE LOAD-BEARING TEST OF THE WHOLE FEATURE, and the reason `psi` reuses
-  # `.gradient_ift()` rather than getting a composite of its own. Give it back
+  # the solving path's composite rather than getting one of its own. Give it back
   # the collar it solved for, and the response of that collar that it derived,
   # and the two paths are the same arithmetic -- so this is `identical()` and not
   # a tolerance. Anything that made the prescribed path a second implementation
@@ -960,9 +958,8 @@ test_that("a psi outside the feasible interval is refused, with no gradient", {
 
 test_that("an integer psi is the same psi as its double", {
   # An integer `psi` -- `psi = 3L`, or the entirely ordinary `for (p in 2:5)`,
-  # since `2:5` yields integers -- is coerced by the checker, so the R reference
-  # and the C++ batch see one value. A discarded return once made the R path
-  # alone misreport it.
+  # since `2:5` yields integers -- is coerced by the checker, so C++ receives
+  # the double.
   d <- grid_drivers(2.0)
   a <- do.call(leaf_gradient, c(d, list(pars = "vcmax_25")))
   whole <- 3                        # inside the feasible interval at this point
@@ -1387,4 +1384,50 @@ test_that("ProfitMax's normaliser follows the traits, so the composite is a tota
   # reaches the composite at an interior optimum.
   expect_identical(g("auto")$method, "ift")
   expect_identical(g("auto")$status, "interior")
+})
+
+test_that("`route` names the potential a curve is maximised over (decision D3)", {
+  sp <- leaf_supply_singlelayer()
+  net <- series_resistance(1e4)
+  outs <- c("A", "gc", "psi_stem", "collar", "profit")
+  # Named no route, a call means what it always has: model = "collar" is TF24 on
+  # the collar route, and a curve name is that curve's stem route.
+  expect_identical(leaf_gradient(1.5, pars = "vcmax_25")$route, "collar")
+  stem <- leaf_gradient(1.5, supply = sp, root_network = net, pars = "vcmax_25",
+                        model = "SOX")
+  expect_identical(stem$route, "stem")
+  expect_identical(leaf_solve(1.5, supply = sp, root_network = net,
+                              model = "SOX"),
+                   leaf_solve(1.5, supply = sp, root_network = net,
+                              model = "SOX", route = "stem"))
+  # TF24 named on the collar route IS model = "collar".
+  expect_identical(leaf_solve(1.5, model = "TF24", route = "collar"),
+                   leaf_solve(1.5))
+  expect_identical(
+    leaf_gradient(1.5, pars = "vcmax_25", model = "TF24",
+                  route = "collar")$gradient,
+    leaf_gradient(1.5, pars = "vcmax_25")$gradient)
+  # A curve on the collar route, on the multi-layer supply: the gradient is
+  # taken at the point leaf_solve() solves, and the collar is its decision.
+  for (m in c("JS22", "SOX", "ProfitMax")) {
+    g <- leaf_gradient(1.5, pars = "vcmax_25", model = m, route = "collar")
+    r <- leaf_solve(1.5, model = m, route = "collar")
+    expect_identical(unname(g$value[outs]), unlist(r[1, outs], use.names = FALSE),
+                     label = m)
+    expect_identical(g$status, "interior", label = m)
+    expect_true(is.finite(g$gradient["vcmax_25", "collar"]), label = m)
+  }
+  b <- leaf_batch(psi_soil = c(1.0, 1.5))
+  expect_identical(leaf_gradient_batch(b, pars = "vcmax_25", model = "SOX",
+                                       route = "collar")$status,
+                   c("interior", "interior"))
+  # Refused by name: TF24's stem route is model = "TF24"; a stem route needs the
+  # single potential; and a route is one of two.
+  expect_error(leaf_gradient(1.5, pars = "vcmax_25", route = "stem"),
+               "model = \"TF24\"")
+  expect_error(leaf_solve(1.5, model = "SOX"), "route = \"collar\"")
+  expect_error(leaf_solve(1.5, model = "SOX", route = "root"),
+               "`route` must be")
+  expect_error(leaf_gradient_batch(b, pars = "vcmax_25", model = "SOX"),
+               "single-potential supply path")
 })

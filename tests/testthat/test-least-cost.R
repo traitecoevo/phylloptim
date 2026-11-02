@@ -134,14 +134,15 @@ test_that("LeastCost_beta is in the gradient enumeration, owned by one curve", {
     "LeastCost")
 })
 
-test_that("LeastCost_beta is differentiated, and the R reference agrees with its FD", {
-  # ⚠️ THE SLOT HAS TO REACH THE LEAF ON EVERY PERTURBATION. C++'s
-  # `gradient::apply()` writes `LeastCost_beta` from theta; R's `.gradient_setter`
-  # must do the same, or the R reference re-solves at the seated beta on every
-  # step and reports an EXACT ZERO -- finite, plausible, and wrong. The first
-  # version of this curve did exactly that. The sign is the check that the write
-  # lands where the objective reads it: a dearer capacity (larger beta) buys more
-  # water per unit carbon, so the leaf opens and A rises.
+test_that("LeastCost_beta is differentiated, and the composite agrees with its FD", {
+  # ⚠️ THE SLOT HAS TO REACH THE LEAF ON EVERY PERTURBATION. `gradient::apply()`
+  # writes `LeastCost_beta` from theta; without that write the gradient re-solves
+  # at the seated beta on every step and reports an EXACT ZERO -- finite,
+  # plausible, and wrong. The first version of this curve did exactly that, and
+  # test-gradient-referee.R holds every curve's parameters to a difference of
+  # leaf_solve(). The sign is the check that the write lands where the objective
+  # reads it: a dearer capacity (larger beta) buys more water per unit carbon, so
+  # the leaf opens and A rises.
   tr <- leaf_traits()
   net <- series_resistance(1e4)
   mk <- function() {

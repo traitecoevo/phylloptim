@@ -725,7 +725,9 @@ test_that("with the gate on, the composite agrees with differencing the solve", 
   }
 })
 
-test_that("with the gate on, the batch reproduces leaf_gradient() bit-for-bit", {
+test_that("with the gate on, leaf_gradient() is the batch's one observation", {
+  # The two entry points build the damage inputs' slots separately: off the
+  # batch's leaf, and off `x`.
   pars <- c("vcmax_25", "I_", "A_", "topt_offset_", "c_repair_flux_")
   psis <- c(0.5, 1.5, 2.5)
   b <- leaf_batch(psi_soil = lapply(psis, function(p) p + c(0, 0.5, 1)),

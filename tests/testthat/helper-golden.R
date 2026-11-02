@@ -58,7 +58,7 @@ golden_water_flux_fields <- c("transpiration", "gc", "e_up", "uptake")
 
 # THE RECORDED GRADIENTS HAVE THEIR OWN TOLERANCE, because their floor is not the
 # solved outputs'. Even the IFT route takes its mixed partial and curvature as
-# central differences of `dprofit` (`.gradient_ift`), so a gradient carries the
+# central differences of `dprofit` (`gradient_ift`), so a gradient carries the
 # solve's floor DIVIDED BY THE STEP. The step is RELATIVE, so the amplification is
 # set by the differentiated parameter's own magnitude: `R_d_25` (1.44) takes a 67x
 # smaller absolute step than `vcmax_25` (96), and the smallest parameter in the

@@ -1,25 +1,21 @@
-# The batched trait gradient (#4).
+# The batched trait gradient (#4), which leaf_gradient() is with one
+# observation.
 #
 # WHAT IS BEING PINNED HERE, in order of how much it matters.
 #
-#   1. That the C++ composite computes the SAME THING as `leaf_gradient()`,
-#      bit-for-bit, over both supply paths, both methods and the pinned and
-#      shut-down rows. This is the whole risk of stage 2: it is a second
-#      implementation of an algorithm that already exists, and the two share no
-#      code, so a transcription slip has nothing to hide behind. Bit-for-bit
-#      rather than close, because a tolerance would let one hide inside the
-#      solver's own ~1e-09 floor -- and because the composite's arithmetic order,
-#      its avoidance of fused multiply-add and its explicit call sequencing were
-#      all written for this test and would otherwise not be checked at all.
+#   1. That leaf_gradient() and leaf_gradient_batch() hand C++ the same problem.
+#      They assemble it separately -- theta from `.gradient_theta()` against
+#      `.gradient_theta_matrix()`, one resolved observation against the batch's
+#      recycling, a caller's leaf against the batch's -- and a slip in either
+#      shows as a difference here, over both supply paths, all three methods and
+#      the pinned and shut-down rows. Identical rather than close, since both
+#      reach one composite. Whether that composite is RIGHT is
+#      test-gradient-referee.R's question, against a difference of the solve.
 #
-#   2. That the values are what they were. ⚠️ (1) CANNOT SEE A CHANGE APPLIED
-#      CONSISTENTLY TO BOTH. Move the step rule, the stationarity threshold or a
-#      solver tolerance and the two implementations move together, the equality
-#      test passes, and nothing says the gradients changed. That is the trap #70
-#      hit inside R alone. So `gradient_golden.tsv` records them, and its five
-#      rows agree with the independently arbitrated references in
-#      test-gradient.R -- which is the check that the transcription is RIGHT and
-#      not merely self-consistent. ⚠️ It is bit-exact only on macOS/arm64, and
+#   2. That the values are what they were. Move the step rule, the stationarity
+#      threshold or a solver tolerance and every gradient moves, by less than
+#      the referee can see. So `gradient_golden.tsv` records them, over every
+#      curve on both routes. ⚠️ It is bit-exact only on macOS/arm64, and
 #      compared with the golden file's own per-class tolerance elsewhere, for the
 #      reason helper-golden.R gives at length.
 #
@@ -44,7 +40,7 @@ one_row <- function(g) {
        stationarity = g$stationarity[[1]])
 }
 
-expect_batch_matches_r <- function(args, pars, method, label) {
+expect_entry_points_agree <- function(args, pars, method, label) {
   batch_args <- args
   ref <- tryCatch(
     do.call(leaf_gradient, c(args, list(pars = pars, method = method))),
@@ -59,8 +55,8 @@ expect_batch_matches_r <- function(args, pars, method, label) {
   got <- one_row(leaf_gradient_batch(b, pars = pars, method = method))
 
   if (is.character(ref)) {
-    # R stops; the batch has to report the same refusal per row rather than
-    # propagate it, and it must not quietly return a number instead.
+    # leaf_gradient() stops; the batch reports the same refusal per row rather
+    # than propagating it, and must not quietly return a number instead.
     expect_identical(got$status, "error", label = label)
     return(invisible(NULL))
   }
@@ -97,18 +93,15 @@ test_that("the parameter enumeration is the same order in R and in C++", {
   expect_identical(gradient_par_names()[1:16], names(leaf_traits()))
 })
 
-test_that("the batch reproduces leaf_gradient() bit-for-bit across the grid", {
-  # THE ACCEPTANCE TEST. Eighteen operating points spanning wet to shut-down and
-  # one to five soil layers, times all three methods -- so it covers the interior
-  # rows the composite runs on, the pinned rows it must decline, the shut-down
-  # rows where there is no curvature at all, and the forced-route cases where R
-  # raises an error and the batch has to report one per row instead.
+test_that("leaf_gradient() is the batch's one observation across the grid", {
+  # Eighteen operating points spanning wet to shut-down and one to five soil
+  # layers, times all three methods -- so it covers the interior rows the
+  # composite runs on, the pinned rows it must decline, the shut-down rows where
+  # there is no curvature at all, and the forced-method cases where
+  # leaf_gradient() raises an error and the batch reports one per row instead.
   #
-  # `stem_c` is in `pars` deliberately: it is the one curve parameter with no
-  # homogeneity identity to exploit, so it takes the rebuild route while
-  # `stem_P50` beside it moves b and leaves the table. Having both means a transcription that
-  # dropped the explicit `collar` assignment, or differenced two identical numbers
-  # instead, shows up on a column whose neighbour is computed another way.
+  # `stem_c` is in `pars` deliberately: it takes the rebuild route while
+  # `stem_P50` beside it moves b and leaves the table.
   pars <- c("vcmax_25", "stem_P50", "TF24_cost_scale", "stem_c")
   rows <- expand.grid(layers = c(1L, 3L, 5L), psi_soil = c(0.5, 2.0, 3.0, 4.0,
                                                           6.0, 16.0),
@@ -122,8 +115,8 @@ test_that("the batch reproduces leaf_gradient() bit-for-bit across the grid", {
       # `grid_drivers()`, not `batch_drivers()`: the helper below hands the same
       # arguments to BOTH entry points and puts the profile in a list for the
       # batch itself, since `leaf_gradient()` takes a bare vector.
-      st <- expect_batch_matches_r(grid_drivers(r$psi_soil, layers = r$layers),
-                                   pars, method, lab)
+      st <- expect_entry_points_agree(
+        grid_drivers(r$psi_soil, layers = r$layers), pars, method, lab)
       if (method == "auto") {
         seen <- c(seen, st)
       }
@@ -142,7 +135,7 @@ test_that("the batch reproduces leaf_gradient() bit-for-bit across the grid", {
   expect_identical(sum(seen == "interior"), 12L)
 })
 
-test_that("the batch matches leaf_gradient() on the single-potential path", {
+test_that("leaf_gradient() is the batch's one observation on the single-potential path", {
   # The other supply path, and with it the two parameters that are not traits.
   # Both of them move the FEASIBLE COLLAR INTERVAL and not only the profit
   # function -- `resistance` directly, the conductance through the supply curve --
@@ -156,7 +149,7 @@ test_that("the batch matches leaf_gradient() on the single-potential path", {
         args <- list(psi_soil = psi_soil, PPFD = 900, atm_vpd = 3.0,
                      supply = leaf_supply_singlelayer(),
                      root_network = series_resistance(resistance))
-        expect_batch_matches_r(
+        expect_entry_points_agree(
           args, pars, method,
           sprintf("psi_soil=%g r=%g method=%s", psi_soil, resistance, method))
       }
@@ -164,10 +157,10 @@ test_that("the batch matches leaf_gradient() on the single-potential path", {
   }
 })
 
-test_that("the batch matches leaf_gradient() with the stem curve rebuilt", {
+test_that("leaf_gradient() is the batch's one observation with the stem curve rebuilt", {
   # `fast_stem_curve = FALSE` rebuilds the vulnerability spline instead of
   # rescaling it, so it is a different code path through `apply()` and
-  # not merely a slower one. It has to be transcribed too.
+  # not merely a slower one; both entry points must pass it through.
   for (psi_soil in c(1.5, 2.0, 4.0)) {
     for (method in c("auto", "fd")) {
       args <- batch_drivers(psi_soil)
@@ -526,9 +519,7 @@ test_that("`pars` order does not change any gradient (#72)", {
     expect_identical(got, solo, label = paste("after", p))
   }
 
-  # The R reference has the same fix, so the two implementations still agree --
-  # which is the point of fixing them together in one change rather than letting
-  # them drift.
+  # And leaf_gradient(), the same composite, agrees.
   r_ref <- leaf_gradient(psi_soil = 1.5, PPFD = 900,
                          pars = c("TF24_cost_scale", "stem_P50"))
   batch <- leaf_gradient_batch(b, pars = c("TF24_cost_scale", "stem_P50"))
@@ -619,12 +610,10 @@ test_that("a batch that has lost its C++ pointer says so rather than crashing", 
 
 # --- a collar potential the caller supplies (#88) -----------------------------
 
-test_that("the batch's prescribed psi agrees with leaf_gradient(), bit-for-bit", {
-  # The batch is a transcription and has to stay one, so the assertion is the
-  # same one the solving path gets: equality with the R reference, not agreement
-  # to a tolerance. Both routes of the new path are covered -- the collar it
-  # solved for handed back (which must reproduce the solve), and a collar
-  # deliberately off it.
+test_that("the batch's prescribed psi agrees with leaf_gradient()", {
+  # Both uses of the prescribed path -- the collar it solved for handed back
+  # (which must reproduce the solve), and a collar deliberately off it -- and
+  # both entry points' handling of `psi` and `dpsi_dtheta`.
   pars <- c("vcmax_25", "stem_P50", "TF24_cost_scale")
   soils <- c(1.0, 2.0, 3.0)
   b <- leaf_batch(psi_soil = soils, PPFD = 900)
@@ -791,12 +780,10 @@ test_that("the batch refuses a price its model does not read, and a missing one,
                "must be a single number")
 })
 
-test_that("the batch reproduces leaf_gradient() on every model, bit-for-bit", {
-  # ⚠️ BIT-FOR-BIT, not close, and for the reason this file's header gives: the
-  # two reach the same C++ model by different routes -- one `leaf_gradient()` per
-  # observation against one `gradient_batch_run()` for all of them -- so they share
-  # no code between the entry point and the residuals. A tolerance would let a
-  # transcription slip hide inside the solver's own ~1e-09 floor.
+test_that("leaf_gradient() is the batch's one observation on every model", {
+  # The owned prices reach theta by different routes in the two entry points --
+  # off the caller's leaf in one, the batch's arguments in the other -- so a
+  # slot one of them misses shows here as a difference.
   tr <- leaf_traits()
   net <- series_resistance(1e4)
   psv <- c(1.0, 1.5, 2.0)
@@ -804,11 +791,9 @@ test_that("the batch reproduces leaf_gradient() on every model, bit-for-bit", {
            CF77 = "CF77_lambda_", JS22 = "JS22_gamma", CMax = "CMax_a",
            SOX = "vcmax_25", JW26 = "vcmax_25", ProfitMax = "vcmax_25",
            TF24_floor = "TF24_floor_lambda_o",
-           # ⚠️ ITS OWN SLOT, NOT A TRAIT, and that is the point of the row: C++'s
-           # `gradient::apply()` writes `LeastCost_beta` from theta, so R's
-           # `.gradient_setter` must too, or the R column is exactly zero while
-           # the batch's is not -- a disagreement this bit-for-bit check sees and
-           # a finiteness check would not.
+           # ⚠️ ITS OWN SLOT, NOT A TRAIT: `gradient::apply()` must write it
+           # from theta, or the column is an exact zero that no finiteness
+           # check sees (test-gradient-referee.R).
            LeastCost = "LeastCost_beta")
   for (m in names(own)) {
     p <- own[[m]]

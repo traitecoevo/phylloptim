@@ -1,9 +1,8 @@
 # Trait gradients at a solved operating point: set_traits() and leaf_gradient().
 #
-# The reference implementation: inst/include/phylloptim/gradient.hpp reproduces
-# this file's composite bit-for-bit, and test-gradient-batch.R asserts it. So the
-# arithmetic order here and the order of calls into the leaf are load-bearing: do
-# not reassociate or reorder either without changing gradient.hpp to match.
+# leaf_gradient() is leaf_gradient_batch() with one observation: this file
+# handles its arguments and the shape of its result, and the gradient itself is
+# inst/include/phylloptim/gradient.hpp's, through `.gradient_run()`.
 #
 # When the exact gradient beats differencing is ?leaf_gradient's "What it
 # costs"; the measured per-call costs are README's "Performance from R".
@@ -65,12 +64,14 @@ set_traits <- function(x, traits) {
 ##' `dprofit/dtheta`, at one operating point.
 ##'
 ##' @section Choosing which model to differentiate:
-##' `model` selects it, and every model in the package has a route. `"collar"`,
-##' the default, is the TF24 cost maximised over the root-collar potential -- the
-##' production path. Naming any of the nine cost curves
-##' (`cost_curve_names()`) differentiates the corresponding **stem** optimum
-##' instead: `psi_stem` with the upstream potential pinned at `psi_soil`, which
-##' needs the single-potential supply path.
+##' A model is a cost curve and a route, and every curve has a gradient on both
+##' routes. `model` names the curve and `route` the potential it is maximised
+##' over: `"collar"`, the root-collar potential, on either supply path; or
+##' `"stem"`, `psi_stem` with the upstream potential pinned at `psi_soil`, which
+##' needs the single-potential supply path. `model = "collar"`, the default, is
+##' TF24 on the collar route -- the production path. A curve name from
+##' `cost_curve_names()` with no `route` is that curve's stem route, so a call
+##' that names no route means what it always has.
 ##'
 ##' The product objectives, `SOX` and `JW26`, need no special case. They maximise
 ##' `A * g(psi)`, which is the `Log` benefit link applied to the same
@@ -82,9 +83,9 @@ set_traits <- function(x, traits) {
 ##' variables over different supply topologies, disagree on 20 of 30 driver rows,
 ##' and the gap does not close as the root resistance goes to zero.
 ##'
-##' ⚠️ **`model` SEATS the leaf, including one you passed as `x`.** The route is
-##' applied with `$set_model()` and is left there when this returns, alongside the
-##' base-point traits and solve. A loop that alternates models on one `x` is fine;
+##' ⚠️ **`model` SEATS the leaf, including one you passed as `x`.** The curve
+##' and route are applied with `$set_model()` and left there when this returns,
+##' alongside the base-point traits and solve. A loop that alternates models on one `x` is fine;
 ##' a loop that takes a gradient and then reads `$optimise()` off the same object
 ##' expecting the default is not.
 ##'
@@ -310,8 +311,7 @@ set_traits <- function(x, traits) {
 ##' thing you can ask for, and a fit that reads four of them pays for the rest.
 ##'
 ##' The intercept is a fresh `Leaf` per call. Pass `x` to reuse one across calls
-##' (#52); without it, construction is 29% of the exact gradient in the study
-##' above.
+##' (#52); without it, construction is most of a one-observation gradient.
 ##'
 ##' @section Precision:
 ##' Do not ask for more than about `1e-09` from any of this. That is the
@@ -341,8 +341,7 @@ set_traits <- function(x, traits) {
 ##'
 ##' **`x` is left solved at the base point**, not at the last perturbation — the
 ##' state this function seats it in, restored on the way out including on an error.
-##' The restore costs one re-trait and one solve, a small fraction of the
-##' construction it saves.
+##' The restore costs one solve, a small fraction of the construction it saves.
 ##'
 ##' @inheritParams set_drivers
 ##' @param x an existing `Leaf` from [leaf_model()] to reuse instead of building
@@ -354,9 +353,13 @@ set_traits <- function(x, traits) {
 ##' @param supply how water reaches the root collar: [leaf_supply_multilayer()]
 ##'   (the default) or [leaf_supply_singlelayer()]
 ##' @param model which optimality model to differentiate: `"collar"` (the
-##'   default, the production path) or any name from [cost_curve_names()], which
-##'   differentiates that curve's stem optimum instead. See *Choosing which model
-##'   to differentiate*.
+##'   default, the production path: TF24 on the collar route) or any name from
+##'   [cost_curve_names()], on `route`. See *Choosing which model to
+##'   differentiate*.
+##' @param route `"collar"` or `"stem"`, the potential the curve is maximised
+##'   over; `NULL` (the default) is the collar route for `model = "collar"` and
+##'   the stem route for a curve name. See *Choosing which model to
+##'   differentiate*.
 ##' @param pars what to differentiate with respect to. Any of the sixteen
 ##'   [leaf_traits()] names, plus `"leaf_specific_conductance_max"`, on the
 ##'   single-potential path only `"resistance"`, on `model = "CF77"` only
@@ -444,7 +447,11 @@ set_traits <- function(x, traits) {
 ##'     \item{`psi`}{the collar the outputs were evaluated at: `psi*` on the
 ##'       solving path, and the `psi` argument on the prescribed path, refused
 ##'       or not}
+##'     \item{`model`, `route`}{the model differentiated and its route}
 ##'   }
+##'
+##'   An entry that is not determined, such as a refused point's gradient or a
+##'   stem route's `collar`, is `NaN`.
 ##'
 ##' @seealso [leaf_solve()] for the operating point itself, [set_traits()].
 ##' @examples
@@ -773,7 +780,7 @@ leaf_gradient <- function(psi_soil,
 # `resistance` are drivers (set_drivers()); `resistance` is read from
 # `r_R_V_sum[1]` and exists only on the single-potential path, where it is one
 # scalar. The derivation does not care whether a parameter is a trait; only the
-# setter differs (.gradient_setter).
+# setter differs (`gradient::apply()`).
 .gradient_theta <- function(traits, kmax, supply, root_network,
                             owned = NULL, damage = NULL) {
   theta <- c(unlist(traits), leaf_specific_conductance_max = kmax)
@@ -820,8 +827,8 @@ leaf_gradient <- function(psi_soil,
          "collar you gave -- so at a prescribed psi neither applies and the ",
          "reported method is \"prescribed\".", call. = FALSE)
   }
-  # Coerced, and the caller must use the return, so the R reference and the C++
-  # batch see the same double; `.gradient_check_psi_batch()` does the same.
+  # Coerced, and the caller must use the return: C++ takes a double, as
+  # `.gradient_check_psi_batch()` hands it.
   as.numeric(psi)
 }
 
