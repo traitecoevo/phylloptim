@@ -18,7 +18,7 @@ leaf_gradient(
   x = NULL,
   traits = leaf_traits(),
   control = leaf_control(),
-  supply = leaf_supply_multilayer(),
+  supply = leaf_supply_singlelayer(),
   pars = NULL,
   psi = NULL,
   dpsi_dtheta = NULL,
@@ -26,7 +26,8 @@ leaf_gradient(
   stationarity_tol = 1e-08,
   method = c("auto", "ift", "fd"),
   fast_stem_curve = TRUE,
-  model = "collar"
+  model = "TF24_floor",
+  route = NULL
 )
 }
 \arguments{
@@ -75,8 +76,8 @@ differentiate at}
 
 \item{control}{a \code{\link[=leaf_control]{leaf_control()}} object}
 
-\item{supply}{how water reaches the root collar: \code{\link[=leaf_supply_multilayer]{leaf_supply_multilayer()}}
-(the default) or \code{\link[=leaf_supply_singlelayer]{leaf_supply_singlelayer()}}}
+\item{supply}{how water reaches the root collar: \code{\link[=leaf_supply_singlelayer]{leaf_supply_singlelayer()}}
+(the default) or \code{\link[=leaf_supply_multilayer]{leaf_supply_multilayer()}}}
 
 \item{pars}{what to differentiate with respect to. Any of the sixteen
 \code{\link[=leaf_traits]{leaf_traits()}} names, plus \code{"leaf_specific_conductance_max"}, on the
@@ -148,9 +149,12 @@ stem's vulnerability table, which depends on \code{stem_c} alone; \code{FALSE} e
 so the equivalence is checkable rather than assumed, and the package's tests
 require the two routes to agree.}
 
-\item{model}{which optimality model to differentiate: \code{"collar"} (the
-default, the production path) or any name from \code{\link[=cost_curve_names]{cost_curve_names()}}, which
-differentiates that curve's stem optimum instead. See \emph{Choosing which model
+\item{model}{which optimality model to differentiate: any name from
+\code{\link[=cost_curve_names]{cost_curve_names()}}, on \code{route}; \code{"TF24_floor"} by default. See \emph{Choosing
+which model to differentiate}.}
+
+\item{route}{\code{"collar"} or \code{"stem"}, the potential the curve is maximised
+over; \code{NULL} (the default) is the stem route. See \emph{Choosing which model
 to differentiate}.}
 }
 \value{
@@ -177,7 +181,11 @@ entry is the analytic zero at a stationary point and the exact
 \item{\code{psi}}{the collar the outputs were evaluated at: \verb{psi*} on the
 solving path, and the \code{psi} argument on the prescribed path, refused
 or not}
+\item{\code{model}, \code{route}}{the model differentiated and its route}
 }
+
+An entry that is not determined, such as a refused point's gradient or a
+stem route's \code{collar}, is \code{NaN}.
 }
 \description{
 The derivatives of the solved outputs with respect to the traits:
@@ -186,25 +194,28 @@ The derivatives of the solved outputs with respect to the traits:
 }
 \section{Choosing which model to differentiate}{
 
-\code{model} selects it, and every model in the package has a route. \code{"collar"},
-the default, is the TF24 cost maximised over the root-collar potential -- the
-production path. Naming any of the nine cost curves
-(\code{cost_curve_names()}) differentiates the corresponding \strong{stem} optimum
-instead: \code{psi_stem} with the upstream potential pinned at \code{psi_soil}, which
-needs the single-potential supply path.
+A model is a cost curve and a route, and every curve has a gradient on both
+routes. \code{model} names the curve and \code{route} the potential it is maximised
+over: \code{"collar"}, the root-collar potential, on either supply path; or
+\code{"stem"}, \code{psi_stem} with the upstream potential pinned at \code{psi_soil}, which
+needs the single-potential supply path. The defaults are one set,
+everywhere: \code{"TF24_floor"} (plant's model; at its default price,
+\code{TF24_floor_lambda_o = 0}, it is TF24) on the stem route over the
+single-potential supply. The collar route and the multi-layer supply are
+asked for.
 
 The product objectives, \code{SOX} and \code{JW26}, need no special case. They maximise
 \code{A * g(psi)}, which is the \code{Log} benefit link applied to the same
 difference form everything else uses: \verb{d/dpsi[h(A) - C] = h'(A) * dA/dpsi - dC/dpsi} with \verb{h' = 1/A}. One derivative serves all nine.
 
-⚠️ \strong{\code{"collar"} and \code{"TF24"} are different models, not two ways of asking one
-question}, even though both use the TF24 cost. They optimise different
-variables over different supply topologies, disagree on 20 of 30 driver rows,
-and the gap does not close as the root resistance goes to zero.
+⚠️ \strong{The two routes are different models, not two ways of asking one
+question}, even for one curve. They optimise different variables over
+different supply topologies, for TF24 disagree on 20 of 30 driver rows, and
+the gap does not close as the root resistance goes to zero.
 
-⚠️ \strong{\code{model} SEATS the leaf, including one you passed as \code{x}.} The route is
-applied with \verb{$set_model()} and is left there when this returns, alongside the
-base-point traits and solve. A loop that alternates models on one \code{x} is fine;
+⚠️ \strong{\code{model} SEATS the leaf, including one you passed as \code{x}.} The curve
+and route are applied with \verb{$set_model()} and left there when this returns,
+alongside the base-point traits and solve. A loop that alternates models on one \code{x} is fine;
 a loop that takes a gradient and then reads \verb{$optimise()} off the same object
 expecting the default is not.
 
@@ -431,7 +442,8 @@ dimension.
 
 ⚠️ \strong{So "is the exact gradient faster" has no answer independent of your
 parameterisation, and both regimes are measured.} \code{vignette("fitting")} fits
-72 observations with \code{P_fit == P_model} and this loses at every count up to 13.
+72 observations with \code{P_fit == P_model} and this loses at every count it
+measures.
 A companion calibration study has \code{N = 1327}, \code{P_fit = 40},
 \code{P_model = 4}, wins 3.4x, and reaches the same optimum — with its
 57-parameter variant costing the same as its 40-parameter one, because
@@ -442,8 +454,7 @@ A companion calibration study has \code{N = 1327}, \code{P_fit = 40},
 thing you can ask for, and a fit that reads four of them pays for the rest.
 
 The intercept is a fresh \code{Leaf} per call. Pass \code{x} to reuse one across calls
-(#52); without it, construction is 29\% of the exact gradient in the study
-above.
+(#52); without it, construction is most of a one-observation gradient.
 }
 
 \section{Precision}{
@@ -476,8 +487,7 @@ is an error rather than silently resolved.
 
 \strong{\code{x} is left solved at the base point}, not at the last perturbation — the
 state this function seats it in, restored on the way out including on an error.
-The restore costs one re-trait and one solve, a small fraction of the
-construction it saves.
+The restore costs one solve, a small fraction of the construction it saves.
 }
 
 \examples{
@@ -485,9 +495,11 @@ g <- leaf_gradient(psi_soil = 2.0, PPFD = 900)
 g$method
 g$gradient[c("vcmax_25", "stem_P50"), ]
 
-# In dry soil at high VPD the optimum pins against the edge of the feasible
-# range, the composite's premise fails, and the fallback is used instead.
-dry <- leaf_gradient(psi_soil = 4.5, PPFD = 900, atm_vpd = 3.0)
+# On the collar route, in dry soil at high VPD, the optimum pins against the
+# edge of the feasible range, the composite's premise fails, and the fallback
+# is used instead.
+dry <- leaf_gradient(psi_soil = 4.5, PPFD = 900, atm_vpd = 3.0,
+                     supply = leaf_supply_multilayer(), route = "collar")
 dry$method       # "fd"
 dry$status       # "pinned"
 dry$stationarity # how far from stationary the optimum is, in MPa

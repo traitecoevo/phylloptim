@@ -757,6 +757,11 @@ inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi, bool* feasible
 
 template <Leaf::CostCurve K>
 inline double Leaf::evaluate_root_collar_psi_for(double target_opt_root_psi){
+    // Seeded as the solve seeds them: unseeded, a normalised curve's profit at
+    // a prescribed collar is not finite.
+    if constexpr (Curve<K>::prepares_normalisers) {
+      prepare_profitmax();
+    }
     double bound_a, bound_b;
     if (!prepare_collar_solve<K>(bound_a, bound_b)) {
       // Shut: profit_ is already set.

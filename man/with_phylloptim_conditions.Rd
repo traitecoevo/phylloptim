@@ -18,17 +18,10 @@ infeasible, re-signals it as a \code{phylloptim_infeasible} condition carrying a
 machine-readable \code{code}. Anything else propagates unchanged.
 }
 \details{
-\code{\link[=leaf_solve]{leaf_solve()}} and \code{\link[=leaf_gradient_batch]{leaf_gradient_batch()}} already do this, so wrap
-\code{expr} yourself when you are \strong{driving a \code{Leaf} directly} —
+\code{\link[=leaf_solve]{leaf_solve()}}, \code{\link[=leaf_gradient]{leaf_gradient()}} and \code{\link[=leaf_gradient_batch]{leaf_gradient_batch()}} already do
+this, so wrap \code{expr} yourself when you are \strong{driving a \code{Leaf} directly} —
 \verb{$find_root_collar_psi()} is generated glue and cannot signal a classified
-condition on its own — or when you are calling \code{\link[=leaf_gradient]{leaf_gradient()}}.
-
-⚠️ \code{\link[=leaf_gradient]{leaf_gradient()}} is \strong{not} routed through this, and that is a gap rather
-than a design: it is one long function that depends on \code{missing()} for two of its
-arguments, so making it delegate to an inner implementation would change argument
-matching in ways worth a separate change. Wrap the call yourself until then.
-\code{\link[=leaf_gradient_batch]{leaf_gradient_batch()}} is the path a fit should be on anyway — one boundary
-crossing rather than one per observation — and it is routed.
+condition on its own.
 }
 \section{Why this and not a per-row NA mode}{
 

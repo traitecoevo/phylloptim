@@ -104,7 +104,7 @@ const double kPriceForFOC = 1e4;
 
 phylloptim::Leaf make_leaf(const Drivers &d, std::vector<double> psi_soil,
                      std::vector<double> soil_depth) {
-  phylloptim::Leaf l;
+  phylloptim::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
   // root carbon per unit leaf area: the old absolute carbon divided by area_leaf
@@ -121,6 +121,11 @@ phylloptim::Leaf make_leaf(const Drivers &d, std::vector<double> psi_soil,
 void test_defaults_are_unset() {
   printf("defaults are unset until set_physiology\n");
   phylloptim::Leaf l;
+  // One set of defaults, as in R: TF24_floor on the stem route, single supply.
+  ok(l.cost_curve_ == phylloptim::Leaf::CostCurve::TF24_floor,
+     "the default curve is TF24_floor");
+  ok(l.model_route() == "stem", "the default route is the stem route");
+  ok(l.supply_kind_name() == "single", "the default supply is the single potential");
   ok(!std::isfinite(l.ci_), "ci_ starts unset");
   ok(!std::isfinite(l.assim_colimited_), "assim_colimited_ starts unset");
   ok(!std::isfinite(l.opt_psi_stem_), "opt_psi_stem_ starts unset");
@@ -167,7 +172,7 @@ void test_curve_definitions_are_the_leaf() {
 
 void test_vulnerability_curve() {
   printf("xylem vulnerability curve\n");
-  phylloptim::Leaf l;
+  phylloptim::Leaf l = fixture::multilayer_leaf();
   near(l.proportion_of_conductivity(0.0), 1.0, 1e-12,
        "full conductivity at zero potential");
   // psi_crit is NOT the 1%-conductivity point -- with the default b and c it sits
@@ -452,7 +457,7 @@ void test_vulnerability_table_tail() {
   near(worst_dq, 0.0, 1e-11, "the conductivity is read to its own relative precision there");
   near(worst_join, 0.0, 4e-16, "G is continuous where the tail starts");
 
-  phylloptim::Leaf l;
+  phylloptim::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(phylloptim::Leaf::ncontrol_default);
   double worst_E = 0.0;
   for (double x_up : {10.0, 20.0, 30.0, 38.0}) {
@@ -603,7 +608,7 @@ void test_spline_matches_direct_integration() {
 
 void test_arrhenius() {
   printf("temperature response\n");
-  phylloptim::Leaf l;
+  phylloptim::Leaf l = fixture::multilayer_leaf();
   near(l.arrh_curve(phylloptim::vcmax_ha, 100.0, 25.0), 100.0, 1e-12,
        "Arrhenius is the identity at the 25 C reference");
   ok(l.arrh_curve(phylloptim::vcmax_ha, 100.0, 35.0) > 100.0,
@@ -617,7 +622,7 @@ void test_arrhenius() {
 
 void test_saturation_vapour_pressure() {
   printf("saturation vapour pressure\n");
-  phylloptim::Leaf l;
+  phylloptim::Leaf l = fixture::multilayer_leaf();
   // Tetens at 25 C is ~3.167 kPa.
   near(l.saturation_vapour_pressure(25.0), 3.167, 1e-3, "es(25 C)");
   // Delta ~ 0.189 kPa/K at 25 C.
@@ -746,7 +751,7 @@ void test_shutdown_when_soil_is_drier_than_psi_crit() {
 void test_shutdown_writes_its_own_fluxes() {
   printf("shutdown writes its own fluxes (plant #578 fixed)\n");
   Drivers d;
-  phylloptim::Leaf l;
+  phylloptim::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
   std::vector<double> mrp{1.0 / d.area_leaf}, depth{1.0};
@@ -799,7 +804,7 @@ void test_shutdown_writes_its_own_fluxes() {
 void test_shallow_roots_do_not_inherit_deep_uptake() {
   printf("shallow roots do not inherit the previous plant's deep uptake\n");
   Drivers d;
-  phylloptim::Leaf l;
+  phylloptim::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
 
@@ -830,7 +835,7 @@ void test_shallow_roots_do_not_inherit_deep_uptake() {
 
   // Order independence is the property that matters: plant reuses one Leaf for
   // every individual in a patch, so the seedling must not depend on its neighbour.
-  phylloptim::Leaf fresh;
+  phylloptim::Leaf fresh = fixture::multilayer_leaf();
   fresh.setup_transpiration(100);
   fresh.setup_root_vulnerability(100);
   fresh.set_physiology(fixture::root_network({1.0 / d.area_leaf, 0.0, 0.0}, depth), d.PPFD, psi_soil, depth,
@@ -851,7 +856,7 @@ void test_shallow_roots_do_not_inherit_deep_uptake() {
 void test_negative_assim_exit_writes_its_own_rates() {
   printf("the assim_max_ < 0 exit writes its own rates\n");
   Drivers d;
-  phylloptim::Leaf l;
+  phylloptim::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
   const std::vector<double> psi_soil{1.0}, depth{1.0};
@@ -890,7 +895,7 @@ void test_negative_assim_exit_writes_its_own_rates() {
   near(l.assim_colimited_ - l.hydraulic_cost_TF(l.opt_psi_stem_), l.profit_,
        1e-14, "profit is consistent with assimilation and the hydraulic cost");
 
-  phylloptim::Leaf fresh;
+  phylloptim::Leaf fresh = fixture::multilayer_leaf();
   fresh.setup_transpiration(100);
   fresh.setup_root_vulnerability(100);
   fresh.set_physiology(fixture::root_network(root, depth), 10.0, psi_soil, depth, d.K_s * d.theta / d.h,
@@ -1343,7 +1348,7 @@ void test_operating_point_kind_is_written_by_every_path() {
   printf("the collar solve says which kind of operating point it found\n");
   using Kind = phylloptim::Leaf::OperatingPointKind;
   Drivers d;
-  phylloptim::Leaf l;
+  phylloptim::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
   ok(l.operating_point_kind() == Kind::Unsolved,
@@ -1530,7 +1535,7 @@ void test_collar_argmax_is_smooth_in_a_trait() {
   double collar[n];
   int distinct = 0;
   for (int i = 0; i < n; ++i) {
-    phylloptim::Leaf l;
+    phylloptim::Leaf l = fixture::multilayer_leaf();
     l.vcmax_25 = base + i * step;
     l.setup_transpiration(100);
     l.setup_root_vulnerability(100);
@@ -1826,7 +1831,7 @@ void test_stem_rows_past_the_dry_end_are_the_closed_forms() {
 void test_signed_potentials_are_rejected() {
   printf("signed potentials are rejected at the input boundary\n");
   Drivers d;
-  phylloptim::Leaf l;
+  phylloptim::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
   bool threw = false;
@@ -1871,7 +1876,7 @@ void test_collar_continuous_into_shutdown() {
   Drivers d;
   for (double gss : {1e-3, 1e-1}) {
     const auto solve = [&](double psi_soil) {
-      phylloptim::Leaf l;
+      phylloptim::Leaf l = fixture::multilayer_leaf();
       l.GSS_tol_abs = gss;
       l.setup_transpiration(100);
       l.setup_root_vulnerability(100);
@@ -2255,7 +2260,7 @@ void test_dprofit_dpsi_stem_matches_a_finite_difference_energy_balance() {
   std::vector<double> errs;
   for (double leaf_temp : {20.0, 30.0, 40.0}) {
     for (double psi_soil : {0.5, 1.0, 2.0}) {
-      phylloptim::Leaf l;
+      phylloptim::Leaf l = fixture::multilayer_leaf();
       l.setup_transpiration(400);
       l.setup_root_vulnerability(400);
       l.use_energy_balance_ = true;
@@ -2639,7 +2644,7 @@ phylloptim::Leaf make_pm_leaf(const Drivers &d, std::vector<double> psi_soil,
                         std::vector<double> soil_depth, bool gate,
                         double wind_speed = 2.0, double leaf_dim = 0.05,
                         bool thermal_cost = false) {
-  phylloptim::Leaf l;
+  phylloptim::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
   l.use_energy_balance_ = gate;
@@ -2711,7 +2716,7 @@ void test_leaf_temperature_is_reported() {
 
   // Unsolved: the NA sentinel, like every other output.
   {
-    phylloptim::Leaf bare;
+    phylloptim::Leaf bare = fixture::multilayer_leaf();
     ok(!std::isfinite(bare.Tleaf_), "Tleaf is NA before a solve");
   }
 
@@ -3173,7 +3178,7 @@ void test_pm_absorbed_shortwave() {
        "and leaves electron transport untouched");
 
   // No default: a missing NIR band throws on the energy-balance path...
-  phylloptim::Leaf unset;
+  phylloptim::Leaf unset = fixture::multilayer_leaf();
   unset.setup_transpiration(100);
   unset.setup_root_vulnerability(100);
   unset.use_energy_balance_ = true;
@@ -3713,7 +3718,7 @@ void test_closed_form() {
     l.set_physiology(net_1m, 900.0, ps, dp, 1.0 * theta / (h * eta_c), vpd, 40.0,
                      25.0, 21.0, 101.3);
   };
-  phylloptim::Leaf l;
+  phylloptim::Leaf l = fixture::multilayer_leaf();
 
   // Near the wet end, where the leading-order expansion is centred, it should be
   // very accurate.
@@ -3765,6 +3770,8 @@ void test_closed_form() {
   // The TF24_beta2 = 1/c leaf, where xi is constant and nothing needs solving.
   phylloptim::Leaf exact_leaf(96.0, 2.680147, 3.4, 2.680147, 3.4, 1.0 / 2.680147, 157.44, 0.30 / 0.85, 0.7, 0.99, 1e-3,
                         100, 1e-3, 1000, 7.5);
+  exact_leaf.set_supply_multilayer();
+  exact_leaf.set_model(phylloptim::Leaf::CostCurve::TF24, true);
   ok(phylloptim::closed_form::beta2_is_exact(exact_leaf),
      "beta2_is_exact recognises TF24_beta2 = 1/stem_c");
   ok(!phylloptim::closed_form::beta2_is_exact(l), "and rejects the default TF24_beta2 = 1.5");
@@ -3833,7 +3840,7 @@ void test_leaf_on_single_potential() {
   printf("Leaf solving on the single-potential supply path\n");
   Drivers d;
 
-  phylloptim::Leaf l;
+  phylloptim::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
   l.set_supply_single();
@@ -3864,7 +3871,7 @@ void test_leaf_on_single_potential() {
 
   // Drier soil must cost carbon here too -- the same contract the multi-layer
   // path is held to, which is what makes the two comparable at all.
-  phylloptim::Leaf dry;
+  phylloptim::Leaf dry = fixture::multilayer_leaf();
   dry.setup_transpiration(100);
   dry.setup_root_vulnerability(100);
   dry.set_supply_single();
@@ -3877,7 +3884,7 @@ void test_leaf_on_single_potential() {
 
   // A larger series resistance is a worse-supplied plant, so it must not do
   // better. This is the knob the multi-layer path spends root carbon to lower.
-  phylloptim::Leaf tight;
+  phylloptim::Leaf tight = fixture::multilayer_leaf();
   tight.setup_transpiration(100);
   tight.setup_root_vulnerability(100);
   tight.set_supply_single();
@@ -3887,10 +3894,12 @@ void test_leaf_on_single_potential() {
   tight.find_root_collar_psi();
   ok(tight.profit_ <= l.profit_, "a higher series resistance does not help");
 
-  // And the default is unchanged: a Leaf nobody configures is multi-layer.
+  // Asking for the root network seats the collar route, the only one it has.
   phylloptim::Leaf plain;
-  ok(plain.supply_kind_ == phylloptim::Leaf::SupplyKind::MultiLayer,
-     "the supply path defaults to multi-layer");
+  plain.set_supply_multilayer();
+  ok(plain.supply_kind_ == phylloptim::Leaf::SupplyKind::MultiLayer &&
+         plain.model_route() == "collar",
+     "set_supply_multilayer() seats the collar route");
 }
 
 // A collar interval narrower than find_root_psi's bracket tolerance
@@ -4246,7 +4255,7 @@ void test_stem_curve_inverse_round_trips() {
     ++compared;
   };
   for (int n : {100, 800}) {
-    phylloptim::Leaf l;
+    phylloptim::Leaf l = fixture::multilayer_leaf();
     l.setup_transpiration(n);
     const double end = phylloptim::vulnerability_psi_end(l.stem_b, l.stem_c);
     for (int i = 0; i <= 1000; ++i) {
@@ -4284,7 +4293,7 @@ void test_conductivity_row_against_the_tables_own() {
   printf("the conductivity's P50 row against the table's own response\n");
   using AD = xad::fwd<double>::active_type;
   const auto leaf_at = [](double P50, int n) {
-    phylloptim::Leaf l;
+    phylloptim::Leaf l = fixture::multilayer_leaf();
     l.vulnerability_curve_ncontrol = n;
     l.set_traits(l.vcmax_25, l.stem_c, P50, l.roots_.root_c, l.roots_.root_P50,
                  l.TF24_beta2, l.jmax_25, l.phi_J, l.curv_fact_elec_trans,
@@ -5010,7 +5019,7 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
     // included although its gate is off, so a difference sees whatever the
     // solve reads.
     const auto solve = [&](const pl::leaf_pars<double>& p) {
-      pl::Leaf l;
+      pl::Leaf l = fixture::multilayer_leaf();
       l.set_traits(p[pl::par_vcmax_25], p[pl::par_stem_c], p[pl::par_stem_P50],
                    p[pl::par_root_c], p[pl::par_root_P50], p[pl::par_TF24_beta2],
                    p[pl::par_jmax_25], p[pl::par_phi_J],
@@ -5041,7 +5050,7 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
       l.optimise();
       return l;
     };
-    pl::Leaf base;
+    pl::Leaf base = fixture::multilayer_leaf();
     base.set_physiology(network, fx.ppfd, fx.psi_soil, depth, 0.000157 / 5.0,
                         fx.vpd, 40.0, 25.0, 21.0, 101.3);
     pl::leaf_pars<double> p0 = base.passive_pars();
@@ -5227,7 +5236,7 @@ void test_shut_leaf_seated_at_its_collar_bills_the_roots_nothing() {
     }
     const pl::RootNetwork network = fixture::root_network(root, depth);
     const auto solve = [&](const pl::leaf_pars<double>& p) {
-      pl::Leaf l;
+      pl::Leaf l = fixture::multilayer_leaf();
       l.set_traits(p[pl::par_vcmax_25], p[pl::par_stem_c], p[pl::par_stem_P50],
                    p[pl::par_root_c], p[pl::par_root_P50], p[pl::par_TF24_beta2],
                    p[pl::par_jmax_25], p[pl::par_phi_J],
@@ -5240,7 +5249,7 @@ void test_shut_leaf_seated_at_its_collar_bills_the_roots_nothing() {
       l.find_root_collar_psi();
       return l;
     };
-    pl::Leaf base;
+    pl::Leaf base = fixture::multilayer_leaf();
     base.set_physiology(network, 900.0, psi_soil, depth, 0.000157 / 5.0, 2.0,
                         40.0, 25.0, 21.0, 101.3);
     pl::leaf_pars<double> p0 = base.passive_pars();
@@ -5401,7 +5410,7 @@ void test_surface_refuses_a_curve_or_supply_it_was_not_solved_on() {
      }, "Leaf::billed_outputs_at: " + wrong),
      "billed_outputs_at refuses a curve the leaf is not seated on");
 
-  phylloptim::Leaf single;
+  phylloptim::Leaf single = fixture::multilayer_leaf();
   single.setup_transpiration(100);
   single.setup_root_vulnerability(100);
   single.set_supply_single();
@@ -5517,7 +5526,7 @@ void test_a_dry_pin_meets_the_interior_answer_continuously() {
                    181713.86294375348, 638874.06435868028};
   const double kmax = 0.00017675922327204239, ppfd = 676.27236337813406;
   auto solve = [&](double top) {
-    pl::Leaf l;
+    pl::Leaf l = fixture::multilayer_leaf();
     l.set_model(CC::TF24_floor, true);
     l.TF24_floor_lambda_o = 0.0;
     // plant's TF24 traits, in set_traits' order.
@@ -6157,6 +6166,8 @@ void test_stem_curve_shortcut_needs_no_rebuild() {
 
   for (const Case &c : cases) {
     phylloptim::gradient::Settings s;  // fast_stem_curve defaults true
+    s.model = {phylloptim::Leaf::CostCurve::TF24,
+               phylloptim::gradient::Route::Collar};
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     l.find_root_collar_psi();
     const long builds = l.stem_curve_builds_;
@@ -6181,6 +6192,8 @@ void test_stem_curve_shortcut_needs_no_rebuild() {
   // which is what shows the counter counts.
   {
     phylloptim::gradient::Settings s;
+    s.model = {phylloptim::Leaf::CostCurve::TF24,
+               phylloptim::gradient::Route::Collar};
     s.fast_stem_curve = false;
     const int pars[1] = {phylloptim::gradient::par_stem_P50};
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
@@ -6223,6 +6236,8 @@ void test_set_traits_matches_a_fresh_leaf() {
     // Fresh: the traits go through the constructor.
     phylloptim::Leaf fresh(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7],
                      t[8], t[9], 1e-3, 100, 1e-3, 1000, t[10]);
+    fresh.set_supply_multilayer();
+    fresh.set_model(phylloptim::Leaf::CostCurve::TF24, true);
     std::vector<double> mrp{1.0 / d.area_leaf}, psi_soil{2.0}, depth{1.0};
     fresh.set_physiology(fixture::root_network(mrp, depth), d.PPFD, psi_soil, depth, d.K_s * d.theta / d.h,
                          d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa, d.atm_kpa);
@@ -6573,7 +6588,7 @@ void test_psi_crit_lies_inside_the_stem_curve_domain() {
 
   // The derived values ARE the quantiles claimed, bit-exactly -- the same
   // expression, so a tolerance here would pass on a different derivation.
-  phylloptim::Leaf def;
+  phylloptim::Leaf def = fixture::multilayer_leaf();
   ok(def.stem_b == def.stem_P50 / std::pow(std::log(2.0), 1.0 / def.stem_c),
      "stem_b is the scale that stem_P50 implies");
   ok(def.psi_crit ==
@@ -6590,7 +6605,7 @@ void test_psi_crit_lies_inside_the_stem_curve_domain() {
   // perturb_stem_P50 is the third route in, and the one where the domain used to
   // be able to walk out from under a fixed psi_crit. Both now scale together, so
   // an arbitrarily large move is safe and psi_crit follows it.
-  phylloptim::Leaf pl;
+  phylloptim::Leaf pl = fixture::multilayer_leaf();
   const double psi_crit_0 = pl.psi_crit;
   ok(message_of([&] { pl.perturb_stem_P50(pl.stem_P50 * 0.25); }).empty(),
      "a large downward perturbation is no longer a domain error");
@@ -6604,7 +6619,7 @@ void test_psi_crit_lies_inside_the_stem_curve_domain() {
 void test_bad_input_throws() {
   printf("input validation\n");
   Drivers d;
-  phylloptim::Leaf l;
+  phylloptim::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
   bool threw = false;
@@ -6638,7 +6653,7 @@ void test_infeasible_is_a_distinct_failure() {
   // A well-formed call whose operating point cannot be found: three iterations do
   // not bring the continuity root-find's bracket to its tolerance.
   {
-    phylloptim::Leaf l;
+    phylloptim::Leaf l = fixture::multilayer_leaf();
     l.ci_niter = 3;
     l.setup_transpiration(100);
     l.setup_root_vulnerability(100);
@@ -6666,7 +6681,7 @@ void test_infeasible_is_a_distinct_failure() {
   // infeasible would be swallowed by the caller's tryCatch and the fit would report
   // a plausible likelihood over whichever rows survived.
   {
-    phylloptim::Leaf l;
+    phylloptim::Leaf l = fixture::multilayer_leaf();
     l.setup_transpiration(100);
     l.setup_root_vulnerability(100);
     bool infeasible = false, threw = false;
@@ -6935,7 +6950,7 @@ void test_leaf_to_air_vpd() {
 // resistance network).
 phylloptim::Leaf make_single_leaf(const Drivers &d, double psi_soil,
                                   bool gate = false) {
-  phylloptim::Leaf l;
+  phylloptim::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
   l.use_energy_balance_ = gate;
@@ -6962,7 +6977,7 @@ void test_aligned_defaults_match_tf24_at_the_reference() {
   using K = phylloptim::Leaf::CostCurve;
   Drivers d;  // PPFD 900, VPD 2 kPa, ca 40 Pa, 25 C, kmax 3.14e-5: the reference
   auto gc_of = [&](auto curve) {
-    phylloptim::Leaf l;
+    phylloptim::Leaf l = fixture::multilayer_leaf();
     l.setup_transpiration(phylloptim::Leaf::ncontrol_default);
     l.setup_root_vulnerability(phylloptim::Leaf::ncontrol_default);
     l.set_supply_single(0.0);
@@ -7230,7 +7245,7 @@ const double kLiveT50 = 32.0, kLiveTcrit = 28.0;
 // before set_physiology, as make_pm_leaf does for the layered supply. With `tc`
 // the thermal cost is on at the live thresholds above.
 phylloptim::Leaf make_linked_eb_leaf(const Drivers &d, double psi_soil, bool tc) {
-  phylloptim::Leaf l;
+  phylloptim::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
   l.use_energy_balance_ = true;
@@ -7634,6 +7649,40 @@ void test_collar_foc_matches_profit_linked_curves() {
   ok(compared >= 36, "enough points were compared on each route (hazard 16)");
 }
 
+// A prescribed collar seeds a normalised curve's normalisers itself, as the
+// solve does: seating a supply clears them, and unseeded the profit at a
+// prescribed collar is not finite. On a freshly seated leaf the prescribed
+// evaluation at the solve's own collar is the solve's point, to the bit.
+void test_collar_prescribed_seeds_normalisers() {
+  printf("a prescribed collar seeds ProfitMax's normalisers\n");
+  using CC = phylloptim::Leaf::CostCurve;
+  Drivers d;
+  d.PPFD = 1500.0;
+  const struct {
+    std::vector<double> psi;
+    std::vector<double> depth;
+  } soils[] = {{{1.0}, {1.0}}, {{1.0, 2.0, 3.0}, {0.5, 1.0, 1.5}}};
+  for (const auto &s : soils) {
+    phylloptim::Leaf solved = make_leaf(d, s.psi, s.depth);
+    solved.set_model(CC::ProfitMax, true);
+    solved.optimise();
+    phylloptim::Leaf fresh = make_leaf(d, s.psi, s.depth);
+    fresh.set_model(CC::ProfitMax, true);
+    // Unseeded, the evaluation refuses its non-finite profit.
+    double profit = std::numeric_limits<double>::quiet_NaN();
+    try {
+      profit = fresh.evaluate_root_collar_psi(solved.opt_root_psi_);
+    } catch (const std::exception &) {
+    }
+    const std::string where = std::to_string(s.psi.size()) + " layer(s)";
+    ok(std::isfinite(profit), "prescribed profit is finite, " + where);
+    ok(profit == solved.profit_ &&
+           fresh.assim_colimited_ == solved.assim_colimited_ &&
+           fresh.opt_psi_stem_ == solved.opt_psi_stem_,
+       "prescribed at the solve's collar is the solve's point, " + where);
+  }
+}
+
 // ===========================================================================
 // The closed form as a SELECTABLE METHOD -- the third axis of set_model()
 // ---------------------------------------------------------------------------
@@ -7763,7 +7812,7 @@ void test_closed_form_is_a_selectable_method() {
        "the collar route is refused");
 
     // Multi-layer: the closed form for it does not exist.
-    phylloptim::Leaf m;
+    phylloptim::Leaf m = fixture::multilayer_leaf();
     m.setup_transpiration(100);
     m.setup_root_vulnerability(100);
     const std::vector<double> depths{1.0, 2.0, 3.0};
@@ -8990,32 +9039,36 @@ void test_tf24_floor_kmax_vpd_invariance() {
   }
 }
 
-void test_tf24_floor_refuses_an_unset_price() {
-  printf("TF24_floor refuses an unset price, and says why\n");
+void test_tf24_floor_defaults_to_tf24() {
+  printf("TF24_floor's price defaults to 0, where it is TF24; a cleared one is refused\n");
   Drivers d;
   {
-    phylloptim::Leaf l = make_single_leaf(d, 1.0);
-    l.set_model(phylloptim::Leaf::CostCurve::TF24_floor, false);
-    ok(throws_with([&] { l.optimise(); },
-                   "needs TF24_floor_lambda_o set"),
-       "an unset lambda_o is refused rather than optimised as a NaN objective");
-    // ⚠️ AND THE MESSAGE HAS TO NAME TF24, or the obvious repair -- set it to
-    // zero -- silently substitutes the production model for the one the caller
-    // asked for.
-    ok(throws_with([&] { l.optimise(); }, "would silently make this curve TF24"),
-       "and says why there is no default");
-    // It also has to say where a price can be SET FROM, since the field is not
-    // reachable through leaf_traits(). That gap is what made this curve
-    // unusable through leaf_solve() when it was first added.
-    ok(throws_with([&] { l.optimise(); }, "leaf_solve()"),
-       "and names a route that can supply one");
+    // The default is plant's, so a leaf that seats TF24_floor and sets nothing
+    // solves TF24, bit for bit (test_tf24_floor_reduces says why exactly).
+    phylloptim::Leaf a = make_single_leaf(d, 1.0);
+    ok(a.TF24_floor_lambda_o == 0.0, "a fresh leaf's lambda_o is 0");
+    a.set_model(phylloptim::Leaf::CostCurve::TF24_floor, false);
+    a.optimise();
+    phylloptim::Leaf b = make_single_leaf(d, 1.0);
+    b.set_model(phylloptim::Leaf::CostCurve::TF24, false);
+    b.optimise();
+    const std::vector<double> va = reported(a), vb = reported(b);
+    for (std::size_t i = 0; i < va.size(); ++i) {
+      ok(same_bits(va[i], vb[i]),
+         std::string("the default TF24_floor is TF24 in ") + reported_names[i]);
+    }
   }
   {
     phylloptim::Leaf l = make_single_leaf(d, 1.0);
-    l.TF24_floor_lambda_o = 0.0;
+    l.TF24_floor_lambda_o = phylloptim::util::na_value;
     l.set_model(phylloptim::Leaf::CostCurve::TF24_floor, false);
-    l.optimise();
-    ok(std::isfinite(l.profit_), "an explicit lambda_o = 0 solves");
+    ok(throws_with([&] { l.optimise(); },
+                   "needs TF24_floor_lambda_o set"),
+       "a cleared lambda_o is refused rather than optimised as a NaN objective");
+    // It has to say where a price can be SET FROM, since the field is not
+    // reachable through leaf_traits().
+    ok(throws_with([&] { l.optimise(); }, "leaf_solve()"),
+       "and names a route that can supply one");
   }
   {
     phylloptim::Leaf l = make_single_leaf(d, 1.0);
@@ -9846,7 +9899,7 @@ phylloptim::Leaf make_thermal_leaf(const Drivers &d, std::vector<double> psi_soi
                                    std::vector<double> soil_depth, bool eb,
                                    bool gate,
                                    void (*inputs)(phylloptim::Leaf &) = nullptr) {
-  phylloptim::Leaf l;
+  phylloptim::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
   l.use_energy_balance_ = eb;
@@ -10004,7 +10057,7 @@ void test_thermal_damage_has_no_corners() {
   // 2. A high-Ea species below 25 C: the impairment rate keeps falling, and its
   //    sensitivity to Ea is the exponential's, where the clamp held both.
   {
-    phylloptim::Leaf l;
+    phylloptim::Leaf l = fixture::multilayer_leaf();
     l.k_i_Ea_ = 619e3;
     const double r10 = l.damage_rates(10.0, 0.0, 0.0, 0.0)[1];
     const double r5 = l.damage_rates(5.0, 0.0, 0.0, 0.0)[1];
@@ -10073,7 +10126,7 @@ void test_thermal_damage_has_no_corners() {
     ok(seat(-phylloptim::Leaf().K_A_, 0.0, 0.0).find("damage_state") != std::string::npos,
        "and A_ at the shift's pole");
     ok(seat(-1e-9, 0.0, 0.0).empty(), "a hair below zero in A_ is read as itself");
-    phylloptim::Leaf l;
+    phylloptim::Leaf l = fixture::multilayer_leaf();
     l.k_i_Tiso_ = 90.0;
     ok(message_of([&] { l.damage_rates(25.0, 0.0, 0.0, 0.0); }).find("[250, 350]") !=
            std::string::npos,
@@ -10292,6 +10345,8 @@ void test_thermal_damage_refusals() {
   const std::vector<phylloptim::gradient::Drivers> obs{gd, gd};
   const int par[] = {phylloptim::gradient::par_vcmax_25};
   phylloptim::gradient::Settings s;
+  s.model = {phylloptim::Leaf::CostCurve::TF24,
+             phylloptim::gradient::Route::Collar};
   phylloptim::gradient::Result r;
   // The trait gradient CARRIES the layer: both routes difference the solve's own
   // dprofit and outputs, which read the block the layer writes. So with the gate
@@ -10375,7 +10430,7 @@ phylloptim::Leaf make(const Drivers &d, const std::vector<double> &psi_soil,
                       bool eb = false, bool single = false,
                       double rho = std::numeric_limits<double>::quiet_NaN(),
                       void (*more)(phylloptim::Leaf &) = nullptr) {
-  phylloptim::Leaf l;
+  phylloptim::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(phylloptim::Leaf::ncontrol_default);
   l.setup_root_vulnerability(phylloptim::Leaf::ncontrol_default);
   l.set_traits(l.vcmax_25, l.stem_c, l.stem_P50, l.roots_.root_c,
@@ -10420,7 +10475,7 @@ Drivers manuscript_drivers() {
 
 void test_temperature_factor() {
   printf("residual conductance: the temperature factor is one smooth curve\n");
-  phylloptim::Leaf l;
+  phylloptim::Leaf l = fixture::multilayer_leaf();
   ok(l.g_min_factor(25.0) == 1.0, "the factor is exactly 1 at 25 C");
   ok(l.g_min == 0.0, "g_min defaults to zero");
   for (double T : {-10.0, 0.0, 25.0, 40.0, 60.0}) {
@@ -11550,6 +11605,7 @@ int main(int argc, char **argv) {
   test_linked_dprofit_with_energy_balance_is_the_identity_link_scaled();
   test_linked_optimum_with_energy_balance_is_stationary();
   test_collar_foc_matches_profit_linked_curves();
+  test_collar_prescribed_seeds_normalisers();
   test_closed_form_is_a_selectable_method();
   test_closed_form_is_prescribed_temperature_only();
   test_single_layer_optimisers_clear_collar_state();
@@ -11565,7 +11621,7 @@ int main(int argc, char **argv) {
   test_tf24_floor_wet_end_price();
   test_tf24_floor_emergent_lambda();
   test_tf24_floor_kmax_vpd_invariance();
-  test_tf24_floor_refuses_an_unset_price();
+  test_tf24_floor_defaults_to_tf24();
   test_tf24_floor_closed_form();
   test_leastcost_matches_prentice_closed_form();
   test_leastcost_refuses_an_unset_or_degenerate_beta();

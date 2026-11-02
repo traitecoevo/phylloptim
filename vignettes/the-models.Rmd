@@ -86,8 +86,8 @@ Water reaches the leaf through soil, then roots, then the **root collar** — th
 
 | route | what is optimised | what supplies it |
 |---|---|---|
-| the **stem route**, `"stem"` | the stem potential `ψ_stem`, with the potential upstream of it held at `ψ_soil` | the soil-to-collar path is ignored entirely |
-| the **collar route**, `"collar"` (the default) | the collar potential, which is then mapped to a stem potential | the root path in series |
+| the **stem route**, `"stem"` (the default) | the stem potential `ψ_stem`, with the potential upstream of it held at `ψ_soil` | the soil-to-collar path is ignored entirely |
+| the **collar route**, `"collar"` | the collar potential, which is then mapped to a stem potential | the root path in series |
 
 Those names are used throughout this page. The literature calls the first "non-root-based", which is also what the package's refusal message means by the term, and `find_root_collar_psi()` is the second under its own name.
 
@@ -447,7 +447,7 @@ cat(sprintf("at psi = 1e-06 MPa:  TF24 %10.3e    TF24_floor %9.1f\n",
             l$lambda_TF24_floor(1e-6)))
 ```
 
-`λ_o` has `CF77_lambda_`'s units and meaning — carbon per unit transpiration — but, unlike it, no default: at `λ_o = 0` this curve *is* `TF24`, so a caller who omitted it would be running the production model under the new model's name. The solve refuses rather than defaults. An explicit zero is accepted, and is the reduction test's own case. [leaf_solve()] and [leaf_batch()] take it as an argument; on a bare `Leaf`, assign the field.
+`λ_o` has `CF77_lambda_`'s units and meaning — carbon per unit transpiration. Its default is 0, as in plant, where this curve *is* `TF24` bit for bit, so `TF24_floor` is the default model of [leaf_solve()] and the gradients without changing a number. [leaf_solve()] and [leaf_batch()] take it as an argument; on a bare `Leaf`, assign the field.
 
 ### Pricing the drop is not pricing the potential
 
@@ -645,7 +645,7 @@ The published models map onto that space as follows.
 |---|---|---|
 | @cowan1977 | `CF77` | the `λE` cost, with λ prescribed. Any topology. |
 | @sperry2017 | `ProfitMax` | the normalised gain-risk cost, with λ derived per operating point. Their own formulation is single-supply. |
-| @towers2024 | `TF24` | the carbon cost, solved over the collar potential with a multi-layer root network. The default here, and what `plant` consumes. |
+| @towers2024 | `TF24` | the carbon cost, solved over the collar potential with a multi-layer root network. What `plant` consumes; the default model, `TF24_floor`, is it at a price of 0. |
 | @joshi2022 | `JS22` | the `γ_J(Δψ)²` cost, the only one priced on the drop. Their hydraulic term only; see below. |
 | @wolf2016 | `CMax` | a marginal cost linear in the absolute potential, `CMax_a·ψ + CMax_b`, in the form Anderegg et al. (2018) gave it. |
 | @eller2020 | `SOX` | the product objective. Takes no parameter of its own. |
@@ -681,7 +681,8 @@ sp <- leaf_supply_singlelayer()
 curves <- c("TF24", "CF77", "JS22", "CMax", "LeastCost", "SOX", "JW26",
             "ProfitMax")
 gc <- sapply(curves, function(m) {
-  leaf_solve(psi_soil = c(0.5, 1, 2, 3), model = m, supply = sp)$gc
+  leaf_solve(psi_soil = c(0.5, 1, 2, 3), model = m, route = "stem",
+             supply = sp)$gc
 })
 rownames(gc) <- paste("psi_soil", c(0.5, 1, 2, 3))
 print(signif(gc, 3))
@@ -690,7 +691,7 @@ print(signif(gc, 3))
 The first five columns agree at `psi_soil` 1 and part either side of it, which is the comparison an alignment is for. Four curves are left unaligned:
 
 - `SOX`, `JW26` and `ProfitMax` have no level parameter; the supply puts their optimum. Matching them through `kmax` would work, but they would then no longer share the one supply every other curve uses.
-- `TF24_floor` adds a price to TF24's own cost at TF24's own traits, so the only `λ_o` that reaches TF24's conductance is zero, where the curve is TF24. It keeps no default.
+- `TF24_floor` adds a price to TF24's own cost at TF24's own traits, so the only `λ_o` that reaches TF24's conductance is zero, where the curve is TF24. That zero is its default.
 
 Call [align_curves()] with a different reference or `target` to align for a different study, and pass its answer back as traits (`JS22_gamma`, `CMax_a`) or as [leaf_solve()] arguments (`CF77_lambda`, `LeastCost_beta`).
 
@@ -965,7 +966,7 @@ The root curve obeys the identical homogeneity identity and takes the same `(roo
 
 # Appendix B — gradients
 
-`leaf_gradient()` and `leaf_gradient_batch()` return exact derivatives of a solved operating point with respect to the parameters. `model` selects which model's optimum is differentiated; every curve in the table above is available, and the batch reproduces the one-observation route bit-for-bit.
+`leaf_gradient()` and `leaf_gradient_batch()` return exact derivatives of a solved operating point with respect to the parameters. `model` and `route` select which optimum is differentiated: every curve in the table above, on the collar route or the stem route. `leaf_gradient()` is the batch with one observation.
 
 ## The composite
 

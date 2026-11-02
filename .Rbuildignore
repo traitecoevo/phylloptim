@@ -83,3 +83,4 @@
 ^build.*$
 ^_deps$
 
+^tests/testthat/_problems$

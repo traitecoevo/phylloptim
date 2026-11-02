@@ -15,7 +15,8 @@ leaf_gradient_batch(
   stationarity_tol = 1e-08,
   method = c("auto", "ift", "fd"),
   fast_stem_curve = TRUE,
-  model = "collar"
+  model = "TF24_floor",
+  route = NULL
 )
 }
 \arguments{
@@ -69,8 +70,9 @@ stem's vulnerability table, which depends on \code{stem_c} alone; \code{FALSE} e
 so the equivalence is checkable rather than assumed, and the package's tests
 require the two routes to agree.}
 
-\item{model}{which optimality model to differentiate, as in
-\code{\link[=leaf_gradient]{leaf_gradient()}}: \code{"collar"} by default, or any \code{\link[=cost_curve_names]{cost_curve_names()}} entry.}
+\item{model, route}{which optimality model to differentiate, and on which
+route, as in \code{\link[=leaf_gradient]{leaf_gradient()}}: any \code{\link[=cost_curve_names]{cost_curve_names()}} entry,
+\code{"TF24_floor"} by default, on its stem route unless \code{route = "collar"}.}
 }
 \value{
 A list with
@@ -98,11 +100,11 @@ observation.
 \section{What it computes, and where the maths is written down}{
 
 The same five derivatives at the same solved operating point, by the same two
-routes, with the same active-set test deciding between them. \strong{Read
+methods, with the same active-set test deciding between them. \strong{Read
 \code{\link[=leaf_gradient]{leaf_gradient()}}'s documentation for all of it} — the implicit function
 theorem, why the second term is not a correction, why the premise is tested
-rather than assumed, and what \code{status} means. Nothing here differs; this is a
-transcription, and it is required to agree with the R version bit-for-bit.
+rather than assumed, and what \code{status} means. Nothing here differs:
+\code{\link[=leaf_gradient]{leaf_gradient()}} is this function with one observation.
 }
 
 \section{Speed, and which side of the boundary the figure belongs to}{

@@ -3,15 +3,14 @@
 #
 #   Rscript tools/gradient_golden.R > tests/testthat/gradient_golden.tsv
 #
-# WHY THIS FILE EXISTS, and it is not "because the other golden file does".
-# `test-gradient-batch.R` compares the C++ composite against `leaf_gradient()`
-# bit-for-bit, and that is the strong test of the transcription -- the two share
-# no code. What it cannot see is a change applied CONSISTENTLY TO BOTH: move the
-# step rule, the active-set threshold or a solver tolerance and the two
-# implementations move together, the equality test passes, and nothing anywhere
-# says the gradients changed. That is the trap #70 hit inside R alone, and it
-# would be far easier to hit across a language boundary. So the values are also
-# pinned to a file.
+# WHY THIS FILE EXISTS. The finite-difference referee
+# (test-gradient-referee.R) checks the gradient against the model to the
+# solver's floor, which a change of the step rule, the active-set threshold or a
+# solver tolerance can move by far less than it sees and still change every
+# number (the trap #70 hit). So the values are also pinned to a file. A file
+# generated from the gradient cannot say the gradient is RIGHT -- it would have
+# recorded a missing parameter write as a correct zero -- which is the referee's
+# job; it says nothing has moved.
 #
 # ⚠️ HEX FLOATS, and do not "tidy" them into decimals. R's decimal
 # string-to-double conversion is not correctly rounded: on a random sample about
@@ -80,66 +79,29 @@ local({
   }
 })
 
-# The golden grid's drivers, so every row here is an operating point the rest of
-# the suite already knows -- tests/cpp/test_golden.cpp, test-golden.R and
-# test-gradient.R all use these.
-grid_drivers <- function(psi_soil, ppfd = 900, vpd = 2.0, layers = 1L) {
-  theta <- 0.000157
-  area_leaf <- 0.05
-  list(psi_soil = list(psi_soil + 0.25 * (seq_len(layers) - 1)),
-       PPFD = ppfd,
-       soil_depth = list(1.0 * seq_len(layers)),
-       root_network = root_network_from_carbon(
-         rep(1 / layers / area_leaf, layers),
-         soil_depth = 1.0 * seq_len(layers)),
-       leaf_specific_conductance_max = 1.0 * theta / 5.0,
-       atm_vpd = vpd, ca = 40, leaf_temp = 25, atm_o2_kpa = 21,
-       atm_kpa = 101.3)
-}
-
-# Five rows, chosen for the branch each one takes rather than to sample evenly.
-# `stem_P50` and `stem_c` are in `pars` throughout because they are the two
-# parameters of one curve and their derivatives are taken by different routes:
-# `stem_P50` moves b and leaves the table, `stem_c` rebuilds the table. Both now carry a term through the derived `stem_b` and
-# `psi_crit`, which is the part a hand-written chain rule would be most likely to
-# drop -- so pinning them here is what would catch a partial masquerading as a
-# total derivative.
+# The cases are tests/testthat/helper-gradient.R's `gradient_golden_cases()`,
+# which test-gradient-batch.R reads back: one list, so the file and its test
+# cannot disagree about what a row is. Its first five cases are the golden grid's
+# operating points that tests/cpp/test_golden.cpp, test-golden.R and
+# test-gradient.R also use, chosen for the branch each takes (interior on one and
+# five layers, a dry pin, a shut leaf, the single potential); after them, every
+# curve on both routes, the thermal-damage layer and prescribed points.
 #
-# `R_d_25` is in `pars` throughout because it is the smallest-magnitude parameter
-# here, so it takes the smallest absolute step and sets this file's cross-platform
-# tolerance -- see `gradient_golden_tolerance()`.
-cases <- list(
-  list(label = "interior-1layer",
-       args = grid_drivers(2.0),
-       pars = c("vcmax_25", "stem_P50", "stem_c", "R_d_25")),
-  list(label = "interior-5layer",
-       args = grid_drivers(0.5, vpd = 0.5, layers = 5L),
-       pars = c("vcmax_25", "stem_P50", "stem_c", "R_d_25")),
-  # A dry pin: psi_crit bounds nothing under TF24 (#183), so the leaf pins dry
-  # only where it transpires all its stem can carry -- a dry soil in humid air,
-  # with the stem held at the end of its curve.
-  list(label = "pinned-dry-1layer",
-       args = grid_drivers(6.0, ppfd = 500, vpd = 0.5),
-       pars = c("vcmax_25", "stem_P50", "stem_c", "R_d_25")),
-  # A shut leaf: a soil past the end of the stem curve (15.44 MPa at the
-  # defaults), where the stem carries nothing. root_P50 4.0, NOT the default,
-  # kept from when the shut stem's placement depended on the root curve.
-  list(label = "shutdown-1layer",
-       args = c(grid_drivers(16.0), list(traits = leaf_traits(root_P50 = 4.0))),
-       pars = c("vcmax_25", "stem_P50", "stem_c", "R_d_25")),
-  list(label = "single-potential",
-       args = list(psi_soil = 1.5, PPFD = 900, atm_vpd = 2.0,
-                   supply = leaf_supply_singlelayer(),
-                   root_network = series_resistance(1e4)),
-       pars = c("vcmax_25", "leaf_specific_conductance_max", "resistance",
-                "R_d_25"))
-)
+# `stem_P50` and `stem_c` are in the grid cases' `pars` because they are the two
+# parameters of one curve and their derivatives are taken by different routes:
+# `stem_P50` moves b and leaves the table, `stem_c` rebuilds the table. Both
+# carry a term through the derived `stem_b` and `psi_crit`, which a hand-written
+# chain rule would be most likely to drop. `R_d_25` is in them because it is the
+# smallest-magnitude parameter here, so it takes the smallest absolute step and
+# sets this file's cross-platform tolerance -- see `gradient_golden_tolerance()`.
+source("tests/testthat/helper-gradient.R")
+cases <- gradient_golden_cases()
 
-out <- do.call(rbind, lapply(cases, function(cs) {
-  b <- do.call(leaf_batch, cs$args)
-  g <- leaf_gradient_batch(b, pars = cs$pars)
+out <- do.call(rbind, lapply(names(cases), function(label) {
+  cs <- cases[[label]]
+  g <- gradient_golden_run(cs)
   do.call(rbind, lapply(cs$pars, function(p) {
-    data.frame(case = cs$label, status = g$status[[1]], method = g$method[[1]],
+    data.frame(case = label, status = g$status[[1]], method = g$method[[1]],
                par = p,
                A = sprintf("%a", g$gradient[1, p, "A"]),
                gc = sprintf("%a", g$gradient[1, p, "gc"]),

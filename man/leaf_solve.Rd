@@ -17,9 +17,10 @@ leaf_solve(
   atm_kpa = 101.3,
   traits = leaf_traits(),
   control = leaf_control(),
-  supply = leaf_supply_multilayer(),
+  supply = leaf_supply_singlelayer(),
   reuse = TRUE,
-  model = "collar",
+  model = "TF24_floor",
+  route = NULL,
   CF77_lambda = NA_real_,
   TF24_floor_lambda_o = NA_real_,
   LeastCost_beta = NA_real_
@@ -66,10 +67,11 @@ assimilation by percent, not by rounding.}
 
 \item{control}{a \code{\link[=leaf_control]{leaf_control()}} object}
 
-\item{supply}{how water reaches the root collar: \code{\link[=leaf_supply_multilayer]{leaf_supply_multilayer()}}
-(the default) or \code{\link[=leaf_supply_singlelayer]{leaf_supply_singlelayer()}}. On the single-potential path
-\code{soil_depth} and \code{root_network} must be omitted, and each \code{psi_soil} is one
-value rather than a profile.}
+\item{supply}{how water reaches the root collar: \code{\link[=leaf_supply_singlelayer]{leaf_supply_singlelayer()}}
+(the default) or \code{\link[=leaf_supply_multilayer]{leaf_supply_multilayer()}}. On the single-potential path
+\code{soil_depth} must be omitted, \code{root_network} is a \code{\link[=series_resistance]{series_resistance()}}
+(defaulted if omitted), and each \code{psi_soil} is one value rather than a
+profile.}
 
 \item{reuse}{solve every row with one \code{Leaf} object (\code{TRUE}) or construct a
 fresh one per row (\code{FALSE}, the default). Reuse is faster because the
@@ -77,15 +79,20 @@ vulnerability tables are built once, and it is safe -- every exit from the
 solve writes its own outputs. \code{FALSE} exists so that can be checked rather
 than assumed, and the package's tests do check it.}
 
-\item{model}{which optimality model to solve, as in \code{\link[=leaf_gradient]{leaf_gradient()}}:
-\code{"collar"} (the default, the production path -- the TF24 cost maximised over
-the root-collar potential) or any name from \code{\link[=cost_curve_names]{cost_curve_names()}}, which
-solves that curve's \strong{stem} optimum instead: \code{psi_stem} with the upstream
-potential pinned at \code{psi_soil}, which needs \code{leaf_supply_singlelayer()}.
+\item{model}{which optimality model to solve, as in \code{\link[=leaf_gradient]{leaf_gradient()}}: any
+name from \code{\link[=cost_curve_names]{cost_curve_names()}}, solved on \code{route}. The default,
+\code{"TF24_floor"}, is plant's default model; at its default price,
+\code{TF24_floor_lambda_o = 0}, it is TF24.}
 
-⚠️ \strong{\code{"collar"} and \code{"TF24"} are different models, not two ways of asking
-one question}, even though both use the TF24 cost. They optimise different
-variables over different supply topologies and disagree on 20 of 30 driver
+\item{route}{which potential the curve is maximised over: \code{"stem"} (the
+default), \code{psi_stem} with the upstream potential pinned at \code{psi_soil},
+which needs \code{leaf_supply_singlelayer()}; or \code{"collar"}, the root-collar
+potential, on either supply path, and the only route on
+\code{leaf_supply_multilayer()}. \code{NULL} is the stem route.
+
+⚠️ \strong{The two routes are different models, not two ways of asking one
+question}, even for one curve. They optimise different variables over
+different supply topologies, and for TF24 disagree on 20 of 30 driver
 rows.
 
 ⚠️ \strong{On a stem route the \code{collar} column comes back non-finite}, because
@@ -95,13 +102,13 @@ left behind.
 
 Two curves take a PRESCRIBED price of water rather than deriving one:
 \code{CF77} reads \code{CF77_lambda} and \code{TF24_floor} reads \code{TF24_floor_lambda_o},
-both below. \code{CF77}'s has a default, aligned to TF24 by \code{\link[=align_curves]{align_curves()}};
-\code{TF24_floor}'s has none, and that curve refuses to solve without one.}
+both below. \code{CF77}'s default is aligned to TF24 by \code{\link[=align_curves]{align_curves()}};
+\code{TF24_floor}'s is 0, where that curve is TF24.}
 
 \item{CF77_lambda, TF24_floor_lambda_o}{the prescribed marginal value of water
 for the two curves that take one, in umol C (kg H2O)^-1. \code{NA_real_} (the
 default) leaves the field as it is: \code{CF77}'s aligned default (see
-\code{\link[=align_curves]{align_curves()}}), or unset for \code{TF24_floor}, which refuses to solve.
+\code{\link[=align_curves]{align_curves()}}), or \code{TF24_floor}'s 0, where that curve is TF24.
 
 ⚠️ \strong{Their scale is set by the leaf, not chosen freely.} At this package's
 defaults the leaf's own marginal cost of water runs 9e4 to 3e5, and a price
@@ -197,12 +204,12 @@ leaf_solve(psi_soil = 1.0, PPFD = seq(100, 1800, length.out = 6))
 d <- leaf_solve(psi_soil = seq(0.5, 5, length.out = 6), PPFD = 900)
 d[, c("psi_soil", "A", "gc", "g1_eff")]
 
-# two three-layer profiles
-leaf_solve(psi_soil = list(c(1, 1.5, 2), c(3, 3.5, 4)), PPFD = 900)
+# two three-layer profiles, on a root network and the collar route
+leaf_solve(psi_soil = list(c(1, 1.5, 2), c(3, 3.5, 4)), PPFD = 900,
+           supply = leaf_supply_multilayer(), route = "collar")
 
-# a different optimality model, on the single-potential path it needs
-leaf_solve(psi_soil = 1.5, PPFD = 900, model = "SOX",
-           supply = leaf_supply_singlelayer())
+# a different optimality model
+leaf_solve(psi_soil = 1.5, PPFD = 900, model = "SOX")
 }
 \seealso{
 \code{\link[=leaf_model]{leaf_model()}} for the stateful interface.

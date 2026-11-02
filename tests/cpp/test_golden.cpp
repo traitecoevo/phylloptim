@@ -70,7 +70,7 @@ const double kLeafTemps[] = {25.0, 40.0};
 
 Row solve(double psi_soil, double ppfd, double vpd, int layers,
           double leaf_temp) {
-  phylloptim::Leaf l;
+  phylloptim::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(phylloptim::Leaf::ncontrol_default);
   l.setup_root_vulnerability(phylloptim::Leaf::ncontrol_default);
 
@@ -613,9 +613,6 @@ int compare(Tolerance tol) {
 //     fields instead;
 //   * `hydraulic_cost_` written in carbon units by `_TF` and `_CF77`
 //     and left STALE by `_ProfitMax`, which does not write it;
-//   * `collar_at_ProfitMax` refused on every row: the collar route's prescribed
-//     evaluation does not seed ProfitMax's normalisers, and seating a supply
-//     clears them;
 //   * `at_ProfitMax` evaluated where the solve takes its degenerate exit (a dark
 //     leaf, a wet end past psi_crit): the stem route's prescribed evaluation
 //     seeds the normalisers but has no such exit.
@@ -1007,7 +1004,7 @@ OptRow solve_one(Solver s, Topology t, double psi_soil, double ppfd,
                  double leaf_temp, bool eb, bool tc) {
   OptRow r{s, t, psi_soil, ppfd, leaf_temp, eb, tc, false, "ok", "-",
            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-  phylloptim::Leaf l;
+  phylloptim::Leaf l = fixture::multilayer_leaf();
   clear_aligned_inputs(l);
   l.setup_transpiration(phylloptim::Leaf::ncontrol_default);
   l.setup_root_vulnerability(phylloptim::Leaf::ncontrol_default);
@@ -1077,7 +1074,7 @@ std::vector<OptRow> run_optima_grid() {
   for (Topology t : kTopologies)
     for (bool eb : {false, true})
       for (bool tc : {false, true}) {
-        phylloptim::Leaf l;
+        phylloptim::Leaf l = fixture::multilayer_leaf();
         clear_aligned_inputs(l);
         l.setup_transpiration(phylloptim::Leaf::ncontrol_default);
         l.setup_root_vulnerability(phylloptim::Leaf::ncontrol_default);

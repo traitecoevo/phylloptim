@@ -176,16 +176,20 @@ public:
   // a branch, not a std::variant, which measured slower (hazard 6).
   SinglePotential single_;
   enum class SupplyKind { MultiLayer, SinglePotential };
-  // MultiLayer by default, which is what plant runs.
-  SupplyKind supply_kind_ = SupplyKind::MultiLayer;
+  // SinglePotential by default, with TF24_floor on the stem route: one set of
+  // defaults, here and in R. plant seats the multi-layer path itself.
+  SupplyKind supply_kind_ = SupplyKind::SinglePotential;
 
   // --- choosing the supply path ----------------------------------------------
   //
   // Two entry points rather than a settable tag, which would leave the other path's
   // state configured, ignored and then stale. Each leaves tag and supply agreeing
   // and clears the solved state, so call set_physiology() again.
+  // A root network has no single upstream potential to pin, so this seats the
+  // collar route as well; the curve is left as it is.
   void set_supply_multilayer() {
     supply_kind_ = SupplyKind::MultiLayer;
+    route_is_collar_ = true;
     single_.clear();
     setup_clean_leaf();
   }
@@ -343,9 +347,9 @@ public:
   // CF77 rows), so cf77_price() then returns CF77_lambda_ rather than dividing by 1.
   bool CF77_soil_beta_ = false;
   // TF24_floor's price of water as transpiration goes to zero, and its only
-  // parameter: an input like `CF77_lambda_`, with no default. Unset is refused,
-  // because at zero the curve is TF24 under another name. Its scale is the leaf's
-  // lambda, 9e4-3e5 at the defaults; far outside it the optimum pins (hazard 16).
+  // parameter: an input like `CF77_lambda_`. Its default is 0, plant's, where the
+  // curve is TF24. Its scale is the leaf's lambda, 9e4-3e5 at the defaults; far
+  // outside it the optimum pins (hazard 16).
   double TF24_floor_lambda_o =
       curve_default<CostCurve::TF24_floor, par_TF24_floor_lambda_o>();  // umol C (kg H2O)^-1
   // Least-cost's unit-cost ratio beta = c_V / c_E (Prentice et al. 2014), the curve's
@@ -1102,9 +1106,9 @@ public:
   template <CostCurve K, int Slot> static constexpr double curve_default();
 
   // The model is configuration, because its parameters already are: set_model()
-  // seats it and optimise() takes nothing. TF24 on the collar route by default.
-  CostCurve cost_curve_ = CostCurve::TF24;
-  bool route_is_collar_ = true;
+  // seats it and optimise() takes nothing. TF24_floor on the stem route by default.
+  CostCurve cost_curve_ = CostCurve::TF24_floor;
+  bool route_is_collar_ = false;
   // The method: exact (the root-find of the first-order condition) or the closed
   // form in closed_form.hpp. A method, not a model: the two must agree where the
   // closed form is valid, which `test-closed-form.R` measures.

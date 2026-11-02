@@ -2,26 +2,22 @@
 #ifndef PHYLLOPTIM_GRADIENT_HPP_
 #define PHYLLOPTIM_GRADIENT_HPP_
 
-// Trait gradients composed in C++: R/gradient.R's `.gradient_ift()` and
-// `.gradient_fd()` transcribed, plus a loop over observations. From R, dispatch
-// rather than the model dominates a gradient's cost, so this crosses the
-// boundary once per likelihood evaluation, not once per parameter per
+// Trait gradients at a solved or prescribed operating point: the
+// implicit-function composite, a finite-difference fallback where its premise
+// fails, and a loop over observations. Every trait gradient the package gives
+// is this one: leaf_gradient() is `batch` with one observation. From R,
+// dispatch rather than the model dominates a gradient's cost, so this crosses
+// the boundary once per likelihood evaluation, not once per parameter per
 // observation. It returns dY/dtheta for the model parameters; the likelihood and
 // the caller's parameterisation Jacobian stay with the caller.
 //
-// R/gradient.R is the reference, and the two must agree bit for bit: a
-// tolerance would let a transcription slip hide inside the solver's ~1e-9
-// floor. Three rules make that possible:
+// ⚠️ The evaluations mutate the leaf, so the call order is sequenced
+// explicitly: `f(a) - f(b)` has unspecified operand order in C++, and every
+// difference names its two halves first.
 //
-//   1. R's arithmetic order is kept literally: `-((up - dn) / (2 * h)) / H` is
-//      not rewritten as `(dn - up) / (2 * h * H)`.
-//   2. No fused multiply-add; see `rounded()`.
-//   3. The call order is sequenced explicitly. `f(a) - f(b)` has unspecified
-//      operand order in C++ and left-to-right in R, and these `f`s mutate the
-//      leaf, so every difference names its two halves first.
-//
-// `tests/testthat/test-gradient-batch.R` holds this over both supply paths,
-// both methods and the pinned and shut-down rows.
+// tests/testthat/test-gradient-referee.R checks the result against a
+// difference of the solve for every curve on both routes; gradient_golden.tsv
+// records it.
 
 #include <phylloptim/leaf_model.hpp>
 #include <phylloptim/roots.hpp>
@@ -124,8 +120,8 @@ inline const std::vector<std::string>& par_names() {
 
 // --- the five differentiated outputs ------------------------------------------
 //
-// A, gc, psi_stem, collar and profit, in R's `.gradient_output_names` order:
-// append, never reorder. `collar` is psi* itself, so dcollar/dtheta is
+// A, gc, psi_stem, collar and profit, the order R names them in (it reads
+// `gradient_output_names()`): append, never reorder. `collar` is psi* itself, so dcollar/dtheta is
 // dpsi*/dtheta. The first four are what a gas-exchange calibration observes;
 // `profit` is the carbon plant's mass budget consumes.
 inline constexpr int n_outputs = 5;
@@ -141,37 +137,50 @@ inline const std::vector<std::string>& output_names() {
 
 // --- which model's optimum is being differentiated ---------------------------
 //
-// `kCollar` is the production path, the TF24 cost maximised over the collar
-// potential; anything >= 0 is a `Leaf::CostCurve` and selects a stem route
-// (psi_stem with the upstream potential pinned at psi_soil). The wrappers below
-// only choose a route: changing what a collar arm calls, or its order, breaks
-// the bit-for-bit contract with R and the golden files.
-inline constexpr int kCollar = -1;
+// A model is a (curve, route) pair, and every curve runs on both routes. The
+// collar route maximises over the root-collar potential; a stem route over
+// psi_stem with the upstream potential pinned at psi_soil, which is a different
+// model, not a restriction of the collar one (hazard 11). The default is the
+// Leaf's: TF24_floor on the stem route.
+enum class Route { Collar, Stem };
 
-// Seat the model once, at the top of a gradient: the one place the int
-// `Settings::curve` meets the Leaf's named API. Seated on the prescribed path
-// too, which never calls route_solve, because the stem entry points read the
+struct Model {
+  Leaf::CostCurve curve = Leaf::CostCurve::TF24_floor;
+  Route route = Route::Stem;
+  bool collar() const { return route == Route::Collar; }
+};
+
+// Seat the model once, at the top of a gradient. Seated on the prescribed path
+// too, which never calls route_solve, because the entry points below read the
 // seated curve and would otherwise differentiate the leaf's last model.
-inline void route_seat(Leaf& l, int curve) {
-  l.set_model(curve < 0 ? Leaf::CostCurve::TF24
-                        : static_cast<Leaf::CostCurve>(curve),
-              curve < 0);
+inline void route_seat(Leaf& l, const Model& m) {
+  l.set_model(m.curve, m.collar());
 }
 
-inline void route_solve(Leaf& l, int curve) {
-  if (curve < 0) {
+// Whether the curve's objective is normalised by quantities seeded before a
+// search (`Curve<K>::prepares_normalisers`). `apply()` clears them, so such a
+// curve re-seeds them after every perturbation: held at the base point, the
+// gradient would be a partial derivative.
+inline bool prepares_normalisers(Leaf::CostCurve c) {
+  return Leaf::with_curve(c, [](auto tag) {
+    return Curve<tag.value>::prepares_normalisers;
+  });
+}
+
+inline void route_solve(Leaf& l, const Model& m) {
+  if (m.collar()) {
     l.find_root_collar_psi();
   } else {
     l.optimise();
   }
 }
 
-inline double route_psi(const Leaf& l, int curve) {
-  return curve < 0 ? l.opt_root_psi_ : l.opt_psi_stem_;
+inline double route_psi(const Leaf& l, const Model& m) {
+  return m.collar() ? l.opt_root_psi_ : l.opt_psi_stem_;
 }
 
-inline void route_evaluate(Leaf& l, int curve, double psi) {
-  if (curve < 0) {
+inline void route_evaluate(Leaf& l, const Model& m, double psi) {
+  if (m.collar()) {
     l.evaluate_root_collar_psi(psi);
   } else {
     l.evaluate_psi_stem_at(psi);
@@ -181,9 +190,9 @@ inline void route_evaluate(Leaf& l, int curve, double psi) {
 // The same, false where the leaf refuses `psi` as outside its feasible interval.
 // Only that refusal is caught: anything else is a failure of the evaluation and
 // propagates.
-inline bool route_evaluate_feasible(Leaf& l, int curve, double psi) {
+inline bool route_evaluate_feasible(Leaf& l, const Model& m, double psi) {
   try {
-    route_evaluate(l, curve, psi);
+    route_evaluate(l, m, psi);
   } catch (const util::infeasible_error& e) {
     const std::string token = util::infeasible_token("prescribed_potential");
     if (std::string(e.what()).compare(0, token.size(), token) != 0) {
@@ -197,9 +206,9 @@ inline bool route_evaluate_feasible(Leaf& l, int curve, double psi) {
 // dprofit with its feasibility: both routes return a hard 0.0 sentinel on their
 // shut-down and reversed-gradient exits, which a bare value cannot tell from a
 // stationary point (Leaf::dprofit_droot_collar_psi).
-inline double route_dprofit_checked(Leaf& l, int curve, double psi,
+inline double route_dprofit_checked(Leaf& l, const Model& m, double psi,
                                     bool* feasible = nullptr) {
-  if (curve < 0) {
+  if (m.collar()) {
     return l.dprofit_droot_collar_psi(psi, feasible);
   }
   const std::vector<double> r = l.dprofit_dpsi_stem_checked(psi);
@@ -209,20 +218,18 @@ inline double route_dprofit_checked(Leaf& l, int curve, double psi,
   return r[0];
 }
 
-inline double route_dprofit(Leaf& l, int curve, double psi) {
-  return route_dprofit_checked(l, curve, psi, nullptr);
+inline double route_dprofit(Leaf& l, const Model& m, double psi) {
+  return route_dprofit_checked(l, m, psi, nullptr);
 }
 
 // The output that is the decision variable, whose derivative is dpsi*/dtheta,
 // assigned rather than differenced: `collar` on the collar route, `psi_stem` on
 // a stem route, where the collar is never solved for.
-inline int route_decision(int curve) {
-  return curve < 0 ? out_collar : out_psi_stem;
+inline int route_decision(const Model& m) {
+  return m.collar() ? out_collar : out_psi_stem;
 }
 
-// Read straight off the members, where R reads operating_point_values(), which
-// copies these same fields: bit-identical. An output R computes rather than
-// copies (uptake, a sum over layers) would need that sum reproduced here.
+// Read straight off the members, which operating_point_values() copies too.
 inline void outputs(const Leaf& l, double* y) {
   y[0] = l.assim_colimited_;
   y[1] = l.stom_cond_CO2_;
@@ -234,23 +241,12 @@ inline void outputs(const Leaf& l, double* y) {
 // The outputs with the collar held at `psi`. False where the leaf refuses `psi`
 // as infeasible, so a stencil reaching past an end is detected rather than
 // differenced one-sidedly over a shorter interval.
-inline bool outputs_at(Leaf& l, double psi, double* y, int curve = kCollar) {
-  if (!route_evaluate_feasible(l, curve, psi)) {
+inline bool outputs_at(Leaf& l, double psi, double* y, const Model& m) {
+  if (!route_evaluate_feasible(l, m, psi)) {
     return false;
   }
   outputs(l, y);
   return true;
-}
-
-// The product, rounded, so that `a + rounded(b * c)` is two IEEE operations and
-// never one fused multiply-add. Required: `direct + dY_dpsi * dpsi_dtheta`
-// contracts to one `fmadd` on arm64 (clang within an expression, gcc across
-// statements), which differs from R's two roundings in the last bit on 28% of
-// random triples. A named intermediate does not stop gcc's
-// `-ffp-contract=fast`; a volatile store does, because the standard makes it round.
-inline double rounded(double x) {
-  volatile double v = x;
-  return v;
 }
 
 // The step: relative to the parameter above 1 and plain `step` below it, so a
@@ -263,11 +259,12 @@ inline double step_for(int par, double value, double step) {
   return std::max(std::abs(value), floor) * step;
 }
 
-// Where the stencil is centred: on the value, except that `g_min` is refused
-// below zero and defaults to zero, so there the stencil shifts up one step and
-// differentiates at g_min = h. The twin of R's `.gradient_centre()`, bit for bit.
+// Where the stencil is centred: on the value, except that `g_min` and
+// TF24_floor's price are refused below zero and default to zero, so there the
+// stencil shifts up one step and differentiates at h.
 inline double centre_for(int par, double value, double h) {
-  return (par == par_g_min && value - h < 0.0) ? value + h : value;
+  const bool non_negative = par == par_g_min || par == par_TF24_floor_lambda_o;
+  return (non_negative && value - h < 0.0) ? value + h : value;
 }
 
 // --- one observation's drivers ------------------------------------------------
@@ -315,16 +312,13 @@ struct Settings {
   double stationarity_tol = 1e-8;
   Method method = Method::Auto;
   bool fast_stem_curve = true;
-  // Which model's optimum to differentiate; `kCollar`, the production path, by
-  // default.
-  int curve = kCollar;
+  // Which model's optimum to differentiate: the Leaf's default, TF24_floor on
+  // the stem route, unless set.
+  Model model;
   // The finite-difference arm's step, separate from `step`: that arm re-solves,
   // so its step must clear the solver's resolution (hazard 15). `step` drives
   // the composite, which perturbs at fixed psi and never re-solves.
   double fd_step = 1e-6;
-  // ProfitMax only: re-solve |A|max after each perturbation, because `apply()`
-  // clears it; holding it fixed would make the gradient a partial derivative.
-  bool resolve_profitmax = false;
 };
 
 // A collar potential the caller imposes in place of the solved one, and how it
@@ -398,8 +392,8 @@ inline void apply(Leaf& l, const double* theta, const Drivers& d, bool single,
                theta[par_R_d_25], theta[par_JS22_gamma],
                theta[par_CMax_a], theta[par_CMax_b], theta[par_g_min]);
   // Not traits and nothing is derived from them, so written directly. Only a
-  // set slot is written, as R does (`!is.na`): on a route that does not own a
-  // slot it is NA, and writing it would overwrite the leaf's aligned default.
+  // set slot is written: on a model that does not own a slot it is NA, and
+  // writing it would overwrite the leaf's aligned default.
   if (!std::isnan(theta[par_CF77_lambda])) {
     l.CF77_lambda_ = theta[par_CF77_lambda];
   }
@@ -430,8 +424,7 @@ inline void apply(Leaf& l, const double* theta, const Drivers& d, bool single,
   }
   if (single) {
     // R's `series_resistance()`: one series resistance in `r_R_V_sum`, built
-    // here rather than copied from `d.root_network` so the two implementations
-    // cannot disagree about the other four fields.
+    // from theta, since `resistance` is a differentiated parameter.
     RootNetwork net;
     net.r_R_V_sum.assign(1, theta[par_resistance]);
     l.set_physiology(net, d.PPFD, d.psi_soil, d.soil_depth, theta[par_kmax],
@@ -468,6 +461,7 @@ inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
   double th[n_theta];
   double up[1 + n_outputs];
   double dn[1 + n_outputs];
+  const bool reseed = prepares_normalisers(s.model.curve);
   bool at_base = true;
   for (std::size_t k = 0; k < npars; ++k) {
     const int p = pars[k];
@@ -478,20 +472,16 @@ inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
     const double h = step_for(p, theta[p], s.step);
     const double centre = centre_for(p, theta[p], h);
     for (int side = 0; side < 2; ++side) {
-      // Up first, then down: R evaluates `up <- side(1)` before `dn <- side(-1)`
-      // and both mutate the leaf.
+      // Up first, then down: both mutate the leaf.
       std::copy(theta, theta + n_theta, th);
       th[p] = side == 0 ? centre + h : centre - h;
       apply(l, th, d, single, p, s.fast_stem_curve);
       double* dst = side == 0 ? up : dn;
-      // Evaluate first, then read dprofit at the same fixed collar -- R's order,
-      // and `evaluate_root_collar_psi` is what seats the state `dprofit` reads.
-      if (s.resolve_profitmax) {
-        // apply() cleared ProfitMax's normaliser. Re-solved, not pinned, so the
-        // derivative is total; must match R/gradient.R's `pinned$reseat`.
-        l.prepare_profitmax();
-      }
-      if (!outputs_at(l, psi_star, dst + 1, s.curve)) {
+      // Evaluate first, then read dprofit at the same fixed collar: the
+      // evaluation is what seats the state `dprofit` reads.
+      // apply() cleared the normalisers; both routes' evaluations re-seed
+      // them, so the derivative is total rather than a partial at the base.
+      if (!outputs_at(l, psi_star, dst + 1, s.model)) {
         util::stop_infeasible(
             "gradient_active_set",
             "leaf_gradient(): perturbing `" + par_names()[std::size_t(p)] +
@@ -500,12 +490,12 @@ inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
                    "on an active-set boundary; lower `stationarity_tol` or "
                    "difference the solve directly.");
       }
-      // Again before the derivative read, because R re-seats inside every
-      // accessor and prepare_profitmax() mutates the leaf's rate fields.
-      if (s.resolve_profitmax) {
+      // Before the derivative read, which does not seed them: prepare_profitmax()
+      // seeds the only curve that has them (leaf_cost_curves.hpp asserts it).
+      if (reseed) {
         l.prepare_profitmax();
       }
-      dst[0] = route_dprofit(l, s.curve, psi_star);
+      dst[0] = route_dprofit(l, s.model, psi_star);
     }
     // M = d2profit/dpsi dtheta, with psi held FIXED at psi*.
     const double M = (up[0] - dn[0]) / (2.0 * h);
@@ -513,11 +503,11 @@ inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
     const double d_psi = dpsi_dtheta == nullptr ? -M / H : dpsi_dtheta[k];
     for (int j = 0; j < n_outputs; ++j) {
       const double direct = (up[1 + j] - dn[1 + j]) / (2.0 * h);
-      out[k * n_outputs + j] = direct + rounded(dY_dpsi[j] * d_psi);
+      out[k * n_outputs + j] = direct + dY_dpsi[j] * d_psi;
     }
     // The decision variable is psi* held fixed, so its direct term is zero and
     // the composite is dpsi*/dtheta: assigned, not differenced.
-    out[k * n_outputs + route_decision(s.curve)] = d_psi;
+    out[k * n_outputs + route_decision(s.model)] = d_psi;
     // The envelope theorem, assigned for the same reason: profit's indirect term
     // is identically zero at a stationary point. Also immune to a non-finite
     // caller-supplied d_psi, where 0 * x would be NaN.
@@ -551,7 +541,7 @@ inline void gradient_fd(Leaf& l, const double* theta, const Drivers& d,
       std::copy(theta, theta + n_theta, th);
       th[p] = side == 0 ? centre + h : centre - h;
       apply(l, th, d, single, p, s.fast_stem_curve);
-      route_solve(l, s.curve);
+      route_solve(l, s.model);
       outputs(l, side == 0 ? up : dn);
     }
     for (int j = 0; j < n_outputs; ++j) {
@@ -577,7 +567,7 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
 
   apply(l, theta, d, single, -1, s.fast_stem_curve);
   // Seated here, not only by `batch`, because at() is a public entry point.
-  route_seat(l, s.curve);
+  route_seat(l, s.model);
 
   // The default solves for the collar; `prescribed` imposes one. Either way
   // `psi_star` is the collar the outputs were evaluated at, not always the argmax.
@@ -585,15 +575,15 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
     // A prescribed psi outside the feasible interval is reported, not thrown: a
     // fit visits such points routinely, and `status` tells a batch which rows to
     // distrust. Everything but `psi` stays NA.
-    if (!route_evaluate_feasible(l, s.curve, prescribed->psi)) {
+    if (!route_evaluate_feasible(l, s.model, prescribed->psi)) {
       out.status = Status::Refused;
       out.psi = prescribed->psi;
       return;
     }
   } else {
-    route_solve(l, s.curve);
+    route_solve(l, s.model);
   }
-  const double psi_star = route_psi(l, s.curve);
+  const double psi_star = route_psi(l, s.model);
   out.psi = psi_star;
   outputs(l, out.value);
 
@@ -607,10 +597,10 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
   // adopt dprofit's 0.0 sentinel as dprofit/dpsi.
   bool resid_feasible = false;
   const double resid =
-      route_dprofit_checked(l, s.curve, psi_star, &resid_feasible);
-  // Named halves (rule 3 in the header).
-  const double d_hi = route_dprofit(l, s.curve, psi_star + h_psi);
-  const double d_lo = route_dprofit(l, s.curve, psi_star - h_psi);
+      route_dprofit_checked(l, s.model, psi_star, &resid_feasible);
+  // Named halves: each call moves the leaf (see the header).
+  const double d_hi = route_dprofit(l, s.model, psi_star + h_psi);
+  const double d_lo = route_dprofit(l, s.model, psi_star - h_psi);
   const double H = (d_hi - d_lo) / (2.0 * h_psi);
   // H == 0 with resid == 0 is the shut-down sentinel, and H > 0 is not a
   // maximum: either way the composite has nothing to stand on.
@@ -643,8 +633,7 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
                "has nothing to stand on. This is a shut-down or otherwise "
                "determined operating point; use method = \"auto\".");
   }
-  // Refused by name, as R/gradient.R does and in the same place: the step check
-  // below does not catch every pinned row.
+  // Refused by name: the step check below does not catch every pinned row.
   if (use_ift && prescribed == nullptr && out.status == Status::Pinned) {
     util::stop("leaf_gradient(): method = \"ift\" was asked for at a pinned "
                "optimum, where psi* is held by a bound and the "
@@ -658,9 +647,9 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
     // of a bound), but nothing relies on that.
     double hi[n_outputs];
     double lo[n_outputs];
-    // Both before either is tested, as in R: each call moves the leaf.
-    const bool hi_ok = outputs_at(l, psi_star + h_psi, hi, s.curve);
-    const bool lo_ok = outputs_at(l, psi_star - h_psi, lo, s.curve);
+    // Both before either is tested: each call moves the leaf.
+    const bool hi_ok = outputs_at(l, psi_star + h_psi, hi, s.model);
+    const bool lo_ok = outputs_at(l, psi_star - h_psi, lo, s.model);
     if (!hi_ok || !lo_ok) {
       if (prescribed != nullptr) {
         // A psi within h_psi of an end cannot have dY/dpsi centred on it, and

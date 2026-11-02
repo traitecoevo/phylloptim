@@ -1,3 +1,12 @@
+# phylloptim 0.29.0
+
+- **Breaking:** one set of defaults everywhere, in `Leaf`, `leaf_model()`, `leaf_solve()`, `leaf_batch()`, `leaf_gradient()` and `leaf_gradient_batch()`: the `TF24_floor` model, plant's, on the stem route over the single-potential supply. The multi-layer supply (`supply = leaf_supply_multilayer()`, or `$set_supply_multilayer()`, which also seats the collar route) and the collar route (`route = "collar"`) are asked for. To reproduce earlier default results, pass `supply = leaf_supply_multilayer(), model = "TF24", route = "collar"`. `model = "collar"` is gone. `align_curves()` aligns on the stem route as before, so its answers do not move.
+- **Breaking:** `TF24_floor_lambda_o` defaults to 0, as plant's does, where `TF24_floor` is `TF24` bit for bit; it used to be refused unset. A `TF24_floor` gradient's default `pars` includes it.
+- Every cost curve has a trait gradient on both routes.
+- `leaf_gradient()` is `leaf_gradient_batch()` with one observation: it crosses into C++ once rather than over a hundred times, and its result names its `route`. An entry it cannot determine (a refused point's gradient, a stem route's `collar`) is `NaN`, as the batch's always was, where it was `NA`. Its errors are classed as the batch's are: an infeasible point is a `phylloptim_infeasible` condition, and no error is a `C++Error`.
+- Gradients can move in the last bit: the composite now lets the compiler fuse one multiply-add it used to round twice to match an R twin that is gone. 3 of the 100 cells recorded at 0.28.0 move, by at most one ulp.
+- ProfitMax at a prescribed collar potential (`$evaluate_root_collar_psi()`) seeds its normalisers, as its solve does; on a leaf whose drivers were just set it used to fail with a non-finite profit ([#232](https://github.com/traitecoevo/phylloptim/issues/232)).
+
 # phylloptim 0.28.0
 
 - **Breaking:** `$lambda`, `$lambda_molar` and the `lambda` column of `operating_point()` and `leaf_solve()` report the marginal cost of water of the curve the leaf is set to, on the route it was solved; they used to report TF24's whatever curve was set. `$lambda_emergent` and the `lambda_emergent` column, which held that number, are gone: read `lambda`. `$lambda_multilayer` is gone too: on the collar route `$lambda` is that number, for every curve.

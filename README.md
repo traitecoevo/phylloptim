@@ -133,6 +133,7 @@ There is nothing to link against — one include is the whole library.
 #include <phylloptim.hpp>
 
 phylloptim::Leaf l;                   // default Eucalyptus saligna traits
+l.set_supply_multilayer();            // a root network; the default is one soil potential
 l.setup_transpiration(phylloptim::Leaf::ncontrol_default);   // the xylem vulnerability tables, 800 knot intervals
 l.setup_root_vulnerability(phylloptim::Leaf::ncontrol_default);
 
@@ -231,6 +232,7 @@ namespace py = pybind11;
 PYBIND11_MODULE(pyleaf, m) {
   py::class_<phylloptim::Leaf>(m, "Leaf")
       .def(py::init<>())
+      .def("set_supply_multilayer", &phylloptim::Leaf::set_supply_multilayer)
       .def("set_physiology", &phylloptim::Leaf::set_physiology)
       .def("find_root_collar_psi", &phylloptim::Leaf::find_root_collar_psi)
       .def_readonly("profit", &phylloptim::Leaf::profit_)
@@ -249,11 +251,12 @@ target_link_libraries(pyleaf PRIVATE phylloptim::phylloptim)
 ```python
 >>> import pyleaf
 >>> l = pyleaf.Leaf()
+>>> l.set_supply_multilayer()
 >>> roots = pyleaf.root_network_from_carbon([20.0], [1.0], 340.0, 9400.0)
 >>> l.set_physiology(roots, 900, [2.0], [1.0], 3.14e-5, 2.0, 40.0, 25.0, 21.0, 101.3)
 >>> l.find_root_collar_psi()
 >>> l.profit
-2.5171574542596087
+2.517157453707453
 ```
 
 `set_physiology` takes a `RootNetwork`, so the binding above needs it exposed too:
@@ -287,10 +290,10 @@ curve is one call:
 library(phylloptim)
 
 leaf_solve(psi_soil = 2.0, PPFD = 900)
-#>   psi_soil layers PPFD atm_vpd ca leaf_temp atm_kpa psi_stem   collar       ci
-#> 1        2      1  900       2 40        25   101.3 3.595348 2.920437 10.48887
-#>          A            E         gc   profit ...   lambda    g1_eff
-#> 1 5.601051 1.141996e-05 0.01922619 2.517157 ... 159896.1 0.5026412
+#>   psi_soil layers PPFD atm_vpd ca leaf_temp atm_kpa psi_stem collar       ci
+#> 1        2      1  900       2 40        25   101.3 3.864854    NaN 18.71375
+#>         A            E        gc   profit ...   lambda   g1_eff
+#> 1 12.8818 3.641312e-05 0.0613037 9.188099 ... 191735.2 1.243302
 
 # a drought response
 leaf_solve(psi_soil = seq(0.5, 5, length.out = 20), PPFD = 900)
@@ -326,13 +329,14 @@ l$lambda             # marginal cost of water, dA/dE
 
 **Which model is configuration, not a call argument.** `$set_model()` seats a cost
 curve, a route and a method; `$optimise()` takes nothing, because the curves'
-constants are already on the object. The defaults are `"TF24"`, `"collar"` and
-`"exact"`, the production path, so an existing caller that never sets a model is
-unaffected — `$find_root_collar_psi()` is that solve under its own name, which is
-what plant's sources spell.
+constants are already on the object. The defaults, here and in every R
+function, are `"TF24_floor"` (plant's model, which at its default price is TF24),
+`"stem"` and `"exact"`, over the single-potential supply; the collar route and the
+multi-layer supply are asked for. `$find_root_collar_psi()` is the collar solve
+under the name plant's sources spell.
 
 ```r
-l <- leaf_model(supply = leaf_supply_singlelayer())
+l <- leaf_model()
 set_drivers(l, psi_soil = 1.5, PPFD = 900)
 l$set_model("SOX", "stem")     # any of cost_curve_names(); "collar" or "stem"
 l$optimise()
@@ -348,7 +352,7 @@ exact solve where its validity guard fails — about 2x realised on a mixed driv
 grid, at a few percent error in wet soil and none at all on a fallback row.
 
 ```r
-c <- leaf_model(supply = leaf_supply_singlelayer())
+c <- leaf_model()
 c$CF77_lambda_ <- 1.5e5
 set_drivers(c, psi_soil = 0.5, PPFD = 1500, atm_vpd = 1)
 c$set_model("CF77", "stem", "closed")
@@ -365,28 +369,28 @@ versus tolerances, and the missing four assigned, and is what you should use.
 throughout, and it is asserted rather than documented — a negative `psi_soil` is
 an error, not a sign convention the model quietly accepts.
 
-A bare leaf needs no root carbon profile at all — collapse the whole
-soil-to-collar path to one resistance:
+By default a leaf needs no root carbon profile at all: the single-potential
+supply collapses the whole soil-to-collar path to one resistance.
 
 ```r
 leaf_solve(psi_soil = 1.5, PPFD = 900,
-           supply = leaf_supply_singlelayer(),
            root_network = series_resistance(1e3))
 ```
 
 The path is chosen when the leaf is built and cannot be flipped afterwards: a
 settable tag would leave the other path's state configured and silently ignored.
 
-On the **multi-layer** path the leaf takes the per-layer resistances, so a caller
-with measured or fitted ones can state them directly:
+On the **multi-layer** path, which plant uses and which takes the collar route,
+the leaf takes the per-layer resistances, so a caller with measured or fitted ones
+can state them directly:
 
 ```r
-l <- leaf_model()
+l <- leaf_model(supply = leaf_supply_multilayer())
 set_drivers(l, psi_soil = 1.5,
             root_network = RootNetwork(r_R_H_min = 25.5, r_R_V_sum = 1410))
 ```
 
-⚠️ The default `root_network` is a nominal 20 kg C m^-2 leaf put through
+⚠️ The multi-layer path's default `root_network` is a nominal 20 kg C m^-2 leaf put through
 `root_network_from_carbon()` — a stand-in rather than a recommendation. It is
 written out in `set_drivers()`' body so it can be seen and replaced.
 
@@ -401,9 +405,12 @@ g <- leaf_gradient(psi_soil = 2.0, PPFD = 900,
 g$gradient   # rows: parameters.  columns: A, gc, psi_stem, collar, profit
 g$method     # "ift" or "fd" -- see below
 
-# any of the nine models, same call -- and `leaf_solve()` takes `model` too
+# any of the nine models, on either route -- and `leaf_solve()` takes both too.
+# The default is TF24_floor, plant's model, on the stem route.
 leaf_gradient(psi_soil = 2.0, PPFD = 900, model = "JS22",
-              supply = leaf_supply_singlelayer(), pars = c("vcmax_25", "JS22_gamma"))
+              pars = c("vcmax_25", "JS22_gamma"))
+leaf_gradient(psi_soil = 2.0, PPFD = 900, model = "JS22", route = "collar",
+              supply = leaf_supply_multilayer(), pars = c("vcmax_25", "JS22_gamma"))
 ```
 
 The first four columns are what a gas-exchange calibration observes. `profit` is
@@ -465,10 +472,10 @@ which is where this route wins; `vignette("fitting")` measures both regimes and
 `?leaf_gradient` has the cost model. ⚠️ **Always pass `pars`** — the default is all
 sixteen on the multi-layer path, which is the most expensive request there is.
 
-**For a fit, use `leaf_gradient_batch()`.** It is the same gradient, composed in C++
-and vectorised over observations, so a likelihood evaluation crosses the R boundary
-once instead of 112 times per observation; what that saves against a loop over
-`leaf_gradient()` is in [Performance from R](#performance-from-r).
+**For a fit, use `leaf_gradient_batch()`.** `leaf_gradient()` is the same call
+with one observation, so a loop over it crosses the R boundary once per
+observation where the batch crosses it once per likelihood evaluation; what that
+saves is in [Performance from R](#performance-from-r).
 
 ```r
 b <- leaf_batch(psi_soil = obs$psi_soil, PPFD = obs$PPFD)   # once per fit
@@ -502,21 +509,21 @@ This section is the one place the package quotes what things cost; the
 vignettes, the help pages and the developer guide link here. The figures are
 **ratios to a trivial `.Call`** (reading one field of a `Leaf`) measured in the
 same process, because a ratio travels between machines and runs and a
-microsecond figure does not. They come from the newest row of
-[`tools/cost-baseline.tsv`](tools/cost-baseline.tsv), written by
-`tools/bench_history.sh` at 0.16.2, plus `tests/cpp/bench_gradient` for the C++
-row; re-run those rather than editing a number here.
+microsecond figure does not. They come from `tools/bench_user_cost.R` at 0.29.0
+(`tools/bench_history.sh` runs it per commit into
+[`tools/cost-baseline.tsv`](tools/cost-baseline.tsv)); re-run it rather than
+editing a number here.
 
 | one call, from R | × a trivial `.Call` |
 |---|---:|
 | `$find_root_collar_psi()`: one crossing around the whole C++ solve | **2.9** |
-| driving one leaf by hand: `set_drivers()`, solve, read three fields | 13 |
-| one row of a vectorised `leaf_solve()` | 23 |
-| constructing a `Leaf` with `leaf_model()` | **~275** |
-| `leaf_gradient()`, one parameter, fresh leaf | 410 |
-| `leaf_gradient()`, one parameter, reusing a leaf (`x =`) | 130 |
-| `leaf_gradient_batch()`, per observation, four parameters | **9.9** |
-| the same gradient as an R loop over `leaf_gradient()`, reusing a leaf | 245 |
+| driving one leaf by hand: `set_drivers()`, solve, read three fields | 12 |
+| one row of a vectorised `leaf_solve()` | 22 |
+| constructing a `Leaf` with `leaf_model()` | **~260** |
+| `leaf_gradient()`, one parameter, fresh leaf | 320 |
+| `leaf_gradient()`, one parameter, reusing a leaf (`x =`) | 67 |
+| `leaf_gradient_batch()`, per observation, four parameters | **8.0** |
+| the same gradient as an R loop over `leaf_gradient()`, reusing a leaf | 78 |
 
 Four things follow:
 
@@ -530,14 +537,14 @@ Four things follow:
   interface is the one to reach for in an inner loop.
 - **The lever is making fewer R calls per row.** If you need a fit's inner loop
   faster than this, the thing to remove is the boundary — which means C++, or
-  `leaf_gradient_batch()`, which crosses it once per call and is about 25× the
+  `leaf_gradient_batch()`, which crosses it once per call and is about 10× the
   R loop per observation.
 - **Construct once and reuse.** Constructing a `Leaf` costs about as much as a
   hundred solves from R, and most of it is R-side object construction over the
   active bindings rather than the vulnerability tables. Re-traiting and
   re-driving an existing leaf costs about four solves, which is why
   `leaf_solve(reuse = TRUE)` is the default, why [`set_traits()`](#trait-gradients)
-  exists, and why construction is about two-thirds of a one-parameter
+  exists, and why construction is about four-fifths of a one-parameter
   `leaf_gradient()` on a fresh leaf.
 
 One C++ cost is worth knowing because it surprises people, and batching cannot

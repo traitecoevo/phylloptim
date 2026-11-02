@@ -198,7 +198,7 @@ int main(int argc, char **argv) {
   const long reps = argc > 1 ? std::atol(argv[1]) : 3000;
   const long per_round = reps / 3 > 0 ? reps / 3 : 1;
 
-  phylloptim::Leaf l;
+  phylloptim::Leaf l = fixture::multilayer_leaf();
   apply_traits(l, kBase);
   set_drivers(l);
   l.find_root_collar_psi();
@@ -379,6 +379,8 @@ int main(int argc, char **argv) {
     const long batch_reps = std::max(1L, per_round / 20);
     for (const Arm &arm : arms) {
       phylloptim::gradient::Settings s;
+      s.model = {phylloptim::Leaf::CostCurve::TF24,
+                 phylloptim::gradient::Route::Collar};
       s.fast_stem_curve = arm.fast;
       const int pars[1] = {arm.par};
       double best = 1e300;

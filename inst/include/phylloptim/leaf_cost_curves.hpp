@@ -413,7 +413,7 @@ template <> struct Curve<Leaf::CostCurve::TF24_floor> {
   // Its own price; its hydraulic half reads TF24's parameters.
   static constexpr std::array parameters{
       CurveParameter{par_TF24_floor_lambda_o, "TF24_floor_lambda_o",
-                     &Leaf::TF24_floor_lambda_o, util::na_value, false}};
+                     &Leaf::TF24_floor_lambda_o, 0.0, false}};
   static constexpr ObjectiveShape shape = ObjectiveShape::Difference;
   static constexpr Leaf::BenefitLink link = Leaf::BenefitLink::Identity;
   static constexpr bool cost_reads_upstream = true;
@@ -422,16 +422,14 @@ template <> struct Curve<Leaf::CostCurve::TF24_floor> {
   static constexpr bool prepares_normalisers = false;
   static constexpr ClosedForm closed_form = ClosedForm::Implemented;
   static void check_parameters(const Leaf& l) {
-    // No default, unlike CF77_lambda_: at lambda_o = 0 this curve IS TF24, so an
-    // unset price would run TF24 under this curve's name. An explicit zero is
-    // accepted (the reduction test's case); the hydraulic half is TF24's traits.
+    // Its default is 0, plant's, where this curve is TF24, so non-finite means a
+    // caller cleared it. Negative would pay the leaf to transpire.
     if (!std::isfinite(l.TF24_floor_lambda_o) || l.TF24_floor_lambda_o < 0.0) {
       util::stop("the TF24_floor cost curve needs TF24_floor_lambda_o set: it is the "
                  "PRESCRIBED marginal cost of water as transpiration goes to "
-                 "zero, in umol C (kg H2O)^-1, non-negative, and NA until you "
-                 "assign one -- set_physiology and set_traits never touch it. It "
-                 "has no default because 0 would silently make this curve TF24. "
-                 "Set `$TF24_floor_lambda_o` on the leaf, or pass "
+                 "zero, in umol C (kg H2O)^-1, non-negative; its default is 0, "
+                 "where this curve is TF24, and set_physiology and set_traits "
+                 "never touch it. Set `$TF24_floor_lambda_o` on the leaf, or pass "
                  "`TF24_floor_lambda_o =` to leaf_solve() / leaf_batch(); got " +
                  util::to_string(l.TF24_floor_lambda_o));
     }

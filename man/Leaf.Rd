@@ -84,8 +84,9 @@ any supply) or \code{"stem"} (psi_stem with the upstream potential pinned at
 the operating point is reached: \code{"exact"} (the default, a root-find of the
 first-order condition) or \code{"closed"} (the closed form, for \code{TF24}, \code{CF77}
 and \code{TF24_floor} on the stem route only). \verb{$model_curve()}, \verb{$model_route()} and
-\verb{$model_method()} report what is seated. The defaults are \code{"TF24"},
-\code{"collar"} and \code{"exact"}, which is the production path.
+\verb{$model_method()} report what is seated. The defaults are \code{"TF24_floor"},
+\code{"stem"} and \code{"exact"}, on the single-potential supply, as in R's
+functions.
 
 \if{html}{\out{<div class="sourceCode r">}}\preformatted{l$set_model("ProfitMax", "stem")
 l$optimise()

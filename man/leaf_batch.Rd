@@ -17,7 +17,7 @@ leaf_batch(
   atm_kpa = 101.3,
   traits = leaf_traits(),
   control = leaf_control(),
-  supply = leaf_supply_multilayer(),
+  supply = leaf_supply_singlelayer(),
   CF77_lambda = NA_real_,
   TF24_floor_lambda_o = NA_real_,
   LeastCost_beta = NA_real_
@@ -64,10 +64,11 @@ assimilation by percent, not by rounding.}
 
 \item{control}{a \code{\link[=leaf_control]{leaf_control()}} object}
 
-\item{supply}{how water reaches the root collar: \code{\link[=leaf_supply_multilayer]{leaf_supply_multilayer()}}
-(the default) or \code{\link[=leaf_supply_singlelayer]{leaf_supply_singlelayer()}}. On the single-potential path
-\code{soil_depth} and \code{root_network} must be omitted, and each \code{psi_soil} is one
-value rather than a profile.}
+\item{supply}{how water reaches the root collar: \code{\link[=leaf_supply_singlelayer]{leaf_supply_singlelayer()}}
+(the default) or \code{\link[=leaf_supply_multilayer]{leaf_supply_multilayer()}}. On the single-potential path
+\code{soil_depth} must be omitted, \code{root_network} is a \code{\link[=series_resistance]{series_resistance()}}
+(defaulted if omitted), and each \code{psi_soil} is one value rather than a
+profile.}
 
 \item{CF77_lambda}{Cowan-Farquhar's prescribed marginal value of water, in
 umol C (kg H2O)^-1, one per observation. Only \code{model = "CF77"} reads it,
@@ -78,8 +79,7 @@ and \code{\link[=leaf_gradient_batch]{leaf_gradient_batch()}} refuses it under a
 \item{TF24_floor_lambda_o}{the \code{TF24_floor} curve's price of water as transpiration
 goes to zero, same units, one per observation. Only \code{model = "TF24_floor"}
 reads it, and it is refused under any other model; \code{NA_real_} (the
-default) leaves it unset, and \code{\link[=leaf_gradient_batch]{leaf_gradient_batch()}} refuses that model
-without one, deliberately: at zero it is \code{TF24}.}
+default) uses its default, 0, where that curve is \code{TF24}.}
 
 \item{LeastCost_beta}{least-cost theory's unit-cost ratio (Prentice et al.
 2014's beta): the cost of maintaining carboxylation capacity relative to the

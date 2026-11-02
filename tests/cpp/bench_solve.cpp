@@ -237,7 +237,7 @@ int main(int argc, char **argv) {
   const int reps = argc > 1 ? std::atoi(argv[1]) : 2000;
   const std::vector<Point> pts = grid();
 
-  std::vector<phylloptim::Leaf> leaves(pts.size());
+  std::vector<phylloptim::Leaf> leaves(pts.size(), fixture::multilayer_leaf());
   for (phylloptim::Leaf &l : leaves) {
     l.setup_transpiration(100);
     l.setup_root_vulnerability(100);
@@ -280,7 +280,8 @@ int main(int argc, char **argv) {
       one.push_back(pt);
     }
   }
-  std::vector<phylloptim::Leaf> one_leaves(one.size());
+  std::vector<phylloptim::Leaf> one_leaves(one.size(),
+                                          fixture::multilayer_leaf());
   for (phylloptim::Leaf &l : one_leaves) {
     l.setup_transpiration(100);
     l.setup_root_vulnerability(100);

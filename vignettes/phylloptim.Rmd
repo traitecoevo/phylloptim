@@ -46,7 +46,7 @@ conductance.
 | *One solve* to *Light and VPD together* | driving the model and reading the result |
 | *Traits and numerical settings are separate* | which arguments are physiology and which are numerics |
 | *Water potentials are positive magnitudes* | the one convention that will break a ported script |
-| *A bare leaf* | the simpler supply path, for a leaf with no root profile |
+| *Two supply paths, two routes* | the root network `plant` uses, and the collar route |
 | *Trait gradients* | exact derivatives, and when they are worth using |
 | *A faster method* | the closed form: what it costs in accuracy, and when it refuses |
 
@@ -62,7 +62,11 @@ leaf_solve(psi_soil = 2.0, PPFD = 900) |>
 ```
 
 Drivers in, operating point out. `psi_soil` is a positive magnitude in MPa, which
-a later section covers.
+a later section covers. The defaults are `plant`'s model, `TF24_floor`, which at
+its default price is TF24, maximised over the stem potential with the potential
+upstream of the stem held at `psi_soil` (the *stem route*). `collar` is `NaN`
+because that route never solves for a collar potential; the root network `plant`
+uses, and the *collar route* that solves for one, come later.
 
 Most of those columns are the usual gas-exchange quantities. Two are less usual.
 
@@ -94,10 +98,9 @@ drought |>
   labs(x = "soil water potential (MPa)", y = NULL)
 ```
 
-Note where both hit exactly zero. That is not a floor imposed by a
-minimum-conductance parameter. It is the solve reporting that no operating point
-both moves water and stays inside the root's hydraulic limit, so the answer is
-shut-down.
+Both fall as the soil dries, because each unit of water costs more as the stem
+nears the end of its vulnerability curve. Neither is held up by a
+minimum-conductance floor: `g_min` is zero by default.
 
 ## The same sweep on a familiar scale
 
@@ -174,16 +177,13 @@ tibble(
 )
 ```
 
-Those two are identical, because the collar solve solves its own first-order
-condition rather than searching profit. The operating point is determined to about
-1e-12, so `GSS_tol_abs` does not reach the production path at all.
+Those two are identical, because the solve root-finds its own first-order
+condition rather than searching profit, to about 1e-12. `GSS_tol_abs` does not
+reach the stem route at all.
 
 It is read in two places, both on the collar route: the threshold below which the
 feasible collar interval is treated as a single point, and the tolerance of a
-fallback search used when neither bracket endpoint has a usable gradient. It does
-not reach the stem route, which root-finds its own first-order condition at a
-hardcoded tolerance, so tightening it to sharpen a stem-route argmax does
-nothing.
+fallback search used when neither bracket endpoint has a usable gradient.
 
 This is not only a precision story. It is what makes the trait gradients below
 possible. An argmax resolved only to 1e-3 moves in discontinuous jumps as a trait
@@ -206,34 +206,34 @@ leaf_solve(psi_soil = -2.0, PPFD = 900)
 That is an error rather than a quiet `abs()`. A model accepting both conventions
 would let such a script return a plausible wrong number instead.
 
-## A bare leaf: one soil potential, one resistance
+## Two supply paths, two routes
 
-Everything above went through the multi-layer root network, which is what `plant`
-uses. The other supply path collapses the whole soil-to-collar journey into a
-single resistance. It is driven through the same `root_network` argument, because
-both paths take their resistances as a per-call driver:
+Everything above used the single-potential supply, which collapses the whole
+soil-to-collar journey into one series resistance. The other path is the
+multi-layer root network that `plant` uses. Both are driven through the same
+`root_network` argument, because both take their resistances as a per-call driver.
+
+On the stem route that resistance never reaches the solve: the potential upstream
+of the stem is pinned at `psi_soil`. The **collar route** maximises over the
+root-collar potential instead, so water has to be pulled through the roots, and
+the resistance costs the leaf. Every cost curve takes either route; the collar
+route is the only one on the multi-layer supply.
 
 ```{r}
-leaf_solve(psi_soil = 1.5, PPFD = 900,
-           supply = leaf_supply_singlelayer(),
+leaf_solve(psi_soil = 1.5, PPFD = 900, route = "collar",
            root_network = series_resistance(1e3)) |>
   as_tibble() |>
   select(psi_soil, psi_stem, collar, A, gc, g1_eff)
 ```
 
-No depth profile, and one number instead of a per-layer network. `soil_depth` is
-the only argument that differs between the two paths, and passing it here is an
-error rather than ignored, because there is no depth profile for anything to read.
-
 The resistance is per unit leaf area, because nothing in this model is allowed to
-scale with plant size. Raising it makes water harder to get, and the leaf closes
-down:
+scale with plant size. On the collar route, raising it makes water harder to get,
+and the leaf closes down:
 
 ```{r, fig.height = 3.4}
 tibble(resistance = 10^seq(2.5, 4.5, length.out = 25)) |>
   rowwise() |>
-  mutate(A = leaf_solve(psi_soil = 1.5, PPFD = 900,
-                        supply = leaf_supply_singlelayer(),
+  mutate(A = leaf_solve(psi_soil = 1.5, PPFD = 900, route = "collar",
                         root_network = series_resistance(resistance))$A) |>
   ungroup() |>
   ggplot(aes(resistance, A)) +
@@ -243,17 +243,17 @@ tibble(resistance = 10^seq(2.5, 4.5, length.out = 25)) |>
        y = expression(A~(mu*mol~m^-2~s^-1)))
 ```
 
-This path is also what makes comparison against other optimality models
+The single potential is what makes comparison against other optimality models
 meaningful. Medlyn, Prentice least-cost and Cowan-Farquhar are all formulated
 against a single soil potential, so comparing them against a multi-layer root
 network would compare two things at once.
 
-The choice is made when the leaf is built rather than afterwards. There is no
+The supply is chosen when the leaf is built rather than afterwards. There is no
 settable `leaf$supply_kind`:
 
 ```{r, error = TRUE}
 l <- leaf_model()
-l$supply_kind <- "single"
+l$supply_kind <- "multilayer"
 ```
 
 Flipping the tag alone would leave the other path's state configured and silently
@@ -262,11 +262,13 @@ completely, so it can never be in a state where the tag and the supply disagree.
 
 ## Multiple soil layers
 
-Pass a vector for a layered profile, or a list of vectors for several profiles.
-Layers default to 1 m thick with the root carbon split evenly.
+On the multi-layer supply, pass a vector for a layered profile, or a list of
+vectors for several profiles. Layers default to 1 m thick with the root carbon
+split evenly.
 
 ```{r}
-leaf_solve(psi_soil = list(c(1.0, 1.5, 2.0), c(3.0, 3.5, 4.0)), PPFD = 900) |>
+leaf_solve(psi_soil = list(c(1.0, 1.5, 2.0), c(3.0, 3.5, 4.0)), PPFD = 900,
+           supply = leaf_supply_multilayer(), route = "collar") |>
   as_tibble() |>
   select(psi_soil, layers, A, gc, uptake)
 ```
@@ -291,7 +293,7 @@ The measured figures are in the README's
 ```{r}
 l <- leaf_model()
 set_drivers(l, psi_soil = 2.0, PPFD = 900)
-l$optimise()          # or l$find_root_collar_psi(), which plant's sources spell
+l$optimise()
 
 tibble(profit = l$profit_, cost = l$hydraulic_cost_, A = l$assim_colimited_)
 ```
@@ -361,9 +363,11 @@ rownames(leaf_gradient(psi_soil = 2.0, PPFD = 900)$gradient)
 
 That is `r length(leaf_traits())` traits from `leaf_traits()`, plus
 `leaf_specific_conductance_max`, which is not a trait but is fitted like one,
-giving `r length(leaf_traits()) + 1L` on the multi-layer path. The
-single-potential path adds `resistance`, and `model = "CF77"` adds
-`CF77_lambda_`, that curve's prescribed marginal value of water. These counts are
+`resistance`, the single-potential path's series resistance, and
+`TF24_floor_lambda_o`, the default model's price of water:
+`r length(leaf_traits()) + 3L` in all. The multi-layer path drops `resistance`;
+`model = "TF24"` drops the price, and `model = "CF77"` swaps in `CF77_lambda_`,
+that curve's prescribed marginal value of water. These counts are
 computed rather than written out, for the reason the hidden chunk below records.
 
 `R_d_25`, dark respiration at 25 °C, is one of the traits and behaves like any
@@ -414,10 +418,13 @@ makes it worth doing rather than merely true.
 ### A collar potential you supply
 
 If your model carries the collar potential rather than solving for it each step,
-pass it and the gradient is taken there:
+as `plant` does, pass it and the gradient is taken there. This and the rest of
+the section are on the collar route over the multi-layer supply:
 
 ```{r}
-g <- leaf_gradient(psi_soil = 2.0, PPFD = 900, pars = "vcmax_25", psi = 2.7)
+collar <- list(supply = leaf_supply_multilayer(), route = "collar")
+g <- leaf_gradient(psi_soil = 2.0, PPFD = 900, pars = "vcmax_25", psi = 2.7,
+                   supply = collar$supply, route = collar$route)
 c(status = g$status, method = g$method)
 ```
 
@@ -431,9 +438,11 @@ Hand back the collar the solver found, with the response it derived, and the two
 paths agree exactly:
 
 ```{r}
-a <- leaf_gradient(psi_soil = 2.0, PPFD = 900, pars = "vcmax_25")
+a <- leaf_gradient(psi_soil = 2.0, PPFD = 900, pars = "vcmax_25",
+                   supply = collar$supply, route = collar$route)
 b <- leaf_gradient(psi_soil = 2.0, PPFD = 900, pars = "vcmax_25",
-                   psi = a$psi, dpsi_dtheta = -a$M / a$H)
+                   psi = a$psi, dpsi_dtheta = -a$M / a$H,
+                   supply = collar$supply, route = collar$route)
 identical(a$gradient, b$gradient)
 ```
 
@@ -447,7 +456,8 @@ Naming something that cannot be differentiated is an error rather than a silent
 omission, and the message says what is available instead:
 
 ```{r, error = TRUE}
-leaf_gradient(psi_soil = 2.0, PPFD = 900, pars = "resistance")
+leaf_gradient(psi_soil = 2.0, PPFD = 900, pars = "resistance",
+              supply = collar$supply, route = collar$route)
 ```
 
 These are not finite differences of the solve. The outputs are read at the
@@ -469,7 +479,8 @@ instead where it does not hold:
 
 ```{r, fig.height = 3.4}
 sweep <- lapply(seq(1.0, 5.0, by = 0.125), function(p) {
-  g <- leaf_gradient(psi_soil = p, PPFD = 900, atm_vpd = 3.0, pars = "stem_P50")
+  g <- leaf_gradient(psi_soil = p, PPFD = 900, atm_vpd = 3.0, pars = "stem_P50",
+                     supply = collar$supply, route = collar$route)
   tibble(psi_soil = p, dA_dstem_P50 = g$gradient["stem_P50", "A"],
          method = g$method, status = g$status)
 }) |> bind_rows()
@@ -482,6 +493,9 @@ ggplot(sweep, aes(psi_soil, dA_dstem_P50)) +
        colour = NULL,
        title = "sensitivity to stem vulnerability, and where the optimum pins")
 ```
+
+On the stem route this sweep stays interior throughout: the potential upstream of
+the stem is pinned at `psi_soil`, so there is no collar interval to pin against.
 
 Read that left to right. In wet soil, a less vulnerable stem is worth about two
 units of assimilation per MPa of `stem_P50`. The sensitivity rises as the soil

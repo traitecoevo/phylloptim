@@ -46,7 +46,7 @@ constexpr auto K = pl::Leaf::CostCurve::TF24;
 namespace {
 
 pl::Leaf set_up(int layers, double psi0) {
-  pl::Leaf l;
+  pl::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
   const double th = 0.5, ks = 2.0, h = 5.0, area = 1.0;

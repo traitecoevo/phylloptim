@@ -1,6 +1,6 @@
 ##' Align the cost curves' level parameters to a common optimum
 ##'
-##' Solves each curve's level parameter so that its stem optimum has the same
+##' Solves each curve's level parameter so that its stem-route optimum has the same
 ##' stomatal conductance as a target, under one reference environment. Aligned
 ##' curves agree at the reference and differ only in how their optimum moves
 ##' away from it, so a comparison across curves measures how each RESPONDS to
@@ -24,7 +24,7 @@
 ##'   longer share the supply every other curve uses.
 ##' * `TF24_floor` reads TF24's own cost and adds a price `lambda_o` on top, so
 ##'   the only `lambda_o` that reaches TF24's conductance is zero, where the
-##'   curve is TF24. It keeps no default and still refuses to solve without one.
+##'   curve is TF24. That zero is its default.
 ##'
 ##' `CF77` aligned to TF24 is an identity rather than a fit: at TF24's emergent
 ##' `lambda` the two first-order conditions coincide, so the price returned is
@@ -52,13 +52,13 @@
 ##' a <- align_curves()
 ##' a
 ##' # The defaults are this answer, so these two agree:
-##' leaf_solve(psi_soil = 1, model = "JS22",
+##' leaf_solve(psi_soil = 1, model = "JS22", route = "stem",
 ##'            supply = leaf_supply_singlelayer())$gc
 ##' attr(a, "target")
 ##'
 ##' # Align to a wetter reference instead, and use the result:
 ##' w <- align_curves(psi_soil = 0.5)
-##' leaf_solve(psi_soil = 0.5, model = "CMax",
+##' leaf_solve(psi_soil = 0.5, model = "CMax", route = "stem",
 ##'            supply = leaf_supply_singlelayer(),
 ##'            traits = leaf_traits(CMax_a = w[["CMax_a"]]))$gc
 ##' @export
@@ -97,7 +97,7 @@ align_curves <- function(models = NULL,
                    atm_kpa = atm_kpa,
                    leaf_specific_conductance_max = leaf_specific_conductance_max,
                    traits = tr, control = control, supply = supply,
-                   model = model),
+                   model = model, route = "stem"),
               extra)
     do.call(leaf_solve, args)$gc
   }

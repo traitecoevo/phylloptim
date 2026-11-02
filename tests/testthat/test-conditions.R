@@ -65,7 +65,9 @@ test_that("an infeasible exit is catchable by class and carries its code", {
   # than a caller error, which is exactly the distinction being tested.
   starved <- leaf_control(ci_niter = 3)
   caught <- tryCatch(
-    leaf_solve(psi_soil = 2.0, PPFD = 900, control = starved),
+    leaf_solve(psi_soil = 2.0, PPFD = 900, control = starved,
+               supply = leaf_supply_multilayer(), model = "TF24",
+               route = "collar"),
     condition = function(e) e)
 
   expect_s3_class(caught, "phylloptim_infeasible")
@@ -77,7 +79,9 @@ test_that("an infeasible exit is catchable by class and carries its code", {
   # ⚠️ leaf_solve() classifies WITHOUT the caller wrapping anything -- it routes
   # through the wrapper itself. That is the property a fit depends on.
   expect_identical(
-    tryCatch(leaf_solve(psi_soil = 2.0, PPFD = 900, control = starved),
+    tryCatch(leaf_solve(psi_soil = 2.0, PPFD = 900, control = starved,
+                        supply = leaf_supply_multilayer(), model = "TF24",
+                        route = "collar"),
              phylloptim_infeasible = function(e) e$code),
     "collar_bracket")
 
@@ -92,8 +96,8 @@ test_that("a soil drier than the stem curve's last knot is a closed leaf (#157)"
   # the stem curve reads its closed form. P95 (psi_crit, 5.87) to P99 give a
   # shut leaf; past P99 must agree.
   for (ps in c(6.5, 6.95, 10, 1000)) {
-    o <- leaf_solve(psi_soil = ps, model = "TF24_floor", TF24_floor_lambda_o = 0,
-                    supply = leaf_supply_singlelayer())
+    o <- leaf_solve(psi_soil = ps, model = "TF24_floor", route = "stem",
+                    TF24_floor_lambda_o = 0, supply = leaf_supply_singlelayer())
     expect_equal(o$gc, 0, info = paste("psi_soil", ps))
     expect_equal(o$E, 0, info = paste("psi_soil", ps))
     expect_equal(o$psi_stem, ps, info = paste("psi_soil", ps))

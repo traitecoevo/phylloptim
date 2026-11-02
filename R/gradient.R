@@ -1,9 +1,8 @@
 # Trait gradients at a solved operating point: set_traits() and leaf_gradient().
 #
-# The reference implementation: inst/include/phylloptim/gradient.hpp reproduces
-# this file's composite bit-for-bit, and test-gradient-batch.R asserts it. So the
-# arithmetic order here and the order of calls into the leaf are load-bearing: do
-# not reassociate or reorder either without changing gradient.hpp to match.
+# leaf_gradient() is leaf_gradient_batch() with one observation: this file
+# handles its arguments and the shape of its result, and the gradient itself is
+# inst/include/phylloptim/gradient.hpp's, through `.gradient_run()`.
 #
 # When the exact gradient beats differencing is ?leaf_gradient's "What it
 # costs"; the measured per-call costs are README's "Performance from R".
@@ -65,26 +64,29 @@ set_traits <- function(x, traits) {
 ##' `dprofit/dtheta`, at one operating point.
 ##'
 ##' @section Choosing which model to differentiate:
-##' `model` selects it, and every model in the package has a route. `"collar"`,
-##' the default, is the TF24 cost maximised over the root-collar potential -- the
-##' production path. Naming any of the nine cost curves
-##' (`cost_curve_names()`) differentiates the corresponding **stem** optimum
-##' instead: `psi_stem` with the upstream potential pinned at `psi_soil`, which
-##' needs the single-potential supply path.
+##' A model is a cost curve and a route, and every curve has a gradient on both
+##' routes. `model` names the curve and `route` the potential it is maximised
+##' over: `"collar"`, the root-collar potential, on either supply path; or
+##' `"stem"`, `psi_stem` with the upstream potential pinned at `psi_soil`, which
+##' needs the single-potential supply path. The defaults are one set,
+##' everywhere: `"TF24_floor"` (plant's model; at its default price,
+##' `TF24_floor_lambda_o = 0`, it is TF24) on the stem route over the
+##' single-potential supply. The collar route and the multi-layer supply are
+##' asked for.
 ##'
 ##' The product objectives, `SOX` and `JW26`, need no special case. They maximise
 ##' `A * g(psi)`, which is the `Log` benefit link applied to the same
 ##' difference form everything else uses: `d/dpsi[h(A) - C] =
 ##' h'(A) * dA/dpsi - dC/dpsi` with `h' = 1/A`. One derivative serves all nine.
 ##'
-##' ⚠️ **`"collar"` and `"TF24"` are different models, not two ways of asking one
-##' question**, even though both use the TF24 cost. They optimise different
-##' variables over different supply topologies, disagree on 20 of 30 driver rows,
-##' and the gap does not close as the root resistance goes to zero.
+##' ⚠️ **The two routes are different models, not two ways of asking one
+##' question**, even for one curve. They optimise different variables over
+##' different supply topologies, for TF24 disagree on 20 of 30 driver rows, and
+##' the gap does not close as the root resistance goes to zero.
 ##'
-##' ⚠️ **`model` SEATS the leaf, including one you passed as `x`.** The route is
-##' applied with `$set_model()` and is left there when this returns, alongside the
-##' base-point traits and solve. A loop that alternates models on one `x` is fine;
+##' ⚠️ **`model` SEATS the leaf, including one you passed as `x`.** The curve
+##' and route are applied with `$set_model()` and left there when this returns,
+##' alongside the base-point traits and solve. A loop that alternates models on one `x` is fine;
 ##' a loop that takes a gradient and then reads `$optimise()` off the same object
 ##' expecting the default is not.
 ##'
@@ -299,7 +301,8 @@ set_traits <- function(x, traits) {
 ##'
 ##' ⚠️ **So "is the exact gradient faster" has no answer independent of your
 ##' parameterisation, and both regimes are measured.** `vignette("fitting")` fits
-##' 72 observations with `P_fit == P_model` and this loses at every count up to 13.
+##' 72 observations with `P_fit == P_model` and this loses at every count it
+##' measures.
 ##' A companion calibration study has `N = 1327`, `P_fit = 40`,
 ##' `P_model = 4`, wins 3.4x, and reaches the same optimum — with its
 ##' 57-parameter variant costing the same as its 40-parameter one, because
@@ -310,8 +313,7 @@ set_traits <- function(x, traits) {
 ##' thing you can ask for, and a fit that reads four of them pays for the rest.
 ##'
 ##' The intercept is a fresh `Leaf` per call. Pass `x` to reuse one across calls
-##' (#52); without it, construction is 29% of the exact gradient in the study
-##' above.
+##' (#52); without it, construction is most of a one-observation gradient.
 ##'
 ##' @section Precision:
 ##' Do not ask for more than about `1e-09` from any of this. That is the
@@ -341,8 +343,7 @@ set_traits <- function(x, traits) {
 ##'
 ##' **`x` is left solved at the base point**, not at the last perturbation — the
 ##' state this function seats it in, restored on the way out including on an error.
-##' The restore costs one re-trait and one solve, a small fraction of the
-##' construction it saves.
+##' The restore costs one solve, a small fraction of the construction it saves.
 ##'
 ##' @inheritParams set_drivers
 ##' @param x an existing `Leaf` from [leaf_model()] to reuse instead of building
@@ -351,11 +352,13 @@ set_traits <- function(x, traits) {
 ##' @param traits a [leaf_traits()] object: the point in trait space to
 ##'   differentiate at
 ##' @param control a [leaf_control()] object
-##' @param supply how water reaches the root collar: [leaf_supply_multilayer()]
-##'   (the default) or [leaf_supply_singlelayer()]
-##' @param model which optimality model to differentiate: `"collar"` (the
-##'   default, the production path) or any name from [cost_curve_names()], which
-##'   differentiates that curve's stem optimum instead. See *Choosing which model
+##' @param supply how water reaches the root collar: [leaf_supply_singlelayer()]
+##'   (the default) or [leaf_supply_multilayer()]
+##' @param model which optimality model to differentiate: any name from
+##'   [cost_curve_names()], on `route`; `"TF24_floor"` by default. See *Choosing
+##'   which model to differentiate*.
+##' @param route `"collar"` or `"stem"`, the potential the curve is maximised
+##'   over; `NULL` (the default) is the stem route. See *Choosing which model
 ##'   to differentiate*.
 ##' @param pars what to differentiate with respect to. Any of the sixteen
 ##'   [leaf_traits()] names, plus `"leaf_specific_conductance_max"`, on the
@@ -444,7 +447,11 @@ set_traits <- function(x, traits) {
 ##'     \item{`psi`}{the collar the outputs were evaluated at: `psi*` on the
 ##'       solving path, and the `psi` argument on the prescribed path, refused
 ##'       or not}
+##'     \item{`model`, `route`}{the model differentiated and its route}
 ##'   }
+##'
+##'   An entry that is not determined, such as a refused point's gradient or a
+##'   stem route's `collar`, is `NaN`.
 ##'
 ##' @seealso [leaf_solve()] for the operating point itself, [set_traits()].
 ##' @examples
@@ -452,9 +459,11 @@ set_traits <- function(x, traits) {
 ##' g$method
 ##' g$gradient[c("vcmax_25", "stem_P50"), ]
 ##'
-##' # In dry soil at high VPD the optimum pins against the edge of the feasible
-##' # range, the composite's premise fails, and the fallback is used instead.
-##' dry <- leaf_gradient(psi_soil = 4.5, PPFD = 900, atm_vpd = 3.0)
+##' # On the collar route, in dry soil at high VPD, the optimum pins against the
+##' # edge of the feasible range, the composite's premise fails, and the fallback
+##' # is used instead.
+##' dry <- leaf_gradient(psi_soil = 4.5, PPFD = 900, atm_vpd = 3.0,
+##'                      supply = leaf_supply_multilayer(), route = "collar")
 ##' dry$method       # "fd"
 ##' dry$status       # "pinned"
 ##' dry$stationarity # how far from stationary the optimum is, in MPa
@@ -472,7 +481,7 @@ leaf_gradient <- function(psi_soil,
                           x = NULL,
                           traits = leaf_traits(),
                           control = leaf_control(),
-                          supply = leaf_supply_multilayer(),
+                          supply = leaf_supply_singlelayer(),
                           pars = NULL,
                           psi = NULL,
                           dpsi_dtheta = NULL,
@@ -480,7 +489,8 @@ leaf_gradient <- function(psi_soil,
                           stationarity_tol = 1e-8,
                           method = c("auto", "ift", "fd"),
                           fast_stem_curve = TRUE,
-                          model = "collar") {
+                          model = "TF24_floor",
+                          route = NULL) {
   method <- match.arg(method)
   if (!inherits(traits, "leaf_traits")) {
     stop("`traits` must come from leaf_traits()", call. = FALSE)
@@ -488,13 +498,10 @@ leaf_gradient <- function(psi_soil,
   if (!(is.numeric(step) && length(step) == 1L && step > 0)) {
     stop("`step` must be a single positive number", call. = FALSE)
   }
-  # A caller who names `step` means it; otherwise the finite-difference arm picks
-  # one matched to the solver whose argmax it is differencing.
-  if (!missing(step)) {
-    attr(step, "user_set") <- TRUE
-  }
-  # Use the return: it coerces an integer `psi` to the double C++ receives, so the
-  # R reference and the C++ batch see one value.
+  .gradient_check_settings(stationarity_tol, fast_stem_curve)
+  # A caller who names `step` means it for the finite-difference arm too;
+  # otherwise that arm takes the step matched to the solver it differences.
+  fd_step <- if (missing(step)) .gradient_fd_step else step
   psi <- .gradient_check_psi(psi, dpsi_dtheta, method)
 
   # --- reusing a Leaf --------------------------------------------------------
@@ -526,6 +533,13 @@ leaf_gradient <- function(psi_soil,
       leaf_supply_multilayer()
     }
   }
+  single <- identical(supply$kind, "single")
+  m <- .resolve_model(model, route, supply$kind)
+  # One observation: every driver but the soil profile is one number.
+  .check_scalars(list(PPFD = PPFD, leaf_specific_conductance_max =
+                        leaf_specific_conductance_max, atm_vpd = atm_vpd,
+                      ca = ca, leaf_temp = leaf_temp, atm_o2_kpa = atm_o2_kpa,
+                      atm_kpa = atm_kpa), "leaf_gradient")
   # The thermal-damage layer's inputs are parameters ONLY on a leaf with its gate
   # on, which only a reused leaf can have: one built here has it off.
   damage <- !is.null(x) && isTRUE(x$use_thermal_damage_)
@@ -533,19 +547,13 @@ leaf_gradient <- function(psi_soil,
   # Resolved here rather than in set_drivers() because `resistance` can be
   # differentiated, so theta must hold the value the solve uses. The same
   # function set_drivers() calls, so there is one default.
-  if (identical(supply$kind, "single") && is.null(root_network)) {
+  if (single && is.null(root_network)) {
     root_network <- .default_series_resistance()
   }
 
-  drivers <- list(psi_soil = psi_soil, PPFD = PPFD, soil_depth = soil_depth,
-                  root_network = root_network,
-                  leaf_specific_conductance_max = leaf_specific_conductance_max,
-                  atm_vpd = atm_vpd, ca = ca, leaf_temp = leaf_temp,
-                  atm_o2_kpa = atm_o2_kpa, atm_kpa = atm_kpa)
-
   # Model-owned fields are read off the leaf when there is one, so theta holds
-  # the value the solve uses; NA on a route that does not own the field, so the
-  # setter writes nothing (see .owned_value()).
+  # the value the solve uses; NA on a model that does not own the field, so it
+  # is left unwritten (see .owned_value()).
   owned <- unname(.owned_fields())
   theta <- .gradient_theta(traits, leaf_specific_conductance_max, supply,
                            root_network,
@@ -554,265 +562,101 @@ leaf_gradient <- function(psi_soil,
                            }, numeric(1)), owned),
                            damage = if (damage) .gradient_damage_values(x))
   if (is.null(pars)) {
-    # What this route can differentiate, not every slot in theta: theta holds
-    # other routes' owned slots, which the check below refuses.
-    pars <- .gradient_available_pars(identical(supply$kind, "single"), model,
-                                     damage)
+    pars <- .gradient_available_pars(single, model, damage)
   }
   # Shared with leaf_gradient_batch(), so the two entry points cannot disagree
   # about which parameters exist or explain a rejection differently.
-  .gradient_check_pars(pars, identical(supply$kind, "single"), model, damage)
+  .gradient_check_pars(pars, single, model, damage)
   # Checked here, unconditionally: the composite reads it only at a usable point,
   # so checking it there would accept a bad value at some psi and not others.
   dpsi_dtheta <- .gradient_dpsi_dtheta(dpsi_dtheta, pars, !is.null(psi))
 
-  # One leaf for the whole gradient (and with `x`, across gradients), re-traited
-  # rather than rebuilt: construction is the largest cost on this surface.
+  # One observation of the batch, on the caller's leaf when there is one:
+  # construction is the largest cost on this surface (#52).
   l <- if (is.null(x)) leaf_model(traits, control, supply) else x
-  reset <- .gradient_setter(l, traits, drivers, supply, fast_stem_curve, damage)
-
-  if (is.null(x)) {
-    do.call(set_drivers, c(list(l), drivers))
-  } else {
-    # Seat a reused leaf with reset(), not set_drivers() alone: it carries its
-    # last user's traits, and set_drivers() never touches traits.
-    reset(theta)
-    # Leave it solved at the base point, not at the last perturbation (hazard 8),
-    # on the model the route seated; `on.exit` because paths below stop().
-    on.exit({
-      try({
-        reset(theta)
-        l$optimise()
-      }, silent = TRUE)
-    }, add = TRUE)
+  resolved <- .resolve_drivers(l, psi_soil, PPFD, soil_depth, root_network,
+                               leaf_specific_conductance_max, atm_vpd, ca,
+                               leaf_temp, atm_o2_kpa, atm_kpa)
+  par_names <- .gradient_par_names()
+  row <- stats::setNames(rep(NA_real_, length(par_names)), par_names)
+  row[names(theta)] <- theta
+  if (!is.null(x)) {
+    # The batch leaves the leaf at the base point's parameters; solved there,
+    # on the model it seated, it is not left at the last perturbation (hazard 8).
+    # `on.exit`, because an error row is rethrown below.
+    on.exit(try(l$optimise(), silent = TRUE), add = TRUE)
   }
-  # --- seat the operating point ---------------------------------------------
-  # Solved for by default, imposed by `psi`. Either way `psi_star` is the collar
-  # the outputs are evaluated at; it is the argmax only on the solving path.
-  route <- .gradient_route(l, model, supply)
-  prescribed <- !is.null(psi)
-  if (prescribed) {
-    # Refused by the leaf and reported, not thrown: a fit visits these points,
-    # and `status` is how a batch flags them.
-    if (!.gradient_evaluate_feasible(route, psi)) {
-      na_out <- stats::setNames(rep(NA_real_, length(.gradient_output_names())),
-                                .gradient_output_names())
-      return(list(
-        gradient = matrix(NA_real_, length(pars), length(na_out),
-                          dimnames = list(pars, names(na_out))),
-        value = na_out, method = "prescribed", status = "refused",
-        H = NA_real_, stationarity = NA_real_, model = route$model,
-        M = stats::setNames(rep(NA_real_, length(pars)), pars),
-        dY_dpsi = na_out, psi = psi))
-    }
-    psi_star <- route$psi_star()
-  } else {
-    route$solve()
-    psi_star <- route$psi_star()
-  }
-  value <- .gradient_outputs(l)
-
-  # Curvature and residual at the seated collar. `route$dprofit` takes psi as an
-  # argument, so neither needs the point to be an optimum.
-  h_psi <- max(abs(psi_star), 1) * step
-  # Read with its feasibility: dprofit is a 0.0 sentinel on the shut-down and
-  # reversed-gradient exits, indistinguishable by value from stationarity. The
-  # prescribed path never divides by `H`, so it relies on the flag.
-  checked <- route$checked(psi_star)
-  resid <- checked[[1L]]
-  feasible <- checked[[2L]] == 1
-  H <- (route$dprofit(psi_star + h_psi) -
-        route$dprofit(psi_star - h_psi)) / (2 * h_psi)
-  # H == 0 (the shut-down sentinel) makes the ratio 0/0, and H > 0 is not a
-  # maximum: either way the composite has nothing to stand on.
-  usable <- is.finite(H) && H < 0 && is.finite(resid)
-  stationarity <- if (usable) abs(resid / H) else Inf
-
-  if (prescribed) {
-    # Stationarity does not route here: there is no argmax to be pinned against,
-    # so `method` is refused upstream. It is still reported, as the distance from
-    # the optimum in MPa, and decides `envelope` below. Only infeasibility
-    # disables the point: a prescribed psi may sit where profit is convex, which
-    # is fine because nothing here divides by `H`.
-    status <- if (!feasible) "no-gradient" else "prescribed"
-  } else {
-    status <- if (!usable) "no-gradient" else
-      if (stationarity > stationarity_tol) "pinned" else "interior"
+  res <- .gradient_run(l, .gradient_prepare(list(resolved)),
+                       matrix(unname(row), nrow = 1L), pars, step, fd_step,
+                       stationarity_tol, method, fast_stem_curve, psi,
+                       if (is.null(dpsi_dtheta)) NULL else
+                         matrix(dpsi_dtheta, nrow = 1L),
+                       m)
+  # One observation is one call: a row's failure is the call's, classified as
+  # it would have been thrown.
+  if (identical(res$status[[1L]], "error")) {
+    with_phylloptim_conditions(stop(res$message[[1L]], call. = FALSE))
   }
 
-  # `status` describes the point and is reported whichever route runs; `use_ift`
-  # is the route. They differ only when the caller has forced one.
-  auto_ift <- identical(status, "interior")
-  use_ift <- if (prescribed) feasible else switch(method,
-                    auto = auto_ift,
-                    ift = TRUE,
-                    fd = FALSE)
-  if (use_ift && !prescribed && !usable) {
-    stop("leaf_gradient(): method = \"ift\" was asked for at a point with no ",
-         "usable curvature (H = ", format(H), "), so -M/H has nothing to stand ",
-         "on. This is a shut-down or otherwise determined operating point; use ",
-         "method = \"auto\".", call. = FALSE)
-  }
-  # Refused on the stationarity test: the step check below does not catch every
-  # pinned optimum, and at one the composite is wrong by orders of magnitude.
-  if (use_ift && !prescribed && identical(status, "pinned")) {
-    stop("leaf_gradient(): method = \"ift\" was asked for at a pinned optimum, ",
-         "where psi* is held by a bound and the implicit-function composite ",
-         "does not apply. Use method = \"auto\".", call. = FALSE)
-  }
-
-  if (use_ift) {
-    # dY/dpsi at fixed traits, centred. A stencil reaching past an end of the
-    # feasible interval is detected rather than taken one-sided; that catches
-    # some pinned optima, but the refusal above is what guards them.
-    hi <- .gradient_outputs_at(l, psi_star + h_psi, route)
-    lo <- .gradient_outputs_at(l, psi_star - h_psi, route)
-    if (is.null(hi) || is.null(lo)) {
-      if (prescribed) {
-        # Within `h_psi` of an end: dY/dpsi cannot be centred, and differencing
-        # the solve would answer about the optimum, so the row is refused with
-        # its value and no gradient.
-        status <- "refused"
-        use_ift <- FALSE
-      } else if (identical(method, "ift")) {
-        stop("leaf_gradient(): method = \"ift\" was asked for at a point whose ",
-             "feasible collar interval is narrower than one step, so dY/dpsi ",
-             "cannot be centred on psi*. Use method = \"auto\".", call. = FALSE)
-      } else {
-        use_ift <- FALSE
-        status <- "pinned"
-      }
-    } else {
-      dY_dpsi <- (hi - lo) / (2 * h_psi)
-      # profit's dY/dpsi is the exact `dprofit` already in hand, not a difference;
-      # one rule on both paths keeps `psi = psi*` reproducing the solve exactly.
-      dY_dpsi[["profit"]] <- resid
-    }
-  }
-
-  # The envelope theorem: at a stationary point profit's indirect term is zero,
-  # so the composite assigns the direct partial (see ?leaf_gradient). Keyed on
-  # `stationarity`, not on `status`, which differs between the two paths at
-  # psi = psi* and would break their bit-for-bit match, nor on `use_ift`: at a
-  # pinned optimum the indirect term is real.
-  envelope <- isTRUE(usable && stationarity <= stationarity_tol)
-
-  if (prescribed && !use_ift) {
-    grad <- matrix(NA_real_, length(pars), length(.gradient_output_names()),
-                   dimnames = list(pars, .gradient_output_names()))
-    M <- stats::setNames(rep(NA_real_, length(pars)), pars)
-    dY_dpsi <- stats::setNames(rep(NA_real_, length(.gradient_output_names())),
-                               .gradient_output_names())
-  } else if (use_ift) {
-    # One composite for both paths; only dpsi/dtheta differs, derived by the
-    # implicit function theorem when solved and supplied by the caller when
-    # imposed.
-    fit <- .gradient_ift(l, reset, theta, pars, psi_star, H, dY_dpsi, step,
-                         fast_stem_curve, dpsi_dtheta = dpsi_dtheta,
-                         envelope = envelope, route = route)
-    grad <- fit$gradient
-    M <- fit$M
-  } else {
-    grad <- .gradient_fd(l, reset, theta, pars, step, fast_stem_curve, route)
-    M <- stats::setNames(rep(NA_real_, length(pars)), pars)
-    dY_dpsi <- stats::setNames(rep(NA_real_, length(.gradient_output_names())),
-                               .gradient_output_names())
-  }
-
-  list(gradient = grad,
-       value = value,
-       method = if (prescribed) "prescribed" else if (use_ift) "ift" else "fd",
-       status = status,
-       H = H,
-       stationarity = stationarity,
-       model = route$model,
-       M = M,
-       dY_dpsi = dY_dpsi,
-       psi = psi_star)
+  outs <- .gradient_output_names()
+  list(gradient = matrix(res$gradient[1L, , , drop = FALSE],
+                         nrow = length(pars), ncol = length(outs),
+                         dimnames = list(pars, outs)),
+       value = res$value[1L, ],
+       method = res$method[[1L]],
+       status = res$status[[1L]],
+       H = res$H[[1L]],
+       stationarity = res$stationarity[[1L]],
+       model = model,
+       route = m$route,
+       M = stats::setNames(res$M[1L, ], pars),
+       dY_dpsi = res$dY_dpsi[1L, ],
+       psi = res$psi[[1L]])
 }
 
-# --- the route: which model's optimum is being differentiated -----------------
+# --- the model: which optimum is being differentiated --------------------------
 #
-# Chosen once here rather than branched on at each call site. The collar route
-# and a stem route are different models, not one restricted to the other
-# (hazard 11). `decision` names the output that IS the decision variable, whose
-# gradient is assigned dpsi*/dtheta rather than differenced. On a stem route
-# `collar` is not solved for, and its NA gradient is the truthful answer.
-.GRADIENT_COLLAR_ROUTE <- "collar"
+# A (curve, route) pair, resolved by `.resolve_model()`. On the collar route the
+# decision variable is the collar; on a stem route it is `psi_stem`, `collar` is
+# not solved for, and its NA gradient is the truthful answer (hazard 11).
+# Every model name: the cost curves, each of which takes either route. The one
+# list `.gradient_model_pars()` and `.resolve_model()` validate against.
+.gradient_models <- function() cost_curve_names()
 
-# Every model this can differentiate: the collar route plus every cost curve's
-# stem route. The one list `.gradient_model_pars()` validates against and
-# `.gradient_route()` dispatches on. Verify a route against a finite difference
-# of its solve by sweeping the step, not at one step (hazard 15).
-.gradient_models <- function() {
-  c(.GRADIENT_COLLAR_ROUTE, cost_curve_names())
+# The finite-difference arm's step when the caller names none. Both routes
+# root-find dprofit == 0, so psi* is stationary to ~1e-15 and a 1e-06 parameter
+# step is resolvable; the floor moves with the solver, so re-sweep it before
+# changing this or the solver (hazard 15). test-gradient-referee.R sweeps it.
+.gradient_fd_step <- 1e-6
+
+# Observations' resolved drivers, held C++-side: what `leaf_batch()` builds and
+# `leaf_gradient()` builds for its one.
+.gradient_prepare <- function(resolved) {
+  pick <- function(field) vapply(resolved, function(a) a[[field]], numeric(1))
+  gradient_batch_prepare(
+    root_network = lapply(resolved, `[[`, "root_network"),
+    psi_soil = lapply(resolved, `[[`, "psi_soil"),
+    soil_depth = lapply(resolved, `[[`, "soil_depth"),
+    PPFD = pick("PPFD"), atm_vpd = pick("atm_vpd"), ca = pick("ca"),
+    leaf_temp = pick("leaf_temp"), atm_o2_kpa = pick("atm_o2_kpa"),
+    atm_kpa = pick("atm_kpa"))
 }
 
-.gradient_route <- function(l, model, supply) {
-  if (identical(model, .GRADIENT_COLLAR_ROUTE)) {
-    # Seated, as the stem routes are below: the closures read the seated curve,
-    # and a reused leaf may come seated on another.
-    l$set_model("TF24", "collar")
-    return(list(
-      model = model,
-      decision = "collar",
-      # A root-find on `dprofit == 0`, stationary to ~1e-15, so a 1e-06 trait step
-      # is resolvable: psi* moves far more than the solve's own precision.
-      fd_step = 1e-6,
-      solve = function() l$find_root_collar_psi(),
-      psi_star = function() l$opt_root_psi_,
-      checked = function(psi) l$dprofit_droot_collar_psi_checked(psi),
-      dprofit = function(psi) l$dprofit_droot_collar_psi(psi),
-      evaluate = function(psi) l$evaluate_root_collar_psi(psi)
-    ))
-  }
-  if (!(model %in% cost_curve_names())) {
-    stop("unknown model \"", model, "\". Available: ",
-         paste(.gradient_models(), collapse = ", "), ".", call. = FALSE)
-  }
-  if (!identical(supply$kind, "single")) {
-    stop("the stem routes optimise `psi_stem` with the upstream potential ",
-         "pinned at `psi_soil`, so they need the single-potential supply path; ",
-         "got the multi-layer one. Use model = \"collar\" for a root network.",
-         call. = FALSE)
-  }
-
-  # Seated on construction, not in `solve()`: the closures below read whichever
-  # model the leaf is set to, and the prescribed path never calls `solve()`.
-  # set_traits() does not clear the seated model.
-  l$set_model(model, "stem")
-
-  # ProfitMax's `|A|max` is cleared by every perturbation, so it is re-solved
-  # before each read rather than pinned at the base point: that is what makes the
-  # composite a total derivative. A no-op on every other curve.
-  reseat <- if (identical(model, "ProfitMax")) {
-    function() l$prepare_profitmax()
-  } else {
-    function() invisible(NULL)
-  }
-
-  list(
-    model = model,
-    decision = "psi_stem",
-    # The same step as the collar route: the stem routes root-find dJ/dpsi == 0,
-    # so psi* is stationary to ~1e-15. The floor moves with the solver; re-sweep
-    # before changing this or the solver (hazard 15).
-    fd_step = 1e-6,
-    solve = function() l$optimise(),
-    psi_star = function() l$opt_psi_stem_,
-    checked = function(psi) {
-      reseat()
-      l$dprofit_dpsi_stem_checked(psi)
-    },
-    dprofit = function(psi) {
-      reseat()
-      l$dprofit_dpsi_stem_checked(psi)[[1L]]
-    },
-    evaluate = function(psi) {
-      reseat()
-      l$evaluate_psi_stem_at(psi)
-    }
-  )
+# The one crossing: every gradient, of one observation or many, is
+# `gradient::batch` in C++. `m` is `.resolve_model()`'s pair.
+.gradient_run <- function(l, drivers, theta, pars, step, fd_step,
+                          stationarity_tol, method, fast_stem_curve, psi,
+                          dpsi_dtheta, m) {
+  res <- with_phylloptim_conditions(gradient_batch_run(
+    l, drivers, theta, match(pars, .gradient_par_names()) - 1L, step,
+    stationarity_tol, method, fast_stem_curve, psi, dpsi_dtheta,
+    match(m$curve, cost_curve_names()) - 1L,
+    identical(m$route, "collar"), fd_step))
+  dimnames(res$gradient) <- list(NULL, pars, .gradient_output_names())
+  dimnames(res$value) <- list(NULL, .gradient_output_names())
+  dimnames(res$M) <- list(NULL, pars)
+  dimnames(res$dY_dpsi) <- list(NULL, .gradient_output_names())
+  res
 }
 
 # --- internals ---------------------------------------------------------------
@@ -830,53 +674,6 @@ leaf_gradient <- function(psi_soil,
     nms
   }
 })
-
-# One C++ reader for every output, not a field read each: every `l$field` is an
-# R6 active binding wrapping a `.Call`, and this runs once per perturbation. The
-# reader is the accessor the bindings wrap, so the values are the same.
-#
-# Cached at first call: R collates `R/` alphabetically, so
-# `.operating_point_names` (leaf-model.R) does not exist when this is sourced.
-.gradient_outputs_idx <- local({
-  idx <- NULL
-  function() {
-    if (is.null(idx)) {
-      idx <<- match(.gradient_output_names(), .operating_point_names)
-    }
-    idx
-  }
-})
-
-.gradient_outputs <- function(l) {
-  v <- l$operating_point_values()[.gradient_outputs_idx()]
-  names(v) <- .gradient_output_names()
-  v
-}
-
-# Outputs with the collar held at `psi` rather than optimised. NULL when the
-# leaf refuses `psi` as outside the feasible interval, so that a stencil
-# reaching past an end is detected rather than differenced one-sidedly.
-.gradient_outputs_at <- function(l, psi, route) {
-  if (!.gradient_evaluate_feasible(route, psi)) {
-    return(NULL)
-  }
-  .gradient_outputs(l)
-}
-
-# `route$evaluate(psi)`, FALSE where the leaf refuses `psi` as outside its
-# feasible interval. Only that refusal is caught, by its infeasibility code;
-# anything else is a failure of the evaluation and propagates.
-.gradient_evaluate_feasible <- function(route, psi) {
-  tryCatch({
-    route$evaluate(psi)
-    TRUE
-  }, error = function(e) {
-    if (identical(.infeasible_code(conditionMessage(e)), "prescribed_potential")) {
-      return(FALSE)
-    }
-    stop(e)
-  })
-}
 
 # The differentiable parameters, in the order C++ indexes them: leaf_traits()'
 # arguments, then the non-traits. C++ derives its own (`gradient::par_names`)
@@ -933,7 +730,7 @@ leaf_gradient <- function(psi_soil,
   unname(owned[names(owned) != model])
 }
 
-.gradient_available_pars <- function(single, model = "collar", damage = FALSE) {
+.gradient_available_pars <- function(single, model = "TF24_floor", damage = FALSE) {
   nms <- .gradient_par_names()
   if (!single) nms <- setdiff(nms, "resistance")
   if (!damage) nms <- setdiff(nms, .gradient_damage_pars)
@@ -945,7 +742,7 @@ leaf_gradient <- function(psi_soil,
   setdiff(nms, excluded)
 }
 
-.gradient_check_pars <- function(pars, single, model = "collar", damage = FALSE) {
+.gradient_check_pars <- function(pars, single, model = "TF24_floor", damage = FALSE) {
   unknown <- setdiff(pars, .gradient_available_pars(single, model, damage))
   if (length(unknown)) {
     off <- intersect(unknown, .gradient_damage_pars)
@@ -970,7 +767,8 @@ leaf_gradient <- function(psi_soil,
            " model: it is the ", owner, " curve's PRESCRIBED price of water, ",
            "and on every other cost curve the price is emergent -- derived from ",
            "that curve's own parameters rather than set. Differentiate those ",
-           "instead, or pass model = \"", owner, "\".", call. = FALSE)
+           "instead, or pass model = \"", owner, "\" (with route = ",
+           "\"collar\" on the multi-layer supply).", call. = FALSE)
     }
     stop("`pars` names things this cannot differentiate: ",
          paste(unknown, collapse = ", "),
@@ -987,7 +785,7 @@ leaf_gradient <- function(psi_soil,
 # `resistance` are drivers (set_drivers()); `resistance` is read from
 # `r_R_V_sum[1]` and exists only on the single-potential path, where it is one
 # scalar. The derivation does not care whether a parameter is a trait; only the
-# setter differs (.gradient_setter).
+# setter differs (`gradient::apply()`).
 .gradient_theta <- function(traits, kmax, supply, root_network,
                             owned = NULL, damage = NULL) {
   theta <- c(unlist(traits), leaf_specific_conductance_max = kmax)
@@ -1010,174 +808,19 @@ leaf_gradient <- function(psi_soil,
 }
 
 
-# The arguments `.resolve_drivers()` takes, in its order, so the drivers list can
-# be handed over without naming them.
-.resolve_names <- c("psi_soil", "PPFD", "soil_depth", "root_network",
-                    "leaf_specific_conductance_max", "atm_vpd", "ca",
-                    "leaf_temp", "atm_o2_kpa", "atm_kpa")
-
-# A closure that pushes a parameter vector onto the leaf. Order is load-bearing
-# (hazard 10): set_traits() returns the leaf to its just-constructed state, so
-# the drivers go on after it, and that write re-derives vcmax_/jmax_/R_d_.
-.gradient_setter <- function(l, traits, drivers, supply,
-                             fast_stem_curve = TRUE, damage = FALSE) {
-  trait_names <- names(traits)
-  single <- identical(supply$kind, "single")
-  # The drivers are resolved once, by the one definition of their rules; the
-  # closure applies them positionally, varying only what a perturbation moves.
-  # A second copy of the rules here would drift from set_drivers().
-  base <- do.call(.resolve_drivers, c(list(l), drivers[.resolve_names]))
-
-  # Method closures pulled out once: `$` on an R6 object is a lookup per use, and
-  # these run per perturbation.
-  apply_traits <- l$set_traits
-  apply_drivers <- l$set_physiology
-  owned <- unname(.owned_fields())
-
-  function(theta, only = NULL) {
-    # Fast path for stem_P50: moves stem_b and leaves the seated physiology
-    # alone. Sound only when `only` names this one parameter and the rest of the
-    # leaf is at base, which .gradient_reseat_base() ensures.
-    if (fast_stem_curve && identical(only, "stem_P50")) {
-      l$perturb_stem_P50(theta[["stem_P50"]])
-      return(invisible(l))
-    }
-    # Straight onto the object, bypassing set_traits()'s checks: sound only
-    # because theta came from a caller's leaf_traits() and the C++ setter asserts
-    # the positive-magnitude invariants. Do not copy this where values are not
-    # known-good.
-    #
-    # A do.call over the derived trait names, and it must stay one (hazard 13):
-    # spelled-out subscripts break at run time when a trait is added, surfacing
-    # as an R-versus-C++ disagreement. test-cost.R counts the crossing.
-    tv <- theta[trait_names]
-    do.call(apply_traits, unname(as.list(tv)))
-    # The thermal-damage inputs, ONLY with its gate on, and BEFORE the drivers:
-    # set_physiology is what seats the block that reads them. A field write per
-    # input costs a `.Call` each, which is why the gate-off path skips the loop.
-    if (damage) {
-      for (nm in .gradient_damage_pars) {
-        l[[nm]] <- theta[[nm]]
-      }
-    }
-    # `resistance` is a driver and goes in with the others, so set_traits() is
-    # the only call here that resets the object.
-    net <- if (single) {
-      series_resistance(theta[["resistance"]])
-    } else {
-      base$root_network
-    }
-    apply_drivers(net, base$PPFD, base$psi_soil, base$soil_depth,
-                  theta[["leaf_specific_conductance_max"]], base$atm_vpd,
-                  base$ca, base$leaf_temp, base$atm_o2_kpa, base$atm_kpa)
-    # Model-owned fields, each written only when set: off its route the slot is
-    # NA, which would poison the leaf, and each write is a `.Call` test-cost.R
-    # counts. Every owned field is written, or its column would be an exact zero
-    # in R while C++'s `gradient::apply()` reports a number.
-    for (field in owned) {
-      v <- theta[[field]]
-      if (!is.na(v)) {
-        l[[field]] <- v
-      }
-    }
-    invisible(l)
+# The two settings C++ reads as a double and a bool, checked here: an NA
+# tolerance would class every point interior, and an NA bool reads as TRUE.
+.gradient_check_settings <- function(stationarity_tol, fast_stem_curve) {
+  if (!(is.numeric(stationarity_tol) && length(stationarity_tol) == 1L &&
+        !is.na(stationarity_tol) && stationarity_tol >= 0)) {
+    stop("`stationarity_tol` must be a single non-negative number",
+         call. = FALSE)
   }
-}
-
-# Parameters whose step is RELATIVE rather than floored at 1. See .gradient_step.
-.gradient_relative_pars <- c("leaf_specific_conductance_max", "resistance")
-
-# The step: relative above 1 and plain `step` below, so a small trait is still
-# perturbed above the solve's ~1e-09 noise and a trait at zero is perturbed at
-# all. Parameters far below 1 by nature (`leaf_specific_conductance_max`,
-# 3.14e-05) take a plain relative step, or the floor would make it a 3% secant.
-.gradient_step <- function(par, value, step) {
-  floor <- if (par %in% .gradient_relative_pars) 0 else 1
-  max(abs(value), floor) * step
-}
-
-# Where the stencil is centred. `g_min` is refused below zero and defaults to
-# zero, so where its stencil would cross zero it shifts up one step and the
-# difference is the derivative at `g_min = h`. Mirrored bit-for-bit in
-# `gradient::centre_for()`.
-.gradient_centre <- function(par, value, h) {
-  if (identical(par, "g_min") && value - h < 0) value + h else value
-}
-
-# Parameters whose setter takes a SHORTCUT that leaves the rest of the object
-# alone, and which therefore require the object to be at the base point before
-# they run. See `.gradient_reseat_base()`.
-.gradient_shortcut_pars <- function(fast_stem_curve) {
-  if (fast_stem_curve) "stem_P50" else character(0)
-}
-
-# Every parameter's gradient is taken from the base point. Every setter but a
-# shortcut (stem_P50's fast path) restores base on its way, so base is restored
-# only before a shortcut that follows another parameter. Cheap: set_traits()
-# rebuilds a table only when a `c` changed.
-.gradient_reseat_base <- function(reset, theta, pars, fast_stem_curve) {
-  shortcut <- pars %in% .gradient_shortcut_pars(fast_stem_curve)
-  at_base <- TRUE
-  function(k) {
-    if (shortcut[[k]] && !at_base) {
-      reset(theta)
-    }
-    at_base <<- FALSE
-    invisible(NULL)
+  if (!(is.logical(fast_stem_curve) && length(fast_stem_curve) == 1L &&
+        !is.na(fast_stem_curve))) {
+    stop("`fast_stem_curve` must be TRUE or FALSE", call. = FALSE)
   }
-}
-
-# The implicit-function composite. Two perturbed evaluations per parameter,
-# neither of which re-solves the model: `dprofit` at the UNPERTURBED psi* gives
-# the mixed partial, and the outputs at that same psi* give the direct term.
-.gradient_ift <- function(l, reset, theta, pars, psi_star, H, dY_dpsi, step,
-                          fast_stem_curve = TRUE, dpsi_dtheta = NULL,
-                          envelope = FALSE, route) {
-  seat <- .gradient_reseat_base(reset, theta, pars, fast_stem_curve)
-  # The mixed partials are returned too: a caller integrating its own sensitivity
-  # of psi needs `M` and `H`, which cannot be recovered once divided.
-  M <- numeric(length(pars))
-  out <- t(vapply(seq_along(pars), function(k) {
-    p <- pars[[k]]
-    seat(k)
-    h <- .gradient_step(p, theta[[p]], step)
-    centre <- .gradient_centre(p, theta[[p]], h)
-    side <- function(sign) {
-      th <- theta
-      th[[p]] <- centre + sign * h
-      reset(th, only = p)
-      y <- .gradient_outputs_at(l, psi_star, route)
-      if (is.null(y)) {
-        stop("leaf_gradient(): perturbing `", p, "` moved the feasible collar ",
-             "interval past psi*, so the operating point could not be ",
-             "evaluated there. This point is on an active-set boundary; ",
-             "lower `stationarity_tol` or difference the solve directly.",
-             call. = FALSE)
-      }
-      c(dprofit = route$dprofit(psi_star), y)
-    }
-    up <- side(1)
-    dn <- side(-1)
-    # M = d2profit/dpsi dtheta, with psi held FIXED at psi*.
-    M[[k]] <<- (up[["dprofit"]] - dn[["dprofit"]]) / (2 * h)
-    # Solved: psi* moves with theta as the implicit function theorem says.
-    # Imposed: it moves only as the caller says, by `dpsi_dtheta`.
-    d_psi <- if (is.null(dpsi_dtheta)) -M[[k]] / H else dpsi_dtheta[[k]]
-    direct <- (up[-1L] - dn[-1L]) / (2 * h)
-    # The decision variable IS psi*, held fixed, so its gradient is assigned
-    # dpsi*/dtheta rather than read off a difference of two identical numbers.
-    g <- direct + dY_dpsi * d_psi
-    g[[route$decision]] <- d_psi
-    # The envelope term, assigned for the same reason: profit's indirect term is
-    # identically zero at a stationary point.
-    if (envelope) {
-      g[["profit"]] <- direct[["profit"]]
-    }
-    g[.gradient_output_names()]
-  }, numeric(length(.gradient_output_names()))))
-  reset(theta)
-  rownames(out) <- pars
-  list(gradient = out, M = stats::setNames(M, pars))
+  invisible(TRUE)
 }
 
 # `psi` and `dpsi_dtheta` only mean anything together, and neither means anything
@@ -1204,8 +847,8 @@ leaf_gradient <- function(psi_soil,
          "collar you gave -- so at a prescribed psi neither applies and the ",
          "reported method is \"prescribed\".", call. = FALSE)
   }
-  # Coerced, and the caller must use the return, so the R reference and the C++
-  # batch see the same double; `.gradient_check_psi_batch()` does the same.
+  # Coerced, and the caller must use the return: C++ takes a double, as
+  # `.gradient_check_psi_batch()` hands it.
   as.numeric(psi)
 }
 
@@ -1248,34 +891,4 @@ leaf_gradient <- function(psi_soil,
          call. = FALSE)
   }
   stats::setNames(dpsi_dtheta, pars)
-}
-
-# The fallback: a central difference of the whole solve. Correct at a pinned
-# optimum because it differences the constrained answer, which is exactly what the
-# composite cannot do.
-.gradient_fd <- function(l, reset, theta, pars, step, fast_stem_curve = TRUE,
-                         route) {
-  # The route's step unless the caller set one: this arm differences the solve,
-  # so its step must clear the solver's resolution (`fd_step`).
-  if (is.null(attr(step, "user_set"))) {
-    step <- route$fd_step
-  }
-  seat <- .gradient_reseat_base(reset, theta, pars, fast_stem_curve)
-  out <- t(vapply(seq_along(pars), function(k) {
-    p <- pars[[k]]
-    seat(k)
-    h <- .gradient_step(p, theta[[p]], step)
-    centre <- .gradient_centre(p, theta[[p]], h)
-    side <- function(sign) {
-      th <- theta
-      th[[p]] <- centre + sign * h
-      reset(th, only = p)
-      route$solve()
-      .gradient_outputs(l)
-    }
-    ((side(1) - side(-1)) / (2 * h))[.gradient_output_names()]
-  }, numeric(length(.gradient_output_names()))))
-  rownames(out) <- pars
-  reset(theta)
-  out
 }

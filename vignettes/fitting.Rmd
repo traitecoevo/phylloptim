@@ -66,6 +66,9 @@ converged" from "the model works". Real data cannot supply it, so start here.
 set.seed(sum(utf8ToInt("phylloptim-fitting")))
 
 truth <- leaf_traits(vcmax_25 = 85, jmax_25 = 140, TF24_cost_scale = 40)
+# plant's configuration throughout: TF24 on the collar route over the
+# multi-layer root network. The package defaults to the stem route instead.
+ML <- leaf_supply_multilayer()
 
 drivers <- expand.grid(
   psi_soil = seq(0.4, 3.2, length.out = 12),
@@ -74,7 +77,8 @@ drivers <- expand.grid(
 )
 
 obs <- leaf_solve(psi_soil = drivers$psi_soil, PPFD = drivers$PPFD,
-                  atm_vpd = drivers$atm_vpd, traits = truth)
+                  atm_vpd = drivers$atm_vpd, traits = truth,
+                  supply = ML, model = "TF24", route = "collar")
 
 sigma <- c(A = 0.4, gc = 0.0015, psi_stem = 0.08)
 obs$A_obs <- obs$A + rnorm(nrow(obs), 0, sigma[["A"]])
@@ -139,7 +143,7 @@ problem. Their cache is keyed on every input of the temperature block, including
 them. It is the curves and the operating point that no re-driving repairs.
 
 ```{r}
-l <- leaf_model(truth)
+l <- leaf_model(truth, supply = ML)
 start <- log(c(vcmax_25 = 60, jmax_25 = 100, TF24_cost_scale = 15))
 fit <- optim(start, ssq, l = l, method = "Nelder-Mead",
              control = list(maxit = 2000, reltol = 1e-10))
@@ -170,7 +174,8 @@ ssq_grad <- function(theta, l) {
   tr <- do.call(leaf_traits, as.list(exp(theta)))
   g <- vapply(seq_len(nrow(obs)), function(i) {
     gi <- leaf_gradient(psi_soil = obs$psi_soil[i], PPFD = obs$PPFD[i],
-                        atm_vpd = obs$atm_vpd[i], traits = tr, pars = FIT)
+                        atm_vpd = obs$atm_vpd[i], traits = tr, pars = FIT,
+                        supply = ML, model = "TF24", route = "collar")
     v <- gi$value
     r <- c((v[["A"]] - obs$A_obs[i]) / sigma[["A"]]^2,
            (v[["gc"]] - obs$gc_obs[i]) / sigma[["gc"]]^2,
@@ -254,8 +259,9 @@ CAND <- c("vcmax_25", "jmax_25", "TF24_cost_scale", "TF24_beta2", "phi_J",
 exact_n <- function(pars) {
   vapply(seq_len(nrow(obs)), function(i) {
     leaf_gradient(psi_soil = obs$psi_soil[i], PPFD = obs$PPFD[i],
-                  atm_vpd = obs$atm_vpd[i], traits = truth,
-                  pars = pars)$gradient[pars, "A"]
+                  atm_vpd = obs$atm_vpd[i], traits = truth, pars = pars,
+                  supply = ML, model = "TF24",
+                  route = "collar")$gradient[pars, "A"]
   }, numeric(length(pars)))
 }
 ssq_at <- function(theta, l, nm) {
@@ -303,14 +309,14 @@ Both are linear, and the two coefficients are the whole story:
 
 - **the finite difference is pure slope.** Its intercept is about 0 and its slope is
   `2 ×` one objective evaluation, because that is literally what it does;
-- **the exact gradient has a large intercept and a slope too.** The intercept is
-  the per-observation `Leaf` construction and solve, paid once whatever you ask
-  for. The slope is `2` evaluations per parameter per observation.
+- **the exact gradient is nearly all intercept.** The intercept is the
+  per-observation `Leaf` construction, solve and R call, paid once whatever you
+  ask for. Its slope is `2` evaluations per parameter per observation in C++,
+  which is close to free; most of what slope there is comes from `stem_c` and
+  `root_c`, whose perturbations rebuild a vulnerability table.
 
-Here the exact route's *slope* is the larger of the two, so **growing the parameter
-count in this design never makes it win.** The ratio improves but does not reach 1.
-Each extra parameter costs it two more R calls per observation, and from R a call
-costs more than the C++ work it wraps.
+So the ratio improves with every parameter, but in this design the intercept is
+large enough that **it does not reach 1 at any count fitted here.**
 
 ### What reverses it is more *fitted* parameters per *model* parameter
 
@@ -382,7 +388,9 @@ fd_gradient <- function() {
     ssq(a, l); ssq(b, l)
   }
 }
-construct_only <- function() for (i in seq_len(nrow(obs))) leaf_model(truth)
+construct_only <- function() {
+  for (i in seq_len(nrow(obs))) leaf_model(truth, supply = ML)
+}
 
 # Warm up all three arms first, then interleave. A cold leaf_model() measured
 # three times its steady-state cost, which is enough to turn "a third" into
@@ -400,15 +408,10 @@ data.frame(
 )
 ```
 
-The third row is most of the intercept. `leaf_gradient()` constructs a fresh model
-on every call, and there is no argument for handing it one you already have, so a
-gradient over `n` observations pays `n` constructions.
-
-The rest is the R call boundary itself. The composite replaces one solve with a
-handful of much cheaper evaluations, but each of those is an R call into C++, and an
-R call costs more than the C++ work it wraps. The theorem does less arithmetic and
-more crossing. That is also why the exact route has a slope in `P_model` at all,
-rather than the near-free one the C++ benchmarks show.
+The third row is most of the intercept. `leaf_gradient()` as called here
+constructs a fresh model on every call, so a gradient over `n` observations pays
+`n` constructions. The rest is one R call per observation, around a composite
+that runs in C++.
 
 Four things follow:
 
@@ -419,15 +422,13 @@ Four things follow:
   vignette naturally demonstrates because fitting traits directly is the simplest
   thing to show. Real fits are usually not that case.
 - **Reuse the model object.** `leaf_gradient(x = )` takes a `Leaf` you already
-  have, which removes the construction cost from the intercept. In
-  that study, model construction was 29% of the exact gradient. It does not make the
-  composite the faster arm in *this* design, because here the problem is the slope
-  rather than the intercept.
-- **Use the batch entry point, which removes the slope.**
-  `leaf_gradient_batch()` composes the theorem in C++ and loops over observations
-  there, so the boundary is crossed once per call instead of 112 times per
-  observation: **over an order of magnitude cheaper per observation** than the R
-  loop at `length(pars)` = 4 ([measured](https://github.com/traitecoevo/phylloptim#performance-from-r)).
+  have, which removes the construction cost from the intercept, most of it in
+  this design.
+- **Use the batch entry point, which removes the rest of the intercept.**
+  `leaf_gradient()` is `leaf_gradient_batch()` with one observation, so a loop
+  over it crosses the boundary once per observation; the batch crosses it once
+  per call, and is **about ten times cheaper per observation** than that loop at
+  `length(pars)` = 4 ([measured](https://github.com/traitecoevo/phylloptim#performance-from-r)).
 
 Read the table above as what the R boundary costs, not as the fastest this can
 go. The cost *model* is the thing to reason with, and `P_fit` against `P_model` is
@@ -435,8 +436,8 @@ what decides which arm wins; the batch route changes only the constant in front 
 the exact arm. The same fit through `leaf_batch()` and `leaf_gradient_batch()`:
 
 ```r
-b <- leaf_batch(psi_soil = obs$psi_soil, PPFD = obs$PPFD)   # once, not per draw
-g <- leaf_gradient_batch(b, traits, pars = FIT)
+b <- leaf_batch(psi_soil = obs$psi_soil, PPFD = obs$PPFD, supply = ML)  # once
+g <- leaf_gradient_batch(b, traits, pars = FIT, model = "TF24", route = "collar")
 ```
 
 with the likelihood and your parameterisation Jacobian still in R, vectorised over
@@ -453,7 +454,7 @@ the same prepared `leaf_batch()` serves any of them, because a batch holds the
 ```{r}
 #| label: collections
 b <- leaf_batch(psi_soil = seq(0.6, 3.0, length.out = 40), PPFD = 900,
-                atm_vpd = 2)
+                atm_vpd = 2, supply = ML)
 
 studies <- list(
   "demand only"      = c("vcmax_25", "jmax_25"),
@@ -465,7 +466,7 @@ studies <- list(
 do.call(rbind, lapply(names(studies), function(nm) {
   p <- studies[[nm]]
   t0 <- Sys.time()
-  g <- leaf_gradient_batch(b, pars = p)
+  g <- leaf_gradient_batch(b, pars = p, model = "TF24", route = "collar")
   ms <- 1000 * as.numeric(Sys.time() - t0, units = "secs")
   # Which parameters came back with NO signal at all, anywhere?
   dead <- p[colSums(abs(g$gradient[, , "A", drop = FALSE])) == 0]
@@ -546,8 +547,8 @@ than an artefact.
 ```{r}
 status <- vapply(seq_len(nrow(obs)), function(i) {
   leaf_gradient(psi_soil = obs$psi_soil[i], PPFD = obs$PPFD[i],
-                atm_vpd = obs$atm_vpd[i], traits = truth,
-                pars = "vcmax_25")$status
+                atm_vpd = obs$atm_vpd[i], traits = truth, pars = "vcmax_25",
+                supply = ML, model = "TF24", route = "collar")$status
 }, character(1))
 table(status)
 ```

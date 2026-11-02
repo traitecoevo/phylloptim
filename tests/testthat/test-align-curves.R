@@ -3,7 +3,8 @@
 # these tests re-solve that alignment and hold the shipped defaults to it.
 
 ref_gc <- function(model, ...) {
-  leaf_solve(psi_soil = 1, model = model, supply = leaf_supply_singlelayer(),
+  leaf_solve(psi_soil = 1, model = model, route = "stem",
+             supply = leaf_supply_singlelayer(),
              ...)$gc
 }
 
@@ -31,7 +32,8 @@ test_that("at their defaults the aligned curves have TF24's conductance", {
   # And they differ away from the reference, which is the point of aligning:
   # a curve that matched everywhere would be the same curve.
   dry <- vapply(c("TF24", "JS22", "CMax"), function(m) {
-    leaf_solve(psi_soil = 2.5, model = m, supply = leaf_supply_singlelayer())$gc
+    leaf_solve(psi_soil = 2.5, model = m, route = "stem",
+               supply = leaf_supply_singlelayer())$gc
   }, numeric(1))
   expect_gt(diff(range(dry)) / mean(dry), 0.01)
 })
@@ -40,7 +42,7 @@ test_that("CF77 aligned to TF24 is TF24's emergent lambda", {
   # At TF24's own marginal cost of water the two first-order conditions
   # coincide, so this is an identity rather than a fit.
   tf24 <- leaf_solve(psi_soil = 1, model = "TF24",
-                     supply = leaf_supply_singlelayer())
+                     route = "stem", supply = leaf_supply_singlelayer())
   expect_equal(align_curves("CF77")[["CF77_lambda"]], tf24$lambda,
                tolerance = 1e-8)
 })
@@ -51,7 +53,7 @@ test_that("the R defaults are the leaf's own", {
   l <- leaf_model()
   expect_identical(l$CF77_lambda_, .level_defaults()[["CF77_lambda_"]])
   expect_identical(l$LeastCost_beta, .level_defaults()[["LeastCost_beta"]])
-  expect_true(is.na(l$TF24_floor_lambda_o))
+  expect_identical(l$TF24_floor_lambda_o, 0)
   # And leaf_traits()'s two are a fresh leaf's.
   expect_identical(leaf_traits()$JS22_gamma, l$JS22_gamma)
   expect_identical(leaf_traits()$CMax_a, l$CMax_a)
@@ -83,10 +85,10 @@ test_that("an NA owned slot in a supplied theta takes the default", {
 test_that("align_curves() follows its reference and its target", {
   w <- align_curves(c("JS22", "CMax"), psi_soil = 0.5)
   tf24 <- leaf_solve(psi_soil = 0.5, model = "TF24",
-                     supply = leaf_supply_singlelayer())$gc
+                     route = "stem", supply = leaf_supply_singlelayer())$gc
   expect_equal(attr(w, "target"), tf24, tolerance = 0)
   got <- leaf_solve(psi_soil = 0.5, model = "CMax",
-                    supply = leaf_supply_singlelayer(),
+                    route = "stem", supply = leaf_supply_singlelayer(),
                     traits = leaf_traits(CMax_a = w[["CMax_a"]]))$gc
   expect_equal(got, tf24, tolerance = 1e-8)
 
@@ -106,12 +108,12 @@ test_that("align_curves() refuses what it cannot align, and says why", {
 test_that("an unset owned price takes the default, and only on its own route", {
   # leaf_gradient() with no leaf seats the default on the owning route ...
   g <- leaf_gradient(psi_soil = 1, PPFD = 900, model = "CF77",
-                     supply = leaf_supply_singlelayer(),
+                     route = "stem", supply = leaf_supply_singlelayer(),
                      pars = "CF77_lambda_")
   expect_true(all(is.finite(g$gradient[, c("A", "gc", "psi_stem")])))
   expect_lt(g$gradient[, "gc"], 0)  # a dearer price of water closes the leaf
-  # ... and NA everywhere else, so the R reference writes nothing there.
+  # ... and NA everywhere else, so the gradient writes nothing there.
   expect_true(is.na(.owned_value("TF24", "CF77_lambda_")))
   expect_true(is.na(.owned_value("collar", "LeastCost_beta")))
-  expect_true(is.na(.owned_value("TF24_floor", "TF24_floor_lambda_o")))
+  expect_identical(.owned_value("TF24_floor", "TF24_floor_lambda_o"), 0)
 })

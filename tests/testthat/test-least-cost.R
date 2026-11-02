@@ -15,7 +15,7 @@ test_that("LeastCost is in the registry and solves through leaf_solve()", {
   sp <- leaf_supply_singlelayer()
   r <- leaf_solve(psi_soil = 0.1, PPFD = 3000, atm_vpd = 2, ca = 40,
                   leaf_temp = 25, supply = sp, model = "LeastCost",
-                  LeastCost_beta = 146)
+                  route = "stem", LeastCost_beta = 146)
   expect_true(is.finite(r$A))
   expect_true(is.finite(r$ci))
   expect_true(is.finite(r$lambda))
@@ -48,6 +48,7 @@ test_that("the solved chi is Prentice et al.'s first-order condition", {
   for (vpd in c(1, 2, 3)) {
     r <- leaf_solve(psi_soil = 0.1, PPFD = 3000, atm_vpd = vpd, ca = ca,
                     leaf_temp = 25, supply = sp, model = "LeastCost",
+                    route = "stem",
                     # `kmax` raised so the optimum stays interior: least-cost has
                     # no vulnerability curve, so a solve pinned on `psi_crit` is
                     # answering a different question.
@@ -86,7 +87,7 @@ test_that("LeastCost refuses a cleared, zero or negative beta", {
   sp <- leaf_supply_singlelayer()
   solve_at <- function(...) {
     leaf_solve(psi_soil = 0.1, PPFD = 900, atm_vpd = 2, supply = sp,
-               model = "LeastCost", ...)
+               model = "LeastCost", route = "stem", ...)
   }
   # Unset takes the aligned default (#156) ...
   expect_identical(solve_at(), solve_at(LeastCost_beta =
@@ -130,18 +131,19 @@ test_that("LeastCost_beta is in the gradient enumeration, owned by one curve", {
   # and `TF24_floor_lambda_o` get.
   expect_error(
     leaf_gradient(psi_soil = 1.0, PPFD = 900, pars = "LeastCost_beta",
-                  model = "TF24"),
+                  model = "TF24", route = "collar"),
     "LeastCost")
 })
 
-test_that("LeastCost_beta is differentiated, and the R reference agrees with its FD", {
-  # ⚠️ THE SLOT HAS TO REACH THE LEAF ON EVERY PERTURBATION. C++'s
-  # `gradient::apply()` writes `LeastCost_beta` from theta; R's `.gradient_setter`
-  # must do the same, or the R reference re-solves at the seated beta on every
-  # step and reports an EXACT ZERO -- finite, plausible, and wrong. The first
-  # version of this curve did exactly that. The sign is the check that the write
-  # lands where the objective reads it: a dearer capacity (larger beta) buys more
-  # water per unit carbon, so the leaf opens and A rises.
+test_that("LeastCost_beta is differentiated, and the composite agrees with its FD", {
+  # ⚠️ THE SLOT HAS TO REACH THE LEAF ON EVERY PERTURBATION. `gradient::apply()`
+  # writes `LeastCost_beta` from theta; without that write the gradient re-solves
+  # at the seated beta on every step and reports an EXACT ZERO -- finite,
+  # plausible, and wrong. The first version of this curve did exactly that, and
+  # test-gradient-referee.R holds every curve's parameters to a difference of
+  # leaf_solve(). The sign is the check that the write lands where the objective
+  # reads it: a dearer capacity (larger beta) buys more water per unit carbon, so
+  # the leaf opens and A rises.
   tr <- leaf_traits()
   net <- series_resistance(1e4)
   mk <- function() {
@@ -153,7 +155,8 @@ test_that("LeastCost_beta is differentiated, and the R reference agrees with its
     leaf_gradient(psi_soil = 0.5, PPFD = 1500, atm_vpd = 2,
                   leaf_specific_conductance_max = 6.3e-3,
                   root_network = net, x = mk(), traits = tr,
-                  pars = "LeastCost_beta", model = "LeastCost", method = meth)
+                  pars = "LeastCost_beta", model = "LeastCost", route = "stem",
+                  method = meth)
   }
   ift <- g("ift")
   fd <- g("fd")

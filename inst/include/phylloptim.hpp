@@ -10,6 +10,7 @@
 //   #include <phylloptim.hpp>
 //
 //   phylloptim::Leaf l;                 // default traits; vulnerability tables built
+//   l.set_supply_multilayer();          // a root network, and the collar route
 //   l.set_physiology(root_network, PPFD, psi_soil, soil_depth,
 //                    leaf_specific_conductance_max, atm_vpd, ca,
 //                    leaf_temp, atm_o2_kpa, atm_kpa);

@@ -51,7 +51,7 @@ test_that("set_drivers() does not build a supply network per call", {
   # goes through `series_resistance()` and so through the RcppR6-generated
   # `RootNetwork__ctor`. Counting the constructor on the multi-layer path returns 0
   # whatever happens, because the constructor is not on that path at all.
-  l <- leaf_model()
+  l <- leaf_model(supply = leaf_supply_multilayer())
   set_drivers(l, psi_soil = 2.0)                      # warm the memo
   n <- count_calls("root_network_from_carbon",
                    for (i in 1:20) set_drivers(l, psi_soil = 2.0))
@@ -123,14 +123,33 @@ test_that("leaf_gradient(x =) constructs no Leaf at all", {
   expect_identical(n, 5L)
 })
 
+test_that("leaf_gradient() is one crossing into the batch", {
+  # leaf_gradient() is the batch with one observation: the composite runs in C++,
+  # so none of the per-perturbation primitives is reached from R. Composed in R,
+  # a four-parameter gradient crossed the boundary over a hundred times.
+  tr <- leaf_traits()
+  l <- leaf_model(traits = tr)
+  pars <- c("vcmax_25", "stem_P50", "TF24_cost_scale", "TF24_beta2")
+  g <- function() leaf_gradient(psi_soil = 2.0, x = l, traits = tr, pars = pars)
+  g()                                                       # warm anything lazy
+  expect_identical(count_calls("gradient_batch_run", g()), 1L)
+  expect_identical(count_calls("gradient_batch_prepare", g()), 1L)
+  for (sym in c("Leaf__set_traits", "Leaf__set_physiology",
+                "Leaf__find_root_collar_psi", "Leaf__evaluate_root_collar_psi",
+                "Leaf__dprofit_droot_collar_psi", "Leaf__operating_point_values",
+                "Leaf__perturb_stem_P50")) {
+    expect_identical(count_calls(sym, g()), 0L, label = sym)
+  }
+  # The one solve that leaves the caller's leaf at the base point (hazard 8).
+  expect_identical(count_calls("Leaf__optimise", g()), 1L)
+})
+
 test_that("leaf_gradient_batch() crosses the boundary once, whatever N is", {
-  # ⚠️ THIS IS THE WHOLE CLAIM OF #4 STAGE 2, AND IT IS COUNTABLE. A four-parameter
-  # gradient through `leaf_gradient()` crosses the boundary 112 times per
-  # observation and spends 1.5% of its time in the model. The batch composes the
-  # composite in C++ instead, so the crossing count must be CONSTANT IN N -- one
-  # call into `gradient_batch_run`, per call and not per row. A timing assertion
-  # would not say this: it would drift with the machine, and it would still pass if
-  # the count went back to being per-row on a fast day.
+  # The batch composes the gradient in C++, so the crossing count must be
+  # CONSTANT IN N -- one call into `gradient_batch_run`, per call and not per
+  # row. A timing assertion would not say this: it would drift with the machine,
+  # and it would still pass if the count went back to being per-row on a fast
+  # day.
   b1 <- leaf_batch(psi_soil = rep(1.5, 4), PPFD = 900)
   b2 <- leaf_batch(psi_soil = rep(1.5, 64), PPFD = 900)
   pars <- c("vcmax_25", "stem_P50", "TF24_cost_scale", "TF24_beta2")
@@ -143,10 +162,9 @@ test_that("leaf_gradient_batch() crosses the boundary once, whatever N is", {
 
   # ⚠️ AND NO MODEL WORK LEAKED BACK TO R, which is the stronger statement and the
   # one that would catch a future "small" convenience added to the R wrapper. Every
-  # per-perturbation primitive `leaf_gradient()` reaches through -- the setter, the
-  # solve, the two gradient evaluations -- must be called ZERO times by the batch,
-  # for any N. A single one of these appearing in the R path is the regression this
-  # file exists for, at 11 crossings per parameter per observation.
+  # per-perturbation primitive -- the setter, the solve, the two gradient
+  # evaluations -- must be called ZERO times from R, for any N. A single one of
+  # these appearing in the R path is the regression this file exists for.
   for (sym in c("Leaf__set_traits", "Leaf__set_physiology",
                 "Leaf__find_root_collar_psi", "Leaf__evaluate_root_collar_psi",
                 "Leaf__dprofit_droot_collar_psi", "Leaf__operating_point_values",
@@ -249,15 +267,15 @@ test_that("leaf_solve() reports the seated curve's lambda, not TF24's", {
   # ⚠️ CF77 PINS IT, its lambda being known independently of the solve: the
   # curve prices water at a prescribed constant, so this must return it.
   cf <- leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = "CF77",
-                   CF77_lambda = price, supply = sp)
+                   route = "stem", CF77_lambda = price, supply = sp)
   expect_equal(cf$lambda, price, tolerance = 1e-8)
   expect_false("lambda_emergent" %in% names(cf))
 
   # TF24's is its lambda at the optimum, and TF24_floor's is that plus the floor
   tf <- leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = "TF24",
-                   supply = sp)
+                   route = "stem", supply = sp)
   fl <- leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = "TF24_floor",
-                   TF24_floor_lambda_o = price, supply = sp)
+                   route = "stem", TF24_floor_lambda_o = price, supply = sp)
   l <- leaf_model(supply = sp)
   set_drivers(l, psi_soil = 1.0, PPFD = 900, atm_vpd = 2)
   expect_identical(tf$lambda, l$lambda_TF24(tf$psi_stem))
