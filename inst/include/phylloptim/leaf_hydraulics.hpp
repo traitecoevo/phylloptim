@@ -269,8 +269,30 @@ inline void Leaf::setup_transpiration(double resolution) {
   vulnerability_curve_ncontrol = resolution;
   // The root's table is the same table wherever the two c agree (the defaults),
   // so it is shared rather than built twice.
-  stem_curve_ = vulnerability_table(stem_c, resolution, roots_.vulnerability_);
-  ++stem_curve_builds_;
+  bool built = false;
+  stem_curve_ = table_for(stem_c, resolution, built);
+  if (built) ++stem_curve_builds_;
+}
+
+inline std::shared_ptr<const VulnerabilityTable>
+Leaf::table_for(double c, double resolution, bool& built) {
+  built = false;
+  // Matched here, not through vulnerability_table(), which builds on a mismatch.
+  // A resolution it would refuse matches nothing and reaches its refusal below.
+  const auto is = [&](const std::shared_ptr<const VulnerabilityTable>& t) {
+    return t && resolution >= 1.0 && t->c() == c &&
+           t->intervals() == static_cast<std::size_t>(resolution);
+  };
+  if (is(stem_curve_)) return stem_curve_;
+  if (is(roots_.vulnerability_)) return roots_.vulnerability_;
+  for (const auto& recent : recent_tables_) {
+    if (is(recent)) return recent;
+  }
+  auto table = vulnerability_table(c, resolution, nullptr);
+  recent_tables_[recent_tables_next_] = table;
+  recent_tables_next_ = (recent_tables_next_ + 1) % recent_tables_size;
+  built = true;
+  return table;
 }
 
 // --- the stem curve, as the four operations performed on it ------------------

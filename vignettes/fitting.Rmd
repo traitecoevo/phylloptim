@@ -312,8 +312,7 @@ Both are linear, and the two coefficients are the whole story:
 - **the exact gradient is nearly all intercept.** The intercept is the
   per-observation `Leaf` construction, solve and R call, paid once whatever you
   ask for. Its slope is `2` evaluations per parameter per observation in C++,
-  which is close to free; most of what slope there is comes from `stem_c` and
-  `root_c`, whose perturbations rebuild a vulnerability table.
+  which is close to free.
 
 So the ratio improves with every parameter, but in this design the intercept is
 large enough that **it does not reach 1 at any count fitted here.**
@@ -481,21 +480,21 @@ do.call(rbind, lapply(names(studies), function(nm) {
 Three things in that table are worth more than the timings, and none of them is
 obvious from the interface.
 
-### Cost per parameter is not uniform
+### Cost per parameter is nearly uniform
 
-Compare the `ms per par` column across rows: the hydraulic study is several times
-the others, and that ratio is the point rather than its exact value, which moves
-with the machine. `stem_c` and
-`root_c` each own a pre-integrated vulnerability table, so perturbing either
-rebuilds it, and the incomplete gamma functions that seed it cost many times a
-whole solve per side ([measured](https://github.com/traitecoevo/phylloptim#performance-from-r)). The table is built in `ψ/b`, so a `P50`
-rebuilds nothing.
+Compare the `ms per par` column across rows: the hydraulic study costs about what
+the others do, although `stem_c` and `root_c` each own a pre-integrated
+vulnerability table, and a table at a new `c` costs many whole solves to build (the
+incomplete gamma functions that seed it; [measured](https://github.com/traitecoevo/phylloptim#performance-from-r)).
+A leaf keeps the last few tables it built, so a gradient's perturbations of `c`
+build each table once and every later observation of the batch reuses them. A
+`P50` moves nothing in a table, which is built in `ψ/b`.
 
-So **a fit that frees a vulnerability curve is in a different cost regime from one
-that does not**, and it is the regime the exact gradient helps least with, since the
-four hydraulic traits are also the ones whose gradient is *entirely*
-argmax-mediated, which is to say the ones you most need it for. Budget for it, and
-see `?leaf_gradient`'s `fast_stem_curve`.
+Where the cost does show is in a fit that moves `c` itself: each new value the
+optimiser tries builds a table for it and its two perturbations, once per gradient
+call rather than once per observation. That matters little for a batch of many
+observations and more for a few, and see `?leaf_gradient`'s `fast_stem_curve` for
+the `P50` shortcut.
 
 ### A stem gradient means something different at a boundary
 

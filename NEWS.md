@@ -1,3 +1,7 @@
+# phylloptim 0.30.1
+
+- Trait gradients that include `stem_c` or `root_c` no longer rebuild a vulnerability table for every observation: a leaf keeps the last eight tables it built, so a batch builds each perturbed table once. A full gradient now costs about what one without those two traits costs. No number moves ([#236](https://github.com/traitecoevo/phylloptim/issues/236)).
+
 # phylloptim 0.30.0
 
 - **Breaking:** the stem route is the leaf route. No conductance sits between the top of the stem and the leaf, so the potential it optimises is the leaf's: `route = "stem"` is `route = "leaf"` (in `leaf_solve()`, both gradients, `$set_model()` and `$model_route()`), and the `psi_stem` column of `leaf_solve()`, `operating_point()` and the gradients is `psi_leaf`. Names about the stem itself keep `stem`: `stem_P50`, `stem_c`, `psi_crit` and the stem curve. There are no aliases: the old names are gone.
