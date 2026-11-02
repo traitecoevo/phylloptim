@@ -443,7 +443,8 @@ dimension.
 
 ⚠️ \strong{So "is the exact gradient faster" has no answer independent of your
 parameterisation, and both regimes are measured.} \code{vignette("fitting")} fits
-72 observations with \code{P_fit == P_model} and this loses at every count up to 13.
+72 observations with \code{P_fit == P_model} and this loses at every count it
+measures.
 A companion calibration study has \code{N = 1327}, \code{P_fit = 40},
 \code{P_model = 4}, wins 3.4x, and reaches the same optimum — with its
 57-parameter variant costing the same as its 40-parameter one, because

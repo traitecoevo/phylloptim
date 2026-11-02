@@ -102,17 +102,10 @@ leaf_infeasible_codes <- function() {
 ##' infeasible, re-signals it as a `phylloptim_infeasible` condition carrying a
 ##' machine-readable `code`. Anything else propagates unchanged.
 ##'
-##' [leaf_solve()] and [leaf_gradient_batch()] already do this, so wrap
-##' `expr` yourself when you are **driving a `Leaf` directly** —
+##' [leaf_solve()], [leaf_gradient()] and [leaf_gradient_batch()] already do
+##' this, so wrap `expr` yourself when you are **driving a `Leaf` directly** —
 ##' `$find_root_collar_psi()` is generated glue and cannot signal a classified
-##' condition on its own — or when you are calling [leaf_gradient()].
-##'
-##' ⚠️ [leaf_gradient()] is **not** routed through this, and that is a gap rather
-##' than a design: it is one long function that depends on `missing()` for two of its
-##' arguments, so making it delegate to an inner implementation would change argument
-##' matching in ways worth a separate change. Wrap the call yourself until then.
-##' [leaf_gradient_batch()] is the path a fit should be on anyway — one boundary
-##' crossing rather than one per observation — and it is routed.
+##' condition on its own.
 ##'
 ##' @section Why this and not a per-row NA mode:
 ##' Returning `NA` rows instead of throwing is the other half of #57 and is not built

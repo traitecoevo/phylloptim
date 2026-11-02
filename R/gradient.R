@@ -497,6 +497,7 @@ leaf_gradient <- function(psi_soil,
   if (!(is.numeric(step) && length(step) == 1L && step > 0)) {
     stop("`step` must be a single positive number", call. = FALSE)
   }
+  .gradient_check_settings(stationarity_tol, fast_stem_curve)
   # A caller who names `step` means it for the finite-difference arm too;
   # otherwise that arm takes the step matched to the solver it differences.
   fd_step <- if (missing(step)) .gradient_fd_step else step
@@ -533,6 +534,11 @@ leaf_gradient <- function(psi_soil,
   }
   single <- identical(supply$kind, "single")
   m <- .resolve_model(model, route, supply$kind)
+  # One observation: every driver but the soil profile is one number.
+  .check_scalars(list(PPFD = PPFD, leaf_specific_conductance_max =
+                        leaf_specific_conductance_max, atm_vpd = atm_vpd,
+                      ca = ca, leaf_temp = leaf_temp, atm_o2_kpa = atm_o2_kpa,
+                      atm_kpa = atm_kpa), "leaf_gradient")
   # The thermal-damage layer's inputs are parameters ONLY on a leaf with its gate
   # on, which only a reused leaf can have: one built here has it off.
   damage <- !is.null(x) && isTRUE(x$use_thermal_damage_)
@@ -592,7 +598,8 @@ leaf_gradient <- function(psi_soil,
   }
 
   outs <- .gradient_output_names()
-  list(gradient = matrix(res$gradient[1L, , ], nrow = length(pars),
+  list(gradient = matrix(res$gradient[1L, , , drop = FALSE],
+                         nrow = length(pars), ncol = length(outs),
                          dimnames = list(pars, outs)),
        value = res$value[1L, ],
        method = res$method[[1L]],
@@ -764,7 +771,8 @@ leaf_gradient <- function(psi_soil,
            " model: it is the ", owner, " curve's PRESCRIBED price of water, ",
            "and on every other cost curve the price is emergent -- derived from ",
            "that curve's own parameters rather than set. Differentiate those ",
-           "instead, or pass model = \"", owner, "\".", call. = FALSE)
+           "instead, or pass model = \"", owner, "\" (with route = ",
+           "\"collar\" on the multi-layer supply).", call. = FALSE)
     }
     stop("`pars` names things this cannot differentiate: ",
          paste(unknown, collapse = ", "),
@@ -803,6 +811,21 @@ leaf_gradient <- function(psi_soil,
   c(theta, damage)
 }
 
+
+# The two settings C++ reads as a double and a bool, checked here: an NA
+# tolerance would class every point interior, and an NA bool reads as TRUE.
+.gradient_check_settings <- function(stationarity_tol, fast_stem_curve) {
+  if (!(is.numeric(stationarity_tol) && length(stationarity_tol) == 1L &&
+        !is.na(stationarity_tol) && stationarity_tol >= 0)) {
+    stop("`stationarity_tol` must be a single non-negative number",
+         call. = FALSE)
+  }
+  if (!(is.logical(fast_stem_curve) && length(fast_stem_curve) == 1L &&
+        !is.na(fast_stem_curve))) {
+    stop("`fast_stem_curve` must be TRUE or FALSE", call. = FALSE)
+  }
+  invisible(TRUE)
+}
 
 # `psi` and `dpsi_dtheta` only mean anything together, and neither means anything
 # alongside `method`.

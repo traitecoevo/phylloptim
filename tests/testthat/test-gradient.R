@@ -1431,3 +1431,23 @@ test_that("`route` names the potential a curve is maximised over (decision D3)",
   expect_error(leaf_gradient_batch(b, pars = "vcmax_25", model = "SOX"),
                "single-potential supply path")
 })
+
+test_that("leaf_gradient() checks what C++ would otherwise read silently", {
+  # An empty request is a 0 x 5 gradient, as the batch's is 1 x 0 x 5.
+  g <- leaf_gradient(2, pars = character(0))
+  expect_identical(dim(g$gradient), c(0L, 5L))
+  expect_identical(colnames(g$gradient), c("A", "gc", "psi_stem", "collar",
+                                           "profit"))
+  # An NA tolerance would class every point interior, and an NA bool reads as
+  # TRUE, so both are refused by name, by both entry points.
+  expect_error(leaf_gradient(2, pars = "vcmax_25", stationarity_tol = NA),
+               "stationarity_tol")
+  expect_error(leaf_gradient(2, pars = "vcmax_25", fast_stem_curve = NA),
+               "fast_stem_curve")
+  b <- leaf_batch(psi_soil = 2)
+  expect_error(leaf_gradient_batch(b, pars = "vcmax_25", stationarity_tol = -1),
+               "stationarity_tol")
+  # One observation: a vector driver is refused by name.
+  expect_error(leaf_gradient(2, PPFD = c(900, 800), pars = "vcmax_25"), "PPFD")
+  expect_error(leaf_gradient(2, pars = "CF77_lambda_"), "route = \"collar\"")
+})

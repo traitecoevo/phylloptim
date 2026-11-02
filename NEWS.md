@@ -1,8 +1,8 @@
 # phylloptim 0.29.0
 
 - Every cost curve has a trait gradient on both routes. `leaf_gradient()`, `leaf_gradient_batch()` and `leaf_solve()` take `route = "collar"` or `"stem"`; with no `route`, `model = "collar"` is TF24 on the collar route and a curve name its stem route, as before, so no existing call changes.
-- `leaf_gradient()` is `leaf_gradient_batch()` with one observation: it crosses into C++ once rather than over a hundred times, and its result names its `route`. An entry it cannot determine (a refused point's gradient, a stem route's `collar`) is `NaN`, as the batch's always was, where it was `NA`.
-- Gradients can move in the last bit: the composite now lets the compiler fuse one multiply-add it used to round twice to match an R twin that is gone. 21 of the 565 recorded cells move, all by rounding.
+- `leaf_gradient()` is `leaf_gradient_batch()` with one observation: it crosses into C++ once rather than over a hundred times, and its result names its `route`. An entry it cannot determine (a refused point's gradient, a stem route's `collar`) is `NaN`, as the batch's always was, where it was `NA`. Its errors are classed as the batch's are: an infeasible point is a `phylloptim_infeasible` condition, and no error is a `C++Error`.
+- Gradients can move in the last bit: the composite now lets the compiler fuse one multiply-add it used to round twice to match an R twin that is gone. 3 of the 100 cells recorded at 0.28.0 move, by at most one ulp.
 - ProfitMax at a prescribed collar potential (`$evaluate_root_collar_psi()`) seeds its normalisers, as its solve does; on a leaf whose drivers were just set it used to fail with a non-finite profit ([#232](https://github.com/traitecoevo/phylloptim/issues/232)).
 
 # phylloptim 0.28.0

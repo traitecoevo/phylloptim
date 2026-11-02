@@ -297,6 +297,7 @@ leaf_gradient_batch <- function(batch,
   if (!(is.numeric(step) && length(step) == 1L && step > 0)) {
     stop("`step` must be a single positive number", call. = FALSE)
   }
+  .gradient_check_settings(stationarity_tol, fast_stem_curve)
   # First, before either handle is read: both are external pointers, NULL after
   # serialize(), and the bare Rcpp error gives no hint to rebuild. They are
   # created together, so checking one covers both.

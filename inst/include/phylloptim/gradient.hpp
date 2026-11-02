@@ -478,12 +478,8 @@ inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
       double* dst = side == 0 ? up : dn;
       // Evaluate first, then read dprofit at the same fixed collar: the
       // evaluation is what seats the state `dprofit` reads.
-      // apply() cleared the normalisers: re-solved, not pinned, so the
-      // derivative is total. prepare_profitmax() seeds the only curve that has
-      // them (leaf_cost_curves.hpp asserts it).
-      if (reseed) {
-        l.prepare_profitmax();
-      }
+      // apply() cleared the normalisers; both routes' evaluations re-seed
+      // them, so the derivative is total rather than a partial at the base.
       if (!outputs_at(l, psi_star, dst + 1, s.model)) {
         util::stop_infeasible(
             "gradient_active_set",
@@ -493,8 +489,8 @@ inline void gradient_ift(Leaf& l, const double* theta, const Drivers& d,
                    "on an active-set boundary; lower `stationarity_tol` or "
                    "difference the solve directly.");
       }
-      // Again before the derivative read: prepare_profitmax() mutates the
-      // leaf's rate fields, which the evaluation above has moved.
+      // Before the derivative read, which does not seed them: prepare_profitmax()
+      // seeds the only curve that has them (leaf_cost_curves.hpp asserts it).
       if (reseed) {
         l.prepare_profitmax();
       }
@@ -601,7 +597,7 @@ inline void at(Leaf& l, const double* theta, const Drivers& d, bool single,
   bool resid_feasible = false;
   const double resid =
       route_dprofit_checked(l, s.model, psi_star, &resid_feasible);
-  // Named halves (rule 3 in the header).
+  // Named halves: each call moves the leaf (see the header).
   const double d_hi = route_dprofit(l, s.model, psi_star + h_psi);
   const double d_lo = route_dprofit(l, s.model, psi_star - h_psi);
   const double H = (d_hi - d_lo) / (2.0 * h_psi);
