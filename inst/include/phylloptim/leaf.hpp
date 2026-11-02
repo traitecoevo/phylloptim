@@ -1932,6 +1932,9 @@ public:
   // Throws, naming `who`, when use_thermal_damage_ is on: the paths that read
   // capacities off the parameter pack (vcmax_at and the rest) do not apply it.
   void refuse_thermal_damage(const char* who) const;
+  // Throws, naming `who`, when use_energy_balance_ is on: the derivative surface
+  // holds leaf temperature at the solve's value and carries no temperature term.
+  void refuse_energy_balance(const char* who) const;
 
   // Sperry (2017) ProfitMax, both terms normalised as the paper defines them
   // (notes above optimise_psi_stem_single in leaf_stem_routes.hpp): seeds |A|max
