@@ -42,28 +42,53 @@ template <std::size_t N>
 inline constexpr bool
     is_curve_parameter_array<const std::array<CurveParameter, N>> = true;
 
-// The properties, each read by the table of the same name below:
+// The properties, each read by the table of the same name below, then the
+// expressions at double, which the solves call:
 //
 //   link                          the benefit link composed with A
 //   cost_reads_upstream           the cost reads the upstream potential too
 //   cost_domain_ends_at_psi_crit  its own form ends there, not at the curve's end
 //   objective_is_product          A times a gain factor that vanishes at psi_crit
+//   cost_reads_leaf_temperature   the cost moves with Tleaf, so the energy
+//                                 balance adds a cost-side slope
 //   prepares_normalisers          normalised by quantities seeded before a search
 //                                 (ProfitMax's |A|max and k_span), and with
 //                                 unusable ones it has no objective
 //   closed_form                   see ClosedForm
+//   cost                          a difference curve's cost, in carbon, written
+//                                 into hydraulic_cost_ (a gain curve's is in its
+//                                 profit)
+//   cost_slope                    dC/dpsi_stem, read by cost_deriv
+//   cost_slope_upstream           dC/dpsi_upstream, where the cost reads it
+//   lambda                        dC/dE at a stem potential, read by lambda_for
+//   lambda_collar                 dC/dE on the collar route at the solved point
+//   less_cost_temperature_slope   the EB term less the cost's slope in Tleaf,
+//                                 where the cost reads it
+//   profit                        the objective at a stem potential
 template <class C>
-concept CurveDefinition = requires(const Leaf& l) {
+concept CurveDefinition = requires(Leaf& l, double x) {
   requires std::same_as<decltype(C::name), const std::string_view>;
   requires is_curve_parameter_array<decltype(C::parameters)>;
   requires std::same_as<decltype(C::link), const Leaf::BenefitLink>;
   requires std::same_as<decltype(C::cost_reads_upstream), const bool>;
   requires std::same_as<decltype(C::cost_domain_ends_at_psi_crit), const bool>;
   requires std::same_as<decltype(C::objective_is_product), const bool>;
+  requires std::same_as<decltype(C::cost_reads_leaf_temperature), const bool>;
   requires std::same_as<decltype(C::prepares_normalisers), const bool>;
   requires std::same_as<decltype(C::closed_form), const ClosedForm>;
   { C::check_parameters(l) } -> std::same_as<void>;
-};
+  { C::cost_slope(l, x, x) } -> std::same_as<double>;
+  { C::lambda(l, x, x) } -> std::same_as<double>;
+  { C::lambda_collar(l) } -> std::same_as<double>;
+  { C::profit(l, x, x) } -> std::same_as<double>;
+} && (C::link != Leaf::BenefitLink::Identity || requires(Leaf& l, double x) {
+  { C::cost(l, x, x) } -> std::same_as<double>;
+}) && (!C::cost_reads_upstream || requires(Leaf& l, double x) {
+  { C::cost_slope_upstream(l, x, x) } -> std::same_as<double>;
+}) && (!C::cost_reads_leaf_temperature ||
+       requires(Leaf& l, double x, const Leaf::TemperaturePath& p) {
+  { C::less_cost_temperature_slope(l, x, p) } -> std::same_as<double>;
+});
 
 // Aligned defaults: each level parameter (`CF77_lambda_`, `JS22_gamma`, `CMax_a`
 // with `CMax_b` 0, `LeastCost_beta`) defaults to where its stem optimum has
@@ -83,9 +108,37 @@ template <> struct Curve<Leaf::CostCurve::TF24> {
   static constexpr bool cost_reads_upstream = false;
   static constexpr bool cost_domain_ends_at_psi_crit = false;
   static constexpr bool objective_is_product = false;
+  static constexpr bool cost_reads_leaf_temperature = false;
   static constexpr bool prepares_normalisers = false;
   static constexpr ClosedForm closed_form = ClosedForm::Implemented;
   static void check_parameters(const Leaf&) {}
+
+  static double cost(Leaf& l, double psi_stem, double psi_upstream) {
+    (void)psi_upstream;
+    l.hydraulic_cost_ = l.hydraulic_cost_TF_kernel(psi_stem);
+    return l.hydraulic_cost_;
+  }
+  // The only cost slope that is a tangent of its own cost kernel.
+  static double cost_slope(Leaf& l, double psi_stem, double psi_upstream) {
+    using AD = xad::fwd<double>::active_type;
+    (void)psi_upstream;
+    AD ps_ad = psi_stem;
+    xad::derivative(ps_ad) = 1.0;
+    return xad::derivative(l.hydraulic_cost_TF_kernel(ps_ad));
+  }
+  // f cancels analytically, so this does not divide by the conductivity.
+  static double lambda(const Leaf& l, double psi_stem, double psi_upstream) {
+    (void)psi_upstream;
+    const double f = l.proportion_of_conductivity(psi_stem);
+    return l.TF24_cost_scale * l.TF24_beta2 * (l.stem_c / l.stem_b) * pow(psi_stem / l.stem_b, l.stem_c - 1.0) *
+           pow(1.0 - f, l.TF24_beta2 - 1.0) / l.leaf_specific_conductance_max_;
+  }
+  static double lambda_collar(Leaf& l) {
+    return l.marginal_cost_water_multilayer();
+  }
+  static double profit(Leaf& l, double psi_stem, double psi_upstream) {
+    return l.profit_psi_stem_TF(psi_stem, psi_upstream);
+  }
 };
 
 template <> struct Curve<Leaf::CostCurve::CF77> {
@@ -97,6 +150,7 @@ template <> struct Curve<Leaf::CostCurve::CF77> {
   // A constant price need not overtake A'(E) before the stem's ceiling.
   static constexpr bool cost_domain_ends_at_psi_crit = true;
   static constexpr bool objective_is_product = false;
+  static constexpr bool cost_reads_leaf_temperature = false;
   static constexpr bool prepares_normalisers = false;
   static constexpr ClosedForm closed_form = ClosedForm::Implemented;
   static void check_parameters(const Leaf& l) {
@@ -129,6 +183,41 @@ template <> struct Curve<Leaf::CostCurve::CF77> {
       }
     }
   }
+
+  // `CF77_lambda_ * E`, a carbon flux (umol C per kg water times kg m^-2 s^-1).
+  // Straight after set_leaf_states_rates_from_psi_stem the memo returns that
+  // point's E.
+  static double cost(Leaf& l, double psi_stem, double psi_upstream) {
+    l.hydraulic_cost_ = l.cf77_price() * l.operating_point_flux(psi_stem, psi_upstream);
+    return l.hydraulic_cost_;
+  }
+  // lambda * E, and dE/dpsi_stem is kmax times the conductivity fraction,
+  // which stem_curve_integral_deriv returns.
+  static double cost_slope(Leaf& l, double psi_stem, double psi_upstream) {
+    (void)psi_upstream;
+    return l.cf77_price() * l.leaf_specific_conductance_max_ *
+           l.stem_curve_integral_deriv(psi_stem);
+  }
+  // lambda * kmax * (G(psi_stem) - G(psi_up)), so -lambda * kmax * G'(psi_up),
+  // with G' the table's own slope: the solve ran on the table.
+  static double cost_slope_upstream(Leaf& l, double psi_stem, double psi_upstream) {
+    (void)psi_stem;
+    return -(l.cf77_price() * l.leaf_specific_conductance_max_ *
+             l.stem_curve_integral_deriv(psi_upstream));
+  }
+  // Exact by construction: the cost is lambda*E, so dC/dpsi over dE/dpsi is the
+  // price, independent of both potentials (the soil factor keys on theta).
+  static double lambda(const Leaf& l, double psi_stem, double psi_upstream) {
+    (void)psi_stem;
+    (void)psi_upstream;
+    return l.cf77_price();
+  }
+  static double lambda_collar(Leaf& l) {
+    return l.cf77_price();
+  }
+  static double profit(Leaf& l, double psi_stem, double psi_upstream) {
+    return l.profit_psi_stem_CF77(psi_stem, psi_upstream);
+  }
 };
 
 template <> struct Curve<Leaf::CostCurve::JS22> {
@@ -139,6 +228,7 @@ template <> struct Curve<Leaf::CostCurve::JS22> {
   static constexpr bool cost_reads_upstream = true;
   static constexpr bool cost_domain_ends_at_psi_crit = false;
   static constexpr bool objective_is_product = false;
+  static constexpr bool cost_reads_leaf_temperature = false;
   static constexpr bool prepares_normalisers = false;
   static constexpr ClosedForm closed_form = ClosedForm::Unwritten;
   static void check_parameters(const Leaf& l) {
@@ -147,6 +237,39 @@ template <> struct Curve<Leaf::CostCurve::JS22> {
       util::stop("JS22_gamma must be a finite, non-negative hydraulic unit cost "
                  "in umol C m^-2 s^-1 MPa^-2; got " + util::to_string(l.JS22_gamma));
     }
+  }
+
+  // gamma * (dpsi)^2, in carbon units. `dpsi*dpsi`, not `pow`: the optimiser's
+  // inner loop (hazard 5).
+  static double cost(Leaf& l, double psi_stem, double psi_upstream) {
+    const double dpsi = psi_stem - psi_upstream;
+    l.hydraulic_cost_ = l.JS22_gamma * dpsi * dpsi;
+    return l.hydraulic_cost_;
+  }
+  static double cost_slope(Leaf& l, double psi_stem, double psi_upstream) {
+    return 2.0 * l.JS22_gamma * (psi_stem - psi_upstream);
+  }
+  static double cost_slope_upstream(Leaf& l, double psi_stem, double psi_upstream) {
+    return -2.0 * l.JS22_gamma * (psi_stem - psi_upstream);
+  }
+  // dC/dpsi over dE/dpsi = kmax*f(psi). Unlike TF24's, f does not cancel, so this
+  // divides by it: safe inside the feasible bracket, where f never reaches zero.
+  static double lambda(const Leaf& l, double psi_stem, double psi_upstream) {
+    const double f = l.proportion_of_conductivity(psi_stem);
+    return 2.0 * l.JS22_gamma * (psi_stem - psi_upstream) /
+           (l.leaf_specific_conductance_max_ * f);
+  }
+  // The cost reads the collar itself, so its partial over S joins the series.
+  static double lambda_collar(Leaf& l) {
+    double S, series;
+    if (!l.collar_series(S, series)) {
+      return util::na_value;
+    }
+    return lambda(l, l.opt_psi_stem_, l.opt_root_psi_) * series +
+           cost_slope_upstream(l, l.opt_psi_stem_, l.opt_root_psi_) / S;
+  }
+  static double profit(Leaf& l, double psi_stem, double psi_upstream) {
+    return l.profit_psi_stem_JS22(psi_stem, psi_upstream);
   }
 };
 
@@ -159,6 +282,7 @@ template <> struct Curve<Leaf::CostCurve::CMax> {
   static constexpr bool cost_reads_upstream = true;
   static constexpr bool cost_domain_ends_at_psi_crit = false;
   static constexpr bool objective_is_product = false;
+  static constexpr bool cost_reads_leaf_temperature = false;
   static constexpr bool prepares_normalisers = false;
   static constexpr ClosedForm closed_form = ClosedForm::Unwritten;
   static void check_parameters(const Leaf& l) {
@@ -173,6 +297,50 @@ template <> struct Curve<Leaf::CostCurve::CMax> {
       util::stop("CMax_b must be finite; got " + util::to_string(l.CMax_b));
     }
   }
+
+  // The integral of `CMax_a*psi + CMax_b` from psi_upstream, zero at no flow:
+  //
+  //     C = (psi - psi_up) * [ CMax_a*(psi + psi_up)/2 + CMax_b ]
+  //
+  // Factored: the difference of squares cancels as the potentials converge (off by
+  // 1.2e-04 at a 1e-12 drop), which a gradient's step reaches near no flow. For the
+  // same reason JS22, this family's (2 gamma, -2 gamma psi_up) member, keeps its own.
+  static double cost(Leaf& l, double psi_stem, double psi_upstream) {
+    l.hydraulic_cost_ = (psi_stem - psi_upstream) *
+                        (0.5 * l.CMax_a * (psi_stem + psi_upstream) + l.CMax_b);
+    return l.hydraulic_cost_;
+  }
+  // Linear in the absolute potential: the form Anderegg et al. state.
+  static double cost_slope(Leaf& l, double psi_stem, double psi_upstream) {
+    (void)psi_upstream;
+    return l.CMax_a * psi_stem + l.CMax_b;
+  }
+  // d/du of (psi - u)*(a*(psi + u)/2 + b) is -(a*u + b): the integrand at the
+  // lower limit, as for any integral of the price.
+  static double cost_slope_upstream(Leaf& l, double psi_stem, double psi_upstream) {
+    (void)psi_stem;
+    return -(l.CMax_a * psi_upstream + l.CMax_b);
+  }
+  // The marginal cost does not vanish at the wet end unless CMax_b is zero, so
+  // this is the one curve that can be boundary-soil with a non-zero cost there.
+  static double lambda(const Leaf& l, double psi_stem, double psi_upstream) {
+    (void)psi_upstream;
+    const double f = l.proportion_of_conductivity(psi_stem);
+    return (l.CMax_a * psi_stem + l.CMax_b) /
+           (l.leaf_specific_conductance_max_ * f);
+  }
+  // As JS22's: the cost reads the collar as its lower limit.
+  static double lambda_collar(Leaf& l) {
+    double S, series;
+    if (!l.collar_series(S, series)) {
+      return util::na_value;
+    }
+    return lambda(l, l.opt_psi_stem_, l.opt_root_psi_) * series +
+           cost_slope_upstream(l, l.opt_psi_stem_, l.opt_root_psi_) / S;
+  }
+  static double profit(Leaf& l, double psi_stem, double psi_upstream) {
+    return l.profit_psi_stem_CMax(psi_stem, psi_upstream);
+  }
 };
 
 template <> struct Curve<Leaf::CostCurve::SOX> {
@@ -183,9 +351,38 @@ template <> struct Curve<Leaf::CostCurve::SOX> {
   // The gain factor reaches zero at psi_crit and is negative past it.
   static constexpr bool cost_domain_ends_at_psi_crit = true;
   static constexpr bool objective_is_product = true;
+  static constexpr bool cost_reads_leaf_temperature = false;
   static constexpr bool prepares_normalisers = false;
   static constexpr ClosedForm closed_form = ClosedForm::Impossible;
   static void check_parameters(const Leaf&) {}
+
+  // Under the log link the cost is `-log g`, so dC/dpsi is `-g'/g`; `g` is zero
+  // only at psi_crit, which no optimiser returns.
+  static double cost_slope(Leaf& l, double psi_stem, double psi_upstream) {
+    (void)psi_upstream;
+    return -l.sox_reduction_deriv(psi_stem) / l.sox_reduction(psi_stem);
+  }
+  // A product: at its optimum A'g + Ag' = 0, so lambda = A'/E' = -A*(g'/g)/(kmax*f).
+  // It carries a factor of A, since a product prices water as a share of
+  // assimilation (the-models.Rmd), and diverges at psi_crit, where g = 0: never
+  // pinned there, and not a number to evaluate at the dry end.
+  static double lambda(const Leaf& l, double psi_stem, double psi_upstream) {
+    (void)psi_upstream;
+    const double g = l.sox_reduction(psi_stem);
+    const double gp = l.sox_reduction_deriv(psi_stem);
+    const double f = l.proportion_of_conductivity(psi_stem);
+    return -l.assim_colimited_ * (gp / g) / (l.leaf_specific_conductance_max_ * f);
+  }
+  static double lambda_collar(Leaf& l) {
+    double S, series;
+    if (!l.collar_series(S, series)) {
+      return util::na_value;
+    }
+    return lambda(l, l.opt_psi_stem_, l.opt_root_psi_) * series;
+  }
+  static double profit(Leaf& l, double psi_stem, double psi_upstream) {
+    return l.profit_psi_stem_SOX(psi_stem, psi_upstream);
+  }
 };
 
 template <> struct Curve<Leaf::CostCurve::JW26> {
@@ -196,9 +393,35 @@ template <> struct Curve<Leaf::CostCurve::JW26> {
   // As SOX's.
   static constexpr bool cost_domain_ends_at_psi_crit = true;
   static constexpr bool objective_is_product = true;
+  static constexpr bool cost_reads_leaf_temperature = false;
   static constexpr bool prepares_normalisers = false;
   static constexpr ClosedForm closed_form = ClosedForm::Impossible;
   static void check_parameters(const Leaf&) {}
+
+  // SOX's `-g'/g`, which collapses: with `g = 1 - psi/psi_crit` it is exactly
+  // `1/(psi_crit - psi)`.
+  static double cost_slope(Leaf& l, double psi_stem, double psi_upstream) {
+    (void)psi_upstream;
+    return 1.0 / (l.psi_crit - psi_stem);
+  }
+  // lambda = A / [(psi_crit - psi) kmax f(psi)], as the-models.Rmd quotes; it
+  // carries A and diverges at psi_crit, as SOX's does.
+  static double lambda(const Leaf& l, double psi_stem, double psi_upstream) {
+    (void)psi_upstream;
+    const double f = l.proportion_of_conductivity(psi_stem);
+    return l.assim_colimited_ /
+           ((l.psi_crit - psi_stem) * l.leaf_specific_conductance_max_ * f);
+  }
+  static double lambda_collar(Leaf& l) {
+    double S, series;
+    if (!l.collar_series(S, series)) {
+      return util::na_value;
+    }
+    return lambda(l, l.opt_psi_stem_, l.opt_root_psi_) * series;
+  }
+  static double profit(Leaf& l, double psi_stem, double psi_upstream) {
+    return l.profit_psi_stem_JW26(psi_stem, psi_upstream);
+  }
 };
 
 template <> struct Curve<Leaf::CostCurve::ProfitMax> {
@@ -208,9 +431,80 @@ template <> struct Curve<Leaf::CostCurve::ProfitMax> {
   static constexpr bool cost_reads_upstream = false;
   static constexpr bool cost_domain_ends_at_psi_crit = false;
   static constexpr bool objective_is_product = false;
+  // Its thermal cost, with the energy balance on.
+  static constexpr bool cost_reads_leaf_temperature = true;
   static constexpr bool prepares_normalisers = true;
   static constexpr ClosedForm closed_form = ClosedForm::Unwritten;
   static void check_parameters(const Leaf&) {}
+
+  // C = [k(psi_s) - k(psi)]/k_span, so dC/dpsi = kmax*|f'|/k_span. The thermal
+  // half's slope is less_cost_temperature_slope.
+  static double cost_slope(Leaf& l, double psi_stem, double psi_upstream) {
+    (void)psi_upstream;
+    const double f = l.proportion_of_conductivity(psi_stem);
+    const double abs_fprime =
+        f * (l.stem_c / l.stem_b) * pow(psi_stem / l.stem_b, l.stem_c - 1.0);
+    return l.leaf_specific_conductance_max_ * abs_fprime / l.profitmax_k_span_;
+  }
+  // Cost (k_soil - kmax f)/k_span + TC(Tleaf), in carbon units by |A|max:
+  //
+  //     lambda = |A|max * [ |f'|/(f*k_span) + (dTC/dT)(dT/dE) ]
+  //
+  // The thermal term vanishes with either gate off.
+  static double lambda(Leaf& l, double psi_stem, double psi_upstream) {
+    (void)psi_upstream;
+    const double f = l.proportion_of_conductivity(psi_stem);
+    if (!(f > 0.0) || !(l.profitmax_k_span_ > 0.0) || !(l.profitmax_A_max_ > 0.0)) {
+      return util::na_value;
+    }
+    // |f'| = (c/b)(psi/b)^(c-1) f, positive because f is decreasing.
+    const double abs_fprime =
+        (l.stem_c / l.stem_b) * pow(psi_stem / l.stem_b, l.stem_c - 1.0) * f;
+
+    double thermal = 0.0;
+    if (l.use_thermal_cost_ && l.use_energy_balance_) {
+      const double E = l.operating_point_flux(psi_stem, l.supply_psi_soil_scalar());
+      double dT_dE = 0.0;
+      const double Tleaf = l.leaf_temp_from_E(E, &dT_dE);
+      // The same slope less_cost_temperature_slope subtracts from dJ/dpsi, so the
+      // reported lambda and the first-order condition cannot disagree about it.
+      thermal = l.thermal_cost_temp_deriv(Tleaf) * dT_dE;
+    }
+    return l.profitmax_A_max_ *
+           (abs_fprime / (f * l.profitmax_k_span_) + thermal);
+  }
+  // The conductance term reads psi_stem alone, so it takes the series factor;
+  // the thermal term, where the gates put one in, reads Tleaf and so E alone.
+  static double lambda_collar(Leaf& l) {
+    double S, series;
+    if (!l.collar_series(S, series)) {
+      return util::na_value;
+    }
+    const double f = l.proportion_of_conductivity(l.opt_psi_stem_);
+    if (!(f > 0.0) || !(l.profitmax_k_span_ > 0.0) || !(l.profitmax_A_max_ > 0.0)) {
+      return util::na_value;
+    }
+    const double abs_fprime = (l.stem_c / l.stem_b) *
+                              pow(l.opt_psi_stem_ / l.stem_b, l.stem_c - 1.0) * f;
+    double thermal = 0.0;
+    if (l.use_thermal_cost_ && l.use_energy_balance_) {
+      double dT_dE = 0.0;
+      const double Tleaf = l.leaf_temp_from_E(
+          l.operating_point_flux(l.opt_psi_stem_, l.opt_root_psi_), &dT_dE);
+      thermal = l.thermal_cost_temp_deriv(Tleaf) * dT_dE;
+    }
+    return l.profitmax_A_max_ *
+           (abs_fprime / (f * l.profitmax_k_span_) * series + thermal);
+  }
+  // dTC/dpsi = TC'(Tleaf) * tau, the slope lambda reports. One expression with
+  // the subtraction, as it was inline, so it contracts as it did.
+  static double less_cost_temperature_slope(const Leaf& l, double term,
+                                            const Leaf::TemperaturePath& p) {
+    return term - l.thermal_cost_temp_deriv(p.Tleaf) * p.tau;
+  }
+  static double profit(Leaf& l, double psi_stem, double psi_upstream) {
+    return l.profit_psi_stem_ProfitMax(psi_stem, psi_upstream);
+  }
 };
 
 template <> struct Curve<Leaf::CostCurve::TF24_floor> {
@@ -223,6 +517,7 @@ template <> struct Curve<Leaf::CostCurve::TF24_floor> {
   static constexpr bool cost_reads_upstream = true;
   static constexpr bool cost_domain_ends_at_psi_crit = false;
   static constexpr bool objective_is_product = false;
+  static constexpr bool cost_reads_leaf_temperature = false;
   static constexpr bool prepares_normalisers = false;
   static constexpr ClosedForm closed_form = ClosedForm::Implemented;
   static void check_parameters(const Leaf& l) {
@@ -240,6 +535,49 @@ template <> struct Curve<Leaf::CostCurve::TF24_floor> {
                  util::to_string(l.TF24_floor_lambda_o));
     }
   }
+
+  // TF24's cost plus CF77's price, both carbon fluxes. Each term here and in the
+  // slopes and lambda is its parent's own expression in its operand order, so
+  // lambda_o = 0 and TF24_cost_scale = 0 reduce bit-exactly, under FMA contraction
+  // too (hazards.md, "One solver: the long form"). Reassociating breaks that;
+  // test_tf24_floor_reduces guards it.
+  static double cost(Leaf& l, double psi_stem, double psi_upstream) {
+    l.hydraulic_cost_ = l.hydraulic_cost_TF_kernel(psi_stem) +
+                        l.TF24_floor_lambda_o * l.operating_point_flux(psi_stem, psi_upstream);
+    return l.hydraulic_cost_;
+  }
+  static double cost_slope(Leaf& l, double psi_stem, double psi_upstream) {
+    using AD = xad::fwd<double>::active_type;
+    (void)psi_upstream;
+    AD ps_ad = psi_stem;
+    xad::derivative(ps_ad) = 1.0;
+    return xad::derivative(l.hydraulic_cost_TF_kernel(ps_ad)) +
+           l.TF24_floor_lambda_o * l.leaf_specific_conductance_max_ *
+               l.stem_curve_integral_deriv(psi_stem);
+  }
+  // TF24's half reads psi_stem alone; the floor's lambda_o*E is CF77's arm.
+  static double cost_slope_upstream(Leaf& l, double psi_stem, double psi_upstream) {
+    (void)psi_stem;
+    return -(l.TF24_floor_lambda_o * l.leaf_specific_conductance_max_ *
+             l.stem_curve_integral_deriv(psi_upstream));
+  }
+  // TF24's lambda plus lambda_o. Called, not repeated: at lambda_o == 0 it is
+  // TF24's bit for bit, since that ends in a division no FMA can absorb.
+  static double lambda(const Leaf& l, double psi_stem, double psi_upstream) {
+    (void)psi_upstream;
+    return l.lambda_TF24(psi_stem) + l.TF24_floor_lambda_o;
+  }
+  // TF24's part takes the series factor; the price reads E alone.
+  static double lambda_collar(Leaf& l) {
+    double S, series;
+    if (!l.collar_series(S, series)) {
+      return util::na_value;
+    }
+    return l.lambda_TF24(l.opt_psi_stem_) * series + l.TF24_floor_lambda_o;
+  }
+  static double profit(Leaf& l, double psi_stem, double psi_upstream) {
+    return l.profit_psi_stem_TF24_floor(psi_stem, psi_upstream);
+  }
 };
 
 template <> struct Curve<Leaf::CostCurve::LeastCost> {
@@ -252,6 +590,8 @@ template <> struct Curve<Leaf::CostCurve::LeastCost> {
   // It sits at psi_crit on most rows, dark and light.
   static constexpr bool cost_domain_ends_at_psi_crit = true;
   static constexpr bool objective_is_product = false;
+  // W's capacity term reads vcmax_ at Tleaf.
+  static constexpr bool cost_reads_leaf_temperature = true;
   static constexpr bool prepares_normalisers = false;
   static constexpr ClosedForm closed_form = ClosedForm::Impossible;
   static void check_parameters(const Leaf& l) {
@@ -270,6 +610,59 @@ template <> struct Curve<Leaf::CostCurve::LeastCost> {
                  "`LeastCost_beta =` to leaf_solve() / leaf_batch(); got " +
                  util::to_string(l.LeastCost_beta));
     }
+  }
+
+  // Under the log link the cost is `+log W`, `W = E_mol + beta*Vcmax_mol`
+  // (`leastcost_flux`), so dC/dpsi is `W'/W` with `W' = kg_to_mol_h2o * kmax * f`:
+  // the opposite sign to SOX's `-g'/g`, as W rises where g falls. Vcmax's slope
+  // in Tleaf is less_cost_temperature_slope.
+  static double cost_slope(Leaf& l, double psi_stem, double psi_upstream) {
+    return kg_to_mol_h2o * l.leaf_specific_conductance_max_ *
+           l.stem_curve_integral_deriv(psi_stem) /
+           l.leastcost_flux(psi_stem, psi_upstream);
+  }
+  // `(dW/du)/W` with `dW/du = -kg_to_mol_h2o * kmax * G'(u)`: CF77's arm with
+  // kg-to-mol in place of the price, over cost_slope's `W`.
+  static double cost_slope_upstream(Leaf& l, double psi_stem, double psi_upstream) {
+    return -(kg_to_mol_h2o * l.leaf_specific_conductance_max_ *
+             l.stem_curve_integral_deriv(psi_upstream)) /
+           l.leastcost_flux(psi_stem, psi_upstream);
+  }
+  // `lambda = A*kg_to_mol_h2o/W`, reading the solved `assim_colimited_` as SOX's
+  // does: valid only at the potential last evaluated.
+  static double lambda(Leaf& l, double psi_stem, double psi_upstream) {
+    if (!l.use_energy_balance_) {
+      return l.assim_colimited_ * kg_to_mol_h2o /
+             l.leastcost_flux(psi_stem, psi_upstream);
+    }
+    // W's capacity term moves with E through Tleaf, adding beta*Vcmax_mol'(T)*dT/dE:
+    // the slope less_cost_temperature_slope takes in the first-order condition.
+    double dT_dE = 0.0;
+    const double Tleaf =
+        l.leaf_temp_from_E(l.operating_point_flux(psi_stem, psi_upstream), &dT_dE);
+    double dW_dE = kg_to_mol_h2o;
+    if (dT_dE != 0.0) {
+      dW_dE += l.LeastCost_beta * umol_to_mol * l.vcmax_temp_deriv(Tleaf) * dT_dE;
+    }
+    return l.assim_colimited_ * dW_dE / l.leastcost_flux(psi_stem, psi_upstream);
+  }
+  // The cost reads E alone, so its lambda carries over unchanged.
+  static double lambda_collar(Leaf& l) {
+    return lambda(l, l.opt_psi_stem_, l.opt_root_psi_);
+  }
+  // C = log W with `vcmax_` at Tleaf, so d(log W)/dpsi gains
+  // beta*umol_to_mol*dVcmax/dT*tau/W (cost_slope holds only the E half). W reads
+  // the total flux, its stomatal part from gc.
+  static double less_cost_temperature_slope(const Leaf& l, double term,
+                                            const Leaf::TemperaturePath& p) {
+    const double dVcmax_dT = (p.vcmax_up - p.vcmax_dn) / (2.0 * p.h);
+    const double W = p.gc_s / p.gc_const * kg_to_mol_h2o +
+                     l.LeastCost_beta * l.vcmax_ * umol_to_mol +
+                     p.r_star * kg_to_mol_h2o;
+    return term - l.LeastCost_beta * umol_to_mol * dVcmax_dT * p.tau / W;
+  }
+  static double profit(Leaf& l, double psi_stem, double psi_upstream) {
+    return l.profit_psi_stem_LeastCost(psi_stem, psi_upstream);
   }
 };
 
@@ -311,62 +704,10 @@ constexpr double Leaf::curve_default() {
 
 // dC/dpsi_stem for one cost curve: the only place a cost curve enters a
 // derivative, shared by both routes (the collar route multiplies it by
-// dpsi_stem/dpsi and adds cost_deriv_upstream<K>). Every arm is explicit and the
-// last asserts, so a new curve is a compile error rather than a plausible number.
+// dpsi_stem/dpsi and adds cost_deriv_upstream<K>).
 template <Leaf::CostCurve K>
 inline double Leaf::cost_deriv(double psi_stem, double psi_upstream) {
-  using AD = xad::fwd<double>::active_type;
-  (void)psi_upstream;
-  double C_prime;
-  if constexpr (K == CostCurve::TF24) {
-    AD ps_ad = psi_stem;
-    xad::derivative(ps_ad) = 1.0;
-    C_prime = xad::derivative(hydraulic_cost_TF_kernel(ps_ad));
-  } else if constexpr (K == CostCurve::CF77) {
-    // lambda * E, and dE/dpsi_stem is kmax times the conductivity fraction,
-    // which stem_curve_integral_deriv returns.
-    C_prime = cf77_price() * leaf_specific_conductance_max_ *
-              stem_curve_integral_deriv(psi_stem);
-  } else if constexpr (K == CostCurve::JS22) {
-    // C = gamma*(psi - psi_up)^2.
-    C_prime = 2.0 * JS22_gamma * (psi_stem - psi_upstream);
-  } else if constexpr (K == CostCurve::TF24_floor) {
-    // TF24's arm plus CF77's, each in its own operand order, so both reductions
-    // stay bit-exact (see `hydraulic_cost_TF24_floor`).
-    AD ps_ad = psi_stem;
-    xad::derivative(ps_ad) = 1.0;
-    C_prime = xad::derivative(hydraulic_cost_TF_kernel(ps_ad)) +
-              TF24_floor_lambda_o * leaf_specific_conductance_max_ *
-                  stem_curve_integral_deriv(psi_stem);
-  } else if constexpr (K == CostCurve::SOX) {
-    // Under the log link the cost is `-log g`, so dC/dpsi is `-g'/g`; `g` is zero
-    // only at psi_crit, which no optimiser returns.
-    C_prime = -sox_reduction_deriv(psi_stem) / sox_reduction(psi_stem);
-  } else if constexpr (K == CostCurve::JW26) {
-    // The same, and here `-g'/g` collapses: with `g = 1 - psi/psi_crit` it is
-    // exactly `1/(psi_crit - psi)`.
-    C_prime = 1.0 / (psi_crit - psi_stem);
-  } else if constexpr (K == CostCurve::LeastCost) {
-    // Under the log link the cost is `+log W`, `W = E_mol + beta*Vcmax_mol`
-    // (`leastcost_flux`), so dC/dpsi is `W'/W` with `W' = kg_to_mol_h2o * kmax * f`:
-    // the opposite sign to SOX's `-g'/g`, as W rises where g falls. Vcmax's slope
-    // in Tleaf is taken in `dprofit_energy_balance_term`.
-    C_prime = kg_to_mol_h2o * leaf_specific_conductance_max_ *
-              stem_curve_integral_deriv(psi_stem) /
-              leastcost_flux(psi_stem, psi_upstream);
-  } else if constexpr (K == CostCurve::ProfitMax) {
-    // C = [k(psi_s) - k(psi)]/k_span, so dC/dpsi = kmax*|f'|/k_span. The thermal
-    // half's slope (energy balance on) is taken in dprofit_energy_balance_term.
-    const double f = proportion_of_conductivity(psi_stem);
-    const double abs_fprime =
-        f * (stem_c / stem_b) * pow(psi_stem / stem_b, stem_c - 1.0);
-    C_prime = leaf_specific_conductance_max_ * abs_fprime / profitmax_k_span_;
-  } else {
-    static_assert(K == CostCurve::CMax, "unhandled CostCurve in cost_deriv");
-    // Linear in the absolute potential: the form Anderegg et al. state.
-    C_prime = CMax_a * psi_stem + CMax_b;
-  }
-  return C_prime;
+  return Curve<K>::cost_slope(*this, psi_stem, psi_upstream);
 }
 
 // Whether a curve's cost reads the upstream potential as well as psi_stem, which
@@ -419,119 +760,39 @@ template <Leaf::CostCurve K>
 inline double Leaf::cost_deriv_upstream(double psi_stem, double psi_upstream) {
   static_assert(cost_reads_upstream<K>(),
                 "cost_deriv_upstream is only defined where the cost reads upstream");
-  if constexpr (K == CostCurve::CF77) {
-    // lambda * kmax * (G(psi_stem) - G(psi_up)), so -lambda * kmax * G'(psi_up),
-    // with G' the table's own slope: the solve ran on the table.
-    (void)psi_stem;
-    return -(cf77_price() * leaf_specific_conductance_max_ *
-             stem_curve_integral_deriv(psi_upstream));
-  } else if constexpr (K == CostCurve::JS22) {
-    return -2.0 * JS22_gamma * (psi_stem - psi_upstream);
-  } else if constexpr (K == CostCurve::CMax) {
-    // d/du of (psi - u)*(a*(psi + u)/2 + b) is -(a*u + b): the integrand at the
-    // lower limit, as for any integral of the price.
-    (void)psi_stem;
-    return -(CMax_a * psi_upstream + CMax_b);
-  } else if constexpr (K == CostCurve::TF24_floor) {
-    // TF24's half reads psi_stem alone; the floor's lambda_o*E is CF77's arm.
-    (void)psi_stem;
-    return -(TF24_floor_lambda_o * leaf_specific_conductance_max_ *
-             stem_curve_integral_deriv(psi_upstream));
-  } else {
-    static_assert(K == CostCurve::LeastCost, "unhandled CostCurve");
-    // `(dW/du)/W` with `dW/du = -kg_to_mol_h2o * kmax * G'(u)`: CF77's arm with
-    // kg-to-mol in place of the price, over `cost_deriv`'s `W`.
-    return -(kg_to_mol_h2o * leaf_specific_conductance_max_ *
-             stem_curve_integral_deriv(psi_upstream)) /
-           leastcost_flux(psi_stem, psi_upstream);
-  }
+  return Curve<K>::cost_slope_upstream(*this, psi_stem, psi_upstream);
 }
-
-// Hydraulic cost equations
 
 // --- Marginal cost of water -------------------------------------------------
+//
+// The bound per-curve lambdas, each its curve's definition's.
 
 inline double Leaf::lambda_TF24(double psi_stem) const {
-  const double f = proportion_of_conductivity(psi_stem);
-  return TF24_cost_scale * TF24_beta2 * (stem_c / stem_b) * pow(psi_stem / stem_b, stem_c - 1.0) *
-         pow(1.0 - f, TF24_beta2 - 1.0) / leaf_specific_conductance_max_;
+  return Curve<CostCurve::TF24>::lambda(*this, psi_stem, util::na_value);
 }
 
-// JS22: dC/dpsi = 2*gamma*(psi - psi_up) over dE/dpsi = kmax*f(psi). Unlike
-// TF24's, f does not cancel, so this divides by it: safe inside the feasible
-// bracket, where f never reaches zero.
 inline double Leaf::lambda_JS22(double psi_stem, double psi_upstream) const {
-  const double f = proportion_of_conductivity(psi_stem);
-  return 2.0 * JS22_gamma * (psi_stem - psi_upstream) /
-         (leaf_specific_conductance_max_ * f);
+  return Curve<CostCurve::JS22>::lambda(*this, psi_stem, psi_upstream);
 }
 
-// CMax: the marginal cost does not vanish at the wet end unless CMax_b is zero,
-// so it is the one curve that can be boundary-soil with a non-zero cost there.
 inline double Leaf::lambda_CMax(double psi_stem, double psi_upstream) const {
-  (void)psi_upstream;
-  const double f = proportion_of_conductivity(psi_stem);
-  return (CMax_a * psi_stem + CMax_b) /
-         (leaf_specific_conductance_max_ * f);
+  return Curve<CostCurve::CMax>::lambda(*this, psi_stem, psi_upstream);
 }
 
-// TF24_floor: TF24's own cost plus a linear price of water, so lambda is
-// lambda_TF24 + lambda_o. Called, not repeated: at lambda_o == 0 it is
-// lambda_TF24 bit for bit, since that ends in a division no FMA can absorb.
 inline double Leaf::lambda_TF24_floor(double psi_stem) const {
-  return lambda_TF24(psi_stem) + TF24_floor_lambda_o;
+  return Curve<CostCurve::TF24_floor>::lambda(*this, psi_stem, util::na_value);
 }
 
-// SOX's objective is a product: at its optimum A'g + Ag' = 0, so
-//
-//     lambda = A'/E' = -A*(g'/g) / (kmax*f)
-//
-// It carries a factor of A, since a product prices water as a share of
-// assimilation (the-models.Rmd), and diverges at psi_crit, where g = 0: never
-// pinned there, and not a number to evaluate at the dry end.
 inline double Leaf::lambda_SOX(double psi_stem, double psi_upstream) const {
-  (void)psi_upstream;
-  const double g = sox_reduction(psi_stem);
-  const double gp = sox_reduction_deriv(psi_stem);
-  const double f = proportion_of_conductivity(psi_stem);
-  return -assim_colimited_ * (gp / g) / (leaf_specific_conductance_max_ * f);
+  return Curve<CostCurve::SOX>::lambda(*this, psi_stem, psi_upstream);
 }
 
-// Jones: g = 1 - psi/psi_crit makes -g'/g = 1/(psi_crit - psi), so lambda =
-// A / [(psi_crit - psi) kmax f(psi)], as the-models.Rmd quotes; it carries A and
-// diverges at psi_crit, as lambda_SOX's does.
 inline double Leaf::lambda_JW26(double psi_stem, double psi_upstream) const {
-  (void)psi_upstream;
-  const double f = proportion_of_conductivity(psi_stem);
-  return assim_colimited_ /
-         ((psi_crit - psi_stem) * leaf_specific_conductance_max_ * f);
+  return Curve<CostCurve::JW26>::lambda(*this, psi_stem, psi_upstream);
 }
 
-// ProfitMax: cost (k_soil - kmax f)/k_span + TC(Tleaf), in carbon units by |A|max:
-//
-//     lambda = |A|max * [ |f'|/(f*k_span) + (dTC/dT)(dT/dE) ]
-//
-// The thermal term vanishes with either gate off.
 inline double Leaf::lambda_ProfitMax(double psi_stem) {
-  const double f = proportion_of_conductivity(psi_stem);
-  if (!(f > 0.0) || !(profitmax_k_span_ > 0.0) || !(profitmax_A_max_ > 0.0)) {
-    return util::na_value;
-  }
-  // |f'| = (c/b)(psi/b)^(c-1) f, positive because f is decreasing.
-  const double abs_fprime =
-      (stem_c / stem_b) * pow(psi_stem / stem_b, stem_c - 1.0) * f;
-
-  double thermal = 0.0;
-  if (use_thermal_cost_ && use_energy_balance_) {
-    const double E = operating_point_flux(psi_stem, supply_psi_soil_scalar());
-    double dT_dE = 0.0;
-    const double Tleaf = leaf_temp_from_E(E, &dT_dE);
-    // The same slope dprofit_energy_balance_term subtracts from dJ/dpsi, so the
-    // reported lambda and the first-order condition cannot disagree about it.
-    thermal = thermal_cost_temp_deriv(Tleaf) * dT_dE;
-  }
-  return profitmax_A_max_ *
-         (abs_fprime / (f * profitmax_k_span_) + thermal);
+  return Curve<CostCurve::ProfitMax>::lambda(*this, psi_stem, util::na_value);
 }
 
 inline double Leaf::marginal_cost_water() const {
@@ -599,11 +860,9 @@ inline T Leaf::hydraulic_cost_TF_kernel(const T& psi_stem,
       pars[par_stem_c], pars[par_TF24_beta2]);
 }
 
+// The bound difference-curve costs, each its curve's definition's.
 inline double Leaf::hydraulic_cost_TF(double psi_stem) {
-
-  hydraulic_cost_ = hydraulic_cost_TF_kernel(psi_stem);
-
-return hydraulic_cost_;
+  return Curve<CostCurve::TF24>::cost(*this, psi_stem, util::na_value);
 }
 
 // Sicangco et al. (2026) Eqns 8-9: the fraction of maximum PSII damage at this
@@ -642,13 +901,8 @@ double benefit_ = assim_colimited_;
   return benefit_ - cost;
 }
 
-// `CF77_lambda_ * E`, written into `hydraulic_cost_` because it IS a carbon flux
-// (umol C per kg water times kg m^-2 s^-1). Straight after
-// set_leaf_states_rates_from_psi_stem the memo returns that point's E.
-inline double Leaf::hydraulic_cost_CF77(double psi_stem,
-                                                double psi_upstream) {
-  hydraulic_cost_ = cf77_price() * operating_point_flux(psi_stem, psi_upstream);
-  return hydraulic_cost_;
+inline double Leaf::hydraulic_cost_CF77(double psi_stem, double psi_upstream) {
+  return Curve<CostCurve::CF77>::cost(*this, psi_stem, psi_upstream);
 }
 
 // The CF77 price with the optional Medlyn soil-moisture factor, rising without
@@ -675,13 +929,8 @@ inline double Leaf::profit_psi_stem_CF77(double psi_stem,
   return benefit_ - cost;
 }
 
-// gamma * (dpsi)^2, in carbon units like TF24 and CF77, so it goes in
-// `hydraulic_cost_`. `dpsi*dpsi`, not `pow`: the optimiser's inner loop (hazard 5).
-inline double Leaf::hydraulic_cost_JS22(double psi_stem,
-                                        double psi_upstream) {
-  const double dpsi = psi_stem - psi_upstream;
-  hydraulic_cost_ = JS22_gamma * dpsi * dpsi;
-  return hydraulic_cost_;
+inline double Leaf::hydraulic_cost_JS22(double psi_stem, double psi_upstream) {
+  return Curve<CostCurve::JS22>::cost(*this, psi_stem, psi_upstream);
 }
 
 inline double Leaf::profit_psi_stem_JS22(double psi_stem,
@@ -694,18 +943,8 @@ inline double Leaf::profit_psi_stem_JS22(double psi_stem,
   return benefit_ - cost;
 }
 
-// The integral of `CMax_a*psi + CMax_b` from psi_upstream, zero at no flow:
-//
-//     C = (psi - psi_up) * [ CMax_a*(psi + psi_up)/2 + CMax_b ]
-//
-// Factored: the difference of squares cancels as the potentials converge (off by
-// 1.2e-04 at a 1e-12 drop), which a gradient's step reaches near no flow. For the
-// same reason JS22, this family's (2 gamma, -2 gamma psi_up) member, keeps its own.
-inline double Leaf::hydraulic_cost_CMax(double psi_stem,
-                                        double psi_upstream) {
-  hydraulic_cost_ = (psi_stem - psi_upstream) *
-                    (0.5 * CMax_a * (psi_stem + psi_upstream) + CMax_b);
-  return hydraulic_cost_;
+inline double Leaf::hydraulic_cost_CMax(double psi_stem, double psi_upstream) {
+  return Curve<CostCurve::CMax>::cost(*this, psi_stem, psi_upstream);
 }
 
 inline double Leaf::profit_psi_stem_CMax(double psi_stem,
@@ -718,15 +957,8 @@ inline double Leaf::profit_psi_stem_CMax(double psi_stem,
   return benefit_ - cost;
 }
 
-// TF24's cost plus CF77's price, both carbon fluxes. Each term is its parent's own
-// expression in its operand order, so lambda_o = 0 and TF24_cost_scale = 0 reduce
-// bit-exactly, under FMA contraction too (hazards.md, "One solver: the long
-// form"). Reassociating breaks that; test_tf24_floor_reduces guards it.
-inline double Leaf::hydraulic_cost_TF24_floor(double psi_stem,
-                                           double psi_upstream) {
-  hydraulic_cost_ = hydraulic_cost_TF_kernel(psi_stem) +
-                    TF24_floor_lambda_o * operating_point_flux(psi_stem, psi_upstream);
-  return hydraulic_cost_;
+inline double Leaf::hydraulic_cost_TF24_floor(double psi_stem, double psi_upstream) {
+  return Curve<CostCurve::TF24_floor>::cost(*this, psi_stem, psi_upstream);
 }
 
 // See the declaration for why zero on the other curves is a statement about the
@@ -820,23 +1052,8 @@ inline double Leaf::profit_psi_stem_LeastCost(double psi_stem,
   return assim_colimited_ / leastcost_flux(psi_stem, psi_upstream);
 }
 
-// `lambda = A*kg_to_mol_h2o/W`, reading the solved `assim_colimited_` as
-// `lambda_SOX` does: valid only at the potential last evaluated.
 inline double Leaf::lambda_LeastCost(double psi_stem, double psi_upstream) {
-  if (!use_energy_balance_) {
-    return assim_colimited_ * kg_to_mol_h2o /
-           leastcost_flux(psi_stem, psi_upstream);
-  }
-  // W's capacity term moves with E through Tleaf, adding beta*Vcmax_mol'(T)*dT/dE:
-  // the slope dprofit_energy_balance_term takes in the first-order condition.
-  double dT_dE = 0.0;
-  const double Tleaf =
-      leaf_temp_from_E(operating_point_flux(psi_stem, psi_upstream), &dT_dE);
-  double dW_dE = kg_to_mol_h2o;
-  if (dT_dE != 0.0) {
-    dW_dE += LeastCost_beta * umol_to_mol * vcmax_temp_deriv(Tleaf) * dT_dE;
-  }
-  return assim_colimited_ * dW_dE / leastcost_flux(psi_stem, psi_upstream);
+  return Curve<CostCurve::LeastCost>::lambda(*this, psi_stem, psi_upstream);
 }
 
 // ===========================================================================
@@ -1030,68 +1247,20 @@ inline void Leaf::check_cost_parameters() {
 
 // --- the per-curve tables ---------------------------------------------------
 //
-// Every arm is explicit and the last asserts, so a curve forgotten here is a
-// compile error, not a fall-through to the `else`.
+// Each reads its curve's definition, which CurveDefinition holds complete.
 
 // Which objective. Not all one kind of number: five are carbon, two products
 // (`profit_psi_stem_SOX`) and one a ratio (`profit_psi_stem_LeastCost`).
 template <Leaf::CostCurve K>
 inline double Leaf::profit_psi_stem_for(double psi_stem, double psi_upstream) {
-  if constexpr (K == CostCurve::TF24) {
-    return profit_psi_stem_TF(psi_stem, psi_upstream);
-  } else if constexpr (K == CostCurve::CF77) {
-    return profit_psi_stem_CF77(psi_stem, psi_upstream);
-  } else if constexpr (K == CostCurve::JS22) {
-    return profit_psi_stem_JS22(psi_stem, psi_upstream);
-  } else if constexpr (K == CostCurve::CMax) {
-    return profit_psi_stem_CMax(psi_stem, psi_upstream);
-  } else if constexpr (K == CostCurve::SOX) {
-    return profit_psi_stem_SOX(psi_stem, psi_upstream);
-  } else if constexpr (K == CostCurve::JW26) {
-    return profit_psi_stem_JW26(psi_stem, psi_upstream);
-  } else if constexpr (K == CostCurve::TF24_floor) {
-    return profit_psi_stem_TF24_floor(psi_stem, psi_upstream);
-  } else if constexpr (K == CostCurve::LeastCost) {
-    return profit_psi_stem_LeastCost(psi_stem, psi_upstream);
-  } else {
-    static_assert(K == CostCurve::ProfitMax, "unhandled CostCurve");
-    return profit_psi_stem_ProfitMax(psi_stem, psi_upstream);
-  }
+  return Curve<K>::profit(*this, psi_stem, psi_upstream);
 }
 
 // Which lambda to report, normalised to two arguments (TF24's reads psi_stem
-// alone). CF77's is exact by construction: its cost is lambda*E, so dC/dpsi over
-// dE/dpsi is lambda identically.
+// alone).
 template <Leaf::CostCurve K>
 inline double Leaf::lambda_for(double psi_stem, double psi_upstream) {
-  if constexpr (K == CostCurve::TF24) {
-    (void)psi_upstream;
-    return lambda_TF24(psi_stem);
-  } else if constexpr (K == CostCurve::CF77) {
-    // Still independent of BOTH potentials -- the soil-beta option keys on theta,
-    // a driver, not on where in the bracket the optimiser is.
-    (void)psi_stem;
-    (void)psi_upstream;
-    return cf77_price();
-  } else if constexpr (K == CostCurve::JS22) {
-    return lambda_JS22(psi_stem, psi_upstream);
-  } else if constexpr (K == CostCurve::CMax) {
-    return lambda_CMax(psi_stem, psi_upstream);
-  } else if constexpr (K == CostCurve::SOX) {
-    return lambda_SOX(psi_stem, psi_upstream);
-  } else if constexpr (K == CostCurve::JW26) {
-    return lambda_JW26(psi_stem, psi_upstream);
-  } else if constexpr (K == CostCurve::TF24_floor) {
-    // The hydraulic half reads psi_stem alone, as TF24's does.
-    (void)psi_upstream;
-    return lambda_TF24_floor(psi_stem);
-  } else if constexpr (K == CostCurve::LeastCost) {
-    return lambda_LeastCost(psi_stem, psi_upstream);
-  } else {
-    static_assert(K == CostCurve::ProfitMax, "unhandled CostCurve");
-    (void)psi_upstream;
-    return lambda_ProfitMax(psi_stem);
-  }
+  return Curve<K>::lambda(*this, psi_stem, psi_upstream);
 }
 
 // lambda_emergent on the COLLAR route: dC/dE along the path the solve moves on,
@@ -1102,52 +1271,22 @@ inline double Leaf::lambda_for(double psi_stem, double psi_upstream) {
 //     lambda = lambda_stem * (1 + kmax f(psi_r) / S),
 //
 // the part reading only E carries over unchanged, and a cost that also reads the
-// collar (JS22's drop, CMax's lower limit) adds its partial over S. Each row must
-// equal dA/dE at an interior optimum: test_collar_lambda_emergent_is_dA_dE.
+// collar (JS22's drop, CMax's lower limit) adds its partial over S. Each curve's
+// definition writes its own; each must equal dA/dE at an interior optimum:
+// test_collar_lambda_emergent_is_dA_dE.
 template <Leaf::CostCurve K>
 inline double Leaf::lambda_collar_for() {
-  if constexpr (K == CostCurve::TF24) {
-    return marginal_cost_water_multilayer();
-  } else if constexpr (K == CostCurve::CF77) {
-    return cf77_price();
-  } else if constexpr (K == CostCurve::LeastCost) {
-    return lambda_LeastCost(opt_psi_stem_, opt_root_psi_);
-  } else {
-    const double S = dE_from_soil_dpsi_collar(opt_root_psi_, supply_psi_soil());
-    if (!std::isfinite(S) || S <= 0.0) {
-      return util::na_value;
-    }
-    const double series =
-        1.0 + leaf_specific_conductance_max_ *
-                  proportion_of_conductivity(opt_root_psi_) / S;
-    if constexpr (K == CostCurve::TF24_floor) {
-      return lambda_TF24(opt_psi_stem_) * series + TF24_floor_lambda_o;
-    } else if constexpr (K == CostCurve::JS22 || K == CostCurve::CMax) {
-      return lambda_for<K>(opt_psi_stem_, opt_root_psi_) * series +
-             cost_deriv_upstream<K>(opt_psi_stem_, opt_root_psi_) / S;
-    } else if constexpr (K == CostCurve::SOX || K == CostCurve::JW26) {
-      return lambda_for<K>(opt_psi_stem_, opt_root_psi_) * series;
-    } else {
-      static_assert(K == CostCurve::ProfitMax, "unhandled CostCurve");
-      // The conductance term reads psi_stem alone; the thermal term, where the
-      // gates put one in, reads the leaf temperature and so E alone.
-      const double f = proportion_of_conductivity(opt_psi_stem_);
-      if (!(f > 0.0) || !(profitmax_k_span_ > 0.0) || !(profitmax_A_max_ > 0.0)) {
-        return util::na_value;
-      }
-      const double abs_fprime = (stem_c / stem_b) *
-                                pow(opt_psi_stem_ / stem_b, stem_c - 1.0) * f;
-      double thermal = 0.0;
-      if (use_thermal_cost_ && use_energy_balance_) {
-        double dT_dE = 0.0;
-        const double Tleaf = leaf_temp_from_E(
-            operating_point_flux(opt_psi_stem_, opt_root_psi_), &dT_dE);
-        thermal = thermal_cost_temp_deriv(Tleaf) * dT_dE;
-      }
-      return profitmax_A_max_ *
-             (abs_fprime / (f * profitmax_k_span_) * series + thermal);
-    }
+  return Curve<K>::lambda_collar(*this);
+}
+
+inline bool Leaf::collar_series(double& S, double& series) {
+  S = dE_from_soil_dpsi_collar(opt_root_psi_, supply_psi_soil());
+  if (!std::isfinite(S) || S <= 0.0) {
+    return false;
   }
+  series = 1.0 + leaf_specific_conductance_max_ *
+                     proportion_of_conductivity(opt_root_psi_) / S;
+  return true;
 }
 
 } // namespace phylloptim

@@ -1291,6 +1291,10 @@ public:
                                            double psi_upstream);
   // The collar route's lambda_emergent, for the seated curve. See the definition.
   template <CostCurve K> double lambda_collar_for();
+  // At the solved collar: S, the soil-to-collar conductance, and the factor
+  // (1 + kmax f(psi_r)/S) a cost reading psi_stem alone takes on the collar route.
+  // False where S is not a positive number, and `series` is then unset.
+  bool collar_series(double& S, double& series);
 
   template <CostCurve K>
   double evaluate_psi_stem(double target_psi_stem);
@@ -1306,6 +1310,12 @@ public:
   // the gate off; out of line so it cannot change FMA contraction on the gate-off
   // path. `E_s`, `r_star`, `drstar_dpsi` and `dgc_dT_residual` are the residual
   // conductance's terms, exact zeros at g_min = 0; derivation at the definition.
+  // What a cost reading leaf temperature needs from that term: the leaf
+  // temperature, its slope tau = dT/dpsi, the difference step and vcmax_ either
+  // side of it, the stomatal flux's conductance terms and the residual flux.
+  struct TemperaturePath {
+    double Tleaf, tau, h, vcmax_up, vcmax_dn, gc_s, gc_const, r_star;
+  };
   template <CostCurve K>
   double dprofit_energy_balance_term(double ci, double gc, double g_ci,
                                      double inv_atm, double gc_const,
