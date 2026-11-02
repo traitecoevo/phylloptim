@@ -140,6 +140,8 @@ The steps land as commits on one PR at a time until the owner merges it, rather 
 10. **F9:** the `damage::` templates on odelia's `tangent_scalar` and `Dual` deleted, if the damage benches are flat. `gradient::Status` and `OperatingPointKind` stay separate, since they classify different things, and the guide says how they map.
 11. **F11's remainder:** the duplicated temperature difference (re-measure the golden move that kept it apart), the duplicated `A'` block, and one exit helper for the classifying writes of `operating_point_kind_`. These come after steps 3 to 5, so collapsing them does not bake in today's dispatch.
 
+**When plant next moves its phylloptim pin** (to 0.27.3 or later), that PR updates the comment in plant's `tf24_strategy.h` (its replay of a recorded point, "THE CURVE-TYPED FORM") that calls `find_root_collar_psi()` the TF24 shorthand which solves TF24 whatever is seated: since step 1 it solves the seated curve (decision D5). The curve-typed call that comment guards stays right.
+
 F7 needs no step: both routes stay for every curve, as decided. After F, as an item of its own: the surface follows the energy balance for every curve (decision D7, #225).
 
 ### Decisions (agreed by the owner, 2026-11-02)
