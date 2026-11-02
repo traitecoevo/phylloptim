@@ -366,7 +366,7 @@ test_that("everything the closed form cannot do is refused, with the reason", {
   # about.
   collar <- cf_leaf()
   collar$set_model("TF24", "collar", "closed")
-  expect_error(collar$optimise(), "STEM-route method")
+  expect_error(collar$optimise(), "LEAF-route method")
 
   # Multi-layer: the closed form for it does not exist, so it is refused rather
   # than run on layer zero.

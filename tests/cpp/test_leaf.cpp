@@ -7808,7 +7808,7 @@ void test_closed_form_is_a_selectable_method() {
     // The collar route: a different model, not a restriction of this one.
     phylloptim::Leaf l = make_single_leaf(d, 0.5);
     l.set_model("TF24", "collar", "closed");
-    ok(throws_with([&] { l.optimise(); }, "STEM-route method"),
+    ok(throws_with([&] { l.optimise(); }, "LEAF-route method"),
        "the collar route is refused");
 
     // Multi-layer: the closed form for it does not exist.

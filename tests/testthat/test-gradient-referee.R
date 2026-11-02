@@ -15,7 +15,7 @@
 # against a floor of 1e-5 of the output per unit of the parameter.
 #
 # Measured on macOS/arm64: worst 5.2e-4 (CF77's g_min on the leaf route, an
-# output at that floor), 99th percentile 1.3e-4, median 2e-9, over 204 rows.
+# output at that floor), 99th percentile 1.3e-4, median 2e-9, over 195 rows.
 
 referee_outputs <- c("A", "gc", "psi_leaf", "collar", "profit")
 

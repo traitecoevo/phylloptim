@@ -520,9 +520,9 @@ than about the solver.
 
 ### Not everything is reachable
 
-`resistance` exists only on the single-potential supply path; ask for it on the
-multi-layer path and you get an error naming the path rather than "unknown
-parameter". `beta_R_H` and `beta_R_V` left with the root-architecture model
+`resistance` exists only on the single-potential supply path's collar route;
+ask for it on the multi-layer path or the leaf route and you get an error naming
+why rather than "unknown parameter". `beta_R_H` and `beta_R_V` left with the root-architecture model
 entirely, so a fit that needs them has to difference `root_network_from_carbon()`
 itself, which is cheap to perturb (it is homogeneous of degree 1 in each) but still
 costs two solves.

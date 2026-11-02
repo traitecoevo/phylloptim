@@ -337,7 +337,7 @@ public:
   double profit_;
   // ⚠️ Kept only because plant's RcppR6 bindings name it (hazard 7); nothing here
   // reads or writes it, and the initialiser makes a read through them a defined NA.
-  double psi_leaf = util::na_value;
+  double psi_stem = util::na_value;
   // The Cowan-Farquhar marginal value of water, carbon per unit transpiration. An
   // input: no model code assigns it and setup_clean_leaf() does not clear it.
   // A curve parameter's default is its curve's definition's (leaf_cost_curves.hpp).
@@ -2358,7 +2358,7 @@ inline void Leaf::setup_clean_leaf() {
 }
 
 // Seat the per-timestep physiology that stays constant through the collar or
-// stem optimisation: temperature-dependent parameters, assim_max_ (ci = ca),
+// leaf-route optimisation: temperature-dependent parameters, assim_max_ (ci = ca),
 // the soil state and the supply resistances.
 inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double leaf_temp, double atm_o2_kpa, double atm_kpa) {
   if (psi_soil.size() != soil_depth.size()) {

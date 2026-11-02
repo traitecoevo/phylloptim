@@ -960,7 +960,7 @@ Leaf:
       roxygen: |
         Evaluate the leaf at a prescribed psi_leaf, rather than optimising one.
 
-        Uses the model `set_model()` seated, so seat a STEM route first. Leaves
+        Uses the model `set_model()` seated, so seat a LEAF route first. Leaves
         the same outputs a solve would and returns `profit_`.
         @param target_psi_leaf leaf water potential to evaluate at, MPa as a
           positive magnitude. Must lie in the model's feasible interval, from
@@ -973,7 +973,7 @@ Leaf:
       roxygen: |
         dprofit/dpsi_leaf at a given leaf potential, with its feasibility.
 
-        Uses the model `set_model()` seated, so seat a STEM route first.
+        Uses the model `set_model()` seated, so seat a LEAF route first.
 
         ⚠️ **Returns `c(dprofit, feasible)`, and the second entry is not
         optional.** The derivative is a hard `0.0` SENTINEL on the shut-down and

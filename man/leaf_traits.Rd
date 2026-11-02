@@ -28,7 +28,7 @@ leaf_traits(
 
 \item{stem_c}{shape parameter of the stem vulnerability curve (unitless)}
 
-\item{stem_P50}{leaf potential at 50\% loss of conductivity (MPa, positive
+\item{stem_P50}{stem potential at 50\% loss of conductivity (MPa, positive
 magnitude). \code{stem_b} and \code{psi_crit} are derived from this pair and are
 readable but not settable on the resulting \code{Leaf}.}
 

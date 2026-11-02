@@ -363,9 +363,10 @@ rownames(leaf_gradient(psi_soil = 2.0, PPFD = 900)$gradient)
 
 That is `r length(leaf_traits())` traits from `leaf_traits()`, plus
 `leaf_specific_conductance_max`, which is not a trait but is fitted like one,
-`resistance`, the single-potential path's series resistance, and
-`TF24_floor_lambda_o`, the default model's price of water:
-`r length(leaf_traits()) + 3L` in all. The multi-layer path drops `resistance`;
+and `TF24_floor_lambda_o`, the default model's price of water:
+`r length(leaf_traits()) + 2L` in all. The collar route over the
+single-potential path adds `resistance`, its series resistance, which the leaf
+route never reads;
 `model = "TF24"` drops the price, and `model = "CF77"` swaps in `CF77_lambda_`,
 that curve's prescribed marginal value of water. These counts are
 computed rather than written out, for the reason the hidden chunk below records.

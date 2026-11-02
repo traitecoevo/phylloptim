@@ -50,7 +50,7 @@
 ##'
 ##' @param vcmax_25 maximum carboxylation rate at 25 C (umol m^-2 s^-1)
 ##' @param stem_c shape parameter of the stem vulnerability curve (unitless)
-##' @param stem_P50 leaf potential at 50% loss of conductivity (MPa, positive
+##' @param stem_P50 stem potential at 50% loss of conductivity (MPa, positive
 ##'   magnitude). `stem_b` and `psi_crit` are derived from this pair and are
 ##'   readable but not settable on the resulting `Leaf`.
 ##' @param root_c shape parameter of the root vulnerability curve (unitless)

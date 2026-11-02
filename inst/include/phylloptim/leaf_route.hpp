@@ -1,6 +1,6 @@
 // -*-c++-*-
-#ifndef PHYLLOPTIM_LEAF_STEM_ROUTES_HPP_
-#define PHYLLOPTIM_LEAF_STEM_ROUTES_HPP_
+#ifndef PHYLLOPTIM_LEAF_ROUTE_HPP_
+#define PHYLLOPTIM_LEAF_ROUTE_HPP_
 
 // The leaf routes: the operating point maximised over the leaf potential
 // with the upstream potential held at psi_soil, over the closed interval
@@ -182,7 +182,7 @@ inline void Leaf::clear_collar_solve_state() {
 // than `model_route()` reports (hazard 11).
 inline void Leaf::require_leaf_route(const char* who) const {
   if (route_is_collar_) {
-    util::stop(std::string(who) + " is a STEM-route method: it pins the "
+    util::stop(std::string(who) + " is a LEAF-route method: it pins the "
                "upstream potential at psi_soil and ignores the soil-to-collar "
                "path. The leaf is seated on the collar route; call "
                "set_model(\"" + curve_name(static_cast<int>(cost_curve_)) +

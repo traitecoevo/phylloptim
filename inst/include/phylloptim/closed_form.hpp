@@ -490,7 +490,7 @@ inline void optimise_into(Leaf &l) {
 // energy balance, thermal damage and g_min are all settable after `set_model`.
 inline void Leaf::optimise_closed() {
   if (route_is_collar_) {
-    util::stop("the closed form is a STEM-route method: it inverts psi_leaf "
+    util::stop("the closed form is a LEAF-route method: it inverts psi_leaf "
                "against a supply measured from psi_soil, and says nothing about "
                "the soil-to-collar path. The leaf is seated on the collar route; "
                "call set_model(\"" +

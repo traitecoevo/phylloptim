@@ -407,7 +407,7 @@ pinned optima in general.
 \section{Two of these are not traits}{
 
 \code{pars} also accepts \code{leaf_specific_conductance_max} and, on the
-single-potential path, \code{resistance}. They are here because a calibration fits
+single-potential path's collar route, \code{resistance}. They are here because a calibration fits
 them: of a companion calibration study's four free parameters two are traits and two are
 these, so restricting \code{pars} to \code{\link[=leaf_traits]{leaf_traits()}} left half of that fit without
 an exact gradient.

@@ -1215,7 +1215,7 @@ test_that("the curve registry is read from C++, not restated in R", {
   # / `.GRADIENT_VERIFIED_LINKS` recorded which routes had been checked against a
   # finite difference of their own solve; once every route was, the predicate was
   # a constant and the `stop()` behind it unreachable -- and that dead branch still
-  # named `$optimise_psi_leaf_<curve>()`, which no longer exists. Deleted. What
+  # named `$optimise_psi_stem_<curve>()`, which no longer exists. Deleted. What
   # replaces it is derived, so a curve added in C++ arrives here on its own.
   expect_identical(phylloptim:::.gradient_models(), nms)
   expect_false(exists(".gradient_link_verified",
@@ -1246,8 +1246,8 @@ test_that("the curve registry is read from C++, not restated in R", {
   # make unrepresentable-by-accident: an index said which curve, and nothing said
   # which route.
   l$set_model("SOX", "collar")
-  expect_error(l$dprofit_dpsi_leaf_checked(l$opt_psi_leaf_), "STEM-route")
-  expect_error(l$evaluate_psi_leaf_at(2.0), "STEM-route")
+  expect_error(l$dprofit_dpsi_leaf_checked(l$opt_psi_leaf_), "LEAF-route")
+  expect_error(l$evaluate_psi_leaf_at(2.0), "LEAF-route")
 })
 
 # --- differentiating a leaf-route model's optimum (plan item 5) --------------------

@@ -980,7 +980,7 @@ parameters:
     symbol: 'P_{50}'
     units: 'MPa'
     class: trait
-    meaning: 'leaf potential at 50% loss of conductivity, a positive magnitude; one of the stem curve''s two settable numbers (hazard 1), moved only through set_traits()'
+    meaning: 'stem potential at 50% loss of conductivity, a positive magnitude; one of the stem curve''s two settable numbers (hazard 1), moved only through set_traits()'
     source: 'E. saligna default (leaf_traits())'
     placeholder: false
     code: phylloptim::Leaf::stem_P50

@@ -267,7 +267,7 @@ set_traits <- function(x, traits) {
 ##'
 ##' @section Two of these are not traits:
 ##' `pars` also accepts `leaf_specific_conductance_max` and, on the
-##' single-potential path, `resistance`. They are here because a calibration fits
+##' single-potential path's collar route, `resistance`. They are here because a calibration fits
 ##' them: of a companion calibration study's four free parameters two are traits and two are
 ##' these, so restricting `pars` to [leaf_traits()] left half of that fit without
 ##' an exact gradient.
