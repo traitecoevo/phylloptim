@@ -76,7 +76,7 @@ Leaf:
       `bigleaf`.
 
       Set the drivers with `$set_physiology()`, solve with `$optimise()`, then
-      read the operating point off the object: `$opt_psi_stem_`, `$profit_`,
+      read the operating point off the object: `$opt_psi_leaf_`, `$profit_`,
       `$assim_colimited_`, `$transpiration_`, `$lambda`, `$g1_eff`.
       `$find_root_collar_psi()` solves the seated curve on the collar route,
       whatever route and method are seated: on the default model, the same solve
@@ -89,17 +89,17 @@ Leaf:
       `$TF24_floor_lambda_o` are fields, and `JS22_gamma`, `CMax_a` and `CMax_b`
       are traits. `curve` is any name from
       [cost_curve_names()]; `route` is `"collar"` (the full soil-to-collar path,
-      any supply) or `"stem"` (psi_stem with the upstream potential pinned at
+      any supply) or `"leaf"` (psi_leaf with the upstream potential pinned at
       `psi_soil`, single soil layer only). A third argument, `method`, chooses HOW
       the operating point is reached: `"exact"` (the default, a root-find of the
       first-order condition) or `"closed"` (the closed form, for `TF24`, `CF77`
-      and `TF24_floor` on the stem route only). `$model_curve()`, `$model_route()` and
+      and `TF24_floor` on the leaf route only). `$model_curve()`, `$model_route()` and
       `$model_method()` report what is seated. The defaults are `"TF24_floor"`,
-      `"stem"` and `"exact"`, on the single-potential supply, as in R's
+      `"leaf"` and `"exact"`, on the single-potential supply, as in R's
       functions.
 
       ```r
-      l$set_model("ProfitMax", "stem")
+      l$set_model("ProfitMax", "leaf")
       l$optimise()
       ```
 
@@ -117,7 +117,7 @@ Leaf:
       operating point, is the one output every curve reports on the same axis.
 
       `$curve_cost()`, `$curve_profit()` and `$curve_lambda()` evaluate any
-      curve by name at a stem potential, whatever is seated; the per-curve
+      curve by name at a leaf potential, whatever is seated; the per-curve
       methods (`$hydraulic_cost_CF77()`, `$lambda_SOX()` and the rest) are the
       same numbers, kept for existing code.
 
@@ -140,7 +140,7 @@ Leaf:
         FALLBACK, and for the width below which it treats the feasible collar
         interval as a single point. ⚠️ It does NOT set how well the operating
         point is determined -- the collar solve root-finds its own first-order
-        condition -- and it does NOT reach the stem route at all.
+        condition -- and it does NOT reach the leaf route at all.
       @param vulnerability_curve_ncontrol number of control points for the pre-computed vulnerability curves
       @param ci_abs_tol absolute tolerance for root-solving ci
       @param ci_niter maximum number of iterations for root-solving ci
@@ -248,7 +248,7 @@ Leaf:
     # Least-cost's unit-cost ratio, @Prentice-2014's beta: the cost of maintaining
     # carboxylation capacity relative to the cost of transpiration.
     #
-    # ⚠️ ITS DEFAULT IS ALIGNED, NOT PUBLISHED: the beta at which LeastCost's stem
+    # ⚠️ ITS DEFAULT IS ALIGNED, NOT PUBLISHED: the beta at which LeastCost's leaf
     # optimum has TF24's conductance at the reference environment of
     # `align_curves()`. At this package's default leaf the published 146 pins the
     # optimum at psi_crit from the reference psi_soil of 1 MPa drier. Clearing it to NA is refused, since that is a NaN
@@ -277,7 +277,7 @@ Leaf:
     hydraulic_cost_norm_: {type: double, access: field}
     thermal_cost_: {type: double, access: field}
     hydraulic_cost_: {type: double, access: field}
-    opt_psi_stem_: {type: double, access: field}
+    opt_psi_leaf_: {type: double, access: field}
     opt_root_psi_: {type: double, access: field}
     E_up_: {type: double, access: field}
     assim_max_: {type: double, access: field}
@@ -638,11 +638,11 @@ Leaf:
       args: [Ea: double, ref_value: double, leaf_temp: double, H_d: double, d_S: double]
     transpiration:
       return_type: double
-      args: [psi_stem: double, psi_upstream: double]
+      args: [psi_leaf: double, psi_upstream: double]
     # The residual conductance's temperature factor (1 at 25 C exactly) and the
-    # conductance itself at a leaf temperature; the stem potential at which the
+    # conductance itself at a leaf temperature; the leaf potential at which the
     # stem carries exactly the residual flux from a pinned upstream potential
-    # (the wet end of a stem route, psi_upstream itself at g_min = 0); and the
+    # (the wet end of a leaf route, psi_upstream itself at g_min = 0); and the
     # stem's flux ceiling from an upstream potential, kmax (G(inf) - G(psi)).
     g_min_factor:
       return_type: double
@@ -650,7 +650,7 @@ Leaf:
     g_min_at:
       return_type: double
       args: [leaf_temp: double]
-    stem_wet_bound:
+    leaf_wet_bound:
       return_type: double
       args: [psi_upstream: double]
     supply_ceiling:
@@ -658,11 +658,11 @@ Leaf:
       args: [psi_upstream: double]
     transpiration_full_integration:
       return_type: double
-      args: [psi_stem: double, psi_upstream: double]
+      args: [psi_leaf: double, psi_upstream: double]
     stom_cond_CO2:
       return_type: double
-      args: [psi_stem: double, psi_upstream: double]
-    transpiration_to_psi_stem:
+      args: [psi_leaf: double, psi_upstream: double]
+    transpiration_to_psi_leaf:
       return_type: double
       args: [transpiration_: double, psi_upstream: double]
 
@@ -678,7 +678,7 @@ Leaf:
       args: [ci_: double]
     assim_minus_stom_cond_CO2:
       return_type: double
-      args: [x: double, psi_stem: double, psi_upstream: double]
+      args: [x: double, psi_leaf: double, psi_upstream: double]
     electron_transport:
       return_type: double
       args: []
@@ -690,9 +690,9 @@ Leaf:
     leaf_temp_from_E:
       return_type: double
       args: [E: double]
-    set_leaf_states_rates_from_psi_stem:
+    set_leaf_states_rates_from_psi_leaf:
       return_type: void
-      args: [psi_stem: double, psi_upstream: double]
+      args: [psi_leaf: double, psi_upstream: double]
 
     # --- the soil -> root-collar supply path ----------------------------------
     #
@@ -711,7 +711,7 @@ Leaf:
     find_root_psi:
       return_type: double
       args: [wettest_soil_layer: double, psi_soil: "std::vector<double>", find_root_crit: int]
-    find_psi_stem_from_psi_root:
+    find_psi_leaf_from_psi_root:
       return_type: double
       args: [psi_root: double, psi_soil: "std::vector<double>"]
     evaluate_root_collar_psi:
@@ -723,92 +723,92 @@ Leaf:
     dprofit_droot_collar_psi_checked:
       return_type: "std::vector<double>"
       args: [opt_root_psi: double]
-    psi_stem_to_ci:
+    psi_leaf_to_ci:
       return_type: double
-      args: [psi_stem: double, psi_upstream: double]
+      args: [psi_leaf: double, psi_upstream: double]
 
     # --- leaf economics -------------------------------------------------------
     hydraulic_cost_TF:
       return_type: double
-      args: [psi_stem: double]
+      args: [psi_leaf: double]
     # Cowan & Farquhar (1977): `lambda * E`, a carbon flux, because `$CF77_lambda_` is
     # umol C per kg of water. This is the cost curve `$CF77_lambda_`'s units belong to,
     # and the one whose first-order condition is the dA/dE == lambda that the
     # optimality literature is written in.
     hydraulic_cost_CF77:
       return_type: double
-      args: [psi_stem: double, psi_upstream: double]
+      args: [psi_leaf: double, psi_upstream: double]
     hydraulic_cost_JS22:
       return_type: double
-      args: [psi_stem: double, psi_upstream: double]
+      args: [psi_leaf: double, psi_upstream: double]
     hydraulic_cost_CMax:
       return_type: double
-      args: [psi_stem: double, psi_upstream: double]
-    profit_psi_stem_TF:
+      args: [psi_leaf: double, psi_upstream: double]
+    profit_psi_leaf_TF:
       return_type: double
-      args: [psi_stem: double, psi_upstream: double]
-    profit_psi_stem_CF77:
+      args: [psi_leaf: double, psi_upstream: double]
+    profit_psi_leaf_CF77:
       return_type: double
-      args: [psi_stem: double, psi_upstream: double]
-    profit_psi_stem_JS22:
+      args: [psi_leaf: double, psi_upstream: double]
+    profit_psi_leaf_JS22:
       return_type: double
-      args: [psi_stem: double, psi_upstream: double]
-    profit_psi_stem_CMax:
+      args: [psi_leaf: double, psi_upstream: double]
+    profit_psi_leaf_CMax:
       return_type: double
-      args: [psi_stem: double, psi_upstream: double]
+      args: [psi_leaf: double, psi_upstream: double]
     # `TF24_cost_scale*(1-f)^TF24_beta2 + TF24_floor_lambda_o*E`: TF24's own cost
     # plus CF77's price. Both halves are carbon fluxes, so this is directly
     # comparable with either parent -- and reduces to each of them, bit-for-bit, at
     # `TF24_floor_lambda_o = 0` and `TF24_cost_scale = 0` respectively.
     hydraulic_cost_TF24_floor:
       return_type: double
-      args: [psi_stem: double, psi_upstream: double]
-    profit_psi_stem_TF24_floor:
+      args: [psi_leaf: double, psi_upstream: double]
+    profit_psi_leaf_TF24_floor:
       return_type: double
-      args: [psi_stem: double, psi_upstream: double]
+      args: [psi_leaf: double, psi_upstream: double]
     lambda_JS22:
       return_type: double
-      args: [psi_stem: double, psi_upstream: double]
+      args: [psi_leaf: double, psi_upstream: double]
     lambda_CMax:
       return_type: double
-      args: [psi_stem: double, psi_upstream: double]
+      args: [psi_leaf: double, psi_upstream: double]
     # ⚠️ THE ONE lambda HERE THAT DOES NOT VANISH AT THE WET END: it is `lambda_TF24`
     # plus `$TF24_floor_lambda_o`, so as the potential closes on zero the price
     # falls to that constant instead of to zero. One argument, like `lambda_TF24`,
     # because the hydraulic half reads the absolute potential.
     lambda_TF24_floor:
       return_type: double
-      args: [psi_stem: double]
+      args: [psi_leaf: double]
     # --- the product-objective family (PLAN 7c) ------------------------------
-    # ⚠️ profit_psi_stem_SOX returns a PRODUCT, not a carbon profit.
+    # ⚠️ profit_psi_leaf_SOX returns a PRODUCT, not a carbon profit.
     sox_reduction:
       return_type: double
-      args: [psi_stem: double]
-    profit_psi_stem_SOX:
+      args: [psi_leaf: double]
+    profit_psi_leaf_SOX:
       return_type: double
-      args: [psi_stem: double, psi_upstream: double]
+      args: [psi_leaf: double, psi_upstream: double]
     lambda_SOX:
       return_type: double
-      args: [psi_stem: double, psi_upstream: double]
+      args: [psi_leaf: double, psi_upstream: double]
     jw26_reduction:
       return_type: double
-      args: [psi_stem: double]
-    profit_psi_stem_JW26:
+      args: [psi_leaf: double]
+    profit_psi_leaf_JW26:
       return_type: double
-      args: [psi_stem: double, psi_upstream: double]
+      args: [psi_leaf: double, psi_upstream: double]
     lambda_JW26:
       return_type: double
-      args: [psi_stem: double, psi_upstream: double]
+      args: [psi_leaf: double, psi_upstream: double]
     lambda_TF24:
       return_type: double
-      args: [psi_stem: double]
+      args: [psi_leaf: double]
 
     # --- every curve by name ----------------------------------------------------
     # Each reads the curve's own definition whatever curve the leaf is set to, so
     # a new curve needs no method here.
     curve_cost:
       roxygen: |
-        A cost curve's cost at a stem potential, by name.
+        A cost curve's cost at a leaf potential, by name.
 
         The `C` in the curve's objective `J = h(A) - C`, in the units its benefit
         link `h` composes with assimilation: a difference curve's cost in umol C
@@ -816,40 +816,40 @@ Leaf:
         `$hydraulic_cost_`), `-log g` for a product (`SOX`, `JW26`), `log W` for
         `LeastCost`'s ratio, and the normalised `HC + TC` for `ProfitMax`, whose
         normalisers must be seeded (`$prepare_profitmax()`). Its slope in
-        `psi_stem` is what `$curve_lambda()` divides.
+        `psi_leaf` is what `$curve_lambda()` divides.
         @param curve cost curve name, from \code{\link{cost_curve_names}}
-        @param psi_stem stem water potential, MPa as a positive magnitude
+        @param psi_leaf leaf water potential, MPa as a positive magnitude
         @param psi_upstream the upstream (collar or soil) potential, MPa
         @export
       return_type: double
-      args: [curve: "std::string", psi_stem: double, psi_upstream: double]
+      args: [curve: "std::string", psi_leaf: double, psi_upstream: double]
     curve_profit:
       roxygen: |
-        A cost curve's objective at a stem potential, by name.
+        A cost curve's objective at a leaf potential, by name.
 
         Evaluates the leaf there and returns the curve's objective in its
         published units -- a carbon profit, a product, a ratio or a normalised
-        profit -- leaving the leaf's outputs as `$evaluate_psi_stem_at()` would.
+        profit -- leaving the leaf's outputs as `$evaluate_psi_leaf_at()` would.
         @param curve cost curve name, from \code{\link{cost_curve_names}}
-        @param psi_stem stem water potential, MPa as a positive magnitude
+        @param psi_leaf leaf water potential, MPa as a positive magnitude
         @param psi_upstream the upstream (collar or soil) potential, MPa
         @export
       return_type: double
-      args: [curve: "std::string", psi_stem: double, psi_upstream: double]
+      args: [curve: "std::string", psi_leaf: double, psi_upstream: double]
     curve_lambda:
       roxygen: |
-        A cost curve's marginal cost of water at a stem potential, by name.
+        A cost curve's marginal cost of water at a leaf potential, by name.
 
-        `dC/dE` in umol C (kg H2O)^-1, as `$lambda` reports it at a stem-route
+        `dC/dE` in umol C (kg H2O)^-1, as `$lambda` reports it at a leaf-route
         optimum: the cost's slope over the transpiration's, in carbon. A product
         or a ratio reads the assimilation last evaluated, so evaluate the leaf at
-        `psi_stem` first (`$curve_profit()` does).
+        `psi_leaf` first (`$curve_profit()` does).
         @param curve cost curve name, from \code{\link{cost_curve_names}}
-        @param psi_stem stem water potential, MPa as a positive magnitude
+        @param psi_leaf leaf water potential, MPa as a positive magnitude
         @param psi_upstream the upstream (collar or soil) potential, MPa
         @export
       return_type: double
-      args: [curve: "std::string", psi_stem: double, psi_upstream: double]
+      args: [curve: "std::string", psi_leaf: double, psi_upstream: double]
 
     # --- optimisers -----------------------------------------------------------
 
@@ -883,7 +883,7 @@ Leaf:
         fields, and `JS22_gamma`, `CMax_a` and `CMax_b` are traits. Seat the
         model, set whatever constants it needs, then call `optimise()`.
 
-        `route = "stem"` optimises `psi_stem` with the upstream potential pinned
+        `route = "leaf"` optimises `psi_leaf` with the upstream potential pinned
         at `psi_soil`, the form the published models are written in, and needs a
         single soil potential. `route = "collar"` is the full
         soil-to-collar-to-stem path, with a root network or with a single soil
@@ -904,15 +904,15 @@ Leaf:
         wet-end constant to expand about); `SOX` and `JW26` cannot have one at all
         (their
         benefit link makes `lambda` carry the assimilation the solve is for); it
-        needs the stem route and a single soil layer; and it is refused with
+        needs the leaf route and a single soil layer; and it is refused with
         `use_energy_balance_` on, because the deficit then depends on the
         transpiration being solved for. Where its validity guard fails it falls
         back to the exact solve — see `$closed_form_fallback_fraction()`.
 
-        Defaults to `"TF24_floor"`, `"stem"` and `"exact"`, as R's functions do;
+        Defaults to `"TF24_floor"`, `"leaf"` and `"exact"`, as R's functions do;
         at its default price TF24_floor is TF24.
         @param curve cost curve name, from \code{\link{cost_curve_names}}
-        @param route `"collar"` or `"stem"`
+        @param route `"collar"` or `"leaf"`
         @param method `"exact"` (default) or `"closed"`
         @export
       return_type: void
@@ -952,26 +952,26 @@ Leaf:
         own constants are all already on the object. See `set_model()`.
         @export
       return_type: void
-    # The stem route's two off-solve entry points. Neither names a curve: they
+    # The leaf route's two off-solve entry points. Neither names a curve: they
     # read the one `set_model()` seated, exactly as `optimise()` does, so a
     # caller never handles an index that means a different model when the
     # enumeration grows. Both refuse on the collar route.
-    evaluate_psi_stem_at:
+    evaluate_psi_leaf_at:
       roxygen: |
-        Evaluate the leaf at a prescribed psi_stem, rather than optimising one.
+        Evaluate the leaf at a prescribed psi_leaf, rather than optimising one.
 
         Uses the model `set_model()` seated, so seat a STEM route first. Leaves
         the same outputs a solve would and returns `profit_`.
-        @param target_psi_stem stem water potential to evaluate at, MPa as a
+        @param target_psi_leaf leaf water potential to evaluate at, MPa as a
           positive magnitude. Must lie in the model's feasible interval, from
           the wet bound to the dry end of its curve; outside it the call is
           refused with the infeasibility code `prescribed_potential`.
         @export
       return_type: double
-      args: [target_psi_stem: double]
-    dprofit_dpsi_stem_checked:
+      args: [target_psi_leaf: double]
+    dprofit_dpsi_leaf_checked:
       roxygen: |
-        dprofit/dpsi_stem at a given stem potential, with its feasibility.
+        dprofit/dpsi_leaf at a given leaf potential, with its feasibility.
 
         Uses the model `set_model()` seated, so seat a STEM route first.
 
@@ -980,10 +980,10 @@ Leaf:
         reversed-gradient exits, which is indistinguishable from a stationary
         point; a composite that reads the value without the flag reports the
         shut-down state as the optimum.
-        @param psi_stem stem water potential, MPa as a positive magnitude
+        @param psi_leaf leaf water potential, MPa as a positive magnitude
         @export
       return_type: "std::vector<double>"
-      args: [psi_stem: double]
+      args: [psi_leaf: double]
 
     # --- Sperry (2017) ProfitMax with BOTH terms normalised -------------------
     #
@@ -1004,9 +1004,9 @@ Leaf:
     prepare_profitmax:
       return_type: void
       args: []
-    profit_psi_stem_ProfitMax:
+    profit_psi_leaf_ProfitMax:
       return_type: double
-      args: [psi_stem: double, psi_upstream: double]
+      args: [psi_leaf: double, psi_upstream: double]
     # n rows of (psi, CG, HC, TC, profit), flattened COLUMN-MAJOR, in one crossing
     # of the R boundary. This is Sicangco et al.'s Figures 2, 3 and S4; building it
     # row by row from R would pay ~1.8 us of call overhead against a ~3 us model.

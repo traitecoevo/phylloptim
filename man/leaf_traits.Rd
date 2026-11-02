@@ -28,7 +28,7 @@ leaf_traits(
 
 \item{stem_c}{shape parameter of the stem vulnerability curve (unitless)}
 
-\item{stem_P50}{stem potential at 50\% loss of conductivity (MPa, positive
+\item{stem_P50}{leaf potential at 50\% loss of conductivity (MPa, positive
 magnitude). \code{stem_b} and \code{psi_crit} are derived from this pair and are
 readable but not settable on the resulting \code{Leaf}.}
 
@@ -63,7 +63,7 @@ photon. Was \code{a} (incident basis) before 0.13.0: \code{phi_J = a / 0.85}.}
 an exactly zero gradient on every other one.
 
 ⚠️ \strong{The default is not a literature value.} It is aligned to TF24 by
-\code{\link[=align_curves]{align_curves()}}: the value at which the JS22 stem optimum has TF24's
+\code{\link[=align_curves]{align_curves()}}: the value at which the JS22 leaf optimum has TF24's
 conductance at that function's reference environment. No single value matches more
 than one soil potential: the \code{JS22_gamma} reproducing TF24's cost at its own
 optimum runs 0.287 at \code{psi_soil} 0.5 MPa to 1.761 at 3.0 MPa. TF24's cost

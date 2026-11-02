@@ -172,9 +172,11 @@ leaf_batch <- function(psi_soil,
 print.leaf_batch <- function(x, ...) {
   cat(sprintf("<leaf_batch> %d observation%s, %s supply\n",
               x$n, if (x$n == 1L) "" else "s", x$supply_kind))
-  cat(sprintf("  differentiable: %s\n",
-              paste(.gradient_available_pars(
-                identical(x$supply_kind, "single")), collapse = ", ")))
+  single <- identical(x$supply_kind, "single")
+  cat(sprintf("  differentiable: %s%s\n",
+              paste(.gradient_available_pars(single, route = "collar"),
+                    collapse = ", "),
+              if (single) " (`resistance` on the collar route only)" else ""))
   invisible(x)
 }
 
@@ -243,7 +245,7 @@ print.leaf_batch <- function(x, ...) {
 ##'   `theta` is given.
 ##' @param model,route which optimality model to differentiate, and on which
 ##'   route, as in [leaf_gradient()]: any [cost_curve_names()] entry,
-##'   `"TF24_floor"` by default, on its stem route unless `route = "collar"`.
+##'   `"TF24_floor"` by default, on its leaf route unless `route = "collar"`.
 ##' @param pars what to differentiate with respect to, as in [leaf_gradient()].
 ##'   ⚠️ **Always pass it.** It is `P_model`, so the default — all of them — is
 ##'   the most expensive thing you can ask for.
@@ -254,7 +256,7 @@ print.leaf_batch <- function(x, ...) {
 ##' @return A list with
 ##'   \describe{
 ##'     \item{`gradient`}{an `n` × `length(pars)` × 5 array, the last dimension
-##'       being `A`, `gc`, `psi_stem`, `collar` and `profit`}
+##'       being `A`, `gc`, `psi_leaf`, `collar` and `profit`}
 ##'     \item{`value`}{an `n` × 5 matrix of the solved outputs}
 ##'     \item{`method`}{`"ift"`, `"fd"` or `"prescribed"` per observation}
 ##'     \item{`status`}{`"interior"`, `"pinned"`, `"no-gradient"`, `"error"`,
@@ -312,9 +314,9 @@ leaf_gradient_batch <- function(batch,
   damage <- isTRUE(batch$leaf$use_thermal_damage_)
   par_names <- .gradient_par_names()
   if (is.null(pars)) {
-    pars <- .gradient_available_pars(single, model, damage)
+    pars <- .gradient_available_pars(single, model, damage, m$route)
   }
-  .gradient_check_pars(pars, single, model, damage)
+  .gradient_check_pars(pars, single, model, damage, m$route)
 
   # The finite-difference arm's step: the caller's if named, as in
   # leaf_gradient(), otherwise the one that clears the solver's resolution.

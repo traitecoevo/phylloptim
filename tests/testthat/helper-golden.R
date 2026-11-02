@@ -74,13 +74,13 @@ golden_water_flux_fields <- c("transpiration", "gc", "e_up", "uptake")
 #
 # Measured on Linux CI, the whole-file worst: 1.19e-07. 1e-5 leaves ~80x of
 # headroom and still catches what this file exists for: tightening
-# `psi_stem_to_ci` from 1e-10 to 1e-13 moved these cells by up to 2.3e-3 (#172),
+# `psi_leaf_to_ci` from 1e-10 to 1e-13 moved these cells by up to 2.3e-3 (#172),
 # and #41's reallocation by 16% to 250%.
 #
 # ⚠️ THE FLOOR IS THE `ci` ROOT-FIND'S TOLERANCE, NOT libm. At 1e-10 this file
 # disagreed across platforms by 2.34e-3 -- the same 2.3e-3 the macOS values were
 # themselves wrong by, measured against a Richardson-extrapolated difference of
-# the solve. Loosen `psi_stem_to_ci` and this tolerance must be re-measured, not
+# the solve. Loosen `psi_leaf_to_ci` and this tolerance must be re-measured, not
 # widened until it passes. Read the worst-difference line the test prints on every
 # run before adding a column.
 gradient_golden_tolerance <- function() 1.0e-5
@@ -163,7 +163,7 @@ golden_solve <- function(psi_soil, ppfd, vpd, layers, leaf_temp = golden_tleaf) 
 
   consumption <- l$soil_consumption_
   list(
-    psi_stem = l$opt_psi_stem_,
+    psi_leaf = l$opt_psi_leaf_,
     opt_root_psi = l$opt_root_psi_,
     ci = l$ci_,
     assim = l$assim_colimited_,

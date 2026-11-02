@@ -14,10 +14,10 @@
 # price, whatever the stem) is noise on both sides, so agreement is measured
 # against a floor of 1e-5 of the output per unit of the parameter.
 #
-# Measured on macOS/arm64: worst 5.2e-4 (CF77's g_min on the stem route, an
+# Measured on macOS/arm64: worst 5.2e-4 (CF77's g_min on the leaf route, an
 # output at that floor), 99th percentile 1.3e-4, median 2e-9, over 204 rows.
 
-referee_outputs <- c("A", "gc", "psi_stem", "collar", "profit")
+referee_outputs <- c("A", "gc", "psi_leaf", "collar", "profit")
 
 # Interior on the multi-layer collar route for every curve; at their aligned
 # defaults CF77 and LeastCost pin there (see helper-gradient.R).
@@ -36,7 +36,7 @@ referee_setups <- list(
                       depth = 1),
   collar_single = list(supply = leaf_supply_singlelayer(), route = "collar",
                        resistance = 1e4),
-  stem_single = list(supply = leaf_supply_singlelayer(), route = "stem",
+  leaf_single = list(supply = leaf_supply_singlelayer(), route = "leaf",
                      resistance = 1e4))
 
 # The drivers both sides take, for a setup and a resistance.
@@ -102,7 +102,8 @@ test_that("every curve's gradient on every route agrees with a difference of its
       pars <- c("vcmax_25", "stem_P50", "stem_c", "R_d_25", "g_min",
                 "leaf_specific_conductance_max",
                 params$parameter[params$curve == curve],
-                if (!is.null(su$resistance)) "resistance")
+                if (identical(su$route, "collar") && !is.null(su$resistance))
+                  "resistance")
       x <- leaf_model(referee_traits, supply = su$supply)
       for (f in names(referee_prices[[curve]])) {
         x[[if (f == "CF77_lambda") "CF77_lambda_" else f]] <-
@@ -134,7 +135,7 @@ test_that("every curve's gradient on every route agrees with a difference of its
           if (is.null(fd)) next
           steps <- steps + 1L
           err <- abs(gp - fd) / pmax(abs(gp), abs(fd), floor_y)
-          # A stem route's collar is not solved for: NaN on both sides.
+          # A leaf route's collar is not solved for: NaN on both sides.
           err[!is.finite(gp) & !is.finite(fd)] <- 0
           best <- pmin(best, err)
         }

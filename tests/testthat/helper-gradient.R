@@ -91,11 +91,10 @@ gradient_golden_cases <- function() {
                  LeastCost = list(LeastCost_beta = 5))
   for (cv in cost_curve_names()) {
     own <- cp$parameter[cp$curve == cv]
-    for (route in c("collar", "stem")) {
+    for (route in c("collar", "leaf")) {
       args <- c(if (route == "collar") batch_drivers(1.0) else single(1.0),
                 prices[[cv]])
-      pars <- c("vcmax_25", "stem_P50", "R_d_25", own,
-                if (route == "stem") "resistance")
+      pars <- c("vcmax_25", "stem_P50", "R_d_25", own)
       cases[[paste0(cv, "-", route)]] <- case(args, pars, cv, route)
     }
   }
@@ -119,8 +118,8 @@ gradient_golden_cases <- function() {
   cases[["prescribed-ProfitMax-collar"]] <- case(
     batch_drivers(1.0), c("vcmax_25", "stem_P50"), "ProfitMax", "collar",
     psi = 2.0)
-  cases[["prescribed-JS22-stem"]] <- case(
-    single(1.0), c("vcmax_25", "stem_P50", "JS22_gamma"), "JS22", "stem", psi = 2.0)
+  cases[["prescribed-JS22-leaf"]] <- case(
+    single(1.0), c("vcmax_25", "stem_P50", "JS22_gamma"), "JS22", "leaf", psi = 2.0)
   cases
 }
 

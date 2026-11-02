@@ -1,4 +1,4 @@
-pass	solver	topology	psi_soil	ppfd	leaf_temp	eb	tc	status	kind	opt_psi_stem	opt_root_psi	profit	ci	assim	transpiration	gc	hydraulic_cost	lambda	lambda_emergent	tleaf	carbon_gain	hydraulic_cost_norm	thermal_cost
+pass	solver	topology	psi_soil	ppfd	leaf_temp	eb	tc	status	kind	opt_psi_leaf	opt_root_psi	profit	ci	assim	transpiration	gc	hydraulic_cost	lambda	lambda_emergent	tleaf	carbon_gain	hydraulic_cost_norm	thermal_cost
 fresh	TF	single	0.5	0	25	0	0	ok	unsolved	0.5	nan	-1.4419413546030404	inf	-1.4399999999999999	0	0	0.0019413546030404472	nan	498.12524204893521	25	nan	nan	nan
 fresh	ProfitMax	single	0.5	0	25	0	0	ok	unsolved	0.5	nan	0	inf	-1.4399999999999999	0	0	nan	nan	nan	25	0	0	0
 fresh	CF77	single	0.5	0	25	0	0	ok	unsolved	0.5	nan	-1.4399999999999999	inf	-1.4399999999999999	0	0	0	150000	150000.00000000087	25	nan	nan	nan

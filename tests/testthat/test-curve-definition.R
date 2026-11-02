@@ -83,9 +83,9 @@ test_that("the by-name methods cover every curve, and are each curve's own", {
   expect_identical(l$curve_cost("JW26", ps, pu), -log(l$jw26_reduction(ps)))
   for (curve in c("CF77", "JS22", "CMax", "TF24_floor", "SOX", "JW26")) {
     expect_identical(l$curve_profit(curve, ps, pu),
-                     l[[paste0("profit_psi_stem_", curve)]](ps, pu), info = curve)
+                     l[[paste0("profit_psi_leaf_", curve)]](ps, pu), info = curve)
   }
-  expect_identical(l$curve_profit("TF24", ps, pu), l$profit_psi_stem_TF(ps, pu))
+  expect_identical(l$curve_profit("TF24", ps, pu), l$profit_psi_leaf_TF(ps, pu))
   expect_identical(l$curve_lambda("TF24", ps, pu), l$lambda_TF24(ps))
   expect_identical(l$curve_lambda("TF24_floor", ps, pu), l$lambda_TF24_floor(ps))
   for (curve in c("JS22", "CMax", "SOX", "JW26")) {

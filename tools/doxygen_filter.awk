@@ -112,7 +112,7 @@ function escape(s) {
 # A `::` that STARTS a line is a wrapped qualified name -- `MultiLayerRoots` at
 # the end of one line and `::set_root_network` at the start of the next -- and
 # Doxygen reads it as an explicit link request to a global entity, which cannot
-# resolve. Escape only that case: `Leaf::optimise_psi_stem_TF` written inline
+# resolve. Escape only that case: `Leaf::optimise_psi_leaf_TF` written inline
 # still auto-links, which is worth keeping. Doxygen 1.9 on ubuntu errors on this
 # where 1.17 does not, so it only ever showed up in CI.
 #

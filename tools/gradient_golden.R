@@ -105,7 +105,7 @@ out <- do.call(rbind, lapply(names(cases), function(label) {
                par = p,
                A = sprintf("%a", g$gradient[1, p, "A"]),
                gc = sprintf("%a", g$gradient[1, p, "gc"]),
-               psi_stem = sprintf("%a", g$gradient[1, p, "psi_stem"]),
+               psi_leaf = sprintf("%a", g$gradient[1, p, "psi_leaf"]),
                collar = sprintf("%a", g$gradient[1, p, "collar"]),
                profit = sprintf("%a", g$gradient[1, p, "profit"]),
                stringsAsFactors = FALSE)

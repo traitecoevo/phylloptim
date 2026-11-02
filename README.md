@@ -156,7 +156,7 @@ l.set_physiology(roots, /*PPFD*/ 900,
 
 l.find_root_collar_psi();       // solve
 
-l.opt_psi_stem_;                // leaf water potential at the optimum, MPa
+l.opt_psi_leaf_;                // leaf water potential at the optimum, MPa
 l.opt_root_psi_;                // root-collar potential, MPa (positive magnitude)
 l.assim_colimited_;             // A, umol m-2 s-1
 l.transpiration_;               // E, kg H2O m-2 s-1
@@ -236,7 +236,7 @@ PYBIND11_MODULE(pyleaf, m) {
       .def("set_physiology", &phylloptim::Leaf::set_physiology)
       .def("find_root_collar_psi", &phylloptim::Leaf::find_root_collar_psi)
       .def_readonly("profit", &phylloptim::Leaf::profit_)
-      .def_readonly("opt_psi_stem", &phylloptim::Leaf::opt_psi_stem_)
+      .def_readonly("opt_psi_leaf", &phylloptim::Leaf::opt_psi_leaf_)
       .def_property_readonly("g1_eff", &phylloptim::Leaf::g1_eff);
 }
 ```
@@ -290,7 +290,7 @@ curve is one call:
 library(phylloptim)
 
 leaf_solve(psi_soil = 2.0, PPFD = 900)
-#>   psi_soil layers PPFD atm_vpd ca leaf_temp atm_kpa psi_stem collar       ci
+#>   psi_soil layers PPFD atm_vpd ca leaf_temp atm_kpa psi_leaf collar       ci
 #> 1        2      1  900       2 40        25   101.3 3.864854    NaN 18.71375
 #>         A            E        gc   profit ...   lambda   g1_eff
 #> 1 12.8818 3.641312e-05 0.0613037 9.188099 ... 191735.2 1.243302
@@ -331,14 +331,14 @@ l$lambda             # marginal cost of water, dA/dE
 curve, a route and a method; `$optimise()` takes nothing, because the curves'
 constants are already on the object. The defaults, here and in every R
 function, are `"TF24_floor"` (plant's model, which at its default price is TF24),
-`"stem"` and `"exact"`, over the single-potential supply; the collar route and the
+`"leaf"` and `"exact"`, over the single-potential supply; the collar route and the
 multi-layer supply are asked for. `$find_root_collar_psi()` is the collar solve
 under the name plant's sources spell.
 
 ```r
 l <- leaf_model()
 set_drivers(l, psi_soil = 1.5, PPFD = 900)
-l$set_model("SOX", "stem")     # any of cost_curve_names(); "collar" or "stem"
+l$set_model("SOX", "leaf")     # any of cost_curve_names(); "collar" or "leaf"
 l$optimise()
 l$model_curve(); l$model_route(); l$model_method()
 ```
@@ -346,7 +346,7 @@ l$model_curve(); l$model_route(); l$model_method()
 The third axis chooses *how* the operating point is reached rather than *what* is
 optimised. `"exact"` root-finds the first-order condition; `"closed"` inverts the
 Medlyn USO relation given the marginal cost of water, which is explicit where that
-cost is a wet-end power law in `psi`. It exists for `TF24` and `CF77` on the stem
+cost is a wet-end power law in `psi`. It exists for `TF24` and `CF77` on the leaf
 route only, is refused outright with the energy balance on, and falls back to the
 exact solve where its validity guard fails — about 2x realised on a mixed driver
 grid, at a few percent error in wet soil and none at all on a fallback row.
@@ -355,7 +355,7 @@ grid, at a few percent error in wet soil and none at all on a fallback row.
 c <- leaf_model()
 c$CF77_lambda_ <- 1.5e5
 set_drivers(c, psi_soil = 0.5, PPFD = 1500, atm_vpd = 1)
-c$set_model("CF77", "stem", "closed")
+c$set_model("CF77", "leaf", "closed")
 c$optimise()
 c$closed_form_fallback_fraction()   # phi, which sets the realised speedup
 ```
@@ -402,11 +402,11 @@ traits, which is what a gradient-based optimiser or a Hamiltonian sampler wants:
 ```r
 g <- leaf_gradient(psi_soil = 2.0, PPFD = 900,
                    pars = c("vcmax_25", "stem_P50", "TF24_cost_scale"))
-g$gradient   # rows: parameters.  columns: A, gc, psi_stem, collar, profit
+g$gradient   # rows: parameters.  columns: A, gc, psi_leaf, collar, profit
 g$method     # "ift" or "fd" -- see below
 
 # any of the nine models, on either route -- and `leaf_solve()` takes both too.
-# The default is TF24_floor, plant's model, on the stem route.
+# The default is TF24_floor, plant's model, on the leaf route.
 leaf_gradient(psi_soil = 2.0, PPFD = 900, model = "JS22",
               pars = c("vcmax_25", "JS22_gamma"))
 leaf_gradient(psi_soil = 2.0, PPFD = 900, model = "JS22", route = "collar",
@@ -419,12 +419,13 @@ from the leaf's profit rather than its assimilation, so without that column no
 gradient from this package reached a demographic model at all.
 
 `pars` is not restricted to traits: `leaf_specific_conductance_max` and, on the
-single-potential path, `resistance` are differentiable too, because a calibration
-fits them and nothing in the derivation cares whether a parameter is a trait.
+single-potential path's collar route, `resistance` are differentiable too, because
+a calibration fits them and nothing in the derivation cares whether a parameter is
+a trait. The leaf route never reads `resistance`, and refuses it.
 
 ```r
 leaf_gradient(psi_soil = 1.5, PPFD = 900,
-              supply = leaf_supply_singlelayer(),
+              supply = leaf_supply_singlelayer(), route = "collar",
               root_network = series_resistance(1e4),
               pars = c("leaf_specific_conductance_max", "resistance"))
 ```

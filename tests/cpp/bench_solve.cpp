@@ -124,7 +124,7 @@ double pass(std::vector<phylloptim::Leaf> &leaves, const std::vector<Point> &pts
     l.set_physiology(net, pt.ppfd, pt.ps, pt.depth, kKs * kTheta / kH,
                      pt.vpd, kCa, kTleaf, kO2, kPatm);
     solve(l);
-    for (double v : {l.opt_psi_stem_, l.opt_root_psi_, l.ci_,
+    for (double v : {l.opt_psi_leaf_, l.opt_root_psi_, l.ci_,
                      l.assim_colimited_, l.transpiration_, l.stom_cond_CO2_,
                      l.profit_, l.E_up_}) {
       if (std::isfinite(v)) {
@@ -165,15 +165,15 @@ enum class Arm { TF, ProfitMax, CF77, TF24_floor, TFClosed, CF77Closed,
 
 const char *arm_label(Arm a) {
   switch (a) {
-    case Arm::TF:            return "psi_stem:TF";
-    case Arm::ProfitMax:     return "psi_stem:ProfitMax";
-    case Arm::CF77: return "psi_stem:CF77";
-    case Arm::TF24_floor:       return "psi_stem:TF24_floor";
-    case Arm::TFClosed:      return "psi_stem:TF-closed";
-    case Arm::CF77Closed:    return "psi_stem:CF77-closed";
-    case Arm::TF24_floorClosed: return "psi_stem:TF24_floor-closed";
+    case Arm::TF:            return "psi_leaf:TF";
+    case Arm::ProfitMax:     return "psi_leaf:ProfitMax";
+    case Arm::CF77: return "psi_leaf:CF77";
+    case Arm::TF24_floor:       return "psi_leaf:TF24_floor";
+    case Arm::TFClosed:      return "psi_leaf:TF-closed";
+    case Arm::CF77Closed:    return "psi_leaf:CF77-closed";
+    case Arm::TF24_floorClosed: return "psi_leaf:TF24_floor-closed";
   }
-  return "psi_stem:?";
+  return "psi_leaf:?";
 }
 
 // Cowan-Farquhar consumes a PRESCRIBED lambda and throws without one. Fixed here
@@ -196,11 +196,11 @@ double pass_optimiser(Arm arm, std::vector<phylloptim::Leaf> &leaves,
     l.set_physiology(net, pt.ppfd, pt.ps, pt.depth, kKs * kTheta / kH,
                      pt.vpd, kCa, kTleaf, kO2, kPatm);
     switch (arm) {
-      case Arm::TF:        l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::TF24>();        break;
-      case Arm::ProfitMax: l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::ProfitMax>(); break;
+      case Arm::TF:        l.optimise_psi_leaf_single<phylloptim::Leaf::CostCurve::TF24>();        break;
+      case Arm::ProfitMax: l.optimise_psi_leaf_single<phylloptim::Leaf::CostCurve::ProfitMax>(); break;
       case Arm::CF77:
                            l.CF77_lambda_ = kLambdaCF77;
-                           l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::CF77>(); break;
+                           l.optimise_psi_leaf_single<phylloptim::Leaf::CostCurve::CF77>(); break;
       // ⚠️ THROUGH `optimise()`, NOT THE FREE FUNCTION, deliberately: what a caller
       // pays for the closed form INCLUDES the fallback to the exact solve on the
       // rows its guard rejects, and pricing the fast path alone would quote the
@@ -215,13 +215,13 @@ double pass_optimiser(Arm arm, std::vector<phylloptim::Leaf> &leaves,
                            l.optimise(); break;
       case Arm::TF24_floor:
                            l.TF24_floor_lambda_o = kLambdaFloorO;
-                           l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::TF24_floor>(); break;
+                           l.optimise_psi_leaf_single<phylloptim::Leaf::CostCurve::TF24_floor>(); break;
       case Arm::TF24_floorClosed:
                            l.TF24_floor_lambda_o = kLambdaFloorO;
                            l.set_model(phylloptim::Leaf::CostCurve::TF24_floor, false, true);
                            l.optimise(); break;
     }
-    for (double v : {l.opt_psi_stem_, l.ci_, l.assim_colimited_,
+    for (double v : {l.opt_psi_leaf_, l.ci_, l.assim_colimited_,
                      l.transpiration_, l.stom_cond_CO2_, l.profit_}) {
       if (std::isfinite(v)) {
         checksum += v;

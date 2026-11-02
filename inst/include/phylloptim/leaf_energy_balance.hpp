@@ -55,7 +55,7 @@ inline double Leaf::vcmax_temp_deriv(double leaf_temp) {
 template <Leaf::CostCurve K>
 inline double Leaf::dprofit_energy_balance_term(
     double ci, double gc, double g_ci, double inv_atm, double gc_const,
-    double A_prime, double dgc_dpsistem, double dgc_dpsi, double dpsistem_dpsi,
+    double A_prime, double dgc_dpsileaf, double dgc_dpsi, double dpsileaf_dpsi,
     double dT_dE, double Tleaf, double E_s, double r_star, double drstar_dpsi,
     double dgc_dT_residual, double bl_slope) {
   if (!use_energy_balance_ || dT_dE == 0.0) {
@@ -94,7 +94,7 @@ inline double Leaf::dprofit_energy_balance_term(
   // slope leaves the stomatal flux's slope, and the residual's is added back,
   // since Tleaf reads the total flux.
   const double dE_dpsi =
-      (dgc_dpsistem * dpsistem_dpsi + dgc_dpsi) / (gc_const * bl_slope) +
+      (dgc_dpsileaf * dpsileaf_dpsi + dgc_dpsi) / (gc_const * bl_slope) +
       drstar_dpsi;
   const double tau = dT_dE * dE_dpsi;
 
@@ -152,7 +152,7 @@ inline double Leaf::saturation_vapour_pressure(double temp) const {
 // Slope of the saturation vapour pressure curve Delta(T) in kPa K^-1, T in deg C:
 // the exact derivative of the Tetens form above. Not FAO-56's rounded 4098
 // (4.2e-5 low), which reaches the energy-balance first-order condition and put
-// dprofit/dpsi_stem 2e-6 to 2e-5 off a central difference of profit.
+// dprofit/dpsi_leaf 2e-6 to 2e-5 off a central difference of profit.
 inline double Leaf::saturation_vapour_pressure_slope(double temp) const {
   return (17.27 * 237.3) * saturation_vapour_pressure(temp) /
          ((temp + 237.3) * (temp + 237.3));

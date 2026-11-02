@@ -209,7 +209,7 @@ test_that("a driven row costs a bounded multiple of a trivial .Call", {
   row <- timeit(function() {
     set_drivers(l, psi_soil = 1.5, PPFD = 900, atm_vpd = 1.5, root_network = net)
     l$find_root_collar_psi()
-    c(l$assim_colimited_, l$stom_cond_CO2_, l$opt_psi_stem_)
+    c(l$assim_colimited_, l$stom_cond_CO2_, l$opt_psi_leaf_)
   }, 2000)
 
   expect_lt(row / ref, 30)      # measured 14
@@ -267,19 +267,19 @@ test_that("leaf_solve() reports the seated curve's lambda, not TF24's", {
   # ⚠️ CF77 PINS IT, its lambda being known independently of the solve: the
   # curve prices water at a prescribed constant, so this must return it.
   cf <- leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = "CF77",
-                   route = "stem", CF77_lambda = price, supply = sp)
+                   route = "leaf", CF77_lambda = price, supply = sp)
   expect_equal(cf$lambda, price, tolerance = 1e-8)
   expect_false("lambda_emergent" %in% names(cf))
 
   # TF24's is its lambda at the optimum, and TF24_floor's is that plus the floor
   tf <- leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = "TF24",
-                   route = "stem", supply = sp)
+                   route = "leaf", supply = sp)
   fl <- leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = "TF24_floor",
-                   route = "stem", TF24_floor_lambda_o = price, supply = sp)
+                   route = "leaf", TF24_floor_lambda_o = price, supply = sp)
   l <- leaf_model(supply = sp)
   set_drivers(l, psi_soil = 1.0, PPFD = 900, atm_vpd = 2)
-  expect_identical(tf$lambda, l$lambda_TF24(tf$psi_stem))
-  expect_equal(fl$lambda, l$lambda_TF24(fl$psi_stem) + price, tolerance = 1e-8)
+  expect_identical(tf$lambda, l$lambda_TF24(tf$psi_leaf))
+  expect_equal(fl$lambda, l$lambda_TF24(fl$psi_leaf) + price, tolerance = 1e-8)
 })
 
 test_that("lambda_molar is lambda in mol CO2 per mol H2O", {
@@ -288,7 +288,7 @@ test_that("lambda_molar is lambda in mol CO2 per mol H2O", {
   # the package, so an inverted conversion fails: nothing else reads this field.
   l <- leaf_model(supply = leaf_supply_singlelayer())
   set_drivers(l, psi_soil = 1.0, PPFD = 900, atm_vpd = 2)
-  l$set_model("TF24", "stem")
+  l$set_model("TF24", "leaf")
   l$optimise()
   expect_true(is.finite(l$lambda) && l$lambda > 0)
   expect_equal(l$lambda_molar, l$lambda * 1e-6 * 0.018015, tolerance = 1e-12)

@@ -1,6 +1,6 @@
 ##' Align the cost curves' level parameters to a common optimum
 ##'
-##' Solves each curve's level parameter so that its stem-route optimum has the same
+##' Solves each curve's level parameter so that its leaf-route optimum has the same
 ##' stomatal conductance as a target, under one reference environment. Aligned
 ##' curves agree at the reference and differ only in how their optimum moves
 ##' away from it, so a comparison across curves measures how each RESPONDS to
@@ -38,7 +38,7 @@
 ##' @param psi_soil,PPFD,atm_vpd,ca,leaf_temp,atm_o2_kpa,atm_kpa the reference
 ##'   environment, as in [leaf_solve()]. The defaults are [leaf_solve()]'s own,
 ##'   with a moderately wet soil.
-##' @param supply the supply path. The stem routes need
+##' @param supply the supply path. The leaf routes need
 ##'   [leaf_supply_singlelayer()], which is the default.
 ##' @param target the stomatal conductance to match, mol CO2 m^-2 s^-1. `NULL`
 ##'   (the default) takes TF24's at the reference, with `traits`.
@@ -52,13 +52,13 @@
 ##' a <- align_curves()
 ##' a
 ##' # The defaults are this answer, so these two agree:
-##' leaf_solve(psi_soil = 1, model = "JS22", route = "stem",
+##' leaf_solve(psi_soil = 1, model = "JS22", route = "leaf",
 ##'            supply = leaf_supply_singlelayer())$gc
 ##' attr(a, "target")
 ##'
 ##' # Align to a wetter reference instead, and use the result:
 ##' w <- align_curves(psi_soil = 0.5)
-##' leaf_solve(psi_soil = 0.5, model = "CMax", route = "stem",
+##' leaf_solve(psi_soil = 0.5, model = "CMax", route = "leaf",
 ##'            supply = leaf_supply_singlelayer(),
 ##'            traits = leaf_traits(CMax_a = w[["CMax_a"]]))$gc
 ##' @export
@@ -97,7 +97,7 @@ align_curves <- function(models = NULL,
                    atm_kpa = atm_kpa,
                    leaf_specific_conductance_max = leaf_specific_conductance_max,
                    traits = tr, control = control, supply = supply,
-                   model = model, route = "stem"),
+                   model = model, route = "leaf"),
               extra)
     do.call(leaf_solve, args)$gc
   }

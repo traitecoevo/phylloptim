@@ -15,7 +15,7 @@
 // and `supply`, from the implicit function theorem at the converged point;
 // nothing the root-find did is recorded. S is double, a tangent
 // (odelia::ode::tangent_scalar) or an adjoint (odelia::ode::adjoint_scalar).
-// `held` is optional: it spares billed_outputs_at solving the stem potential and
+// `held` is optional: it spares billed_outputs_at solving the leaf potential and
 // ci again, and changes no value or tangent (adjoint rows only to rounding).
 // Preconditions, checked where marked:
 //
@@ -103,9 +103,9 @@ inline void Leaf::held_coords_at(double sigma_star, double ci_star,
   // T1's slope there is kmax e^-40, and dividing by it amplifies rounding. A shut
   // leaf's stem seated at its collar IS the collar (V = 1 in the channel):
   // inverting T1 there divides by a conductivity of ~1e-20.
-  if (stem_held_at_dry_pin(sigma_star)) {
+  if (leaf_held_at_dry_pin(sigma_star)) {
     sigma_h = stem_curve_end_at<S>(pars);
-  } else if (stem_held_at_collar(sigma_star, to_passive(collar))) {
+  } else if (leaf_held_at_collar(sigma_star, to_passive(collar))) {
     sigma_h = held;
   } else {
     sigma_h = odelia::implicit_value<S>(
@@ -194,10 +194,10 @@ inline Leaf::CollarCoords<S> Leaf::collar_channel_at(
                                    pars[par_stem_c]);
 
   // dsigma/dcollar: the inverse's own slope times the transport's, as
-  // dprofit_at_collar_psi forms it, read where psi_stem_carrying placed the stem
+  // dprofit_at_collar_psi forms it, read where psi_leaf_carrying placed the stem
   // for the soil draw. Formed only where read, since the inverse can refuse.
   const auto dsigma_du = [&]() -> S {
-    const double sigma_at = psi_stem_carrying(
+    const double sigma_at = psi_leaf_carrying(
         to_passive(draw.E_up.value), to_passive(collar),
         "Leaf::collar_channel_at, placing the stem for the soil draw");
     const S recip = S(1.0) / f_sigma;
@@ -208,9 +208,9 @@ inline Leaf::CollarCoords<S> Leaf::collar_channel_at(
   // its channel is an exact zero, which formed would be e^40 times terms of
   // order e^-40, platform-dependent rounding. A stem seated at a shut leaf's
   // collar moves with it one for one.
-  const S V = stem_held_at_dry_pin(sigma_star)
+  const S V = leaf_held_at_dry_pin(sigma_star)
                   ? S(0.0)
-                  : stem_held_at_collar(sigma_star, to_passive(collar))
+                  : leaf_held_at_collar(sigma_star, to_passive(collar))
                         ? S(1.0)
                         : dsigma_du() * (draw.E_up.slope / kmax + f_p);
 
@@ -281,7 +281,7 @@ inline S Leaf::profit_at(const S& collar, const SupplyDraw<S>& draw,
   // One capacity for the point and for the assimilation read off it, so the ci
   // the residual placed and the A evaluated there are the same function.
   const PhotoCapacity<S> cap = photo_capacity_at<S>(pars);
-  const CollarCoords<S> at = collar_coords_at<S>(opt_psi_stem_, ci_, collar,
+  const CollarCoords<S> at = collar_coords_at<S>(opt_psi_leaf_, ci_, collar,
                                                  draw, pars, cap, collar_moves);
   return profit_from_coords<K, S>(collar, pars, cap, at.sigma.value,
                                   at.ci.value);
@@ -392,7 +392,7 @@ inline S Leaf::dprofit_dcollar_at(const S& collar, const SupplyDraw<S>& draw,
   // disagree by the interpolation error, enough to flip a curvature's sign.
   const PhotoCapacity<S> cap = photo_capacity_at<S>(pars);
   const CollarCoords<S> at =
-      collar_coords_at<S>(opt_psi_stem_, ci_, collar, draw, pars, cap, true);
+      collar_coords_at<S>(opt_psi_leaf_, ci_, collar, draw, pars, cap, true);
   return dprofit_dcollar_from_coords<K, S>(collar, pars, cap, at);
 }
 
@@ -408,7 +408,7 @@ inline S Leaf::dprofit_dcollar_at(const S& collar, const SupplyDraw<S>& draw,
                " and are being read at " + util::to_string(to_passive(collar)));
   }
   const CollarCoords<S> at =
-      collar_channel_at<S>(opt_psi_stem_, collar, draw, pars, held.cap,
+      collar_channel_at<S>(opt_psi_leaf_, collar, draw, pars, held.cap,
                            held.sigma, held.gc, held.ci, true);
   return dprofit_dcollar_from_coords<K, S>(collar, pars, held.cap, at);
 }
@@ -421,14 +421,14 @@ inline S Leaf::dprofit_dcollar_from_coords(const S& collar, const leaf_pars<S>& 
                 "the reverse-mode surface covers TF24 and TF24_floor; another "
                 "curve is a row in profit_at and dprofit_dcollar_at");
   const S A_prime = assim_slope_at<S>(at.ci.value, cap);
-  // dC/dpsi_stem as a tangent through the cost kernel, not a slope beside it.
+  // dC/dpsi_leaf as a tangent through the cost kernel, not a slope beside it.
   S C_prime = cost_slope_at<S>(at.sigma.value, pars);
   if constexpr (K == CostCurve::TF24_floor) {
     // d/dsigma of lambda_o kmax (G(sigma) - G(collar)) is lambda_o kmax f, with
     // the table's conductivity because the solve ran on the table.
     C_prime = C_prime +
               pars[par_TF24_floor_lambda_o] * pars[par_kmax] *
-                  curve_with_closed_form_rows<S>(stem_curve_integral_deriv(opt_psi_stem_),
+                  curve_with_closed_form_rows<S>(stem_curve_integral_deriv(opt_psi_leaf_),
                                  at.sigma.value, pars[par_stem_P50],
                                  pars[par_stem_c]);
   }
@@ -577,7 +577,7 @@ inline S Leaf::operating_collar(const SupplyDraw<S>& draw, const leaf_pars<S>& p
         if (placed != nullptr) {
           const S at = S(opt_root_psi_);
           placed->cap = photo_capacity_at<S>(pars);
-          held_coords_at<S>(opt_psi_stem_, ci_, at, draw, pars, placed->cap,
+          held_coords_at<S>(opt_psi_leaf_, ci_, at, draw, pars, placed->cap,
                             placed->sigma, placed->gc, placed->ci);
           placed->at = opt_root_psi_;
           const HeldCoords<S>& h = *placed;

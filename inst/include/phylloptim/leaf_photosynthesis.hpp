@@ -4,7 +4,7 @@
 
 // Photosynthesis: the temperature responses of Vcmax, Jmax and R_d, the
 // Farquhar kernels on any scalar, ci at a conductance (solve_ci), and the
-// operating point's outputs at a stem potential in one pass.
+// operating point's outputs at a leaf potential in one pass.
 //
 // Part of `Leaf`: include <phylloptim/leaf_model.hpp>, which includes every
 // part in order.
@@ -244,8 +244,8 @@ inline double Leaf::solve_ci(double gc) {
 // The TOTAL conductance to CO2, mol CO2 m^-2 LA s^-1: the stomata's, from the
 // flux the residual leaves them, plus the cuticle's. Reads the deficit as seated
 // (set_leaf_vpd), so on the energy-balance path seat the leaf temperature first.
-inline double Leaf:: stom_cond_CO2(double psi_stem, double psi_upstream) {
-  const double E = transpiration(psi_stem, psi_upstream);
+inline double Leaf:: stom_cond_CO2(double psi_leaf, double psi_upstream) {
+  const double E = transpiration(psi_leaf, psi_upstream);
   double E_s = E - residual_flux(psi_upstream, E);
   if (E_s < 0.0) {
     clamps.note(CLAMP_STOMATAL_FLUX);
@@ -350,11 +350,11 @@ inline double Leaf::assim_colimited(double ci_) {
 // A - gc curves
 
 // returns difference between co-limited assimilation and stom_cond_CO2, to be minimised (umol m^-2 s^-1)
-inline double Leaf::assim_minus_stom_cond_CO2(double x, double psi_stem, double psi_upstream) {
+inline double Leaf::assim_minus_stom_cond_CO2(double x, double psi_leaf, double psi_upstream) {
 
   double assim_colimited_x_ = assim_colimited(x);
 
-  double stom_cond_CO2_x_ = stom_cond_CO2(psi_stem, psi_upstream);
+  double stom_cond_CO2_x_ = stom_cond_CO2(psi_leaf, psi_upstream);
   return assim_colimited_x_ * umol_to_mol -
          (stom_cond_CO2_x_ * (ca_ - x) / (atm_kpa_ * kPa_to_Pa));
 }
@@ -362,11 +362,11 @@ inline double Leaf::assim_minus_stom_cond_CO2(double x, double psi_stem, double 
 // The ci at which A(ci) = gc(ca - ci). The target is smooth and strictly
 // monotone in ci (Ar and Ae vanish linearly at gamma*), so a superlinear
 // bracketing solver suits it; the bracket and the degenerate case are solve_ci's.
-inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
-  return ci_ = solve_ci(stom_cond_CO2(psi_stem, psi_upstream));
+inline double Leaf::psi_leaf_to_ci(double psi_leaf, double psi_upstream) {
+  return ci_ = solve_ci(stom_cond_CO2(psi_leaf, psi_upstream));
 }
 
-// The operating point at psi_stem in one pass, with no branch on the flow: the
+// The operating point at psi_leaf in one pass, with no branch on the flow: the
 // flux (zero for a reversed pair), the leaf temperature, the residual the cuticle
 // loses, and ci on the total conductance. A shut leaf is the same expressions
 // with the stomatal term zero; with no conductance at all solve_ci takes the
@@ -374,8 +374,8 @@ inline double Leaf::psi_stem_to_ci(double psi_stem, double psi_upstream) {
 // ⚠️ Tleaf_ is written on every path (hazard 8): with the energy balance on, a
 // leaf transpiring nothing is the hottest. The temperature block and the deficit
 // are seated at the stored Tleaf_, so the three temperatures are one number.
-inline void Leaf::set_leaf_states_rates_from_psi_stem(double psi_stem, double psi_upstream) {
-  transpiration_ = operating_point_flux(psi_stem, psi_upstream);
+inline void Leaf::set_leaf_states_rates_from_psi_leaf(double psi_leaf, double psi_upstream) {
+  transpiration_ = operating_point_flux(psi_leaf, psi_upstream);
   Tleaf_ = use_energy_balance_ ? leaf_temp_from_E(transpiration_) : leaf_temp_;
   if (use_energy_balance_) {
     update_temperature_dependent_params(Tleaf_);

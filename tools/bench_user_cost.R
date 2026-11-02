@@ -79,7 +79,7 @@ drive <- function() {
                               leaf_temp = 25, atm_o2_kpa = 21, atm_kpa = 101.3,
                               leaf_specific_conductance_max = 3.14e-5), extra))
 }
-read3 <- function() c(l$assim_colimited_, l$stom_cond_CO2_, l$opt_psi_stem_)
+read3 <- function() c(l$assim_colimited_, l$stom_cond_CO2_, l$opt_psi_leaf_)
 drive(); l$find_root_collar_psi()
 
 # --- the boundary unit ----------------------------------------------------

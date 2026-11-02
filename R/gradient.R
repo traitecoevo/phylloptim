@@ -60,17 +60,17 @@ set_traits <- function(x, traits) {
 ##' Trait gradients of a solved operating point
 ##'
 ##' The derivatives of the solved outputs with respect to the traits:
-##' `dA/dtheta`, `dgc/dtheta`, `dpsi_stem/dtheta`, `dcollar/dtheta` and
+##' `dA/dtheta`, `dgc/dtheta`, `dpsi_leaf/dtheta`, `dcollar/dtheta` and
 ##' `dprofit/dtheta`, at one operating point.
 ##'
 ##' @section Choosing which model to differentiate:
 ##' A model is a cost curve and a route, and every curve has a gradient on both
 ##' routes. `model` names the curve and `route` the potential it is maximised
 ##' over: `"collar"`, the root-collar potential, on either supply path; or
-##' `"stem"`, `psi_stem` with the upstream potential pinned at `psi_soil`, which
+##' `"leaf"`, `psi_leaf` with the upstream potential pinned at `psi_soil`, which
 ##' needs the single-potential supply path. The defaults are one set,
 ##' everywhere: `"TF24_floor"` (plant's model; at its default price,
-##' `TF24_floor_lambda_o = 0`, it is TF24) on the stem route over the
+##' `TF24_floor_lambda_o = 0`, it is TF24) on the leaf route over the
 ##' single-potential supply. The collar route and the multi-layer supply are
 ##' asked for.
 ##'
@@ -90,7 +90,7 @@ set_traits <- function(x, traits) {
 ##' a loop that takes a gradient and then reads `$optimise()` off the same object
 ##' expecting the default is not.
 ##'
-##' ⚠️ **On a stem route the decision variable is `psi_stem`, so `collar` comes
+##' ⚠️ **On a leaf route the decision variable is `psi_leaf`, so `collar` comes
 ##' back non-finite.** The collar is not solved for at all there, and an absent
 ##' number is the truthful answer rather than a gap -- reading one would be reading
 ##' state from whichever solve ran last.
@@ -357,12 +357,13 @@ set_traits <- function(x, traits) {
 ##' @param model which optimality model to differentiate: any name from
 ##'   [cost_curve_names()], on `route`; `"TF24_floor"` by default. See *Choosing
 ##'   which model to differentiate*.
-##' @param route `"collar"` or `"stem"`, the potential the curve is maximised
-##'   over; `NULL` (the default) is the stem route. See *Choosing which model
+##' @param route `"collar"` or `"leaf"`, the potential the curve is maximised
+##'   over; `NULL` (the default) is the leaf route. See *Choosing which model
 ##'   to differentiate*.
 ##' @param pars what to differentiate with respect to. Any of the sixteen
 ##'   [leaf_traits()] names, plus `"leaf_specific_conductance_max"`, on the
-##'   single-potential path only `"resistance"`, on `model = "CF77"` only
+##'   single-potential path's collar route only `"resistance"` (the leaf route
+##'   never reads it), on `model = "CF77"` only
 ##'   `"CF77_lambda_"`, on `model = "TF24_floor"` only `"TF24_floor_lambda_o"`,
 ##'   and on `model = "LeastCost"` only `"LeastCost_beta"`.
 ##'   On a reused leaf `x` with `use_thermal_damage_` on, also the layer's inputs
@@ -427,7 +428,7 @@ set_traits <- function(x, traits) {
 ##' @return A list with
 ##'   \describe{
 ##'     \item{`gradient`}{a matrix, one row per trait in `pars`, with columns
-##'       `A` (umol C m^-2 s^-1 per trait unit), `gc`, `psi_stem`, `collar` and
+##'       `A` (umol C m^-2 s^-1 per trait unit), `gc`, `psi_leaf`, `collar` and
 ##'       `profit` (also umol C m^-2 s^-1 per trait unit)}
 ##'     \item{`value`}{the solved outputs the gradient is taken at}
 ##'     \item{`method`}{`"ift"` if the implicit-function composite was used,
@@ -451,7 +452,7 @@ set_traits <- function(x, traits) {
 ##'   }
 ##'
 ##'   An entry that is not determined, such as a refused point's gradient or a
-##'   stem route's `collar`, is `NaN`.
+##'   leaf route's `collar`, is `NaN`.
 ##'
 ##' @seealso [leaf_solve()] for the operating point itself, [set_traits()].
 ##' @examples
@@ -562,11 +563,11 @@ leaf_gradient <- function(psi_soil,
                            }, numeric(1)), owned),
                            damage = if (damage) .gradient_damage_values(x))
   if (is.null(pars)) {
-    pars <- .gradient_available_pars(single, model, damage)
+    pars <- .gradient_available_pars(single, model, damage, m$route)
   }
   # Shared with leaf_gradient_batch(), so the two entry points cannot disagree
   # about which parameters exist or explain a rejection differently.
-  .gradient_check_pars(pars, single, model, damage)
+  .gradient_check_pars(pars, single, model, damage, m$route)
   # Checked here, unconditionally: the composite reads it only at a usable point,
   # so checking it there would accept a bad value at some psi and not others.
   dpsi_dtheta <- .gradient_dpsi_dtheta(dpsi_dtheta, pars, !is.null(psi))
@@ -617,7 +618,7 @@ leaf_gradient <- function(psi_soil,
 # --- the model: which optimum is being differentiated --------------------------
 #
 # A (curve, route) pair, resolved by `.resolve_model()`. On the collar route the
-# decision variable is the collar; on a stem route it is `psi_stem`, `collar` is
+# decision variable is the collar; on a leaf route it is `psi_leaf`, `collar` is
 # not solved for, and its NA gradient is the truthful answer (hazard 11).
 # Every model name: the cost curves, each of which takes either route. The one
 # list `.gradient_model_pars()` and `.resolve_model()` validate against.
@@ -714,10 +715,11 @@ leaf_gradient <- function(psi_soil,
 }
 
 # What `pars` may name, shared by leaf_gradient() and leaf_gradient_batch(). A
-# parameter is unavailable on one of two axes, the supply path (`resistance` is
-# single-potential only) or the model (an owned parameter belongs to one curve),
-# and the refusal names which. Refusing is not a zero: a zero means "in the
-# objective but inactive here", which is information.
+# parameter is unavailable on one of two axes, the supply path and route
+# (`resistance` is the single-potential supply's soil-to-collar resistance, which
+# the leaf route never reads) or the model (an owned parameter belongs to one
+# curve), and the refusal names which. Refusing is not a zero: a zero means "in
+# the objective but inactive here", which is information.
 #
 # A model-owned parameter belongs to one curve, and `.owned_fields()`, read from
 # the curves' definitions, says which (hazard 13). Not all are prices:
@@ -730,9 +732,10 @@ leaf_gradient <- function(psi_soil,
   unname(owned[names(owned) != model])
 }
 
-.gradient_available_pars <- function(single, model = "TF24_floor", damage = FALSE) {
+.gradient_available_pars <- function(single, model = "TF24_floor", damage = FALSE,
+                                     route = "leaf") {
   nms <- .gradient_par_names()
-  if (!single) nms <- setdiff(nms, "resistance")
+  if (!single || !identical(route, "collar")) nms <- setdiff(nms, "resistance")
   if (!damage) nms <- setdiff(nms, .gradient_damage_pars)
   excluded <- .gradient_model_pars(model)
   if (is.null(excluded)) {
@@ -742,8 +745,9 @@ leaf_gradient <- function(psi_soil,
   setdiff(nms, excluded)
 }
 
-.gradient_check_pars <- function(pars, single, model = "TF24_floor", damage = FALSE) {
-  unknown <- setdiff(pars, .gradient_available_pars(single, model, damage))
+.gradient_check_pars <- function(pars, single, model = "TF24_floor", damage = FALSE,
+                                 route = "leaf") {
+  unknown <- setdiff(pars, .gradient_available_pars(single, model, damage, route))
   if (length(unknown)) {
     off <- intersect(unknown, .gradient_damage_pars)
     if (length(off) && !damage) {
@@ -756,6 +760,11 @@ leaf_gradient <- function(psi_soil,
       paste(" `resistance` is a parameter of the single-potential path only;",
             "on the multi-layer path the soil-to-collar resistances are derived",
             "from root carbon.")
+    } else if ("resistance" %in% unknown) {
+      paste(" `resistance` reaches only the collar route: the leaf route pins",
+            "the potential upstream of the stem at `psi_soil`, so it never reads",
+            "the soil-to-collar resistance. Pass route = \"collar\" to",
+            "differentiate it.")
     } else {
       ""
     }
@@ -774,7 +783,7 @@ leaf_gradient <- function(psi_soil,
          paste(unknown, collapse = ", "),
          ". Available: the traits from leaf_traits(), plus ",
          "`leaf_specific_conductance_max`",
-         if (single) " and `resistance`" else "",
+         if (single && identical(route, "collar")) " and `resistance`" else "",
          ".", why, call. = FALSE)
   }
   invisible(pars)

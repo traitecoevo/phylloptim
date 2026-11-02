@@ -78,7 +78,7 @@ public:
                  "least " + util::to_string(resistance_min) +
                  " MPa s m2 (mol H2O)-1, below which the collar route cannot "
                  "resolve the flux; got " + util::to_string(r) +
-                 ". The stem routes are the zero-resistance model.");
+                 ". The leaf routes are the zero-resistance model.");
     }
     resistance_ = r;
   }

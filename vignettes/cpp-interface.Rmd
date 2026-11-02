@@ -75,7 +75,7 @@ failing `test_golden` by ~1e-15 has found nothing.
 
 int main() {
   phylloptim::Leaf l;                    // default Eucalyptus saligna traits
-  // A Leaf defaults to TF24_floor on the stem route over one soil potential;
+  // A Leaf defaults to TF24_floor on the leaf route over one soil potential;
   // a root network and the collar solve, as plant runs them, are seated.
   l.set_supply_multilayer();
   l.set_model(phylloptim::Leaf::CostCurve::TF24, /*collar_route=*/true);
@@ -98,8 +98,8 @@ int main() {
                    /*atm_kpa*/ 101.3);
   l.find_root_collar_psi();
 
-  std::printf("A = %.6f, gc = %.6f, psi_stem = %.6f\n",
-              l.assim_colimited_, l.stom_cond_CO2_, l.opt_psi_stem_);
+  std::printf("A = %.6f, gc = %.6f, psi_leaf = %.6f\n",
+              l.assim_colimited_, l.stom_cond_CO2_, l.opt_psi_leaf_);
   return 0;
 }
 ```
@@ -191,7 +191,7 @@ Three things the free function gives you that a hand-rolled loop would not:
 
 **It is every trait gradient the package gives**: `leaf_gradient()` and
 `leaf_gradient_batch()` both call it. `Settings::model` names the curve and the
-route, the `Leaf`'s default (TF24_floor on the stem route) unless set. `tests/testthat/test-gradient-referee.R`
+route, the `Leaf`'s default (TF24_floor on the leaf route) unless set. `tests/testthat/test-gradient-referee.R`
 checks it against a difference of the solve for every curve on both routes. If
 you modify it, read its header first: every difference names its two halves,
 because the evaluations mutate the leaf and C++ does not sequence `f(a) - f(b)`.

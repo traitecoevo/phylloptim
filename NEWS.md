@@ -1,3 +1,10 @@
+# phylloptim 0.30.0
+
+- **Breaking:** the stem route is the leaf route. No conductance sits between the top of the stem and the leaf, so the potential it optimises is the leaf's: `route = "stem"` is `route = "leaf"` (in `leaf_solve()`, `leaf_batch()`, both gradients, `$set_model()` and `$model_route()`), and the `psi_stem` column of `leaf_solve()`, `operating_point()` and the gradients is `psi_leaf`. Names about the stem itself keep `stem`: `stem_P50`, `stem_c`, `psi_crit` and the stem curve. There are no aliases: the old names are gone.
+- **Breaking:** every bound member and C++ name that meant that potential follows: `opt_psi_stem_` is `opt_psi_leaf_`, and `psi_stem` reads `psi_leaf` in `profit_psi_stem_*`, `dprofit_dpsi_stem*`, `optimise_psi_stem_single`, `evaluate_psi_stem_at`, `psi_stem_to_ci`, `transpiration_to_psi_stem`, `set_leaf_states_rates_from_psi_stem` and `find_psi_stem_from_psi_root`. `$stem_wet_bound()` is `$leaf_wet_bound()`, `gradient::Route::Stem` is `Route::Leaf`, and the header `leaf_stem_routes.hpp` is `leaf_route.hpp`.
+- **Breaking:** on the leaf route `resistance` is no longer a gradient parameter: the route pins the stem's upstream end at `psi_soil`, so its row was exactly zero. Naming it is refused with that reason; it remains one on the collar route over the single-potential supply.
+- No number moves ([#234](https://github.com/traitecoevo/phylloptim/issues/234)).
+
 # phylloptim 0.29.0
 
 - **Breaking:** one set of defaults everywhere, in `Leaf`, `leaf_model()`, `leaf_solve()`, `leaf_batch()`, `leaf_gradient()` and `leaf_gradient_batch()`: the `TF24_floor` model, plant's, on the stem route over the single-potential supply. The multi-layer supply (`supply = leaf_supply_multilayer()`, or `$set_supply_multilayer()`, which also seats the collar route) and the collar route (`route = "collar"`) are asked for. To reproduce earlier default results, pass `supply = leaf_supply_multilayer(), model = "TF24", route = "collar"`. `model = "collar"` is gone. `align_curves()` aligns on the stem route as before, so its answers do not move.

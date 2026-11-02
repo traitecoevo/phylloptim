@@ -2,9 +2,9 @@
 #ifndef PHYLLOPTIM_CLOSED_FORM_HPP_
 #define PHYLLOPTIM_CLOSED_FORM_HPP_
 
-// The closed form: an alternative method for the stem-route optimum, seated with
-// `set_model(curve, "stem", "closed")` and run by `optimise()`. It exists for
-// speed; `bench_solve` prices it against the exact stem solve, fallbacks included.
+// The closed form: an alternative method for the leaf-route optimum, seated with
+// `set_model(curve, "leaf", "closed")` and run by `optimise()`. It exists for
+// speed; `bench_solve` prices it against the exact leaf-route solve, fallbacks included.
 //
 // Every curve here satisfies dA/dE = lambda at the optimum, and given lambda the
 // optimum is the Medlyn USO form
@@ -36,7 +36,7 @@
 //  4. ⚠️ Hazard 3: the argmax jumps where a smooth input carries the leaf across
 //     the guard, so this method must not sit under a differentiated path, and
 //     `gradient::route_seat` seats the exact solve. Over a 201-point +/-30% `kmax`
-//     sweep the mean |second difference| of `opt_psi_stem_` is 1.2x the exact
+//     sweep the mean |second difference| of `opt_psi_leaf_` is 1.2x the exact
 //     solve's where the sweep never falls back, and 100-153x where it crosses.
 //  5. psi* is not E/kmax: the supply is the vulnerability integral, so
 //     psi* = G^-1(E/kmax + G(psi_upstream)), which is `psi_from_supply`.
@@ -132,7 +132,7 @@ inline void require_prescribed_temperature(const Leaf &l, const char *who) {
 }
 
 struct Solution {
-  double psi_stem;      // MPa, positive magnitude
+  double psi_leaf;      // MPa, positive magnitude
   double ci;            // Pa
   double assim;         // umol CO2 m-2 s-1
   double transpiration; // kg H2O m-2 s-1
@@ -140,7 +140,7 @@ struct Solution {
   double g1_eff;        // the USO slope xi, kPa^0.5
 };
 
-// The stem potential that carries transpiration E from psi_upstream (note 5):
+// The leaf potential that carries transpiration E from psi_upstream (note 5):
 //
 //     E = kmax * [G(psi) - G(psi_upstream)]   =>   psi = G^-1(E/kmax + G(psi_up))
 //
@@ -153,10 +153,10 @@ inline double psi_from_supply(Leaf &l, double E, double psi_upstream) {
   if (!(E < l.transpiration(l.psi_crit, psi_upstream))) {
     return l.psi_crit;
   }
-  return l.transpiration_to_psi_stem(E, psi_upstream);
+  return l.transpiration_to_psi_leaf(E, psi_upstream);
 }
 
-// The outputs implied by a stem potential and the lambda there. The curve enters
+// The outputs implied by a leaf potential and the lambda there. The curve enters
 // only through `lambda`, so one body serves every curve with a constant h'.
 inline Solution evaluate_at_lambda(Leaf &l, double psi, double lambda, double Q,
                                    double sqrt_D) {
@@ -175,7 +175,7 @@ inline Solution evaluate_at(Leaf &l, double psi, double Q, double sqrt_D) {
 // The wet-end starting potential in units of stem_b: the root of
 //     h(p) = (p - p_up) * p^(n/2) - C
 // the power-law demand against a supply linearised at the wet end. The p_up term
-// is psi_soil on the stem route, and dropping it overstates the supply by the
+// is psi_soil on the leaf route, and dropping it overstates the supply by the
 // whole wet-end integral. At p_up == 0 the root is C^(2/(n+2)) exactly.
 inline double wet_end_p(double C, double p_up, double n, double p_crit) {
   const double p0 = std::pow(C, 2.0 / (n + 2.0));
@@ -271,7 +271,7 @@ inline Solution solve_exact_beta2(Leaf &l, double psi_upstream) {
   const double ci = l.ca_ * xi / (xi + sqrt_D);
   const double assim = l.assim_colimited(ci);
   const double E = transpiration_from_assim(l, assim, ci);
-  // The potential comes from the supply; `opt_psi_stem_` is set from it.
+  // The potential comes from the supply; `opt_psi_leaf_` is set from it.
   return Solution{psi_from_supply(l, E, psi_upstream),
                   ci, assim, E, stom_cond_from_E(l, E), xi};
 }
@@ -355,16 +355,16 @@ inline Solution solve_TF24_floor(Leaf &l, double psi_upstream,
   return evaluate_at_lambda(l, psi, l.lambda_TF24_floor(psi), Q, sqrt_D);
 }
 
-// The validity guard (note 2): finite, ci/ca > 0.5, and psi_stem strictly inside
+// The validity guard (note 2): finite, ci/ca > 0.5, and psi_leaf strictly inside
 // (psi_soil, psi_crit (1 - 1e-9)). Below ci/ca ~ 0.3 the fixed point stops
 // existing, and an answer on either bound is a clamp, not an optimum; both go to
 // the exact solve. psi_crit bounds the expansion, not the model. It reads no
 // driver, so `true` never means the answer is right (the energy balance, above).
 inline bool within_guard(const Leaf &l, const Solution &s) {
-  return std::isfinite(s.psi_stem) && std::isfinite(s.ci) &&
+  return std::isfinite(s.psi_leaf) && std::isfinite(s.ci) &&
          std::isfinite(s.assim) && s.ci / l.ca_ > 0.5 &&
-         s.psi_stem > l.supply_psi_soil_scalar() &&
-         s.psi_stem < l.psi_crit * (1.0 - 1e-9);
+         s.psi_leaf > l.supply_psi_soil_scalar() &&
+         s.psi_leaf < l.psi_crit * (1.0 - 1e-9);
 }
 
 // ---------------------------------------------------------------------------
@@ -372,8 +372,8 @@ inline bool within_guard(const Leaf &l, const Solution &s) {
 // ---------------------------------------------------------------------------
 //
 // ⚠️ Hazard 8: every output the exact solve writes is written here, by the same
-// functions. The closed form only locates psi*; `profit_psi_stem_for<K>` and
-// `lambda_for<K>` write the rest, as at the end of `optimise_psi_stem_single`. So
+// functions. The closed form only locates psi*; `profit_psi_leaf_for<K>` and
+// `lambda_for<K>` write the rest, as at the end of `optimise_psi_leaf_single`. So
 // `ci_`, `assim_colimited_` and `transpiration_` are the exact state at the
 // approximate psi*, not the closed form's USO estimates.
 template <Leaf::CostCurve K>
@@ -406,12 +406,12 @@ inline void optimise_into(Leaf &l) {
     }
 
     const double psi_soil = l.supply_psi_soil_scalar();
-    l.opt_psi_stem_ = psi_soil;
+    l.opt_psi_leaf_ = psi_soil;
 
     // Soil drier than the stem can reach leaves one feasible potential: the exact
     // solve's branch, verbatim.
     if (psi_soil > l.dry_end<K>()) {
-      l.profit_ = l.profit_psi_stem_for<K>(psi_soil, psi_soil);
+      l.profit_ = l.profit_psi_leaf_for<K>(psi_soil, psi_soil);
       l.lambda_emergent_ = l.lambda_for<K>(psi_soil, psi_soil);
       return;
     }
@@ -421,7 +421,7 @@ inline void optimise_into(Leaf &l) {
     if (!(psi_soil < l.psi_crit)) {
       ++l.closed_form_fallbacks_;
       l.last_solve_fell_back_ = true;
-      l.optimise_psi_stem_single<K>();
+      l.optimise_psi_leaf_single<K>();
       return;
     }
 
@@ -440,16 +440,16 @@ inline void optimise_into(Leaf &l) {
       // fixed point may not exist.
       ++l.closed_form_fallbacks_;
       l.last_solve_fell_back_ = true;
-      l.optimise_psi_stem_single<K>();
+      l.optimise_psi_leaf_single<K>();
       return;
     }
 
     // Into the exact solve's bracket, so the clamp is a property of the answer
     // and not of one code path.
     const double psi =
-        std::max(psi_soil, std::min(s.psi_stem, l.psi_crit));
-    l.opt_psi_stem_ = psi;
-    l.profit_ = l.profit_psi_stem_for<K>(psi, psi_soil);
+        std::max(psi_soil, std::min(s.psi_leaf, l.psi_crit));
+    l.opt_psi_leaf_ = psi;
+    l.profit_ = l.profit_psi_leaf_for<K>(psi, psi_soil);
     l.lambda_emergent_ = l.lambda_for<K>(psi, psi_soil);
   } else if constexpr (Curve<K>::closed_form == ClosedForm::Unwritten) {
     // Feasible, not implemented: each needs a `dlambda_*` for the Newton step, and
@@ -490,12 +490,12 @@ inline void optimise_into(Leaf &l) {
 // energy balance, thermal damage and g_min are all settable after `set_model`.
 inline void Leaf::optimise_closed() {
   if (route_is_collar_) {
-    util::stop("the closed form is a STEM-route method: it inverts psi_stem "
+    util::stop("the closed form is a STEM-route method: it inverts psi_leaf "
                "against a supply measured from psi_soil, and says nothing about "
                "the soil-to-collar path. The leaf is seated on the collar route; "
                "call set_model(\"" +
                curve_name(static_cast<int>(cost_curve_)) +
-               "\", \"stem\", \"closed\"), or use method \"exact\".");
+               "\", \"leaf\", \"closed\"), or use method \"exact\".");
   }
   if (!supply_is_single_layer()) {
     util::stop("the closed form is single-layer only: the multi-layer case is a "

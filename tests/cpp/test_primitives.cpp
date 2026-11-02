@@ -234,15 +234,15 @@ std::vector<Row> run_grid() {
   // because it is the raw table read and `transpiration` is that scaled -- so a
   // tier-4 failure that appears in one and not the other separates the table from
   // the conductance scaling.
-  for (double psi_stem = 0.25; psi_stem <= 5.5 + 1e-12; psi_stem += 0.25) {
-    row(kSpline, "stem_curve_integral", psi_stem, 0.0,
-        l.stem_curve_integral(psi_stem));
-    row(kSpline, "stem_curve_integral_deriv", psi_stem, 0.0,
-        l.stem_curve_integral_deriv(psi_stem));
-    row(kSpline, "transpiration", psi_stem, 0.0, l.transpiration(psi_stem, 0.0));
-    row(kSpline, "stom_cond_CO2", psi_stem, 0.0, l.stom_cond_CO2(psi_stem, 0.0));
-    row(kSpline, "hydraulic_cost_TF", psi_stem, 0.0,
-        l.hydraulic_cost_TF(psi_stem));
+  for (double psi_leaf = 0.25; psi_leaf <= 5.5 + 1e-12; psi_leaf += 0.25) {
+    row(kSpline, "stem_curve_integral", psi_leaf, 0.0,
+        l.stem_curve_integral(psi_leaf));
+    row(kSpline, "stem_curve_integral_deriv", psi_leaf, 0.0,
+        l.stem_curve_integral_deriv(psi_leaf));
+    row(kSpline, "transpiration", psi_leaf, 0.0, l.transpiration(psi_leaf, 0.0));
+    row(kSpline, "stom_cond_CO2", psi_leaf, 0.0, l.stom_cond_CO2(psi_leaf, 0.0));
+    row(kSpline, "hydraulic_cost_TF", psi_leaf, 0.0,
+        l.hydraulic_cost_TF(psi_leaf));
   }
 
   // --- tier 5: primitives containing their own iteration --------------------
@@ -250,9 +250,9 @@ std::vector<Row> run_grid() {
   // A disagreement that FIRST appears here, with tiers 1-4 clean, means the
   // primitives agree and an iteration count differs -- which is a different bug
   // from an arithmetic one and wants a different fix.
-  for (double psi_stem = 0.25; psi_stem <= 5.5 + 1e-12; psi_stem += 0.25) {
-    row(kIterative, "psi_stem_to_ci", psi_stem, 0.0,
-        l.psi_stem_to_ci(psi_stem, 0.0));
+  for (double psi_leaf = 0.25; psi_leaf <= 5.5 + 1e-12; psi_leaf += 0.25) {
+    row(kIterative, "psi_leaf_to_ci", psi_leaf, 0.0,
+        l.psi_leaf_to_ci(psi_leaf, 0.0));
   }
   // Fluxes up to the transpiration reached at psi_crit, derived from the model
   // rather than hard-coded, so a trait change cannot push the sweep somewhere
@@ -260,8 +260,8 @@ std::vector<Row> run_grid() {
   const double e_max = l.transpiration(l.psi_crit, 0.0);
   for (int i = 1; i < 20; ++i) {
     const double e = e_max * i / 20.0;
-    row(kIterative, "transpiration_to_psi_stem", e, 0.0,
-        l.transpiration_to_psi_stem(e, 0.0));
+    row(kIterative, "transpiration_to_psi_leaf", e, 0.0,
+        l.transpiration_to_psi_leaf(e, 0.0));
   }
   return rows;
 }
@@ -291,7 +291,7 @@ std::vector<Row> run_grid() {
 //     vulnerability   7.01e-16   7.01e-16   1e-12      cumulative_..._at(4.1351, 3.9)
 //     assimilation    1.75e-15   1.75e-15   1e-11      assim_colimited(7)
 //     spline          3.07e-14   3.07e-14   1e-10      stem_curve_integral_deriv(3.75)
-//     iterative       8.01e-11   8.01e-11   1e-6       psi_stem_to_ci(2.75)
+//     iterative       8.01e-11   8.01e-11   1e-6       psi_leaf_to_ci(2.75)
 //
 // The two compilers agree on four tiers exactly and differ only in tier 1, at the
 // same operating point -- so what is being measured is the platform's libm, not the
@@ -299,7 +299,7 @@ std::vector<Row> run_grid() {
 //
 // ⚠️ READ THE SHAPE, NOT JUST THE SIZES, because the shape is the result. Four tiers
 // sit at 1e-14 to 1e-16 -- libm and FMA contraction, nothing else -- and the
-// iterative tier sits three orders higher at 8.01e-11, which is `psi_stem_to_ci`'s
+// iterative tier sits three orders higher at 8.01e-11, which is `psi_leaf_to_ci`'s
 // own 1e-10 tolerance showing through. So the 1.4e-04 that operating_points.tsv
 // reports for its argmax-derived fields is NOT present in the primitives at all: it
 // is amplification by the solve, and this file is what establishes that rather than

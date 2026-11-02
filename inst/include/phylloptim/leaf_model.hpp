@@ -14,7 +14,7 @@
 #include <phylloptim/leaf_damage.hpp>
 #include <phylloptim/leaf_cost_curves.hpp>
 #include <phylloptim/leaf_collar_solve.hpp>
-#include <phylloptim/leaf_stem_routes.hpp>
+#include <phylloptim/leaf_route.hpp>
 #include <phylloptim/leaf_derivative_surface.hpp>
 #include <phylloptim/leaf_medlyn.hpp>
 

@@ -25,10 +25,10 @@ as a single point, and the tolerance of the golden-section FALLBACK used when
 either bracket endpoint has no usable gradient (no driver sweep has reached
 that fallback).
 
-⚠️ \strong{It does not reach the stem route at all.} That refines by a root-find
+⚠️ \strong{It does not reach the leaf route at all.} That refines by a root-find
 on \code{dJ/dpsi == 0} at a hardcoded tolerance; the \verb{(cell width) * 1e-4} figure
 is its own golden-section fallback, not its normal path. Tightening this to
-sharpen a stem-route argmax does nothing.}
+sharpen a leaf-route argmax does nothing.}
 
 \item{vulnerability_curve_ncontrol}{number of knot intervals in each Weibull
 vulnerability curve's table (a C2 quintic of its cumulative integral).

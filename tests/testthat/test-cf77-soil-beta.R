@@ -25,7 +25,7 @@ cf77_leaf <- function(theta = NULL, beta_on = FALSE, lambda = 1.5e5,
   l$CF77_soil_beta_ <- beta_on
   if (!is.null(theta)) l$theta <- theta
   set_drivers(l, psi_soil = psi_soil, root_network = series_resistance(1500))
-  l$set_model("CF77", "stem")
+  l$set_model("CF77", "leaf")
   l
 }
 
@@ -45,7 +45,7 @@ test_that("the option is off by default and off is bit-identical", {
   also_off <- cf77_leaf(theta = 0.25, beta_on = FALSE)
   also_off$optimise()
 
-  expect_identical(also_off$opt_psi_stem_, off$opt_psi_stem_)
+  expect_identical(also_off$opt_psi_leaf_, off$opt_psi_leaf_)
   expect_identical(also_off$stom_cond_CO2_, off$stom_cond_CO2_)
   expect_identical(also_off$assim_colimited_, off$assim_colimited_)
   expect_identical(also_off$lambda, off$lambda)
@@ -58,7 +58,7 @@ test_that("at or above field capacity it reduces to plain CF77, exactly", {
   # beta == 1 exactly at theta == theta_fc.
   at_fc <- cf77_leaf(theta = 0.5, beta_on = TRUE)
   at_fc$optimise()
-  expect_identical(at_fc$opt_psi_stem_, off$opt_psi_stem_)
+  expect_identical(at_fc$opt_psi_leaf_, off$opt_psi_leaf_)
   expect_identical(at_fc$lambda, off$lambda)
 
   # And above it, because beta is CLAMPED at 1. This is the behaviour that makes
@@ -67,7 +67,7 @@ test_that("at or above field capacity it reduces to plain CF77, exactly", {
   # BELOW the prescribed marginal value.
   above_fc <- cf77_leaf(theta = 0.8, beta_on = TRUE)
   above_fc$optimise()
-  expect_identical(above_fc$opt_psi_stem_, off$opt_psi_stem_)
+  expect_identical(above_fc$opt_psi_leaf_, off$opt_psi_leaf_)
   expect_identical(above_fc$lambda, off$lambda)
 })
 
@@ -82,7 +82,7 @@ test_that("dA/dE equals lambda/beta at the optimum", {
 
   l <- cf77_leaf(theta = theta, beta_on = TRUE, lambda = lambda)
   l$optimise()
-  psi <- l$opt_psi_stem_
+  psi <- l$opt_psi_leaf_
 
   # Interior optimum, or the identity is a statement about a bound instead.
   expect_gt(psi, l$single_psi_soil_ + 1e-6)
@@ -90,7 +90,7 @@ test_that("dA/dE equals lambda/beta at the optimum", {
 
   h <- 1e-5
   at <- function(p) {
-    l$evaluate_psi_stem_at(p)
+    l$evaluate_psi_leaf_at(p)
     c(A = l$assim_colimited_, E = l$transpiration_)
   }
   hi <- at(psi + h)
@@ -109,7 +109,7 @@ test_that("drying the soil closes stomata, which plain CF77 will not do", {
   solve_at <- function(theta, beta_on) {
     l <- cf77_leaf(theta = theta, beta_on = beta_on)
     l$optimise()
-    c(gs = l$stom_cond_CO2_, psi = l$opt_psi_stem_)
+    c(gs = l$stom_cond_CO2_, psi = l$opt_psi_leaf_)
   }
 
   on <- vapply(thetas, solve_at, numeric(2), beta_on = TRUE)
@@ -149,7 +149,7 @@ test_that("an unusable soil-moisture factor is refused, not optimised", {
   degenerate$theta_fc <- 0.2
   set_drivers(degenerate, psi_soil = 0.5,
               root_network = series_resistance(1500))
-  degenerate$set_model("CF77", "stem")
+  degenerate$set_model("CF77", "leaf")
   expect_error(degenerate$optimise(), "theta_fc_ > theta_w_")
 
   # ⚠️ And none of this fires when the option is off, so a caller who never
@@ -194,9 +194,9 @@ test_that("the option touches CF77 and nothing else", {
     l$CF77_soil_beta_ <- beta_on
     l$theta <- theta
     set_drivers(l, psi_soil = 0.5, root_network = series_resistance(1500))
-    l$set_model("TF24", "stem")
+    l$set_model("TF24", "leaf")
     l$optimise()
-    l$opt_psi_stem_
+    l$opt_psi_leaf_
   }
   expect_identical(solve_tf24(TRUE, 0.25), solve_tf24(FALSE, 0.5))
 })

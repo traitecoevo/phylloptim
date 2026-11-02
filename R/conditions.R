@@ -59,21 +59,21 @@ leaf_infeasible_codes <- function() {
       paste("the soil-to-collar continuity root-find failed on its bracket, so",
             "no collar potential equilibrates the column"),
     collar_solve =
-      paste("profit or stem potential came back non-finite inside the feasible",
+      paste("profit or leaf potential came back non-finite inside the feasible",
             "collar interval, so the maximisation has nothing to maximise"),
     ci_solve =
       paste("the nested ci root-find failed, and not in the way that means",
             "shut-down (which is an answer, not an error)"),
     stem_curve_domain =
       paste("a vulnerability curve was asked for a negative or non-finite",
-            "potential, or the stem curve for a flow no stem potential can carry",
+            "potential, or the stem curve for a flow no leaf potential can carry",
             "(below its table, or at or past the curve's total)"),
     uptake =
       paste("the soil-to-root-collar flux is non-finite, or a layer's",
             "vulnerability weighting is unusable, at this candidate collar"),
-    stem_wet_bound =
-      paste("no stem potential carries the residual (cuticular) flux from this",
-            "upstream potential, so a stem route has no wet bound to start from"),
+    leaf_wet_bound =
+      paste("no leaf potential carries the residual (cuticular) flux from this",
+            "upstream potential, so a leaf route has no wet bound to start from"),
     root_find_iterations =
       paste("a one-dimensional solver hit max_iterations without converging"),
     gradient_active_set =
@@ -81,7 +81,7 @@ leaf_infeasible_codes <- function() {
             "operating point, so the point sits on an active-set boundary and",
             "cannot be differentiated there"),
     prescribed_potential =
-      paste("a prescribed collar or stem potential lies outside its feasible",
+      paste("a prescribed collar or leaf potential lies outside its feasible",
             "interval; it is refused rather than moved onto the interval's end"),
     damage_state =
       paste("the thermal-damage states seated before set_physiology are outside",

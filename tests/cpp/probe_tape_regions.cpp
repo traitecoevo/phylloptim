@@ -146,14 +146,14 @@ Regions measure(int layers, double psi0) {
   const long c0 = long(tape.getNumStatements());
   volatile double sink = 0.0;
   {
-    const auto at = l.collar_coords_at<A>(l.opt_psi_stem_, l.ci_, held, draw,
+    const auto at = l.collar_coords_at<A>(l.opt_psi_leaf_, l.ci_, held, draw,
                                           io.in, l.photo_capacity_at<A>(io.in),
                                           false);
     sink += odelia::util::to_passive(at.sigma.value);
   }
   const long c1 = long(tape.getNumStatements());
   {
-    const auto at = l.collar_coords_at<A>(l.opt_psi_stem_, l.ci_, collar, draw,
+    const auto at = l.collar_coords_at<A>(l.opt_psi_leaf_, l.ci_, collar, draw,
                                           io.in, l.photo_capacity_at<A>(io.in),
                                           true);
     sink += odelia::util::to_passive(at.sigma.value);
@@ -238,7 +238,7 @@ void kernels() {
   Inputs io;
   io.register_on(tape, l);
   const pl::SupplyInputs<A> supply = io.supply();
-  const A collar(l.opt_root_psi_), sigma(l.opt_psi_stem_), ci(l.ci_);
+  const A collar(l.opt_root_psi_), sigma(l.opt_psi_leaf_), ci(l.ci_);
   volatile double sink = 0.0;
   long s0 = 0, o0 = 0;
   auto mark = [&]() {
@@ -259,7 +259,7 @@ void kernels() {
   mark(); keep(l.stem_integral_at<A>(sigma, io.in));         say("stem_integral_at(psi, pars)");
   mark(); keep(l.transpiration_at<A>(sigma, collar, io.in)); say("transpiration_at(sigma, collar, pars)");
   mark(); keep(l.hydraulic_cost_TF_kernel<A>(sigma, io.in)); say("hydraulic_cost_TF_kernel(sigma, pars)");
-  mark(); keep(pl::curve_with_closed_form_rows<A>(l.stem_curve_integral_deriv(l.opt_psi_stem_),
+  mark(); keep(pl::curve_with_closed_form_rows<A>(l.stem_curve_integral_deriv(l.opt_psi_leaf_),
                                                   sigma, io.in[pl::par_stem_P50],
                                                   io.in[pl::par_stem_c]));
                                                              say("curve_with_closed_form_rows(table, psi, P50, c)");

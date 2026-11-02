@@ -120,17 +120,17 @@ inline const std::vector<std::string>& par_names() {
 
 // --- the five differentiated outputs ------------------------------------------
 //
-// A, gc, psi_stem, collar and profit, the order R names them in (it reads
+// A, gc, psi_leaf, collar and profit, the order R names them in (it reads
 // `gradient_output_names()`): append, never reorder. `collar` is psi* itself, so dcollar/dtheta is
 // dpsi*/dtheta. The first four are what a gas-exchange calibration observes;
 // `profit` is the carbon plant's mass budget consumes.
 inline constexpr int n_outputs = 5;
-inline constexpr int out_psi_stem = 2;
+inline constexpr int out_psi_leaf = 2;
 inline constexpr int out_collar = 3;
 inline constexpr int out_profit = 4;
 
 inline const std::vector<std::string>& output_names() {
-  static const std::vector<std::string> names{"A", "gc", "psi_stem", "collar",
+  static const std::vector<std::string> names{"A", "gc", "psi_leaf", "collar",
                                               "profit"};
   return names;
 }
@@ -138,15 +138,15 @@ inline const std::vector<std::string>& output_names() {
 // --- which model's optimum is being differentiated ---------------------------
 //
 // A model is a (curve, route) pair, and every curve runs on both routes. The
-// collar route maximises over the root-collar potential; a stem route over
-// psi_stem with the upstream potential pinned at psi_soil, which is a different
+// collar route maximises over the root-collar potential; a leaf route over
+// psi_leaf with the upstream potential pinned at psi_soil, which is a different
 // model, not a restriction of the collar one (hazard 11). The default is the
-// Leaf's: TF24_floor on the stem route.
-enum class Route { Collar, Stem };
+// Leaf's: TF24_floor on the leaf route.
+enum class Route { Collar, Leaf };
 
 struct Model {
   Leaf::CostCurve curve = Leaf::CostCurve::TF24_floor;
-  Route route = Route::Stem;
+  Route route = Route::Leaf;
   bool collar() const { return route == Route::Collar; }
 };
 
@@ -176,14 +176,14 @@ inline void route_solve(Leaf& l, const Model& m) {
 }
 
 inline double route_psi(const Leaf& l, const Model& m) {
-  return m.collar() ? l.opt_root_psi_ : l.opt_psi_stem_;
+  return m.collar() ? l.opt_root_psi_ : l.opt_psi_leaf_;
 }
 
 inline void route_evaluate(Leaf& l, const Model& m, double psi) {
   if (m.collar()) {
     l.evaluate_root_collar_psi(psi);
   } else {
-    l.evaluate_psi_stem_at(psi);
+    l.evaluate_psi_leaf_at(psi);
   }
 }
 
@@ -211,7 +211,7 @@ inline double route_dprofit_checked(Leaf& l, const Model& m, double psi,
   if (m.collar()) {
     return l.dprofit_droot_collar_psi(psi, feasible);
   }
-  const std::vector<double> r = l.dprofit_dpsi_stem_checked(psi);
+  const std::vector<double> r = l.dprofit_dpsi_leaf_checked(psi);
   if (feasible != nullptr) {
     *feasible = r[1] != 0.0;
   }
@@ -223,17 +223,17 @@ inline double route_dprofit(Leaf& l, const Model& m, double psi) {
 }
 
 // The output that is the decision variable, whose derivative is dpsi*/dtheta,
-// assigned rather than differenced: `collar` on the collar route, `psi_stem` on
-// a stem route, where the collar is never solved for.
+// assigned rather than differenced: `collar` on the collar route, `psi_leaf` on
+// a leaf route, where the collar is never solved for.
 inline int route_decision(const Model& m) {
-  return m.collar() ? out_collar : out_psi_stem;
+  return m.collar() ? out_collar : out_psi_leaf;
 }
 
 // Read straight off the members, which operating_point_values() copies too.
 inline void outputs(const Leaf& l, double* y) {
   y[0] = l.assim_colimited_;
   y[1] = l.stom_cond_CO2_;
-  y[2] = l.opt_psi_stem_;
+  y[2] = l.opt_psi_leaf_;
   y[3] = l.opt_root_psi_;
   y[4] = l.profit_;
 }
@@ -313,7 +313,7 @@ struct Settings {
   Method method = Method::Auto;
   bool fast_stem_curve = true;
   // Which model's optimum to differentiate: the Leaf's default, TF24_floor on
-  // the stem route, unless set.
+  // the leaf route, unless set.
   Model model;
   // The finite-difference arm's step, separate from `step`: that arm re-solves,
   // so its step must clear the solver's resolution (hazard 15). `step` drives

@@ -57,13 +57,13 @@ test_that("a stem wetter than its upstream potential is refused, not answered (#
   # legal; the profit functions read a reversed pair as no flow and refuse nothing.
   l <- leaf_model()
   set_drivers(l, psi_soil = 2.0, PPFD = 900)
-  msg <- "psi_stem = 1.99 MPa is wetter than psi_upstream = 2 MPa"
+  msg <- "psi_leaf = 1.99 MPa is wetter than psi_upstream = 2 MPa"
   expect_error(l$transpiration(1.99, 2.0), msg)
   expect_error(l$stom_cond_CO2(1.99, 2.0), msg)
-  expect_true(is.finite(l$profit_psi_stem_TF(1.99, 2.0)))
+  expect_true(is.finite(l$profit_psi_leaf_TF(1.99, 2.0)))
   expect_identical(l$transpiration_, 0)
   expect_identical(l$transpiration(2.0, 2.0), 0)
-  expect_true(is.finite(l$profit_psi_stem_TF(2.0, 2.0)))
+  expect_true(is.finite(l$profit_psi_leaf_TF(2.0, 2.0)))
   expect_gt(l$transpiration(2.01, 2.0), 0)
 })
 
@@ -348,7 +348,7 @@ test_that("leaf_solve() reproduces the stateful path exactly", {
 outputs_one_at_a_time <- function(l) {
   consumption <- l$soil_consumption_
   finite <- consumption[is.finite(consumption)]
-  c(psi_stem = l$opt_psi_stem_,
+  c(psi_leaf = l$opt_psi_leaf_,
     collar = l$opt_root_psi_,
     ci = l$ci_,
     A = l$assim_colimited_,
@@ -445,7 +445,7 @@ test_that("operating_point() is the data.frame it replaced", {
 
   consumption <- l$soil_consumption_
   as_written_before <- data.frame(
-    psi_stem = l$opt_psi_stem_,
+    psi_leaf = l$opt_psi_leaf_,
     collar = l$opt_root_psi_,
     ci = l$ci_,
     A = l$assim_colimited_,
@@ -467,7 +467,7 @@ test_that("operating_point() is the data.frame it replaced", {
   expect_identical(operating_point(leaf_model()),
                    operating_point(leaf_model()))
   expect_true(all(is.na(unlist(operating_point(leaf_model())[
-    c("psi_stem", "A", "gc")]))))
+    c("psi_leaf", "A", "gc")]))))
 })
 
 test_that("leaf_solve()'s rows are assembled in the right order", {
@@ -606,7 +606,7 @@ test_that("there is no state in which the tag and the supply disagree", {
 })
 
 test_that("the single-potential path solves, and responds to its resistance", {
-  # The collar route: on the stem route the upstream potential is pinned at
+  # The collar route: on the leaf route the upstream potential is pinned at
   # psi_soil, so the resistance does not reach the solve.
   solve_at <- function(r) {
     leaf_solve(psi_soil = 1.5, PPFD = 900,
@@ -616,7 +616,7 @@ test_that("the single-potential path solves, and responds to its resistance", {
   easy <- solve_at(1e3)
   hard <- solve_at(1e4)
 
-  expect_true(all(is.finite(c(easy$A, easy$gc, easy$psi_stem))))
+  expect_true(all(is.finite(c(easy$A, easy$gc, easy$psi_leaf))))
   expect_gt(easy$A, 0)
   # A tenfold harder path to the collar must cost the leaf something. This is
   # the check that the resistance actually reaches the model rather than being
@@ -626,7 +626,7 @@ test_that("the single-potential path solves, and responds to its resistance", {
 
   # Water runs downhill: soil <= collar <= stem, all positive magnitudes.
   expect_gte(easy$collar, 1.5 - 1e-9)
-  expect_lte(easy$collar, easy$psi_stem + 1e-9)
+  expect_lte(easy$collar, easy$psi_leaf + 1e-9)
 })
 
 test_that("the single path refuses inputs it would otherwise ignore", {
@@ -670,7 +670,7 @@ test_that("the single path refuses inputs it would otherwise ignore", {
 })
 
 test_that("gravity_head costs the leaf water, on the single path", {
-  # The collar route: the stem route pins the upstream potential at psi_soil,
+  # The collar route: the leaf route pins the upstream potential at psi_soil,
   # upstream of the head.
   flat <- leaf_solve(psi_soil = 1.5, PPFD = 900,
                      supply = leaf_supply_singlelayer(), route = "collar",
@@ -911,7 +911,7 @@ test_that("a prescribed CF77_lambda_ survives both re-driving calls (#96)", {
   # hazard 8: set_traits must leave nothing describing the old traits.
   set_traits(l, leaf_traits(vcmax_25 = 96))
   expect_true(is.na(l$profit_))
-  expect_true(is.na(l$opt_psi_stem_))
+  expect_true(is.na(l$opt_psi_leaf_))
   expect_identical(l$CF77_lambda_, 30)
 })
 
@@ -940,7 +940,7 @@ test_that("TF24_floor is TF24 plus a price, and reduces to each of them", {
     prices <- list(...)
     for (nm in names(prices)) l[[nm]] <- prices[[nm]]
     set_drivers(l, psi_soil = 1.5, PPFD = 1500, root_network = net)
-    l$set_model(model, "stem")
+    l$set_model(model, "leaf")
     l$optimise()
     operating_point(l)
   }
@@ -975,8 +975,8 @@ test_that("TF24_floor is TF24 plus a price, and reduces to each of them", {
   # And with both halves live it is neither of them, which is what makes the two
   # equalities above tests rather than tautologies.
   both <- solve_at("TF24_floor", TF24_floor_lambda_o = 1.5e5)
-  expect_false(isTRUE(all.equal(both$psi_stem, tf24$psi_stem)))
-  expect_false(isTRUE(all.equal(both$psi_stem, cf77$psi_stem)))
+  expect_false(isTRUE(all.equal(both$psi_leaf, tf24$psi_leaf)))
+  expect_false(isTRUE(all.equal(both$psi_leaf, cf77$psi_leaf)))
 
   # The floor is on the emergent price, which `$lambda` reports for the seated
   # curve.
@@ -985,7 +985,7 @@ test_that("TF24_floor is TF24 plus a price, and reduces to each of them", {
     prices <- list(...)
     for (nm in names(prices)) l[[nm]] <- prices[[nm]]
     set_drivers(l, psi_soil = 1.5, PPFD = 1500, root_network = net)
-    l$set_model(model, "stem")
+    l$set_model(model, "leaf")
     l$optimise()
     l$lambda
   }
@@ -1008,7 +1008,7 @@ test_that("TF24_floor refuses a cleared price at the R surface too", {
   set_drivers(l, psi_soil = 1.5, PPFD = 1500,
               root_network = series_resistance(1e4))
   l$TF24_floor_lambda_o <- NA
-  l$set_model("TF24_floor", "stem")
+  l$set_model("TF24_floor", "leaf")
   expect_error(l$optimise(), "needs TF24_floor_lambda_o set")
 })
 
@@ -1023,36 +1023,36 @@ test_that("the prescribed prices are reachable from leaf_solve() (#132)", {
   one <- leaf_solve(psi_soil = 1.5, PPFD = 1500,
                     supply = leaf_supply_singlelayer(),
                     root_network = series_resistance(1e4),
-                    model = "TF24_floor", route = "stem",
+                    model = "TF24_floor", route = "leaf",
                     TF24_floor_lambda_o = 1.5e5)
-  expect_true(is.finite(one$psi_stem))
+  expect_true(is.finite(one$psi_leaf))
 
   # The same answer the stateful route gives, to the bit.
   l <- leaf_model(supply = leaf_supply_singlelayer())
   l$TF24_floor_lambda_o <- 1.5e5
   set_drivers(l, psi_soil = 1.5, PPFD = 1500,
               root_network = series_resistance(1e4))
-  l$set_model("TF24_floor", "stem")
+  l$set_model("TF24_floor", "leaf")
   l$optimise()
-  expect_identical(one$psi_stem, operating_point(l)$psi_stem)
+  expect_identical(one$psi_leaf, operating_point(l)$psi_leaf)
 
   # CF77 too, which is the pre-existing half of the same gap.
   expect_true(is.finite(leaf_solve(psi_soil = 1.5, PPFD = 1500,
                                    supply = leaf_supply_singlelayer(),
                                    root_network = series_resistance(1e4),
-                                   model = "CF77", route = "stem",
-                                   CF77_lambda = 1.5e5)$psi_stem))
+                                   model = "CF77", route = "leaf",
+                                   CF77_lambda = 1.5e5)$psi_leaf))
 
   # Without one, the default 0, where the curve is TF24, to the bit.
   floor0 <- leaf_solve(psi_soil = 1.5, PPFD = 1500,
                        supply = leaf_supply_singlelayer(),
                        root_network = series_resistance(1e4),
-                       model = "TF24_floor", route = "stem")
+                       model = "TF24_floor", route = "leaf")
   tf24 <- leaf_solve(psi_soil = 1.5, PPFD = 1500,
                      supply = leaf_supply_singlelayer(),
                      root_network = series_resistance(1e4),
-                     model = "TF24", route = "stem")
-  expect_identical(floor0$psi_stem, tf24$psi_stem)
+                     model = "TF24", route = "leaf")
+  expect_identical(floor0$psi_leaf, tf24$psi_leaf)
   expect_identical(floor0$profit, tf24$profit)
 
   # ⚠️ A PRICE THE SEATED MODEL DOES NOT READ IS REFUSED, NOT IGNORED. Silently

@@ -84,18 +84,18 @@ name from \code{\link[=cost_curve_names]{cost_curve_names()}}, solved on \code{r
 \code{"TF24_floor"}, is plant's default model; at its default price,
 \code{TF24_floor_lambda_o = 0}, it is TF24.}
 
-\item{route}{which potential the curve is maximised over: \code{"stem"} (the
-default), \code{psi_stem} with the upstream potential pinned at \code{psi_soil},
+\item{route}{which potential the curve is maximised over: \code{"leaf"} (the
+default), \code{psi_leaf} with the upstream potential pinned at \code{psi_soil},
 which needs \code{leaf_supply_singlelayer()}; or \code{"collar"}, the root-collar
 potential, on either supply path, and the only route on
-\code{leaf_supply_multilayer()}. \code{NULL} is the stem route.
+\code{leaf_supply_multilayer()}. \code{NULL} is the leaf route.
 
 ⚠️ \strong{The two routes are different models, not two ways of asking one
 question}, even for one curve. They optimise different variables over
 different supply topologies, and for TF24 disagree on 20 of 30 driver
 rows.
 
-⚠️ \strong{On a stem route the \code{collar} column comes back non-finite}, because
+⚠️ \strong{On a leaf route the \code{collar} column comes back non-finite}, because
 the collar is not solved for at all. An absent number is the truthful answer
 rather than a gap -- reading one would be reading whatever the last solve
 left behind.
@@ -123,7 +123,7 @@ it. \code{NA_real_} (the default) keeps the leaf's own default, aligned to TF24
 by \code{\link[=align_curves]{align_curves()}}. Zero is refused, since at zero the capacity term
 vanishes and what is left is water-use efficiency, which rises without bound
 as transpiration falls. The published value is 146, which at this
-package's default leaf pins the stem optimum at \code{psi_crit} from the
+package's default leaf pins the leaf optimum at \code{psi_crit} from the
 reference \code{psi_soil} of 1 MPa drier.}
 }
 \value{

@@ -49,7 +49,7 @@ inline phylloptim::RootNetwork series_resistance(double r) {
 }
 
 // A leaf seated as plant seats it: the multi-layer supply and TF24 on the
-// collar route. A bare Leaf defaults to TF24_floor on the stem route over the
+// collar route. A bare Leaf defaults to TF24_floor on the leaf route over the
 // single-potential supply.
 inline phylloptim::Leaf multilayer_leaf() {
   phylloptim::Leaf l;
