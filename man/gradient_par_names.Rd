@@ -11,10 +11,11 @@ A character vector, one entry per differentiable parameter.
 }
 \description{
 The sixteen \code{\link[=leaf_traits]{leaf_traits()}} in \code{set_traits()}'s argument order, then
-\code{leaf_specific_conductance_max}, \code{resistance} and \code{CF77_lambda_}. Exported so that R's own
-copy of this order can be compared against it in a test: R passes integer
-positions into this enumeration, so appending to it is safe and reordering it
-would silently differentiate the wrong parameter.
+\code{leaf_specific_conductance_max}, \code{resistance}, the parameters the cost
+curves own (\code{\link[=cost_curve_parameters]{cost_curve_parameters()}}) and the thermal-damage inputs.
+Exported so that R's own copy of this order can be compared against it in a
+test: R passes integer positions into this enumeration, so appending to it
+is safe and reordering it would silently differentiate the wrong parameter.
 }
 \examples{
 gradient_par_names()

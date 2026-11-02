@@ -216,6 +216,18 @@ double Leaf__lambda_TF24(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, doub
   return obj_->lambda_TF24(psi_stem);
 }
 // [[Rcpp::export]]
+double Leaf__curve_cost(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, std::string curve, double psi_stem, double psi_upstream) {
+  return obj_->curve_cost(curve, psi_stem, psi_upstream);
+}
+// [[Rcpp::export]]
+double Leaf__curve_profit(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, std::string curve, double psi_stem, double psi_upstream) {
+  return obj_->curve_profit(curve, psi_stem, psi_upstream);
+}
+// [[Rcpp::export]]
+double Leaf__curve_lambda(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, std::string curve, double psi_stem, double psi_upstream) {
+  return obj_->curve_lambda(curve, psi_stem, psi_upstream);
+}
+// [[Rcpp::export]]
 void Leaf__prepare_profitmax_at(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double A_max) {
   obj_->prepare_profitmax_at(A_max);
 }
@@ -1512,22 +1524,12 @@ double Leaf__single_psi_soil___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> 
 
 // [[Rcpp::export]]
 double Leaf__lambda__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
-  return obj_->marginal_cost_water();
+  return obj_->lambda_emergent();
 }
 
 // [[Rcpp::export]]
 double Leaf__lambda_molar__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
-  return obj_->marginal_cost_water_molar();
-}
-
-// [[Rcpp::export]]
-double Leaf__lambda_multilayer__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
-  return obj_->marginal_cost_water_multilayer();
-}
-
-// [[Rcpp::export]]
-double Leaf__lambda_emergent__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
-  return obj_->lambda_emergent();
+  return obj_->lambda_molar();
 }
 
 // [[Rcpp::export]]

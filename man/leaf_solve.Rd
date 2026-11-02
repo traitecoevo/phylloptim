@@ -107,7 +107,7 @@ default) leaves the field as it is: \code{CF77}'s aligned default (see
 defaults the leaf's own marginal cost of water runs 9e4 to 3e5, and a price
 far outside that band pins the optimum against a bound — where the answer
 describes the bracket rather than the model. \code{\link[=operating_point]{operating_point()}}'s
-\code{lambda_emergent} is how you find a value that means something.}
+\code{lambda} is how you find a value that means something.}
 
 \item{LeastCost_beta}{the \code{LeastCost} curve's unit-cost ratio (Prentice et
 al. 2014's beta): the cost of maintaining carboxylation capacity relative to

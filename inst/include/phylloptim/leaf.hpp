@@ -1203,6 +1203,8 @@ public:
                            bool* feasible = nullptr);
 
   static std::string curve_name(int curve);
+  // The curve of that name; an unknown name is refused with the list.
+  static CostCurve curve_from_name(const std::string& curve);
 
   // ⚠️ Hazard 17: the derivative surface read on another curve is a wrong,
   // finite number. Checked against the SEATED curve; find_root_collar_psi_for<K>()
@@ -1291,6 +1293,13 @@ public:
                                            double psi_upstream);
   // The collar route's lambda_emergent, for the seated curve. See the definition.
   template <CostCurve K> double lambda_collar_for();
+  // What lambda_for and lambda_collar_for compose: 1/h'(A), and a cost's slope in
+  // E through leaf temperature. See the definitions.
+  template <CostCurve K> double lambda_carbon_scale() const;
+  template <CostCurve K> double lambda_temperature_slope(double psi_stem,
+                                                         double psi_upstream);
+  // The C in J = h(A) - C at a stem potential, in the link's units.
+  template <CostCurve K> double cost_for(double psi_stem, double psi_upstream);
   // At the solved collar: S, the soil-to-collar conductance, and the factor
   // (1 + kmax f(psi_r)/S) a cost reading psi_stem alone takes on the collar route.
   // False where S is not a positive number, and `series` is then unset.
@@ -1708,19 +1717,19 @@ public:
 // its optimum and differs only in lambda(state). Accessors, not stored state
 // (hazard 5). CF77_lambda_ is an input; these are emergent outputs.
 
-  // (dC/dpsi) / (dE/dpsi) for TF24 at a stem potential (MPa), umol CO2 (kg H2O)^-1,
-  // with the conductivity cancelled analytically so it stays finite at psi_crit.
-  // With TF24_beta2 < 1 it diverges as psi -> 0, a property of the cost.
-  double lambda_TF24(double psi_stem) const;
+  // Each curve's lambda_for at a stem potential (MPa), umol C (kg H2O)^-1, bound
+  // per curve and frozen: curve_lambda() takes any curve by name. TF24's, with
+  // TF24_beta2 < 1, diverges as psi -> 0, a property of the cost.
+  double lambda_TF24(double psi_stem);
   // Takes both potentials: JS22's cost is a function of the drop, so its
   // marginal cost depends on the upstream potential.
-  double lambda_JS22(double psi_stem, double psi_upstream) const;
+  double lambda_JS22(double psi_stem, double psi_upstream);
   // Also both potentials, but only because `E` is measured from the upstream one --
   // the COST here is a function of the absolute potential, unlike JS22's.
-  double lambda_CMax(double psi_stem, double psi_upstream) const;
+  double lambda_CMax(double psi_stem, double psi_upstream);
   // lambda_TF24(psi) + lambda_o, which does not vanish at the wet end. One argument, because the hydraulic half reads the absolute
   // potential; lambda_for<TF24_floor> discards the upstream one.
-  double lambda_TF24_floor(double psi_stem) const;
+  double lambda_TF24_floor(double psi_stem);
 
   // --- the product-objective family --------------------------------
   // SOX (Eller 2018, 2020) maximises `A * g(psi)` rather than `A - C(psi)`, with
@@ -1729,7 +1738,7 @@ public:
   double sox_reduction(double psi_stem) const;
   double sox_reduction_deriv(double psi_stem) const;
   double profit_psi_stem_SOX(double psi_stem, double psi_upstream);
-  double lambda_SOX(double psi_stem, double psi_upstream) const;
+  double lambda_SOX(double psi_stem, double psi_upstream);
 
   // --- least-cost / cost-per-unit-carbon --------------------------------------
   // Prentice et al. (2014) and Dong et al. (2017) minimise the cost per unit
@@ -1761,23 +1770,21 @@ public:
   double jw26_reduction(double psi_stem) const;
   double jw26_reduction_deriv(double psi_stem) const;
   double profit_psi_stem_JW26(double psi_stem, double psi_upstream);
-  double lambda_JW26(double psi_stem, double psi_upstream) const;
+  double lambda_JW26(double psi_stem, double psi_upstream);
 
   // ProfitMax's marginal cost of water, umol C (kg H2O)^-1: the normalised dC/dE
   // times |A|max. Requires prepare_profitmax() to have seeded the normalisers.
   double lambda_ProfitMax(double psi_stem);
 
-  // lambda at the operating point as the stem sees it: dA/dE only with the
-  // collar fixed (the optimise_psi_stem_* solvers).
-  double marginal_cost_water() const;
+  // lambda_emergent() in mol CO2 (mol H2O)^-1, the optimality literature's units.
+  double lambda_molar() const;
 
-  // The same in mol CO2 (mol H2O)^-1, the optimality literature's units.
-  double marginal_cost_water_molar() const;
-
-  // lambda with the root network's series resistance, which find_root_collar_psi
-  // equalises: lambda_TF24 * [1 + kmax*f(psi_r)/S], S = dE_up/dpsi_r. NA where S
-  // is NaN (a kink) or zero. Requires a collar solve to have seated the caches.
-  double marginal_cost_water_multilayer();
+  // Any curve by name, whatever is seated: its cost (cost_for), its objective
+  // (profit_psi_stem_for, which evaluates the leaf there) and its lambda
+  // (lambda_for) at a stem potential. ProfitMax's need its normalisers seeded.
+  double curve_cost(const std::string& curve, double psi_stem, double psi_upstream);
+  double curve_profit(const std::string& curve, double psi_stem, double psi_upstream);
+  double curve_lambda(const std::string& curve, double psi_stem, double psi_upstream);
 
   // Equivalent Medlyn USO slope, kPa^0.5: chi * sqrt(D) / (1 - chi) from the
   // solved chi = ci/ca, comparable with fitted g1 (plantecophys::fitBB).
@@ -1819,7 +1826,9 @@ public:
   // solve, so it cannot abort a plant run.
   double stom_cond_stomatal_H2O() const;
 
-  // Read-only: it is derived from the operating point.
+  // The seated curve's lambda at its operating point, written by the solve or the
+  // evaluation that ran; R binds it as `lambda`. Read-only: it is derived from
+  // the operating point.
   double lambda_emergent() const { return lambda_emergent_; }
   // ProfitMax's normalisers, so a caller can form its equivalence ratio without
   // this class pretending that ratio is a lambda.
@@ -1846,12 +1855,10 @@ public:
             hydraulic_cost_,
             E_up_,
             uptake,
-            marginal_cost_water(),
+            lambda_emergent(),
             g1_eff(),
             Tleaf_,          // deg C
             shadow_cost(),
-            // The seated curve's marginal cost of water; `lambda` above is TF24's.
-            lambda_emergent(),
             // The realised residual flux, kg H2O m^-2 s^-1; `E` above is the total.
             residual_flux_};
   }
@@ -2527,17 +2534,7 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
 inline void Leaf::set_model(const std::string& curve,
                            const std::string& route,
                            const std::string& method) {
-  int k = -1;
-  for (int i = 0; i < n_cost_curves; ++i) {
-    if (curve_name(i) == curve) { k = i; break; }
-  }
-  if (k < 0) {
-    std::string names;
-    for (int i = 0; i < n_cost_curves; ++i) {
-      names += (i == 0 ? "" : ", ") + curve_name(i);
-    }
-    util::stop("unknown cost curve \"" + curve + "\". Available: " + names + ".");
-  }
+  const CostCurve k = curve_from_name(curve);
   if (route != "collar" && route != "stem") {
     util::stop("unknown route \"" + route + "\": use \"collar\" for the full "
                "soil-to-collar path or \"stem\" for psi_stem with the upstream "
@@ -2551,7 +2548,7 @@ inline void Leaf::set_model(const std::string& curve,
                "first-order-condition root-find over the closed interval, or "
                "\"closed\" for the closed form. Available: exact, closed.");
   }
-  set_model(static_cast<CostCurve>(k), route == "collar", method == "closed");
+  set_model(k, route == "collar", method == "closed");
 }
 
 // The same, already parsed, for a C++ caller holding a `CostCurve`

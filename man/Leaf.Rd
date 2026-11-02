@@ -96,11 +96,18 @@ l$optimise()
 \verb{$hydraulic_cost_}; \verb{$profitmax_curve()} returns its whole cost, gain and
 profit curve in one call.
 
-⚠️ \strong{\verb{$profit_} carries three kinds of number across the eight curves} --
+⚠️ \strong{\verb{$profit_} carries four kinds of number across the nine curves} --
 carbon for the five difference objectives, a dimensionless normalised
-profit for \code{ProfitMax}, and carbon times a dimensionless factor for the two
-products. Comparing it BETWEEN curves is not meaningful; comparing each
-curve's argmax is.
+profit for \code{ProfitMax}, carbon times a dimensionless factor for the two
+products, and carbon per unit of weighted resource for \code{LeastCost}.
+Comparing it BETWEEN curves is not meaningful; comparing each curve's
+argmax is. \verb{$lambda}, the seated curve's marginal cost of water at its
+operating point, is the one output every curve reports on the same axis.
+
+\verb{$curve_cost()}, \verb{$curve_profit()} and \verb{$curve_lambda()} evaluate any
+curve by name at a stem potential, whatever is seated; the per-curve
+methods (\verb{$hydraulic_cost_CF77()}, \verb{$lambda_SOX()} and the rest) are the
+same numbers, kept for existing code.
 
 All water potentials are \strong{positive magnitudes in MPa}. There is one
 representation throughout and it is asserted, not documented: a negative

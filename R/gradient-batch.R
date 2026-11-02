@@ -144,13 +144,13 @@ leaf_batch <- function(psi_soil,
     rep(NA_real_, n)
   }
 
-  prices <- list(CF77_lambda = CF77_lambda,
+  # Each owned field's argument, by field.
+  prices <- list(CF77_lambda_ = CF77_lambda,
                  TF24_floor_lambda_o = TF24_floor_lambda_o,
                  LeastCost_beta = LeastCost_beta)
-  prices <- lapply(names(prices), function(nm) {
-    .recycle_to(as.numeric(prices[[nm]]), n, nm)
+  prices <- lapply(stats::setNames(names(prices), names(prices)), function(f) {
+    .recycle_to(as.numeric(prices[[f]]), n, .owned_argument(f))
   })
-  names(prices) <- c("CF77_lambda", "TF24_floor_lambda_o", "LeastCost_beta")
 
   # One row of `theta` when every observation shares these two and the prices,
   # n rows when they do not. Not an optimisation of the arithmetic -- the C++
@@ -175,9 +175,7 @@ leaf_batch <- function(psi_soil,
          traits = traits,
          kmax = one_or_all(kmax),
          resistance = one_or_all(resistance),
-         CF77_lambda = one_or_all(prices$CF77_lambda),
-         TF24_floor_lambda_o = one_or_all(prices$TF24_floor_lambda_o),
-         LeastCost_beta = one_or_all(prices$LeastCost_beta),
+         owned = lapply(prices, one_or_all),
          theta_nrow = if (shared) 1L else n),
     class = "leaf_batch")
 }
@@ -461,7 +459,7 @@ leaf_gradient_batch <- function(batch,
               dimnames = list(NULL, par_names))
   # Every column by name (hazard 13): a positional tail column shifts silently
   # when a parameter is appended.
-  trait_names <- setdiff(par_names, .gradient_non_traits)
+  trait_names <- setdiff(par_names, .gradient_non_traits())
   tv <- unlist(traits)[trait_names]
   if (anyNA(tv)) {
     stop("`traits` is missing: ",
@@ -474,9 +472,9 @@ leaf_gradient_batch <- function(batch,
   m[, "resistance"] <- batch$resistance
   # NA unless the batch was built for the route that owns it; C++ reads every
   # slot, so each holds whatever the solve will use.
-  m[, "CF77_lambda_"] <- batch$CF77_lambda
-  m[, "TF24_floor_lambda_o"] <- batch$TF24_floor_lambda_o
-  m[, "LeastCost_beta"] <- batch$LeastCost_beta
+  for (field in .owned_fields()) {
+    m[, field] <- batch$owned[[field]]
+  }
   m <- .gradient_fill_level_defaults(m, model, par_names)
   # The thermal-damage inputs, off the batch's leaf, when its gate is on; NA (and
   # unread) otherwise. One row for every observation: pass `theta` to give each
@@ -518,10 +516,11 @@ leaf_gradient_batch <- function(batch,
   if (is.null(model)) {
     return(m)
   }
-  for (field in names(.level_defaults)) {
+  levels <- .level_defaults()
+  for (field in names(levels)) {
     if (.owns_field(model, field)) {
       j <- match(field, par_names)
-      m[is.na(m[, j]), j] <- .level_defaults[[field]]
+      m[is.na(m[, j]), j] <- levels[[field]]
     }
   }
   m
@@ -532,17 +531,15 @@ leaf_gradient_batch <- function(batch,
 # must be set on every row. Left to C++, a missing one is a per-row error, which
 # a fit reads as observations that failed to solve.
 .gradient_check_theta_prices <- function(m, model, par_names) {
-  col <- function(field) m[, match(field, par_names)]
-  .check_prices(model, col("CF77_lambda_"), col("TF24_floor_lambda_o"),
-                col("LeastCost_beta"))
-  if (!model %in% names(.solve_price_fields)) {
-    return(invisible(m))
-  }
-  field <- .solve_price_fields[[model]]
-  if (anyNA(m[, match(field, par_names)])) {
-    stop("the ", model, " cost curve needs ", field, " set on every ",
-         "observation: pass `", field, " =` to leaf_batch(), or fill that ",
-         "column of `theta`; it has no default.", call. = FALSE)
+  owned <- .owned_fields()
+  .check_prices(model, lapply(stats::setNames(owned, owned),
+                              function(field) m[, match(field, par_names)]))
+  for (field in owned[names(owned) == model]) {
+    if (anyNA(m[, match(field, par_names)])) {
+      stop("the ", model, " cost curve needs ", field, " set on every ",
+           "observation: pass `", field, " =` to leaf_batch(), or fill that ",
+           "column of `theta`; it has no default.", call. = FALSE)
+    }
   }
   invisible(m)
 }

@@ -28,6 +28,7 @@ reference:
   - set_traits
   - operating_point
   - cost_curve_names
+  - cost_curve_parameters
   - align_curves
 - title: Water supply
   desc: How water reaches the root collar, and the root resistances that carry it.

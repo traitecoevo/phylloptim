@@ -349,11 +349,10 @@ outputs_one_at_a_time <- function(l) {
     g1_eff = l$g1_eff,
     Tleaf = l$Tleaf_,
     shadow_cost = l$shadow_cost,
-    lambda_emergent = l$lambda_emergent,
     residual_flux = l$residual_flux_)
 }
 
-test_that("operating_point_values() returns the sixteen fields, in that order", {
+test_that("operating_point_values() returns the fifteen fields, in that order", {
   # ⚠️ THE ORDER IS AN INTERFACE AND NOTHING IN THE TYPES ENFORCES IT. The C++
   # method returns a flat vector because that is what crosses the R boundary for
   # free (#39: twelve active bindings cost ~15 us against a ~3 us solve, one call
@@ -407,7 +406,7 @@ test_that("Tleaf is reported, and is not the leaf_temp driver on the PM path", {
   expect_identical(d$Tleaf, rep(30, 3L))
   # Last column, not inserted: these names are positions, and a saved output
   # would shift under an insertion.
-  expect_identical(names(d)[[length(names(d)) - 3L]], "Tleaf")
+  expect_identical(names(d)[[length(names(d)) - 2L]], "Tleaf")
 
   # With the energy balance on, driven by hand because the gate is a field.
   l <- leaf_model()
@@ -447,7 +446,6 @@ test_that("operating_point() is the data.frame it replaced", {
     g1_eff = l$g1_eff,
     Tleaf = l$Tleaf_,
     shadow_cost = l$shadow_cost,
-    lambda_emergent = l$lambda_emergent,
     residual_flux = l$residual_flux_
   )
   expect_identical(operating_point(l), as_written_before)
@@ -871,7 +869,7 @@ test_that("a prescribed CF77_lambda_ survives both re-driving calls (#96)", {
   # passes on the code this test exists to reject.
   l <- leaf_model(supply = leaf_supply_singlelayer())
   # not "never initialised": the aligned default (#156)
-  expect_identical(l$CF77_lambda_, .level_defaults[["CF77_lambda_"]])
+  expect_identical(l$CF77_lambda_, .level_defaults()[["CF77_lambda_"]])
 
   l$CF77_lambda_ <- 30
   set_drivers(l, psi_soil = 1.5, root_network = series_resistance(1500))
@@ -934,26 +932,20 @@ test_that("TF24_floor is TF24 plus a price, and reduces to each of them", {
   cf77 <- solve_at("CF77", CF77_lambda_ = 1.5e5)
   no_hydraulic <- solve_at("TF24_floor", TF24_floor_lambda_o = 1.5e5,
                            traits = leaf_traits(TF24_cost_scale = 0))
-  # ⚠️ EVERY COLUMN BUT `lambda`, AND THE EXCEPTION IS THE POINT. `lambda` here is
-  # `marginal_cost_water()`, i.e. TF24's own price at this operating point -- and
-  # the two leaves reach the same operating point with DIFFERENT
-  # `TF24_cost_scale`, so it is 0 on the left and 1.65e+05 on the right. That is
-  # the diagnostic disagreeing, not the model: every reported state and flux is
-  # bit-identical. Pinned rather than papered over, because this column is the one
-  # a reader of this curve is most likely to quote by mistake.
+  # Every column, `lambda` included -- the seated curve's, so the price on both
+  # sides -- but one.
   #
-  # ⚠️ AND `shadow_cost`, WHICH IS A SECOND EXCEPTION OF A DIFFERENT KIND. These two
-  # leaves are the same model numerically -- same state, same fluxes, bit for bit --
-  # and this is the one column that separates them, because only one of them
+  # ⚠️ `shadow_cost` IS THE EXCEPTION. These two leaves are the same model
+  # numerically -- same state, same fluxes, bit for bit -- and this is the one
+  # column that separates them, because only one of them
   # DECLARES its price as a price. TF24_floor reports `lambda_o * E`; CF77 reports
   # zero, not because its cost is realised carbon but because its single `lambda`
   # merges the two readings and supplies nothing to attribute the number with. So
   # the pair below is the sharpest available statement of what the column means: it
   # is about what a curve can attribute, not about what a leaf does.
-  cols <- setdiff(names(cf77), c("lambda", "shadow_cost"))
+  cols <- setdiff(names(cf77), "shadow_cost")
   expect_identical(no_hydraulic[cols], cf77[cols])
-  expect_identical(no_hydraulic$lambda, 0)
-  expect_gt(cf77$lambda, 0)
+  expect_identical(cf77$lambda, 1.5e5)
   expect_gt(no_hydraulic$shadow_cost, 0)
   expect_identical(cf77$shadow_cost, 0)
 
@@ -963,10 +955,8 @@ test_that("TF24_floor is TF24 plus a price, and reduces to each of them", {
   expect_false(isTRUE(all.equal(both$psi_stem, tf24$psi_stem)))
   expect_false(isTRUE(all.equal(both$psi_stem, cf77$psi_stem)))
 
-  # ⚠️ THE FLOOR IS ON THE EMERGENT PRICE, and `$lambda_emergent` is where to read
-  # it -- NOT `operating_point()$lambda`, which is `marginal_cost_water()` and so
-  # reports the TF24 cost's price whatever curve is seated. On THIS curve the two
-  # are especially easy to confuse, since the hydraulic half really is TF24's.
+  # The floor is on the emergent price, which `$lambda` reports for the seated
+  # curve.
   emergent <- function(model, ..., traits = leaf_traits()) {
     l <- leaf_model(traits, leaf_control(), leaf_supply_singlelayer())
     prices <- list(...)
@@ -974,7 +964,7 @@ test_that("TF24_floor is TF24 plus a price, and reduces to each of them", {
     set_drivers(l, psi_soil = 1.5, PPFD = 1500, root_network = net)
     l$set_model(model, "stem")
     l$optimise()
-    l$lambda_emergent
+    l$lambda
   }
   expect_gt(emergent("TF24_floor", TF24_floor_lambda_o = 1.5e5), 1.5e5)
 

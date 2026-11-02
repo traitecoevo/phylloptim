@@ -1001,11 +1001,10 @@ void test_collar_foc_matches_profit() {
 // central difference ALONG THE COLLAR PATH: assimilation and transpiration at
 // the collar either side of the optimum.
 //
-// ⚠️ This is what catches a lambda of the wrong curve. Every collar solve used to
-// report TF24's (marginal_cost_water_multilayer, its series-corrected form)
-// whatever it had maximised: CF77 at a price of 1e5 read 1.05e6. A check on TF24
-// alone, or on the stem route, where each curve has always reported its own,
-// cannot see that.
+// ⚠️ This is what catches a lambda of the wrong curve: a collar solve reporting
+// TF24's series-corrected lambda whatever it had maximised read 1.05e6 for CF77
+// at a price of 1e5. A check on TF24 alone, or on the stem route, cannot see
+// that.
 template <phylloptim::Leaf::CostCurve K>
 int check_collar_lambda_emergent(const Drivers &d, double *worst) {
   const struct {
@@ -2008,9 +2007,9 @@ void test_lambda_equals_dA_dE_single_layer() {
     l.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::TF24>();
     // Tolerance is set by the optimiser: GSS_tol_abs is 1e-3 on psi, so the
     // first-order condition only holds to about that accuracy.
-    near(l.marginal_cost_water() / fd, 1.0, 1e-3,
+    near(l.lambda_emergent() / fd, 1.0, 1e-3,
          "lambda/(dA/dE) at psi_soil=" + std::to_string(psi_soil));
-    ok(l.marginal_cost_water() > 0.0, "lambda is positive");
+    ok(l.lambda_emergent() > 0.0, "lambda is positive");
   }
 }
 
@@ -2020,7 +2019,7 @@ void test_lambda_equals_dA_dE_single_layer() {
 // defining assertion rather than a consistency check on it.
 //
 // Contrast test_lambda_equals_dA_dE_single_layer above, which asks the same
-// question of the TF24 cost and has to go through `marginal_cost_water()` to get
+// question of the TF24 cost and has to go through `lambda_emergent()` to get
 // an answer: there lambda is a DERIVED property of the operating point, here it
 // is the prescribed input. The two tests look alike and are asking opposite
 // questions.
@@ -2035,7 +2034,7 @@ void test_cowan_farquhar_equates_dA_dE_to_lambda() {
   int interior_rows = 0, bound_rows = 0;
   // ⚠️ lambda's SCALE is set by the model, not chosen freely: it is umol C per kg
   // of water, and at these drivers the leaf's own marginal cost of water runs
-  // 9e4 to 3e5 (see `marginal_cost_water()`). A lambda far below that band makes
+  // 9e4 to 3e5 (TF24's `lambda_emergent()`). A lambda far below that band makes
   // water free and every optimum pins wide open at psi_crit; far above it and
   // they all pin shut. Either way the identity below is never exercised, and the
   // test passes while asserting nothing -- so keep these values inside the band
@@ -2092,7 +2091,7 @@ void test_cowan_farquhar_equates_dA_dE_to_lambda() {
 //
 // This is a much sharper instrument than a finite-difference ratio: it compares
 // two argmaxes computed by two objectives, with no derivative approximation in
-// between, and it fails if `marginal_cost_water()` reports the wrong quantity for
+// between, and it fails if `lambda_emergent()` reports the wrong quantity for
 // either curve.
 void test_cowan_farquhar_reproduces_the_TF_optimum() {
   printf("Cowan-Farquhar at TF24's implied lambda finds TF24's optimum\n");
@@ -2103,7 +2102,7 @@ void test_cowan_farquhar_reproduces_the_TF_optimum() {
     phylloptim::Leaf ref = make_leaf(d, {psi_soil}, {1.0});
     ref.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::TF24>();
     const double psi_tf = ref.opt_psi_stem_;
-    const double lambda_implied = ref.marginal_cost_water();
+    const double lambda_implied = ref.lambda_emergent();
 
     phylloptim::Leaf cf = make_leaf(d, {psi_soil}, {1.0});
     cf.CF77_lambda_ = lambda_implied;
@@ -2570,9 +2569,10 @@ void test_every_curve_reports_an_emergent_lambda() {
 
 // The multi-layer identity from the companion manuscript:
 //   lambda_multi = lambda_single * [1 + kmax*f(psi_r)/S],   S = dE_up/dpsi_r
-// find_root_collar_psi optimises the COLLAR, so lambda_multi is what it
-// equalises. The single-layer lambda should be badly wrong here -- that is the
-// point of the correction, and this test pins the size of the error.
+// find_root_collar_psi optimises the COLLAR, so lambda_multi, the collar route's
+// lambda_emergent, is what it equalises. The stem route's lambda at the same
+// point should be badly wrong here -- that is the point of the correction, and
+// this test pins the size of the error.
 void test_multilayer_lambda_identity() {
   printf("multi-layer lambda: series-resistance correction vs dA/dE (collar free)\n");
   Drivers d;
@@ -2585,8 +2585,8 @@ void test_multilayer_lambda_identity() {
     }
     phylloptim::Leaf l = make_leaf(d, ps, depth);
     l.find_root_collar_psi();
-    const double single = l.marginal_cost_water();
-    const double multi = l.marginal_cost_water_multilayer();
+    const double single = l.lambda_TF24(l.opt_psi_stem_);
+    const double multi = l.lambda_emergent();
 
     const double target = l.opt_root_psi_;
     const double eps = 1e-6;
@@ -2626,7 +2626,7 @@ void test_g1_eff() {
   dry.find_root_collar_psi();
   ok(dry.g1_eff() < g1, "g1_eff falls as the soil dries");
   // And a higher marginal cost of water goes with a lower g1_eff.
-  ok(dry.marginal_cost_water() > l.marginal_cost_water(),
+  ok(dry.lambda_emergent() > l.lambda_emergent(),
      "lambda rises as the soil dries");
 }
 
@@ -2726,13 +2726,10 @@ void test_leaf_temperature_is_reported() {
     ok(l.Tleaf_ == T,
        "off the energy-balance path Tleaf is the driver, at T = " +
            std::to_string(T));
-    // ⚠️ NOT `.back()`: `shadow_cost`, `lambda_emergent` and then
-    // `residual_flux` were appended after `Tleaf`, so the last element is none
-    // of them. Addressed from the end by name-order instead, which is what the
-    // R side's `.operating_point_names` pins -- and that test is what catches
-    // this drifting again.
+    // ⚠️ NOT `.back()`: outputs follow `Tleaf`. Addressed by its position in
+    // R's `.operating_point_names`, which test-surface.R pins.
     const std::vector<double> ov = l.operating_point_values();
-    ok(ov[ov.size() - 4] == l.Tleaf_,
+    ok(ov[12] == l.Tleaf_,
        "operating_point_values() reports it, at T = " + std::to_string(T));
   }
 
@@ -8452,13 +8449,13 @@ void test_single_layer_optimisers_reach_a_bound() {
     //
     // The prescribed lambda is what can push this model's optimum to a bound: at
     // several times the price the leaf's own operating point implies, water is
-    // not worth taking and full closure wins. Derived per row from
-    // marginal_cost_water() rather than fixed, because the implied price moves
+    // not worth taking and full closure wins. Derived per row from TF24's
+    // lambda_emergent() rather than fixed, because the implied price moves
     // 3.4x across a drydown and a fixed number would leave some rows unpriced.
     {
       phylloptim::Leaf ref = make_single_leaf(d, r.psi_soil);
       ref.optimise_psi_stem_single<phylloptim::Leaf::CostCurve::TF24>();
-      const double lambda = 5.0 * ref.marginal_cost_water();
+      const double lambda = 5.0 * ref.lambda_emergent();
       if (!(std::isfinite(lambda) && lambda > 0.0)) continue;
 
       phylloptim::Leaf l = make_single_leaf(d, r.psi_soil);
@@ -8700,11 +8697,9 @@ void test_shadow_cost() {
 
 void test_lambda_emergent_reported() {
   printf("operating_point_values() reports the SEATED curve's lambda\n");
-  // WHY THIS EXISTS. `lambda` is `marginal_cost_water()` -- TF24's price at this
-  // operating point, whatever curve ran -- so on any other curve it answers a
-  // question nobody asked. `lambda_emergent` is the seated curve's own
-  // (dC/dpsi)/(dE/dpsi), and it was reachable only off the object until it was
-  // appended here, which left every leaf_solve() caller reconstructing it.
+  // R's `lambda` is this slot: the seated curve's own (dC/dpsi)/(dE/dpsi), not
+  // TF24's whatever curve ran, which on any other curve answers a question
+  // nobody asked.
   //
   // ⚠️ CF77 IS THE CASE THAT PINS IT, because its emergent lambda is KNOWN: the
   // curve prices water at a prescribed constant, so `lambda_emergent` must come
@@ -8727,12 +8722,12 @@ void test_lambda_emergent_reported() {
         ++compared;
       }
 
-      // TF24 is the one curve where the two agree, by construction
+      // TF24's is its bound per-curve lambda at the optimum, exactly
       phylloptim::Leaf t = make_single_leaf(d, psi_soil);
       t.set_model(phylloptim::Leaf::CostCurve::TF24, false);
       t.optimise();
-      ok(t.lambda_emergent() == t.marginal_cost_water(),
-         "on TF24 the seated lambda and marginal_cost_water agree exactly");
+      ok(t.lambda_emergent() == t.lambda_TF24(t.opt_psi_stem_),
+         "on TF24 the seated lambda is lambda_TF24 at the optimum exactly");
 
       // and TF24_floor's is its hydraulic half plus the floor -- the correction a
       // caller used to have to make by hand
@@ -8741,14 +8736,14 @@ void test_lambda_emergent_reported() {
       f.set_model(phylloptim::Leaf::CostCurve::TF24_floor, false);
       f.optimise();
       ok(std::fabs(f.lambda_emergent() -
-                   (f.marginal_cost_water() + price)) <= 1e-9 * price,
+                   (f.lambda_TF24(f.opt_psi_stem_) + price)) <= 1e-9 * price,
          "TF24_floor's emergent lambda is the hydraulic half plus the floor");
 
-      // the reported vector must carry the same number the accessor does;
-      // `residual_flux` was appended after it (#182), so it is second to last
+      // the reported vector carries the same number the accessor does, in the
+      // slot R names `lambda`, and the residual flux last
       const std::vector<double> ov = f.operating_point_values();
-      ok(ov[ov.size() - 2] == f.lambda_emergent(),
-         "operating_point_values() reports lambda_emergent second to last");
+      ok(ov[10] == f.lambda_emergent(),
+         "operating_point_values() reports lambda_emergent as `lambda`");
       ok(ov.back() == f.residual_flux_,
          "and the residual flux last");
     }

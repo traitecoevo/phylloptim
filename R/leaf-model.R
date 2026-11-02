@@ -2,32 +2,15 @@
 # the only route from here into C++. It splits traits from numerical settings and
 # assigns the traits the 15-argument constructor does not take.
 
-# Eucalyptus saligna; the defaults for every function below. They must equal
+# leaf_traits()' defaults are Eucalyptus saligna's and must equal
 # phylloptim::Leaf's default constructor: test-golden.R solves through them and
 # compares bit-exactly with a golden file from a default-constructed C++ Leaf.
-# The order is the gradient's trait vector: append, never reorder (hazard 13).
-# JS22_gamma and CMax_a are solved by align_curves(); test-align-curves.R checks.
+# Its argument order is the gradient's trait vector: append, never reorder
+# (hazard 13). The cost curves' traits (TF24_beta2, TF24_cost_scale, JS22_gamma,
+# CMax_a, CMax_b) are their definitions' defaults, and test-curve-definition.R
+# holds the two equal; JS22_gamma and CMax_a are solved by align_curves().
 # root_c / root_P50 default in MultiLayerRoots, not Leaf (hazard 1); they are
 # restated because the R constructor passes them.
-.leaf_trait_defaults <- list(
-  vcmax_25 = 96,
-  stem_c = 2.680147,
-  stem_P50 = 3.4,
-  root_c = 2.680147,
-  root_P50 = 3.4,
-  TF24_beta2 = 1.5,
-  jmax_25 = 157.44,
-  phi_J = 0.30 / 0.85,
-  curv_fact_elec_trans = 0.7,
-  curv_fact_colim = 0.99,
-  TF24_cost_scale = 7.5,
-  R_d_25 = 1.44,
-  JS22_gamma = 0.4717887793,
-  CMax_a = 0.6385596982,
-  CMax_b = 0.0,
-  g_min = 0.0
-)
-
 ##' Physiological traits for a leaf
 ##'
 ##' The traits, and only the traits. Numerical settings live in
@@ -762,9 +745,9 @@ operating_point <- function(x) {
   "hydraulic_cost",
   "E_up",
   "uptake",
-  # TF24's marginal cost of water at this operating point, whatever curve is
-  # seated; the seated curve's own is `lambda_emergent`.
-  "lambda",         # dA/dE under the TF24 cost
+  # umol C (kg H2O)^-1: the seated curve's marginal cost of water, dC/dE, on
+  # the same axis for every curve.
+  "lambda",
   "g1_eff",         # the Medlyn g1 this leaf implies
   # deg C. Not the `leaf_temp` driver: on the energy-balance path that is air
   # temperature and this the leaf's own; off it, this is a copy of the driver.
@@ -773,9 +756,6 @@ operating_point <- function(x) {
   # given up; `TF24_floor_lambda_o * E` on that curve and zero on every other,
   # where zero means the curve does not separate the two. See operating_point().
   "shadow_cost",
-  # umol C (kg H2O)^-1: the seated curve's marginal cost of water,
-  # `(dC/dpsi)/(dE/dpsi)`, on the same axis for every curve.
-  "lambda_emergent",
   # kg H2O m^-2 s^-1: the residual (cuticular) flux. `E` is the total flux; the
   # stomatal flux is `E - residual_flux`.
   "residual_flux"
@@ -882,7 +862,7 @@ operating_point <- function(x) {
 ##'   defaults the leaf's own marginal cost of water runs 9e4 to 3e5, and a price
 ##'   far outside that band pins the optimum against a bound — where the answer
 ##'   describes the bracket rather than the model. [operating_point()]'s
-##'   `lambda_emergent` is how you find a value that means something.
+##'   `lambda` is how you find a value that means something.
 ##' @param reuse solve every row with one `Leaf` object (`TRUE`) or construct a
 ##'   fresh one per row (`FALSE`, the default). Reuse is faster because the
 ##'   vulnerability tables are built once, and it is safe -- every exit from the
@@ -938,8 +918,9 @@ leaf_solve <- function(psi_soil,
          "leaf_solve() seats one price for every row. For a price per ",
          "observation, use leaf_batch().", call. = FALSE)
   }
-  prices <- .check_prices(model, CF77_lambda, TF24_floor_lambda_o,
-                          LeastCost_beta)
+  prices <- .check_prices(model, list(CF77_lambda_ = CF77_lambda,
+                                     TF24_floor_lambda_o = TF24_floor_lambda_o,
+                                     LeastCost_beta = LeastCost_beta))
   layered <- .as_layer_list(psi_soil, "psi_soil")
   scalars <- list(PPFD = PPFD, atm_vpd = atm_vpd, ca = ca,
                   leaf_temp = leaf_temp, atm_o2_kpa = atm_o2_kpa,
@@ -1052,23 +1033,40 @@ leaf_solve <- function(psi_soil,
   x
 }
 
-# Which field belongs to which curve: the solve's twin of `.gradient_owned_pars`,
-# so a new priced curve needs a row in both. A price the seated model does not
-# read is refused, not ignored; an omitted one is reported by the curve itself.
-.solve_price_fields <- c(CF77 = "CF77_lambda_",
-                         TF24_floor = "TF24_floor_lambda_o",
-                         LeastCost = "LeastCost_beta")
+# The curves' parameters, read from their C++ definitions (cost_curve_parameters())
+# at first use, since R collates `R/` before the shared library can be called.
+# Every table below derives from it, so a curve's parameter is routed by its
+# definition alone.
+.curve_tables <- local({
+  tables <- NULL
+  function() {
+    if (is.null(tables)) {
+      cp <- cost_curve_parameters()
+      owned <- cp[!cp$trait, , drop = FALSE]
+      levels <- owned[!is.na(owned$default), , drop = FALSE]
+      tables <<- list(
+        parameters = cp,
+        # Which field belongs to which curve: the parameters that are not
+        # traits, named by their curve. A price the seated model does not read
+        # is refused, not ignored; an omitted one is reported by the curve.
+        owned = stats::setNames(owned$parameter, owned$curve),
+        # The owned fields' defaults, where they have one (align_curves()'s).
+        level_defaults = stats::setNames(levels$default, levels$parameter))
+    }
+    tables
+  }
+})
 
-# The defaults of the owned fields that have one: solved by align_curves(), and
-# the R copy of their curves' definitions in leaf_cost_curves.hpp. test-align-curves.R
-# checks both against a fresh Leaf and a re-run of the alignment.
-# `TF24_floor_lambda_o` has none.
-.level_defaults <- c(CF77_lambda_ = 107750.8846,
-                     LeastCost_beta = 51.59667042)
+.owned_fields <- function() .curve_tables()$owned
+.level_defaults <- function() .curve_tables()$level_defaults
+
+# The argument leaf_solve() and leaf_batch() take for an owned field: its name
+# without the trailing underscore.
+.owned_argument <- function(field) sub("_$", "", field)
 
 .owns_field <- function(model, field) {
-  model %in% names(.solve_price_fields) &&
-    identical(.solve_price_fields[[model]], field)
+  owned <- .owned_fields()
+  field %in% owned[names(owned) == model]
 }
 
 # The value an owned field takes in a gradient's theta: off the leaf when there
@@ -1082,29 +1080,22 @@ leaf_solve <- function(psi_soil,
   if (!is.null(x)) {
     return(x[[field]])
   }
-  if (field %in% names(.level_defaults)) .level_defaults[[field]] else NA_real_
+  levels <- .level_defaults()
+  if (field %in% names(levels)) levels[[field]] else NA_real_
 }
 
-# `LeastCost_beta` is a dimensionless ratio of unit costs, not a price of water,
-# so the refusal names it differently. What the three fields share is that one
-# curve reads each and no other does.
-.check_prices <- function(model, CF77_lambda, TF24_floor_lambda_o,
-                          LeastCost_beta = NA_real_) {
-  # A list, because leaf_gradient_batch() passes a column of `theta`, one value
-  # per row; a field is given when any row sets it.
-  given <- list(CF77_lambda_ = CF77_lambda,
-                TF24_floor_lambda_o = TF24_floor_lambda_o,
-                LeastCost_beta = LeastCost_beta)
-  # Not `[[model]]`, which errors on an unpriced model; "" matches no field.
-  mine <- if (model %in% names(.solve_price_fields)) {
-    .solve_price_fields[[model]]
-  } else {
-    ""
-  }
+# `given` is every owned field's value, named by field: one value from
+# leaf_solve(), a column of `theta` (one per row) from leaf_gradient_batch(), so a
+# field is given when any row sets it. What the fields share is that one curve
+# reads each and no other does. `LeastCost_beta` is a dimensionless ratio of unit
+# costs, not a price of water, so the refusal names it differently.
+.check_prices <- function(model, given) {
+  owned <- .owned_fields()
+  mine <- owned[names(owned) == model]
   set <- vapply(given, function(x) any(!is.na(x)), logical(1))
-  wrong <- names(given)[set & names(given) != mine]
+  wrong <- names(given)[set & !names(given) %in% mine]
   if (length(wrong)) {
-    owner <- names(.solve_price_fields)[match(wrong[[1]], .solve_price_fields)]
+    owner <- names(owned)[match(wrong[[1]], owned)]
     what <- if (wrong[[1]] == "LeastCost_beta") {
       paste("the LeastCost curve's unit-cost ratio, the cost of maintaining",
             "carboxylation capacity relative to that of transpiration")

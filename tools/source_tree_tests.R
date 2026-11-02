@@ -6,7 +6,7 @@
 # and here a skip is a failure: this is the one place they can run.
 #
 # Usage, from the package root: Rscript tools/source_tree_tests.R
-files <- c("test-readme.R", "test-registry.R")
+files <- c("test-readme.R", "test-registry.R", "test-curve-counts.R")
 Sys.setenv(NOT_CRAN = "true")
 
 suppressPackageStartupMessages({

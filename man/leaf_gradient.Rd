@@ -188,14 +188,14 @@ The derivatives of the solved outputs with respect to the traits:
 
 \code{model} selects it, and every model in the package has a route. \code{"collar"},
 the default, is the TF24 cost maximised over the root-collar potential -- the
-production path. Naming any of the seven cost curves
+production path. Naming any of the nine cost curves
 (\code{cost_curve_names()}) differentiates the corresponding \strong{stem} optimum
 instead: \code{psi_stem} with the upstream potential pinned at \code{psi_soil}, which
 needs the single-potential supply path.
 
 The product objectives, \code{SOX} and \code{JW26}, need no special case. They maximise
 \code{A * g(psi)}, which is the \code{Log} benefit link applied to the same
-difference form everything else uses: \verb{d/dpsi[h(A) - C] = h'(A) * dA/dpsi - dC/dpsi} with \verb{h' = 1/A}. One derivative serves all seven.
+difference form everything else uses: \verb{d/dpsi[h(A) - C] = h'(A) * dA/dpsi - dC/dpsi} with \verb{h' = 1/A}. One derivative serves all nine.
 
 ⚠️ \strong{\code{"collar"} and \code{"TF24"} are different models, not two ways of asking one
 question}, even though both use the TF24 cost. They optimise different

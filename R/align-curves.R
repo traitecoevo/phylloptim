@@ -28,11 +28,13 @@
 ##'
 ##' `CF77` aligned to TF24 is an identity rather than a fit: at TF24's emergent
 ##' `lambda` the two first-order conditions coincide, so the price returned is
-##' [operating_point()]'s `lambda_emergent` for TF24 at the reference.
+##' [operating_point()]'s `lambda` for TF24 at the reference.
 ##'
 ##' @inheritParams leaf_solve
 ##' @param models which curves to align; any subset of `"CF77"`, `"JS22"`,
-##'   `"CMax"` and `"LeastCost"`.
+##'   `"CMax"` and `"LeastCost"`, the curves whose definitions have an aligned
+##'   parameter ([cost_curve_parameters()]). `NULL`, the default, aligns all of
+##'   them.
 ##' @param psi_soil,PPFD,atm_vpd,ca,leaf_temp,atm_o2_kpa,atm_kpa the reference
 ##'   environment, as in [leaf_solve()]. The defaults are [leaf_solve()]'s own,
 ##'   with a moderately wet soil.
@@ -60,7 +62,7 @@
 ##'            supply = leaf_supply_singlelayer(),
 ##'            traits = leaf_traits(CMax_a = w[["CMax_a"]]))$gc
 ##' @export
-align_curves <- function(models = c("CF77", "JS22", "CMax", "LeastCost"),
+align_curves <- function(models = NULL,
                          psi_soil = 1,
                          PPFD = 900,
                          atm_vpd = 2.0,
@@ -74,10 +76,14 @@ align_curves <- function(models = c("CF77", "JS22", "CMax", "LeastCost"),
                          supply = leaf_supply_singlelayer(),
                          target = NULL,
                          tol = 1e-12) {
-  unaligned <- setdiff(models, names(.align_levels))
+  levels <- .align_levels()
+  if (is.null(models)) {
+    models <- names(levels)
+  }
+  unaligned <- setdiff(models, names(levels))
   if (length(unaligned)) {
     stop("cannot align ", paste0("\"", unaligned, "\"", collapse = ", "),
-         ": only ", paste0("\"", names(.align_levels), "\"", collapse = ", "),
+         ": only ", paste0("\"", names(levels), "\"", collapse = ", "),
          " have a level parameter. SOX, JW26 and ProfitMax have none, and ",
          "TF24_floor reaches TF24's conductance only at lambda_o = 0, where it ",
          "is TF24. See ?align_curves.", call. = FALSE)
@@ -110,7 +116,7 @@ align_curves <- function(models = c("CF77", "JS22", "CMax", "LeastCost"),
   }
 
   out <- vapply(models, function(model) {
-    level <- .align_levels[[model]]
+    level <- levels[[model]]
     gc_of <- function(value) {
       if (level$trait) {
         tr <- do.call(leaf_traits,
@@ -134,22 +140,37 @@ align_curves <- function(models = c("CF77", "JS22", "CMax", "LeastCost"),
     exp(stats::uniroot(f, bracket, f.lower = ends[[1]], f.upper = ends[[2]],
                        tol = tol)$root)
   }, numeric(1))
-  names(out) <- vapply(models, function(m) .align_levels[[m]]$name,
-                       character(1))
+  names(out) <- vapply(models, function(m) levels[[m]]$name, character(1))
   attr(out, "target") <- target
   out
 }
 
-# Each alignable curve's level parameter: its name as a leaf_traits() argument
-# or a leaf_solve() argument, which of the two it is, and a bracket wide enough
-# that the curve's conductance runs from shut to the wet bound across it at
-# this package's default leaf. Conductance falls with the first three and
-# rises with beta, which weighs capacity against water; uniroot needs only the
-# sign change.
-.align_levels <- list(
-  CF77 = list(name = "CF77_lambda", trait = FALSE, bracket = c(1e3, 1e8)),
-  JS22 = list(name = "JS22_gamma", trait = TRUE, bracket = c(1e-4, 1e4)),
-  CMax = list(name = "CMax_a", trait = TRUE, bracket = c(1e-4, 1e4)),
-  LeastCost = list(name = "LeastCost_beta", trait = FALSE,
-                   bracket = c(1e-1, 1e7))
-)
+# The curves with an aligned parameter, in cost_curve_names() order: the
+# definitions say which (cost_curve_parameters()'s `aligned`).
+.align_curves <- function() {
+  cp <- .curve_tables()$parameters
+  unique(cp$curve[cp$aligned])
+}
+
+# Each alignable curve's level parameter, from its definition: its name as a
+# leaf_traits() argument or a leaf_solve() argument, which of the two it is, and
+# the bracket below.
+.align_levels <- function() {
+  cp <- .curve_tables()$parameters
+  cp <- cp[cp$aligned, , drop = FALSE]
+  stats::setNames(lapply(seq_len(nrow(cp)), function(i) {
+    list(name = if (cp$trait[i]) cp$parameter[i] else .owned_argument(cp$parameter[i]),
+         trait = cp$trait[i],
+         bracket = .align_brackets[[cp$parameter[i]]])
+  }), cp$curve)
+}
+
+# A bracket per aligned parameter, wide enough that its curve's conductance runs
+# from shut to the wet bound across it at this package's default leaf.
+# Conductance falls with the first three and rises with beta, which weighs
+# capacity against water; uniroot needs only the sign change. A new aligned
+# parameter needs one here; test-curve-definition.R checks that each has.
+.align_brackets <- list(CF77_lambda_ = c(1e3, 1e8),
+                        JS22_gamma = c(1e-4, 1e4),
+                        CMax_a = c(1e-4, 1e4),
+                        LeastCost_beta = c(1e-1, 1e7))

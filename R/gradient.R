@@ -67,7 +67,7 @@ set_traits <- function(x, traits) {
 ##' @section Choosing which model to differentiate:
 ##' `model` selects it, and every model in the package has a route. `"collar"`,
 ##' the default, is the TF24 cost maximised over the root-collar potential -- the
-##' production path. Naming any of the seven cost curves
+##' production path. Naming any of the nine cost curves
 ##' (`cost_curve_names()`) differentiates the corresponding **stem** optimum
 ##' instead: `psi_stem` with the upstream potential pinned at `psi_soil`, which
 ##' needs the single-potential supply path.
@@ -75,7 +75,7 @@ set_traits <- function(x, traits) {
 ##' The product objectives, `SOX` and `JW26`, need no special case. They maximise
 ##' `A * g(psi)`, which is the `Log` benefit link applied to the same
 ##' difference form everything else uses: `d/dpsi[h(A) - C] =
-##' h'(A) * dA/dpsi - dC/dpsi` with `h' = 1/A`. One derivative serves all seven.
+##' h'(A) * dA/dpsi - dC/dpsi` with `h' = 1/A`. One derivative serves all nine.
 ##'
 ##' ⚠️ **`"collar"` and `"TF24"` are different models, not two ways of asking one
 ##' question**, even though both use the TF24 cost. They optimise different
@@ -546,13 +546,12 @@ leaf_gradient <- function(psi_soil,
   # Model-owned fields are read off the leaf when there is one, so theta holds
   # the value the solve uses; NA on a route that does not own the field, so the
   # setter writes nothing (see .owned_value()).
+  owned <- unname(.owned_fields())
   theta <- .gradient_theta(traits, leaf_specific_conductance_max, supply,
                            root_network,
-                           CF77_lambda = .owned_value(model, "CF77_lambda_", x),
-                           TF24_floor_lambda_o =
-                             .owned_value(model, "TF24_floor_lambda_o", x),
-                           LeastCost_beta =
-                             .owned_value(model, "LeastCost_beta", x),
+                           owned = stats::setNames(vapply(owned, function(f) {
+                             .owned_value(model, f, x)
+                           }, numeric(1)), owned),
                            damage = if (damage) .gradient_damage_values(x))
   if (is.null(pars)) {
     # What this route can differentiate, not every slot in theta: theta holds
@@ -879,32 +878,28 @@ leaf_gradient <- function(psi_soil,
   })
 }
 
-# The differentiable parameters, in the order C++ indexes them, derived from
-# leaf_traits() so they cannot drift from the trait vector. C++ keeps its own
-# copy (`gradient::par_names`) and test-gradient-batch.R compares the two: R
-# passes positions, so appending is safe and reordering differentiates the wrong
-# parameter (hazard 13). Computed at first call, for the collation reason above.
+# The differentiable parameters, in the order C++ indexes them: leaf_traits()'
+# arguments, then the non-traits. C++ derives its own (`gradient::par_names`)
+# and test-gradient-batch.R compares the two: R passes positions, so appending
+# is safe and reordering differentiates the wrong parameter (hazard 13).
+# Computed at first call, for the collation reason above.
 .gradient_par_names <- local({
   nms <- NULL
   function() {
     if (is.null(nms)) {
-      nms <<- c(names(.leaf_trait_defaults), .gradient_non_traits)
+      nms <<- c(names(formals(leaf_traits)), .gradient_non_traits())
     }
     nms
   }
 })
 
 # The differentiable parameters that are not traits, in enumeration order after
-# the traits: the one list of the slots `leaf_traits()` does not supply.
-.gradient_non_traits <- c("leaf_specific_conductance_max", "resistance",
-                          "CF77_lambda_", "TF24_floor_lambda_o",
-                          "LeastCost_beta",
-                          # the same as .gradient_damage_pars, spelled out
-                          # because that is defined below
-                          "A_", "I_", "D_", "topt_offset_", "dTopt_max_", "K_A_",
-                          "k_i_", "k_i_baseline_", "k_rec_", "k_rec_Ea_",
-                          "c_acclim_maint_", "c_repair_maint_",
-                          "c_protect_maint_", "c_repair_flux_")
+# the traits: the drivers that are parameters, the fields the curves own (their
+# definitions', in curve order), and the thermal-damage inputs.
+.gradient_non_traits <- function() {
+  c("leaf_specific_conductance_max", "resistance", unname(.owned_fields()),
+    .gradient_damage_pars)
+}
 
 # The thermal-damage layer's inputs that reach the solve, in enumeration order:
 # Leaf fields, read and written by name, available only with
@@ -927,19 +922,15 @@ leaf_gradient <- function(psi_soil,
 # and the refusal names which. Refusing is not a zero: a zero means "in the
 # objective but inactive here", which is information.
 #
-# The one table mapping a model-owned parameter to its owner (hazard 13); its
-# twin on the solve side is `.solve_price_fields`. Not all are prices:
-# `LeastCost_beta` is a dimensionless cost ratio. A new owned parameter needs a
-# row here, a row in `.solve_price_fields` and a write in `.gradient_setter`.
-.gradient_owned_pars <- c(CF77 = "CF77_lambda_",
-                          TF24_floor = "TF24_floor_lambda_o",
-                          LeastCost = "LeastCost_beta")
-
+# A model-owned parameter belongs to one curve, and `.owned_fields()`, read from
+# the curves' definitions, says which (hazard 13). Not all are prices:
+# `LeastCost_beta` is a dimensionless cost ratio.
 .gradient_model_pars <- function(model) {
   if (!(model %in% .gradient_models())) {
     return(NULL)
   }
-  unname(.gradient_owned_pars[names(.gradient_owned_pars) != model])
+  owned <- .owned_fields()
+  unname(owned[names(owned) != model])
 }
 
 .gradient_available_pars <- function(single, model = "collar", damage = FALSE) {
@@ -971,10 +962,10 @@ leaf_gradient <- function(psi_soil,
     } else {
       ""
     }
-    owned <- intersect(unknown, .gradient_owned_pars)
+    owned <- intersect(unknown, .owned_fields())
     if (length(owned)) {
       par <- owned[[1L]]
-      owner <- names(.gradient_owned_pars)[match(par, .gradient_owned_pars)]
+      owner <- names(.owned_fields())[match(par, .owned_fields())]
       stop("`pars` names `", par, "`, which is not a parameter of the ", model,
            " model: it is the ", owner, " curve's PRESCRIBED price of water, ",
            "and on every other cost curve the price is emergent -- derived from ",
@@ -998,19 +989,17 @@ leaf_gradient <- function(psi_soil,
 # scalar. The derivation does not care whether a parameter is a trait; only the
 # setter differs (.gradient_setter).
 .gradient_theta <- function(traits, kmax, supply, root_network,
-                            CF77_lambda = NA_real_,
-                            TF24_floor_lambda_o = NA_real_,
-                            LeastCost_beta = NA_real_,
-                            damage = NULL) {
+                            owned = NULL, damage = NULL) {
   theta <- c(unlist(traits), leaf_specific_conductance_max = kmax)
   if (identical(supply$kind, "single")) {
     theta <- c(theta, resistance = root_network$r_R_V_sum[[1]])
   }
-  # NA unless the caller is on the route that owns it. C++ reads every slot, so
-  # each holds the value the solve uses; off its route the value is never read.
-  theta <- c(theta, CF77_lambda_ = CF77_lambda,
-             TF24_floor_lambda_o = TF24_floor_lambda_o,
-             LeastCost_beta = LeastCost_beta)
+  # Each owned field, named by field: NA unless the caller is on the route that
+  # owns it. C++ reads every slot, so each holds the value the solve uses; off
+  # its route the value is never read.
+  fields <- unname(.owned_fields())
+  theta <- c(theta, stats::setNames(
+    if (is.null(owned)) rep(NA_real_, length(fields)) else owned[fields], fields))
   # The thermal-damage inputs, read off the leaf when its gate is on and NA
   # otherwise -- in which case neither side reads them.
   if (is.null(damage)) {
@@ -1043,6 +1032,7 @@ leaf_gradient <- function(psi_soil,
   # these run per perturbation.
   apply_traits <- l$set_traits
   apply_drivers <- l$set_physiology
+  owned <- unname(.owned_fields())
 
   function(theta, only = NULL) {
     # Fast path for stem_P50: moves stem_b and leaves the seated physiology
@@ -1082,19 +1072,13 @@ leaf_gradient <- function(psi_soil,
                   base$ca, base$leaf_temp, base$atm_o2_kpa, base$atm_kpa)
     # Model-owned fields, each written only when set: off its route the slot is
     # NA, which would poison the leaf, and each write is a `.Call` test-cost.R
-    # counts. Every owned slot needs its write here, or its column is an exact
-    # zero in R while C++'s `gradient::apply()` reports a number.
-    lam <- theta[["CF77_lambda_"]]
-    if (!is.na(lam)) {
-      l$CF77_lambda_ <- lam
-    }
-    lam_o <- theta[["TF24_floor_lambda_o"]]
-    if (!is.na(lam_o)) {
-      l$TF24_floor_lambda_o <- lam_o
-    }
-    beta <- theta[["LeastCost_beta"]]
-    if (!is.na(beta)) {
-      l$LeastCost_beta <- beta
+    # counts. Every owned field is written, or its column would be an exact zero
+    # in R while C++'s `gradient::apply()` reports a number.
+    for (field in owned) {
+      v <- theta[[field]]
+      if (!is.na(v)) {
+        l[[field]] <- v
+      }
     }
     invisible(l)
   }

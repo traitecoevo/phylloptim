@@ -74,7 +74,7 @@ test_that("seating exact is bit-identical to not seating a method at all", {
   expect_identical(a$transpiration_, b$transpiration_)
   expect_identical(a$stom_cond_CO2_, b$stom_cond_CO2_)
   expect_identical(a$profit_, b$profit_)
-  expect_identical(a$lambda_emergent, b$lambda_emergent)
+  expect_identical(a$lambda, b$lambda)
 })
 
 test_that("the closed form writes every output the exact solve writes", {
@@ -170,7 +170,7 @@ test_that("CF77 is the n = 0 arm, so its lambda is the price exactly", {
   l <- cf_leaf(curve = "CF77", lambda = lambda)
   l$optimise()
   expect_false(l$last_solve_fell_back_)
-  expect_identical(l$lambda_emergent, lambda)
+  expect_identical(l$lambda, lambda)
 
   # With the Medlyn soil-moisture factor on, the price is lambda/beta and the
   # closed form must see the divided price, not the bare field.
@@ -184,7 +184,7 @@ test_that("CF77 is the n = 0 arm, so its lambda is the price exactly", {
   m$set_model("CF77", "stem", "closed")
   m$optimise()
   beta <- (theta - m$theta_w_) / (m$theta_fc_ - m$theta_w_)
-  expect_equal(m$lambda_emergent, lambda / beta, tolerance = 1e-12)
+  expect_equal(m$lambda, lambda / beta, tolerance = 1e-12)
   # And the behaviour that follows: a dearer price closes the stomata.
   expect_lt(m$opt_psi_stem_, l$opt_psi_stem_)
 })

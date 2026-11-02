@@ -68,24 +68,57 @@ using phylloptim::par_PPFD;
 // ⚠️ Not n_leaf_pars, which also counts par_PPFD (hazard 12).
 inline constexpr int n_theta = par_PPFD;
 
-// The proposed slots' names. par_PPFD is seated from the drivers and never
-// fitted, so it has none. Append, never reorder (hazard 13);
-// test-gradient-batch.R compares R's `.gradient_par_names()` with this list.
+// The proposed slots' names: each curve's parameters from its definition
+// (`curve_parameters`), the slots no curve owns here. par_PPFD is seated from
+// the drivers and never fitted, so it has none. Append, never reorder (hazard
+// 13); test-gradient-batch.R compares R's `.gradient_par_names()` with this list.
+struct SlotName {
+  int slot;
+  const char* name;
+};
+inline constexpr SlotName slots_no_curve_owns[] = {
+    {par_vcmax_25, "vcmax_25"},       {par_stem_c, "stem_c"},
+    {par_stem_P50, "stem_P50"},       {par_root_c, "root_c"},
+    {par_root_P50, "root_P50"},       {par_jmax_25, "jmax_25"},
+    {par_phi_J, "phi_J"},             {par_curv_fact_elec_trans, "curv_fact_elec_trans"},
+    {par_curv_fact_colim, "curv_fact_colim"}, {par_R_d_25, "R_d_25"},
+    {par_g_min, "g_min"},             {par_kmax, "leaf_specific_conductance_max"},
+    {par_resistance, "resistance"},   {par_A, "A_"},
+    {par_I, "I_"},                    {par_D, "D_"},
+    {par_topt_offset, "topt_offset_"}, {par_dTopt_max, "dTopt_max_"},
+    {par_K_A, "K_A_"},                {par_k_i, "k_i_"},
+    {par_k_i_baseline, "k_i_baseline_"}, {par_k_rec, "k_rec_"},
+    {par_k_rec_Ea, "k_rec_Ea_"},      {par_c_acclim_maint, "c_acclim_maint_"},
+    {par_c_repair_maint, "c_repair_maint_"},
+    {par_c_protect_maint, "c_protect_maint_"},
+    {par_c_repair_flux, "c_repair_flux_"}};
+
+constexpr std::array<const char*, n_theta> par_names_by_slot() {
+  std::array<const char*, n_theta> out{};
+  for (const SlotName& s : slots_no_curve_owns) out[s.slot] = s.name;
+  for (const CurveParameterEntry& e : curve_parameters) {
+    out[e.parameter.slot] = e.parameter.field;
+  }
+  return out;
+}
+
+// Every slot is named exactly once, by a curve or by the list above.
+constexpr bool every_slot_named_once() {
+  std::array<int, n_theta> seen{};
+  for (const SlotName& s : slots_no_curve_owns) ++seen[s.slot];
+  for (const CurveParameterEntry& e : curve_parameters) ++seen[e.parameter.slot];
+  for (int n : seen) {
+    if (n != 1) return false;
+  }
+  return true;
+}
+static_assert(every_slot_named_once(),
+              "a slot before par_PPFD is unnamed or named twice: a curve's slot "
+              "goes in its Curve<K>::parameters, any other in slots_no_curve_owns");
+
 inline const std::vector<std::string>& par_names() {
-  static const std::vector<std::string> names{
-      "vcmax_25",  "stem_c",              "stem_P50",
-      "root_c",    "root_P50",            "TF24_beta2",
-      "jmax_25",   "phi_J",               "curv_fact_elec_trans",
-      "curv_fact_colim", "TF24_cost_scale", "R_d_25",
-      "JS22_gamma", "CMax_a", "CMax_b", "g_min",
-      "leaf_specific_conductance_max",
-      "resistance",
-      "CF77_lambda_",
-      "TF24_floor_lambda_o",
-      "LeastCost_beta",
-      "A_", "I_", "D_", "topt_offset_", "dTopt_max_", "K_A_", "k_i_",
-      "k_i_baseline_", "k_rec_", "k_rec_Ea_", "c_acclim_maint_",
-      "c_repair_maint_", "c_protect_maint_", "c_repair_flux_"};
+  static constexpr auto by_slot = par_names_by_slot();
+  static const std::vector<std::string> names(by_slot.begin(), by_slot.end());
   return names;
 }
 

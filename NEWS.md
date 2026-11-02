@@ -1,3 +1,10 @@
+# phylloptim 0.28.0
+
+- **Breaking:** `$lambda`, `$lambda_molar` and the `lambda` column of `operating_point()` and `leaf_solve()` report the marginal cost of water of the curve the leaf is set to, on the route it was solved; they used to report TF24's whatever curve was set. `$lambda_emergent` and the `lambda_emergent` column, which held that number, are gone: read `lambda`. `$lambda_multilayer` is gone too: on the collar route `$lambda` is that number, for every curve.
+- One generic form, the cost's slope over the transpiration's, now gives six curves' marginal cost of water (TF24, JS22, CMax, SOX, JW26, ProfitMax); their `lambda` moves by at most about 1e-14 relative. CF77, TF24_floor and LeastCost keep their own, which the generic form would compute less accurately. Nothing else moves.
+- `cost_curve_parameters()` lists each curve's parameters and defaults from the curves' definitions, which the package's own parameter tables now read; `$curve_cost()`, `$curve_profit()` and `$curve_lambda()` evaluate any curve by name at a stem potential, whatever the leaf is set to.
+- For C++ users, `marginal_cost_water()` and `marginal_cost_water_multilayer()` are removed and `marginal_cost_water_molar()` is `lambda_molar()`: `lambda_emergent()` is the one λ a leaf reports. A curve's `Curve<K>` states `own_lambda`, and its parameters whether their defaults are aligned ([#230](https://github.com/traitecoevo/phylloptim/issues/230)).
+
 # phylloptim 0.27.5
 
 - For C++ users, each curve's `Curve<K>` states the shape of its objective (a difference, a product, a ratio or a normalised value) and holds the factor that shape composes with assimilation: SOX's and JW26's reduction factors, LeastCost's weighted resource use and ProfitMax's normalised hydraulic cost. One evaluator per shape computes every curve's profit. No result changes and every bound method keeps its name ([#228](https://github.com/traitecoevo/phylloptim/issues/228)).

@@ -56,10 +56,11 @@ DriverBatch* checked(SEXP drivers) {
 //' The differentiable parameters, in the order C++ indexes them
 //'
 //' The sixteen [leaf_traits()] in `set_traits()`'s argument order, then
-//' `leaf_specific_conductance_max`, `resistance` and `CF77_lambda_`. Exported so that R's own
-//' copy of this order can be compared against it in a test: R passes integer
-//' positions into this enumeration, so appending to it is safe and reordering it
-//' would silently differentiate the wrong parameter.
+//' `leaf_specific_conductance_max`, `resistance`, the parameters the cost
+//' curves own ([cost_curve_parameters()]) and the thermal-damage inputs.
+//' Exported so that R's own copy of this order can be compared against it in a
+//' test: R passes integer positions into this enumeration, so appending to it
+//' is safe and reordering it would silently differentiate the wrong parameter.
 //'
 //' @return A character vector, one entry per differentiable parameter.
 //' @seealso [leaf_gradient_batch()]
@@ -92,6 +93,49 @@ std::vector<std::string> cost_curve_names() {
     out.push_back(nm);
   }
   return out;
+}
+
+//' Each cost curve's parameters, from its definition
+//'
+//' One row per parameter a cost curve owns, curves in [cost_curve_names()]
+//' order: the curve, the parameter's name (a [gradient_par_names()] entry, and
+//' the [leaf_traits()] argument or `Leaf` field that carries it), its default,
+//' whether it is a trait, and whether its default is aligned by
+//' [align_curves()]. `NA` as a default means the curve refuses to solve until
+//' the parameter is set. Read out of the C++ definitions, so the R tables that
+//' route these parameters cannot drift from the curves.
+//'
+//' A parameter that is not a trait is owned by its curve: [leaf_solve()] and
+//' [leaf_batch()] take it as an argument named without the trailing
+//' underscore, and every other curve refuses it.
+//'
+//' @return A data frame with columns `curve`, `parameter`, `default`, `trait`
+//'   and `aligned`.
+//' @seealso [cost_curve_names()], [align_curves()]
+//' @examples
+//' cost_curve_parameters()
+//' @export
+// [[Rcpp::export]]
+Rcpp::DataFrame cost_curve_parameters() {
+  const auto& all = phylloptim::curve_parameters;
+  const R_xlen_t n = static_cast<R_xlen_t>(all.size());
+  Rcpp::CharacterVector curve(n), parameter(n);
+  Rcpp::NumericVector default_value(n);
+  Rcpp::LogicalVector trait(n), aligned(n);
+  for (R_xlen_t i = 0; i < n; ++i) {
+    const auto& e = all[static_cast<std::size_t>(i)];
+    curve[i] = phylloptim::Leaf::curve_name(static_cast<int>(e.curve));
+    parameter[i] = e.parameter.field;
+    default_value[i] = std::isnan(e.parameter.default_value)
+                           ? NA_REAL
+                           : e.parameter.default_value;
+    trait[i] = e.parameter.slot < phylloptim::n_traits;
+    aligned[i] = e.parameter.aligned;
+  }
+  return Rcpp::DataFrame::create(
+      Rcpp::_["curve"] = curve, Rcpp::_["parameter"] = parameter,
+      Rcpp::_["default"] = default_value, Rcpp::_["trait"] = trait,
+      Rcpp::_["aligned"] = aligned, Rcpp::_["stringsAsFactors"] = false);
 }
 
 // `Leaf::ncontrol_default`, the vulnerability curves' knot count, read rather

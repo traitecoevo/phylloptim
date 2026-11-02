@@ -90,7 +90,7 @@ test_that("LeastCost refuses a cleared, zero or negative beta", {
   }
   # Unset takes the aligned default (#156) ...
   expect_identical(solve_at(), solve_at(LeastCost_beta =
-                                          .level_defaults[["LeastCost_beta"]]))
+                                          .level_defaults()[["LeastCost_beta"]]))
   # ... and a beta cleared to NA on the leaf is refused rather than solved as a
   # NaN objective. The message has to carry the units: a beta derived against
   # this package's kg H2O and umol CO2 rather than mol and mol is out by 5.6e7
