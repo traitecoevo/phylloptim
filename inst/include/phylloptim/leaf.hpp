@@ -672,7 +672,7 @@ public:
   // Joshi & Stocker (2022)'s hydraulic unit cost, `gamma` in
   // `F = A - alpha*Jmax - gamma*(dpsi)^2`, initialised here for R_d_25's reason.
   // Their capacity term is not implemented, so this is their cost, not their model.
-  // The default is aligned (see `Curve<CostCurve::CF77>`).
+  // The default is aligned (see the aligned defaults in leaf_cost_curves.hpp).
   double JS22_gamma = curve_default<CostCurve::JS22, par_JS22_gamma>();  // umol C m^-2 s^-1 MPa^-2
   // Wolf, Anderegg & Pacala (2016) carbon maximisation as Sabot's TractLSM
   // implements it (`SPAC/fregulate.py`), a marginal cost linear in leaf potential,
@@ -681,7 +681,7 @@ public:
   //
   // CMax_b is signed, negative in the paper's convention, and TractLSM stores it
   // sign-inverted: pin the sign by reproducing a TractLSM number. CMax_a is aligned
-  // with CMax_b = 0 (see `Curve<CostCurve::CF77>`).
+  // with CMax_b = 0 (see the aligned defaults in leaf_cost_curves.hpp).
   double CMax_a = curve_default<CostCurve::CMax, par_CMax_a>();  // umol C m^-2 s^-1 MPa^-2
   double CMax_b = curve_default<CostCurve::CMax, par_CMax_b>();  // umol C m^-2 s^-1 MPa^-1
   // Dark respiration's temperature response, Tjoelker et al. (2001):
@@ -1306,16 +1306,17 @@ public:
   // dVcmax/dTleaf, the same way and with the same restore, for lambda_LeastCost
   // with the energy balance on (LeastCost's capacity cost reads vcmax_).
   double vcmax_temp_deriv(double leaf_temp);
+  // What a cost reading leaf temperature needs from dprofit_energy_balance_term:
+  // the leaf temperature, its slope tau = dT/dpsi, the difference step and
+  // vcmax_ either side of it, the stomatal flux's conductance terms and the
+  // residual flux.
+  struct TemperaturePath {
+    double Tleaf, tau, h, vcmax_up, vcmax_dn, gc_s, gc_const, r_star;
+  };
   // The energy-balance contribution to dJ/dpsi through Tleaf(E(psi)), zero with
   // the gate off; out of line so it cannot change FMA contraction on the gate-off
   // path. `E_s`, `r_star`, `drstar_dpsi` and `dgc_dT_residual` are the residual
   // conductance's terms, exact zeros at g_min = 0; derivation at the definition.
-  // What a cost reading leaf temperature needs from that term: the leaf
-  // temperature, its slope tau = dT/dpsi, the difference step and vcmax_ either
-  // side of it, the stomatal flux's conductance terms and the residual flux.
-  struct TemperaturePath {
-    double Tleaf, tau, h, vcmax_up, vcmax_dn, gc_s, gc_const, r_star;
-  };
   template <CostCurve K>
   double dprofit_energy_balance_term(double ci, double gc, double g_ci,
                                      double inv_atm, double gc_const,
@@ -1717,8 +1718,7 @@ public:
   // Also both potentials, but only because `E` is measured from the upstream one --
   // the COST here is a function of the absolute potential, unlike JS22's.
   double lambda_CMax(double psi_stem, double psi_upstream) const;
-  // lambda_TF24(psi) + lambda_o: the one lambda here that does not vanish at the
-  // wet end. One argument, because the hydraulic half reads the absolute
+  // lambda_TF24(psi) + lambda_o, which does not vanish at the wet end. One argument, because the hydraulic half reads the absolute
   // potential; lambda_for<TF24_floor> discards the upstream one.
   double lambda_TF24_floor(double psi_stem) const;
 

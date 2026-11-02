@@ -1749,7 +1749,7 @@ equations:
       \tau = \frac{dT_\mathrm{leaf}}{dE}\, \frac{dE}{d\psi}, \qquad
       \frac{\partial g_c}{\partial T} = -\, g_c\, \frac{\Delta(T_\mathrm{leaf})}{D_\mathrm{leaf}} \quad (0 \text{ on the floor } D_\min)
     code: phylloptim::Leaf::dprofit_energy_balance_term
-    also: [phylloptim::Leaf::temp_deriv, phylloptim::Leaf::vcmax_temp_deriv, phylloptim::Leaf::thermal_cost_temp_deriv]
+    also: [phylloptim::Curve< Leaf::CostCurve::ProfitMax >::less_cost_temperature_slope, phylloptim::Curve< Leaf::CostCurve::LeastCost >::less_cost_temperature_slope, phylloptim::Leaf::temp_deriv, phylloptim::Leaf::vcmax_temp_deriv, phylloptim::Leaf::thermal_cost_temp_deriv]
     reads: [fd_step, ca, vpd_leaf_min, use_energy_balance_]
     writes: []
     kind: derivative
@@ -2597,7 +2597,7 @@ equations:
     latex: |
       \lambda_{\mathrm{collar},K} = \lambda_{\psi,K}(\psi_s, \psi_r)\left[1 + \frac{k_{max} f(\psi_r)}{S}\right] + \lambda_{E,K} + \frac{1}{S}\frac{\partial C_K}{\partial \psi_r}, \qquad S = \frac{dE_\mathrm{up}}{d\psi_r}
     code: phylloptim::Leaf::lambda_collar_for
-    also: [phylloptim::Leaf::collar_series, phylloptim::Leaf::marginal_cost_water_multilayer, phylloptim::Leaf::find_root_collar_psi_for, phylloptim::Leaf::profit_at_collar_psi]
+    also: [phylloptim::Leaf::collar_series, phylloptim::Leaf::marginal_cost_water_multilayer, phylloptim::Curve< Leaf::CostCurve::TF24 >::lambda_collar, phylloptim::Curve< Leaf::CostCurve::CF77 >::lambda_collar, phylloptim::Curve< Leaf::CostCurve::JS22 >::lambda_collar, phylloptim::Curve< Leaf::CostCurve::CMax >::lambda_collar, phylloptim::Curve< Leaf::CostCurve::SOX >::lambda_collar, phylloptim::Curve< Leaf::CostCurve::JW26 >::lambda_collar, phylloptim::Curve< Leaf::CostCurve::ProfitMax >::lambda_collar, phylloptim::Curve< Leaf::CostCurve::TF24_floor >::lambda_collar, phylloptim::Curve< Leaf::CostCurve::LeastCost >::lambda_collar, phylloptim::Leaf::find_root_collar_psi_for, phylloptim::Leaf::profit_at_collar_psi]
     reads: [leaf_specific_conductance_max]
     writes: []
     kind: identity

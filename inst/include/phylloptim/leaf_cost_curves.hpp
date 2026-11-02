@@ -18,10 +18,12 @@ namespace phylloptim {
 
 // --- a curve is one definition -----------------------------------------------
 //
-// `Curve<K>` states everything about curve K that the solves read: its name, the
-// parameters it owns, and its properties. Every property is stated in every
-// specialisation, with no base and no default: a defaulted `cost_reads_upstream
-// = false` would solve the wrong first-order condition with no error.
+// `Curve<K>` states everything about curve K that the tables read: its name, the
+// parameters it owns, its properties and its expressions. Every property is
+// stated in every specialisation, with no base and no default: a defaulted
+// `cost_reads_upstream = false` would solve the wrong first-order condition with
+// no error. The concept checks each is present; review holds that none comes
+// from a base.
 
 // A parameter a curve owns: its slot in the pack, its bound field, the member it
 // is, and its default, NaN where the curve refuses to solve until it is set.
@@ -42,8 +44,8 @@ template <std::size_t N>
 inline constexpr bool
     is_curve_parameter_array<const std::array<CurveParameter, N>> = true;
 
-// The properties, each read by the table of the same name below, then the
-// expressions at double, which the solves call:
+// The properties, each read by the table of the same name or the branch that
+// needs it, then the expressions at double, which the solves call:
 //
 //   link                          the benefit link composed with A
 //   cost_reads_upstream           the cost reads the upstream potential too
@@ -56,17 +58,17 @@ inline constexpr bool
 //                                 unusable ones it has no objective
 //   closed_form                   see ClosedForm
 //   cost                          a difference curve's cost, in carbon, written
-//                                 into hydraulic_cost_ (a gain curve's is in its
-//                                 profit)
+//                                 into hydraulic_cost_ (a gain or normalised
+//                                 curve's is in its profit)
 //   cost_slope                    dC/dpsi_stem, read by cost_deriv
 //   cost_slope_upstream           dC/dpsi_upstream, where the cost reads it
 //   lambda                        dC/dE at a stem potential, read by lambda_for
 //   lambda_collar                 dC/dE on the collar route at the solved point
 //   less_cost_temperature_slope   the EB term less the cost's slope in Tleaf,
 //                                 where the cost reads it
-//   profit                        the objective at a stem potential
+//   profit                        the bound method that is its objective
 template <class C>
-concept CurveDefinition = requires(Leaf& l, double x) {
+concept CurveDefinition = requires(Leaf& l, const Leaf& cl, double x) {
   requires std::same_as<decltype(C::name), const std::string_view>;
   requires is_curve_parameter_array<decltype(C::parameters)>;
   requires std::same_as<decltype(C::link), const Leaf::BenefitLink>;
@@ -76,16 +78,18 @@ concept CurveDefinition = requires(Leaf& l, double x) {
   requires std::same_as<decltype(C::cost_reads_leaf_temperature), const bool>;
   requires std::same_as<decltype(C::prepares_normalisers), const bool>;
   requires std::same_as<decltype(C::closed_form), const ClosedForm>;
-  { C::check_parameters(l) } -> std::same_as<void>;
+  { C::check_parameters(cl) } -> std::same_as<void>;
   { C::cost_slope(l, x, x) } -> std::same_as<double>;
   { C::lambda(l, x, x) } -> std::same_as<double>;
   { C::lambda_collar(l) } -> std::same_as<double>;
-  { C::profit(l, x, x) } -> std::same_as<double>;
+  requires std::same_as<decltype(C::profit),
+                        double (Leaf::*const)(double, double)>;
 } && (C::link != Leaf::BenefitLink::Identity || requires(Leaf& l, double x) {
   { C::cost(l, x, x) } -> std::same_as<double>;
-}) && (!C::cost_reads_upstream || requires(Leaf& l, double x) {
+  // Both ways for the slopes: one its property does not ask for is never called.
+}) && (C::cost_reads_upstream == requires(Leaf& l, double x) {
   { C::cost_slope_upstream(l, x, x) } -> std::same_as<double>;
-}) && (!C::cost_reads_leaf_temperature ||
+}) && (C::cost_reads_leaf_temperature ==
        requires(Leaf& l, double x, const Leaf::TemperaturePath& p) {
   { C::less_cost_temperature_slope(l, x, p) } -> std::same_as<double>;
 });
@@ -136,9 +140,7 @@ template <> struct Curve<Leaf::CostCurve::TF24> {
   static double lambda_collar(Leaf& l) {
     return l.marginal_cost_water_multilayer();
   }
-  static double profit(Leaf& l, double psi_stem, double psi_upstream) {
-    return l.profit_psi_stem_TF(psi_stem, psi_upstream);
-  }
+  static constexpr auto profit = &Leaf::profit_psi_stem_TF;
 };
 
 template <> struct Curve<Leaf::CostCurve::CF77> {
@@ -215,9 +217,7 @@ template <> struct Curve<Leaf::CostCurve::CF77> {
   static double lambda_collar(Leaf& l) {
     return l.cf77_price();
   }
-  static double profit(Leaf& l, double psi_stem, double psi_upstream) {
-    return l.profit_psi_stem_CF77(psi_stem, psi_upstream);
-  }
+  static constexpr auto profit = &Leaf::profit_psi_stem_CF77;
 };
 
 template <> struct Curve<Leaf::CostCurve::JS22> {
@@ -252,8 +252,9 @@ template <> struct Curve<Leaf::CostCurve::JS22> {
   static double cost_slope_upstream(Leaf& l, double psi_stem, double psi_upstream) {
     return -2.0 * l.JS22_gamma * (psi_stem - psi_upstream);
   }
-  // dC/dpsi over dE/dpsi = kmax*f(psi). Unlike TF24's, f does not cancel, so this
-  // divides by it: safe inside the feasible bracket, where f never reaches zero.
+  // dC/dpsi over dE/dpsi, which is kmax*f(psi). Unlike TF24's, f does not cancel,
+  // so this divides by it: safe inside the feasible bracket, where f never
+  // reaches zero.
   static double lambda(const Leaf& l, double psi_stem, double psi_upstream) {
     const double f = l.proportion_of_conductivity(psi_stem);
     return 2.0 * l.JS22_gamma * (psi_stem - psi_upstream) /
@@ -268,9 +269,7 @@ template <> struct Curve<Leaf::CostCurve::JS22> {
     return lambda(l, l.opt_psi_stem_, l.opt_root_psi_) * series +
            cost_slope_upstream(l, l.opt_psi_stem_, l.opt_root_psi_) / S;
   }
-  static double profit(Leaf& l, double psi_stem, double psi_upstream) {
-    return l.profit_psi_stem_JS22(psi_stem, psi_upstream);
-  }
+  static constexpr auto profit = &Leaf::profit_psi_stem_JS22;
 };
 
 template <> struct Curve<Leaf::CostCurve::CMax> {
@@ -321,8 +320,8 @@ template <> struct Curve<Leaf::CostCurve::CMax> {
     (void)psi_stem;
     return -(l.CMax_a * psi_upstream + l.CMax_b);
   }
-  // The marginal cost does not vanish at the wet end unless CMax_b is zero, so
-  // this is the one curve that can be boundary-soil with a non-zero cost there.
+  // The marginal cost does not vanish at the wet end unless CMax_b is zero, so,
+  // as CF77's and TF24_floor's, it can be boundary-soil with a non-zero cost there.
   static double lambda(const Leaf& l, double psi_stem, double psi_upstream) {
     (void)psi_upstream;
     const double f = l.proportion_of_conductivity(psi_stem);
@@ -338,9 +337,7 @@ template <> struct Curve<Leaf::CostCurve::CMax> {
     return lambda(l, l.opt_psi_stem_, l.opt_root_psi_) * series +
            cost_slope_upstream(l, l.opt_psi_stem_, l.opt_root_psi_) / S;
   }
-  static double profit(Leaf& l, double psi_stem, double psi_upstream) {
-    return l.profit_psi_stem_CMax(psi_stem, psi_upstream);
-  }
+  static constexpr auto profit = &Leaf::profit_psi_stem_CMax;
 };
 
 template <> struct Curve<Leaf::CostCurve::SOX> {
@@ -380,9 +377,7 @@ template <> struct Curve<Leaf::CostCurve::SOX> {
     }
     return lambda(l, l.opt_psi_stem_, l.opt_root_psi_) * series;
   }
-  static double profit(Leaf& l, double psi_stem, double psi_upstream) {
-    return l.profit_psi_stem_SOX(psi_stem, psi_upstream);
-  }
+  static constexpr auto profit = &Leaf::profit_psi_stem_SOX;
 };
 
 template <> struct Curve<Leaf::CostCurve::JW26> {
@@ -419,9 +414,7 @@ template <> struct Curve<Leaf::CostCurve::JW26> {
     }
     return lambda(l, l.opt_psi_stem_, l.opt_root_psi_) * series;
   }
-  static double profit(Leaf& l, double psi_stem, double psi_upstream) {
-    return l.profit_psi_stem_JW26(psi_stem, psi_upstream);
-  }
+  static constexpr auto profit = &Leaf::profit_psi_stem_JW26;
 };
 
 template <> struct Curve<Leaf::CostCurve::ProfitMax> {
@@ -497,14 +490,13 @@ template <> struct Curve<Leaf::CostCurve::ProfitMax> {
            (abs_fprime / (f * l.profitmax_k_span_) * series + thermal);
   }
   // dTC/dpsi = TC'(Tleaf) * tau, the slope lambda reports. One expression with
-  // the subtraction, as it was inline, so it contracts as it did.
+  // the subtraction: returned alone, the product is rounded before it is
+  // subtracted, and the energy-balance rows move.
   static double less_cost_temperature_slope(const Leaf& l, double term,
                                             const Leaf::TemperaturePath& p) {
     return term - l.thermal_cost_temp_deriv(p.Tleaf) * p.tau;
   }
-  static double profit(Leaf& l, double psi_stem, double psi_upstream) {
-    return l.profit_psi_stem_ProfitMax(psi_stem, psi_upstream);
-  }
+  static constexpr auto profit = &Leaf::profit_psi_stem_ProfitMax;
 };
 
 template <> struct Curve<Leaf::CostCurve::TF24_floor> {
@@ -575,9 +567,7 @@ template <> struct Curve<Leaf::CostCurve::TF24_floor> {
     }
     return l.lambda_TF24(l.opt_psi_stem_) * series + l.TF24_floor_lambda_o;
   }
-  static double profit(Leaf& l, double psi_stem, double psi_upstream) {
-    return l.profit_psi_stem_TF24_floor(psi_stem, psi_upstream);
-  }
+  static constexpr auto profit = &Leaf::profit_psi_stem_TF24_floor;
 };
 
 template <> struct Curve<Leaf::CostCurve::LeastCost> {
@@ -661,9 +651,7 @@ template <> struct Curve<Leaf::CostCurve::LeastCost> {
                      p.r_star * kg_to_mol_h2o;
     return term - l.LeastCost_beta * umol_to_mol * dVcmax_dT * p.tau / W;
   }
-  static double profit(Leaf& l, double psi_stem, double psi_upstream) {
-    return l.profit_psi_stem_LeastCost(psi_stem, psi_upstream);
-  }
+  static constexpr auto profit = &Leaf::profit_psi_stem_LeastCost;
 };
 
 // Every enumerator has a complete definition. Asserted per curve, so a missing
@@ -671,7 +659,15 @@ template <> struct Curve<Leaf::CostCurve::LeastCost> {
 template <Leaf::CostCurve K>
 constexpr bool curve_is_defined() {
   static_assert(CurveDefinition<Curve<K>>,
-                "this curve's Curve<K> is missing a piece CurveDefinition requires");
+                "this curve's Curve<K> fails CurveDefinition; the notes name the requirement");
+  // The normalisers the solves seed are ProfitMax's (prepare_profitmax), so a
+  // second normalised curve needs its own before it can say true.
+  static_assert(!Curve<K>::prepares_normalisers || K == Leaf::CostCurve::ProfitMax,
+                "prepares_normalisers seeds ProfitMax's normalisers");
+  // ClosedForm says why a closed form is impossible: the Log link.
+  static_assert((Curve<K>::closed_form == ClosedForm::Impossible) ==
+                    (Curve<K>::link == Leaf::BenefitLink::Log),
+                "a closed form is impossible exactly for a Log-link curve");
   return true;
 }
 
@@ -692,6 +688,35 @@ constexpr std::array<std::string_view, sizeof...(I)> curve_names_of(
 
 inline constexpr auto curve_names = curve_names_of(
     std::make_index_sequence<static_cast<std::size_t>(Leaf::n_cost_curves)>{});
+
+// set_model() finds a curve by its name and R a parameter by its slot, so
+// neither may repeat.
+constexpr bool curve_names_are_unique() {
+  for (std::size_t i = 0; i < curve_names.size(); ++i) {
+    for (std::size_t j = i + 1; j < curve_names.size(); ++j) {
+      if (curve_names[i] == curve_names[j]) return false;
+    }
+  }
+  return true;
+}
+static_assert(curve_names_are_unique(), "two curves share a name");
+
+template <std::size_t... I>
+constexpr bool curve_slots_are_unique(std::index_sequence<I...>) {
+  std::array<bool, n_leaf_pars> seen{};
+  bool unique = true;
+  const auto mark = [&](const auto& parameters) {
+    for (const CurveParameter& p : parameters) {
+      if (seen[static_cast<std::size_t>(p.slot)]) unique = false;
+      seen[static_cast<std::size_t>(p.slot)] = true;
+    }
+  };
+  (mark(Curve<static_cast<Leaf::CostCurve>(I)>::parameters), ...);
+  return unique;
+}
+static_assert(curve_slots_are_unique(std::make_index_sequence<
+                  static_cast<std::size_t>(Leaf::n_cost_curves)>{}),
+              "two curve parameters share a slot");
 
 template <Leaf::CostCurve K, int Slot>
 constexpr double Leaf::curve_default() {
@@ -719,8 +744,8 @@ constexpr bool Leaf::cost_reads_upstream() {
   return Curve<K>::cost_reads_upstream;
 }
 
-// Whether a curve's own form ends at psi_crit. For the others the marginal cost
-// diverges as the stem dries, so the dry end is the end of the stem curve
+// Whether a curve's own form ends at psi_crit. Where it does not, the marginal
+// cost diverges as the stem dries, so the dry end is the end of the stem curve
 // (vulnerability_psi_end).
 template <Leaf::CostCurve K>
 constexpr bool Leaf::cost_domain_ends_at_psi_crit() {
@@ -1253,7 +1278,7 @@ inline void Leaf::check_cost_parameters() {
 // (`profit_psi_stem_SOX`) and one a ratio (`profit_psi_stem_LeastCost`).
 template <Leaf::CostCurve K>
 inline double Leaf::profit_psi_stem_for(double psi_stem, double psi_upstream) {
-  return Curve<K>::profit(*this, psi_stem, psi_upstream);
+  return (this->*Curve<K>::profit)(psi_stem, psi_upstream);
 }
 
 // Which lambda to report, normalised to two arguments (TF24's reads psi_stem

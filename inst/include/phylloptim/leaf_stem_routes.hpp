@@ -122,7 +122,9 @@ inline double Leaf::evaluate_psi_stem(double target_psi_stem) {
     util::stop("psi soil must have only one value to use non-root-based profit optimisation methods");
   }
   // The optimiser's checks and the curve's normalisers, so a prescribed point
-  // and a solved one agree on what a curve requires and whether its objective exists.
+  // requires what a solved one does. Unlike the solve it has no degenerate exit:
+  // a normalised curve is evaluated where the solve finds no objective (a dark
+  // leaf, a wet end past psi_crit).
   check_cost_parameters<K>();
   if constexpr (Curve<K>::prepares_normalisers) {
     prepare_profitmax();

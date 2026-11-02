@@ -128,15 +128,13 @@ void test_defaults_are_unset() {
   ok(l.use_energy_balance_ == false, "energy balance defaults off");
 }
 
-// A curve's definition is what the leaf runs on: its name is the one curve_name()
-// and set_model() read, and a fresh Leaf holds each of its parameters' defaults.
-// Returns how many parameters it checked.
+// A curve's definition is what the leaf runs on: set_model() seats it by its
+// name, a fresh Leaf holds each of its parameters' defaults, and each parameter's
+// member is the one the pack reads at its slot. Returns how many it checked.
 template <phylloptim::Leaf::CostCurve K>
 int check_curve_definition() {
   using C = phylloptim::Curve<K>;
   const std::string name(C::name);
-  ok(phylloptim::Leaf::curve_name(static_cast<int>(K)) == name,
-     name + ": curve_name() is the definition's name");
   phylloptim::Leaf l;
   l.set_model(name, "stem");
   ok(l.cost_curve_ == K, name + ": set_model() seats it by that name");
@@ -146,6 +144,10 @@ int check_curve_definition() {
        name + ": a fresh Leaf holds " + p.field + "'s default");
     ok(p.slot >= 0 && p.slot < phylloptim::par_PPFD,
        name + ": " + p.field + " is a fitted slot");
+    const double marker = 0.125 + p.slot;
+    l.*(p.member) = marker;
+    ok(l.passive_pars()[p.slot] == marker,
+       name + ": the pack reads " + p.field + " at its slot");
   }
   return static_cast<int>(C::parameters.size());
 }

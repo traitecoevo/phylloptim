@@ -613,10 +613,12 @@ int compare(Tolerance tol) {
 //     fields instead;
 //   * `hydraulic_cost_` written in carbon units by `_TF` and `_CF77`
 //     and left STALE by `_ProfitMax`, which does not write it;
-//   * `CF77_lambda_` as a caller input that `_ProfitMax` overwrites;
 //   * `collar_at_ProfitMax` refused on every row: the collar route's prescribed
 //     evaluation does not seed ProfitMax's normalisers, and seating a supply
-//     clears them.
+//     clears them;
+//   * `at_ProfitMax` evaluated where the solve takes its degenerate exit (a dark
+//     leaf, a wet end past psi_crit): the stem route's prescribed evaluation
+//     seeds the normalisers but has no such exit.
 //
 // ⚠️ ADDING A SOLVER IS AN ADDITION IN THE "fresh" PASS AND NOT IN THE "reuse"
 // ONE, so check the two separately when regenerating. The reuse pass drives one
@@ -633,8 +635,9 @@ int compare(Tolerance tol) {
 // constructs a Leaf per row, which makes it reproducible and blind to stale
 // state -- the same trade the grid above makes. Pass "reuse" drives ONE Leaf
 // through a fixed sequence of rows, poisoning every stale-prone output first, so
-// a value that survives is provably not written by the path under test. Four of
-// the divergences above are stale-state bugs that pass "fresh" cannot see.
+// a value that survives is provably not written by the path under test. A stale
+// write, like `hydraulic_cost_` under `_ProfitMax` above, is what pass "fresh"
+// cannot see.
 //
 // The two axes that make a different MODEL rather than a different driver:
 //   solver    which objective, and which variable it optimises. `collar`
@@ -883,8 +886,9 @@ void blank_outputs(OptRow &r) {
 // A prescribed row's point: a quarter of the way from the wet end of the curve's
 // own interval on that route. It is placed on a copy, so the leaf under test is
 // written by the evaluator alone and the reuse pass's poison still shows what it
-// leaves stale. With no interval (a shut leaf, or the stem route on layers) the
-// target is NaN, which the evaluator ignores or refuses as it would any target.
+// leaves stale. With no interval (a shut leaf on the collar route, or the stem
+// route on layers) the target is NaN, and a stem-route leaf whose wet end is past
+// its dry end gets one outside it; the evaluator ignores or refuses either.
 template <phylloptim::Leaf::CostCurve K>
 void evaluate_at_quarter(phylloptim::Leaf &l, bool collar) {
   phylloptim::Leaf probe = l;
