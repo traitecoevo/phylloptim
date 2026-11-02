@@ -354,15 +354,18 @@ const Tolerance kExact{-1.0, -1.0};
 //   operating_points.tsv
 //     profit                 2.13e-11        1e-9         47x
 //     argmax-derived         8.6e-8          5e-6         58x
-//   psi_stem_optima.tsv
+//   psi_stem_optima.tsv, the original ten solvers
+//     profit                 3.87e-12        1e-10        26x
+//     argmax-derived         1.24e-9         1e-7         81x
+//   psi_stem_optima.tsv, the solvers appended from CollarProfitMax on
 //     profit                 2.42e-9         1e-7         41x
 //     argmax-derived         1.97e-7         1e-5         51x
 //
-// The psi_stem figures are set by the collar route's rows for the curves other
-// than TF24: genuine profits as small as 1e-7, where rounding on terms of order
-// one is a large fraction, and a leaf all but shut in a hot, dark, dry soil with
-// the energy balance on (collar_JS22, 3 layers), whose flux is ~1e-10. Before
-// those rows the pair was 2.01e-12 and 1.33e-9.
+// Only the appended rows get the looser pair, so a Linux-only change to the
+// routes the original rows cover still shows. Theirs is set by genuine profits as
+// small as 1e-7, the difference of terms that nearly cancel, and by a leaf all
+// but shut in a hot, dark, dry soil with the energy balance on (collar_JS22, 3
+// layers), whose flux is ~1e-10.
 //
 // The psi_stem argmax class was 6.63e-6 until 0.19.0: its worst cells were a
 // shut leaf's `assim`, a root-find's residue around zero that cancelled in the
@@ -374,7 +377,8 @@ const Tolerance kExact{-1.0, -1.0};
 // At 1e-10 they were ~100-1000x larger. Loosen that root-find and these must be
 // re-measured off the summary lines, not widened until they pass.
 const Tolerance kCrossPlatform{1e-9, 5e-6};
-const Tolerance kCrossPlatformOptima{1e-7, 1e-5};
+const Tolerance kCrossPlatformOptima{1e-10, 1e-7};
+const Tolerance kCrossPlatformOptimaAppended{1e-7, 1e-5};
 
 // `profit` is the only reported field that is the maximum itself; every other
 // field is evaluated at the argmax and so inherits its displacement.
@@ -674,8 +678,8 @@ const double kLambdaFloorO = 1.5e5;
 // rather than mol and mol would be out by 5.6e7 and would still solve.
 const double kBetaLeastCost = 146.0;
 // A second beta, at which LeastCost's optimum is interior on the wet soils: at
-// 146 every row here pins at psi_crit on both routes, so those rows cannot see a
-// wrong LeastCost slope.
+// 146 no collar-route row is interior and only a few stem rows lie inside
+// psi_crit, so those rows can barely see a wrong LeastCost slope.
 const double kBetaLeastCostInterior = 2.0;
 // JS22's and CMax's level parameters, at the class defaults these rows were
 // generated with. Pinned here because the defaults are now ALIGNED (#156) and
@@ -1115,7 +1119,7 @@ int compare_optima(Tolerance tol) {
       if (r > rel) { rel = r; rel_at = at; }
       if (a > abs) { abs = a; abs_at = at; }
     }
-  } worst_max, worst_argmax;
+  } worst_max, worst_argmax, worst_max_app, worst_argmax_app;
 
   size_t i = 0;
   for (; i < rows.size(); ++i) {
@@ -1188,8 +1192,13 @@ int compare_optima(Tolerance tol) {
       }
       const double rel = rel_diff(got[j], want[j]);
       const bool is_max = is_maximum_field(kOptFieldNames[j]);
-      const double limit = is_max ? tol.maximum : tol.argmax;
-      (is_max ? worst_max : worst_argmax)
+      // The appended solvers have their own pair; see kCrossPlatformOptima.
+      const bool appended = static_cast<int>(r.solver) >=
+                            static_cast<int>(Solver::CollarProfitMax);
+      const Tolerance t = exact_mode || !appended ? tol : kCrossPlatformOptimaAppended;
+      const double limit = is_max ? t.maximum : t.argmax;
+      (appended ? (is_max ? worst_max_app : worst_argmax_app)
+                : (is_max ? worst_max : worst_argmax))
           .see(rel, std::fabs(got[j] - want[j]),
                std::string(tag) + " " + kOptFieldNames[j]);
       if (!exact_mode && rel <= limit) {
@@ -1222,6 +1231,10 @@ int compare_optima(Tolerance tol) {
                          "profit  (the maximum)    ");
       print_optima_worst(stdout, worst_argmax, tol.argmax,
                          "others  (from the argmax)");
+      print_optima_worst(stdout, worst_max_app, kCrossPlatformOptimaAppended.maximum,
+                         "profit, appended solvers ");
+      print_optima_worst(stdout, worst_argmax_app, kCrossPlatformOptimaAppended.argmax,
+                         "others, appended solvers ");
     }
     // Never silent: an exempted cell is a cell nothing checked.
     if (!exact_mode && negligible > 0) {
@@ -1236,6 +1249,12 @@ int compare_optima(Tolerance tol) {
                      "profit  (the maximum)    ");
   print_optima_worst(stderr, worst_argmax, tol.argmax,
                      "others  (from the argmax)");
+  if (!exact_mode) {
+    print_optima_worst(stderr, worst_max_app, kCrossPlatformOptimaAppended.maximum,
+                       "profit, appended solvers ");
+    print_optima_worst(stderr, worst_argmax_app, kCrossPlatformOptimaAppended.argmax,
+                       "others, appended solvers ");
+  }
   if (exact_mode) {
     fprintf(stderr,
             "If this change was intended, regenerate with `make psi-stem-golden` "

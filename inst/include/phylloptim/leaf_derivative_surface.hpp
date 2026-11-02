@@ -65,6 +65,7 @@ inline Leaf::CollarCoords<S> Leaf::collar_coords_at(
     double sigma_star, double ci_star, const S& collar,
     const SupplyDraw<S>& draw, const leaf_pars<S>& pars,
     const PhotoCapacity<S>& cap, bool collar_moves) const {
+  refuse_energy_balance("Leaf::collar_coords_at");
   S sigma_h, gc, ci_h;
   held_coords_at<S>(sigma_star, ci_star, collar, draw, pars, cap, sigma_h, gc,
                     ci_h);
