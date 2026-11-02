@@ -534,7 +534,7 @@ tibble(method = cf$model_method(), psi_stem = cf$opt_psi_stem_,
 It is refused rather than approximated wherever it does not hold, and the
 refusals carry their reasons:
 
-- **`TF24`, `CF77` and `TF24_floor` only, of the eight cost curves.** The three-way
+- **`TF24`, `CF77` and `TF24_floor` only, of the nine cost curves.** The three-way
   split is worth knowing, because only one part of it is a gap in the code. A
   closed form exists exactly when `h'(A)`, the derivative of the benefit link, does
   not depend on the solution. For `JS22`, `CMax` and `ProfitMax` it does not — so
@@ -709,7 +709,7 @@ output from this one are:
 ## Where to go next
 
 - **I want to know what is being solved.** `vignette("the-models")` is the
-  reference: the objective, the eight cost curves, the first-order conditions,
+  reference: the objective, the nine cost curves, the first-order conditions,
   and the two optional gates.
 - **I want to fit this to data.** `vignette("fitting")` works through a
   calibration, and covers when the exact gradient earns its complexity.

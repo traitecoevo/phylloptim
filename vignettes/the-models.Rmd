@@ -110,7 +110,7 @@ Fix any one of these and the rest follow. Because each map is monotone, it carri
 
 This package solves in water potential, because that is the coordinate in which the hydraulic supply constraint is simplest to state. That is an implementation choice and nothing more. What actually distinguishes the models is the cost function, which is the next section.
 
-The maps are monotone but not linear, and that limits how far the equivalence goes. A *derivative* does depend on the coordinate. `dA/dE` and `dA/dψ` are different numbers, related by `dE/dψ`. So a marginal cost only means something once you say what it is per unit of, and comparing a λ from one paper with a λ from another means checking that they share a denominator. `marginal_cost_water()` reports per unit `E`, which is the convention the λ literature uses.
+The maps are monotone but not linear, and that limits how far the equivalence goes. A *derivative* does depend on the coordinate. `dA/dE` and `dA/dψ` are different numbers, related by `dE/dψ`. So a marginal cost only means something once you say what it is per unit of, and comparing a λ from one paper with a λ from another means checking that they share a denominator. A leaf's `$lambda` is per unit `E`, which is the convention the λ literature uses.
 
 ### Solving for the optimum by its first-order condition
 
@@ -372,7 +372,7 @@ $$\frac{dP}{d\psi}=A'g+Ag',
 
 The two differ by the factor `A·g`, which is strictly positive wherever the log form is defined. They therefore vanish at exactly the same potentials. The framework's stationary points *are* the product's stationary points, and putting the link on the benefit drops nothing. It is the product rule, divided through.
 
-That claim is checkable rather than decorative. In the chunk below, the left-hand side comes from the model's own `dJ/dψ`, the single expression it uses for all eight curves. The right-hand side is `A'g + Ag'` assembled from parts: `A'` as the derivative of a zero-cost curve, and `g'` differentiated by hand from the closed form for `g` quoted above. So the check does not simply ask the implementation to agree with itself.
+That claim is checkable rather than decorative. In the chunk below, the left-hand side comes from the model's own `dJ/dψ`, the single expression it uses for all nine curves. The right-hand side is `A'g + Ag'` assembled from parts: `A'` as the derivative of a zero-cost curve, and `g'` differentiated by hand from the closed form for `g` quoted above. So the check does not simply ask the implementation to agree with itself.
 
 ```{r}
 #| label: link-identity
@@ -490,7 +490,7 @@ Divide any model's marginal cost by the marginal water use and you get the same 
 
 $$\lambda(\psi)=\frac{dC/d\psi}{dE/d\psi},$$
 
-and `marginal_cost_water()` reports it for whichever curve is in force. It is the axis on which otherwise incomparable models can be compared, and it is the whole content of the family resemblance between them.
+and a solved leaf's `$lambda` reports it for the curve in force, at its operating point (`$curve_lambda()` evaluates any curve at any stem potential). It is the axis on which otherwise incomparable models can be compared, and it is the whole content of the family resemblance between them.
 
 For Cowan-Farquhar, λ is by construction the prescribed constant, because that model's first-order condition is exactly the classical `dA/dE = λ`. For ProfitMax it is derived, `λ* = |A|max / [k(ψ_s) − k_crit]`, and it is a function of the drivers: as the soil dries, `k(ψ_s)` falls, the denominator shrinks, and water automatically gets dearer.
 
@@ -543,9 +543,9 @@ for (ps in c(0.5, 1, 2, 3)) {
   lw <- leaf_model()
   set_drivers(lw, psi_soil = ps, PPFD = 1500)
   lw$set_model("TF24", "stem"); lw$optimise()
-  cat(sprintf(" %7.1f  %10.4g  %10.4g  %9.3f\n", ps, lw$lambda_emergent,
+  cat(sprintf(" %7.1f  %10.4g  %10.4g  %9.3f\n", ps, lw$lambda,
               lw$assim_colimited_ / lw$transpiration_,
-              lw$lambda_emergent / (lw$assim_colimited_ / lw$transpiration_)))
+              lw$lambda / (lw$assim_colimited_ / lw$transpiration_)))
 }
 ```
 
@@ -800,7 +800,7 @@ Blocks 1 to 5 are shared. Every published model in the table above accepts them,
 
 Two divisions cut across that list, and both are sharper than any of the individual formulae.
 
-The first is what the *marginal* cost reads, which is the third column of the table and the quantity that actually locates the optimum. For seven of the eight it is a function of `ψ` alone. `JS22` is the exception, because `2γ_J Δψ` reads the drop. That is the one difference no parameter can absorb, since as the soil dries the drop shrinks while every absolute-potential cost rises. The `gamma-match` chunk measures both spreads side by side.
+The first is what the *marginal* cost reads, which is the third column of the table and the quantity that actually locates the optimum. For seven of the nine it is a function of `ψ` alone. `JS22` is the exception that matters, because `2γ_J Δψ` reads the drop; `LeastCost`'s reads the flux, and so the drop, only through its denominator. That is the one difference no parameter can absorb, since as the soil dries the drop shrinks while every absolute-potential cost rises. The `gamma-match` chunk measures both spreads side by side.
 
 The second is whether the cost is subtracted or the objective is a product. Five subtract; `SOX` and `JW26` multiply. That decides whether λ carries a factor of `A`, and so whether water is priced in absolute carbon or as a share of what the leaf is currently earning.
 

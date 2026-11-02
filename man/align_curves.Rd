@@ -5,7 +5,7 @@
 \title{Align the cost curves' level parameters to a common optimum}
 \usage{
 align_curves(
-  models = c("CF77", "JS22", "CMax", "LeastCost"),
+  models = NULL,
   psi_soil = 1,
   PPFD = 900,
   atm_vpd = 2,
@@ -23,7 +23,9 @@ align_curves(
 }
 \arguments{
 \item{models}{which curves to align; any subset of \code{"CF77"}, \code{"JS22"},
-\code{"CMax"} and \code{"LeastCost"}.}
+\code{"CMax"} and \code{"LeastCost"}, the curves whose definitions have an aligned
+parameter (\code{\link[=cost_curve_parameters]{cost_curve_parameters()}}). \code{NULL}, the default, aligns all of
+them.}
 
 \item{psi_soil, PPFD, atm_vpd, ca, leaf_temp, atm_o2_kpa, atm_kpa}{the reference
 environment, as in \code{\link[=leaf_solve]{leaf_solve()}}. The defaults are \code{\link[=leaf_solve]{leaf_solve()}}'s own,
@@ -81,7 +83,7 @@ curve is TF24. It keeps no default and still refuses to solve without one.
 
 \code{CF77} aligned to TF24 is an identity rather than a fit: at TF24's emergent
 \code{lambda} the two first-order conditions coincide, so the price returned is
-\code{\link[=operating_point]{operating_point()}}'s \code{lambda_emergent} for TF24 at the reference.
+\code{\link[=operating_point]{operating_point()}}'s \code{lambda} for TF24 at the reference.
 }
 
 \examples{

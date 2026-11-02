@@ -240,32 +240,28 @@ test_that("shadow_cost separates the price from the realised carbon cost", {
 
 
 test_that("leaf_solve() reports the seated curve's lambda, not TF24's", {
-  # `lambda` is `marginal_cost_water()` -- TF24's price at this operating point,
-  # whatever curve ran. `lambda_emergent` is the curve's own. Until it was appended
-  # to the reported vector it was reachable only off a `leaf_model()` object, so a
-  # `leaf_solve()` caller on any other curve had to reconstruct it -- and on
-  # TF24_floor that meant knowing `lambda` carries only the hydraulic half and
-  # adding the floor back by hand.
+  # `lambda` is the seated curve's own marginal cost of water, so a leaf_solve()
+  # caller on any curve reads it without reconstructing it -- on TF24_floor,
+  # without knowing to add the floor to TF24's half by hand.
   sp <- leaf_supply_singlelayer()
   price <- 1.5e5
 
-  # ⚠️ CF77 PINS IT, its emergent lambda being known independently of the solve:
-  # the curve prices water at a prescribed constant, so this must return it.
+  # ⚠️ CF77 PINS IT, its lambda being known independently of the solve: the
+  # curve prices water at a prescribed constant, so this must return it.
   cf <- leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = "CF77",
                    CF77_lambda = price, supply = sp)
-  expect_equal(cf$lambda_emergent, price, tolerance = 1e-6)
-  expect_false(isTRUE(all.equal(cf$lambda, price)))   # `lambda` is NOT the price
+  expect_equal(cf$lambda, price, tolerance = 1e-8)
+  expect_false("lambda_emergent" %in% names(cf))
 
-  # TF24 is the one curve where the two agree, by construction
+  # TF24's is its lambda at the optimum, and TF24_floor's is that plus the floor
   tf <- leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = "TF24",
                    supply = sp)
-  expect_identical(tf$lambda_emergent, tf$lambda)
-
-  # and TF24_floor's is the hydraulic half plus the floor
   fl <- leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = "TF24_floor",
                    TF24_floor_lambda_o = price, supply = sp)
-  expect_equal(fl$lambda_emergent, fl$lambda + price)
-  expect_gt(fl$lambda_emergent, fl$lambda)
+  l <- leaf_model(supply = sp)
+  set_drivers(l, psi_soil = 1.0, PPFD = 900, atm_vpd = 2)
+  expect_identical(tf$lambda, l$lambda_TF24(tf$psi_stem))
+  expect_equal(fl$lambda, l$lambda_TF24(fl$psi_stem) + price, tolerance = 1e-8)
 })
 
 test_that("lambda_molar is lambda in mol CO2 per mol H2O", {

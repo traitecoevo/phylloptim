@@ -213,6 +213,18 @@ Leaf__lambda_TF24 <- function(obj_, psi_stem) {
     .Call('_phylloptim_Leaf__lambda_TF24', PACKAGE = 'phylloptim', obj_, psi_stem)
 }
 
+Leaf__curve_cost <- function(obj_, curve, psi_stem, psi_upstream) {
+    .Call('_phylloptim_Leaf__curve_cost', PACKAGE = 'phylloptim', obj_, curve, psi_stem, psi_upstream)
+}
+
+Leaf__curve_profit <- function(obj_, curve, psi_stem, psi_upstream) {
+    .Call('_phylloptim_Leaf__curve_profit', PACKAGE = 'phylloptim', obj_, curve, psi_stem, psi_upstream)
+}
+
+Leaf__curve_lambda <- function(obj_, curve, psi_stem, psi_upstream) {
+    .Call('_phylloptim_Leaf__curve_lambda', PACKAGE = 'phylloptim', obj_, curve, psi_stem, psi_upstream)
+}
+
 Leaf__prepare_profitmax_at <- function(obj_, A_max) {
     invisible(.Call('_phylloptim_Leaf__prepare_profitmax_at', PACKAGE = 'phylloptim', obj_, A_max))
 }
@@ -1373,14 +1385,6 @@ Leaf__lambda_molar__get <- function(obj_) {
     .Call('_phylloptim_Leaf__lambda_molar__get', PACKAGE = 'phylloptim', obj_)
 }
 
-Leaf__lambda_multilayer__get <- function(obj_) {
-    .Call('_phylloptim_Leaf__lambda_multilayer__get', PACKAGE = 'phylloptim', obj_)
-}
-
-Leaf__lambda_emergent__get <- function(obj_) {
-    .Call('_phylloptim_Leaf__lambda_emergent__get', PACKAGE = 'phylloptim', obj_)
-}
-
 Leaf__profitmax_A_max__get <- function(obj_) {
     .Call('_phylloptim_Leaf__profitmax_A_max__get', PACKAGE = 'phylloptim', obj_)
 }
@@ -1420,10 +1424,11 @@ Leaf__H2O_CO2_stom_diff_ratio___set <- function(obj_, value) {
 #' The differentiable parameters, in the order C++ indexes them
 #'
 #' The sixteen [leaf_traits()] in `set_traits()`'s argument order, then
-#' `leaf_specific_conductance_max`, `resistance` and `CF77_lambda_`. Exported so that R's own
-#' copy of this order can be compared against it in a test: R passes integer
-#' positions into this enumeration, so appending to it is safe and reordering it
-#' would silently differentiate the wrong parameter.
+#' `leaf_specific_conductance_max`, `resistance`, the parameters the cost
+#' curves own ([cost_curve_parameters()]) and the thermal-damage inputs.
+#' Exported so that R's own copy of this order can be compared against it in a
+#' test: R passes integer positions into this enumeration, so appending to it
+#' is safe and reordering it would silently differentiate the wrong parameter.
 #'
 #' @return A character vector, one entry per differentiable parameter.
 #' @seealso [leaf_gradient_batch()]
@@ -1448,6 +1453,30 @@ gradient_par_names <- function() {
 #' @export
 cost_curve_names <- function() {
     .Call('_phylloptim_cost_curve_names', PACKAGE = 'phylloptim')
+}
+
+#' Each cost curve's parameters, from its definition
+#'
+#' One row per parameter a cost curve owns, curves in [cost_curve_names()]
+#' order: the curve, the parameter's name (a [gradient_par_names()] entry, and
+#' the [leaf_traits()] argument or `Leaf` field that carries it), its default,
+#' whether it is a trait, and whether its default is aligned by
+#' [align_curves()]. `NA` as a default means the curve refuses to solve until
+#' the parameter is set. Read out of the C++ definitions, so the R tables that
+#' route these parameters cannot drift from the curves.
+#'
+#' A parameter that is not a trait is owned by its curve: [leaf_solve()] and
+#' [leaf_batch()] take it as an argument named without the trailing
+#' underscore, and every other curve refuses it.
+#'
+#' @return A data frame with columns `curve`, `parameter`, `default`, `trait`
+#'   and `aligned`.
+#' @seealso [cost_curve_names()], [align_curves()]
+#' @examples
+#' cost_curve_parameters()
+#' @export
+cost_curve_parameters <- function() {
+    .Call('_phylloptim_cost_curve_parameters', PACKAGE = 'phylloptim')
 }
 
 .leaf_ncontrol_default <- function() {

@@ -2463,147 +2463,125 @@ equations:
     title: TF24 marginal cost of water
     latex: |
       \lambda_\mathrm{TF24}(\psi) = \frac{C'}{E'} = \frac{\gamma\beta\,(c/b)(\psi/b)^{c-1}\,(1-f)^{\beta-1}}{k_{max}}
-    code: phylloptim::Curve< Leaf::CostCurve::TF24 >::lambda
-    also: [phylloptim::Leaf::lambda_TF24]
+    code: phylloptim::Curve< Leaf::CostCurve::TF24 >::cost_slope
+    also: [phylloptim::Leaf::lambda_for, phylloptim::Leaf::lambda_TF24, phylloptim::Leaf::hydraulic_cost_TF_kernel]
     reads: [TF24_cost_scale, TF24_beta2, stem_b, stem_c, leaf_specific_conductance_max]
     writes: []
     kind: closed_form
     cite: Towers-2024
-    note: 'µmol C (kg H₂O)⁻¹. The $f$ in $|f''|$ cancels against $dE/d\psi = k_{max} f$ analytically, so it stays finite at $\psi_\mathrm{crit}$; with $\beta < 1$ it diverges as $\psi \to 0$, a property of the cost.'
+    note: 'µmol C (kg H₂O)⁻¹. The generic λ (lambda_ratio) evaluates it, as the tangent of the cost over $k_{max} f$; the $f$ in $|f''|$ cancels analytically here and to rounding there, at the end of the curve too. With $\beta < 1$ it diverges as $\psi \to 0$, a property of the cost.'
   lambda_JS22:
     section: marginal_cost
     title: JS22 marginal cost of water
     latex: |
       \lambda_\mathrm{JS22} = \frac{2\gamma_J(\psi - \psi_u)}{k_{max} f(\psi)}
-    code: phylloptim::Curve< Leaf::CostCurve::JS22 >::lambda
-    also: [phylloptim::Leaf::lambda_JS22]
+    code: phylloptim::Curve< Leaf::CostCurve::JS22 >::cost_slope
+    also: [phylloptim::Leaf::lambda_for, phylloptim::Leaf::lambda_JS22]
     reads: [JS22_gamma, leaf_specific_conductance_max]
     writes: []
     kind: closed_form
     cite: Joshi-2022
-    note: 'No $f$ cancels, so it divides by $f$, which stays above 0.05 inside the bracket.'
+    note: 'The generic λ (lambda_ratio). No $f$ cancels, so it divides by $f$, which stays above 0.05 inside the bracket.'
   lambda_CMax:
     section: marginal_cost
     title: CMax marginal cost of water
     latex: |
       \lambda_\mathrm{CMax} = \frac{a\psi + b}{k_{max} f(\psi)}
-    code: phylloptim::Curve< Leaf::CostCurve::CMax >::lambda
-    also: [phylloptim::Leaf::lambda_CMax]
+    code: phylloptim::Curve< Leaf::CostCurve::CMax >::cost_slope
+    also: [phylloptim::Leaf::lambda_for, phylloptim::Leaf::lambda_CMax]
     reads: [CMax_a, CMax_b, leaf_specific_conductance_max]
     writes: []
     kind: closed_form
     cite: Anderegg-2018
-    note: 'Non-zero at the wet end unless $b = 0$. The upstream potential enters only through $E$, so it is not read.'
+    note: 'The generic λ (lambda_ratio). Non-zero at the wet end unless $b = 0$. The upstream potential enters only through $E$, so it is not read.'
   lambda_TF24_floor:
     section: marginal_cost
     title: TF24_floor marginal cost of water
     latex: |
       \lambda_\mathrm{TF24f}(\psi) = \lambda_\mathrm{TF24}(\psi) + \lambda_o
-    code: phylloptim::Curve< Leaf::CostCurve::TF24_floor >::lambda
-    also: [phylloptim::Leaf::lambda_TF24_floor, phylloptim::Leaf::lambda_TF24, phylloptim::Curve< Leaf::CostCurve::TF24 >::lambda]
+    code: phylloptim::Curve< Leaf::CostCurve::TF24_floor >::cost_slope
+    also: [phylloptim::Leaf::lambda_for, phylloptim::Leaf::lambda_TF24_floor, phylloptim::Leaf::hydraulic_cost_TF_kernel]
     reads: [TF24_floor_lambda_o, TF24_cost_scale, TF24_beta2, leaf_specific_conductance_max]
     writes: []
     kind: closed_form
-    note: 'The one difference-curve lambda that does not vanish at the wet end. Bit-identical to lambda_TF24 at $\lambda_o = 0$.'
+    note: 'The generic λ (lambda_ratio); the floor''s part reads $E''$ from the stem table, so it is $\lambda_o$ to the table''s slope accuracy against the closed-form $f$. The one difference-curve lambda that does not vanish at the wet end. Bit-identical to lambda_TF24 at $\lambda_o = 0$.'
   lambda_SOX:
     section: marginal_cost
     title: SOX marginal cost of water
     latex: |
       \lambda_\mathrm{SOX} = \frac{-A\,(g'/g)}{k_{max} f(\psi)}
-    code: phylloptim::Curve< Leaf::CostCurve::SOX >::lambda
-    also: [phylloptim::Leaf::lambda_SOX, phylloptim::Curve< Leaf::CostCurve::SOX >::gain, phylloptim::Curve< Leaf::CostCurve::SOX >::gain_slope]
+    code: phylloptim::Curve< Leaf::CostCurve::SOX >::cost_slope
+    also: [phylloptim::Leaf::lambda_for, phylloptim::Leaf::benefit_link_deriv, phylloptim::Leaf::lambda_SOX, phylloptim::Curve< Leaf::CostCurve::SOX >::gain, phylloptim::Curve< Leaf::CostCurve::SOX >::gain_slope]
     reads: [leaf_specific_conductance_max]
     writes: []
     kind: closed_form
     cite: Eller-2020
-    note: 'Carries a factor of $A$ (a product objective prices water as a share of assimilation) and diverges at $\psi_\mathrm{crit}$. Reads the leaf''s current `assim_colimited_`, so it means what it says only at the potential last evaluated.'
+    note: 'The generic λ (lambda_ratio), with $1/h''(A) = A$. Carries a factor of $A$ (a product objective prices water as a share of assimilation) and diverges at $\psi_\mathrm{crit}$. Reads the leaf''s current `assim_colimited_`, so it means what it says only at the potential last evaluated.'
   lambda_JW26:
     section: marginal_cost
     title: JW26 marginal cost of water
     latex: |
       \lambda_\mathrm{JW26} = \frac{A}{(\psi_\mathrm{crit} - \psi)\, k_{max} f(\psi)}
-    code: phylloptim::Curve< Leaf::CostCurve::JW26 >::lambda
-    also: [phylloptim::Leaf::lambda_JW26]
+    code: phylloptim::Curve< Leaf::CostCurve::JW26 >::cost_slope
+    also: [phylloptim::Leaf::lambda_for, phylloptim::Leaf::benefit_link_deriv, phylloptim::Leaf::lambda_JW26]
     reads: [psi_crit, leaf_specific_conductance_max]
     writes: []
     kind: closed_form
     cite: Jones-2026
-    note: 'Reads the current `assim_colimited_`, as lambda_SOX does.'
+    note: 'The generic λ (lambda_ratio). Reads the current `assim_colimited_`, as lambda_SOX does.'
   lambda_ProfitMax:
     section: marginal_cost
     title: ProfitMax marginal cost of water
     latex: |
       \lambda_\mathrm{PM} = \lvert A\rvert_{\max} \left[\frac{\lvert f'\rvert}{f\, k_\mathrm{span}} + \frac{dTC}{dT}\,\frac{dT_\mathrm{leaf}}{dE}\right], \qquad
       \frac{dTC}{dT} = r\,TC\,(1 - TC), \qquad \frac{dT_\mathrm{leaf}}{dE} = -\frac{\lambda_v}{\rho c_p / r_a + g_\mathrm{rad}}
-    code: phylloptim::Curve< Leaf::CostCurve::ProfitMax >::lambda
-    also: [phylloptim::Leaf::lambda_ProfitMax, phylloptim::Leaf::thermal_cost_temp_deriv]
+    code: phylloptim::Curve< Leaf::CostCurve::ProfitMax >::cost_slope
+    also: [phylloptim::Leaf::lambda_for, phylloptim::Leaf::benefit_link_deriv, phylloptim::Leaf::lambda_temperature_slope, phylloptim::Curve< Leaf::CostCurve::ProfitMax >::less_cost_temperature_slope, phylloptim::Leaf::lambda_ProfitMax, phylloptim::Leaf::thermal_cost_temp_deriv]
     reads: [stem_b, stem_c, use_thermal_cost_, use_energy_balance_]
     writes: []
     kind: closed_form
     cite: Sperry-2017
-    note: 'Multiplying the normalised objective by $|A|_{\max}$ restores carbon units. The thermal term needs both gates on and is the slope dprofit_energy_balance_term subtracts. NA where $f$, $k_\mathrm{span}$ or $|A|_{\max}$ is not positive. Not bound: read through `lambda_emergent` after a stem-route ProfitMax solve, gates off and both on (a leaf inside the temperature clamp).'
+    note: 'The generic λ (lambda_ratio), with $1/h''(A) = |A|_{\max}$, which restores carbon units; the thermal term is the cost''s slope through leaf temperature, the one dprofit_energy_balance_term subtracts, and needs both gates on. NA where $f$, $k_\mathrm{span}$ or $|A|_{\max}$ is not positive. Bound as `lambda` after a stem-route ProfitMax solve.'
   lambda_LeastCost:
     section: marginal_cost
     title: LeastCost marginal cost of water
     latex: |
       \lambda_\mathrm{LC} = h'(A)^{-1}\,\frac{d\log W}{dE} = \frac{A}{M_w\, W}
-    code: phylloptim::Curve< Leaf::CostCurve::LeastCost >::lambda
-    also: [phylloptim::Leaf::lambda_LeastCost, phylloptim::Curve< Leaf::CostCurve::LeastCost >::resource_use]
+    code: phylloptim::Curve< Leaf::CostCurve::LeastCost >::cost_slope
+    also: [phylloptim::Leaf::lambda_for, phylloptim::Leaf::benefit_link_deriv, phylloptim::Leaf::lambda_temperature_slope, phylloptim::Leaf::lambda_LeastCost, phylloptim::Curve< Leaf::CostCurve::LeastCost >::resource_use]
     reads: [kg_to_mol_h2o]
     writes: []
     kind: closed_form
     cite: Prentice-2014
-    note: 'Eq. S1.4 of the theory manuscript, $c_E A/(c_E E + c_V V_{cmax})$ with $c_E$ cancelled and the kg-to-mol factor supplied. Finite at the wet end, set by the capacity term. Not bound: read through `lambda_emergent` after a stem-route LeastCost solve.'
+    note: 'The generic λ (lambda_ratio), with $1/h''(A) = A$, so NA at $A \le 0$; equal to this closed form to the stem table''s slope accuracy. Eq. S1.4 of the theory manuscript, $c_E A/(c_E E + c_V V_{cmax})$ with $c_E$ cancelled and the kg-to-mol factor supplied. Finite at the wet end, set by the capacity term. Bound as `lambda` after a stem-route LeastCost solve.'
   lambda_ratio:
     section: marginal_cost
     title: λ is the marginal cost over the marginal water use
     latex: |
-      \lambda_K(\psi) = \frac{dC_K/d\psi}{h_K'(A)\; dE/d\psi}
-    code: ~
-    also: [phylloptim::Leaf::lambda_for]
-    reads: []
+      \lambda_K(\psi) = \frac{dC_K/d\psi}{h_K'(A)\; k_{max} f(\psi)} + \frac{1}{h_K'(A)}\frac{\partial C_K}{\partial T_\mathrm{leaf}}\frac{dT_\mathrm{leaf}}{dE}
+    code: phylloptim::Leaf::lambda_for
+    also: [phylloptim::Leaf::benefit_link_deriv, phylloptim::Leaf::lambda_temperature_slope, phylloptim::Leaf::curve_lambda, phylloptim::Leaf::cost_deriv]
+    reads: [leaf_specific_conductance_max]
     writes: []
     kind: derivative
-    note: 'The definition every closed form above implements. A lambda read through $E$ agrees with its closed form only to 1.4e-8 to 2.6e-8 relative: $E$ is the integral table, whose slope differs from the closed forms'' $k_{max} f$ by that much (the same table-slope gap as cost_deriv).'
-  marginal_cost_water:
-    section: marginal_cost
-    title: The reported λ
-    latex: |
-      \lambda = \lambda_\mathrm{TF24}(\psi^*)
-    code: phylloptim::Leaf::marginal_cost_water
-    also: [phylloptim::Leaf::lambda_TF24]
-    reads: []
-    writes: []
-    kind: closed_form
-    note: 'Bound as `lambda`. TF24''s marginal cost at whatever optimum the last solve found, WHICHEVER curve ran, on either route; the seated curve''s own is `lambda_emergent`. Single-layer: on the collar route it omits the series-resistance correction (marginal_cost_water_multilayer).'
-  marginal_cost_water_molar:
+    note: 'Every curve''s λ: $1/h''$ is 1, $A$ or $|A|_{\max}$, NA where the link has no slope ($A \le 0$ under the log link, unusable normalisers), and the temperature term is there only for a cost that reads leaf temperature, with the energy balance on. A cost that reads E (CF77, TF24_floor''s floor, LeastCost) has its slope from the stem table, which $E''$ here does not use, so CF77''s λ is its price to the table''s slope accuracy against the closed form: about 1e-12 at the default curve, up to 4e-10 on a shallow one and about 1e-8 on a 100-knot table. Over the stem-optima golden grid it equals each curve''s closed form above to 1.4e-15 relative where neither reads E.'
+  lambda_molar:
     section: marginal_cost
     title: λ in molar units
     latex: |
       \lambda_\mathrm{mol} = \lambda \times 10^{-6}\, M_w
-    code: phylloptim::Leaf::marginal_cost_water_molar
+    code: phylloptim::Leaf::lambda_molar
     reads: [umol_to_mol, kg_to_mol_h2o]
     writes: []
     kind: closed_form
     note: 'mol CO₂ (mol H₂O)⁻¹, the convention the optimality literature states λ in. Bound as `lambda_molar`.'
-  marginal_cost_water_multilayer:
-    section: marginal_cost
-    title: λ with the root-network resistance
-    latex: |
-      \lambda_\mathrm{multi} = \lambda_\mathrm{TF24}(\psi^*)\left[1 + \frac{k_{max} f(\psi_r)}{S}\right], \qquad S = \frac{dE_\mathrm{up}}{d\psi_r}
-    code: phylloptim::Leaf::marginal_cost_water_multilayer
-    also: [phylloptim::Leaf::lambda_TF24]
-    reads: [leaf_specific_conductance_max]
-    writes: []
-    kind: derivative
-    note: 'TF24''s λ on the collar route: the bracket is $\ge 1$, so the single-layer λ understates the marginal cost. NA where $S$ is unavailable or not positive. Bound as `lambda_multilayer`; it is lambda_emergent on the collar route for TF24 only (lambda_collar).'
   lambda_collar:
     section: marginal_cost
     title: The seated curve's λ on the collar route
     latex: |
       \lambda_{\mathrm{collar},K} = \lambda_{\psi,K}(\psi_s, \psi_r)\left[1 + \frac{k_{max} f(\psi_r)}{S}\right] + \lambda_{E,K} + \frac{1}{S}\frac{\partial C_K}{\partial \psi_r}, \qquad S = \frac{dE_\mathrm{up}}{d\psi_r}
     code: phylloptim::Leaf::lambda_collar_for
-    also: [phylloptim::Leaf::collar_series, phylloptim::Leaf::marginal_cost_water_multilayer, phylloptim::Curve< Leaf::CostCurve::TF24 >::lambda_collar, phylloptim::Curve< Leaf::CostCurve::CF77 >::lambda_collar, phylloptim::Curve< Leaf::CostCurve::JS22 >::lambda_collar, phylloptim::Curve< Leaf::CostCurve::CMax >::lambda_collar, phylloptim::Curve< Leaf::CostCurve::SOX >::lambda_collar, phylloptim::Curve< Leaf::CostCurve::JW26 >::lambda_collar, phylloptim::Curve< Leaf::CostCurve::ProfitMax >::lambda_collar, phylloptim::Curve< Leaf::CostCurve::TF24_floor >::lambda_collar, phylloptim::Curve< Leaf::CostCurve::LeastCost >::lambda_collar, phylloptim::Leaf::find_root_collar_psi_for, phylloptim::Leaf::profit_at_collar_psi]
+    also: [phylloptim::Leaf::collar_series, phylloptim::Leaf::benefit_link_deriv, phylloptim::Leaf::lambda_temperature_slope, phylloptim::Leaf::find_root_collar_psi_for, phylloptim::Leaf::profit_at_collar_psi]
     reads: [leaf_specific_conductance_max]
     writes: []
     kind: identity
@@ -2612,13 +2590,13 @@ equations:
     section: marginal_cost
     title: The seated curve's λ at its operating point
     latex: |
-      \lambda_\mathrm{emergent} = \begin{cases} \lambda_K(\psi^*, \psi_s) & \text{stem route} \\ \lambda_{\mathrm{collar},K} & \text{collar route (lambda\_collar)} \end{cases}, \qquad \lambda_\mathrm{CF77} = p
+      \lambda_\mathrm{emergent} = \begin{cases} \lambda_K(\psi^*, \psi_s) & \text{stem route} \\ \lambda_{\mathrm{collar},K} & \text{collar route (lambda\_collar)} \end{cases}
     code: phylloptim::Leaf::lambda_emergent
     also: [phylloptim::Leaf::lambda_for, phylloptim::Leaf::optimise_psi_stem_single, phylloptim::Leaf::evaluate_psi_stem, phylloptim::Leaf::find_root_collar_psi_for]
     reads: []
     writes: []
     kind: closed_form
-    note: 'Written by the solve or the prescribed stem evaluation that ran; NA before. On the stem route it is the seated curve''s λ (CF77''s is its price, exactly); on the collar route, the same curve''s λ along the collar path (lambda_collar). Until 0.15.4 the collar route reported TF24''s multilayer λ whatever curve was seated.'
+    note: 'Bound as `lambda`. Written by the solve or the prescribed evaluation that ran; NA before. On the stem route it is the seated curve''s λ (CF77''s is its price, to the stem table''s accuracy); on the collar route, the same curve''s λ along the collar path (lambda_collar).'
   g1_eff:
     section: marginal_cost
     title: Equivalent Medlyn slope

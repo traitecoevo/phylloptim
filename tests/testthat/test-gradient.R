@@ -1121,7 +1121,7 @@ test_that("CF77_lambda_ is in the enumeration and refused by other models", {
 test_that("TF24_floor_lambda_o is the second model-owned price, and refused elsewhere", {
   # ⚠️ THE CLASS, NOT THE INSTANCE. There are two prescribed prices in the
   # enumeration now -- Cowan-Farquhar's and the two-term curve's -- so the thing
-  # under test is that `.gradient_owned_pars` maps each to its owner rather than
+  # under test is that `.owned_fields()` maps each to its owner rather than
   # that one name is special. On every other curve the price is EMERGENT, derived
   # from that curve's own parameters rather than set.
   expect_true("TF24_floor_lambda_o" %in% gradient_par_names())
@@ -1223,7 +1223,7 @@ test_that("every additive curve's IFT gradient matches differencing its solve", 
   net <- series_resistance(1e4)
   mk <- function() {
     l <- leaf_model(tr, leaf_control(), leaf_supply_singlelayer())
-    l$CF77_lambda_ <- 1.5e5   # in band: marginal_cost_water runs 9e4-3e5
+    l$CF77_lambda_ <- 1.5e5   # in band: TF24's lambda runs 9e4-3e5
     l$TF24_floor_lambda_o <- 1.5e5   # the same band, and the same reason
     l
   }

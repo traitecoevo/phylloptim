@@ -107,11 +107,18 @@ Leaf:
       `$hydraulic_cost_`; `$profitmax_curve()` returns its whole cost, gain and
       profit curve in one call.
 
-      ⚠️ **`$profit_` carries three kinds of number across the eight curves** --
+      ⚠️ **`$profit_` carries four kinds of number across the nine curves** --
       carbon for the five difference objectives, a dimensionless normalised
-      profit for `ProfitMax`, and carbon times a dimensionless factor for the two
-      products. Comparing it BETWEEN curves is not meaningful; comparing each
-      curve's argmax is.
+      profit for `ProfitMax`, carbon times a dimensionless factor for the two
+      products, and carbon per unit of weighted resource for `LeastCost`.
+      Comparing it BETWEEN curves is not meaningful; comparing each curve's
+      argmax is. `$lambda`, the seated curve's marginal cost of water at its
+      operating point, is the one output every curve reports on the same axis.
+
+      `$curve_cost()`, `$curve_profit()` and `$curve_lambda()` evaluate any
+      curve by name at a stem potential, whatever is seated; the per-curve
+      methods (`$hydraulic_cost_CF77()`, `$lambda_SOX()` and the rest) are the
+      same numbers, kept for existing code.
 
       All water potentials are **positive magnitudes in MPa**. There is one
       representation throughout and it is asserted, not documented: a negative
@@ -513,18 +520,20 @@ Leaf:
     single_gravity_head_: {type: double, access: field, name_cpp: "single_.grav_head_", readonly: true}
     single_psi_soil_: {type: double, access: field, name_cpp: "single_.psi_soil_", readonly: true}
 
-    lambda: {type: double, access: member, name_cpp: marginal_cost_water}
-    lambda_molar: {type: double, access: member, name_cpp: marginal_cost_water_molar}
-    lambda_multilayer: {type: double, access: member, name_cpp: marginal_cost_water_multilayer}
-    # THE MARGINAL COST OF WATER THE OPERATING POINT IMPLIES, `(dC/dpsi)/(dE/dpsi)`
-    # in umol C (kg H2O)^-1 -- the one output every cost curve reports on the same
-    # axis, and in the same units as the `$CF77_lambda_` INPUT so the two are directly
-    # comparable. Cowan-Farquhar prices water at a constant, so its emergent lambda
-    # IS that constant; every other curve's moves with the drivers.
+    # THE SEATED CURVE'S MARGINAL COST OF WATER AT ITS OPERATING POINT, dC/dE in
+    # umol C (kg H2O)^-1, on the route the solve used (along the collar path on the
+    # collar route) -- the one output every cost curve reports on the same axis,
+    # and in the same units as the `$CF77_lambda_` INPUT so the two are directly
+    # comparable. Cowan-Farquhar prices water at a constant, so its lambda is that
+    # constant, to the stem table's accuracy; every other curve's moves with the
+    # drivers. NA where the curve's link has no slope (a product or LeastCost at
+    # A <= 0). `lambda_molar` is the
+    # same in mol CO2 (mol H2O)^-1.
     #
     # Read-only: a settable one would be a way to disagree with the operating point
-    # it comes from. NA until an optimiser has run.
-    lambda_emergent: {type: double, access: member, name_cpp: lambda_emergent}
+    # it comes from. NA until an optimiser or a prescribed evaluation has run.
+    lambda: {type: double, access: member, name_cpp: lambda_emergent}
+    lambda_molar: {type: double, access: member, name_cpp: lambda_molar}
     # ProfitMax's normalisers, so its equivalence ratio |A|max/k_span is one
     # division away. ⚠️ That ratio is NOT a lambda -- it is carbon per unit
     # CONDUCTANCE lost, because it multiplies `k(psi_soil) - k(psi)`.
@@ -793,6 +802,54 @@ Leaf:
       return_type: double
       args: [psi_stem: double]
 
+    # --- every curve by name ----------------------------------------------------
+    # Each reads the curve's own definition whatever curve the leaf is set to, so
+    # a new curve needs no method here.
+    curve_cost:
+      roxygen: |
+        A cost curve's cost at a stem potential, by name.
+
+        The `C` in the curve's objective `J = h(A) - C`, in the units its benefit
+        link `h` composes with assimilation: a difference curve's cost in umol C
+        m^-2 s^-1 (`TF24`, `CF77`, `JS22`, `CMax`, `TF24_floor`; also written to
+        `$hydraulic_cost_`), `-log g` for a product (`SOX`, `JW26`), `log W` for
+        `LeastCost`'s ratio, and the normalised `HC + TC` for `ProfitMax`, whose
+        normalisers must be seeded (`$prepare_profitmax()`). Its slope in
+        `psi_stem` is what `$curve_lambda()` divides.
+        @param curve cost curve name, from \code{\link{cost_curve_names}}
+        @param psi_stem stem water potential, MPa as a positive magnitude
+        @param psi_upstream the upstream (collar or soil) potential, MPa
+        @export
+      return_type: double
+      args: [curve: "std::string", psi_stem: double, psi_upstream: double]
+    curve_profit:
+      roxygen: |
+        A cost curve's objective at a stem potential, by name.
+
+        Evaluates the leaf there and returns the curve's objective in its
+        published units -- a carbon profit, a product, a ratio or a normalised
+        profit -- leaving the leaf's outputs as `$evaluate_psi_stem_at()` would.
+        @param curve cost curve name, from \code{\link{cost_curve_names}}
+        @param psi_stem stem water potential, MPa as a positive magnitude
+        @param psi_upstream the upstream (collar or soil) potential, MPa
+        @export
+      return_type: double
+      args: [curve: "std::string", psi_stem: double, psi_upstream: double]
+    curve_lambda:
+      roxygen: |
+        A cost curve's marginal cost of water at a stem potential, by name.
+
+        `dC/dE` in umol C (kg H2O)^-1, as `$lambda` reports it at a stem-route
+        optimum: the cost's slope over the transpiration's, in carbon. A product
+        or a ratio reads the assimilation last evaluated, so evaluate the leaf at
+        `psi_stem` first (`$curve_profit()` does).
+        @param curve cost curve name, from \code{\link{cost_curve_names}}
+        @param psi_stem stem water potential, MPa as a positive magnitude
+        @param psi_upstream the upstream (collar or soil) potential, MPa
+        @export
+      return_type: double
+      args: [curve: "std::string", psi_stem: double, psi_upstream: double]
+
     # --- optimisers -----------------------------------------------------------
 
     # Cowan & Farquhar (1977), the model the whole optimality family is measured
@@ -804,8 +861,8 @@ Leaf:
     # objective. Its SCALE is set by the leaf, not chosen freely: at the
     # package defaults the leaf's own marginal cost of water runs 9e4 to 3e5, and
     # a lambda far outside that band pins the optimum shut or wide open.
-    # `$lambda` (that is, `marginal_cost_water()`) reports the same quantity for
-    # the other cost curves, so it is how you find a value that means something.
+    # `$lambda` reports the same quantity for every curve, so TF24's at your
+    # drivers is how you find a value that means something.
     # --- runtime curve selection, for the gradient ----------------------------
     # ⚠️ `curve` is the CostCurve enum's VALUE. R sends positions into it, so
     # appending is safe and reordering would silently solve a different model;

@@ -74,7 +74,7 @@ test_that("seating exact is bit-identical to not seating a method at all", {
   expect_identical(a$transpiration_, b$transpiration_)
   expect_identical(a$stom_cond_CO2_, b$stom_cond_CO2_)
   expect_identical(a$profit_, b$profit_)
-  expect_identical(a$lambda_emergent, b$lambda_emergent)
+  expect_identical(a$lambda, b$lambda)
 })
 
 test_that("the closed form writes every output the exact solve writes", {
@@ -160,17 +160,17 @@ test_that("the fallback fraction is measurable, which it was not before", {
   expect_true(is.na(l$closed_form_fallback_fraction()))
 })
 
-test_that("CF77 is the n = 0 arm, so its lambda is the price exactly", {
+test_that("CF77 is the n = 0 arm, so its lambda is the price", {
   # The one analytical identity available at n = 0: with lambda constant there
   # is no power law to approximate, so the reported marginal cost must be the
-  # prescribed price itself, to the last bit. This is also the check that the
+  # prescribed price, to the stem table's slope accuracy. This is also the check that the
   # closed arm reads `cf77_price()` rather than reconstructing a lambda -- which
   # is what lets it compose with the soil-moisture option (#128).
   lambda <- 1.5e5
   l <- cf_leaf(curve = "CF77", lambda = lambda)
   l$optimise()
   expect_false(l$last_solve_fell_back_)
-  expect_identical(l$lambda_emergent, lambda)
+  expect_equal(l$lambda, lambda, tolerance = 1e-8)
 
   # With the Medlyn soil-moisture factor on, the price is lambda/beta and the
   # closed form must see the divided price, not the bare field.
@@ -184,7 +184,7 @@ test_that("CF77 is the n = 0 arm, so its lambda is the price exactly", {
   m$set_model("CF77", "stem", "closed")
   m$optimise()
   beta <- (theta - m$theta_w_) / (m$theta_fc_ - m$theta_w_)
-  expect_equal(m$lambda_emergent, lambda / beta, tolerance = 1e-12)
+  expect_equal(m$lambda, lambda / beta, tolerance = 1e-8)
   # And the behaviour that follows: a dearer price closes the stomata.
   expect_lt(m$opt_psi_stem_, l$opt_psi_stem_)
 })

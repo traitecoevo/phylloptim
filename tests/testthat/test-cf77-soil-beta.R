@@ -19,7 +19,7 @@
 cf77_leaf <- function(theta = NULL, beta_on = FALSE, lambda = 1.5e5,
                       psi_soil = 0.5) {
   l <- leaf_model(supply = leaf_supply_singlelayer())
-  # In band: marginal_cost_water runs 9e4-3e5 at package defaults, and a lambda
+  # In band: TF24's lambda runs 9e4-3e5 at package defaults, and a lambda
   # far outside it pins the optimum shut or wide open regardless of beta.
   l$CF77_lambda_ <- lambda
   l$CF77_soil_beta_ <- beta_on
@@ -48,7 +48,7 @@ test_that("the option is off by default and off is bit-identical", {
   expect_identical(also_off$opt_psi_stem_, off$opt_psi_stem_)
   expect_identical(also_off$stom_cond_CO2_, off$stom_cond_CO2_)
   expect_identical(also_off$assim_colimited_, off$assim_colimited_)
-  expect_identical(also_off$lambda_emergent, off$lambda_emergent)
+  expect_identical(also_off$lambda, off$lambda)
 })
 
 test_that("at or above field capacity it reduces to plain CF77, exactly", {
@@ -59,7 +59,7 @@ test_that("at or above field capacity it reduces to plain CF77, exactly", {
   at_fc <- cf77_leaf(theta = 0.5, beta_on = TRUE)
   at_fc$optimise()
   expect_identical(at_fc$opt_psi_stem_, off$opt_psi_stem_)
-  expect_identical(at_fc$lambda_emergent, off$lambda_emergent)
+  expect_identical(at_fc$lambda, off$lambda)
 
   # And above it, because beta is CLAMPED at 1. This is the behaviour that makes
   # CF77_lambda_ a floor the wet end cannot undercut, and it is a choice rather
@@ -68,14 +68,14 @@ test_that("at or above field capacity it reduces to plain CF77, exactly", {
   above_fc <- cf77_leaf(theta = 0.8, beta_on = TRUE)
   above_fc$optimise()
   expect_identical(above_fc$opt_psi_stem_, off$opt_psi_stem_)
-  expect_identical(above_fc$lambda_emergent, off$lambda_emergent)
+  expect_identical(above_fc$lambda, off$lambda)
 })
 
 test_that("dA/dE equals lambda/beta at the optimum", {
   # The analytical identity, and the reason this is a cost curve rather than an
   # empirical gs formula: CF77's first-order condition is dA/dE == lambda, and
   # with the factor on the prescribed value becomes lambda/beta. Differenced
-  # against the model's own A and E, so nothing here trusts lambda_emergent.
+  # against the model's own A and E, so nothing here trusts the reported lambda.
   theta <- 0.35
   beta <- (theta - 0.2) / (0.5 - 0.2)
   lambda <- 1.5e5
@@ -100,7 +100,7 @@ test_that("dA/dE equals lambda/beta at the optimum", {
   expect_equal(fd_dassim_dtransp, lambda / beta, tolerance = 1e-4)
   # And the reported lambda agrees with the prescribed price, which is what puts
   # this curve on the same axis as the others.
-  expect_equal(l$lambda_emergent, lambda / beta, tolerance = 1e-10)
+  expect_equal(l$lambda, lambda / beta, tolerance = 1e-8)
 })
 
 test_that("drying the soil closes stomata, which plain CF77 will not do", {

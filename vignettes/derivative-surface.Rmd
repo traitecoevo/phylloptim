@@ -22,7 +22,7 @@ The package has two, and they answer different questions.
 | caller | R, or C++ calibrating a leaf against data | a C++ model that differentiates a run containing the leaf |
 | scalar | `double`; derivatives are returned as numbers | the caller's: `double`, a tangent, or an adjoint on the caller's tape |
 | method | implicit function theorem, with the curvature by finite difference | implicit function theorem, with every row from automatic differentiation of closed forms |
-| curves | all eight | TF24 and TF24_floor |
+| curves | all nine | TF24 and TF24_floor |
 | outputs | A, gc, psi_stem, collar, profit | profit, each layer's water uptake, and the residual (cuticular) flux |
 | classification | a status (`interior`, `pinned`, ...) from a stationarity test | a kind (`interior`, `boundary-soil`, ...) written by the branch the solve took |
 
