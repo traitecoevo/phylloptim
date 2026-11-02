@@ -105,7 +105,8 @@ Leaf:
 
       `ProfitMax` writes `$carbon_gain_`, `$hydraulic_cost_norm_` and
       `$thermal_cost_`, which are unitless and are NOT the same quantities as
-      `$hydraulic_cost_`; `$profitmax_curve()` returns its whole cost, gain and
+      `$hydraulic_cost_`, which it sets to `NA` as SOX, JW26 and LeastCost do;
+      `$profitmax_curve()` returns its whole cost, gain and
       profit curve in one call.
 
       ⚠️ **`$profit_` carries four kinds of number across the nine curves** --

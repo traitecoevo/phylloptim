@@ -611,8 +611,8 @@ int compare(Tolerance tol) {
 //   * two different degenerate conventions -- `_TF` and `_CF77`
 //     evaluate the real objective at the closed point, `_ProfitMax` zeroes seven
 //     fields instead;
-//   * `hydraulic_cost_` written in carbon units by `_TF` and `_CF77`
-//     and left STALE by `_ProfitMax`, which does not write it;
+//   * `hydraulic_cost_` written in carbon units by `_TF` and `_CF77`, and NA
+//     under every curve with no subtracted carbon cost, `_ProfitMax` included;
 //   * `at_ProfitMax` evaluated where the solve takes its degenerate exit (a dark
 //     leaf, a wet end past psi_crit): the leaf route's prescribed evaluation
 //     seeds the normalisers but has no such exit.
@@ -633,8 +633,7 @@ int compare(Tolerance tol) {
 // state -- the same trade the grid above makes. Pass "reuse" drives ONE Leaf
 // through a fixed sequence of rows, poisoning every stale-prone output first, so
 // a value that survives is provably not written by the path under test. A stale
-// write, like `hydraulic_cost_` under `_ProfitMax` above, is what pass "fresh"
-// cannot see.
+// field is what pass "fresh" cannot see.
 //
 // The two axes that make a different MODEL rather than a different driver:
 //   solver    which objective, and which variable it optimises. `collar`
