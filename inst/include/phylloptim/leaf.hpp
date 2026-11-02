@@ -164,8 +164,9 @@ public:
   std::shared_ptr<const VulnerabilityTable> stem_curve_;
   InverseScale stem_inv_b_;
 
-  // Instrumentation: how many stem tables this leaf has built, never reset, so a
-  // caller takes differences. A rebuild is otherwise invisible: it is bit-identical.
+  // Instrumentation: how many stem tables this leaf has built (the root's count is
+  // root_curve_builds_, last in the class), never reset, so a caller takes
+  // differences. A build is otherwise invisible: a reused table is bit-identical.
   long stem_curve_builds_ = 0;
 
   // The tables this leaf built most recently, for both curves, so that moving a `c`
@@ -173,7 +174,8 @@ public:
   // building it again: a build costs many solves. A table depends on (c,
   // resolution) alone, so a reused one is bit-identical to a rebuild. Eight covers
   // one observation's perturbations of stem_c and root_c (six tables) with room.
-  // The ring itself is the last member, so adding it moved no other member's offset.
+  // The ring is the class's last member and must stay so: a member placed earlier
+  // shifts every later one's offset, and with them the solve's compiled code.
   static constexpr std::size_t recent_tables_size = 8;
 
   // The soil -> root-collar supply. Held by value because Leaf must stay copyable,
@@ -805,8 +807,9 @@ public:
   void set_physiology(const RootNetwork& root_network, double PPFD, const std::vector<double>& psi_soil, const std::vector<double>& soil_depth, double leaf_specific_conductance_max, double atm_vpd, double ca, double leaf_temp, double atm_o2_kpa, double atm_kpa);
 
   // Replace the traits, in `leaf_traits()`' order, leaving the numerical controls
-  // alone: the one way to change a trait (hazard 10). Rebuilds a table only when
-  // its c moved and ends with setup_clean_leaf(), so call set_physiology() again.
+  // alone: the one way to change a trait (hazard 10). Re-seats a table only when
+  // its c moved (built only if not recent: table_for) and ends with
+  // setup_clean_leaf(), so call set_physiology() again.
   void set_traits(double vcmax_25, double stem_c, double stem_P50,
                   double root_c, double root_P50,
                   double TF24_beta2, double jmax_25, double phi_J,
@@ -887,6 +890,7 @@ public:
     vulnerability_curve_ncontrol = resolution;
     bool built = false;
     roots_.setup_vulnerability(resolution, table_for(roots_.root_c, resolution, built));
+    if (built) ++root_curve_builds_;
   }
   void setup_clean_leaf();
 
@@ -2095,6 +2099,11 @@ private:
   // table_for's ring (recent_tables_size, above). Kept last: see there.
   std::array<std::shared_ptr<const VulnerabilityTable>, recent_tables_size> recent_tables_;
   std::size_t recent_tables_next_ = 0;
+
+public:
+  // How many root tables this leaf has built; see stem_curve_builds_. Last for the
+  // ring's reason.
+  long root_curve_builds_ = 0;
 };
 
 // Everything about one cost curve, specialised for each in leaf_cost_curves.hpp.
@@ -2226,7 +2235,7 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_P50_,
   const double root_psi_crit_ =
       weibull_psi_at_fraction(root_b_, root_c_, k_crit_fraction);
 
-  // Which tables to rebuild, decided before the assignment. A table depends on
+  // Which tables to re-seat, decided before the assignment. A table depends on
   // its curve's c alone, so exact equality is right: an unchanged c gives a
   // bit-identical table, and a gradient's 1e-08 perturbation compares unequal.
   const bool stem_curve_moved = (stem_c_ != stem_c);

@@ -99,9 +99,11 @@ static_assert(sizeof(kBase.v) / sizeof(kBase.v[0]) == kNTraits,
 static_assert(sizeof(kNames) / sizeof(kNames[0]) == kNTraits,
               "kNames must have exactly kNTraits entries");
 
-// Whether perturbing this trait forces a vulnerability table to be rebuilt:
-// stem_c owns the stem's, root_c the root's. A P50 only rescales the argument
-// (#183). This turns out to be the single most important fact about the results.
+// Whether perturbing this trait needs a vulnerability table at a new c: stem_c
+// owns the stem's, root_c the root's. The traits arm below changes c every rep,
+// so every table there is new; a leaf reuses recent tables (Leaf::table_for), so
+// a real gradient builds each perturbed table once. A P50 only rescales the
+// argument.
 bool rebuilds_a_table(int i) {
   return i == 1 || i == 3;
 }
@@ -421,11 +423,10 @@ int main(int argc, char **argv) {
   }
 
   printf(
-      "\nThe two that rebuild a table are stem_c and root_c, and they are among\n"
-      "the traits for which the argmax-mediated term is 100%% of the gradient. So\n"
-      "the composite's advantage is smallest precisely where the composite is\n"
-      "most necessary. The P50s rebuild nothing: each table is built in psi/b\n"
-      "and depends on c alone (#183).\n");
+      "\nThe two that rebuild a table are stem_c and root_c, here because the\n"
+      "traits arm moves c every rep; a gradient at a fixed c reuses its tables\n"
+      "(the batch arm above). The P50s rebuild nothing: each table is built in\n"
+      "psi/b and depends on c alone.\n");
   printf("\nchecksum %.6f\n", sink);
   return 0;
 }
