@@ -1,3 +1,7 @@
+# phylloptim 0.30.2
+
+- Under `ProfitMax`, on either route, `$hydraulic_cost_` and the `hydraulic_cost` column of `operating_point()` are `NA`, as under SOX, JW26 and LeastCost; on a reused leaf they reported the last other curve's cost. ProfitMax's own costs are `$hydraulic_cost_norm_` and `$thermal_cost_`. Nothing else moves ([#209](https://github.com/traitecoevo/phylloptim/issues/209)).
+
 # phylloptim 0.30.1
 
 - Trait gradients that include `stem_c` or `root_c` no longer rebuild a vulnerability table for every observation: a leaf keeps the last eight tables it built, so a batch builds each perturbed table once. A full gradient now costs about what one without those two traits costs. No number moves ([#236](https://github.com/traitecoevo/phylloptim/issues/236)).

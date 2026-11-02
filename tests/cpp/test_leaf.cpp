@@ -2393,6 +2393,33 @@ void test_evaluate_psi_leaf_prescribes_rather_than_optimises() {
        "the TF24 arm agrees with its own objective at that point");
 }
 
+// ProfitMax's solve on a reused leaf writes hydraulic_cost_, as NA, on every
+// exit: its objective is unitless, so the field holds no cost of its own, and
+// left alone it reports the last curve's (hazard 8). The dark leaf takes the
+// degenerate exit, which writes its outputs by hand.
+void test_profitmax_writes_hydraulic_cost_on_every_exit() {
+  printf("ProfitMax writes hydraulic_cost_ on a reused leaf, on every exit\n");
+  for (double ppfd : {0.0, 900.0}) {
+    for (bool collar : {false, true}) {
+      Drivers d;
+      d.PPFD = ppfd;
+      phylloptim::Leaf l = make_leaf(d, {0.5}, {1.0});
+      l.set_model(phylloptim::Leaf::CostCurve::TF24, collar);
+      l.optimise();
+      ok(std::isfinite(l.hydraulic_cost_), "TF24 leaves a finite cost behind");
+      l.set_model(phylloptim::Leaf::CostCurve::ProfitMax, collar);
+      l.optimise();
+      const std::string at = std::string(collar ? " (collar" : " (leaf") +
+                             " route, PPFD " + std::to_string(int(ppfd)) + ")";
+      if (ppfd == 0.0 && !collar) {
+        ok(l.operating_point_kind() == phylloptim::Leaf::OperatingPointKind::Unsolved,
+           "the dark leaf takes the degenerate exit" + at);
+      }
+      ok(std::isnan(l.hydraulic_cost_), "ProfitMax reports hydraulic_cost_ as NA" + at);
+    }
+  }
+}
+
 // A prescribed leaf point writes every reported output, on a reused leaf
 // (hazard 8): solved first, outputs poisoned, then evaluated, it must report
 // what a fresh leaf evaluated at the same point reports, bit for bit. The dry
@@ -2426,13 +2453,8 @@ void check_prescribed_leaf_writes_every_output(const Drivers &d, int *rows,
     for (double* f : {&reused.opt_psi_leaf_, &reused.ci_, &reused.assim_colimited_,
                       &reused.transpiration_, &reused.stom_cond_CO2_,
                       &reused.profit_, &reused.Tleaf_, &reused.lambda_emergent_,
-                      &reused.residual_flux_}) {
+                      &reused.residual_flux_, &reused.hydraulic_cost_}) {
       *f = poison;
-    }
-    // ProfitMax's leaf routes do not write hydraulic_cost_, a defect
-    // psi_leaf_optima.tsv records; every other curve's is checked.
-    if constexpr (K != phylloptim::Leaf::CostCurve::ProfitMax) {
-      reused.hydraulic_cost_ = poison;
     }
     reused.template evaluate_psi_leaf<K>(target);
 
@@ -11666,6 +11688,7 @@ int main(int argc, char **argv) {
   test_perturb_stem_P50_matches_a_rebuild();
   test_stem_curve_shortcut_needs_no_rebuild();
   test_a_restored_c_reuses_its_table();
+  test_profitmax_writes_hydraulic_cost_on_every_exit();
   test_water_mass_conversions_are_reciprocal();
   test_gas_constant_and_arrhenius_reference_point();
   test_knot_grid_reaches_its_intended_domain();

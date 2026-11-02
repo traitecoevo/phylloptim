@@ -94,7 +94,8 @@ l$optimise()
 
 \code{ProfitMax} writes \verb{$carbon_gain_}, \verb{$hydraulic_cost_norm_} and
 \verb{$thermal_cost_}, which are unitless and are NOT the same quantities as
-\verb{$hydraulic_cost_}; \verb{$profitmax_curve()} returns its whole cost, gain and
+\verb{$hydraulic_cost_}, which it sets to \code{NA} as SOX, JW26 and LeastCost do;
+\verb{$profitmax_curve()} returns its whole cost, gain and
 profit curve in one call.
 
 ⚠️ \strong{\verb{$profit_} carries four kinds of number across the nine curves} --

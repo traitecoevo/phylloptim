@@ -1057,6 +1057,7 @@ inline void Leaf::set_profitmax_degenerate_state(double psi_leaf,
   carbon_gain_ = 0;
   hydraulic_cost_norm_ = 0;
   thermal_cost_ = 0;
+  hydraulic_cost_ = util::na_value;  // as profit_psi_leaf_for's arm (hazard 8)
   lambda_emergent_ = util::na_value;
 }
 
@@ -1190,6 +1191,10 @@ inline double Leaf::profit_psi_leaf_for(double psi_leaf, double psi_upstream) {
     // CG - (HC + TC), with the normalisers prepare_profitmax seeded. Writes
     // carbon_gain_, hydraulic_cost_norm_ and thermal_cost_ so a caller plotting
     // Sicangco et al.'s Figure 2 can read the three components off the object.
+    // hydraulic_cost_ is poisoned as in the arms above: the carbon-unit cost it
+    // holds is not this objective's, and a reused Leaf would report the last
+    // curve's (hazard 8).
+    hydraulic_cost_ = util::na_value;
     carbon_gain_ = (profitmax_A_max_ > 0.0)
                        ? assim_colimited_ / profitmax_A_max_
                        : 0.0;
