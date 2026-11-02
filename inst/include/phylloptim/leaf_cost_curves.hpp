@@ -2,17 +2,312 @@
 #ifndef PHYLLOPTIM_LEAF_COST_CURVES_HPP_
 #define PHYLLOPTIM_LEAF_COST_CURVES_HPP_
 
-// The cost curves: each one's cost, profit and lambda, and the per-curve
-// tables the solves dispatch on. A new curve needs an arm in every table
-// here (each ends in a static_assert that names it), in curve_name() here,
-// in with_curve() in leaf.hpp, and in closed_form::optimise_into.
+// The cost curves: each one's definition, `Curve<K>`, then its cost, profit and
+// lambda, and the per-curve tables the solves dispatch on. A new curve is an
+// enumerator, an arm in with_curve() in leaf.hpp, and a `Curve<K>` here, which
+// `CurveDefinition` checks is complete.
 //
 // Part of `Leaf`: include <phylloptim/leaf_model.hpp>, which includes every
 // part in order.
 
 #include <phylloptim/leaf.hpp>
 
+#include <string_view>
+
 namespace phylloptim {
+
+// --- a curve is one definition -----------------------------------------------
+//
+// `Curve<K>` states everything about curve K that the solves read: its name, the
+// parameters it owns, and its properties. Every property is stated in every
+// specialisation, with no base and no default: a defaulted `cost_reads_upstream
+// = false` would solve the wrong first-order condition with no error.
+
+// A parameter a curve owns: its slot in the pack, its bound field, the member it
+// is, and its default, NaN where the curve refuses to solve until it is set.
+struct CurveParameter {
+  int slot;
+  const char* field;
+  double Leaf::*member;
+  double default_value;
+};
+
+// What closed_form::optimise_into does with a curve: solves it; refuses it as
+// unwritten (the expansion exists, its Newton slope does not); or refuses it as
+// impossible (under the Log link lambda carries A, a fixed point).
+enum class ClosedForm { Implemented, Unwritten, Impossible };
+
+template <class T> inline constexpr bool is_curve_parameter_array = false;
+template <std::size_t N>
+inline constexpr bool
+    is_curve_parameter_array<const std::array<CurveParameter, N>> = true;
+
+// The properties, each read by the table of the same name below:
+//
+//   link                          the benefit link composed with A
+//   cost_reads_upstream           the cost reads the upstream potential too
+//   cost_domain_ends_at_psi_crit  its own form ends there, not at the curve's end
+//   objective_is_product          A times a gain factor that vanishes at psi_crit
+//   prepares_normalisers          normalised by quantities seeded before a search
+//                                 (ProfitMax's |A|max and k_span), and with
+//                                 unusable ones it has no objective
+//   closed_form                   see ClosedForm
+template <class C>
+concept CurveDefinition = requires(const Leaf& l) {
+  requires std::same_as<decltype(C::name), const std::string_view>;
+  requires is_curve_parameter_array<decltype(C::parameters)>;
+  requires std::same_as<decltype(C::link), const Leaf::BenefitLink>;
+  requires std::same_as<decltype(C::cost_reads_upstream), const bool>;
+  requires std::same_as<decltype(C::cost_domain_ends_at_psi_crit), const bool>;
+  requires std::same_as<decltype(C::objective_is_product), const bool>;
+  requires std::same_as<decltype(C::prepares_normalisers), const bool>;
+  requires std::same_as<decltype(C::closed_form), const ClosedForm>;
+  { C::check_parameters(l) } -> std::same_as<void>;
+};
+
+// Aligned defaults: each level parameter (`CF77_lambda_`, `JS22_gamma`, `CMax_a`
+// with `CMax_b` 0, `LeastCost_beta`) defaults to where its stem optimum has
+// TF24's conductance at one reference: single-potential supply, psi_soil 1 MPa,
+// PPFD 900, VPD 2 kPa, ca 40 Pa, leaf at 25 C, energy balance off, other traits
+// at default. R's `align_curves()` solves them and `test-align-curves.R` fails
+// when a change moves an optimum there: re-align every copy rather than loosen it.
+
+template <> struct Curve<Leaf::CostCurve::TF24> {
+  static constexpr std::string_view name = "TF24";
+  // Traits, which TF24_floor's hydraulic half reads too.
+  static constexpr std::array parameters{
+      CurveParameter{par_TF24_beta2, "TF24_beta2", &Leaf::TF24_beta2, 1.5},
+      CurveParameter{par_TF24_cost_scale, "TF24_cost_scale",
+                     &Leaf::TF24_cost_scale, 7.5}};
+  static constexpr Leaf::BenefitLink link = Leaf::BenefitLink::Identity;
+  static constexpr bool cost_reads_upstream = false;
+  static constexpr bool cost_domain_ends_at_psi_crit = false;
+  static constexpr bool objective_is_product = false;
+  static constexpr bool prepares_normalisers = false;
+  static constexpr ClosedForm closed_form = ClosedForm::Implemented;
+  static void check_parameters(const Leaf&) {}
+};
+
+template <> struct Curve<Leaf::CostCurve::CF77> {
+  static constexpr std::string_view name = "CF77";
+  static constexpr std::array parameters{CurveParameter{
+      par_CF77_lambda, "CF77_lambda_", &Leaf::CF77_lambda_, 107750.8846}};
+  static constexpr Leaf::BenefitLink link = Leaf::BenefitLink::Identity;
+  static constexpr bool cost_reads_upstream = true;
+  // A constant price need not overtake A'(E) before the stem's ceiling.
+  static constexpr bool cost_domain_ends_at_psi_crit = true;
+  static constexpr bool objective_is_product = false;
+  static constexpr bool prepares_normalisers = false;
+  static constexpr ClosedForm closed_form = ClosedForm::Implemented;
+  static void check_parameters(const Leaf& l) {
+    // An input with an aligned default, so non-finite means a caller cleared it:
+    // a NaN objective's argmax is a property of the bracket and looks plausible.
+    if (!std::isfinite(l.CF77_lambda_)) {
+      util::stop("the CF77 cost curve needs CF77_lambda_ set: it is the "
+                 "PRESCRIBED marginal value of water in umol C (kg H2O)^-1, and "
+                 "it was set to " + util::to_string(l.CF77_lambda_) + ". Its "
+                 "default is aligned to TF24 (see align_curves()); "
+                 "set_physiology and set_traits never touch it.");
+    }
+    // Only with the option on, so a caller who never sets it is not refused for
+    // soil values the constant never reads. beta <= 0 prices water at infinity
+    // or below zero, which pays the leaf to transpire to the wet bound.
+    if (l.CF77_soil_beta_) {
+      if (!(l.theta_fc_ > l.theta_w_)) {
+        util::stop("CF77_soil_beta_ needs theta_fc_ > theta_w_; got theta_fc_ = " +
+                   util::to_string(l.theta_fc_) + ", theta_w_ = " +
+                   util::to_string(l.theta_w_));
+      }
+      const double beta = (l.theta_ - l.theta_w_) / (l.theta_fc_ - l.theta_w_);
+      if (!std::isfinite(beta) || beta <= 0.0) {
+        util::stop("CF77_soil_beta_ is on and the soil-moisture factor beta = "
+                   "(theta_ - theta_w_)/(theta_fc_ - theta_w_) is " +
+                   util::to_string(beta) + ", which prices water at infinity or "
+                   "below zero. theta_ must exceed theta_w_; got theta_ = " +
+                   util::to_string(l.theta_) + ", theta_w_ = " +
+                   util::to_string(l.theta_w_));
+      }
+    }
+  }
+};
+
+template <> struct Curve<Leaf::CostCurve::JS22> {
+  static constexpr std::string_view name = "JS22";
+  static constexpr std::array parameters{CurveParameter{
+      par_JS22_gamma, "JS22_gamma", &Leaf::JS22_gamma, 0.4717887793}};
+  static constexpr Leaf::BenefitLink link = Leaf::BenefitLink::Identity;
+  static constexpr bool cost_reads_upstream = true;
+  static constexpr bool cost_domain_ends_at_psi_crit = false;
+  static constexpr bool objective_is_product = false;
+  static constexpr bool prepares_normalisers = false;
+  static constexpr ClosedForm closed_form = ClosedForm::Unwritten;
+  static void check_parameters(const Leaf& l) {
+    // A trait with a default, still checked: a NaN maximises a NaN objective.
+    if (!std::isfinite(l.JS22_gamma) || l.JS22_gamma < 0.0) {
+      util::stop("JS22_gamma must be a finite, non-negative hydraulic unit cost "
+                 "in umol C m^-2 s^-1 MPa^-2; got " + util::to_string(l.JS22_gamma));
+    }
+  }
+};
+
+template <> struct Curve<Leaf::CostCurve::CMax> {
+  static constexpr std::string_view name = "CMax";
+  static constexpr std::array parameters{
+      CurveParameter{par_CMax_a, "CMax_a", &Leaf::CMax_a, 0.6385596982},
+      CurveParameter{par_CMax_b, "CMax_b", &Leaf::CMax_b, 0.0}};
+  static constexpr Leaf::BenefitLink link = Leaf::BenefitLink::Identity;
+  static constexpr bool cost_reads_upstream = true;
+  static constexpr bool cost_domain_ends_at_psi_crit = false;
+  static constexpr bool objective_is_product = false;
+  static constexpr bool prepares_normalisers = false;
+  static constexpr ClosedForm closed_form = ClosedForm::Unwritten;
+  static void check_parameters(const Leaf& l) {
+    // Only CMax_a gets the sign check: CMax_b is signed, negative in the paper's
+    // own convention (see the member).
+    if (!std::isfinite(l.CMax_a) || l.CMax_a < 0.0) {
+      util::stop("CMax_a must be a finite, non-negative slope for the CMax "
+                 "marginal cost in umol C m^-2 s^-1 MPa^-2; got " +
+                 util::to_string(l.CMax_a));
+    }
+    if (!std::isfinite(l.CMax_b)) {
+      util::stop("CMax_b must be finite; got " + util::to_string(l.CMax_b));
+    }
+  }
+};
+
+template <> struct Curve<Leaf::CostCurve::SOX> {
+  static constexpr std::string_view name = "SOX";
+  static constexpr std::array<CurveParameter, 0> parameters{};
+  static constexpr Leaf::BenefitLink link = Leaf::BenefitLink::Log;
+  static constexpr bool cost_reads_upstream = false;
+  // The gain factor reaches zero at psi_crit and is negative past it.
+  static constexpr bool cost_domain_ends_at_psi_crit = true;
+  static constexpr bool objective_is_product = true;
+  static constexpr bool prepares_normalisers = false;
+  static constexpr ClosedForm closed_form = ClosedForm::Impossible;
+  static void check_parameters(const Leaf&) {}
+};
+
+template <> struct Curve<Leaf::CostCurve::JW26> {
+  static constexpr std::string_view name = "JW26";
+  static constexpr std::array<CurveParameter, 0> parameters{};
+  static constexpr Leaf::BenefitLink link = Leaf::BenefitLink::Log;
+  static constexpr bool cost_reads_upstream = false;
+  // As SOX's.
+  static constexpr bool cost_domain_ends_at_psi_crit = true;
+  static constexpr bool objective_is_product = true;
+  static constexpr bool prepares_normalisers = false;
+  static constexpr ClosedForm closed_form = ClosedForm::Impossible;
+  static void check_parameters(const Leaf&) {}
+};
+
+template <> struct Curve<Leaf::CostCurve::ProfitMax> {
+  static constexpr std::string_view name = "ProfitMax";
+  static constexpr std::array<CurveParameter, 0> parameters{};
+  static constexpr Leaf::BenefitLink link = Leaf::BenefitLink::Scaled;
+  static constexpr bool cost_reads_upstream = false;
+  static constexpr bool cost_domain_ends_at_psi_crit = false;
+  static constexpr bool objective_is_product = false;
+  static constexpr bool prepares_normalisers = true;
+  static constexpr ClosedForm closed_form = ClosedForm::Unwritten;
+  static void check_parameters(const Leaf&) {}
+};
+
+template <> struct Curve<Leaf::CostCurve::TF24_floor> {
+  static constexpr std::string_view name = "TF24_floor";
+  // Its own price; its hydraulic half reads TF24's parameters.
+  static constexpr std::array parameters{
+      CurveParameter{par_TF24_floor_lambda_o, "TF24_floor_lambda_o",
+                     &Leaf::TF24_floor_lambda_o, util::na_value}};
+  static constexpr Leaf::BenefitLink link = Leaf::BenefitLink::Identity;
+  static constexpr bool cost_reads_upstream = true;
+  static constexpr bool cost_domain_ends_at_psi_crit = false;
+  static constexpr bool objective_is_product = false;
+  static constexpr bool prepares_normalisers = false;
+  static constexpr ClosedForm closed_form = ClosedForm::Implemented;
+  static void check_parameters(const Leaf& l) {
+    // No default, unlike CF77_lambda_: at lambda_o = 0 this curve IS TF24, so an
+    // unset price would run TF24 under this curve's name. An explicit zero is
+    // accepted (the reduction test's case); the hydraulic half is TF24's traits.
+    if (!std::isfinite(l.TF24_floor_lambda_o) || l.TF24_floor_lambda_o < 0.0) {
+      util::stop("the TF24_floor cost curve needs TF24_floor_lambda_o set: it is the "
+                 "PRESCRIBED marginal cost of water as transpiration goes to "
+                 "zero, in umol C (kg H2O)^-1, non-negative, and NA until you "
+                 "assign one -- set_physiology and set_traits never touch it. It "
+                 "has no default because 0 would silently make this curve TF24. "
+                 "Set `$TF24_floor_lambda_o` on the leaf, or pass "
+                 "`TF24_floor_lambda_o =` to leaf_solve() / leaf_batch(); got " +
+                 util::to_string(l.TF24_floor_lambda_o));
+    }
+  }
+};
+
+template <> struct Curve<Leaf::CostCurve::LeastCost> {
+  static constexpr std::string_view name = "LeastCost";
+  static constexpr std::array parameters{CurveParameter{
+      par_LeastCost_beta, "LeastCost_beta", &Leaf::LeastCost_beta, 51.59667042}};
+  static constexpr Leaf::BenefitLink link = Leaf::BenefitLink::Log;
+  // `log W` reads upstream through E, the only log-link cost that does.
+  static constexpr bool cost_reads_upstream = true;
+  // It sits at psi_crit on most rows, dark and light.
+  static constexpr bool cost_domain_ends_at_psi_crit = true;
+  static constexpr bool objective_is_product = false;
+  static constexpr bool prepares_normalisers = false;
+  static constexpr ClosedForm closed_form = ClosedForm::Impossible;
+  static void check_parameters(const Leaf& l) {
+    // An aligned default, refused when cleared for CF77's reason. Strictly
+    // positive, unlike TF24_floor_lambda_o: zero leaves `A/E`, which rises without
+    // bound as E -> 0 and puts every optimum at the wet bound.
+    if (!std::isfinite(l.LeastCost_beta) || l.LeastCost_beta <= 0.0) {
+      util::stop("the LeastCost cost curve needs LeastCost_beta set: it is "
+                 "Prentice et al. (2014)'s beta, the unit cost of maintaining "
+                 "carboxylation capacity relative to that of transpiration, "
+                 "DIMENSIONLESS (both fluxes are weighed in mol m^-2 s^-1), "
+                 "strictly positive; its default is aligned to TF24 (see "
+                 "align_curves()), and set_physiology and set_traits never touch "
+                 "it. The published value is 146. Set `$LeastCost_beta` on the "
+                 "leaf, or pass "
+                 "`LeastCost_beta =` to leaf_solve() / leaf_batch(); got " +
+                 util::to_string(l.LeastCost_beta));
+    }
+  }
+};
+
+// Every enumerator has a complete definition. Asserted per curve, so a missing
+// piece is reported against the curve and the requirement it fails.
+template <Leaf::CostCurve K>
+constexpr bool curve_is_defined() {
+  static_assert(CurveDefinition<Curve<K>>,
+                "this curve's Curve<K> is missing a piece CurveDefinition requires");
+  return true;
+}
+
+template <std::size_t... I>
+constexpr bool every_curve_is_defined(std::index_sequence<I...>) {
+  return (curve_is_defined<static_cast<Leaf::CostCurve>(I)>() && ...);
+}
+
+static_assert(every_curve_is_defined(
+    std::make_index_sequence<static_cast<std::size_t>(Leaf::n_cost_curves)>{}));
+
+// Every curve's name, in enum order.
+template <std::size_t... I>
+constexpr std::array<std::string_view, sizeof...(I)> curve_names_of(
+    std::index_sequence<I...>) {
+  return {Curve<static_cast<Leaf::CostCurve>(I)>::name...};
+}
+
+inline constexpr auto curve_names = curve_names_of(
+    std::make_index_sequence<static_cast<std::size_t>(Leaf::n_cost_curves)>{});
+
+template <Leaf::CostCurve K, int Slot>
+constexpr double Leaf::curve_default() {
+  constexpr const auto& ps = Curve<K>::parameters;
+  constexpr auto it = std::find_if(
+      ps.begin(), ps.end(), [](const CurveParameter& p) { return p.slot == Slot; });
+  static_assert(it != ps.end(), "curve_default: the curve owns no parameter in this slot");
+  return it->default_value;
+}
 
 // dC/dpsi_stem for one cost curve: the only place a cost curve enters a
 // derivative, shared by both routes (the collar route multiplies it by
@@ -76,43 +371,19 @@ inline double Leaf::cost_deriv(double psi_stem, double psi_upstream) {
 
 // Whether a curve's cost reads the upstream potential as well as psi_stem, which
 // matters on the collar route, where upstream is the decision variable. A curve
-// that reads it but says false here solves the wrong first-order condition with
-// no error; `test_collar_foc_matches_profit` checks every curve. Every arm is
-// explicit for the reason `cost_deriv`'s are.
+// that reads it but says false solves the wrong first-order condition with no
+// error; `test_collar_foc_matches_profit` checks every curve.
 template <Leaf::CostCurve K>
 constexpr bool Leaf::cost_reads_upstream() {
-  if constexpr (K == CostCurve::CF77 || K == CostCurve::JS22 ||
-                K == CostCurve::CMax || K == CostCurve::TF24_floor ||
-                K == CostCurve::LeastCost) {
-    // LeastCost: `log W` reads upstream through E, the only log-link cost that does.
-    return true;
-  } else {
-    static_assert(K == CostCurve::TF24 || K == CostCurve::SOX ||
-                      K == CostCurve::JW26 || K == CostCurve::ProfitMax,
-                  "unhandled CostCurve in cost_reads_upstream");
-    return false;
-  }
+  return Curve<K>::cost_reads_upstream;
 }
 
 // Whether a curve's own form ends at psi_crit. For the others the marginal cost
 // diverges as the stem dries, so the dry end is the end of the stem curve
-// (vulnerability_psi_end). For these four the bound belongs to the curve:
-//
-//   SOX, JW26  the gain factor reaches zero at psi_crit and is negative past it
-//   CF77       a constant price need not overtake A'(E) before the stem's ceiling
-//   LeastCost  sits at psi_crit on most rows, dark and light
+// (vulnerability_psi_end).
 template <Leaf::CostCurve K>
 constexpr bool Leaf::cost_domain_ends_at_psi_crit() {
-  if constexpr (K == CostCurve::SOX || K == CostCurve::JW26 ||
-                K == CostCurve::CF77 || K == CostCurve::LeastCost) {
-    return true;
-  } else {
-    static_assert(K == CostCurve::TF24 || K == CostCurve::JS22 ||
-                      K == CostCurve::CMax || K == CostCurve::ProfitMax ||
-                      K == CostCurve::TF24_floor,
-                  "unhandled CostCurve in cost_domain_ends_at_psi_crit");
-    return false;
-  }
+  return Curve<K>::cost_domain_ends_at_psi_crit;
 }
 
 // SOX and JW26 maximise A g, g falling to 0 at psi_crit. With A <= 0 at every
@@ -121,16 +392,7 @@ constexpr bool Leaf::cost_domain_ends_at_psi_crit() {
 // bound instead. The argmax jumps at the light compensation point regardless.
 template <Leaf::CostCurve K>
 constexpr bool Leaf::objective_is_product() {
-  if constexpr (K == CostCurve::SOX || K == CostCurve::JW26) {
-    return true;
-  } else {
-    static_assert(K == CostCurve::TF24 || K == CostCurve::CF77 ||
-                      K == CostCurve::JS22 || K == CostCurve::CMax ||
-                      K == CostCurve::ProfitMax || K == CostCurve::TF24_floor ||
-                      K == CostCurve::LeastCost,
-                  "unhandled CostCurve in objective_is_product");
-    return false;
-  }
+  return Curve<K>::objective_is_product;
 }
 
 template <Leaf::CostCurve K>
@@ -727,45 +989,20 @@ inline void Leaf::set_profitmax_degenerate_state(double psi_stem,
 }
 
 // --- runtime curve selection --------------------------------------------------
-//
-// One switch, so the integer-to-curve mapping is written once. `-Werror=switch`
-// makes a curve added to the enum and forgotten here a build failure.
+
 inline std::string Leaf::curve_name(int curve) {
   if (curve < 0 || curve >= n_cost_curves) {
     return "unknown";
   }
-  switch (static_cast<CostCurve>(curve)) {
-    case CostCurve::TF24: return "TF24";
-    case CostCurve::CF77: return "CF77";
-    case CostCurve::JS22: return "JS22";
-    case CostCurve::CMax: return "CMax";
-    case CostCurve::SOX:  return "SOX";
-    case CostCurve::JW26: return "JW26";
-    case CostCurve::ProfitMax: return "ProfitMax";
-    case CostCurve::TF24_floor: return "TF24_floor";
-    case CostCurve::LeastCost: return "LeastCost";
-  }
-  return "unknown";   // unreachable past the bounds check above
+  return std::string(curve_names[static_cast<std::size_t>(curve)]);
 }
 
-// Which link each curve composes with assimilation. One table, and the last arm
-// asserts, so a curve added to the enum without a link is a build failure.
+// Which link each curve composes with assimilation. SOX and JW26 are products
+// `A*g`, LeastCost a ratio `A/W`: the link is the same `h = log`, and the sign
+// (-log g against +log W) lands in `cost_deriv`.
 template <Leaf::CostCurve K>
 constexpr Leaf::BenefitLink Leaf::benefit_link() {
-  if constexpr (K == CostCurve::SOX || K == CostCurve::JW26 ||
-                K == CostCurve::LeastCost) {
-    // SOX and JW26 are products `A*g`, LeastCost a ratio `A/W`: the link is the
-    // same `h = log`, and the sign (-log g against +log W) lands in `cost_deriv`.
-    return BenefitLink::Log;
-  } else if constexpr (K == CostCurve::ProfitMax) {
-    return BenefitLink::Scaled;
-  } else {
-    static_assert(K == CostCurve::TF24 || K == CostCurve::CF77 ||
-                  K == CostCurve::JS22 || K == CostCurve::CMax ||
-                  K == CostCurve::TF24_floor,
-                  "unhandled CostCurve in benefit_link");
-    return BenefitLink::Identity;
-  }
+  return Curve<K>::link;
 }
 
 // `h'(A)`, all the derivative needs from the link. The Log arm differentiates
@@ -785,98 +1022,16 @@ inline double Leaf::benefit_link_deriv(double A) const {
   }
 }
 
-// --- the three things that vary, each in ONE place ---------------------------
-//
-// A new single-layer cost curve is a `CostCurve` member plus one arm in each of
-// these three. Every arm is explicit and the last asserts, so a curve forgotten
-// here is a compile error, not a fall-through to the `else`.
-
-// What must be set before the search. TF24's parameters are traits with
-// defaults; SOX and JW26 take none.
+// What must be set before the search: each curve's own checks.
 template <Leaf::CostCurve K>
 inline void Leaf::check_cost_parameters() {
-  if constexpr (K == CostCurve::CF77) {
-    // An input with an aligned default, so non-finite means a caller cleared it:
-    // a NaN objective's argmax is a property of the bracket and looks plausible.
-    if (!std::isfinite(CF77_lambda_)) {
-      util::stop("the CF77 cost curve needs CF77_lambda_ set: it is the "
-                 "PRESCRIBED marginal value of water in umol C (kg H2O)^-1, and "
-                 "it was set to " + util::to_string(CF77_lambda_) + ". Its "
-                 "default is aligned to TF24 (see align_curves()); "
-                 "set_physiology and set_traits never touch it.");
-    }
-    // Only with the option on, so a caller who never sets it is not refused for
-    // soil values the constant never reads. beta <= 0 prices water at infinity
-    // or below zero, which pays the leaf to transpire to the wet bound.
-    if (CF77_soil_beta_) {
-      if (!(theta_fc_ > theta_w_)) {
-        util::stop("CF77_soil_beta_ needs theta_fc_ > theta_w_; got theta_fc_ = " +
-                   util::to_string(theta_fc_) + ", theta_w_ = " +
-                   util::to_string(theta_w_));
-      }
-      const double beta = (theta_ - theta_w_) / (theta_fc_ - theta_w_);
-      if (!std::isfinite(beta) || beta <= 0.0) {
-        util::stop("CF77_soil_beta_ is on and the soil-moisture factor beta = "
-                   "(theta_ - theta_w_)/(theta_fc_ - theta_w_) is " +
-                   util::to_string(beta) + ", which prices water at infinity or "
-                   "below zero. theta_ must exceed theta_w_; got theta_ = " +
-                   util::to_string(theta_) + ", theta_w_ = " +
-                   util::to_string(theta_w_));
-      }
-    }
-  } else if constexpr (K == CostCurve::JS22) {
-    // A trait with a default, still checked: a NaN maximises a NaN objective.
-    if (!std::isfinite(JS22_gamma) || JS22_gamma < 0.0) {
-      util::stop("JS22_gamma must be a finite, non-negative hydraulic unit cost "
-                 "in umol C m^-2 s^-1 MPa^-2; got " + util::to_string(JS22_gamma));
-    }
-  } else if constexpr (K == CostCurve::CMax) {
-    // Only CMax_a gets the sign check: CMax_b is signed, negative in the paper's
-    // own convention (see the member).
-    if (!std::isfinite(CMax_a) || CMax_a < 0.0) {
-      util::stop("CMax_a must be a finite, non-negative slope for the CMax "
-                 "marginal cost in umol C m^-2 s^-1 MPa^-2; got " +
-                 util::to_string(CMax_a));
-    }
-    if (!std::isfinite(CMax_b)) {
-      util::stop("CMax_b must be finite; got " + util::to_string(CMax_b));
-    }
-  } else if constexpr (K == CostCurve::TF24_floor) {
-    // No default, unlike CF77_lambda_: at lambda_o = 0 this curve IS TF24, so an
-    // unset price would run TF24 under this curve's name. An explicit zero is
-    // accepted (the reduction test's case); the hydraulic half is TF24's traits.
-    if (!std::isfinite(TF24_floor_lambda_o) || TF24_floor_lambda_o < 0.0) {
-      util::stop("the TF24_floor cost curve needs TF24_floor_lambda_o set: it is the "
-                 "PRESCRIBED marginal cost of water as transpiration goes to "
-                 "zero, in umol C (kg H2O)^-1, non-negative, and NA until you "
-                 "assign one -- set_physiology and set_traits never touch it. It "
-                 "has no default because 0 would silently make this curve TF24. "
-                 "Set `$TF24_floor_lambda_o` on the leaf, or pass "
-                 "`TF24_floor_lambda_o =` to leaf_solve() / leaf_batch(); got " +
-                 util::to_string(TF24_floor_lambda_o));
-    }
-  } else if constexpr (K == CostCurve::LeastCost) {
-    // An aligned default, refused when cleared for CF77's reason. Strictly
-    // positive, unlike TF24_floor_lambda_o: zero leaves `A/E`, which rises without
-    // bound as E -> 0 and puts every optimum at the wet bound.
-    if (!std::isfinite(LeastCost_beta) || LeastCost_beta <= 0.0) {
-      util::stop("the LeastCost cost curve needs LeastCost_beta set: it is "
-                 "Prentice et al. (2014)'s beta, the unit cost of maintaining "
-                 "carboxylation capacity relative to that of transpiration, "
-                 "DIMENSIONLESS (both fluxes are weighed in mol m^-2 s^-1), "
-                 "strictly positive; its default is aligned to TF24 (see "
-                 "align_curves()), and set_physiology and set_traits never touch "
-                 "it. The published value is 146. Set `$LeastCost_beta` on the "
-                 "leaf, or pass "
-                 "`LeastCost_beta =` to leaf_solve() / leaf_batch(); got " +
-                 util::to_string(LeastCost_beta));
-    }
-  } else {
-    static_assert(K == CostCurve::TF24 || K == CostCurve::SOX ||
-                  K == CostCurve::JW26 || K == CostCurve::ProfitMax,
-                  "unhandled CostCurve");
-  }
+  Curve<K>::check_parameters(*this);
 }
+
+// --- the per-curve tables ---------------------------------------------------
+//
+// Every arm is explicit and the last asserts, so a curve forgotten here is a
+// compile error, not a fall-through to the `else`.
 
 // Which objective. Not all one kind of number: five are carbon, two products
 // (`profit_psi_stem_SOX`) and one a ratio (`profit_psi_stem_LeastCost`).
