@@ -766,6 +766,11 @@ test_that("a reused leaf is differentiated on the route's model, not the one it 
   expect_identical(reused$status, fresh$status)
   expect_identical(reused$gradient, fresh$gradient)
   expect_identical(reused$value, fresh$value)
+  # And it is handed back on the route's model, solved there: TF24's collar.
+  tf <- leaf_model(traits = tr)
+  set_drivers(tf, psi_soil = 1.0, PPFD = 900)
+  tf$optimise()
+  expect_identical(operating_point(seated), operating_point(tf))
 })
 
 test_that("a stem-route gradient leaves the caller's leaf solved on that route", {

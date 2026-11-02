@@ -1,8 +1,8 @@
 # phylloptim 0.27.3
 
-- `$find_root_collar_psi()` solves the collar route for the curve the leaf is set to; it used to solve TF24 whatever curve was set. A leaf on the default model is unchanged.
-- `leaf_gradient(model = "collar")` on a reused leaf set to another curve gives the same gradient as a fresh leaf; it used to solve TF24 there and report the point as pinned. A reused leaf is left solved on the route the gradient used.
-- `leaf_gradient_batch(method = "fd")` uses a `step` you name, as `leaf_gradient()` does; it used to ignore it ([#219](https://github.com/traitecoevo/phylloptim/issues/219)).
+- `$find_root_collar_psi()` solves the curve the leaf is set to, on the collar route, and refuses what that curve refuses (TF24_floor without its price, for one); it used to solve TF24 whatever curve was set. A leaf on the default model is unchanged.
+- `leaf_gradient(model = "collar")` on a reused leaf set to another curve differentiates TF24's collar route, as a fresh leaf does, at a solved or a prescribed `psi`. It used to solve TF24 and test the point against the other curve, reporting it pinned, and to differentiate the other curve at a prescribed `psi`. The leaf is left set to the model the gradient used, as the stem routes already left it, and solved on that route.
+- `leaf_gradient_batch()` uses a `step` you name wherever it takes a finite difference (`method = "fd"`, or a pinned row under `"auto"`), as `leaf_gradient()` does; it used to ignore it there ([#219](https://github.com/traitecoevo/phylloptim/issues/219)).
 
 # phylloptim 0.27.2
 

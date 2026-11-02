@@ -732,9 +732,11 @@ inline void Leaf::find_root_collar_psi_for(){
     }
 }
 
-// The collar solve on the seated curve, whatever route is seated; optimise()
-// solves the seated curve on its own route.
+// The collar solve on the seated curve, whatever route and method are seated;
+// optimise() solves the seated model as seated. It writes the fallback flag as
+// optimise() does, since a caller may read it after either (hazard 8).
 inline void Leaf::find_root_collar_psi() {
+  last_solve_fell_back_ = false;
   with_curve(cost_curve_, [&](auto tag) { find_root_collar_psi_for<tag.value>(); });
 }
 

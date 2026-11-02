@@ -326,7 +326,8 @@ leaf_gradient_batch <- function(batch,
 
   # The same route object leaf_gradient() uses, so the two cannot disagree about
   # what a model name selects, its `fd_step` or the supply path it needs. Built
-  # only for those; C++ seats the model itself (`gradient::route_seat`).
+  # for those; it seats the batch's leaf too, which C++ re-seats for every row
+  # (`gradient::route_seat`).
   route <- .gradient_route(batch$leaf, model, list(kind = batch$supply_kind))
   # The curve as an index into cost_curve_names(), -1 for the collar route:
   # C++'s `gradient::Settings::curve`, never seen by an R caller.
