@@ -613,9 +613,6 @@ int compare(Tolerance tol) {
 //     fields instead;
 //   * `hydraulic_cost_` written in carbon units by `_TF` and `_CF77`
 //     and left STALE by `_ProfitMax`, which does not write it;
-//   * `collar_at_ProfitMax` refused on every row: the collar route's prescribed
-//     evaluation does not seed ProfitMax's normalisers, and seating a supply
-//     clears them;
 //   * `at_ProfitMax` evaluated where the solve takes its degenerate exit (a dark
 //     leaf, a wet end past psi_crit): the stem route's prescribed evaluation
 //     seeds the normalisers but has no such exit.

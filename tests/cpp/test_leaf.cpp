@@ -7634,6 +7634,40 @@ void test_collar_foc_matches_profit_linked_curves() {
   ok(compared >= 36, "enough points were compared on each route (hazard 16)");
 }
 
+// A prescribed collar seeds a normalised curve's normalisers itself, as the
+// solve does: seating a supply clears them, and unseeded the profit at a
+// prescribed collar is not finite. On a freshly seated leaf the prescribed
+// evaluation at the solve's own collar is the solve's point, to the bit.
+void test_collar_prescribed_seeds_normalisers() {
+  printf("a prescribed collar seeds ProfitMax's normalisers\n");
+  using CC = phylloptim::Leaf::CostCurve;
+  Drivers d;
+  d.PPFD = 1500.0;
+  const struct {
+    std::vector<double> psi;
+    std::vector<double> depth;
+  } soils[] = {{{1.0}, {1.0}}, {{1.0, 2.0, 3.0}, {0.5, 1.0, 1.5}}};
+  for (const auto &s : soils) {
+    phylloptim::Leaf solved = make_leaf(d, s.psi, s.depth);
+    solved.set_model(CC::ProfitMax, true);
+    solved.optimise();
+    phylloptim::Leaf fresh = make_leaf(d, s.psi, s.depth);
+    fresh.set_model(CC::ProfitMax, true);
+    // Unseeded, the evaluation refuses its non-finite profit.
+    double profit = std::numeric_limits<double>::quiet_NaN();
+    try {
+      profit = fresh.evaluate_root_collar_psi(solved.opt_root_psi_);
+    } catch (const std::exception &) {
+    }
+    const std::string where = std::to_string(s.psi.size()) + " layer(s)";
+    ok(std::isfinite(profit), "prescribed profit is finite, " + where);
+    ok(profit == solved.profit_ &&
+           fresh.assim_colimited_ == solved.assim_colimited_ &&
+           fresh.opt_psi_stem_ == solved.opt_psi_stem_,
+       "prescribed at the solve's collar is the solve's point, " + where);
+  }
+}
+
 // ===========================================================================
 // The closed form as a SELECTABLE METHOD -- the third axis of set_model()
 // ---------------------------------------------------------------------------
@@ -11550,6 +11584,7 @@ int main(int argc, char **argv) {
   test_linked_dprofit_with_energy_balance_is_the_identity_link_scaled();
   test_linked_optimum_with_energy_balance_is_stationary();
   test_collar_foc_matches_profit_linked_curves();
+  test_collar_prescribed_seeds_normalisers();
   test_closed_form_is_a_selectable_method();
   test_closed_form_is_prescribed_temperature_only();
   test_single_layer_optimisers_clear_collar_state();
