@@ -188,12 +188,17 @@ inline double Leaf::solve_ci(double gc) {
       }
       const PhotoCapacity<double> cap = photo_capacity<double>();
       const double supply_per_pa = gc / (atm_kpa_ * kPa_to_Pa);
-      // The value is `target`'s and the slope is the kernel's own tangent
-      // (assim_slope_at), so the Newton root and TOMS748's are the same
-      // function's to the last bit and the slope cannot drift from it.
+      // Value and slope from one forward pass of the kernel, so the slope is the
+      // derivative of the value the step reads. The value can differ from
+      // `target`'s in the last bit, which moves the root within its tolerance.
       auto residual = [&](double x, double& slope) -> double {
-        slope = assim_slope_at<double>(x, cap) * umol_to_mol + supply_per_pa;
-        return target(x);
+        using AD = xad::fwd<double>::active_type;
+        AD c = x;
+        xad::derivative(c) = 1.0;
+        const AD a = assim_colimited_kernel<AD, double, double>(c, cap);
+        slope = xad::derivative(a) * umol_to_mol + supply_per_pa;
+        return xad::value(a) * umol_to_mol -
+               (gc * (ca_ - x) / (atm_kpa_ * kPa_to_Pa));
       };
       double a = lo, b = hi;
       double f_a = f_lo, slope_a = std::numeric_limits<double>::quiet_NaN();
