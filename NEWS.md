@@ -1,3 +1,8 @@
+# phylloptim 0.35.0
+
+- The derivative surface's rows are exact with a cuticle. Where the stem's ceiling caps the residual flux, as with `g_min = 5e-3` on a dry soil, rows in the stem traits and in `g_min` were wrong by up to 100%. With the energy balance on, the `g_min` row was wrong by up to 30% even at `g_min = 0`. No solve moves, and a leaf with no cuticle and the energy balance off records the same tape ([#250](https://github.com/traitecoevo/phylloptim/issues/250)).
+- For C++ users, the parameter pack gains `par_NIR` after `par_PPFD` (`n_leaf_pars` is 37), so with the energy balance on a derivative in the intercepted near-infrared reaches leaf temperature. `passive_pars()` fills it from `NIR_int_`; `gradient::n_theta` does not change ([#257](https://github.com/traitecoevo/phylloptim/issues/257)).
+
 # phylloptim 0.34.0
 
 - **Breaking:** TF24's bound cost and profit are named for the curve, beside its other names: `$hydraulic_cost_TF()` is `$hydraulic_cost_TF24()` and `$profit_psi_leaf_TF()` is `$profit_psi_leaf_TF24()`, with no aliases. For C++ users, `hydraulic_cost_TF_kernel` is `hydraulic_cost_TF24_kernel`, and `MultiLayerRoots::soil_number_of_depths_` is an `int`. No number moves.
