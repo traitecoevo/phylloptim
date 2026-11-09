@@ -1,3 +1,7 @@
+# phylloptim 0.32.1
+
+- `leaf_damage_gradient()` takes every input's derivative in one forward pass, through odelia's forward-mode scalar, in place of a hand-written dual number and a pass per input. For all 17 inputs, the default, it is about 6 times faster; asking for one or two inputs costs what asking for all of them does. Derivatives move by at most 2e-15 relative; nothing else moves.
+
 # phylloptim 0.32.0
 
 - Under `LeastCost` a leaf that cannot fix carbon at any opening (in the dark, or too hot) is reported closed at its wet end on both routes, as under SOX and JW26. It used to be opened to `psi_crit` on the leaf route, since a negative `A/W` is largest at the largest `W`, and refused on the collar route.

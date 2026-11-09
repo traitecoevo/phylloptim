@@ -153,40 +153,47 @@ inline std::vector<std::string> Leaf::damage_par_names() const {
           "dTimpair_max_", "K_A_", "topt_offset_", "A0", "I0", "D0"};
 }
 
-// One forward-mode pass per requested input (a parameter or initial state)
-// through the double trajectory's RK4: exact for the discrete map, at the
-// double run's sub-step count.
+// One forward-mode pass through the double trajectory's RK4, carrying every
+// input's direction at once (a parameter or initial state), from which the
+// requested columns are read: exact for the discrete map, at the double run's
+// sub-step count.
 inline std::vector<double> Leaf::damage_trajectory_gradient(
     const std::vector<double>& times, const std::vector<double>& leaf_temp,
     double A0, double I0, double D0, const std::vector<int>& which) const {
   check_damage_series(times, leaf_temp);
   check_damage_initial_states(A0, I0, D0);
-  const std::size_t n = times.size(), np = which.size();
-  const int n_inputs = damage::n_dyn_pars + 3;
-  std::vector<double> out(3 * n * np);
-  const damage::dyn_pars<double> base = damage_pars();
-  for (std::size_t k = 0; k < np; ++k) {
-    const int w = which[k];
+  constexpr int n_inputs = damage::n_dyn_pars + 3;
+  for (const int w : which) {
     if (w < 0 || w >= n_inputs) {
       util::stop("damage_trajectory_gradient: input index " + std::to_string(w) +
                  " is out of range; see damage_par_names()");
     }
-    damage::dyn_pars<damage::Dual> p;
-    for (int j = 0; j < damage::n_dyn_pars; ++j) {
-      p[std::size_t(j)] = damage::Dual(base[std::size_t(j)], j == w ? 1.0 : 0.0);
-    }
-    const int s0 = w - damage::n_dyn_pars;
-    std::array<damage::Dual, 3> y0{damage::Dual(A0, s0 == 0 ? 1.0 : 0.0),
-                                   damage::Dual(I0, s0 == 1 ? 1.0 : 0.0),
-                                   damage::Dual(D0, s0 == 2 ? 1.0 : 0.0)};
-    damage::trajectory<damage::Dual>(
-        times, leaf_temp, y0, p,
-        [&](std::size_t i, const std::array<damage::Dual, 3>& y) {
-          for (int st = 0; st < 3; ++st) {
-            out[i + n * (std::size_t(st) + 3 * k)] = y[std::size_t(st)].d;
-          }
-        });
   }
+  const std::size_t n = times.size(), np = which.size();
+  std::vector<double> out(3 * n * np);
+  if (np == 0) {
+    return out;
+  }
+  using T = xad::fwd<double, n_inputs>::active_type;
+  const damage::dyn_pars<double> base = damage_pars();
+  damage::dyn_pars<T> p;
+  for (int j = 0; j < damage::n_dyn_pars; ++j) {
+    p[std::size_t(j)] = base[std::size_t(j)];
+    xad::derivative(p[std::size_t(j)])[std::size_t(j)] = 1.0;
+  }
+  std::array<T, 3> y0{T(A0), T(I0), T(D0)};
+  for (int s = 0; s < 3; ++s) {
+    xad::derivative(y0[std::size_t(s)])[std::size_t(damage::n_dyn_pars + s)] = 1.0;
+  }
+  damage::trajectory<T>(
+      times, leaf_temp, y0, p, [&](std::size_t i, const std::array<T, 3>& y) {
+        for (int st = 0; st < 3; ++st) {
+          const auto& d = xad::derivative(y[std::size_t(st)]);
+          for (std::size_t k = 0; k < np; ++k) {
+            out[i + n * (std::size_t(st) + 3 * k)] = d[std::size_t(which[k])];
+          }
+        }
+      });
   return out;
 }
 
