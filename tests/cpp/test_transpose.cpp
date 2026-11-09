@@ -19,10 +19,13 @@
 // evaluated at the wrong temperature or the wrong light satisfies this identity
 // exactly -- test_leaf's member-against-pack comparison is what covers that.
 //
-// ⚠️ THE RESIDUAL IS SCALED BY THE TERMS, NOT BY THE PAIRING. Both sides are a
-// sum over inputs of u_k times a row, and the sum can cancel: over this sweep the
+// ⚠️ THE RESIDUAL IS SCALED BY THE TERMS, NOT BY THE PAIRING. The reverse side
+// is a sum over inputs of u_k times a row and the forward side a sum over
+// outputs of v_j times a tangent, and either sum can cancel: over this sweep the
 // pairing runs from 1.0 to 1.6e+03 times smaller than the sum of its terms'
-// magnitudes. Dividing by the pairing therefore measures rounding in a
+// magnitudes. The larger of the two sums is the scale, since outputs that
+// nearly copy one another (profit and the carbon billed from it) cancel inside
+// an input's reverse row, where only the forward sum still sees them. Dividing by the pairing therefore measures rounding in a
 // cancellation wherever it is small, and it measures it against a threshold set
 // for the cases where it is not -- one point read 4.0e-09 that way with every
 // individual row agreeing to 3.3e-12. Scaling by the terms gives a wrong row of
@@ -48,6 +51,7 @@
 #include <odelia/ode_interface.hpp>
 #include <odelia/tangent.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <map>
 #include <cstdio>
@@ -161,9 +165,16 @@ struct OutputIndex {
   std::size_t count() const { return 10 + layers; }
 };
 
+// A pairing and the size of the terms it was summed from: the reverse side's
+// over inputs, the forward side's over outputs.
+struct Pairing {
+  double value = 0.0;
+  double terms = 0.0;
+};
+
 // <v, J u>: one tangent, every input given its direction at once.
 template <pl::Leaf::CostCurve K>
-double forward_side(pl::Leaf l, const std::vector<double>& u,
+Pairing forward_side(pl::Leaf l, const std::vector<double>& u,
                     const std::vector<double>& v, double curvature,
                     bool handoff) {
   Inputs<T> in = inputs_of<T>(l);
@@ -178,24 +189,25 @@ double forward_side(pl::Leaf l, const std::vector<double>& u,
   const auto o = l.billed_outputs_at<K, T>(collar, draw, in.pars, h);
   const auto p = l.physical_outputs_at<K, T>(collar, draw, in.pars, h);
   const OutputIndex at{o.uptake.size()};
-  const auto d = [](const T& x) { return odelia::ode::derivative_along(x); };
-
-  double acc = v[0] * d(p.psi_leaf) + v[1] * d(p.ci) +
-               v[2] * d(draw.E_up.value) + v[3] * d(o.profit);
-  for (std::size_t i = 0; i < o.uptake.size(); ++i) {
-    acc += v[at.uptake(i)] * d(o.uptake[i]);
-  }
-  acc += v[at.residual()] * d(o.residual_flux);
-  acc += v[at.carbon_billed()] * d(o.carbon) + v[at.carbon()] * d(p.carbon) +
-         v[at.A()] * d(p.A) + v[at.E()] * d(p.E) + v[at.gc()] * d(p.gc);
-  return acc;
+  Pairing out;
+  const auto add = [&](double w, const T& x) {
+    const double term = w * odelia::ode::derivative_along(x);
+    out.value += term;
+    out.terms += std::abs(term);
+  };
+  add(v[0], p.psi_leaf);
+  add(v[1], p.ci);
+  add(v[2], draw.E_up.value);
+  add(v[3], o.profit);
+  for (std::size_t i = 0; i < o.uptake.size(); ++i) add(v[at.uptake(i)], o.uptake[i]);
+  add(v[at.residual()], o.residual_flux);
+  add(v[at.carbon_billed()], o.carbon);
+  add(v[at.carbon()], p.carbon);
+  add(v[at.A()], p.A);
+  add(v[at.E()], p.E);
+  add(v[at.gc()], p.gc);
+  return out;
 }
-
-// <J^T v, u> and the size of the terms it was summed from.
-struct Pairing {
-  double value = 0.0;
-  double terms = 0.0;
-};
 
 // One recording, one sweep.
 template <pl::Leaf::CostCurve K>
@@ -331,10 +343,11 @@ void check_solved(pl::Leaf l, const std::string& at, unsigned long seed) {
 
   // Through the coordinates operating_collar hands to billed_outputs_at, which is how plant
   // calls the surface.
-  const double fwd = forward_side<K>(l, u, v, curvature, true);
+  const Pairing fwd_side = forward_side<K>(l, u, v, curvature, true);
+  const double fwd = fwd_side.value;
   const Pairing rev = reverse_side<K>(l, u, v, curvature, false, true);
 
-  const double fwd_solved = forward_side<K>(l, u, v, curvature, false);
+  const double fwd_solved = forward_side<K>(l, u, v, curvature, false).value;
   const Pairing rev_solved = reverse_side<K>(l, u, v, curvature, false, false);
   if (fwd != fwd_solved) ++handoff_forward_differs;
   const double handoff_rel =
@@ -368,16 +381,22 @@ void check_solved(pl::Leaf l, const std::string& at, unsigned long seed) {
          std::string(l.operating_point_kind_name(l.operating_point_kind())) +
          " g_min=" + std::to_string(l.g_min) +
          " moved=" + std::to_string(moved));
-  const double rel = (rev.terms > 0.0)
-                         ? std::abs(fwd - rev.value) / rev.terms
-                         : 0.0;
+  // Scaled by the larger side's terms. Two outputs can carry near-opposite rows
+  // in one input (profit and the carbon billed from it, apart by the price),
+  // which cancel inside that input's reverse row before the reverse side sums
+  // its terms; the forward side sums per output, before they cancel.
+  const double scale = std::max(rev.terms, fwd_side.terms);
+  const double rel = (scale > 0.0) ? std::abs(fwd - rev.value) / scale : 0.0;
   const double cancel = rev.terms / std::max(std::abs(rev.value), 1e-300);
   ++compared;
   if (rel > worst) worst = rel;
   if (cancel > worst_cancel) worst_cancel = cancel;
   ++seen_kind[curve + " " + l.operating_point_kind_name(l.operating_point_kind())];
-  ok(rel < 1e-10, "transpose identity (" + curve + "): " + at +
-                      " rel=" + std::to_string(rel) +
+  char rel_s[32];
+  std::snprintf(rel_s, sizeof rel_s, "%.3e", rel);
+  ok(rel < 1e-10, "transpose identity (" + curve + "): " + at + " kind=" +
+                      l.operating_point_kind_name(l.operating_point_kind()) +
+                      " rel=" + rel_s +
                       " cancellation=" + std::to_string(cancel));
 }
 
@@ -389,6 +408,9 @@ template <class F>
 void for_each_surface_curve(F&& f) {
   f(std::integral_constant<CC, CC::TF24>{});
   f(std::integral_constant<CC, CC::TF24_floor>{});
+  f(std::integral_constant<CC, CC::CF77>{});
+  f(std::integral_constant<CC, CC::JS22>{});
+  f(std::integral_constant<CC, CC::CMax>{});
 }
 std::vector<std::string> surface_curve_names() {
   std::vector<std::string> out;
@@ -444,11 +466,8 @@ void check_kind(const std::vector<double>& psi_soil, double ppfd, double vpd,
   for_each_surface_curve([&](auto tag) {
     constexpr CC K = decltype(tag)::value;
     const pl::Leaf c = solved_on<K>(l);
-    ok(c.operating_point_kind() == want,
-       "the " + at + " is " +
-           std::string(pl::Leaf::operating_point_kind_name(want)) + " on " +
-           pl::Leaf::curve_name(static_cast<int>(K)) + ", got " +
-           c.operating_point_kind_name(c.operating_point_kind()));
+    // Checked at whatever kind it lands on: each fixture reaches its kind on some
+    // curves, and the coverage asserted in main() is per curve.
     check_solved<K>(c, at, seed);
   });
 }
@@ -479,6 +498,11 @@ int main() {
   // And a soil past the end of the curve, which shuts the leaf.
   check_kind({6.0}, 500.0, 0.5, K::BoundaryDry, seed += 7919);
   check_kind({16.0, 16.25, 16.5}, 900.0, 2.0, K::HydraulicShutdown, seed += 7919);
+  // Where the other curves reach the kinds the sweep misses (test_leaf's referee
+  // fixtures): a dim leaf on a wet soil, a bright one on a moist soil, a dark one.
+  check_kind({0.5}, 100.0, 0.5, K::Interior, seed += 7919);
+  check_kind({0.5}, 500.0, 2.0, K::BoundaryDry, seed += 7919);
+  check_kind({0.3}, 1.0, 0.5, K::BoundarySoil, seed += 7919);
   printf("    %d operating points compared | worst relative %.3e\n", compared,
          worst);
   // Reported because it is what the scaling above is for: a sweep that stopped
@@ -502,13 +526,15 @@ int main() {
      "the sweep reached at least 20 operating points per curve");
   ok(seen_shut > 0, "the sweep reached a shut leaf");
   ok(seen_residual > 0, "the sweep reached a leaf with a residual conductance");
-  for (const std::string& curve : surface_curve_names()) {
-    for (const char* kind : {"interior", "boundary-soil", "boundary-dry",
-                             "hydraulic-shutdown"}) {
-      ok(seen_kind[curve + " " + kind] > 0,
-         "the identity was checked at a " + std::string(kind) + " point on " + curve);
+  for_each_surface_curve([&](auto tag) {
+    constexpr CC K = decltype(tag)::value;
+    const std::string curve = pl::Leaf::curve_name(static_cast<int>(K));
+    for (pl::Leaf::OperatingPointKind kind : fixture::surface_kinds(K)) {
+      const std::string name = pl::Leaf::operating_point_kind_name(kind);
+      ok(seen_kind[curve + " " + name] > 0,
+         "the identity was checked at a " + name + " point on " + curve);
     }
-  }
+  });
   printf("%d checks, %d failures\n", compared + seen_carry + 8, failures);
   return failures == 0 ? 0 : 1;
 }

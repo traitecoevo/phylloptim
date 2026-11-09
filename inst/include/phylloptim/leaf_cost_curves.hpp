@@ -253,6 +253,43 @@ template <> struct Curve<Leaf::CostCurve::CF77> {
     return -(l.cf77_price() * l.leaf_specific_conductance_max_ *
              l.stem_curve_integral_deriv(psi_upstream));
   }
+
+  // The scalar forms, each the double form's operands in its order. The price
+  // carries the CF77_lambda row; the soil's beta, which no pack slot holds, is
+  // passive, as cf77_price() applies it.
+  template <class S>
+  static S scalar_lambda(const Leaf& l, const leaf_pars<S>& pars) {
+    if (!l.CF77_soil_beta_) {
+      return pars[par_CF77_lambda];
+    }
+    const double beta = (l.theta_ - l.theta_w_) / (l.theta_fc_ - l.theta_w_);
+    return pars[par_CF77_lambda] / S(beta > 1.0 ? 1.0 : beta);
+  }
+  template <class S>
+  static S scalar_cost(const Leaf& l, const S& sigma, const S& collar,
+                       const leaf_pars<S>& pars) {
+    return scalar_lambda<S>(l, pars) * l.template transpiration_at<S>(sigma, collar, pars);
+  }
+  template <class S>
+  static S scalar_cost_slope(const Leaf& l, const S& sigma, const S&,
+                             const leaf_pars<S>& pars) {
+    return scalar_lambda<S>(l, pars) * pars[par_kmax] *
+           l.template stem_conductivity_at<S>(sigma, pars);
+  }
+  template <class S>
+  static S scalar_cost_slope_upstream(const Leaf& l, const S&, const S& collar,
+                                      const leaf_pars<S>& pars) {
+    return -(scalar_lambda<S>(l, pars) * pars[par_kmax] *
+             l.template stem_conductivity_at<S>(collar, pars));
+  }
+  template <class S>
+  static S scalar_carbon_cost(const Leaf&, const S&, const leaf_pars<S>&) {
+    return S(0.0);
+  }
+  template <class S>
+  static S scalar_price(const Leaf& l, const S& E, const leaf_pars<S>& pars) {
+    return scalar_lambda<S>(l, pars) * E;
+  }
 };
 
 template <> struct Curve<Leaf::CostCurve::JS22> {
@@ -289,6 +326,27 @@ template <> struct Curve<Leaf::CostCurve::JS22> {
   }
   static double cost_slope_upstream(Leaf& l, double psi_leaf, double psi_upstream) {
     return -2.0 * l.JS22_gamma * (psi_leaf - psi_upstream);
+  }
+
+  template <class S>
+  static S scalar_cost(const Leaf&, const S& sigma, const S& collar,
+                       const leaf_pars<S>& pars) {
+    const S dpsi = sigma - collar;
+    return pars[par_JS22_gamma] * dpsi * dpsi;
+  }
+  template <class S>
+  static S scalar_cost_slope(const Leaf&, const S& sigma, const S& collar,
+                             const leaf_pars<S>& pars) {
+    return S(2.0) * pars[par_JS22_gamma] * (sigma - collar);
+  }
+  template <class S>
+  static S scalar_cost_slope_upstream(const Leaf&, const S& sigma, const S& collar,
+                                      const leaf_pars<S>& pars) {
+    return S(-2.0) * pars[par_JS22_gamma] * (sigma - collar);
+  }
+  template <class S>
+  static S scalar_carbon_cost(const Leaf&, const S&, const leaf_pars<S>&) {
+    return S(0.0);
   }
 };
 
@@ -342,6 +400,27 @@ template <> struct Curve<Leaf::CostCurve::CMax> {
   static double cost_slope_upstream(Leaf& l, double psi_leaf, double psi_upstream) {
     (void)psi_leaf;
     return -(l.CMax_a * psi_upstream + l.CMax_b);
+  }
+
+  template <class S>
+  static S scalar_cost(const Leaf&, const S& sigma, const S& collar,
+                       const leaf_pars<S>& pars) {
+    return (sigma - collar) *
+           (S(0.5) * pars[par_CMax_a] * (sigma + collar) + pars[par_CMax_b]);
+  }
+  template <class S>
+  static S scalar_cost_slope(const Leaf&, const S& sigma, const S&,
+                             const leaf_pars<S>& pars) {
+    return pars[par_CMax_a] * sigma + pars[par_CMax_b];
+  }
+  template <class S>
+  static S scalar_cost_slope_upstream(const Leaf&, const S&, const S& collar,
+                                      const leaf_pars<S>& pars) {
+    return -(pars[par_CMax_a] * collar + pars[par_CMax_b]);
+  }
+  template <class S>
+  static S scalar_carbon_cost(const Leaf&, const S&, const leaf_pars<S>&) {
+    return S(0.0);
   }
 };
 

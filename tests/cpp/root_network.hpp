@@ -58,6 +58,36 @@ inline phylloptim::Leaf multilayer_leaf() {
   return l;
 }
 
+// The operating-point kinds the derivative surface's tests must reach on each
+// curve, which their coverage assertions require. A kind is left out only where
+// the curve cannot reach it at plausible drivers (measured over soil 0.3 to 16
+// MPa, light 1 to 1500, deficit 0.5 to 3.1 kPa and, for JS22 and CMax, their
+// level at 1e-4 of its default): a price on the drop in potential keeps the
+// leaf off the stem's end; a product's gain vanishes at psi_crit, so its
+// optimum never sits there; and the solve refuses a dark LeastCost leaf, whose
+// log link has no slope at A <= 0, rather than shutting it on its wet bound.
+inline std::vector<phylloptim::Leaf::OperatingPointKind>
+surface_kinds(phylloptim::Leaf::CostCurve curve) {
+  using CC = phylloptim::Leaf::CostCurve;
+  using Kind = phylloptim::Leaf::OperatingPointKind;
+  switch (curve) {
+    case CC::TF24:
+    case CC::TF24_floor:
+    case CC::CF77:
+    case CC::ProfitMax:
+      return {Kind::Interior, Kind::BoundarySoil, Kind::BoundaryDry,
+              Kind::HydraulicShutdown};
+    case CC::JS22:
+    case CC::CMax:
+    case CC::SOX:
+    case CC::JW26:
+      return {Kind::Interior, Kind::BoundarySoil, Kind::HydraulicShutdown};
+    case CC::LeastCost:
+      return {Kind::Interior, Kind::BoundaryDry, Kind::HydraulicShutdown};
+  }
+  return {};
+}
+
 }  // namespace fixture
 
 #endif
