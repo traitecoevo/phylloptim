@@ -13,24 +13,31 @@
 
 namespace phylloptim {
 
-// See the declaration. The step is 1e-3 K, matching dprofit_energy_balance_term's
-// dA/dT difference; the full restore makes calling this inside a derivative safe.
+// See the declaration. Restored by assignment: exact, and cheaper than a third
+// update, so calling this inside a derivative is safe.
 template <class F>
-inline double Leaf::temp_deriv(double leaf_temp, F read) {
-  const double h = 1e-3;
+inline void Leaf::at_temperatures_either_side(double leaf_temp, F read) {
+  const double h = temp_fd_step;
   const double vc0 = vcmax_, jm0 = jmax_, ga0 = gamma_, ko0 = ko_,
                kc0 = kc_, rd0 = R_d_, km0 = km_, J0 = electron_transport_;
   const double kimp0 = k_imp_eff_, krec0 = k_rec_eff_, func0 = functional_;
   const double pt0 = photo_temp_;
   update_temperature_dependent_params(leaf_temp + h);
-  const double up = read();
+  read();
   update_temperature_dependent_params(leaf_temp - h);
-  const double dn = read();
+  read();
   vcmax_ = vc0; jmax_ = jm0; gamma_ = ga0; ko_ = ko0; kc_ = kc0;
   R_d_ = rd0; km_ = km0; electron_transport_ = J0;
   k_imp_eff_ = kimp0; k_rec_eff_ = krec0; functional_ = func0;
   photo_temp_ = pt0;
-  return (up - dn) / (2.0 * h);
+}
+
+template <class F>
+inline double Leaf::temp_deriv(double leaf_temp, F read) {
+  double v[2];
+  int k = 0;
+  at_temperatures_either_side(leaf_temp, [&] { v[k++] = read(); });
+  return (v[0] - v[1]) / (2.0 * temp_fd_step);
 }
 
 inline double Leaf::vcmax_temp_deriv(double leaf_temp) {
@@ -63,31 +70,18 @@ inline double Leaf::dprofit_energy_balance_term(
   }
 
   // dA/dTleaf by a central difference over the model's own temperature block,
-  // so it cannot drift from the evaluated function. Not a templated block: that
-  // changes what shares an inlined body, and moved the gate-off results. ⚠️ h is
-  // fixed and absolute: relative to T, the estimator becomes a function of psi
-  // and puts a staircase in the argmax (hazard 3).
-  const double h = 1e-3;
-  const double vcmax0 = vcmax_, jmax0 = jmax_, gamma0 = gamma_, ko0 = ko_,
-               kc0 = kc_, Rd0 = R_d_, km0 = km_, J0 = electron_transport_;
-  const double kimp0 = k_imp_eff_, krec0 = k_rec_eff_, func0 = functional_;
-  const double pt0 = photo_temp_;
-  // Tleaf, not leaf_temp_, which the energy-balance path reads as air temperature.
-  const double T0 = Tleaf;
-
-  update_temperature_dependent_params(T0 + h);
-  const double A_up = assim_colimited(ci);
-  const double vcmax_up = vcmax_;
-  update_temperature_dependent_params(T0 - h);
-  const double A_dn = assim_colimited(ci);
-  const double vcmax_dn = vcmax_;
-
-  // Restored by assignment: exact, and cheaper than a third update.
-  vcmax_ = vcmax0; jmax_ = jmax0; gamma_ = gamma0; ko_ = ko0; kc_ = kc0;
-  R_d_ = Rd0; km_ = km0; electron_transport_ = J0;
-  k_imp_eff_ = kimp0; k_rec_eff_ = krec0; functional_ = func0;
-  photo_temp_ = pt0;
-
+  // so it cannot drift from the evaluated function; at Tleaf, not leaf_temp_,
+  // which the energy-balance path reads as air temperature.
+  const double h = temp_fd_step;
+  double A_side[2], vcmax_side[2];
+  int k = 0;
+  at_temperatures_either_side(Tleaf, [&] {
+    A_side[k] = assim_colimited(ci);
+    vcmax_side[k] = vcmax_;
+    ++k;
+  });
+  const double A_up = A_side[0], A_dn = A_side[1];
+  const double vcmax_up = vcmax_side[0], vcmax_dn = vcmax_side[1];
   const double A_T = (A_up - A_dn) / (2.0 * h);
 
   // dE/dpsi from the gc partials: dividing out gc_const and the boundary layer's

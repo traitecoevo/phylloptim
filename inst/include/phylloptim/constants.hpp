@@ -128,6 +128,11 @@ inline constexpr double atmos_emissivity_exponent = 1.0 / 7.0;
 // emissivity below 1, so the longwave term reaches zero smoothly in hot, humid
 // air. Bit-identical to the plain fit wherever ema < 0.937.
 inline constexpr double atmos_emissivity_softmin_width = 0.002;
+// Step of the central difference in leaf temperature, K, that the optimiser's
+// dA/dTleaf and every other temperature slope take. ⚠️ Fixed and absolute:
+// relative to T, the estimator becomes a function of psi and puts a staircase in
+// the argmax (hazard 3).
+inline constexpr double temp_fd_step = 1e-3;
 // Aerodynamic resistance, s m^-1, where no leaf dimension or wind speed is set.
 inline constexpr double aerodynamic_resistance_fixed = 50.0;
 // leaf boundary-layer coefficient C_ra, s^0.5 m^-1, in ra = C_ra*sqrt(d/U)

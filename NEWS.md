@@ -1,3 +1,7 @@
+# phylloptim 0.32.2
+
+- Internal: one central difference in leaf temperature serves the optimiser and every temperature slope, one forward pass gives the first-order conditions' dA/dci on both routes, and every exit of the collar search classifies its point through one call. No number moves.
+
 # phylloptim 0.32.1
 
 - `leaf_damage_gradient()` takes every input's derivative in one forward pass, on XAD's forward-mode scalar carrying all 17 directions, in place of a hand-written dual number and a pass per input. For all 17 inputs, the default, it is about 6 times faster; asking for one or two inputs costs what asking for all of them does. Derivatives move by at most 2e-15 relative; nothing else moves.
