@@ -1,3 +1,8 @@
+# phylloptim 0.33.3
+
+- `plot_model_overview()` draws its profit panel at the leaf's own soil potential: given a leaf at a soil other than 1 MPa, the panel's curve used to disagree with the optimum it marked. The figure also hands a caller's leaf back on its own model.
+- `leaf_gradient()` and `leaf_gradient_batch()` refuse `LeastCost_beta` on another curve with the same description `leaf_solve()` gives, a unit-cost ratio, where they called it a price of water.
+
 # phylloptim 0.33.2
 
 - Every solve is a little cheaper: each Newton step of the ci solve takes its residual and slope from one pass of the kernel, about 2% fewer instructions per collar solve and 4.5% per leaf-route solve. Results move by rounding only: profit by at most 2e-12 relative, ci by at most 4e-11 Pa; recorded trait gradients move at their finite-difference noise.
