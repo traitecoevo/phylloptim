@@ -82,35 +82,14 @@ leaf_batch <- function(psi_soil,
     stop("`traits` must come from leaf_traits()", call. = FALSE)
   }
 
-  # The same recycling `leaf_solve()` does, through the same helpers, because a
-  # second copy of these rules would be free to drift from the first.
-  layered <- .as_layer_list(psi_soil, "psi_soil")
-  scalars <- list(PPFD = PPFD, atm_vpd = atm_vpd, ca = ca,
-                  leaf_temp = leaf_temp, atm_o2_kpa = atm_o2_kpa,
-                  atm_kpa = atm_kpa,
-                  leaf_specific_conductance_max = leaf_specific_conductance_max)
-  n <- max(length(layered), vapply(scalars, length, integer(1)))
-  if (n == 0L) {
-    stop("nothing to differentiate: every driver has length zero", call. = FALSE)
-  }
-  layered <- .recycle_to(layered, n, "psi_soil")
-  nms <- names(scalars)
-  scalars <- lapply(seq_along(scalars), function(i) {
-    .recycle_to(scalars[[i]], n, nms[[i]])
-  })
-  names(scalars) <- nms
-
-  depths <- if (is.null(soil_depth)) NULL else
-    .recycle_to(.as_layer_list(soil_depth, "soil_depth"), n, "soil_depth")
-  # inherits() first: a RootNetwork *is* a list, so length() on one would be 5
-  # and it would be read as five observations' worth of networks.
-  networks <- if (is.null(root_network)) {
-    NULL
-  } else if (inherits(root_network, "RootNetwork")) {
-    rep(list(root_network), n)
-  } else {
-    .recycle_to(root_network, n, "root_network")
-  }
+  rows <- .recycle_drivers(psi_soil, PPFD, soil_depth, root_network,
+                           leaf_specific_conductance_max, atm_vpd, ca,
+                           leaf_temp, atm_o2_kpa, atm_kpa, "differentiate")
+  n <- rows$n
+  layered <- rows$layered
+  scalars <- rows$scalars
+  depths <- rows$depths
+  networks <- rows$networks
 
   l <- leaf_model(traits, control, supply)
 
@@ -295,10 +274,8 @@ leaf_gradient_batch <- function(batch,
          call. = FALSE)
   }
   method <- match.arg(method)
-  if (!(is.numeric(step) && length(step) == 1L && step > 0)) {
-    stop("`step` must be a single positive number", call. = FALSE)
-  }
-  .gradient_check_settings(stationarity_tol, fast_stem_curve)
+  fd_step <- .gradient_fd_step_for(step, !missing(step), stationarity_tol,
+                                   fast_stem_curve)
   # First, before either handle is read: both are external pointers, NULL after
   # serialize(), and the bare Rcpp error gives no hint to rebuild. They are
   # created together, so checking one covers both.
@@ -313,14 +290,7 @@ leaf_gradient_batch <- function(batch,
   # The thermal-damage inputs are parameters only with the batch leaf's gate on.
   damage <- isTRUE(batch$leaf$use_thermal_damage_)
   par_names <- .gradient_par_names()
-  if (is.null(pars)) {
-    pars <- .gradient_available_pars(single, model, damage, m$route)
-  }
-  .gradient_check_pars(pars, single, model, damage, m$route)
-
-  # The finite-difference arm's step: the caller's if named, as in
-  # leaf_gradient(), otherwise the one that clears the solver's resolution.
-  fd_step <- if (missing(step)) .gradient_fd_step else step
+  pars <- .gradient_pars(pars, single, model, damage, m$route)
 
   if (is.null(theta)) {
     if (is.null(traits)) {

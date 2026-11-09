@@ -496,13 +496,8 @@ leaf_gradient <- function(psi_soil,
   if (!inherits(traits, "leaf_traits")) {
     stop("`traits` must come from leaf_traits()", call. = FALSE)
   }
-  if (!(is.numeric(step) && length(step) == 1L && step > 0)) {
-    stop("`step` must be a single positive number", call. = FALSE)
-  }
-  .gradient_check_settings(stationarity_tol, fast_stem_curve)
-  # A caller who names `step` means it for the finite-difference arm too;
-  # otherwise that arm takes the step matched to the solver it differences.
-  fd_step <- if (missing(step)) .gradient_fd_step else step
+  fd_step <- .gradient_fd_step_for(step, !missing(step), stationarity_tol,
+                                   fast_stem_curve)
   psi <- .gradient_check_psi(psi, dpsi_dtheta, method)
 
   # --- reusing a Leaf --------------------------------------------------------
@@ -562,12 +557,7 @@ leaf_gradient <- function(psi_soil,
                              .owned_value(model, f, x)
                            }, numeric(1)), owned),
                            damage = if (damage) .gradient_damage_values(x))
-  if (is.null(pars)) {
-    pars <- .gradient_available_pars(single, model, damage, m$route)
-  }
-  # Shared with leaf_gradient_batch(), so the two entry points cannot disagree
-  # about which parameters exist or explain a rejection differently.
-  .gradient_check_pars(pars, single, model, damage, m$route)
+  pars <- .gradient_pars(pars, single, model, damage, m$route)
   # Checked here, unconditionally: the composite reads it only at a usable point,
   # so checking it there would accept a bad value at some psi and not others.
   dpsi_dtheta <- .gradient_dpsi_dtheta(dpsi_dtheta, pars, !is.null(psi))
@@ -745,6 +735,27 @@ leaf_gradient <- function(psi_soil,
   setdiff(nms, excluded)
 }
 
+# The two gradient entry points' shared checks, so they cannot disagree. The
+# finite-difference arm's step is the caller's if named, otherwise the one
+# matched to the solver it differences.
+.gradient_fd_step_for <- function(step, named, stationarity_tol, fast_stem_curve) {
+  if (!(is.numeric(step) && length(step) == 1L && step > 0)) {
+    stop("`step` must be a single positive number", call. = FALSE)
+  }
+  .gradient_check_settings(stationarity_tol, fast_stem_curve)
+  if (named) step else .gradient_fd_step
+}
+
+# The parameters to differentiate: every one available by default, and a named
+# one refused, with the reason, if this model on this route does not read it.
+.gradient_pars <- function(pars, single, model, damage, route) {
+  if (is.null(pars)) {
+    pars <- .gradient_available_pars(single, model, damage, route)
+  }
+  .gradient_check_pars(pars, single, model, damage, route)
+  pars
+}
+
 .gradient_check_pars <- function(pars, single, model = "TF24_floor", damage = FALSE,
                                  route = "leaf") {
   unknown <- setdiff(pars, .gradient_available_pars(single, model, damage, route))
@@ -773,7 +784,7 @@ leaf_gradient <- function(psi_soil,
       par <- owned[[1L]]
       owner <- names(.owned_fields())[match(par, .owned_fields())]
       stop("`pars` names `", par, "`, which is not a parameter of the ", model,
-           " model: it is the ", owner, " curve's PRESCRIBED price of water, ",
+           " model: it is ", .owned_field_meaning(par, owner), ", ",
            "and on every other cost curve the price is emergent -- derived from ",
            "that curve's own parameters rather than set. Differentiate those ",
            "instead, or pass model = \"", owner, "\" (with route = ",

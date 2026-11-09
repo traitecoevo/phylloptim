@@ -15,13 +15,18 @@
 # default to the C++ one is that leaf_control() reads it from
 # `Leaf::ncontrol_default`, which test-surface.R asserts.
 #
-# The golden points are TF24 on the collar route over the multi-layer supply,
-# which is plant's configuration and not the package default, so it is named.
-default_leaf <- function() {
-  l <- leaf_model(supply = leaf_supply_multilayer())
+# The configuration plant runs, which is not the package default: TF24 on the
+# collar route over the multi-layer supply. The golden points, the layer
+# profiles and the collar solve's tests name it through this.
+plant_leaf <- function(traits = leaf_traits(), control = leaf_control()) {
+  l <- leaf_model(traits, control, leaf_supply_multilayer())
   l$set_model("TF24", "collar")
   l
 }
+
+# The default leaf-specific conductance, read off the entry point's formals so
+# a test does not carry its own copy of the number.
+kmax_default <- eval(formals(leaf_solve)$leaf_specific_conductance_max)
 
 # --- how exactly to compare -------------------------------------------------
 #
@@ -140,7 +145,7 @@ golden_network_1m <- root_network_from_carbon(1.0 / golden_area_leaf,
 # temperature response is inert there by construction -- a 25 C-only set of pinned
 # values cannot see a response curve change at all.
 golden_solve <- function(psi_soil, ppfd, vpd, layers, leaf_temp = golden_tleaf) {
-  l <- default_leaf()
+  l <- plant_leaf()
 
   i <- seq_len(layers) - 1L
   ps <- psi_soil + 0.25 * i

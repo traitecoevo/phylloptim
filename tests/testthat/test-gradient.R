@@ -479,7 +479,7 @@ test_that("the two non-trait parameters agree with a resolved reference", {
   expect_identical(g$status, "interior")
 
   for (p in c("leaf_specific_conductance_max", "resistance")) {
-    v <- if (identical(p, "resistance")) 1e4 else 3.14e-5
+    v <- if (identical(p, "resistance")) 1e4 else kmax_default
     h <- v * 1e-5
     ref <- (solve_at(p, v + h) - solve_at(p, v - h)) / (2 * h)
     # Six digits, which is well inside the reference's own precision. Measured

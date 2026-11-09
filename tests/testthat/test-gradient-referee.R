@@ -55,7 +55,7 @@ referee_drivers <- function(su, resistance = su$resistance) {
 referee_solve <- function(curve, su, par = NULL, value = NULL) {
   tr <- referee_traits
   prices <- referee_prices[[curve]]
-  kmax <- 3.14e-5
+  kmax <- kmax_default
   resistance <- su$resistance
   if (!is.null(par)) {
     if (par %in% names(tr)) {
@@ -65,7 +65,7 @@ referee_solve <- function(curve, su, par = NULL, value = NULL) {
     } else if (par == "resistance") {
       resistance <- value
     } else {
-      prices[[sub("_$", "", par)]] <- value
+      prices[[phylloptim:::.owned_argument(par)]] <- value
     }
   }
   args <- c(referee_drivers(su, resistance),
@@ -79,9 +79,9 @@ referee_solve <- function(curve, su, par = NULL, value = NULL) {
 # gradient's own rule (relative, floored at 1 but for the two drivers).
 referee_value <- function(curve, su, par) {
   if (par %in% names(referee_traits)) return(referee_traits[[par]])
-  if (par == "leaf_specific_conductance_max") return(3.14e-5)
+  if (par == "leaf_specific_conductance_max") return(kmax_default)
   if (par == "resistance") return(su$resistance)
-  given <- referee_prices[[curve]][[sub("_$", "", par)]]
+  given <- referee_prices[[curve]][[phylloptim:::.owned_argument(par)]]
   if (!is.null(given)) given else .level_defaults()[[par]]
 }
 

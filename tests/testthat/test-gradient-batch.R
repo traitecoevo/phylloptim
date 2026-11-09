@@ -419,7 +419,7 @@ test_that("per-observation theta differentiates each row at its own parameters",
   n_traits <- length(leaf_traits())
   n_pars <- length(gradient_par_names())
   theta <- t(vapply(traits, function(tr) {
-    unname(c(unlist(tr)[gradient_par_names()[seq_len(n_traits)]], 3.14e-5,
+    unname(c(unlist(tr)[gradient_par_names()[seq_len(n_traits)]], kmax_default,
              rep(NA_real_, n_pars - n_traits - 1L)))
   }, numeric(n_pars)))
   g <- leaf_gradient_batch(b, theta = theta, pars = pars,
@@ -467,7 +467,7 @@ test_that("the default theta describes the point the batch was built at", {
 
   # Non-shared conductances take the n-row path, which is a different branch in
   # `.gradient_theta_matrix()` and has to produce the same answers.
-  kv <- c(3.14e-5, 5e-5)
+  kv <- c(kmax_default, 5e-5)
   b2 <- leaf_batch(psi_soil = c(1.5, 1.5), PPFD = 900,
                    leaf_specific_conductance_max = kv,
                    supply = leaf_supply_multilayer())

@@ -927,34 +927,14 @@ leaf_solve <- function(psi_soil,
          "price per observation, use leaf_batch().", call. = FALSE)
   }
   prices <- .check_prices(model, given)
-  layered <- .as_layer_list(psi_soil, "psi_soil")
-  scalars <- list(PPFD = PPFD, atm_vpd = atm_vpd, ca = ca,
-                  leaf_temp = leaf_temp, atm_o2_kpa = atm_o2_kpa,
-                  atm_kpa = atm_kpa,
-                  leaf_specific_conductance_max = leaf_specific_conductance_max)
-
-  n <- max(length(layered), vapply(scalars, length, integer(1)))
-  if (n == 0L) {
-    stop("nothing to solve: every driver has length zero", call. = FALSE)
-  }
-  layered <- .recycle_to(layered, n, "psi_soil")
-  scalars <- lapply(seq_along(scalars), function(i) {
-    .recycle_to(scalars[[i]], n, names(scalars)[[i]])
-  })
-  names(scalars) <- c("PPFD", "atm_vpd", "ca", "leaf_temp", "atm_o2_kpa",
-                      "atm_kpa", "leaf_specific_conductance_max")
-
-  depths <- if (is.null(soil_depth)) NULL else
-    .recycle_to(.as_layer_list(soil_depth, "soil_depth"), n, "soil_depth")
-  # One network for every row, or one per row. inherits() first: a RootNetwork
-  # is a list of five, and would otherwise read as five rows' networks.
-  networks <- if (is.null(root_network)) {
-    NULL
-  } else if (inherits(root_network, "RootNetwork")) {
-    rep(list(root_network), n)
-  } else {
-    .recycle_to(root_network, n, "root_network")
-  }
+  rows <- .recycle_drivers(psi_soil, PPFD, soil_depth, root_network,
+                           leaf_specific_conductance_max, atm_vpd, ca,
+                           leaf_temp, atm_o2_kpa, atm_kpa, "solve")
+  n <- rows$n
+  layered <- rows$layered
+  scalars <- rows$scalars
+  depths <- rows$depths
+  networks <- rows$networks
 
   shared <- if (reuse) .seat_model(leaf_model(traits, control, supply), m,
                                    prices)
@@ -1078,6 +1058,18 @@ leaf_solve <- function(psi_soil,
 # without the trailing underscore.
 .owned_argument <- function(field) sub("_$", "", field)
 
+# What a curve-owned field is, for a refusal that names it: two are prescribed
+# prices of water; LeastCost_beta is a ratio of unit costs, from which that
+# curve's price of water emerges.
+.owned_field_meaning <- function(field, owner) {
+  if (field == "LeastCost_beta") {
+    paste("the LeastCost curve's unit-cost ratio, the cost of maintaining",
+          "carboxylation capacity relative to that of transpiration")
+  } else {
+    paste("the", owner, "curve's prescribed price of water")
+  }
+}
+
 # Every owned field's argument, read out of the calling function's frame and
 # named by field. A curve parameter with no argument fails here, by name.
 .owned_arguments <- function(frame) {
@@ -1117,13 +1109,8 @@ leaf_solve <- function(psi_soil,
   wrong <- names(given)[set & !names(given) %in% mine]
   if (length(wrong)) {
     owner <- names(owned)[match(wrong[[1]], owned)]
-    what <- if (wrong[[1]] == "LeastCost_beta") {
-      paste("the LeastCost curve's unit-cost ratio, the cost of maintaining",
-            "carboxylation capacity relative to that of transpiration")
-    } else {
-      paste("the", owner, "curve's prescribed price of water")
-    }
-    stop("`", sub("_$", "", wrong[[1]]), "` is ", what,
+    stop("`", .owned_argument(wrong[[1]]), "` is ",
+         .owned_field_meaning(wrong[[1]], owner),
          ", and model = \"", model,
          "\" does not read it: on every other curve the price is emergent, ",
          "derived from that curve's own parameters rather than set. Pass ",
@@ -1158,6 +1145,40 @@ leaf_solve <- function(psi_soil,
     stop("`", what, "` has an entry with no layers", call. = FALSE)
   }
   out
+}
+
+# The drivers of leaf_solve() and leaf_batch(), recycled to a common number
+# of rows: psi_soil and soil_depth as one vector per row, the scalars to length
+# n, and the root network one for every row or one per row. inherits() first: a
+# RootNetwork is a list of five, and would otherwise read as five rows'.
+.recycle_drivers <- function(psi_soil, PPFD, soil_depth, root_network,
+                             leaf_specific_conductance_max, atm_vpd, ca,
+                             leaf_temp, atm_o2_kpa, atm_kpa, verb) {
+  layered <- .as_layer_list(psi_soil, "psi_soil")
+  scalars <- list(PPFD = PPFD, atm_vpd = atm_vpd, ca = ca,
+                  leaf_temp = leaf_temp, atm_o2_kpa = atm_o2_kpa,
+                  atm_kpa = atm_kpa,
+                  leaf_specific_conductance_max = leaf_specific_conductance_max)
+  n <- max(length(layered), vapply(scalars, length, integer(1)))
+  if (n == 0L) {
+    stop("nothing to ", verb, ": every driver has length zero", call. = FALSE)
+  }
+  nms <- names(scalars)
+  scalars <- lapply(seq_along(scalars), function(i) {
+    .recycle_to(scalars[[i]], n, nms[[i]])
+  })
+  names(scalars) <- nms
+  depths <- if (is.null(soil_depth)) NULL else
+    .recycle_to(.as_layer_list(soil_depth, "soil_depth"), n, "soil_depth")
+  networks <- if (is.null(root_network)) {
+    NULL
+  } else if (inherits(root_network, "RootNetwork")) {
+    rep(list(root_network), n)
+  } else {
+    .recycle_to(root_network, n, "root_network")
+  }
+  list(n = n, layered = .recycle_to(layered, n, "psi_soil"), scalars = scalars,
+       depths = depths, networks = networks)
 }
 
 .recycle_to <- function(x, n, what) {

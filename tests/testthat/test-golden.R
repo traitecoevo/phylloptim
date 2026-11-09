@@ -308,7 +308,7 @@ test_that("a shut-down point writes every output, not just the ones it changed",
   # plant's value. The golden comparison above cannot see that -- it builds a
   # fresh Leaf per point, by design -- so the check has to reuse one, and the R
   # layer is the natural place because reusing an object is what an R user does.
-  l <- default_leaf()
+  l <- plant_leaf()
   wet <- list(psi_soil = 0.5, ppfd = 1500, vpd = 0.5)
   dry <- list(psi_soil = 6.0, ppfd = 100, vpd = 3.0)
 
@@ -328,7 +328,7 @@ test_that("a shut-down point writes every output, not just the ones it changed",
   run(l, wet)
   after_wet_then_dry <- run(l, dry)
 
-  fresh <- default_leaf()
+  fresh <- plant_leaf()
   dry_from_fresh <- run(fresh, dry)
 
   # The point of the test: the same drivers must give the same answer whether or
@@ -342,7 +342,7 @@ test_that("psi_soil is rejected as a signed potential, through the R layer too",
   # script -- which passed -psi_soil -- and a plausible wrong number, so it has
   # to survive the trip through Rcpp as an error rather than as a warning or a
   # silent abs().
-  l <- default_leaf()
+  l <- plant_leaf()
   expect_error(
     l$set_physiology(
       root_network = golden_network_1m,
@@ -359,7 +359,7 @@ test_that("lambda and g1_eff are reachable and read-only", {
   # Issue #5's explicit ask, and the first item on the companion project's list.
   # They are accessors rather than stored state (hazard 5), so the thing worth
   # pinning is that they compute from the solved state and cannot be assigned.
-  l <- default_leaf()
+  l <- plant_leaf()
   l$set_physiology(
     root_network = golden_network_1m,
     PPFD = 900, psi_soil = 2.0, soil_depth = 1.0,
