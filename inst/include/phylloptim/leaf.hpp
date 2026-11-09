@@ -1469,14 +1469,15 @@ public:
   double E_column(double x, const std::vector<double>& psi_soil, double psi_leaf);
   double E_column_zero(double x, const std::vector<double>& psi_soil);
   
-  // The two temperature responses, exactly linear in ref_value. Only ref_value
-  // is templated: the other arguments do not move, and lifting one to T makes
-  // every operation carry a derivative vector of zeros. The operation order is
+  // The two temperature responses, exactly linear in ref_value. ref_value and
+  // the temperature take their own scalars, the temperature's V double except
+  // where leaf temperature carries rows: lifting a constant to T makes every
+  // operation carry a derivative vector of zeros. The operation order is
   // load-bearing: reordering moves the double results by an ULP.
-  template <typename T>
-  T arrh_curve(double Ea, const T& ref_value, double leaf_temp) const;
-  template <typename T>
-  T peak_arrh_curve(double Ea, const T& ref_value, double leaf_temp, double H_d,
+  template <typename T, typename V = double>
+  T arrh_curve(double Ea, const T& ref_value, const V& leaf_temp) const;
+  template <typename T, typename V = double>
+  T peak_arrh_curve(double Ea, const T& ref_value, const V& leaf_temp, double H_d,
                     double d_S) const;
 
   // --- Penman-Monteith leaf energy balance (minimal core) ---------------------
@@ -1529,14 +1530,20 @@ public:
   double assim_colimited(double ci_);
 
   // Photosynthetic capacity at this leaf's temperature and light: the two
-  // limiting capacities, the colimiting curvature and dark respiration. None
-  // moves with ci, so dA/dci walks four directions rather than one per pack slot.
-  template <class T>
+  // limiting capacities, the colimiting curvature, dark respiration, and the CO2
+  // compensation point and Michaelis-Menten constant the kernel reads with them.
+  // None moves with ci, so dA/dci walks six directions rather than one per pack
+  // slot. The last two take their own scalar G: they carry rows only where leaf
+  // temperature moves, and as plain doubles elsewhere they cost a tangent
+  // nothing.
+  template <class T, class G = T>
   struct PhotoCapacity {
     T vcmax;
     T transport;
     T curvature;
     T respiration;
+    G gamma;
+    G km;
 
     // ⚠️ Hazard 17: every member that carries a row is visited here, or its
     // columns read exactly zero. The member count is asserted below.
@@ -1546,9 +1553,11 @@ public:
       f(transport);
       f(curvature);
       f(respiration);
+      f(gamma);
+      f(km);
     }
   };
-  static_assert(sizeof(PhotoCapacity<double>) == 4 * sizeof(double),
+  static_assert(sizeof(PhotoCapacity<double>) == 6 * sizeof(double),
                 "PhotoCapacity gained or lost a member: update for_each_active, "
                 "then this count");
 
@@ -1582,10 +1591,12 @@ public:
   // at double for the model and at AD types for its derivative, so the two
   // cannot disagree. A kernel's arguments are its read set (fixed physiology
   // stays a member), and it must not write a member, or an AD probe moves the model.
-  template <typename T, typename U> T assim_rubisco_limited_kernel(const T& ci, const U& vcmax) const;
-  template <typename T, typename U> T assim_electron_limited_kernel(const T& ci, const U& transport) const;
-  template <typename T, typename U> T assim_colimited_kernel(const T& ci,
-                                                 const PhotoCapacity<U>& cap) const;
+  template <typename T, typename U, typename G> T assim_rubisco_limited_kernel(
+      const T& ci, const PhotoCapacity<U, G>& cap) const;
+  template <typename T, typename U, typename G> T assim_electron_limited_kernel(
+      const T& ci, const PhotoCapacity<U, G>& cap) const;
+  template <typename T, typename U, typename G> T assim_colimited_kernel(
+      const T& ci, const PhotoCapacity<U, G>& cap) const;
   // The curve parameters take their own scalar U, so pow(tangent, double) pays
   // no log for an exponent that does not move.
   template <typename T, typename U> T proportion_of_conductivity_kernel(
@@ -1605,13 +1616,24 @@ public:
   // never the members: at double they hold the same numbers, so a member read is
   // right in value and a silent zero in every trait's row. The temperature
   // responses are re-run, linear in the 25 C reference, which carries the row.
+  // Each at photo_temp_, or at a leaf temperature `temp` on its own scalar V.
   template <typename T> T vcmax_at(const leaf_pars<T>& pars) const;
   template <typename T> T jmax_at(const leaf_pars<T>& pars) const;
   template <typename T> T respiration_at(const leaf_pars<T>& pars) const;
   template <typename T> T electron_transport_at(const leaf_pars<T>& pars) const;
+  template <typename T, typename V> T vcmax_at(const leaf_pars<T>& pars, const V& temp) const;
+  template <typename T, typename V> T jmax_at(const leaf_pars<T>& pars, const V& temp) const;
+  template <typename T, typename V> T respiration_at(const leaf_pars<T>& pars, const V& temp) const;
+  template <typename T, typename V> T electron_transport_at(const leaf_pars<T>& pars,
+                                                           const V& temp) const;
 
-  // The one place that says which pack slots each kernel reads.
+  // The one place that says which pack slots each kernel reads. The first holds
+  // leaf temperature at photo_temp_, Gamma* and Km at their members; the second
+  // forms all six at `temp`, update_temperature_dependent_params' expressions on
+  // the scalar, for a surface whose leaf temperature moves.
   template <typename T> PhotoCapacity<T> photo_capacity_at(const leaf_pars<T>& pars) const;
+  template <typename T> PhotoCapacity<T> photo_capacity_at(const leaf_pars<T>& pars,
+                                                           const T& temp) const;
   template <typename T> PhotoCapacity<T> photo_capacity() const;
   // Net assimilation as ci -> infinity: the colimited capacity less respiration,
   // what a leaf with no conductance nets where A reaches zero at no ci (the
@@ -2027,6 +2049,8 @@ public:
   // The instantaneous thermal cost at a leaf temperature, in [0,1]. Zero when the
   // gate is off, so callers need not branch.
   double thermal_cost_at(double leaf_temp) const;
+  // The same at a leaf temperature on any scalar; the gate is read as above.
+  template <class V> V thermal_cost_on(const V& leaf_temp) const;
   // Its slope in leaf temperature, r*TC*(1 - TC) with r = 2/(T50 - Tcrit): the
   // sigmoid's own derivative. Zero when the gate is off, like thermal_cost_at.
   double thermal_cost_temp_deriv(double leaf_temp) const;

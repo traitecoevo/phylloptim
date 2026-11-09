@@ -4639,6 +4639,38 @@ void test_pack_kernels_are_the_models_own() {
           same(l.cost_slope_at<double>(l.opt_psi_leaf_, p),
                xad::derivative(l.hydraulic_cost_TF_kernel(sigma_ad)),
                "dC/dsigma" + at);
+          // At the block's own temperature on a scalar, all six capacities are
+          // the members bit for bit, Gamma* and Km included; and with that
+          // temperature moving, their slopes are the model's own central
+          // difference in temperature, to its truncation error.
+          const phylloptim::Leaf::PhotoCapacity<double> at_T =
+              l.photo_capacity_at<double>(p, l.photo_temp_);
+          same(at_T.vcmax, l.vcmax_, "vcmax at a scalar temperature" + at);
+          same(at_T.transport, l.electron_transport_,
+               "electron transport at a scalar temperature" + at);
+          same(at_T.respiration, l.R_d_, "respiration at a scalar temperature" + at);
+          same(at_T.gamma, l.gamma_, "Gamma* at a scalar temperature" + at);
+          same(at_T.km, l.km_, "Km at a scalar temperature" + at);
+          {
+            using TT = odelia::ode::tangent_scalar<double>;
+            phylloptim::leaf_pars<TT> pt;
+            for (std::size_t i = 0; i < pt.size(); ++i) pt[i] = TT(p[i]);
+            TT temp_t(l.photo_temp_);
+            odelia::ode::set_direction(temp_t, 1.0);
+            const phylloptim::Leaf::PhotoCapacity<TT> c =
+                l.photo_capacity_at<TT>(pt, temp_t);
+            const auto slope_ok = [&](const TT& got, auto read, const char* what) {
+              const double want = l.temp_deriv(l.photo_temp_, read);
+              near(odelia::ode::derivative_along(got), want,
+                   1e-6 * std::abs(want) + 1e-12,
+                   std::string("d") + what + "/dT on a scalar temperature" + at);
+            };
+            slope_ok(c.vcmax, [&] { return l.vcmax_; }, "vcmax");
+            slope_ok(c.transport, [&] { return l.electron_transport_; }, "J");
+            slope_ok(c.respiration, [&] { return l.R_d_; }, "R_d");
+            slope_ok(c.gamma, [&] { return l.gamma_; }, "Gamma*");
+            slope_ok(c.km, [&] { return l.km_; }, "Km");
+          }
         }
       }
     }

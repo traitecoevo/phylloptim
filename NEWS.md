@@ -1,3 +1,7 @@
+# phylloptim 0.32.3
+
+- Internal, toward the derivative surface following the energy balance ([#225](https://github.com/traitecoevo/phylloptim/issues/225)): the photosynthesis kernel reads the CO2 compensation point and Michaelis-Menten constant from its capacity rather than from the leaf, and the capacity can be formed at a leaf temperature that carries derivatives. No number moves.
+
 # phylloptim 0.32.2
 
 - Internal: one central difference in leaf temperature serves the optimiser and every temperature slope, one forward pass gives the first-order conditions' dA/dci on both routes, and every exit of the collar search classifies its point through one call. No number moves.

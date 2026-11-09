@@ -1154,6 +1154,21 @@ inline double Leaf::thermal_cost_at(double leaf_temp) const {
   return 1.0 / (1.0 + std::exp(-(2.0 / span) * (leaf_temp - T50_)));
 }
 
+template <class V>
+inline V Leaf::thermal_cost_on(const V& leaf_temp) const {
+  if constexpr (std::is_same_v<V, double>) {
+    return thermal_cost_at(leaf_temp);
+  } else {
+    using std::exp;
+    if (!use_thermal_cost_) {
+      return V(0.0);
+    }
+    const double span = T50_ - Tcrit_;
+    (void)thermal_cost_at(T50_);  // its refusal of span <= 0
+    return V(1.0) / (V(1.0) + exp(-(2.0 / span) * (leaf_temp - T50_)));
+  }
+}
+
 inline double Leaf::thermal_cost_temp_deriv(double leaf_temp) const {
   if (!use_thermal_cost_) {
     return 0.0;

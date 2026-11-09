@@ -164,7 +164,8 @@ inline S Leaf::ci_at_conductance(double ci_star, const S& gc,
   if (!no_coordinate) {
     const PhotoCapacity<double> at_cap{
         to_passive(cap.vcmax), to_passive(cap.transport),
-        to_passive(cap.curvature), to_passive(cap.respiration)};
+        to_passive(cap.curvature), to_passive(cap.respiration),
+        to_passive(cap.gamma), to_passive(cap.km)};
     dT2_dci = assim_slope_at<double>(ci_star, at_cap) * umol_to_mol +
               to_passive(gc) * inv_atm;
   }
