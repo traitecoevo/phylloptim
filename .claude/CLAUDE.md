@@ -200,7 +200,14 @@ YAML 1.1 reads `1e-3` as a string: write a float with a point and a signed expon
 
 ## Decisions that stand
 
-Each was taken by the package owner; reopening one is a decision for them, not a refactor.
+Each was taken by the package owner; reopening one is a decision for them, not a refactor. Four are requirements every change keeps:
+
+- **Every curve runs on both routes**, collar and leaf, and none is restricted to one.
+- **Every curve has gradients**, through the trait gradient and through the derivative surface.
+- **The R bindings stay.** The per-curve bound methods are frozen (no new curve adds one), not removed; `$curve_cost()`, `$curve_profit()` and `$curve_lambda()` take any curve by name.
+- **Common infrastructure, not code per curve**: a new curve is its `Curve<K>`, and the routes, gradients, bindings and registry follow from it.
+
+The rest:
 
 - **D1. The closed form stays, frozen.** TF24, CF77 and TF24_floor carry `ClosedForm::Implemented`; no new curve adds a closed-form solver, and the closed form is never under a gradient (hazard 3). Collapsing duplication inside `closed_form.hpp` is allowed.
 - **D2. Medlyn stays outside the curve dispatch**, as an empirical-conductance diagnostic: the USO form is not a cost the solve maximises, and no λ maps onto `g1`.
