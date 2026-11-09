@@ -46,10 +46,14 @@
 
 #include "root_network.hpp"
 
+#include <odelia/tangent.hpp>
+
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <string>
 #include <vector>
 
 namespace {
@@ -194,9 +198,255 @@ double ift_arm_rescaled_stem_curve(phylloptim::Leaf &l, double psi_star,
   return us;
 }
 
+// --- the composite against the derivative surface -----------------------------
+//
+// The same trait gradient taken two ways at the same solved point: the
+// implicit-function composite (`gradient::batch`, one observation: two
+// perturbed evaluations per parameter) against the derivative surface
+// (`operating_collar` and `physical_outputs_at` on a forward-mode scalar, one
+// tangent pass per direction, or one pass carrying every direction at once).
+// Both arms start from a seated proposal: set_traits, set_physiology and the
+// solve are in both, so the difference is the gradient machinery alone. The
+// surface's arm also pays `profit_curvature_at_collar`, the two `dprofit`
+// evaluations the composite's own `H` costs.
+//
+// `--count <arm> <reps>` runs one arm `reps` times and nothing else, so the
+// instructions retired can be read off `/usr/bin/time -l` (macOS) or `perf stat`
+// against the `none` arm.
+
+namespace surface_arm {
+
+using CC = phylloptim::Leaf::CostCurve;
+constexpr CC K = CC::TF24;
+using Tan = odelia::ode::tangent_scalar<double>;
+
+// The gradient's drivers, as the batch arm below seats them.
+inline phylloptim::gradient::Drivers drivers() {
+  std::vector<double> root{1.0 / kAreaLeaf}, psi_soil{2.0}, depth{1.0};
+  phylloptim::gradient::Drivers gd;
+  gd.root_network = fixture::root_network(root, depth);
+  gd.PPFD = 900.0;
+  gd.psi_soil = psi_soil;
+  gd.soil_depth = depth;
+  gd.atm_vpd = 2.0;
+  gd.ca = 40.0;
+  gd.leaf_temp = 25.0;
+  gd.atm_o2_kpa = 21.0;
+  gd.atm_kpa = 101.3;
+  return gd;
+}
+
+// theta at the base traits, varied per rep in TF24_beta2 as the batch arm does.
+inline void fill_theta(double *theta, long r) {
+  for (int j = 0; j < phylloptim::gradient::n_theta; ++j) theta[j] = 0.0;
+  for (int i = 0; i < kNTraits; ++i) theta[i] = kBase.v[i];
+  theta[phylloptim::par_R_d_25] = 1.44;
+  theta[phylloptim::par_JS22_gamma] = 1.0;
+  theta[phylloptim::par_CMax_a] = 0.6;
+  theta[phylloptim::par_CMax_b] = 0.0;
+  theta[phylloptim::par_g_min] = 0.0;
+  theta[phylloptim::par_kmax] = kKs * kTheta / kH;
+  theta[phylloptim::par_TF24_beta2] = kBase.v[5] * (1.0 + double(r) * 1e-12);
+}
+
+// The surface's active inputs at scalar S, seated from the leaf.
+template <class S>
+struct Inputs {
+  phylloptim::leaf_pars<S> pars;
+  std::vector<S> soil, r_h, r_v;
+  void seat(const phylloptim::Leaf &l, const phylloptim::leaf_pars<double> &p0) {
+    for (std::size_t i = 0; i < pars.size(); ++i) pars[i] = S(p0[i]);
+    soil.clear(); r_h.clear(); r_v.clear();
+    for (int i = 0; i < l.supply_n_layers(); ++i) {
+      soil.push_back(S(l.roots_.psi_soil_[std::size_t(i)]));
+      r_h.push_back(S(l.roots_.network_.r_R_H_min[std::size_t(i)]));
+      r_v.push_back(S(l.roots_.network_.r_R_V_sum[std::size_t(i)]));
+    }
+  }
+  phylloptim::SupplyInputs<S> supply() const {
+    return {soil, r_h, r_v, pars[phylloptim::par_root_P50], pars[phylloptim::par_root_c]};
+  }
+};
+
+// One tangent pass in direction `par`; the five outputs the composite reports.
+template <bool physical>
+double tangent_pass(phylloptim::Leaf &l, const phylloptim::leaf_pars<double> &p0,
+                    int par, double curvature) {
+  Inputs<Tan> in;
+  in.seat(l, p0);
+  odelia::ode::set_direction(in.pars[std::size_t(par)], 1.0);
+  const auto supply = in.supply();
+  const auto draw = l.supply_draw_at<Tan>(Tan(l.opt_root_psi_), supply);
+  phylloptim::Leaf::HeldCoords<Tan> held;
+  const Tan collar = l.operating_collar<K, Tan>(draw, in.pars, curvature, &held);
+  const auto d = [](const Tan &x) { return odelia::ode::derivative_along(x); };
+  if constexpr (physical) {
+    const auto out = l.physical_outputs_at<K, Tan>(collar, draw, in.pars, &held);
+    return d(out.A) + d(out.gc) + d(out.psi_leaf) + d(collar) + d(out.profit);
+  } else {
+    const auto out = l.billed_outputs_at<K, Tan>(collar, draw, in.pars, &held);
+    return d(collar) + d(out.profit) + d(out.carbon);
+  }
+}
+
+// One pass carrying N directions, lane k seeded on pars[k].
+template <std::size_t N>
+double vector_pass(phylloptim::Leaf &l, const phylloptim::leaf_pars<double> &p0,
+                   const int *pars, double curvature) {
+  using V = typename xad::fwd<double, N>::active_type;
+  Inputs<V> in;
+  in.seat(l, p0);
+  for (std::size_t k = 0; k < N; ++k) {
+    xad::derivative(in.pars[std::size_t(pars[k])])[k] = 1.0;
+  }
+  const auto supply = in.supply();
+  const auto draw = l.supply_draw_at<V>(V(l.opt_root_psi_), supply);
+  phylloptim::Leaf::HeldCoords<V> held;
+  const V collar = l.operating_collar<K, V>(draw, in.pars, curvature, &held);
+  const auto out = l.physical_outputs_at<K, V>(collar, draw, in.pars, &held);
+  double s = 0.0;
+  for (std::size_t k = 0; k < N; ++k) {
+    s += xad::derivative(out.A)[k] + xad::derivative(out.gc)[k] +
+         xad::derivative(out.psi_leaf)[k] + xad::derivative(collar)[k] +
+         xad::derivative(out.profit)[k];
+  }
+  return s;
+}
+
+enum class Kind { None, Composite, Tangent, Billed, Vector };
+
+struct Arm {
+  const char *label;
+  Kind kind;
+  int npars;  // the first npars slots of the pack
+};
+
+// The first 17 slots are the sixteen traits and kmax, every slot TF24 reads on
+// the layered collar route; the rest are NA or inert here.
+constexpr int kAllRead = 17;
+
+// One rep: seat the proposal, solve, take the gradient. Returns a checksum.
+double one(phylloptim::Leaf &l, const Arm &arm, long r,
+           const std::vector<phylloptim::gradient::Drivers> &obs) {
+  double theta[phylloptim::gradient::n_theta];
+  fill_theta(theta, r);
+  int pars[phylloptim::gradient::n_theta];
+  for (int i = 0; i < arm.npars; ++i) pars[i] = i;
+  if (arm.kind == Kind::Composite) {
+    phylloptim::gradient::Settings s;
+    s.model = {K, phylloptim::gradient::Route::Collar};
+    const std::vector<phylloptim::gradient::Result> g = phylloptim::gradient::batch(
+        l, theta, 1, obs, false, pars, std::size_t(arm.npars), s);
+    double sum = 0.0;
+    for (double v : g[0].grad) sum += v;
+    return sum;
+  }
+  // The surface's arms: the same seating and solve, then the curvature.
+  Traits t = kBase;
+  t.v[5] = theta[phylloptim::par_TF24_beta2];
+  apply_traits(l, t);
+  set_drivers(l);
+  l.find_root_collar_psi();
+  if (arm.kind == Kind::None) return l.profit_;
+  const double curvature = l.profit_curvature_at_collar<K>();
+  const phylloptim::leaf_pars<double> p0 = l.passive_pars();
+  double sum = 0.0;
+  switch (arm.kind) {
+    case Kind::Tangent:
+      for (int i = 0; i < arm.npars; ++i) sum += tangent_pass<true>(l, p0, pars[i], curvature);
+      break;
+    case Kind::Billed:
+      for (int i = 0; i < arm.npars; ++i) sum += tangent_pass<false>(l, p0, pars[i], curvature);
+      break;
+    case Kind::Vector:
+      if (arm.npars == kAllRead) {
+        sum = vector_pass<kAllRead>(l, p0, pars, curvature);
+      } else {
+        int all[phylloptim::gradient::n_theta];
+        for (int i = 0; i < phylloptim::gradient::n_theta; ++i) all[i] = i;
+        sum = vector_pass<phylloptim::gradient::n_theta>(l, p0, all, curvature);
+      }
+      break;
+    case Kind::None:
+    case Kind::Composite:
+      break;
+  }
+  return sum;
+}
+
+const Arm arms[] = {
+    {"none (seat + solve only)", Kind::None, 0},
+    {"composite, 1 par", Kind::Composite, 1},
+    {"composite, 11 pars", Kind::Composite, 11},
+    {"composite, 17 pars", Kind::Composite, kAllRead},
+    {"surface tangent, 1 par", Kind::Tangent, 1},
+    {"surface tangent, 11 pars", Kind::Tangent, 11},
+    {"surface tangent, 17 pars", Kind::Tangent, kAllRead},
+    {"surface billed, 17 pars", Kind::Billed, kAllRead},
+    {"surface vector, 17 lanes", Kind::Vector, kAllRead},
+    {"surface vector, 35 lanes", Kind::Vector, phylloptim::gradient::n_theta},
+};
+constexpr int n_arms = int(sizeof(arms) / sizeof(arms[0]));
+
+const Arm *find(const char *name) {
+  for (const Arm &a : arms) {
+    if (std::string(a.label).rfind(name, 0) == 0) return &a;
+  }
+  return nullptr;
+}
+
+double timed(phylloptim::Leaf &l, const Arm &arm, long reps,
+             const std::vector<phylloptim::gradient::Drivers> &obs, double &sink) {
+  const auto t0 = clock_type::now();
+  for (long r = 0; r < reps; ++r) sink += one(l, arm, r, obs);
+  return us_per(t0, clock_type::now(), reps);
+}
+
+void report(phylloptim::Leaf &l, long per_round, double &sink) {
+  const std::vector<phylloptim::gradient::Drivers> obs(1, drivers());
+  const long reps = std::max(1L, per_round / 10);
+  double best[n_arms];
+  for (int a = 0; a < n_arms; ++a) best[a] = 1e300;
+  for (int round = 0; round < 3; ++round) {
+    for (int a = 0; a < n_arms; ++a) {
+      best[a] = std::min(best[a], timed(l, arms[a], reps, obs, sink));
+    }
+  }
+  printf("\n%-30s %10s %12s\n", "arm (TF24, collar, 1 layer)", "us/grad", "less none");
+  for (int a = 0; a < n_arms; ++a) {
+    printf("%-30s %10.2f %12.2f\n", arms[a].label, best[a], best[a] - best[0]);
+  }
+  printf("\n  per parameter: composite %.2f us, surface tangent %.2f us\n",
+         (best[3] - best[1]) / (kAllRead - 1), (best[6] - best[4]) / (kAllRead - 1));
+  apply_traits(l, kBase);
+  set_drivers(l);
+  l.find_root_collar_psi();
+}
+
+}  // namespace surface_arm
+
 }  // namespace
 
 int main(int argc, char **argv) {
+  // `--count <arm> <reps>`: one surface arm alone, for an instruction count.
+  if (argc == 4 && std::strcmp(argv[1], "--count") == 0) {
+    const surface_arm::Arm *arm = surface_arm::find(argv[2]);
+    if (arm == nullptr) {
+      fprintf(stderr, "no arm starts with '%s'\n", argv[2]);
+      return 2;
+    }
+    phylloptim::Leaf l = fixture::multilayer_leaf();
+    apply_traits(l, kBase);
+    set_drivers(l);
+    l.find_root_collar_psi();
+    const std::vector<phylloptim::gradient::Drivers> obs(1, surface_arm::drivers());
+    double sink = 0.0;
+    const long n = std::atol(argv[3]);
+    for (long r = 0; r < n; ++r) sink += surface_arm::one(l, *arm, r, obs);
+    printf("%s x %ld: checksum %.6f\n", arm->label, n, sink);
+    return 0;
+  }
+
   const long reps = argc > 1 ? std::atol(argv[1]) : 3000;
   const long per_round = reps / 3 > 0 ? reps / 3 : 1;
 
@@ -431,6 +681,9 @@ int main(int argc, char **argv) {
       "traits arm moves c every rep; a gradient at a fixed c reuses its tables\n"
       "(the batch arm above). The P50s rebuild nothing: each table is built in\n"
       "psi/b and depends on c alone.\n");
+
+  surface_arm::report(l, per_round, sink);
+
   printf("\nchecksum %.6f\n", sink);
   return 0;
 }
