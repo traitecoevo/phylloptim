@@ -112,8 +112,10 @@ bench: bench_solve bench_gradient
 smoothness: test_leaf
 	./test_leaf smoothness
 
-test_leaf: test_leaf.cpp $(HEADERS)
-	$(CXX) $(CXXSTD) $(OPT) $(WARN) $(INCLUDES) $< -o $@
+# One program from several sources, a part per subsystem sharing leaf_harness.hpp.
+LEAF_SOURCES = test_leaf.cpp $(wildcard test_leaf_*.cpp)
+test_leaf: $(LEAF_SOURCES) $(HEADERS)
+	$(CXX) $(CXXSTD) $(OPT) $(WARN) $(INCLUDES) $(LEAF_SOURCES) -o $@
 
 # The one row this surface SUPPLIES rather than records, against a difference of
 # the function it claims to describe. A difference of anything downstream is

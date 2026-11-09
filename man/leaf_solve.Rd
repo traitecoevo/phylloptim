@@ -166,8 +166,7 @@ Two consequences, both the opposite of what you might expect:
 of building a \code{Leaf} yourself and looping \code{set_drivers()} +
 \verb{$find_root_collar_psi()} + \code{\link[=operating_point]{operating_point()}}. Reaching into the object
 saves about 1 µs a row and is worth doing for access to intermediate state,
-not for speed. (This was not true before: building the result row by row and
-\code{rbind}ing cost 344 µs a row, 26× the stateful loop.)
+not for speed.
 \item \strong{The lever is fewer R calls per row, not a different R function.} Pass all
 your drivers to one vectorised call rather than looping in R. If you need
 more than that -- a fit's inner loop, say -- what has to go is the boundary

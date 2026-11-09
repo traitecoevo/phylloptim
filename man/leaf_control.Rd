@@ -14,9 +14,9 @@ leaf_control(
 )
 }
 \arguments{
-\item{GSS_tol_abs}{a width on the collar potential, despite its name, which
-dates from a golden-section search the solve no longer uses. ⚠️ \strong{This does not set how well the operating point is
-determined.} Every solver in the package now root-finds its own first-order
+\item{GSS_tol_abs}{a width on the collar potential, for the collar solve's
+golden-section fallback. ⚠️ \strong{This does not set how well the operating point is
+determined.} Every solver in the package root-finds its own first-order
 condition instead of searching the objective, so changing this leaves the
 answer bit-identical. What it still does, and it is
 less than the name suggests: it is read in exactly two places, both on the

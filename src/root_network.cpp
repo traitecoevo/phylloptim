@@ -4,8 +4,8 @@
 // free function rather than a class member and RcppR6 only generates class glue.
 // A plain Rcpp attribute is the whole mechanism.
 //
-// WHY IT IS EXPOSED AT ALL, given that #33 was about the leaf NOT running this.
-// Two reasons, and neither is convenience:
+// WHY IT IS EXPOSED AT ALL, given that the leaf does not run it. Two reasons,
+// and neither is convenience:
 //
 //   * The layer thicknesses. root_network_from_carbon scales the vertical
 //     resistance by dz[i]^2, and an R caller working from a cumulative depth
@@ -19,7 +19,8 @@
 
 //' Root resistances from a root carbon profile
 //'
-//' The root-architecture model that used to run inside `set_physiology()` (#33).
+//' The root-architecture model, which the caller runs: `set_physiology()` takes
+//' the resistances it returns.
 //' Each layer's root carbon is split 1/3 vertical : 2/3 horizontal; the minimum
 //' horizontal resistance is `beta_R_H / c_r_h`, and the vertical resistance is
 //' `beta_R_V * dz[i]^2 / c_r_v`, accumulated from the surface down, where `dz[i]`

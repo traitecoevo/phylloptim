@@ -105,9 +105,9 @@ equal.
 so a fit that wants respiration to follow Vcmax moves both and adds the two
 columns.
 
-\code{beta_R_H} and \code{beta_R_V} were here until #33 and are not any more: they
-parameterise the root-architecture model, which the leaf no longer runs, so
-this function has no way to reach them. Getting a gradient in either means
+\code{beta_R_H} and \code{beta_R_V} are not parameters here: they parameterise the
+root-architecture model, which the leaf does not run, so this function has
+no way to reach them. Getting a gradient in either means
 solving at two networks yourself. The perturbation itself is cheap —
 \code{\link[=root_network_from_carbon]{root_network_from_carbon()}} is homogeneous of degree 1 in each constant, so
 scaling \code{beta_R_H} scales \code{r_R_H_min} by the same factor and needs no
@@ -226,13 +226,9 @@ number is the truthful answer rather than a gap -- reading one would be reading
 state from whichever solve ran last.
 
 \strong{Every route reaches the composite under \code{method = "auto"}, and every route
-uses the same finite-difference step (1e-06).} Both were once untrue.
-\code{ProfitMax} normalises by \verb{|A|max}, and while that came from a 500-point scan
-its argmax was piecewise constant in the parameters -- so the composite had to
-pin it and returned a PARTIAL (0.0766 against a true 0.0579), and differencing
-needed a step large enough to cross a scan cell. \verb{|A|max} is found by a
-root-find now, so it is re-solved per perturbation, the composite returns the
-TOTAL, and no model carries that split.
+uses the same finite-difference step (1e-06).} \code{ProfitMax} normalises by
+\verb{|A|max}, which is re-read at every perturbation, so its gradient is the
+total derivative, not a partial at a held normaliser.
 
 ⚠️ \strong{A zero column for another curve's parameter means two different things,
 and they are not distinguishable from the number.} On a \code{collar} or \code{TF24}
@@ -277,9 +273,8 @@ The second term is not a correction. For \code{TF24_cost_scale}, \code{TF24_beta
 
 The first four outputs are what a gas-exchange calibration observes. \code{profit}
 is here because it is what a \strong{demographic} consumer bills: plant's carbon
-budget reads \code{leaf.profit_}, not \code{assim_colimited_}, so before it was added
-the two sets were disjoint and no gradient from this package reached a
-demographic model at all.
+budget reads the leaf's carbon, not \code{assim_colimited_}, and without it no
+gradient from this package would reach a demographic model.
 
 It is also the cheapest of the five, because it is the objective. At an
 interior optimum \code{dprofit/dpsi = 0}, so the indirect term above vanishes
@@ -338,8 +333,8 @@ gradient-ascent law above it obeys \verb{ds/dt = k(M + H s)}, and those are its
 coefficients. Its fixed point is \code{-M/H}, which is what the solving path
 returns — the two agree in the large-gain limit.
 
-⚠️ \strong{\code{stationarity} is still reported, and is used for exactly one thing.}
-It no longer routes anything; it now measures how far the collar you supplied
+⚠️ \strong{\code{stationarity} is reported, and is used for exactly one thing.}
+It routes nothing; it measures how far the collar you supplied
 sits from the optimum. The one decision it makes is \code{profit}'s: at a
 stationary point the envelope theorem applies and the analytic zero is used,
 and away from one the exact \code{dprofit/dpsi} is used instead of differencing
@@ -454,8 +449,8 @@ A companion calibration study has \code{N = 1327}, \code{P_fit = 40},
 \code{leaf_specific_conductance_max} on the multi-layer path — is the most expensive
 thing you can ask for, and a fit that reads four of them pays for the rest.
 
-The intercept is a fresh \code{Leaf} per call. Pass \code{x} to reuse one across calls
-(#52); without it, construction is most of a one-observation gradient.
+The intercept is a fresh \code{Leaf} per call. Pass \code{x} to reuse one across calls;
+without it, construction is most of a one-observation gradient.
 }
 
 \section{Precision}{

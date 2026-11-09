@@ -84,21 +84,17 @@ the same length; by default \code{soil_depth} becomes 1 m layers.
 \section{The supply resistances, on either path}{
 
 The leaf takes the soil-to-collar hydraulic RESISTANCES, not the root carbon
-they may have been derived from (#33). The solve reads two vectors of them,
+they may have been derived from. The solve reads two vectors of them,
 \code{r_R_H_min} and \code{r_R_V_sum}, and nothing in it knows about root carbon, layer
 thickness, the 1/3 : 2/3 vertical/horizontal split or either \verb{beta_R_*}
-constant. This function used to ask for a root carbon profile, which a leaf
-physiologist does not have, and invented a default of 20 kg C m^-2 leaf.
+constant, so a caller without a root carbon profile needs none.
 
 \strong{\code{root_network} is the same argument on both supply paths}, which is the
 point. On the multi-layer path it carries one \code{r_R_H_min} and one \code{r_R_V_sum}
 per rooted layer; on the single-potential path it carries one series resistance
 in \code{r_R_V_sum} and nothing else, which is that field's own meaning with one
 layer and no vulnerability-weighted term. \code{\link[=root_network_from_carbon]{root_network_from_carbon()}} builds
-the first, \code{\link[=series_resistance]{series_resistance()}} the second. Before this change the
-single-potential resistance was an argument to \code{\link[=leaf_supply_singlelayer]{leaf_supply_singlelayer()}} instead —
-so the same quantity arrived at a different \emph{time} depending on which path was
-in force, and it was the only fitted parameter whose setter reset the object.
+the first, \code{\link[=series_resistance]{series_resistance()}} the second.
 
 Both paths default it, because neither should force a caller to own a supply
 model they do not have, and both defaults are written out in this function's

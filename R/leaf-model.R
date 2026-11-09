@@ -22,9 +22,8 @@
 ##' @section Two vulnerability curves, not one:
 ##' `stem_P50`/`stem_c` describe the STEM Weibull curve, which drives the
 ##' hydraulic cost; `root_P50`/`root_c` describe the ROOT curve, which drives
-##' uptake. They are separate parameters with separate meanings and they are
-##' named accordingly, because they were once an unmarked `b`/`c` pair alongside
-##' `root_b`/`root_c` and an analysis used the root parameters for the stem cost.
+##' uptake. They are separate parameters with separate meanings, and named so:
+##' an unmarked pair is easy to read as the other curve's.
 ##'
 ##' Each curve has exactly TWO settable numbers. `stem_b`, `psi_crit`, `root_b`
 ##' and `root_psi_crit` are quantiles of the curve those two define -- readable on
@@ -63,7 +62,7 @@
 ##'   intercepted `PPFD`, so the default 0.30 / 0.85 is the old incident-basis
 ##'   yield of 0.30 restated. A gas-exchange fit identifies only
 ##'   `phi_J * alpha_PAR_`; fix `alpha_PAR_` to make the fitted value per absorbed
-##'   photon. Was `a` (incident basis) before 0.13.0: `phi_J = a / 0.85`.
+##'   photon. An incident-basis yield `a` is `phi_J = a / 0.85`.
 ##' @param curv_fact_elec_trans curvature of the light response curve (unitless)
 ##' @param curv_fact_colim curvature of the colimited photosynthesis equation
 ##' @param TF24_cost_scale cost parameter for the TF24 profit model
@@ -113,13 +112,12 @@
 ##'   the `Leaf` (`$g_min_k_low_`, `$g_min_k_high_`, `$g_min_T_trans_`,
 ##'   `$g_min_T_width_`); their defaults are placeholders, inert at 25 C.
 ##'
-##' @section Where the two root-resistance constants went:
-##' `beta_R_H` and `beta_R_V` were traits here until #33. They parameterise the
-##' root-ARCHITECTURE model, which the leaf no longer runs -- it takes the
-##' resistances. They are arguments to [root_network_from_carbon()] now.
+##' @section The root-resistance constants are not traits:
+##' `beta_R_H` and `beta_R_V` parameterise the root-architecture model, which the
+##' leaf does not run -- it takes the resistances. They are arguments to
+##' [root_network_from_carbon()].
 ##'
-##' The cost is real and worth stating: [leaf_gradient()] can no longer
-##' differentiate with respect to either. Perturbing them is cheap, because
+##' So [leaf_gradient()] does not differentiate with respect to either. Perturbing them is cheap, because
 ##' [root_network_from_carbon()] is homogeneous of degree 1 in each, but the
 ##' derivative of a solved output still needs two solves either side.
 ##'
@@ -179,9 +177,9 @@ leaf_traits <- function(vcmax_25 = 96,
 ##' evaluate (R_d's Q10 reaching zero, about 119 C at the defaults), rather than
 ##' holding the temperature at a bound.
 ##'
-##' @param GSS_tol_abs a width on the collar potential, despite its name, which
-##'   dates from a golden-section search the solve no longer uses. ⚠️ **This does not set how well the operating point is
-##'   determined.** Every solver in the package now root-finds its own first-order
+##' @param GSS_tol_abs a width on the collar potential, for the collar solve's
+##'   golden-section fallback. ⚠️ **This does not set how well the operating point is
+##'   determined.** Every solver in the package root-finds its own first-order
 ##'   condition instead of searching the objective, so changing this leaves the
 ##'   answer bit-identical. What it still does, and it is
 ##'   less than the name suggests: it is read in exactly two places, both on the
@@ -256,10 +254,8 @@ leaf_control <- function(GSS_tol_abs = 1e-3,
 ##' Neither function takes a resistance. The soil-to-collar resistance is a
 ##' per-call **driver** on both paths, supplied to [set_drivers()] as
 ##' `root_network` — [root_network_from_carbon()] on the multi-layer path,
-##' [series_resistance()] on this one. It used to be an argument here, so the same
-##' quantity arrived at construction on one path and per call on the other, and
-##' `resistance` was the only differentiable parameter whose setter reset the whole
-##' object.
+##' [series_resistance()] on this one, so the same quantity arrives the same way
+##' on both paths, and setting it resets nothing.
 ##'
 ##' ⚠️ **`gravity_head` is the one asymmetry left, and it is deliberate.** The
 ##' multi-layer path derives a per-layer head from the depth profile it is handed
@@ -286,7 +282,7 @@ leaf_control <- function(GSS_tol_abs = 1e-3,
 ##'
 ##' @section The two ends of this path are in different unit bases:
 ##' \strong{Read this before parameterising a whole soil-to-leaf path}, which is
-##' exactly what this supply path is for (#56).
+##' exactly what this supply path is for.
 
 ##'
 ##' - `leaf_specific_conductance_max` is **kg** m^-2 s^-1 MPa^-1
@@ -511,21 +507,17 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
 ##'
 ##' @section The supply resistances, on either path:
 ##' The leaf takes the soil-to-collar hydraulic RESISTANCES, not the root carbon
-##' they may have been derived from (#33). The solve reads two vectors of them,
+##' they may have been derived from. The solve reads two vectors of them,
 ##' `r_R_H_min` and `r_R_V_sum`, and nothing in it knows about root carbon, layer
 ##' thickness, the 1/3 : 2/3 vertical/horizontal split or either `beta_R_*`
-##' constant. This function used to ask for a root carbon profile, which a leaf
-##' physiologist does not have, and invented a default of 20 kg C m^-2 leaf.
+##' constant, so a caller without a root carbon profile needs none.
 ##'
 ##' **`root_network` is the same argument on both supply paths**, which is the
 ##' point. On the multi-layer path it carries one `r_R_H_min` and one `r_R_V_sum`
 ##' per rooted layer; on the single-potential path it carries one series resistance
 ##' in `r_R_V_sum` and nothing else, which is that field's own meaning with one
 ##' layer and no vulnerability-weighted term. [root_network_from_carbon()] builds
-##' the first, [series_resistance()] the second. Before this change the
-##' single-potential resistance was an argument to [leaf_supply_singlelayer()] instead —
-##' so the same quantity arrived at a different *time* depending on which path was
-##' in force, and it was the only fitted parameter whose setter reset the object.
+##' the first, [series_resistance()] the second.
 ##'
 ##' Both paths default it, because neither should force a caller to own a supply
 ##' model they do not have, and both defaults are written out in this function's
@@ -684,10 +676,8 @@ set_drivers <- function(x,
 ##' before that the values are the missing-value sentinels the object was
 ##' constructed with.
 ##'
-##' Costs about 4 µs, so it is usable in a loop. It was 180 µs until it stopped
-##' reading the fifteen outputs through fifteen separate calls into C++ and
-##' stopped building its one row with `data.frame()` (#39) -- 45× more than the
-##' ~3 µs solve it was reporting on.
+##' Cheap enough to use in a loop: one call into C++ for every output, and no
+##' `data.frame()` per row (the README's "Performance from R" has the figure).
 ##'
 ##' @section What the cost columns mean:
 ##'
@@ -797,8 +787,7 @@ operating_point <- function(x) {
 ##'   of building a `Leaf` yourself and looping `set_drivers()` +
 ##'   `$find_root_collar_psi()` + [operating_point()]. Reaching into the object
 ##'   saves about 1 µs a row and is worth doing for access to intermediate state,
-##'   not for speed. (This was not true before: building the result row by row and
-##'   `rbind`ing cost 344 µs a row, 26× the stateful loop.)
+##'   not for speed.
 ##' * **The lever is fewer R calls per row, not a different R function.** Pass all
 ##'   your drivers to one vectorised call rather than looping in R. If you need
 ##'   more than that -- a fit's inner loop, say -- what has to go is the boundary
@@ -927,34 +916,14 @@ leaf_solve <- function(psi_soil,
          "price per observation, use leaf_batch().", call. = FALSE)
   }
   prices <- .check_prices(model, given)
-  layered <- .as_layer_list(psi_soil, "psi_soil")
-  scalars <- list(PPFD = PPFD, atm_vpd = atm_vpd, ca = ca,
-                  leaf_temp = leaf_temp, atm_o2_kpa = atm_o2_kpa,
-                  atm_kpa = atm_kpa,
-                  leaf_specific_conductance_max = leaf_specific_conductance_max)
-
-  n <- max(length(layered), vapply(scalars, length, integer(1)))
-  if (n == 0L) {
-    stop("nothing to solve: every driver has length zero", call. = FALSE)
-  }
-  layered <- .recycle_to(layered, n, "psi_soil")
-  scalars <- lapply(seq_along(scalars), function(i) {
-    .recycle_to(scalars[[i]], n, names(scalars)[[i]])
-  })
-  names(scalars) <- c("PPFD", "atm_vpd", "ca", "leaf_temp", "atm_o2_kpa",
-                      "atm_kpa", "leaf_specific_conductance_max")
-
-  depths <- if (is.null(soil_depth)) NULL else
-    .recycle_to(.as_layer_list(soil_depth, "soil_depth"), n, "soil_depth")
-  # One network for every row, or one per row. inherits() first: a RootNetwork
-  # is a list of five, and would otherwise read as five rows' networks.
-  networks <- if (is.null(root_network)) {
-    NULL
-  } else if (inherits(root_network, "RootNetwork")) {
-    rep(list(root_network), n)
-  } else {
-    .recycle_to(root_network, n, "root_network")
-  }
+  rows <- .recycle_drivers(psi_soil, PPFD, soil_depth, root_network,
+                           leaf_specific_conductance_max, atm_vpd, ca,
+                           leaf_temp, atm_o2_kpa, atm_kpa, "solve")
+  n <- rows$n
+  layered <- rows$layered
+  scalars <- rows$scalars
+  depths <- rows$depths
+  networks <- rows$networks
 
   shared <- if (reuse) .seat_model(leaf_model(traits, control, supply), m,
                                    prices)
@@ -1078,6 +1047,18 @@ leaf_solve <- function(psi_soil,
 # without the trailing underscore.
 .owned_argument <- function(field) sub("_$", "", field)
 
+# What a curve-owned field is, for a refusal that names it: two are prescribed
+# prices of water; LeastCost_beta is a ratio of unit costs, from which that
+# curve's price of water emerges.
+.owned_field_meaning <- function(field, owner) {
+  if (field == "LeastCost_beta") {
+    paste("the LeastCost curve's unit-cost ratio, the cost of maintaining",
+          "carboxylation capacity relative to that of transpiration")
+  } else {
+    paste("the", owner, "curve's prescribed price of water")
+  }
+}
+
 # Every owned field's argument, read out of the calling function's frame and
 # named by field. A curve parameter with no argument fails here, by name.
 .owned_arguments <- function(frame) {
@@ -1117,13 +1098,8 @@ leaf_solve <- function(psi_soil,
   wrong <- names(given)[set & !names(given) %in% mine]
   if (length(wrong)) {
     owner <- names(owned)[match(wrong[[1]], owned)]
-    what <- if (wrong[[1]] == "LeastCost_beta") {
-      paste("the LeastCost curve's unit-cost ratio, the cost of maintaining",
-            "carboxylation capacity relative to that of transpiration")
-    } else {
-      paste("the", owner, "curve's prescribed price of water")
-    }
-    stop("`", sub("_$", "", wrong[[1]]), "` is ", what,
+    stop("`", .owned_argument(wrong[[1]]), "` is ",
+         .owned_field_meaning(wrong[[1]], owner),
          ", and model = \"", model,
          "\" does not read it: on every other curve the price is emergent, ",
          "derived from that curve's own parameters rather than set. Pass ",
@@ -1158,6 +1134,40 @@ leaf_solve <- function(psi_soil,
     stop("`", what, "` has an entry with no layers", call. = FALSE)
   }
   out
+}
+
+# The drivers of leaf_solve() and leaf_batch(), recycled to a common number
+# of rows: psi_soil and soil_depth as one vector per row, the scalars to length
+# n, and the root network one for every row or one per row. inherits() first: a
+# RootNetwork is a list of five, and would otherwise read as five rows'.
+.recycle_drivers <- function(psi_soil, PPFD, soil_depth, root_network,
+                             leaf_specific_conductance_max, atm_vpd, ca,
+                             leaf_temp, atm_o2_kpa, atm_kpa, verb) {
+  layered <- .as_layer_list(psi_soil, "psi_soil")
+  scalars <- list(PPFD = PPFD, atm_vpd = atm_vpd, ca = ca,
+                  leaf_temp = leaf_temp, atm_o2_kpa = atm_o2_kpa,
+                  atm_kpa = atm_kpa,
+                  leaf_specific_conductance_max = leaf_specific_conductance_max)
+  n <- max(length(layered), vapply(scalars, length, integer(1)))
+  if (n == 0L) {
+    stop("nothing to ", verb, ": every driver has length zero", call. = FALSE)
+  }
+  nms <- names(scalars)
+  scalars <- lapply(seq_along(scalars), function(i) {
+    .recycle_to(scalars[[i]], n, nms[[i]])
+  })
+  names(scalars) <- nms
+  depths <- if (is.null(soil_depth)) NULL else
+    .recycle_to(.as_layer_list(soil_depth, "soil_depth"), n, "soil_depth")
+  networks <- if (is.null(root_network)) {
+    NULL
+  } else if (inherits(root_network, "RootNetwork")) {
+    rep(list(root_network), n)
+  } else {
+    .recycle_to(root_network, n, "root_network")
+  }
+  list(n = n, layered = .recycle_to(layered, n, "psi_soil"), scalars = scalars,
+       depths = depths, networks = networks)
 }
 
 .recycle_to <- function(x, n, what) {

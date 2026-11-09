@@ -113,8 +113,13 @@ includes <- c("-I", shQuote(deps[["phylloptim"]]),
 # not be. CMakeLists.txt states the same exclusion as `if(EXISTS .../src/Tape.cpp)`,
 # and `make all` and cpp-tests.yml both run it from a checkout, where the tape is.
 for (prog in c("test_leaf", "test_supplied_rows", "test_golden", "test_primitives")) {
-  src <- paste0(prog, ".cpp")
-  message("\n== ", src)
+  # test_leaf is one program from several sources, a part per subsystem.
+  src <- if (prog == "test_leaf") {
+    c("test_leaf.cpp", sort(Sys.glob("test_leaf_*.cpp")))
+  } else {
+    paste0(prog, ".cpp")
+  }
+  message("\n== ", paste(src, collapse = " "))
   status <- system2(cxx, c(cxxstd, "-O2", "-Wall", "-Wextra",
                            "-Wno-unused-parameter", includes,
                            shQuote(src), "-o", shQuote(prog)))

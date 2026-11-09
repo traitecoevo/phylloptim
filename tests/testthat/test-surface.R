@@ -9,15 +9,6 @@
 # pin the friendly path against the raw one, so the chain reaches the golden
 # file from both.
 
-# The configuration plant runs, which is not the default: TF24 on the collar
-# route over the multi-layer supply. Tests of layer profiles and of the collar
-# solve name it through this.
-plant_leaf <- function(traits = leaf_traits(), control = leaf_control()) {
-  l <- leaf_model(traits, control, leaf_supply_multilayer())
-  l$set_model("TF24", "collar")
-  l
-}
-
 test_that("leaf_traits() and leaf_control() partition the C++ constructor", {
   # Between them they must cover the 19 constructor arguments exactly once --
   # no argument silently dropped (which would leave it at whatever the
