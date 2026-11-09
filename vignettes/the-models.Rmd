@@ -609,6 +609,27 @@ The **thermal cost** (`use_thermal_cost_`) adds a sigmoid penalty in leaf temper
 
 The thermal cost is inert on its own, without the energy balance. With a prescribed leaf temperature the penalty is an additive constant in ψ, so it changes the value of the objective but not its argmax.
 
+## Thermal damage
+
+A third gate, `use_thermal_damage_`, also off by default and not drawn in the overview, carries what heat has already done to the leaf. Its states are an acclimation state `A_`, an impaired fraction `I_` and a damaged fraction `D_`. The functional fraction `F = 1 − I − D` scales both photosynthetic capacities, acclimation shifts their temperature optima, and the layer's maintenance costs add to dark respiration. The states are read when the drivers are set, so a caller sets them first. At one driver, an undamaged leaf with the gate on is the same leaf as with it off, and a leaf with 30% of its capacity impaired or damaged loses that share of Vcmax and draws less water:
+
+```{r}
+#| label: thermal-damage-gate
+damaged_leaf <- function(gate, I = 0, D = 0) {
+  l <- leaf_model()
+  l$use_thermal_damage_ <- gate
+  l$I_ <- I
+  l$D_ <- D
+  set_drivers(l, psi_soil = 1, PPFD = 1500, leaf_temp = 38)
+  l$optimise()
+  data.frame(gate = gate, I = I, D = D, F = l$functional_, vcmax = l$vcmax_,
+             A = l$assim_colimited_, E = l$transpiration_, psi_leaf = l$opt_psi_leaf_)
+}
+rbind(damaged_leaf(FALSE), damaged_leaf(TRUE), damaged_leaf(TRUE, I = 0.2, D = 0.1))
+```
+
+The states themselves move on a timescale of hours to days, which no single solve sees. `leaf_damage_trajectory()` integrates them through a temperature series, and `leaf_damage_gradient()` gives their exact sensitivities to the layer's parameters, for fitting it to a heat experiment.
+
 ## When the leaf cannot transpire
 
 Where the soil is drier than the stem's critical potential there is no interval to optimise over, and the leaf sits at its wet bound with its stomata shut: the leaf potential at which the supply delivers exactly what the cuticle loses. The package evaluates the objective there with the same expressions as an open leaf, so every output describes one consistent state and the shut leaf cannot disagree with the open one next to it.
