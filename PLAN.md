@@ -148,6 +148,17 @@ The steps land as commits on one PR at a time until the owner merges it, rather 
 
 F7 needs no step: both routes stay for every curve, as decided. After F, as an item of its own: the surface follows the energy balance for every curve (decision D7, #225).
 
+**#225, the surface follows the energy balance (design, 2026-11-09).** What the surface must carry with the gate on, each on its scalar and each with the solve's own value:
+
+- **Leaf temperature.** `T = Tair + (Rn - λ_v E)/g_total` is affine in the total flux `E` and, through `Rn`'s absorbed shortwave `α_PAR PPFD/upj`, in `PPFD`; `g_total` reads only drivers. So `T_S = T* + dT/dE (E_S - E*) + (α_PAR/upj)/g_total (PPFD_S - PPFD*)`, values from the solve, rows from the two slopes. Light's rows come only through this (the issue's wholly wrong PPFD rows).
+- **Everything that reads T:** `vcmax_at`, `jmax_at` (with the thermal cost's `1 - TC(T)` factor where on), `respiration_at`, and Γ* and Km, which the kernel reads as members today; the leaf deficit `D_leaf(T)` in `gc`'s flux-to-conductance factor; the cuticle's `g_min_factor(T)`; and the boundary layer's split, already carried. Γ* and Km join `PhotoCapacity` so the kernel reads them from it; at double they are the members, and the per-iteration functions must compile identically (checked as in #244).
+- **The first-order condition.** The surface's marginal `M` must equal `dprofit_at_collar_psi` at double, so it gains `dprofit_energy_balance_term` on the scalar, its central difference in T included (`at_temperatures_either_side`'s step, on capacities formed at `T_S ± h`).
+- **The collar's channel** (`collar_channel_at`): `dci/dcollar` and `dgc/dcollar` gain the temperature path, `T` moving with `E` and so with the collar.
+- **Curve costs that read T:** LeastCost's `W` reads `vcmax(T)`; ProfitMax's thermal cost reads `TC(T)`; their scalar forms take `T_S`.
+- **ProfitMax's |A|max.** With T free, |A| peaks inside the stream at half the sweep's points, not at `psi_crit`. The normaliser takes the argmax's rows by the envelope theorem where it is interior, and `psi_crit`'s where it is pinned; the switch is continuous in value. The owner's 2026-11-09 answer (smooth under the no-clamp rule) applies to the slope's kink there, measured before any smoothing is chosen.
+
+**Order, one PR each:** (1) temperature as a scalar input to the capacity and kernel, gate off bit-identical and the per-iteration functions instruction-identical; (2) TF24 and TF24_floor with the gate on, the refusal lifted for them, B6's referee passing with the gate on at every kind, and `test_transpose`'s rows; (3) CF77, JS22, CMax, SOX, JW26 and LeastCost; (4) ProfitMax, with its normaliser. plant can then differentiate a TF24 strategy with `use_energy_balance` set, which it takes up at its next pin.
+
 ### Decisions (agreed by the owner, 2026-11-02)
 
 - **D1. The closed form (F6) stays, frozen.** Its three curves carry "has a closed form" in their definitions, no new curve needs one, and it stays outside every gradient. Its three per-curve solvers stay in `closed_form.hpp`, outside the definition; frozen means no new curve adds one.
