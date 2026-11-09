@@ -791,13 +791,6 @@ public:
   // ⚠️ Kept only for plant's bindings, like psi_leaf (hazard 7).
   std::vector<double> f_r;
 
-  double atm_vpd = 2.0; //kPa
-  double ca = 40.0; // Pa
-  double atm_kpa = 101.3; //kPa
-  //partial pressure o2 (kPa)
-  double atm_o2_kpa = 21;
-  //leaf temperature (deg C)
-  double leaf_temp = 25;
   // Default soil-moisture content for the Medlyn beta_ factor.
   double theta_w = 0.2;  //m^3 m^-3
   double theta_fc = 0.5; //m^3 m^-3
@@ -869,7 +862,6 @@ public:
   // `converge` has no effect: the inverse always converges to a few ulps.
   double stem_curve_integral_inverse(double w, const char* caller = nullptr,
                                      bool converge = false) const;
-  double stem_curve_integral_inverse_deriv(double w) const;
   // G(inf) = stem_b Gamma(1/c) / c, the most the stem carries per unit conductance.
   double stem_curve_limit() const;
   // Q = G(inf) - G(psi), to its own relative precision, and its inverse; zero past

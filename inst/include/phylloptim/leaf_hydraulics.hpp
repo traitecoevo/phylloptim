@@ -357,12 +357,6 @@ inline double Leaf::stem_curve_integral_inverse(double w, const char* caller,
   return vulnerability_integral_inverse(*stem_curve_, std::min(w, G_inf), stem_b);
 }
 
-inline double Leaf::stem_curve_integral_inverse_deriv(double w) const {
-  // dpsi/dG = 1/G'(psi) at the inverse: the forward slope's reciprocal, so there
-  // is one definition of this number.
-  return 1.0 / stem_curve_integral_deriv(stem_curve_integral_inverse(w));
-}
-
 inline double Leaf::stem_curve_complement(double psi, const char* caller) const {
   if (psi < 0.0) {
     stem_curve_out_of_domain(0.0, std::numeric_limits<double>::infinity(), psi,

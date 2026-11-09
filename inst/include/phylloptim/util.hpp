@@ -62,14 +62,6 @@ inline std::string format_double(double x) {
 
 inline bool is_finite(double x) { return std::isfinite(x); }
 
-// Use this to be explicit when a deliberate floating-point equality test is
-// being made (e.g. checking a value is exactly the one we set).
-inline bool identical(double a, double b) { return a == b; }
-
-template <typename T> T clamp(T x, T min_val, T max_val) {
-  return std::max(std::min(x, max_val), min_val);
-}
-
 // log(1 + exp(x)) and its slope, the logistic, in the forms that do not
 // overflow. The smooth replacement for a max(0, x), at a width the caller
 // scales x by; every soft floor and soft cap in the leaf is one of these.

@@ -45,24 +45,9 @@ double uniroot(Function f, double min, double max, double tol,
 // per step. Judge smoothness target by target, on the bracket actually handed in:
 // the leaf's ci, soil-to-collar and collar residuals qualify. Unlike boost::bisect it
 // throws on a non-finite or same-sign bracket, so guard upstream wherever a
-// degenerate bracket can occur.
-template <typename Function>
-double uniroot_smooth(Function f, double min, double max, double tol,
-                      size_t max_iterations) {
-  using boost::math::tools::toms748_solve;
-  boost::uintmax_t it = max_iterations;
-  std::pair<double, double> root = toms748_solve(
-      f, min, max, internals::uniroot_tol(tol, tol), it);
-  if (it >= static_cast<boost::uintmax_t>(max_iterations)) {
-    util::stop_infeasible("root_find_iterations",
-                          "exceeded max_iterations");
-  }
-  return (root.first + root.second) / 2.0;
-}
-
-// Same solver, given f at both ends, returning the final bracket rather than its
-// midpoint for a caller that needs the root from one side: f(first) and f(second)
-// differ in sign (or one is zero).
+// degenerate bracket can occur. The caller hands over f at both ends, which it has
+// evaluated to choose the bracket, and gets the final bracket back: f(first) and
+// f(second) differ in sign (or one is zero).
 template <typename Function>
 std::pair<double, double> uniroot_smooth_bracket(Function f, double min,
                                                  double max, double f_min,
@@ -79,9 +64,9 @@ std::pair<double, double> uniroot_smooth_bracket(Function f, double min,
   return root;
 }
 
-// Same solver, for a caller that has already evaluated both ends, as the collar
-// solve must to classify its optimum: saves two evaluations, each carrying a
-// nested ci root-find.
+// The same, returning the final bracket's midpoint. Written out rather than
+// calling the bracket form: through the extra call the collar search compiled
+// several instructions longer.
 template <typename Function>
 double uniroot_smooth(Function f, double min, double max, double f_min,
                       double f_max, double tol, size_t max_iterations) {
