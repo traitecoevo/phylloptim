@@ -1374,10 +1374,13 @@ public:
 
   template <CostCurve K>
   double evaluate_psi_leaf(double target_psi_leaf);
+  // Calls `read` with the temperature block at leaf_temp + temp_fd_step,
+  // then at leaf_temp - temp_fd_step, and restores every member the block
+  // writes; a member added to update_temperature_dependent_params must be
+  // added here, or the leaf stays a step off.
+  template <class F> void at_temperatures_either_side(double leaf_temp, F read);
   // d/dTleaf of what `read` takes from the temperature block, by a central
-  // difference of the block. It restores every member the block writes; a
-  // member added to update_temperature_dependent_params must be added here and
-  // to dprofit_energy_balance_term, or the leaf stays 1e-3 degrees off.
+  // difference over at_temperatures_either_side.
   template <class F> double temp_deriv(double leaf_temp, F read);
   // dVcmax/dTleaf, the same way and with the same restore (LeastCost's capacity
   // cost reads vcmax_, so its slope in Tleaf does).
@@ -1394,7 +1397,7 @@ public:
   // path. `E_s`, `r_star`, `drstar_dpsi` and `dgc_dT_residual` are the residual
   // conductance's terms, exact zeros at g_min = 0; derivation at the definition.
   template <CostCurve K>
-  double dprofit_energy_balance_term(double ci, double gc, double g_ci,
+  [[gnu::noinline]] double dprofit_energy_balance_term(double ci, double gc, double g_ci,
                                      double inv_atm, double gc_const,
                                      double A_prime, double dgc_dpsileaf,
                                      double dgc_dpsi, double dpsileaf_dpsi,
@@ -1631,6 +1634,10 @@ public:
   // hand-written twin that could disagree with it by a finite, plausible amount.
   template <typename T>
   T assim_slope_at(const T& ci, const PhotoCapacity<T>& cap) const;
+  // dA/dci at double on the seated capacity, by one forward pass through the
+  // kernel assim_colimited() instantiates: the first-order conditions' A'. Not
+  // assim_slope_at, whose general form costs the collar solve a tenth.
+  double assim_slope(double ci) const;
   template <typename T>
   T cost_slope_at(const T& sigma, const leaf_pars<T>& pars) const;
 

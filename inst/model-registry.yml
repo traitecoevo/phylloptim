@@ -654,11 +654,10 @@ parameters:
     symbol: 'h'
     units: 'K'
     class: constant
-    meaning: 'fixed, absolute step of the central difference for $\partial A/\partial T_\mathrm{leaf}$ inside the optimiser'
+    meaning: 'fixed, absolute step of the central differences in leaf temperature: $\partial A/\partial T_\mathrm{leaf}$ inside the optimiser and every temperature slope (at_temperatures_either_side)'
     source: code
     placeholder: false
-    literal: 1.0e-3
-    code: phylloptim::Leaf::dprofit_energy_balance_term
+    code: phylloptim::temp_fd_step
   boundary_scan_n_:
     section: energy_balance
     symbol: 'n_\mathrm{scan}'

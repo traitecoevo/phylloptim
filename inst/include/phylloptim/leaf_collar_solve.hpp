@@ -446,6 +446,11 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
   // and for a leaf with no objective to maximise (below).
   double lo = bound_a;
   double hi = bound_b;
+  // Every exit returns through this, so none returns a collar unclassified.
+  const auto classified = [this](OperatingPointKind kind, double collar) {
+    operating_point_kind_ = kind;
+    return collar;
+  };
   const auto place_at_wet_bound = [&]() {
     const double a = polish_bracket_bound(bound_a, supply_psi_soil(), 0);
     wet_bound_root_ = a;
@@ -490,8 +495,7 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
     // the no-flow sentinel at g_min = 0, should placement find no step.
     lo = g_min > 0.0 ? bound_a : bound_a + 1e-6 * width;
     place_at_wet_bound();
-    operating_point_kind_ = OperatingPointKind::BoundarySoil;
-    return lo;
+    return classified(OperatingPointKind::BoundarySoil, lo);
   }
 
   // The WET endpoint. With g_min > 0 it is an ordinary point, tried as-is. At
@@ -600,17 +604,17 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
   // partial feasibility said would be finite (NonFiniteGradient). A NaN would
   // otherwise fail both pin tests below and reach the root-find unbracketed.
   if (!ok_lo || !ok_hi || !std::isfinite(f_lo) || !std::isfinite(f_hi)) {
-    operating_point_kind_ =
+    const OperatingPointKind kind =
         ((ok_lo && !std::isfinite(f_lo)) || (ok_hi && !std::isfinite(f_hi)))
             ? OperatingPointKind::NonFiniteGradient
             : OperatingPointKind::SolverRefused;
-    return util::golden_section_max(
-        [&](double bound) {
-          const double psi_leaf =
-              find_psi_leaf_from_psi_root(bound, supply_psi_soil());
-          return profit_psi_leaf_for<K>(psi_leaf, bound);
-        },
-        bound_a, bound_b, GSS_tol_abs);
+    return classified(kind, util::golden_section_max(
+                                [&](double bound) {
+                                  const double psi_leaf = find_psi_leaf_from_psi_root(
+                                      bound, supply_psi_soil());
+                                  return profit_psi_leaf_for<K>(psi_leaf, bound);
+                                },
+                                bound_a, bound_b, GSS_tol_abs));
   }
 
   // A CONSTRAINED optimum: profit still climbs at one end, so the answer is that
@@ -635,30 +639,24 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
   }
 
   if (f_lo <= 0.0 && f_hi >= 0.0) {
-    operating_point_kind_ = OperatingPointKind::SolverRefused;
     const double p_lo = profit_psi_leaf_for<K>(
         find_psi_leaf_from_psi_root(lo, supply_psi_soil()), lo);
     const double p_hi = profit_psi_leaf_for<K>(
         find_psi_leaf_from_psi_root(hi, supply_psi_soil()), hi);
-    if (!std::isfinite(p_hi)) {
-      return lo;
-    }
-    if (!std::isfinite(p_lo)) {
-      return hi;
-    }
-    return p_hi > p_lo ? hi : lo;
+    const double larger = !std::isfinite(p_hi)   ? lo
+                          : !std::isfinite(p_lo) ? hi
+                          : p_hi > p_lo          ? hi
+                                                 : lo;
+    return classified(OperatingPointKind::SolverRefused, larger);
   }
   if (f_lo <= 0.0) {
-    operating_point_kind_ = OperatingPointKind::BoundarySoil;
-    return lo;
+    return classified(OperatingPointKind::BoundarySoil, lo);
   }
   if (f_hi >= 0.0) {
-    operating_point_kind_ = OperatingPointKind::BoundaryDry;
-    return hi;
+    return classified(OperatingPointKind::BoundaryDry, hi);
   }
 
   // Interior stationary point: f_lo > 0 > f_hi, a valid bracket.
-  operating_point_kind_ = OperatingPointKind::Interior;
   double root;
   if (!bounded && decided && std::isfinite(dry_bound_root_)) {
     // Near the end the marginal is close to linear in the log of the distance
@@ -671,8 +669,7 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
                             ? dprofit(end - dry_pin_resolution, &ok_in)
                             : 0.0;
     if (!(ok_in && std::isfinite(f_in) && f_in < 0.0)) {
-      operating_point_kind_ = OperatingPointKind::BoundaryDry;
-      return end;
+      return classified(OperatingPointKind::BoundaryDry, end);
     }
     const auto in_log_distance = [&](double s) {
       return dprofit(end - std::exp(s));
@@ -698,12 +695,11 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
         dry_bound_root_ = polish_bracket_bound(bound_b, supply_psi_soil(), 1);
       }
       if (dry_bound_root_ - root < dry_pin_resolution) {
-        operating_point_kind_ = OperatingPointKind::BoundaryDry;
-        return dry_bound_root_;
+        return classified(OperatingPointKind::BoundaryDry, dry_bound_root_);
       }
     }
   }
-  return root;
+  return classified(OperatingPointKind::Interior, root);
 }
 
 template <Leaf::CostCurve K>
@@ -912,7 +908,6 @@ inline std::vector<double> Leaf::dprofit_droot_collar_psi_checked(
 
 template <Leaf::CostCurve K>
 inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
-  using AD = xad::fwd<double>::active_type;
   const double psi = opt_root_psi;
   // Infeasible until the exits below are passed: their 0.0 must be
   // distinguishable from a stationary point.
@@ -989,8 +984,7 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
 
   // A'(ci) by forward AD of the kernel assim_colimited() instantiates, so it is
   // the derivative of the function evaluated, not of a hand-kept mirror.
-  AD ci_ad = ci;            xad::derivative(ci_ad) = 1.0;
-  const double A_prime = xad::derivative(assim_colimited_kernel(ci_ad));
+  const double A_prime = assim_slope(ci);
   const double C_prime = cost_deriv<K>(psi_leaf, psi);
 
   // gc and its partials, on the stem table's own slope. The residual flux reads

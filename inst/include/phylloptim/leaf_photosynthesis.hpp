@@ -513,6 +513,13 @@ inline S Leaf::kernel_slope_at(Kernel&& kernel, const char* what, const S& x,
   }
 }
 
+inline double Leaf::assim_slope(double ci) const {
+  using AD = xad::fwd<double>::active_type;
+  AD ci_ad = ci;
+  xad::derivative(ci_ad) = 1.0;
+  return xad::derivative(assim_colimited_kernel(ci_ad));
+}
+
 template <typename T>
 inline T Leaf::assim_slope_at(const T& ci, const PhotoCapacity<T>& cap) const {
   return kernel_slope_at<T>(

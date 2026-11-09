@@ -21,7 +21,6 @@ namespace phylloptim {
 template <Leaf::CostCurve K>
 inline double Leaf::dprofit_dpsi_leaf(double psi_leaf, double psi_upstream,
                                       bool* feasible) {
-  using AD = xad::fwd<double>::active_type;
   if (feasible != nullptr) {
     *feasible = false;
   }
@@ -60,9 +59,7 @@ inline double Leaf::dprofit_dpsi_leaf(double psi_leaf, double psi_upstream,
     *feasible = true;
   }
 
-  AD ci_ad = ci;
-  xad::derivative(ci_ad) = 1.0;
-  const double A_prime = xad::derivative(assim_colimited_kernel(ci_ad));
+  const double A_prime = assim_slope(ci);
 
   const double gc_const =
       atm_kpa_ * kg_to_mol_h2o / vpd_leaf_ / H2O_CO2_stom_diff_ratio_;

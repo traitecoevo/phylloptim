@@ -1598,10 +1598,10 @@ inline double Leaf::lambda_temperature_slope(double psi_leaf, double psi_upstrea
   if (dT_dE == 0.0) {
     return 0.0;
   }
-  const double h = 1e-3;
+  const double h = temp_fd_step;
   double vcmax_either_side[2] = {0.0, 0.0};
   int k = 0;
-  temp_deriv(Tleaf, [&] { return vcmax_either_side[k++] = vcmax_; });
+  at_temperatures_either_side(Tleaf, [&] { vcmax_either_side[k++] = vcmax_; });
   // The stomatal flux unclamped, so a cost rebuilding E from gc_s and r_star
   // gets this E back below the wet bound too, where curve_lambda() can ask.
   const double r_star = residual_flux(psi_upstream, E);
