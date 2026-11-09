@@ -5356,12 +5356,9 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
                          : "uptake[" + std::to_string(j - n_named) + "]") +
             "/d" + par_name(k);
         if (unread(k)) {
-          // The row is exactly zero. The difference is too, but for one source of
-          // rounding: ProfitMax's search for |A|max reads TF24's marginal plus
-          // its cost's slope, which cancel to rounding, so with the balance on
-          // an interior peak moves in the last bit with TF24's parameters. Held
-          // to the solve's own noise floor (hazard 15).
-          ok(rows[j] == 0.0 && std::abs(fd[j]) <= 1e-10 * mag[j] / h,
+          // The row is exactly zero, and so is the difference: the solve reads
+          // nothing of the parameter, not even through rounding.
+          ok(rows[j] == 0.0 && fd[j] == 0.0,
              "a parameter the solve does not read has a zero row and a zero "
              "difference" + at + ": row " + pl::util::format_double(rows[j]) +
                  ", difference " + pl::util::format_double(fd[j]));

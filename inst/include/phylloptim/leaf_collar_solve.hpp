@@ -906,33 +906,12 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
     return 0.0;  // shut-down / infeasible: no informative gradient
   }
 
-  // With the energy balance on, the temperature parameters are seated at this
-  // candidate's Tleaf(E), as the objective is: otherwise this is the first-order
-  // condition of the air-temperature model. Same order as
-  // set_leaf_states_rates_from_psi_leaf: transpiration, temperature, ci solve.
-  const double E = transpiration(psi_leaf, psi);
-  double dT_dE = 0.0;
-  double Tleaf_here = leaf_temp_;
-  if (use_energy_balance_) {
-    Tleaf_here = leaf_temp_from_E(E, &dT_dE);
-    update_temperature_dependent_params(Tleaf_here);
-    set_leaf_vpd(Tleaf_here);
-  }
-
-  // Below the wet bound the stomatal flux is zero, the corner the solve keeps
-  // (E_s >= 0); with nothing conducting (the g_min = 0 wet bound) there is no
-  // derivative to take.
-  const double r_star = residual_flux(psi, E);
-  const double E_s = E - r_star < 0.0 ? 0.0 : E - r_star;
-  const double cuticle = cuticular_cond_CO2();
-  if (E_s == 0.0 && cuticle == 0.0) {
+  FocPoint at;
+  if (!foc_point(psi_leaf, psi, at)) {
     return 0.0;
   }
-
-  const double ci = psi_leaf_to_ci(psi_leaf, psi);
-  if (!std::isfinite(ci)) {
-    return 0.0;
-  }
+  const double dT_dE = at.dT_dE, Tleaf_here = at.Tleaf, r_star = at.r_star,
+               E_s = at.E_s, cuticle = at.cuticle, ci = at.ci;
 
   // The stem table's slope at either end, each read once: a read is an
   // out-of-line table lookup, and the compiler does not share two of them.

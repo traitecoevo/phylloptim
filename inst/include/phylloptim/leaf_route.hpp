@@ -14,11 +14,37 @@
 
 namespace phylloptim {
 
+inline bool Leaf::foc_point(double psi_leaf, double psi_upstream, FocPoint& p) {
+  // With the energy balance on, the temperature parameters are seated at this
+  // candidate's Tleaf(E), as the objective is: otherwise this is the first-order
+  // condition of the air-temperature model. Same order as
+  // set_leaf_states_rates_from_psi_leaf: transpiration, temperature, ci solve.
+  p.E = transpiration(psi_leaf, psi_upstream);
+  p.dT_dE = 0.0;
+  p.Tleaf = leaf_temp_;
+  if (use_energy_balance_) {
+    p.Tleaf = leaf_temp_from_E(p.E, &p.dT_dE);
+    update_temperature_dependent_params(p.Tleaf);
+    set_leaf_vpd(p.Tleaf);
+  }
+  // Below the wet bound the stomatal flux is zero, the corner the solve keeps
+  // (E_s >= 0); with nothing conducting (the g_min = 0 wet bound) there is no
+  // derivative to take.
+  p.r_star = residual_flux(psi_upstream, p.E);
+  p.E_s = p.E - p.r_star < 0.0 ? 0.0 : p.E - p.r_star;
+  p.cuticle = cuticular_cond_CO2();
+  if (p.E_s == 0.0 && p.cuticle == 0.0) {
+    return false;
+  }
+  p.ci = psi_leaf_to_ci(psi_leaf, psi_upstream);
+  return std::isfinite(p.ci);
+}
+
 // dprofit/dpsi_leaf = h'(A) A'(ci) dci/dpsi_leaf - C'(psi_leaf), upstream held
-// fixed, for every curve through its `BenefitLink` h. A deliberate copy of
-// dprofit_at_collar_psi's algebra: equal in value at dpsileaf_dpsi = 1 and
-// dgc_dpsi = 0, but not in operation order, which the golden files pin.
-template <Leaf::CostCurve K>
+// fixed, for every curve through its `BenefitLink` h. It shares foc_point with
+// dprofit_at_collar_psi; the algebra after ci is that function's at
+// dpsileaf_dpsi = 1 and dgc_dpsi = 0, written out in its own operation order.
+template <Leaf::CostCurve K, bool with_cost>
 inline double Leaf::dprofit_dpsi_leaf(double psi_leaf, double psi_upstream,
                                       bool* feasible) {
   if (feasible != nullptr) {
@@ -30,30 +56,17 @@ inline double Leaf::dprofit_dpsi_leaf(double psi_leaf, double psi_upstream,
     return 0.0;
   }
 
-  const double E = transpiration(psi_leaf, psi_upstream);
-  double dT_dE = 0.0;
-  double Tleaf_here = leaf_temp_;
-  if (use_energy_balance_) {
-    Tleaf_here = leaf_temp_from_E(E, &dT_dE);
-    update_temperature_dependent_params(Tleaf_here);
-    set_leaf_vpd(Tleaf_here);
-  }
-
-  // As on the collar route: the stomatal flux the residual leaves, read as
-  // zero below the wet bound, and no derivative where nothing conducts.
-  const double r_star = residual_flux(psi_upstream, E);
-  const double E_s = E - r_star < 0.0 ? 0.0 : E - r_star;
-  const double cuticle = cuticular_cond_CO2();
-  if (E_s == 0.0 && cuticle == 0.0) {
+  FocPoint at;
+  if (!foc_point(psi_leaf, psi_upstream, at)) {
     return 0.0;
   }
+  const double dT_dE = at.dT_dE, Tleaf_here = at.Tleaf, r_star = at.r_star,
+               E_s = at.E_s, cuticle = at.cuticle, ci = at.ci;
 
-  const double ci = psi_leaf_to_ci(psi_leaf, psi_upstream);
-  if (!std::isfinite(ci)) {
-    return 0.0;
+  double C_prime = 0.0;
+  if constexpr (with_cost) {
+    C_prime = cost_deriv<K>(psi_leaf, psi_upstream);
   }
-
-  const double C_prime = cost_deriv<K>(psi_leaf, psi_upstream);
 
   if (feasible != nullptr) {
     *feasible = true;

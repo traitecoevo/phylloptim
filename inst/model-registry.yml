@@ -2777,7 +2777,6 @@ equations:
     latex: |
       \xi = \sqrt{Q/\lambda}, \quad c_i = \frac{c_a\,\xi}{\xi + \sqrt{D_\mathrm{leaf}}}, \quad A = A(c_i), \quad E = E(A, c_i), \quad g_c = g_c(E)
     code: phylloptim::closed_form::evaluate_at_lambda
-    also: [phylloptim::closed_form::evaluate_at]
     reads: []
     writes: []
     kind: closed_form
@@ -2801,7 +2800,7 @@ equations:
       \psi_1 = \psi_0 - \frac{E_\mathrm{supply}(\psi_0) - E(\psi_0)}{k_{max} f(\psi_0) - dE/d\psi};\quad
       \beta_2 = 1/c:\ \xi = \Xi,\ \psi^* = \psi(E)
     code: phylloptim::closed_form::solve
-    also: [phylloptim::closed_form::solve_exact_beta2, phylloptim::closed_form::beta2_is_exact]
+    also: [phylloptim::closed_form::newton_on_supply, phylloptim::closed_form::solve_exact_beta2, phylloptim::closed_form::beta2_is_exact]
     reads: [TF24_cost_scale, TF24_beta2, stem_c, stem_b, leaf_specific_conductance_max, psi_crit, H2O_CO2_stom_diff_ratio_, kg_to_mol_h2o]
     writes: []
     kind: closed_form
@@ -2826,6 +2825,7 @@ equations:
       \psi_0 = \min\!\big(\psi(E)|_{\lambda = \lambda_o},\ \psi_\mathrm{crit}(1 - 10^{-9})\big), \quad
       \psi_1 = \psi_0 - \frac{E_\mathrm{supply}(\psi_0) - E(\psi_0)}{k_{max} f(\psi_0) - dE/d\psi}, \quad \lambda = \lambda_\mathrm{TF24} + \lambda_o
     code: phylloptim::closed_form::solve_TF24_floor
+    also: [phylloptim::closed_form::newton_on_supply]
     reads: [TF24_floor_lambda_o, psi_crit, leaf_specific_conductance_max, H2O_CO2_stom_diff_ratio_, kg_to_mol_h2o]
     writes: []
     kind: closed_form

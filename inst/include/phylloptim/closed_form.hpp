@@ -167,11 +167,6 @@ inline Solution evaluate_at_lambda(Leaf &l, double psi, double lambda, double Q,
   return Solution{psi, ci, assim, E, stom_cond_from_E(l, E), xi};
 }
 
-// `evaluate_at_lambda` at TF24's lambda.
-inline Solution evaluate_at(Leaf &l, double psi, double Q, double sqrt_D) {
-  return evaluate_at_lambda(l, psi, l.lambda_TF24(psi), Q, sqrt_D);
-}
-
 // The wet-end starting potential in units of stem_b: the root of
 //     h(p) = (p - p_up) * p^(n/2) - C
 // the power-law demand against a supply linearised at the wet end. The p_up term
@@ -203,35 +198,24 @@ inline double wet_end_p(double C, double p_up, double n, double p_crit) {
   return p;
 }
 
-// General TF24_beta2: power-law leading order, then `newton_steps` Newton steps on
-// the supply-minus-demand residual. Requires set_physiology. Leave newton_steps
-// at 1 (note 1).
-inline Solution solve(Leaf &l, double psi_upstream, int newton_steps = 1) {
-  require_prescribed_temperature(l, "closed_form::solve");
+// `newton_steps` Newton steps on the supply-minus-demand residual from `psi`,
+// for a curve whose lambda is `lambda_at(psi)` and whose lambda's slope is
+// TF24's (TF24_floor's lambda_o differentiates away). Each step stays strictly
+// inside (psi_upstream, psi_crit): below psi_upstream no water moves and the
+// residual's supply term is negative, which Newton would chase outward. A step
+// that is not finite returns NaN, which fails within_guard: the row falls back
+// to the exact solve.
+template <class LambdaAt>
+inline double newton_on_supply(Leaf &l, double psi, double psi_upstream,
+                               int newton_steps, double Q, double sqrt_D,
+                               LambdaAt lambda_at) {
   const double kmax = l.leaf_specific_conductance_max_;
-  const double sqrt_D = std::sqrt(l.vpd_leaf_);
-  const double Q = uso_group(l);
-  const double K_lambda = l.TF24_cost_scale * l.TF24_beta2 * l.stem_c / (l.stem_b * kmax);
-  const double Xi = std::sqrt(Q / K_lambda);
-  const double n = l.stem_c * l.TF24_beta2 - 1.0;
   const double electron_transport = l.electron_transport();
-
-  // Leading order, taking kappa from the wet-end limit A(ci -> ca).
-  const double assim_wet = l.assim_colimited(l.ca_ * (1.0 - 1e-9));
-  const double kappa = l.H2O_CO2_stom_diff_ratio_ * 1e-3 * assim_wet /
-                       (l.ca_ * kg_to_mol_h2o);
-  const double C = kappa * sqrt_D * Xi / (kmax * l.stem_b);
-  const double p_crit = l.psi_crit / l.stem_b;
-  double p = wet_end_p(C, psi_upstream / l.stem_b, n, p_crit);
-
   for (int k = 0; k < newton_steps; ++k) {
-    const double psi = p * l.stem_b;
-    // The bracket, not just positivity: below psi_upstream no water moves and the
-    // residual's supply term is negative, which Newton would chase outward.
     if (!(psi > psi_upstream) || psi >= l.psi_crit) {
       break;
     }
-    const double lambda = l.lambda_TF24(psi);
+    const double lambda = lambda_at(psi);
     const double xi = std::sqrt(Q / lambda);
     const double ci = l.ca_ * xi / (xi + sqrt_D);
     const double assim = l.assim_colimited(ci);
@@ -245,18 +229,46 @@ inline Solution solve(Leaf &l, double psi_upstream, int newton_steps = 1) {
     // Residual: hydraulic supply minus stomatal demand, kg H2O m-2 s-1. Measuring
     // the supply from psi_upstream moves its value but not its slope kmax*f(psi).
     const double R = l.transpiration(psi, psi_upstream) - E;
-    const double dR =
-        kmax * std::exp(-std::pow(p, l.stem_c)) - dE_dci * dci_dxi * dxi_dpsi;
+    const double dR = kmax * l.proportion_of_conductivity(psi) -
+                      dE_dci * dci_dxi * dxi_dpsi;
     if (dR == 0.0 || !std::isfinite(R) || !std::isfinite(dR)) {
       break;
     }
-    double psi_next = psi - R / dR;
-    psi_next = std::max(psi_upstream,
-                        std::min(psi_next, l.psi_crit * (1.0 - 1e-9)));
-    p = psi_next / l.stem_b;
+    const double psi_next = psi - R / dR;
+    if (!std::isfinite(psi_next)) {
+      return std::numeric_limits<double>::quiet_NaN();
+    }
+    psi = std::max(psi_upstream, std::min(psi_next, l.psi_crit * (1.0 - 1e-9)));
   }
+  return psi;
+}
 
-  return evaluate_at(l, p * l.stem_b, Q, sqrt_D);
+// General TF24_beta2: power-law leading order, then `newton_steps` Newton steps on
+// the supply-minus-demand residual. Requires set_physiology. Leave newton_steps
+// at 1 (note 1).
+inline Solution solve(Leaf &l, double psi_upstream, int newton_steps = 1) {
+  require_prescribed_temperature(l, "closed_form::solve");
+  const double kmax = l.leaf_specific_conductance_max_;
+  const double sqrt_D = std::sqrt(l.vpd_leaf_);
+  const double Q = uso_group(l);
+  const double K_lambda = l.TF24_cost_scale * l.TF24_beta2 * l.stem_c / (l.stem_b * kmax);
+  const double Xi = std::sqrt(Q / K_lambda);
+  const double n = l.stem_c * l.TF24_beta2 - 1.0;
+
+  // Leading order, taking kappa from the wet-end limit A(ci -> ca).
+  const double assim_wet = l.assim_colimited(l.ca_ * (1.0 - 1e-9));
+  const double kappa = l.H2O_CO2_stom_diff_ratio_ * 1e-3 * assim_wet /
+                       (l.ca_ * kg_to_mol_h2o);
+  const double C = kappa * sqrt_D * Xi / (kmax * l.stem_b);
+  const double p_crit = l.psi_crit / l.stem_b;
+  const double p = wet_end_p(C, psi_upstream / l.stem_b, n, p_crit);
+  const double psi = newton_on_supply(l, p * l.stem_b, psi_upstream, newton_steps,
+                                      Q, sqrt_D,
+                                      [&](double x) { return l.lambda_TF24(x); });
+  if (!std::isfinite(psi)) {
+    return Solution{psi, psi, psi, psi, psi, psi};
+  }
+  return evaluate_at_lambda(l, psi, l.lambda_TF24(psi), Q, sqrt_D);
 }
 
 // TF24_beta2 == 1/stem_c: lambda is independent of psi (n = 0), so xi is constant
@@ -308,10 +320,8 @@ inline Solution solve_CF77(Leaf &l, double psi_upstream) {
 inline Solution solve_TF24_floor(Leaf &l, double psi_upstream,
                               int newton_steps = 1) {
   require_prescribed_temperature(l, "closed_form::solve_TF24_floor");
-  const double kmax = l.leaf_specific_conductance_max_;
   const double sqrt_D = std::sqrt(l.vpd_leaf_);
   const double Q = uso_group(l);
-  const double electron_transport = l.electron_transport();
 
   // Leading order: lambda == lambda_o, i.e. `solve_CF77` at this curve's price.
   const double xi0 = std::sqrt(Q / l.TF24_floor_lambda_o);
@@ -321,35 +331,10 @@ inline Solution solve_TF24_floor(Leaf &l, double psi_upstream,
                                         psi_upstream),
                         l.psi_crit * (1.0 - 1e-9));
 
-  for (int k = 0; k < newton_steps; ++k) {
-    // The bracket, not just positivity, for `solve()`'s reason.
-    if (!(psi > psi_upstream) || psi >= l.psi_crit) {
-      break;
-    }
-    const double lambda = l.lambda_TF24_floor(psi);
-    const double xi = std::sqrt(Q / lambda);
-    const double ci = l.ca_ * xi / (xi + sqrt_D);
-    const double assim = l.assim_colimited(ci);
-    const double dassim = dassim_dci(l, ci, electron_transport);
-    const double u = l.ca_ - ci;
-    const double E = transpiration_from_assim(l, assim, ci);
-    const double dE_dci = l.H2O_CO2_stom_diff_ratio_ * 1e-3 * l.vpd_leaf_ /
-                          kg_to_mol_h2o * (dassim * u + assim) / (u * u);
-    const double dci_dxi = l.ca_ * sqrt_D / ((xi + sqrt_D) * (xi + sqrt_D));
-    // lambda_o differentiates away, so TF24's derivative is this curve's.
-    const double dxi_dpsi = -0.5 * xi / lambda * dlambda_TF24(l, psi);
-    const double R = l.transpiration(psi, psi_upstream) - E;
-    const double dR = kmax * l.proportion_of_conductivity(psi) -
-                      dE_dci * dci_dxi * dxi_dpsi;
-    if (dR == 0.0 || !std::isfinite(R) || !std::isfinite(dR)) {
-      break;
-    }
-    const double psi_next = psi - R / dR;
-    if (!std::isfinite(psi_next)) {
-      break;
-    }
-    psi = std::max(psi_upstream,
-                   std::min(psi_next, l.psi_crit * (1.0 - 1e-9)));
+  psi = newton_on_supply(l, psi, psi_upstream, newton_steps, Q, sqrt_D,
+                         [&](double x) { return l.lambda_TF24_floor(x); });
+  if (!std::isfinite(psi)) {
+    return Solution{psi, psi, psi, psi, psi, psi};
   }
 
   return evaluate_at_lambda(l, psi, l.lambda_TF24_floor(psi), Q, sqrt_D);

@@ -1426,12 +1426,15 @@ inline void Leaf::prepare_profitmax() {
   // scan, whose argmax is piecewise constant in the parameters (hazard 3). One
   // maximisation of A suffices: |A| peaks at a minimum of A only where A < 0,
   // at closure or along a whole stream that cannot fix carbon (below). dA/dpsi
-  // is dJ/dpsi plus the cost derivative, for an identity link. Closure is
-  // excluded, as gsthermal drops it (`A[E == 0] <- NA`): the search starts one
-  // probe inside the wet bound.
+  // is TF24's first-order condition without its cost: TF24 has the identity
+  // link and a cost that reads no leaf temperature. Closure is excluded, as
+  // gsthermal drops it (`A[E == 0] <- NA`): the search starts one probe inside
+  // the wet bound.
+  static_assert(Curve<CostCurve::TF24>::link == BenefitLink::Identity &&
+                !Curve<CostCurve::TF24>::cost_reads_leaf_temperature,
+                "dA_of reads TF24's condition without its cost as dA/dpsi");
   const auto dA_of = [&](double psi, bool* ok) {
-    const double dJ = dprofit_dpsi_leaf<CostCurve::TF24>(psi, psi_soil, ok);
-    return dJ + cost_deriv<CostCurve::TF24>(psi, psi_soil);
+    return dprofit_dpsi_leaf<CostCurve::TF24, false>(psi, psi_soil, ok);
   };
   const double lo = psi_wet + 1e-9 * width;   // the open end: closure excluded
   double a_hi = -std::numeric_limits<double>::infinity();

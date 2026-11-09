@@ -99,43 +99,43 @@ golden_rows <- list(
   list(
     inputs = list(psi_soil = 0.5, ppfd = 1500, vpd = 0.5, layers = 1L),
     expected = list(
-      psi_leaf      = "0x1.709bdd973848bp+1",
-      opt_root_psi  = "0x1.066f206418756p+1",
-      ci            = "0x1.9f4d8353e5aeep+4",
-      assim         = "0x1.215ca9d9740e1p+4",
-      transpiration = "0x1.450032c3cb9c3p-16",
-      gc            = "0x1.0b2ace4d4c37fp-3",
-      profit        = "0x1.07970cd153bccp+4",
-      e_up          = "0x1.450032c3cb9c7p-16",
-      uptake        = "0x1.19e242571d857p-10"
+      psi_leaf      = "0x1.709bdd9738486p+1",
+      opt_root_psi  = "0x1.066f206418753p+1",
+      ci            = "0x1.9f4d8353e5aecp+4",
+      assim         = "0x1.215ca9d9740d7p+4",
+      transpiration = "0x1.450032c3cb9bcp-16",
+      gc            = "0x1.0b2ace4d4c37ap-3",
+      profit        = "0x1.07970cd153bc4p+4",
+      e_up          = "0x1.450032c3cb9c2p-16",
+      uptake        = "0x1.19e242571d852p-10"
     )
   ),
   list(
     inputs = list(psi_soil = 2.0, ppfd = 900, vpd = 2.0, layers = 3L),
     expected = list(
-      psi_leaf      = "0x1.b1bea0a2f4461p+1",
-      opt_root_psi  = "0x1.821841efd374cp+1",
+      psi_leaf      = "0x1.b1bea0a2f445ap+1",
+      opt_root_psi  = "0x1.821841efd3748p+1",
       ci            = "0x1.0de7939a33b55p+3",
       assim         = "0x1.b2e0241264c97p+1",
       transpiration = "0x1.b29d0f355e608p-18",
       gc            = "0x1.654643c265babp-7",
-      profit        = "0x1.8a7e20d88dae8p-1",
-      e_up          = "0x1.b29d0f355e61p-18",
-      uptake        = "0x1.78f45d1fcb36fp-12"
+      profit        = "0x1.8a7e20d88db28p-1",
+      e_up          = "0x1.b29d0f355e6p-18",
+      uptake        = "0x1.78f45d1fcb361p-12"
     )
   ),
   list(
     inputs = list(psi_soil = 4.0, ppfd = 500, vpd = 1.0, layers = 5L),
     expected = list(
-      psi_leaf      = "0x1.806ce1023184p+2",
-      opt_root_psi  = "0x1.3917d4d02abb8p+2",
-      ci            = "0x1.0ec2d5552da8ap+3",
-      assim         = "0x1.aa12ab799f089p+1",
-      transpiration = "0x1.aa2d745ec3e0dp-19",
-      gc            = "0x1.5e56f599ccf32p-7",
-      profit        = "-0x1.db03fa1b158d7p+1",
-      e_up          = "0x1.aa2d745ec3e07p-19",
-      uptake        = "0x1.71a34488313e8p-13"
+      psi_leaf      = "0x1.806ce10231835p+2",
+      opt_root_psi  = "0x1.3917d4d02abb7p+2",
+      ci            = "0x1.0ec2d5552da82p+3",
+      assim         = "0x1.aa12ab799f061p+1",
+      transpiration = "0x1.aa2d745ec3decp-19",
+      gc            = "0x1.5e56f599ccf18p-7",
+      profit        = "-0x1.db03fa1b158efp+1",
+      e_up          = "0x1.aa2d745ec3dfbp-19",
+      uptake        = "0x1.71a34488313dep-13"
     )
   ),
   list(
@@ -229,30 +229,30 @@ golden_rows_40 <- list(
     inputs = list(psi_soil = 2.0, ppfd = 900, vpd = 2.0, layers = 1L,
                   leaf_temp = 40.0),
     expected = list(
-      psi_leaf      = "0x1.3c43d2872d74ep+1",
-      opt_root_psi  = "0x1.27d38b4c6d6a5p+1",
-      ci            = "0x1.a8bad8ee963ep+4",
-      assim         = "0x1.b63a5431b611cp-1",
-      transpiration = "0x1.00e0c211f2c13p-18",
-      gc            = "0x1.a65564b23bf9dp-8",
-      profit        = "-0x1.c63090c20adb8p-4",
-      e_up          = "0x1.00e0c211f2c2ap-18",
-      uptake        = "0x1.bd98ec0988d45p-13"
+      psi_leaf      = "0x1.3c43d2872d751p+1",
+      opt_root_psi  = "0x1.27d38b4c6d6a6p+1",
+      ci            = "0x1.a8bad8ee963e4p+4",
+      assim         = "0x1.b63a5431b6134p-1",
+      transpiration = "0x1.00e0c211f2c24p-18",
+      gc            = "0x1.a65564b23bfbap-8",
+      profit        = "-0x1.c63090c20ad8p-4",
+      e_up          = "0x1.00e0c211f2c31p-18",
+      uptake        = "0x1.bd98ec0988d51p-13"
     )
   ),
   list(
     inputs = list(psi_soil = 0.5, ppfd = 1500, vpd = 0.5, layers = 3L,
                   leaf_temp = 40.0),
     expected = list(
-      psi_leaf      = "0x1.ca0d19a92a8a3p+0",
-      opt_root_psi  = "0x1.8cdab5adcbb34p+0",
-      ci            = "0x1.1428b22905327p+5",
-      assim         = "0x1.3ba438c0f6b7dp+1",
-      transpiration = "0x1.c63fbdb8a35c3p-18",
-      gc            = "0x1.756a741059ccp-5",
-      profit        = "0x1.1563763925828p+1",
-      e_up          = "0x1.c63fbdb8a35cdp-18",
-      uptake        = "0x1.89fc2b687021dp-12"
+      psi_leaf      = "0x1.ca0d19a92bc52p+0",
+      opt_root_psi  = "0x1.8cdab5adcca24p+0",
+      ci            = "0x1.1428b22905533p+5",
+      assim         = "0x1.3ba438c0f71b9p+1",
+      transpiration = "0x1.c63fbdb8a53e4p-18",
+      gc            = "0x1.756a74105b585p-5",
+      profit        = "0x1.156376392582fp+1",
+      e_up          = "0x1.c63fbdb8a53efp-18",
+      uptake        = "0x1.89fc2b6871c4p-12"
     )
   )
 )

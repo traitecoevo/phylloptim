@@ -78,7 +78,25 @@ static_assert(Leaf::residual_cap_power == 8.0,
               "residual_cap_factor takes the eighth root by three square roots; "
               "another power needs another expression");
 
-// r* = r (1 + (r/E_inf)^p)^(-1/p), the smooth minimum of the demand and the
+// The smooth minimum r (1 + (r/cap)^p)^(-1/p) of a demand and a cap, at any
+// scalar, in three regimes chosen at double: the cap itself past
+// residual_cap_q_limit, r where the cap is inert (its rows below double
+// precision), and the soft minimum between.
+template <class S>
+inline S soft_cap(const S& r, const S& cap) {
+  const S q = r / cap;
+  const double qd = odelia::util::to_passive(q);
+  if (qd > residual_cap_q_limit) {
+    return cap;
+  }
+  const double q2 = qd * qd, q4 = q2 * q2;
+  if (q4 * q4 < residual_cap_inert_qp) {
+    return r;
+  }
+  return r * residual_cap_factor<S>(q);
+}
+
+// r* = soft_cap(r, phi E_inf), the smooth minimum of the demand and the
 // ceiling (see residual_cap_power). Exactly zero at r = 0, and the ceiling
 // itself where the ceiling has closed.
 inline double Leaf::residual_cap(double r, double E_inf) {
@@ -88,16 +106,7 @@ inline double Leaf::residual_cap(double r, double E_inf) {
   if (!(E_inf > 0.0)) {
     return 0.0;
   }
-  const double E_cap = residual_cap_fraction * E_inf;
-  const double q = r / E_cap;
-  if (q > residual_cap_q_limit) {
-    return E_cap;
-  }
-  const double q2 = q * q, q4 = q2 * q2;
-  if (q4 * q4 < residual_cap_inert_qp) {
-    return r;
-  }
-  return r * residual_cap_factor(q);
+  return soft_cap<double>(r, residual_cap_fraction * E_inf);
 }
 
 // With q = r / (phi E_inf): dr*/dr = (1 + q^p)^(-1/p - 1), and
@@ -218,16 +227,7 @@ inline S Leaf::residual_flux_at(const S& collar, const leaf_pars<S>& pars,
   if (!(odelia::util::to_passive(E_inf) > 0.0)) {
     return S(0.0) * r;
   }
-  const S q = r / E_cap;
-  // The same three regimes as residual_cap, chosen at double: the limit, the
-  // inert cap (whose rows in the ceiling are below double precision), and the
-  // soft minimum itself.
-  auto inert = [](double qd) { const double q2 = qd * qd, q4 = q2 * q2; return q4 * q4 < residual_cap_inert_qp; };
-  const S r1 = odelia::util::to_passive(q) > residual_cap_q_limit
-                   ? E_cap
-                   : inert(odelia::util::to_passive(q))
-                         ? r
-                         : r * residual_cap_factor<S>(q);
+  const S r1 = soft_cap<S>(r, E_cap);
   // The roots' ceiling, the draw's, with its rows; the same limits again.
   if (!draw.has_uptake_limit) {
     return r1;
@@ -239,14 +239,7 @@ inline S Leaf::residual_flux_at(const S& collar, const leaf_pars<S>& pars,
   const S& U = draw.uptake_limit;
   const S w = U / (U + r);
   const S U_cap = S(residual_cap_fraction) * (U * w * w);
-  const S q_root = r1 / U_cap;
-  if (odelia::util::to_passive(q_root) > residual_cap_q_limit) {
-    return U_cap;
-  }
-  if (inert(odelia::util::to_passive(q_root))) {
-    return r1;
-  }
-  return r1 * residual_cap_factor<S>(q_root);
+  return soft_cap<S>(r1, U_cap);
 }
 
 // transpiration supply functions
