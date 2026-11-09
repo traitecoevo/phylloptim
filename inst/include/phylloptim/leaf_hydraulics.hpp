@@ -96,6 +96,29 @@ inline S soft_cap(const S& r, const S& cap) {
   return r * residual_cap_factor<S>(q);
 }
 
+// soft_cap's slopes in the demand and in the cap, in its three regimes:
+// (1 + q^p)^(-1/p - 1) and q^(p+1) (1 + q^p)^(-1/p - 1).
+template <class S>
+struct SoftCapSlopes {
+  S d_demand;
+  S d_cap;
+};
+
+template <class S>
+inline SoftCapSlopes<S> soft_cap_slopes(const S& r, const S& cap) {
+  const S q = r / cap;
+  if (odelia::util::to_passive(q) > residual_cap_q_limit) {
+    return {S(0.0), S(1.0)};
+  }
+  const S q2 = q * q, q4 = q2 * q2, q8 = q4 * q4;
+  if (odelia::util::to_passive(q8) < residual_cap_inert_qp) {
+    return {S(1.0), q8 * q};
+  }
+  S s;
+  const S slope = residual_cap_factor<S>(q, &s) / s;
+  return {slope, q8 * q * slope};
+}
+
 // r* = soft_cap(r, phi E_inf), the smooth minimum of the demand and the
 // ceiling (see residual_cap_power). Exactly zero at r = 0, and the ceiling
 // itself where the ceiling has closed.
@@ -240,6 +263,36 @@ inline S Leaf::residual_flux_at(const S& collar, const leaf_pars<S>& pars,
   const S w = U / (U + r);
   const S U_cap = S(residual_cap_fraction) * (U * w * w);
   return soft_cap<S>(r1, U_cap);
+}
+
+template <class S>
+inline Leaf::ResidualFluxSlopes<S> Leaf::residual_flux_slopes_at(
+    const S& collar, const S& f_collar, const leaf_pars<S>& pars,
+    const SupplyDraw<S>& draw, const S& per_g) const {
+  const S r = pars[par_g_min] * per_g;
+  const S E_inf = pars[par_kmax] * stem_complement_at<S>(collar, pars);
+  const S phi(residual_cap_fraction);
+  // Where a ceiling has closed the flux is zero and so are its slopes.
+  if (!(odelia::util::to_passive(E_inf) > 0.0) ||
+      (draw.has_uptake_limit &&
+       !(odelia::util::to_passive(draw.uptake_limit) > 0.0))) {
+    return {S(0.0), S(0.0)};
+  }
+  const S E_cap = phi * E_inf;
+  const SoftCapSlopes<S> stem = soft_cap_slopes<S>(r, E_cap);
+  // dE_inf/dcollar = -kmax f(collar).
+  S d_collar = stem.d_cap * phi * (-pars[par_kmax] * f_collar);
+  S d_demand = stem.d_demand;
+  if (draw.has_uptake_limit) {
+    // The roots' ceiling U w^2, w = U / (U + r), moves with r but not the collar.
+    const S& U = draw.uptake_limit;
+    const S w = U / (U + r);
+    const SoftCapSlopes<S> roots =
+        soft_cap_slopes<S>(soft_cap<S>(r, E_cap), phi * (U * w * w));
+    d_collar = roots.d_demand * d_collar;
+    d_demand = roots.d_demand * d_demand + roots.d_cap * (S(-2.0) * phi * (w * w * w));
+  }
+  return {d_collar, d_demand};
 }
 
 // transpiration supply functions

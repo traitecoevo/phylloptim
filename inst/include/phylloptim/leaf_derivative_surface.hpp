@@ -174,13 +174,15 @@ inline S Leaf::leaf_temperature_at(const S& E, const leaf_pars<S>& pars) const {
   using odelia::util::to_passive;
   double dT_dE = 0.0;
   (void)leaf_temp_from_E(to_passive(E), &dT_dE);
-  // Rn's absorbed shortwave is alpha_PAR PPFD / umol_par_per_joule, over the
-  // balance's summed conductance; NIR is a driver, not a slot.
-  const double dT_dPPFD =
-      alpha_PAR_ / umol_par_per_joule / (vol_heat_cap_air / ra_ + g_rad_);
+  // Rn's absorbed shortwave is alpha_PAR PPFD / umol_par_per_joule plus
+  // alpha_NIR NIR, over the balance's summed conductance.
+  const double g_total = vol_heat_cap_air / ra_ + g_rad_;
+  const double dT_dPPFD = alpha_PAR_ / umol_par_per_joule / g_total;
+  const double dT_dNIR = alpha_NIR_ / g_total;
   // The value is the balance's at E: the seated Tleaf_ wherever E is the solve's.
   return S(leaf_temp_from_E(to_passive(E))) + dT_dE * (E - S(to_passive(E))) +
-         dT_dPPFD * (pars[par_PPFD] - S(to_passive(pars[par_PPFD])));
+         dT_dPPFD * (pars[par_PPFD] - S(to_passive(pars[par_PPFD]))) +
+         dT_dNIR * (pars[par_NIR] - S(to_passive(pars[par_NIR])));
 }
 
 template <class S>
@@ -230,6 +232,25 @@ inline S Leaf::g_min_factor_on(const S& temp) const {
 template <class S>
 inline S Leaf::residual_demand_per_g_on(const S& temp) const {
   return g_min_factor_on<S>(temp) * leaf_vpd_on<S>(temp) / atm_kpa_ / kg_to_mol_h2o;
+}
+
+template <class S>
+inline S Leaf::g_min_factor_temp_deriv_on(const S& temp) const {
+  using std::exp;
+  const S x = (temp - g_min_T_trans_) / g_min_T_width_;
+  return g_min_factor_on<S>(temp) *
+         (S(g_min_k_low_) + g_min_k_high_ / (S(1.0) + exp(-x)));
+}
+
+template <class S>
+inline S Leaf::residual_demand_per_g_dT_on(const S& temp) const {
+  // residual_demand_dT's rule: the deficit's slope is zero on its floor.
+  const S D = leaf_vpd_on<S>(temp);
+  const S dD_dT = (use_energy_balance_ && odelia::util::to_passive(D) > vpd_leaf_min)
+                      ? saturation_vapour_pressure_slope_on<S>(temp)
+                      : S(0.0);
+  return (g_min_factor_temp_deriv_on<S>(temp) * D + g_min_factor_on<S>(temp) * dD_dT) /
+         atm_kpa_ / kg_to_mol_h2o;
 }
 
 template <class S>
@@ -283,20 +304,11 @@ inline S Leaf::energy_balance_marginal_at(const S& collar, const leaf_pars<S>& p
   const S A_up = assim_colimited_kernel<S>(ci, cap_up);
   const S A_dn = assim_colimited_kernel<S>(ci, cap_dn);
   const S A_T = (A_up - A_dn) / (2.0 * h);
-  // The residual conductance's two slopes are the solve's numbers, with rows:
-  // each is proportional to g_min and moves with leaf temperature, and the
-  // cuticle's also with gc's factor, in which it is affine.
+  // The residual flux's collar slope is the channel's; the residual conductance's
+  // temperature slope, -gc_const dr*/dr dr/dT plus the cuticle's own, is the
+  // solve's number with every row.
   const double p_v = to_passive(collar), t = to_passive(T);
-  const double g_v = to_passive(pars[par_g_min]);
-  const S dT_row = T - S(t);
-  const auto with_rows = [&](double v, double v_T) -> S {
-    const S out = S(v) + v_T * dT_row;
-    return g_v > 0.0 ? out + (v / g_v) * (pars[par_g_min] - S(g_v)) : out;
-  };
-  const S drstar_dpsi = with_rows(
-      residual_flux_dpsi_upstream(p_v, t),
-      (residual_flux_dpsi_upstream(p_v, t + h) - residual_flux_dpsi_upstream(p_v, t - h)) /
-          (2.0 * h));
+  const S& drstar_dpsi = at.drstar_dpsi;
   const S dE_dpsi =
       (at.dgc_dsigma * at.sigma.slope + at.dgc_dp) / (gc_const * at.bl_slope) +
       drstar_dpsi;
@@ -306,15 +318,13 @@ inline S Leaf::energy_balance_marginal_at(const S& collar, const leaf_pars<S>& p
   const S stomatal = (to_passive(vpd) > vpd_leaf_min)
                          ? S(-gc_s * saturation_vapour_pressure_slope_on<S>(T) / vpd)
                          : S(0.0);
-  const double gc_v = to_passive(gc_const);
-  const double cut_v = residual_cond_temp_deriv(p_v, t, gc_v);
-  // Its gc-factor part is -gc_const dr*/dr dr/dT, the rest the cuticle's own.
-  const double cuticle_part = g_min_co2_ratio_ * g_min * g_min_factor_temp_deriv(t);
+  const S& g = pars[par_g_min];
+  const S residual_rows =
+      -gc_const * at.drstar_ddemand * (g * residual_demand_per_g_dT_on<S>(T)) +
+      g * (S(g_min_co2_ratio_) * g_min_factor_temp_deriv_on<S>(T));
   const S residual_part =
-      with_rows(cut_v, (residual_cond_temp_deriv(p_v, t + h, gc_v) -
-                        residual_cond_temp_deriv(p_v, t - h, gc_v)) /
-                           (2.0 * h)) +
-      (gc_v != 0.0 ? ((cut_v - cuticle_part) / gc_v) * (gc_const - S(gc_v)) : S(0.0));
+      S(residual_cond_temp_deriv(p_v, t, to_passive(gc_const))) +
+      (residual_rows - S(to_passive(residual_rows)));
   const S dgc_dT = (stomatal + residual_part) * at.bl_slope;
   if constexpr (benefit_link<K>() == BenefitLink::Identity) {
     return tau * (A_T * gc * inv_atm + A_prime * dgc_dT * (S(ca_) - ci) * inv_atm) / g_ci;
@@ -432,11 +442,19 @@ inline Leaf::CollarCoords<S> Leaf::collar_channel_at(
   const S inv = S(inv_atm);
   // The conductance partials are kmax * f at each end. The residual flux moves
   // with the collar through its ceiling, appended as dprofit_at_collar_psi
-  // appends it; an exact zero at g_min = 0.
+  // appends it: the solve's number, with every row; an exact zero at g_min = 0.
   S dgc_dsigma = gc_const * kmax * f_sigma;
   S dgc_dp = -gc_const * kmax * f_p;
-  dgc_dp = dgc_dp - gc_const * S(residual_flux_dpsi_upstream(to_passive(collar),
-                                                             Tleaf_));
+  ResidualFluxSlopes<S> residual{S(0.0), S(1.0)};
+  S drstar_dpsi = S(residual_flux_dpsi_upstream(to_passive(collar), Tleaf_));
+  if (g_min > 0.0) {
+    const S per_g = use_energy_balance_
+                        ? residual_demand_per_g_on<S>(balance.temp)
+                        : S(g_min_factor(Tleaf_) * vpd_leaf_ / atm_kpa_ / kg_to_mol_h2o);
+    residual = residual_flux_slopes_at<S>(held, f_p, pars, draw, per_g);
+    drstar_dpsi = drstar_dpsi + (residual.d_collar - S(to_passive(residual.d_collar)));
+  }
+  dgc_dp = dgc_dp - gc_const * drstar_dpsi;
 
   // The same condition governs the slope: with no conductance at all ci is
   // placed by A(ci) = 0, which the collar does not enter, and gc is the cuticle's.
@@ -510,6 +528,8 @@ inline Leaf::CollarCoords<S> Leaf::collar_channel_at(
     out.dgc_dp = dgc_dp;
     out.bl_slope = bl_slope;
     out.balance = balance;
+    out.drstar_dpsi = drstar_dpsi;
+    out.drstar_ddemand = residual.d_demand;
   }
   return out;
 }
