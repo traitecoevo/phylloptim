@@ -37,7 +37,8 @@
 // potential that maximises carbon profit (assimilation through a benefit link,
 // minus a hydraulic cost) subject to continuity from soil to stem. The answer is
 // left in members (opt_root_psi_, opt_psi_leaf_, ci_, profit_, E_up_, ...). The
-// cost curves share that solve and differ only in their cost (see CostCurve).
+// cost curves share that solve and differ in their cost and its benefit link
+// (Curve<K>, leaf_cost_curves.hpp).
 //
 // The class and its construction are here; the other members are defined
 // in the leaf_*.hpp headers by subsystem, and optimise_closed in
@@ -45,16 +46,9 @@
 // leaf_*.hpp headers: a member used and not defined in a translation unit is
 // a link error.
 
-// ===========================================================================
-// ONE REPRESENTATION FOR WATER POTENTIAL (hazard 2)
-// ---------------------------------------------------------------------------
 // Every psi here, members and arguments alike, is a positive magnitude in MPa,
-// asserted at the entry points. Where one potential opposes another the sign
-// is in the equation, as in the soil -> collar flux
-// E_i = (T_collar - T_soil_i - gravity_head * z_i) / r_R, which is < 0 where a
-// layer gains water. Do not call it "tension": that holds only while there is
-// no osmotic term and gravity is carried separately in `gravity_head`.
-// ===========================================================================
+// asserted at the entry points; where one potential opposes another the sign is
+// in the equation (hazard 2).
 
 // "Hazard N" in these headers is the numbered hazard in the repository's
 // .claude/hazards.md, which is not shipped with the package.
@@ -435,30 +429,19 @@ public:
   // Gate for the energy balance. Off by default, with leaf_temp prescribed.
   bool use_energy_balance_ = false;
   // --- the residual (cuticular) conductance ----------------------------------
-  //
-  // The cuticle passes water and CO2 after the stomata shut. The leaf optimises
-  // its stomatal flux and the xylem carries the total:
-  //
-  //     E   = E_s + r,            r  = g_min(T_leaf) D_leaf / P_atm
-  //     g_c = g_cs + rho g_min,   g_cs = (E - r) P_atm / (1.67 D_leaf)
-  //
-  // with g_c the total conductance to CO2 and rho = g_min_co2_ratio_. Every cost
-  // that reads the flux reads the total. With g_c > 0 the supply == demand residual
-  // has a root for every leaf, so a shut leaf is the ordinary evaluator at E_s = 0
-  // (hazard 18). A trait, default 0, where the term is an exact zero appended to
-  // every expression (hazard 18). Measured cuticular conductance, not a fitted g0,
-  // which is mostly stomata not yet closed (Duursma et al. 2018).
+  // The cuticle passes water and CO2 after the stomata shut: the leaf optimises
+  // its stomatal flux E_s, the xylem carries E = E_s + r, and every cost that
+  // reads the flux reads the total (the registry's `residual_flux`). A trait,
+  // default 0, where each residual term is an exact zero appended to its
+  // expression, and a shut leaf is the ordinary evaluator at E_s = 0 (hazard 18).
+  // Measured cuticular conductance, not a fitted g0 (Duursma et al. 2018).
   double g_min = 0.0;  // mol H2O m^-2 s^-1, at 25 C
   // The cuticle's CO2:H2O conductance ratio, 1/20 to 1/40 measured (Boyer 2015);
   // 0.05 is the upper end.
   double g_min_co2_ratio_ = 0.05;
-  // The temperature response of g_min, a softplus blend of two exponentials,
-  //
-  //     g_min(T) = g_min * exp( k_lo (T - 25) + w k_hi [ sp((T - T_t)/w) -
-  //                                                     sp((25 - T_t)/w) ] )
-  //
-  // with sp(x) = log(1 + exp(x)): slope k_lo below T_t, k_lo + k_hi above, exactly 1
-  // at 25 C, and no kink. The defaults are placeholders, inert at 25 C and at
+  // The temperature response of g_min, a softplus blend of two exponential
+  // slopes, exactly 1 at 25 C and without a kink (the registry's
+  // `g_min_temperature`). The defaults are placeholders, inert at 25 C and at
   // g_min = 0; a run that leans on the hot branch needs measured values.
   double g_min_k_low_ = 0.03;     // K^-1, the slope below the transition
   double g_min_k_high_ = 0.15;    // K^-1, the EXTRA slope above it
@@ -599,35 +582,23 @@ public:
   double NIR_int_ = util::na_value;
 
   // --- Sicangco et al. (2026) thermal cost, default OFF ----------------------
-  // An instantaneous cost of PSII damage, sigmoid in leaf temperature,
-  //
-  //   TC(Tleaf) = 1 / (1 + exp(-r*(Tleaf - T50))),   r = 2/(T50 - Tcrit)
-  //
-  // with Jmax scaled by (1 - TC), as in the paper's ProfitMaxTC. r is gsthermal's,
-  // which made the figures; the paper's Eqn 8 prints (T50 - Tcrit)/2.
+  // An instantaneous cost of PSII damage, sigmoid in leaf temperature, scaling
+  // Jmax by (1 - TC) as the paper's ProfitMaxTC (the registry's `thermal_cost`;
+  // its slope is gsthermal's 2/(T50 - Tcrit), which made the figures).
   bool use_thermal_cost_ = false;
   double T50_ = 50.4;    // deg C; Sicangco Table 2, heatwave treatment
   double Tcrit_ = 46.5;  // deg C; Sicangco Table 2, heatwave treatment
 
   // --- ATLS thermal damage and acclimation, default OFF ----------------------
-  // A lasting damage model on three fractions of leaf area:
-  //
-  //   functional F  <=>  impaired I  -->  damaged D,      F = 1 - I - D
-  //
-  //   dA/dt = acclim_alpha_ * softplus(T - acclim_T_; acclim_s_) - acclim_beta_ * A
-  //   dI/dt = k_imp(T) * F - (k_rec(T) + k_mat(T)) * I
-  //   dD/dt = k_mat(T) * I
-  //   k(T)  = k * exp[(Ea/R)(1/T_ref - 1/T)]   for each of the three rates
-  //
-  // with T the leaf temperature and rates per day. damage_rates() evaluates this and
-  // damage_trajectory() integrates it; a caller integrating the states itself seats
-  // A_, I_ and D_ before each set_physiology. Behind the gate,
-  // update_temperature_dependent_params shifts the Vcmax and Jmax optima by
-  // topt_offset_ + dTopt_max_ * A/(A + K_A_), scales both capacities by F, and adds
-  // four maintenance costs to R_d_, which F does not scale. With the gate off
-  // nothing here is read and every number is bit-identical. The states enter the
-  // benefit only, and the rates no objective. The derivative surface refuses the
-  // layer; the dynamics' sensitivities are damage_trajectory_gradient().
+  // A lasting damage model on three fractions of leaf area, functional F,
+  // impaired I and damaged D = 1 - F - I, with an acclimation state A (the
+  // registry's `damage` section). damage_rates() evaluates it, damage_trajectory()
+  // integrates it, and a caller integrating the states itself seats A_, I_ and D_
+  // before each set_physiology. Behind the gate the Vcmax and Jmax optima shift
+  // with A, both capacities scale by F, and four maintenance costs join R_d_; the
+  // states enter the benefit only, and the rates no objective. With the gate off
+  // nothing here is read. The derivative surface refuses the layer; the dynamics'
+  // sensitivities are damage_trajectory_gradient().
   bool use_thermal_damage_ = false;
   // Constitutive thermostability shift, deg C, of both the photosynthetic optimum
   // and the impairment's isokinetic temperature.
@@ -776,7 +747,7 @@ public:
 
   // --- Medlyn stomatal-conductance model -------------------------------------
   // A standalone, R-callable alternative to the profit optimisation
-  // (solve_medlyn_ci_*), not used by the TF24 path.
+  // (solve_medlyn_ci_*), outside the curve dispatch: no solve reads it.
   double g0 = 0.022;        // residual stomatal conductance (umol m^-2 s^-1)
   double g1 = 2.57;         // sensitivity to vpd (kPa^0.5)
 
@@ -1194,7 +1165,7 @@ public:
     HeldBalance<T> balance{};
   };
 
-  // The cost curves. A curve enters the derivative only through dC/dpsi_leaf.
+  // The cost curves, each defined once as Curve<K> (leaf_cost_curves.hpp).
   enum class CostCurve { TF24, CF77, JS22, CMax, SOX, JW26, ProfitMax, TF24_floor,
                          LeastCost };
 
@@ -1210,8 +1181,8 @@ public:
   // Log serves the products (log A + log g has A g's argmax), whose cost is stored
   // as -log g, and LeastCost's ratio. The energy-balance path through Tleaf(E) is
   // part of dA/dpsi and takes the same h'; cost-side Tleaf terms take none (see
-  // `dprofit_energy_balance_term`). `Scaled` holds |A|max fixed, so ProfitMax's trait
-  // gradients are partials: |A|max comes from a scan.
+  // `dprofit_energy_balance_term`). `Scaled` holds |A|max fixed within a solve;
+  // a trait gradient re-reads it at each perturbation, so it is total.
   enum class BenefitLink { Identity, Log, Scaled };
 
   // Names the enum's last member: move it when a curve is appended, or the new

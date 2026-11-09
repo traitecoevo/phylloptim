@@ -775,9 +775,6 @@ template <> struct Curve<Leaf::CostCurve::LeastCost> {
              l.stem_curve_integral_deriv(psi_upstream)) /
            resource_use(l, psi_leaf, psi_upstream);
   }
-  // C = log W with `vcmax_` at Tleaf, so d(log W)/dpsi gains
-  // beta*umol_to_mol*dVcmax/dT*tau/W (cost_slope holds only the E half). W reads
-  // the total flux, its stomatal part from gc.
   // The scalar forms. vcmax is at the photosynthesis temperature, which is the
   // leaf's with the energy balance off, as the surface requires.
   template <class S>
@@ -806,6 +803,9 @@ template <> struct Curve<Leaf::CostCurve::LeastCost> {
     return S(0.0);
   }
 
+  // C = log W with `vcmax_` at Tleaf, so d(log W)/dpsi gains
+  // beta*umol_to_mol*dVcmax/dT*tau/W (cost_slope holds only the E half). W reads
+  // the total flux, its stomatal part from gc.
   static double less_cost_temperature_slope(const Leaf& l, double term,
                                             const Leaf::TemperaturePath& p) {
     const double dVcmax_dT = (p.vcmax_up - p.vcmax_dn) / (2.0 * p.h);
@@ -1242,16 +1242,16 @@ inline double Leaf::hydraulic_cost_TF24_floor(double psi_leaf, double psi_upstre
   return Curve<CostCurve::TF24_floor>::cost(*this, psi_leaf, psi_upstream);
 }
 
-// Where the price reads only the flux, both are read off the reported objective
-// and flux, linearly: exact against them, and still right for a caller that
-// averages the leaf's outputs over a crown and writes the means back (plant's
-// crown integration), where a kernel evaluated at a mean potential would not be.
 inline bool Leaf::seated_curve_prepares_normalisers() const {
   return with_curve(cost_curve_, [](auto tag) {
     return Curve<decltype(tag)::value>::prepares_normalisers;
   });
 }
 
+// carbon() and shadow_cost(). Where the price reads only the flux, both are read off the reported objective
+// and flux, linearly: exact against them, and still right for a caller that
+// averages the leaf's outputs over a crown and writes the means back (plant's
+// crown integration), where a kernel evaluated at a mean potential would not be.
 inline double Leaf::carbon() const {
   return with_curve(cost_curve_, [&](auto tag) -> double {
     using C = Curve<decltype(tag)::value>;
