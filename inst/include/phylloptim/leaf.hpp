@@ -1286,6 +1286,19 @@ public:
   double dprofit_at_collar_psi(double opt_root_psi, bool* feasible = nullptr);
 
 
+  // What both first-order conditions read at a candidate (psi_leaf, upstream):
+  // the flux, the leaf temperature it seats with the energy balance on (and its
+  // slope in the flux), the residual and stomatal fluxes, the cuticle's
+  // conductance and ci. False where there is no derivative to take: nothing
+  // conducts at the wet bound, or ci is not finite.
+  struct FocPoint {
+    double E, dT_dE, Tleaf, r_star, E_s, cuticle, ci;
+  };
+  // Forced inline: out of line its struct goes through memory, which bench_solve
+  // measures on the hot path (hazard 5).
+  [[gnu::always_inline]] bool foc_point(double psi_leaf, double psi_upstream,
+                                        FocPoint& p);
+
   // dprofit/dpsi_leaf with the upstream potential held, for the leaf routes:
   // dprofit_at_collar_psi with dpsi_leaf/dx = 1. `feasible` false means the 0.0
   // returned is a sentinel, not a stationary point.
