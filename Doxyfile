@@ -1,4 +1,4 @@
-# Doxygen configuration for the leaf C++ API (issue #12, PLAN item 15).
+# Doxygen configuration for the leaf C++ API.
 #
 #   doxygen            # writes docs/html/index.html
 #
@@ -6,11 +6,8 @@
 # else is left alone deliberately, so this file stays readable and a Doxygen
 # upgrade does not arrive as a 3000-line diff.
 #
-# Roxygen is not an option here and this is not a close call: roxygen documents
-# R objects, and this package has none -- no R/ directory, no compiled code,
-# nothing exported from NAMESPACE. When PLAN item 6 gives the package an R
-# interface, roxygen becomes the right tool for *that* surface, and the two sit
-# side by side. Doxygen is the only one of the pair that can read a C++ header.
+# Roxygen documents the R layer and this documents the C++ headers; Doxygen is
+# the only one of the pair that can read a C++ header.
 
 PROJECT_NAME           = "phylloptim"
 PROJECT_BRIEF          = "Header-only leaf gas exchange with explicit plant hydraulics"
