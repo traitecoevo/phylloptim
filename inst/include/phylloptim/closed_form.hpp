@@ -202,7 +202,9 @@ inline double wet_end_p(double C, double p_up, double n, double p_crit) {
 // for a curve whose lambda is `lambda_at(psi)` and whose lambda's slope is
 // TF24's (TF24_floor's lambda_o differentiates away). Each step stays strictly
 // inside (psi_upstream, psi_crit): below psi_upstream no water moves and the
-// residual's supply term is negative, which Newton would chase outward.
+// residual's supply term is negative, which Newton would chase outward. A step
+// that is not finite returns NaN, which fails within_guard: the row falls back
+// to the exact solve.
 template <class LambdaAt>
 inline double newton_on_supply(Leaf &l, double psi, double psi_upstream,
                                int newton_steps, double Q, double sqrt_D,
@@ -234,7 +236,7 @@ inline double newton_on_supply(Leaf &l, double psi, double psi_upstream,
     }
     const double psi_next = psi - R / dR;
     if (!std::isfinite(psi_next)) {
-      break;
+      return std::numeric_limits<double>::quiet_NaN();
     }
     psi = std::max(psi_upstream, std::min(psi_next, l.psi_crit * (1.0 - 1e-9)));
   }
@@ -263,6 +265,9 @@ inline Solution solve(Leaf &l, double psi_upstream, int newton_steps = 1) {
   const double psi = newton_on_supply(l, p * l.stem_b, psi_upstream, newton_steps,
                                       Q, sqrt_D,
                                       [&](double x) { return l.lambda_TF24(x); });
+  if (!std::isfinite(psi)) {
+    return Solution{psi, psi, psi, psi, psi, psi};
+  }
   return evaluate_at_lambda(l, psi, l.lambda_TF24(psi), Q, sqrt_D);
 }
 
@@ -328,6 +333,9 @@ inline Solution solve_TF24_floor(Leaf &l, double psi_upstream,
 
   psi = newton_on_supply(l, psi, psi_upstream, newton_steps, Q, sqrt_D,
                          [&](double x) { return l.lambda_TF24_floor(x); });
+  if (!std::isfinite(psi)) {
+    return Solution{psi, psi, psi, psi, psi, psi};
+  }
 
   return evaluate_at_lambda(l, psi, l.lambda_TF24_floor(psi), Q, sqrt_D);
 }
