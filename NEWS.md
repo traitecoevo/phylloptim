@@ -1,3 +1,8 @@
+# phylloptim 0.33.2
+
+- Every solve is a little cheaper: each Newton step of the ci solve takes its residual and slope from one pass of the kernel, about 2% fewer instructions per collar solve and 4.5% per leaf-route solve. Results move by rounding only: profit by at most 2e-12 relative, ci by at most 4e-11 Pa; recorded trait gradients move at their finite-difference noise.
+- Under ProfitMax with the energy balance on, the search for |A|max reads dA/dpsi directly rather than as TF24's condition plus its cost slope, two terms that cancelled only to rounding; those results move by at most 7e-15 relative.
+
 # phylloptim 0.33.1
 
 - ProfitMax solves about a third faster on either route: with the energy balance off, its normaliser |A|max is read at `psi_crit` in one evaluation rather than searched for. The collar solve of every curve is 2-3% faster. No number moves.
