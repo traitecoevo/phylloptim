@@ -291,6 +291,16 @@ enum class Method { Auto, Ift, Fd };
 // caller-supplied-psi path: the collar was imposed, and for `Refused` it, or
 // the stencil about it, fell outside the feasible interval. Append only: a
 // consumer holding the integer breaks quietly if a value moves.
+//
+// Not the solve's `OperatingPointKind`, which records which condition placed
+// the point: a status is read off the objective's curvature and first-order
+// residual at it. On the collar route they mostly agree: interior is interior,
+// boundary-dry is pinned, boundary-soil is pinned, solver-refused and
+// non-finite-gradient are no-gradient. A log-link curve's dark leaf, shut on its
+// wet bound, is no-gradient (the link has no slope at A <= 0); a shut leaf is
+// no-gradient on the flat sentinel, or pinned or interior where the residual at
+// its collar says so. The leaf route's solve records no kind (unsolved); a
+// prescribed point on either route is prescribed.
 enum class Status { Interior, Pinned, NoGradient, Error, Prescribed, Refused };
 
 // No `default:`, so a new Status is a compiler diagnostic rather than silently

@@ -73,8 +73,9 @@ leaf_damage_trajectory <- function(x, times, leaf_temp, A0 = 0, I0 = 0, D0 = 0) 
 ##' The exact sensitivities of [leaf_damage_trajectory()]'s states to the layer's
 ##' dynamics parameters and initial states: what a fit of the layer to a leaf
 ##' experiment needs. Computed by forward-mode differentiation of the same RK4 the
-##' trajectory runs -- one pass per input -- so it is the derivative of the
-##' numbers [leaf_damage_trajectory()] returns, not of an idealised solution.
+##' trajectory runs, in one pass that carries every input's direction, so it is
+##' the derivative of the numbers [leaf_damage_trajectory()] returns, not of an
+##' idealised solution. Its cost does not depend on how many inputs are asked for.
 ##'
 ##' The inputs, named as the leaf's fields: the impairment rate (`k_i_`,
 ##' `k_i_Ea_`, `k_i_Tiso_`), repair (`k_rec_`, `k_rec_Ea_`), maturation (`k_mat_`,

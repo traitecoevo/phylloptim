@@ -10661,7 +10661,7 @@ void test_thermal_damage_bypasses_the_cache() {
 // have moved.
 void test_thermal_damage_has_no_corners() {
   printf("thermal damage: no clamp, no max, a soft floor on F\n");
-  using phylloptim::damage::Dual;
+  using T = odelia::ode::tangent_scalar<double>;
   // 1. The softplus is its plain form inside [-30, 30] and the function past it,
   //    with a non-zero slope on both sides of each end.
   {
@@ -10673,9 +10673,12 @@ void test_thermal_damage_has_no_corners() {
     near(phylloptim::Leaf::softplus_(-20.0, 2.0), std::log1p(std::exp(-40.0)) / 2.0, 1e-30,
          "below -30 it is the function, not its value at -30");
     near(phylloptim::Leaf::softplus_(20.0, 2.0), 20.0, 1e-15, "above 30 it is x to rounding");
-    const Dual lo = phylloptim::damage::softplus(Dual(-20.0, 1.0), Dual(2.0));
-    const Dual hi = phylloptim::damage::softplus(Dual(20.0, 1.0), Dual(2.0));
-    ok(lo.d > 0.0 && std::abs(hi.d - 1.0) < 1e-15,
+    T x_lo(-20.0), x_hi(20.0);
+    odelia::ode::set_direction(x_lo, 1.0);
+    odelia::ode::set_direction(x_hi, 1.0);
+    const double lo = odelia::ode::derivative_along(phylloptim::damage::softplus(x_lo, T(2.0)));
+    const double hi = odelia::ode::derivative_along(phylloptim::damage::softplus(x_hi, T(2.0)));
+    ok(lo > 0.0 && std::abs(hi - 1.0) < 1e-15,
        "and its slope is the logistic's on both sides, not the clamp's zero");
   }
   // 2. A high-Ea species below 25 C: the impairment rate keeps falling, and its
@@ -10690,6 +10693,22 @@ void test_thermal_damage_has_no_corners() {
     const std::vector<double> g =
         l.damage_trajectory_gradient({0.0, 1.0}, {5.0, 5.0}, 0.0, 0.0, 0.0, {1});
     ok(g[1 + 2] != 0.0, "and I's sensitivity to k_i_Ea_ there is not the clamp's zero");
+    // A requested subset, reordered and repeated, is the full gradient's
+    // columns: one pass carries every direction and the request picks them.
+    std::vector<int> all(17);
+    for (int k = 0; k < 17; ++k) all[std::size_t(k)] = k;
+    const std::vector<double> full = l.damage_trajectory_gradient(
+        {0.0, 0.5, 1.0}, {5.0, 30.0, 45.0}, 0.2, 0.1, 0.05, all);
+    const std::vector<int> some{16, 5, 14, 1, 16};
+    const std::vector<double> part = l.damage_trajectory_gradient(
+        {0.0, 0.5, 1.0}, {5.0, 30.0, 45.0}, 0.2, 0.1, 0.05, some);
+    bool same = part.size() == 3 * 3 * some.size();
+    for (std::size_t k = 0; same && k < some.size(); ++k) {
+      for (std::size_t j = 0; j < 9; ++j) {
+        same = same && part[j + 9 * k] == full[j + 9 * std::size_t(some[k])];
+      }
+    }
+    ok(same, "a reordered, repeated subset of inputs is those columns, bit for bit");
   }
   // 3. F's soft floor: the plain fraction wherever the correction is below an
   //    ulp, positive and falling through I + D = 1 (it underflows to zero only
