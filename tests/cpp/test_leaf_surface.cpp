@@ -477,7 +477,12 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
       {{0.5}, 100.0, 0.5, Kind::Interior},
       {{0.5}, 100.0, 0.5, Kind::Interior, 5e-4},
       {{0.5}, 500.0, 2.0, Kind::BoundaryDry},
-      {{0.3}, 1.0, 0.5, Kind::BoundarySoil, 5e-4}};
+      {{0.3}, 1.0, 0.5, Kind::BoundarySoil, 5e-4},
+      // A cuticle large enough that the stem's ceiling caps it on a dry soil,
+      // where the residual flux's slopes move with every stem trait.
+      {{5.0}, 900.0, 2.0, Kind::Interior, 5e-3},
+      {{6.5, 6.75, 7.0}, 900.0, 2.0, Kind::Interior, 5e-3},
+      {{7.2}, 900.0, 2.0, Kind::BoundarySoil, 2e-2}};
   // With the energy balance on, the cooling a wide-open leaf earns moves the dry
   // pin: dim light on a dry soil reaches it.
   if (EB) {
@@ -495,6 +500,8 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
   };
   const auto unread = [&](int k) {
     if (k == pl::par_resistance || (k >= pl::par_A && k < pl::par_PPFD)) return true;
+    // NIR reaches the solve only through the energy balance.
+    if (k == pl::par_NIR) return !EB;
     bool owned = false;
     for (int c = 0; c < pl::Leaf::n_cost_curves; ++c) {
       pl::Leaf::with_curve(static_cast<CC>(c), [&](auto tag) {
@@ -507,8 +514,9 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
     return !reads;
   };
   const auto par_name = [](int k) {
-    return k == pl::par_PPFD ? std::string("PPFD")
-                             : pl::gradient::par_names()[std::size_t(k)];
+    return k == pl::par_PPFD  ? std::string("PPFD")
+           : k == pl::par_NIR ? std::string("NIR")
+                              : pl::gradient::par_names()[std::size_t(k)];
   };
   std::map<std::string, std::vector<int>> per_par_kind;
   double worst_rel = 0.0, worst_abs = 0.0;
@@ -554,6 +562,7 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
       l.c_protect_maint_ = p[pl::par_c_protect_maint];
       l.c_repair_flux_ = p[pl::par_c_repair_flux];
       seat_balance(l, fx.ppfd);
+      if (EB) l.NIR_int_ = p[pl::par_NIR];
       l.set_physiology(network, p[pl::par_PPFD], fx.psi_soil, depth,
                        p[pl::par_kmax], fx.vpd, 40.0, 25.0, 21.0, 101.3);
       l.set_model(K, true);
@@ -569,6 +578,8 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
     p0[pl::par_TF24_floor_lambda_o] = price;
     // The single path's slot, NA on this one; any value, since nothing reads it.
     p0[pl::par_resistance] = 1e3;
+    // NIR is unset off the balance, where nothing reads it; any finite value.
+    if (!EB) p0[pl::par_NIR] = 0.0;
     pl::Leaf l;
     try {
       l = solve(p0);

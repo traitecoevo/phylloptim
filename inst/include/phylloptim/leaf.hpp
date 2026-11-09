@@ -59,14 +59,14 @@ namespace phylloptim {
 //
 // The sixteen traits in `Leaf::set_traits`' argument order, then the non-traits:
 // `kmax`, `resistance`, three model-owned slots, the thermal-damage inputs that
-// reach the solve, and `PPFD`. Everything before `PPFD` is what a calibration
-// fits, `gradient::n_theta`; `n_leaf_pars` also counts `PPFD`, so size `theta` by
-// `n_theta` (hazard 12).
+// reach the solve, and the two light drivers `PPFD` and `NIR`. Everything before
+// `PPFD` is what a calibration fits, `gradient::n_theta`; `n_leaf_pars` also
+// counts the drivers, so size `theta` by `n_theta` (hazard 12).
 //
 // ⚠️ R indexes these positions, so a reordering silently differentiates the wrong
 // parameter (hazard 13); `test-gradient-batch.R` compares the names with R's.
 inline constexpr int n_traits = 16;
-inline constexpr int n_leaf_pars = 36;
+inline constexpr int n_leaf_pars = 37;
 
 // The first `n_traits` are `set_traits`' arguments in its order, which is also
 // `leaf_traits()`'; the non-traits after them take a relative step.
@@ -123,8 +123,11 @@ inline constexpr int par_c_repair_flux = 34;
 // light's only route to carbon, so a kernel reading the `PPFD_` member instead
 // gives every trait that moves light a zero row.
 inline constexpr int par_PPFD = 35;
-static_assert(n_leaf_pars == par_PPFD + 1,
-              "the pack ends at par_PPFD; move n_leaf_pars with it");
+// The intercepted near-infrared per unit leaf area, W m^-2 (see NIR_int_): a
+// driver, read only by the energy balance; NA where NIR_int_ is unset.
+inline constexpr int par_NIR = 36;
+static_assert(n_leaf_pars == par_NIR + 1,
+              "the pack ends at par_NIR; move n_leaf_pars with it");
 
 
 // The differentiable parameters, as one array rather than a struct, which would
@@ -558,6 +561,18 @@ public:
   template <class S>
   S residual_flux_at(const S& collar, const leaf_pars<S>& pars,
                      const SupplyDraw<S>& draw, const S& per_g) const;
+  // That flux's slopes in the collar and in the demand g_min per_g, with every
+  // row: f_collar is the stem curve's integrand at the collar, with its rows.
+  template <class S>
+  struct ResidualFluxSlopes {
+    S d_collar;
+    S d_demand;
+  };
+  template <class S>
+  ResidualFluxSlopes<S> residual_flux_slopes_at(const S& collar, const S& f_collar,
+                                                const leaf_pars<S>& pars,
+                                                const SupplyDraw<S>& draw,
+                                                const S& per_g) const;
   // The cuticle's conductance to CO2 at the seated leaf temperature.
   double cuticular_cond_CO2() const { return g_min_co2_ratio_ * g_min_leaf_; }
   // Net assimilation as c_i -> infinity, the colimited capacity less respiration:
@@ -1163,6 +1178,9 @@ public:
     T dgc_dp{};
     T bl_slope{};
     HeldBalance<T> balance{};
+    // The residual flux's slopes in the collar and in its demand, with rows.
+    T drstar_dpsi{};
+    T drstar_ddemand{};
   };
 
   // The cost curves, each defined once as Curve<K> (leaf_cost_curves.hpp).
@@ -1781,6 +1799,10 @@ public:
   // The residual flux's demand per unit g_min: the cuticle's factor times the
   // deficit over the atmosphere, in kg.
   template <class S> S residual_demand_per_g_on(const S& temp) const;
+  // The temperature slopes of the cuticle's factor and of that demand, with
+  // their own temperature rows.
+  template <class S> S g_min_factor_temp_deriv_on(const S& temp) const;
+  template <class S> S residual_demand_per_g_dT_on(const S& temp) const;
   // dprofit_energy_balance_term on the scalar, from the coordinates.
   template <CostCurve K, class S>
   S energy_balance_marginal_at(const S& collar, const leaf_pars<S>& pars,
@@ -2574,6 +2596,7 @@ inline leaf_pars<double> Leaf::passive_pars() const {
     p[d.slot] = this->*d.member;
   }
   p[par_PPFD] = PPFD_;
+  p[par_NIR] = NIR_int_;
   return p;
 }
 

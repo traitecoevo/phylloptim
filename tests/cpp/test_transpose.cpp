@@ -342,6 +342,7 @@ void check_solved(pl::Leaf l, const std::string& at, unsigned long seed) {
   for (int k = pl::par_A; k < pl::par_PPFD; ++k) u[k] = rng.next();
   v[nout - 1] = rng.next();
   for (std::size_t k = nout; k < index.count(); ++k) v[k] = rng.next();
+  u[pl::par_NIR] = rng.next();
 
   const Arm arm = arm_of(l.operating_point_kind());
   if (arm == Arm::Refuses) return;
