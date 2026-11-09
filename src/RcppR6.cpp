@@ -1548,6 +1548,11 @@ double Leaf__g1_eff__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
 }
 
 // [[Rcpp::export]]
+double Leaf__carbon__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->carbon();
+}
+
+// [[Rcpp::export]]
 double Leaf__shadow_cost__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
   return obj_->shadow_cost();
 }

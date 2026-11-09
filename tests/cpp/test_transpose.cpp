@@ -145,10 +145,27 @@ Inputs<S> inputs_of(const pl::Leaf& l) {
   return in;
 }
 
+// The outputs paired, by index into v: the leaf potential and ci, the soil's
+// flux, profit, each layer's draw and the residual flux; then, appended so the
+// draws above keep their weights, the billed carbon and the physical outputs.
+// Both variants are read, so the pairing covers each and the core they share.
+struct OutputIndex {
+  std::size_t layers;
+  std::size_t uptake(std::size_t i) const { return 4 + i; }
+  std::size_t residual() const { return 4 + layers; }
+  std::size_t carbon_billed() const { return 5 + layers; }
+  std::size_t carbon() const { return 6 + layers; }
+  std::size_t A() const { return 7 + layers; }
+  std::size_t E() const { return 8 + layers; }
+  std::size_t gc() const { return 9 + layers; }
+  std::size_t count() const { return 10 + layers; }
+};
+
 // <v, J u>: one tangent, every input given its direction at once.
+template <pl::Leaf::CostCurve K>
 double forward_side(pl::Leaf l, const std::vector<double>& u,
                     const std::vector<double>& v, double curvature,
-                    bool has_coords, bool handoff) {
+                    bool handoff) {
   Inputs<T> in = inputs_of<T>(l);
   std::vector<T*> f = in.flat();
   for (std::size_t k = 0; k < f.size(); ++k) {
@@ -157,24 +174,20 @@ double forward_side(pl::Leaf l, const std::vector<double>& u,
   const auto draw = l.supply_draw_at<T>(T(l.opt_root_psi_), in.supply());
   pl::Leaf::HeldCoords<T> held;
   pl::Leaf::HeldCoords<T>* h = handoff ? &held : nullptr;
-  const T collar =
-      l.operating_collar<pl::Leaf::CostCurve::TF24, T>(draw, in.pars, curvature, h);
-  const auto o =
-      l.billed_outputs_at<pl::Leaf::CostCurve::TF24, T>(collar, draw, in.pars, h);
+  const T collar = l.operating_collar<K, T>(draw, in.pars, curvature, h);
+  const auto o = l.billed_outputs_at<K, T>(collar, draw, in.pars, h);
+  const auto p = l.physical_outputs_at<K, T>(collar, draw, in.pars, h);
+  const OutputIndex at{o.uptake.size()};
+  const auto d = [](const T& x) { return odelia::ode::derivative_along(x); };
 
-  double acc = v[2] * odelia::ode::derivative_along(draw.E_up.value) +
-               v[3] * odelia::ode::derivative_along(o.profit);
-  if (has_coords) {
-    const auto co =
-        l.collar_coords_at<T>(l.opt_psi_leaf_, l.ci_, collar, draw, in.pars,
-                              l.photo_capacity_at<T>(in.pars), true);
-    acc += v[0] * odelia::ode::derivative_along(co.sigma.value) +
-           v[1] * odelia::ode::derivative_along(co.ci.value);
-  }
+  double acc = v[0] * d(p.psi_leaf) + v[1] * d(p.ci) +
+               v[2] * d(draw.E_up.value) + v[3] * d(o.profit);
   for (std::size_t i = 0; i < o.uptake.size(); ++i) {
-    acc += v[4 + i] * odelia::ode::derivative_along(o.uptake[i]);
+    acc += v[at.uptake(i)] * d(o.uptake[i]);
   }
-  acc += v[4 + o.uptake.size()] * odelia::ode::derivative_along(o.residual_flux);
+  acc += v[at.residual()] * d(o.residual_flux);
+  acc += v[at.carbon_billed()] * d(o.carbon) + v[at.carbon()] * d(p.carbon) +
+         v[at.A()] * d(p.A) + v[at.E()] * d(p.E) + v[at.gc()] * d(p.gc);
   return acc;
 }
 
@@ -185,9 +198,10 @@ struct Pairing {
 };
 
 // One recording, one sweep.
+template <pl::Leaf::CostCurve K>
 Pairing reverse_side(pl::Leaf l, const std::vector<double>& u,
                      const std::vector<double>& v, double curvature,
-                     bool hold_collar, bool has_coords, bool handoff) {
+                     bool hold_collar, bool handoff) {
   Tape tape;
   Inputs<A> in = inputs_of<A>(l);
   std::vector<A*> f = in.flat();
@@ -197,31 +211,28 @@ Pairing reverse_side(pl::Leaf l, const std::vector<double>& u,
   auto draw = l.supply_draw_at<A>(A(l.opt_root_psi_), in.supply());
   pl::Leaf::HeldCoords<A> held;
   pl::Leaf::HeldCoords<A>* h = handoff ? &held : nullptr;
-  A collar =
-      l.operating_collar<pl::Leaf::CostCurve::TF24, A>(draw, in.pars, curvature, h);
+  A collar = l.operating_collar<K, A>(draw, in.pars, curvature, h);
   // The control: strip the collar's rows on THIS side only.
   if (hold_collar) collar = A(odelia::util::to_passive(collar));
-  auto o = l.billed_outputs_at<pl::Leaf::CostCurve::TF24, A>(collar, draw, in.pars, h);
+  auto o = l.billed_outputs_at<K, A>(collar, draw, in.pars, h);
+  auto p = l.physical_outputs_at<K, A>(collar, draw, in.pars, h);
+  const OutputIndex at{o.uptake.size()};
+  const auto seed = [&](A& x, double w) {
+    tape.registerOutput(x);
+    xad::derivative(x) = w;
+  };
 
-  if (has_coords) {
-    auto co = l.collar_coords_at<A>(l.opt_psi_leaf_, l.ci_, collar, draw,
-                                    in.pars, l.photo_capacity_at<A>(in.pars),
-                                    true);
-    tape.registerOutput(co.sigma.value);
-    xad::derivative(co.sigma.value) = v[0];
-    tape.registerOutput(co.ci.value);
-    xad::derivative(co.ci.value) = v[1];
-  }
-  tape.registerOutput(draw.E_up.value);
-  xad::derivative(draw.E_up.value) = v[2];
-  tape.registerOutput(o.profit);
-  xad::derivative(o.profit) = v[3];
-  for (std::size_t i = 0; i < o.uptake.size(); ++i) {
-    tape.registerOutput(o.uptake[i]);
-    xad::derivative(o.uptake[i]) = v[4 + i];
-  }
-  tape.registerOutput(o.residual_flux);
-  xad::derivative(o.residual_flux) = v[4 + o.uptake.size()];
+  seed(p.psi_leaf, v[0]);
+  seed(p.ci, v[1]);
+  seed(draw.E_up.value, v[2]);
+  seed(o.profit, v[3]);
+  for (std::size_t i = 0; i < o.uptake.size(); ++i) seed(o.uptake[i], v[at.uptake(i)]);
+  seed(o.residual_flux, v[at.residual()]);
+  seed(o.carbon, v[at.carbon_billed()]);
+  seed(p.carbon, v[at.carbon()]);
+  seed(p.A, v[at.A()]);
+  seed(p.E, v[at.E()]);
+  seed(p.gc, v[at.gc()]);
   tape.computeAdjoints();
 
   Pairing out;
@@ -278,14 +289,18 @@ int handoff_forward_differs = 0;
 // kind that carries rows is asserted reached, not just the arm.
 std::map<std::string, int> seen_kind;
 
+template <pl::Leaf::CostCurve K>
 void check_solved(pl::Leaf l, const std::string& at, unsigned long seed) {
   const std::size_t layers = std::size_t(l.supply_n_layers());
+  const std::string curve = pl::Leaf::curve_name(static_cast<int>(K));
   Stream rng{seed};
   const std::size_t nin = pl::n_leaf_pars + 3 * layers;
-  // The residual flux is the last output, and its weight is drawn last of all,
-  // for the reason the comment below gives about draw order.
-  const std::size_t nout = 5 + layers;
-  std::vector<double> u(nin), v(nout);
+  // The residual flux was the last output, and its weight is drawn after the
+  // others', for the reason the comment below gives about draw order; the
+  // outputs added since are drawn after it, so the earlier weights stand.
+  const OutputIndex index{layers};
+  const std::size_t nout = index.residual() + 1;
+  std::vector<double> u(nin), v(index.count());
   // ⚠️ DRAWN IN A FIXED ORDER, NOT SLOT ORDER: the parameters before the
   // thermal-damage layer, then PPFD, the soil state and v, and the layer's
   // slots last. Drawn in slot order, every parameter added to the enumeration
@@ -301,28 +316,26 @@ void check_solved(pl::Leaf l, const std::string& at, unsigned long seed) {
   for (std::size_t k = 0; k + 1 < nout; ++k) v[k] = rng.next();
   for (int k = pl::par_A; k < pl::par_PPFD; ++k) u[k] = rng.next();
   v[nout - 1] = rng.next();
+  for (std::size_t k = nout; k < index.count(); ++k) v[k] = rng.next();
 
   const Arm arm = arm_of(l.operating_point_kind());
   if (arm == Arm::Refuses) return;
   const double curvature =
       l.operating_point_kind() == pl::Leaf::OperatingPointKind::Interior
-          ? l.profit_curvature_at_collar<pl::Leaf::CostCurve::TF24>()
+          ? l.profit_curvature_at_collar<K>()
           : std::numeric_limits<double>::quiet_NaN();
   if (l.operating_point_kind() == pl::Leaf::OperatingPointKind::Interior &&
       !std::isfinite(curvature)) {
     return;  // no curvature to divide by; operating_collar would refuse too
   }
 
-  const bool has_coords =
-      l.operating_point_kind() != pl::Leaf::OperatingPointKind::HydraulicShutdown;
   // Through the coordinates operating_collar hands to billed_outputs_at, which is how plant
   // calls the surface.
-  const double fwd = forward_side(l, u, v, curvature, has_coords, true);
-  const Pairing rev = reverse_side(l, u, v, curvature, false, has_coords, true);
+  const double fwd = forward_side<K>(l, u, v, curvature, true);
+  const Pairing rev = reverse_side<K>(l, u, v, curvature, false, true);
 
-  const double fwd_solved = forward_side(l, u, v, curvature, has_coords, false);
-  const Pairing rev_solved =
-      reverse_side(l, u, v, curvature, false, has_coords, false);
+  const double fwd_solved = forward_side<K>(l, u, v, curvature, false);
+  const Pairing rev_solved = reverse_side<K>(l, u, v, curvature, false, false);
   if (fwd != fwd_solved) ++handoff_forward_differs;
   const double handoff_rel =
       std::abs(rev.value - rev_solved.value) / std::max(rev.terms, 1e-300);
@@ -336,7 +349,7 @@ void check_solved(pl::Leaf l, const std::string& at, unsigned long seed) {
          at + " rel=" + moved_by);
 
   // The control, on the reverse side only.
-  const Pairing held = reverse_side(l, u, v, curvature, true, has_coords, true);
+  const Pairing held = reverse_side<K>(l, u, v, curvature, true, true);
   const double moved =
       std::abs(rev.value - held.value) / std::max(rev.terms, 1e-300);
   ++seen_carry;
@@ -362,21 +375,51 @@ void check_solved(pl::Leaf l, const std::string& at, unsigned long seed) {
   ++compared;
   if (rel > worst) worst = rel;
   if (cancel > worst_cancel) worst_cancel = cancel;
-  ++seen_kind[l.operating_point_kind_name(l.operating_point_kind())];
-  ok(rel < 1e-10, "transpose identity: " + at + " rel=" + std::to_string(rel) +
+  ++seen_kind[curve + " " + l.operating_point_kind_name(l.operating_point_kind())];
+  ok(rel < 1e-10, "transpose identity (" + curve + "): " + at +
+                      " rel=" + std::to_string(rel) +
                       " cancellation=" + std::to_string(cancel));
+}
+
+// The curves the surface serves, each run on the same leaf and seed; a price on
+// TF24_floor small enough that its points land on TF24's kinds.
+const double kFloorPrice = 1e3;
+using CC = pl::Leaf::CostCurve;
+template <class F>
+void for_each_surface_curve(F&& f) {
+  f(std::integral_constant<CC, CC::TF24>{});
+  f(std::integral_constant<CC, CC::TF24_floor>{});
+}
+std::vector<std::string> surface_curve_names() {
+  std::vector<std::string> out;
+  for_each_surface_curve([&](auto tag) {
+    out.push_back(pl::Leaf::curve_name(static_cast<int>(decltype(tag)::value)));
+  });
+  return out;
+}
+
+// Seats curve K on a copy of the leaf, solves it and checks it.
+template <CC K>
+pl::Leaf solved_on(const pl::Leaf& base) {
+  pl::Leaf l = base;
+  l.TF24_floor_lambda_o = kFloorPrice;
+  l.set_model(K, true);
+  l.find_root_collar_psi();
+  return l;
 }
 
 void check(int layers, double psi0, double ppfd, double leaf_temp,
            unsigned long seed, double g_min) {
-  pl::Leaf l = set_up(layers, psi0, ppfd, leaf_temp, g_min);
-  l.find_root_collar_psi();
-  check_solved(l,
-               "layers=" + std::to_string(layers) + " psi_soil=" +
-                   std::to_string(psi0) + " ppfd=" + std::to_string(ppfd) +
-                   " T=" + std::to_string(leaf_temp) +
-                   " g_min=" + std::to_string(g_min),
-               seed);
+  const pl::Leaf base = set_up(layers, psi0, ppfd, leaf_temp, g_min);
+  for_each_surface_curve([&](auto tag) {
+    constexpr CC K = decltype(tag)::value;
+    check_solved<K>(solved_on<K>(base),
+                    "layers=" + std::to_string(layers) + " psi_soil=" +
+                        std::to_string(psi0) + " ppfd=" + std::to_string(ppfd) +
+                        " T=" + std::to_string(leaf_temp) +
+                        " g_min=" + std::to_string(g_min),
+                    seed);
+  });
 }
 
 // The kinds the sweep above does not reach, each on test_leaf's drivers and
@@ -394,16 +437,20 @@ void check_kind(const std::vector<double>& psi_soil, double ppfd, double vpd,
   }
   l.set_physiology(fixture::root_network(root, depth), ppfd, psi_soil, depth,
                    0.000157 / 5.0, vpd, 40.0, 25.0, 21.0, 101.3);
-  l.find_root_collar_psi();
   const std::string at = std::string(pl::Leaf::operating_point_kind_name(want)) +
                          " fixture psi_soil=" + std::to_string(psi_soil[0]) +
                          " ppfd=" + std::to_string(ppfd) +
                          " vpd=" + std::to_string(vpd);
-  ok(l.operating_point_kind() == want,
-     "the " + at + " is " +
-         std::string(pl::Leaf::operating_point_kind_name(want)) + ", got " +
-         l.operating_point_kind_name(l.operating_point_kind()));
-  check_solved(l, at, seed);
+  for_each_surface_curve([&](auto tag) {
+    constexpr CC K = decltype(tag)::value;
+    const pl::Leaf c = solved_on<K>(l);
+    ok(c.operating_point_kind() == want,
+       "the " + at + " is " +
+           std::string(pl::Leaf::operating_point_kind_name(want)) + " on " +
+           pl::Leaf::curve_name(static_cast<int>(K)) + ", got " +
+           c.operating_point_kind_name(c.operating_point_kind()));
+    check_solved<K>(c, at, seed);
+  });
 }
 
 }  // namespace
@@ -451,13 +498,16 @@ int main() {
   for (const auto& [name, count] : seen_kind) printf(" %s %d,", name.c_str(), count);
   printf("\n");
   // The identity is only evidence about the arms and kinds it ran on.
-  ok(compared >= 20, "the sweep reached at least 20 operating points");
+  ok(compared >= 20 * int(surface_curve_names().size()),
+     "the sweep reached at least 20 operating points per curve");
   ok(seen_shut > 0, "the sweep reached a shut leaf");
   ok(seen_residual > 0, "the sweep reached a leaf with a residual conductance");
-  for (const char* kind : {"interior", "boundary-soil", "boundary-dry",
-                           "hydraulic-shutdown"}) {
-    ok(seen_kind[kind] > 0, std::string("the identity was checked at a ") + kind +
-                                " point");
+  for (const std::string& curve : surface_curve_names()) {
+    for (const char* kind : {"interior", "boundary-soil", "boundary-dry",
+                             "hydraulic-shutdown"}) {
+      ok(seen_kind[curve + " " + kind] > 0,
+         "the identity was checked at a " + std::string(kind) + " point on " + curve);
+    }
   }
   printf("%d checks, %d failures\n", compared + seen_carry + 8, failures);
   return failures == 0 ? 0 : 1;

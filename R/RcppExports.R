@@ -1397,6 +1397,10 @@ Leaf__g1_eff__get <- function(obj_) {
     .Call('_phylloptim_Leaf__g1_eff__get', PACKAGE = 'phylloptim', obj_)
 }
 
+Leaf__carbon__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__carbon__get', PACKAGE = 'phylloptim', obj_)
+}
+
 Leaf__shadow_cost__get <- function(obj_) {
     .Call('_phylloptim_Leaf__shadow_cost__get', PACKAGE = 'phylloptim', obj_)
 }

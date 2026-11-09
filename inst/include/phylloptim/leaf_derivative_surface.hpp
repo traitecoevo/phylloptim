@@ -11,12 +11,22 @@
 //   S              psi  = leaf.operating_collar<K, S>(draw, pars, curvature, &held);
 //   BilledOutputs<S> out  = leaf.billed_outputs_at<K, S>(psi, draw, pars, &held);
 //
-// `out.profit` and each `out.uptake[j]` then carry their derivatives in `pars`
-// and `supply`, from the implicit function theorem at the converged point;
-// nothing the root-find did is recorded. S is double, a tangent
+// Every member of `out` then carries its derivatives in `pars` and `supply`,
+// from the implicit function theorem at the converged point; nothing the
+// root-find did is recorded. S is double, a tangent
 // (odelia::ode::tangent_scalar) or an adjoint (odelia::ode::adjoint_scalar).
-// `held` is optional: it spares billed_outputs_at solving the leaf potential and
-// ci again, and changes no value or tangent (adjoint rows only to rounding).
+//
+// `out.profit` is the objective that placed the point, taken with the collar
+// held at an interior point (the envelope theorem), so it needs no curvature;
+// `out.carbon` is A less the carbon part of the curve's cost (Curve<K>), which
+// is what a plant grows on, and has no envelope: it carries the collar's move.
+// physical_outputs_at returns the same and the point's A, E, psi_leaf, ci and gc
+// at the live collar, for a caller fitting the model to what it observes; it
+// is dearer, since the billed outputs skip the collar's channel at an interior
+// point where the curve's price reads only the flux.
+//
+// `held` is optional: it spares the outputs solving the leaf potential and ci
+// again, and changes no value or tangent (adjoint rows only to rounding).
 // Preconditions, checked where marked:
 //
 //   - the draw is taken at the solved collar (checked: operating_collar and
@@ -26,8 +36,9 @@
 //   - nothing moves the leaf between the solve and billed_outputs_at;
 //   - `pars` and `supply` hold, in value, the seated traits (passive_pars()) and
 //     the seated soil state and root network;
-//   - K is the curve the solve used, TF24 or TF24_floor (checked against the
-//     seated curve; see check_surface_curve for the one solve it cannot see);
+//   - K is the curve the solve used (checked against the seated curve; see
+//     check_surface_curve for the one solve it cannot see), and its Curve<K>
+//     holds the scalar forms (SurfaceForms, checked at compile time);
 //   - the supply path is multi-layer (checked: supply_draw_at refuses another);
 //   - `curvature` is profit_curvature_at_collar<K>() at an Interior point, and is
 //     not read at any other kind or at double; operating_collar refuses one that
@@ -120,6 +131,9 @@ inline void Leaf::held_coords_at(double sigma_star, double ci_star,
   // gc is built from the stem's flux at the placed sigma, which the ci solve
   // reads, not from the draw (they agree only to the table's round-trip). At
   // g_min = 0 the residual and the cuticle are exact zeros carrying the g_min row.
+  // In dprofit_at_collar_psi's operation order, which the marginal must match;
+  // the reported stom_cond_CO2_ associates the same product differently, so it
+  // equals this to rounding.
   const S stem_flux = transpiration_at<S>(sigma_h, held, pars);
   const S r_star = residual_flux_at<S>(held, pars, draw);
   const S cuticle = pars[par_g_min] * S(g_min_co2_ratio_ * g_min_factor(Tleaf_));
@@ -180,7 +194,8 @@ inline Leaf::CollarCoords<S> Leaf::collar_channel_at(
   if (!collar_moves) {
     const S absent(std::numeric_limits<double>::quiet_NaN());
     return CollarCoords<S>{odelia::with_slope<S>{sigma_h, absent},
-                           odelia::with_slope<S>{ci_h, absent}};
+                           odelia::with_slope<S>{ci_h, absent},
+                           odelia::with_slope<S>{gc, absent}};
   }
 
   // The collar's own channel. The conductivity's value is the table's, since the
@@ -225,8 +240,9 @@ inline Leaf::CollarCoords<S> Leaf::collar_channel_at(
                                                              Tleaf_));
 
   // The same condition governs the slope: with no conductance at all ci is
-  // placed by A(ci) = 0, which the collar does not enter.
+  // placed by A(ci) = 0, which the collar does not enter, and gc is the cuticle's.
   S dci_dp = S(0.0);
+  S dgc_dcollar = S(0.0);
   if (!no_coordinate && stom_cond_CO2_ != 0.0) {
     // The partials above are before the boundary layer's split; gc is after it.
     if (use_energy_balance_) {
@@ -240,13 +256,15 @@ inline Leaf::CollarCoords<S> Leaf::collar_channel_at(
     const S dci_dsigma = (dgc_dsigma * ca_minus_ci * inv) / g_ci;
     const S dci_dp_expl = (dgc_dp * ca_minus_ci * inv) / g_ci;
     dci_dp = dci_dsigma * V + dci_dp_expl;
+    dgc_dcollar = dgc_dsigma * V + dgc_dp;
   }
 
   // The step is exactly zero in VALUE, so both coordinates are the residuals'
   // bit for bit and only the collar's channel is added.
   const S step = collar - held;
   return CollarCoords<S>{odelia::with_slope<S>{sigma_h + V * step, V},
-                         odelia::with_slope<S>{ci_h + dci_dp * step, dci_dp}};
+                         odelia::with_slope<S>{ci_h + dci_dp * step, dci_dp},
+                         odelia::with_slope<S>{gc + dgc_dcollar * step, dgc_dcollar}};
 }
 
 template <class S>
@@ -275,9 +293,6 @@ inline S Leaf::dry_end_at(const leaf_pars<S>& pars) const {
 template <Leaf::CostCurve K, class S>
 inline S Leaf::profit_at(const S& collar, const SupplyDraw<S>& draw,
                          const leaf_pars<S>& pars, bool collar_moves) const {
-  static_assert(K == CostCurve::TF24 || K == CostCurve::TF24_floor,
-                "the reverse-mode surface covers TF24 and TF24_floor; another "
-                "curve is a row in profit_at and dprofit_dcollar_at");
   // One capacity for the point and for the assimilation read off it, so the ci
   // the residual placed and the A evaluated there are the same function.
   const PhotoCapacity<S> cap = photo_capacity_at<S>(pars);
@@ -287,33 +302,41 @@ inline S Leaf::profit_at(const S& collar, const SupplyDraw<S>& draw,
                                   at.ci.value);
 }
 
+template <class S>
+inline S Leaf::assim_at_coords(const PhotoCapacity<S>& cap, const S& ci) const {
+  // With no conductance and no root, ci = +inf and the saturated assimilation,
+  // as the forward reported. With no conductance and a root, A is zero exactly,
+  // carrying the kernel's rows, which are what move it off zero.
+  if (!std::isfinite(ci_)) {
+    return assim_saturated_kernel<S, S>(cap);
+  }
+  S A = assim_colimited_kernel<S>(ci, cap);
+  if (stom_cond_CO2_ == 0.0) {
+    A = A - S(odelia::util::to_passive(A));
+  }
+  return A;
+}
+
 template <Leaf::CostCurve K, class S>
 inline S Leaf::profit_from_coords(const S& collar, const leaf_pars<S>& pars,
                                   const PhotoCapacity<S>& cap, const S& sigma,
                                   const S& ci) const {
-  static_assert(K == CostCurve::TF24 || K == CostCurve::TF24_floor,
-                "the reverse-mode surface covers TF24 and TF24_floor; another "
-                "curve is a row in profit_at and dprofit_dcollar_at");
-  // With no conductance and no root, ci = +inf and the saturated assimilation,
-  // as the forward reported. With no conductance and a root, A is zero exactly,
-  // carrying the kernel's rows, which are what move it off zero.
-  S A;
-  if (!std::isfinite(ci_)) {
-    A = assim_saturated_kernel<S, S>(cap);
+  using C = Curve<K>;
+  static_assert(SurfaceForms<C>,
+                "this curve has no scalar forms in its Curve<K> (SurfaceForms), "
+                "so the derivative surface cannot bill it");
+  const S A = assim_at_coords<S>(cap, ci);
+  // The objective as profit_psi_leaf_for evaluates it, shape by shape.
+  if constexpr (C::shape == ObjectiveShape::Difference) {
+    return A - C::template scalar_cost<S>(*this, sigma, collar, pars);
+  } else if constexpr (C::shape == ObjectiveShape::Product) {
+    return A * C::template scalar_gain<S>(*this, sigma, pars);
+  } else if constexpr (C::shape == ObjectiveShape::Ratio) {
+    return A / C::template scalar_resource_use<S>(*this, sigma, collar, pars);
   } else {
-    A = assim_colimited_kernel<S>(ci, cap);
-    if (stom_cond_CO2_ == 0.0) {
-      A = A - S(odelia::util::to_passive(A));
-    }
+    static_assert(C::shape != ObjectiveShape::Normalised,
+                  "the normalised shape is billed with its normalisers' rows");
   }
-  S cost = hydraulic_cost_TF_kernel<S>(sigma, pars);
-  if constexpr (K == CostCurve::TF24_floor) {
-    // TF24's own cost plus lambda_o*E, as the parent's expression plus a term,
-    // so the reduction at lambda_o = 0 is exact, fused multiply-add included.
-    cost = cost + pars[par_TF24_floor_lambda_o] *
-                      transpiration_at<S>(sigma, collar, pars);
-  }
-  return A - cost;
 }
 
 template <Leaf::CostCurve K, class S>
@@ -321,10 +344,35 @@ inline Leaf::BilledOutputs<S> Leaf::billed_outputs_at(const S& collar,
                                                       const SupplyDraw<S>& draw,
                                                       const leaf_pars<S>& pars,
                                                       const HeldCoords<S>* placed) const {
+  return outputs_at<K, S, BilledOutputs<S>>(collar, draw, pars, placed,
+                                            "Leaf::billed_outputs_at");
+}
+
+template <Leaf::CostCurve K, class S>
+inline Leaf::PhysicalOutputs<S> Leaf::physical_outputs_at(
+    const S& collar, const SupplyDraw<S>& draw, const leaf_pars<S>& pars,
+    const HeldCoords<S>* placed) const {
+  return outputs_at<K, S, PhysicalOutputs<S>>(collar, draw, pars, placed,
+                                              "Leaf::physical_outputs_at");
+}
+
+template <Leaf::CostCurve K, class S, class Out>
+inline Out Leaf::outputs_at(const S& collar, const SupplyDraw<S>& draw,
+                            const leaf_pars<S>& pars, const HeldCoords<S>* placed,
+                            const char* who) const {
   using odelia::util::to_passive;
-  refuse_thermal_damage("Leaf::billed_outputs_at");
-  refuse_energy_balance("Leaf::billed_outputs_at");
-  check_surface_curve<K>("Leaf::billed_outputs_at");
+  using C = Curve<K>;
+  constexpr bool physical = std::is_same_v<Out, PhysicalOutputs<S>>;
+  static_assert(physical || std::is_same_v<Out, BilledOutputs<S>>,
+                "outputs_at fills BilledOutputs or PhysicalOutputs");
+  // Where the objective is carbon less a price of the flux, the billed carbon is
+  // the objective plus that price at the draw's flux, and nothing needs the
+  // collar's channel at an interior point. Anywhere else carbon is read off the
+  // coordinates at the live collar, as the physical outputs are.
+  constexpr bool carbon_from_price = !physical && C::price_reads_flux_only;
+  refuse_thermal_damage(who);
+  refuse_energy_balance(who);
+  check_surface_curve<K>(who);
   check_draw(to_passive(collar), draw);
   // Placed coordinates hold only at an interior point and at the collar
   // operating_collar placed them at; either check failing means the leaf moved
@@ -332,19 +380,17 @@ inline Leaf::BilledOutputs<S> Leaf::billed_outputs_at(const S& collar,
   const bool reuse = placed != nullptr && placed->placed();
   if (reuse) {
     if (operating_point_kind_ != OperatingPointKind::Interior) {
-      util::stop(std::string("Leaf::billed_outputs_at: the held coordinates were "
-                             "placed at an interior point and are being read "
-                             "at one that is ") +
+      util::stop(std::string(who) + ": the held coordinates were "
+                 "placed at an interior point and are being read at one that is " +
                  operating_point_kind_name(operating_point_kind_));
     }
     if (placed->at != to_passive(collar)) {
-      util::stop("Leaf::billed_outputs_at: the held coordinates were placed at a "
+      util::stop(std::string(who) + ": the held coordinates were placed at a "
                  "collar of " + util::to_string(placed->at) +
                  " and are being read at " + util::to_string(to_passive(collar)));
     }
   }
-  BilledOutputs<S> out;
-  const std::size_t n = static_cast<std::size_t>(supply_n_layers());
+  Out out;
 
   // The draws carry supplied rows, not a second supply: the draw holds each
   // layer's uptake at the passive collar with the state's rows, and the collar's
@@ -357,22 +403,67 @@ inline Leaf::BilledOutputs<S> Leaf::billed_outputs_at(const S& collar,
   for (std::size_t j = 0; j < draw.uptake.size(); ++j) {
     out.uptake.push_back(draw.uptake[j] + S(draw.duptake_dp[j]) * step);
   }
-  (void)n;
+
+  // The outputs read at the live collar, from coordinates that carry its
+  // channel: carbon, and with them the physical outputs.
+  const auto from_live = [&](const PhotoCapacity<S>& cap,
+                             const CollarCoords<S>& at) {
+    const S A = assim_at_coords<S>(cap, at.ci.value);
+    out.carbon = A - C::template scalar_carbon_cost<S>(*this, at.sigma.value, pars);
+    if constexpr (physical) {
+      out.A = A;
+      out.E = transpiration_at<S>(at.sigma.value, collar, pars);
+      out.psi_leaf = at.sigma.value;
+      out.ci = at.ci.value;
+      out.gc = at.gc.value;
+    }
+  };
 
   // Profit reads the HELD collar at an interior point: the envelope theorem as
   // an omission. The marginal is zero there by the solve, so carrying the collar
   // would add M dp/dtheta, of the size of the solve's tolerance. A shut leaf is
   // pinned: the wet bound places its collar and profit carries its movement.
-  const bool interior = operating_point_kind_ == OperatingPointKind::Interior;
-  const S collar_held(to_passive(collar));
-  if (reuse) {
-    // The same coordinates profit_at would solve for at the held collar: the
-    // residuals see a held collar there too, so these are its numbers and rows.
-    out.profit = profit_from_coords<K, S>(collar_held, pars, placed->cap,
-                                          placed->sigma, placed->ci);
+  // Carbon is not the objective, so no envelope spares it the collar's movement.
+  if (operating_point_kind_ == OperatingPointKind::Interior) {
+    const S collar_held(to_passive(collar));
+    if (reuse) {
+      // The same coordinates profit_at would solve for at the held collar: the
+      // residuals see a held collar there too, so these are its numbers and rows.
+      out.profit = profit_from_coords<K, S>(collar_held, pars, placed->cap,
+                                            placed->sigma, placed->ci);
+    } else {
+      out.profit = profit_at<K, S>(collar_held, draw, pars, false);
+    }
+    if constexpr (!carbon_from_price) {
+      // The channel added to the held coordinates leaves every value as it is
+      // (the step is zero) and adds the collar's rows.
+      if (reuse) {
+        from_live(placed->cap,
+                  collar_channel_at<S>(opt_psi_leaf_, collar, draw, pars,
+                                       placed->cap, placed->sigma, placed->gc,
+                                       placed->ci, true));
+      } else {
+        const PhotoCapacity<S> cap = photo_capacity_at<S>(pars);
+        from_live(cap, collar_coords_at<S>(opt_psi_leaf_, ci_, collar, draw,
+                                           pars, cap, true));
+      }
+    }
   } else {
-    out.profit = profit_at<K, S>(interior ? collar_held : collar, draw, pars,
-                                 !interior);
+    const PhotoCapacity<S> cap = photo_capacity_at<S>(pars);
+    const CollarCoords<S> at = collar_coords_at<S>(opt_psi_leaf_, ci_, collar,
+                                                   draw, pars, cap, true);
+    out.profit = profit_from_coords<K, S>(collar, pars, cap, at.sigma.value,
+                                          at.ci.value);
+    if constexpr (!carbon_from_price) {
+      from_live(cap, at);
+    }
+  }
+  if constexpr (carbon_from_price) {
+    // The flux at the live collar from the draw's own slope: the stem carries
+    // what the soil delivers at every collar, so it is the price's flux too.
+    out.carbon = out.profit +
+                 C::template scalar_price<S>(
+                     *this, draw.E_up.value + draw.E_up.slope * step, pars);
   }
   // The residual flux at the LIVE collar: the envelope theorem is profit's,
   // and the cuticle's loss moves with the collar through the stem's ceiling.
@@ -384,9 +475,6 @@ inline Leaf::BilledOutputs<S> Leaf::billed_outputs_at(const S& collar,
 template <Leaf::CostCurve K, class S>
 inline S Leaf::dprofit_dcollar_at(const S& collar, const SupplyDraw<S>& draw,
                                   const leaf_pars<S>& pars) const {
-  static_assert(K == CostCurve::TF24 || K == CostCurve::TF24_floor,
-                "the reverse-mode surface covers TF24 and TF24_floor; another "
-                "curve is a row in profit_at and dprofit_dcollar_at");
   // Every factor is a value, so this is arithmetic at S and dM/dp a first
   // derivative of it: a table's value with the true function's derivative
   // disagree by the interpolation error, enough to flip a curvature's sign.
@@ -414,34 +502,51 @@ inline S Leaf::dprofit_dcollar_at(const S& collar, const SupplyDraw<S>& draw,
 }
 
 template <Leaf::CostCurve K, class S>
+inline S Leaf::benefit_link_slope_at(const S& A) const {
+  if constexpr (benefit_link<K>() == BenefitLink::Log) {
+    // The solve reports no gradient here (dprofit_at_collar_psi's feasible
+    // flag), so no interior point should reach it; a NaN on the tape would
+    // reach every row it touched.
+    if (!(odelia::util::to_passive(A) > 0.0)) {
+      util::stop("Leaf::benefit_link_slope_at: the log link has no slope at A = " +
+                 util::format_double(odelia::util::to_passive(A)) +
+                 ", where the leaf is a net source");
+    }
+    return S(1.0) / A;
+  } else {
+    static_assert(benefit_link<K>() == BenefitLink::Log,
+                  "the identity link's slope is 1, never formed; the scaled "
+                  "link's is ProfitMax's normaliser");
+  }
+}
+
+// The marginal as dprofit_at_collar_psi forms it, operation for operation on
+// the identity link, so at S = double it IS the solve's.
+template <Leaf::CostCurve K, class S>
 inline S Leaf::dprofit_dcollar_from_coords(const S& collar, const leaf_pars<S>& pars,
                                            const PhotoCapacity<S>& cap,
                                            const CollarCoords<S>& at) const {
-  static_assert(K == CostCurve::TF24 || K == CostCurve::TF24_floor,
-                "the reverse-mode surface covers TF24 and TF24_floor; another "
-                "curve is a row in profit_at and dprofit_dcollar_at");
+  using C = Curve<K>;
+  static_assert(SurfaceForms<C>,
+                "this curve has no scalar forms in its Curve<K> (SurfaceForms), "
+                "so the derivative surface cannot place it");
   const S A_prime = assim_slope_at<S>(at.ci.value, cap);
-  // dC/dpsi_leaf as a tangent through the cost kernel, not a slope beside it.
-  S C_prime = cost_slope_at<S>(at.sigma.value, pars);
-  if constexpr (K == CostCurve::TF24_floor) {
-    // d/dsigma of lambda_o kmax (G(sigma) - G(collar)) is lambda_o kmax f, with
-    // the table's conductivity because the solve ran on the table.
-    C_prime = C_prime +
-              pars[par_TF24_floor_lambda_o] * pars[par_kmax] *
-                  curve_with_closed_form_rows<S>(stem_curve_integral_deriv(opt_psi_leaf_),
-                                 at.sigma.value, pars[par_stem_P50],
-                                 pars[par_stem_c]);
+  // dC/dpsi_leaf on the pack, from the curve's scalar form.
+  const S C_prime =
+      C::template scalar_cost_slope<S>(*this, at.sigma.value, collar, pars);
+  S M;
+  if constexpr (C::link == BenefitLink::Identity) {
+    M = A_prime * at.ci.slope - C_prime * at.sigma.slope;
+  } else {
+    const S A = assim_colimited_kernel<S>(at.ci.value, cap);
+    M = benefit_link_slope_at<K, S>(A) * (A_prime * at.ci.slope) -
+        C_prime * at.sigma.slope;
   }
-
-  S M = A_prime * at.ci.slope - C_prime * at.sigma.slope;
-  if constexpr (cost_reads_upstream<K>()) {
-    using odelia::util::to_passive;
-    // -dC/dcollar at fixed sigma: the floor's lambda_o*E reads the collar as its
-    // upstream end, as cost_deriv_upstream bills it in the solve. At the LIVE
-    // collar, so the term's own dM/dcollar reaches the implicit row.
-    M = M + pars[par_TF24_floor_lambda_o] * pars[par_kmax] *
-                curve_with_closed_form_rows<S>(stem_curve_integral_deriv(to_passive(collar)),
-                                               collar, pars[par_stem_P50], pars[par_stem_c]);
+  // The cost's direct dependence on the collar, at the LIVE collar, so the
+  // term's own dM/dcollar reaches the implicit row.
+  if constexpr (C::cost_reads_upstream) {
+    M = M - C::template scalar_cost_slope_upstream<S>(*this, at.sigma.value,
+                                                      collar, pars);
   }
   return M;
 }

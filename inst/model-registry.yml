@@ -2288,16 +2288,28 @@ equations:
     writes: [hydraulic_cost_]
     kind: closed_form
     note: 'TF24''s own cost at TF24''s own parameters plus a CF77 price, each the parent''s expression in its operand order, so $\lambda_o = 0$ is TF24 and $\gamma = 0$ is CF77 bit for bit.'
-  shadow_cost:
+  carbon:
     section: costs
-    title: The shadow part of the cost
+    title: The carbon the leaf kept
     latex: |
-      C_\mathrm{shadow} = \begin{cases} \lambda_o\,E & \text{TF24\_floor} \\ 0 & \text{every other curve} \end{cases}
-    code: phylloptim::Leaf::shadow_cost
-    reads: [TF24_floor_lambda_o]
+      A_\mathrm{kept} = A - C_\mathrm{carbon}(\psi) = J + P(E), \qquad C_\mathrm{carbon} = \begin{cases} \gamma\,\big[1 - f(\psi)\big]^{\beta} & \text{TF24, TF24\_floor} \\ 0 & \text{every other curve} \end{cases}
+    code: phylloptim::Leaf::carbon
+    also: [phylloptim::Curve< Leaf::CostCurve::TF24 >::carbon_cost, phylloptim::Curve< Leaf::CostCurve::TF24_floor >::carbon_cost, phylloptim::Curve< Leaf::CostCurve::TF24_floor >::price, phylloptim::Curve< Leaf::CostCurve::CF77 >::price, phylloptim::Leaf::cf77_price, phylloptim::Leaf::hydraulic_cost_TF_kernel]
+    reads: [TF24_cost_scale, TF24_beta2, TF24_floor_lambda_o, CF77_lambda_]
     writes: []
     kind: closed_form
-    note: 'The part of the cost that is a price rather than a realised carbon loss, at the reported $E$. Zero on the other curves means the curve does not separate the two, not that its cost is all realised carbon (CF77''s whole cost could be read either way).'
+    note: 'Each curve''s definition states the part of its cost that is carbon spent (decision D6): TF24''s hydraulic cost, on TF24 and on TF24_floor''s TF24 half; the rest of every cost is a price or a risk term. Where the price $P$ reads only the flux (TF24, at zero; TF24_floor; CF77) it is evaluated as the objective $J$ plus $P$ at the reported $E$, which is exact against those and linear in them. What a consumer growing a plant on this leaf books, never the objective; the derivative surface bills it beside the objective.'
+  shadow_cost:
+    section: costs
+    title: The price part of the cost
+    latex: |
+      C_\mathrm{shadow} = C - C_\mathrm{carbon} = \begin{cases} 0 & \text{TF24} \\ \lambda_o\,E & \text{TF24\_floor} \\ C & \text{CF77, JS22, CMax} \end{cases}
+    code: phylloptim::Leaf::shadow_cost
+    also: [phylloptim::Curve< Leaf::CostCurve::TF24_floor >::price, phylloptim::Curve< Leaf::CostCurve::CF77 >::price, phylloptim::Leaf::cf77_price, phylloptim::Curve< Leaf::CostCurve::TF24 >::carbon_cost, phylloptim::Leaf::hydraulic_cost_TF_kernel]
+    reads: [TF24_floor_lambda_o, CF77_lambda_]
+    writes: []
+    kind: closed_form
+    note: 'The cost a difference objective subtracted, less its carbon part: a price, not carbon the plant spent. Where the price reads only the flux it is that price at the reported $E$, bit-exact against it; on JS22 and CMax it is the whole cost ($C$, read as `hydraulic_cost_`, which the cost_ entries write). NA on SOX, JW26, LeastCost and ProfitMax, whose objectives have no cost in carbon units to split.'
   sox_reduction:
     section: costs
     title: SOX reduction factor

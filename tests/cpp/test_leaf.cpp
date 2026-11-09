@@ -5112,9 +5112,22 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
       const auto draw = l.supply_draw_at<T>(T(l.opt_root_psi_), supply);
       const T collar = l.operating_collar<K, T>(draw, tp, curvature);
       const auto out = l.billed_outputs_at<K, T>(collar, draw, tp);
-      std::vector<double> rows{odelia::ode::derivative_along(collar),
-                               odelia::ode::derivative_along(out.profit)};
-      for (const T& u : out.uptake) rows.push_back(odelia::ode::derivative_along(u));
+      const auto phys = l.physical_outputs_at<K, T>(collar, draw, tp);
+      const auto row_of = [](const T& x) { return odelia::ode::derivative_along(x); };
+      // The two variants share their core: what both return is the same number.
+      bool shared = row_of(phys.profit) == row_of(out.profit) &&
+                    row_of(phys.residual_flux) == row_of(out.residual_flux);
+      for (std::size_t j = 0; j < out.uptake.size(); ++j) {
+        shared = shared && row_of(phys.uptake[j]) == row_of(out.uptake[j]);
+      }
+      ok(shared, curve + ": the billed and physical variants share profit, "
+                 "uptake and the residual flux at " + name + "/" + par_name(k));
+      std::vector<double> rows{row_of(collar),       row_of(out.profit),
+                               row_of(out.carbon),   row_of(phys.carbon),
+                               row_of(phys.A),       row_of(phys.E),
+                               row_of(phys.psi_leaf), row_of(phys.ci),
+                               row_of(phys.gc),      row_of(out.residual_flux)};
+      for (const T& u : out.uptake) rows.push_back(row_of(u));
 
       // RELATIVE 1e-4, read off a step sweep rather than assumed: every row's
       // error-versus-step V has its floor at or above 1e-5, and at the
@@ -5136,17 +5149,36 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
         skipped_at += " " + name + "/" + par_name(k);
         continue;
       }
-      std::vector<double> fd{(up.opt_root_psi_ - down.opt_root_psi_) / span,
-                             (up.profit_ - down.profit_) / span};
+      // Each output's difference, and its size at the two ends, which sets the
+      // noise floor below.
+      std::vector<double> fd, mag;
+      const auto diff = [&](double a, double b) {
+        fd.push_back((a - b) / span);
+        mag.push_back(std::max(std::abs(a), std::abs(b)));
+      };
+      diff(up.opt_root_psi_, down.opt_root_psi_);
+      diff(up.profit_, down.profit_);
+      diff(up.carbon(), down.carbon());
+      diff(up.carbon(), down.carbon());
+      diff(up.assim_colimited_, down.assim_colimited_);
+      diff(up.transpiration_, down.transpiration_);
+      diff(up.opt_psi_leaf_, down.opt_psi_leaf_);
+      diff(up.ci_, down.ci_);
+      diff(up.stom_cond_CO2_, down.stom_cond_CO2_);
+      diff(up.residual_flux_, down.residual_flux_);
       for (std::size_t j = 0; j < out.uptake.size(); ++j) {
-        fd.push_back((up.soil_consumption_[j] - down.soil_consumption_[j]) / span);
+        diff(up.soil_consumption_[j], down.soil_consumption_[j]);
       }
+      static const char* const output_name[] = {
+          "collar", "profit", "carbon (billed)", "carbon (physical)", "A", "E",
+          "psi_leaf", "ci", "gc", "residual_flux"};
+      constexpr std::size_t n_named = std::size(output_name);
       for (std::size_t j = 0; j < rows.size(); ++j) {
         const std::string at =
-            " (" + curve + ") at " + name + " d" +
-            (j == 0   ? std::string("collar")
-             : j == 1 ? std::string("profit")
-                      : "uptake[" + std::to_string(j - 2) + "]") +
+            " (" + curve + ") at " + name +
+            (fx.g_min > 0.0 ? " with a cuticle" : "") + " d" +
+            (j < n_named ? std::string(output_name[j])
+                         : "uptake[" + std::to_string(j - n_named) + "]") +
             "/d" + par_name(k);
         if (unread(k)) {
           ok(rows[j] == 0.0 && fd[j] == 0.0,
@@ -5158,8 +5190,18 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
         }
         const double err = std::abs(rows[j] - fd[j]);
         const double scale = std::max(std::abs(rows[j]), std::abs(fd[j]));
+        // The absolute floor is on the row times the parameter's own scale,
+        // so a parameter of order 1e3 (PPFD, the price) is not let off rows of
+        // order 1e-9 per unit. The second floor is the solve's own noise in the
+        // output over the step (hazard 15): 1e-10 of its size, ten times the
+        // worst measured, ci in the dark, where A'(ci) is near zero and a step
+        // in kmax or stem_P50 moved ci by 1e-11 of itself.
+        const double unit = std::max(1.0, std::abs(v));
+        const double noise = 1e-10 * mag[j] / h;
+        const double floor = 1e-7 / unit + noise;
         if (err > worst_abs) { worst_abs = err; worst_abs_at = at; }
-        if (scale > 1e-6 && err / scale > worst_rel) {
+        // Worst relative among the rows the relative term governs.
+        if (1e-4 * scale > floor && err / scale > worst_rel) {
           worst_rel = err / scale;
           worst_rel_at = at;
         }
@@ -5167,14 +5209,10 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
         auto& seen = per_par_kind[name];
         seen.resize(pl::n_leaf_pars, 0);
         ++seen[std::size_t(k)];
-        // The absolute floor is on the row times the parameter's own scale,
-        // so a parameter of order 1e3 (PPFD, the price) is not let off rows of
-        // order 1e-9 per unit.
-        const double unit = std::max(1.0, std::abs(v));
-        ok(err <= 1e-4 * scale + 1e-7 / unit,
+        ok(err <= 1e-4 * scale + floor,
            "the supplied row matches a difference of the solve" + at +
-               ": row " + std::to_string(rows[j]) + ", difference " +
-               std::to_string(fd[j]));
+               ": row " + pl::util::format_double(rows[j]) + ", difference " +
+               pl::util::format_double(fd[j]));
       }
     }
   }
@@ -5213,7 +5251,7 @@ void test_supplied_rows_match_a_resolve_at_every_kind() {
   int compared = 0;
   referee_every_parameter_at_every_kind<CC::TF24>(&compared);
   referee_every_parameter_at_every_kind<CC::TF24_floor>(&compared);
-  ok(compared >= 1100, "the referee compared at least 1100 rows");
+  ok(compared >= 3300, "the referee compared at least 3300 rows");
 }
 
 // A shut leaf whose roots outlast its stem, so set_shut_state seats the stem at
@@ -8784,21 +8822,23 @@ const char *reported_names[] = {"opt_psi_leaf", "profit", "hydraulic_cost",
                                 "lambda_emergent"};
 
 void test_shadow_cost() {
-  printf("shadow_cost separates the price from the realised carbon cost\n");
-  // WHAT THIS PINS. `hydraulic_cost_` is the whole cost the objective subtracted;
-  // `shadow_cost()` is the share of it that is a price rather than carbon the
-  // plant gave up. So the carbon actually forgone is the difference, and the
-  // realised profit is `profit + shadow_cost`. A consumer that grows a plant on
-  // this leaf wants that second quantity and never `profit`, or it taxes growth
-  // by something the plant never spent.
+  printf("carbon and shadow_cost split each curve's cost into carbon and price\n");
+  // WHAT THIS PINS. `hydraulic_cost_` is the whole cost a difference objective
+  // subtracted. Each curve's definition states the part of it that is carbon
+  // spent (Curve<K>::carbon_cost); `shadow_cost()` is the rest, a price, and
+  // `carbon()` is A less the carbon part, what a consumer growing a plant on
+  // this leaf books, never `profit`. The carbon part is TF24's whole cost and
+  // TF24_floor's TF24 half; nothing on CF77, JS22 and CMax, whose costs are
+  // prices; and the product, ratio and normalised curves have no cost in
+  // carbon units to split, so their shadow cost is NA and their carbon is A.
   //
-  // ⚠️ BIT EQUALITY against `lambda_o * transpiration_`, not a tolerance. The
-  // accessor reads the stored transpiration rather than recomputing it, precisely
-  // so this identity holds exactly against the REPORTED `E` -- which is what a
-  // caller checks. A tolerance would pass on an accessor that recomputed
-  // transpiration from the potentials and drifted in the last bit.
+  // ⚠️ BIT EQUALITY against the reported numbers. Where the price reads only
+  // the flux, both read the reported objective and E (so a caller that checks
+  // `shadow_cost == lambda_o * E` gets it exactly), and carbon equals A less the
+  // carbon part to rounding: the cost was subtracted and the price added back.
+  using CC = phylloptim::Leaf::CostCurve;
   Drivers d;
-  int compared = 0;
+  int compared = 0, per_curve = 0;
   for (double ppfd : {300.0, 900.0, 1500.0}) {
     for (double vpd : {1.0, 2.0, 3.0}) {
       for (double psi_soil : {0.5, 1.0, 2.0, 3.0}) {
@@ -8808,42 +8848,58 @@ void test_shadow_cost() {
         for (double lo : {0.0, 1.5e4, 1.5e5}) {
           phylloptim::Leaf l = make_single_leaf(d, psi_soil);
           l.TF24_floor_lambda_o = lo;
-          l.set_model(phylloptim::Leaf::CostCurve::TF24_floor, false);
+          l.set_model(CC::TF24_floor, false);
           l.optimise();
           if (!std::isfinite(l.transpiration_)) continue;
-
           ok(l.shadow_cost() == lo * l.transpiration_,
-             "shadow_cost is lambda_o * E exactly");
-          // the realised cost is what is left, and it is never the whole cost
-          // unless the price is zero
-          const double realised = l.hydraulic_cost_ - l.shadow_cost();
-          ok(std::isfinite(realised) && realised >= 0.0,
-             "the realised cost is non-negative");
+             "TF24_floor's shadow cost is lambda_o * E exactly");
+          ok(l.carbon() == l.profit_ + l.shadow_cost(),
+             "TF24_floor's carbon is profit plus the price, exactly");
+          near(l.carbon(),
+               l.assim_colimited_ - l.hydraulic_cost_TF_kernel(l.opt_psi_leaf_), 1e-12,
+               "TF24_floor's carbon is A less TF24's cost");
           ok((lo == 0.0) == (l.shadow_cost() == 0.0),
              "the price vanishes exactly when lambda_o does");
+          ok(l.carbon() >= l.profit_, "the carbon kept is never below the objective");
           ++compared;
         }
 
-        // ⚠️ ZERO ON EVERY OTHER CURVE, INCLUDING CF77. That is a statement about
-        // the curve, not about the cost: CF77's whole cost IS `lambda * E` and
-        // reading it as a shadow price is ordinary, but the model supplies one
-        // number and nothing to attribute it with. Reporting it as all-shadow
-        // would ship one reading as a fact. See `Leaf::shadow_cost`.
-        for (auto c : {phylloptim::Leaf::CostCurve::TF24,
-                       phylloptim::Leaf::CostCurve::CF77,
-                       phylloptim::Leaf::CostCurve::JS22,
-                       phylloptim::Leaf::CostCurve::CMax}) {
+        for (int c = 0; c < phylloptim::Leaf::n_cost_curves; ++c) {
+          const CC curve = static_cast<CC>(c);
+          const std::string name = phylloptim::Leaf::curve_name(c);
           phylloptim::Leaf l = make_single_leaf(d, psi_soil);
           l.CF77_lambda_ = 1.5e5;
-          l.set_model(c, false);
+          l.set_model(curve, false);
           l.optimise();
-          ok(l.shadow_cost() == 0.0,
-             "shadow_cost is exactly zero off TF24_floor");
+          if (!std::isfinite(l.assim_colimited_)) continue;
+          if (curve == CC::TF24) {
+            ok(l.shadow_cost() == 0.0, "TF24's shadow cost is exactly zero");
+            ok(l.carbon() == l.profit_, "TF24's carbon IS its objective");
+          } else if (curve == CC::TF24_floor) {
+            continue;  // above, at a price
+          } else if (curve == CC::CF77) {
+            ok(l.shadow_cost() == l.hydraulic_cost_,
+               "CF77's cost is all price: its shadow cost is the whole cost");
+            ok(l.carbon() == l.profit_ + l.shadow_cost(),
+               "CF77's carbon is profit plus the price, exactly");
+            near(l.carbon(), l.assim_colimited_, 1e-12, "CF77's carbon is A");
+          } else if (curve == CC::JS22 || curve == CC::CMax) {
+            ok(l.shadow_cost() == l.hydraulic_cost_,
+               name + "'s cost is all price: its shadow cost is the whole cost");
+            ok(l.carbon() == l.assim_colimited_, name + "'s carbon is A");
+          } else {
+            ok(std::isnan(l.shadow_cost()),
+               name + " has no cost in carbon to split: its shadow cost is NA");
+            ok(l.carbon() == l.assim_colimited_, name + "'s carbon is A");
+          }
+          ++per_curve;
         }
       }
     }
   }
-  printf("  compared %d priced operating points\n", compared);
+  printf("  compared %d priced TF24_floor points and %d points across the other "
+         "curves\n", compared, per_curve);
+  ok(per_curve >= 8 * 30, "every other curve was compared on most of the grid");
 }
 
 
@@ -8895,8 +8951,8 @@ void test_lambda_emergent_reported() {
       const std::vector<double> ov = f.operating_point_values();
       ok(ov[10] == f.lambda_emergent(),
          "operating_point_values() reports lambda_emergent as `lambda`");
-      ok(ov.back() == f.residual_flux_,
-         "and the residual flux last");
+      ok(ov[14] == f.residual_flux_, "and the residual flux after the shadow cost");
+      ok(ov.size() == 16 && ov.back() == f.carbon(), "and carbon last");
     }
   }
   printf("  %d CF77 points with a known emergent lambda\n", compared);
@@ -9866,9 +9922,15 @@ void benchmark() {
 // census below is
 // part of the result -- a fixture reaching only one of them has narrowed the
 // check without narrowing what it claims.
-void test_outputs_agree_with_the_solve() {
-  printf("billed_outputs_at and dprofit_dcollar_at against the solve's own numbers\n");
-  using K = phylloptim::Leaf::CostCurve;
+// The surface's outputs at S = double against the numbers the solve reported:
+// every value the surface hands over is the solve's, so its rows are rows of
+// the right number. Bit for bit, except carbon on a curve whose price reads only
+// the flux (see below) and gc (likewise).
+template <phylloptim::Leaf::CostCurve K>
+void outputs_agree_with_the_solve_on(double price) {
+  namespace pl = phylloptim;
+  using Kind = pl::Leaf::OperatingPointKind;
+  const std::string curve = pl::Leaf::curve_name(static_cast<int>(K));
   const std::vector<std::vector<double>> soils = {
       {2.0}, {1.0, 2.0, 3.0}, {0.5, 1.0, 1.5, 2.0, 2.5}};
   const std::vector<std::vector<double>> depths = {
@@ -9886,32 +9948,56 @@ void test_outputs_agree_with_the_solve() {
           if (ps.back() <= 0.0) bad = true;
         }
         if (bad) continue;
-        phylloptim::Leaf l = make_leaf(d, ps, depths[k]);
-        l.find_root_collar_psi();
+        pl::Leaf l = make_leaf(d, ps, depths[k]);
+        l.CF77_lambda_ = price;
+        l.TF24_floor_lambda_o = price;
+        l.set_model(K, true);
+        l.optimise();
         const auto kind = l.operating_point_kind();
-        if (kind == phylloptim::Leaf::OperatingPointKind::SolverRefused ||
-            kind == phylloptim::Leaf::OperatingPointKind::NonFiniteGradient ||
-            kind == phylloptim::Leaf::OperatingPointKind::Unsolved) {
+        if (kind == Kind::SolverRefused || kind == Kind::NonFiniteGradient ||
+            kind == Kind::Unsolved) {
           continue;
         }
-        if (kind == phylloptim::Leaf::OperatingPointKind::Interior) ++n_interior;
-        else if (kind == phylloptim::Leaf::OperatingPointKind::HydraulicShutdown) ++n_shut;
+        if (kind == Kind::Interior) ++n_interior;
+        else if (kind == Kind::HydraulicShutdown) ++n_shut;
         else ++n_bound;
+        const std::string at = " (" + curve + ", " +
+                               l.operating_point_kind_name(kind) + ")";
 
         const auto pars = l.passive_pars();
         const double p0 = l.opt_root_psi_;
         const auto draw = l.supply_draw_at<double>(p0, l.roots_.held_supply());
-        const auto got = l.billed_outputs_at<K::TF24, double>(p0, draw, pars);
-        ok(got.profit == l.profit_, "billed_outputs_at's profit IS the solve's");
+        const auto got = l.billed_outputs_at<K, double>(p0, draw, pars);
+        const auto phys = l.physical_outputs_at<K, double>(p0, draw, pars);
+        ok(got.profit == l.profit_, "billed_outputs_at's profit IS the solve's" + at);
+        ok(phys.profit == l.profit_, "physical_outputs_at's profit IS the solve's" + at);
         ok(got.uptake.size() == l.soil_consumption_.size(),
-           "one uptake per layer");
+           "one uptake per layer" + at);
         for (std::size_t j = 0; j < got.uptake.size(); ++j) {
           ok(got.uptake[j] == l.soil_consumption_[j],
-             "billed_outputs_at's layer draw IS the solve's");
+             "billed_outputs_at's layer draw IS the solve's" + at);
         }
-        if (kind == phylloptim::Leaf::OperatingPointKind::Interior) {
+        if constexpr (pl::Curve<K>::price_reads_flux_only) {
+          // The solve's carbon is profit plus the price (Leaf::carbon); the
+          // physical outputs' is A less the carbon part, equal to rounding.
+          near(phys.carbon, l.carbon(), 1e-12, "the physical carbon is the solve's" + at);
+          near(got.carbon, l.carbon(), 1e-10,
+               "the billed carbon is the solve's, to the collar's tolerance" + at);
+        } else {
+          ok(phys.carbon == l.carbon(), "the physical carbon IS the solve's" + at);
+          ok(got.carbon == l.carbon(), "the billed carbon IS the solve's" + at);
+        }
+        ok(phys.A == l.assim_colimited_, "A IS the solve's" + at);
+        ok(phys.E == l.transpiration_, "E IS the solve's" + at);
+        ok(phys.psi_leaf == l.opt_psi_leaf_, "psi_leaf IS the solve's" + at);
+        ok(phys.ci == l.ci_ || (std::isnan(phys.ci) && std::isnan(l.ci_)),
+           "ci IS the solve's" + at);
+        // The marginal's association of the conductance, which the reported
+        // one forms in another order: equal to rounding, not bit for bit.
+        near(phys.gc, l.stom_cond_CO2_, 1e-14, "gc is the solve's" + at);
+        if (kind == Kind::Interior) {
           bool feasible = false;
-          const double up = l.dprofit_at_collar_psi<K::TF24>(p0, &feasible);
+          const double up = l.dprofit_at_collar_psi<K>(p0, &feasible);
           // dprofit_at_collar_psi drives the model to that collar; put the point
           // back before reading anything else off this leaf, because every path
           // out of the solve writes its own rates.
@@ -9919,18 +10005,146 @@ void test_outputs_agree_with_the_solve() {
           if (feasible && std::isfinite(up)) {
             ++n_marg;
             const auto d2 = l.supply_draw_at<double>(p0, l.roots_.held_supply());
-            ok(l.dprofit_dcollar_at<K::TF24, double>(p0, d2, pars) == up,
-               "dprofit_dcollar_at IS upstream's dprofit_at_collar_psi");
+            ok(l.dprofit_dcollar_at<K, double>(p0, d2, pars) == up,
+               "dprofit_dcollar_at IS upstream's dprofit_at_collar_psi" + at);
           }
         }
       }
     }
   }
-  printf("    %d interior (%d refereed against dprofit), %d at a bound, %d shut\n",
-         n_interior, n_marg, n_bound, n_shut);
+  printf("    %s: %d interior (%d refereed against dprofit), %d at a bound, %d shut\n",
+         curve.c_str(), n_interior, n_marg, n_bound, n_shut);
   ok(n_interior > 0 && n_bound > 0 && n_shut > 0,
-     "the sweep reached an interior point, a bound and a shut point");
-  ok(n_marg > 0, "the sweep refereed the marginal somewhere");
+     curve + ": the sweep reached an interior point, a bound and a shut point");
+  ok(n_marg > 0, curve + ": the sweep refereed the marginal somewhere");
+}
+
+// TF24_floor at lambda_o = 0 IS TF24 on the surface too, bit for bit: every
+// value and every row of every output, at every kind the sweep reaches, in every
+// parameter but the price, whose row is the flux on TF24_floor and absent on
+// TF24. It holds because each scalar form adds the floor's term to its parent's
+// expression, and a term of zero adds an exact zero (hazards.md, "One solver").
+void test_surface_reduces_tf24_floor_to_tf24() {
+  printf("the surface on TF24_floor at a zero price is TF24's, bit for bit\n");
+  namespace pl = phylloptim;
+  using CC = pl::Leaf::CostCurve;
+  using T = odelia::ode::tangent_scalar<double>;
+  using Kind = pl::Leaf::OperatingPointKind;
+  std::map<std::string, int> seen;
+  int compared = 0, differ = 0;
+  // A grid over light and soil, and the referee's dry pin, which the grid's
+  // drivers do not reach; each with and without a cuticle, set before the
+  // physiology seats it.
+  std::vector<pl::Leaf> bases;
+  for (double g_min : {0.0, 5e-4}) {
+    for (double ppfd : {1.0, 900.0, 1500.0}) {
+      for (double psi0 : {1.0, 2.0, 4.0, 6.0, 17.0}) {
+        Drivers d;
+        pl::Leaf l = fixture::multilayer_leaf();
+        l.setup_transpiration(100);
+        l.setup_root_vulnerability(100);
+        l.g_min = g_min;
+        l.set_physiology(fixture::root_network({1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0},
+                                               {0.5, 1.0, 1.5}),
+                         ppfd, {psi0, psi0 + 0.25, psi0 + 0.5}, {0.5, 1.0, 1.5},
+                         d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                         d.atm_o2_kpa, d.atm_kpa);
+        bases.push_back(l);
+      }
+    }
+    pl::Leaf dry = fixture::multilayer_leaf();
+    dry.g_min = g_min;
+    dry.set_physiology(fixture::root_network({1.0 / 0.05}, {1.0}), 500.0, {6.0},
+                       {1.0}, 0.000157 / 5.0, 0.5, 40.0, 25.0, 21.0, 101.3);
+    bases.push_back(dry);
+  }
+  for (const pl::Leaf& base : bases) {
+    pl::Leaf a = base, b = base;
+    a.set_model(CC::TF24, true);
+    b.TF24_floor_lambda_o = 0.0;
+    b.set_model(CC::TF24_floor, true);
+    a.optimise();
+    b.optimise();
+    const Kind kind = a.operating_point_kind();
+    if (kind != Kind::Interior && kind != Kind::BoundarySoil &&
+        kind != Kind::BoundaryDry && kind != Kind::HydraulicShutdown) {
+      continue;
+    }
+    ok(b.operating_point_kind() == kind && b.opt_root_psi_ == a.opt_root_psi_ &&
+           b.profit_ == a.profit_,
+       "the solves reduce, so the surfaces read the same point");
+    const double ca = kind == Kind::Interior
+                          ? a.profit_curvature_at_collar<CC::TF24>()
+                          : std::numeric_limits<double>::quiet_NaN();
+    const double cb = kind == Kind::Interior
+                          ? b.profit_curvature_at_collar<CC::TF24_floor>()
+                          : std::numeric_limits<double>::quiet_NaN();
+    if (kind == Kind::Interior && !(ca < -pl::Leaf::interior_curvature_floor)) {
+      continue;
+    }
+    ok(ca == cb || (std::isnan(ca) && std::isnan(cb)),
+       "the curvature reduces bit for bit");
+    ++seen[a.operating_point_kind_name(kind)];
+    for (int k = 0; k < pl::n_leaf_pars; ++k) {
+      if (k == pl::par_TF24_floor_lambda_o) continue;
+      const auto rows = [&]<CC K>(pl::Leaf& l, double curvature) {
+        pl::leaf_pars<T> tp;
+        const auto p = l.passive_pars();
+        for (std::size_t i = 0; i < tp.size(); ++i) tp[i] = T(p[i]);
+        odelia::ode::set_direction(tp[std::size_t(k)], 1.0);
+        std::vector<T> soil, r_h, r_v;
+        for (int i = 0; i < l.supply_n_layers(); ++i) {
+          soil.push_back(T(l.roots_.psi_soil_[std::size_t(i)]));
+          r_h.push_back(T(l.roots_.network_.r_R_H_min[std::size_t(i)]));
+          r_v.push_back(T(l.roots_.network_.r_R_V_sum[std::size_t(i)]));
+        }
+        const pl::SupplyInputs<T> supply{soil, r_h, r_v, tp[pl::par_root_P50],
+                                         tp[pl::par_root_c]};
+        const auto draw = l.supply_draw_at<T>(T(l.opt_root_psi_), supply);
+        pl::Leaf::HeldCoords<T> held;
+        const T collar = l.operating_collar<K, T>(draw, tp, curvature, &held);
+        const auto o = l.billed_outputs_at<K, T>(collar, draw, tp, &held);
+        const auto q = l.physical_outputs_at<K, T>(collar, draw, tp, &held);
+        std::vector<double> v{collar.value(), o.profit.value(), o.carbon.value(),
+                              q.carbon.value(), q.A.value(), q.E.value(),
+                              q.psi_leaf.value(), q.ci.value(), q.gc.value(),
+                              o.residual_flux.value()};
+        for (const T* x : {&collar, &o.profit, &o.carbon, &q.carbon, &q.A, &q.E,
+                           &q.psi_leaf, &q.ci, &q.gc, &o.residual_flux}) {
+          v.push_back(odelia::ode::derivative_along(*x));
+        }
+        for (const T& u : o.uptake) {
+          v.push_back(u.value());
+          v.push_back(odelia::ode::derivative_along(u));
+        }
+        return v;
+      };
+      const auto ra = rows.template operator()<CC::TF24>(a, ca);
+      const auto rb = rows.template operator()<CC::TF24_floor>(b, cb);
+      bool same = ra.size() == rb.size();
+      for (std::size_t j = 0; same && j < ra.size(); ++j) {
+        same = ra[j] == rb[j] || (std::isnan(ra[j]) && std::isnan(rb[j]));
+      }
+      if (!same) {
+        ++differ;
+        ok(false, std::string("the surface reduces at ") + a.operating_point_kind_name(kind) +
+                      " in " + pl::gradient::par_names()[std::size_t(k)]);
+      }
+      ++compared;
+    }
+  }
+  std::string kinds;
+  for (const auto& [kind, n] : seen) kinds += " " + kind + " " + std::to_string(n);
+  printf("    %d parameter directions compared at%s, %d differ\n", compared,
+         kinds.c_str(), differ);
+  ok(seen.size() == 4, "the reduction was compared at all four kinds");
+}
+
+void test_outputs_agree_with_the_solve() {
+  printf("the surface's outputs and marginal against the solve's own numbers\n");
+  using K = phylloptim::Leaf::CostCurve;
+  outputs_agree_with_the_solve_on<K::TF24>(kPriceForFOC);
+  outputs_agree_with_the_solve_on<K::TF24_floor>(kPriceForFOC);
 }
 
 // --- the ATLS thermal-damage layer (use_thermal_damage_) ----------------------
@@ -11617,6 +11831,7 @@ int main(int argc, char **argv) {
   test_collar_solve_refuses_rather_than_guessing();
   test_collar_argmax_is_smooth_in_a_trait();
   test_outputs_agree_with_the_solve();
+  test_surface_reduces_tf24_floor_to_tf24();
   test_soil_conductance_is_positive();
   test_root_vulnerability_closed_form_past_the_curve();
   test_root_rows_past_the_dry_end_match_the_table();
