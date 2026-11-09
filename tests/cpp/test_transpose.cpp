@@ -414,6 +414,7 @@ void for_each_surface_curve(F&& f) {
   f(std::integral_constant<CC, CC::CMax>{});
   f(std::integral_constant<CC, CC::SOX>{});
   f(std::integral_constant<CC, CC::JW26>{});
+  f(std::integral_constant<CC, CC::LeastCost>{});
 }
 std::vector<std::string> surface_curve_names() {
   std::vector<std::string> out;

@@ -5289,6 +5289,7 @@ void test_supplied_rows_match_a_resolve_at_every_kind() {
   referee_every_parameter_at_every_kind<CC::CMax>(&compared);
   referee_every_parameter_at_every_kind<CC::SOX>(&compared);
   referee_every_parameter_at_every_kind<CC::JW26>(&compared);
+  referee_every_parameter_at_every_kind<CC::LeastCost>(&compared);
   ok(compared >= 3300, "the referee compared at least 3300 rows");
 }
 
@@ -5720,6 +5721,7 @@ void for_each_further_surface_curve(F&& f) {
   f(std::integral_constant<CC, CC::CMax>{});
   f(std::integral_constant<CC, CC::SOX>{});
   f(std::integral_constant<CC, CC::JW26>{});
+  f(std::integral_constant<CC, CC::LeastCost>{});
 }
 
 template <phylloptim::Leaf::CostCurve K>
@@ -10280,6 +10282,7 @@ void test_outputs_agree_with_the_solve() {
   outputs_agree_with_the_solve_on<K::CMax>(kPriceForFOC);
   outputs_agree_with_the_solve_on<K::SOX>(kPriceForFOC);
   outputs_agree_with_the_solve_on<K::JW26>(kPriceForFOC);
+  outputs_agree_with_the_solve_on<K::LeastCost>(kPriceForFOC);
 }
 
 // --- the ATLS thermal-damage layer (use_thermal_damage_) ----------------------

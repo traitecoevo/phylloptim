@@ -745,6 +745,33 @@ template <> struct Curve<Leaf::CostCurve::LeastCost> {
   // C = log W with `vcmax_` at Tleaf, so d(log W)/dpsi gains
   // beta*umol_to_mol*dVcmax/dT*tau/W (cost_slope holds only the E half). W reads
   // the total flux, its stomatal part from gc.
+  // The scalar forms. vcmax is at the photosynthesis temperature, which is the
+  // leaf's with the energy balance off, as the surface requires.
+  template <class S>
+  static S scalar_resource_use(const Leaf& l, const S& sigma, const S& collar,
+                               const leaf_pars<S>& pars) {
+    return l.template transpiration_at<S>(sigma, collar, pars) * S(kg_to_mol_h2o) +
+           pars[par_LeastCost_beta] * l.template vcmax_at<S>(pars) * S(umol_to_mol);
+  }
+  template <class S>
+  static S scalar_cost_slope(const Leaf& l, const S& sigma, const S& collar,
+                             const leaf_pars<S>& pars) {
+    return S(kg_to_mol_h2o) * pars[par_kmax] *
+           l.template stem_conductivity_at<S>(sigma, pars) /
+           scalar_resource_use<S>(l, sigma, collar, pars);
+  }
+  template <class S>
+  static S scalar_cost_slope_upstream(const Leaf& l, const S& sigma, const S& collar,
+                                      const leaf_pars<S>& pars) {
+    return -(S(kg_to_mol_h2o) * pars[par_kmax] *
+             l.template stem_conductivity_at<S>(collar, pars)) /
+           scalar_resource_use<S>(l, sigma, collar, pars);
+  }
+  template <class S>
+  static S scalar_carbon_cost(const Leaf&, const S&, const leaf_pars<S>&) {
+    return S(0.0);
+  }
+
   static double less_cost_temperature_slope(const Leaf& l, double term,
                                             const Leaf::TemperaturePath& p) {
     const double dVcmax_dT = (p.vcmax_up - p.vcmax_dn) / (2.0 * p.h);
