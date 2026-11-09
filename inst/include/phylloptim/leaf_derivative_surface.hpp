@@ -593,11 +593,12 @@ inline Leaf::Normalisers<S> Leaf::normalisers_at(const SupplyDraw<S>& draw,
     }
     const double ref = profitmax_reference_psi_;
     const double ci_crit = profitmax_crit_ci_;
-    // No stream to normalise over (the wet bound past psi_crit, or no light):
-    // the leaf route's degenerate exit, and no objective to differentiate.
-    if (!(profitmax_A_max_ > 0.0) || !(profitmax_k_span_ > 0.0)) {
+    // No stream to normalise over (the wet bound past psi_crit) or no light:
+    // the solves' degenerate exit, and no objective to differentiate.
+    if (!profitmax_has_objective()) {
       util::stop("Leaf::normalisers_at: ProfitMax has no objective at this point: "
-                 "|A|max = " + util::format_double(profitmax_A_max_) +
+                 "PPFD = " + util::format_double(PPFD_) +
+                 ", |A|max = " + util::format_double(profitmax_A_max_) +
                  ", k_span = " + util::format_double(profitmax_k_span_));
     }
     if (!std::isfinite(ref) || std::isnan(ci_crit)) {
@@ -636,7 +637,7 @@ inline Leaf::Normalisers<S> Leaf::normalisers_at(const SupplyDraw<S>& draw,
                     : assim_saturated_kernel<S, S>(cap);
     n.A_max = to_passive(A) < 0.0 ? -A : A;
     // |A|max is zero only where A is zero at psi_crit, where ProfitMax has no
-    // objective; the leaf route takes its degenerate exit there.
+    // objective; the solves take their degenerate exit there.
     if (!(to_passive(n.A_max) > 0.0) || !(to_passive(n.k_span) > 0.0)) {
       util::stop("Leaf::normalisers_at: ProfitMax has no objective here: |A|max = " +
                  util::format_double(to_passive(n.A_max)) + ", k_span = " +

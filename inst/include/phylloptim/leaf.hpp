@@ -1339,13 +1339,17 @@ public:
                                            double psi_upstream);
   template <CostCurve K> static constexpr bool cost_reads_upstream();
   template <CostCurve K> static constexpr bool cost_domain_ends_at_psi_crit();
-  // Whether the objective is A times a gain factor, which has no maximum
-  // where A <= 0 throughout, so the leaf is shut there (dark_under_product).
-  template <CostCurve K> static constexpr bool objective_is_product();
+  // Whether the objective is under the log link (a product or a ratio), which
+  // has no maximum where A <= 0 throughout, so the leaf is shut there
+  // (dark_under_log_link).
+  template <CostCurve K> static constexpr bool objective_has_log_link();
   // For such a curve, whether A <= 0 with the stem at its dry end, the most
   // open the leaf can be; this leaves the leaf evaluated there.
-  template <CostCurve K> bool dark_under_product(double psi_dry,
-                                                 double psi_upstream);
+  template <CostCurve K> bool dark_under_log_link(double psi_dry,
+                                                  double psi_upstream);
+  // Whether ProfitMax has an objective on the normalisers prepare_profitmax
+  // seeded: none in the dark, nor without a stream to psi_crit.
+  bool profitmax_has_objective() const;
   // The leaf potential past which a solve does not look: psi_crit for a curve
   // whose own domain ends there, and the end of the stem curve for every other.
   template <CostCurve K> double dry_end() const;

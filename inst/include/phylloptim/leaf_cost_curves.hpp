@@ -838,8 +838,8 @@ constexpr bool curve_is_defined() {
   static_assert(Curve<K>::prepares_normalisers ==
                     (Curve<K>::shape == ObjectiveShape::Normalised),
                 "a curve prepares normalisers exactly when its shape is Normalised");
-  // A product's gain vanishes at psi_crit, which is what lets dark_under_product
-  // shut a leaf with A <= 0 at the dry end: the supremum of A*g sits there.
+  // A product's gain vanishes at psi_crit, which is where dark_under_log_link
+  // reads A: the supremum of A*g of a leaf with A <= 0 sits there.
   static_assert(Curve<K>::shape != ObjectiveShape::Product ||
                     Curve<K>::cost_domain_ends_at_psi_crit,
                 "a product's gain must vanish at its dry end, psi_crit");
@@ -1011,19 +1011,21 @@ constexpr bool Leaf::cost_domain_ends_at_psi_crit() {
   return Curve<K>::cost_domain_ends_at_psi_crit;
 }
 
-// SOX and JW26 maximise A g, g falling to 0 at psi_crit. With A <= 0 at every
-// opening the supremum is 0 as g -> 0, driving a dark leaf to psi_crit, so a
-// leaf with A <= 0 at the dry end (A rises with opening) is shut at the wet
-// bound instead. The argmax jumps at the light compensation point regardless.
+// With A <= 0 at every opening a log-link objective has no maximum to find:
+// SOX's and JW26's A g reaches its supremum 0 as g -> 0 at psi_crit, and
+// LeastCost's A / W rises with W, the most open leaf. Either drives a leaf that
+// cannot fix carbon open, so one with A <= 0 at the dry end (A rises with
+// opening) is shut at the wet bound instead. The argmax jumps at the light
+// compensation point regardless.
 template <Leaf::CostCurve K>
-constexpr bool Leaf::objective_is_product() {
-  return Curve<K>::shape == ObjectiveShape::Product;
+constexpr bool Leaf::objective_has_log_link() {
+  return Curve<K>::link == Leaf::BenefitLink::Log;
 }
 
 template <Leaf::CostCurve K>
-inline bool Leaf::dark_under_product(double psi_dry, double psi_upstream) {
-  static_assert(objective_is_product<K>(),
-                "dark_under_product is only defined for a product objective");
+inline bool Leaf::dark_under_log_link(double psi_dry, double psi_upstream) {
+  static_assert(objective_has_log_link<K>(),
+                "dark_under_log_link is only defined for a log-link objective");
   set_leaf_states_rates_from_psi_leaf(psi_dry, psi_upstream);
   return !(assim_colimited_ > 0.0);
 }
@@ -1413,6 +1415,11 @@ inline std::vector<double> Leaf::profitmax_curve(int n) {
     out[4 * N + k] = profit;
   }
   return out;
+}
+
+// The leaf route's degenerate exit, which the collar route takes too.
+inline bool Leaf::profitmax_has_objective() const {
+  return !(PPFD_ < 1.5e-8) && profitmax_k_span_ > 0.0 && profitmax_A_max_ > 0.0;
 }
 
 inline void Leaf::set_profitmax_degenerate_state(double psi_leaf,

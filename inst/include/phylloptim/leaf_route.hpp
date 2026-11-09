@@ -289,7 +289,7 @@ inline void Leaf::optimise_psi_leaf_single() {
       return;
     }
     prepare_profitmax();
-    if (!(profitmax_k_span_ > 0.0) || !(profitmax_A_max_ > 0.0)) {
+    if (!profitmax_has_objective()) {
       set_profitmax_degenerate_state(psi_wet, psi_soil);
       return;
     }
@@ -301,10 +301,10 @@ inline void Leaf::optimise_psi_leaf_single() {
     lambda_emergent_ = lambda_for<K>(psi_wet, psi_soil);
     return;
   }
-  // A product objective with A <= 0 at the dry end has no maximum, and the leaf
-  // is shut at the wet end (objective_is_product).
-  if constexpr (objective_is_product<K>()) {
-    if (dark_under_product<K>(psi_dry, psi_soil)) {
+  // A log-link objective with A <= 0 at the dry end has no maximum, and the
+  // leaf is shut at the wet end (objective_has_log_link).
+  if constexpr (objective_has_log_link<K>()) {
+    if (dark_under_log_link<K>(psi_dry, psi_soil)) {
       profit_ = profit_psi_leaf_for<K>(psi_wet, psi_soil);
       lambda_emergent_ = lambda_for<K>(psi_wet, psi_soil);
       return;

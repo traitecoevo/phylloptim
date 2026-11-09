@@ -1,3 +1,9 @@
+# phylloptim 0.32.0
+
+- Under `LeastCost` a leaf that cannot fix carbon at any opening (in the dark, or too hot) is reported closed at its wet end on both routes, as under SOX and JW26. It used to be opened to `psi_crit` on the leaf route, since a negative `A/W` is largest at the largest `W`, and refused on the collar route.
+- Under `ProfitMax` the collar route reports a leaf with no objective (in the dark, or with a soil drier than `psi_crit`) as the leaf route does: closed, with zero profit and `NA` lambda. It used to report a profit from normalisers that were not positive, be refused, or fail on a very dry soil. Its derivative surface refuses such a point by name.
+- Only those results move ([#184](https://github.com/traitecoevo/phylloptim/issues/184)).
+
 # phylloptim 0.31.0
 
 - The derivative surface serves every curve, from each curve's own definition, in place of TF24 and TF24_floor only. Its outputs gain `carbon`, `A` less the part of the cost that is carbon spent (only TF24's hydraulic cost is), beside `profit`, the objective; plant grows on `carbon`. `physical_outputs_at()` also returns `A`, `E`, `psi_leaf`, `ci` and `gc`, for fitting. ([#239](https://github.com/traitecoevo/phylloptim/issues/239)).
