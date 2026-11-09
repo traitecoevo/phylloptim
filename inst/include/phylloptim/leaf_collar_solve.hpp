@@ -95,10 +95,9 @@ inline double Leaf::polish_bracket_bound(double x0,
     const double up = E_column_zero(x, psi_soil);
     return up - residual_flux(x, up);
   };
-  // Tighter than collar_root_tol (~6e-12 at a 5 MPa collar): near the dry end
-  // the steep stem curve turns that into ~2e-11 of psi_leaf, a 2e-6 row error
-  // to a finite difference at a 1e-6 step.
-  constexpr double polish_tol = 1e-15;
+  // bound_root_tol, tighter than collar_root_tol (~6e-12 at a 5 MPa collar):
+  // near the dry end the steep stem curve turns that into ~2e-11 of psi_leaf, a
+  // 2e-6 row error to a finite difference at a 1e-6 step.
   const double f0 = target(x0);
   if (f0 == 0.0 || !std::isfinite(f0)) {
     return x0;
@@ -120,9 +119,9 @@ inline double Leaf::polish_bracket_bound(double x0,
       if (std::isfinite(fx) && fx * f0 <= 0.0) {
         const std::pair<double, double> r =
             side < 0.0
-                ? util::uniroot_smooth_bracket(target, x, x0, fx, f0, polish_tol,
+                ? util::uniroot_smooth_bracket(target, x, x0, fx, f0, bound_root_tol,
                                                static_cast<size_t>(ci_niter))
-                : util::uniroot_smooth_bracket(target, x0, x, f0, fx, polish_tol,
+                : util::uniroot_smooth_bracket(target, x0, x, f0, fx, bound_root_tol,
                                                static_cast<size_t>(ci_niter));
         // The continuity root from its feasible side, for the reason
         // find_root_psi takes it; the wet bound from the middle of its bracket.
@@ -167,18 +166,12 @@ inline double Leaf::find_wet_bound(double wettest_soil_layer,
   double f_hi = (hi == psi_crit && dry_end_ == psi_crit && std::isfinite(E_up_at_crit))
                     ? E_up_at_crit - residual_flux(psi_crit, E_up_at_crit)
                     : target(hi);
-  for (int i = 0; f_hi < 0.0; ++i) {
-    if (i >= 64) {
-      util::stop_infeasible("collar_bracket",
-                            "find_wet_bound: the soil delivers less than the "
-                            "residual flux at every collar potential tried; "
-                            "wettest=" + util::to_string(wettest_soil_layer) +
-                            "; last=" + util::to_string(hi));
-    }
-    lo = hi;
-    f_lo = f_hi;
-    hi = hi + (hi - wettest_soil_layer) + bracket_tol_at(hi);
-    f_hi = target(hi);
+  if (!widen_to_sign_change(target, wettest_soil_layer, lo, f_lo, hi, f_hi)) {
+    util::stop_infeasible("collar_bracket",
+                          "find_wet_bound: the soil delivers less than the "
+                          "residual flux at every collar potential tried; "
+                          "wettest=" + util::to_string(wettest_soil_layer) +
+                          "; last=" + util::to_string(hi));
   }
   try {
     return util::uniroot_smooth(target, lo, hi, f_lo, f_hi, bracket_tol,
@@ -210,26 +203,17 @@ inline double Leaf::find_shut_wet_bound() {
   }
   double hi = std::max(supply_wet_ceiling(), lo + bracket_tol_at(lo));
   double f_hi = target(hi);
-  for (int i = 0; f_hi < 0.0; ++i) {
-    if (i >= 64) {
-      util::stop_infeasible("collar_bracket",
-                            "find_shut_wet_bound: the soil delivers less than "
-                            "the residual flux at every collar tried; floor=" +
-                            util::to_string(floor) +
-                            "; last=" + util::to_string(hi));
-    }
-    lo = hi;
-    f_lo = f_hi;
-    hi = hi + (hi - floor) + bracket_tol_at(hi);
-    f_hi = target(hi);
+  if (!widen_to_sign_change(target, floor, lo, f_lo, hi, f_hi)) {
+    util::stop_infeasible("collar_bracket",
+                          "find_shut_wet_bound: the soil delivers less than "
+                          "the residual flux at every collar tried; floor=" +
+                          util::to_string(floor) + "; last=" + util::to_string(hi));
   }
   if (f_hi == 0.0) {
     return hi;
   }
-  // polish_bracket_bound's 1e-15, for its reason: the bound is the answer.
-  constexpr double shut_tol = 1e-15;
   try {
-    return util::uniroot_smooth(target, lo, hi, f_lo, f_hi, shut_tol,
+    return util::uniroot_smooth(target, lo, hi, f_lo, f_hi, bound_root_tol,
                                 static_cast<size_t>(ci_niter));
   } catch (const std::exception& e) {
     util::stop_infeasible("collar_bracket",
@@ -257,19 +241,12 @@ inline double Leaf::leaf_wet_bound(double psi_upstream) {
   double lo = psi_upstream, f_lo = -residual_flux(psi_upstream, 0.0);
   double hi = std::max(psi_crit, psi_upstream + bracket_tol_at(psi_upstream));
   double f_hi = target(hi);
-  for (int i = 0; f_hi < 0.0; ++i) {
-    if (i >= 64) {
-      util::stop_infeasible("leaf_wet_bound",
-                            "the stem cannot carry the residual flux from "
-                            "psi_upstream=" + util::to_string(psi_upstream));
-    }
-    lo = hi;
-    f_lo = f_hi;
-    hi = hi + (hi - psi_upstream) + bracket_tol_at(hi);
-    f_hi = target(hi);
+  if (!widen_to_sign_change(target, psi_upstream, lo, f_lo, hi, f_hi)) {
+    util::stop_infeasible("leaf_wet_bound",
+                          "the stem cannot carry the residual flux from "
+                          "psi_upstream=" + util::to_string(psi_upstream));
   }
-  constexpr double wet_tol = 1e-15;
-  return util::uniroot_smooth(target, lo, hi, f_lo, f_hi, wet_tol,
+  return util::uniroot_smooth(target, lo, hi, f_lo, f_hi, bound_root_tol,
                               static_cast<size_t>(ci_niter));
 }
 

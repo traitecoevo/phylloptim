@@ -328,6 +328,26 @@ public:
   static double bracket_tol_at(double x) {
     return 1.5 * bracket_tol * (1.0 + std::abs(x));
   }
+  // Tolerance on a bound that is itself the answer (a polished bracket end, the
+  // wet bound of a shut leaf or a leaf route): the derivative rows differentiate
+  // the root, so where a loose root-find stops would show in them.
+  static constexpr double bound_root_tol = 1e-15;
+  // Widens [lo, hi] away from `anchor`, doubling hi's distance from it, until the
+  // rising `target` is non-negative at hi; false if 64 doublings do not reach it.
+  template <class F>
+  static bool widen_to_sign_change(F&& target, double anchor, double& lo,
+                                   double& f_lo, double& hi, double& f_hi) {
+    for (int i = 0; f_hi < 0.0; ++i) {
+      if (i >= 64) {
+        return false;
+      }
+      lo = hi;
+      f_lo = f_hi;
+      hi = hi + (hi - anchor) + bracket_tol_at(hi);
+      f_hi = target(hi);
+    }
+    return true;
+  }
   // A stationary point this close to the dry end, in MPa of collar, is reported as
   // the pin at the end: the stem's inverse resolves its rows to ~1e-6 here and
   // nothing within ~1e-10. ⚠️ Measured on the collar, not on the stem's remaining
