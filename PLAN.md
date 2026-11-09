@@ -44,7 +44,7 @@ Written for: agents picking up work on this package. Each item names what to cha
 
 **B6. The derivative surface's FD-versus-IFT check covers a minority of parameters.** `test_leaf.cpp`'s referees compare the implicit-function rows against a difference of the solve for the parameters each fixture happens to perturb. Extend one referee to every `par_*` at every operating-point kind on a small grid, with the per-kind tolerances the existing tests measured. Done when the referee lists every parameter by name and a planted wrong row in any one of them fails.
 
-## C. Shorter comments and NEWS — required, no behaviour change (#206 options 1 and 2; C1–C4 done, C5 optional and open)
+## C. Shorter comments and NEWS — required, no behaviour change (#206 options 1 and 2; C1–C5 done)
 
 **C1. Comments as current contracts only.** `leaf_model.hpp` is 10,300 lines, about 5,100 of them comments, with 257 ⚠️ markers and 110 issue-number references; `R/` carries the same style. Each comment becomes a contract, a unit or a hazard in one to three lines. History ("the probe that sat here is gone", "was X before #NNN"), retracted claims and issue numbers go: the PR already holds them. Keep a ⚠️ only where the reader is about to make a mistake the hazard list names. Three examples #206 picked: the 36 `par_*` constants carry ~130 lines on when each slot was inserted; the water-potential convention block retells two closed issues; the header of `R/gradient.R` documents a retracted speed claim. Do it one file per PR with no code change in the PR, so the diff is reviewable and the compiled objects and all three goldens can be shown bit-identical. Expected: ~5,000 lines off the C++ and ~1,000 off R. Done per file when every remaining comment answers "what must hold here, and what breaks if it does not".
 
@@ -54,7 +54,7 @@ Written for: agents picking up work on this package. Each item names what to cha
 
 **C4. Stale counts** (done in #210)**.** The reference grid is 672 points, not 576: `README.md:601`, `.claude/measurements.md:7`, `vignettes/the-models.Rmd:27` and `:202` say 576 (`.claude/CLAUDE.md:54` is right). `vignettes/cpp-interface.Rmd:169` quotes `static_assert(g::n_theta == 19)`; `n_theta` is 35 (`gradient.hpp:103`), and the same vignette's line 151 says so. `README.md`'s Status section is at 0.10.0; `NEWS.md` is at 0.27.0. `README.md:557`, `:570` and `:583` put odelia's floor at 0.7.0; `DESCRIPTION` says `>= 0.10.0`. Fix each from the code, not from another document, and add a line to `test-readme.R` (after B1) that greps the two counts out of the goldens.
 
-**C5. Thermal damage has no worked example outside `the-models.Rmd`.** The `fitting` and `phylloptim` vignettes do not mention it. One short section in `the-models.Rmd` showing the gate on and off at one driver is enough; it is optional.
+**C5. Thermal damage has no worked example outside `the-models.Rmd`.** The `fitting` and `phylloptim` vignettes do not mention it. One short section in `the-models.Rmd` showing the gate on and off at one driver is enough; it is optional. **Done (2026-11-09):** `the-models.Rmd`'s "Thermal damage" section, after "The two gates", solves one driver with the gate off, on and undamaged, and on with 30% of the leaf impaired or damaged, and points to `leaf_damage_trajectory()` and `leaf_damage_gradient()`.
 
 ## D. Speed — measure first (done in 0.27.2: D1 taken; D2, D3, D4 measured and dropped)
 
