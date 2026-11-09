@@ -370,12 +370,15 @@ int main(int argc, char **argv) {
       const char *label;
       int par;
       bool fast;
+      double g_min = 0.0;
     };
     const Arm arms[] = {
         {"vcmax_25 (no table anywhere)", 0, true},
         {"stem_P50, fast_stem_curve on", phylloptim::gradient::par_stem_P50, true},
         {"stem_P50, fast_stem_curve off", phylloptim::gradient::par_stem_P50, false},
-        {"stem_c (reuses its tables)", phylloptim::gradient::par_stem_c, true}};
+        {"stem_c (reuses its tables)", phylloptim::gradient::par_stem_c, true},
+        // With a cuticle: every arm above runs at its exact-zero default.
+        {"vcmax_25, g_min 5e-4", 0, true, 5e-4}};
 
     printf("\n%-32s %10s %12s\n", "pars", "us/obs", "rebuilds/obs");
     const long batch_reps = std::max(1L, per_round / 20);
@@ -385,6 +388,7 @@ int main(int argc, char **argv) {
                  phylloptim::gradient::Route::Collar};
       s.fast_stem_curve = arm.fast;
       const int pars[1] = {arm.par};
+      theta[phylloptim::par_g_min] = arm.g_min;
       double best = 1e300;
       long builds = 0;
       for (int round = 0; round < 3; ++round) {

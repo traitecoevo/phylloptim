@@ -361,6 +361,8 @@ const Tolerance kExact{-1.0, -1.0};
 //     profit                 2.42e-9         1e-7         41x
 //     argmax-derived         1.97e-7         1e-5         51x
 //
+// The cuticle pass takes the appended pair too.
+//
 // Only the appended rows get the looser pair, so a Linux-only change to the
 // routes the original rows cover still shows. Theirs is set by genuine profits as
 // small as 1e-7, the difference of terms that nearly cancel, and by a leaf all
@@ -628,12 +630,14 @@ int compare(Tolerance tol) {
 // pure addition" is the wrong check here. The right one is: the fresh pass is
 // additive, and every reuse-pass difference is attributable to a named cause.
 //
-// TWO PASSES, and the second is the one the file exists for. Pass "fresh"
+// THREE PASSES, and the second is the one the file exists for. Pass "fresh"
 // constructs a Leaf per row, which makes it reproducible and blind to stale
 // state -- the same trade the grid above makes. Pass "reuse" drives ONE Leaf
 // through a fixed sequence of rows, poisoning every stale-prone output first, so
 // a value that survives is provably not written by the path under test. A stale
-// field is what pass "fresh" cannot see.
+// field is what pass "fresh" cannot see. Pass "cuticle", appended last, is pass
+// "fresh" with a residual conductance: every row above it runs at g_min = 0, where
+// the residual terms are exact zeros, so they cannot see that path at all.
 //
 // The two axes that make a different MODEL rather than a different driver:
 //   solver    which objective, and which variable it optimises. `collar`
@@ -796,7 +800,7 @@ struct OptRow {
   Topology topology;
   double psi_soil, ppfd, leaf_temp;
   bool energy_balance, thermal_cost;
-  bool reuse_pass;
+  const char *pass;   // "fresh", "reuse" or "cuticle"
   // what happened
   const char *status; // "ok" or "threw"
   const char *kind;   // operating_point_kind_name
@@ -1000,11 +1004,13 @@ void dispatch(phylloptim::Leaf &l, Solver s) {
 }
 
 OptRow solve_one(Solver s, Topology t, double psi_soil, double ppfd,
-                 double leaf_temp, bool eb, bool tc) {
-  OptRow r{s, t, psi_soil, ppfd, leaf_temp, eb, tc, false, "ok", "-",
+                 double leaf_temp, bool eb, bool tc, double g_min = 0.0,
+                 const char *pass = "fresh") {
+  OptRow r{s, t, psi_soil, ppfd, leaf_temp, eb, tc, pass, "ok", "-",
            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
   phylloptim::Leaf l = fixture::multilayer_leaf();
   clear_aligned_inputs(l);
+  l.g_min = g_min;
   l.setup_transpiration(phylloptim::Leaf::ncontrol_default);
   l.setup_root_vulnerability(phylloptim::Leaf::ncontrol_default);
   l.use_energy_balance_ = eb;
@@ -1055,6 +1061,12 @@ const Topology kTopologies[] = {Topology::Single, Topology::Multi1,
 const double kReusePsiSoils[] = {0.5, 3.0, 6.0};
 const double kReuseTemps[] = {25.0, 50.0};
 
+// Pass "cuticle": a new Leaf per row with a residual conductance, the path every
+// other row leaves at its exact-zero default (hazard 18), on the reuse pass's
+// drivers at 25 and 40 C. 5e-4 mol H2O m^-2 s^-1 is the surface referee's cuticle.
+const double kCuticleGmin = 5e-4;
+const double kCuticleTemps[] = {25.0, 40.0};
+
 std::vector<OptRow> run_optima_grid() {
   std::vector<OptRow> rows;
 
@@ -1083,7 +1095,7 @@ std::vector<OptRow> run_optima_grid() {
           for (double T : kReuseTemps)
             for (double ppfd : kOptPPFDs)
               for (Solver s : kSolvers) {
-                OptRow r{s,  t,  ps, ppfd, T, eb, tc, true, "ok", "-",
+                OptRow r{s,  t,  ps, ppfd, T, eb, tc, "reuse", "ok", "-",
                          0,  0,  0,  0,    0, 0,  0,  0,    0,    0, 0, 0, 0,
                          0};
                 try {
@@ -1100,6 +1112,17 @@ std::vector<OptRow> run_optima_grid() {
                 rows.push_back(r);
               }
       }
+  // --- pass "cuticle": a new Leaf per row, with a residual conductance -------
+  for (Topology t : kTopologies)
+    for (bool eb : {false, true})
+      for (bool tc : {false, true})
+        for (double ps : kReusePsiSoils)
+          for (double T : kCuticleTemps)
+            for (double ppfd : kOptPPFDs)
+              for (Solver s : kSolvers) {
+                rows.push_back(
+                    solve_one(s, t, ps, ppfd, T, eb, tc, kCuticleGmin, "cuticle"));
+              }
   return rows;
 }
 
@@ -1111,7 +1134,7 @@ const char *kOptimaHeader =
 
 void write_opt_row(FILE *f, const OptRow &r) {
   fprintf(f, "%s\t%s\t%s\t%.17g\t%.17g\t%.17g\t%d\t%d\t%s\t%s",
-          r.reuse_pass ? "reuse" : "fresh", solver_name(r.solver),
+          r.pass, solver_name(r.solver),
           topology_name(r.topology), r.psi_soil, r.ppfd, r.leaf_temp,
           r.energy_balance ? 1 : 0, r.thermal_cost ? 1 : 0, r.status, r.kind);
   for (double v : {r.opt_psi_leaf, r.opt_root_psi, r.profit, r.ci, r.assim,
@@ -1244,7 +1267,7 @@ int compare_optima(Tolerance tol) {
     const OptRow &r = rows[i];
     char tag[192];
     snprintf(tag, sizeof tag, "%s/%s/%s psi_soil=%g ppfd=%g T=%g eb=%d tc=%d",
-             r.reuse_pass ? "reuse" : "fresh", solver_name(r.solver),
+             r.pass, solver_name(r.solver),
              topology_name(r.topology), r.psi_soil, r.ppfd, r.leaf_temp,
              r.energy_balance ? 1 : 0, r.thermal_cost ? 1 : 0);
 
@@ -1287,7 +1310,8 @@ int compare_optima(Tolerance tol) {
       const bool is_max = is_maximum_field(kOptFieldNames[j]);
       // The appended solvers have their own pair; see kCrossPlatformOptima.
       const bool appended = static_cast<int>(r.solver) >=
-                            static_cast<int>(Solver::CollarProfitMax);
+                                static_cast<int>(Solver::CollarProfitMax) ||
+                            std::strcmp(r.pass, "cuticle") == 0;
       const Tolerance t = exact_mode || !appended ? tol : kCrossPlatformOptimaAppended;
       const double limit = is_max ? t.maximum : t.argmax;
       (appended ? (is_max ? worst_max_app : worst_argmax_app)
