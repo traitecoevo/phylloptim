@@ -11,7 +11,6 @@ Read alongside:
 - **[`vignettes/the-models.Rmd`](../vignettes/the-models.Rmd)** — the nine optimality models, the cost/link framework that unifies them, the solver's per-call costs, and two appendices: **B** derives the gradients, **C** is the numerical practice (finite-difference steps, golden files, cross-platform magnitudes)
 - **[`vignettes/fitting.Rmd`](../vignettes/fitting.Rmd)** — ⚠️ read *"Fitting a different collection of parameters"* before answering anything about `pars`: what a different collection costs, which parameters return exactly zero and why, which are unreachable, and what a new study has to write itself
 - **[COMPARISON.md](../COMPARISON.md)** — how this differs from `plantecophys`, `tealeaves`, `bigleaf`
-- **[PLAN.md](../PLAN.md)** — the work queue after 0.27.0, in order, with what "done" is for each item; read it before picking up anything from the issues
 - **[issues](https://github.com/traitecoevo/phylloptim/issues)** — the work queue, and the *why* behind each open item
 
 Family context lives in [`plant-meta`](https://github.com/traitecoevo/plant-meta).
@@ -126,7 +125,7 @@ Everything is an argument to that call:
 | a different decision variable or supply topology | the bracket and the chain factor `dpsi_leaf/dpsi` |
 | a scan, or no scan | `n` |
 
-- **A new cost curve touches no solver.** It is one enumerator appended last (move `n_cost_curves`, which names the last one), one arm in `with_curve()`, and one `Curve<K>` specialisation in `leaf_cost_curves.hpp`: its name, the parameters it owns (slot, bound field, member, default, whether the default is aligned), every property stated with no default, its expressions at `double` (its objective's shape and the factor that shape composes with `A`: a cost, a gain, a resource use or a normalised cost; the cost's slopes), the part of its cost that is carbon spent (`carbon_cost`) and, where the rest is a price of the flux alone (`price_reads_flux_only`), that price; and the same expressions on any scalar (`SurfaceForms`), which the derivative surface reads and `test_scalar_forms_are_the_double_forms` holds to the double forms bit for bit. λ is not part of it: `lambda_for` and `lambda_collar_for` compute every curve's as `C′/(h′(A)·E′)` from its cost's slopes and link (PLAN.md, D8). `CurveDefinition` checks each specialisation is complete, so a missing piece is a compile error naming the curve and the piece. Every per-curve table reads the definition and none has a per-curve arm: the property tables, `check_cost_parameters`, `cost_deriv`, `cost_deriv_upstream`, `profit_psi_leaf_for`, `lambda_for`, `lambda_collar_for`, `curve_name()`, the energy balance's cost-side slope and `closed_form::optimise_into`, whose three per-curve solvers are frozen (PLAN.md, decision D1).
+- **A new cost curve touches no solver.** It is one enumerator appended last (move `n_cost_curves`, which names the last one), one arm in `with_curve()`, and one `Curve<K>` specialisation in `leaf_cost_curves.hpp`: its name, the parameters it owns (slot, bound field, member, default, whether the default is aligned), every property stated with no default, its expressions at `double` (its objective's shape and the factor that shape composes with `A`: a cost, a gain, a resource use or a normalised cost; the cost's slopes), the part of its cost that is carbon spent (`carbon_cost`) and, where the rest is a price of the flux alone (`price_reads_flux_only`), that price; and the same expressions on any scalar (`SurfaceForms`), which the derivative surface reads and `test_scalar_forms_are_the_double_forms` holds to the double forms bit for bit. λ is not part of it: `lambda_for` and `lambda_collar_for` compute every curve's as `C′/(h′(A)·E′)` from its cost's slopes and link (decision D4 below). `CurveDefinition` checks each specialisation is complete, so a missing piece is a compile error naming the curve and the piece. Every per-curve table reads the definition and none has a per-curve arm: the property tables, `check_cost_parameters`, `cost_deriv`, `cost_deriv_upstream`, `profit_psi_leaf_for`, `lambda_for`, `lambda_collar_for`, `curve_name()`, the energy balance's cost-side slope and `closed_form::optimise_into`, whose three per-curve solvers are frozen (decision D1 below).
 - ⚠️ **A cost that reads the upstream potential must say `cost_reads_upstream = true` in its definition**, which then requires its `cost_slope_upstream`; said false, the collar solve converges onto a point that is not the maximum, with no error (#141). Likewise a cost that reads leaf temperature says `cost_reads_leaf_temperature = true` and gives its slope, or the energy balance's first-order condition leaves it out.
 - **A cost or λ that reads the flux reads it through `operating_point_flux()`, never `transpiration()`.** `transpiration()` refuses a reversed pair (#31), while the evaluator reads that pair as no flow, and a prescribed collar at the multi-layer wet bound inverts to a leaf potential ~1e-14 MPa wetter; `test_prescribed_wet_bound_reads_no_flow` lists the curves that read E, and a new one belongs in it.
 - **Runtime curve dispatch is ONE switch, `Leaf::with_curve()`.** It has no `default:`, deliberately: a `default` satisfies `-Werror=switch` and removes the check it exists for.
@@ -174,6 +173,8 @@ Each has cost someone real numbers; the narrative and its measurements are in [h
 
 `tests/cpp/bench_solve.cpp` and `bench_gradient.cpp` cover the C++ side; `tools/bench_user_cost.R` covers the R side; `tools/bench_history.sh` runs both against a list of commits; `tools/cost-baseline.tsv` is the recorded table and `tests/testthat/test-cost.R` the guard. The README's "Performance from R" quotes the R-side figures and the solver table in `vignette("the-models")` the per-model ones; everything else links to those two. How to measure is in [the benchmark method](measurements.md#benchmark-method).
 
+**No slowdown unless it is essential**, and a claim about cost is measured interleaved against master, never read off one run.
+
 1. **Never pin an absolute microsecond figure, in a test or in prose.** Record cost ÷ a trivial `.Call` in the same process; that ratio travels between machines and runs. Quote each figure in one place and link to it from the others, or the copies drift apart.
 2. **Guard by COUNTING, not by timing, wherever you can.** A count of `.Call`s has no variance. Timing assertions are a backstop, bounded at ~2× the measurement and `skip_on_ci()`. Count the symbol the path actually calls: the two supply paths reach C++ through different ones.
 3. **For the batch gradient a count is always available**: one `gradient_batch_run` per call for any N, and zero per-perturbation primitives.
@@ -197,6 +198,18 @@ Doxygen's line numbers are in the stream it parsed, which is the awk filter's ou
 
 YAML 1.1 reads `1e-3` as a string: write a float with a point and a signed exponent (`1.0e-3`), which the reader checks.
 
+## Decisions that stand
+
+Each was taken by the package owner; reopening one is a decision for them, not a refactor.
+
+- **D1. The closed form stays, frozen.** TF24, CF77 and TF24_floor carry `ClosedForm::Implemented`; no new curve adds a closed-form solver, and the closed form is never under a gradient (hazard 3). Collapsing duplication inside `closed_form.hpp` is allowed.
+- **D2. Medlyn stays outside the curve dispatch**, as an empirical-conductance diagnostic: the USO form is not a cost the solve maximises, and no λ maps onto `g1`.
+- **D3. One set of defaults everywhere**: `TF24_floor` at `lambda_o = 0` (TF24 bit for bit), the leaf route, the single-potential supply, in `Leaf`, `gradient::Settings` and every R entry point. The collar route and the multi-layer supply are asked for. Renamed or removed names get no alias.
+- **D4. One λ.** `$lambda` is the seated curve's on its route, `C′/(h′(A)·E′)` from the cost's slopes and the link; no curve holds its own. It is NA where the link has no slope and at a shut collar, and carries the stem table's slope error (about 1e-12) on curves whose cost reads E.
+- **D5. `find_root_collar_psi()` solves the seated curve.**
+- **D6. The derivative surface bills carbon beside the objective**: `carbon` is A less the part of the curve's cost that is carbon spent (`Curve<K>::carbon_cost`; only TF24's hydraulic cost is), and `profit` is the objective with the collar held (envelope theorem). plant books `carbon`.
+- **Simplicity over the last bit.** A change that collapses duplicated code by moving goldens at rounding level does so, and states the move split by cause, rather than contorting the code to stay bit-identical. A change that claims to move nothing is still held to bit-identity.
+
 ## Invariants and what not to touch
 
 - **The one-way include rule** (hazard 9; older comments call it "PLAN item 6a"): `inst/include/` is plain C++ and never includes from `src/`; `src/` and `R/` include downward only. A separate R-binding package was considered and rejected: two repositories for one model, installed twice.
@@ -208,7 +221,7 @@ YAML 1.1 reads `1e-3` as a string: write a float with a point and a signed expon
 - **`tsv_to_hex.c`**, which is live: `test-golden.R`'s regeneration recipe needs it.
 - **The aligned level defaults** (`CF77_lambda_`, `JS22_gamma`, `CMax_a`, `LeastCost_beta`; #156) are solved by `align_curves()`, not chosen, and live in two places: each curve's `Curve<K>` parameters in `leaf_cost_curves.hpp` (which `Leaf`'s initialisers and every R table read, through `cost_curve_parameters()`), and `leaf_traits()`'s signature (`JS22_gamma`, `CMax_a`), which `test-curve-definition.R` holds to the first. `test-align-curves.R` re-solves them, so a change that moves TF24 or one of these curves at the reference fails it; re-align both rather than loosening the test. The golden files pin their own values and do not follow the defaults.
 
-Comments in `inst/include/phylloptim.h`, `inst/RcppR6_classes.yml`, `Doxyfile` and old `NEWS.md` entries that cite "PLAN item N" refer to a `PLAN.md` retired in #126; its last version is `git show 83fbb25^:PLAN.md`. Item 6a is the one-way include rule above, 6c the RcppR6 layering, and 15 the Doxygen site (issue #12).
+Comments in `inst/include/phylloptim.h`, `inst/RcppR6_classes.yml`, `Doxyfile` and old `NEWS.md` entries that cite "PLAN item N" refer to a `PLAN.md` retired in #126; its last version is `git show 83fbb25^:PLAN.md`. Item 6a is the one-way include rule above, 6c the RcppR6 layering, and 15 the Doxygen site (issue #12). A second `PLAN.md` carried the redesign from 0.27.0 to 0.33.0 (sections A to F); what still binds from it is "Decisions that stand" above, and its last version is `git show 75b0242:PLAN.md`.
 
 ## Validating against plant
 
@@ -228,13 +241,7 @@ If you do run anything against a plant build: build plant from the commit you me
 
 ## Branches
 
-**Single-branch now.** `feature/api-cleanup` merged as #15 on 2026-08-03, and with it the two-branch rule this section used to state ("results changes live on the branch, `master` stays a drop-in"). Both halves of that rule are spent: `master` is no longer a source-level drop-in for plant's leaf, and there is no longer a branch to quarantine results changes onto.
-
-- **`master`** — everything. **Behaviourally** still validated against plant's own leaf as of the pre-#15 state: full suite 0 fail / 0 error, SCM regression bit-identical across 78/78 nodes. (The pass *count* is environment-dependent — 2364 when first recorded, 2431 on a rerun with `NOT_CRAN` unset, on both arms of a control. Compare against a control run, never against a remembered number.) ⚠️ **#15 deliberately changed results**, so that validation now needs redoing against plant — see hazard 7.
-
-What replaces the old rule: **a change that moves results lands on `master` through a PR that states its measured blast radius against the golden file.** #15 is the worked example — 240 cells from the shutdown fix, 355 at ≤1.2e-13 from reassociation, split by cause because the two classes are four orders apart. A PR that regenerates the golden file without saying what moved and why is the thing to refuse.
-
-The commit message carries **one line** of that: the magnitude and where the breakdown lives ("moves 240 golden cells; split by cause in #15"). The cell counts, the per-cause split and the tolerance bands go in the first PR comment — see "Writing commits here" below.
+**One branch, `master`.** A change that moves results lands through a PR that states its measured blast radius against the golden files, split by cause where the causes differ in magnitude (#15 is the worked example: 240 cells from the shutdown fix, 355 at ≤1.2e-13 from reassociation). The commit message carries one line of it ("moves 240 golden cells; split by cause in #15"); the counts and bands go in the first PR comment. A PR that regenerates a golden file without saying what moved and why is the thing to refuse.
 
 ## Writing in this guide
 
@@ -261,5 +268,7 @@ The same reader meets the code's comments and NEWS, so two more rules hold there
 This repo squash-merges, so a PR's title and body are copied verbatim into permanent history. Commit bodies here reached a median of 450 words and a maximum of 1822, and two commits exist for nothing but correcting an earlier commit message. That is the habit to drop: a reader three years from now is bisecting, and needs what the change does, not the order in which it was understood.
 
 So: keep the commit to why the change was needed and what it does to observable behaviour, in about 10 lines. Everything else — the measurements in full, the explanations that turned out wrong, the alternatives rejected, what was tried first — goes in the **first comment on the PR**, which is just as permanent and is linked from the squashed subject. Never write a commit whose purpose is to correct an earlier commit message; correct the record on the issue or PR instead.
+
+Open an issue for a piece of work when you pick it up, and close it from the PR.
 
 The family guideline, with the split set out as a table, is [`commit-messages.md`](https://github.com/traitecoevo/plant-meta/blob/main/governance/commit-messages.md).
