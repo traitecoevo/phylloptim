@@ -120,7 +120,7 @@
     l$psi_soil_[1]
   psi <- seq(wet, l$psi_crit, length.out = n)
   benefit <- vapply(psi, function(p) {
-    l$profit_psi_leaf_TF(p, 1.0)
+    l$profit_psi_leaf_TF(p, wet)
     l$assim_colimited_
   }, numeric(1))
   cost <- vapply(psi, l$hydraulic_cost_TF, numeric(1))
@@ -160,7 +160,7 @@
 
   mtext("a)  where to operate", side = 3, line = 0.5, adj = 0, font = 2,
         cex = 0.82 * cex)
-  invisible(NULL)
+  invisible(list(psi = psi, profit = profit, psi_star = star, profit_star = jstar))
 }
 
 ## ---------------------------------------------------------------------------
@@ -282,8 +282,8 @@
   .fig_arrow(rmid, 54.3, rmid, 47.1, col = .fig_col$gate)
   .fig_box(rx0, rx1, 41.5, 10.5,
            expression(C(psi) ~ "-- the cost of the tension"),
-           paste0("TF24 | Cowan-Farquhar | ProfitMax\n",
-                  "the models differ here, and nowhere else"),
+           paste0(length(cost_curve_names()), " cost curves, TF24 the default\n",
+                  "they differ here and in the benefit's link"),
            border = .fig_col$cost, fill = .fig_col$cost_fill, cex = cex)
 
   ## the cross-links ------------------------------------------------------
@@ -312,7 +312,7 @@
            fill = .fig_col$profit_fill, cex = cex, tag = "[a]")
   .fig_arrow(lmid, 19.9, lmid, 12.7)
 
-  ## lambda: the quantity that makes the three cost curves comparable
+  ## lambda: the quantity that makes the cost curves comparable
   text(lmid + 5, 16.3,
        "lambda = (dC/dpsi)/(dE/dpsi)  --  the common currency",
        adj = c(0, 0.5), cex = 0.58 * cex, font = 3, col = "grey25")
@@ -418,7 +418,7 @@
     c("The stem.  Conductivity falls as tension rises, so E",
       "saturates -- and that saturation is what makes an interior",
       "optimum exist. It is also the tension the cost curve prices:",
-      "the three models accept everything else and differ here."),
+      "the cost curves share everything else and differ here."),
     c("Supply topology.  Either one psi_soil in series, or this",
       "multi-layer network solved at the collar.  Different",
       "models, not one restricted to the other.")
@@ -484,6 +484,11 @@ plot_model_overview <- function(model = NULL, cex = 1) {
 
   op <- par(no.readonly = TRUE)
   on.exit(par(op), add = TRUE)
+  # The panels solve TF24 on the leaf route; a caller's leaf gets its own model
+  # back, re-solved.
+  curve <- model$model_curve()
+  route <- model$model_route()
+  on.exit({ model$set_model(curve, route); model$optimise() }, add = TRUE)
 
   layout(matrix(c(1, 3, 4,
                   2, 3, 4), nrow = 2, byrow = TRUE),
