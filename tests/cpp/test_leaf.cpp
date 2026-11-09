@@ -5393,6 +5393,7 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
     printf("    ProfitMax's |A| peak: %d points inside the stream, %d at psi_crit\n",
            peak_inside, peak_at_crit);
     ok(peak_inside > 0, curve + ": rows were compared where |A| peaks inside the stream");
+    ok(peak_at_crit > 0, curve + ": and where it peaks at psi_crit");
   }
   // A referee that skipped a parameter at a kind would pass on what is left.
   for (Kind want : fixture::surface_kinds(K)) {
