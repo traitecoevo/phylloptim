@@ -157,6 +157,11 @@ if(PHYLLOPTIM_BUILD_TESTS)
 
   foreach(prog test_leaf test_supplied_rows test_golden test_primitives bench_solve)
     add_executable(${prog} tests/cpp/${prog}.cpp)
+    if(prog STREQUAL "test_leaf")
+      # One program from several sources, a part per subsystem.
+      file(GLOB leaf_parts CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tests/cpp/test_leaf_*.cpp)
+      target_sources(${prog} PRIVATE ${leaf_parts})
+    endif()
     target_link_libraries(${prog} PRIVATE phylloptim::phylloptim)
     target_compile_options(${prog} PRIVATE -Wall -Wextra -Wno-unused-parameter)
   endforeach()
