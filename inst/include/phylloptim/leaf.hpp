@@ -1047,7 +1047,7 @@ public:
   // The soil's draw at `collar`, which is passive whatever the caller passes: where
   // the point moves is the supplied row's business, and a live collar would record
   // the search that placed it.
-  // The draw keeps a pointer to `supply` (SupplyDraw::inputs), so a temporary
+  // The draw keeps a pointer to `supply` (`SupplyDraw::inputs`), so a temporary
   // is refused at compile time: it would dangle by the time the draw is read.
   template <class S>
   SupplyDraw<S> supply_draw_at(const S& collar, SupplyInputs<S>&& supply) const = delete;
@@ -1901,7 +1901,7 @@ public:
   double g1_eff() const;
 
   // The carbon the leaf kept at its operating point, umol C m^-2 s^-1: A less
-  // the part of its curve's cost that is carbon spent (Curve<K>::carbon_cost),
+  // the part of its curve's cost that is carbon spent (`Curve<K>::carbon_cost`),
   // which only TF24's hydraulic cost is, on TF24 and TF24_floor. Where the rest
   // of the cost is a price of the flux, it is profit plus that price at the
   // reported E: profit itself on TF24, `profit + lambda_o * E` on TF24_floor.

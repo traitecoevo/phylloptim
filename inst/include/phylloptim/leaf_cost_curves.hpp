@@ -70,7 +70,7 @@ inline constexpr bool
 //   price_reads_flux_only         the objective is carbon less a price of the
 //                                 stem's flux alone, so the surface bills carbon
 //                                 from the objective and the price, without the
-//                                 collar's channel (Leaf::outputs_at)
+//                                 collar's channel (`Leaf::outputs_at`)
 //   carbon_cost                   the part of the cost that is carbon spent, at
 //                                 a leaf potential (D6); the rest is a price
 //   price                         that price at a flux, where it reads only that
@@ -588,7 +588,7 @@ template <> struct Curve<Leaf::CostCurve::ProfitMax> {
   }
 
   // The scalar forms, on the closed-form curve, with the normalisers on the pack
-  // (Leaf::normalisers_at) in place of the members prepare_profitmax seeded.
+  // (`Leaf::normalisers_at`) in place of the members prepare_profitmax seeded.
   template <class S>
   static S scalar_hydraulic_cost_norm(const Leaf& l, const S& sigma,
                                       const leaf_pars<S>& pars,
