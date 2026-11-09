@@ -5287,6 +5287,8 @@ void test_supplied_rows_match_a_resolve_at_every_kind() {
   referee_every_parameter_at_every_kind<CC::CF77>(&compared);
   referee_every_parameter_at_every_kind<CC::JS22>(&compared);
   referee_every_parameter_at_every_kind<CC::CMax>(&compared);
+  referee_every_parameter_at_every_kind<CC::SOX>(&compared);
+  referee_every_parameter_at_every_kind<CC::JW26>(&compared);
   ok(compared >= 3300, "the referee compared at least 3300 rows");
 }
 
@@ -5711,11 +5713,13 @@ struct HandoffTally {
 // The curves the surface serves beyond TF24 and TF24_floor, for the tests that
 // treat those two separately.
 template <class F>
-void for_each_difference_price_curve(F&& f) {
+void for_each_further_surface_curve(F&& f) {
   using CC = phylloptim::Leaf::CostCurve;
   f(std::integral_constant<CC, CC::CF77>{});
   f(std::integral_constant<CC, CC::JS22>{});
   f(std::integral_constant<CC, CC::CMax>{});
+  f(std::integral_constant<CC, CC::SOX>{});
+  f(std::integral_constant<CC, CC::JW26>{});
 }
 
 template <phylloptim::Leaf::CostCurve K>
@@ -5826,7 +5830,7 @@ void test_held_coordinates_move_no_row() {
           fl.set_model(K::TF24_floor, true);
           fl.optimise();
           compare_held_handoff<K::TF24_floor>(fl, "TF24_floor " + at, tally);
-          for_each_difference_price_curve([&](auto tag) {
+          for_each_further_surface_curve([&](auto tag) {
             constexpr K curve = decltype(tag)::value;
             phylloptim::Leaf c = make_leaf(d, psi_soil, soil_depth);
             c.set_model(curve, true);
@@ -10274,6 +10278,8 @@ void test_outputs_agree_with_the_solve() {
   outputs_agree_with_the_solve_on<K::CF77>(kPriceForFOC);
   outputs_agree_with_the_solve_on<K::JS22>(kPriceForFOC);
   outputs_agree_with_the_solve_on<K::CMax>(kPriceForFOC);
+  outputs_agree_with_the_solve_on<K::SOX>(kPriceForFOC);
+  outputs_agree_with_the_solve_on<K::JW26>(kPriceForFOC);
 }
 
 // --- the ATLS thermal-damage layer (use_thermal_damage_) ----------------------

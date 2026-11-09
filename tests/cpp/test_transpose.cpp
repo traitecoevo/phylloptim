@@ -350,16 +350,17 @@ void check_solved(pl::Leaf l, const std::string& at, unsigned long seed) {
   const double fwd_solved = forward_side<K>(l, u, v, curvature, false).value;
   const Pairing rev_solved = reverse_side<K>(l, u, v, curvature, false, false);
   if (fwd != fwd_solved) ++handoff_forward_differs;
-  const double handoff_rel =
-      std::abs(rev.value - rev_solved.value) / std::max(rev.terms, 1e-300);
+  // On the identity's scale, the larger side's terms, for the same reason.
+  const double handoff_rel = std::abs(rev.value - rev_solved.value) /
+                             std::max({rev.terms, fwd_side.terms, 1e-300});
   if (handoff_rel > worst_handoff) worst_handoff = handoff_rel;
   // Two orders below the identity's own threshold, which is what rounding in a
   // reordered sum reaches here (1.1e-13 on this sweep).
   char moved_by[32];
   std::snprintf(moved_by, sizeof moved_by, "%.3e", handoff_rel);
   ok(handoff_rel < 1e-12,
-     "handing the coordinates over moves the reverse pairing past rounding: " +
-         at + " rel=" + moved_by);
+     "handing the coordinates over moves the reverse pairing past rounding (" +
+         curve + "): " + at + " rel=" + moved_by);
 
   // The control, on the reverse side only.
   const Pairing held = reverse_side<K>(l, u, v, curvature, true, true);
@@ -411,6 +412,8 @@ void for_each_surface_curve(F&& f) {
   f(std::integral_constant<CC, CC::CF77>{});
   f(std::integral_constant<CC, CC::JS22>{});
   f(std::integral_constant<CC, CC::CMax>{});
+  f(std::integral_constant<CC, CC::SOX>{});
+  f(std::integral_constant<CC, CC::JW26>{});
 }
 std::vector<std::string> surface_curve_names() {
   std::vector<std::string> out;

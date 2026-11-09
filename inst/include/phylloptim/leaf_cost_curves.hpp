@@ -465,6 +465,34 @@ template <> struct Curve<Leaf::CostCurve::SOX> {
     (void)psi_upstream;
     return -gain_slope(l, psi_leaf) / gain(l, psi_leaf);
   }
+
+  // The scalar forms, on the closed-form curve at the pack's trait pair.
+  template <class S>
+  static S scalar_gain(const Leaf& l, const S& sigma, const leaf_pars<S>& pars) {
+    const S& c = pars[par_stem_c];
+    const S b = weibull_b_from_P50<S>(pars[par_stem_P50], c);
+    const S g = (l.template proportion_of_conductivity_kernel<S, S>(sigma, b, c) -
+                 S(l.k_crit_fraction)) /
+                S(1.0 - l.k_crit_fraction);
+    return odelia::util::to_passive(g) < 0.0 ? S(0.0) : g;
+  }
+  template <class S>
+  static S scalar_gain_slope(const Leaf& l, const S& sigma, const leaf_pars<S>& pars) {
+    const S& c = pars[par_stem_c];
+    const S b = weibull_b_from_P50<S>(pars[par_stem_P50], c);
+    const S f = l.template proportion_of_conductivity_kernel<S, S>(sigma, b, c);
+    const S abs_fprime = f * (c / b) * pow(sigma / b, c - 1.0);
+    return -abs_fprime / S(1.0 - l.k_crit_fraction);
+  }
+  template <class S>
+  static S scalar_cost_slope(const Leaf& l, const S& sigma, const S&,
+                             const leaf_pars<S>& pars) {
+    return -scalar_gain_slope<S>(l, sigma, pars) / scalar_gain<S>(l, sigma, pars);
+  }
+  template <class S>
+  static S scalar_carbon_cost(const Leaf&, const S&, const leaf_pars<S>&) {
+    return S(0.0);
+  }
 };
 
 template <> struct Curve<Leaf::CostCurve::JW26> {
@@ -500,6 +528,22 @@ template <> struct Curve<Leaf::CostCurve::JW26> {
   static double cost_slope(Leaf& l, double psi_leaf, double psi_upstream) {
     (void)psi_upstream;
     return 1.0 / (l.psi_crit - psi_leaf);
+  }
+
+  // The scalar forms, with psi_crit carrying its trait rows.
+  template <class S>
+  static S scalar_gain(const Leaf& l, const S& sigma, const leaf_pars<S>& pars) {
+    const S g = S(1.0) - sigma / l.template psi_crit_at<S>(pars);
+    return odelia::util::to_passive(g) < 0.0 ? S(0.0) : g;
+  }
+  template <class S>
+  static S scalar_cost_slope(const Leaf& l, const S& sigma, const S&,
+                             const leaf_pars<S>& pars) {
+    return S(1.0) / (l.template psi_crit_at<S>(pars) - sigma);
+  }
+  template <class S>
+  static S scalar_carbon_cost(const Leaf&, const S&, const leaf_pars<S>&) {
+    return S(0.0);
   }
 };
 
