@@ -4605,9 +4605,11 @@ void test_pack_kernels_are_the_models_own() {
           Drivers d;
           d.PPFD = ppfd;
           d.leaf_temp = temp;
+          // The thermal cost scales jmax, so it is on at the hot rows: the
+          // scalar-temperature capacity must carry its factor's slope too.
           phylloptim::Leaf l =
               make_pm_leaf(d, {psi0, psi0 + 0.35, psi0 + 0.7}, {1.0, 2.0, 3.0},
-                           gate);
+                           gate, 2.0, 0.05, temp > 30.0);
           l.find_root_collar_psi();
           const double ci = l.ci_;
           if (!std::isfinite(ci)) continue;
@@ -4670,6 +4672,16 @@ void test_pack_kernels_are_the_models_own() {
             slope_ok(c.respiration, [&] { return l.R_d_; }, "R_d");
             slope_ok(c.gamma, [&] { return l.gamma_; }, "Gamma*");
             slope_ok(c.km, [&] { return l.km_; }, "Km");
+            if (l.use_thermal_cost_) {
+              near(odelia::ode::derivative_along(l.thermal_cost_on<TT>(temp_t)),
+                   l.thermal_cost_temp_deriv(l.photo_temp_),
+                   1e-12 * std::abs(l.thermal_cost_temp_deriv(l.photo_temp_)) + 1e-15,
+                   "the thermal cost's slope on a scalar temperature" + at);
+              phylloptim::Leaf bad = l;
+              bad.Tcrit_ = bad.T50_;
+              ok(throws_with([&] { bad.thermal_cost_on<TT>(temp_t); }, "T50 > Tcrit"),
+                 "and it refuses T50 <= Tcrit as thermal_cost_at does" + at);
+            }
           }
         }
       }
@@ -5016,13 +5028,24 @@ double profit_row_at_current_point(phylloptim::Leaf &l, int par,
 // surface that starts reading one fails here by name. Every other row is held
 // to the tolerance below, and every read parameter must be compared somewhere,
 // so a wrong row in any of them fails.
-template <phylloptim::Leaf::CostCurve K>
+template <phylloptim::Leaf::CostCurve K, bool EB = false>
 void referee_every_parameter_at_every_kind(int* compared_out) {
   using T = odelia::ode::tangent_scalar<double>;
   using Kind = phylloptim::Leaf::OperatingPointKind;
   using CC = phylloptim::Leaf::CostCurve;
   namespace pl = phylloptim;
-  const std::string curve = pl::Leaf::curve_name(static_cast<int>(K));
+  const std::string curve =
+      pl::Leaf::curve_name(static_cast<int>(K)) + (EB ? " with the energy balance" : "");
+  // With the energy balance on, as make_pm_leaf seats it: daylight NIR fixed at
+  // the fixture's light, so PPFD's row is the light's alone.
+  const auto seat_balance = [&](pl::Leaf& leaf, double ppfd) {
+    leaf.use_energy_balance_ = EB;
+    if (EB) {
+      leaf.wind_speed_ = 2.0;
+      leaf.d_ = 0.05;
+      leaf.NIR_int_ = ppfd / pl::umol_par_per_joule;
+    }
+  };
   struct Fixture {
     std::vector<double> psi_soil;
     double ppfd, vpd;
@@ -5121,6 +5144,7 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
       l.c_repair_maint_ = p[pl::par_c_repair_maint];
       l.c_protect_maint_ = p[pl::par_c_protect_maint];
       l.c_repair_flux_ = p[pl::par_c_repair_flux];
+      seat_balance(l, fx.ppfd);
       l.set_physiology(network, p[pl::par_PPFD], fx.psi_soil, depth,
                        p[pl::par_kmax], fx.vpd, 40.0, 25.0, 21.0, 101.3);
       l.set_model(K, true);
@@ -5128,6 +5152,7 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
       return l;
     };
     pl::Leaf base = fixture::multilayer_leaf();
+    seat_balance(base, fx.ppfd);
     base.set_physiology(network, fx.ppfd, fx.psi_soil, depth, 0.000157 / 5.0,
                         fx.vpd, 40.0, 25.0, 21.0, 101.3);
     pl::leaf_pars<double> p0 = base.passive_pars();
@@ -11000,6 +11025,9 @@ void test_thermal_damage_refusals() {
   ok(throws_with([&] { on.photo_capacity_at<double>(pars); },
                  "Leaf::vcmax_at: " + refused),
      "photo_capacity_at refuses, through vcmax_at");
+  ok(throws_with([&] { on.photo_capacity_at<double>(pars, on.photo_temp_); },
+                 "Leaf::vcmax_at: " + refused),
+     "and at a scalar leaf temperature too");
 
   // The trait gradient, both entry points.
   double theta[phylloptim::gradient::n_theta];
