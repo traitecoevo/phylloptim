@@ -26,27 +26,25 @@ stopped building its one row with \code{data.frame()} (#39) -- 45× more than th
 \section{What the cost columns mean}{
 
 
-\code{hydraulic_cost} is the whole cost the objective subtracted. \code{shadow_cost} is
-the share of it that is a \emph{price} rather than carbon the plant gave up: the
-value of water in its best alternative use, which for a leaf is assimilation
-later. So
+\code{hydraulic_cost} is the whole cost a difference objective subtracted. Each
+curve states which part of its cost is carbon the plant spent; \code{shadow_cost} is
+the rest, a \emph{price}: the value of water, or of a drop in potential, in its best
+alternative use. \code{carbon} is \code{A} less the carbon part, the carbon the leaf kept:
 
 \preformatted{
-  realised cost   = hydraulic_cost - shadow_cost
-  carbon profit   = profit + shadow_cost
+  carbon = A - (hydraulic_cost - shadow_cost)
+         = profit + shadow_cost       on a difference curve
 }
 
-and a consumer that grows a plant on this leaf wants the second of those,
-never \code{profit}. Deducting a shadow price from a carbon budget taxes growth by
-something the plant never spent.
+A consumer that grows a plant on this leaf wants \code{carbon}, never \code{profit}:
+deducting a price from a carbon budget taxes growth by something the plant
+never spent.
 
-\code{shadow_cost} is \code{TF24_floor_lambda_o * E} on that curve and zero on every
-other. Zero means \emph{this curve does not separate the two}, not \emph{this curve's
-cost is all realised carbon}. \code{CF77} is the case worth stating: its whole cost
-is \code{lambda * E}, and reading that as a shadow price is an ordinary thing to do,
-but the model supplies one number and nothing to attribute it with and behaves
-identically whichever way it is read. Reporting it as all-shadow would present
-one reading as a fact. The field is defined only where the curve defines it.
+Only TF24's hydraulic cost is carbon spent. So \code{shadow_cost} is zero on \code{TF24},
+whose \code{carbon} is its \code{profit}; \code{TF24_floor_lambda_o * E} on \code{TF24_floor}; and
+the whole cost on \code{CF77}, \code{JS22} and \code{CMax}, whose costs are prices. \code{SOX},
+\code{JW26}, \code{LeastCost} and \code{ProfitMax} have no cost in carbon units to split, so
+their \code{shadow_cost} is \code{NA} and their \code{carbon} is \code{A}.
 }
 
 \examples{

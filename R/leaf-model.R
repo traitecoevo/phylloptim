@@ -691,27 +691,25 @@ set_drivers <- function(x,
 ##'
 ##' @section What the cost columns mean:
 ##'
-##' `hydraulic_cost` is the whole cost the objective subtracted. `shadow_cost` is
-##' the share of it that is a *price* rather than carbon the plant gave up: the
-##' value of water in its best alternative use, which for a leaf is assimilation
-##' later. So
+##' `hydraulic_cost` is the whole cost a difference objective subtracted. Each
+##' curve states which part of its cost is carbon the plant spent; `shadow_cost` is
+##' the rest, a *price*: the value of water, or of a drop in potential, in its best
+##' alternative use. `carbon` is `A` less the carbon part, the carbon the leaf kept:
 ##'
 ##' \preformatted{
-##'   realised cost   = hydraulic_cost - shadow_cost
-##'   carbon profit   = profit + shadow_cost
+##'   carbon = A - (hydraulic_cost - shadow_cost)
+##'          = profit + shadow_cost       on a difference curve
 ##' }
 ##'
-##' and a consumer that grows a plant on this leaf wants the second of those,
-##' never `profit`. Deducting a shadow price from a carbon budget taxes growth by
-##' something the plant never spent.
+##' A consumer that grows a plant on this leaf wants `carbon`, never `profit`:
+##' deducting a price from a carbon budget taxes growth by something the plant
+##' never spent.
 ##'
-##' `shadow_cost` is `TF24_floor_lambda_o * E` on that curve and zero on every
-##' other. Zero means *this curve does not separate the two*, not *this curve's
-##' cost is all realised carbon*. `CF77` is the case worth stating: its whole cost
-##' is `lambda * E`, and reading that as a shadow price is an ordinary thing to do,
-##' but the model supplies one number and nothing to attribute it with and behaves
-##' identically whichever way it is read. Reporting it as all-shadow would present
-##' one reading as a fact. The field is defined only where the curve defines it.
+##' Only TF24's hydraulic cost is carbon spent. So `shadow_cost` is zero on `TF24`,
+##' whose `carbon` is its `profit`; `TF24_floor_lambda_o * E` on `TF24_floor`; and
+##' the whole cost on `CF77`, `JS22` and `CMax`, whose costs are prices. `SOX`,
+##' `JW26`, `LeastCost` and `ProfitMax` have no cost in carbon units to split, so
+##' their `shadow_cost` is `NA` and their `carbon` is `A`.
 ##'
 ##' @param x a solved `Leaf`
 ##' @return A one-row data.frame.
@@ -757,12 +755,13 @@ operating_point <- function(x) {
   # temperature and this the leaf's own; off it, this is a copy of the driver.
   "Tleaf",
   # umol C m^-2 s^-1: the share of `hydraulic_cost` that is a price, not carbon
-  # given up; `TF24_floor_lambda_o * E` on that curve and zero on every other,
-  # where zero means the curve does not separate the two. See operating_point().
+  # spent; NA where the curve has no cost in carbon units. See operating_point().
   "shadow_cost",
   # kg H2O m^-2 s^-1: the residual (cuticular) flux. `E` is the total flux; the
   # stomatal flux is `E - residual_flux`.
-  "residual_flux"
+  "residual_flux",
+  # umol C m^-2 s^-1: A less the carbon part of the cost. See operating_point().
+  "carbon"
 )
 
 ##' Solve a leaf, in one call

@@ -204,16 +204,18 @@ therefore defaults to `Release` rather than to CMake's flagless default.
 
 ### Derivatives of the operating point
 
-A model that differentiates a run containing the leaf (plant's stand gradient is one) needs the derivative of the operating point with respect to the traits and the soil. The leaf supplies it from the implicit function theorem at the converged point, so nothing the root-find did is recorded. After the ordinary solve at `double`, three calls at the consumer's scalar `S`:
+A model that differentiates a run containing the leaf (plant's stand gradient is one; a C++ fit of the model to observations is another) needs the derivative of the operating point with respect to the traits and the soil. The leaf supplies it from the implicit function theorem at the converged point, so nothing the root-find did is recorded. After the ordinary solve at `double`, three calls at the consumer's scalar `S`:
 
 ```cpp
 l.find_root_collar_psi();                                     // the solve, at double
 auto draw = l.supply_draw_at<S>(S(l.opt_root_psi_), supply);  // the soil's draw at the solved collar
 S    psi  = l.operating_collar<K, S>(draw, pars, curvature);  // the collar, carrying its rows
-auto out  = l.billed_outputs_at<K, S>(psi, draw, pars);       // profit, per-layer uptake, residual flux
+auto out  = l.billed_outputs_at<K, S>(psi, draw, pars);       // profit, carbon, per-layer uptake, residual flux
 ```
 
-`l.operating_point_kind()` says which condition placed the point, and decides what `operating_collar` does; a consumer branches on it. The preconditions, the kinds, and a compiled example are at the top of `inst/include/phylloptim/leaf_derivative_surface.hpp`; `vignette("derivative-surface")` explains the design. The surface is implemented for the TF24 and TF24_floor curves and the multi-layer supply, and refuses a leaf with the energy balance or the thermal-damage layer on.
+`out.carbon` is what a plant grows on: `A` less the part of the curve's cost that is carbon spent, which is `profit` on TF24 and `A` on a curve whose cost is a price or a risk term. `l.physical_outputs_at<K, S>(psi, draw, pars)` also returns the point's `A`, `E`, `psi_leaf`, `ci` and `gc`, for a model fitted to what a leaf is observed to do.
+
+`l.operating_point_kind()` says which condition placed the point, and decides what `operating_collar` does; a consumer branches on it. The preconditions, the kinds, and a compiled example are at the top of `inst/include/phylloptim/leaf_derivative_surface.hpp`; `vignette("derivative-surface")` explains the design. The surface serves every curve on the multi-layer supply, and refuses a leaf with the energy balance or the thermal-damage layer on.
 
 A consumer that records on an adjoint tape also compiles with `-DXAD_NO_THREADLOCAL -DXAD_USE_STRONG_INLINE`, matching odelia's and every other package sharing that tape, and links odelia's `src/Tape.cpp` once (an R package gets it from odelia's DLL). The defines are not carried by the CMake target; a mismatch is not diagnosed.
 

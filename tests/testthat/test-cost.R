@@ -219,41 +219,51 @@ test_that("a driven row costs a bounded multiple of a trivial .Call", {
 })
 
 
-test_that("shadow_cost separates the price from the realised carbon cost", {
-  # ⚠️ BIT EQUALITY against `lambda_o * E`, not a tolerance. The accessor reads the
-  # stored transpiration rather than recomputing it, precisely so the identity
-  # holds exactly against the REPORTED `E` -- which is what a caller checks.
+test_that("carbon and shadow_cost split each curve's cost into carbon and price", {
+  # Each curve's definition states the part of its cost that is carbon spent
+  # (decision D6): TF24's whole cost and TF24_floor's TF24 half, nothing on the
+  # price curves. `carbon` is A less that part, `shadow_cost` the rest.
   sp <- leaf_supply_singlelayer()
+  solve <- function(m, ...) {
+    leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = m, supply = sp, ...)
+  }
   for (lo in c(0, 1.5e4, 1.5e5)) {
-    r <- leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = "TF24_floor",
-                    TF24_floor_lambda_o = lo, supply = sp)
+    r <- solve("TF24_floor", TF24_floor_lambda_o = lo)
+    # ⚠️ BIT EQUALITY: both read the reported objective and E, so the identity a
+    # caller checks holds exactly.
     expect_identical(r$shadow_cost, lo * r$E)
-    # The two routes to the carbon the plant actually kept agree, but NOT to the
-    # last bit: `profit` is `A - hydraulic_cost` computed in C++, so adding the
-    # shadow term back reassociates the subtraction. 1 ULP, and asserting
-    # `identical` here would be asserting that floating-point addition is
-    # associative.
-    expect_equal(r$profit + r$shadow_cost,
-                 r$A - (r$hydraulic_cost - r$shadow_cost))
-    expect_gte(r$hydraulic_cost - r$shadow_cost, 0)
+    expect_identical(r$carbon, r$profit + r$shadow_cost)
+    expect_gte(r$carbon, r$profit)
   }
-
-  # At a zero price the curve IS TF24, so the realised cost is the whole cost and
-  # the carbon profit is the objective.
-  r0 <- leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = "TF24_floor",
-                   TF24_floor_lambda_o = 0, supply = sp)
+  # At a zero price the curve IS TF24, whose carbon IS its objective.
+  r0 <- solve("TF24_floor", TF24_floor_lambda_o = 0)
   expect_identical(r0$shadow_cost, 0)
-  expect_identical(r0$profit + r0$shadow_cost, r0$profit)
+  expect_identical(r0$carbon, r0$profit)
+  t <- solve("TF24")
+  expect_identical(t$shadow_cost, 0)
+  expect_identical(t$carbon, t$profit)
 
-  # ⚠️ ZERO ON EVERY OTHER CURVE, CF77 INCLUDED, and that is a statement about the
-  # curve rather than about the cost -- see operating_point()'s documentation.
-  for (m in c("TF24", "JS22", "CMax", "SOX", "JW26", "ProfitMax")) {
-    r <- leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = m, supply = sp)
-    expect_identical(r$shadow_cost, 0, info = m)
+  # The price curves: the whole cost is price, so carbon is A -- to rounding on
+  # CF77, whose carbon is its objective plus its price, as TF24_floor's is.
+  for (m in c("CF77", "JS22", "CMax")) {
+    r <- solve(m)
+    if (m == "CF77") {
+      expect_identical(r$shadow_cost, r$hydraulic_cost)
+      expect_identical(r$carbon, r$profit + r$shadow_cost)
+      expect_equal(r$carbon, r$A, tolerance = 1e-12)
+    } else {
+      # Read off A and profit, which a caller averaging the outputs averages.
+      expect_identical(r$shadow_cost, r$A - r$profit, info = m)
+      expect_equal(r$shadow_cost, r$hydraulic_cost, tolerance = 1e-12, info = m)
+      expect_identical(r$carbon, r$A, info = m)
+    }
   }
-  rc <- leaf_solve(psi_soil = 1.0, PPFD = 900, atm_vpd = 2, model = "CF77",
-                   CF77_lambda = 1.5e5, supply = sp)
-  expect_identical(rc$shadow_cost, 0)
+  # No cost in carbon units to split: NA, and carbon is A.
+  for (m in c("SOX", "JW26", "LeastCost", "ProfitMax")) {
+    r <- solve(m)
+    expect_true(is.na(r$shadow_cost), info = m)
+    expect_identical(r$carbon, r$A, info = m)
+  }
 })
 
 

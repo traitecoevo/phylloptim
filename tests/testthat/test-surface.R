@@ -362,10 +362,11 @@ outputs_one_at_a_time <- function(l) {
     g1_eff = l$g1_eff,
     Tleaf = l$Tleaf_,
     shadow_cost = l$shadow_cost,
-    residual_flux = l$residual_flux_)
+    residual_flux = l$residual_flux_,
+    carbon = l$carbon)
 }
 
-test_that("operating_point_values() returns the fifteen fields, in that order", {
+test_that("operating_point_values() returns the sixteen fields, in that order", {
   # ⚠️ THE ORDER IS AN INTERFACE AND NOTHING IN THE TYPES ENFORCES IT. The C++
   # method returns a flat vector because that is what crosses the R boundary for
   # free (#39: twelve active bindings cost ~15 us against a ~3 us solve, one call
@@ -419,7 +420,7 @@ test_that("Tleaf is reported, and is not the leaf_temp driver on the PM path", {
   expect_identical(d$Tleaf, rep(30, 3L))
   # Last column, not inserted: these names are positions, and a saved output
   # would shift under an insertion.
-  expect_identical(names(d)[[length(names(d)) - 2L]], "Tleaf")
+  expect_identical(names(d)[[length(names(d)) - 3L]], "Tleaf")
 
   # With the energy balance on, driven by hand because the gate is a field.
   l <- leaf_model()
@@ -459,7 +460,8 @@ test_that("operating_point() is the data.frame it replaced", {
     g1_eff = l$g1_eff,
     Tleaf = l$Tleaf_,
     shadow_cost = l$shadow_cost,
-    residual_flux = l$residual_flux_
+    residual_flux = l$residual_flux_,
+    carbon = l$carbon
   )
   expect_identical(operating_point(l), as_written_before)
 
@@ -956,21 +958,12 @@ test_that("TF24_floor is TF24 plus a price, and reduces to each of them", {
   no_hydraulic <- solve_at("TF24_floor", TF24_floor_lambda_o = 1.5e5,
                            traits = leaf_traits(TF24_cost_scale = 0))
   # Every column, `lambda` included -- the seated curve's, so the price on both
-  # sides -- but one.
-  #
-  # ⚠️ `shadow_cost` IS THE EXCEPTION. These two leaves are the same model
-  # numerically -- same state, same fluxes, bit for bit -- and this is the one
-  # column that separates them, because only one of them
-  # DECLARES its price as a price. TF24_floor reports `lambda_o * E`; CF77 reports
-  # zero, not because its cost is realised carbon but because its single `lambda`
-  # merges the two readings and supplies nothing to attribute the number with. So
-  # the pair below is the sharpest available statement of what the column means: it
-  # is about what a curve can attribute, not about what a leaf does.
-  cols <- setdiff(names(cf77), "shadow_cost")
-  expect_identical(no_hydraulic[cols], cf77[cols])
+  # sides -- and `shadow_cost` and `carbon` too: each curve states that its price
+  # is a price (decision D6), so the two leaves agree on what the leaf kept.
+  expect_identical(no_hydraulic, cf77)
   expect_equal(cf77$lambda, 1.5e5, tolerance = 1e-8)
-  expect_gt(no_hydraulic$shadow_cost, 0)
-  expect_identical(cf77$shadow_cost, 0)
+  expect_gt(cf77$shadow_cost, 0)
+  expect_equal(cf77$carbon, cf77$A, tolerance = 1e-12)
 
   # And with both halves live it is neither of them, which is what makes the two
   # equalities above tests rather than tautologies.

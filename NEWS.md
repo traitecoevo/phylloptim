@@ -1,3 +1,9 @@
+# phylloptim 0.31.0
+
+- The derivative surface serves every curve, from each curve's own definition, in place of TF24 and TF24_floor only. Its outputs gain `carbon`, `A` less the part of the cost that is carbon spent (only TF24's hydraulic cost is), beside `profit`, the objective; plant grows on `carbon`. `physical_outputs_at()` also returns `A`, `E`, `psi_leaf`, `ci` and `gc`, for fitting. ([#239](https://github.com/traitecoevo/phylloptim/issues/239)).
+- New `$carbon` and a `carbon` column of `operating_point()` and `leaf_solve()`, appended last.
+- **Breaking:** `shadow_cost` is the price part of every difference curve's cost: the whole cost on CF77, JS22 and CMax (it was 0), unchanged on TF24 and TF24_floor, and `NA` on SOX, JW26, LeastCost and ProfitMax (it was 0). No other number moves.
+
 # phylloptim 0.30.2
 
 - Under `ProfitMax`, on either route, `$hydraulic_cost_` and the `hydraulic_cost` column of `operating_point()` are `NA`, as under SOX, JW26 and LeastCost; on a reused leaf they reported the last other curve's cost. ProfitMax's own costs are `$hydraulic_cost_norm_` and `$thermal_cost_`. Nothing else moves ([#209](https://github.com/traitecoevo/phylloptim/issues/209)).

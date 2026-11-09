@@ -58,6 +58,48 @@ inline phylloptim::Leaf multilayer_leaf() {
   return l;
 }
 
+// The operating-point kinds the derivative surface's tests must reach on each
+// curve, which their coverage assertions require. A kind is left out only where
+// the curve cannot reach it at plausible drivers (measured over soil 0.3 to 16
+// MPa, light 1 to 1500, deficit 0.5 to 3.1 kPa and, for JS22 and CMax, their
+// level at 1e-4 of its default): a price on the drop in potential keeps the
+// leaf off the stem's end; a product's gain vanishes at psi_crit, so its
+// optimum never sits there; the solve refuses a dark LeastCost leaf, whose
+// log link has no slope at A <= 0, rather than shutting it on its wet bound;
+// and a shut ProfitMax leaf has no stream to normalise over, so no objective,
+// while none pinned dry over that grid with one.
+inline std::vector<phylloptim::Leaf::OperatingPointKind>
+surface_kinds(phylloptim::Leaf::CostCurve curve) {
+  using CC = phylloptim::Leaf::CostCurve;
+  using Kind = phylloptim::Leaf::OperatingPointKind;
+  switch (curve) {
+    case CC::TF24:
+    case CC::TF24_floor:
+    case CC::CF77:
+      return {Kind::Interior, Kind::BoundarySoil, Kind::BoundaryDry,
+              Kind::HydraulicShutdown};
+    case CC::ProfitMax:
+      return {Kind::Interior, Kind::BoundarySoil};
+    case CC::JS22:
+    case CC::CMax:
+    case CC::SOX:
+    case CC::JW26:
+      return {Kind::Interior, Kind::BoundarySoil, Kind::HydraulicShutdown};
+    case CC::LeastCost:
+      return {Kind::Interior, Kind::BoundaryDry, Kind::HydraulicShutdown};
+  }
+  return {};
+}
+
+// Whether the surface has an objective to differentiate at a solved point:
+// false only for a normalised curve with no stream to normalise over (|A|max or
+// k_span not positive), which the leaf route meets with its degenerate exit and
+// the surface refuses by name.
+inline bool surface_has_objective(const phylloptim::Leaf& l) {
+  return l.cost_curve_ != phylloptim::Leaf::CostCurve::ProfitMax ||
+         (l.profitmax_A_max() > 0.0 && l.profitmax_k_span() > 0.0);
+}
+
 }  // namespace fixture
 
 #endif

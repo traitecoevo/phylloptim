@@ -533,6 +533,13 @@ inline S Leaf::stem_complement_at(const S& psi, const leaf_pars<S>& pars) const 
       pars[par_stem_c]);
 }
 
+template <class S>
+inline S Leaf::stem_conductivity_at(const S& psi, const leaf_pars<S>& pars) const {
+  return curve_with_closed_form_rows<S>(
+      stem_curve_integral_deriv(odelia::util::to_passive(psi)), psi,
+      pars[par_stem_P50], pars[par_stem_c]);
+}
+
 template <typename T>
 inline T Leaf::transpiration_at(const T& sigma, const T& collar,
                                 const leaf_pars<T>& pars) const {

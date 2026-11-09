@@ -950,14 +950,45 @@ public:
     }
   }
 
-  // What the leaf hands over, at any scalar: the objective plant bills, the water
-  // drawn from each layer, and the cuticle's share, each with rows matching its
-  // own value. The stomatal flux is the total less `residual_flux`.
+  // What the leaf hands over, at any scalar, each with rows matching its own
+  // value: the objective that placed the point, the carbon the leaf kept (A less
+  // the carbon part of its curve's cost; the rest of the cost is a price), the
+  // water drawn from each layer, and the cuticle's share. The stomatal flux is
+  // the total less `residual_flux`.
   template <class T>
   struct BilledOutputs {
     T profit{};
     std::vector<T> uptake;
     T residual_flux{};
+    T carbon{};
+  };
+  // The same, and the point's physical outputs at the live collar: net
+  // assimilation, the stem's (total) flux, the leaf potential, ci and the CO2
+  // conductance, as the solve reports them. Its own type, so a caller that asked
+  // for the billed outputs cannot read one of these as a finite number.
+  template <class T>
+  struct PhysicalOutputs : BilledOutputs<T> {
+    T A{};
+    T E{};
+    T psi_leaf{};
+    T ci{};
+    T gc{};
+  };
+  // A normalised curve's normalisers on the pack, with the rows of the point they
+  // are read at (ProfitMax's reference collar and |A| at psi_crit along the stem
+  // from it); empty for every other curve. The point is the solve's, recorded by
+  // prepare_profitmax; the second draw is taken from the supply `draw` was.
+  template <class T>
+  struct Normalisers {
+    T k_soil{};
+    T k_span{};
+    T A_max{};
+    template <class F>
+    void for_each_active(F&& f) const {
+      f(k_soil);
+      f(k_span);
+      f(A_max);
+    }
   };
 
   // The soil's draw at one collar, with that collar, so check_draw can refuse a
@@ -979,6 +1010,12 @@ public:
     // and takes its rows: the residual is zero at every collar there.
     bool no_conduction = false;
     S gravity_balance{};
+    // A copy of the supply it was drawn from, kept only where the seated curve
+    // draws again at a reference collar for its normalisers (normalisers_at);
+    // null otherwise, so no other curve pays for it. Owned, so it outlives
+    // whatever the caller drew from. Not visited: its rows reach the tape only
+    // through the second draw.
+    std::shared_ptr<const SupplyInputs<S>> inputs;
 
     // Everything that carries a row. ⚠️ A member not visited here gives exact-zero
     // columns, not an error (hazard 17); the static_assert below counts members.
@@ -1001,7 +1038,8 @@ public:
   static_assert(sizeof(SupplyDraw<double>) ==
                     sizeof(double) + sizeof(odelia::with_slope<double>) +
                         sizeof(std::vector<double>) * 2 +
-                        2 * (alignof(double) + sizeof(double)),
+                        2 * (alignof(double) + sizeof(double)) +
+                        sizeof(std::shared_ptr<const SupplyInputs<double>>),
                 "SupplyDraw gained or lost a member: update for_each_active, "
                 "then this count");
   static_assert(sizeof(odelia::with_slope<double>) == 2 * sizeof(double),
@@ -1023,6 +1061,9 @@ public:
     const std::size_t n = static_cast<std::size_t>(supply_n_layers());
     SupplyDraw<S> d;
     d.at = odelia::util::to_passive(collar);
+    if (seated_curve_prepares_normalisers()) {
+      d.inputs = std::make_shared<const SupplyInputs<S>>(supply);
+    }
 
     // A shut leaf sits on its wet bound and is drawn like any other point.
 
@@ -1088,11 +1129,13 @@ public:
   // The surface's coordinates: each a value and its response in the collar, which
   // travel together because every coordinate must move with the collar.
 
-  // What profit needs: the leaf potential the collar determines, and its ci.
+  // What profit needs: the leaf potential the collar determines, and its ci;
+  // and the CO2 conductance that placed ci, which the physical outputs report.
   template <class T>
   struct CollarCoords {
     odelia::with_slope<T> sigma;
     odelia::with_slope<T> ci;
+    odelia::with_slope<T> gc;
   };
 
   // The cost curves. A curve enters the derivative only through dC/dpsi_leaf.
@@ -1603,6 +1646,10 @@ public:
   // precision however small, with the closed form's rows for what is left.
   template <class S>
   S stem_complement_at(const S& psi, const leaf_pars<S>& pars) const;
+  // The stem's conductivity fraction at psi: the table's value, which the solve
+  // ran on, with the closed form's rows in psi and the trait pair.
+  template <class S>
+  S stem_conductivity_at(const S& psi, const leaf_pars<S>& pars) const;
 
   // The two conditions that place the operating point at a held collar:
   //
@@ -1656,16 +1703,18 @@ public:
   template <class S>
   S stem_curve_end_at(const leaf_pars<S>& pars) const;
 
-  // The objective at a placed operating point, and everything plant reads.
-  // Implemented for TF24 and TF24_floor; a static_assert refuses the rest.
+  // The objective at a placed operating point, from the curve's scalar forms
+  // (Curve<K>); a curve without them is refused at compile time.
   template <CostCurve K, class S>
   S profit_at(const S& collar, const SupplyDraw<S>& draw,
-              const leaf_pars<S>& pars, bool collar_moves) const;
-  // The objective at coordinates already placed.
+              const leaf_pars<S>& pars, bool collar_moves,
+              const Normalisers<S>& norms = {}) const;
+  // The objective at coordinates already placed; `norms` from normalisers_at
+  // for a normalised curve, read by no other.
   template <CostCurve K, class S>
   S profit_from_coords(const S& collar, const leaf_pars<S>& pars,
                        const PhotoCapacity<S>& cap, const S& sigma,
-                       const S& ci) const;
+                       const S& ci, const Normalisers<S>& norms = {}) const;
 
   // `placed`, when operating_collar placed it at this point, is read instead of
   // solving sigma and ci again. Refused at any kind but interior or at any other
@@ -1674,20 +1723,64 @@ public:
   BilledOutputs<S> billed_outputs_at(const S& collar, const SupplyDraw<S>& draw,
                                      const leaf_pars<S>& pars,
                                      const HeldCoords<S>* placed = nullptr) const;
+  // The billed outputs and the physical ones. Dearer: the coordinates carry the
+  // collar's channel at every kind, which the billed outputs skip where the
+  // curve's price reads only the flux.
+  template <CostCurve K, class S>
+  PhysicalOutputs<S> physical_outputs_at(const S& collar, const SupplyDraw<S>& draw,
+                                         const leaf_pars<S>& pars,
+                                         const HeldCoords<S>* placed = nullptr) const;
+  // Refuses normalisers left empty (the default argument) on a curve that reads
+  // them, before anything divides by them.
+  template <class S>
+  static void check_normalisers(const Normalisers<S>& n, const char* who) {
+    if (!(odelia::util::to_passive(n.A_max) > 0.0) ||
+        !(odelia::util::to_passive(n.k_span) > 0.0)) {
+      util::stop(std::string(who) + ": a normalised curve needs its normalisers; "
+                 "pass normalisers_at's");
+    }
+  }
+  // Whether the seated curve seeds normalisers before its search (ProfitMax).
+  bool seated_curve_prepares_normalisers() const;
+  // See Normalisers: empty for every curve that does not prepare them.
+  template <CostCurve K, class S>
+  Normalisers<S> normalisers_at(const SupplyDraw<S>& draw,
+                                const leaf_pars<S>& pars) const;
+  // ci at a conductance, placed by its residual at the solve's root ci_star:
+  // the CO2 supply equal to demand. +inf (no root) passes through.
+  template <class S>
+  S ci_at_conductance(double ci_star, const S& gc, const PhotoCapacity<S>& cap) const;
+  // The one core both read; `Out` is BilledOutputs<S> or PhysicalOutputs<S>.
+  template <CostCurve K, class S, class Out>
+  Out outputs_at(const S& collar, const SupplyDraw<S>& draw,
+                 const leaf_pars<S>& pars, const HeldCoords<S>* placed,
+                 const char* who) const;
+  // A at placed coordinates, on the forward model's branches: the saturated
+  // kernel where it reported no ci, and zero in value with the kernel's rows
+  // where nothing conducts.
+  template <class S>
+  S assim_at_coords(const PhotoCapacity<S>& cap, const S& ci) const;
+  // The link's slope h'(A) on any scalar, for the marginal; refused where it
+  // has none (a Log link at A <= 0), which the solve reports as no gradient.
+  template <CostCurve K, class S>
+  S benefit_link_slope_at(const S& A) const;
 
   // M = dprofit/dcollar, a scalar; the collar responses are the coordinates'
   // own slope halves.
   template <CostCurve K, class S>
   S dprofit_dcollar_at(const S& collar, const SupplyDraw<S>& draw,
-                       const leaf_pars<S>& pars) const;
+                       const leaf_pars<S>& pars,
+                       const Normalisers<S>& norms = {}) const;
   // The same marginal on coordinates operating_collar placed, adding the collar's channel.
   template <CostCurve K, class S>
   S dprofit_dcollar_at(const S& collar, const SupplyDraw<S>& draw,
-                       const leaf_pars<S>& pars, const HeldCoords<S>& held) const;
+                       const leaf_pars<S>& pars, const HeldCoords<S>& held,
+                       const Normalisers<S>& norms = {}) const;
   template <CostCurve K, class S>
   S dprofit_dcollar_from_coords(const S& collar, const leaf_pars<S>& pars,
                                 const PhotoCapacity<S>& cap,
-                                const CollarCoords<S>& at) const;
+                                const CollarCoords<S>& at,
+                                const Normalisers<S>& norms = {}) const;
 
   // dM/dp at the solved point, the curvature the interior derivation divides by,
   // as a first difference of M: a tangent is wrong by a factor of eight, because
@@ -1810,10 +1903,17 @@ public:
   // solved chi = ci/ca, comparable with fitted g1 (plantecophys::fitBB).
   double g1_eff() const;
 
-  // The part of the cost that is a price, not a realised carbon loss, umol C
-  // m^-2 s^-1: `TF24_floor_lambda_o * E` on that curve, bit-exact against the
-  // reported E, and zero on every other. Zero says the curve does not separate
-  // the two, not that its cost is all realised carbon (CF77 could be read either way).
+  // The carbon the leaf kept at its operating point, umol C m^-2 s^-1: A less
+  // the part of its curve's cost that is carbon spent (`Curve<K>::carbon_cost`),
+  // which only TF24's hydraulic cost is, on TF24 and TF24_floor. Where the rest
+  // of the cost is a price of the flux, it is profit plus that price at the
+  // reported E: profit itself on TF24, `profit + lambda_o * E` on TF24_floor.
+  // A, to rounding or exactly, on every curve whose cost is a price or a risk term.
+  double carbon() const;
+  // The part of the cost that is a price, not carbon spent, umol C m^-2 s^-1:
+  // zero on TF24, `lambda_o * E` on TF24_floor, bit-exact against the reported
+  // E, and the whole cost on CF77, JS22 and CMax; NA on the others, which have
+  // no cost in carbon units to split.
   double shadow_cost() const;
 
   // Conductance to water vapour, mol H2O m^-2 s^-1, from the solved CO2
@@ -1880,7 +1980,8 @@ public:
             Tleaf_,          // deg C
             shadow_cost(),
             // The realised residual flux, kg H2O m^-2 s^-1; `E` above is the total.
-            residual_flux_};
+            residual_flux_,
+            carbon()};       // umol C m^-2 s^-1
   }
 
 // leaf economics functions
@@ -2104,6 +2205,11 @@ public:
   // How many root tables this leaf has built; see stem_curve_builds_. Last for the
   // ring's reason.
   long root_curve_builds_ = 0;
+  // Where prepare_profitmax read |A|max: its reference collar, and ci at psi_crit
+  // along the stem from it, for normalisers_at; NaN where it recorded neither
+  // (the energy balance or damage layer on, which the surface refuses).
+  double profitmax_reference_psi_ = std::numeric_limits<double>::quiet_NaN();
+  double profitmax_crit_ci_ = std::numeric_limits<double>::quiet_NaN();
 };
 
 // Everything about one cost curve, specialised for each in leaf_cost_curves.hpp.
