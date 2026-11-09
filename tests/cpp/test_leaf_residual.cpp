@@ -392,7 +392,7 @@ void test_shut_leaf_sits_on_its_wet_bound() {
       ok(std::isfinite(l.ci_) &&
              std::abs(l.stom_cond_CO2_ / l.cuticular_cond_CO2() - 1.0) < 1e-9,
          "and CO2 moves through the cuticle alone" + at);
-      near(l.profit_, l.assim_colimited_ - l.hydraulic_cost_TF(l.opt_psi_leaf_), 1e-12,
+      near(l.profit_, l.assim_colimited_ - l.hydraulic_cost_TF24(l.opt_psi_leaf_), 1e-12,
            "profit == A - C at the stem" + at);
     }
   }
@@ -431,7 +431,7 @@ void test_costs_charge_the_total_flux() {
     fl.optimise();
     ok(fl.shadow_cost() == fl.TF24_floor_lambda_o * fl.transpiration_,
        "TF24_floor's shadow cost is the price times the TOTAL flux");
-    near(fl.hydraulic_cost_, fl.hydraulic_cost_TF_kernel(fl.opt_psi_leaf_) + fl.shadow_cost(), 1e-12,
+    near(fl.hydraulic_cost_, fl.hydraulic_cost_TF24_kernel(fl.opt_psi_leaf_) + fl.shadow_cost(), 1e-12,
          "and its cost is TF24's plus that");
 
     phylloptim::Leaf lc = make(d, {ps}, {1.0}, kGmin, false, true);

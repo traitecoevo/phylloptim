@@ -42,8 +42,8 @@ void test_dprofit_dpsi_leaf_matches_a_finite_difference_energy_balance() {
             l.dprofit_dpsi_leaf<phylloptim::Leaf::CostCurve::TF24>(psi, psi_soil,
                                                                    &feasible);
         if (!feasible) continue;
-        const double up = l.profit_psi_leaf_TF(psi + h, psi_soil);
-        const double dn = l.profit_psi_leaf_TF(psi - h, psi_soil);
+        const double up = l.profit_psi_leaf_TF24(psi + h, psi_soil);
+        const double dn = l.profit_psi_leaf_TF24(psi - h, psi_soil);
         const double fd = (up - dn) / (2.0 * h);
         const double err = std::abs(an - fd) / std::max(std::abs(an), 1.0);
         errs.push_back(err);
@@ -236,7 +236,7 @@ void test_shutdown_reports_one_temperature() {
 
   // The accounting identity every branch is supposed to satisfy, re-checked at
   // these points because the shut one used to form profit by hand rather than
-  // through profit_psi_leaf_TF. `ci_` is in here because an exit once did not
+  // through profit_psi_leaf_TF24. `ci_` is in here because an exit once did not
   // write it at all: it reported the previous solve's internal CO2, or the NA
   // sentinel on a cold object.
   for (const Case &c : cases) {
@@ -252,7 +252,7 @@ void test_shutdown_reports_one_temperature() {
     ok(l.assim_colimited_ ==
            (l.stom_cond_CO2_ == 0.0 ? 0.0 : l.assim_colimited(l.ci_)),
        "net assimilation is the block's value at the reported ci" + what);
-    near(l.profit_, l.assim_colimited_ - l.hydraulic_cost_TF(l.opt_psi_leaf_),
+    near(l.profit_, l.assim_colimited_ - l.hydraulic_cost_TF24(l.opt_psi_leaf_),
          1e-12, "profit == assimilation - hydraulic cost" + what);
     // ci is the root of supply == demand at the reported conductance, which
     // with no conductance at all is the compensation point of this block.

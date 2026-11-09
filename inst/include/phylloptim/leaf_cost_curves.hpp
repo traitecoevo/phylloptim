@@ -144,14 +144,14 @@ template <> struct Curve<Leaf::CostCurve::TF24> {
   static constexpr bool price_reads_flux_only = true;
   // Its hydraulic cost is carbon the plant spends, and it has no price.
   static double carbon_cost(const Leaf& l, double psi_leaf) {
-    return l.hydraulic_cost_TF_kernel(psi_leaf);
+    return l.hydraulic_cost_TF24_kernel(psi_leaf);
   }
   static double price(const Leaf&, double) { return 0.0; }
   static void check_parameters(const Leaf&) {}
 
   static double cost(Leaf& l, double psi_leaf, double psi_upstream) {
     (void)psi_upstream;
-    l.hydraulic_cost_ = l.hydraulic_cost_TF_kernel(psi_leaf);
+    l.hydraulic_cost_ = l.hydraulic_cost_TF24_kernel(psi_leaf);
     return l.hydraulic_cost_;
   }
   // The only cost slope that is a tangent of its own cost kernel.
@@ -160,14 +160,14 @@ template <> struct Curve<Leaf::CostCurve::TF24> {
     (void)psi_upstream;
     AD ps_ad = psi_leaf;
     xad::derivative(ps_ad) = 1.0;
-    return xad::derivative(l.hydraulic_cost_TF_kernel(ps_ad));
+    return xad::derivative(l.hydraulic_cost_TF24_kernel(ps_ad));
   }
 
   // The scalar forms the derivative surface reads (SurfaceForms), on the pack.
   template <class S>
   static S scalar_cost(const Leaf& l, const S& sigma, const S&,
                        const leaf_pars<S>& pars) {
-    return l.template hydraulic_cost_TF_kernel<S>(sigma, pars);
+    return l.template hydraulic_cost_TF24_kernel<S>(sigma, pars);
   }
   template <class S>
   static S scalar_cost_slope(const Leaf& l, const S& sigma, const S&,
@@ -177,7 +177,7 @@ template <> struct Curve<Leaf::CostCurve::TF24> {
   template <class S>
   static S scalar_carbon_cost(const Leaf& l, const S& sigma,
                               const leaf_pars<S>& pars) {
-    return l.template hydraulic_cost_TF_kernel<S>(sigma, pars);
+    return l.template hydraulic_cost_TF24_kernel<S>(sigma, pars);
   }
   template <class S>
   static S scalar_price(const Leaf&, const S&, const leaf_pars<S>&) {
@@ -637,7 +637,7 @@ template <> struct Curve<Leaf::CostCurve::TF24_floor> {
   static constexpr bool price_reads_flux_only = true;
   // Its TF24 half is carbon the plant spends; its floor is a price of water.
   static double carbon_cost(const Leaf& l, double psi_leaf) {
-    return l.hydraulic_cost_TF_kernel(psi_leaf);
+    return l.hydraulic_cost_TF24_kernel(psi_leaf);
   }
   static double price(const Leaf& l, double E) { return l.TF24_floor_lambda_o * E; }
   static void check_parameters(const Leaf& l) {
@@ -660,7 +660,7 @@ template <> struct Curve<Leaf::CostCurve::TF24_floor> {
   // too (hazards.md, "One solver: the long form"). Reassociating breaks that;
   // test_tf24_floor_reduces guards it.
   static double cost(Leaf& l, double psi_leaf, double psi_upstream) {
-    l.hydraulic_cost_ = l.hydraulic_cost_TF_kernel(psi_leaf) +
+    l.hydraulic_cost_ = l.hydraulic_cost_TF24_kernel(psi_leaf) +
                         l.TF24_floor_lambda_o * l.operating_point_flux(psi_leaf, psi_upstream);
     return l.hydraulic_cost_;
   }
@@ -669,7 +669,7 @@ template <> struct Curve<Leaf::CostCurve::TF24_floor> {
     (void)psi_upstream;
     AD ps_ad = psi_leaf;
     xad::derivative(ps_ad) = 1.0;
-    return xad::derivative(l.hydraulic_cost_TF_kernel(ps_ad)) +
+    return xad::derivative(l.hydraulic_cost_TF24_kernel(ps_ad)) +
            l.TF24_floor_lambda_o * l.leaf_specific_conductance_max_ *
                l.stem_curve_integral_deriv(psi_leaf);
   }
@@ -685,7 +685,7 @@ template <> struct Curve<Leaf::CostCurve::TF24_floor> {
   template <class S>
   static S scalar_cost(const Leaf& l, const S& sigma, const S& collar,
                        const leaf_pars<S>& pars) {
-    S cost = l.template hydraulic_cost_TF_kernel<S>(sigma, pars);
+    S cost = l.template hydraulic_cost_TF24_kernel<S>(sigma, pars);
     cost = cost + pars[par_TF24_floor_lambda_o] *
                       l.template transpiration_at<S>(sigma, collar, pars);
     return cost;
@@ -707,7 +707,7 @@ template <> struct Curve<Leaf::CostCurve::TF24_floor> {
   template <class S>
   static S scalar_carbon_cost(const Leaf& l, const S& sigma,
                               const leaf_pars<S>& pars) {
-    return l.template hydraulic_cost_TF_kernel<S>(sigma, pars);
+    return l.template hydraulic_cost_TF24_kernel<S>(sigma, pars);
   }
   template <class S>
   static S scalar_price(const Leaf&, const S& E, const leaf_pars<S>& pars) {
@@ -1113,7 +1113,7 @@ inline double Leaf::lambda_molar() const {
 // Pure: no write to hydraulic_cost_, so the AD pass cannot scribble model state
 // while probing. The caching is the double entry point's job.
 template <typename T, typename U>
-inline T Leaf::hydraulic_cost_TF_kernel(const T& psi_leaf, const U& scale,
+inline T Leaf::hydraulic_cost_TF24_kernel(const T& psi_leaf, const U& scale,
                                         const U& b, const U& c,
                                         const U& beta2) const {
   return scale *
@@ -1121,8 +1121,8 @@ inline T Leaf::hydraulic_cost_TF_kernel(const T& psi_leaf, const U& scale,
 }
 
 template <typename T>
-inline T Leaf::hydraulic_cost_TF_kernel(T psi_leaf) const {
-  return hydraulic_cost_TF_kernel<T, double>(psi_leaf, TF24_cost_scale, stem_b,
+inline T Leaf::hydraulic_cost_TF24_kernel(T psi_leaf) const {
+  return hydraulic_cost_TF24_kernel<T, double>(psi_leaf, TF24_cost_scale, stem_b,
                                              stem_c, TF24_beta2);
 }
 
@@ -1135,7 +1135,7 @@ inline T Leaf::cost_slope_at(const T& sigma, const leaf_pars<T>& pars) const {
   return kernel_slope_at<T>(
       [this]<class U>(const U& s, const U& scale, const U& bb, const U& c,
                       const U& beta2) -> U {
-        return hydraulic_cost_TF_kernel<U, U>(s, scale, bb, c, beta2);
+        return hydraulic_cost_TF24_kernel<U, U>(s, scale, bb, c, beta2);
       },
       "hydraulic cost in leaf potential", sigma, pars[par_TF24_cost_scale], b,
       pars[par_stem_c], pars[par_TF24_beta2]);
@@ -1145,16 +1145,16 @@ inline T Leaf::cost_slope_at(const T& sigma, const leaf_pars<T>& pars) const {
 // derivation rather than a supplied row: only the pre-integrated G(psi) is tabulated and
 // needs its rows supplied (stem_integral_at).
 template <typename T>
-inline T Leaf::hydraulic_cost_TF_kernel(const T& psi_leaf,
+inline T Leaf::hydraulic_cost_TF24_kernel(const T& psi_leaf,
                                         const leaf_pars<T>& pars) const {
-  return hydraulic_cost_TF_kernel<T>(
+  return hydraulic_cost_TF24_kernel<T>(
       psi_leaf, pars[par_TF24_cost_scale],
       phylloptim::weibull_b_from_P50<T>(pars[par_stem_P50], pars[par_stem_c]),
       pars[par_stem_c], pars[par_TF24_beta2]);
 }
 
 // The bound difference-curve costs, each its curve's definition's.
-inline double Leaf::hydraulic_cost_TF(double psi_leaf) {
+inline double Leaf::hydraulic_cost_TF24(double psi_leaf) {
   return Curve<CostCurve::TF24>::cost(*this, psi_leaf, util::na_value);
 }
 
@@ -1300,7 +1300,7 @@ inline double Leaf::leastcost_flux(double psi_leaf, double psi_upstream) {
   return Curve<CostCurve::LeastCost>::resource_use(*this, psi_leaf, psi_upstream);
 }
 
-inline double Leaf::profit_psi_leaf_TF(double psi_leaf, double psi_upstream) {
+inline double Leaf::profit_psi_leaf_TF24(double psi_leaf, double psi_upstream) {
   return profit_psi_leaf_for<CostCurve::TF24>(psi_leaf, psi_upstream);
 }
 

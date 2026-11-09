@@ -1,3 +1,7 @@
+# phylloptim 0.34.0
+
+- **Breaking:** TF24's bound cost and profit are named for the curve, beside its other names: `$hydraulic_cost_TF()` is `$hydraulic_cost_TF24()` and `$profit_psi_leaf_TF()` is `$profit_psi_leaf_TF24()`, with no aliases. For C++ users, `hydraulic_cost_TF_kernel` is `hydraulic_cost_TF24_kernel`, and `MultiLayerRoots::soil_number_of_depths_` is an `int`. No number moves.
+
 # phylloptim 0.33.3
 
 - `plot_model_overview()` draws its profit panel at the leaf's own soil potential: given a leaf at a soil other than 1 MPa, the panel's curve used to disagree with the optimum it marked. The figure also hands a caller's leaf back on its own model.

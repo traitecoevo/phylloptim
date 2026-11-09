@@ -319,7 +319,7 @@ inline double Leaf::stem_curve_limit() const {
 }
 
 // A NaN fails the comparison and falls through to the read, which returns NaN:
-// plant's profit_psi_leaf_TF(NA, .) -> NA contract rests on this.
+// plant's profit_psi_leaf_TF24(NA, .) -> NA contract rests on this.
 inline double Leaf::stem_curve_integral(double psi, const char* caller) const {
   if (psi < 0.0) {
     stem_curve_out_of_domain(0.0, std::numeric_limits<double>::infinity(), psi,

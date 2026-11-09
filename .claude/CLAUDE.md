@@ -200,7 +200,14 @@ YAML 1.1 reads `1e-3` as a string: write a float with a point and a signed expon
 
 ## Decisions that stand
 
-Each was taken by the package owner; reopening one is a decision for them, not a refactor.
+Each was taken by the package owner; reopening one is a decision for them, not a refactor. Four are requirements every change keeps:
+
+- **Every curve runs on both routes**, collar and leaf, and none is restricted to one.
+- **Every curve has gradients**, through the trait gradient and through the derivative surface.
+- **The R bindings stay.** The per-curve bound methods are frozen (no new curve adds one), not removed; `$curve_cost()`, `$curve_profit()` and `$curve_lambda()` take any curve by name.
+- **Common infrastructure, not code per curve**: a new curve is its `Curve<K>`, and the routes, gradients, bindings and registry follow from it.
+
+The rest:
 
 - **D1. The closed form stays, frozen.** TF24, CF77 and TF24_floor carry `ClosedForm::Implemented`; no new curve adds a closed-form solver, and the closed form is never under a gradient (hazard 3). Collapsing duplication inside `closed_form.hpp` is allowed.
 - **D2. Medlyn stays outside the curve dispatch**, as an empirical-conductance diagnostic: the USO form is not a cost the solve maximises, and no λ maps onto `g1`.
@@ -212,8 +219,8 @@ Each was taken by the package owner; reopening one is a decision for them, not a
 
 ## Invariants and what not to touch
 
-- **The one-way include rule** (hazard 9; older comments call it "PLAN item 6a"): `inst/include/` is plain C++ and never includes from `src/`; `src/` and `R/` include downward only. A separate R-binding package was considered and rejected: two repositories for one model, installed twice.
-- **The generated RcppR6 files** (old comments: "PLAN item 6c"): never hand-edit them, and keep RcppR6 undeclared.
+- **The one-way include rule** (hazard 9): `inst/include/` is plain C++ and never includes from `src/`; `src/` and `R/` include downward only. A separate R-binding package was considered and rejected: two repositories for one model, installed twice.
+- **The generated RcppR6 files**: never hand-edit them, and keep RcppR6 undeclared.
 - **`psi_leaf_to_ci`'s tolerance** and **`basin_scan_cells()`'s gate**, both set by measurement.
 - **No clamp, `min`, `max` or branch on a physical quantity inside the solved range** (#183, decided). A driver or state outside the model's range is refused at its entry point, by name and limit; a reachable bound gets a smooth form with a registered width. The kept exceptions are the stomatal corner `E_s >= 0`, `vpd_leaf_min`, SOX's and JW26's reduction factors held at zero past psi_crit (without it a dark leaf's negative A times a negative factor reports a positive profit), the log-link curves' shut for a leaf with A <= 0 at the dry end (`objective_has_log_link`: SOX's, JW26's and LeastCost's objectives have no maximum there, and the argmax jumps at the light compensation point whatever is done), and the published forms (Medlyn's beta, CF77's soil price), each with its reason in the registry. `make -C tests/cpp smoothness` is the check.
 - **The `supply_kind_` enum**, which measured free where `std::variant` did not (hazard 6).
@@ -221,7 +228,7 @@ Each was taken by the package owner; reopening one is a decision for them, not a
 - **`tsv_to_hex.c`**, which is live: `test-golden.R`'s regeneration recipe needs it.
 - **The aligned level defaults** (`CF77_lambda_`, `JS22_gamma`, `CMax_a`, `LeastCost_beta`; #156) are solved by `align_curves()`, not chosen, and live in two places: each curve's `Curve<K>` parameters in `leaf_cost_curves.hpp` (which `Leaf`'s initialisers and every R table read, through `cost_curve_parameters()`), and `leaf_traits()`'s signature (`JS22_gamma`, `CMax_a`), which `test-curve-definition.R` holds to the first. `test-align-curves.R` re-solves them, so a change that moves TF24 or one of these curves at the reference fails it; re-align both rather than loosening the test. The golden files pin their own values and do not follow the defaults.
 
-Comments in `inst/include/phylloptim.h`, `inst/RcppR6_classes.yml`, `Doxyfile` and old `NEWS.md` entries that cite "PLAN item N" refer to a `PLAN.md` retired in #126; its last version is `git show 83fbb25^:PLAN.md`. Item 6a is the one-way include rule above, 6c the RcppR6 layering, and 15 the Doxygen site (issue #12). A second `PLAN.md` carried the redesign from 0.27.0 to 0.33.0 (sections A to F); what still binds from it is "Decisions that stand" above, and its last version is `git show 75b0242:PLAN.md`.
+Old `NEWS.md` entries that cite "PLAN item N" refer to a `PLAN.md` retired in #126; its last version is `git show 83fbb25^:PLAN.md`. Item 6a is the one-way include rule above, 6c the RcppR6 layering, and 15 the Doxygen site. A second `PLAN.md` carried the redesign from 0.27.0 to 0.33.0 (sections A to F); what still binds from it is "Decisions that stand" above, and its last version is `git show 75b0242:PLAN.md`.
 
 ## Validating against plant
 

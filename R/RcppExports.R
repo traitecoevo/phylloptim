@@ -133,8 +133,8 @@ Leaf__psi_leaf_to_ci <- function(obj_, psi_leaf, psi_upstream) {
     .Call('_phylloptim_Leaf__psi_leaf_to_ci', PACKAGE = 'phylloptim', obj_, psi_leaf, psi_upstream)
 }
 
-Leaf__hydraulic_cost_TF <- function(obj_, psi_leaf) {
-    .Call('_phylloptim_Leaf__hydraulic_cost_TF', PACKAGE = 'phylloptim', obj_, psi_leaf)
+Leaf__hydraulic_cost_TF24 <- function(obj_, psi_leaf) {
+    .Call('_phylloptim_Leaf__hydraulic_cost_TF24', PACKAGE = 'phylloptim', obj_, psi_leaf)
 }
 
 Leaf__hydraulic_cost_CF77 <- function(obj_, psi_leaf, psi_upstream) {
@@ -149,8 +149,8 @@ Leaf__hydraulic_cost_CMax <- function(obj_, psi_leaf, psi_upstream) {
     .Call('_phylloptim_Leaf__hydraulic_cost_CMax', PACKAGE = 'phylloptim', obj_, psi_leaf, psi_upstream)
 }
 
-Leaf__profit_psi_leaf_TF <- function(obj_, psi_leaf, psi_upstream) {
-    .Call('_phylloptim_Leaf__profit_psi_leaf_TF', PACKAGE = 'phylloptim', obj_, psi_leaf, psi_upstream)
+Leaf__profit_psi_leaf_TF24 <- function(obj_, psi_leaf, psi_upstream) {
+    .Call('_phylloptim_Leaf__profit_psi_leaf_TF24', PACKAGE = 'phylloptim', obj_, psi_leaf, psi_upstream)
 }
 
 Leaf__profit_psi_leaf_CF77 <- function(obj_, psi_leaf, psi_upstream) {

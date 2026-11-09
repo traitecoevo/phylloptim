@@ -136,8 +136,8 @@ double Leaf__psi_leaf_to_ci(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, d
   return obj_->psi_leaf_to_ci(psi_leaf, psi_upstream);
 }
 // [[Rcpp::export]]
-double Leaf__hydraulic_cost_TF(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_leaf) {
-  return obj_->hydraulic_cost_TF(psi_leaf);
+double Leaf__hydraulic_cost_TF24(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_leaf) {
+  return obj_->hydraulic_cost_TF24(psi_leaf);
 }
 // [[Rcpp::export]]
 double Leaf__hydraulic_cost_CF77(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_leaf, double psi_upstream) {
@@ -152,8 +152,8 @@ double Leaf__hydraulic_cost_CMax(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> ob
   return obj_->hydraulic_cost_CMax(psi_leaf, psi_upstream);
 }
 // [[Rcpp::export]]
-double Leaf__profit_psi_leaf_TF(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_leaf, double psi_upstream) {
-  return obj_->profit_psi_leaf_TF(psi_leaf, psi_upstream);
+double Leaf__profit_psi_leaf_TF24(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_leaf, double psi_upstream) {
+  return obj_->profit_psi_leaf_TF24(psi_leaf, psi_upstream);
 }
 // [[Rcpp::export]]
 double Leaf__profit_psi_leaf_CF77(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_leaf, double psi_upstream) {

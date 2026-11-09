@@ -21,7 +21,7 @@
 // hardwires both `#include <phylloptim.h>` in the code it generates and
 // `<leaf/RcppR6_pre.hpp>` in the umbrella it expects to find, so the name is
 // fixed and the model's umbrella had to be the one that moved. Hence this
-// banner. See PLAN item 6a for the decision and for what actually enforces it:
+// banner. What enforces the one-way include rule (hazard 9):
 // .github/workflows/cpp-tests.yml builds the C++ suite with no R installed, so
 // a header that reaches for Rcpp turns three jobs red before review.
 // ============================================================================

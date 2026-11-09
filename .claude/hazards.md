@@ -8,7 +8,7 @@ The last section, "One solver: the long form", is the evidence behind the rule o
 
 ## 1. There are TWO Weibull vulnerability curves
 
-Stem (`stem_P50`, `stem_c`) drives `hydraulic_cost_TF`; root (`root_P50`, `root_c`) drives uptake. They used to be the unmarked `b`/`c` plus `root_b`/`root_c`, and the companion analysis used the root parameters for the stem cost and carried λ ∝ ψ^3.02 into a manuscript draft where it should have been ψ^0.64. Never leave an unmarked default for a parameter that exists in two versions.
+Stem (`stem_P50`, `stem_c`) drives `hydraulic_cost_TF24`; root (`root_P50`, `root_c`) drives uptake. They used to be the unmarked `b`/`c` plus `root_b`/`root_c`, and the companion analysis used the root parameters for the stem cost and carried λ ∝ ψ^3.02 into a manuscript draft where it should have been ψ^0.64. Never leave an unmarked default for a parameter that exists in two versions.
 
 ⚠️ **Each curve has exactly TWO settable numbers, and everything else about it is derived.** `stem_b = P50/(ln 2)^(1/c)` and `psi_crit = b·ln(1/0.05)^(1/c)`, i.e. P95 of the same curve — and Sperry's `k_crit = 0.05·kmax` reads that same 0.05 from `Leaf::k_crit_fraction`. All four are readable and none is settable.
 
@@ -70,7 +70,7 @@ Every input is per unit leaf area or a dimensionless/intensive driver. Nothing s
 What is *not* true is the blanket "prefer compile-time dispatch, a virtual call in the solve would cost". Measured (`make -C tests/cpp bench`), the code splits into two halves that answer oppositely:
 
 - **The soil/supply path is already out-of-line.** `E_from_Soil_to_Root_Collar` is inlined into none of its 18 call sites at `-O2`, nor at `-inline-threshold=2000`; neither was the per-layer spline `eval` that the vulnerability table replaced in #183. So making it virtual costs **+1.1%**, `std::function` +0.6%, `std::variant` +2.6% — noise. Forcing more inlining is *worse*, by 4%.
-- **The cost core is fully inlined.** `profit_psi_leaf_TF`, `hydraulic_cost_TF`, `assim_colimited` and `transpiration_to_psi_leaf` have no out-of-line symbol at all, so a change there is a different question and needs its own measurement.
+- **The cost core is fully inlined.** `profit_psi_leaf_TF24`, `hydraulic_cost_TF24`, `assim_colimited` and `transpiration_to_psi_leaf` have no out-of-line symbol at all, so a change there is a different question and needs its own measurement.
 
 Two choices in the first-order conditions look like tidy-ups waiting to happen and are measured: `dprofit_energy_balance_term` is `[[gnu::noinline]]`, because smaller it was inlined into every curve's first-order condition and changed the gate-off path's code; and both conditions take `A'` from `assim_slope(ci)`, the one-direction pass, not `assim_slope_at`, whose general form cost the collar solve about 10%. With both, the two functions compile instruction-identical to their pre-merge forms.
 
@@ -108,7 +108,7 @@ Check `git grep 'access: field' inst/RcppR6_classes.yml` in plant before moving 
 `Leaf` is a value member that plant reuses for every individual in a patch, so any output a branch declines to write silently becomes the *previous plant's* value. Three paths had this defect, and each fix is a pattern to keep:
 
 - **Clear with `.assign`, never `.resize`.** `set_physiology` cleared `soil_consumption_` with `.resize`, whose fill reaches only newly-added elements, while the uptake loop writes only up to `max_soil_layer` — the deepest *rooted* layer, not the deepest soil layer. A shallow-rooted plant therefore inherited the deep layers' uptake, and plant bills that to the patch water balance (plant #577, fixed in plant by #585).
-- **Every exit writes every output.** The `assim_max_ < 0` exit set `profit_` but left `transpiration_`, `stom_cond_CO2_` and `assim_colimited_` alone, which made `profit_ == assim_colimited_ - hydraulic_cost_TF()` false in that one branch (7.79 vs -1.47 when measured).
+- **Every exit writes every output.** The `assim_max_ < 0` exit set `profit_` but left `transpiration_`, `stom_cond_CO2_` and `assim_colimited_` alone, which made `profit_ == assim_colimited_ - hydraulic_cost_TF24()` false in that one branch (7.79 vs -1.47 when measured).
 - **A method that reads seated state must check that it is seated.** `dprofit_droot_collar_psi` read soil potentials a solve had to have seated, so calling it without one **segfaulted**; and it missed the reversed-gradient case (`psi >= psi_leaf`), where `psi_leaf_to_ci` either throws or returns a gradient built on a negative conductance.
 
 ⚠️ **The golden file cannot see any of this, by design.** `test_golden` constructs a fresh `Leaf` per grid point (see its header), so `soil_consumption_` is always empty when `set_physiology` runs; the grid's minimum `assim_max_` is 3.71 so it never reaches that exit; and no golden column comes from the gradient. All three fixes are golden-bit-identical. **A bit-identical golden run is not evidence about a stale-state bug** — reach for a test that reuses one `Leaf`, and check whether the grid reaches the branch at all before reading its silence as a result.

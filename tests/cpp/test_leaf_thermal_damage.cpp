@@ -297,7 +297,7 @@ void test_thermal_damage_has_no_corners() {
 // both read the block update_temperature_dependent_params writes -- and on the
 // energy-balance path both re-seat it at each candidate's own leaf temperature.
 // Collar route against a difference of evaluate_root_collar_psi, leaf route
-// against a difference of profit_psi_leaf_TF, at every input non-default.
+// against a difference of profit_psi_leaf_TF24, at every input non-default.
 void test_thermal_damage_dprofit_is_the_solves_own() {
   printf("thermal damage, gate on: dprofit is the derivative of the reported "
          "profit\n");
@@ -357,8 +357,8 @@ void test_thermal_damage_dprofit_is_the_solves_own() {
             bool feasible = false;
             const double an =
                 l.dprofit_dpsi_leaf<CC::TF24>(psi, psi_soil, &feasible);
-            const double fd = (l.profit_psi_leaf_TF(psi + h, psi_soil) -
-                               l.profit_psi_leaf_TF(psi - h, psi_soil)) /
+            const double fd = (l.profit_psi_leaf_TF24(psi + h, psi_soil) -
+                               l.profit_psi_leaf_TF24(psi - h, psi_soil)) /
                               (2.0 * h);
             if (!feasible) {
               continue;

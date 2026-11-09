@@ -358,10 +358,10 @@ void test_every_curve_reports_an_emergent_lambda() {
       const double psi = l.opt_psi_leaf_;
       if (psi <= psi_soil + h || psi >= l.psi_crit - h) continue;
       const double dC =
-          (l.hydraulic_cost_TF(psi + h) - l.hydraulic_cost_TF(psi - h)) / (2 * h);
-      l.profit_psi_leaf_TF(psi + h, psi_soil);
+          (l.hydraulic_cost_TF24(psi + h) - l.hydraulic_cost_TF24(psi - h)) / (2 * h);
+      l.profit_psi_leaf_TF24(psi + h, psi_soil);
       const double E1 = l.transpiration_;
-      l.profit_psi_leaf_TF(psi - h, psi_soil);
+      l.profit_psi_leaf_TF24(psi - h, psi_soil);
       const double E0 = l.transpiration_;
       const double fd = dC / ((E1 - E0) / (2 * h));
       l.optimise_psi_leaf_single<phylloptim::Leaf::CostCurve::TF24>();
@@ -1054,7 +1054,7 @@ void test_shadow_cost() {
           ok(l.carbon() == l.profit_ + l.shadow_cost(),
              "TF24_floor's carbon is profit plus the price, exactly");
           near(l.carbon(),
-               l.assim_colimited_ - l.hydraulic_cost_TF_kernel(l.opt_psi_leaf_), 1e-12,
+               l.assim_colimited_ - l.hydraulic_cost_TF24_kernel(l.opt_psi_leaf_), 1e-12,
                "TF24_floor's carbon is A less TF24's cost");
           ok((lo == 0.0) == (l.shadow_cost() == 0.0),
              "the price vanishes exactly when lambda_o does");

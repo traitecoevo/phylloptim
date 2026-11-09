@@ -288,7 +288,7 @@ public:
   int supply_n_layers() const {
     switch (supply_kind_) {
       case SupplyKind::MultiLayer:
-        return static_cast<int>(roots_.soil_number_of_depths_);
+        return roots_.soil_number_of_depths_;
       case SupplyKind::SinglePotential:
         return single_.n_layers();
     }
@@ -1651,7 +1651,7 @@ public:
   // no log for an exponent that does not move.
   template <typename T, typename U> T proportion_of_conductivity_kernel(
       const T& psi, const U& b, const U& c) const;
-  template <typename T, typename U> T hydraulic_cost_TF_kernel(
+  template <typename T, typename U> T hydraulic_cost_TF24_kernel(
       const T& psi_leaf, const U& scale, const U& b, const U& c,
       const U& beta2) const;
 
@@ -1660,7 +1660,7 @@ public:
   template <typename T> T assim_electron_limited_kernel(T ci) const;
   template <typename T> T assim_colimited_kernel(T ci) const;
   template <typename T> T proportion_of_conductivity_kernel(T psi) const;
-  template <typename T> T hydraulic_cost_TF_kernel(T psi_leaf) const;
+  template <typename T> T hydraulic_cost_TF24_kernel(T psi_leaf) const;
 
   // The kernels' arguments read off a caller's parameter pack. From the pack,
   // never the members: at double they hold the same numbers, so a member read is
@@ -1691,7 +1691,7 @@ public:
   template <typename T, typename U>
   T assim_saturated_kernel(const PhotoCapacity<U>& cap) const;
   template <typename T>
-  T hydraulic_cost_TF_kernel(const T& psi_leaf, const leaf_pars<T>& pars) const;
+  T hydraulic_cost_TF24_kernel(const T& psi_leaf, const leaf_pars<T>& pars) const;
 
   // The slope of a kernel in its first argument, carrying rows: a tangent of a
   // tangent at double through the kernel alone, supplied as rows, since nesting
@@ -2119,7 +2119,7 @@ public:
   }
 
 // leaf economics functions
-  double hydraulic_cost_TF(double psi_leaf);
+  double hydraulic_cost_TF24(double psi_leaf);
 
   // Cowan & Farquhar (1977): `CF77_lambda_ * E`, umol C m^-2 s^-1, water priced
   // at a constant marginal value; maximising `A - lambda*E` gives dA/dE == lambda.
@@ -2133,7 +2133,7 @@ public:
   // See `JS22_gamma` for what is missing from it.
   double hydraulic_cost_JS22(double psi_leaf, double psi_upstream);
 
-  double profit_psi_leaf_TF(double psi_leaf, double psi_upstream);
+  double profit_psi_leaf_TF24(double psi_leaf, double psi_upstream);
   double profit_psi_leaf_CF77(double psi_leaf, double psi_upstream);
   double profit_psi_leaf_JS22(double psi_leaf, double psi_upstream);
 
