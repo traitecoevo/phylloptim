@@ -93,10 +93,17 @@ struct Stream {
 const double kTheta = 0.5, kKs = 2.0, kH = 5.0, kAreaLeaf = 1.0;
 
 pl::Leaf set_up(int layers, double psi0, double ppfd, double leaf_temp,
-                double g_min = 0.0) {
+                double g_min = 0.0, bool energy_balance = false) {
   pl::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
+  // With the balance on, as test_leaf seats it: daylight NIR at the light.
+  if (energy_balance) {
+    l.use_energy_balance_ = true;
+    l.wind_speed_ = 2.0;
+    l.d_ = 0.05;
+    l.NIR_int_ = ppfd / pl::umol_par_per_joule;
+  }
   // The residual conductance is a trait (#182): seated through set_traits so
   // the g_min rows the pack carries are exercised at a non-zero value as well
   // as at the default.
@@ -110,8 +117,11 @@ pl::Leaf set_up(int layers, double psi0, double ppfd, double leaf_temp,
     psi_soil.push_back(psi0 + 0.35 * i);
     depth.push_back(1.0 * (i + 1));
   }
+  // With the balance on, test_leaf's conductance: this one carries enough to cool
+  // a leaf past what the model can evaluate, which set_physiology refuses.
+  const double kmax = energy_balance ? 0.000157 / 5.0 : kKs * kTheta / kH;
   l.set_physiology(fixture::root_network(root, depth), ppfd, psi_soil, depth,
-                   kKs * kTheta / kH, 2.0, 40.0, leaf_temp, 21.0, 101.3);
+                   kmax, 2.0, 40.0, leaf_temp, 21.0, 101.3);
   return l;
 }
 
@@ -460,6 +470,26 @@ void check(int layers, double psi0, double ppfd, double leaf_temp,
   });
 }
 
+// The same with the energy balance on, on the curves the surface follows it for.
+void check_energy_balance(int layers, double psi0, double ppfd, double leaf_temp,
+                          unsigned long seed, double g_min) {
+  const pl::Leaf base = set_up(layers, psi0, ppfd, leaf_temp, g_min, true);
+  for_each_surface_curve([&](auto tag) {
+    constexpr CC K = decltype(tag)::value;
+    if constexpr (pl::Leaf::surface_follows_energy_balance<K>()) {
+      const std::optional<pl::Leaf> l = solved_on<K>(base);
+      if (!l) return;
+      check_solved<K>(*l,
+                      "energy balance layers=" + std::to_string(layers) +
+                          " psi_soil=" + std::to_string(psi0) +
+                          " ppfd=" + std::to_string(ppfd) +
+                          " T=" + std::to_string(leaf_temp) +
+                          " g_min=" + std::to_string(g_min),
+                      seed);
+    }
+  });
+}
+
 // The kinds the sweep above does not reach, each on test_leaf's drivers and
 // asserted to land on its kind before it is compared: a fixture that drifted to
 // another kind would narrow the check without failing it.
@@ -503,6 +533,18 @@ int main() {
         for (double ppfd : {100.0, 1500.0}) {
           for (double leaf_temp : {25.0, 40.0}) {
             check(layers, psi0, ppfd, leaf_temp, seed += 7919, g_min);
+          }
+        }
+      }
+    }
+  }
+  // With the energy balance on, which moves leaf temperature with the flux.
+  for (double g_min : {0.0, 5e-4}) {
+    for (int layers : {1, 3}) {
+      for (double psi0 : {0.5, 1.0, 2.0, 3.0, 5.0, 7.0}) {
+        for (double ppfd : {100.0, 1500.0}) {
+          for (double leaf_temp : {25.0, 40.0}) {
+            check_energy_balance(layers, psi0, ppfd, leaf_temp, seed += 7919, g_min);
           }
         }
       }

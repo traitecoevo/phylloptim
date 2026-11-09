@@ -300,11 +300,13 @@ inline double Leaf::stom_cond_stomatal_H2O() const {
 inline void Leaf::refuse_energy_balance(const char* who) const {
   if (use_energy_balance_) {
     util::stop(std::string(who) +
-               ": refused with use_energy_balance_ on. The derivative surface "
-               "holds leaf temperature at the value the solve placed and carries "
-               "none of its terms, while the solve's first-order condition "
-               "includes them, so its rows would describe a different model from "
-               "the one the solve ran. Set use_energy_balance_ to false.");
+               ": refused with use_energy_balance_ on. On this curve the "
+               "derivative surface holds leaf temperature at the value the solve "
+               "placed and carries none of its terms, while the solve's "
+               "first-order condition includes them, so its rows would describe a "
+               "different model from the one the solve ran. TF24 and TF24_floor "
+               "follow the balance; on another curve set use_energy_balance_ to "
+               "false.");
   }
 }
 

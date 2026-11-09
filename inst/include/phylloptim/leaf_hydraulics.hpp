@@ -203,7 +203,13 @@ inline S Leaf::residual_flux_at(const S& collar, const leaf_pars<S>& pars,
   // The demand: g_min at the seated leaf temperature, at the seated deficit.
   // Both are the operating point's and passive; the trait carries the row.
   const double per_g = g_min_factor(Tleaf_) * vpd_leaf_ / atm_kpa_ / kg_to_mol_h2o;
-  const S r = pars[par_g_min] * S(per_g);
+  return residual_flux_at<S>(collar, pars, draw, S(per_g));
+}
+
+template <class S>
+inline S Leaf::residual_flux_at(const S& collar, const leaf_pars<S>& pars,
+                                const SupplyDraw<S>& draw, const S& per_g) const {
+  const S r = pars[par_g_min] * per_g;
   const S E_inf = pars[par_kmax] * stem_complement_at<S>(collar, pars);
   const S E_cap = S(residual_cap_fraction) * E_inf;
   // The same limits as the double path's residual_cap, so the two agree where

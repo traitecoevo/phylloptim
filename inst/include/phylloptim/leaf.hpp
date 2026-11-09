@@ -537,10 +537,15 @@ public:
                                          double gc_const) const;
   // The same flux on the tape, at a collar, with rows in g_min, kmax and the stem
   // curve's pair; leaf temperature and deficit are the seated point's, passive.
+  // The second takes the demand per unit g_min, which carries rows where leaf
+  // temperature moves (residual_demand_per_g_on).
   template <class S> struct SupplyDraw;
   template <class S>
   S residual_flux_at(const S& collar, const leaf_pars<S>& pars,
                      const SupplyDraw<S>& draw) const;
+  template <class S>
+  S residual_flux_at(const S& collar, const leaf_pars<S>& pars,
+                     const SupplyDraw<S>& draw, const S& per_g) const;
   // The cuticle's conductance to CO2 at the seated leaf temperature.
   double cuticular_cond_CO2() const { return g_min_co2_ratio_ * g_min_leaf_; }
   // Net assimilation as c_i -> infinity, the colimited capacity less respiration:
@@ -1131,11 +1136,42 @@ public:
 
   // What profit needs: the leaf potential the collar determines, and its ci;
   // and the CO2 conductance that placed ci, which the physical outputs report.
+  //
+  // With the energy balance on, leaf temperature moves with the flux, so the
+  // capacity and gc's flux-to-conductance factor are formed at it during
+  // placement, and the marginal reads them again with the stomatal and residual
+  // fluxes: HeldBalance. Left default with the balance off, where nothing reads it.
+  template <class T>
+  struct HeldBalance {
+    T temp{};
+    T gc_per_flux{};
+    T E_s{};
+    T r_star{};
+    // The boundary layer's split's slope, as the split formed it.
+    T bl_slope{};
+
+    template <class F>
+    void for_each_active(F&& f) const {
+      f(temp);
+      f(gc_per_flux);
+      f(E_s);
+      f(r_star);
+      f(bl_slope);
+    }
+  };
+
+  // A coordinate's value carries the collar's whole channel; ci's slope is the
+  // one at fixed leaf temperature, the partial dprofit_at_collar_psi forms, which
+  // the marginal reads with the gc partials and the boundary layer's slope.
   template <class T>
   struct CollarCoords {
     odelia::with_slope<T> sigma;
     odelia::with_slope<T> ci;
     odelia::with_slope<T> gc;
+    T dgc_dsigma{};
+    T dgc_dp{};
+    T bl_slope{};
+    HeldBalance<T> balance{};
   };
 
   // The cost curves. A curve enters the derivative only through dC/dpsi_leaf.
@@ -1572,6 +1608,7 @@ public:
     S sigma{};
     S gc{};
     S ci{};
+    HeldBalance<S> balance{};
 
     bool placed() const { return !std::isnan(at); }
 
@@ -1583,6 +1620,7 @@ public:
       f(sigma);
       f(gc);
       f(ci);
+      balance.for_each_active(f);
     }
   };
 
@@ -1691,11 +1729,13 @@ public:
   //
   // gc is derived from the draw. `collar_moves` is false at an interior point
   // (the envelope theorem), and the slopes are then absent rather than zero.
+  // `cap` is the capacity at the held leaf temperature: passed in with the
+  // balance off, formed here with it on, where temperature follows the flux.
   template <class S>
   CollarCoords<S> collar_coords_at(double sigma_star, double ci_star,
                                    const S& collar, const SupplyDraw<S>& draw,
                                    const leaf_pars<S>& pars,
-                                   const PhotoCapacity<S>& cap,
+                                   PhotoCapacity<S>& cap,
                                    bool collar_moves) const;
 
   // collar_coords_at in two halves, the coordinates at the held collar and then
@@ -1703,15 +1743,48 @@ public:
   template <class S>
   void held_coords_at(double sigma_star, double ci_star, const S& collar,
                       const SupplyDraw<S>& draw, const leaf_pars<S>& pars,
-                      const PhotoCapacity<S>& cap, S& sigma_h, S& gc,
-                      S& ci_h) const;
+                      PhotoCapacity<S>& cap, S& sigma_h, S& gc,
+                      S& ci_h, HeldBalance<S>& balance) const;
   template <class S>
   CollarCoords<S> collar_channel_at(double sigma_star, const S& collar,
                                     const SupplyDraw<S>& draw,
                                     const leaf_pars<S>& pars,
                                     const PhotoCapacity<S>& cap,
                                     const S& sigma_h, const S& gc,
-                                    const S& ci_h, bool collar_moves) const;
+                                    const S& ci_h, const HeldBalance<S>& balance,
+                                    bool collar_moves) const;
+
+  // --- the energy balance on the surface's scalar --------------------------
+  // Each takes its value from the solve's seated state and its rows from the
+  // balance: leaf temperature is affine in the stem's flux E and, through the
+  // absorbed shortwave, in PPFD.
+  template <class S> S leaf_temperature_at(const S& E, const leaf_pars<S>& pars) const;
+  // The deficit, its saturation slope, gc's flux-to-conductance factor and the
+  // cuticle's temperature factor, at a leaf temperature on the scalar.
+  template <class S> S saturation_vapour_pressure_on(const S& temp) const;
+  template <class S> S saturation_vapour_pressure_slope_on(const S& temp) const;
+  template <class S> S leaf_vpd_on(const S& temp) const;
+  template <class S> S gc_per_flux_on(const S& temp) const;
+  template <class S> S g_min_factor_on(const S& temp) const;
+  // The residual flux's demand per unit g_min: the cuticle's factor times the
+  // deficit over the atmosphere, in kg.
+  template <class S> S residual_demand_per_g_on(const S& temp) const;
+  // dprofit_energy_balance_term on the scalar, from the coordinates.
+  template <CostCurve K, class S>
+  S energy_balance_marginal_at(const S& collar, const leaf_pars<S>& pars,
+                               const CollarCoords<S>& at, const S& A_prime) const;
+  // The capacity at the live collar's leaf temperature, formed into `store`:
+  // `cap` itself with the balance off, where temperature does not move with the
+  // collar, and returned by reference so that path copies nothing onto a tape.
+  template <class S>
+  const PhotoCapacity<S>& live_capacity_at(const S& collar, const leaf_pars<S>& pars,
+                                           const CollarCoords<S>& at,
+                                           const PhotoCapacity<S>& cap,
+                                           PhotoCapacity<S>& store) const;
+  // Which curves the surface follows with the energy balance on; the rest refuse.
+  template <CostCurve K> static constexpr bool surface_follows_energy_balance() {
+    return K == CostCurve::TF24 || K == CostCurve::TF24_floor;
+  }
   // Whether sigma_star is the stem held at a dry pin at the end of its curve
   // (seat_leaf_at_dry_pin), where sigma is a function of the traits, not the collar.
   bool leaf_held_at_dry_pin(double sigma_star) const {
