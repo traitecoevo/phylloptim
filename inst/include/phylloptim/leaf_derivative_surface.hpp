@@ -39,7 +39,9 @@
 //   - K is the curve the solve used (checked against the seated curve; see
 //     check_surface_curve for the one solve it cannot see), and its Curve<K>
 //     holds the scalar forms (SurfaceForms, checked at compile time);
-//   - the supply path is multi-layer (checked: supply_draw_at refuses another);
+//   - on either supply path, `supply` is Leaf::held_supply()'s shape: the
+//     layers' potentials and resistances, or the single potential and its one
+//     series resistance in r_R_V_sum[0] (the pack's par_resistance);
 //   - `curvature` is profit_curvature_at_collar<K>() at an Interior point, and is
 //     not read at any other kind or at double; operating_collar refuses one that
 //     is not negative or lies inside Leaf::interior_curvature_floor;
