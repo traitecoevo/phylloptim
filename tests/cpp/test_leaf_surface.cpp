@@ -1774,7 +1774,9 @@ void test_surface_reduces_tf24_floor_to_tf24() {
       if (!same) {
         ++differ;
         ok(false, std::string("the surface reduces at ") + a.operating_point_kind_name(kind) +
-                      " in " + pl::gradient::par_names()[std::size_t(k)]);
+                      " in " + (k == pl::par_PPFD  ? std::string("PPFD")
+                                : k == pl::par_NIR ? std::string("NIR")
+                                                   : pl::gradient::par_names()[std::size_t(k)]));
       }
       ++compared;
     }

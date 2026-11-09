@@ -1787,7 +1787,7 @@ public:
   // --- the energy balance on the surface's scalar --------------------------
   // Each takes its value from the solve's seated state and its rows from the
   // balance: leaf temperature is affine in the stem's flux E and, through the
-  // absorbed shortwave, in PPFD.
+  // absorbed shortwave, in PPFD and NIR.
   template <class S> S leaf_temperature_at(const S& E, const leaf_pars<S>& pars) const;
   // The deficit, its saturation slope, gc's flux-to-conductance factor and the
   // cuticle's temperature factor, at a leaf temperature on the scalar.
