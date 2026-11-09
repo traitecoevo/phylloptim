@@ -135,8 +135,8 @@ inline constexpr double aerodynamic_resistance_coef = 200.0;
 // Floor on the leaf-to-air deficit Fick's law divides by, kPa. A leaf cooled below
 // the dew point has a negative deficit and would report a negative conductance;
 // the floor keeps such points finite and unattractive. It binds at candidate
-// points on the energy-balance leaf routes and at a solved point only where
-// LeastCost pins a dark leaf at psi_crit, never at a collar-route optimum.
+// points on the energy-balance routes, not at a solved point: a dark LeastCost
+// leaf, the one that sat there, is shut at its wet bound.
 inline constexpr double vpd_leaf_min = 0.01;
 
 

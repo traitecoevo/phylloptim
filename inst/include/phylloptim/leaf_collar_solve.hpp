@@ -292,6 +292,13 @@ inline void Leaf::set_shut_state() {
   opt_psi_leaf_ = (residual_flux(collar, E_up_) == 0.0 || !(E_up_ > 0.0))
                       ? collar
                       : find_psi_leaf_from_psi_root(collar, soil);
+  if constexpr (Curve<K>::prepares_normalisers) {
+    if (!profitmax_has_objective()) {
+      set_profitmax_degenerate_state(opt_psi_leaf_, collar);
+      operating_point_kind_ = OperatingPointKind::HydraulicShutdown;
+      return;
+    }
+  }
   profit_ = profit_psi_leaf_for<K>(opt_psi_leaf_, collar);
   // NA where the supply's conductance is unavailable (a one-layer wet bound is
   // its gravity-balance kink).
@@ -436,7 +443,7 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
   };
 
   // Places lo at the wet bound: the answer where profit falls from the wet end,
-  // and for a dark leaf under a product objective (below).
+  // and for a leaf with no objective to maximise (below).
   double lo = bound_a;
   double hi = bound_b;
   const auto place_at_wet_bound = [&]() {
@@ -467,19 +474,24 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
     }
   };
 
-  // A product objective with A <= 0 at the dry end has no maximum, and the leaf
-  // is shut (objective_is_product). Decided before either end's gradient is
-  // read: through the log link at a negative A they say nothing.
-  if constexpr (objective_is_product<K>()) {
-    if (dark_under_product<K>(
-            find_psi_leaf_from_psi_root(bound_b, supply_psi_soil()), bound_b)) {
-      // Where the open path would start: the bound at g_min > 0, a step inside
-      // the no-flow sentinel at g_min = 0, should placement find no step.
-      lo = g_min > 0.0 ? bound_a : bound_a + 1e-6 * width;
-      place_at_wet_bound();
-      operating_point_kind_ = OperatingPointKind::BoundarySoil;
-      return lo;
-    }
+  // A leaf with no objective is shut: a log-link one with A <= 0 at the dry end
+  // (objective_has_log_link), or ProfitMax without its normalisers. Decided
+  // before either end's gradient is read: through the log link at a negative A
+  // they say nothing.
+  bool shut = false;
+  if constexpr (objective_has_log_link<K>()) {
+    shut = dark_under_log_link<K>(
+        find_psi_leaf_from_psi_root(bound_b, supply_psi_soil()), bound_b);
+  } else if constexpr (Curve<K>::prepares_normalisers) {
+    shut = !profitmax_has_objective();
+  }
+  if (shut) {
+    // Where the open path would start: the bound at g_min > 0, a step inside
+    // the no-flow sentinel at g_min = 0, should placement find no step.
+    lo = g_min > 0.0 ? bound_a : bound_a + 1e-6 * width;
+    place_at_wet_bound();
+    operating_point_kind_ = OperatingPointKind::BoundarySoil;
+    return lo;
   }
 
   // The WET endpoint. With g_min > 0 it is an ordinary point, tried as-is. At
@@ -716,6 +728,13 @@ inline void Leaf::find_root_collar_psi_for(){
     seat_leaf_at_dry_pin<K>();
 
     opt_root_psi_ = opt_root_psi;
+    // The leaf route's degenerate exit: its outputs, at the wet bound placed.
+    if constexpr (Curve<K>::prepares_normalisers) {
+      if (!profitmax_has_objective()) {
+        set_profitmax_degenerate_state(opt_psi_leaf_, opt_root_psi);
+        return;
+      }
+    }
     profit_ = profit_psi_leaf_for<K>(opt_psi_leaf_, opt_root_psi);
     // On the single-layer solvers' axis: the collar is the free variable, so the
     // marginal cost carries the soil-to-collar series-resistance correction.
@@ -810,6 +829,12 @@ inline double Leaf::replay_operating_point_for(double collar,
       // so the interval is widened to hold it.
       out = profit_at_collar_psi<K>(collar, std::min(bound_a, collar),
                                     std::max(bound_b, collar));
+      if constexpr (Curve<K>::prepares_normalisers) {
+        if (!profitmax_has_objective()) {
+          set_profitmax_degenerate_state(opt_psi_leaf_, opt_root_psi_);
+          out = profit_;
+        }
+      }
     }
     operating_point_kind_ = kind;
     if (seat_leaf_at_dry_pin<K>()) {

@@ -9805,17 +9805,18 @@ void test_every_curve_returns_its_own_maximum() {
       // Fresh leaf, so the solve's own state cannot influence the oracle.
       phylloptim::Leaf m = make_single_leaf(d, r.psi_soil);
 
-      // A product objective with A <= 0 throughout has no maximum, only a
-      // supremum at psi_crit, and the leaf is shut by rule rather than by its
-      // objective (objective_is_product): a scan beats it there by
-      // construction. What it must do instead is sit at the wet end. Decided
+      // A log-link objective with A <= 0 throughout has no maximum (a
+      // product's supremum is at psi_crit, a ratio's at the most open leaf),
+      // and the leaf is shut by rule rather than by its objective
+      // (objective_has_log_link): a scan beats it there by construction. What it must do instead is sit at the wet end. Decided
       // on the oracle, at psi_crit, not on the solve: a shut leaf at g_min = 0
       // has A = 0 exactly, so testing the solve's A would excuse a light leaf
       // the solve shut by mistake.
-      const bool product =
+      const bool log_link =
           curve == static_cast<int>(phylloptim::Leaf::CostCurve::SOX) ||
-          curve == static_cast<int>(phylloptim::Leaf::CostCurve::JW26);
-      if (product) {
+          curve == static_cast<int>(phylloptim::Leaf::CostCurve::JW26) ||
+          curve == static_cast<int>(phylloptim::Leaf::CostCurve::LeastCost);
+      if (log_link) {
         m.set_leaf_states_rates_from_psi_leaf(m.psi_crit, r.psi_soil);
         if (!(m.assim_colimited_ > 0.0)) {
           ++dark_shut;
@@ -9883,9 +9884,9 @@ void test_every_curve_returns_its_own_maximum() {
      "and the rows span both the interior and the pinned regime");
   ok(worst_shortfall < 1e-6,
      "no curve's solver is beaten by a 20001-point scan of its own objective");
-  printf("    %d SOX/JW26 rows with A <= 0 throughout, shut by rule\n", dark_shut);
+  printf("    %d SOX/JW26/LeastCost rows with A <= 0 throughout, shut by rule\n", dark_shut);
   ok(dark_shut > 0 && dark_at_wet,
-     "a product objective's dark rows sit at the wet end, not at psi_crit");
+     "a log-link objective's dark rows sit at the wet end, not at psi_crit");
 }
 
 // Each curve's reported `profit_` is ITS OWN objective at the point it returned.
@@ -10055,8 +10056,7 @@ void outputs_agree_with_the_solve_on(double price) {
         l.CF77_lambda_ = price;
         l.TF24_floor_lambda_o = price;
         l.set_model(K, true);
-        // ProfitMax's collar solve throws where it has no stream to normalise
-        // over (no degenerate exit on that route); there is nothing to compare.
+        // A solve the supply refuses as infeasible leaves nothing to compare.
         try {
           l.optimise();
         } catch (const pl::util::infeasible_error&) {
@@ -10364,6 +10364,74 @@ void test_a_profitmax_draw_outlives_its_supply() {
   const auto t_supply = t.roots_.held_supply();
   ok(t.supply_draw_at<double>(t.opt_root_psi_, t_supply).inputs == nullptr,
      "a curve without normalisers keeps no copy");
+}
+
+// ProfitMax with no objective (in the dark, or with the soil past psi_crit so
+// there is no stream to normalise over) takes the leaf route's degenerate exit
+// on the collar route too: zero outputs at the wet bound, classified, never a
+// thrown solve or a profit from unusable normalisers. A replay hands the same
+// zeros back, and the surface refuses the point by name.
+void test_profitmax_collar_route_has_a_degenerate_exit() {
+  printf("ProfitMax's collar route takes the degenerate exit\n");
+  namespace pl = phylloptim;
+  using CC = pl::Leaf::CostCurve;
+  using Kind = pl::Leaf::OperatingPointKind;
+  int rows = 0, shut = 0;
+  bool zeros = true, classified = true, replayed = true, refused = true, open = true;
+  bool solved = true;
+  for (int layers : {1, 3}) for (double psi : {0.5, 6.0, 17.0})
+  for (double ppfd : {0.0, 900.0}) {
+    Drivers d;
+    d.PPFD = ppfd;
+    std::vector<double> ps, dp;
+    for (int i = 0; i < layers; ++i) { ps.push_back(psi + 0.25 * i); dp.push_back(i + 1.0); }
+    pl::Leaf l = make_leaf(d, ps, dp);
+    l.set_model(CC::ProfitMax, true);
+    try {
+      l.optimise();
+    } catch (const std::exception&) {
+      solved = false;
+      continue;
+    }
+    const std::string at = " (" + std::to_string(layers) + " layers, psi_soil " +
+                           std::to_string(psi) + ", PPFD " + std::to_string(int(ppfd)) + ")";
+    if (ppfd > 0.0 && psi == 0.5) {
+      open = open && l.profitmax_has_objective() &&
+             l.operating_point_kind() == Kind::Interior && l.profit_ > 0.0;
+      continue;
+    }
+    ++rows;
+    const Kind kind = l.operating_point_kind();
+    if (kind == Kind::HydraulicShutdown) ++shut;
+    classified = classified && !l.profitmax_has_objective() &&
+                 (kind == Kind::BoundarySoil || kind == Kind::HydraulicShutdown);
+    zeros = zeros && l.profit_ == 0.0 && l.carbon_gain_ == 0.0 &&
+            l.hydraulic_cost_norm_ == 0.0 && std::isnan(l.lambda_emergent_);
+    if (kind == Kind::BoundarySoil) {
+      pl::Leaf r = make_leaf(d, ps, dp);
+      r.set_model(CC::ProfitMax, true);
+      replayed = replayed && r.replay_operating_point(l.opt_root_psi_, kind) == 0.0 &&
+                 r.profit_ == 0.0 && r.opt_psi_leaf_ == l.opt_psi_leaf_;
+      const auto supply = l.roots_.held_supply();
+      const auto draw = l.supply_draw_at<double>(l.opt_root_psi_, supply);
+      bool threw = false;
+      try {
+        l.normalisers_at<CC::ProfitMax, double>(draw, l.passive_pars());
+      } catch (const std::exception& e) {
+        threw = std::string(e.what()).find("no objective") != std::string::npos;
+      }
+      refused = refused && threw;
+      if (!threw) printf("    not refused%s\n", at.c_str());
+    }
+  }
+  printf("    %d rows without an objective, %d of them shut on water\n", rows, shut);
+  ok(solved, "no solve throws");
+  ok(rows == 10 && shut > 0 && classified,
+     "each is classified, at the wet bound or shut on water");
+  ok(zeros, "with the leaf route's zero outputs and lambda NA");
+  ok(replayed, "a replay hands back the same zeros");
+  ok(refused, "the surface refuses it by name");
+  ok(open, "and a lit leaf in moist soil still has its objective");
 }
 
 void test_outputs_agree_with_the_solve() {
@@ -11986,18 +12054,19 @@ void test_rows_where_the_roots_cap_binds() {
 
 }  // namespace residual
 
-// SOX and JW26 on the collar route, where A <= 0 at every opening: the leaf is
-// shut at the wet bound (objective_is_product) rather than reported
-// solver-refused, on one and three layers, with and without a residual
-// conductance or the energy balance. The same leaf in light is interior, so a
-// shut that fired on light would show here.
-void test_product_curves_shut_dark_collar_leaves() {
-  printf("SOX and JW26 shut a collar-route leaf that cannot fix carbon\n");
+// SOX, JW26 and LeastCost on the collar route, where A <= 0 at every opening:
+// the leaf is shut at the wet bound (objective_has_log_link) rather than
+// reported solver-refused or opened wide, on one and three layers, with and
+// without a residual conductance or the energy balance. The same leaf in light
+// is open (LeastCost mostly at psi_crit), so a shut that fired on light would
+// show here.
+void test_log_link_curves_shut_dark_collar_leaves() {
+  printf("SOX, JW26 and LeastCost shut a collar-route leaf that cannot fix carbon\n");
   using CC = phylloptim::Leaf::CostCurve;
   using Kind = phylloptim::Leaf::OperatingPointKind;
   int dark = 0, light = 0;
   bool dark_shut = true, dark_finite = true, light_open = true;
-  for (CC curve : {CC::SOX, CC::JW26})
+  for (CC curve : {CC::SOX, CC::JW26, CC::LeastCost})
   for (int layers : {1, 3}) for (double g : {0.0, residual::kGmin}) for (bool eb : {false, true})
   for (double psi : {0.5, 1.5}) for (double ppfd : {0.0, 900.0}) {
     Drivers d;
@@ -12017,14 +12086,17 @@ void test_product_curves_shut_dark_collar_leaves() {
                     std::isnan(l.lambda_emergent_);
     } else {
       ++light;
-      light_open = light_open && l.operating_point_kind() == Kind::Interior &&
+      const Kind open = curve == CC::LeastCost ? Kind::BoundaryDry : Kind::Interior;
+      light_open = light_open &&
+                   (l.operating_point_kind() == Kind::Interior ||
+                    l.operating_point_kind() == open) &&
                    l.assim_colimited_ > 0.0;
     }
   }
   printf("    %d dark rows, %d light rows\n", dark, light);
-  ok(dark == 32 && dark_shut, "every dark row is shut at the wet bound (boundary-soil)");
+  ok(dark == 48 && dark_shut, "every dark row is shut at the wet bound (boundary-soil)");
   ok(dark_finite, "with finite profit, and lambda NA");
-  ok(light == 32 && light_open, "and the same leaves in light are interior");
+  ok(light == 48 && light_open, "and the same leaves in light are open");
 }
 
 int main(int argc, char **argv) {
@@ -12183,7 +12255,8 @@ int main(int argc, char **argv) {
   test_every_curve_returns_its_own_maximum();
   test_collar_profit_is_its_own_curve();
   test_collar_shorthand_solves_the_seated_curve();
-  test_product_curves_shut_dark_collar_leaves();
+  test_log_link_curves_shut_dark_collar_leaves();
+  test_profitmax_collar_route_has_a_degenerate_exit();
   test_thermal_damage_gate_off_is_inert();
   test_thermal_damage_bypasses_the_cache();
   test_thermal_damage_dprofit_is_the_solves_own();
