@@ -38,8 +38,8 @@ public:
   // psi_soil_ as a one-element vector, so Leaf's vector-taking soil machinery
   // serves this path unchanged. Written with psi_soil_, and again by begin_solve.
   std::vector<double> psi_soil_vec_{0.0};
-  // The resistance as the supply view's one series resistance, and no
-  // horizontal term, so held_supply() can hand out references.
+  // The resistance as a supply view's one series resistance, and no horizontal
+  // term, so Leaf::held_supply() can hand out references to members.
   std::vector<double> r_R_V_sum_{util::na_value};
   std::vector<double> r_R_H_min_{0.0};
 
@@ -92,12 +92,6 @@ public:
     r_R_V_sum_.assign(1, r);
   }
 
-  // This object's own state as a supply view, for the double path; the root
-  // pair is the leaf's, which this path does not read.
-  SupplyInputs<double> held_supply(const double& root_P50,
-                                   const double& root_c) const {
-    return {psi_soil_vec_, r_R_H_min_, r_R_V_sum_, root_P50, root_c};
-  }
 
   // Per-solve entry point, as MultiLayerRoots::begin_solve: publish the soil
   // state as a vector and return the wettest (here the only) suction.

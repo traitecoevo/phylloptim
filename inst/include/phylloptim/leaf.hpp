@@ -289,12 +289,15 @@ public:
     unknown_supply_kind();
   }
   // The seated soil state and supply resistances as a view, on either path:
-  // what a caller of the derivative surface builds its SupplyInputs from.
+  // what a caller of the derivative surface builds its SupplyInputs from. It
+  // holds references to members, so it lasts as long as the leaf is not
+  // reseated; the single path's root pair is the leaf's, which it does not read.
   SupplyInputs<double> held_supply() const {
     switch (supply_kind_) {
       case SupplyKind::MultiLayer:      return roots_.held_supply();
       case SupplyKind::SinglePotential:
-        return single_.held_supply(roots_.root_P50, roots_.root_c);
+        return {single_.psi_soil_vec_, single_.r_R_H_min_, single_.r_R_V_sum_,
+                roots_.root_P50, roots_.root_c};
     }
     unknown_supply_kind();
   }

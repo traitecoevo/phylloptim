@@ -536,7 +536,7 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
   std::map<std::string, std::vector<int>> per_par_kind;
   double worst_rel = 0.0, worst_abs = 0.0;
   std::string worst_rel_at, worst_abs_at, skipped_at;
-  int compared = 0, skipped = 0, zero = 0, at_zero_g_min = 0;
+  int compared = 0, skipped = 0, zero = 0, at_zero_g_min = 0, at_another_step = 0;
   // ProfitMax's normaliser with the balance on, where |A| can peak inside the
   // stream: points refereed with the peak there and at psi_crit.
   int peak_inside = 0, peak_at_crit = 0;
@@ -650,26 +650,15 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
     }
     // psi_leaf is the collar's function, so the solve's noise in it is the
     // collar's times dpsi_leaf/dcollar, which on the curve's tail runs to 1e5.
-    // Within a step of the stem curve's end the drier side is off the curve, so
-    // the slope is taken on the wet side alone there: an allowance that throws
-    // must not read as none.
     double psi_per_collar = 0.0;
-    {
+    try {
       const double dp = 1e-6;
-      const auto psi_leaf_at = [&](double x) {
-        return probe.find_psi_leaf_from_psi_root(x, probe.supply_psi_soil());
-      };
-      try {
-        psi_per_collar = std::abs((psi_leaf_at(probe.opt_root_psi_ + dp) -
-                                   psi_leaf_at(probe.opt_root_psi_ - dp)) / (2.0 * dp));
-      } catch (const std::exception&) {
-        try {
-          psi_per_collar = std::abs((psi_leaf_at(probe.opt_root_psi_) -
-                                     psi_leaf_at(probe.opt_root_psi_ - dp)) / dp);
-        } catch (const std::exception&) {
-        }
-      }
+      psi_per_collar = std::abs(
+          (probe.find_psi_leaf_from_psi_root(probe.opt_root_psi_ + dp, probe.supply_psi_soil()) -
+           probe.find_psi_leaf_from_psi_root(probe.opt_root_psi_ - dp, probe.supply_psi_soil())) /
+          (2.0 * dp));
       if (!std::isfinite(psi_per_collar)) psi_per_collar = 0.0;
+    } catch (const std::exception&) {
     }
     if (K == CC::ProfitMax && EB) {
       (l.profitmax_peak_psi_ == l.psi_crit ? peak_at_crit : peak_inside) += 1;
@@ -726,50 +715,79 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
       // step, since some (CMax_b among them) may not go negative.
       const double v = p0[std::size_t(k)];
       const bool forward = v == 0.0;
-      const double h = forward ? 1e-7 : std::abs(v) * 1e-4;
-      pl::leaf_pars<double> p_up = p0, p_down = p0;
-      p_up[std::size_t(k)] += h;
-      if (!forward) p_down[std::size_t(k)] -= h;
-      pl::Leaf up, down;
-      try {
-        up = solve(p_up);
-        down = forward ? l : solve(p_down);
-      } catch (const pl::util::infeasible_error&) {
-        ++skipped;
-        skipped_at += " " + name + "/" + par_name(k) + "(infeasible)";
-        continue;
-      }
-      const double span = forward ? h : 2.0 * h;
-      if (up.operating_point_kind() != kind ||
-          down.operating_point_kind() != kind) {
+      // Every output's difference at a step `hk`, and the size of each output
+      // there, which sets the noise floor below. False where a side is
+      // infeasible or lands on another kind: a difference across a kink is not
+      // a derivative.
+      struct Difference {
+        double h = 0.0;
+        std::vector<double> fd, mag;
+      };
+      const auto difference_at = [&](double hk, Difference& d) -> bool {
+        pl::leaf_pars<double> p_up = p0, p_down = p0;
+        p_up[std::size_t(k)] += hk;
+        if (!forward) p_down[std::size_t(k)] -= hk;
+        pl::Leaf up, down;
+        try {
+          up = solve(p_up);
+          down = forward ? l : solve(p_down);
+        } catch (const pl::util::infeasible_error&) {
+          return false;
+        }
+        if (up.operating_point_kind() != kind || down.operating_point_kind() != kind) {
+          return false;
+        }
+        const double span = forward ? hk : 2.0 * hk;
+        d.h = hk;
+        d.fd.clear();
+        d.mag.clear();
+        const auto diff = [&](double a, double b) {
+          d.fd.push_back((a - b) / span);
+          d.mag.push_back(std::max(std::abs(a), std::abs(b)));
+        };
+        diff(up.opt_root_psi_, down.opt_root_psi_);
+        diff(up.profit_, down.profit_);
+        diff(up.carbon(), down.carbon());
+        diff(up.carbon(), down.carbon());
+        diff(up.assim_colimited_, down.assim_colimited_);
+        diff(up.transpiration_, down.transpiration_);
+        diff(up.opt_psi_leaf_, down.opt_psi_leaf_);
+        diff(up.ci_, down.ci_);
+        diff(up.stom_cond_CO2_, down.stom_cond_CO2_);
+        diff(up.residual_flux_, down.residual_flux_);
+        for (std::size_t j = 0; j < out.uptake.size(); ++j) {
+          diff(up.soil_consumption_[j], down.soil_consumption_[j]);
+        }
+        return true;
+      };
+      // The base step and, for a row that misses at it, two larger steps
+      // (hazard 15): error against step is a V and only its floor is a
+      // derivative. Near the end of the stem curve psi_leaf's difference is the
+      // collar's noise times dpsi_leaf/dcollar ~ 1e6, and at a near-zero A it
+      // is A's rounding over h; both shrink as the step grows. Only LARGER
+      // steps: the noise floor below grows as 1/h, so a smaller step would
+      // excuse a wrong row that a larger one catches. The tolerance is the same
+      // at every step.
+      const double scale_k = forward ? 1.0 : std::abs(v);
+      const double h_base = forward ? 1e-7 : scale_k * 1e-4;
+      const double h_others[] = {scale_k * (forward ? 1e-6 : 1e-3),
+                                 scale_k * (forward ? 1e-5 : 1e-2)};
+      Difference base;
+      if (!difference_at(h_base, base)) {
         ++skipped;
         skipped_at += " " + name + "/" + par_name(k);
         continue;
       }
-      // Each output's difference, and the size of what it is rounded on, which
-      // sets the noise floor below: the output's own size, except that A and
-      // the carbon read off it net gross assimilation against respiration, so
-      // near zero they carry the rounding of the larger term (R_d), not of
-      // their own size.
-      std::vector<double> fd, mag;
-      const auto diff = [&](double a, double b, double terms = 0.0) {
-        fd.push_back((a - b) / span);
-        mag.push_back(std::max({std::abs(a), std::abs(b), terms}));
+      std::vector<Difference> others;
+      bool others_taken = false;
+      const auto take_others = [&]() {
+        if (others_taken) return;
+        others_taken = true;
+        for (double hk : h_others) {
+          Difference d;
+          if (difference_at(hk, d)) others.push_back(std::move(d));
+        }
       };
-      const double respiration = std::max(std::abs(up.R_d_), std::abs(down.R_d_));
-      diff(up.opt_root_psi_, down.opt_root_psi_);
-      diff(up.profit_, down.profit_);
-      diff(up.carbon(), down.carbon(), respiration);
-      diff(up.carbon(), down.carbon(), respiration);
-      diff(up.assim_colimited_, down.assim_colimited_, respiration);
-      diff(up.transpiration_, down.transpiration_);
-      diff(up.opt_psi_leaf_, down.opt_psi_leaf_);
-      diff(up.ci_, down.ci_);
-      diff(up.stom_cond_CO2_, down.stom_cond_CO2_);
-      diff(up.residual_flux_, down.residual_flux_);
-      for (std::size_t j = 0; j < out.uptake.size(); ++j) {
-        diff(up.soil_consumption_[j], down.soil_consumption_[j]);
-      }
       static const char* const output_name[] = {
           "collar", "profit", "carbon (billed)", "carbon (physical)", "A", "E",
           "psi_leaf", "ci", "gc", "residual_flux"};
@@ -784,15 +802,13 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
         if (unread(k)) {
           // The row is exactly zero, and so is the difference: the solve reads
           // nothing of the parameter, not even through rounding.
-          ok(rows[j] == 0.0 && fd[j] == 0.0,
+          ok(rows[j] == 0.0 && base.fd[j] == 0.0,
              "a parameter the solve does not read has a zero row and a zero "
              "difference" + at + ": row " + pl::util::format_double(rows[j]) +
-                 ", difference " + pl::util::format_double(fd[j]));
+                 ", difference " + pl::util::format_double(base.fd[j]));
           ++zero;
           continue;
         }
-        const double err = std::abs(rows[j] - fd[j]);
-        const double scale = std::max(std::abs(rows[j]), std::abs(fd[j]));
         // The absolute floor is on the row times the parameter's own scale,
         // so a parameter of order 1e3 (PPFD, the price) is not let off rows of
         // order 1e-9 per unit. The second floor is the solve's own noise in the
@@ -800,9 +816,36 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
         // worst measured, ci in the dark, where A'(ci) is near zero and a step
         // in kmax or stem_P50 moved ci by 1e-11 of itself.
         const double unit = std::max(1.0, std::abs(v));
-        const double noise =
-            1e-10 * (j == 6 ? std::max(mag[j], psi_per_collar * mag[0]) : mag[j]) / h;
-        const double floor = 1e-7 / unit + noise;
+        const double rel_tol = 1e-4 + (j == 6 ? 2.0 * inverse_err : 0.0);
+        const auto agrees = [&](const Difference& d, double* err_out, double* scale_out,
+                                double* floor_out) {
+          const double err = std::abs(rows[j] - d.fd[j]);
+          const double scale = std::max(std::abs(rows[j]), std::abs(d.fd[j]));
+          const double noise =
+              1e-10 * (j == 6 ? std::max(d.mag[j], psi_per_collar * d.mag[0]) : d.mag[j]) /
+              d.h;
+          const double floor = 1e-7 / unit + noise;
+          *err_out = err;
+          *scale_out = scale;
+          *floor_out = floor;
+          return err <= rel_tol * scale + floor;
+        };
+        double err = 0.0, scale = 0.0, floor = 0.0;
+        bool pass = agrees(base, &err, &scale, &floor);
+        if (!pass) {
+          take_others();
+          for (const Difference& d : others) {
+            double e = 0.0, sc = 0.0, fl = 0.0;
+            if (agrees(d, &e, &sc, &fl)) {
+              pass = true;
+              err = e;
+              scale = sc;
+              floor = fl;
+              ++at_another_step;
+              break;
+            }
+          }
+        }
         if (err > worst_abs) { worst_abs = err; worst_abs_at = at; }
         // Worst relative among the rows the relative term governs.
         if (1e-4 * scale > floor && err / scale > worst_rel) {
@@ -813,11 +856,10 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
         auto& seen = per_par_kind[name];
         seen.resize(pl::n_leaf_pars, 0);
         ++seen[std::size_t(k)];
-        const double rel_tol = 1e-4 + (j == 6 ? 2.0 * inverse_err : 0.0);
-        ok(err <= rel_tol * scale + floor,
-           "the supplied row matches a difference of the solve" + at +
-               ": row " + pl::util::format_double(rows[j]) + ", difference " +
-               pl::util::format_double(fd[j]));
+        ok(pass,
+           "the supplied row matches a difference of the solve at some step" + at +
+               ": row " + pl::util::format_double(rows[j]) + ", difference at the base step " +
+               pl::util::format_double(base.fd[j]));
       }
     }
   }
@@ -828,10 +870,11 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
     kinds += " " + kind + " " + std::to_string(n);
   }
   printf("    %s: %d rows compared (%s ), %d unread rows exactly zero,\n"
+         "    %d rows agreeing at a step other than the base,\n"
          "    g_min passed over at %d fixtures without a cuticle,\n"
          "    %d parameters skipped across a kind change:%s\n"
          "    worst relative %.3g%s\n    worst absolute %.3g%s\n",
-         curve.c_str(), compared, kinds.c_str(), zero, at_zero_g_min, skipped,
+         curve.c_str(), compared, kinds.c_str(), zero, at_another_step, at_zero_g_min, skipped,
          skipped_at.c_str(), worst_rel, worst_rel_at.c_str(), worst_abs,
          worst_abs_at.c_str());
   if (K == CC::ProfitMax && EB) {
