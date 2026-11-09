@@ -2163,6 +2163,28 @@ void test_cowan_farquhar_refuses_an_unset_lambda() {
   }
   ok(threw, "it refuses rather than maximising a NaN objective");
   ok(what.find("CF77_lambda_") != std::string::npos, "and the message names CF77_lambda_");
+
+  // So do the collar route's solve, its prescribed collar and its replay, which
+  // would otherwise report a NaN objective's value at the point asked for.
+  phylloptim::Leaf c = make_leaf(d, {1.0}, {1.0});
+  c.set_model(phylloptim::Leaf::CostCurve::CF77, true);
+  c.optimise();
+  const double collar = c.opt_root_psi_;
+  const auto kind = c.operating_point_kind();
+  c.CF77_lambda_ = std::numeric_limits<double>::quiet_NaN();
+  const auto refuses = [&](auto call) {
+    try {
+      call();
+    } catch (const std::exception &e) {
+      return std::string(e.what()).find("CF77_lambda_") != std::string::npos;
+    }
+    return false;
+  };
+  ok(refuses([&] { c.optimise(); }), "the collar solve refuses it, naming it");
+  ok(refuses([&] { c.evaluate_root_collar_psi(collar); }),
+     "a prescribed collar refuses it, naming it");
+  ok(refuses([&] { c.replay_operating_point(collar, kind); }),
+     "a replay refuses it, naming it");
 }
 
 // dprofit_dpsi_leaf against a central difference of the objective it claims to

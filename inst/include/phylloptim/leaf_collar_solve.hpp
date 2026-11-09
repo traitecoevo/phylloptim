@@ -703,16 +703,20 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
 }
 
 template <Leaf::CostCurve K>
-inline void Leaf::find_root_collar_psi_for(){
-  // The leaf route's parameter check: without it CF77 with an unset lambda
-  // maximises a NaN objective and returns a bracket end as an operating point.
+inline void Leaf::begin_collar_point() {
+  // Without the check CF77 with an unset lambda maximises a NaN objective and
+  // returns a bracket end as an operating point. The normalisers' reference is
+  // psi_soil where there is one and the zero-flow collar where there is not
+  // (profitmax_reference_psi); unseeded, a normalised profit is not finite.
   check_cost_parameters<K>();
-  // A normalised curve seeds its normalisers before searching, on either
-  // topology: the reference potential is psi_soil where there is one and the
-  // zero-flow collar where there is not (see profitmax_reference_psi).
   if constexpr (Curve<K>::prepares_normalisers) {
     prepare_profitmax();
   }
+}
+
+template <Leaf::CostCurve K>
+inline void Leaf::find_root_collar_psi_for(){
+  begin_collar_point<K>();
     double bound_a, bound_b;
     if (!prepare_collar_solve<K>(bound_a, bound_b, true)) {
       return;
@@ -772,11 +776,7 @@ inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi, bool* feasible
 
 template <Leaf::CostCurve K>
 inline double Leaf::evaluate_root_collar_psi_for(double target_opt_root_psi){
-    // Seeded as the solve seeds them: unseeded, a normalised curve's profit at
-    // a prescribed collar is not finite.
-    if constexpr (Curve<K>::prepares_normalisers) {
-      prepare_profitmax();
-    }
+    begin_collar_point<K>();
     double bound_a, bound_b;
     if (!prepare_collar_solve<K>(bound_a, bound_b)) {
       // Shut: profit_ is already set.
@@ -801,9 +801,7 @@ inline double Leaf::replay_operating_point_for(double collar,
                                                OperatingPointKind kind) {
     // Seeded as the solve seeds them (hazard 8): on a leaf that solved another
     // point since, a normalised curve's profit would read that point's.
-    if constexpr (Curve<K>::prepares_normalisers) {
-      prepare_profitmax();
-    }
+    begin_collar_point<K>();
     double bound_a, bound_b;
     double out;
     if (!prepare_collar_solve<K>(bound_a, bound_b)) {

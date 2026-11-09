@@ -1363,6 +1363,10 @@ public:
   // written rather than left stale (hazard 8).
   void set_profitmax_degenerate_state(double psi_leaf, double psi_upstream);
   template <CostCurve K> void check_cost_parameters();
+  // What every collar-route point does before its bracket: refuse the curve's
+  // unset parameters, and seed a normalised curve's normalisers. The solve, a
+  // prescribed collar and a replay share it, so none can skip either.
+  template <CostCurve K> void begin_collar_point();
   template <CostCurve K> double cost_deriv(double psi_leaf,
                                            double psi_upstream);
   template <CostCurve K> static constexpr bool cost_reads_upstream();
