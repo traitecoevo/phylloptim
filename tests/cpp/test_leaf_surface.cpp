@@ -647,8 +647,9 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
       // At g_min = 0 the solve steps 1e-6 of the bracket inside the wet bound,
       // and at any g_min > 0 it sits on it (hazard 18), so a forward difference
       // carries that step over h (-4.3e-6 MPa / h in the collar here). The row
-      // is the slope from above; it is refereed at the fixtures with a cuticle.
-      if (k == pl::par_g_min && fx.g_min == 0.0) {
+      // is the slope from above; on a bound it is refereed at the fixtures with
+      // a cuticle. An interior point has no such step.
+      if (k == pl::par_g_min && fx.g_min == 0.0 && kind != Kind::Interior) {
         ++at_zero_g_min;
         continue;
       }
