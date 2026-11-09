@@ -470,23 +470,21 @@ void check(int layers, double psi0, double ppfd, double leaf_temp,
   });
 }
 
-// The same with the energy balance on, on the curves the surface follows it for.
+// The same with the energy balance on.
 void check_energy_balance(int layers, double psi0, double ppfd, double leaf_temp,
                           unsigned long seed, double g_min) {
   const pl::Leaf base = set_up(layers, psi0, ppfd, leaf_temp, g_min, true);
   for_each_surface_curve([&](auto tag) {
     constexpr CC K = decltype(tag)::value;
-    if constexpr (pl::Leaf::surface_follows_energy_balance<K>()) {
-      const std::optional<pl::Leaf> l = solved_on<K>(base);
-      if (!l) return;
-      check_solved<K>(*l,
-                      "energy balance layers=" + std::to_string(layers) +
-                          " psi_soil=" + std::to_string(psi0) +
-                          " ppfd=" + std::to_string(ppfd) +
-                          " T=" + std::to_string(leaf_temp) +
-                          " g_min=" + std::to_string(g_min),
-                      seed);
-    }
+    const std::optional<pl::Leaf> l = solved_on<K>(base);
+    if (!l) return;
+    check_solved<K>(*l,
+                    "energy balance layers=" + std::to_string(layers) +
+                        " psi_soil=" + std::to_string(psi0) +
+                        " ppfd=" + std::to_string(ppfd) +
+                        " T=" + std::to_string(leaf_temp) +
+                        " g_min=" + std::to_string(g_min),
+                    seed);
   });
 }
 

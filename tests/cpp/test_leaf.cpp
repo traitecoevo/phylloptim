@@ -5044,6 +5044,8 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
       leaf.wind_speed_ = 2.0;
       leaf.d_ = 0.05;
       leaf.NIR_int_ = ppfd / pl::umol_par_per_joule;
+      // ProfitMax's thermal cost reads leaf temperature, so it is on there.
+      leaf.use_thermal_cost_ = K == CC::ProfitMax;
     }
   };
   struct Fixture {
@@ -5114,6 +5116,9 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
   double worst_rel = 0.0, worst_abs = 0.0;
   std::string worst_rel_at, worst_abs_at, skipped_at;
   int compared = 0, skipped = 0, zero = 0, at_zero_g_min = 0;
+  // ProfitMax's normaliser with the balance on, where |A| can peak inside the
+  // stream: points refereed with the peak there and at psi_crit.
+  int peak_inside = 0, peak_at_crit = 0;
   for (const Fixture& fx : fixtures) {
     std::vector<double> depth, root;
     for (std::size_t i = 0; i < fx.psi_soil.size(); ++i) {
@@ -5226,6 +5231,9 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
       if (!std::isfinite(psi_per_collar)) psi_per_collar = 0.0;
     } catch (const std::exception&) {
     }
+    if (K == CC::ProfitMax && EB) {
+      (l.profitmax_peak_psi_ == l.psi_crit ? peak_at_crit : peak_inside) += 1;
+    }
     for (int k = 0; k < pl::n_leaf_pars; ++k) {
       // At g_min = 0 the solve steps 1e-6 of the bracket inside the wet bound,
       // and at any g_min > 0 it sits on it (hazard 18), so a forward difference
@@ -5326,10 +5334,15 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
                          : "uptake[" + std::to_string(j - n_named) + "]") +
             "/d" + par_name(k);
         if (unread(k)) {
-          ok(rows[j] == 0.0 && fd[j] == 0.0,
+          // The row is exactly zero. The difference is too, but for one source of
+          // rounding: ProfitMax's search for |A|max reads TF24's marginal plus
+          // its cost's slope, which cancel to rounding, so with the balance on
+          // an interior peak moves in the last bit with TF24's parameters. Held
+          // to the solve's own noise floor (hazard 15).
+          ok(rows[j] == 0.0 && std::abs(fd[j]) <= 1e-10 * mag[j] / h,
              "a parameter the solve does not read has a zero row and a zero "
-             "difference" + at + ": row " + std::to_string(rows[j]) +
-                 ", difference " + std::to_string(fd[j]));
+             "difference" + at + ": row " + pl::util::format_double(rows[j]) +
+                 ", difference " + pl::util::format_double(fd[j]));
           ++zero;
           continue;
         }
@@ -5376,6 +5389,11 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
          curve.c_str(), compared, kinds.c_str(), zero, at_zero_g_min, skipped,
          skipped_at.c_str(), worst_rel, worst_rel_at.c_str(), worst_abs,
          worst_abs_at.c_str());
+  if (K == CC::ProfitMax && EB) {
+    printf("    ProfitMax's |A| peak: %d points inside the stream, %d at psi_crit\n",
+           peak_inside, peak_at_crit);
+    ok(peak_inside > 0, curve + ": rows were compared where |A| peaks inside the stream");
+  }
   // A referee that skipped a parameter at a kind would pass on what is left.
   for (Kind want : fixture::surface_kinds(K)) {
     ok(per_par_kind.count(pl::Leaf::operating_point_kind_name(want)) == 1,
@@ -5416,6 +5434,7 @@ void test_supplied_rows_match_a_resolve_at_every_kind() {
   referee_every_parameter_at_every_kind<CC::SOX, true>(&compared);
   referee_every_parameter_at_every_kind<CC::JW26, true>(&compared);
   referee_every_parameter_at_every_kind<CC::LeastCost, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::ProfitMax, true>(&compared);
   ok(compared >= 3300, "the referee compared at least 3300 rows");
 }
 
@@ -10163,7 +10182,10 @@ void outputs_agree_with_the_solve_on(double price) {
           if (ps.back() <= 0.0) bad = true;
         }
         if (bad) continue;
-        pl::Leaf l = EB ? make_pm_leaf(d, ps, depths[k], true) : make_leaf(d, ps, depths[k]);
+        // ProfitMax's thermal cost on with the balance: it reads leaf temperature.
+        pl::Leaf l = EB ? make_pm_leaf(d, ps, depths[k], true, 2.0, 0.05,
+                                       K == pl::Leaf::CostCurve::ProfitMax)
+                        : make_leaf(d, ps, depths[k]);
         l.CF77_lambda_ = price;
         l.TF24_floor_lambda_o = price;
         l.set_model(K, true);
@@ -10572,6 +10594,7 @@ void test_outputs_agree_with_the_solve() {
   outputs_agree_with_the_solve_on<K::SOX, true>(kPriceForFOC);
   outputs_agree_with_the_solve_on<K::JW26, true>(kPriceForFOC);
   outputs_agree_with_the_solve_on<K::LeastCost, true>(kPriceForFOC);
+  outputs_agree_with_the_solve_on<K::ProfitMax, true>(kPriceForFOC);
 }
 
 // --- the ATLS thermal-damage layer (use_thermal_damage_) ----------------------
@@ -11880,22 +11903,14 @@ void test_smoothness_sweep() {
   printf("\n");
 }
 
-// The derivative surface follows the energy balance on the curves it carries the
-// temperature path for, and refuses a leaf with it on, by name, at both entry
-// points, on every other: there it would hold leaf temperature at the solve's
-// value, and its collar and uptake rows would be wrong, by up to the whole row in
-// PPFD, which heats the leaf.
+// The derivative surface follows the energy balance on every curve: ProfitMax,
+// the last to, answers with it on, and the supply draw reads no temperature.
 void test_surface_refuses_the_energy_balance() {
-  printf("the derivative surface follows the energy balance where it carries it, and refuses it elsewhere\n");
+  printf("the derivative surface follows the energy balance on every curve\n");
   using CC = phylloptim::Leaf::CostCurve;
-  const std::string refused = "refused with use_energy_balance_ on";
   Drivers d;
   d.PPFD = 1500.0;
   const std::vector<double> psi{1.0, 1.25}, depth{1.0, 2.0};
-  phylloptim::Leaf off = make(d, psi, depth, kGmin, false);
-  off.find_root_collar_psi();
-  ok(std::isfinite(profit_row_at_current_point(off, phylloptim::par_vcmax_25)),
-     "control: the surface answers with the energy balance off");
   phylloptim::Leaf on = make(d, psi, depth, kGmin, true);
   on.find_root_collar_psi();
   ok(on.operating_point_kind() == Kind::Interior,
@@ -11909,17 +11924,8 @@ void test_surface_refuses_the_energy_balance() {
   const auto pm_supply = pm.roots_.held_supply();
   const auto draw = pm.supply_draw_at<double>(pm.opt_root_psi_, pm_supply);
   ok(std::isfinite(draw.E_up.value), "supply_draw_at reads no temperature, and runs");
-  ok(throws_with([&] {
-       pm.operating_collar<CC::ProfitMax, double>(
-           draw, pars, std::numeric_limits<double>::quiet_NaN());
-     },
-     "Leaf::operating_collar: " + refused),
-     "ProfitMax's operating_collar refuses");
-  ok(throws_with([&] {
-       pm.billed_outputs_at<CC::ProfitMax, double>(pm.opt_root_psi_, draw, pars);
-     },
-     "Leaf::billed_outputs_at: " + refused),
-     "and its billed_outputs_at");
+  const auto out = pm.billed_outputs_at<CC::ProfitMax, double>(pm.opt_root_psi_, draw, pars);
+  ok(out.profit == pm.profit_, "and ProfitMax's profit is the solve's with it on");
 }
 
 // #184's first requirement from plant: a leaf forced shut -- by a dry soil, the

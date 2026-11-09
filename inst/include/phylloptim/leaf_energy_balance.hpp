@@ -297,19 +297,6 @@ inline double Leaf::stom_cond_stomatal_H2O() const {
 // The surface carries the boundary layer's split but not the leaf-temperature
 // terms the solve's first-order condition holds (dprofit_energy_balance_term), so
 // with the gate on its rows would differentiate a different model.
-inline void Leaf::refuse_energy_balance(const char* who) const {
-  if (use_energy_balance_) {
-    util::stop(std::string(who) +
-               ": refused with use_energy_balance_ on. On this curve the "
-               "derivative surface holds leaf temperature at the value the solve "
-               "placed and carries none of its terms, while the solve's "
-               "first-order condition includes them, so its rows would describe a "
-               "different model from the one the solve ran. Every curve but "
-               "ProfitMax follows the balance; on ProfitMax set "
-               "use_energy_balance_ to false.");
-  }
-}
-
 } // namespace phylloptim
 
 #endif

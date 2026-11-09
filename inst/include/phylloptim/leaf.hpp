@@ -1773,7 +1773,8 @@ public:
   template <CostCurve K, class S>
   S energy_balance_marginal_at(const S& collar, const leaf_pars<S>& pars,
                                const PhotoCapacity<S>& cap,
-                               const CollarCoords<S>& at, const S& A_prime) const;
+                               const CollarCoords<S>& at, const S& A_prime,
+                               const Normalisers<S>& norms) const;
   // The capacity at the live collar's leaf temperature, formed into `store`:
   // `cap` itself with the balance off, where temperature does not move with the
   // collar, and returned by reference so that path copies nothing onto a tape.
@@ -1782,10 +1783,13 @@ public:
                                            const CollarCoords<S>& at,
                                            const PhotoCapacity<S>& cap,
                                            PhotoCapacity<S>& store) const;
-  // Which curves the surface follows with the energy balance on; the rest refuse.
-  template <CostCurve K> static constexpr bool surface_follows_energy_balance() {
-    return K != CostCurve::ProfitMax;
-  }
+  // The thermal cost's slope in leaf temperature on any scalar.
+  template <class V> V thermal_cost_temp_deriv_on(const V& leaf_temp) const;
+  // Leaf temperature at a stem potential and collar: the air's with the balance
+  // off, the balance's with it on.
+  template <class S>
+  S leaf_temperature_at_point(const S& sigma, const S& collar,
+                              const leaf_pars<S>& pars) const;
   // Vcmax on the scalar at the leaf temperature a stem potential and collar
   // set: at photo_temp_ with the balance off, at the balance's with it on.
   template <class S>
@@ -2192,7 +2196,6 @@ public:
   void refuse_thermal_damage(const char* who) const;
   // Throws, naming `who`, when use_energy_balance_ is on: the derivative surface
   // holds leaf temperature at the solve's value and carries no temperature term.
-  void refuse_energy_balance(const char* who) const;
 
   // Sperry (2017) ProfitMax, both terms normalised as the paper defines them
   // (notes above optimise_psi_leaf_single in leaf_route.hpp): seeds |A|max
@@ -2325,11 +2328,16 @@ public:
   // How many root tables this leaf has built; see stem_curve_builds_. Last for the
   // ring's reason.
   long root_curve_builds_ = 0;
-  // Where prepare_profitmax read |A|max: its reference collar, and ci at psi_crit
-  // along the stem from it, for normalisers_at; NaN where it recorded neither
-  // (the energy balance or damage layer on, which the surface refuses).
+  // Where prepare_profitmax read |A|max: its reference collar, and ci at the peak
+  // along the stem from it (psi_crit with the energy balance off), for
+  // normalisers_at; NaN with the damage layer on, which the surface refuses.
   double profitmax_reference_psi_ = std::numeric_limits<double>::quiet_NaN();
   double profitmax_crit_ci_ = std::numeric_limits<double>::quiet_NaN();
+  // Where |A| peaks along the stream from the reference collar, and whether the
+  // peak is of -A (a stream that cannot fix carbon). psi_crit with leaf
+  // temperature fixed; with the energy balance on it can sit inside the stream.
+  double profitmax_peak_psi_ = std::numeric_limits<double>::quiet_NaN();
+  bool profitmax_peak_negated_ = false;
 };
 
 // Everything about one cost curve, specialised for each in leaf_cost_curves.hpp.

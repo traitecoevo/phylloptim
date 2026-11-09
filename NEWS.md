@@ -1,6 +1,6 @@
-# phylloptim 0.32.3
+# phylloptim 0.33.0
 
-- Internal, toward the derivative surface following the energy balance ([#225](https://github.com/traitecoevo/phylloptim/issues/225)): the photosynthesis kernel reads the CO2 compensation point and Michaelis-Menten constant from its capacity rather than from the leaf, and the capacity can be formed at a leaf temperature that carries derivatives. No number moves.
+- For C++ users, the derivative surface (`operating_collar()`, `billed_outputs_at()`, `physical_outputs_at()`) follows the energy balance on every curve, where it refused a leaf with it on ([#225](https://github.com/traitecoevo/phylloptim/issues/225)). Leaf temperature moves with the stem's flux and with light, and the rows carry it through the capacities, the deficit, the cuticle and the first-order condition; ProfitMax's |A|max is read where |A| peaks. With the energy balance off every number and every tape is unchanged.
 
 # phylloptim 0.32.2
 
