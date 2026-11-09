@@ -44,8 +44,8 @@
 //     not read at any other kind or at double; operating_collar refuses one that
 //     is not negative or lies inside Leaf::interior_curvature_floor;
 //   - the thermal-damage layer is off (checked): the kernels read do not apply it;
-//   - the energy balance is off (checked): leaf temperature is held at the
-//     solve's value, and none of its terms is carried.
+//   - with the energy balance on, leaf temperature follows the stem's flux and
+//     the light, and its terms are carried on every curve (HeldBalance).
 //
 // operating_point_kind() says which condition placed the point. Branch on it,
 // never on a returned value. What operating_collar does at each:
@@ -75,21 +75,21 @@ template <class S>
 inline Leaf::CollarCoords<S> Leaf::collar_coords_at(
     double sigma_star, double ci_star, const S& collar,
     const SupplyDraw<S>& draw, const leaf_pars<S>& pars,
-    const PhotoCapacity<S>& cap, bool collar_moves) const {
-  refuse_energy_balance("Leaf::collar_coords_at");
+    PhotoCapacity<S>& cap, bool collar_moves) const {
   S sigma_h, gc, ci_h;
+  HeldBalance<S> balance;
   held_coords_at<S>(sigma_star, ci_star, collar, draw, pars, cap, sigma_h, gc,
-                    ci_h);
+                    ci_h, balance);
   return collar_channel_at<S>(sigma_star, collar, draw, pars, cap, sigma_h, gc,
-                              ci_h, collar_moves);
+                              ci_h, balance, collar_moves);
 }
 
 template <class S>
 inline void Leaf::held_coords_at(double sigma_star, double ci_star,
                                  const S& collar, const SupplyDraw<S>& draw,
                                  const leaf_pars<S>& pars,
-                                 const PhotoCapacity<S>& cap, S& sigma_h,
-                                 S& gc, S& ci_h) const {
+                                 PhotoCapacity<S>& cap, S& sigma_h,
+                                 S& gc, S& ci_h, HeldBalance<S>& balance) const {
   using odelia::util::to_passive;
   check_draw(to_passive(collar), draw);
 
@@ -134,20 +134,210 @@ inline void Leaf::held_coords_at(double sigma_star, double ci_star,
   // the reported stom_cond_CO2_ associates the same product differently, so it
   // equals this to rounding.
   const S stem_flux = transpiration_at<S>(sigma_h, held, pars);
-  const S r_star = residual_flux_at<S>(held, pars, draw);
-  const S cuticle = pars[par_g_min] * S(g_min_co2_ratio_ * g_min_factor(Tleaf_));
   // Where nothing conducts (a shut leaf at g_min = 0, on its wet bound) the
   // stomatal term carries no row: the collar's channel is skipped there, so
   // nothing would cancel the held collar's partial in stem_flux.
-  gc = stom_cond_CO2_ == 0.0
-           ? cuticle
-           : S(gc_per_flux) * (stem_flux - r_star) + cuticle;
-  // Through the boundary layer's split as the evaluator formed it, on the tape.
   if (use_energy_balance_) {
-    gc = boundary_layer_split_CO2<S>(gc).first;
+    // Leaf temperature follows the stem's flux, so the capacity, gc's factor,
+    // the cuticle and the residual flux are formed at it; at double each is
+    // the member the solve seated.
+    balance.temp = leaf_temperature_at<S>(stem_flux, pars);
+    cap = photo_capacity_at<S>(pars, balance.temp);
+    balance.gc_per_flux = gc_per_flux_on<S>(balance.temp);
+    balance.r_star = residual_flux_at<S>(held, pars, draw,
+                                         residual_demand_per_g_on<S>(balance.temp));
+    balance.E_s = stem_flux - balance.r_star;
+    const S cuticle =
+        pars[par_g_min] * (S(g_min_co2_ratio_) * g_min_factor_on<S>(balance.temp));
+    gc = stom_cond_CO2_ == 0.0 ? cuticle
+                               : balance.gc_per_flux * balance.E_s + cuticle;
+    // Through the boundary layer's split as the evaluator formed it, keeping its
+    // slope, which the marginal reads in dprofit_at_collar_psi's own number.
+    const std::pair<S, S> split = boundary_layer_split_CO2<S>(gc);
+    gc = split.first;
+    balance.bl_slope = split.second;
+  } else {
+    const S r_star = residual_flux_at<S>(held, pars, draw);
+    const S cuticle = pars[par_g_min] * S(g_min_co2_ratio_ * g_min_factor(Tleaf_));
+    gc = stom_cond_CO2_ == 0.0
+             ? cuticle
+             : S(gc_per_flux) * (stem_flux - r_star) + cuticle;
   }
 
   ci_h = ci_at_conductance<S>(ci_star, gc, cap);
+}
+
+// --- the energy balance on the surface's scalar --------------------------
+
+template <class S>
+inline S Leaf::leaf_temperature_at(const S& E, const leaf_pars<S>& pars) const {
+  using odelia::util::to_passive;
+  double dT_dE = 0.0;
+  (void)leaf_temp_from_E(to_passive(E), &dT_dE);
+  // Rn's absorbed shortwave is alpha_PAR PPFD / umol_par_per_joule, over the
+  // balance's summed conductance; NIR is a driver, not a slot.
+  const double dT_dPPFD =
+      alpha_PAR_ / umol_par_per_joule / (vol_heat_cap_air / ra_ + g_rad_);
+  // The value is the balance's at E: the seated Tleaf_ wherever E is the solve's.
+  return S(leaf_temp_from_E(to_passive(E))) + dT_dE * (E - S(to_passive(E))) +
+         dT_dPPFD * (pars[par_PPFD] - S(to_passive(pars[par_PPFD])));
+}
+
+template <class S>
+inline S Leaf::leaf_temperature_at_point(const S& sigma, const S& collar,
+                                         const leaf_pars<S>& pars) const {
+  if (!use_energy_balance_) {
+    return S(leaf_temp_);
+  }
+  return leaf_temperature_at<S>(transpiration_at<S>(sigma, collar, pars), pars);
+}
+
+template <class S>
+inline S Leaf::saturation_vapour_pressure_on(const S& temp) const {
+  using std::exp;
+  return 0.6108 * exp(17.27 * temp / (temp + 237.3));
+}
+
+template <class S>
+inline S Leaf::saturation_vapour_pressure_slope_on(const S& temp) const {
+  return (17.27 * 237.3) * saturation_vapour_pressure_on<S>(temp) /
+         ((temp + 237.3) * (temp + 237.3));
+}
+
+template <class S>
+inline S Leaf::leaf_vpd_on(const S& temp) const {
+  if (!use_energy_balance_) {
+    return S(atm_vpd_);
+  }
+  const S d = atm_vpd_ + (saturation_vapour_pressure_on<S>(temp) -
+                          saturation_vapour_pressure(Tair_));
+  // leaf_vpd_at's floor, which a slope does not cross.
+  return !(odelia::util::to_passive(d) < vpd_leaf_min) ? d : S(vpd_leaf_min);
+}
+
+template <class S>
+inline S Leaf::gc_per_flux_on(const S& temp) const {
+  return S(atm_kpa_ * kg_to_mol_h2o) / leaf_vpd_on<S>(temp) / H2O_CO2_stom_diff_ratio_;
+}
+
+template <class S>
+inline S Leaf::g_min_factor_on(const S& temp) const {
+  // Its value is the member's, memoised; its slope is the exponent's.
+  const double t = odelia::util::to_passive(temp);
+  return S(g_min_factor(t)) + g_min_factor_temp_deriv(t) * (temp - S(t));
+}
+
+template <class S>
+inline S Leaf::residual_demand_per_g_on(const S& temp) const {
+  return g_min_factor_on<S>(temp) * leaf_vpd_on<S>(temp) / atm_kpa_ / kg_to_mol_h2o;
+}
+
+template <class S>
+inline S Leaf::vcmax_at_point(const S& sigma, const S& collar,
+                              const leaf_pars<S>& pars) const {
+  if (!use_energy_balance_) {
+    return vcmax_at<S>(pars);
+  }
+  return vcmax_at<S, S>(
+      pars, leaf_temperature_at<S>(transpiration_at<S>(sigma, collar, pars), pars));
+}
+
+template <class S>
+inline const Leaf::PhotoCapacity<S>& Leaf::live_capacity_at(
+    const S& collar, const leaf_pars<S>& pars, const CollarCoords<S>& at,
+    const PhotoCapacity<S>& cap, PhotoCapacity<S>& store) const {
+  if (!use_energy_balance_) {
+    return cap;
+  }
+  store = photo_capacity_at<S>(
+      pars, leaf_temperature_at<S>(transpiration_at<S>(at.sigma.value, collar, pars),
+                                   pars));
+  return store;
+}
+
+// dprofit_energy_balance_term on the scalar, in its operation order, so at
+// double it is the solve's: dA/dTleaf by the same central difference over the
+// capacity at Tleaf +- temp_fd_step, times tau = dT/dE dE/dpsi.
+template <Leaf::CostCurve K, class S>
+inline S Leaf::energy_balance_marginal_at(const S& collar, const leaf_pars<S>& pars,
+                                          const PhotoCapacity<S>& cap,
+                                          const CollarCoords<S>& at,
+                                          const S& A_prime,
+                                          const Normalisers<S>& norms) const {
+  using odelia::util::to_passive;
+  using C = Curve<K>;
+  double dT_dE = 0.0;
+  (void)leaf_temp_from_E(transpiration_, &dT_dE);
+  if (dT_dE == 0.0) {
+    return S(0.0);
+  }
+  const double inv_atm = 1.0 / (atm_kpa_ * kPa_to_Pa);
+  const double h = temp_fd_step;
+  const S& ci = at.ci.value;
+  const S& gc = at.gc.value;
+  const S& T = at.balance.temp;
+  const S& gc_const = at.balance.gc_per_flux;
+  const S g_ci = A_prime * umol_to_mol + gc * inv_atm;
+  const PhotoCapacity<S> cap_up = photo_capacity_at<S>(pars, T + h);
+  const PhotoCapacity<S> cap_dn = photo_capacity_at<S>(pars, T - h);
+  const S A_up = assim_colimited_kernel<S>(ci, cap_up);
+  const S A_dn = assim_colimited_kernel<S>(ci, cap_dn);
+  const S A_T = (A_up - A_dn) / (2.0 * h);
+  // The residual conductance's two slopes are the solve's numbers, with rows:
+  // each is proportional to g_min and moves with leaf temperature, and the
+  // cuticle's also with gc's factor, in which it is affine.
+  const double p_v = to_passive(collar), t = to_passive(T);
+  const double g_v = to_passive(pars[par_g_min]);
+  const S dT_row = T - S(t);
+  const auto with_rows = [&](double v, double v_T) -> S {
+    const S out = S(v) + v_T * dT_row;
+    return g_v > 0.0 ? out + (v / g_v) * (pars[par_g_min] - S(g_v)) : out;
+  };
+  const S drstar_dpsi = with_rows(
+      residual_flux_dpsi_upstream(p_v, t),
+      (residual_flux_dpsi_upstream(p_v, t + h) - residual_flux_dpsi_upstream(p_v, t - h)) /
+          (2.0 * h));
+  const S dE_dpsi =
+      (at.dgc_dsigma * at.sigma.slope + at.dgc_dp) / (gc_const * at.bl_slope) +
+      drstar_dpsi;
+  const S tau = dT_dE * dE_dpsi;
+  const S gc_s = gc_const * at.balance.E_s;
+  const S vpd = leaf_vpd_on<S>(T);
+  const S stomatal = (to_passive(vpd) > vpd_leaf_min)
+                         ? S(-gc_s * saturation_vapour_pressure_slope_on<S>(T) / vpd)
+                         : S(0.0);
+  const double gc_v = to_passive(gc_const);
+  const double cut_v = residual_cond_temp_deriv(p_v, t, gc_v);
+  // Its gc-factor part is -gc_const dr*/dr dr/dT, the rest the cuticle's own.
+  const double cuticle_part = g_min_co2_ratio_ * g_min * g_min_factor_temp_deriv(t);
+  const S residual_part =
+      with_rows(cut_v, (residual_cond_temp_deriv(p_v, t + h, gc_v) -
+                        residual_cond_temp_deriv(p_v, t - h, gc_v)) /
+                           (2.0 * h)) +
+      (gc_v != 0.0 ? ((cut_v - cuticle_part) / gc_v) * (gc_const - S(gc_v)) : S(0.0));
+  const S dgc_dT = (stomatal + residual_part) * at.bl_slope;
+  if constexpr (benefit_link<K>() == BenefitLink::Identity) {
+    return tau * (A_T * gc * inv_atm + A_prime * dgc_dT * (S(ca_) - ci) * inv_atm) / g_ci;
+  } else {
+    const S dA_dpsi_T =
+        tau * (A_T * gc * inv_atm + A_prime * dgc_dT * (S(ca_) - ci) * inv_atm) / g_ci;
+    S term;
+    if constexpr (benefit_link<K>() == BenefitLink::Scaled) {
+      (void)cap;
+      term = (S(1.0) / norms.A_max) * dA_dpsi_T;
+    } else {
+      (void)norms;
+      const S A = assim_colimited_kernel<S>(ci, cap);
+      term = benefit_link_slope_at<K, S>(A) * dA_dpsi_T;
+    }
+    if constexpr (C::cost_reads_leaf_temperature) {
+      term = C::template scalar_less_cost_temperature_slope<S>(
+          *this, term, pars,
+          TemperaturePathAt<S>{T, tau, h, cap_up.vcmax, cap_dn.vcmax, gc_s, gc_const,
+                               at.balance.r_star});
+    }
+    return term;
+  }
 }
 
 template <class S>
@@ -164,7 +354,8 @@ inline S Leaf::ci_at_conductance(double ci_star, const S& gc,
   if (!no_coordinate) {
     const PhotoCapacity<double> at_cap{
         to_passive(cap.vcmax), to_passive(cap.transport),
-        to_passive(cap.curvature), to_passive(cap.respiration)};
+        to_passive(cap.curvature), to_passive(cap.respiration),
+        to_passive(cap.gamma), to_passive(cap.km)};
     dT2_dci = assim_slope_at<double>(ci_star, at_cap) * umol_to_mol +
               to_passive(gc) * inv_atm;
   }
@@ -185,7 +376,8 @@ template <class S>
 inline Leaf::CollarCoords<S> Leaf::collar_channel_at(
     double sigma_star, const S& collar, const SupplyDraw<S>& draw,
     const leaf_pars<S>& pars, const PhotoCapacity<S>& cap, const S& sigma_h,
-    const S& gc, const S& ci_h, bool collar_moves) const {
+    const S& gc, const S& ci_h, const HeldBalance<S>& balance,
+    bool collar_moves) const {
   using odelia::util::to_passive;
   const S held(to_passive(collar));
   const double gc_per_flux =
@@ -236,7 +428,7 @@ inline Leaf::CollarCoords<S> Leaf::collar_channel_at(
                         ? S(1.0)
                         : dsigma_du() * (draw.E_up.slope / kmax + f_p);
 
-  const S gc_const = S(gc_per_flux);
+  const S gc_const = use_energy_balance_ ? balance.gc_per_flux : S(gc_per_flux);
   const S inv = S(inv_atm);
   // The conductance partials are kmax * f at each end. The residual flux moves
   // with the collar through its ceiling, appended as dprofit_at_collar_psi
@@ -250,10 +442,14 @@ inline Leaf::CollarCoords<S> Leaf::collar_channel_at(
   // placed by A(ci) = 0, which the collar does not enter, and gc is the cuticle's.
   S dci_dp = S(0.0);
   S dgc_dcollar = S(0.0);
+  S bl_slope = S(1.0);
+  // The coordinates' total slopes with leaf temperature moving: values only,
+  // since the step they multiply is zero in value and carries the rows.
+  double dci_total = 0.0, dgc_total = 0.0;
   if (!no_coordinate && stom_cond_CO2_ != 0.0) {
     // The partials above are before the boundary layer's split; gc is after it.
     if (use_energy_balance_) {
-      const S bl_slope = boundary_layer_split_slope_at<S>(gc);
+      bl_slope = balance.bl_slope;
       dgc_dsigma = dgc_dsigma * bl_slope;
       dgc_dp = dgc_dp * bl_slope;
     }
@@ -264,14 +460,58 @@ inline Leaf::CollarCoords<S> Leaf::collar_channel_at(
     const S dci_dp_expl = (dgc_dp * ca_minus_ci * inv) / g_ci;
     dci_dp = dci_dsigma * V + dci_dp_expl;
     dgc_dcollar = dgc_dsigma * V + dgc_dp;
+    if (use_energy_balance_) {
+      // Leaf temperature moves with the stem's flux, kmax (f_sigma V - f_p) per
+      // unit collar, and moves ci and gc at fixed flux: A's own slope in T over
+      // the temperature block, gc's through the deficit and the cuticle.
+      double dT_dE = 0.0;
+      (void)leaf_temp_from_E(transpiration_, &dT_dE);
+      const double dT_dcollar =
+          dT_dE * (to_passive(kmax) *
+                   (to_passive(f_sigma) * to_passive(V) - to_passive(f_p)));
+      const double t = to_passive(balance.temp), h = temp_fd_step;
+      leaf_pars<double> pp;
+      for (std::size_t i = 0; i < pp.size(); ++i) pp[i] = to_passive(pars[i]);
+      const double ci_v = to_passive(ci_h);
+      const double A_T =
+          (assim_colimited_kernel<double>(ci_v, photo_capacity_at<double>(pp, t + h)) -
+           assim_colimited_kernel<double>(ci_v, photo_capacity_at<double>(pp, t - h))) /
+          (2.0 * h);
+      const double gc_const_v = to_passive(balance.gc_per_flux);
+      const double gc_s = gc_const_v * to_passive(balance.E_s);
+      const double dgc_dT =
+          (((vpd_leaf_ > vpd_leaf_min)
+                ? -gc_s * saturation_vapour_pressure_slope(t) / vpd_leaf_
+                : 0.0) +
+           residual_cond_temp_deriv(to_passive(collar), t, gc_const_v)) *
+          to_passive(bl_slope);
+      const double dci_dT =
+          (dgc_dT * (ca_ - ci_v) * inv_atm - A_T * umol_to_mol) / to_passive(g_ci);
+      dci_total = to_passive(dci_dp) + dci_dT * dT_dcollar;
+      dgc_total = to_passive(dgc_dcollar) + dgc_dT * dT_dcollar;
+    }
   }
 
   // The step is exactly zero in VALUE, so both coordinates are the residuals'
   // bit for bit and only the collar's channel is added.
   const S step = collar - held;
-  return CollarCoords<S>{odelia::with_slope<S>{sigma_h + V * step, V},
-                         odelia::with_slope<S>{ci_h + dci_dp * step, dci_dp},
-                         odelia::with_slope<S>{gc + dgc_dcollar * step, dgc_dcollar}};
+  CollarCoords<S> out =
+      use_energy_balance_
+          ? CollarCoords<S>{odelia::with_slope<S>{sigma_h + V * step, V},
+                            odelia::with_slope<S>{ci_h + S(dci_total) * step, dci_dp},
+                            odelia::with_slope<S>{gc + S(dgc_total) * step, dgc_dcollar}}
+          : CollarCoords<S>{odelia::with_slope<S>{sigma_h + V * step, V},
+                            odelia::with_slope<S>{ci_h + dci_dp * step, dci_dp},
+                            odelia::with_slope<S>{gc + dgc_dcollar * step, dgc_dcollar}};
+  // What only the energy balance's term reads, copied only where it does: on a
+  // tape each copy is a statement.
+  if (use_energy_balance_) {
+    out.dgc_dsigma = dgc_dsigma;
+    out.dgc_dp = dgc_dp;
+    out.bl_slope = bl_slope;
+    out.balance = balance;
+  }
+  return out;
 }
 
 template <class S>
@@ -303,11 +543,13 @@ inline S Leaf::profit_at(const S& collar, const SupplyDraw<S>& draw,
                          const Normalisers<S>& norms) const {
   // One capacity for the point and for the assimilation read off it, so the ci
   // the residual placed and the A evaluated there are the same function.
-  const PhotoCapacity<S> cap = photo_capacity_at<S>(pars);
+  PhotoCapacity<S> cap = photo_capacity_at<S>(pars);
   const CollarCoords<S> at = collar_coords_at<S>(opt_psi_leaf_, ci_, collar,
                                                  draw, pars, cap, collar_moves);
-  return profit_from_coords<K, S>(collar, pars, cap, at.sigma.value,
-                                  at.ci.value, norms);
+  PhotoCapacity<S> store;
+  return profit_from_coords<K, S>(
+      collar, pars, collar_moves ? live_capacity_at<S>(collar, pars, at, cap, store) : cap,
+      at.sigma.value, at.ci.value, norms);
 }
 
 template <class S>
@@ -343,12 +585,13 @@ inline S Leaf::profit_from_coords(const S& collar, const leaf_pars<S>& pars,
     return A / C::template scalar_resource_use<S>(*this, sigma, collar, pars);
   } else {
     // A/|A|max less the normalised costs; the thermal cost reads leaf
-    // temperature alone, which the surface holds at the solve's.
-    (void)collar;
+    // temperature, the air's with the balance off and the point's with it on.
     check_normalisers(norms, "Leaf::profit_from_coords");
     return A / norms.A_max -
            (C::template scalar_hydraulic_cost_norm<S>(*this, sigma, pars, norms) +
-            S(thermal_cost_at(leaf_temp_)));
+            (use_energy_balance_
+                 ? thermal_cost_on<S>(leaf_temperature_at_point<S>(sigma, collar, pars))
+                 : S(thermal_cost_at(leaf_temp_))));
   }
 }
 
@@ -384,7 +627,6 @@ inline Out Leaf::outputs_at(const S& collar, const SupplyDraw<S>& draw,
   // coordinates at the live collar, as the physical outputs are.
   constexpr bool carbon_from_price = !physical && C::price_reads_flux_only;
   refuse_thermal_damage(who);
-  refuse_energy_balance(who);
   check_surface_curve<K>(who);
   check_draw(to_passive(collar), draw);
   // Placed coordinates hold only at an interior point and at the collar
@@ -421,8 +663,11 @@ inline Out Leaf::outputs_at(const S& collar, const SupplyDraw<S>& draw,
 
   // The outputs read at the live collar, from coordinates that carry its
   // channel: carbon, and with them the physical outputs.
-  const auto from_live = [&](const PhotoCapacity<S>& cap,
+  const auto from_live = [&](const PhotoCapacity<S>& held_cap,
                              const CollarCoords<S>& at) {
+    PhotoCapacity<S> store;
+    const PhotoCapacity<S>& cap =
+        live_capacity_at<S>(collar, pars, at, held_cap, store);
     const S A = assim_at_coords<S>(cap, at.ci.value);
     out.carbon = A - C::template scalar_carbon_cost<S>(*this, at.sigma.value, pars);
     if constexpr (physical) {
@@ -456,19 +701,22 @@ inline Out Leaf::outputs_at(const S& collar, const SupplyDraw<S>& draw,
         from_live(placed->cap,
                   collar_channel_at<S>(opt_psi_leaf_, collar, draw, pars,
                                        placed->cap, placed->sigma, placed->gc,
-                                       placed->ci, true));
+                                       placed->ci, placed->balance, true));
       } else {
-        const PhotoCapacity<S> cap = photo_capacity_at<S>(pars);
-        from_live(cap, collar_coords_at<S>(opt_psi_leaf_, ci_, collar, draw,
-                                           pars, cap, true));
+        PhotoCapacity<S> cap = photo_capacity_at<S>(pars);
+        const CollarCoords<S> at = collar_coords_at<S>(opt_psi_leaf_, ci_, collar,
+                                                       draw, pars, cap, true);
+        from_live(cap, at);
       }
     }
   } else {
-    const PhotoCapacity<S> cap = photo_capacity_at<S>(pars);
+    PhotoCapacity<S> cap = photo_capacity_at<S>(pars);
     const CollarCoords<S> at = collar_coords_at<S>(opt_psi_leaf_, ci_, collar,
                                                    draw, pars, cap, true);
-    out.profit = profit_from_coords<K, S>(collar, pars, cap, at.sigma.value,
-                                          at.ci.value, norms);
+    PhotoCapacity<S> store;
+    out.profit = profit_from_coords<K, S>(
+        collar, pars, live_capacity_at<S>(collar, pars, at, cap, store),
+        at.sigma.value, at.ci.value, norms);
     if constexpr (!carbon_from_price) {
       from_live(cap, at);
     }
@@ -483,7 +731,16 @@ inline Out Leaf::outputs_at(const S& collar, const SupplyDraw<S>& draw,
   // The residual flux at the LIVE collar: the envelope theorem is profit's,
   // and the cuticle's loss moves with the collar through the stem's ceiling.
   // An exact zero carrying the g_min row at g_min = 0.
-  out.residual_flux = residual_flux_at<S>(collar, pars, draw);
+  // With the energy balance on, the demand is at the leaf temperature of the
+  // draw's flux carried to the live collar.
+  if (use_energy_balance_) {
+    out.residual_flux = residual_flux_at<S>(
+        collar, pars, draw,
+        residual_demand_per_g_on<S>(leaf_temperature_at<S>(
+            draw.E_up.value + draw.E_up.slope * step, pars)));
+  } else {
+    out.residual_flux = residual_flux_at<S>(collar, pars, draw);
+  }
   return out;
 }
 
@@ -494,7 +751,7 @@ inline S Leaf::dprofit_dcollar_at(const S& collar, const SupplyDraw<S>& draw,
   // Every factor is a value, so this is arithmetic at S and dM/dp a first
   // derivative of it: a table's value with the true function's derivative
   // disagree by the interpolation error, enough to flip a curvature's sign.
-  const PhotoCapacity<S> cap = photo_capacity_at<S>(pars);
+  PhotoCapacity<S> cap = photo_capacity_at<S>(pars);
   const CollarCoords<S> at =
       collar_coords_at<S>(opt_psi_leaf_, ci_, collar, draw, pars, cap, true);
   return dprofit_dcollar_from_coords<K, S>(collar, pars, cap, at, norms);
@@ -514,7 +771,7 @@ inline S Leaf::dprofit_dcollar_at(const S& collar, const SupplyDraw<S>& draw,
   }
   const CollarCoords<S> at =
       collar_channel_at<S>(opt_psi_leaf_, collar, draw, pars, held.cap,
-                           held.sigma, held.gc, held.ci, true);
+                           held.sigma, held.gc, held.ci, held.balance, true);
   return dprofit_dcollar_from_coords<K, S>(collar, pars, held.cap, at, norms);
 }
 
@@ -575,6 +832,12 @@ inline S Leaf::dprofit_dcollar_from_coords(const S& collar, const leaf_pars<S>& 
     M = M - C::template scalar_cost_slope_upstream<S>(*this, at.sigma.value,
                                                       collar, pars);
   }
+  // The temperature path, appended as dprofit_at_collar_psi appends it.
+  {
+    if (use_energy_balance_) {
+      M = M + energy_balance_marginal_at<K, S>(collar, pars, cap, at, A_prime, norms);
+    }
+  }
   return M;
 }
 
@@ -621,6 +884,33 @@ inline Leaf::Normalisers<S> Leaf::normalisers_at(const SupplyDraw<S>& draw,
     // |A| at psi_crit along the stem from the reference collar, the leaf state
     // set_leaf_states_rates_from_psi_leaf forms there: the stem's flux less the
     // cuticle's, at its corner, as conductance, and ci placed by it.
+    if (use_energy_balance_) {
+      // With the balance on |A| peaks where prepare_profitmax found it. Inside
+      // the stream the peak is held (the envelope theorem: dA/dpsi is zero
+      // there); at psi_crit it moves with the curve's rows. The state there is
+      // set_leaf_states_rates_from_psi_leaf's at the peak's own temperature.
+      const double peak = profitmax_peak_psi_;
+      const S sigma = peak == psi_crit ? crit : S(peak);
+      const S E = transpiration_at<S>(sigma, psi_ref, pars);
+      const S temp = leaf_temperature_at<S>(E, pars);
+      const S r_star = residual_flux_at<S>(psi_ref, pars, at_ref,
+                                           residual_demand_per_g_on<S>(temp));
+      S E_s = E - r_star;
+      if (to_passive(E_s) < 0.0) {
+        E_s = E_s - S(to_passive(E_s));
+      }
+      const S gc = boundary_layer_split_CO2<S>(
+                       gc_per_flux_on<S>(temp) * E_s +
+                       pars[par_g_min] * (S(g_min_co2_ratio_) * g_min_factor_on<S>(temp)))
+                       .first;
+      const PhotoCapacity<S> cap = photo_capacity_at<S>(pars, temp);
+      const S A = std::isfinite(ci_crit)
+                      ? assim_colimited_kernel<S>(ci_at_conductance<S>(ci_crit, gc, cap), cap)
+                      : assim_saturated_kernel<S, S>(cap);
+      // The solve's number, with these rows.
+      n.A_max = S(profitmax_A_max_) +
+                (profitmax_peak_negated_ ? S(-1.0) : S(1.0)) * (A - S(to_passive(A)));
+    } else {
     const S E = transpiration_at<S>(crit, psi_ref, pars);
     const S r_star = residual_flux_at<S>(psi_ref, pars, at_ref);
     S E_s = E - r_star;
@@ -636,6 +926,7 @@ inline Leaf::Normalisers<S> Leaf::normalisers_at(const SupplyDraw<S>& draw,
                     ? assim_colimited_kernel<S>(ci_at_conductance<S>(ci_crit, gc, cap), cap)
                     : assim_saturated_kernel<S, S>(cap);
     n.A_max = to_passive(A) < 0.0 ? -A : A;
+    }
     // |A|max is zero only where A is zero at psi_crit, where ProfitMax has no
     // objective; the solves take their degenerate exit there.
     if (!(to_passive(n.A_max) > 0.0) || !(to_passive(n.k_span) > 0.0)) {
@@ -674,17 +965,37 @@ inline S Leaf::wet_bound_at(double bound_x, const SupplyDraw<S>& draw,
   const double step = std::isfinite(wet_bound_root_)
                           ? bound_x - wet_bound_root_
                           : 0.0;
-  const double dres_dx =
-      dflux_dx - residual_flux_dpsi_upstream(bound_x, Tleaf_);
-  const S held(bound_x);
+  double dres_dx = dflux_dx - residual_flux_dpsi_upstream(bound_x, Tleaf_);
+  // With the energy balance on the demand is at the temperature of the flux
+  // the bound carries, which moves with it: dr*/dT dT/dE times the draw's slope.
+  if (use_energy_balance_ && g_min > 0.0) {
+    // At the temperature of the flux the bound carries, which is the operating
+    // point's only where the bound is the operating point.
+    double dT_dE = 0.0;
+    const double t_b = leaf_temp_from_E(to_passive(draw.E_up.value), &dT_dE);
+    dres_dx = dflux_dx - residual_flux_dpsi_upstream(bound_x, t_b);
+    const double r = residual_demand_at(t_b);
+    const double E_inf = supply_ceiling(bound_x);
+    const double r1 = residual_cap(r, E_inf);
+    const double drstar_dr = residual_root_cap_ddemand(r1, r) *
+                                 residual_cap_ddemand(r, E_inf) +
+                             residual_root_cap_dceiling_dr(r1, r);
+    dres_dx -= drstar_dr * residual_demand_dT(t_b) * dT_dE * dflux_dx;
+  }
+  const auto r_star_at = [&](const S& flux) -> S {
+    return use_energy_balance_
+               ? leaf.template residual_flux_at<S>(
+                     S(bound_x), pars, draw,
+                     leaf.template residual_demand_per_g_on<S>(
+                         leaf.template leaf_temperature_at<S>(flux, pars)))
+               : leaf.template residual_flux_at<S>(S(bound_x), pars, draw);
+  };
   // ⚠️ Every active input the residual reads goes in the list, the roots'
   // ceiling among them when in force, or the reverse sweep drops its rows while
   // a forward tangent keeps them (hazard 18; test_transpose).
   if (step != 0.0) {
     const S at_root = draw.E_up.value - step * draw.E_up.slope;
-    auto residual = [&](const S&) -> S {
-      return at_root - leaf.template residual_flux_at<S>(held, pars, draw);
-    };
+    auto residual = [&](const S&) -> S { return at_root - r_star_at(at_root); };
     return draw.has_uptake_limit
                ? odelia::implicit_value<S>(bound_x, dres_dx, residual, at_root,
                                            draw.uptake_limit, pars)
@@ -692,8 +1003,7 @@ inline S Leaf::wet_bound_at(double bound_x, const SupplyDraw<S>& draw,
                                            pars);
   }
   auto residual = [&](const S&) -> S {
-    return draw.E_up.value -
-           leaf.template residual_flux_at<S>(held, pars, draw);
+    return draw.E_up.value - r_star_at(draw.E_up.value);
   };
   const S wet = draw.has_uptake_limit
                     ? odelia::implicit_value<S>(bound_x, dres_dx, residual,
@@ -739,7 +1049,6 @@ inline S Leaf::operating_collar(const SupplyDraw<S>& draw, const leaf_pars<S>& p
   // Refused at every kind, not only where the kernels are read: a surface that
   // answers at some kinds and not others is one a caller cannot plan around.
   refuse_thermal_damage("Leaf::operating_collar");
-  refuse_energy_balance("Leaf::operating_collar");
   check_surface_curve<K>("Leaf::operating_collar");
   check_draw(opt_root_psi_, draw);
   // Unplaced until the interior arm places it, so coordinates left from an
@@ -794,7 +1103,8 @@ inline S Leaf::operating_collar(const SupplyDraw<S>& draw, const leaf_pars<S>& p
           const S at = S(opt_root_psi_);
           placed->cap = photo_capacity_at<S>(pars);
           held_coords_at<S>(opt_psi_leaf_, ci_, at, draw, pars, placed->cap,
-                            placed->sigma, placed->gc, placed->ci);
+                            placed->sigma, placed->gc, placed->ci,
+                            placed->balance);
           placed->at = opt_root_psi_;
           const HeldCoords<S>& h = *placed;
           collar = solve(

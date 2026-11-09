@@ -1,3 +1,7 @@
+# phylloptim 0.33.0
+
+- For C++ users, the derivative surface (`operating_collar()`, `billed_outputs_at()`, `physical_outputs_at()`) follows the energy balance on every curve, where it refused a leaf with it on ([#225](https://github.com/traitecoevo/phylloptim/issues/225)). Leaf temperature moves with the stem's flux and with light, and the rows carry it through the capacities, the deficit, the cuticle and the first-order condition; ProfitMax's |A|max is read where |A| peaks. With the energy balance off every number and every tape is unchanged.
+
 # phylloptim 0.32.2
 
 - Internal: one central difference in leaf temperature serves the optimiser and every temperature slope, one forward pass gives the first-order conditions' dA/dci on both routes, and every exit of the collar search classifies its point through one call. No number moves.

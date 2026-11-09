@@ -586,6 +586,13 @@ template <> struct Curve<Leaf::CostCurve::ProfitMax> {
                                             const Leaf::TemperaturePath& p) {
     return term - l.thermal_cost_temp_deriv(p.Tleaf) * p.tau;
   }
+  // The same on the surface's scalar.
+  template <class S>
+  static S scalar_less_cost_temperature_slope(const Leaf& l, const S& term,
+                                              const leaf_pars<S>&,
+                                              const Leaf::TemperaturePathAt<S>& p) {
+    return term - l.template thermal_cost_temp_deriv_on<S>(p.temp) * p.tau;
+  }
 
   // The scalar forms, on the closed-form curve, with the normalisers on the pack
   // (`Leaf::normalisers_at`) in place of the members prepare_profitmax seeded.
@@ -777,7 +784,8 @@ template <> struct Curve<Leaf::CostCurve::LeastCost> {
   static S scalar_resource_use(const Leaf& l, const S& sigma, const S& collar,
                                const leaf_pars<S>& pars) {
     return l.template transpiration_at<S>(sigma, collar, pars) * S(kg_to_mol_h2o) +
-           pars[par_LeastCost_beta] * l.template vcmax_at<S>(pars) * S(umol_to_mol);
+           pars[par_LeastCost_beta] * l.template vcmax_at_point<S>(sigma, collar, pars) *
+               S(umol_to_mol);
   }
   template <class S>
   static S scalar_cost_slope(const Leaf& l, const S& sigma, const S& collar,
@@ -805,6 +813,18 @@ template <> struct Curve<Leaf::CostCurve::LeastCost> {
                      l.LeastCost_beta * l.vcmax_ * umol_to_mol +
                      p.r_star * kg_to_mol_h2o;
     return term - l.LeastCost_beta * umol_to_mol * dVcmax_dT * p.tau / W;
+  }
+  // The same on the surface's scalar, Vcmax at the path's temperature.
+  template <class S>
+  static S scalar_less_cost_temperature_slope(const Leaf& l, const S& term,
+                                              const leaf_pars<S>& pars,
+                                              const Leaf::TemperaturePathAt<S>& p) {
+    const S dVcmax_dT = (p.vcmax_up - p.vcmax_dn) / (2.0 * p.h);
+    const S W = p.gc_s / p.gc_const * kg_to_mol_h2o +
+                pars[par_LeastCost_beta] * l.template vcmax_at<S, S>(pars, p.temp) *
+                    umol_to_mol +
+                p.r_star * kg_to_mol_h2o;
+    return term - pars[par_LeastCost_beta] * umol_to_mol * dVcmax_dT * p.tau / W;
   }
 };
 
@@ -1154,6 +1174,35 @@ inline double Leaf::thermal_cost_at(double leaf_temp) const {
   return 1.0 / (1.0 + std::exp(-(2.0 / span) * (leaf_temp - T50_)));
 }
 
+template <class V>
+inline V Leaf::thermal_cost_temp_deriv_on(const V& leaf_temp) const {
+  if constexpr (std::is_same_v<V, double>) {
+    return thermal_cost_temp_deriv(leaf_temp);
+  } else {
+    if (!use_thermal_cost_) {
+      return V(0.0);
+    }
+    const double span = T50_ - Tcrit_;
+    const V TC = thermal_cost_on<V>(leaf_temp);
+    return (2.0 / span) * TC * (1.0 - TC);
+  }
+}
+
+template <class V>
+inline V Leaf::thermal_cost_on(const V& leaf_temp) const {
+  if constexpr (std::is_same_v<V, double>) {
+    return thermal_cost_at(leaf_temp);
+  } else {
+    using std::exp;
+    if (!use_thermal_cost_) {
+      return V(0.0);
+    }
+    const double span = T50_ - Tcrit_;
+    (void)thermal_cost_at(T50_);  // its refusal of span <= 0
+    return V(1.0) / (V(1.0) + exp(-(2.0 / span) * (leaf_temp - T50_)));
+  }
+}
+
 inline double Leaf::thermal_cost_temp_deriv(double leaf_temp) const {
   if (!use_thermal_cost_) {
     return 0.0;
@@ -1365,10 +1414,12 @@ inline void Leaf::prepare_profitmax() {
   const double width = psi_crit - psi_wet;
   const double lo = psi_wet + 1e-9 * width;   // the open end: closure excluded
   double a_hi = -std::numeric_limits<double>::infinity();
+  double peak = std::numeric_limits<double>::quiet_NaN();
+  bool negated = false;
   if (width > 0.0) {
-    util::maximise_over_closed_interval_foc(A_of, dA_of, lo, psi_crit, 0,
-                                            collar_root_tol,
-                                            static_cast<size_t>(ci_niter), &a_hi);
+    peak = util::maximise_over_closed_interval_foc(A_of, dA_of, lo, psi_crit, 0,
+                                                   collar_root_tol,
+                                                   static_cast<size_t>(ci_niter), &a_hi);
   }
   double a_max = (std::isfinite(a_hi) && a_hi > 0.0) ? a_hi : 0.0;
   // The reachable case where max|A| is not max A: A negative along the whole
@@ -1376,20 +1427,32 @@ inline void Leaf::prepare_profitmax() {
   // no objective, so maximise -A, and only then.
   if (!(a_max > 0.0) && width > 0.0) {
     double neg = -std::numeric_limits<double>::infinity();
-    util::maximise_over_closed_interval_foc(
+    const double neg_peak = util::maximise_over_closed_interval_foc(
         [&](double psi) { return -A_of(psi); },
         [&](double psi, bool* ok) { return -dA_of(psi, ok); }, lo, psi_crit, 0,
         collar_root_tol, static_cast<size_t>(ci_niter), &neg);
-    if (std::isfinite(neg) && neg > 0.0) a_max = neg;
+    if (std::isfinite(neg) && neg > 0.0) {
+      a_max = neg;
+      peak = neg_peak;
+      negated = true;
+    }
   }
   profitmax_A_max_ = a_max;
+  profitmax_peak_psi_ = peak;
+  profitmax_peak_negated_ = negated;
   // With leaf temperature fixed |A| rises with conductance at either sign of A,
   // so |A|max is |A| at psi_crit (measured: bit for bit on every point of a
   // 576-point sweep). The surface reads it there, on its scalar, so it needs ci
-  // at that point; with the energy balance or damage layer on it refuses.
+  // at that point; with the energy balance on, at the peak; with the damage layer
+  // on it refuses.
   profitmax_crit_ci_ = std::numeric_limits<double>::quiet_NaN();
   if (!use_energy_balance_ && !use_thermal_damage_ && width > 0.0) {
     set_leaf_states_rates_from_psi_leaf(psi_crit, psi_soil);
+    profitmax_crit_ci_ = ci_;
+  } else if (use_energy_balance_ && !use_thermal_damage_ && std::isfinite(peak)) {
+    // With the balance on |A| can peak inside the stream; the surface reads it
+    // at the peak, so it needs ci there.
+    set_leaf_states_rates_from_psi_leaf(peak, psi_soil);
     profitmax_crit_ci_ = ci_;
   }
 }

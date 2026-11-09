@@ -537,10 +537,15 @@ public:
                                          double gc_const) const;
   // The same flux on the tape, at a collar, with rows in g_min, kmax and the stem
   // curve's pair; leaf temperature and deficit are the seated point's, passive.
+  // The second takes the demand per unit g_min, which carries rows where leaf
+  // temperature moves (residual_demand_per_g_on).
   template <class S> struct SupplyDraw;
   template <class S>
   S residual_flux_at(const S& collar, const leaf_pars<S>& pars,
                      const SupplyDraw<S>& draw) const;
+  template <class S>
+  S residual_flux_at(const S& collar, const leaf_pars<S>& pars,
+                     const SupplyDraw<S>& draw, const S& per_g) const;
   // The cuticle's conductance to CO2 at the seated leaf temperature.
   double cuticular_cond_CO2() const { return g_min_co2_ratio_ * g_min_leaf_; }
   // Net assimilation as c_i -> infinity, the colimited capacity less respiration:
@@ -1131,11 +1136,42 @@ public:
 
   // What profit needs: the leaf potential the collar determines, and its ci;
   // and the CO2 conductance that placed ci, which the physical outputs report.
+  //
+  // With the energy balance on, leaf temperature moves with the flux, so the
+  // capacity and gc's flux-to-conductance factor are formed at it during
+  // placement, and the marginal reads them again with the stomatal and residual
+  // fluxes: HeldBalance. Left default with the balance off, where nothing reads it.
+  template <class T>
+  struct HeldBalance {
+    T temp{};
+    T gc_per_flux{};
+    T E_s{};
+    T r_star{};
+    // The boundary layer's split's slope, as the split formed it.
+    T bl_slope{};
+
+    template <class F>
+    void for_each_active(F&& f) const {
+      f(temp);
+      f(gc_per_flux);
+      f(E_s);
+      f(r_star);
+      f(bl_slope);
+    }
+  };
+
+  // A coordinate's value carries the collar's whole channel; ci's slope is the
+  // one at fixed leaf temperature, the partial dprofit_at_collar_psi forms, which
+  // the marginal reads with the gc partials and the boundary layer's slope.
   template <class T>
   struct CollarCoords {
     odelia::with_slope<T> sigma;
     odelia::with_slope<T> ci;
     odelia::with_slope<T> gc;
+    T dgc_dsigma{};
+    T dgc_dp{};
+    T bl_slope{};
+    HeldBalance<T> balance{};
   };
 
   // The cost curves. A curve enters the derivative only through dC/dpsi_leaf.
@@ -1469,14 +1505,15 @@ public:
   double E_column(double x, const std::vector<double>& psi_soil, double psi_leaf);
   double E_column_zero(double x, const std::vector<double>& psi_soil);
   
-  // The two temperature responses, exactly linear in ref_value. Only ref_value
-  // is templated: the other arguments do not move, and lifting one to T makes
-  // every operation carry a derivative vector of zeros. The operation order is
+  // The two temperature responses, exactly linear in ref_value. ref_value and
+  // the temperature take their own scalars, the temperature's V double except
+  // where leaf temperature carries rows: lifting a constant to T makes every
+  // operation carry a derivative vector of zeros. The operation order is
   // load-bearing: reordering moves the double results by an ULP.
-  template <typename T>
-  T arrh_curve(double Ea, const T& ref_value, double leaf_temp) const;
-  template <typename T>
-  T peak_arrh_curve(double Ea, const T& ref_value, double leaf_temp, double H_d,
+  template <typename T, typename V = double>
+  T arrh_curve(double Ea, const T& ref_value, const V& leaf_temp) const;
+  template <typename T, typename V = double>
+  T peak_arrh_curve(double Ea, const T& ref_value, const V& leaf_temp, double H_d,
                     double d_S) const;
 
   // --- Penman-Monteith leaf energy balance (minimal core) ---------------------
@@ -1529,14 +1566,20 @@ public:
   double assim_colimited(double ci_);
 
   // Photosynthetic capacity at this leaf's temperature and light: the two
-  // limiting capacities, the colimiting curvature and dark respiration. None
-  // moves with ci, so dA/dci walks four directions rather than one per pack slot.
-  template <class T>
+  // limiting capacities, the colimiting curvature, dark respiration, and the CO2
+  // compensation point and Michaelis-Menten constant the kernel reads with them.
+  // None moves with ci, so dA/dci walks six directions rather than one per pack
+  // slot. The last two take their own scalar G: they carry rows only where leaf
+  // temperature moves, and as plain doubles elsewhere they cost a tangent
+  // nothing.
+  template <class T, class G = T>
   struct PhotoCapacity {
     T vcmax;
     T transport;
     T curvature;
     T respiration;
+    G gamma;
+    G km;
 
     // ⚠️ Hazard 17: every member that carries a row is visited here, or its
     // columns read exactly zero. The member count is asserted below.
@@ -1546,9 +1589,11 @@ public:
       f(transport);
       f(curvature);
       f(respiration);
+      f(gamma);
+      f(km);
     }
   };
-  static_assert(sizeof(PhotoCapacity<double>) == 4 * sizeof(double),
+  static_assert(sizeof(PhotoCapacity<double>) == 6 * sizeof(double),
                 "PhotoCapacity gained or lost a member: update for_each_active, "
                 "then this count");
 
@@ -1563,6 +1608,7 @@ public:
     S sigma{};
     S gc{};
     S ci{};
+    HeldBalance<S> balance{};
 
     bool placed() const { return !std::isnan(at); }
 
@@ -1574,6 +1620,7 @@ public:
       f(sigma);
       f(gc);
       f(ci);
+      balance.for_each_active(f);
     }
   };
 
@@ -1582,10 +1629,12 @@ public:
   // at double for the model and at AD types for its derivative, so the two
   // cannot disagree. A kernel's arguments are its read set (fixed physiology
   // stays a member), and it must not write a member, or an AD probe moves the model.
-  template <typename T, typename U> T assim_rubisco_limited_kernel(const T& ci, const U& vcmax) const;
-  template <typename T, typename U> T assim_electron_limited_kernel(const T& ci, const U& transport) const;
-  template <typename T, typename U> T assim_colimited_kernel(const T& ci,
-                                                 const PhotoCapacity<U>& cap) const;
+  template <typename T, typename U, typename G> T assim_rubisco_limited_kernel(
+      const T& ci, const PhotoCapacity<U, G>& cap) const;
+  template <typename T, typename U, typename G> T assim_electron_limited_kernel(
+      const T& ci, const PhotoCapacity<U, G>& cap) const;
+  template <typename T, typename U, typename G> T assim_colimited_kernel(
+      const T& ci, const PhotoCapacity<U, G>& cap) const;
   // The curve parameters take their own scalar U, so pow(tangent, double) pays
   // no log for an exponent that does not move.
   template <typename T, typename U> T proportion_of_conductivity_kernel(
@@ -1605,13 +1654,24 @@ public:
   // never the members: at double they hold the same numbers, so a member read is
   // right in value and a silent zero in every trait's row. The temperature
   // responses are re-run, linear in the 25 C reference, which carries the row.
+  // Each at photo_temp_, or at a leaf temperature `temp` on its own scalar V.
   template <typename T> T vcmax_at(const leaf_pars<T>& pars) const;
   template <typename T> T jmax_at(const leaf_pars<T>& pars) const;
   template <typename T> T respiration_at(const leaf_pars<T>& pars) const;
   template <typename T> T electron_transport_at(const leaf_pars<T>& pars) const;
+  template <typename T, typename V> T vcmax_at(const leaf_pars<T>& pars, const V& temp) const;
+  template <typename T, typename V> T jmax_at(const leaf_pars<T>& pars, const V& temp) const;
+  template <typename T, typename V> T respiration_at(const leaf_pars<T>& pars, const V& temp) const;
+  template <typename T, typename V> T electron_transport_at(const leaf_pars<T>& pars,
+                                                           const V& temp) const;
 
-  // The one place that says which pack slots each kernel reads.
+  // The one place that says which pack slots each kernel reads. The first holds
+  // leaf temperature at photo_temp_, Gamma* and Km at their members; the second
+  // forms all six at `temp`, update_temperature_dependent_params' expressions on
+  // the scalar, for a surface whose leaf temperature moves.
   template <typename T> PhotoCapacity<T> photo_capacity_at(const leaf_pars<T>& pars) const;
+  template <typename T> PhotoCapacity<T> photo_capacity_at(const leaf_pars<T>& pars,
+                                                           const T& temp) const;
   template <typename T> PhotoCapacity<T> photo_capacity() const;
   // Net assimilation as ci -> infinity: the colimited capacity less respiration,
   // what a leaf with no conductance nets where A reaches zero at no ci (the
@@ -1669,11 +1729,13 @@ public:
   //
   // gc is derived from the draw. `collar_moves` is false at an interior point
   // (the envelope theorem), and the slopes are then absent rather than zero.
+  // `cap` is the capacity at the held leaf temperature: passed in with the
+  // balance off, formed here with it on, where temperature follows the flux.
   template <class S>
   CollarCoords<S> collar_coords_at(double sigma_star, double ci_star,
                                    const S& collar, const SupplyDraw<S>& draw,
                                    const leaf_pars<S>& pars,
-                                   const PhotoCapacity<S>& cap,
+                                   PhotoCapacity<S>& cap,
                                    bool collar_moves) const;
 
   // collar_coords_at in two halves, the coordinates at the held collar and then
@@ -1681,15 +1743,64 @@ public:
   template <class S>
   void held_coords_at(double sigma_star, double ci_star, const S& collar,
                       const SupplyDraw<S>& draw, const leaf_pars<S>& pars,
-                      const PhotoCapacity<S>& cap, S& sigma_h, S& gc,
-                      S& ci_h) const;
+                      PhotoCapacity<S>& cap, S& sigma_h, S& gc,
+                      S& ci_h, HeldBalance<S>& balance) const;
   template <class S>
   CollarCoords<S> collar_channel_at(double sigma_star, const S& collar,
                                     const SupplyDraw<S>& draw,
                                     const leaf_pars<S>& pars,
                                     const PhotoCapacity<S>& cap,
                                     const S& sigma_h, const S& gc,
-                                    const S& ci_h, bool collar_moves) const;
+                                    const S& ci_h, const HeldBalance<S>& balance,
+                                    bool collar_moves) const;
+
+  // --- the energy balance on the surface's scalar --------------------------
+  // Each takes its value from the solve's seated state and its rows from the
+  // balance: leaf temperature is affine in the stem's flux E and, through the
+  // absorbed shortwave, in PPFD.
+  template <class S> S leaf_temperature_at(const S& E, const leaf_pars<S>& pars) const;
+  // The deficit, its saturation slope, gc's flux-to-conductance factor and the
+  // cuticle's temperature factor, at a leaf temperature on the scalar.
+  template <class S> S saturation_vapour_pressure_on(const S& temp) const;
+  template <class S> S saturation_vapour_pressure_slope_on(const S& temp) const;
+  template <class S> S leaf_vpd_on(const S& temp) const;
+  template <class S> S gc_per_flux_on(const S& temp) const;
+  template <class S> S g_min_factor_on(const S& temp) const;
+  // The residual flux's demand per unit g_min: the cuticle's factor times the
+  // deficit over the atmosphere, in kg.
+  template <class S> S residual_demand_per_g_on(const S& temp) const;
+  // dprofit_energy_balance_term on the scalar, from the coordinates.
+  template <CostCurve K, class S>
+  S energy_balance_marginal_at(const S& collar, const leaf_pars<S>& pars,
+                               const PhotoCapacity<S>& cap,
+                               const CollarCoords<S>& at, const S& A_prime,
+                               const Normalisers<S>& norms) const;
+  // The capacity at the live collar's leaf temperature, formed into `store`:
+  // `cap` itself with the balance off, where temperature does not move with the
+  // collar, and returned by reference so that path copies nothing onto a tape.
+  template <class S>
+  const PhotoCapacity<S>& live_capacity_at(const S& collar, const leaf_pars<S>& pars,
+                                           const CollarCoords<S>& at,
+                                           const PhotoCapacity<S>& cap,
+                                           PhotoCapacity<S>& store) const;
+  // The thermal cost's slope in leaf temperature on any scalar.
+  template <class V> V thermal_cost_temp_deriv_on(const V& leaf_temp) const;
+  // Leaf temperature at a stem potential and collar: the air's with the balance
+  // off, the balance's with it on.
+  template <class S>
+  S leaf_temperature_at_point(const S& sigma, const S& collar,
+                              const leaf_pars<S>& pars) const;
+  // Vcmax on the scalar at the leaf temperature a stem potential and collar
+  // set: at photo_temp_ with the balance off, at the balance's with it on.
+  template <class S>
+  S vcmax_at_point(const S& sigma, const S& collar, const leaf_pars<S>& pars) const;
+  // TemperaturePath on the scalar, for a cost's slope in leaf temperature.
+  template <class S>
+  struct TemperaturePathAt {
+    S temp, tau;
+    double h;
+    S vcmax_up, vcmax_dn, gc_s, gc_const, r_star;
+  };
   // Whether sigma_star is the stem held at a dry pin at the end of its curve
   // (seat_leaf_at_dry_pin), where sigma is a function of the traits, not the collar.
   bool leaf_held_at_dry_pin(double sigma_star) const {
@@ -2027,6 +2138,8 @@ public:
   // The instantaneous thermal cost at a leaf temperature, in [0,1]. Zero when the
   // gate is off, so callers need not branch.
   double thermal_cost_at(double leaf_temp) const;
+  // The same at a leaf temperature on any scalar; the gate is read as above.
+  template <class V> V thermal_cost_on(const V& leaf_temp) const;
   // Its slope in leaf temperature, r*TC*(1 - TC) with r = 2/(T50 - Tcrit): the
   // sigmoid's own derivative. Zero when the gate is off, like thermal_cost_at.
   double thermal_cost_temp_deriv(double leaf_temp) const;
@@ -2081,9 +2194,6 @@ public:
   // Throws, naming `who`, when use_thermal_damage_ is on: the paths that read
   // capacities off the parameter pack (vcmax_at and the rest) do not apply it.
   void refuse_thermal_damage(const char* who) const;
-  // Throws, naming `who`, when use_energy_balance_ is on: the derivative surface
-  // holds leaf temperature at the solve's value and carries no temperature term.
-  void refuse_energy_balance(const char* who) const;
 
   // Sperry (2017) ProfitMax, both terms normalised as the paper defines them
   // (notes above optimise_psi_leaf_single in leaf_route.hpp): seeds |A|max
@@ -2216,11 +2326,16 @@ public:
   // How many root tables this leaf has built; see stem_curve_builds_. Last for the
   // ring's reason.
   long root_curve_builds_ = 0;
-  // Where prepare_profitmax read |A|max: its reference collar, and ci at psi_crit
-  // along the stem from it, for normalisers_at; NaN where it recorded neither
-  // (the energy balance or damage layer on, which the surface refuses).
+  // Where prepare_profitmax read |A|max: its reference collar, and ci at the peak
+  // along the stem from it (psi_crit with the energy balance off), for
+  // normalisers_at; NaN with the damage layer on, which the surface refuses.
   double profitmax_reference_psi_ = std::numeric_limits<double>::quiet_NaN();
   double profitmax_crit_ci_ = std::numeric_limits<double>::quiet_NaN();
+  // Where |A| peaks along the stream from the reference collar, and whether the
+  // peak is of -A (a stream that cannot fix carbon). psi_crit with leaf
+  // temperature fixed; with the energy balance on it can sit inside the stream.
+  double profitmax_peak_psi_ = std::numeric_limits<double>::quiet_NaN();
+  bool profitmax_peak_negated_ = false;
 };
 
 // Everything about one cost curve, specialised for each in leaf_cost_curves.hpp.

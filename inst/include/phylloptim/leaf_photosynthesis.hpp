@@ -13,17 +13,19 @@
 
 namespace phylloptim {
 
-template <typename T>
-inline T Leaf::arrh_curve(double Ea, const T& ref_value, double leaf_temp) const {
-  return ref_value*std::exp(Ea*((leaf_temp+C_to_K) - (25 + C_to_K))/((25 + C_to_K)*gas_constant*(leaf_temp+C_to_K)));
+template <typename T, typename V>
+inline T Leaf::arrh_curve(double Ea, const T& ref_value, const V& leaf_temp) const {
+  using std::exp;
+  return ref_value*exp(Ea*((leaf_temp+C_to_K) - (25 + C_to_K))/((25 + C_to_K)*gas_constant*(leaf_temp+C_to_K)));
 }
 
-template <typename T>
-inline T Leaf::peak_arrh_curve(double Ea, const T& ref_value, double leaf_temp,
+template <typename T, typename V>
+inline T Leaf::peak_arrh_curve(double Ea, const T& ref_value, const V& leaf_temp,
                                double H_d, double d_S) const {
-  T arrh = arrh_curve<T>(Ea, ref_value, leaf_temp);
+  using std::exp;
+  T arrh = arrh_curve<T, V>(Ea, ref_value, leaf_temp);
   double arg2 = 1 + std::exp((d_S*(25 + C_to_K) - H_d)/(gas_constant*(25 + C_to_K)));
-  double arg3 = 1 + std::exp((d_S*(leaf_temp + C_to_K) - H_d)/(gas_constant*(leaf_temp + C_to_K)));
+  V arg3 = 1 + exp((d_S*(leaf_temp + C_to_K) - H_d)/(gas_constant*(leaf_temp + C_to_K)));
 
   return arrh * arg2/arg3;
 }
@@ -274,33 +276,34 @@ inline double Leaf::electron_transport() {
 // the double instantiation's association. U is independent of T on purpose: a
 // double times a tangent is one multiply, a tangent times a tangent three, so
 // wrapping the capacity in T measured slower per solve.
-template <typename T, typename U>
-inline T Leaf::assim_rubisco_limited_kernel(const T& ci, const U& vcmax) const {
-  return (vcmax * (ci - gamma_ * umol_per_mol_to_Pa_)) / (ci + km_);
+template <typename T, typename U, typename G>
+inline T Leaf::assim_rubisco_limited_kernel(const T& ci,
+                                            const PhotoCapacity<U, G>& cap) const {
+  return (cap.vcmax * (ci - cap.gamma * umol_per_mol_to_Pa_)) / (ci + cap.km);
 }
 
 template <typename T>
 inline T Leaf::assim_rubisco_limited_kernel(T ci) const {
-  return assim_rubisco_limited_kernel<T, double>(ci, vcmax_);
+  return assim_rubisco_limited_kernel<T, double, double>(ci, photo_capacity<double>());
 }
 
-template <typename T, typename U>
+template <typename T, typename U, typename G>
 inline T Leaf::assim_electron_limited_kernel(const T& ci,
-                                             const U& transport) const {
-  return transport / 4 *
-  ((ci - gamma_ * umol_per_mol_to_Pa_) / (ci + 2 * gamma_ * umol_per_mol_to_Pa_));
+                                             const PhotoCapacity<U, G>& cap) const {
+  return cap.transport / 4 *
+  ((ci - cap.gamma * umol_per_mol_to_Pa_) / (ci + 2 * cap.gamma * umol_per_mol_to_Pa_));
 }
 
 template <typename T>
 inline T Leaf::assim_electron_limited_kernel(T ci) const {
-  return assim_electron_limited_kernel<T, double>(ci, electron_transport_);
+  return assim_electron_limited_kernel<T, double, double>(ci, photo_capacity<double>());
 }
 
-template <typename T, typename U>
+template <typename T, typename U, typename G>
 inline T Leaf::assim_colimited_kernel(const T& ci,
-                                      const PhotoCapacity<U>& cap) const {
-  const T rubisco = assim_rubisco_limited_kernel<T, U>(ci, cap.vcmax);
-  const T electron = assim_electron_limited_kernel<T, U>(ci, cap.transport);
+                                      const PhotoCapacity<U, G>& cap) const {
+  const T rubisco = assim_rubisco_limited_kernel<T, U, G>(ci, cap);
+  const T electron = assim_electron_limited_kernel<T, U, G>(ci, cap);
 
   return (rubisco + electron -
           sqrt(pow(rubisco + electron, 2) -
@@ -329,7 +332,7 @@ inline double Leaf::assim_saturated() const {
 
 template <typename T>
 inline T Leaf::assim_colimited_kernel(T ci) const {
-  return assim_colimited_kernel<T, double>(ci, photo_capacity<double>());
+  return assim_colimited_kernel<T, double, double>(ci, photo_capacity<double>());
 }
 
 inline double Leaf::assim_rubisco_limited(double ci_) {
@@ -411,57 +414,93 @@ inline void Leaf::set_leaf_states_rates_from_psi_leaf(double psi_leaf, double ps
 // a leaf with it on rather than disagree with the member it twins.
 template <typename T>
 inline T Leaf::vcmax_at(const leaf_pars<T>& pars) const {
+  return vcmax_at<T, double>(pars, photo_temp_);
+}
+
+template <typename T, typename V>
+inline T Leaf::vcmax_at(const leaf_pars<T>& pars, const V& temp) const {
   refuse_thermal_damage("Leaf::vcmax_at");
-  return peak_arrh_curve<T>(vcmax_ha_, pars[par_vcmax_25], photo_temp_,
-                            vcmax_H_d_, vcmax_d_S_);
+  return peak_arrh_curve<T, V>(vcmax_ha_, pars[par_vcmax_25], temp,
+                               vcmax_H_d_, vcmax_d_S_);
 }
 
 template <typename T>
 inline T Leaf::jmax_at(const leaf_pars<T>& pars) const {
+  return jmax_at<T, double>(pars, photo_temp_);
+}
+
+template <typename T, typename V>
+inline T Leaf::jmax_at(const leaf_pars<T>& pars, const V& temp) const {
   refuse_thermal_damage("Leaf::jmax_at");
-  T j = peak_arrh_curve<T>(jmax_ha_, pars[par_jmax_25], photo_temp_, jmax_H_d_,
-                           jmax_d_S_);
-  // The thermal cost reads no trait, so it is a factor, not a term with rows.
+  T j = peak_arrh_curve<T, V>(jmax_ha_, pars[par_jmax_25], temp, jmax_H_d_,
+                              jmax_d_S_);
+  // At a fixed temperature the thermal cost reads no trait, so it is a factor,
+  // not a term with rows.
   if (use_thermal_cost_) {
     // Not `*=`, whose overload is ambiguous at a nested scalar.
-    j = j * T(1.0 - thermal_cost_at(photo_temp_));
+    if constexpr (std::is_same_v<V, double>) {
+      j = j * T(1.0 - thermal_cost_at(temp));
+    } else {
+      j = j * (T(1.0) - thermal_cost_on<V>(temp));
+    }
   }
   return j;
 }
 
 template <typename T>
 inline T Leaf::respiration_at(const leaf_pars<T>& pars) const {
+  return respiration_at<T, double>(pars, photo_temp_);
+}
+
+template <typename T, typename V>
+inline T Leaf::respiration_at(const leaf_pars<T>& pars, const V& temp) const {
+  using std::pow;
   refuse_thermal_damage("Leaf::respiration_at");
-  const double q10 =
-      rd_q10_intercept_ - rd_q10_slope_ * (photo_temp_ + 25.0) / 2.0;
-  return pars[par_R_d_25] *
-         T(std::pow(q10, (photo_temp_ - 25.0) / 10.0));
+  const V q10 = rd_q10_intercept_ - rd_q10_slope_ * (temp + 25.0) / 2.0;
+  return pars[par_R_d_25] * T(pow(q10, (temp - 25.0) / 10.0));
 }
 
 template <typename T>
 inline T Leaf::electron_transport_at(const leaf_pars<T>& pars) const {
+  return electron_transport_at<T, double>(pars, photo_temp_);
+}
+
+template <typename T, typename V>
+inline T Leaf::electron_transport_at(const leaf_pars<T>& pars, const V& temp) const {
   // alpha_PAR_ is a leaf property, not a slot, so it enters as a constant.
   const T I = pars[par_phi_J] * alpha_PAR_ * pars[par_PPFD];
-  const T jm = jmax_at<T>(pars);
+  const T jm = jmax_at<T, V>(pars, temp);
   const T curv = pars[par_curv_fact_elec_trans];
   return (I + jm -
           sqrt(pow(I + jm, 2) - 4 * curv * I * jm)) /
          (2 * curv);
 }
 
-// gamma_ and km_ are temperature responses of fixed physiology -- no trait
-// reaches either -- so they stay members and the capacity carries the four that
-// do.
+// gamma_ and km_ are temperature responses of fixed physiology: no trait reaches
+// either, so at a fixed leaf temperature they enter as constants.
 template <typename T>
 inline Leaf::PhotoCapacity<T> Leaf::photo_capacity_at(
     const leaf_pars<T>& pars) const {
   return {vcmax_at<T>(pars), electron_transport_at<T>(pars),
-          pars[par_curv_fact_colim], respiration_at<T>(pars)};
+          pars[par_curv_fact_colim], respiration_at<T>(pars), T(gamma_), T(km_)};
+}
+
+template <typename T>
+inline Leaf::PhotoCapacity<T> Leaf::photo_capacity_at(const leaf_pars<T>& pars,
+                                                      const T& temp) const {
+  const T gamma = arrh_curve<T, T>(gamma_ha_, T(gamma_25_), temp);
+  const T ko = arrh_curve<T, T>(ko_ha_, T(ko_25_), temp);
+  const T kc = arrh_curve<T, T>(kc_ha_, T(kc_25_), temp);
+  const T km = (kc * umol_per_mol_to_Pa_) *
+               (1 + (atm_o2_kpa_ * kPa_to_Pa) / (ko * umol_per_mol_to_Pa_));
+  return {vcmax_at<T, T>(pars, temp), electron_transport_at<T, T>(pars, temp),
+          pars[par_curv_fact_colim], respiration_at<T, T>(pars, temp), gamma, km};
 }
 
 template <typename T>
 inline Leaf::PhotoCapacity<T> Leaf::photo_capacity() const {
-  return {T(vcmax_), T(electron_transport_), T(curv_fact_colim), T(R_d_)};
+  return {T(vcmax_), T(electron_transport_), T(curv_fact_colim), T(R_d_),
+          T(gamma_), T(km_)};
 }
 
 template <class S, class Kernel, std::same_as<S>... Args>
@@ -522,14 +561,30 @@ inline double Leaf::assim_slope(double ci) const {
 
 template <typename T>
 inline T Leaf::assim_slope_at(const T& ci, const PhotoCapacity<T>& cap) const {
-  return kernel_slope_at<T>(
-      [this]<class U>(const U& c, const U& vcmax, const U& transport,
-                      const U& curvature, const U& respiration) -> U {
-        return assim_colimited_kernel<U>(
-            c, PhotoCapacity<U>{vcmax, transport, curvature, respiration});
-      },
-      "assimilation in intercellular CO2", ci, cap.vcmax, cap.transport,
-      cap.curvature, cap.respiration);
+  // At double, Gamma* and Km are constants of the slope, kept as doubles: lifted
+  // to tangents they cost the ci solve's Newton step a dozen instructions.
+  if constexpr (std::is_same_v<T, double>) {
+    const double gamma = cap.gamma, km = cap.km;
+    return kernel_slope_at<T>(
+        [this, gamma, km]<class U>(const U& c, const U& vcmax, const U& transport,
+                                   const U& curvature, const U& respiration) -> U {
+          return assim_colimited_kernel<U, U, double>(
+              c, PhotoCapacity<U, double>{vcmax, transport, curvature,
+                                          respiration, gamma, km});
+        },
+        "assimilation in intercellular CO2", ci, cap.vcmax, cap.transport,
+        cap.curvature, cap.respiration);
+  } else {
+    return kernel_slope_at<T>(
+        [this]<class U>(const U& c, const U& vcmax, const U& transport,
+                        const U& curvature, const U& respiration, const U& gamma,
+                        const U& km) -> U {
+          return assim_colimited_kernel<U, U, U>(
+              c, PhotoCapacity<U>{vcmax, transport, curvature, respiration, gamma, km});
+        },
+        "assimilation in intercellular CO2", ci, cap.vcmax, cap.transport,
+        cap.curvature, cap.respiration, cap.gamma, cap.km);
+  }
 }
 
 } // namespace phylloptim
