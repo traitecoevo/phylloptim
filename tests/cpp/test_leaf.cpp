@@ -11281,6 +11281,21 @@ void test_profitmax_abs_assim_max_is_at_psi_crit() {
   ok(cases == 108 && negative >= 20, "the walk reaches leaves of either sign of A");
   ok(worst_excess <= 0.0, "no point of the stream has a larger |A| than |A|max");
   ok(exact_at_crit, "|A|max is |A| at psi_crit, bit for bit");
+
+  // A dark leaf with no respiration has A = 0 along the whole stream: the one
+  // evaluation finds no |A|max, and the search it falls back to finds none
+  // either, so the leaf has no objective rather than a stale normaliser.
+  Drivers dark;
+  dark.PPFD = 0.0;
+  phylloptim::Leaf z = make_single_leaf(dark, 1.0);
+  z.profitmax_A_max_ = 1.0;  // poisoned: the preparation must write it
+  z.R_d_25 = 0.0;
+  z.set_physiology(fixture::series_resistance(1.0e3), dark.PPFD, {1.0}, {1.0},
+                   dark.K_s * dark.theta / dark.h, dark.atm_vpd, dark.ca,
+                   dark.leaf_temp, dark.atm_o2_kpa, dark.atm_kpa);
+  z.prepare_profitmax();
+  ok(z.profitmax_A_max_ == 0.0 && !z.profitmax_has_objective(),
+     "a leaf with A = 0 throughout has no |A|max and no objective");
 }
 
 namespace residual {
