@@ -34,31 +34,6 @@
 namespace phylloptim {
 namespace gradient {
 
-// The parameter indices, defined in leaf.hpp beside the set_traits whose
-// argument order they are, reachable under this namespace too.
-using phylloptim::n_traits;
-using phylloptim::par_vcmax_25;   using phylloptim::par_stem_c;
-using phylloptim::par_stem_P50;   using phylloptim::par_root_c;
-using phylloptim::par_root_P50;   using phylloptim::par_TF24_beta2;
-using phylloptim::par_jmax_25;    using phylloptim::par_phi_J;
-using phylloptim::par_curv_fact_elec_trans;
-using phylloptim::par_curv_fact_colim;
-using phylloptim::par_TF24_cost_scale; using phylloptim::par_R_d_25;
-using phylloptim::par_JS22_gamma; using phylloptim::par_CMax_a;
-using phylloptim::par_CMax_b;     using phylloptim::par_kmax;
-using phylloptim::par_resistance; using phylloptim::par_CF77_lambda;
-using phylloptim::par_TF24_floor_lambda_o;
-using phylloptim::par_LeastCost_beta;
-using phylloptim::par_A;          using phylloptim::par_I;
-using phylloptim::par_D;          using phylloptim::par_topt_offset;
-using phylloptim::par_dTopt_max;  using phylloptim::par_K_A;
-using phylloptim::par_k_i;        using phylloptim::par_k_i_baseline;
-using phylloptim::par_k_rec;      using phylloptim::par_k_rec_Ea;
-using phylloptim::par_c_acclim_maint;
-using phylloptim::par_c_repair_maint; using phylloptim::par_c_protect_maint;
-using phylloptim::par_c_repair_flux;
-using phylloptim::par_PPFD;
-
 // How long `theta` is: one entry per par_names(), the slots a calibration
 // proposes, which come first in the enumeration and stop at par_PPFD.
 // ⚠️ Not n_leaf_pars, which also counts par_PPFD (hazard 12).
@@ -417,20 +392,9 @@ inline void apply(Leaf& l, const double* theta, const Drivers& d, bool single,
   // hold whatever a caller zero-filled and are never read -- and BEFORE the
   // drivers, because set_physiology is what seats the block that reads them.
   if (l.use_thermal_damage_) {
-    l.A_ = theta[par_A];
-    l.I_ = theta[par_I];
-    l.D_ = theta[par_D];
-    l.topt_offset_ = theta[par_topt_offset];
-    l.dTopt_max_ = theta[par_dTopt_max];
-    l.K_A_ = theta[par_K_A];
-    l.k_i_ = theta[par_k_i];
-    l.k_i_baseline_ = theta[par_k_i_baseline];
-    l.k_rec_ = theta[par_k_rec];
-    l.k_rec_Ea_ = theta[par_k_rec_Ea];
-    l.c_acclim_maint_ = theta[par_c_acclim_maint];
-    l.c_repair_maint_ = theta[par_c_repair_maint];
-    l.c_protect_maint_ = theta[par_c_protect_maint];
-    l.c_repair_flux_ = theta[par_c_repair_flux];
+    for (const DamageSlot& d : damage_slots) {
+      l.*d.member = theta[d.slot];
+    }
   }
   if (single) {
     // R's `series_resistance()`: one series resistance in `r_R_V_sum`, built

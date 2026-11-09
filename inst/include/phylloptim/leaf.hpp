@@ -2535,6 +2535,30 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_P50_,
   setup_clean_leaf();
 }
 
+// The thermal-damage layer's inputs in the parameter pack, each slot with the
+// member it holds: passive_pars and gradient::apply both read this list.
+struct DamageSlot {
+  int slot;
+  double Leaf::*member;
+};
+inline constexpr DamageSlot damage_slots[] = {
+    {par_A, &Leaf::A_},
+    {par_I, &Leaf::I_},
+    {par_D, &Leaf::D_},
+    {par_topt_offset, &Leaf::topt_offset_},
+    {par_dTopt_max, &Leaf::dTopt_max_},
+    {par_K_A, &Leaf::K_A_},
+    {par_k_i, &Leaf::k_i_},
+    {par_k_i_baseline, &Leaf::k_i_baseline_},
+    {par_k_rec, &Leaf::k_rec_},
+    {par_k_rec_Ea, &Leaf::k_rec_Ea_},
+    {par_c_acclim_maint, &Leaf::c_acclim_maint_},
+    {par_c_repair_maint, &Leaf::c_repair_maint_},
+    {par_c_protect_maint, &Leaf::c_protect_maint_},
+    {par_c_repair_flux, &Leaf::c_repair_flux_}};
+static_assert(std::size(damage_slots) == par_c_repair_flux - par_A + 1,
+              "every damage slot from par_A to par_c_repair_flux has a member");
+
 inline leaf_pars<double> Leaf::passive_pars() const {
   leaf_pars<double> p{};
   p[par_vcmax_25] = vcmax_25;
@@ -2560,20 +2584,9 @@ inline leaf_pars<double> Leaf::passive_pars() const {
   p[par_CF77_lambda] = CF77_lambda_;
   p[par_TF24_floor_lambda_o] = TF24_floor_lambda_o;
   p[par_LeastCost_beta] = LeastCost_beta;
-  p[par_A] = A_;
-  p[par_I] = I_;
-  p[par_D] = D_;
-  p[par_topt_offset] = topt_offset_;
-  p[par_dTopt_max] = dTopt_max_;
-  p[par_K_A] = K_A_;
-  p[par_k_i] = k_i_;
-  p[par_k_i_baseline] = k_i_baseline_;
-  p[par_k_rec] = k_rec_;
-  p[par_k_rec_Ea] = k_rec_Ea_;
-  p[par_c_acclim_maint] = c_acclim_maint_;
-  p[par_c_repair_maint] = c_repair_maint_;
-  p[par_c_protect_maint] = c_protect_maint_;
-  p[par_c_repair_flux] = c_repair_flux_;
+  for (const DamageSlot& d : damage_slots) {
+    p[d.slot] = this->*d.member;
+  }
   p[par_PPFD] = PPFD_;
   return p;
 }

@@ -6546,11 +6546,11 @@ void test_stem_curve_shortcut_needs_no_rebuild() {
     std::vector<int> pars;
   };
   const Case cases[] = {
-      {"stem_P50", {phylloptim::gradient::par_stem_P50}},
+      {"stem_P50", {phylloptim::par_stem_P50}},
       {"stem_P50 then vcmax_25",
-       {phylloptim::gradient::par_stem_P50, phylloptim::gradient::par_vcmax_25}},
+       {phylloptim::par_stem_P50, phylloptim::par_vcmax_25}},
       {"vcmax_25 then stem_P50",
-       {phylloptim::gradient::par_vcmax_25, phylloptim::gradient::par_stem_P50}}};
+       {phylloptim::par_vcmax_25, phylloptim::par_stem_P50}}};
 
   for (const Case &c : cases) {
     phylloptim::gradient::Settings s;  // fast_stem_curve defaults true
@@ -6583,14 +6583,14 @@ void test_stem_curve_shortcut_needs_no_rebuild() {
     s.model = {phylloptim::Leaf::CostCurve::TF24,
                phylloptim::gradient::Route::Collar};
     s.fast_stem_curve = false;
-    const int pars[1] = {phylloptim::gradient::par_stem_P50};
+    const int pars[1] = {phylloptim::par_stem_P50};
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     l.find_root_collar_psi();
     const long builds = l.stem_curve_builds_;
     phylloptim::gradient::batch(l, theta, 1, obs, false, pars, 1, s);
     ok(l.stem_curve_builds_ == builds,
        "with fast_stem_curve off, a P50 batch still rebuilds nothing");
-    const int c_pars[1] = {phylloptim::gradient::par_stem_c};
+    const int c_pars[1] = {phylloptim::par_stem_c};
     phylloptim::gradient::batch(l, theta, 1, obs, false, c_pars, 1, s);
     ok(l.stem_curve_builds_ > builds, "and a stem_c batch does rebuild");
     printf("  stem curve builds over 3 observations of d/dstem_P50:"
@@ -11154,7 +11154,7 @@ void test_thermal_damage_refusals() {
   gd.atm_o2_kpa = d.atm_o2_kpa;
   gd.atm_kpa = d.atm_kpa;
   const std::vector<phylloptim::gradient::Drivers> obs{gd, gd};
-  const int par[] = {phylloptim::gradient::par_vcmax_25};
+  const int par[] = {phylloptim::par_vcmax_25};
   phylloptim::gradient::Settings s;
   s.model = {phylloptim::Leaf::CostCurve::TF24,
              phylloptim::gradient::Route::Collar};
@@ -11171,9 +11171,9 @@ void test_thermal_damage_refusals() {
     }
   }
   // A trait, a damage state and a cost-carried input, through both routes.
-  const int pars_on[] = {phylloptim::gradient::par_vcmax_25,
-                         phylloptim::gradient::par_I,
-                         phylloptim::gradient::par_c_repair_flux};
+  const int pars_on[] = {phylloptim::par_vcmax_25,
+                         phylloptim::par_I,
+                         phylloptim::par_c_repair_flux};
   phylloptim::gradient::Result r_on;
   phylloptim::gradient::at(on, theta_on, gd, false, pars_on, 3, s, r_on);
   ok(r_on.status != phylloptim::gradient::Status::Error,
