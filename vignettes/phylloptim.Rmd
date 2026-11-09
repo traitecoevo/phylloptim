@@ -314,7 +314,7 @@ The profit function is not defined everywhere. Water flows from the soil to the
 leaf, so `psi_leaf` must be at least the upstream potential. Below it the leaf
 would be wetter than the soil, so `transpiration()`, `stom_cond_CO2()` and
 `psi_leaf_to_ci()` stop with an error rather than return a negative flux.
-`profit_psi_leaf_TF()` reads that pair as zero flux, as the solve's evaluator
+`profit_psi_leaf_TF24()` reads that pair as zero flux, as the solve's evaluator
 does, so it returns a number, but not one on the curve the solve maximises.
 `psi_leaf` equal to the upstream potential is the shut stomata's state, with no
 stomatal flux. Plot the domain the solve actually searches:
@@ -323,7 +323,7 @@ stomatal flux. Plot the domain the solve actually searches:
 psi_upstream <- 2.0
 
 tibble(psi = seq(psi_upstream, 6, length.out = 200)) |>
-  mutate(profit = vapply(psi, l$profit_psi_leaf_TF, numeric(1),
+  mutate(profit = vapply(psi, l$profit_psi_leaf_TF24, numeric(1),
                          psi_upstream = psi_upstream)) |>
   ggplot(aes(psi, profit)) +
   geom_line(linewidth = 0.8, colour = "darkgreen") +

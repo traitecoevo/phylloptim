@@ -241,8 +241,8 @@ std::vector<Row> run_grid() {
         l.stem_curve_integral_deriv(psi_leaf));
     row(kSpline, "transpiration", psi_leaf, 0.0, l.transpiration(psi_leaf, 0.0));
     row(kSpline, "stom_cond_CO2", psi_leaf, 0.0, l.stom_cond_CO2(psi_leaf, 0.0));
-    row(kSpline, "hydraulic_cost_TF", psi_leaf, 0.0,
-        l.hydraulic_cost_TF(psi_leaf));
+    row(kSpline, "hydraulic_cost_TF24", psi_leaf, 0.0,
+        l.hydraulic_cost_TF24(psi_leaf));
   }
 
   // --- tier 5: primitives containing their own iteration --------------------

@@ -270,7 +270,7 @@ public:
   // --- soil geometry -------------------------------------------------------
   // Initialised to the sentinels clear() assigns, so a bare MultiLayerRoots is
   // never indeterminate.
-  double soil_number_of_depths_ = util::na_value_int;
+  int soil_number_of_depths_ = util::na_value_int;
   int max_soil_layer = util::na_value_int;  // deepest layer with non-zero root mass
   std::vector<double> soil_depth_;
   std::vector<double> z_soil_mid_;
@@ -367,7 +367,7 @@ public:
                       const std::vector<double>& soil_depth) {
     psi_soil_ = psi_soil;
     soil_depth_ = soil_depth;
-    soil_number_of_depths_ = soil_depth_.size();
+    soil_number_of_depths_ = static_cast<int>(soil_depth_.size());
 
     if (!(use_precomputed_z_soil_mid_ &&
           z_soil_mid_.size() == static_cast<size_t>(soil_number_of_depths_))) {
@@ -375,7 +375,7 @@ public:
       // to the bottom of each layer, so the mean of consecutive boundaries is
       // the midpoint at any spacing.
       z_soil_mid_.resize(soil_number_of_depths_);
-      for (size_t i = 0; i < soil_number_of_depths_; ++i) {
+      for (size_t i = 0; i < static_cast<size_t>(soil_number_of_depths_); ++i) {
         if (i == 0) {
           z_soil_mid_[i] = (soil_depth_[i] / 2.0);
         } else {
@@ -387,7 +387,7 @@ public:
     use_precomputed_z_soil_mid_ = false;
 
     grav_head_z_.resize(soil_number_of_depths_);
-    for (size_t i = 0; i < soil_number_of_depths_; ++i) {
+    for (size_t i = 0; i < static_cast<size_t>(soil_number_of_depths_); ++i) {
       grav_head_z_[i] = gravity_head * z_soil_mid_[i];
     }
   }
@@ -411,7 +411,7 @@ public:
       util::stop("set_root_network: network has " +
                  std::to_string(network.r_R_H_min.size()) +
                  " rooted layers but the soil profile has only " +
-                 std::to_string(static_cast<int>(soil_number_of_depths_)));
+                 std::to_string(soil_number_of_depths_));
     }
     for (size_t i = 0; i < network.r_R_H_min.size(); ++i) {
       // Non-negative. Zero means infinite conductance, which

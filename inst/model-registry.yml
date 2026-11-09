@@ -2133,7 +2133,7 @@ equations:
       \qquad \psi_\mathrm{leaf} = \mathrm{clamp}_{[\psi_w,\,\psi_\mathrm{crit}]}(\psi) \ \text{(leaf route)}, \qquad
       \psi_r = \mathrm{clamp}_{[\psi_a,\,\psi_b]}(\psi) \ \text{(collar route)}
     code: phylloptim::Leaf::profit_psi_leaf_for
-    also: [phylloptim::Leaf::profit_psi_leaf_TF, phylloptim::Leaf::evaluate_psi_leaf, phylloptim::Leaf::evaluate_psi_leaf_at, phylloptim::Leaf::evaluate_root_collar_psi, phylloptim::Leaf::evaluate_root_collar_psi_for, phylloptim::Leaf::profit_at_collar_psi, phylloptim::Leaf::dry_end]
+    also: [phylloptim::Leaf::profit_psi_leaf_TF24, phylloptim::Leaf::evaluate_psi_leaf, phylloptim::Leaf::evaluate_psi_leaf_at, phylloptim::Leaf::evaluate_root_collar_psi, phylloptim::Leaf::evaluate_root_collar_psi_for, phylloptim::Leaf::profit_at_collar_psi, phylloptim::Leaf::dry_end]
     reads: [psi_crit]
     writes: [profit_, opt_psi_leaf_, opt_root_psi_]
     kind: closed_form
@@ -2234,7 +2234,7 @@ equations:
     latex: |
       C_\mathrm{TF24}(\psi) = \gamma\,\big[1 - f(\psi)\big]^{\beta}, \qquad f(\psi) = \exp\!\big[-(\psi/b)^{c}\big]
     code: phylloptim::Curve< Leaf::CostCurve::TF24 >::cost
-    also: [phylloptim::Leaf::hydraulic_cost_TF, phylloptim::Leaf::hydraulic_cost_TF_kernel]
+    also: [phylloptim::Leaf::hydraulic_cost_TF24, phylloptim::Leaf::hydraulic_cost_TF24_kernel]
     reads: [TF24_cost_scale, TF24_beta2, stem_b, stem_c]
     writes: [hydraulic_cost_]
     kind: closed_form
@@ -2282,7 +2282,7 @@ equations:
     latex: |
       C_\mathrm{TF24f}(\psi; \psi_u) = \gamma\,\big[1 - f(\psi)\big]^{\beta} + \lambda_o\,E
     code: phylloptim::Curve< Leaf::CostCurve::TF24_floor >::cost
-    also: [phylloptim::Leaf::hydraulic_cost_TF24_floor, phylloptim::Leaf::hydraulic_cost_TF_kernel]
+    also: [phylloptim::Leaf::hydraulic_cost_TF24_floor, phylloptim::Leaf::hydraulic_cost_TF24_kernel]
     reads: [TF24_cost_scale, TF24_beta2, TF24_floor_lambda_o]
     writes: [hydraulic_cost_]
     kind: closed_form
@@ -2293,7 +2293,7 @@ equations:
     latex: |
       A_\mathrm{kept} = A - C_\mathrm{carbon}(\psi) = J + P(E), \qquad C_\mathrm{carbon} = \begin{cases} \gamma\,\big[1 - f(\psi)\big]^{\beta} & \text{TF24, TF24\_floor} \\ 0 & \text{every other curve} \end{cases}
     code: phylloptim::Leaf::carbon
-    also: [phylloptim::Curve< Leaf::CostCurve::TF24 >::carbon_cost, phylloptim::Curve< Leaf::CostCurve::TF24_floor >::carbon_cost, phylloptim::Curve< Leaf::CostCurve::TF24_floor >::price, phylloptim::Curve< Leaf::CostCurve::CF77 >::price, phylloptim::Leaf::cf77_price, phylloptim::Leaf::hydraulic_cost_TF_kernel]
+    also: [phylloptim::Curve< Leaf::CostCurve::TF24 >::carbon_cost, phylloptim::Curve< Leaf::CostCurve::TF24_floor >::carbon_cost, phylloptim::Curve< Leaf::CostCurve::TF24_floor >::price, phylloptim::Curve< Leaf::CostCurve::CF77 >::price, phylloptim::Leaf::cf77_price, phylloptim::Leaf::hydraulic_cost_TF24_kernel]
     reads: [TF24_cost_scale, TF24_beta2, TF24_floor_lambda_o, CF77_lambda_]
     writes: []
     kind: closed_form
@@ -2304,7 +2304,7 @@ equations:
     latex: |
       C_\mathrm{shadow} = C - C_\mathrm{carbon} = \begin{cases} 0 & \text{TF24} \\ \lambda_o\,E & \text{TF24\_floor} \\ C & \text{CF77, JS22, CMax} \end{cases}
     code: phylloptim::Leaf::shadow_cost
-    also: [phylloptim::Curve< Leaf::CostCurve::TF24_floor >::price, phylloptim::Curve< Leaf::CostCurve::CF77 >::price, phylloptim::Leaf::cf77_price, phylloptim::Curve< Leaf::CostCurve::TF24 >::carbon_cost, phylloptim::Leaf::hydraulic_cost_TF_kernel]
+    also: [phylloptim::Curve< Leaf::CostCurve::TF24_floor >::price, phylloptim::Curve< Leaf::CostCurve::CF77 >::price, phylloptim::Leaf::cf77_price, phylloptim::Curve< Leaf::CostCurve::TF24 >::carbon_cost, phylloptim::Leaf::hydraulic_cost_TF24_kernel]
     reads: [TF24_floor_lambda_o, CF77_lambda_]
     writes: []
     kind: closed_form
@@ -2412,7 +2412,7 @@ equations:
       J_K(\psi) = h_K(A) - C_K(\psi) \;\text{in the form}\;
       \begin{cases} A - C_K & \text{TF24, CF77, JS22, CMax, TF24\_floor} \\ A\, g_K(\psi) & \text{SOX, JW26} \;(h = \log,\ C = -\log g) \\ A / W & \text{LeastCost} \;(h = \log,\ C = \log W) \\ CG - (HC + TC) & \text{ProfitMax} \;(h = A/\lvert A\rvert_{\max}) \end{cases}
     code: phylloptim::Leaf::profit_psi_leaf_for
-    also: [phylloptim::Leaf::benefit_link, phylloptim::Curve< Leaf::CostCurve::SOX >::gain, phylloptim::Curve< Leaf::CostCurve::JW26 >::gain, phylloptim::Curve< Leaf::CostCurve::LeastCost >::resource_use, phylloptim::Curve< Leaf::CostCurve::ProfitMax >::hydraulic_cost_norm, phylloptim::Leaf::profit_psi_leaf_TF, phylloptim::Leaf::profit_psi_leaf_CF77, phylloptim::Leaf::profit_psi_leaf_JS22, phylloptim::Leaf::profit_psi_leaf_CMax, phylloptim::Leaf::profit_psi_leaf_SOX, phylloptim::Leaf::profit_psi_leaf_JW26, phylloptim::Leaf::profit_psi_leaf_TF24_floor, phylloptim::Leaf::profit_psi_leaf_LeastCost, phylloptim::Leaf::profit_psi_leaf_ProfitMax]
+    also: [phylloptim::Leaf::benefit_link, phylloptim::Curve< Leaf::CostCurve::SOX >::gain, phylloptim::Curve< Leaf::CostCurve::JW26 >::gain, phylloptim::Curve< Leaf::CostCurve::LeastCost >::resource_use, phylloptim::Curve< Leaf::CostCurve::ProfitMax >::hydraulic_cost_norm, phylloptim::Leaf::profit_psi_leaf_TF24, phylloptim::Leaf::profit_psi_leaf_CF77, phylloptim::Leaf::profit_psi_leaf_JS22, phylloptim::Leaf::profit_psi_leaf_CMax, phylloptim::Leaf::profit_psi_leaf_SOX, phylloptim::Leaf::profit_psi_leaf_JW26, phylloptim::Leaf::profit_psi_leaf_TF24_floor, phylloptim::Leaf::profit_psi_leaf_LeastCost, phylloptim::Leaf::profit_psi_leaf_ProfitMax]
     reads: []
     writes: []
     kind: closed_form
@@ -2444,7 +2444,7 @@ equations:
       k_{max}\lvert f'\rvert / k_\mathrm{span} & \text{ProfitMax}
       \end{cases}
     code: phylloptim::Leaf::cost_deriv
-    also: [phylloptim::Leaf::cf77_price, phylloptim::Leaf::hydraulic_cost_TF_kernel, phylloptim::Curve< Leaf::CostCurve::LeastCost >::resource_use, phylloptim::Curve< Leaf::CostCurve::TF24 >::cost_slope, phylloptim::Curve< Leaf::CostCurve::CF77 >::cost_slope, phylloptim::Curve< Leaf::CostCurve::JS22 >::cost_slope, phylloptim::Curve< Leaf::CostCurve::CMax >::cost_slope, phylloptim::Curve< Leaf::CostCurve::SOX >::cost_slope, phylloptim::Curve< Leaf::CostCurve::JW26 >::cost_slope, phylloptim::Curve< Leaf::CostCurve::ProfitMax >::cost_slope, phylloptim::Curve< Leaf::CostCurve::TF24_floor >::cost_slope, phylloptim::Curve< Leaf::CostCurve::LeastCost >::cost_slope]
+    also: [phylloptim::Leaf::cf77_price, phylloptim::Leaf::hydraulic_cost_TF24_kernel, phylloptim::Curve< Leaf::CostCurve::LeastCost >::resource_use, phylloptim::Curve< Leaf::CostCurve::TF24 >::cost_slope, phylloptim::Curve< Leaf::CostCurve::CF77 >::cost_slope, phylloptim::Curve< Leaf::CostCurve::JS22 >::cost_slope, phylloptim::Curve< Leaf::CostCurve::CMax >::cost_slope, phylloptim::Curve< Leaf::CostCurve::SOX >::cost_slope, phylloptim::Curve< Leaf::CostCurve::JW26 >::cost_slope, phylloptim::Curve< Leaf::CostCurve::ProfitMax >::cost_slope, phylloptim::Curve< Leaf::CostCurve::TF24_floor >::cost_slope, phylloptim::Curve< Leaf::CostCurve::LeastCost >::cost_slope]
     reads: [TF24_cost_scale, TF24_beta2, CF77_lambda_, JS22_gamma, CMax_a, CMax_b, TF24_floor_lambda_o, LeastCost_beta, kg_to_mol_h2o, leaf_specific_conductance_max, stem_b, stem_c, psi_crit]
     writes: []
     kind: identity
@@ -2475,7 +2475,7 @@ equations:
     latex: |
       \lambda_\mathrm{TF24}(\psi) = \frac{C'}{E'} = \frac{\gamma\beta\,(c/b)(\psi/b)^{c-1}\,(1-f)^{\beta-1}}{k_{max}}
     code: phylloptim::Curve< Leaf::CostCurve::TF24 >::cost_slope
-    also: [phylloptim::Leaf::lambda_for, phylloptim::Leaf::lambda_TF24, phylloptim::Leaf::hydraulic_cost_TF_kernel]
+    also: [phylloptim::Leaf::lambda_for, phylloptim::Leaf::lambda_TF24, phylloptim::Leaf::hydraulic_cost_TF24_kernel]
     reads: [TF24_cost_scale, TF24_beta2, stem_b, stem_c, leaf_specific_conductance_max]
     writes: []
     kind: closed_form
@@ -2511,7 +2511,7 @@ equations:
     latex: |
       \lambda_\mathrm{TF24f}(\psi) = \lambda_\mathrm{TF24}(\psi) + \lambda_o
     code: phylloptim::Curve< Leaf::CostCurve::TF24_floor >::cost_slope
-    also: [phylloptim::Leaf::lambda_for, phylloptim::Leaf::lambda_TF24_floor, phylloptim::Leaf::hydraulic_cost_TF_kernel]
+    also: [phylloptim::Leaf::lambda_for, phylloptim::Leaf::lambda_TF24_floor, phylloptim::Leaf::hydraulic_cost_TF24_kernel]
     reads: [TF24_floor_lambda_o, TF24_cost_scale, TF24_beta2, leaf_specific_conductance_max]
     writes: []
     kind: closed_form

@@ -451,15 +451,15 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// Leaf__hydraulic_cost_TF
-double Leaf__hydraulic_cost_TF(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_leaf);
-RcppExport SEXP _phylloptim_Leaf__hydraulic_cost_TF(SEXP obj_SEXP, SEXP psi_leafSEXP) {
+// Leaf__hydraulic_cost_TF24
+double Leaf__hydraulic_cost_TF24(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_leaf);
+RcppExport SEXP _phylloptim_Leaf__hydraulic_cost_TF24(SEXP obj_SEXP, SEXP psi_leafSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
     Rcpp::traits::input_parameter< double >::type psi_leaf(psi_leafSEXP);
-    rcpp_result_gen = Rcpp::wrap(Leaf__hydraulic_cost_TF(obj_, psi_leaf));
+    rcpp_result_gen = Rcpp::wrap(Leaf__hydraulic_cost_TF24(obj_, psi_leaf));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -502,16 +502,16 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// Leaf__profit_psi_leaf_TF
-double Leaf__profit_psi_leaf_TF(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_leaf, double psi_upstream);
-RcppExport SEXP _phylloptim_Leaf__profit_psi_leaf_TF(SEXP obj_SEXP, SEXP psi_leafSEXP, SEXP psi_upstreamSEXP) {
+// Leaf__profit_psi_leaf_TF24
+double Leaf__profit_psi_leaf_TF24(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double psi_leaf, double psi_upstream);
+RcppExport SEXP _phylloptim_Leaf__profit_psi_leaf_TF24(SEXP obj_SEXP, SEXP psi_leafSEXP, SEXP psi_upstreamSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
     Rcpp::traits::input_parameter< double >::type psi_leaf(psi_leafSEXP);
     Rcpp::traits::input_parameter< double >::type psi_upstream(psi_upstreamSEXP);
-    rcpp_result_gen = Rcpp::wrap(Leaf__profit_psi_leaf_TF(obj_, psi_leaf, psi_upstream));
+    rcpp_result_gen = Rcpp::wrap(Leaf__profit_psi_leaf_TF24(obj_, psi_leaf, psi_upstream));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -4219,11 +4219,11 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__dprofit_droot_collar_psi", (DL_FUNC) &_phylloptim_Leaf__dprofit_droot_collar_psi, 2},
     {"_phylloptim_Leaf__dprofit_droot_collar_psi_checked", (DL_FUNC) &_phylloptim_Leaf__dprofit_droot_collar_psi_checked, 2},
     {"_phylloptim_Leaf__psi_leaf_to_ci", (DL_FUNC) &_phylloptim_Leaf__psi_leaf_to_ci, 3},
-    {"_phylloptim_Leaf__hydraulic_cost_TF", (DL_FUNC) &_phylloptim_Leaf__hydraulic_cost_TF, 2},
+    {"_phylloptim_Leaf__hydraulic_cost_TF24", (DL_FUNC) &_phylloptim_Leaf__hydraulic_cost_TF24, 2},
     {"_phylloptim_Leaf__hydraulic_cost_CF77", (DL_FUNC) &_phylloptim_Leaf__hydraulic_cost_CF77, 3},
     {"_phylloptim_Leaf__hydraulic_cost_JS22", (DL_FUNC) &_phylloptim_Leaf__hydraulic_cost_JS22, 3},
     {"_phylloptim_Leaf__hydraulic_cost_CMax", (DL_FUNC) &_phylloptim_Leaf__hydraulic_cost_CMax, 3},
-    {"_phylloptim_Leaf__profit_psi_leaf_TF", (DL_FUNC) &_phylloptim_Leaf__profit_psi_leaf_TF, 3},
+    {"_phylloptim_Leaf__profit_psi_leaf_TF24", (DL_FUNC) &_phylloptim_Leaf__profit_psi_leaf_TF24, 3},
     {"_phylloptim_Leaf__profit_psi_leaf_CF77", (DL_FUNC) &_phylloptim_Leaf__profit_psi_leaf_CF77, 3},
     {"_phylloptim_Leaf__profit_psi_leaf_JS22", (DL_FUNC) &_phylloptim_Leaf__profit_psi_leaf_JS22, 3},
     {"_phylloptim_Leaf__profit_psi_leaf_CMax", (DL_FUNC) &_phylloptim_Leaf__profit_psi_leaf_CMax, 3},

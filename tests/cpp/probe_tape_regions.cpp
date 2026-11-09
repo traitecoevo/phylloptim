@@ -258,7 +258,7 @@ void kernels() {
   mark(); keep(l.assim_colimited_kernel<A>(ci, cap));        say("assim_colimited_kernel(ci, capacity)");
   mark(); keep(l.stem_integral_at<A>(sigma, io.in));         say("stem_integral_at(psi, pars)");
   mark(); keep(l.transpiration_at<A>(sigma, collar, io.in)); say("transpiration_at(sigma, collar, pars)");
-  mark(); keep(l.hydraulic_cost_TF_kernel<A>(sigma, io.in)); say("hydraulic_cost_TF_kernel(sigma, pars)");
+  mark(); keep(l.hydraulic_cost_TF24_kernel<A>(sigma, io.in)); say("hydraulic_cost_TF24_kernel(sigma, pars)");
   mark(); keep(pl::curve_with_closed_form_rows<A>(l.stem_curve_integral_deriv(l.opt_psi_leaf_),
                                                   sigma, io.in[pl::par_stem_P50],
                                                   io.in[pl::par_stem_c]));

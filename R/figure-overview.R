@@ -120,10 +120,10 @@
     l$psi_soil_[1]
   psi <- seq(wet, l$psi_crit, length.out = n)
   benefit <- vapply(psi, function(p) {
-    l$profit_psi_leaf_TF(p, wet)
+    l$profit_psi_leaf_TF24(p, wet)
     l$assim_colimited_
   }, numeric(1))
-  cost <- vapply(psi, l$hydraulic_cost_TF, numeric(1))
+  cost <- vapply(psi, l$hydraulic_cost_TF24, numeric(1))
   profit <- benefit - cost
 
   l$set_model("TF24", "leaf"); l$optimise()

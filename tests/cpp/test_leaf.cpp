@@ -240,7 +240,7 @@ void test_shutdown_writes_its_own_fluxes() {
   // root-find's tolerance, and profit_ is that less the hydraulic cost at the
   // stem.
   near(l.assim_colimited_, 0.0, 1e-9, "assimilation is zero in light");
-  near(l.assim_colimited_, l.profit_ + l.hydraulic_cost_TF(l.opt_psi_leaf_), 1e-12,
+  near(l.assim_colimited_, l.profit_ + l.hydraulic_cost_TF24(l.opt_psi_leaf_), 1e-12,
        "assimilation is consistent with profit and the hydraulic cost");
   ok(std::isfinite(l.ci_), "ci is set to the compensation point, not left stale");
   near(l.assim_colimited(l.ci_), 0.0, 1e-9, "and net assimilation is zero there");
@@ -310,7 +310,7 @@ void test_shallow_roots_do_not_inherit_deep_uptake() {
 }
 
 // The other early exit that determines the operating point without going through
-// profit_psi_leaf_TF: assimilation is negative even at ci = ca, so there is no
+// profit_psi_leaf_TF24: assimilation is negative even at ci = ca, so there is no
 // light level at which opening the stomata pays. It set profit_ but left the
 // leaf-side rates alone, so they held whatever the previous solve wrote -- and on
 // a fresh leaf, nothing at all. Ported from plant develop (#585).
@@ -353,7 +353,7 @@ void test_negative_assim_exit_writes_its_own_rates() {
      "a loss, smaller than R_d");
   // The invariant the fix buys: profit_ == assim_colimited_ - hydraulic cost in
   // every branch. It held numerically to the last bit when measured.
-  near(l.assim_colimited_ - l.hydraulic_cost_TF(l.opt_psi_leaf_), l.profit_,
+  near(l.assim_colimited_ - l.hydraulic_cost_TF24(l.opt_psi_leaf_), l.profit_,
        1e-14, "profit is consistent with assimilation and the hydraulic cost");
 
   phylloptim::Leaf fresh = fixture::multilayer_leaf();
@@ -605,8 +605,8 @@ void test_ad_kernels_are_the_model_not_a_mirror() {
        "electron kernel matches bit-exactly at ci=" + std::to_string(ci));
   }
   for (double p : {0.5, 2.0, 3.5949, 5.0}) {
-    ok(l.hydraulic_cost_TF_kernel(p) == l.hydraulic_cost_TF(p),
-       "hydraulic_cost_TF_kernel<double> is hydraulic_cost_TF at psi=" +
+    ok(l.hydraulic_cost_TF24_kernel(p) == l.hydraulic_cost_TF24(p),
+       "hydraulic_cost_TF24_kernel<double> is hydraulic_cost_TF24 at psi=" +
            std::to_string(p));
   }
 
@@ -627,18 +627,18 @@ void test_ad_kernels_are_the_model_not_a_mirror() {
   }
   for (double p : {0.5, 2.0, 3.5949, 5.0}) {
     AD a = p; xad::derivative(a) = 1.0;
-    const double ad = xad::derivative(l.hydraulic_cost_TF_kernel(a));
+    const double ad = xad::derivative(l.hydraulic_cost_TF24_kernel(a));
     const double fd =
-        richardson([&](double x) { return l.hydraulic_cost_TF_kernel(x); }, p, 1e-4);
+        richardson([&](double x) { return l.hydraulic_cost_TF24_kernel(x); }, p, 1e-4);
     near(ad, fd, 1e-8, "dcost/dpsi: AD vs Richardson FD at psi=" +
                            std::to_string(p));
   }
 
   // 3. The cost kernel must be PURE -- an AD probe must not scribble the cached
   // hydraulic_cost_, or a gradient evaluation would corrupt reported model state.
-  const double cached = l.hydraulic_cost_TF(3.0);
+  const double cached = l.hydraulic_cost_TF24(3.0);
   AD probe = 4.5; xad::derivative(probe) = 1.0;
-  (void)l.hydraulic_cost_TF_kernel(probe);
+  (void)l.hydraulic_cost_TF24_kernel(probe);
   ok(l.hydraulic_cost_ == cached,
      "an AD probe of the cost kernel leaves hydraulic_cost_ untouched");
 }
@@ -850,9 +850,9 @@ void test_collar_solve_refuses_rather_than_guessing() {
   phylloptim::Leaf p = make_leaf(d, psi, depth);
   double pa = 0.0, pb = 0.0;
   p.prepare_collar_solve<phylloptim::Leaf::CostCurve::TF24>(pa, pb);
-  const double profit_dry = p.profit_psi_leaf_TF(
+  const double profit_dry = p.profit_psi_leaf_TF24(
       p.find_psi_leaf_from_psi_root(dry_end, p.supply_psi_soil()), dry_end);
-  const double profit_wet = p.profit_psi_leaf_TF(
+  const double profit_wet = p.profit_psi_leaf_TF24(
       p.find_psi_leaf_from_psi_root(wet_end, p.supply_psi_soil()), wet_end);
   ok(profit_wet > profit_dry,
      "the wetter end is the better of the two, by construction");
@@ -1236,8 +1236,8 @@ void test_dprofit_dpsi_leaf_matches_a_finite_difference() {
       const double an_tf =
           l.dprofit_dpsi_leaf<phylloptim::Leaf::CostCurve::TF24>(psi, psi_soil,
                                                                  &feasible);
-      const double up_tf = l.profit_psi_leaf_TF(psi + h, psi_soil);
-      const double dn_tf = l.profit_psi_leaf_TF(psi - h, psi_soil);
+      const double up_tf = l.profit_psi_leaf_TF24(psi + h, psi_soil);
+      const double dn_tf = l.profit_psi_leaf_TF24(psi - h, psi_soil);
       const double fd_tf = (up_tf - dn_tf) / (2.0 * h);
       if (feasible) {
         worst_tf = std::max(worst_tf, std::abs(an_tf / fd_tf - 1.0));
@@ -1360,7 +1360,7 @@ void test_evaluate_psi_leaf_prescribes_rather_than_optimises() {
   // The TF24 curve takes the same route and needs no lambda.
   phylloptim::Leaf t = make_leaf(d, {psi_soil}, {1.0});
   const double p_tf = t.evaluate_psi_leaf<CC::TF24>(psi_off);
-  near(p_tf, t.profit_psi_leaf_TF(psi_off, psi_soil), 1e-12,
+  near(p_tf, t.profit_psi_leaf_TF24(psi_off, psi_soil), 1e-12,
        "the TF24 arm agrees with its own objective at that point");
 }
 
@@ -2743,10 +2743,10 @@ void test_reversed_gradient_is_refused() {
   // golden-section fallback can hand it a stem a hair wetter than the collar.
   // So profit there is the shut-down state, built on zero flux rather than a
   // negative one.
-  const double profit_reversed = l.profit_psi_leaf_TF(up - 0.01, up);
+  const double profit_reversed = l.profit_psi_leaf_TF24(up - 0.01, up);
   ok(std::isfinite(profit_reversed) && l.transpiration_ == 0.0 &&
          l.stom_cond_CO2_ == 0.0,
-     "profit_psi_leaf_TF evaluates the shut-down state, at zero flux");
+     "profit_psi_leaf_TF24 evaluates the shut-down state, at zero flux");
   // A cost that reads the flux reads it by the evaluator's rule, so CF77's
   // profit below the boundary is its shut-down profit exactly.
   l.CF77_lambda_ = 3e5;
@@ -2769,7 +2769,7 @@ void test_reversed_gradient_is_refused() {
      "and a repeated reversed pair is refused again, not served from it");
 
   // Just inside the boundary still answers, and profit there is finite.
-  ok(std::isfinite(l.profit_psi_leaf_TF(up + 0.01, up)),
+  ok(std::isfinite(l.profit_psi_leaf_TF24(up + 0.01, up)),
      "the valid side of the boundary still answers");
 }
 
@@ -2831,8 +2831,8 @@ void test_leaf_route_is_continuous_at_zero_flow_below_compensation() {
     const std::string tag = " at PPFD " + std::to_string(at.ppfd) + ", " +
                             std::to_string(at.temp) + " C" +
                             (at.eb ? ", energy balance" : "");
-    const double shut = l.profit_psi_leaf_TF(1.0, 1.0);
-    const double open = l.profit_psi_leaf_TF(1.0 + 1e-7, 1.0);
+    const double shut = l.profit_psi_leaf_TF24(1.0, 1.0);
+    const double open = l.profit_psi_leaf_TF24(1.0 + 1e-7, 1.0);
     ok(l.assim_colimited_ < 0.0, "the leaf is below compensation" + tag);
     ok(std::abs(open - shut) < 1e-5, "no step in profit at zero flow" + tag);
 
@@ -2840,8 +2840,8 @@ void test_leaf_route_is_continuous_at_zero_flow_below_compensation() {
     bool feasible = false;
     const double slope =
         l.dprofit_dpsi_leaf<phylloptim::Leaf::CostCurve::TF24>(psi, 1.0, &feasible);
-    const double fd = (l.profit_psi_leaf_TF(psi + h, 1.0) -
-                       l.profit_psi_leaf_TF(psi - h, 1.0)) / (2 * h);
+    const double fd = (l.profit_psi_leaf_TF24(psi + h, 1.0) -
+                       l.profit_psi_leaf_TF24(psi - h, 1.0)) / (2 * h);
     near(slope, fd, 1e-4, "dprofit/dpsi_leaf is the profit's slope" + tag);
   }
 }
@@ -3161,14 +3161,14 @@ void test_single_layer_optimisers_reach_a_bound() {
       double best = -std::numeric_limits<double>::infinity(), best_psi = r.psi_soil;
       for (int i = 0; i <= 1000; ++i) {
         const double q = r.psi_soil + (m.psi_crit - r.psi_soil) * double(i) / 1000.0;
-        const double v = m.profit_psi_leaf_TF(q, r.psi_soil);
+        const double v = m.profit_psi_leaf_TF24(q, r.psi_soil);
         if (std::isfinite(v) && v > best) { best = v; best_psi = q; }
       }
       ok(p >= best - 1e-9,
          "the TF24 leaf optimum is at no lower profit than a 1001-point scan");
       // And the reported fields describe the returned point rather than the
       // search's last probe (hazard 8).
-      ok(l.profit_ == m.profit_psi_leaf_TF(psi, r.psi_soil),
+      ok(l.profit_ == m.profit_psi_leaf_TF24(psi, r.psi_soil),
          "and its profit is that point's, bit-for-bit");
       if (best_psi <= r.psi_soil + (m.psi_crit - r.psi_soil) * 1e-3) {
         ++pinned_TF;
@@ -3226,7 +3226,7 @@ void test_single_layer_optimisers_reach_a_bound() {
 // ⚠️ THE GOLDEN GRID CANNOT SEE THIS, WHICH IS WHY IT IS HERE. Every golden row on
 // the collar route solves TF24, so a bug that reports TF24's objective for a
 // different curve is invisible to all four baselines -- and that bug existed: two
-// `profit_psi_leaf_TF` calls survived templating the collar solve, so a SOX solve
+// `profit_psi_leaf_TF24` calls survived templating the collar solve, so a SOX solve
 // maximised SOX and reported TF24's profit AT SOX's argmax. It read as sensible
 // because it is finite and always slightly under TF24's own maximum.
 //

@@ -51,10 +51,10 @@ test_that("a stem wetter than its upstream potential is refused, not answered (#
   msg <- "psi_leaf = 1.99 MPa is wetter than psi_upstream = 2 MPa"
   expect_error(l$transpiration(1.99, 2.0), msg)
   expect_error(l$stom_cond_CO2(1.99, 2.0), msg)
-  expect_true(is.finite(l$profit_psi_leaf_TF(1.99, 2.0)))
+  expect_true(is.finite(l$profit_psi_leaf_TF24(1.99, 2.0)))
   expect_identical(l$transpiration_, 0)
   expect_identical(l$transpiration(2.0, 2.0), 0)
-  expect_true(is.finite(l$profit_psi_leaf_TF(2.0, 2.0)))
+  expect_true(is.finite(l$profit_psi_leaf_TF24(2.0, 2.0)))
   expect_gt(l$transpiration(2.01, 2.0), 0)
 })
 

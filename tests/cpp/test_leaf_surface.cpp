@@ -84,7 +84,7 @@ void test_pack_kernels_are_the_models_own() {
           AD sigma_ad = l.opt_psi_leaf_;
           xad::derivative(sigma_ad) = 1.0;
           same(l.cost_slope_at<double>(l.opt_psi_leaf_, p),
-               xad::derivative(l.hydraulic_cost_TF_kernel(sigma_ad)),
+               xad::derivative(l.hydraulic_cost_TF24_kernel(sigma_ad)),
                "dC/dsigma" + at);
           // At the block's own temperature on a scalar, all six capacities are
           // the members bit for bit, Gamma* and Km included; and with that

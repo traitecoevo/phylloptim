@@ -74,7 +74,7 @@ test_that("the by-name methods cover every curve, and are each curve's own", {
 
   # Bit for bit against the frozen per-curve methods. A product's or a ratio's
   # lambda reads the assimilation last evaluated, so the profit goes first.
-  expect_identical(l$curve_cost("TF24", ps, pu), l$hydraulic_cost_TF(ps))
+  expect_identical(l$curve_cost("TF24", ps, pu), l$hydraulic_cost_TF24(ps))
   for (curve in c("CF77", "JS22", "CMax", "TF24_floor")) {
     expect_identical(l$curve_cost(curve, ps, pu),
                      l[[paste0("hydraulic_cost_", curve)]](ps, pu), info = curve)
@@ -85,7 +85,7 @@ test_that("the by-name methods cover every curve, and are each curve's own", {
     expect_identical(l$curve_profit(curve, ps, pu),
                      l[[paste0("profit_psi_leaf_", curve)]](ps, pu), info = curve)
   }
-  expect_identical(l$curve_profit("TF24", ps, pu), l$profit_psi_leaf_TF(ps, pu))
+  expect_identical(l$curve_profit("TF24", ps, pu), l$profit_psi_leaf_TF24(ps, pu))
   expect_identical(l$curve_lambda("TF24", ps, pu), l$lambda_TF24(ps))
   expect_identical(l$curve_lambda("TF24_floor", ps, pu), l$lambda_TF24_floor(ps))
   for (curve in c("JS22", "CMax", "SOX", "JW26")) {
