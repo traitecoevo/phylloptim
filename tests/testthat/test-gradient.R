@@ -1336,12 +1336,9 @@ test_that("the decision variable follows the route", {
 })
 
 test_that("a product objective's gradient survives an h-sweep", {
-  # ⚠️ THE SWEEP IS THE TEST, not a single step. A finite difference of a
-  # SCAN-resolved argmax is quantisation noise at a small step: psi* moves ~3e-06
-  # MPa under a 1e-06 relative perturbation while the scan resolves it to ~4e-06
-  # over a 4.4 MPa bracket. At that step the FD reported 0.1855 against a true
-  # 0.0551 for SOX, and got the SIGN wrong for JW26 -- which is what a false bug
-  # report is made of. The composite is flat across six decades; the FD is not.
+  # ⚠️ THE SWEEP IS THE TEST, not a single step (hazard 15): a finite difference
+  # through a solve has a noise floor set by the solver, and only a composite
+  # that is flat across six decades of step shows it is not reading that floor.
   tr <- leaf_traits()
   net <- series_resistance(1e4)
   mk <- function(v, p50) {
