@@ -1010,10 +1010,12 @@ public:
     // and takes its rows: the residual is zero at every collar there.
     bool no_conduction = false;
     S gravity_balance{};
-    // The supply it was drawn from, for a curve whose normalisers draw again at
-    // a reference collar (normalisers_at). ⚠️ The caller's object: it must
-    // outlive the draw. Not active; its values reach the tape through draws.
-    const SupplyInputs<S>* inputs = nullptr;
+    // A copy of the supply it was drawn from, kept only where the seated curve
+    // draws again at a reference collar for its normalisers (normalisers_at);
+    // null otherwise, so no other curve pays for it. Owned, so it outlives
+    // whatever the caller drew from. Not visited: its rows reach the tape only
+    // through the second draw.
+    std::shared_ptr<const SupplyInputs<S>> inputs;
 
     // Everything that carries a row. ⚠️ A member not visited here gives exact-zero
     // columns, not an error (hazard 17); the static_assert below counts members.
@@ -1037,7 +1039,7 @@ public:
                     sizeof(double) + sizeof(odelia::with_slope<double>) +
                         sizeof(std::vector<double>) * 2 +
                         2 * (alignof(double) + sizeof(double)) +
-                        sizeof(const SupplyInputs<double>*),
+                        sizeof(std::shared_ptr<const SupplyInputs<double>>),
                 "SupplyDraw gained or lost a member: update for_each_active, "
                 "then this count");
   static_assert(sizeof(odelia::with_slope<double>) == 2 * sizeof(double),
@@ -1047,10 +1049,6 @@ public:
   // The soil's draw at `collar`, which is passive whatever the caller passes: where
   // the point moves is the supplied row's business, and a live collar would record
   // the search that placed it.
-  // The draw keeps a pointer to `supply` (`SupplyDraw::inputs`), so a temporary
-  // is refused at compile time: it would dangle by the time the draw is read.
-  template <class S>
-  SupplyDraw<S> supply_draw_at(const S& collar, SupplyInputs<S>&& supply) const = delete;
   template <class S>
   SupplyDraw<S> supply_draw_at(const S& collar,
                                const SupplyInputs<S>& supply) const {
@@ -1063,7 +1061,9 @@ public:
     const std::size_t n = static_cast<std::size_t>(supply_n_layers());
     SupplyDraw<S> d;
     d.at = odelia::util::to_passive(collar);
-    d.inputs = &supply;
+    if (seated_curve_prepares_normalisers()) {
+      d.inputs = std::make_shared<const SupplyInputs<S>>(supply);
+    }
 
     // A shut leaf sits on its wet bound and is drawn like any other point.
 
@@ -1731,14 +1731,17 @@ public:
                                          const leaf_pars<S>& pars,
                                          const HeldCoords<S>* placed = nullptr) const;
   // Refuses normalisers left empty (the default argument) on a curve that reads
-  // them: zeros would divide, not fail.
+  // them, before anything divides by them.
   template <class S>
   static void check_normalisers(const Normalisers<S>& n, const char* who) {
-    if (!(odelia::util::to_passive(n.A_max) > 0.0)) {
+    if (!(odelia::util::to_passive(n.A_max) > 0.0) ||
+        !(odelia::util::to_passive(n.k_span) > 0.0)) {
       util::stop(std::string(who) + ": a normalised curve needs its normalisers; "
                  "pass normalisers_at's");
     }
   }
+  // Whether the seated curve seeds normalisers before its search (ProfitMax).
+  bool seated_curve_prepares_normalisers() const;
   // See Normalisers: empty for every curve that does not prepare them.
   template <CostCurve K, class S>
   Normalisers<S> normalisers_at(const SupplyDraw<S>& draw,

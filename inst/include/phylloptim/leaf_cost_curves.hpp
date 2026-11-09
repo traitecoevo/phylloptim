@@ -1195,6 +1195,12 @@ inline double Leaf::hydraulic_cost_TF24_floor(double psi_leaf, double psi_upstre
 // and flux, linearly: exact against them, and still right for a caller that
 // averages the leaf's outputs over a crown and writes the means back (plant's
 // crown integration), where a kernel evaluated at a mean potential would not be.
+inline bool Leaf::seated_curve_prepares_normalisers() const {
+  return with_curve(cost_curve_, [](auto tag) {
+    return Curve<decltype(tag)::value>::prepares_normalisers;
+  });
+}
+
 inline double Leaf::carbon() const {
   return with_curve(cost_curve_, [&](auto tag) -> double {
     using C = Curve<decltype(tag)::value>;

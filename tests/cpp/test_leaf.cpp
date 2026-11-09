@@ -10335,6 +10335,37 @@ void test_surface_reduces_tf24_floor_to_tf24() {
   ok(seen.size() == 4, "the reduction was compared at all four kinds");
 }
 
+// A ProfitMax draw keeps its own copy of the supply, so its normalisers read
+// the same numbers after the caller's supply is gone; a draw on any other
+// curve keeps none.
+void test_a_profitmax_draw_outlives_its_supply() {
+  printf("a ProfitMax draw keeps the supply its normalisers read\n");
+  namespace pl = phylloptim;
+  using CC = pl::Leaf::CostCurve;
+  Drivers d;
+  pl::Leaf l = make_leaf(d, {1.0, 1.25, 1.5}, {0.5, 1.0, 1.5});
+  l.set_model(CC::ProfitMax, true);
+  l.optimise();
+  const auto pars = l.passive_pars();
+  const auto drawn_in_a_scope = [&] {
+    const auto supply = l.roots_.held_supply();
+    return l.supply_draw_at<double>(l.opt_root_psi_, supply);
+  };
+  const auto draw = drawn_in_a_scope();
+  const auto held = l.roots_.held_supply();
+  const auto live = l.supply_draw_at<double>(l.opt_root_psi_, held);
+  const auto a = l.normalisers_at<CC::ProfitMax, double>(draw, pars);
+  const auto b = l.normalisers_at<CC::ProfitMax, double>(live, pars);
+  ok(draw.inputs != nullptr && a.k_soil == b.k_soil && a.k_span == b.k_span &&
+         a.A_max == b.A_max,
+     "the normalisers read the draw's own copy of the supply");
+  pl::Leaf t = make_leaf(d, {1.0, 1.25, 1.5}, {0.5, 1.0, 1.5});
+  t.optimise();
+  const auto t_supply = t.roots_.held_supply();
+  ok(t.supply_draw_at<double>(t.opt_root_psi_, t_supply).inputs == nullptr,
+     "a curve without normalisers keeps no copy");
+}
+
 void test_outputs_agree_with_the_solve() {
   printf("the surface's outputs and marginal against the solve's own numbers\n");
   using K = phylloptim::Leaf::CostCurve;
@@ -12033,6 +12064,7 @@ int main(int argc, char **argv) {
   test_collar_solve_refuses_rather_than_guessing();
   test_collar_argmax_is_smooth_in_a_trait();
   test_scalar_forms_are_the_double_forms();
+  test_a_profitmax_draw_outlives_its_supply();
   test_outputs_agree_with_the_solve();
   test_surface_reduces_tf24_floor_to_tf24();
   test_soil_conductance_is_positive();

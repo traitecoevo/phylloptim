@@ -552,6 +552,7 @@ inline S Leaf::dprofit_dcollar_from_coords(const S& collar, const leaf_pars<S>& 
   // dC/dpsi_leaf on the pack, from the curve's scalar form.
   S C_prime;
   if constexpr (C::shape == ObjectiveShape::Normalised) {
+    check_normalisers(norms, "Leaf::dprofit_dcollar_from_coords");
     C_prime = C::template scalar_cost_slope<S>(*this, at.sigma.value, collar, pars,
                                                norms);
   } else {
@@ -562,7 +563,6 @@ inline S Leaf::dprofit_dcollar_from_coords(const S& collar, const leaf_pars<S>& 
     M = A_prime * at.ci.slope - C_prime * at.sigma.slope;
   } else if constexpr (C::link == BenefitLink::Scaled) {
     // benefit_link_deriv's 1/|A|max, on the pack.
-    check_normalisers(norms, "Leaf::dprofit_dcollar_from_coords");
     M = (S(1.0) / norms.A_max) * (A_prime * at.ci.slope) - C_prime * at.sigma.slope;
   } else {
     const S A = assim_colimited_kernel<S>(at.ci.value, cap);
@@ -588,8 +588,8 @@ inline Leaf::Normalisers<S> Leaf::normalisers_at(const SupplyDraw<S>& draw,
                   "normalisers_at builds ProfitMax's normalisers");
     if (draw.inputs == nullptr) {
       util::stop("Leaf::normalisers_at: ProfitMax's normalisers draw the supply "
-                 "again at its reference collar, and this draw was not taken by "
-                 "supply_draw_at from a supply it can reach");
+                 "again at its reference collar, and this draw kept no copy of "
+                 "it: take it with supply_draw_at on a leaf seated on ProfitMax");
     }
     const double ref = profitmax_reference_psi_;
     const double ci_crit = profitmax_crit_ci_;

@@ -1,6 +1,6 @@
 # phylloptim 0.31.0
 
-- The derivative surface serves every curve, from each curve's own definition, in place of TF24 and TF24_floor only. Its outputs gain `carbon`, `A` less the part of the cost that is carbon spent (only TF24's hydraulic cost is), beside `profit`, the objective; plant grows on `carbon`. `physical_outputs_at()` also returns `A`, `E`, `psi_leaf`, `ci` and `gc`, for fitting. For C++ users: `supply_draw_at()` refuses a temporary supply, since the draw keeps a pointer to it ([#239](https://github.com/traitecoevo/phylloptim/issues/239)).
+- The derivative surface serves every curve, from each curve's own definition, in place of TF24 and TF24_floor only. Its outputs gain `carbon`, `A` less the part of the cost that is carbon spent (only TF24's hydraulic cost is), beside `profit`, the objective; plant grows on `carbon`. `physical_outputs_at()` also returns `A`, `E`, `psi_leaf`, `ci` and `gc`, for fitting. ([#239](https://github.com/traitecoevo/phylloptim/issues/239)).
 - New `$carbon` and a `carbon` column of `operating_point()` and `leaf_solve()`, appended last.
 - **Breaking:** `shadow_cost` is the price part of every difference curve's cost: the whole cost on CF77, JS22 and CMax (it was 0), unchanged on TF24 and TF24_floor, and `NA` on SOX, JW26, LeastCost and ProfitMax (it was 0). No other number moves.
 

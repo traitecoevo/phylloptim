@@ -286,6 +286,24 @@ jobs:
             if (std::fabs(g[0].grad[0] - 0.0209497) > 1e-5) {
               return 1;
             }
+            // The derivative surface on a curve other than TF24, at double: it
+            // reads the curve's scalar forms from the installed headers, and
+            // hands over the solve's own numbers.
+            {
+              phylloptim::Leaf c = l;
+              c.set_model(phylloptim::Leaf::CostCurve::CF77, true);
+              c.optimise();
+              const phylloptim::SupplyInputs<double> supply = c.roots_.held_supply();
+              const auto draw = c.supply_draw_at<double>(c.opt_root_psi_, supply);
+              const auto out =
+                  c.physical_outputs_at<phylloptim::Leaf::CostCurve::CF77, double>(
+                      c.opt_root_psi_, draw, c.passive_pars());
+              std::printf("CF77 surface: carbon = %.17g, A = %.17g\n", out.carbon, out.A);
+              if (out.A != c.assim_colimited_ ||
+                  !(std::fabs(out.carbon - c.carbon()) <= 1e-12 * std::fabs(c.carbon()))) {
+                return 1;
+              }
+            }
             l.set_physiology(roots, 900, {2.0}, soil_depth,
                              1.0 * 0.000157 / 5.0, 2.0, 40.0, 25.0, 21.0, 101.3);
             l.find_root_collar_psi();

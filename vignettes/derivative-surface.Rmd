@@ -83,7 +83,7 @@ The calls assume, and mostly do not check:
 - nothing moves the leaf between the solve and `billed_outputs_at`;
 - `pars` and `supply` hold, in value, the leaf's seated traits (`passive_pars()`) and its seated soil state and root network;
 - the supply path is multi-layer;
-- `supply` outlives the draw: the draw keeps a pointer to it, which ProfitMax's normalisers read to draw again at its reference collar, so `supply_draw_at` refuses a temporary at compile time;
+- on ProfitMax, whose normalisers draw the supply again at its reference collar, the draw keeps its own copy of `supply` for that; no other curve's does;
 - the thermal-damage layer and the energy balance are off (both calls refuse either): the surface holds leaf temperature at the solve's value and applies none of the damage layer.
 
 ## The solve path, and the eight kinds

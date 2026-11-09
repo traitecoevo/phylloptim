@@ -358,12 +358,11 @@ void check_solved(pl::Leaf l, const std::string& at, unsigned long seed) {
   const double handoff_rel = std::abs(rev.value - rev_solved.value) /
                              std::max({rev.terms, fwd_side.terms, 1e-300});
   if (handoff_rel > worst_handoff) worst_handoff = handoff_rel;
-  // An order below the identity's own threshold: rounding in a reordered sum,
-  // which on every curve with every output reaches 1.1e-12 on Linux (JW26) and
-  // 3.6e-13 on macOS.
+  // Rounding in a reordered sum, which on every curve with every output reaches
+  // 1.1e-12 on Linux (JW26) and 3.6e-13 on macOS; about three times the worst.
   char moved_by[32];
   std::snprintf(moved_by, sizeof moved_by, "%.3e", handoff_rel);
-  ok(handoff_rel < 1e-11,
+  ok(handoff_rel < 3e-12,
      "handing the coordinates over moves the reverse pairing past rounding (" +
          curve + "): " + at + " rel=" + moved_by);
 
