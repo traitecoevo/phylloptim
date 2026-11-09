@@ -288,6 +288,16 @@ public:
     }
     unknown_supply_kind();
   }
+  // The seated soil state and supply resistances as a view, on either path:
+  // what a caller of the derivative surface builds its SupplyInputs from.
+  SupplyInputs<double> held_supply() const {
+    switch (supply_kind_) {
+      case SupplyKind::MultiLayer:      return roots_.held_supply();
+      case SupplyKind::SinglePotential:
+        return single_.held_supply(roots_.root_P50, roots_.root_c);
+    }
+    unknown_supply_kind();
+  }
   int supply_n_layers() const {
     switch (supply_kind_) {
       case SupplyKind::MultiLayer:
@@ -1063,12 +1073,6 @@ public:
   template <class S>
   SupplyDraw<S> supply_draw_at(const S& collar,
                                const SupplyInputs<S>& supply) const {
-    // The walk is MultiLayerRoots', which a single-potential solve never read.
-    if (supply_kind_ != SupplyKind::MultiLayer) {
-      util::stop("Leaf::supply_draw_at: the derivative surface reads the "
-                 "multi-layer supply, and this leaf is on the " +
-                 supply_kind_name() + " path");
-    }
     const std::size_t n = static_cast<std::size_t>(supply_n_layers());
     SupplyDraw<S> d;
     d.at = odelia::util::to_passive(collar);
@@ -1082,8 +1086,20 @@ public:
     const S held = S(d.at);
     d.uptake.assign(n, S(0.0));
     CollarConductance<S> conductance;
-    roots_.template uptake_at<S>(held, supply, d.uptake, d.E_up.value,
-                                 &conductance);
+    switch (supply_kind_) {
+      case SupplyKind::MultiLayer:
+        roots_.template uptake_at<S>(held, supply, d.uptake, d.E_up.value,
+                                     &conductance);
+        break;
+      case SupplyKind::SinglePotential:
+        // Ohm's law: no roots' ceiling (residual_root_ceiling_ is infinite on
+        // this path), every collar conducts, and no kink to difference.
+        single_.template uptake_at<S>(held, supply, d.uptake, d.E_up.value,
+                                      &conductance);
+        d.E_up.slope = conductance.total;
+        d.duptake_dp = std::move(conductance.per_layer);
+        return d;
+    }
     d.E_up.slope = conductance.total;
     d.duptake_dp = std::move(conductance.per_layer);
     if (!std::isinf(residual_root_ceiling_)) {
@@ -2586,9 +2602,18 @@ inline leaf_pars<double> Leaf::passive_pars() const {
   p[par_CMax_b] = CMax_b;
   p[par_g_min] = g_min;
   p[par_kmax] = leaf_specific_conductance_max_;
-  // The single path's series resistance; NA on the layered route (per layer).
-  p[par_resistance] = roots_.network_.r_R_V_sum.empty() ? util::na_value
-                                    : roots_.network_.r_R_V_sum.front();
+  // The single path's series resistance. On the layered route the resistances
+  // are per layer and this slot reads nothing; it carries the first layer's.
+  switch (supply_kind_) {
+    case SupplyKind::MultiLayer:
+      p[par_resistance] = roots_.network_.r_R_V_sum.empty()
+                              ? util::na_value
+                              : roots_.network_.r_R_V_sum.front();
+      break;
+    case SupplyKind::SinglePotential:
+      p[par_resistance] = single_.resistance_;
+      break;
+  }
   p[par_CF77_lambda] = CF77_lambda_;
   p[par_TF24_floor_lambda_o] = TF24_floor_lambda_o;
   p[par_LeastCost_beta] = LeastCost_beta;

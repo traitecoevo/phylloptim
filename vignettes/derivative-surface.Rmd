@@ -82,7 +82,7 @@ The calls assume, and mostly do not check:
 - `held`, if passed, comes from `operating_collar` at this point (`billed_outputs_at` refuses one placed at another collar or kind);
 - nothing moves the leaf between the solve and `billed_outputs_at`;
 - `pars` and `supply` hold, in value, the leaf's seated traits (`passive_pars()`) and its seated soil state and root network;
-- the supply path is multi-layer;
+- `supply` has the shape `Leaf::held_supply()` gives on the leaf's supply path: each layer's potential and resistances on the multi-layer path, or the one soil potential and the series resistance (`r_R_V_sum[0]`, the pack's `par_resistance`) on the single-potential path;
 - on ProfitMax, whose normalisers draw the supply again at its reference collar, the draw keeps its own copy of `supply` for that; no other curve's does;
 - the thermal-damage layer is off (both calls refuse it): the surface applies none of the damage layer.
 

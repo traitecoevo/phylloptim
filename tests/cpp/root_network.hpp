@@ -66,7 +66,8 @@ inline phylloptim::Leaf multilayer_leaf() {
 // leaf off the stem's end; a product's gain vanishes at psi_crit, so its
 // optimum never sits there; and a shut ProfitMax leaf has no stream to
 // normalise over, so no objective, while none pinned dry over that grid with
-// one.
+// one. The single-potential supply reaches the same kinds on every curve
+// (test_transpose's sweep).
 inline std::vector<phylloptim::Leaf::OperatingPointKind>
 surface_kinds(phylloptim::Leaf::CostCurve curve) {
   using CC = phylloptim::Leaf::CostCurve;

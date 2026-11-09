@@ -92,11 +92,17 @@ struct Stream {
 
 const double kTheta = 0.5, kKs = 2.0, kH = 5.0, kAreaLeaf = 1.0;
 
+// The single-potential path's series resistance, MPa s m2 (mol H2O)^-1: the
+// suite's single-path value (test_leaf's make_single_leaf).
+const double kSeriesResistance = 1.0e3;
+
 pl::Leaf set_up(int layers, double psi0, double ppfd, double leaf_temp,
-                double g_min = 0.0, bool energy_balance = false) {
+                double g_min = 0.0, bool energy_balance = false,
+                bool single = false) {
   pl::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
+  if (single) l.set_supply_single();
   // With the balance on, as test_leaf seats it: daylight NIR at the light.
   if (energy_balance) {
     l.use_energy_balance_ = true;
@@ -120,8 +126,9 @@ pl::Leaf set_up(int layers, double psi0, double ppfd, double leaf_temp,
   // With the balance on, test_leaf's conductance: this one carries enough to cool
   // a leaf past what the model can evaluate, which set_physiology refuses.
   const double kmax = energy_balance ? 0.000157 / 5.0 : kKs * kTheta / kH;
-  l.set_physiology(fixture::root_network(root, depth), ppfd, psi_soil, depth,
-                   kmax, 2.0, 40.0, leaf_temp, 21.0, 101.3);
+  l.set_physiology(single ? fixture::series_resistance(kSeriesResistance)
+                          : fixture::root_network(root, depth),
+                   ppfd, psi_soil, depth, kmax, 2.0, 40.0, leaf_temp, 21.0, 101.3);
   return l;
 }
 
@@ -146,16 +153,18 @@ struct Inputs {
   }
 };
 
+// From the leaf's own supply view, so both supply paths pair the same way.
 template <class S>
 Inputs<S> inputs_of(const pl::Leaf& l) {
   Inputs<S> in;
   const pl::leaf_pars<double> p = l.passive_pars();
   for (std::size_t i = 0; i < p.size(); ++i) in.pars[i] = S(p[i]);
+  const pl::SupplyInputs<double> held = l.held_supply();
   const int n = l.supply_n_layers();
   for (int i = 0; i < n; ++i) {
-    in.psi_soil.push_back(S(l.roots_.psi_soil_[std::size_t(i)]));
-    in.r_R_H_min.push_back(S(l.roots_.network_.r_R_H_min[std::size_t(i)]));
-    in.r_R_V_sum.push_back(S(l.roots_.network_.r_R_V_sum[std::size_t(i)]));
+    in.psi_soil.push_back(S(held.psi_soil[std::size_t(i)]));
+    in.r_R_H_min.push_back(S(held.r_R_H_min[std::size_t(i)]));
+    in.r_R_V_sum.push_back(S(held.r_R_V_sum[std::size_t(i)]));
   }
   return in;
 }
@@ -407,7 +416,8 @@ void check_solved(pl::Leaf l, const std::string& at, unsigned long seed) {
   ++compared;
   if (rel > worst) worst = rel;
   if (cancel > worst_cancel) worst_cancel = cancel;
-  ++seen_kind[curve + " " + l.operating_point_kind_name(l.operating_point_kind())];
+  ++seen_kind[l.supply_kind_name() + " " + curve + " " +
+              l.operating_point_kind_name(l.operating_point_kind())];
   char rel_s[32];
   std::snprintf(rel_s, sizeof rel_s, "%.3e", rel);
   ok(rel < 1e-10, "transpose identity (" + curve + "): " + at + " kind=" +
@@ -456,14 +466,15 @@ std::optional<pl::Leaf> solved_on(const pl::Leaf& base) {
 }
 
 void check(int layers, double psi0, double ppfd, double leaf_temp,
-           unsigned long seed, double g_min) {
-  const pl::Leaf base = set_up(layers, psi0, ppfd, leaf_temp, g_min);
+           unsigned long seed, double g_min, bool single = false) {
+  const pl::Leaf base = set_up(layers, psi0, ppfd, leaf_temp, g_min, false, single);
   for_each_surface_curve([&](auto tag) {
     constexpr CC K = decltype(tag)::value;
     const std::optional<pl::Leaf> l = solved_on<K>(base);
     if (!l) return;
     check_solved<K>(*l,
-                    "layers=" + std::to_string(layers) + " psi_soil=" +
+                    std::string(single ? "single " : "") +
+                        "layers=" + std::to_string(layers) + " psi_soil=" +
                         std::to_string(psi0) + " ppfd=" + std::to_string(ppfd) +
                         " T=" + std::to_string(leaf_temp) +
                         " g_min=" + std::to_string(g_min),
@@ -473,14 +484,15 @@ void check(int layers, double psi0, double ppfd, double leaf_temp,
 
 // The same with the energy balance on.
 void check_energy_balance(int layers, double psi0, double ppfd, double leaf_temp,
-                          unsigned long seed, double g_min) {
-  const pl::Leaf base = set_up(layers, psi0, ppfd, leaf_temp, g_min, true);
+                          unsigned long seed, double g_min, bool single = false) {
+  const pl::Leaf base = set_up(layers, psi0, ppfd, leaf_temp, g_min, true, single);
   for_each_surface_curve([&](auto tag) {
     constexpr CC K = decltype(tag)::value;
     const std::optional<pl::Leaf> l = solved_on<K>(base);
     if (!l) return;
     check_solved<K>(*l,
-                    "energy balance layers=" + std::to_string(layers) +
+                    std::string(single ? "single " : "") +
+                        "energy balance layers=" + std::to_string(layers) +
                         " psi_soil=" + std::to_string(psi0) +
                         " ppfd=" + std::to_string(ppfd) +
                         " T=" + std::to_string(leaf_temp) +
@@ -549,6 +561,18 @@ int main() {
       }
     }
   }
+  // The single-potential supply: one soil potential and a series resistance,
+  // on the collar route, with the energy balance off and on.
+  for (double g_min : {0.0, 5e-4}) {
+    for (double psi0 : {0.5, 1.0, 2.0, 3.0, 5.0, 7.0, 16.0}) {
+      for (double ppfd : {1.0, 100.0, 1500.0}) {
+        for (double leaf_temp : {25.0, 40.0}) {
+          check(1, psi0, ppfd, leaf_temp, seed += 7919, g_min, true);
+          check_energy_balance(1, psi0, ppfd, leaf_temp, seed += 7919, g_min, true);
+        }
+      }
+    }
+  }
   using K = pl::Leaf::OperatingPointKind;
   // The dry pin: a soil dry enough that the leaf transpires all its stem can
   // carry, the continuity root with the stem at the end of its curve (#183).
@@ -586,10 +610,13 @@ int main() {
   for_each_surface_curve([&](auto tag) {
     constexpr CC K = decltype(tag)::value;
     const std::string curve = pl::Leaf::curve_name(static_cast<int>(K));
-    for (pl::Leaf::OperatingPointKind kind : fixture::surface_kinds(K)) {
-      const std::string name = pl::Leaf::operating_point_kind_name(kind);
-      ok(seen_kind[curve + " " + name] > 0,
-         "the identity was checked at a " + name + " point on " + curve);
+    for (const char* supply : {"multilayer", "single"}) {
+      for (pl::Leaf::OperatingPointKind kind : fixture::surface_kinds(K)) {
+        const std::string name = pl::Leaf::operating_point_kind_name(kind);
+        ok(seen_kind[std::string(supply) + " " + curve + " " + name] > 0,
+           "the identity was checked at a " + name + " point on " + curve +
+               " (" + supply + " supply)");
+      }
     }
   });
   printf("%d checks, %d failures\n", compared + seen_carry + 8, failures);

@@ -36,20 +36,28 @@ public:
   double grav_head_ = 0.0;
 
   // psi_soil_ as a one-element vector, so Leaf's vector-taking soil machinery
-  // serves this path unchanged. begin_solve is the only writer.
+  // serves this path unchanged. Written with psi_soil_, and again by begin_solve.
   std::vector<double> psi_soil_vec_{0.0};
+  // The resistance as the supply view's one series resistance, and no
+  // horizontal term, so held_supply() can hand out references.
+  std::vector<double> r_R_V_sum_{util::na_value};
+  std::vector<double> r_R_H_min_{0.0};
 
   void clear() {
     psi_soil_ = util::na_value;
     psi_soil_vec_.assign(1, util::na_value);
     // A driver, so cleared too: set_physiology always re-supplies it.
     resistance_ = util::na_value;
+    r_R_V_sum_.assign(1, util::na_value);
   }
 
   // One layer, always: the consumption buffer gets exactly one entry.
   int n_layers() const { return 1; }
 
-  void set_soil_state(double psi_soil) { psi_soil_ = psi_soil; }
+  void set_soil_state(double psi_soil) {
+    psi_soil_ = psi_soil;
+    psi_soil_vec_.assign(1, psi_soil);
+  }
 
   // The per-call resistance, from the RootNetwork the multi-layer path also takes:
   // `r_R_V_sum[0]` is the series resistance of one layer. A non-zero `r_R_H_min`
@@ -81,6 +89,14 @@ public:
                  ". The leaf routes are the zero-resistance model.");
     }
     resistance_ = r;
+    r_R_V_sum_.assign(1, r);
+  }
+
+  // This object's own state as a supply view, for the double path; the root
+  // pair is the leaf's, which this path does not read.
+  SupplyInputs<double> held_supply(const double& root_P50,
+                                   const double& root_c) const {
+    return {psi_soil_vec_, r_R_H_min_, r_R_V_sum_, root_P50, root_c};
   }
 
   // Per-solve entry point, as MultiLayerRoots::begin_solve: publish the soil
@@ -132,6 +148,35 @@ public:
       util::stop("SinglePotential::uptake_at needs at least one potential");
     }
     uptake_from(T_collar, psi_soil[0], soil_consumption, E_up);
+  }
+
+  // The draw at any scalar, for the derivative surface, in MultiLayerRoots::
+  // uptake_at's shape: one layer's uptake in mol, E_up in kg, and the collar
+  // slope (kg in total, mol per layer). The resistance is the supply's
+  // `r_R_V_sum[0]`, so a caller that passes the pack's `par_resistance` there
+  // gets its row. The same expression as uptake_from, so at double the value is
+  // that function's bit for bit.
+  template <class S>
+  void uptake_at(const S& T_collar, const SupplyInputs<S>& at,
+                 std::vector<S>& uptake, S& E_up,
+                 CollarConductance<S>* conductance = nullptr) const {
+    using odelia::util::to_passive;
+    const S& r = at.r_R_V_sum[0];
+    if (!std::isfinite(to_passive(T_collar)) || !(to_passive(r) > 0.0)) {
+      util::stop_infeasible("uptake",
+          "SinglePotential::uptake_at invalid input; T_collar=" +
+              util::to_string(to_passive(T_collar)) +
+              ", resistance=" + util::to_string(to_passive(r)));
+    }
+    const S E_i = (T_collar - at.psi_soil[0] - grav_head_) / r;
+    uptake.assign(1, E_i);
+    E_up = E_i * kg_per_mol_h2o;
+    if (conductance != nullptr) {
+      conductance->total = S(kg_per_mol_h2o) / r;
+      if (conductance->keep_per_layer) {
+        conductance->per_layer.assign(1, 1.0 / to_passive(r));
+      }
+    }
   }
 
   double duptake_dpsi(double T_collar,

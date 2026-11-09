@@ -426,14 +426,15 @@ void test_tf24_floor_rows_at_a_price() {
 // surface that starts reading one fails here by name. Every other row is held
 // to the tolerance below, and every read parameter must be compared somewhere,
 // so a wrong row in any of them fails.
-template <phylloptim::Leaf::CostCurve K, bool EB = false>
+template <phylloptim::Leaf::CostCurve K, bool EB = false, bool Single = false>
 void referee_every_parameter_at_every_kind(int* compared_out) {
   using T = odelia::ode::tangent_scalar<double>;
   using Kind = phylloptim::Leaf::OperatingPointKind;
   using CC = phylloptim::Leaf::CostCurve;
   namespace pl = phylloptim;
   const std::string curve =
-      pl::Leaf::curve_name(static_cast<int>(K)) + (EB ? " with the energy balance" : "");
+      pl::Leaf::curve_name(static_cast<int>(K)) + (EB ? " with the energy balance" : "") +
+      (Single ? " on the single potential" : "");
   // With the energy balance on, as make_pm_leaf seats it: daylight NIR fixed at
   // the fixture's light, so PPFD's row is the light's alone.
   const auto seat_balance = [&](pl::Leaf& leaf, double ppfd) {
@@ -489,6 +490,18 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
     fixtures.push_back({{6.0}, 100.0, 0.5, Kind::BoundaryDry});
     fixtures.push_back({{6.0}, 100.0, 0.5, Kind::BoundaryDry, 5e-4});
   }
+  // On the single potential, one soil potential behind a series resistance:
+  // each fixture's first layer, and a bright leaf on a moist soil, where that
+  // supply reaches its dry pin.
+  if (Single) {
+    std::vector<Fixture> one;
+    for (const Fixture& fx : fixtures) {
+      one.push_back({{fx.psi_soil[0]}, fx.ppfd, fx.vpd, fx.want, fx.g_min});
+    }
+    one.push_back({{2.0}, 1500.0, 2.0, Kind::BoundaryDry});
+    one.push_back({{2.0}, 1500.0, 2.0, Kind::BoundaryDry, 5e-4});
+    fixtures = one;
+  }
   // TF24_floor at a small price, so its fixtures stay on TF24's kinds.
   const double price = 1e3;
   // A slot some curve owns is read only by its owner, and TF24's two by
@@ -499,7 +512,9 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
     return false;
   };
   const auto unread = [&](int k) {
-    if (k == pl::par_resistance || (k >= pl::par_A && k < pl::par_PPFD)) return true;
+    // The series resistance is read on the single potential alone.
+    if (k == pl::par_resistance) return !Single;
+    if (k >= pl::par_A && k < pl::par_PPFD) return true;
     // NIR reaches the solve only through the energy balance.
     if (k == pl::par_NIR) return !EB;
     bool owned = false;
@@ -537,6 +552,7 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
     // solve reads.
     const auto solve = [&](const pl::leaf_pars<double>& p) {
       pl::Leaf l = fixture::multilayer_leaf();
+      if (Single) l.set_supply_single();
       l.set_traits(p[pl::par_vcmax_25], p[pl::par_stem_c], p[pl::par_stem_P50],
                    p[pl::par_root_c], p[pl::par_root_P50], p[pl::par_TF24_beta2],
                    p[pl::par_jmax_25], p[pl::par_phi_J],
@@ -563,20 +579,24 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
       l.c_repair_flux_ = p[pl::par_c_repair_flux];
       seat_balance(l, fx.ppfd);
       if (EB) l.NIR_int_ = p[pl::par_NIR];
-      l.set_physiology(network, p[pl::par_PPFD], fx.psi_soil, depth,
+      l.set_physiology(Single ? fixture::series_resistance(p[pl::par_resistance])
+                              : network,
+                       p[pl::par_PPFD], fx.psi_soil, depth,
                        p[pl::par_kmax], fx.vpd, 40.0, 25.0, 21.0, 101.3);
       l.set_model(K, true);
       l.optimise();
       return l;
     };
     pl::Leaf base = fixture::multilayer_leaf();
+    if (Single) base.set_supply_single();
     seat_balance(base, fx.ppfd);
-    base.set_physiology(network, fx.ppfd, fx.psi_soil, depth, 0.000157 / 5.0,
+    base.set_physiology(Single ? fixture::series_resistance(1e3) : network, fx.ppfd,
+                        fx.psi_soil, depth, 0.000157 / 5.0,
                         fx.vpd, 40.0, 25.0, 21.0, 101.3);
     pl::leaf_pars<double> p0 = base.passive_pars();
     p0[pl::par_g_min] = fx.g_min;
     p0[pl::par_TF24_floor_lambda_o] = price;
-    // The single path's slot, NA on this one; any value, since nothing reads it.
+    // The single path's series resistance; on the layered path nothing reads it.
     p0[pl::par_resistance] = 1e3;
     // NIR is unset off the balance, where nothing reads it; any finite value.
     if (!EB) p0[pl::par_NIR] = 0.0;
@@ -630,15 +650,26 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
     }
     // psi_leaf is the collar's function, so the solve's noise in it is the
     // collar's times dpsi_leaf/dcollar, which on the curve's tail runs to 1e5.
+    // Within a step of the stem curve's end the drier side is off the curve, so
+    // the slope is taken on the wet side alone there: an allowance that throws
+    // must not read as none.
     double psi_per_collar = 0.0;
-    try {
+    {
       const double dp = 1e-6;
-      psi_per_collar = std::abs(
-          (probe.find_psi_leaf_from_psi_root(probe.opt_root_psi_ + dp, probe.supply_psi_soil()) -
-           probe.find_psi_leaf_from_psi_root(probe.opt_root_psi_ - dp, probe.supply_psi_soil())) /
-          (2.0 * dp));
+      const auto psi_leaf_at = [&](double x) {
+        return probe.find_psi_leaf_from_psi_root(x, probe.supply_psi_soil());
+      };
+      try {
+        psi_per_collar = std::abs((psi_leaf_at(probe.opt_root_psi_ + dp) -
+                                   psi_leaf_at(probe.opt_root_psi_ - dp)) / (2.0 * dp));
+      } catch (const std::exception&) {
+        try {
+          psi_per_collar = std::abs((psi_leaf_at(probe.opt_root_psi_) -
+                                     psi_leaf_at(probe.opt_root_psi_ - dp)) / dp);
+        } catch (const std::exception&) {
+        }
+      }
       if (!std::isfinite(psi_per_collar)) psi_per_collar = 0.0;
-    } catch (const std::exception&) {
     }
     if (K == CC::ProfitMax && EB) {
       (l.profitmax_peak_psi_ == l.psi_crit ? peak_at_crit : peak_inside) += 1;
@@ -656,11 +687,14 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
       pl::leaf_pars<T> tp;
       for (std::size_t i = 0; i < tp.size(); ++i) tp[i] = T(p0[i]);
       odelia::ode::set_direction(tp[std::size_t(k)], 1.0);
+      // From the leaf's own supply view; on the single potential the series
+      // resistance is the pack's, so its row is carried.
+      const pl::SupplyInputs<double> held = l.held_supply();
       std::vector<T> soil, r_h, r_v;
       for (int i = 0; i < l.supply_n_layers(); ++i) {
-        soil.push_back(T(l.roots_.psi_soil_[std::size_t(i)]));
-        r_h.push_back(T(l.roots_.network_.r_R_H_min[std::size_t(i)]));
-        r_v.push_back(T(l.roots_.network_.r_R_V_sum[std::size_t(i)]));
+        soil.push_back(T(held.psi_soil[std::size_t(i)]));
+        r_h.push_back(T(held.r_R_H_min[std::size_t(i)]));
+        r_v.push_back(Single ? tp[pl::par_resistance] : T(held.r_R_V_sum[std::size_t(i)]));
       }
       const pl::SupplyInputs<T> supply{soil, r_h, r_v, tp[pl::par_root_P50],
                                        tp[pl::par_root_c]};
@@ -712,18 +746,22 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
         skipped_at += " " + name + "/" + par_name(k);
         continue;
       }
-      // Each output's difference, and its size at the two ends, which sets the
-      // noise floor below.
+      // Each output's difference, and the size of what it is rounded on, which
+      // sets the noise floor below: the output's own size, except that A and
+      // the carbon read off it net gross assimilation against respiration, so
+      // near zero they carry the rounding of the larger term (R_d), not of
+      // their own size.
       std::vector<double> fd, mag;
-      const auto diff = [&](double a, double b) {
+      const auto diff = [&](double a, double b, double terms = 0.0) {
         fd.push_back((a - b) / span);
-        mag.push_back(std::max(std::abs(a), std::abs(b)));
+        mag.push_back(std::max({std::abs(a), std::abs(b), terms}));
       };
+      const double respiration = std::max(std::abs(up.R_d_), std::abs(down.R_d_));
       diff(up.opt_root_psi_, down.opt_root_psi_);
       diff(up.profit_, down.profit_);
-      diff(up.carbon(), down.carbon());
-      diff(up.carbon(), down.carbon());
-      diff(up.assim_colimited_, down.assim_colimited_);
+      diff(up.carbon(), down.carbon(), respiration);
+      diff(up.carbon(), down.carbon(), respiration);
+      diff(up.assim_colimited_, down.assim_colimited_, respiration);
       diff(up.transpiration_, down.transpiration_);
       diff(up.opt_psi_leaf_, down.opt_psi_leaf_);
       diff(up.ci_, down.ci_);
@@ -843,6 +881,24 @@ void test_supplied_rows_match_a_resolve_at_every_kind() {
   referee_every_parameter_at_every_kind<CC::JW26, true>(&compared);
   referee_every_parameter_at_every_kind<CC::LeastCost, true>(&compared);
   referee_every_parameter_at_every_kind<CC::ProfitMax, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::TF24, false, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::TF24_floor, false, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::CF77, false, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::JS22, false, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::CMax, false, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::SOX, false, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::JW26, false, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::LeastCost, false, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::ProfitMax, false, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::TF24, true, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::TF24_floor, true, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::CF77, true, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::JS22, true, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::CMax, true, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::SOX, true, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::JW26, true, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::LeastCost, true, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::ProfitMax, true, true>(&compared);
   ok(compared >= 3300, "the referee compared at least 3300 rows");
 }
 
@@ -981,8 +1037,8 @@ void test_shut_leaf_seated_at_its_collar_bills_the_roots_nothing() {
 // checked by name: the curve the solve was seated on, the supply path the draw
 // walks, and the draw's E_up at a shutdown, which supply_draw_at returns before
 // writing. The control for each is the same call on the matching leaf.
-void test_surface_refuses_a_curve_or_supply_it_was_not_solved_on() {
-  printf("the derivative surface refuses another curve or supply path\n");
+void test_surface_refuses_a_curve_it_was_not_solved_on() {
+  printf("the derivative surface refuses another curve, and draws on either supply\n");
   using CC = phylloptim::Leaf::CostCurve;
   using Kind = phylloptim::Leaf::OperatingPointKind;
   Drivers d;
@@ -1017,12 +1073,21 @@ void test_surface_refuses_a_curve_or_supply_it_was_not_solved_on() {
                         d.atm_o2_kpa, d.atm_kpa);
   single.find_root_collar_psi();
   ok(std::isfinite(single.profit_), "control: the single-potential leaf solves");
-  const auto single_supply = single.roots_.held_supply();
-  ok(throws_with([&] {
-       single.supply_draw_at<double>(single.opt_root_psi_, single_supply);
-     }, "Leaf::supply_draw_at: the derivative surface reads the multi-layer "
-        "supply, and this leaf is on the single path"),
-     "supply_draw_at refuses the single-potential path");
+  // The single path draws by Ohm's law at the solved collar: the solve's own
+  // uptake bit for bit, its constant conductance, and the resistance the pack
+  // carries in par_resistance.
+  const auto single_supply = single.held_supply();
+  const auto single_draw =
+      single.supply_draw_at<double>(single.opt_root_psi_, single_supply);
+  ok(single_draw.E_up.value == single.E_up_ &&
+         single_draw.uptake.size() == 1 &&
+         single_draw.uptake[0] == single.soil_consumption_[0],
+     "the single-potential draw is the solve's uptake, bit for bit");
+  ok(single_draw.E_up.slope == single.single_.duptake_dpsi() &&
+         !single_draw.has_uptake_limit && !single_draw.no_conduction,
+     "the single-potential draw's slope is its conductance, with no ceiling");
+  ok(single.passive_pars()[phylloptim::par_resistance] == 1.0e3,
+     "the pack carries the single path's series resistance");
 
   phylloptim::Leaf shut = make_leaf(Drivers{}, {17.0}, {1.0});
   shut.find_root_collar_psi();
@@ -1858,6 +1923,6 @@ void run_surface() {
   test_held_coordinates_are_refused_off_their_point();
   test_supplied_rows_match_a_resolve_at_every_kind();
   test_shut_leaf_seated_at_its_collar_bills_the_roots_nothing();
-  test_surface_refuses_a_curve_or_supply_it_was_not_solved_on();
+  test_surface_refuses_a_curve_it_was_not_solved_on();
   test_tf24_floor_rows_at_a_price();
 }
