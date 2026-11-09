@@ -11202,6 +11202,65 @@ void test_thermal_damage_refusals() {
 // ===========================================================================
 // The residual (cuticular) conductance, #182
 // ---------------------------------------------------------------------------
+// ProfitMax's |A|max with the energy balance off is |A| at psi_crit, read in one
+// evaluation: at a fixed leaf temperature |A| rises with conductance at either
+// sign of A. Held against a 400-point walk of the stream, with and without a
+// cuticle and the damage layer, on dark and bright, cool and hot leaves, so a
+// normaliser read anywhere but the peak fails here.
+void test_profitmax_abs_assim_max_is_at_psi_crit() {
+  printf("ProfitMax: |A|max is |A| at psi_crit with the energy balance off\n");
+  int cases = 0, negative = 0;
+  double worst_excess = 0.0;
+  bool exact_at_crit = true;
+  for (double g_min : {0.0, 5e-4, 5e-3})
+    for (bool damage : {false, true})
+      for (double psi_soil : {0.5, 2.0, 4.0})
+        for (double ppfd : {1.0, 200.0, 1500.0})
+          for (double temp : {25.0, 50.0}) {
+            Drivers d;
+            d.PPFD = ppfd;
+            d.leaf_temp = temp;
+            phylloptim::Leaf l = make_single_leaf(d, psi_soil);
+            l.g_min = g_min;
+            if (damage) {
+              l.use_thermal_damage_ = true;
+              set_atls_inputs(l);
+            }
+            // Re-seated, since set_physiology reads g_min and the damage gate.
+            l = [&] {
+              phylloptim::Leaf m = l;
+              phylloptim::RootNetwork rn = fixture::series_resistance(1.0e3);
+              m.set_physiology(rn, d.PPFD, {psi_soil}, {1.0}, d.K_s * d.theta / d.h,
+                               d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa,
+                               d.atm_kpa);
+              return m;
+            }();
+            l.prepare_profitmax();
+            const double a_max = l.profitmax_A_max_;
+            const double ref = l.profitmax_reference_psi();
+            const double wet = l.leaf_wet_bound(ref);
+            if (!(a_max > 0.0) || !(l.psi_crit > wet)) {
+              continue;
+            }
+            ++cases;
+            const int n = 400;
+            for (int i = 1; i <= n; ++i) {
+              const double psi = wet + (l.psi_crit - wet) * double(i) / n;
+              l.set_leaf_states_rates_from_psi_leaf(psi, ref);
+              worst_excess = std::max(
+                  worst_excess, (std::abs(l.assim_colimited_) - a_max) / a_max);
+            }
+            // The walk's last point is psi_crit itself.
+            if (std::abs(l.assim_colimited_) != a_max) exact_at_crit = false;
+            if (l.assim_colimited_ < 0.0) ++negative;
+          }
+  printf("    %d cases (%d with A < 0), worst |A| above |A|max %.3g of it\n", cases,
+         negative, worst_excess);
+  ok(cases == 108 && negative >= 20, "the walk reaches leaves of either sign of A");
+  ok(worst_excess <= 0.0, "no point of the stream has a larger |A| than |A|max");
+  ok(exact_at_crit, "|A|max is |A| at psi_crit, bit for bit");
+}
+
 namespace residual {
 
 using Kind = phylloptim::Leaf::OperatingPointKind;
@@ -12420,6 +12479,7 @@ int main(int argc, char **argv) {
   test_collar_shorthand_solves_the_seated_curve();
   test_log_link_curves_shut_dark_collar_leaves();
   test_profitmax_collar_route_has_a_degenerate_exit();
+  test_profitmax_abs_assim_max_is_at_psi_crit();
   test_thermal_damage_gate_off_is_inert();
   test_thermal_damage_bypasses_the_cache();
   test_thermal_damage_dprofit_is_the_solves_own();

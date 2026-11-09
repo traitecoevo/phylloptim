@@ -2192,14 +2192,15 @@ public:
   // and the conductance span.
   void prepare_profitmax();
 
-  // The conductance normalisers alone, `k(psi_soil)` and the span to `k_crit`:
-  // analytic in the traits, so refreshed whenever the traits move.
+  // The conductance normalisers alone, `k(psi_soil)` and the span to `k_crit`,
+  // from the reference potential: analytic in the traits, so refreshed whenever
+  // the traits move. On the layered supply the reference is a collar solve's wet
+  // bracket end, so it is found once per preparation and passed in.
   double profitmax_reference_psi();
-  void prepare_profitmax_norms();
+  void prepare_profitmax_norms(double reference_psi);
 
-  // The same with |A|max supplied, not scanned: the scan is piecewise constant
-  // in the traits, so a gradient holds |A|max at the base point and refreshes
-  // only the analytic normalisers after set_traits clears them.
+  // The same with |A|max supplied rather than found, for a caller that holds it
+  // at a base point.
   void prepare_profitmax_at(double A_max);
   double profit_psi_leaf_ProfitMax(double psi_leaf, double psi_upstream);
 
