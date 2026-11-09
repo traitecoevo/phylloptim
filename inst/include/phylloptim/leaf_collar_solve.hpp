@@ -959,14 +959,18 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
     return 0.0;
   }
 
+  // The stem table's slope at either end, each read once: a read is an
+  // out-of-line table lookup, and the compiler does not share two of them.
+  const double f_psi = stem_curve_integral_deriv(psi);
+  const double f_leaf = stem_curve_integral_deriv(psi_leaf);
   // dpsi_leaf/dpsi, shared by both branches below.
   double dpsileaf_dpsi;
   if (std::isfinite(dEup_dpsi)) {
     const double dEpsileaf_dpsi =
-        dEup_dpsi / leaf_specific_conductance_max_ + stem_curve_integral_deriv(psi);
+        dEup_dpsi / leaf_specific_conductance_max_ + f_psi;
     // dpsi_leaf/dE_psi_leaf = 1/G'(psi_leaf), at the psi_leaf inverted above
     // from the same E_up_ and psi.
-    dpsileaf_dpsi = (1.0 / stem_curve_integral_deriv(psi_leaf)) * dEpsileaf_dpsi;
+    dpsileaf_dpsi = (1.0 / f_leaf) * dEpsileaf_dpsi;
   } else {
     // NaN from the supply means "use finite differences" (hazard 6).
     const double h = 1e-6;
@@ -994,9 +998,9 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
       atm_kpa_ * kg_to_mol_h2o / vpd_leaf_ / H2O_CO2_stom_diff_ratio_;
   double gc = gc_const * E_s + cuticle;
   double dgc_dpsileaf =
-      gc_const * leaf_specific_conductance_max_ * stem_curve_integral_deriv(psi_leaf);
+      gc_const * leaf_specific_conductance_max_ * f_leaf;
   double dgc_dpsi =
-      gc_const * leaf_specific_conductance_max_ * (-stem_curve_integral_deriv(psi));
+      gc_const * leaf_specific_conductance_max_ * (-f_psi);
   const double drstar_dpsi = residual_flux_dpsi_upstream(psi, Tleaf_here);
   dgc_dpsi = dgc_dpsi - gc_const * drstar_dpsi;
   // The boundary layer's share of the CO2 path: the value and every partial
