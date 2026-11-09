@@ -1302,7 +1302,9 @@ public:
   // dprofit/dpsi_leaf with the upstream potential held, for the leaf routes:
   // dprofit_at_collar_psi with dpsi_leaf/dx = 1. `feasible` false means the 0.0
   // returned is a sentinel, not a stationary point.
-  template <CostCurve K>
+  // `with_cost` false drops the cost's slope: on an identity-link curve that
+  // reads no leaf temperature in its cost, the result is then dA/dpsi_leaf.
+  template <CostCurve K, bool with_cost = true>
   double dprofit_dpsi_leaf(double psi_leaf, double psi_upstream,
                            bool* feasible = nullptr);
 

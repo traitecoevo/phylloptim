@@ -44,7 +44,7 @@ inline bool Leaf::foc_point(double psi_leaf, double psi_upstream, FocPoint& p) {
 // fixed, for every curve through its `BenefitLink` h. It shares foc_point with
 // dprofit_at_collar_psi; the algebra after ci is that function's at
 // dpsileaf_dpsi = 1 and dgc_dpsi = 0, written out in its own operation order.
-template <Leaf::CostCurve K>
+template <Leaf::CostCurve K, bool with_cost>
 inline double Leaf::dprofit_dpsi_leaf(double psi_leaf, double psi_upstream,
                                       bool* feasible) {
   if (feasible != nullptr) {
@@ -63,7 +63,10 @@ inline double Leaf::dprofit_dpsi_leaf(double psi_leaf, double psi_upstream,
   const double dT_dE = at.dT_dE, Tleaf_here = at.Tleaf, r_star = at.r_star,
                E_s = at.E_s, cuticle = at.cuticle, ci = at.ci;
 
-  const double C_prime = cost_deriv<K>(psi_leaf, psi_upstream);
+  double C_prime = 0.0;
+  if constexpr (with_cost) {
+    C_prime = cost_deriv<K>(psi_leaf, psi_upstream);
+  }
 
   if (feasible != nullptr) {
     *feasible = true;
