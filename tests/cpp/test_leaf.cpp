@@ -5410,6 +5410,12 @@ void test_supplied_rows_match_a_resolve_at_every_kind() {
   referee_every_parameter_at_every_kind<CC::ProfitMax>(&compared);
   referee_every_parameter_at_every_kind<CC::TF24, true>(&compared);
   referee_every_parameter_at_every_kind<CC::TF24_floor, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::CF77, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::JS22, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::CMax, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::SOX, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::JW26, true>(&compared);
+  referee_every_parameter_at_every_kind<CC::LeastCost, true>(&compared);
   ok(compared >= 3300, "the referee compared at least 3300 rows");
 }
 
@@ -10141,7 +10147,10 @@ void outputs_agree_with_the_solve_on(double price) {
   const std::vector<std::vector<double>> depths = {
       {1.0}, {0.5, 1.0, 1.5}, {0.4, 0.8, 1.2, 1.6, 2.0}};
   int n_interior = 0, n_bound = 0, n_shut = 0, n_marg = 0;
-  for (double ppfd : {Drivers().PPFD, 30.0, 1.0}) for (double T : {25.0, 40.0}) {
+  // With the balance on, dim light as well: where LeastCost leaves psi_crit.
+  std::vector<double> lights{Drivers().PPFD, 30.0, 1.0};
+  if (EB) lights.push_back(100.0);
+  for (double ppfd : lights) for (double T : {25.0, 40.0}) {
     for (double psi0 : {0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 17.0}) {
       for (std::size_t k = 0; k < soils.size(); ++k) {
         Drivers d;
@@ -10557,6 +10566,12 @@ void test_outputs_agree_with_the_solve() {
   outputs_agree_with_the_solve_on<K::ProfitMax>(kPriceForFOC);
   outputs_agree_with_the_solve_on<K::TF24, true>(kPriceForFOC);
   outputs_agree_with_the_solve_on<K::TF24_floor, true>(kPriceForFOC);
+  outputs_agree_with_the_solve_on<K::CF77, true>(kPriceForFOC);
+  outputs_agree_with_the_solve_on<K::JS22, true>(kPriceForFOC);
+  outputs_agree_with_the_solve_on<K::CMax, true>(kPriceForFOC);
+  outputs_agree_with_the_solve_on<K::SOX, true>(kPriceForFOC);
+  outputs_agree_with_the_solve_on<K::JW26, true>(kPriceForFOC);
+  outputs_agree_with_the_solve_on<K::LeastCost, true>(kPriceForFOC);
 }
 
 // --- the ATLS thermal-damage layer (use_thermal_damage_) ----------------------
@@ -11887,22 +11902,23 @@ void test_surface_refuses_the_energy_balance() {
      "the gate-on fixture is an interior point");
   ok(std::isfinite(profit_row_at_current_point(on, phylloptim::par_vcmax_25)),
      "TF24 answers with the energy balance on");
-  phylloptim::Leaf cf = make(d, psi, depth, kGmin, true);
-  cf.CF77_lambda_ = kPriceForFOC;
-  cf.set_model(CC::CF77, true);
-  cf.optimise();
-  const phylloptim::leaf_pars<double> pars = cf.passive_pars();
-  const auto cf_supply = cf.roots_.held_supply();
-  const auto draw = cf.supply_draw_at<double>(cf.opt_root_psi_, cf_supply);
+  phylloptim::Leaf pm = make(d, psi, depth, kGmin, true);
+  pm.set_model(CC::ProfitMax, true);
+  pm.optimise();
+  const phylloptim::leaf_pars<double> pars = pm.passive_pars();
+  const auto pm_supply = pm.roots_.held_supply();
+  const auto draw = pm.supply_draw_at<double>(pm.opt_root_psi_, pm_supply);
   ok(std::isfinite(draw.E_up.value), "supply_draw_at reads no temperature, and runs");
   ok(throws_with([&] {
-       cf.operating_collar<CC::CF77, double>(draw, pars,
-                                             std::numeric_limits<double>::quiet_NaN());
+       pm.operating_collar<CC::ProfitMax, double>(
+           draw, pars, std::numeric_limits<double>::quiet_NaN());
      },
      "Leaf::operating_collar: " + refused),
-     "CF77's operating_collar refuses");
-  ok(throws_with([&] { cf.billed_outputs_at<CC::CF77, double>(cf.opt_root_psi_, draw, pars); },
-                 "Leaf::billed_outputs_at: " + refused),
+     "ProfitMax's operating_collar refuses");
+  ok(throws_with([&] {
+       pm.billed_outputs_at<CC::ProfitMax, double>(pm.opt_root_psi_, draw, pars);
+     },
+     "Leaf::billed_outputs_at: " + refused),
      "and its billed_outputs_at");
 }
 

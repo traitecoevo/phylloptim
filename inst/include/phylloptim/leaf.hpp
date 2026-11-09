@@ -1772,6 +1772,7 @@ public:
   // dprofit_energy_balance_term on the scalar, from the coordinates.
   template <CostCurve K, class S>
   S energy_balance_marginal_at(const S& collar, const leaf_pars<S>& pars,
+                               const PhotoCapacity<S>& cap,
                                const CollarCoords<S>& at, const S& A_prime) const;
   // The capacity at the live collar's leaf temperature, formed into `store`:
   // `cap` itself with the balance off, where temperature does not move with the
@@ -1783,8 +1784,19 @@ public:
                                            PhotoCapacity<S>& store) const;
   // Which curves the surface follows with the energy balance on; the rest refuse.
   template <CostCurve K> static constexpr bool surface_follows_energy_balance() {
-    return K == CostCurve::TF24 || K == CostCurve::TF24_floor;
+    return K != CostCurve::ProfitMax;
   }
+  // Vcmax on the scalar at the leaf temperature a stem potential and collar
+  // set: at photo_temp_ with the balance off, at the balance's with it on.
+  template <class S>
+  S vcmax_at_point(const S& sigma, const S& collar, const leaf_pars<S>& pars) const;
+  // TemperaturePath on the scalar, for a cost's slope in leaf temperature.
+  template <class S>
+  struct TemperaturePathAt {
+    S temp, tau;
+    double h;
+    S vcmax_up, vcmax_dn, gc_s, gc_const, r_star;
+  };
   // Whether sigma_star is the stem held at a dry pin at the end of its curve
   // (seat_leaf_at_dry_pin), where sigma is a function of the traits, not the collar.
   bool leaf_held_at_dry_pin(double sigma_star) const {

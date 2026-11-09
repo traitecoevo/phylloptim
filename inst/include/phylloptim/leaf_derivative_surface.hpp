@@ -223,6 +223,16 @@ inline S Leaf::residual_demand_per_g_on(const S& temp) const {
 }
 
 template <class S>
+inline S Leaf::vcmax_at_point(const S& sigma, const S& collar,
+                              const leaf_pars<S>& pars) const {
+  if (!use_energy_balance_) {
+    return vcmax_at<S>(pars);
+  }
+  return vcmax_at<S, S>(
+      pars, leaf_temperature_at<S>(transpiration_at<S>(sigma, collar, pars), pars));
+}
+
+template <class S>
 inline const Leaf::PhotoCapacity<S>& Leaf::live_capacity_at(
     const S& collar, const leaf_pars<S>& pars, const CollarCoords<S>& at,
     const PhotoCapacity<S>& cap, PhotoCapacity<S>& store) const {
@@ -240,11 +250,11 @@ inline const Leaf::PhotoCapacity<S>& Leaf::live_capacity_at(
 // capacity at Tleaf +- temp_fd_step, times tau = dT/dE dE/dpsi.
 template <Leaf::CostCurve K, class S>
 inline S Leaf::energy_balance_marginal_at(const S& collar, const leaf_pars<S>& pars,
+                                          const PhotoCapacity<S>& cap,
                                           const CollarCoords<S>& at,
                                           const S& A_prime) const {
   using odelia::util::to_passive;
-  static_assert(benefit_link<K>() == BenefitLink::Identity,
-                "the energy balance's term on the surface takes the identity link");
+  using C = Curve<K>;
   double dT_dE = 0.0;
   (void)leaf_temp_from_E(transpiration_, &dT_dE);
   if (dT_dE == 0.0) {
@@ -257,8 +267,10 @@ inline S Leaf::energy_balance_marginal_at(const S& collar, const leaf_pars<S>& p
   const S& T = at.balance.temp;
   const S& gc_const = at.balance.gc_per_flux;
   const S g_ci = A_prime * umol_to_mol + gc * inv_atm;
-  const S A_up = assim_colimited_kernel<S>(ci, photo_capacity_at<S>(pars, T + h));
-  const S A_dn = assim_colimited_kernel<S>(ci, photo_capacity_at<S>(pars, T - h));
+  const PhotoCapacity<S> cap_up = photo_capacity_at<S>(pars, T + h);
+  const PhotoCapacity<S> cap_dn = photo_capacity_at<S>(pars, T - h);
+  const S A_up = assim_colimited_kernel<S>(ci, cap_up);
+  const S A_dn = assim_colimited_kernel<S>(ci, cap_dn);
   const S A_T = (A_up - A_dn) / (2.0 * h);
   // The residual conductance's two slopes are the solve's numbers, with rows:
   // each is proportional to g_min and moves with leaf temperature, and the
@@ -293,7 +305,23 @@ inline S Leaf::energy_balance_marginal_at(const S& collar, const leaf_pars<S>& p
                            (2.0 * h)) +
       (gc_v != 0.0 ? ((cut_v - cuticle_part) / gc_v) * (gc_const - S(gc_v)) : S(0.0));
   const S dgc_dT = (stomatal + residual_part) * at.bl_slope;
-  return tau * (A_T * gc * inv_atm + A_prime * dgc_dT * (S(ca_) - ci) * inv_atm) / g_ci;
+  if constexpr (benefit_link<K>() == BenefitLink::Identity) {
+    return tau * (A_T * gc * inv_atm + A_prime * dgc_dT * (S(ca_) - ci) * inv_atm) / g_ci;
+  } else {
+    static_assert(benefit_link<K>() == BenefitLink::Log,
+                  "ProfitMax's scaled link takes its own term");
+    const S dA_dpsi_T =
+        tau * (A_T * gc * inv_atm + A_prime * dgc_dT * (S(ca_) - ci) * inv_atm) / g_ci;
+    const S A = assim_colimited_kernel<S>(ci, cap);
+    S term = benefit_link_slope_at<K, S>(A) * dA_dpsi_T;
+    if constexpr (C::cost_reads_leaf_temperature) {
+      term = C::template scalar_less_cost_temperature_slope<S>(
+          *this, term, pars,
+          TemperaturePathAt<S>{T, tau, h, cap_up.vcmax, cap_dn.vcmax, gc_s, gc_const,
+                               at.balance.r_star});
+    }
+    return term;
+  }
 }
 
 template <class S>
@@ -793,7 +821,7 @@ inline S Leaf::dprofit_dcollar_from_coords(const S& collar, const leaf_pars<S>& 
   // The temperature path, appended as dprofit_at_collar_psi appends it.
   if constexpr (surface_follows_energy_balance<K>()) {
     if (use_energy_balance_) {
-      M = M + energy_balance_marginal_at<K, S>(collar, pars, at, A_prime);
+      M = M + energy_balance_marginal_at<K, S>(collar, pars, cap, at, A_prime);
     }
   }
   return M;

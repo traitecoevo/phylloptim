@@ -304,9 +304,9 @@ inline void Leaf::refuse_energy_balance(const char* who) const {
                "derivative surface holds leaf temperature at the value the solve "
                "placed and carries none of its terms, while the solve's "
                "first-order condition includes them, so its rows would describe a "
-               "different model from the one the solve ran. TF24 and TF24_floor "
-               "follow the balance; on another curve set use_energy_balance_ to "
-               "false.");
+               "different model from the one the solve ran. Every curve but "
+               "ProfitMax follows the balance; on ProfitMax set "
+               "use_energy_balance_ to false.");
   }
 }
 

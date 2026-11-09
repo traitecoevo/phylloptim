@@ -777,7 +777,8 @@ template <> struct Curve<Leaf::CostCurve::LeastCost> {
   static S scalar_resource_use(const Leaf& l, const S& sigma, const S& collar,
                                const leaf_pars<S>& pars) {
     return l.template transpiration_at<S>(sigma, collar, pars) * S(kg_to_mol_h2o) +
-           pars[par_LeastCost_beta] * l.template vcmax_at<S>(pars) * S(umol_to_mol);
+           pars[par_LeastCost_beta] * l.template vcmax_at_point<S>(sigma, collar, pars) *
+               S(umol_to_mol);
   }
   template <class S>
   static S scalar_cost_slope(const Leaf& l, const S& sigma, const S& collar,
@@ -805,6 +806,18 @@ template <> struct Curve<Leaf::CostCurve::LeastCost> {
                      l.LeastCost_beta * l.vcmax_ * umol_to_mol +
                      p.r_star * kg_to_mol_h2o;
     return term - l.LeastCost_beta * umol_to_mol * dVcmax_dT * p.tau / W;
+  }
+  // The same on the surface's scalar, Vcmax at the path's temperature.
+  template <class S>
+  static S scalar_less_cost_temperature_slope(const Leaf& l, const S& term,
+                                              const leaf_pars<S>& pars,
+                                              const Leaf::TemperaturePathAt<S>& p) {
+    const S dVcmax_dT = (p.vcmax_up - p.vcmax_dn) / (2.0 * p.h);
+    const S W = p.gc_s / p.gc_const * kg_to_mol_h2o +
+                pars[par_LeastCost_beta] * l.template vcmax_at<S, S>(pars, p.temp) *
+                    umol_to_mol +
+                p.r_star * kg_to_mol_h2o;
+    return term - pars[par_LeastCost_beta] * umol_to_mol * dVcmax_dT * p.tau / W;
   }
 };
 
