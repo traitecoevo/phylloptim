@@ -611,7 +611,7 @@ The thermal cost is inert on its own, without the energy balance. With a prescri
 
 ## Thermal damage
 
-A third gate, `use_thermal_damage_`, also off by default and not drawn in the overview, carries what heat has already done to the leaf. Its states are an acclimation state `A_`, an impaired fraction `I_` and a damaged fraction `D_`. The functional fraction `F = 1 − I − D` scales both photosynthetic capacities, acclimation shifts their temperature optima, and the layer's maintenance costs add to dark respiration. The states are read when the drivers are set, so a caller sets them first. At one driver, an undamaged leaf with the gate on is the same leaf as with it off, and a leaf with 30% of its capacity impaired or damaged loses that share of Vcmax and draws less water:
+A third gate, `use_thermal_damage_`, also off by default and not drawn in the overview, carries what heat has already done to the leaf. Its states are an acclimation state `A_`, an impaired fraction `I_` and a damaged fraction `D_`. The functional fraction `F = 1 − I − D`, held above zero by a soft floor, scales both photosynthetic capacities, acclimation shifts their temperature optima, and the layer's maintenance costs add to dark respiration. All of this is on the benefit side: the cost curves do not read the states. The states are read when the drivers are set, so a caller sets them first. At one driver, an undamaged leaf with the gate on is the same leaf as with it off, and a leaf with 30% of its capacity impaired or damaged loses that share of Vcmax and draws less water:
 
 ```{r}
 #| label: thermal-damage-gate
