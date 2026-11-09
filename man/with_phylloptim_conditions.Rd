@@ -25,8 +25,8 @@ condition on its own.
 }
 \section{Why this and not a per-row NA mode}{
 
-Returning \code{NA} rows instead of throwing is the other half of #57 and is not built
-yet, deliberately: it must not be built before the classification in
+Returning \code{NA} rows instead of throwing is not built, deliberately: it must not
+be built before the classification in
 \code{\link[=leaf_infeasible_codes]{leaf_infeasible_codes()}} has been reviewed, or the opt-in would return \code{NA} for
 programming errors too and a guard written against "most rows failed" would be
 applied to bugs as well as to infeasibility. \code{\link[=leaf_gradient_batch]{leaf_gradient_batch()}} already

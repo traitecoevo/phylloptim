@@ -22,7 +22,7 @@ misconfigured supply path: those stay ordinary errors, and that is the whole
 safety property of this list. Classifying one of them as infeasible would let it
 be swallowed by the very \code{tryCatch()} this exists to enable, and a fit would
 report a plausible likelihood over whichever rows survived — which is exactly
-the failure #39 rejected silent NA rows to prevent.
+the failure that refusing silent NA rows exists to prevent.
 
 So the test a site has to pass is narrow: it must be reachable from a
 \strong{well-formed call with in-range data}, because the parameters or the state make

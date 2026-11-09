@@ -41,10 +41,8 @@ network compares two things at once.
 Neither function takes a resistance. The soil-to-collar resistance is a
 per-call \strong{driver} on both paths, supplied to \code{\link[=set_drivers]{set_drivers()}} as
 \code{root_network} — \code{\link[=root_network_from_carbon]{root_network_from_carbon()}} on the multi-layer path,
-\code{\link[=series_resistance]{series_resistance()}} on this one. It used to be an argument here, so the same
-quantity arrived at construction on one path and per call on the other, and
-\code{resistance} was the only differentiable parameter whose setter reset the whole
-object.
+\code{\link[=series_resistance]{series_resistance()}} on this one, so the same quantity arrives the same way
+on both paths, and setting it resets nothing.
 
 ⚠️ \strong{\code{gravity_head} is the one asymmetry left, and it is deliberate.} The
 multi-layer path derives a per-layer head from the depth profile it is handed
@@ -71,7 +69,7 @@ the two paths read different inputs.
 \section{The two ends of this path are in different unit bases}{
 
 \strong{Read this before parameterising a whole soil-to-leaf path}, which is
-exactly what this supply path is for (#56).
+exactly what this supply path is for.
 \itemize{
 \item \code{leaf_specific_conductance_max} is \strong{kg} m^-2 s^-1 MPa^-1
 \item \code{\link[=series_resistance]{series_resistance()}}'s \code{resistance} is MPa s \strong{mol}^-1 m^2

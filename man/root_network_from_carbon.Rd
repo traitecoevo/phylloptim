@@ -36,7 +36,8 @@ a depth profile cannot get the differencing wrong.}
 A \code{\link[=RootNetwork]{RootNetwork()}}.
 }
 \description{
-The root-architecture model that used to run inside \code{set_physiology()} (#33).
+The root-architecture model, which the caller runs: \code{set_physiology()} takes
+the resistances it returns.
 Each layer's root carbon is split 1/3 vertical : 2/3 horizontal; the minimum
 horizontal resistance is \code{beta_R_H / c_r_h}, and the vertical resistance is
 \code{beta_R_V * dz[i]^2 / c_r_v}, accumulated from the surface down, where \code{dz[i]}

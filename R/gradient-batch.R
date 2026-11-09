@@ -21,7 +21,7 @@
 ##' would cost ~80 ms and swamp the ~13 ms of gradient it was carrying. The same
 ##' argument applies to the `Leaf`: constructing one is the largest single cost in
 ##' the R layer (the README's "Performance from R" has the measured ratio), so a fit
-##' builds it once here rather than once per gradient (#52).
+##' builds it once here rather than once per gradient.
 ##'
 ##' ⚠️ **The result holds a C++ pointer, so it does not survive `saveRDS()` or a
 ##' new session.** Rebuild it rather than restoring it; [leaf_gradient_batch()]

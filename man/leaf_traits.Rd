@@ -46,7 +46,7 @@ magnitude), with \code{root_b} and \code{root_psi_crit} derived from it.}
 intercepted \code{PPFD}, so the default 0.30 / 0.85 is the old incident-basis
 yield of 0.30 restated. A gas-exchange fit identifies only
 \code{phi_J * alpha_PAR_}; fix \code{alpha_PAR_} to make the fitted value per absorbed
-photon. Was \code{a} (incident basis) before 0.13.0: \code{phi_J = a / 0.85}.}
+photon. An incident-basis yield \code{a} is \code{phi_J = a / 0.85}.}
 
 \item{curv_fact_elec_trans}{curvature of the light response curve (unitless)}
 
@@ -118,9 +118,8 @@ Defaults are \emph{Eucalyptus saligna}, and are the same values
 
 \code{stem_P50}/\code{stem_c} describe the STEM Weibull curve, which drives the
 hydraulic cost; \code{root_P50}/\code{root_c} describe the ROOT curve, which drives
-uptake. They are separate parameters with separate meanings and they are
-named accordingly, because they were once an unmarked \code{b}/\code{c} pair alongside
-\code{root_b}/\code{root_c} and an analysis used the root parameters for the stem cost.
+uptake. They are separate parameters with separate meanings, and named so:
+an unmarked pair is easy to read as the other curve's.
 
 Each curve has exactly TWO settable numbers. \code{stem_b}, \code{psi_crit}, \code{root_b}
 and \code{root_psi_crit} are quantiles of the curve those two define -- readable on
@@ -146,14 +145,13 @@ inconsistently. \code{vignette("fitting")} derives the
 pair from a published P50/P88 pair, which is the right way round.
 }
 
-\section{Where the two root-resistance constants went}{
+\section{The root-resistance constants are not traits}{
 
-\code{beta_R_H} and \code{beta_R_V} were traits here until #33. They parameterise the
-root-ARCHITECTURE model, which the leaf no longer runs -- it takes the
-resistances. They are arguments to \code{\link[=root_network_from_carbon]{root_network_from_carbon()}} now.
+\code{beta_R_H} and \code{beta_R_V} parameterise the root-architecture model, which the
+leaf does not run -- it takes the resistances. They are arguments to
+\code{\link[=root_network_from_carbon]{root_network_from_carbon()}}.
 
-The cost is real and worth stating: \code{\link[=leaf_gradient]{leaf_gradient()}} can no longer
-differentiate with respect to either. Perturbing them is cheap, because
+So \code{\link[=leaf_gradient]{leaf_gradient()}} does not differentiate with respect to either. Perturbing them is cheap, because
 \code{\link[=root_network_from_carbon]{root_network_from_carbon()}} is homogeneous of degree 1 in each, but the
 derivative of a solved output still needs two solves either side.
 }

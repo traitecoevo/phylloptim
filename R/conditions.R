@@ -23,7 +23,7 @@
 ##' safety property of this list. Classifying one of them as infeasible would let it
 ##' be swallowed by the very `tryCatch()` this exists to enable, and a fit would
 ##' report a plausible likelihood over whichever rows survived — which is exactly
-##' the failure #39 rejected silent NA rows to prevent.
+##' the failure that refusing silent NA rows exists to prevent.
 ##'
 ##' So the test a site has to pass is narrow: it must be reachable from a
 ##' **well-formed call with in-range data**, because the parameters or the state make
@@ -108,8 +108,8 @@ leaf_infeasible_codes <- function() {
 ##' condition on its own.
 ##'
 ##' @section Why this and not a per-row NA mode:
-##' Returning `NA` rows instead of throwing is the other half of #57 and is not built
-##' yet, deliberately: it must not be built before the classification in
+##' Returning `NA` rows instead of throwing is not built, deliberately: it must not
+##' be built before the classification in
 ##' [leaf_infeasible_codes()] has been reviewed, or the opt-in would return `NA` for
 ##' programming errors too and a guard written against "most rows failed" would be
 ##' applied to bugs as well as to infeasibility. [leaf_gradient_batch()] already

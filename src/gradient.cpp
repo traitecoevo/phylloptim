@@ -9,17 +9,15 @@
 //   * `gradient_par_names()` hands the parameter enumeration back to R so the two
 //     orders can be compared in a test rather than trusted.
 //   * `gradient_batch_prepare()` converts N observations' drivers to C++ ONCE and
-//     returns a pointer to them. ⚠️ This is not premature: a `RootNetwork` costs
-//     60-100 us to cross the boundary -- 60x a trivial `.Call` -- because it is an
-//     RcppR6 `list:` class and every crossing rebuilds a five-element named list.
-//     Converting per call would cost 80 ms for a 1,327-row batch and swamp the
-//     ~13 ms of gradient it was carrying.
+//     returns a pointer to them. ⚠️ This is not premature: a `RootNetwork` is an
+//     RcppR6 `list:` class, so every crossing rebuilds a five-element named list,
+//     and converting per call would cost a large batch more than its gradient.
 //   * `gradient_batch_run()` is the hot path: ONE crossing per likelihood
 //     evaluation, carrying a parameter matrix in and three arrays out.
 //
 // The `Leaf` is the caller's, passed per call. That costs one pointer unwrap and
-// means construction -- ~204 us from R, some 70 solves -- is paid once for the
-// whole fit rather than once per gradient (#52).
+// means construction, the largest single cost in the R layer (README,
+// "Performance from R"), is paid once for the whole fit rather than per gradient.
 #include <phylloptim.h>
 
 #include <string>

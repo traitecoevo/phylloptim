@@ -96,13 +96,9 @@ set_traits <- function(x, traits) {
 ##' state from whichever solve ran last.
 ##'
 ##' **Every route reaches the composite under `method = "auto"`, and every route
-##' uses the same finite-difference step (1e-06).** Both were once untrue.
-##' `ProfitMax` normalises by `|A|max`, and while that came from a 500-point scan
-##' its argmax was piecewise constant in the parameters -- so the composite had to
-##' pin it and returned a PARTIAL (0.0766 against a true 0.0579), and differencing
-##' needed a step large enough to cross a scan cell. `|A|max` is found by a
-##' root-find now, so it is re-solved per perturbation, the composite returns the
-##' TOTAL, and no model carries that split.
+##' uses the same finite-difference step (1e-06).** `ProfitMax` normalises by
+##' `|A|max`, which is re-read at every perturbation, so its gradient is the
+##' total derivative, not a partial at a held normaliser.
 ##'
 ##' ⚠️ **A zero column for another curve's parameter means two different things,
 ##' and they are not distinguishable from the number.** On a `collar` or `TF24`
@@ -143,9 +139,8 @@ set_traits <- function(x, traits) {
 ##' @section profit, which is the one output the envelope theorem reaches:
 ##' The first four outputs are what a gas-exchange calibration observes. `profit`
 ##' is here because it is what a **demographic** consumer bills: plant's carbon
-##' budget reads `leaf.profit_`, not `assim_colimited_`, so before it was added
-##' the two sets were disjoint and no gradient from this package reached a
-##' demographic model at all.
+##' budget reads the leaf's carbon, not `assim_colimited_`, and without it no
+##' gradient from this package would reach a demographic model.
 ##'
 ##' It is also the cheapest of the five, because it is the objective. At an
 ##' interior optimum `dprofit/dpsi = 0`, so the indirect term above vanishes
@@ -202,8 +197,8 @@ set_traits <- function(x, traits) {
 ##' coefficients. Its fixed point is `-M/H`, which is what the solving path
 ##' returns — the two agree in the large-gain limit.
 ##'
-##' ⚠️ **`stationarity` is still reported, and is used for exactly one thing.**
-##' It no longer routes anything; it now measures how far the collar you supplied
+##' ⚠️ **`stationarity` is reported, and is used for exactly one thing.**
+##' It routes nothing; it measures how far the collar you supplied
 ##' sits from the optimum. The one decision it makes is `profit`'s: at a
 ##' stationary point the envelope theorem applies and the analytic zero is used,
 ##' and away from one the exact `dprofit/dpsi` is used instead of differencing
@@ -312,8 +307,8 @@ set_traits <- function(x, traits) {
 ##' `leaf_specific_conductance_max` on the multi-layer path — is the most expensive
 ##' thing you can ask for, and a fit that reads four of them pays for the rest.
 ##'
-##' The intercept is a fresh `Leaf` per call. Pass `x` to reuse one across calls
-##' (#52); without it, construction is most of a one-observation gradient.
+##' The intercept is a fresh `Leaf` per call. Pass `x` to reuse one across calls;
+##' without it, construction is most of a one-observation gradient.
 ##'
 ##' @section Precision:
 ##' Do not ask for more than about `1e-09` from any of this. That is the
@@ -386,9 +381,9 @@ set_traits <- function(x, traits) {
 ##'   so a fit that wants respiration to follow Vcmax moves both and adds the two
 ##'   columns.
 ##'
-##'   `beta_R_H` and `beta_R_V` were here until #33 and are not any more: they
-##'   parameterise the root-architecture model, which the leaf no longer runs, so
-##'   this function has no way to reach them. Getting a gradient in either means
+##'   `beta_R_H` and `beta_R_V` are not parameters here: they parameterise the
+##'   root-architecture model, which the leaf does not run, so this function has
+##'   no way to reach them. Getting a gradient in either means
 ##'   solving at two networks yourself. The perturbation itself is cheap —
 ##'   [root_network_from_carbon()] is homogeneous of degree 1 in each constant, so
 ##'   scaling `beta_R_H` scales `r_R_H_min` by the same factor and needs no
@@ -563,7 +558,7 @@ leaf_gradient <- function(psi_soil,
   dpsi_dtheta <- .gradient_dpsi_dtheta(dpsi_dtheta, pars, !is.null(psi))
 
   # One observation of the batch, on the caller's leaf when there is one:
-  # construction is the largest cost on this surface (#52).
+  # construction is the largest cost on this surface.
   l <- if (is.null(x)) leaf_model(traits, control, supply) else x
   resolved <- .resolve_drivers(l, psi_soil, PPFD, soil_depth, root_network,
                                leaf_specific_conductance_max, atm_vpd, ca,
