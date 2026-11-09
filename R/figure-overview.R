@@ -488,7 +488,8 @@ plot_model_overview <- function(model = NULL, cex = 1) {
   # back, re-solved.
   curve <- model$model_curve()
   route <- model$model_route()
-  on.exit({ model$set_model(curve, route); model$optimise() }, add = TRUE)
+  method <- model$model_method()
+  on.exit({ model$set_model(curve, route, method); model$optimise() }, add = TRUE)
 
   layout(matrix(c(1, 3, 4,
                   2, 3, 4), nrow = 2, byrow = TRUE),

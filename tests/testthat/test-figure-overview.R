@@ -19,7 +19,7 @@ test_that("the profit panel's curve peaks at the optimum it marks", {
 test_that("plot_model_overview() leaves the caller's leaf on its own model", {
   x <- leaf_model()
   set_drivers(x, psi_soil = 1.5, PPFD = 900)
-  x$set_model("CF77", "leaf")
+  x$set_model("CF77", "leaf", "closed")
   x$optimise()
   before <- x$profit_
   grDevices::pdf(NULL)
@@ -27,5 +27,6 @@ test_that("plot_model_overview() leaves the caller's leaf on its own model", {
   grDevices::dev.off()
   expect_identical(x$model_curve(), "CF77")
   expect_identical(x$model_route(), "leaf")
+  expect_identical(x$model_method(), "closed")
   expect_identical(x$profit_, before)
 })
