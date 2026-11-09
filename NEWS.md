@@ -1,3 +1,9 @@
+# phylloptim 0.33.1
+
+- ProfitMax solves about a third faster on either route: with the energy balance off, its normaliser |A|max is read at `psi_crit` in one evaluation rather than searched for. The collar solve of every curve is 2-3% faster. No number moves.
+- A prescribed collar potential (`$evaluate_root_collar_psi()`) and a replay refuse a curve's unset parameter by name, as the solve does; they used to report a non-finite objective.
+- For C++ users, the unused `Leaf` members `atm_vpd`, `ca`, `atm_kpa`, `atm_o2_kpa` and `leaf_temp` are gone (the drivers are `set_physiology`'s arguments), as are `util::identical`, `util::clamp` and `Leaf::stem_curve_integral_inverse_deriv` ([#248](https://github.com/traitecoevo/phylloptim/issues/248)).
+
 # phylloptim 0.33.0
 
 - For C++ users, the derivative surface (`operating_collar()`, `billed_outputs_at()`, `physical_outputs_at()`) follows the energy balance on every curve, where it refused a leaf with it on ([#225](https://github.com/traitecoevo/phylloptim/issues/225)). Leaf temperature moves with the stem's flux and with light, and the rows carry it through the capacities, the deficit, the cuticle and the first-order condition; ProfitMax's |A|max is read where |A| peaks. With the energy balance off every number and every tape is unchanged.

@@ -775,9 +775,6 @@ template <> struct Curve<Leaf::CostCurve::LeastCost> {
              l.stem_curve_integral_deriv(psi_upstream)) /
            resource_use(l, psi_leaf, psi_upstream);
   }
-  // C = log W with `vcmax_` at Tleaf, so d(log W)/dpsi gains
-  // beta*umol_to_mol*dVcmax/dT*tau/W (cost_slope holds only the E half). W reads
-  // the total flux, its stomatal part from gc.
   // The scalar forms. vcmax is at the photosynthesis temperature, which is the
   // leaf's with the energy balance off, as the surface requires.
   template <class S>
@@ -806,6 +803,9 @@ template <> struct Curve<Leaf::CostCurve::LeastCost> {
     return S(0.0);
   }
 
+  // C = log W with `vcmax_` at Tleaf, so d(log W)/dpsi gains
+  // beta*umol_to_mol*dVcmax/dT*tau/W (cost_slope holds only the E half). W reads
+  // the total flux, its stomatal part from gc.
   static double less_cost_temperature_slope(const Leaf& l, double term,
                                             const Leaf::TemperaturePath& p) {
     const double dVcmax_dT = (p.vcmax_up - p.vcmax_dn) / (2.0 * p.h);
@@ -1242,16 +1242,16 @@ inline double Leaf::hydraulic_cost_TF24_floor(double psi_leaf, double psi_upstre
   return Curve<CostCurve::TF24_floor>::cost(*this, psi_leaf, psi_upstream);
 }
 
-// Where the price reads only the flux, both are read off the reported objective
-// and flux, linearly: exact against them, and still right for a caller that
-// averages the leaf's outputs over a crown and writes the means back (plant's
-// crown integration), where a kernel evaluated at a mean potential would not be.
 inline bool Leaf::seated_curve_prepares_normalisers() const {
   return with_curve(cost_curve_, [](auto tag) {
     return Curve<decltype(tag)::value>::prepares_normalisers;
   });
 }
 
+// carbon() and shadow_cost(). Where the price reads only the flux, both are read off the reported objective
+// and flux, linearly: exact against them, and still right for a caller that
+// averages the leaf's outputs over a crown and writes the means back (plant's
+// crown integration), where a kernel evaluated at a mean potential would not be.
 inline double Leaf::carbon() const {
   return with_curve(cost_curve_, [&](auto tag) -> double {
     using C = Curve<decltype(tag)::value>;
@@ -1368,11 +1368,11 @@ inline double Leaf::profitmax_reference_psi() {
   return bound_a;
 }
 
-inline void Leaf::prepare_profitmax_norms() {
+inline void Leaf::prepare_profitmax_norms(double reference_psi) {
   // A non-finite reference is propagated, not refused: this runs on leaves whose
   // drivers are not seated yet (the batch route seeds |A|max first). The
   // optimiser's `!(profitmax_k_span_ > 0)` guard is the one place that decides it.
-  const double psi_soil = profitmax_reference_psi();
+  const double psi_soil = reference_psi;
   profitmax_reference_psi_ = psi_soil;
   profitmax_k_soil_ =
       leaf_specific_conductance_max_ * proportion_of_conductivity(psi_soil);
@@ -1382,7 +1382,7 @@ inline void Leaf::prepare_profitmax_norms() {
 }
 
 inline void Leaf::prepare_profitmax_at(double A_max) {
-  prepare_profitmax_norms();
+  prepare_profitmax_norms(profitmax_reference_psi());
   if (!(std::isfinite(A_max) && A_max > 0.0)) {
     util::stop("prepare_profitmax_at needs a finite positive |A|max -- it is the "
                "normaliser held fixed across a perturbation, so an unset one "
@@ -1394,24 +1394,45 @@ inline void Leaf::prepare_profitmax_at(double A_max) {
 
 inline void Leaf::prepare_profitmax() {
   const double psi_soil = profitmax_reference_psi();
-  prepare_profitmax_norms();
+  prepare_profitmax_norms(psi_soil);
 
-  // |A|max by the one solver, not a scan, whose argmax is piecewise constant in
-  // the parameters (hazard 3). One maximisation of A suffices: |A| peaks at a
-  // minimum of A only where A < 0, at closure or along a whole stream that cannot
-  // fix carbon (below). dA/dpsi is dJ/dpsi plus the cost derivative, for an
-  // identity link. Closure is excluded, as gsthermal drops it (`A[E == 0] <- NA`):
-  // the search starts one probe inside the wet bound.
   const auto A_of = [&](double psi) {
     set_leaf_states_rates_from_psi_leaf(psi, psi_soil);
     return assim_colimited_;
   };
+  const double psi_wet = leaf_wet_bound(psi_soil);
+  const double width = psi_crit - psi_wet;
+
+  // At a fixed leaf temperature |A| rises with conductance at either sign of A:
+  // A > 0 holds ci below ca, and more conductance raises it; A < 0 holds ci
+  // above ca, and more conductance lowers it. A cannot change sign along the
+  // stream, since A = 0 puts ci at the compensation point, which no positive
+  // conductance holds. So |A|max is |A| at psi_crit, read in one evaluation.
+  if (!use_energy_balance_ && width > 0.0) {
+    const double a_crit = A_of(psi_crit);
+    if (std::isfinite(a_crit) && a_crit != 0.0) {
+      profitmax_A_max_ = std::abs(a_crit);
+      profitmax_peak_psi_ = psi_crit;
+      profitmax_peak_negated_ = a_crit < 0.0;
+      profitmax_crit_ci_ = use_thermal_damage_
+                               ? std::numeric_limits<double>::quiet_NaN()
+                               : ci_;
+      return;
+    }
+  }
+
+  // With the energy balance on, leaf temperature moves with the flux and |A|
+  // can peak inside the stream, so it is searched for by the one solver, not a
+  // scan, whose argmax is piecewise constant in the parameters (hazard 3). One
+  // maximisation of A suffices: |A| peaks at a minimum of A only where A < 0,
+  // at closure or along a whole stream that cannot fix carbon (below). dA/dpsi
+  // is dJ/dpsi plus the cost derivative, for an identity link. Closure is
+  // excluded, as gsthermal drops it (`A[E == 0] <- NA`): the search starts one
+  // probe inside the wet bound.
   const auto dA_of = [&](double psi, bool* ok) {
     const double dJ = dprofit_dpsi_leaf<CostCurve::TF24>(psi, psi_soil, ok);
     return dJ + cost_deriv<CostCurve::TF24>(psi, psi_soil);
   };
-  const double psi_wet = leaf_wet_bound(psi_soil);
-  const double width = psi_crit - psi_wet;
   const double lo = psi_wet + 1e-9 * width;   // the open end: closure excluded
   double a_hi = -std::numeric_limits<double>::infinity();
   double peak = std::numeric_limits<double>::quiet_NaN();
@@ -1440,11 +1461,8 @@ inline void Leaf::prepare_profitmax() {
   profitmax_A_max_ = a_max;
   profitmax_peak_psi_ = peak;
   profitmax_peak_negated_ = negated;
-  // With leaf temperature fixed |A| rises with conductance at either sign of A,
-  // so |A|max is |A| at psi_crit (measured: bit for bit on every point of a
-  // 576-point sweep). The surface reads it there, on its scalar, so it needs ci
-  // at that point; with the energy balance on, at the peak; with the damage layer
-  // on it refuses.
+  // The surface reads |A|max at the peak, on its scalar, so it needs ci there;
+  // with the damage layer on it refuses.
   profitmax_crit_ci_ = std::numeric_limits<double>::quiet_NaN();
   if (!use_energy_balance_ && !use_thermal_damage_ && width > 0.0) {
     set_leaf_states_rates_from_psi_leaf(psi_crit, psi_soil);

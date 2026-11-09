@@ -183,6 +183,8 @@ const double kLambdaCF77 = 1.5e5;
 // The same for TF24_floor's price floor, which is a separate input on the same
 // footing. `TF24_floor_a` is a trait and takes its default.
 const double kLambdaFloorO = 1.5e5;
+// A cuticle's residual conductance, mol H2O m^-2 s^-1: the surface referee's.
+const double kCuticleGmin = 5e-4;
 
 double pass_optimiser(Arm arm, std::vector<phylloptim::Leaf> &leaves,
                       const std::vector<Point> &pts) {
@@ -273,6 +275,35 @@ int main(int argc, char **argv) {
          "collar:TF24_floor", floor_best / pts.size() * 1e6, pts.size(), reps,
          floor_checksum);
 
+  // The same collar solves with a cuticle, the path every arm above leaves at its
+  // exact-zero default, and ProfitMax's collar solve, whose normalisers are
+  // seeded per solve. Separate leaves, since g_min is read by set_physiology.
+  std::vector<phylloptim::Leaf> cuticle_leaves(pts.size(), fixture::multilayer_leaf());
+  for (phylloptim::Leaf &l : cuticle_leaves) {
+    l.setup_transpiration(100);
+    l.setup_root_vulnerability(100);
+    l.g_min = kCuticleGmin;
+  }
+  const auto collar_arm = [&](const char *label, std::vector<phylloptim::Leaf> &ls,
+                              auto solve) {
+    double sum = 0.0, best_arm = 1e300;
+    for (int r = 0; r < reps; ++r) {
+      const auto t0 = std::chrono::steady_clock::now();
+      sum = pass(ls, pts, solve);
+      const auto t1 = std::chrono::steady_clock::now();
+      best_arm = std::min(best_arm, std::chrono::duration<double>(t1 - t0).count());
+    }
+    printf("%-22s  %8.2f us/call    (%zu points, best of %d)   checksum %.17g\n",
+           label, best_arm / pts.size() * 1e6, pts.size(), reps, sum);
+  };
+  collar_arm("collar:TF24_floor+cut", cuticle_leaves, [](phylloptim::Leaf &l) {
+    l.TF24_floor_lambda_o = kLambdaFloorO;
+    l.find_root_collar_psi_for<phylloptim::Leaf::CostCurve::TF24_floor>();
+  });
+  collar_arm("collar:ProfitMax", leaves, [](phylloptim::Leaf &l) {
+    l.find_root_collar_psi_for<phylloptim::Leaf::CostCurve::ProfitMax>();
+  });
+
   // --- the single-layer optimisers, on the 1-layer subset -------------------
   std::vector<Point> one;
   for (const Point &pt : pts) {
@@ -316,5 +347,21 @@ int main(int argc, char **argv) {
            arm_label(arm), arm_best / one.size() * 1e6, one.size(), reps,
            arm_checksum, phi);
   }
+  std::vector<phylloptim::Leaf> one_cuticle(one.size(), fixture::multilayer_leaf());
+  for (phylloptim::Leaf &l : one_cuticle) {
+    l.setup_transpiration(100);
+    l.setup_root_vulnerability(100);
+    l.g_min = kCuticleGmin;
+  }
+  double cut_checksum = 0.0, cut_best = 1e300;
+  for (int r = 0; r < reps; ++r) {
+    const auto t0 = std::chrono::steady_clock::now();
+    cut_checksum = pass_optimiser(Arm::TF24_floor, one_cuticle, one);
+    const auto t1 = std::chrono::steady_clock::now();
+    cut_best = std::min(cut_best, std::chrono::duration<double>(t1 - t0).count());
+  }
+  printf("%-22s  %8.2f us/call    (%zu points, best of %d)   checksum %.17g\n",
+         "psi_leaf:TF24_floor+cut", cut_best / one.size() * 1e6, one.size(), reps,
+         cut_checksum);
   return 0;
 }

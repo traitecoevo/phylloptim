@@ -2163,6 +2163,28 @@ void test_cowan_farquhar_refuses_an_unset_lambda() {
   }
   ok(threw, "it refuses rather than maximising a NaN objective");
   ok(what.find("CF77_lambda_") != std::string::npos, "and the message names CF77_lambda_");
+
+  // So do the collar route's solve, its prescribed collar and its replay, which
+  // would otherwise report a NaN objective's value at the point asked for.
+  phylloptim::Leaf c = make_leaf(d, {1.0}, {1.0});
+  c.set_model(phylloptim::Leaf::CostCurve::CF77, true);
+  c.optimise();
+  const double collar = c.opt_root_psi_;
+  const auto kind = c.operating_point_kind();
+  c.CF77_lambda_ = std::numeric_limits<double>::quiet_NaN();
+  const auto refuses = [&](auto call) {
+    try {
+      call();
+    } catch (const std::exception &e) {
+      return std::string(e.what()).find("CF77_lambda_") != std::string::npos;
+    }
+    return false;
+  };
+  ok(refuses([&] { c.optimise(); }), "the collar solve refuses it, naming it");
+  ok(refuses([&] { c.evaluate_root_collar_psi(collar); }),
+     "a prescribed collar refuses it, naming it");
+  ok(refuses([&] { c.replay_operating_point(collar, kind); }),
+     "a replay refuses it, naming it");
 }
 
 // dprofit_dpsi_leaf against a central difference of the objective it claims to
@@ -6524,11 +6546,11 @@ void test_stem_curve_shortcut_needs_no_rebuild() {
     std::vector<int> pars;
   };
   const Case cases[] = {
-      {"stem_P50", {phylloptim::gradient::par_stem_P50}},
+      {"stem_P50", {phylloptim::par_stem_P50}},
       {"stem_P50 then vcmax_25",
-       {phylloptim::gradient::par_stem_P50, phylloptim::gradient::par_vcmax_25}},
+       {phylloptim::par_stem_P50, phylloptim::par_vcmax_25}},
       {"vcmax_25 then stem_P50",
-       {phylloptim::gradient::par_vcmax_25, phylloptim::gradient::par_stem_P50}}};
+       {phylloptim::par_vcmax_25, phylloptim::par_stem_P50}}};
 
   for (const Case &c : cases) {
     phylloptim::gradient::Settings s;  // fast_stem_curve defaults true
@@ -6561,14 +6583,14 @@ void test_stem_curve_shortcut_needs_no_rebuild() {
     s.model = {phylloptim::Leaf::CostCurve::TF24,
                phylloptim::gradient::Route::Collar};
     s.fast_stem_curve = false;
-    const int pars[1] = {phylloptim::gradient::par_stem_P50};
+    const int pars[1] = {phylloptim::par_stem_P50};
     phylloptim::Leaf l = make_leaf(d, {2.0}, {1.0});
     l.find_root_collar_psi();
     const long builds = l.stem_curve_builds_;
     phylloptim::gradient::batch(l, theta, 1, obs, false, pars, 1, s);
     ok(l.stem_curve_builds_ == builds,
        "with fast_stem_curve off, a P50 batch still rebuilds nothing");
-    const int c_pars[1] = {phylloptim::gradient::par_stem_c};
+    const int c_pars[1] = {phylloptim::par_stem_c};
     phylloptim::gradient::batch(l, theta, 1, obs, false, c_pars, 1, s);
     ok(l.stem_curve_builds_ > builds, "and a stem_c batch does rebuild");
     printf("  stem curve builds over 3 observations of d/dstem_P50:"
@@ -11132,7 +11154,7 @@ void test_thermal_damage_refusals() {
   gd.atm_o2_kpa = d.atm_o2_kpa;
   gd.atm_kpa = d.atm_kpa;
   const std::vector<phylloptim::gradient::Drivers> obs{gd, gd};
-  const int par[] = {phylloptim::gradient::par_vcmax_25};
+  const int par[] = {phylloptim::par_vcmax_25};
   phylloptim::gradient::Settings s;
   s.model = {phylloptim::Leaf::CostCurve::TF24,
              phylloptim::gradient::Route::Collar};
@@ -11149,9 +11171,9 @@ void test_thermal_damage_refusals() {
     }
   }
   // A trait, a damage state and a cost-carried input, through both routes.
-  const int pars_on[] = {phylloptim::gradient::par_vcmax_25,
-                         phylloptim::gradient::par_I,
-                         phylloptim::gradient::par_c_repair_flux};
+  const int pars_on[] = {phylloptim::par_vcmax_25,
+                         phylloptim::par_I,
+                         phylloptim::par_c_repair_flux};
   phylloptim::gradient::Result r_on;
   phylloptim::gradient::at(on, theta_on, gd, false, pars_on, 3, s, r_on);
   ok(r_on.status != phylloptim::gradient::Status::Error,
@@ -11202,6 +11224,80 @@ void test_thermal_damage_refusals() {
 // ===========================================================================
 // The residual (cuticular) conductance, #182
 // ---------------------------------------------------------------------------
+// ProfitMax's |A|max with the energy balance off is |A| at psi_crit, read in one
+// evaluation: at a fixed leaf temperature |A| rises with conductance at either
+// sign of A. Held against a 400-point walk of the stream, with and without a
+// cuticle and the damage layer, on dark and bright, cool and hot leaves, so a
+// normaliser read anywhere but the peak fails here.
+void test_profitmax_abs_assim_max_is_at_psi_crit() {
+  printf("ProfitMax: |A|max is |A| at psi_crit with the energy balance off\n");
+  int cases = 0, negative = 0;
+  double worst_excess = 0.0;
+  bool exact_at_crit = true;
+  for (double g_min : {0.0, 5e-4, 5e-3})
+    for (bool damage : {false, true})
+      for (double psi_soil : {0.5, 2.0, 4.0})
+        for (double ppfd : {1.0, 200.0, 1500.0})
+          for (double temp : {25.0, 50.0}) {
+            Drivers d;
+            d.PPFD = ppfd;
+            d.leaf_temp = temp;
+            phylloptim::Leaf l = make_single_leaf(d, psi_soil);
+            l.g_min = g_min;
+            if (damage) {
+              l.use_thermal_damage_ = true;
+              set_atls_inputs(l);
+            }
+            // Re-seated, since set_physiology reads g_min and the damage gate.
+            l = [&] {
+              phylloptim::Leaf m = l;
+              phylloptim::RootNetwork rn = fixture::series_resistance(1.0e3);
+              m.set_physiology(rn, d.PPFD, {psi_soil}, {1.0}, d.K_s * d.theta / d.h,
+                               d.atm_vpd, d.ca, d.leaf_temp, d.atm_o2_kpa,
+                               d.atm_kpa);
+              return m;
+            }();
+            l.prepare_profitmax();
+            const double a_max = l.profitmax_A_max_;
+            const double ref = l.profitmax_reference_psi();
+            const double wet = l.leaf_wet_bound(ref);
+            if (!(a_max > 0.0) || !(l.psi_crit > wet)) {
+              continue;
+            }
+            ++cases;
+            const int n = 400;
+            for (int i = 1; i <= n; ++i) {
+              const double psi = wet + (l.psi_crit - wet) * double(i) / n;
+              l.set_leaf_states_rates_from_psi_leaf(psi, ref);
+              worst_excess = std::max(
+                  worst_excess, (std::abs(l.assim_colimited_) - a_max) / a_max);
+            }
+            // The walk's last point is psi_crit itself.
+            if (std::abs(l.assim_colimited_) != a_max) exact_at_crit = false;
+            if (l.assim_colimited_ < 0.0) ++negative;
+          }
+  printf("    %d cases (%d with A < 0), worst |A| above |A|max %.3g of it\n", cases,
+         negative, worst_excess);
+  ok(cases == 108 && negative >= 20, "the walk reaches leaves of either sign of A");
+  ok(worst_excess <= 0.0, "no point of the stream has a larger |A| than |A|max");
+  ok(exact_at_crit, "|A|max is |A| at psi_crit, bit for bit");
+
+  // A dark leaf with no respiration has A = 0 along the whole stream: the one
+  // evaluation finds no |A|max, and the search it falls back to finds none
+  // either, so the leaf has no objective rather than a stale normaliser.
+  Drivers dark;
+  dark.PPFD = 0.0;
+  phylloptim::Leaf z = make_single_leaf(dark, 1.0);
+  z.profitmax_A_max_ = 1.0;  // poisoned: the preparation must write it
+  z.R_d_25 = 0.0;
+  z.set_physiology(fixture::series_resistance(1.0e3), dark.PPFD, {1.0}, {1.0},
+                   dark.K_s * dark.theta / dark.h, dark.atm_vpd, dark.ca,
+                   dark.leaf_temp, dark.atm_o2_kpa, dark.atm_kpa);
+  z.prepare_profitmax();
+  ok(z.profitmax_A_max_ == 0.0 && !z.profitmax_has_objective(),
+     "a leaf with A = 0 throughout has no |A|max and no objective");
+}
+
 namespace residual {
 
 using Kind = phylloptim::Leaf::OperatingPointKind;
@@ -12420,6 +12516,7 @@ int main(int argc, char **argv) {
   test_collar_shorthand_solves_the_seated_curve();
   test_log_link_curves_shut_dark_collar_leaves();
   test_profitmax_collar_route_has_a_degenerate_exit();
+  test_profitmax_abs_assim_max_is_at_psi_crit();
   test_thermal_damage_gate_off_is_inert();
   test_thermal_damage_bypasses_the_cache();
   test_thermal_damage_dprofit_is_the_solves_own();

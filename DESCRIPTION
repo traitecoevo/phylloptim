@@ -1,6 +1,6 @@
 Package: phylloptim
 Title: Leaf Gas Exchange with Explicit Plant Hydraulics
-Version: 0.33.0
+Version: 0.33.1
 Authors@R: c(
     person("Isaac", "Towers", , "", "aut",
             comment = "Author of the leaf gas exchange and hydraulics model"),
@@ -32,8 +32,11 @@ License: AGPL (>= 3)
 Depends:
     R (>= 4.2.0)
 Imports:
+    graphics,
     R6,
     Rcpp,
+    stats,
+    utils
 LinkingTo: Rcpp, BH, odelia (>= 0.10.0)
 Suggests:
     codetools,

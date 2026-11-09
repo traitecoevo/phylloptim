@@ -37,7 +37,8 @@
 // potential that maximises carbon profit (assimilation through a benefit link,
 // minus a hydraulic cost) subject to continuity from soil to stem. The answer is
 // left in members (opt_root_psi_, opt_psi_leaf_, ci_, profit_, E_up_, ...). The
-// cost curves share that solve and differ only in their cost (see CostCurve).
+// cost curves share that solve and differ in their cost and its benefit link
+// (Curve<K>, leaf_cost_curves.hpp).
 //
 // The class and its construction are here; the other members are defined
 // in the leaf_*.hpp headers by subsystem, and optimise_closed in
@@ -45,16 +46,9 @@
 // leaf_*.hpp headers: a member used and not defined in a translation unit is
 // a link error.
 
-// ===========================================================================
-// ONE REPRESENTATION FOR WATER POTENTIAL (hazard 2)
-// ---------------------------------------------------------------------------
 // Every psi here, members and arguments alike, is a positive magnitude in MPa,
-// asserted at the entry points. Where one potential opposes another the sign
-// is in the equation, as in the soil -> collar flux
-// E_i = (T_collar - T_soil_i - gravity_head * z_i) / r_R, which is < 0 where a
-// layer gains water. Do not call it "tension": that holds only while there is
-// no osmotic term and gravity is carried separately in `gravity_head`.
-// ===========================================================================
+// asserted at the entry points; where one potential opposes another the sign is
+// in the equation (hazard 2).
 
 // "Hazard N" in these headers is the numbered hazard in the repository's
 // .claude/hazards.md, which is not shipped with the package.
@@ -227,20 +221,24 @@ public:
 
   // --- supply dispatch -------------------------------------------------------
   // Where the two paths differ; the rest of the solve reads the suction vector both
-  // provide. `default:` means the single path, so a third path needs an explicit arm
-  // in every switch (hazard 6).
+  // provide. Every switch names both arms and none has a `default:`, so with
+  // -Werror=switch a third path is a build failure wherever an arm is missing.
+  // After a switch that returns from both arms: no code, no branch.
+  [[noreturn]] static void unknown_supply_kind() { __builtin_unreachable(); }
   double supply_begin_solve() {
     switch (supply_kind_) {
-      case SupplyKind::MultiLayer: return roots_.begin_solve();
-      default:                     return single_.begin_solve();
+      case SupplyKind::MultiLayer:      return roots_.begin_solve();
+      case SupplyKind::SinglePotential: return single_.begin_solve();
     }
+    unknown_supply_kind();
   }
   // The current soil state, as positive suction magnitudes.
   const std::vector<double>& supply_psi_soil() const {
     switch (supply_kind_) {
-      case SupplyKind::MultiLayer: return roots_.psi_soil_;
-      default:                     return single_.psi_soil_vec_;
+      case SupplyKind::MultiLayer:      return roots_.psi_soil_;
+      case SupplyKind::SinglePotential: return single_.psi_soil_vec_;
     }
+    unknown_supply_kind();
   }
   // The wet bound's floor (MultiLayerRoots::wet_floor_layer): the lowest balance
   // psi_i + z_i among conducting layers, else the wettest layer's. `conducts` and
@@ -255,41 +253,46 @@ public:
         const std::size_t k = static_cast<std::size_t>(i);
         return roots_.psi_soil_[k] + roots_.grav_head_z_[k];
       }
-      default:
+      case SupplyKind::SinglePotential:
         if (conducts != nullptr) *conducts = true;
         if (layer != nullptr) *layer = 0;
         return single_.psi_soil_ + single_.grav_head_;
     }
+    unknown_supply_kind();
   }
   // Its partner (MultiLayerRoots::wet_ceiling): the highest such balance, where
   // uptake is at least zero. Equal to the floor on one layer or a single potential.
   double supply_wet_ceiling() const {
     switch (supply_kind_) {
-      case SupplyKind::MultiLayer: return roots_.wet_ceiling(roots_.psi_soil_);
-      default:                     return single_.psi_soil_ + single_.grav_head_;
+      case SupplyKind::MultiLayer:      return roots_.wet_ceiling(roots_.psi_soil_);
+      case SupplyKind::SinglePotential: return single_.psi_soil_ + single_.grav_head_;
     }
+    unknown_supply_kind();
   }
   // The one soil potential the single-layer solvers read. It checks nothing: on a
   // multi-layer profile it returns layer zero's, so test supply_is_single_layer().
   double supply_psi_soil_scalar() const {
     switch (supply_kind_) {
-      case SupplyKind::MultiLayer: return roots_.psi_soil_[0];
-      default:                     return single_.psi_soil_;
+      case SupplyKind::MultiLayer:      return roots_.psi_soil_[0];
+      case SupplyKind::SinglePotential: return single_.psi_soil_;
     }
+    unknown_supply_kind();
   }
   bool supply_is_single_layer() const {
     switch (supply_kind_) {
-      case SupplyKind::MultiLayer: return roots_.psi_soil_.size() == 1;
-      default:                     return true;
+      case SupplyKind::MultiLayer:      return roots_.psi_soil_.size() == 1;
+      case SupplyKind::SinglePotential: return true;
     }
+    unknown_supply_kind();
   }
   int supply_n_layers() const {
     switch (supply_kind_) {
       case SupplyKind::MultiLayer:
         return static_cast<int>(roots_.soil_number_of_depths_);
-      default:
+      case SupplyKind::SinglePotential:
         return single_.n_layers();
     }
+    unknown_supply_kind();
   }
 
 
@@ -327,6 +330,26 @@ public:
   static constexpr double bracket_tol = 1e-4;
   static double bracket_tol_at(double x) {
     return 1.5 * bracket_tol * (1.0 + std::abs(x));
+  }
+  // Tolerance on a bound that is itself the answer (a polished bracket end, the
+  // wet bound of a shut leaf or a leaf route): the derivative rows differentiate
+  // the root, so where a loose root-find stops would show in them.
+  static constexpr double bound_root_tol = 1e-15;
+  // Widens [lo, hi] away from `anchor`, doubling hi's distance from it, until the
+  // rising `target` is non-negative at hi; false if 64 doublings do not reach it.
+  template <class F>
+  static bool widen_to_sign_change(F&& target, double anchor, double& lo,
+                                   double& f_lo, double& hi, double& f_hi) {
+    for (int i = 0; f_hi < 0.0; ++i) {
+      if (i >= 64) {
+        return false;
+      }
+      lo = hi;
+      f_lo = f_hi;
+      hi = hi + (hi - anchor) + bracket_tol_at(hi);
+      f_hi = target(hi);
+    }
+    return true;
   }
   // A stationary point this close to the dry end, in MPa of collar, is reported as
   // the pin at the end: the stem's inverse resolves its rows to ~1e-6 here and
@@ -406,30 +429,19 @@ public:
   // Gate for the energy balance. Off by default, with leaf_temp prescribed.
   bool use_energy_balance_ = false;
   // --- the residual (cuticular) conductance ----------------------------------
-  //
-  // The cuticle passes water and CO2 after the stomata shut. The leaf optimises
-  // its stomatal flux and the xylem carries the total:
-  //
-  //     E   = E_s + r,            r  = g_min(T_leaf) D_leaf / P_atm
-  //     g_c = g_cs + rho g_min,   g_cs = (E - r) P_atm / (1.67 D_leaf)
-  //
-  // with g_c the total conductance to CO2 and rho = g_min_co2_ratio_. Every cost
-  // that reads the flux reads the total. With g_c > 0 the supply == demand residual
-  // has a root for every leaf, so a shut leaf is the ordinary evaluator at E_s = 0
-  // (hazard 18). A trait, default 0, where the term is an exact zero appended to
-  // every expression (hazard 18). Measured cuticular conductance, not a fitted g0,
-  // which is mostly stomata not yet closed (Duursma et al. 2018).
+  // The cuticle passes water and CO2 after the stomata shut: the leaf optimises
+  // its stomatal flux E_s, the xylem carries E = E_s + r, and every cost that
+  // reads the flux reads the total (the registry's `residual_flux`). A trait,
+  // default 0, where each residual term is an exact zero appended to its
+  // expression, and a shut leaf is the ordinary evaluator at E_s = 0 (hazard 18).
+  // Measured cuticular conductance, not a fitted g0 (Duursma et al. 2018).
   double g_min = 0.0;  // mol H2O m^-2 s^-1, at 25 C
   // The cuticle's CO2:H2O conductance ratio, 1/20 to 1/40 measured (Boyer 2015);
   // 0.05 is the upper end.
   double g_min_co2_ratio_ = 0.05;
-  // The temperature response of g_min, a softplus blend of two exponentials,
-  //
-  //     g_min(T) = g_min * exp( k_lo (T - 25) + w k_hi [ sp((T - T_t)/w) -
-  //                                                     sp((25 - T_t)/w) ] )
-  //
-  // with sp(x) = log(1 + exp(x)): slope k_lo below T_t, k_lo + k_hi above, exactly 1
-  // at 25 C, and no kink. The defaults are placeholders, inert at 25 C and at
+  // The temperature response of g_min, a softplus blend of two exponential
+  // slopes, exactly 1 at 25 C and without a kink (the registry's
+  // `g_min_temperature`). The defaults are placeholders, inert at 25 C and at
   // g_min = 0; a run that leans on the hot branch needs measured values.
   double g_min_k_low_ = 0.03;     // K^-1, the slope below the transition
   double g_min_k_high_ = 0.15;    // K^-1, the EXTRA slope above it
@@ -570,35 +582,23 @@ public:
   double NIR_int_ = util::na_value;
 
   // --- Sicangco et al. (2026) thermal cost, default OFF ----------------------
-  // An instantaneous cost of PSII damage, sigmoid in leaf temperature,
-  //
-  //   TC(Tleaf) = 1 / (1 + exp(-r*(Tleaf - T50))),   r = 2/(T50 - Tcrit)
-  //
-  // with Jmax scaled by (1 - TC), as in the paper's ProfitMaxTC. r is gsthermal's,
-  // which made the figures; the paper's Eqn 8 prints (T50 - Tcrit)/2.
+  // An instantaneous cost of PSII damage, sigmoid in leaf temperature, scaling
+  // Jmax by (1 - TC) as the paper's ProfitMaxTC (the registry's `thermal_cost`;
+  // its slope is gsthermal's 2/(T50 - Tcrit), which made the figures).
   bool use_thermal_cost_ = false;
   double T50_ = 50.4;    // deg C; Sicangco Table 2, heatwave treatment
   double Tcrit_ = 46.5;  // deg C; Sicangco Table 2, heatwave treatment
 
   // --- ATLS thermal damage and acclimation, default OFF ----------------------
-  // A lasting damage model on three fractions of leaf area:
-  //
-  //   functional F  <=>  impaired I  -->  damaged D,      F = 1 - I - D
-  //
-  //   dA/dt = acclim_alpha_ * softplus(T - acclim_T_; acclim_s_) - acclim_beta_ * A
-  //   dI/dt = k_imp(T) * F - (k_rec(T) + k_mat(T)) * I
-  //   dD/dt = k_mat(T) * I
-  //   k(T)  = k * exp[(Ea/R)(1/T_ref - 1/T)]   for each of the three rates
-  //
-  // with T the leaf temperature and rates per day. damage_rates() evaluates this and
-  // damage_trajectory() integrates it; a caller integrating the states itself seats
-  // A_, I_ and D_ before each set_physiology. Behind the gate,
-  // update_temperature_dependent_params shifts the Vcmax and Jmax optima by
-  // topt_offset_ + dTopt_max_ * A/(A + K_A_), scales both capacities by F, and adds
-  // four maintenance costs to R_d_, which F does not scale. With the gate off
-  // nothing here is read and every number is bit-identical. The states enter the
-  // benefit only, and the rates no objective. The derivative surface refuses the
-  // layer; the dynamics' sensitivities are damage_trajectory_gradient().
+  // A lasting damage model on three fractions of leaf area, functional F,
+  // impaired I and damaged D = 1 - F - I, with an acclimation state A (the
+  // registry's `damage` section). damage_rates() evaluates it, damage_trajectory()
+  // integrates it, and a caller integrating the states itself seats A_, I_ and D_
+  // before each set_physiology. Behind the gate the Vcmax and Jmax optima shift
+  // with A, both capacities scale by F, and four maintenance costs join R_d_; the
+  // states enter the benefit only, and the rates no objective. With the gate off
+  // nothing here is read. The derivative surface refuses the layer; the dynamics'
+  // sensitivities are damage_trajectory_gradient().
   bool use_thermal_damage_ = false;
   // Constitutive thermostability shift, deg C, of both the photosynthetic optimum
   // and the impairment's isokinetic temperature.
@@ -747,7 +747,7 @@ public:
 
   // --- Medlyn stomatal-conductance model -------------------------------------
   // A standalone, R-callable alternative to the profit optimisation
-  // (solve_medlyn_ci_*), not used by the TF24 path.
+  // (solve_medlyn_ci_*), outside the curve dispatch: no solve reads it.
   double g0 = 0.022;        // residual stomatal conductance (umol m^-2 s^-1)
   double g1 = 2.57;         // sensitivity to vpd (kPa^0.5)
 
@@ -791,13 +791,6 @@ public:
   // ⚠️ Kept only for plant's bindings, like psi_leaf (hazard 7).
   std::vector<double> f_r;
 
-  double atm_vpd = 2.0; //kPa
-  double ca = 40.0; // Pa
-  double atm_kpa = 101.3; //kPa
-  //partial pressure o2 (kPa)
-  double atm_o2_kpa = 21;
-  //leaf temperature (deg C)
-  double leaf_temp = 25;
   // Default soil-moisture content for the Medlyn beta_ factor.
   double theta_w = 0.2;  //m^3 m^-3
   double theta_fc = 0.5; //m^3 m^-3
@@ -869,7 +862,6 @@ public:
   // `converge` has no effect: the inverse always converges to a few ulps.
   double stem_curve_integral_inverse(double w, const char* caller = nullptr,
                                      bool converge = false) const;
-  double stem_curve_integral_inverse_deriv(double w) const;
   // G(inf) = stem_b Gamma(1/c) / c, the most the stem carries per unit conductance.
   double stem_curve_limit() const;
   // Q = G(inf) - G(psi), to its own relative precision, and its inverse; zero past
@@ -947,12 +939,11 @@ public:
     require_suction_vector(psi_soil, "E_from_Soil_to_Root_Collar");
     switch (supply_kind_) {
       case SupplyKind::MultiLayer:
-        roots_.uptake_at(T_collar, psi_soil, soil_consumption_, E_up_);
-        break;
-      default:
-        single_.uptake_at(T_collar, psi_soil, soil_consumption_, E_up_);
-        break;
+        return roots_.uptake_at(T_collar, psi_soil, soil_consumption_, E_up_);
+      case SupplyKind::SinglePotential:
+        return single_.uptake_at(T_collar, psi_soil, soil_consumption_, E_up_);
     }
+    unknown_supply_kind();
   }
 
   // What the leaf hands over, at any scalar, each with rows matching its own
@@ -1174,7 +1165,7 @@ public:
     HeldBalance<T> balance{};
   };
 
-  // The cost curves. A curve enters the derivative only through dC/dpsi_leaf.
+  // The cost curves, each defined once as Curve<K> (leaf_cost_curves.hpp).
   enum class CostCurve { TF24, CF77, JS22, CMax, SOX, JW26, ProfitMax, TF24_floor,
                          LeastCost };
 
@@ -1190,8 +1181,8 @@ public:
   // Log serves the products (log A + log g has A g's argmax), whose cost is stored
   // as -log g, and LeastCost's ratio. The energy-balance path through Tleaf(E) is
   // part of dA/dpsi and takes the same h'; cost-side Tleaf terms take none (see
-  // `dprofit_energy_balance_term`). `Scaled` holds |A|max fixed, so ProfitMax's trait
-  // gradients are partials: |A|max comes from a scan.
+  // `dprofit_energy_balance_term`). `Scaled` holds |A|max fixed within a solve;
+  // a trait gradient re-reads it at each perturbation, so it is total.
   enum class BenefitLink { Identity, Log, Scaled };
 
   // Names the enum's last member: move it when a curve is appended, or the new
@@ -1371,6 +1362,10 @@ public:
   // written rather than left stale (hazard 8).
   void set_profitmax_degenerate_state(double psi_leaf, double psi_upstream);
   template <CostCurve K> void check_cost_parameters();
+  // What every collar-route point does before its bracket: refuse the curve's
+  // unset parameters, and seed a normalised curve's normalisers. The solve, a
+  // prescribed collar and a replay share it, so none can skip either.
+  template <CostCurve K> void begin_collar_point();
   template <CostCurve K> double cost_deriv(double psi_leaf,
                                            double psi_upstream);
   template <CostCurve K> static constexpr bool cost_reads_upstream();
@@ -1452,9 +1447,10 @@ public:
     switch (supply_kind_) {
       case SupplyKind::MultiLayer:
         return roots_.duptake_dpsi(T_collar, psi_soil);
-      default:
+      case SupplyKind::SinglePotential:
         return single_.duptake_dpsi(T_collar, psi_soil);
     }
+    unknown_supply_kind();
   }
   // E_from_Soil_to_Root_Collar and dE_from_soil_dpsi_collar from one walk where
   // the path has one, each bit for bit what the two calls give; returns the slope.
@@ -1464,10 +1460,11 @@ public:
       case SupplyKind::MultiLayer:
         return roots_.uptake_and_slope_at(T_collar, psi_soil, soil_consumption_,
                                           E_up_);
-      default:
+      case SupplyKind::SinglePotential:
         single_.uptake_at(T_collar, psi_soil, soil_consumption_, E_up_);
         return single_.duptake_dpsi(T_collar, psi_soil);
     }
+    unknown_supply_kind();
   }
   // The shut operating point the collar solve's early exits place: the collar
   // where uptake meets the residual flux, the stem where it carries it, and every
@@ -2200,14 +2197,15 @@ public:
   // and the conductance span.
   void prepare_profitmax();
 
-  // The conductance normalisers alone, `k(psi_soil)` and the span to `k_crit`:
-  // analytic in the traits, so refreshed whenever the traits move.
+  // The conductance normalisers alone, `k(psi_soil)` and the span to `k_crit`,
+  // from the reference potential: analytic in the traits, so refreshed whenever
+  // the traits move. On the layered supply the reference is a collar solve's wet
+  // bracket end, so it is found once per preparation and passed in.
   double profitmax_reference_psi();
-  void prepare_profitmax_norms();
+  void prepare_profitmax_norms(double reference_psi);
 
-  // The same with |A|max supplied, not scanned: the scan is piecewise constant
-  // in the traits, so a gradient holds |A|max at the base point and refreshes
-  // only the analytic normalisers after set_traits clears them.
+  // The same with |A|max supplied rather than found, for a caller that holds it
+  // at a base point.
   void prepare_profitmax_at(double A_max);
   double profit_psi_leaf_ProfitMax(double psi_leaf, double psi_upstream);
 
@@ -2508,6 +2506,30 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_P50_,
   setup_clean_leaf();
 }
 
+// The thermal-damage layer's inputs in the parameter pack, each slot with the
+// member it holds: passive_pars and gradient::apply both read this list.
+struct DamageSlot {
+  int slot;
+  double Leaf::*member;
+};
+inline constexpr DamageSlot damage_slots[] = {
+    {par_A, &Leaf::A_},
+    {par_I, &Leaf::I_},
+    {par_D, &Leaf::D_},
+    {par_topt_offset, &Leaf::topt_offset_},
+    {par_dTopt_max, &Leaf::dTopt_max_},
+    {par_K_A, &Leaf::K_A_},
+    {par_k_i, &Leaf::k_i_},
+    {par_k_i_baseline, &Leaf::k_i_baseline_},
+    {par_k_rec, &Leaf::k_rec_},
+    {par_k_rec_Ea, &Leaf::k_rec_Ea_},
+    {par_c_acclim_maint, &Leaf::c_acclim_maint_},
+    {par_c_repair_maint, &Leaf::c_repair_maint_},
+    {par_c_protect_maint, &Leaf::c_protect_maint_},
+    {par_c_repair_flux, &Leaf::c_repair_flux_}};
+static_assert(std::size(damage_slots) == par_c_repair_flux - par_A + 1,
+              "every damage slot from par_A to par_c_repair_flux has a member");
+
 inline leaf_pars<double> Leaf::passive_pars() const {
   leaf_pars<double> p{};
   p[par_vcmax_25] = vcmax_25;
@@ -2533,20 +2555,9 @@ inline leaf_pars<double> Leaf::passive_pars() const {
   p[par_CF77_lambda] = CF77_lambda_;
   p[par_TF24_floor_lambda_o] = TF24_floor_lambda_o;
   p[par_LeastCost_beta] = LeastCost_beta;
-  p[par_A] = A_;
-  p[par_I] = I_;
-  p[par_D] = D_;
-  p[par_topt_offset] = topt_offset_;
-  p[par_dTopt_max] = dTopt_max_;
-  p[par_K_A] = K_A_;
-  p[par_k_i] = k_i_;
-  p[par_k_i_baseline] = k_i_baseline_;
-  p[par_k_rec] = k_rec_;
-  p[par_k_rec_Ea] = k_rec_Ea_;
-  p[par_c_acclim_maint] = c_acclim_maint_;
-  p[par_c_repair_maint] = c_repair_maint_;
-  p[par_c_protect_maint] = c_protect_maint_;
-  p[par_c_repair_flux] = c_repair_flux_;
+  for (const DamageSlot& d : damage_slots) {
+    p[d.slot] = this->*d.member;
+  }
   p[par_PPFD] = PPFD_;
   return p;
 }
@@ -2677,7 +2688,7 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
      case SupplyKind::MultiLayer:
        roots_.set_soil_state(psi_soil, soil_depth);
        break;
-     default:
+     case SupplyKind::SinglePotential:
        // One potential: the depth and root-mass profiles are not read, nor any
        // element of psi_soil past the first.
        single_.set_soil_state(psi_soil[0]);
@@ -2769,7 +2780,7 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
     case SupplyKind::MultiLayer:
       roots_.set_root_network(root_network);
       break;
-    default:
+    case SupplyKind::SinglePotential:
       single_.set_supply_resistances(root_network);
       break;
   }

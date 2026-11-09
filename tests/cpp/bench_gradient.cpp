@@ -306,7 +306,7 @@ int main(int argc, char **argv) {
   }
 
   printf("\n  %d of the %d traits  FD %8.1f us   IFT %8.1f us   %.2fx\n",
-         kNTraits, phylloptim::gradient::n_traits,
+         kNTraits, phylloptim::n_traits,
          fd_all, ift_all, fd_all / ift_all);
   printf("  the %2d with no rebuild  FD %8.1f us   IFT %8.1f us   %.2fx\n",
          n_cheap, fd_cheap, ift_cheap, fd_cheap / ift_cheap);
@@ -370,12 +370,15 @@ int main(int argc, char **argv) {
       const char *label;
       int par;
       bool fast;
+      double g_min = 0.0;
     };
     const Arm arms[] = {
         {"vcmax_25 (no table anywhere)", 0, true},
-        {"stem_P50, fast_stem_curve on", phylloptim::gradient::par_stem_P50, true},
-        {"stem_P50, fast_stem_curve off", phylloptim::gradient::par_stem_P50, false},
-        {"stem_c (reuses its tables)", phylloptim::gradient::par_stem_c, true}};
+        {"stem_P50, fast_stem_curve on", phylloptim::par_stem_P50, true},
+        {"stem_P50, fast_stem_curve off", phylloptim::par_stem_P50, false},
+        {"stem_c (reuses its tables)", phylloptim::par_stem_c, true},
+        // With a cuticle: every arm above runs at its exact-zero default.
+        {"vcmax_25, g_min 5e-4", 0, true, 5e-4}};
 
     printf("\n%-32s %10s %12s\n", "pars", "us/obs", "rebuilds/obs");
     const long batch_reps = std::max(1L, per_round / 20);
@@ -385,6 +388,7 @@ int main(int argc, char **argv) {
                  phylloptim::gradient::Route::Collar};
       s.fast_stem_curve = arm.fast;
       const int pars[1] = {arm.par};
+      theta[phylloptim::par_g_min] = arm.g_min;
       double best = 1e300;
       long builds = 0;
       for (int round = 0; round < 3; ++round) {
@@ -399,7 +403,7 @@ int main(int argc, char **argv) {
           // `stem_c`, which would rebuild the stem table each rep -- a rebuild the
           // model genuinely owes, which would read like a leftover of the bug this
           // arm exists to measure. `TF24_beta2` owns no table.
-          theta[phylloptim::gradient::par_TF24_beta2] =
+          theta[phylloptim::par_TF24_beta2] =
               kBase.v[7] * (1.0 + double(r) * 1e-12);
           const std::vector<phylloptim::gradient::Result> g =
               phylloptim::gradient::batch(l, theta, 1, obs, false, pars, 1, s);

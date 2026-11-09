@@ -120,6 +120,19 @@ gradient_golden_cases <- function() {
     psi = 2.0)
   cases[["prescribed-JS22-leaf"]] <- case(
     single(1.0), c("vcmax_25", "stem_P50", "JS22_gamma"), "JS22", "leaf", psi = 2.0)
+
+  # Every curve on both routes again with a cuticle: every case above runs at
+  # g_min = 0, where the residual terms are exact zeros (hazard 18).
+  cuticle <- list(traits = leaf_traits(g_min = 5e-4))
+  for (cv in cost_curve_names()) {
+    own <- cp$parameter[cp$curve == cv]
+    for (route in c("collar", "leaf")) {
+      args <- c(if (route == "collar") batch_drivers(1.0) else single(1.0),
+                prices[[cv]], cuticle)
+      pars <- c("vcmax_25", "stem_P50", "R_d_25", "g_min", own)
+      cases[[paste0(cv, "-", route, "-cuticle")]] <- case(args, pars, cv, route)
+    }
+  }
   cases
 }
 
