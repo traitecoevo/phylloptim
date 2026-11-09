@@ -145,7 +145,7 @@ Each has cost someone real numbers; the narrative and its measurements are in [h
 3. **The argmax must vary smoothly with inputs**; any solver change must re-measure it, and the closed form is never under a derivative because its guard switches on an output.
 4. **The leaf is purely intensive**: every input is per unit leaf area, including the `RootNetwork` resistances, which nothing here can check.
 5. **The collar solve is the hot path**, so measure before arguing about dispatch or inlining: the supply path is out of line, the cost core is fully inlined.
-6. **There are two supply paths, selected by `supply_kind_`**; a third needs an arm in every `switch (supply_kind_)` (each has a `default:` that silently means "single"), and `duptake_dpsi` returning NaN means "use finite differences".
+6. **There are two supply paths, selected by `supply_kind_`**; a third needs an arm in every `switch (supply_kind_)`, which `-Werror=switch` enforces because none has a `default:`, and `duptake_dpsi` returning NaN means "use finite differences".
 7. **Moving a public member breaks plant's generated bindings**; fix it with a dotted `name_cpp` and land both changes together.
 8. **Every path out of the solve writes every output**, because plant reuses one `Leaf` per patch; a bit-identical golden run is no evidence about stale state.
 9. **Nothing reachable from `<phylloptim.hpp>` includes Rcpp**, enforced only by `cpp-tests.yml` running without R.

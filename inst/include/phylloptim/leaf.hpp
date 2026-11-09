@@ -227,20 +227,24 @@ public:
 
   // --- supply dispatch -------------------------------------------------------
   // Where the two paths differ; the rest of the solve reads the suction vector both
-  // provide. `default:` means the single path, so a third path needs an explicit arm
-  // in every switch (hazard 6).
+  // provide. Every switch names both arms and none has a `default:`, so with
+  // -Werror=switch a third path is a build failure wherever an arm is missing.
+  // After a switch that returns from both arms: no code, no branch.
+  [[noreturn]] static void unknown_supply_kind() { __builtin_unreachable(); }
   double supply_begin_solve() {
     switch (supply_kind_) {
-      case SupplyKind::MultiLayer: return roots_.begin_solve();
-      default:                     return single_.begin_solve();
+      case SupplyKind::MultiLayer:      return roots_.begin_solve();
+      case SupplyKind::SinglePotential: return single_.begin_solve();
     }
+    unknown_supply_kind();
   }
   // The current soil state, as positive suction magnitudes.
   const std::vector<double>& supply_psi_soil() const {
     switch (supply_kind_) {
-      case SupplyKind::MultiLayer: return roots_.psi_soil_;
-      default:                     return single_.psi_soil_vec_;
+      case SupplyKind::MultiLayer:      return roots_.psi_soil_;
+      case SupplyKind::SinglePotential: return single_.psi_soil_vec_;
     }
+    unknown_supply_kind();
   }
   // The wet bound's floor (MultiLayerRoots::wet_floor_layer): the lowest balance
   // psi_i + z_i among conducting layers, else the wettest layer's. `conducts` and
@@ -255,41 +259,46 @@ public:
         const std::size_t k = static_cast<std::size_t>(i);
         return roots_.psi_soil_[k] + roots_.grav_head_z_[k];
       }
-      default:
+      case SupplyKind::SinglePotential:
         if (conducts != nullptr) *conducts = true;
         if (layer != nullptr) *layer = 0;
         return single_.psi_soil_ + single_.grav_head_;
     }
+    unknown_supply_kind();
   }
   // Its partner (MultiLayerRoots::wet_ceiling): the highest such balance, where
   // uptake is at least zero. Equal to the floor on one layer or a single potential.
   double supply_wet_ceiling() const {
     switch (supply_kind_) {
-      case SupplyKind::MultiLayer: return roots_.wet_ceiling(roots_.psi_soil_);
-      default:                     return single_.psi_soil_ + single_.grav_head_;
+      case SupplyKind::MultiLayer:      return roots_.wet_ceiling(roots_.psi_soil_);
+      case SupplyKind::SinglePotential: return single_.psi_soil_ + single_.grav_head_;
     }
+    unknown_supply_kind();
   }
   // The one soil potential the single-layer solvers read. It checks nothing: on a
   // multi-layer profile it returns layer zero's, so test supply_is_single_layer().
   double supply_psi_soil_scalar() const {
     switch (supply_kind_) {
-      case SupplyKind::MultiLayer: return roots_.psi_soil_[0];
-      default:                     return single_.psi_soil_;
+      case SupplyKind::MultiLayer:      return roots_.psi_soil_[0];
+      case SupplyKind::SinglePotential: return single_.psi_soil_;
     }
+    unknown_supply_kind();
   }
   bool supply_is_single_layer() const {
     switch (supply_kind_) {
-      case SupplyKind::MultiLayer: return roots_.psi_soil_.size() == 1;
-      default:                     return true;
+      case SupplyKind::MultiLayer:      return roots_.psi_soil_.size() == 1;
+      case SupplyKind::SinglePotential: return true;
     }
+    unknown_supply_kind();
   }
   int supply_n_layers() const {
     switch (supply_kind_) {
       case SupplyKind::MultiLayer:
         return static_cast<int>(roots_.soil_number_of_depths_);
-      default:
+      case SupplyKind::SinglePotential:
         return single_.n_layers();
     }
+    unknown_supply_kind();
   }
 
 
@@ -959,12 +968,11 @@ public:
     require_suction_vector(psi_soil, "E_from_Soil_to_Root_Collar");
     switch (supply_kind_) {
       case SupplyKind::MultiLayer:
-        roots_.uptake_at(T_collar, psi_soil, soil_consumption_, E_up_);
-        break;
-      default:
-        single_.uptake_at(T_collar, psi_soil, soil_consumption_, E_up_);
-        break;
+        return roots_.uptake_at(T_collar, psi_soil, soil_consumption_, E_up_);
+      case SupplyKind::SinglePotential:
+        return single_.uptake_at(T_collar, psi_soil, soil_consumption_, E_up_);
     }
+    unknown_supply_kind();
   }
 
   // What the leaf hands over, at any scalar, each with rows matching its own
@@ -1468,9 +1476,10 @@ public:
     switch (supply_kind_) {
       case SupplyKind::MultiLayer:
         return roots_.duptake_dpsi(T_collar, psi_soil);
-      default:
+      case SupplyKind::SinglePotential:
         return single_.duptake_dpsi(T_collar, psi_soil);
     }
+    unknown_supply_kind();
   }
   // E_from_Soil_to_Root_Collar and dE_from_soil_dpsi_collar from one walk where
   // the path has one, each bit for bit what the two calls give; returns the slope.
@@ -1480,10 +1489,11 @@ public:
       case SupplyKind::MultiLayer:
         return roots_.uptake_and_slope_at(T_collar, psi_soil, soil_consumption_,
                                           E_up_);
-      default:
+      case SupplyKind::SinglePotential:
         single_.uptake_at(T_collar, psi_soil, soil_consumption_, E_up_);
         return single_.duptake_dpsi(T_collar, psi_soil);
     }
+    unknown_supply_kind();
   }
   // The shut operating point the collar solve's early exits place: the collar
   // where uptake meets the residual flux, the stem where it carries it, and every
@@ -2694,7 +2704,7 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
      case SupplyKind::MultiLayer:
        roots_.set_soil_state(psi_soil, soil_depth);
        break;
-     default:
+     case SupplyKind::SinglePotential:
        // One potential: the depth and root-mass profiles are not read, nor any
        // element of psi_soil past the first.
        single_.set_soil_state(psi_soil[0]);
@@ -2786,7 +2796,7 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
     case SupplyKind::MultiLayer:
       roots_.set_root_network(root_network);
       break;
-    default:
+    case SupplyKind::SinglePotential:
       single_.set_supply_resistances(root_network);
       break;
   }
