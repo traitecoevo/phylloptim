@@ -827,13 +827,21 @@ inline double Leaf::replay_operating_point_for(double collar,
       // A pinned solve's collar is a polished bound, up to ~1e-4 outside the
       // bracket returned here; clamped back it would replay a different point,
       // so the interval is widened to hold it.
-      out = profit_at_collar_psi<K>(collar, std::min(bound_a, collar),
-                                    std::max(bound_b, collar));
+      bool evaluate = true;
       if constexpr (Curve<K>::prepares_normalisers) {
+        // The solve's degenerate exit, placed without evaluating an objective
+        // whose normalisers it cannot divide by.
         if (!profitmax_has_objective()) {
-          set_profitmax_degenerate_state(opt_psi_leaf_, opt_root_psi_);
+          opt_psi_leaf_ = find_psi_leaf_from_psi_root(collar, supply_psi_soil());
+          opt_root_psi_ = collar;
+          set_profitmax_degenerate_state(opt_psi_leaf_, collar);
           out = profit_;
+          evaluate = false;
         }
+      }
+      if (evaluate) {
+        out = profit_at_collar_psi<K>(collar, std::min(bound_a, collar),
+                                      std::max(bound_b, collar));
       }
     }
     operating_point_kind_ = kind;

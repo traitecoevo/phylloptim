@@ -10407,11 +10407,18 @@ void test_profitmax_collar_route_has_a_degenerate_exit() {
                  (kind == Kind::BoundarySoil || kind == Kind::HydraulicShutdown);
     zeros = zeros && l.profit_ == 0.0 && l.carbon_gain_ == 0.0 &&
             l.hydraulic_cost_norm_ == 0.0 && std::isnan(l.lambda_emergent_);
-    if (kind == Kind::BoundarySoil) {
+    {
       pl::Leaf r = make_leaf(d, ps, dp);
       r.set_model(CC::ProfitMax, true);
-      replayed = replayed && r.replay_operating_point(l.opt_root_psi_, kind) == 0.0 &&
-                 r.profit_ == 0.0 && r.opt_psi_leaf_ == l.opt_psi_leaf_;
+      try {
+        replayed = replayed && r.replay_operating_point(l.opt_root_psi_, kind) == 0.0 &&
+                   r.profit_ == 0.0 && r.opt_psi_leaf_ == l.opt_psi_leaf_ &&
+                   r.operating_point_kind() == kind;
+      } catch (const std::exception&) {
+        replayed = false;
+      }
+    }
+    if (kind == Kind::BoundarySoil) {
       const auto supply = l.roots_.held_supply();
       const auto draw = l.supply_draw_at<double>(l.opt_root_psi_, supply);
       bool threw = false;
