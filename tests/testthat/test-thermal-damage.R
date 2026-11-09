@@ -803,6 +803,10 @@ test_that("the trajectory gradient is the derivative of the trajectory", {
   g_some <- leaf_damage_gradient(l, t, temp, A0 = 0.5, I0 = 0.05, D0 = 0.01,
                                  pars = some)
   expect_identical(unname(g_some$gradient), unname(g$gradient[, , some]))
+  # And none is an empty gradient of the right shape.
+  g_none <- leaf_damage_gradient(l, t, temp, A0 = 0.5, I0 = 0.05, D0 = 0.01,
+                                 pars = character(0))
+  expect_identical(dim(g_none$gradient), c(length(t), 3L, 0L))
 })
 
 test_that("the trajectory gradient refuses an unknown input", {

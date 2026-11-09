@@ -1,6 +1,6 @@
 # phylloptim 0.32.1
 
-- `leaf_damage_gradient()` takes every input's derivative in one forward pass, through odelia's forward-mode scalar, in place of a hand-written dual number and a pass per input. For all 17 inputs, the default, it is about 6 times faster; asking for one or two inputs costs what asking for all of them does. Derivatives move by at most 2e-15 relative; nothing else moves.
+- `leaf_damage_gradient()` takes every input's derivative in one forward pass, on XAD's forward-mode scalar carrying all 17 directions, in place of a hand-written dual number and a pass per input. For all 17 inputs, the default, it is about 6 times faster; asking for one or two inputs costs what asking for all of them does. Derivatives move by at most 2e-15 relative; nothing else moves.
 
 # phylloptim 0.32.0
 
