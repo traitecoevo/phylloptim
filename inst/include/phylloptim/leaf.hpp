@@ -974,6 +974,22 @@ public:
     T ci{};
     T gc{};
   };
+  // A normalised curve's normalisers on the pack, with the rows of the point they
+  // are read at (ProfitMax's reference collar and |A| at psi_crit along the stem
+  // from it); empty for every other curve. The point is the solve's, recorded by
+  // prepare_profitmax; the second draw is taken from the supply `draw` was.
+  template <class T>
+  struct Normalisers {
+    T k_soil{};
+    T k_span{};
+    T A_max{};
+    template <class F>
+    void for_each_active(F&& f) const {
+      f(k_soil);
+      f(k_span);
+      f(A_max);
+    }
+  };
 
   // The soil's draw at one collar, with that collar, so check_draw can refuse a
   // flux and a slope from different ones. `E_up` and its slope are an active pair;
@@ -994,6 +1010,10 @@ public:
     // and takes its rows: the residual is zero at every collar there.
     bool no_conduction = false;
     S gravity_balance{};
+    // The supply it was drawn from, for a curve whose normalisers draw again at
+    // a reference collar (normalisers_at). ⚠️ The caller's object: it must
+    // outlive the draw. Not active; its values reach the tape through draws.
+    const SupplyInputs<S>* inputs = nullptr;
 
     // Everything that carries a row. ⚠️ A member not visited here gives exact-zero
     // columns, not an error (hazard 17); the static_assert below counts members.
@@ -1016,7 +1036,8 @@ public:
   static_assert(sizeof(SupplyDraw<double>) ==
                     sizeof(double) + sizeof(odelia::with_slope<double>) +
                         sizeof(std::vector<double>) * 2 +
-                        2 * (alignof(double) + sizeof(double)),
+                        2 * (alignof(double) + sizeof(double)) +
+                        sizeof(const SupplyInputs<double>*),
                 "SupplyDraw gained or lost a member: update for_each_active, "
                 "then this count");
   static_assert(sizeof(odelia::with_slope<double>) == 2 * sizeof(double),
@@ -1026,6 +1047,10 @@ public:
   // The soil's draw at `collar`, which is passive whatever the caller passes: where
   // the point moves is the supplied row's business, and a live collar would record
   // the search that placed it.
+  // The draw keeps a pointer to `supply` (SupplyDraw::inputs), so a temporary
+  // is refused at compile time: it would dangle by the time the draw is read.
+  template <class S>
+  SupplyDraw<S> supply_draw_at(const S& collar, SupplyInputs<S>&& supply) const = delete;
   template <class S>
   SupplyDraw<S> supply_draw_at(const S& collar,
                                const SupplyInputs<S>& supply) const {
@@ -1038,6 +1063,7 @@ public:
     const std::size_t n = static_cast<std::size_t>(supply_n_layers());
     SupplyDraw<S> d;
     d.at = odelia::util::to_passive(collar);
+    d.inputs = &supply;
 
     // A shut leaf sits on its wet bound and is drawn like any other point.
 
@@ -1681,12 +1707,14 @@ public:
   // (Curve<K>); a curve without them is refused at compile time.
   template <CostCurve K, class S>
   S profit_at(const S& collar, const SupplyDraw<S>& draw,
-              const leaf_pars<S>& pars, bool collar_moves) const;
-  // The objective at coordinates already placed.
+              const leaf_pars<S>& pars, bool collar_moves,
+              const Normalisers<S>& norms = {}) const;
+  // The objective at coordinates already placed; `norms` from normalisers_at
+  // for a normalised curve, read by no other.
   template <CostCurve K, class S>
   S profit_from_coords(const S& collar, const leaf_pars<S>& pars,
                        const PhotoCapacity<S>& cap, const S& sigma,
-                       const S& ci) const;
+                       const S& ci, const Normalisers<S>& norms = {}) const;
 
   // `placed`, when operating_collar placed it at this point, is read instead of
   // solving sigma and ci again. Refused at any kind but interior or at any other
@@ -1702,6 +1730,23 @@ public:
   PhysicalOutputs<S> physical_outputs_at(const S& collar, const SupplyDraw<S>& draw,
                                          const leaf_pars<S>& pars,
                                          const HeldCoords<S>* placed = nullptr) const;
+  // Refuses normalisers left empty (the default argument) on a curve that reads
+  // them: zeros would divide, not fail.
+  template <class S>
+  static void check_normalisers(const Normalisers<S>& n, const char* who) {
+    if (!(odelia::util::to_passive(n.A_max) > 0.0)) {
+      util::stop(std::string(who) + ": a normalised curve needs its normalisers; "
+                 "pass normalisers_at's");
+    }
+  }
+  // See Normalisers: empty for every curve that does not prepare them.
+  template <CostCurve K, class S>
+  Normalisers<S> normalisers_at(const SupplyDraw<S>& draw,
+                                const leaf_pars<S>& pars) const;
+  // ci at a conductance, placed by its residual at the solve's root ci_star:
+  // the CO2 supply equal to demand. +inf (no root) passes through.
+  template <class S>
+  S ci_at_conductance(double ci_star, const S& gc, const PhotoCapacity<S>& cap) const;
   // The one core both read; `Out` is BilledOutputs<S> or PhysicalOutputs<S>.
   template <CostCurve K, class S, class Out>
   Out outputs_at(const S& collar, const SupplyDraw<S>& draw,
@@ -1721,15 +1766,18 @@ public:
   // own slope halves.
   template <CostCurve K, class S>
   S dprofit_dcollar_at(const S& collar, const SupplyDraw<S>& draw,
-                       const leaf_pars<S>& pars) const;
+                       const leaf_pars<S>& pars,
+                       const Normalisers<S>& norms = {}) const;
   // The same marginal on coordinates operating_collar placed, adding the collar's channel.
   template <CostCurve K, class S>
   S dprofit_dcollar_at(const S& collar, const SupplyDraw<S>& draw,
-                       const leaf_pars<S>& pars, const HeldCoords<S>& held) const;
+                       const leaf_pars<S>& pars, const HeldCoords<S>& held,
+                       const Normalisers<S>& norms = {}) const;
   template <CostCurve K, class S>
   S dprofit_dcollar_from_coords(const S& collar, const leaf_pars<S>& pars,
                                 const PhotoCapacity<S>& cap,
-                                const CollarCoords<S>& at) const;
+                                const CollarCoords<S>& at,
+                                const Normalisers<S>& norms = {}) const;
 
   // dM/dp at the solved point, the curvature the interior derivation divides by,
   // as a first difference of M: a tangent is wrong by a factor of eight, because
@@ -2154,6 +2202,11 @@ public:
   // How many root tables this leaf has built; see stem_curve_builds_. Last for the
   // ring's reason.
   long root_curve_builds_ = 0;
+  // Where prepare_profitmax read |A|max: its reference collar, and ci at psi_crit
+  // along the stem from it, for normalisers_at; NaN where it recorded neither
+  // (the energy balance or damage layer on, which the surface refuses).
+  double profitmax_reference_psi_ = std::numeric_limits<double>::quiet_NaN();
+  double profitmax_crit_ci_ = std::numeric_limits<double>::quiet_NaN();
 };
 
 // Everything about one cost curve, specialised for each in leaf_cost_curves.hpp.

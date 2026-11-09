@@ -5103,12 +5103,22 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
     p0[pl::par_TF24_floor_lambda_o] = price;
     // The single path's slot, NA on this one; any value, since nothing reads it.
     p0[pl::par_resistance] = 1e3;
-    pl::Leaf l = solve(p0);
+    pl::Leaf l;
+    try {
+      l = solve(p0);
+    } catch (const pl::util::infeasible_error&) {
+      skipped_at += " fixture:infeasible";
+      continue;
+    }
     const Kind kind = l.operating_point_kind();
     const std::string name = l.operating_point_kind_name(kind);
     if (kind != Kind::Interior && kind != Kind::BoundarySoil &&
         kind != Kind::BoundaryDry && kind != Kind::HydraulicShutdown) {
       skipped_at += " fixture:" + name;
+      continue;
+    }
+    if (!fixture::surface_has_objective(l)) {
+      skipped_at += " fixture:no-objective";
       continue;
     }
     const double curvature = kind == Kind::Interior
@@ -5171,7 +5181,15 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
       pl::leaf_pars<double> p_up = p0, p_down = p0;
       p_up[std::size_t(k)] += h;
       if (!forward) p_down[std::size_t(k)] -= h;
-      pl::Leaf up = solve(p_up), down = forward ? l : solve(p_down);
+      pl::Leaf up, down;
+      try {
+        up = solve(p_up);
+        down = forward ? l : solve(p_down);
+      } catch (const pl::util::infeasible_error&) {
+        ++skipped;
+        skipped_at += " " + name + "/" + par_name(k) + "(infeasible)";
+        continue;
+      }
       const double span = forward ? h : 2.0 * h;
       if (up.operating_point_kind() != kind ||
           down.operating_point_kind() != kind) {
@@ -5290,6 +5308,7 @@ void test_supplied_rows_match_a_resolve_at_every_kind() {
   referee_every_parameter_at_every_kind<CC::SOX>(&compared);
   referee_every_parameter_at_every_kind<CC::JW26>(&compared);
   referee_every_parameter_at_every_kind<CC::LeastCost>(&compared);
+  referee_every_parameter_at_every_kind<CC::ProfitMax>(&compared);
   ok(compared >= 3300, "the referee compared at least 3300 rows");
 }
 
@@ -5473,8 +5492,8 @@ void test_operating_collar_refuses_a_flat_or_rising_curvature() {
      "a positive curvature is refused as not negative");
   ok(throws_with([&] { row(0.0); }, "which is not negative"),
      "a zero curvature is refused as not negative");
-  const auto draw_d =
-      l.supply_draw_at<double>(l.opt_root_psi_, l.roots_.held_supply());
+  const auto held_d = l.roots_.held_supply();
+  const auto draw_d = l.supply_draw_at<double>(l.opt_root_psi_, held_d);
   ok(l.operating_collar<CC::TF24, double>(draw_d, seated, -1e-300) == l.opt_root_psi_,
      "the double path reads no curvature, so refuses none");
 }
@@ -5493,8 +5512,8 @@ void test_surface_refuses_a_curve_or_supply_it_was_not_solved_on() {
   l.find_root_collar_psi();
   ok(l.operating_point_kind() == Kind::Interior, "the fixture is an interior point");
   const phylloptim::leaf_pars<double> pars = l.passive_pars();
-  const auto draw =
-      l.supply_draw_at<double>(l.opt_root_psi_, l.roots_.held_supply());
+  const auto held_supply = l.roots_.held_supply();
+  const auto draw = l.supply_draw_at<double>(l.opt_root_psi_, held_supply);
   ok(l.operating_collar<CC::TF24, double>(draw, pars) == l.opt_root_psi_,
      "control: operating_collar answers on the seated curve");
   ok(std::isfinite(l.billed_outputs_at<CC::TF24, double>(l.opt_root_psi_, draw, pars).profit),
@@ -5519,9 +5538,9 @@ void test_surface_refuses_a_curve_or_supply_it_was_not_solved_on() {
                         d.atm_o2_kpa, d.atm_kpa);
   single.find_root_collar_psi();
   ok(std::isfinite(single.profit_), "control: the single-potential leaf solves");
+  const auto single_supply = single.roots_.held_supply();
   ok(throws_with([&] {
-       single.supply_draw_at<double>(single.opt_root_psi_,
-                                     single.roots_.held_supply());
+       single.supply_draw_at<double>(single.opt_root_psi_, single_supply);
      }, "Leaf::supply_draw_at: the derivative surface reads the multi-layer "
         "supply, and this leaf is on the single path"),
      "supply_draw_at refuses the single-potential path");
@@ -5530,8 +5549,8 @@ void test_surface_refuses_a_curve_or_supply_it_was_not_solved_on() {
   shut.find_root_collar_psi();
   ok(shut.operating_point_kind() == Kind::HydraulicShutdown,
      "the dry fixture is a hydraulic shutdown");
-  const auto dry =
-      shut.supply_draw_at<double>(shut.opt_root_psi_, shut.roots_.held_supply());
+  const auto shut_supply = shut.roots_.held_supply();
+  const auto dry = shut.supply_draw_at<double>(shut.opt_root_psi_, shut_supply);
   ok(dry.E_up.value == 0.0 && dry.E_up.slope == 0.0,
      "a shutdown draw's E_up is zero, not indeterminate");
 }
@@ -5722,6 +5741,7 @@ void for_each_further_surface_curve(F&& f) {
   f(std::integral_constant<CC, CC::SOX>{});
   f(std::integral_constant<CC, CC::JW26>{});
   f(std::integral_constant<CC, CC::LeastCost>{});
+  f(std::integral_constant<CC, CC::ProfitMax>{});
 }
 
 template <phylloptim::Leaf::CostCurve K>
@@ -5737,6 +5757,7 @@ void compare_held_handoff(phylloptim::Leaf &l, const std::string &at,
       !(curvature < -phylloptim::Leaf::interior_curvature_floor)) {
     return;
   }
+  if (!fixture::surface_has_objective(l)) return;
   ++(kind == Kind::Interior ? tally.interior : tally.other);
   // Traits every curve reads, the shallowest layer's soil potential (-1), and
   // the curve's own parameters, with TF24's for TF24_floor, whose hydraulic half
@@ -5836,7 +5857,11 @@ void test_held_coordinates_move_no_row() {
             constexpr K curve = decltype(tag)::value;
             phylloptim::Leaf c = make_leaf(d, psi_soil, soil_depth);
             c.set_model(curve, true);
-            c.optimise();
+            try {
+              c.optimise();
+            } catch (const phylloptim::util::infeasible_error&) {
+              return;  // ProfitMax with no stream: see outputs_agree_with_the_solve_on
+            }
             compare_held_handoff<curve>(
                 c, phylloptim::Leaf::curve_name(static_cast<int>(curve)) + " " + at,
                 tally);
@@ -5897,7 +5922,8 @@ void test_held_coordinates_are_refused_off_their_point() {
          bound.operating_point_kind_name(bound.operating_point_kind()));
 
   const Seat si = seat(in);
-  const auto draw = in.supply_draw_at<T>(T(in.opt_root_psi_), si.supply());
+  const auto si_supply = si.supply();
+  const auto draw = in.supply_draw_at<T>(T(in.opt_root_psi_), si_supply);
   const double curvature = in.profit_curvature_at_collar<CC::TF24>();
   phylloptim::Leaf::HeldCoords<T> held;
   const T collar = in.operating_collar<CC::TF24, T>(draw, si.pars, curvature, &held);
@@ -5907,14 +5933,15 @@ void test_held_coordinates_are_refused_off_their_point() {
   // Read at another collar on the same leaf: the draw is taken there, so only
   // the coordinates are out of place.
   const double off = in.opt_root_psi_ + 0.01;
-  const auto draw_off = in.supply_draw_at<T>(T(off), si.supply());
+  const auto draw_off = in.supply_draw_at<T>(T(off), si_supply);
   ok(throws_with([&] { in.billed_outputs_at<CC::TF24, T>(T(off), draw_off, si.pars, &held); },
                  "Leaf::billed_outputs_at: the held coordinates were placed at a collar of"),
      "billed_outputs_at refuses coordinates placed at another collar");
 
   // Read at a point of another kind.
   const Seat sb = seat(bound);
-  const auto draw_b = bound.supply_draw_at<T>(T(bound.opt_root_psi_), sb.supply());
+  const auto sb_supply = sb.supply();
+  const auto draw_b = bound.supply_draw_at<T>(T(bound.opt_root_psi_), sb_supply);
   ok(throws_with([&] {
        bound.billed_outputs_at<CC::TF24, T>(T(bound.opt_root_psi_), draw_b, sb.pars, &held);
      },
@@ -8956,8 +8983,11 @@ void test_shadow_cost() {
                "CF77's carbon is profit plus the price, exactly");
             near(l.carbon(), l.assim_colimited_, 1e-12, "CF77's carbon is A");
           } else if (curve == CC::JS22 || curve == CC::CMax) {
-            ok(l.shadow_cost() == l.hydraulic_cost_,
-               name + "'s cost is all price: its shadow cost is the whole cost");
+            // Read off the reported A and profit, so a crown average holds it.
+            ok(l.shadow_cost() == l.assim_colimited_ - l.profit_,
+               name + "'s shadow cost is A less profit, exactly");
+            near(l.shadow_cost(), l.hydraulic_cost_, 1e-12,
+                 name + "'s cost is all price: its shadow cost is the whole cost");
             ok(l.carbon() == l.assim_colimited_, name + "'s carbon is A");
           } else {
             ok(std::isnan(l.shadow_cost()),
@@ -10025,12 +10055,19 @@ void outputs_agree_with_the_solve_on(double price) {
         l.CF77_lambda_ = price;
         l.TF24_floor_lambda_o = price;
         l.set_model(K, true);
-        l.optimise();
+        // ProfitMax's collar solve throws where it has no stream to normalise
+        // over (no degenerate exit on that route); there is nothing to compare.
+        try {
+          l.optimise();
+        } catch (const pl::util::infeasible_error&) {
+          continue;
+        }
         const auto kind = l.operating_point_kind();
         if (kind == Kind::SolverRefused || kind == Kind::NonFiniteGradient ||
             kind == Kind::Unsolved) {
           continue;
         }
+        if (!fixture::surface_has_objective(l)) continue;
         if (kind == Kind::Interior) ++n_interior;
         else if (kind == Kind::HydraulicShutdown) ++n_shut;
         else ++n_bound;
@@ -10039,7 +10076,8 @@ void outputs_agree_with_the_solve_on(double price) {
 
         const auto pars = l.passive_pars();
         const double p0 = l.opt_root_psi_;
-        const auto draw = l.supply_draw_at<double>(p0, l.roots_.held_supply());
+        const auto held_supply = l.roots_.held_supply();
+        const auto draw = l.supply_draw_at<double>(p0, held_supply);
         const auto got = l.billed_outputs_at<K, double>(p0, draw, pars);
         const auto phys = l.physical_outputs_at<K, double>(p0, draw, pars);
         ok(got.profit == l.profit_, "billed_outputs_at's profit IS the solve's" + at);
@@ -10077,8 +10115,10 @@ void outputs_agree_with_the_solve_on(double price) {
           l.replay_operating_point(p0, kind);
           if (feasible && std::isfinite(up)) {
             ++n_marg;
-            const auto d2 = l.supply_draw_at<double>(p0, l.roots_.held_supply());
-            ok(l.dprofit_dcollar_at<K, double>(p0, d2, pars) == up,
+            const auto held2 = l.roots_.held_supply();
+            const auto d2 = l.supply_draw_at<double>(p0, held2);
+            ok(l.dprofit_dcollar_at<K, double>(p0, d2, pars,
+                                               l.normalisers_at<K, double>(d2, pars)) == up,
                "dprofit_dcollar_at IS upstream's dprofit_at_collar_psi" + at);
           }
         }
@@ -10087,8 +10127,12 @@ void outputs_agree_with_the_solve_on(double price) {
   }
   printf("    %s: %d interior (%d refereed against dprofit), %d at a bound, %d shut\n",
          curve.c_str(), n_interior, n_marg, n_bound, n_shut);
-  ok(n_interior > 0 && n_bound > 0 && n_shut > 0,
-     curve + ": the sweep reached an interior point, a bound and a shut point");
+  const auto reach = fixture::surface_kinds(K);
+  const bool shuts = std::find(reach.begin(), reach.end(),
+                               Kind::HydraulicShutdown) != reach.end();
+  ok(n_interior > 0 && n_bound > 0 && (n_shut > 0 || !shuts),
+     curve + ": the sweep reached an interior point, a bound and, where the "
+             "curve has one, a shut point");
   ok(n_marg > 0, curve + ": the sweep refereed the marginal somewhere");
 }
 
@@ -10104,6 +10148,10 @@ void test_scalar_forms_are_the_double_forms() {
   pl::Leaf base = make_leaf(d, {1.0, 1.25, 1.5}, {0.5, 1.0, 1.5});
   base.optimise();
   const pl::leaf_pars<double> p = base.passive_pars();
+  // ProfitMax's double forms read the normalisers its solve seeds.
+  pl::Leaf seeded = base;
+  seeded.set_model(CC::ProfitMax, true);
+  seeded.optimise();
   std::map<std::string, int> compared;
   for (int c = 0; c < pl::Leaf::n_cost_curves; ++c) {
     pl::Leaf::with_curve(static_cast<CC>(c), [&](auto tag) {
@@ -10115,7 +10163,7 @@ void test_scalar_forms_are_the_double_forms() {
           for (double drop : {0.05, 0.5, 1.0, 2.0}) {
             const double sigma = collar + drop;
             if (C::cost_domain_ends_at_psi_crit && sigma >= base.psi_crit) continue;
-            pl::Leaf l = base;
+            pl::Leaf l = C::prepares_normalisers ? seeded : base;
             const std::string at = " (" + name + ", collar " + std::to_string(collar) +
                                    ", leaf " + std::to_string(sigma) + ")";
             if constexpr (C::shape == pl::ObjectiveShape::Difference) {
@@ -10123,9 +10171,20 @@ void test_scalar_forms_are_the_double_forms() {
                      C::cost(l, sigma, collar),
                  "the scalar cost is the cost" + at);
             }
-            ok(C::template scalar_cost_slope<double>(l, sigma, collar, p) ==
-                   C::cost_slope(l, sigma, collar),
-               "the scalar slope is the slope" + at);
+            if constexpr (C::shape == pl::ObjectiveShape::Normalised) {
+              const pl::Leaf::Normalisers<double> n{
+                  l.profitmax_k_soil_, l.profitmax_k_span_, l.profitmax_A_max_};
+              ok(C::template scalar_hydraulic_cost_norm<double>(l, sigma, p, n) ==
+                     C::hydraulic_cost_norm(l, sigma),
+                 "the scalar normalised cost is the normalised cost" + at);
+              ok(C::template scalar_cost_slope<double>(l, sigma, collar, p, n) ==
+                     C::cost_slope(l, sigma, collar),
+                 "the scalar slope is the slope" + at);
+            } else {
+              ok(C::template scalar_cost_slope<double>(l, sigma, collar, p) ==
+                     C::cost_slope(l, sigma, collar),
+                 "the scalar slope is the slope" + at);
+            }
             if constexpr (C::cost_reads_upstream) {
               ok(C::template scalar_cost_slope_upstream<double>(l, sigma, collar, p) ==
                      C::cost_slope_upstream(l, sigma, collar),
@@ -10148,7 +10207,11 @@ void test_scalar_forms_are_the_double_forms() {
   std::string seen;
   for (const auto& [name, n] : compared) seen += " " + name + " " + std::to_string(n);
   printf("    points compared per curve:%s\n", seen.c_str());
-  ok(compared.size() >= 2, "the scalar forms were compared on every curve that has them");
+  // Every curve has them, and every curve was compared on the whole grid.
+  for (int c = 0; c < pl::Leaf::n_cost_curves; ++c) {
+    const std::string name = pl::Leaf::curve_name(c);
+    ok(compared[name] > 0, "the scalar forms were compared on " + name);
+  }
 }
 
 // TF24_floor at lambda_o = 0 IS TF24 on the surface too, bit for bit: every
@@ -10283,6 +10346,7 @@ void test_outputs_agree_with_the_solve() {
   outputs_agree_with_the_solve_on<K::SOX>(kPriceForFOC);
   outputs_agree_with_the_solve_on<K::JW26>(kPriceForFOC);
   outputs_agree_with_the_solve_on<K::LeastCost>(kPriceForFOC);
+  outputs_agree_with_the_solve_on<K::ProfitMax>(kPriceForFOC);
 }
 
 // --- the ATLS thermal-damage layer (use_thermal_damage_) ----------------------
@@ -10758,8 +10822,8 @@ void test_thermal_damage_refusals() {
                  "Leaf::operating_collar: " + refused),
      "operating_collar refuses");
   const phylloptim::leaf_pars<double> pars = on.passive_pars();
-  const auto draw = on.supply_draw_at<double>(on.opt_root_psi_,
-                                              on.roots_.held_supply());
+  const auto on_supply = on.roots_.held_supply();
+  const auto draw = on.supply_draw_at<double>(on.opt_root_psi_, on_supply);
   ok(std::isfinite(draw.E_up.value), "supply_draw_at reads no capacity, and runs");
   ok(std::isfinite(on.profit_curvature_at_collar<CC::TF24>()),
      "profit_curvature_at_collar differences the solve's own dprofit, and runs");
@@ -11593,8 +11657,8 @@ void test_surface_refuses_the_energy_balance() {
                  "Leaf::operating_collar: " + refused),
      "operating_collar refuses");
   const phylloptim::leaf_pars<double> pars = on.passive_pars();
-  const auto draw = on.supply_draw_at<double>(on.opt_root_psi_,
-                                              on.roots_.held_supply());
+  const auto on_supply = on.roots_.held_supply();
+  const auto draw = on.supply_draw_at<double>(on.opt_root_psi_, on_supply);
   ok(std::isfinite(draw.E_up.value), "supply_draw_at reads no temperature, and runs");
   ok(std::isfinite(on.profit_curvature_at_collar<CC::TF24>()),
      "profit_curvature_at_collar differences the solve's own dprofit, and runs");

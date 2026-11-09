@@ -586,6 +586,32 @@ template <> struct Curve<Leaf::CostCurve::ProfitMax> {
                                             const Leaf::TemperaturePath& p) {
     return term - l.thermal_cost_temp_deriv(p.Tleaf) * p.tau;
   }
+
+  // The scalar forms, on the closed-form curve, with the normalisers on the pack
+  // (Leaf::normalisers_at) in place of the members prepare_profitmax seeded.
+  template <class S>
+  static S scalar_hydraulic_cost_norm(const Leaf& l, const S& sigma,
+                                      const leaf_pars<S>& pars,
+                                      const Leaf::Normalisers<S>& n) {
+    const S& c = pars[par_stem_c];
+    const S b = weibull_b_from_P50<S>(pars[par_stem_P50], c);
+    return (n.k_soil -
+            pars[par_kmax] * l.template proportion_of_conductivity_kernel<S, S>(sigma, b, c)) /
+           n.k_span;
+  }
+  template <class S>
+  static S scalar_cost_slope(const Leaf& l, const S& sigma, const S&,
+                             const leaf_pars<S>& pars, const Leaf::Normalisers<S>& n) {
+    const S& c = pars[par_stem_c];
+    const S b = weibull_b_from_P50<S>(pars[par_stem_P50], c);
+    const S f = l.template proportion_of_conductivity_kernel<S, S>(sigma, b, c);
+    const S abs_fprime = f * (c / b) * pow(sigma / b, c - 1.0);
+    return pars[par_kmax] * abs_fprime / n.k_span;
+  }
+  template <class S>
+  static S scalar_carbon_cost(const Leaf&, const S&, const leaf_pars<S>&) {
+    return S(0.0);
+  }
 };
 
 template <> struct Curve<Leaf::CostCurve::TF24_floor> {
@@ -835,7 +861,8 @@ constexpr bool curve_is_defined() {
 //
 //   scalar_cost, scalar_gain, scalar_resource_use, scalar_hydraulic_cost_norm
 //                                 the shape's factor at (sigma, collar)
-//   scalar_cost_slope             dC/dsigma, the C in J = h(A) - C
+//   scalar_cost_slope             dC/dsigma, the C in J = h(A) - C; the
+//                                 normalised shape's reads the normalisers
 //   scalar_cost_slope_upstream    dC/dcollar, where the cost reads it
 //   scalar_carbon_cost            carbon_cost on the pack
 //   scalar_price                  the price at a flux, where it reads only that
@@ -844,9 +871,16 @@ constexpr bool curve_is_defined() {
 template <class C>
 concept SurfaceForms =
     requires(const Leaf& cl, const double& x, const leaf_pars<double>& p) {
-  { C::template scalar_cost_slope<double>(cl, x, x, p) } -> std::same_as<double>;
   { C::template scalar_carbon_cost<double>(cl, x, p) } -> std::same_as<double>;
-} && ((C::shape == ObjectiveShape::Difference) ==
+  // The normalised shape's slope reads the normalisers; every other shape's not.
+} && ((C::shape != ObjectiveShape::Normalised) ==
+      requires(const Leaf& cl, const double& x, const leaf_pars<double>& p) {
+  { C::template scalar_cost_slope<double>(cl, x, x, p) } -> std::same_as<double>;
+}) && ((C::shape == ObjectiveShape::Normalised) ==
+       requires(const Leaf& cl, const double& x, const leaf_pars<double>& p,
+                const Leaf::Normalisers<double>& n) {
+  { C::template scalar_cost_slope<double>(cl, x, x, p, n) } -> std::same_as<double>;
+}) && ((C::shape == ObjectiveShape::Difference) ==
       requires(const Leaf& cl, const double& x, const leaf_pars<double>& p) {
   { C::template scalar_cost<double>(cl, x, x, p) } -> std::same_as<double>;
 }) && ((C::shape == ObjectiveShape::Product) ==
@@ -856,8 +890,9 @@ concept SurfaceForms =
        requires(const Leaf& cl, const double& x, const leaf_pars<double>& p) {
   { C::template scalar_resource_use<double>(cl, x, x, p) } -> std::same_as<double>;
 }) && ((C::shape == ObjectiveShape::Normalised) ==
-       requires(const Leaf& cl, const double& x, const leaf_pars<double>& p) {
-  { C::template scalar_hydraulic_cost_norm<double>(cl, x, p) } -> std::same_as<double>;
+       requires(const Leaf& cl, const double& x, const leaf_pars<double>& p,
+                const Leaf::Normalisers<double>& n) {
+  { C::template scalar_hydraulic_cost_norm<double>(cl, x, p, n) } -> std::same_as<double>;
 }) && (C::cost_reads_upstream ==
        requires(const Leaf& cl, const double& x, const leaf_pars<double>& p) {
   { C::template scalar_cost_slope_upstream<double>(cl, x, x, p) } -> std::same_as<double>;
@@ -1177,7 +1212,9 @@ inline double Leaf::shadow_cost() const {
     if constexpr (C::price_reads_flux_only) {
       return C::price(*this, transpiration_);
     } else if constexpr (C::shape == ObjectiveShape::Difference) {
-      return hydraulic_cost_ - C::carbon_cost(*this, opt_psi_leaf_);
+      // The cost the objective subtracted, read off the reported A and profit
+      // rather than hydraulic_cost_, which a crown average does not write.
+      return (assim_colimited_ - profit_) - C::carbon_cost(*this, opt_psi_leaf_);
     } else {
       return util::na_value;
     }
@@ -1279,6 +1316,7 @@ inline void Leaf::prepare_profitmax_norms() {
   // drivers are not seated yet (the batch route seeds |A|max first). The
   // optimiser's `!(profitmax_k_span_ > 0)` guard is the one place that decides it.
   const double psi_soil = profitmax_reference_psi();
+  profitmax_reference_psi_ = psi_soil;
   profitmax_k_soil_ =
       leaf_specific_conductance_max_ * proportion_of_conductivity(psi_soil);
   profitmax_k_span_ =
@@ -1337,6 +1375,15 @@ inline void Leaf::prepare_profitmax() {
     if (std::isfinite(neg) && neg > 0.0) a_max = neg;
   }
   profitmax_A_max_ = a_max;
+  // With leaf temperature fixed |A| rises with conductance at either sign of A,
+  // so |A|max is |A| at psi_crit (measured: bit for bit on every point of a
+  // 576-point sweep). The surface reads it there, on its scalar, so it needs ci
+  // at that point; with the energy balance or damage layer on it refuses.
+  profitmax_crit_ci_ = std::numeric_limits<double>::quiet_NaN();
+  if (!use_energy_balance_ && !use_thermal_damage_ && width > 0.0) {
+    set_leaf_states_rates_from_psi_leaf(psi_crit, psi_soil);
+    profitmax_crit_ci_ = ci_;
+  }
 }
 
 inline std::vector<double> Leaf::profitmax_curve(int n) {

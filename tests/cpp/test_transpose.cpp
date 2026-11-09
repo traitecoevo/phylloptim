@@ -54,6 +54,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <optional>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -182,7 +183,8 @@ Pairing forward_side(pl::Leaf l, const std::vector<double>& u,
   for (std::size_t k = 0; k < f.size(); ++k) {
     odelia::ode::set_direction(*f[k], u[k]);
   }
-  const auto draw = l.supply_draw_at<T>(T(l.opt_root_psi_), in.supply());
+  const auto supply = in.supply();
+  const auto draw = l.supply_draw_at<T>(T(l.opt_root_psi_), supply);
   pl::Leaf::HeldCoords<T> held;
   pl::Leaf::HeldCoords<T>* h = handoff ? &held : nullptr;
   const T collar = l.operating_collar<K, T>(draw, in.pars, curvature, h);
@@ -220,7 +222,8 @@ Pairing reverse_side(pl::Leaf l, const std::vector<double>& u,
   for (A* p : f) tape.registerInput(*p);
   tape.newRecording();
 
-  auto draw = l.supply_draw_at<A>(A(l.opt_root_psi_), in.supply());
+  const auto supply = in.supply();
+  auto draw = l.supply_draw_at<A>(A(l.opt_root_psi_), supply);
   pl::Leaf::HeldCoords<A> held;
   pl::Leaf::HeldCoords<A>* h = handoff ? &held : nullptr;
   A collar = l.operating_collar<K, A>(draw, in.pars, curvature, h);
@@ -332,6 +335,7 @@ void check_solved(pl::Leaf l, const std::string& at, unsigned long seed) {
 
   const Arm arm = arm_of(l.operating_point_kind());
   if (arm == Arm::Refuses) return;
+  if (!fixture::surface_has_objective(l)) return;
   const double curvature =
       l.operating_point_kind() == pl::Leaf::OperatingPointKind::Interior
           ? l.profit_curvature_at_collar<K>()
@@ -415,6 +419,7 @@ void for_each_surface_curve(F&& f) {
   f(std::integral_constant<CC, CC::SOX>{});
   f(std::integral_constant<CC, CC::JW26>{});
   f(std::integral_constant<CC, CC::LeastCost>{});
+  f(std::integral_constant<CC, CC::ProfitMax>{});
 }
 std::vector<std::string> surface_curve_names() {
   std::vector<std::string> out;
@@ -424,13 +429,18 @@ std::vector<std::string> surface_curve_names() {
   return out;
 }
 
-// Seats curve K on a copy of the leaf, solves it and checks it.
+// Seats curve K on a copy of the leaf and solves it; empty where the solve
+// throws, as ProfitMax's collar solve does with no stream to normalise over.
 template <CC K>
-pl::Leaf solved_on(const pl::Leaf& base) {
+std::optional<pl::Leaf> solved_on(const pl::Leaf& base) {
   pl::Leaf l = base;
   l.TF24_floor_lambda_o = kFloorPrice;
   l.set_model(K, true);
-  l.find_root_collar_psi();
+  try {
+    l.find_root_collar_psi();
+  } catch (const pl::util::infeasible_error&) {
+    return std::nullopt;
+  }
   return l;
 }
 
@@ -439,7 +449,9 @@ void check(int layers, double psi0, double ppfd, double leaf_temp,
   const pl::Leaf base = set_up(layers, psi0, ppfd, leaf_temp, g_min);
   for_each_surface_curve([&](auto tag) {
     constexpr CC K = decltype(tag)::value;
-    check_solved<K>(solved_on<K>(base),
+    const std::optional<pl::Leaf> l = solved_on<K>(base);
+    if (!l) return;
+    check_solved<K>(*l,
                     "layers=" + std::to_string(layers) + " psi_soil=" +
                         std::to_string(psi0) + " ppfd=" + std::to_string(ppfd) +
                         " T=" + std::to_string(leaf_temp) +
@@ -469,10 +481,10 @@ void check_kind(const std::vector<double>& psi_soil, double ppfd, double vpd,
                          " vpd=" + std::to_string(vpd);
   for_each_surface_curve([&](auto tag) {
     constexpr CC K = decltype(tag)::value;
-    const pl::Leaf c = solved_on<K>(l);
+    const std::optional<pl::Leaf> c = solved_on<K>(l);
     // Checked at whatever kind it lands on: each fixture reaches its kind on some
     // curves, and the coverage asserted in main() is per curve.
-    check_solved<K>(c, at, seed);
+    if (c) check_solved<K>(*c, at, seed);
   });
 }
 

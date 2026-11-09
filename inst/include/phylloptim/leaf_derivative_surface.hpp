@@ -100,7 +100,6 @@ inline void Leaf::held_coords_at(double sigma_star, double ci_star,
   const S held(to_passive(collar));
   const double gc_per_flux =
       atm_kpa_ * kg_to_mol_h2o / vpd_leaf_ / H2O_CO2_stom_diff_ratio_;
-  const double inv_atm = 1.0 / (atm_kpa_ * kPa_to_Pa);
   const Leaf& leaf = *this;
 
   // dT1/dsigma from the table, the derivative the model forms, with kmax off the
@@ -148,6 +147,15 @@ inline void Leaf::held_coords_at(double sigma_star, double ci_star,
     gc = boundary_layer_split_CO2<S>(gc).first;
   }
 
+  ci_h = ci_at_conductance<S>(ci_star, gc, cap);
+}
+
+template <class S>
+inline S Leaf::ci_at_conductance(double ci_star, const S& gc,
+                                 const PhotoCapacity<S>& cap) const {
+  using odelia::util::to_passive;
+  const double inv_atm = 1.0 / (atm_kpa_ * kPa_to_Pa);
+  const Leaf& leaf = *this;
   // Follow the forward model's branch: with no conductance and no root of A(ci)
   // it reported ci = +inf and the saturated assimilation, nothing to place. A'
   // is a tangent through the kernel the residual calls, not a hand-written twin.
@@ -162,16 +170,15 @@ inline void Leaf::held_coords_at(double sigma_star, double ci_star,
   }
   // The capacity and gc are the active things the residual reads, so they are
   // the list; ca_ and inv_atm are double.
-  ci_h =
-      no_coordinate
-          ? S(ci_star)
-          : odelia::implicit_value<S>(
-                ci_star, dT2_dci,
-                [&](const S& c) -> S {
-                  const S A = leaf.template assim_colimited_kernel<S>(c, cap);
-                  return A * umol_to_mol - gc * (S(leaf.ca_) - c) * S(inv_atm);
-                },
-                cap, gc);
+  return no_coordinate
+             ? S(ci_star)
+             : odelia::implicit_value<S>(
+                   ci_star, dT2_dci,
+                   [&](const S& c) -> S {
+                     const S A = leaf.template assim_colimited_kernel<S>(c, cap);
+                     return A * umol_to_mol - gc * (S(leaf.ca_) - c) * S(inv_atm);
+                   },
+                   cap, gc);
 }
 
 template <class S>
@@ -292,14 +299,15 @@ inline S Leaf::dry_end_at(const leaf_pars<S>& pars) const {
 
 template <Leaf::CostCurve K, class S>
 inline S Leaf::profit_at(const S& collar, const SupplyDraw<S>& draw,
-                         const leaf_pars<S>& pars, bool collar_moves) const {
+                         const leaf_pars<S>& pars, bool collar_moves,
+                         const Normalisers<S>& norms) const {
   // One capacity for the point and for the assimilation read off it, so the ci
   // the residual placed and the A evaluated there are the same function.
   const PhotoCapacity<S> cap = photo_capacity_at<S>(pars);
   const CollarCoords<S> at = collar_coords_at<S>(opt_psi_leaf_, ci_, collar,
                                                  draw, pars, cap, collar_moves);
   return profit_from_coords<K, S>(collar, pars, cap, at.sigma.value,
-                                  at.ci.value);
+                                  at.ci.value, norms);
 }
 
 template <class S>
@@ -320,7 +328,7 @@ inline S Leaf::assim_at_coords(const PhotoCapacity<S>& cap, const S& ci) const {
 template <Leaf::CostCurve K, class S>
 inline S Leaf::profit_from_coords(const S& collar, const leaf_pars<S>& pars,
                                   const PhotoCapacity<S>& cap, const S& sigma,
-                                  const S& ci) const {
+                                  const S& ci, const Normalisers<S>& norms) const {
   using C = Curve<K>;
   static_assert(SurfaceForms<C>,
                 "this curve has no scalar forms in its Curve<K> (SurfaceForms), "
@@ -334,8 +342,13 @@ inline S Leaf::profit_from_coords(const S& collar, const leaf_pars<S>& pars,
   } else if constexpr (C::shape == ObjectiveShape::Ratio) {
     return A / C::template scalar_resource_use<S>(*this, sigma, collar, pars);
   } else {
-    static_assert(C::shape != ObjectiveShape::Normalised,
-                  "the normalised shape is billed with its normalisers' rows");
+    // A/|A|max less the normalised costs; the thermal cost reads leaf
+    // temperature alone, which the surface holds at the solve's.
+    (void)collar;
+    check_normalisers(norms, "Leaf::profit_from_coords");
+    return A / norms.A_max -
+           (C::template scalar_hydraulic_cost_norm<S>(*this, sigma, pars, norms) +
+            S(thermal_cost_at(leaf_temp_)));
   }
 }
 
@@ -391,6 +404,8 @@ inline Out Leaf::outputs_at(const S& collar, const SupplyDraw<S>& draw,
     }
   }
   Out out;
+  // Empty on every curve but a normalised one, which reads them in profit.
+  const Normalisers<S> norms = normalisers_at<K, S>(draw, pars);
 
   // The draws carry supplied rows, not a second supply: the draw holds each
   // layer's uptake at the passive collar with the state's rows, and the collar's
@@ -430,9 +445,9 @@ inline Out Leaf::outputs_at(const S& collar, const SupplyDraw<S>& draw,
       // The same coordinates profit_at would solve for at the held collar: the
       // residuals see a held collar there too, so these are its numbers and rows.
       out.profit = profit_from_coords<K, S>(collar_held, pars, placed->cap,
-                                            placed->sigma, placed->ci);
+                                            placed->sigma, placed->ci, norms);
     } else {
-      out.profit = profit_at<K, S>(collar_held, draw, pars, false);
+      out.profit = profit_at<K, S>(collar_held, draw, pars, false, norms);
     }
     if constexpr (!carbon_from_price) {
       // The channel added to the held coordinates leaves every value as it is
@@ -453,7 +468,7 @@ inline Out Leaf::outputs_at(const S& collar, const SupplyDraw<S>& draw,
     const CollarCoords<S> at = collar_coords_at<S>(opt_psi_leaf_, ci_, collar,
                                                    draw, pars, cap, true);
     out.profit = profit_from_coords<K, S>(collar, pars, cap, at.sigma.value,
-                                          at.ci.value);
+                                          at.ci.value, norms);
     if constexpr (!carbon_from_price) {
       from_live(cap, at);
     }
@@ -474,20 +489,22 @@ inline Out Leaf::outputs_at(const S& collar, const SupplyDraw<S>& draw,
 
 template <Leaf::CostCurve K, class S>
 inline S Leaf::dprofit_dcollar_at(const S& collar, const SupplyDraw<S>& draw,
-                                  const leaf_pars<S>& pars) const {
+                                  const leaf_pars<S>& pars,
+                                  const Normalisers<S>& norms) const {
   // Every factor is a value, so this is arithmetic at S and dM/dp a first
   // derivative of it: a table's value with the true function's derivative
   // disagree by the interpolation error, enough to flip a curvature's sign.
   const PhotoCapacity<S> cap = photo_capacity_at<S>(pars);
   const CollarCoords<S> at =
       collar_coords_at<S>(opt_psi_leaf_, ci_, collar, draw, pars, cap, true);
-  return dprofit_dcollar_from_coords<K, S>(collar, pars, cap, at);
+  return dprofit_dcollar_from_coords<K, S>(collar, pars, cap, at, norms);
 }
 
 template <Leaf::CostCurve K, class S>
 inline S Leaf::dprofit_dcollar_at(const S& collar, const SupplyDraw<S>& draw,
                                   const leaf_pars<S>& pars,
-                                  const HeldCoords<S>& held) const {
+                                  const HeldCoords<S>& held,
+                                  const Normalisers<S>& norms) const {
   using odelia::util::to_passive;
   check_draw(to_passive(collar), draw);
   if (held.at != to_passive(collar)) {
@@ -498,7 +515,7 @@ inline S Leaf::dprofit_dcollar_at(const S& collar, const SupplyDraw<S>& draw,
   const CollarCoords<S> at =
       collar_channel_at<S>(opt_psi_leaf_, collar, draw, pars, held.cap,
                            held.sigma, held.gc, held.ci, true);
-  return dprofit_dcollar_from_coords<K, S>(collar, pars, held.cap, at);
+  return dprofit_dcollar_from_coords<K, S>(collar, pars, held.cap, at, norms);
 }
 
 template <Leaf::CostCurve K, class S>
@@ -525,18 +542,28 @@ inline S Leaf::benefit_link_slope_at(const S& A) const {
 template <Leaf::CostCurve K, class S>
 inline S Leaf::dprofit_dcollar_from_coords(const S& collar, const leaf_pars<S>& pars,
                                            const PhotoCapacity<S>& cap,
-                                           const CollarCoords<S>& at) const {
+                                           const CollarCoords<S>& at,
+                                           const Normalisers<S>& norms) const {
   using C = Curve<K>;
   static_assert(SurfaceForms<C>,
                 "this curve has no scalar forms in its Curve<K> (SurfaceForms), "
                 "so the derivative surface cannot place it");
   const S A_prime = assim_slope_at<S>(at.ci.value, cap);
   // dC/dpsi_leaf on the pack, from the curve's scalar form.
-  const S C_prime =
-      C::template scalar_cost_slope<S>(*this, at.sigma.value, collar, pars);
+  S C_prime;
+  if constexpr (C::shape == ObjectiveShape::Normalised) {
+    C_prime = C::template scalar_cost_slope<S>(*this, at.sigma.value, collar, pars,
+                                               norms);
+  } else {
+    C_prime = C::template scalar_cost_slope<S>(*this, at.sigma.value, collar, pars);
+  }
   S M;
   if constexpr (C::link == BenefitLink::Identity) {
     M = A_prime * at.ci.slope - C_prime * at.sigma.slope;
+  } else if constexpr (C::link == BenefitLink::Scaled) {
+    // benefit_link_deriv's 1/|A|max, on the pack.
+    check_normalisers(norms, "Leaf::dprofit_dcollar_from_coords");
+    M = (S(1.0) / norms.A_max) * (A_prime * at.ci.slope) - C_prime * at.sigma.slope;
   } else {
     const S A = assim_colimited_kernel<S>(at.ci.value, cap);
     M = benefit_link_slope_at<K, S>(A) * (A_prime * at.ci.slope) -
@@ -549,6 +576,77 @@ inline S Leaf::dprofit_dcollar_from_coords(const S& collar, const leaf_pars<S>& 
                                                       collar, pars);
   }
   return M;
+}
+
+template <Leaf::CostCurve K, class S>
+inline Leaf::Normalisers<S> Leaf::normalisers_at(const SupplyDraw<S>& draw,
+                                                 const leaf_pars<S>& pars) const {
+  using odelia::util::to_passive;
+  Normalisers<S> n;
+  if constexpr (Curve<K>::prepares_normalisers) {
+    static_assert(K == CostCurve::ProfitMax,
+                  "normalisers_at builds ProfitMax's normalisers");
+    if (draw.inputs == nullptr) {
+      util::stop("Leaf::normalisers_at: ProfitMax's normalisers draw the supply "
+                 "again at its reference collar, and this draw was not taken by "
+                 "supply_draw_at from a supply it can reach");
+    }
+    const double ref = profitmax_reference_psi_;
+    const double ci_crit = profitmax_crit_ci_;
+    // No stream to normalise over (the wet bound past psi_crit, or no light):
+    // the leaf route's degenerate exit, and no objective to differentiate.
+    if (!(profitmax_A_max_ > 0.0) || !(profitmax_k_span_ > 0.0)) {
+      util::stop("Leaf::normalisers_at: ProfitMax has no objective at this point: "
+                 "|A|max = " + util::format_double(profitmax_A_max_) +
+                 ", k_span = " + util::format_double(profitmax_k_span_));
+    }
+    if (!std::isfinite(ref) || std::isnan(ci_crit)) {
+      util::stop("Leaf::normalisers_at: ProfitMax's normalisers were not "
+                 "recorded where the surface can read them (a reference collar of " +
+                 util::format_double(ref) + "); solve or replay the point first");
+    }
+    // The reference as profitmax_reference_psi places it: one layer's own
+    // potential, with the soil's row, or the wet bound, with that bound's rows.
+    const SupplyDraw<S> at_ref = supply_draw_at<S>(S(ref), *draw.inputs);
+    const S psi_ref = supply_is_single_layer() ? draw.inputs->psi_soil[0]
+                                               : wet_bound_at<S>(ref, at_ref, pars);
+    const S& c = pars[par_stem_c];
+    const S b = phylloptim::weibull_b_from_P50<S>(pars[par_stem_P50], c);
+    const S crit = psi_crit_at<S>(pars);
+    // prepare_profitmax_norms' expressions, on the pack.
+    n.k_soil = pars[par_kmax] * proportion_of_conductivity_kernel<S, S>(psi_ref, b, c);
+    n.k_span = n.k_soil -
+               pars[par_kmax] * proportion_of_conductivity_kernel<S, S>(crit, b, c);
+    // |A| at psi_crit along the stem from the reference collar, the leaf state
+    // set_leaf_states_rates_from_psi_leaf forms there: the stem's flux less the
+    // cuticle's, at its corner, as conductance, and ci placed by it.
+    const S E = transpiration_at<S>(crit, psi_ref, pars);
+    const S r_star = residual_flux_at<S>(psi_ref, pars, at_ref);
+    S E_s = E - r_star;
+    if (to_passive(E_s) < 0.0) {
+      E_s = E_s - S(to_passive(E_s));
+    }
+    const double gc_per_flux =
+        atm_kpa_ * kg_to_mol_h2o / vpd_leaf_ / H2O_CO2_stom_diff_ratio_;
+    const S gc = S(gc_per_flux) * E_s +
+                 pars[par_g_min] * S(g_min_co2_ratio_ * g_min_factor(Tleaf_));
+    const PhotoCapacity<S> cap = photo_capacity_at<S>(pars);
+    const S A = std::isfinite(ci_crit)
+                    ? assim_colimited_kernel<S>(ci_at_conductance<S>(ci_crit, gc, cap), cap)
+                    : assim_saturated_kernel<S, S>(cap);
+    n.A_max = to_passive(A) < 0.0 ? -A : A;
+    // |A|max is zero only where A is zero at psi_crit, where ProfitMax has no
+    // objective; the leaf route takes its degenerate exit there.
+    if (!(to_passive(n.A_max) > 0.0) || !(to_passive(n.k_span) > 0.0)) {
+      util::stop("Leaf::normalisers_at: ProfitMax has no objective here: |A|max = " +
+                 util::format_double(to_passive(n.A_max)) + ", k_span = " +
+                 util::format_double(to_passive(n.k_span)));
+    }
+  } else {
+    (void)draw;
+    (void)pars;
+  }
+  return n;
 }
 
 template <class S>
@@ -679,6 +777,18 @@ inline S Leaf::operating_collar(const SupplyDraw<S>& draw, const leaf_pars<S>& p
         // The coordinates are placed before the residual, which is rewound, so
         // they stay on the caller's tape for billed_outputs_at. The residual
         // reads them, so they join the list: one left out is a column of zeros.
+        // A normalised curve's marginal reads its normalisers, which carry
+        // rows of their own, so they join the list too; empty on the others.
+        const Normalisers<S> norms = normalisers_at<K, S>(draw, pars);
+        const auto solve = [&](const auto& residual, const auto&... inputs) {
+          if constexpr (Curve<K>::prepares_normalisers) {
+            return odelia::implicit_value<S>(opt_root_psi_, curvature, residual,
+                                             inputs..., norms);
+          } else {
+            return odelia::implicit_value<S>(opt_root_psi_, curvature, residual,
+                                             inputs...);
+          }
+        };
         if (placed != nullptr) {
           const S at = S(opt_root_psi_);
           placed->cap = photo_capacity_at<S>(pars);
@@ -686,19 +796,17 @@ inline S Leaf::operating_collar(const SupplyDraw<S>& draw, const leaf_pars<S>& p
                             placed->sigma, placed->gc, placed->ci);
           placed->at = opt_root_psi_;
           const HeldCoords<S>& h = *placed;
-          collar = odelia::implicit_value<S>(
-              opt_root_psi_, curvature,
+          collar = solve(
               [&](const S& y) -> S {
-                return dprofit_dcollar_at<K, S>(y, draw, pars, h);
+                return dprofit_dcollar_at<K, S>(y, draw, pars, h, norms);
               },
               draw, pars, h);
         } else {
           // The whole draw, because dprofit_dcollar_at reads more of it than
           // E_up: SupplyDraw names its own active members for this.
-          collar = odelia::implicit_value<S>(
-              opt_root_psi_, curvature,
+          collar = solve(
               [&](const S& y) -> S {
-                return dprofit_dcollar_at<K, S>(y, draw, pars);
+                return dprofit_dcollar_at<K, S>(y, draw, pars, norms);
               },
               draw, pars);
         }

@@ -784,6 +784,11 @@ inline double Leaf::evaluate_root_collar_psi_for(double target_opt_root_psi){
 template <Leaf::CostCurve K>
 inline double Leaf::replay_operating_point_for(double collar,
                                                OperatingPointKind kind) {
+    // Seeded as the solve seeds them (hazard 8): on a leaf that solved another
+    // point since, a normalised curve's profit would read that point's.
+    if constexpr (Curve<K>::prepares_normalisers) {
+      prepare_profitmax();
+    }
     double bound_a, bound_b;
     double out;
     if (!prepare_collar_solve<K>(bound_a, bound_b)) {

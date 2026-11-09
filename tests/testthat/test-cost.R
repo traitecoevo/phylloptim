@@ -247,11 +247,14 @@ test_that("carbon and shadow_cost split each curve's cost into carbon and price"
   # CF77, whose carbon is its objective plus its price, as TF24_floor's is.
   for (m in c("CF77", "JS22", "CMax")) {
     r <- solve(m)
-    expect_identical(r$shadow_cost, r$hydraulic_cost, info = m)
     if (m == "CF77") {
+      expect_identical(r$shadow_cost, r$hydraulic_cost)
       expect_identical(r$carbon, r$profit + r$shadow_cost)
       expect_equal(r$carbon, r$A, tolerance = 1e-12)
     } else {
+      # Read off A and profit, which a caller averaging the outputs averages.
+      expect_identical(r$shadow_cost, r$A - r$profit, info = m)
+      expect_equal(r$shadow_cost, r$hydraulic_cost, tolerance = 1e-12, info = m)
       expect_identical(r$carbon, r$A, info = m)
     }
   }
