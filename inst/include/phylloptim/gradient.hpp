@@ -274,8 +274,9 @@ enum class Method { Auto, Ift, Fd };
 // non-finite-gradient are no-gradient. A log-link curve's dark leaf, shut on its
 // wet bound, is no-gradient (the link has no slope at A <= 0); a shut leaf is
 // no-gradient on the flat sentinel, or pinned or interior where the residual at
-// its collar says so. The leaf route's solve records no kind (unsolved); a
-// prescribed point on either route is prescribed.
+// its collar says so. The leaf route's solve records its kind by the same
+// conditions in the leaf potential; a prescribed point on either route is
+// prescribed.
 enum class Status { Interior, Pinned, NoGradient, Error, Prescribed, Refused };
 
 // No `default:`, so a new Status is a compiler diagnostic rather than silently

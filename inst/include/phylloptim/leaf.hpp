@@ -288,6 +288,12 @@ public:
     }
     unknown_supply_kind();
   }
+  // The seated route's decision variable: the collar on the collar route, the
+  // leaf potential on a leaf route, where the upstream potential is the soil's.
+  // The derivative surface's draw and placement are taken at it.
+  double decision_psi() const {
+    return route_is_collar_ ? opt_root_psi_ : opt_psi_leaf_;
+  }
   // The seated soil state and supply resistances as a view, on either path:
   // what a caller of the derivative surface builds its SupplyInputs from. It
   // holds references to members, so it lasts as long as the leaf is not
@@ -1034,6 +1040,11 @@ public:
     // and takes its rows: the residual is zero at every collar there.
     bool no_conduction = false;
     S gravity_balance{};
+    // On the leaf route there is no walk: the stem's upstream end is the soil
+    // potential, held by the route and an input with rows of its own, and `at`
+    // is the leaf potential, the route's decision variable.
+    bool leaf_route = false;
+    S upstream{};
     // A copy of the supply it was drawn from, kept only where the seated curve
     // draws again at a reference collar for its normalisers (normalisers_at);
     // null otherwise, so no other curve pays for it. Owned, so it outlives
@@ -1056,13 +1067,16 @@ public:
       if (no_conduction) {
         f(gravity_balance);
       }
+      if (leaf_route) {
+        f(upstream);
+      }
     }
   };
   // Each optional row is a flag and a value; at double the flag pads to a double.
   static_assert(sizeof(SupplyDraw<double>) ==
                     sizeof(double) + sizeof(odelia::with_slope<double>) +
                         sizeof(std::vector<double>) * 2 +
-                        2 * (alignof(double) + sizeof(double)) +
+                        3 * (alignof(double) + sizeof(double)) +
                         sizeof(std::shared_ptr<const SupplyInputs<double>>),
                 "SupplyDraw gained or lost a member: update for_each_active, "
                 "then this count");
@@ -1081,6 +1095,13 @@ public:
     d.at = odelia::util::to_passive(collar);
     if (seated_curve_prepares_normalisers()) {
       d.inputs = std::make_shared<const SupplyInputs<S>>(supply);
+    }
+    // The leaf route reads the soil's potential and nothing of the supply's
+    // resistances: `collar` is the leaf potential there (decision_psi()).
+    if (!route_is_collar_) {
+      d.leaf_route = true;
+      d.upstream = supply.psi_soil[0];
+      return d;
     }
 
     // A shut leaf sits on its wet bound and is drawn like any other point.
@@ -1985,6 +2006,10 @@ public:
   template <class S>
   S wet_bound_at(double bound_x, const SupplyDraw<S>& draw,
                  const leaf_pars<S>& pars) const;
+  // A leaf route's wet end: the leaf potential at which the stem carries the
+  // residual flux from the soil (leaf_wet_bound), with the soil from the draw.
+  template <class S>
+  S leaf_wet_end_at(const SupplyDraw<S>& draw, const leaf_pars<S>& pars) const;
   // The dry end: the continuity root with the stem held at dry_end_at<K>(),
   // which is where the curve enters.
   template <CostCurve K, class S>
@@ -2273,13 +2298,13 @@ public:
   // would otherwise report a point assembled from two solves (hazard 8).
   void clear_collar_solve_state();
 
-  // --- WHICH KIND of operating point the collar solve found -------------------
+  // --- WHICH KIND of operating point the solve found, on either route --------
   // The kind changes what a derivative there means. Recorded by the branch
   // TAKEN, never inferred from a residual: dprofit_at_collar_psi's 0.0 sentinel
   // is indistinguishable from a stationary point.
   enum class OperatingPointKind {
-    // No solve since construction, set_traits, or an off-path psi_leaf
-    // optimiser; the operating point reads NA sentinels.
+    // No solve since construction or set_traits, or the closed form, which
+    // records no kind; the collar's outputs read NA sentinels.
     Unsolved,
     // Interior profit maximum: dprofit == 0 strictly inside the feasible interval.
     Interior,

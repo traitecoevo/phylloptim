@@ -141,11 +141,18 @@ double golden_section_max(Function f, double ax, double bx, double tol) {
   return (a + b) / 2.0;
 }
 
+// Which candidate the one solver returned. An end is a constrained optimum and
+// the root a stationary one; a grid point or the `brent_fmin` fallback is an
+// argmax resolved only to a width, with no first-order condition behind it.
+enum class ArgmaxSource { Lo, Hi, Grid, Root, Fallback };
+
 // Maximise f over the closed interval [lo, hi], where the maximum may sit at an
 // endpoint and f need not be unimodal, refining by a root-find on df == 0. Returns
-// the argmax; `fmax`, if non-null, receives f there. This is the one solver, and
-// `Leaf::maximise_profit_over_collar` is it at n = 0 plus an `OperatingPointKind`
-// tag, which this cannot report.
+// the argmax; `fmax`, if non-null, receives f there, and `source` which candidate
+// it is, which a caller classifies on rather than comparing the argmax with the
+// ends (the scan's last point is not `hi` bit for bit). This is the one solver,
+// and `Leaf::maximise_profit_over_collar` is it at n = 0 plus an
+// `OperatingPointKind` tag.
 //
 // The root-find is what makes the argmax differentiable: a width-terminated search
 // resolves it more coarsely than a 1e-6 parameter step moves it (hazard 15), and
@@ -163,17 +170,23 @@ double golden_section_max(Function f, double ax, double bx, double tol) {
 template <typename Function, typename Deriv>
 double maximise_over_closed_interval_foc(Function f, Deriv df, double lo, double hi,
                                          int n, double tol, size_t max_iterations,
-                                         double* fmax = nullptr) {
+                                         double* fmax = nullptr,
+                                         ArgmaxSource* source = nullptr) {
   double best_x = lo;
   double best_f = -std::numeric_limits<double>::infinity();
-  auto consider = [&](double x, double fx) {
-    if (std::isfinite(fx) && fx > best_f) { best_f = fx; best_x = x; }
+  ArgmaxSource best_from = ArgmaxSource::Lo;
+  auto consider = [&](double x, double fx, ArgmaxSource from) {
+    if (std::isfinite(fx) && fx > best_f) { best_f = fx; best_x = x; best_from = from; }
+  };
+  auto done = [&]() {
+    if (fmax != nullptr) *fmax = best_f;
+    if (source != nullptr) *source = best_from;
+    return best_x;
   };
 
   if (!(hi > lo)) {
-    consider(lo, f(lo));
-    if (fmax != nullptr) *fmax = best_f;
-    return best_x;
+    consider(lo, f(lo), ArgmaxSource::Lo);
+    return done();
   }
 
   // `n < 2` means no basin scan, not no search: the cell is the whole interval,
@@ -187,17 +200,17 @@ double maximise_over_closed_interval_foc(Function f, Deriv df, double lo, double
       xs[static_cast<std::size_t>(i)] = lo + (hi - lo) * double(i) / double(n);
       const double fx = f(xs[static_cast<std::size_t>(i)]);
       if (std::isfinite(fx) && fx > best_f) arg = i;
-      consider(xs[static_cast<std::size_t>(i)], fx);
+      consider(xs[static_cast<std::size_t>(i)], fx,
+               i == 0 ? ArgmaxSource::Lo : i == n ? ArgmaxSource::Hi : ArgmaxSource::Grid);
     }
     if (arg == 0 || arg == n) {
-      if (fmax != nullptr) *fmax = best_f;
-      return best_x;   // a constrained optimum, returned unrefined on purpose
+      return done();   // a constrained optimum, returned unrefined on purpose
     }
     a = xs[static_cast<std::size_t>(arg - 1)];
     b = xs[static_cast<std::size_t>(arg + 1)];
   } else {
-    consider(lo, f(lo));
-    consider(hi, f(hi));
+    consider(lo, f(lo), ArgmaxSource::Lo);
+    consider(hi, f(hi), ArgmaxSource::Hi);
   }
   // Probe inward for a usable derivative, never at the ends: at the wet end gc ~ 0
   // makes dJ/dpsi 0/0, and at the dry end the supply integral is at its domain
@@ -221,15 +234,14 @@ double maximise_over_closed_interval_foc(Function f, Deriv df, double lo, double
     const double x = util::uniroot_smooth(
         [&](double v) { bool ok = false; return df(v, &ok); }, xa, xb, da, db, tol,
         max_iterations);
-    consider(x, f(x));
+    consider(x, f(x), ArgmaxSource::Root);
   } else {
     double neg = 0.0;
     const double x = brent_fmin([&](double v) { return -f(v); }, a, b,
                                 (b - a) * 1e-4, &neg);
-    consider(x, -neg);
+    consider(x, -neg, ArgmaxSource::Fallback);
   }
-  if (fmax != nullptr) *fmax = best_f;
-  return best_x;
+  return done();
 }
 
 
