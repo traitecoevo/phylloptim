@@ -110,8 +110,7 @@ the model quietly accepts.
 
 ## Trait gradients from C++
 
-`<phylloptim/gradient.hpp>`, reached from the umbrella header, composes the implicit function theorem and the active-set guard with no R
-anywhere, and batches the result over observations.
+`<phylloptim/gradient.hpp>`, reached from the umbrella header, gives the trait gradient at a solved point with no R anywhere, as one forward pass of the derivative surface carrying every parameter, and batches it over observations.
 
 ```cpp
 #include <phylloptim.hpp>
@@ -148,12 +147,8 @@ const std::vector<g::Result> out =
 // out[i].M / out[i].H are the coefficients of ds/dt = k(M + H s)
 ```
 
-A null `dpsi_dtheta` means zero here, and "derive it" one layer down. That is
-is the one place this API can bite: `gradient_ift`'s null is the implicit function
-theorem, correct for a collar that was *solved* for, and passing it through would
-hand a prescribed caller the solving path's indirect term on top of their partial.
-`at()` materialises the zeros so no consumer has to know that. For one
-observation, use `g::at()` with a `g::Prescribed`.
+A null `dpsi_dtheta` means zero: the collar was imposed, so it moves only as you
+say it does. For one observation, use `g::at()` with a `g::Prescribed`.
 
 `theta` is `g::n_theta` = **35** doubles: the sixteen traits in `set_traits`'
 argument order, then `leaf_specific_conductance_max`, the single-potential path's
@@ -162,9 +157,9 @@ and `LeastCost_beta`, and the fourteen inputs of the thermal-damage layer that
 reach the solve. `g::par_names()` is that order and every position has a name
 (`g::par_vcmax_25`, `g::par_R_d_25`, `g::par_kmax`, ...); `pars` holds positions
 into it. R indexes these positions, so reordering the enumeration silently
-differentiates the wrong parameter. `phylloptim::n_leaf_pars` is **36**, one longer:
-the pack the kernels read also holds `par_PPFD`, seated per observation from the
-drivers and never fitted. Size `theta` by `n_theta`; read it out to `n_leaf_pars` and
+differentiates the wrong parameter. `phylloptim::n_leaf_pars` is **37**, two longer:
+the pack the kernels read also holds `par_PPFD` and `par_NIR`, seated per
+observation from the drivers and never fitted. Size `theta` by `n_theta`; read it out to `n_leaf_pars` and
 you run past its end.
 
 **Count the initialiser against `g::n_theta` rather than against this
@@ -177,96 +172,61 @@ symptom was `dA/dvcmax = nan`. The package's own CI consumer carries a
 
 Three things the free function gives you that a hand-rolled loop would not:
 
-* **the active-set test**, which is the reason `leaf_gradient()` is careful. Where
-  the optimum sits on a boundary of the feasible range, the composite is wrong by
-  orders of magnitude and fails silently. The premise is therefore tested, using
-  the implied Newton step `|dprofit(ψ*) / H|`, a distance in MPa that needs no
-  scale of its own, and a central difference of the solve is used where the
-  premise does not hold.
-* **the refusal detector.** `evaluate_root_collar_psi` refuses a collar outside
-  its feasible interval, so a stencil that steps past an end is caught rather than
-  differenced one-sidedly.
+* **the classification.** The solve records what kind of point it found,
+  interior or held by a bound, and the pass places the decision variable
+  accordingly: by the implicit function theorem at an interior optimum, on the
+  bound at a pinned one. Where the optimum sits on a bound, `-M/H` is wrong by
+  orders of magnitude and fails silently; `status` says which it was.
+* **one pass for every parameter.** The pass runs at `g::n_theta + 1` lanes, one
+  per slot and one for the decision variable, so its cost does not depend on
+  `pars`.
 * **per-row status rather than an exception**, so a proposal that reaches an
   unsolvable point costs that row and not the batch.
 
 **It is every trait gradient the package gives**: `leaf_gradient()` and
 `leaf_gradient_batch()` both call it. `Settings::model` names the curve and the
 route, the `Leaf`'s default (TF24_floor on the leaf route) unless set. `tests/testthat/test-gradient-referee.R`
-checks it against a difference of the solve for every curve on both routes. If
-you modify it, read its header first: every difference names its two halves,
-because the evaluations mutate the leaf and C++ does not sequence `f(a) - f(b)`.
+checks it against a difference of the solve for every curve on both routes, and
+`tests/cpp/test_leaf_surface.cpp` checks the surface itself at every kind of
+point.
 
-The ingredients are public, if you want to compose something else:
+The surface is public, if you want to compose something else; plant does, to
+read the operating point's rows at its own scalar type:
 
 | piece | what it is |
 |---|---|
-| `set_traits(...)` | replace all sixteen traits, refreshing the vulnerability tables and the temperature cache |
-| `perturb_stem_P50(P50)` | move `stem_P50` (and `stem_b`, `psi_crit`) without clearing the solved physiology |
-| `dprofit_droot_collar_psi(psi, &feasible)` | dprofit/dψ at a given collar potential |
-| `dprofit_droot_collar_psi_checked(psi)` | the same as `{dprofit, feasible}`, for R, because RcppR6 has no form for a `bool*` and the generated binding drops the flag |
-| `evaluate_root_collar_psi(psi)` | solve the inner problem at a fixed collar |
+| `supply_draw_at<S>(collar, supply)` | the supply's draw at a collar, on any scalar |
+| `operating_collar<K, S>(draw, pars, H, &held)` | the decision variable placed from the kind the solve recorded |
+| `physical_outputs_at<K, S>(x, draw, pars, &held)` | A, gc, psi_leaf and profit at that placement |
+| `profit_curvature_at_collar<K>()` | `H`, the curvature the implicit function theorem divides by |
+| `dprofit_droot_collar_psi(psi, &feasible)` | dprofit/dψ at a given collar potential, at double |
 
 **Pass the `feasible` flag.** `dprofit_droot_collar_psi` returns `0.0` on its
 shut-down and reversed-gradient exits, and a bare zero is indistinguishable from a
 stationary point, so a root-find looking for `dprofit == 0` would converge onto a
 shut-down state and report it as the optimum. The optional `bool*` second
-argument is how the two are told apart, and a composite that ignores it inherits
-the bug.
+argument is how the two are told apart.
 
-Composing them is what `gradient.hpp` does, and what `R/gradient.R` did alone
-before it: perturb a trait, evaluate `dprofit` at the **unperturbed** optimum to
-get the mixed partial `M`, difference `dprofit` in ψ to get the curvature `H`, then
-`dψ*/dθ = −M/H`, and finally chain that through the direct effect on the output.
-
-`tests/cpp/bench_gradient.cpp` does the same thing by hand and is compiled by CI,
-so the shape of it is visible without reading the header:
-
-```cpp
-// tests/cpp/bench_gradient.cpp -- the composite, hand-rolled
-for (int sign = -1; sign <= 1; sign += 2) {
-  Traits t = kBase;
-  t.v[idx] = perturbed(kBase, idx, sign, r);
-  apply_traits(l, t);
-  set_drivers(l);
-  // The mixed partial, and then the direct term at the same fixed collar.
-  sink += l.dprofit_droot_collar_psi(psi_star);
-  sink += l.evaluate_root_collar_psi(psi_star);
-  sink += l.assim_colimited_;
-}
-```
-
-**A hand-rolled composite inherits none of the guards.** That snippet is a
-timing harness at one interior point, not a gradient you should ship: it has no
-stationarity test and no refusal detector, so at a boundary optimum it returns a
-plausible number that is wrong by up to 3.5e+07. `g::batch` above is the one to
-call. This is here to show what the primitives compose into, not as a template.
+`vignette("derivative-surface")` documents the surface: what each kind places,
+and what each scalar type is for.
 
 ## What is fast, and what is not
 
-Measured per parameter (`vcmax_25`) at one operating point through `leaf_gradient()`,
-the three routes interleaved in one process, relative to the cheapest:
+`tests/cpp/bench_gradient.cpp` times the gradient beside a central difference of
+the whole solve, both in C++, at one interior point (TF24 on the collar route,
+one layer), less the seat and solve every arm pays:
 
-| route | cost per parameter |
-|---|---:|
-| central FD on the solve, fresh `Leaf` per call | 3.2× |
-| central FD on the solve, `set_traits` reuse | 1 |
-| the IFT composite, `set_traits` reuse | 1.12× |
+| arm | cost |
+|---|---|
+| the gradient, any number of parameters | about 9 µs |
+| a difference of the solve | about 5 µs a parameter, and tens where it rebuilds a vulnerability table (`stem_c`, `root_c`) |
 
-**The composite is about 10% slower than the finite difference it was built to
-replace**, and the 3× that is real comes from **object reuse, not from the
-theorem**, and that accrues to the finite difference equally. The composite does
-replace a solve with a gradient evaluation costing under a tenth as much, exactly
-as projected; it just costs one extra R call per side to do it, and in the R layer
-a call costs more than the C++ work it wraps.
+So the pass costs about two parameters' worth of differencing, and then nothing
+more: from three parameters up it is the cheaper of the two, and it is exact.
 
-Of the cost per parameter, **only a small fraction is C++**. So a C++ consumer
-composing the theorem directly avoids the boundary that makes the R version slow,
-and is where the IFT's advantage first becomes visible at all: `bench_gradient`
-measures it at about 3.5× on the traits that rebuild no vulnerability table.
-
-That is also what an R caller gets from `leaf_gradient_batch()`: the composition
-runs once, in C++, over every observation, so the boundary is crossed once per call
-rather than 112 times per observation, and none of the saving is a faster gradient.
+That is also what an R caller gets from `leaf_gradient_batch()`: the pass runs
+in C++ over every observation, so the boundary is crossed once per call rather
+than once per observation.
 
 **Constructing a `Leaf` from R is the largest single cost in the R layer**, and
 most of it is R-side object construction rather than the vulnerability tables.

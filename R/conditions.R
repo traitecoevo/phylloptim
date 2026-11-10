@@ -76,10 +76,6 @@ leaf_infeasible_codes <- function() {
             "upstream potential, so a leaf route has no wet bound to start from"),
     root_find_iterations =
       paste("a one-dimensional solver hit max_iterations without converging"),
-    gradient_active_set =
-      paste("perturbing a parameter moved the feasible collar interval past the",
-            "operating point, so the point sits on an active-set boundary and",
-            "cannot be differentiated there"),
     prescribed_potential =
       paste("a prescribed collar or leaf potential lies outside its feasible",
             "interval; it is refused rather than moved onto the interval's end"),

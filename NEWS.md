@@ -1,3 +1,9 @@
+# phylloptim 0.36.0
+
+- **Breaking:** the trait gradient is one forward pass of the derivative surface, on every curve, both routes, both supplies and with the thermal-damage layer on. `leaf_gradient()` and `leaf_gradient_batch()` lose `method`, `step`, `stationarity_tol` and `fast_stem_curve`, and their results lose `method` and `stationarity`, with no aliases: there is no difference to tune and no fallback to choose. A gradient costs the same whatever `pars` asks for.
+- Rows agree with a difference of the whole solve to its own precision: the referee's worst row falls from 5e-4 to 5e-5. Most recorded gradients move by less than 1e-6 relative; the few that move more are rows near zero, or rows where the old difference was the one in error. A pinned optimum's rows are its bound's, exact where they were a difference of the solve.
+- `status` is the kind the solve recorded: a leaf shut past the end of its stem curve is `"pinned"`, not `"no-gradient"`. A prescribed `psi` reproduces the solving path to rounding, not to the bit, and one whose leaf potential lies in the stem curve's tail is `"no-gradient"`. The `gradient_active_set` condition is gone ([#261](https://github.com/traitecoevo/phylloptim/issues/261)).
+
 # phylloptim 0.35.0
 
 - The derivative surface's rows are exact with a cuticle. Where the stem's ceiling caps the residual flux, as with `g_min = 5e-3` on a dry soil, rows in the stem traits and in `g_min` were wrong by up to 100%. With the energy balance on, the `g_min` row was wrong by up to 30% even at `g_min = 0`. No solve moves, and a leaf with no cuticle and the energy balance off records the same tape ([#250](https://github.com/traitecoevo/phylloptim/issues/250)).

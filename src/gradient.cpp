@@ -219,11 +219,8 @@ void gradient_batch_check(SEXP drivers) { checked(drivers); }
 // [[Rcpp::export]]
 Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_,
                               SEXP drivers, Rcpp::NumericMatrix theta,
-                              Rcpp::IntegerVector pars, double step,
-                              double stationarity_tol, std::string method,
-                              bool fast_stem_curve, SEXP psi,
-                              SEXP dpsi_dtheta, int curve, bool collar,
-                              double fd_step) {
+                              Rcpp::IntegerVector pars, SEXP psi,
+                              SEXP dpsi_dtheta, int curve, bool collar) {
   DriverBatch* batch_drivers = checked(drivers);
   const std::size_t n = batch_drivers->size();
   const std::size_t npars = static_cast<std::size_t>(pars.size());
@@ -244,25 +241,12 @@ Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_,
   }
 
   phylloptim::gradient::Settings settings;
-  settings.step = step;
-  settings.stationarity_tol = stationarity_tol;
-  settings.fast_stem_curve = fast_stem_curve;
   if (curve < 0 || curve >= phylloptim::Leaf::n_cost_curves) {
     Rcpp::stop("gradient_batch_run(): `curve` is out of range");
   }
   settings.model.curve = static_cast<phylloptim::Leaf::CostCurve>(curve);
   settings.model.route = collar ? phylloptim::gradient::Route::Collar
                                 : phylloptim::gradient::Route::Leaf;
-  settings.fd_step = fd_step;
-  if (method == "auto") {
-    settings.method = phylloptim::gradient::Method::Auto;
-  } else if (method == "ift") {
-    settings.method = phylloptim::gradient::Method::Ift;
-  } else if (method == "fd") {
-    settings.method = phylloptim::gradient::Method::Fd;
-  } else {
-    Rcpp::stop("gradient_batch_run(): `method` must be auto, ift or fd");
-  }
 
   // `pars` is copied into an int vector rather than read out of the
   // Rcpp::IntegerVector inside the loop so that nothing on the hot path touches
@@ -271,9 +255,9 @@ Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_,
   const std::vector<int> par_idx(pars.begin(), pars.end());
 
   // `psi` is NULL to solve, or one collar potential per observation to impose;
-  // `dpsi_dtheta` is then an n x npars matrix. R validates both -- shape,
-  // positivity and the `method` conflict -- so this only holds the shape it was
-  // promised, and says so rather than reading past the end if it was not.
+  // `dpsi_dtheta` is then an n x npars matrix. R validates both -- shape and
+  // positivity -- so this only holds the shape it was promised, and says so
+  // rather than reading past the end if it was not.
   Rcpp::NumericVector psi_v;
   Rcpp::NumericVector dpsi_v;
   const double* psi_p = nullptr;
@@ -306,10 +290,8 @@ Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_,
   Rcpp::NumericVector grad(static_cast<R_xlen_t>(n) *
                            static_cast<R_xlen_t>(npars) * n_out);
   Rcpp::CharacterVector status(static_cast<R_xlen_t>(n));
-  Rcpp::CharacterVector method_used(static_cast<R_xlen_t>(n));
   Rcpp::CharacterVector message(static_cast<R_xlen_t>(n));
   Rcpp::NumericVector H(static_cast<R_xlen_t>(n));
-  Rcpp::NumericVector stationarity(static_cast<R_xlen_t>(n));
   Rcpp::NumericMatrix M(static_cast<int>(n), static_cast<int>(npars));
   Rcpp::NumericMatrix dY_dpsi(static_cast<int>(n), n_out);
   Rcpp::NumericVector psi_used(static_cast<R_xlen_t>(n));
@@ -334,20 +316,8 @@ Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_,
       }
     }
     status[i] = phylloptim::gradient::status_name(r.status);
-    // `method` names the route, and a prescribed collar is a third one: neither
-    // "ift" (nothing was derived from -M/H) nor "fd" (the solve was not
-    // differenced).
-    //
-    // ⚠️ `psi_p` is CALL-level, so this does not vary across `i` -- the whole
-    // batch is prescribed or none of it is. A row that threw therefore reports
-    // `status = "error"` with `method = "prescribed"`, which is right: `method`
-    // says which route was asked for, and `status` says what happened to the row.
-    method_used[i] = psi_p != nullptr
-                         ? "prescribed"
-                         : (r.used_ift ? "ift" : "fd");
     message[i] = r.message;
     H[i] = r.H;
-    stationarity[i] = r.stationarity;
   }
 
   grad.attr("dim") = Rcpp::IntegerVector::create(
@@ -355,8 +325,7 @@ Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_,
 
   return Rcpp::List::create(
       Rcpp::_["value"] = value, Rcpp::_["gradient"] = grad,
-      Rcpp::_["status"] = status, Rcpp::_["method"] = method_used,
-      Rcpp::_["H"] = H, Rcpp::_["stationarity"] = stationarity,
+      Rcpp::_["status"] = status, Rcpp::_["H"] = H,
       Rcpp::_["M"] = M, Rcpp::_["dY_dpsi"] = dY_dpsi,
       Rcpp::_["psi"] = psi_used, Rcpp::_["message"] = message);
 }

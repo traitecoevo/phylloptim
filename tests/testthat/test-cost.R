@@ -124,8 +124,8 @@ test_that("leaf_gradient(x =) constructs no Leaf at all", {
 })
 
 test_that("leaf_gradient() is one crossing into the batch", {
-  # leaf_gradient() is the batch with one observation: the composite runs in C++,
-  # so none of the per-perturbation primitives is reached from R. Composed in R,
+  # leaf_gradient() is the batch with one observation: the gradient runs in C++,
+  # so none of the leaf's primitives is reached from R. Composed in R,
   # a four-parameter gradient crossed the boundary over a hundred times.
   tr <- leaf_traits()
   l <- leaf_model(traits = tr)

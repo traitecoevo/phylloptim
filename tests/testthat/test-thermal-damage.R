@@ -702,7 +702,7 @@ test_that("the layer's inputs are gradient parameters only with its gate on", {
                "cannot differentiate")
 })
 
-test_that("with the gate on, the composite agrees with differencing the solve", {
+test_that("with the gate on, the gradient agrees with differencing the solve", {
   for (supply in list(leaf_supply_multilayer(), leaf_supply_singlelayer())) {
     single <- identical(supply$kind, "single")
     psi <- if (single) 1.0 else c(1, 2, 3)
@@ -712,13 +712,25 @@ test_that("with the gate on, the composite agrees with differencing the solve", 
     pars <- c("vcmax_25", damage_gradient_pars)
     a <- leaf_gradient(psi_soil = psi, soil_depth = depth, PPFD = 1500,
                        leaf_temp = 35, x = l, traits = leaf_traits(), pars = pars,
-                       method = "ift", model = "TF24", route = "collar")
-    b <- leaf_gradient(psi_soil = psi, soil_depth = depth, PPFD = 1500,
-                       leaf_temp = 35, x = l, traits = leaf_traits(), pars = pars,
-                       method = "fd", step = 1e-5,
                        model = "TF24", route = "collar")
+    # The difference of the solve, read off the same entry point's solved
+    # value: the layer's inputs are leaf state, which leaf_solve() cannot set.
+    solved <- function(par, v) {
+      m <- gradient_leaf(supply)
+      m$use_thermal_damage_ <- TRUE
+      tr <- leaf_traits()
+      if (par %in% names(tr)) tr[[par]] <- v else m[[par]] <- v
+      leaf_gradient(psi_soil = psi, soil_depth = depth, PPFD = 1500,
+                    leaf_temp = 35, x = m, traits = tr, pars = character(0),
+                    model = "TF24", route = "collar")$value
+    }
+    b <- t(vapply(pars, function(p) {
+      v <- if (p %in% names(leaf_traits())) leaf_traits()[[p]] else l[[p]]
+      h <- max(abs(v), 1) * 1e-5
+      (solved(p, v + h) - solved(p, v - h)) / (2 * h)
+    }, numeric(5)))
     expect_identical(a$status, "interior", info = supply$kind)
-    rel <- abs(a$gradient - b$gradient) / pmax(1, abs(a$gradient))
+    rel <- abs(a$gradient - b) / pmax(1, abs(a$gradient))
     expect_lt(max(rel), 1e-6, label = paste(supply$kind, "worst", max(rel)))
     # Impaired and damaged area do not photosynthesise: A falls with each.
     expect_lt(a$gradient["I_", "A"], 0)
@@ -738,20 +750,16 @@ test_that("with the gate on, leaf_gradient() is the batch's one observation", {
                   supply = leaf_supply_multilayer())
   set_inputs(b$leaf, atls_inputs[damage_gradient_pars])
   b$leaf$use_thermal_damage_ <- TRUE
-  for (method in c("ift", "fd")) {
-    g <- leaf_gradient_batch(b, pars = pars, method = method,
-                             model = "TF24", route = "collar")
-    for (i in seq_along(psis)) {
-      l <- gradient_leaf()
-      l$use_thermal_damage_ <- TRUE
-      r <- leaf_gradient(psi_soil = psis[i] + c(0, 0.5, 1),
-                         soil_depth = c(.5, 1, 1.5), PPFD = 1500, leaf_temp = 35,
-                         x = l, traits = leaf_traits(), pars = pars,
-                         method = method, model = "TF24", route = "collar")
-      expect_identical(g$gradient[i, , ], r$gradient,
-                       info = paste(method, "row", i))
-      expect_identical(g$status[i], r$status, info = paste(method, "row", i))
-    }
+  g <- leaf_gradient_batch(b, pars = pars, model = "TF24", route = "collar")
+  for (i in seq_along(psis)) {
+    l <- gradient_leaf()
+    l$use_thermal_damage_ <- TRUE
+    r <- leaf_gradient(psi_soil = psis[i] + c(0, 0.5, 1),
+                       soil_depth = c(.5, 1, 1.5), PPFD = 1500, leaf_temp = 35,
+                       x = l, traits = leaf_traits(), pars = pars,
+                       model = "TF24", route = "collar")
+    expect_identical(g$gradient[i, , ], r$gradient, info = paste("row", i))
+    expect_identical(g$status[i], r$status, info = paste("row", i))
   }
   # Per-observation state through a theta matrix: each row its own I_.
   th <- matrix(rep(.gradient_theta_matrix(b, b$traits, TRUE), each = 1),

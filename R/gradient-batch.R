@@ -1,7 +1,7 @@
 # Trait gradients over many observations in one crossing: leaf_batch() and
 # leaf_gradient_batch().
 #
-# The composite is inst/include/phylloptim/gradient.hpp, looped over
+# The gradient is inst/include/phylloptim/gradient.hpp, looped over
 # observations there; this file gets a parameter matrix in and the arrays out.
 # leaf_gradient() is the same call with one observation. The likelihood and the
 # parameterisation Jacobian stay with the caller, in R: a fit with
@@ -177,17 +177,16 @@ print.leaf_batch <- function(x, ...) {
 ##'   [leaf_gradient()] records. Only meaningful with `psi`.
 ##'
 ##' @section What it computes, and where the maths is written down:
-##' The same five derivatives at the same solved operating point, by the same two
-##' methods, with the same active-set test deciding between them. **Read
-##' [leaf_gradient()]'s documentation for all of it** — the implicit function
-##' theorem, why the second term is not a correction, why the premise is tested
-##' rather than assumed, and what `status` means. Nothing here differs:
-##' [leaf_gradient()] is this function with one observation.
+##' The same five derivatives at the same solved operating point, by the same
+##' pass. **Read [leaf_gradient()]'s documentation for all of it** — the
+##' implicit function theorem, why the second term is not a correction, how a
+##' pinned point is differentiated, and what `status` means. Nothing here
+##' differs: [leaf_gradient()] is this function with one observation.
 ##'
 ##' @section Speed, and which side of the boundary the figure belongs to:
-##' Through [leaf_gradient()], almost all of a four-parameter gradient's cost per
-##' observation is dispatch and the R interpreter; the model work — two solves — is
-##' a few percent of it. Composed here in C++, the same gradient costs over an order
+##' Through [leaf_gradient()], almost all of a gradient's cost per observation is
+##' dispatch and the R interpreter; the model work — a solve and one pass — is a
+##' small part of it. Composed here in C++, the same gradient costs over an order
 ##' of magnitude less per observation. The README's "Performance from R" has the
 ##' measured ratios.
 ##'
@@ -200,12 +199,11 @@ print.leaf_batch <- function(x, ...) {
 ##' A proposal during a fit **will** reach operating points the solve cannot
 ##' handle. That has to cost those rows rather than the whole dataset, so every
 ##' row reports its own `status` and a failure is `"error"` with a `message`
-##' rather than a condition. A failed row's gradient is all `NA`, not partially
-##' filled: a parameter loop that failed halfway has valid entries before the
-##' failure, and returning them next to `status == "error"` would invite a caller
-##' who checks the status per row to read a gradient with a hole in it. `value`,
-##' `H` and `stationarity` are kept where they were determined, because they
-##' describe the point rather than the derivative.
+##' rather than a condition. A failed row's gradient is all `NA`, never partly
+##' filled: returning entries next to `status == "error"` would invite a caller
+##' who checks the status per row to read a gradient with a hole in it. `value`
+##' and `H` are kept where they were determined, because they describe the point
+##' rather than the derivative.
 ##'
 ##' @section Supplying `theta` directly:
 ##' By default the parameters are `traits` — the batch's, or the ones passed here
@@ -226,24 +224,22 @@ print.leaf_batch <- function(x, ...) {
 ##'   route, as in [leaf_gradient()]: any [cost_curve_names()] entry,
 ##'   `"TF24_floor"` by default, on its leaf route unless `route = "collar"`.
 ##' @param pars what to differentiate with respect to, as in [leaf_gradient()].
-##'   ⚠️ **Always pass it.** It is `P_model`, so the default — all of them — is
-##'   the most expensive thing you can ask for.
+##'   It selects rows, not work: the default, all of them, costs the same as
+##'   one.
 ##' @param theta the model parameters as a matrix, for the case where they vary
 ##'   by observation. See the section above.
-##' @inheritParams leaf_gradient
 ##'
 ##' @return A list with
 ##'   \describe{
 ##'     \item{`gradient`}{an `n` × `length(pars)` × 5 array, the last dimension
 ##'       being `A`, `gc`, `psi_leaf`, `collar` and `profit`}
 ##'     \item{`value`}{an `n` × 5 matrix of the solved outputs}
-##'     \item{`method`}{`"ift"`, `"fd"` or `"prescribed"` per observation}
 ##'     \item{`status`}{`"interior"`, `"pinned"`, `"no-gradient"`, `"error"`,
 ##'       or with `psi` one of `"prescribed"`, `"refused"`, `"no-gradient"`}
-##'     \item{`H`, `stationarity`}{the curvature and the implied Newton step
-##'       `method` was decided on, per observation}
+##'     \item{`H`}{the curvature at each interior optimum or prescribed `psi`;
+##'       `NA` elsewhere}
 ##'     \item{`M`}{an `n` × `length(pars)` matrix of mixed partials
-##'       `d2profit/dpsi dtheta`}
+##'       `d2profit/dpsi dtheta`, `NA` where [leaf_gradient()] has none}
 ##'     \item{`dY_dpsi`}{an `n` × 5 matrix of `dY/dpsi` at fixed traits}
 ##'     \item{`psi`}{the collar each row was evaluated at}
 ##'     \item{`message`}{`""`, or why that row failed}
@@ -263,19 +259,12 @@ leaf_gradient_batch <- function(batch,
                                 theta = NULL,
                                 psi = NULL,
                                 dpsi_dtheta = NULL,
-                                step = 1e-6,
-                                stationarity_tol = 1e-8,
-                                method = c("auto", "ift", "fd"),
-                                fast_stem_curve = TRUE,
                                 model = "TF24_floor",
                                 route = NULL) {
   if (!inherits(batch, "leaf_batch")) {
     stop("`batch` must come from leaf_batch(); got ", class(batch)[[1]],
          call. = FALSE)
   }
-  method <- match.arg(method)
-  fd_step <- .gradient_fd_step_for(step, !missing(step), stationarity_tol,
-                                   fast_stem_curve)
   # First, before either handle is read: both are external pointers, NULL after
   # serialize(), and the bare Rcpp error gives no hint to rebuild. They are
   # created together, so checking one covers both.
@@ -311,14 +300,13 @@ leaf_gradient_batch <- function(batch,
 
   .gradient_check_theta_prices(theta, model, par_names)
 
-  psi <- .gradient_check_psi_batch(psi, batch$n, method)
+  psi <- .gradient_check_psi_batch(psi, batch$n)
   dpsi_dtheta <- .gradient_dpsi_dtheta_batch(dpsi_dtheta, pars, batch$n,
                                              !is.null(psi))
 
   # One crossing: per-row failures come back as `status`, so its condition
   # wrapper catches only what takes the whole call down.
-  .gradient_run(batch$leaf, batch$drivers, theta, pars, step, fd_step,
-                stationarity_tol, method, fast_stem_curve, psi, dpsi_dtheta, m)
+  .gradient_run(batch$leaf, batch$drivers, theta, pars, psi, dpsi_dtheta, m)
 }
 
 # --- internals ---------------------------------------------------------------
@@ -326,13 +314,9 @@ leaf_gradient_batch <- function(batch,
 # The batch counterparts of `.gradient_check_psi()` and `.gradient_dpsi_dtheta()`.
 # A length-1 `psi` is not recycled: rows sharing an imposed collar is a
 # coincidence, and broadcasting one would make a length mismatch look intended.
-.gradient_check_psi_batch <- function(psi, n, method) {
+.gradient_check_psi_batch <- function(psi, n) {
   if (is.null(psi)) {
     return(NULL)
-  }
-  if (!identical(method, "auto")) {
-    stop("`method` cannot be given with `psi`; see ?leaf_gradient.",
-         call. = FALSE)
   }
   if (!(is.numeric(psi) && length(psi) == n)) {
     stop("`psi` must be one collar potential per observation (", n,

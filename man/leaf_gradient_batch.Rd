@@ -11,10 +11,6 @@ leaf_gradient_batch(
   theta = NULL,
   psi = NULL,
   dpsi_dtheta = NULL,
-  step = 1e-06,
-  stationarity_tol = 1e-08,
-  method = c("auto", "ift", "fd"),
-  fast_stem_curve = TRUE,
   model = "TF24_floor",
   route = NULL
 )
@@ -27,8 +23,8 @@ differentiate at. Defaults to the one \code{batch} was built with. Ignored when
 \code{theta} is given.}
 
 \item{pars}{what to differentiate with respect to, as in \code{\link[=leaf_gradient]{leaf_gradient()}}.
-⚠️ \strong{Always pass it.} It is \code{P_model}, so the default — all of them — is
-the most expensive thing you can ask for.}
+It selects rows, not work: the default, all of them, costs the same as
+one.}
 
 \item{theta}{the model parameters as a matrix, for the case where they vary
 by observation. See the section above.}
@@ -45,31 +41,6 @@ an \code{n} × \code{length(pars)} matrix, or one vector of \code{length(pars)} 
 every observation. Defaults to zero. Must be finite, for the reason
 \code{\link[=leaf_gradient]{leaf_gradient()}} records. Only meaningful with \code{psi}.}
 
-\item{step}{relative step for the trait difference. The default \code{1e-06} is
-near the middle of the five decades over which the mixed partial was
-measured stable; it is also used, relative to the collar potential, for the
-two differences in \code{psi}.}
-
-\item{stationarity_tol}{how far from stationary, as an implied Newton step in
-MPa, the solved point may be before the optimum is called pinned and the
-finite-difference fallback is used. The default \code{1e-08} sits in the empty
-band between the two measured populations; there is no operating point in
-this package's grid within four orders of magnitude of it.}
-
-\item{method}{which route to take: \code{"auto"} (the default) uses the
-implicit-function composite where its premise holds and the finite
-difference where it does not. \code{"ift"} and \code{"fd"} force one route, for
-checking one against the other. Forcing \code{"ift"} at a pinned optimum returns
-a confidently wrong number -- that is the whole reason \code{"auto"} exists --
-and \code{status} still reports the truth about the point.}
-
-\item{fast_stem_curve}{perturb \code{stem_P50} through \code{perturb_stem_P50()}, which
-moves \code{stem_b} and leaves the seated physiology alone (\code{TRUE}, the
-default), rather than through \code{set_traits()}. Neither route rebuilds the
-stem's vulnerability table, which depends on \code{stem_c} alone; \code{FALSE} exists
-so the equivalence is checkable rather than assumed, and the package's tests
-require the two routes to agree.}
-
 \item{model, route}{which optimality model to differentiate, and on which
 route, as in \code{\link[=leaf_gradient]{leaf_gradient()}}: any \code{\link[=cost_curve_names]{cost_curve_names()}} entry,
 \code{"TF24_floor"} by default, on its leaf route unless \code{route = "collar"}.}
@@ -80,13 +51,12 @@ A list with
 \item{\code{gradient}}{an \code{n} × \code{length(pars)} × 5 array, the last dimension
 being \code{A}, \code{gc}, \code{psi_leaf}, \code{collar} and \code{profit}}
 \item{\code{value}}{an \code{n} × 5 matrix of the solved outputs}
-\item{\code{method}}{\code{"ift"}, \code{"fd"} or \code{"prescribed"} per observation}
 \item{\code{status}}{\code{"interior"}, \code{"pinned"}, \code{"no-gradient"}, \code{"error"},
 or with \code{psi} one of \code{"prescribed"}, \code{"refused"}, \code{"no-gradient"}}
-\item{\code{H}, \code{stationarity}}{the curvature and the implied Newton step
-\code{method} was decided on, per observation}
+\item{\code{H}}{the curvature at each interior optimum or prescribed \code{psi};
+\code{NA} elsewhere}
 \item{\code{M}}{an \code{n} × \code{length(pars)} matrix of mixed partials
-\verb{d2profit/dpsi dtheta}}
+\verb{d2profit/dpsi dtheta}, \code{NA} where \code{\link[=leaf_gradient]{leaf_gradient()}} has none}
 \item{\code{dY_dpsi}}{an \code{n} × 5 matrix of \code{dY/dpsi} at fixed traits}
 \item{\code{psi}}{the collar each row was evaluated at}
 \item{\code{message}}{\code{""}, or why that row failed}
@@ -99,19 +69,18 @@ observation.
 }
 \section{What it computes, and where the maths is written down}{
 
-The same five derivatives at the same solved operating point, by the same two
-methods, with the same active-set test deciding between them. \strong{Read
-\code{\link[=leaf_gradient]{leaf_gradient()}}'s documentation for all of it} — the implicit function
-theorem, why the second term is not a correction, why the premise is tested
-rather than assumed, and what \code{status} means. Nothing here differs:
-\code{\link[=leaf_gradient]{leaf_gradient()}} is this function with one observation.
+The same five derivatives at the same solved operating point, by the same
+pass. \strong{Read \code{\link[=leaf_gradient]{leaf_gradient()}}'s documentation for all of it} — the
+implicit function theorem, why the second term is not a correction, how a
+pinned point is differentiated, and what \code{status} means. Nothing here
+differs: \code{\link[=leaf_gradient]{leaf_gradient()}} is this function with one observation.
 }
 
 \section{Speed, and which side of the boundary the figure belongs to}{
 
-Through \code{\link[=leaf_gradient]{leaf_gradient()}}, almost all of a four-parameter gradient's cost per
-observation is dispatch and the R interpreter; the model work — two solves — is
-a few percent of it. Composed here in C++, the same gradient costs over an order
+Through \code{\link[=leaf_gradient]{leaf_gradient()}}, almost all of a gradient's cost per observation is
+dispatch and the R interpreter; the model work — a solve and one pass — is a
+small part of it. Composed here in C++, the same gradient costs over an order
 of magnitude less per observation. The README's "Performance from R" has the
 measured ratios.
 
@@ -126,12 +95,11 @@ is the lever.
 A proposal during a fit \strong{will} reach operating points the solve cannot
 handle. That has to cost those rows rather than the whole dataset, so every
 row reports its own \code{status} and a failure is \code{"error"} with a \code{message}
-rather than a condition. A failed row's gradient is all \code{NA}, not partially
-filled: a parameter loop that failed halfway has valid entries before the
-failure, and returning them next to \code{status == "error"} would invite a caller
-who checks the status per row to read a gradient with a hole in it. \code{value},
-\code{H} and \code{stationarity} are kept where they were determined, because they
-describe the point rather than the derivative.
+rather than a condition. A failed row's gradient is all \code{NA}, never partly
+filled: returning entries next to \code{status == "error"} would invite a caller
+who checks the status per row to read a gradient with a hole in it. \code{value}
+and \code{H} are kept where they were determined, because they describe the point
+rather than the derivative.
 }
 
 \section{Supplying \code{theta} directly}{

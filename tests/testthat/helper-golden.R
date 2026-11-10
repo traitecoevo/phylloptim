@@ -69,18 +69,16 @@ golden_flux_negligible <- 1.0e-15
 golden_water_flux_fields <- c("transpiration", "gc", "e_up", "uptake")
 
 # THE RECORDED GRADIENTS HAVE THEIR OWN TOLERANCE, because their floor is not the
-# solved outputs'. Even the IFT route takes its mixed partial and curvature as
-# central differences of `dprofit` (`gradient_ift`), so a gradient carries the
-# solve's floor DIVIDED BY THE STEP. The step is RELATIVE, so the amplification is
-# set by the differentiated parameter's own magnitude: `R_d_25` (1.44) takes a 67x
-# smaller absolute step than `vcmax_25` (96), and the smallest parameter in the
-# file decides the tolerance for all of it. `profit` is the smallest-magnitude
-# column carrying that floor, so its relative disagreement is the largest.
+# solved outputs'. The rows are the derivative surface's, exact at the converged
+# point, but an interior row divides by the profit's curvature, which is a
+# difference of the marginal (profit_curvature_at_collar), and every row is taken
+# at a point the solve placed to its own tolerance.
 #
-# Measured on Linux CI, the whole-file worst: 1.19e-07. 1e-5 leaves ~80x of
-# headroom and still catches what this file exists for: tightening
-# `psi_leaf_to_ci` from 1e-10 to 1e-13 moved these cells by up to 2.3e-3 (#172),
-# and #41's reallocation by 16% to 250%.
+# Measured on Linux CI when the rows were differences of `dprofit`, the
+# whole-file worst: 1.19e-07. 1e-5 leaves ~80x of headroom over that and still
+# catches what this file exists for: tightening `psi_leaf_to_ci` from 1e-10 to
+# 1e-13 moved these cells by up to 2.3e-3 (#172), and #41's reallocation by 16% to
+# 250%. Re-measure it from the worst-difference line on Linux CI.
 #
 # ⚠️ THE FLOOR IS THE `ci` ROOT-FIND'S TOLERANCE, NOT libm. At 1e-10 this file
 # disagreed across platforms by 2.34e-3 -- the same 2.3e-3 the macOS values were

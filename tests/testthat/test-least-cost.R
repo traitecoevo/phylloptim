@@ -135,7 +135,7 @@ test_that("LeastCost_beta is in the gradient enumeration, owned by one curve", {
     "LeastCost")
 })
 
-test_that("LeastCost_beta is differentiated, and the composite agrees with its FD", {
+test_that("LeastCost_beta is differentiated, and agrees with a difference of the solve", {
   # ⚠️ THE SLOT HAS TO REACH THE LEAF ON EVERY PERTURBATION. `gradient::apply()`
   # writes `LeastCost_beta` from theta; without that write the gradient re-solves
   # at the seated beta on every step and reports an EXACT ZERO -- finite,
@@ -151,22 +151,23 @@ test_that("LeastCost_beta is differentiated, and the composite agrees with its F
     l$LeastCost_beta <- 146
     l
   }
-  g <- function(meth) {
-    leaf_gradient(psi_soil = 0.5, PPFD = 1500, atm_vpd = 2,
-                  leaf_specific_conductance_max = 6.3e-3,
-                  root_network = net, x = mk(), traits = tr,
-                  pars = "LeastCost_beta", model = "LeastCost", route = "leaf",
-                  method = meth)
-  }
-  ift <- g("ift")
-  fd <- g("fd")
-  expect_identical(ift$model, "LeastCost")
-  expect_identical(ift$status, "interior")
-  expect_gt(ift$gradient["LeastCost_beta", "A"], 0)
-  for (out in c("A", "gc", "psi_leaf")) {
-    expect_equal(ift$gradient["LeastCost_beta", out],
-                 fd$gradient["LeastCost_beta", out],
-                 tolerance = 5e-3, label = out)
+  g <- leaf_gradient(psi_soil = 0.5, PPFD = 1500, atm_vpd = 2,
+                     leaf_specific_conductance_max = 6.3e-3,
+                     root_network = net, x = mk(), traits = tr,
+                     pars = "LeastCost_beta", model = "LeastCost", route = "leaf")
+  expect_identical(g$model, "LeastCost")
+  expect_identical(g$status, "interior")
+  expect_gt(g$gradient["LeastCost_beta", "A"], 0)
+  ref <- solve_difference(list(psi_soil = 0.5, PPFD = 1500, atm_vpd = 2,
+                               leaf_specific_conductance_max = 6.3e-3,
+                               root_network = net, traits = tr,
+                               supply = leaf_supply_singlelayer(),
+                               model = "LeastCost", route = "leaf",
+                               LeastCost_beta = 146),
+                          "LeastCost_beta")
+  for (out in c("A", "gc", "psi_leaf", "profit")) {
+    expect_equal(g$gradient["LeastCost_beta", out],
+                 ref["LeastCost_beta", out], tolerance = 1e-5, label = out)
   }
 })
 

@@ -143,3 +143,47 @@ gradient_golden_run <- function(cs) {
   leaf_gradient_batch(b, pars = cs$pars, model = cs$model, route = cs$route,
                       psi = cs$psi, dpsi_dtheta = cs$dpsi_dtheta)
 }
+
+# A central difference of the whole solve, one row per parameter: what a
+# gradient row is held to. `args` is a leaf_solve() call; each of `pars` is a
+# trait, `leaf_specific_conductance_max`, or a price leaf_solve() takes by name
+# (given in `args`). The step is `rel` of the value, floored at 1 for all but
+# the conductance, the gradient's own scale.
+solve_difference <- function(args, pars, rel = 1e-5) {
+  outs <- c("A", "gc", "psi_leaf", "collar", "profit")
+  traits <- if (is.null(args$traits)) leaf_traits() else args$traits
+  rows <- lapply(pars, function(par) {
+    at <- function(v) {
+      a <- args
+      if (par %in% names(traits)) {
+        tr <- traits
+        tr[[par]] <- v
+        a$traits <- tr
+      } else {
+        a[[phylloptim:::.owned_argument(par)]] <- v
+      }
+      unlist(do.call(leaf_solve, a)[1, outs])
+    }
+    v <- if (par %in% names(traits)) {
+      traits[[par]]
+    } else if (par == "leaf_specific_conductance_max") {
+      if (is.null(args[[par]])) kmax_default else args[[par]]
+    } else {
+      args[[phylloptim:::.owned_argument(par)]]
+    }
+    if (is.null(v)) stop("solve_difference(): give `", par, "` in `args`")
+    h <- rel * if (par == "leaf_specific_conductance_max") abs(v) else max(abs(v), 1)
+    (at(v + h) - at(v - h)) / (2 * h)
+  })
+  matrix(unlist(rows), nrow = length(pars), byrow = TRUE,
+         dimnames = list(pars, outs))
+}
+
+# grid_drivers() as a leaf_solve() call, TF24 on the collar route. One
+# observation, so the profile is wrapped as batch_drivers() wraps it.
+grid_solve_args <- function(psi_soil, ppfd = 900, vpd = 2.0, layers = 1L, ...) {
+  a <- c(batch_drivers(psi_soil, ppfd, vpd, layers), list(...))
+  if (is.null(a$model)) a$model <- "TF24"
+  if (is.null(a$route)) a$route <- "collar"
+  a
+}

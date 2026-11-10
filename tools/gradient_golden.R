@@ -29,12 +29,9 @@
 # test-gradient-batch.R compares with `golden_tolerance()` elsewhere. Regenerating
 # on Linux would just move the failure to the platform the file came from.
 #
-# These are derivatives of outputs evaluated at the ARGMAX, and, being built
-# from central differences, they carry the solve's floor divided by the step: the
-# smallest-magnitude parameter in the file therefore sets the cross-platform
-# tolerance for all of it, which since #41 is `R_d_25` at 1.44 rather than
-# `vcmax_25` at 96. `gradient_golden_tolerance()` in tests/testthat/helper-golden.R
-# carries the arithmetic and the measured figure.
+# These are derivatives of outputs evaluated at the ARGMAX, from the derivative
+# surface; `gradient_golden_tolerance()` in tests/testthat/helper-golden.R carries
+# the cross-platform tolerance and the measured figure.
 suppressMessages(library(phylloptim))
 
 # ⚠️ AND SAY WHICH BUILD THAT WAS. `library(phylloptim)` resolves against the
@@ -101,8 +98,7 @@ out <- do.call(rbind, lapply(names(cases), function(label) {
   cs <- cases[[label]]
   g <- gradient_golden_run(cs)
   do.call(rbind, lapply(cs$pars, function(p) {
-    data.frame(case = label, status = g$status[[1]], method = g$method[[1]],
-               par = p,
+    data.frame(case = label, status = g$status[[1]], par = p,
                A = sprintf("%a", g$gradient[1, p, "A"]),
                gc = sprintf("%a", g$gradient[1, p, "gc"]),
                psi_leaf = sprintf("%a", g$gradient[1, p, "psi_leaf"]),

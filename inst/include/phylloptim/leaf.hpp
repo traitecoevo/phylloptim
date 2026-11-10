@@ -98,8 +98,7 @@ inline constexpr int par_CF77_lambda = 18;
 // TF24_floor's price of water at zero transpiration.
 inline constexpr int par_TF24_floor_lambda_o = 19;
 // Least-cost's unit-cost ratio beta (Prentice et al. 2014): dimensionless, not a
-// price. `gradient::step_for` takes a relative step only while |beta| >= 1; below
-// that its absolute step is a large perturbation (2x at beta = 0.5).
+// price.
 inline constexpr int par_LeastCost_beta = 20;
 // The thermal-damage inputs that reach the solve, refused unless
 // use_thermal_damage_ is on. Not the dynamics parameters: they move only

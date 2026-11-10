@@ -140,9 +140,9 @@ The cache key does not clear the tables or the solved operating point, so `set_t
 **Measure before optimising a trait loop, in the layer you actually care about.** Two costs dominate, and which one bites depends on where you are:
 
 - **From R**, constructing a `Leaf` is the largest single cost: most of a one-parameter gradient on a fresh leaf, and mostly R-side object construction over the active bindings rather than the tables. That, not the choice of gradient formula, is what dominates a finite-difference gradient in R. `set_traits` exists to avoid it: a re-trait plus a re-drive costs a few solves.
-- **In C++**, `set_traits` is almost free unless it rebuilds a vulnerability table, and then costs many whole solves. Only `stem_c` and `root_c` rebuild, and only to a `c` the leaf has not built recently (`Leaf::recent_tables_`, the last eight, shared by both curves, so a gradient's perturb-and-restore builds each table once): a table depends on `c` alone, so a P50 moves nothing in it, and `perturb_stem_P50` moves `stem_b` without even clearing the operating point.
+- **In C++**, `set_traits` is almost free unless it rebuilds a vulnerability table, and then costs many whole solves. Only `stem_c` and `root_c` rebuild, and only to a `c` the leaf has not built recently (`Leaf::recent_tables_`, the last eight, shared by both curves): a table depends on `c` alone, so a P50 moves nothing in it. A trait gradient builds none, because it perturbs nothing.
 
-The measured ratios for both are in the README's "Performance from R", the one place they are quoted; `tools/bench_user_cost.R` and `make -C tests/cpp bench_gradient` reproduce them. ⚠️ **Do not carry the R conclusion into C++**: with the boundary removed, the IFT composite beats differencing the solve several-fold on the traits that touch no table (`bench_gradient`'s summary lines), which an R measurement does not show.
+The measured ratios for both are in the README's "Performance from R", the one place they are quoted; `tools/bench_user_cost.R` and `make -C tests/cpp bench_gradient` reproduce them. ⚠️ **Do not carry the R conclusion into C++**: with the boundary removed, the gradient's pass costs about two parameters' worth of differencing the solve and no more, so it wins from three parameters up (`bench_gradient`), which an R measurement, dominated by the boundary, does not show.
 
 ## 11. A bracketing optimiser answers "where is the interior maximum", which is not "where is the maximum"
 
@@ -180,9 +180,9 @@ Since the dry end is a quantile of the curve rather than a trait — `psi_crit` 
 
 ## 15. A finite difference through a solve has a noise floor, and the floor moves with the solver
 
-The error-versus-step curve is a V and only its floor is a derivative; a small step is the wrong instinct. The V's position depends on which solver produced the argmax: the collar solve and the leaf routes both root-find the first-order condition and locate psi* to ~1e-15, so ONE step (1e-06) serves every route. When the leaf routes refined on bracket WIDTH they resolved psi* only to ~1e-06 of the bracket, and a relative parameter step of 1e-06 differenced quantisation — measured 0.1855 against a true 0.0551, and the wrong SIGN on another curve. Re-sweep whenever a solver changes.
+The error-versus-step curve is a V and only its floor is a derivative; a small step is the wrong instinct. The V's position depends on which solver produced the argmax: the collar solve and the leaf routes both root-find the first-order condition and locate psi* to ~1e-15, so a step of 1e-06 sits on the floor for every route. When the leaf routes refined on bracket WIDTH they resolved psi* only to ~1e-06 of the bracket, and a relative parameter step of 1e-06 differenced quantisation — measured 0.1855 against a true 0.0551, and the wrong SIGN on another curve. Re-sweep whenever a solver changes.
 
-**Sweep the step and read the floor.** Two bugs were reported against a correct composite on the strength of one 1e-06 step. Each gradient route carries its own `fd_step` for this reason. `vignette("the-models")` Appendix C has the numbers.
+**Sweep the step and read the floor.** Two bugs were reported against a correct gradient on the strength of one 1e-06 step, which is why `test-gradient-referee.R` sweeps five decades. `vignette("the-models")` Appendix C has the numbers.
 
 ## 16. Check that an assertion was actually exercised
 
