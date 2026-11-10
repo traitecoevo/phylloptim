@@ -165,9 +165,9 @@ print.leaf_batch <- function(x, ...) {
 ##' [leaf_batch()]. One crossing of the R boundary per call, in place of 112 per
 ##' observation.
 ##'
-##' @param psi one collar water potential per observation to evaluate at
-##'   (positive magnitudes, MPa) instead of solving for the profit-maximising
-##'   one. See [leaf_gradient()]'s section on it. Recycling a single value across
+##' @param psi one decision variable per observation to evaluate at (positive
+##'   magnitudes, MPa) instead of solving for the profit-maximising one: the
+##'   collar potential on the collar route, the leaf potential on a leaf route. See [leaf_gradient()]'s section on it. Recycling a single value across
 ##'   the batch is deliberately not offered — rows sharing an imposed collar is a
 ##'   coincidence rather than a design, and broadcasting one would make a length
 ##'   mismatch look intentional.
@@ -241,7 +241,7 @@ print.leaf_batch <- function(x, ...) {
 ##'     \item{`M`}{an `n` × `length(pars)` matrix of mixed partials
 ##'       `d2profit/dpsi dtheta`, `NA` where [leaf_gradient()] has none}
 ##'     \item{`dY_dpsi`}{an `n` × 5 matrix of `dY/dpsi` at fixed traits}
-##'     \item{`psi`}{the collar each row was evaluated at}
+##'     \item{`psi`}{the decision variable each row was evaluated at}
 ##'     \item{`message`}{`""`, or why that row failed}
 ##'   }
 ##'

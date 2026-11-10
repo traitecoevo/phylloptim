@@ -166,7 +166,9 @@ set_traits <- function(x, traits) {
 ##'
 ##' @section A collar potential you supply, instead of the one this solves for:
 ##' Pass `psi` and the outputs are evaluated at that collar rather than at the
-##' argmax. This is for a caller whose model **tracks** the optimum instead of
+##' argmax; on a leaf route `psi` is the leaf potential, that route's decision
+##' variable, and everything below holds with it in the collar's place. This is
+##' for a caller whose model **tracks** the optimum instead of
 ##' finding it — plant's TF24f carries the collar potential as an ODE state,
 ##' `dpsi/dt = k * dprofit/dpsi`, so at finite gain its `dprofit/dpsi` is
 ##' deliberately non-zero and *is* the acclimation rate.
@@ -345,9 +347,10 @@ set_traits <- function(x, traits) {
 ##'   [root_network_from_carbon()] is homogeneous of degree 1 in each constant, so
 ##'   scaling `beta_R_H` scales `r_R_H_min` by the same factor and needs no
 ##'   rebuild — but the two solves are still two solves.
-##' @param psi a collar water potential to evaluate at, in MPa as a positive
-##'   magnitude, instead of solving for the profit-maximising one. `NULL` (the
-##'   default) solves. See the section above.
+##' @param psi the decision variable to evaluate at, in MPa as a positive
+##'   magnitude, instead of solving for the profit-maximising one: the collar
+##'   potential on the collar route, the leaf potential on a leaf route. `NULL`
+##'   (the default) solves. See the section above.
 ##' @param dpsi_dtheta how the prescribed `psi` itself responds to each
 ##'   parameter, as one value per entry of `pars` (or one value recycled, or a
 ##'   vector named by `pars`). Defaults to zero, which is the partial derivative
@@ -369,9 +372,9 @@ set_traits <- function(x, traits) {
 ##'     \item{`dY_dpsi`}{`dY/dpsi` at fixed traits, one per output. `profit`'s
 ##'       entry is the analytic zero at an interior optimum and the exact
 ##'       `dprofit/dpsi` elsewhere -- see the envelope section}
-##'     \item{`psi`}{the collar the outputs were evaluated at: `psi*` on the
-##'       solving path, and the `psi` argument on the prescribed path, refused
-##'       or not}
+##'     \item{`psi`}{the decision variable the outputs were evaluated at (the
+##'       collar, or `psi_leaf` on a leaf route): `psi*` on the solving path,
+##'       and the `psi` argument on the prescribed path, refused or not}
 ##'     \item{`model`, `route`}{the model differentiated and its route}
 ##'   }
 ##'

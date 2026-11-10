@@ -109,9 +109,10 @@ solving at two networks yourself. The perturbation itself is cheap —
 scaling \code{beta_R_H} scales \code{r_R_H_min} by the same factor and needs no
 rebuild — but the two solves are still two solves.}
 
-\item{psi}{a collar water potential to evaluate at, in MPa as a positive
-magnitude, instead of solving for the profit-maximising one. \code{NULL} (the
-default) solves. See the section above.}
+\item{psi}{the decision variable to evaluate at, in MPa as a positive
+magnitude, instead of solving for the profit-maximising one: the collar
+potential on the collar route, the leaf potential on a leaf route. \code{NULL}
+(the default) solves. See the section above.}
 
 \item{dpsi_dtheta}{how the prescribed \code{psi} itself responds to each
 parameter, as one value per entry of \code{pars} (or one value recycled, or a
@@ -144,9 +145,9 @@ interior optimum or at the \code{psi} given; \code{NA} elsewhere}
 \item{\code{dY_dpsi}}{\code{dY/dpsi} at fixed traits, one per output. \code{profit}'s
 entry is the analytic zero at an interior optimum and the exact
 \code{dprofit/dpsi} elsewhere -- see the envelope section}
-\item{\code{psi}}{the collar the outputs were evaluated at: \verb{psi*} on the
-solving path, and the \code{psi} argument on the prescribed path, refused
-or not}
+\item{\code{psi}}{the decision variable the outputs were evaluated at (the
+collar, or \code{psi_leaf} on a leaf route): \verb{psi*} on the solving path,
+and the \code{psi} argument on the prescribed path, refused or not}
 \item{\code{model}, \code{route}}{the model differentiated and its route}
 }
 
@@ -267,7 +268,9 @@ the indirect term is real and the gradient carries it through the bound.
 \section{A collar potential you supply, instead of the one this solves for}{
 
 Pass \code{psi} and the outputs are evaluated at that collar rather than at the
-argmax. This is for a caller whose model \strong{tracks} the optimum instead of
+argmax; on a leaf route \code{psi} is the leaf potential, that route's decision
+variable, and everything below holds with it in the collar's place. This is
+for a caller whose model \strong{tracks} the optimum instead of
 finding it — plant's TF24f carries the collar potential as an ODE state,
 \code{dpsi/dt = k * dprofit/dpsi}, so at finite gain its \code{dprofit/dpsi} is
 deliberately non-zero and \emph{is} the acclimation rate.

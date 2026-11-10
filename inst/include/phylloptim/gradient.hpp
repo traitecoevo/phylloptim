@@ -374,11 +374,13 @@ inline void surface_rows(Leaf& l, const int* pars, std::size_t npars,
     xad::derivative(p[std::size_t(k)])[std::size_t(k)] = 1.0;
   }
   // The soil and the root network are drivers; on the single path the series
-  // resistance is the pack's, so its slot carries a row.
+  // resistance is the pack's, so its slot carries a row. Each keeps its own
+  // length: a network is sized to its deepest rooted layer, which may lie
+  // above the bottom of the soil profile.
   const SupplyInputs<double> held = l.held_supply();
   std::vector<Lanes> soil, r_h, r_v;
-  for (std::size_t i = 0; i < held.psi_soil.size(); ++i) {
-    soil.push_back(Lanes(held.psi_soil[i]));
+  for (double psi : held.psi_soil) soil.push_back(Lanes(psi));
+  for (std::size_t i = 0; i < held.r_R_H_min.size(); ++i) {
     r_h.push_back(Lanes(held.r_R_H_min[i]));
     r_v.push_back(single ? p[par_resistance] : Lanes(held.r_R_V_sum[i]));
   }
