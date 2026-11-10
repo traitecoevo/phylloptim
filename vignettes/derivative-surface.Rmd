@@ -13,32 +13,29 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 
 A model that contains this leaf and is itself differentiated, such as plant's stand gradient or a C++ fit of the model to observations, needs the derivative of the leaf's operating point with respect to its traits and its soil. This vignette is how the leaf supplies it: the three calls a consumer makes, what each operating point does, why the derivative comes from the implicit function theorem rather than from recording the solve, and what a consumer must not get wrong. It contains no runnable R; the C++ below is compiled and run by `tests/cpp/test_leaf.cpp`.
 
-## Two routes to a derivative
+## One surface, two consumers
 
-The package has two, and they answer different questions.
+The package differentiates the operating point one way, and two kinds of caller read it.
 
-| | `leaf_gradient()` and `gradient::batch` | the derivative surface |
+| | `leaf_gradient()` and `gradient::batch` | a C++ model reading the surface |
 |---|---|---|
-| caller | R, or C++ calibrating a leaf against data | a C++ model that differentiates a run containing the leaf |
-| scalar | `double`; derivatives are returned as numbers | the caller's: `double`, a tangent, or an adjoint on the caller's tape |
-| method | implicit function theorem, with the curvature by finite difference | implicit function theorem, with every row from automatic differentiation of closed forms |
-| curves | all nine | all nine |
+| caller | R, or C++ calibrating a leaf against data | a C++ model that differentiates a run containing the leaf, such as plant's stand gradient |
+| scalar | a forward scalar with one lane per parameter and one for the decision variable; derivatives are returned as numbers | the caller's: `double`, a tangent, or an adjoint on the caller's tape |
+| method | implicit function theorem, with every row from automatic differentiation of closed forms | the same |
+| curves and routes | all nine, on both routes and both supplies | the same |
 | outputs | A, gc, psi_leaf, collar, profit | profit, carbon, each layer's water uptake and the residual (cuticular) flux; with `physical_outputs_at`, also A, E, psi_leaf, ci and gc |
-| classification | a status (`interior`, `pinned`, ...) from a stationarity test | a kind (`interior`, `boundary-soil`, ...) written by the branch the solve took |
+| classification | a status, derived from the kind | a kind (`interior`, `boundary-soil`, ...) written by the branch the solve took |
 
-The two classifications are decided differently and are not interchangeable: a status reads the converged numbers, and a kind records which exit the solve took. Only `prescribed` appears in both. So one kind can be reported under more than one status. On a sweep of 1,920 solved points (`psi_soil` 0.5-14 MPa, PPFD 0-1500, VPD 0.5-4 kPa, 25 and 40 C, 1 and 3 layers, `g_min` 0 and 5e-4) the solving path reported:
+`gradient::at` is a thin reader of the surface: it seats the parameters, solves, makes one pass through the three calls below, and reads the requested lanes. Its status is the kind, coarsened:
 
-| kind (C++) | status (R) | points |
-|---|---|---|
-| `interior` | `interior` | 453 |
-| `interior` | `pinned` | 12 |
-| `boundary-soil` | `pinned` | 1086 |
-| `boundary-soil` | `no-gradient` | 155, all with `g_min > 0` |
-| `boundary-dry` | `pinned` | 94 |
-| `hydraulic-shutdown` | `pinned` | 60 |
-| `hydraulic-shutdown` | `no-gradient` | 60 |
+| kind (C++) | status (R) |
+|---|---|
+| `interior` | `interior`, or `no-gradient` where the curvature is not below `-interior_curvature_floor` |
+| `boundary-soil`, `boundary-dry`, `hydraulic-shutdown` | `pinned` |
+| `solver-refused`, `non-finite-gradient`, `unsolved` | `no-gradient` |
+| `prescribed` | not reached on the solving path |
 
-An `interior` kind reads as `pinned` where the implied Newton step exceeds `stationarity_tol` or the stencil about the collar leaves the feasible interval; a bound reads as `no-gradient` where the curvature there is not negative. `solver-refused` and `non-finite-gradient` were not reached on the sweep, and `unsolved` is never reported. `prescribed`, `refused` and `no-gradient` are the statuses of the path that takes `psi`: there the kind is always `prescribed`, and `refused` means the collar, or the stencil about it, fell outside the feasible interval. The rest of this vignette is about the second route.
+ProfitMax with no objective (no light, or no stream to normalise over) is `no-gradient` whatever its kind. `prescribed`, `refused` and `no-gradient` are the statuses of the path that takes `psi`: `refused` means the collar fell outside the feasible interval, and `no-gradient` that the leaf potential it implies lies in the stem curve's tail, where every row would be rounding. The rest of this vignette is about the surface itself.
 
 ## Terms
 
@@ -84,7 +81,7 @@ The calls assume, and mostly do not check:
 - `pars` and `supply` hold, in value, the leaf's seated traits (`passive_pars()`) and its seated soil state and root network;
 - `supply` has the shape `Leaf::held_supply()` gives on the leaf's supply path: each layer's potential and resistances on the multi-layer path, or the one soil potential and the series resistance (`r_R_V_sum[0]`, the pack's `par_resistance`) on the single-potential path;
 - on ProfitMax, whose normalisers draw the supply again at its reference collar, the draw keeps its own copy of `supply` for that; no other curve's does;
-- the thermal-damage layer is off (both calls refuse it): the surface applies none of the damage layer.
+- with the thermal-damage layer on, its inputs are the pack's slots `par_A` to `par_c_repair_flux`: the capacities on the pack apply its shifted optimum, its functional fraction and its maintenance costs, as the solve's members do.
 
 With the energy balance on, the surface follows it on every curve: leaf temperature moves with the stem's flux and with the light that heats the leaf, and the capacities, the deficit, the cuticle and the first-order condition's temperature term carry its rows. ProfitMax's |A|max, which can then peak inside the stream rather than at `psi_crit`, takes its rows at that peak.
 
@@ -122,6 +119,8 @@ What `operating_collar` does at each kind:
 A dry pin is decided at the end itself. The solve probes the marginal a step inside the dry end and, where it rises there, solves the end to collar precision and reads the marginal there: falling, the maximum is interior however close to the end it sits, and its curvature is then taken from a difference in the logarithm of its distance to the end, where the marginal is close to linear; rising, the leaf is pinned. The two answers are one continuous function of the drivers, which a consumer differencing a whole run depends on: a pin decided a step inside the end sat past its maximum, and a run crossing that decision jumped there.
 
 A narrow interval is polished, and a closed one is shut. When the feasible interval is narrower than `bracket_tol_at(bound_b)`, both of its ends are solved to collar precision before anything is decided on it; one no wider than `collar_root_tol` is `hydraulic-shutdown`, as is a soil from which the stem can carry nothing (past the end of its curve). Every open leaf therefore takes its stem from continuity. The collar route loses precision as the root resistance goes to zero (#176).
+
+**The leaf route** is the same surface with a different decision variable. There the stem's upstream end is held at the soil, so the leaf potential is what the solve places, and `decision_psi()` returns it; `supply_draw_at` carries the soil potential as an input of its own and walks no supply. The solve records the same kinds, read off which candidate the one solver returned: an optimum at the wet end, where the stem carries the residual flux from the soil, is `boundary-soil`; one at the stem's dry end is `boundary-dry`; a root of `dprofit/dpsi_leaf = 0` is `interior`; the one feasible potential, and ProfitMax with no objective, are `hydraulic-shutdown`; an argmax resolved only to a width is `solver-refused`. `operating_collar` places each by its condition in the leaf potential, and the coordinates follow the leaf potential one for one. On the stem curve's far tail the leaf route's profit is flat to ~1e-17 per MPa, so its argmax is undetermined there; `operating_collar` refuses such a point as flatter than `interior_curvature_floor`.
 
 A shut leaf is the ordinary evaluator at its wet bound (#182): `E` is the cuticle's residual flux, the conductance to CO2 is the cuticle's `rho g_min`, and `ci` solves the same supply-demand balance as an open leaf, above `ca` where the leaf is a net source. Nothing is written by hand, so the rows differentiate the value the solve reports and the shut leaf is continuous with the open one next to it. At `g_min = 0` there is no conductance and the shut leaf takes the `g_min -> 0` limit: the root of `A(ci) = 0`, or `A` as `ci -> infinity` where there is none. Light and heat shut no leaf: a leaf in the dark or too hot to fix carbon is an ordinary optimum, and the kind `shade-death` is gone. The shut stem sits at the collar rather than being held at a critical potential, so it keeps following a drying soil past `psi_crit` with no kink in the stem or root traits.
 

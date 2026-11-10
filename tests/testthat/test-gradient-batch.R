@@ -7,14 +7,14 @@
 #      They assemble it separately -- theta from `.gradient_theta()` against
 #      `.gradient_theta_matrix()`, one resolved observation against the batch's
 #      recycling, a caller's leaf against the batch's -- and a slip in either
-#      shows as a difference here, over both supply paths, all three methods and
-#      the pinned and shut-down rows. Identical rather than close, since both
-#      reach one composite. Whether that composite is RIGHT is
-#      test-gradient-referee.R's question, against a difference of the solve.
+#      shows as a difference here, over both supply paths and the pinned and
+#      shut-down rows. Identical rather than close, since both reach one
+#      surface pass. Whether that pass is RIGHT is test-gradient-referee.R's
+#      question, against a difference of the solve.
 #
-#   2. That the values are what they were. Move the step rule, the stationarity
-#      threshold or a solver tolerance and every gradient moves, by less than
-#      the referee can see. So `gradient_golden.tsv` records them, over every
+#   2. That the values are what they were. Move a solver tolerance or the
+#      surface's arithmetic and every gradient moves, by less than the referee
+#      can see. So `gradient_golden.tsv` records them, over every
 #      curve on both routes. ⚠️ It is bit-exact only on macOS/arm64, and
 #      compared with the golden file's own per-class tolerance elsewhere, for the
 #      reason helper-golden.R gives at length.
@@ -35,18 +35,16 @@ one_row <- function(g) {
   list(gradient = g$gradient[1, , , drop = FALSE],
        value = g$value[1, ],
        status = g$status[[1]],
-       method = g$method[[1]],
-       H = g$H[[1]],
-       stationarity = g$stationarity[[1]])
+       H = g$H[[1]])
 }
 
 # TF24 on the collar route, the grid's model, unless `args` names one.
-expect_entry_points_agree <- function(args, pars, method, label) {
+expect_entry_points_agree <- function(args, pars, label) {
   if (is.null(args$model)) args$model <- "TF24"
   if (is.null(args$route)) args$route <- "collar"
   batch_args <- args[setdiff(names(args), c("model", "route"))]
   ref <- tryCatch(
-    do.call(leaf_gradient, c(args, list(pars = pars, method = method))),
+    do.call(leaf_gradient, c(args, list(pars = pars))),
     error = function(e) conditionMessage(e))
   if (!is.null(batch_args$psi_soil) && !is.list(batch_args$psi_soil)) {
     batch_args$psi_soil <- list(batch_args$psi_soil)
@@ -55,7 +53,7 @@ expect_entry_points_agree <- function(args, pars, method, label) {
     }
   }
   b <- do.call(leaf_batch, batch_args)
-  got <- one_row(leaf_gradient_batch(b, pars = pars, method = method,
+  got <- one_row(leaf_gradient_batch(b, pars = pars,
                                      model = args$model, route = args$route))
 
   if (is.character(ref)) {
@@ -69,10 +67,7 @@ expect_entry_points_agree <- function(args, pars, method, label) {
   expect_identical(unname(got$value), unname(ref$value),
                    label = paste(label, "value"))
   expect_identical(got$status, ref$status, label = paste(label, "status"))
-  expect_identical(got$method, ref$method, label = paste(label, "method"))
   expect_identical(got$H, ref$H, label = paste(label, "H"))
-  expect_identical(got$stationarity, ref$stationarity,
-                   label = paste(label, "stationarity"))
   invisible(ref$status)
 }
 
@@ -99,42 +94,32 @@ test_that("the parameter enumeration is the same order in R and in C++", {
 
 test_that("leaf_gradient() is the batch's one observation across the grid", {
   # Eighteen operating points spanning wet to shut-down and one to five soil
-  # layers, times all three methods -- so it covers the interior rows the
-  # composite runs on, the pinned rows it must decline, the shut-down rows where
-  # there is no curvature at all, and the forced-method cases where
-  # leaf_gradient() raises an error and the batch reports one per row instead.
-  #
-  # `stem_c` is in `pars` deliberately: it takes the rebuild route while
-  # `stem_P50` beside it moves b and leaves the table.
+  # layers, so it covers the interior rows, the pinned ones, and the shut-down
+  # rows past the end of the stem curve, pinned at their wet bound.
   pars <- c("vcmax_25", "stem_P50", "TF24_cost_scale", "stem_c")
   rows <- expand.grid(layers = c(1L, 3L, 5L), psi_soil = c(0.5, 2.0, 3.0, 4.0,
                                                           6.0, 16.0),
                       KEEP.OUT.ATTRS = FALSE)
   seen <- character(0)
-  for (method in c("auto", "ift", "fd")) {
-    for (i in seq_len(nrow(rows))) {
-      r <- rows[i, ]
-      lab <- sprintf("psi_soil=%g layers=%d method=%s", r$psi_soil, r$layers,
-                     method)
-      # `grid_drivers()`, not `batch_drivers()`: the helper below hands the same
-      # arguments to BOTH entry points and puts the profile in a list for the
-      # batch itself, since `leaf_gradient()` takes a bare vector.
-      st <- expect_entry_points_agree(
-        grid_drivers(r$psi_soil, layers = r$layers), pars, method, lab)
-      if (method == "auto") {
-        seen <- c(seen, st)
-      }
-    }
+  for (i in seq_len(nrow(rows))) {
+    r <- rows[i, ]
+    lab <- sprintf("psi_soil=%g layers=%d", r$psi_soil, r$layers)
+    # `grid_drivers()`, not `batch_drivers()`: the helper below hands the same
+    # arguments to BOTH entry points and puts the profile in a list for the
+    # batch itself, since `leaf_gradient()` takes a bare vector.
+    seen <- c(seen, expect_entry_points_agree(
+      grid_drivers(r$psi_soil, layers = r$layers), pars, lab))
   }
-  # ⚠️ The grid has to REACH all three classes, or the loop above is only testing
+  # ⚠️ The grid has to REACH both classes, or the loop above is only testing
   # the happy path while looking thorough -- which is the way a comparison test
   # fails silently. Asserted by WHERE the classes fall rather than by bare counts,
   # so the claim survives adding a row to the grid: the rows past the end of the
-  # stem curve are shut (psi_crit bounds nothing under TF24, #183), and the
-  # pinned ones are at the dry end a drought calibration visits.
+  # stem curve are shut and pinned at their wet bound (psi_crit bounds nothing
+  # under TF24, #183), and the other pinned ones are at the dry end a drought
+  # calibration visits.
   expect_length(seen, 18L)
-  expect_true(all(seen[rows$psi_soil == 16] == "no-gradient"))
-  expect_true(all(rows$psi_soil[seen == "pinned"] %in% c(3, 4, 6)))
+  expect_true(all(seen[rows$psi_soil == 16] == "pinned"))
+  expect_true(all(rows$psi_soil[seen == "pinned"] %in% c(4, 6, 16)))
   expect_gt(sum(seen == "pinned" & rows$psi_soil < 6), 0L)
   expect_identical(sum(seen == "interior"), 12L)
 })
@@ -142,78 +127,17 @@ test_that("leaf_gradient() is the batch's one observation across the grid", {
 test_that("leaf_gradient() is the batch's one observation on the single-potential path", {
   # The other supply path, and with it the two parameters that are not traits.
   # Both of them move the FEASIBLE COLLAR INTERVAL and not only the profit
-  # function -- `resistance` directly, the conductance through the supply curve --
-  # so a perturbation can push a bound past psi* more readily than a trait
-  # perturbation can, and the refusal detector has to be reached through this
-  # route too.
+  # function -- `resistance` directly, the conductance through the supply curve.
   pars <- c("vcmax_25", "stem_P50", "leaf_specific_conductance_max", "resistance")
   for (psi_soil in c(0.5, 1.5, 3.5, 5.5, 6.5)) {
     for (resistance in c(1e3, 1e4)) {
-      for (method in c("auto", "ift", "fd")) {
-        args <- list(psi_soil = psi_soil, PPFD = 900, atm_vpd = 3.0,
-                     supply = leaf_supply_singlelayer(),
-                     root_network = series_resistance(resistance))
-        expect_entry_points_agree(
-          args, pars, method,
-          sprintf("psi_soil=%g r=%g method=%s", psi_soil, resistance, method))
-      }
+      args <- list(psi_soil = psi_soil, PPFD = 900, atm_vpd = 3.0,
+                   supply = leaf_supply_singlelayer(),
+                   root_network = series_resistance(resistance))
+      expect_entry_points_agree(
+        args, pars, sprintf("psi_soil=%g r=%g", psi_soil, resistance))
     }
   }
-})
-
-test_that("leaf_gradient() is the batch's one observation with the stem curve rebuilt", {
-  # `fast_stem_curve = FALSE` rebuilds the vulnerability spline instead of
-  # rescaling it, so it is a different code path through `apply()` and
-  # not merely a slower one; both entry points must pass it through.
-  for (psi_soil in c(1.5, 2.0, 4.0)) {
-    for (method in c("auto", "fd")) {
-      args <- batch_drivers(psi_soil)
-      ref <- do.call(leaf_gradient, c(grid_drivers(psi_soil),
-                                      list(pars = "stem_P50", method = method,
-                                           fast_stem_curve = FALSE,
-                                           model = "TF24", route = "collar")))
-      b <- do.call(leaf_batch, args)
-      got <- leaf_gradient_batch(b, pars = "stem_P50", method = method,
-                                 fast_stem_curve = FALSE,
-                                 model = "TF24", route = "collar")
-      expect_identical(as.vector(got$gradient[1, , ]),
-                       as.vector(ref$gradient),
-                       label = sprintf("psi_soil=%g method=%s", psi_soil,
-                                       method))
-    }
-  }
-})
-
-test_that("the batch's finite-difference arm takes a step the caller names", {
-  # leaf_gradient() differences with a named step and with the route's otherwise;
-  # the batch must too, or the two disagree only when a step is named, which the
-  # default-step comparisons above cannot see.
-  p <- c("vcmax_25", "stem_P50")
-  ref <- leaf_gradient(psi_soil = 1.0, PPFD = 900, pars = p, method = "fd",
-                       step = 1e-3,
-                       supply = leaf_supply_multilayer(), model = "TF24",
-                       route = "collar")
-  b <- leaf_batch(psi_soil = 1.0, PPFD = 900, supply = leaf_supply_multilayer())
-  got <- one_row(leaf_gradient_batch(b, pars = p, method = "fd", step = 1e-3,
-                                     model = "TF24", route = "collar"))
-  expect_identical(as.vector(got$gradient), as.vector(ref$gradient))
-  # The named step reached the arm: it moves the answer off the default's.
-  default <- one_row(leaf_gradient_batch(b, pars = p, method = "fd",
-                                         model = "TF24", route = "collar"))
-  expect_false(identical(as.vector(default$gradient), as.vector(got$gradient)))
-
-  # Under the default "auto" a pinned row takes the same arm, so the named step
-  # reaches it there too.
-  pinned <- list(psi_soil = 4.5, PPFD = 900, atm_vpd = 3,
-                 supply = leaf_supply_multilayer())
-  ref_auto <- do.call(leaf_gradient, c(pinned, list(pars = p, step = 1e-3,
-                                                    model = "TF24",
-                                                    route = "collar")))
-  expect_identical(ref_auto$status, "pinned")
-  got_auto <- one_row(leaf_gradient_batch(do.call(leaf_batch, pinned), pars = p,
-                                          step = 1e-3,
-                                          model = "TF24", route = "collar"))
-  expect_identical(as.vector(got_auto$gradient), as.vector(ref_auto$gradient))
 })
 
 test_that("the recorded gradients have not moved", {
@@ -237,9 +161,8 @@ test_that("the recorded gradients have not moved", {
   # between glibc on x86-64 and Apple's libm on arm64.
   #
   # THE TOLERANCE IS `gradient_golden_tolerance()`, not the solved-output one: a
-  # gradient here is a finite difference, so it carries the solve's floor divided by
-  # the step, and the smallest-magnitude parameter sets it for the whole file. See
-  # that function for the arithmetic.
+  # gradient carries the solve's floor through the curvature it divides by, and
+  # the smallest-magnitude row sets it for the whole file. See that function.
   #
   # ⚠️ Read the SUMMARY LINE below for a magnitude, never the FAIL lines. The
   # figures in this package's guide were wrong twice because a truncated failure
@@ -251,7 +174,6 @@ test_that("the recorded gradients have not moved", {
     expect_identical(rows$par, cs$pars, label = nm)
     g <- gradient_golden_run(cs)
     expect_identical(g$status[[1]], rows$status[[1]], label = nm)
-    expect_identical(g$method[[1]], rows$method[[1]], label = nm)
     for (i in seq_len(nrow(rows))) {
       for (out in c("A", "gc", "psi_leaf", "collar", "profit")) {
         got <- g$gradient[1, rows$par[[i]], out]
@@ -292,112 +214,55 @@ test_that("the recorded gradients have not moved", {
   # The shut-down row sits at its wet bound, the zero-uptake collar, which no
   # stem trait moves (#182): its stem and collar rows in stem_P50 are exactly
   # zero and it moves no gas. Past the end of the stem curve the hydraulic cost
-  # has saturated too, so nothing reaches profit either (#183).
+  # has saturated too, so nothing reaches profit either, to rounding (#183).
   shut <- gold[gold$case == "shutdown-1layer" & gold$par == "stem_P50", ]
+  expect_identical(shut$status, "pinned")
   expect_identical(as.numeric(shut$A), 0)
   expect_identical(as.numeric(shut$psi_leaf), 0)
   expect_identical(as.numeric(shut$collar), 0)
-  expect_identical(as.numeric(shut$profit), 0)
-})
-
-test_that("a forced method = \"ift\" at a pinned row is refused by name (#147)", {
-  # The batch's own refusal, not leaf_gradient()'s: the two are separate
-  # implementations of the same rule, and test-gradient.R checks only the R one.
-  # The rows are the pinned ones test-gradient.R names -- two wet, one dry -- and
-  # each is checked to be pinned under "auto" first, so the refusal is not read
-  # off a row that never reached the branch.
-  pinned <- list(list(psi_soil = 4, vpd = 2.0, layers = 5L, ppfd = 900),
-                 list(psi_soil = 3, vpd = 3.0, layers = 5L, ppfd = 900),
-                 list(psi_soil = 6, vpd = 0.5, layers = 1L, ppfd = 500))
-  pars <- c("stem_P50", "vcmax_25")
-  for (p in pinned) {
-    lab <- sprintf("psi_soil=%g vpd=%g layers=%d", p$psi_soil, p$vpd, p$layers)
-    b <- do.call(leaf_batch, batch_drivers(p$psi_soil, ppfd = p$ppfd,
-                                           vpd = p$vpd, layers = p$layers))
-    auto <- leaf_gradient_batch(b, pars = pars,
-                                model = "TF24", route = "collar")
-    expect_identical(auto$status, "pinned", label = lab)
-    ift <- leaf_gradient_batch(b, pars = pars, method = "ift",
-                               model = "TF24", route = "collar")
-    expect_identical(ift$status, "error", label = lab)
-    expect_match(ift$message, "pinned optimum", label = lab)
-    expect_true(all(is.na(ift$gradient)), label = lab)
-  }
+  expect_lt(abs(as.numeric(shut$profit)), 1e-12)
 })
 
 test_that("an unsolvable row costs that row and not the batch", {
   # ⚠️ THE REASON THE BATCH REPORTS A STATUS RATHER THAN THROWING. A proposal
-  # during a fit will reach operating points the solve cannot handle -- that is
-  # what a proposal distribution does -- and taking out the whole likelihood
-  # evaluation for one observation would take out the draw.
+  # during a fit will reach parameters the leaf cannot take -- that is what a
+  # proposal distribution does -- and taking out the whole likelihood
+  # evaluation for one observation would take out the draw. Here two rows of a
+  # per-observation theta carry a stem_P50 the leaf refuses.
   pars <- c("vcmax_25", "stem_P50")
-  ok <- c(1.5, 2.0, 2.5)
-  b <- leaf_batch(psi_soil = c(ok[[1]], 6.5, ok[[2]], 7.5, ok[[3]]), PPFD = 900,
+  soils <- c(1.5, 6.5, 2.0, 7.5, 2.5)
+  ok <- c(1, 3, 5)
+  b <- leaf_batch(psi_soil = soils, PPFD = 900,
                   supply = leaf_supply_multilayer())
-  g <- leaf_gradient_batch(b, pars = pars, method = "ift",
+  n_traits <- length(leaf_traits())
+  n_pars <- length(gradient_par_names())
+  base <- unname(c(unlist(leaf_traits())[gradient_par_names()[seq_len(n_traits)]],
+                   kmax_default, rep(NA_real_, n_pars - n_traits - 1L)))
+  theta <- matrix(base, nrow = length(soils), ncol = n_pars, byrow = TRUE,
+                  dimnames = list(NULL, gradient_par_names()))
+  theta[-ok, "stem_P50"] <- -1
+  g <- leaf_gradient_batch(b, theta = theta, pars = pars,
                            model = "TF24", route = "collar")
 
   expect_identical(g$status, c("interior", "error", "interior", "error",
                                "interior"))
   # BIT-IDENTICAL to being differentiated alone, which is the real claim: a
-  # failed row must not leave the leaf carrying state into its neighbours. The
-  # displaced stem-vulnerability spline `perturb_stem_P50()` leaves behind is
-  # exactly the kind of thing that would show up here and nowhere else.
-  solo <- vapply(ok, function(p) {
-    as.vector(leaf_gradient_batch(leaf_batch(psi_soil = p, PPFD = 900,
-                                             supply = leaf_supply_multilayer()),
-                                  pars = pars, method = "ift",
-                                  model = "TF24",
-                                  route = "collar")$gradient[1, , ])
-  }, numeric(length(pars) * dim(g$gradient)[[3]]))
-  for (i in seq_along(ok)) {
-    expect_identical(as.vector(g$gradient[2 * i - 1, , ]), solo[, i],
-                     label = paste("row", 2 * i - 1))
+  # failed row must not leave the leaf carrying state into its neighbours.
+  for (i in ok) {
+    solo <- leaf_gradient_batch(leaf_batch(psi_soil = soils[[i]], PPFD = 900,
+                                           supply = leaf_supply_multilayer()),
+                                pars = pars, model = "TF24", route = "collar")
+    expect_identical(as.vector(g$gradient[i, , ]),
+                     as.vector(solo$gradient[1, , ]), label = paste("row", i))
   }
 
-  # A failed row's gradient is ALL NA rather than partially filled. The parameter
-  # loop fails on the first parameter here, but even where it does not, returning
-  # the entries computed before the failure alongside `status == "error"` would
-  # invite a caller who checks the status per row to read a gradient with a hole
-  # in it.
-  expect_true(all(is.na(g$gradient[c(2, 4), , ])))
-  expect_true(all(nzchar(g$message[c(2, 4)])))
-  expect_identical(g$message[c(1, 3, 5)], rep("", 3L))
-  # The point's own diagnostics survive, because they describe the operating
-  # point rather than the derivative and were determined before the failure.
-  expect_true(all(is.finite(g$stationarity[c(2, 4)]) |
-                    is.infinite(g$stationarity[c(2, 4)])))
-})
-
-test_that("a batch that failed on the fast stem_b path leaves a usable leaf", {
-  # ⚠️ `perturb_stem_P50()` leaves the splines built at a different stem_b ON
-  # PURPOSE, and `set_traits()` is the way back. A row that threw between the two
-  # skipped the restore, so the batch does it in the handler -- and the LAST row
-  # is the case that needs it, because there is no next row whose own
-  # `set_traits()` would have covered for it (hazard 8).
-  b <- leaf_batch(psi_soil = c(2.0, 7.5), PPFD = 900,
-                  supply = leaf_supply_multilayer())
-  invisible(leaf_gradient_batch(b, pars = "stem_P50", method = "ift",
-                                model = "TF24", route = "collar"))
-  after <- leaf_gradient_batch(b, pars = "stem_P50",
-                               model = "TF24", route = "collar")
-  fresh <- leaf_gradient_batch(leaf_batch(psi_soil = c(2.0, 7.5), PPFD = 900,
-                                          supply = leaf_supply_multilayer()),
-                               pars = "stem_P50",
-                               model = "TF24", route = "collar")
-  expect_identical(after$gradient, fresh$gradient)
-  expect_identical(after$value, fresh$value)
-
-  # And the leaf itself, which the caller can still reach, solves as a fresh one
-  # does -- the strongest form of the claim, since a rescaled curve would be
-  # invisible in the gradient columns above if both routes carried it.
-  set_drivers(b$leaf, psi_soil = 1.5, PPFD = 900)
-  b$leaf$find_root_collar_psi()
-  expect_identical(operating_point(b$leaf),
-                   leaf_solve(psi_soil = 1.5, PPFD = 900,
-                              supply = leaf_supply_multilayer(), model = "TF24",
-                              route = "collar")[
-                     , names(operating_point(b$leaf))])
+  # A failed row's gradient is ALL NA rather than partially filled: returning
+  # entries computed before the failure alongside `status == "error"` would
+  # invite a caller who checks the status per row to read a gradient with a
+  # hole in it. Its message names the refusal.
+  expect_true(all(is.na(g$gradient[-ok, , ])))
+  expect_match(g$message[-ok], "stem_P50 must be a positive magnitude")
+  expect_identical(g$message[ok], rep("", 3L))
 })
 
 test_that("per-observation theta differentiates each row at its own parameters", {
@@ -500,12 +365,12 @@ test_that("the result is shaped and named for a caller applying a Jacobian", {
   expect_identical(dim(g$value), c(4L, 5L))
   expect_identical(colnames(g$value),
                    c("A", "gc", "psi_leaf", "collar", "profit"))
-  for (f in c("status", "method", "message")) {
+  for (f in c("status", "message", "H", "psi")) {
     expect_length(g[[f]], 4L)
   }
-  for (f in c("H", "stationarity")) {
-    expect_length(g[[f]], 4L)
-  }
+  # The differencing's diagnostics are gone with it.
+  expect_null(g$method)
+  expect_null(g$stationarity)
   # `pars` selects, and its ORDER is the array's order -- a fit reads columns by
   # position after this, so a permuted request has to come back permuted rather
   # than in the enumeration's order.
@@ -516,50 +381,27 @@ test_that("the result is shaped and named for a caller applying a Jacobian", {
 })
 
 test_that("`pars` order does not change any gradient (#72)", {
-  # ⚠️ THE REGRESSION GUARD FOR #72, AND IT IS THE PRIMARY ONE -- not the golden
-  # file. The defect was worth up to 3.4e-5 relative, and the golden file is
-  # compared with a 1e-3 tolerance off macOS/arm64, so on Linux it could not
-  # catch a recurrence. This test compares two runs IN THE SAME PROCESS, so it is
-  # exact everywhere and needs no tolerance at all.
-  #
-  # What went wrong, because the shape of it is what this asserts: the `stem_b`
-  # shortcut calls `perturb_stem_P50()`, which rescales the spline and touches
-  # nothing else, while the loops only restore base AFTER the whole parameter
-  # loop. So a `stem_b` that was not first was differentiated at a point
-  # displaced by one step in whichever parameter preceded it.
+  # ⚠️ THE REGRESSION GUARD FOR #72. The defect was worth up to 3.4e-5
+  # relative: a stem trait differentiated after another parameter was taken at
+  # a point displaced by that parameter's step. The pass now carries a lane per
+  # slot whatever is asked for, so order cannot reach the arithmetic -- and this
+  # compares two runs IN THE SAME PROCESS, so it is exact everywhere.
   #
   # ⚠️ Asserted as the GENERAL invariant -- order changes nothing, for any
-  # parameter -- rather than as "stem_b is now reseated". `root_b` obeys the same
-  # homogeneity identity and would get the same shortcut, and a stem_b-shaped
-  # test would silently stop covering the case it was written for.
+  # parameter -- and every trait is checked as a predecessor of stem_P50.
   b <- leaf_batch(psi_soil = 1.5, PPFD = 900, supply = leaf_supply_multilayer())
   pars <- c("vcmax_25", "stem_c", "phi_J", "stem_P50", "TF24_cost_scale", "root_P50")
-
-  for (method in c("auto", "fd")) {
-    for (fast in c(TRUE, FALSE)) {
-      lab <- paste(method, "fast =", fast)
-      ref <- leaf_gradient_batch(b, pars = pars, method = method,
-                                 fast_stem_curve = fast,
-                                 model = "TF24",
-                                 route = "collar")$gradient[1, , ]
-      # Reversed, and rotated, so the claim is not "one other ordering agrees".
-      for (perm in list(rev(pars), pars[c(4, 1, 6, 2, 5, 3)],
-                        c("stem_P50", setdiff(pars, "stem_P50")))) {
-        got <- leaf_gradient_batch(b, pars = perm, method = method,
-                                   fast_stem_curve = fast,
-                                   model = "TF24",
-                                   route = "collar")$gradient[1, , ]
-        expect_identical(got[pars, ], ref[pars, ],
-                         label = paste(lab, paste(perm, collapse = ",")))
-      }
-    }
+  ref <- leaf_gradient_batch(b, pars = pars, model = "TF24",
+                             route = "collar")$gradient[1, , ]
+  # Reversed, and rotated, so the claim is not "one other ordering agrees".
+  for (perm in list(rev(pars), pars[c(4, 1, 6, 2, 5, 3)],
+                    c("stem_P50", setdiff(pars, "stem_P50")))) {
+    got <- leaf_gradient_batch(b, pars = perm, model = "TF24",
+                               route = "collar")$gradient[1, , ]
+    expect_identical(got[pars, ], ref[pars, ],
+                     label = paste(perm, collapse = ","))
   }
 
-  # ⚠️ And the predecessor that made the defect WORST, which is not the one you
-  # would pick by eye: `a` = 0.30 and `curv_fact_colim` = 0.99 take the absolute
-  # 1e-6 step floor rather than a relative step, and `stem_c`'s perturbation
-  # REBUILDS the very curve the `stem_b` shortcut then rescales. Every trait is
-  # checked as a predecessor rather than a sample of them.
   solo <- leaf_gradient_batch(b, pars = "stem_P50",
                               model = "TF24",
                               route = "collar")$gradient[1, "stem_P50", ]
@@ -570,7 +412,7 @@ test_that("`pars` order does not change any gradient (#72)", {
     expect_identical(got, solo, label = paste("after", p))
   }
 
-  # And leaf_gradient(), the same composite, agrees.
+  # And leaf_gradient(), the same pass, agrees.
   r_ref <- leaf_gradient(psi_soil = 1.5, PPFD = 900,
                          pars = c("TF24_cost_scale", "stem_P50"),
                          supply = leaf_supply_multilayer(), model = "TF24",
@@ -624,11 +466,11 @@ test_that("leaf_gradient_batch() rejects what it cannot do", {
                                             route = "collar")$gradient[
     1, 1, "A"]))
 
-  expect_error(leaf_gradient_batch(b, step = -1,
-                                   model = "TF24",
-                                   route = "collar"), "positive number")
-  expect_error(leaf_gradient_batch(b, method = "magic",
-                                   model = "TF24", route = "collar"))
+  for (a in c("step", "method", "stationarity_tol", "fast_stem_curve")) {
+    expect_error(do.call(leaf_gradient_batch,
+                         stats::setNames(list(b, 1e-6), c("batch", a))),
+                 "unused argument", label = a)
+  }
   expect_error(leaf_gradient_batch(leaf_traits()), "must come from leaf_batch")
   expect_error(leaf_batch(psi_soil = 1.5, traits = list(vcmax_25 = 96),
                           supply = leaf_supply_multilayer()),
@@ -702,10 +544,15 @@ test_that("the batch's prescribed psi agrees with leaf_gradient()", {
                            dpsi_dtheta = -a$M / a$H,
                            model = "TF24", route = "collar")
   expect_true(all(g$status == "prescribed"))
-  expect_true(all(g$method == "prescribed"))
-  expect_identical(g$gradient, a$gradient)
-  expect_identical(g$M, a$M)
-  expect_identical(g$dY_dpsi, a$dY_dpsi)
+  # To rounding: test-gradient.R says why not to the bit.
+  expect_equal(g$gradient, a$gradient, tolerance = 1e-12)
+  expect_equal(g$M, a$M, tolerance = 1e-12)
+  # profit's dY/dpsi is the analytic zero on the solving path and the
+  # marginal at the live collar here: the solve's residual, ~1e-12.
+  outs <- c("A", "gc", "psi_leaf", "collar")
+  expect_equal(g$dY_dpsi[, outs], a$dY_dpsi[, outs], tolerance = 1e-12)
+  expect_true(all(a$dY_dpsi[, "profit"] == 0))
+  expect_lt(max(abs(g$dY_dpsi[, "profit"])), 1e-10)
 
   off <- a$psi + 0.2
   h <- leaf_gradient_batch(b, pars = pars, psi = off,
@@ -766,10 +613,6 @@ test_that("the batch validates psi and dpsi_dtheta by shape", {
   expect_error(leaf_gradient_batch(b, pars = pars, psi = rep(-1, 3),
                                    model = "TF24", route = "collar"),
                "finite and positive")
-  expect_error(leaf_gradient_batch(b, pars = pars, psi = rep(2, 3),
-                                   method = "fd",
-                                   model = "TF24", route = "collar"),
-               "cannot be given with `psi`")
   expect_error(leaf_gradient_batch(b, pars = pars, dpsi_dtheta = c(1, 2),
                                    model = "TF24", route = "collar"),
                "needs `psi`")

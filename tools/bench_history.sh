@@ -10,6 +10,12 @@
 # moved 0.69 -> 1.10 us between two runs an hour apart on the same build, so an
 # absolute column is only meaningful within a single invocation of this script.
 #
+# The two gradient columns read bench_gradient's `vcmax_25` line: a difference of
+# the solve in one parameter (cpp_grad_fd_us), and the trait gradient in one
+# parameter (cpp_grad_ift_us). From the commit that put the trait gradient on the
+# derivative surface (#261) the second is that one pass; before it, the
+# implicit-function composite's two perturbed evaluations.
+#
 # Usage: tools/bench_history.sh <sha> [<sha> ...]
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd)

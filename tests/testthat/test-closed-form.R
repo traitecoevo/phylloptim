@@ -397,8 +397,8 @@ test_that("everything the closed form cannot do is refused, with the reason", {
 test_that("the gradient differentiates the exact solve whatever is seated", {
   # ⚠️ Seating a model resets the method to exact, so `gradient::route_seat` --
   # which seats once per observation -- always differentiates the exact solve.
-  # That is deliberate: the implicit-function-theorem composite is derived from
-  # the exact first-order condition, and the closed form's argmax is
+  # That is deliberate: the gradient is derived from the exact first-order
+  # condition, and the closed form's argmax is
   # DISCONTINUOUS across its own guard boundary (measured: the mean |second
   # difference| of the argmax over a kmax sweep rises 100x where the sweep
   # crosses it). A gradient through that is not a gradient. This test pins the

@@ -22,10 +22,6 @@ leaf_gradient(
   pars = NULL,
   psi = NULL,
   dpsi_dtheta = NULL,
-  step = 1e-06,
-  stationarity_tol = 1e-08,
-  method = c("auto", "ift", "fd"),
-  fast_stem_curve = TRUE,
   model = "TF24_floor",
   route = NULL
 )
@@ -113,42 +109,16 @@ solving at two networks yourself. The perturbation itself is cheap —
 scaling \code{beta_R_H} scales \code{r_R_H_min} by the same factor and needs no
 rebuild — but the two solves are still two solves.}
 
-\item{psi}{a collar water potential to evaluate at, in MPa as a positive
-magnitude, instead of solving for the profit-maximising one. \code{NULL} (the
-default) solves. See the section above; \code{method} cannot be given with it.}
+\item{psi}{the decision variable to evaluate at, in MPa as a positive
+magnitude, instead of solving for the profit-maximising one: the collar
+potential on the collar route, the leaf potential on a leaf route. \code{NULL}
+(the default) solves. See the section above.}
 
 \item{dpsi_dtheta}{how the prescribed \code{psi} itself responds to each
 parameter, as one value per entry of \code{pars} (or one value recycled, or a
 vector named by \code{pars}). Defaults to zero, which is the partial derivative
-at fixed collar. Must be finite — an infinite value would return an
-all-infinite gradient row with a finite, plausible-looking \code{profit} in it,
-because the envelope theorem assigns that column rather than multiplying
-through. Only meaningful with \code{psi}.}
-
-\item{step}{relative step for the trait difference. The default \code{1e-06} is
-near the middle of the five decades over which the mixed partial was
-measured stable; it is also used, relative to the collar potential, for the
-two differences in \code{psi}.}
-
-\item{stationarity_tol}{how far from stationary, as an implied Newton step in
-MPa, the solved point may be before the optimum is called pinned and the
-finite-difference fallback is used. The default \code{1e-08} sits in the empty
-band between the two measured populations; there is no operating point in
-this package's grid within four orders of magnitude of it.}
-
-\item{method}{which route to take: \code{"auto"} (the default) uses the
-implicit-function composite where its premise holds and the finite
-difference where it does not. \code{"ift"} and \code{"fd"} force one route, for
-checking one against the other. Forcing \code{"ift"} at a pinned optimum returns
-a confidently wrong number -- that is the whole reason \code{"auto"} exists --
-and \code{status} still reports the truth about the point.}
-
-\item{fast_stem_curve}{perturb \code{stem_P50} through \code{perturb_stem_P50()}, which
-moves \code{stem_b} and leaves the seated physiology alone (\code{TRUE}, the
-default), rather than through \code{set_traits()}. Neither route rebuilds the
-stem's vulnerability table, which depends on \code{stem_c} alone; \code{FALSE} exists
-so the equivalence is checkable rather than assumed, and the package's tests
-require the two routes to agree.}
+at fixed collar. Must be finite — an infinite value would return infinite
+rows, and \code{NaN} wherever \code{dY/dpsi} is zero. Only meaningful with \code{psi}.}
 
 \item{model}{which optimality model to differentiate: any name from
 \code{\link[=cost_curve_names]{cost_curve_names()}}, on \code{route}; \code{"TF24_floor"} by default. See \emph{Choosing
@@ -165,23 +135,19 @@ A list with
 \code{A} (umol C m^-2 s^-1 per trait unit), \code{gc}, \code{psi_leaf}, \code{collar} and
 \code{profit} (also umol C m^-2 s^-1 per trait unit)}
 \item{\code{value}}{the solved outputs the gradient is taken at}
-\item{\code{method}}{\code{"ift"} if the implicit-function composite was used,
-\code{"fd"} if the fallback was, \code{"prescribed"} if \code{psi} was given}
 \item{\code{status}}{\code{"interior"}, \code{"pinned"} or \code{"no-gradient"} on the
 solving path; \code{"prescribed"}, \code{"refused"} or \code{"no-gradient"} with
 \code{psi}}
-\item{\code{H}}{the curvature of profit in the collar potential}
-\item{\code{stationarity}}{the implied Newton step, in MPa: what \code{method} was
-decided on, or with \code{psi} how far the collar you gave is from the
-optimum}
+\item{\code{H}}{the curvature of profit in the decision variable, at an
+interior optimum or at the \code{psi} given; \code{NA} elsewhere}
 \item{\code{M}}{the mixed partial \verb{d2profit/dpsi dtheta}, one per entry of
-\code{pars}, or \code{NA} where the fallback ran}
+\code{pars}, at an interior optimum or a prescribed \code{psi}; \code{NA} elsewhere}
 \item{\code{dY_dpsi}}{\code{dY/dpsi} at fixed traits, one per output. \code{profit}'s
-entry is the analytic zero at a stationary point and the exact
+entry is the analytic zero at an interior optimum and the exact
 \code{dprofit/dpsi} elsewhere -- see the envelope section}
-\item{\code{psi}}{the collar the outputs were evaluated at: \verb{psi*} on the
-solving path, and the \code{psi} argument on the prescribed path, refused
-or not}
+\item{\code{psi}}{the decision variable the outputs were evaluated at (the
+collar, or \code{psi_leaf} on a leaf route): \verb{psi*} on the solving path,
+and the \code{psi} argument on the prescribed path, refused or not}
 \item{\code{model}, \code{route}}{the model differentiated and its route}
 }
 
@@ -225,10 +191,10 @@ back non-finite.} The collar is not solved for at all there, and an absent
 number is the truthful answer rather than a gap -- reading one would be reading
 state from whichever solve ran last.
 
-\strong{Every route reaches the composite under \code{method = "auto"}, and every route
-uses the same finite-difference step (1e-06).} \code{ProfitMax} normalises by
-\verb{|A|max}, which is re-read at every perturbation, so its gradient is the
-total derivative, not a partial at a held normaliser.
+\strong{Every curve on every route is differentiated the same way.} \code{ProfitMax}
+normalises by \verb{|A|max}, which the gradient carries as a function of the
+parameters, so its gradient is the total derivative, not a partial at a held
+normaliser.
 
 ⚠️ \strong{A zero column for another curve's parameter means two different things,
 and they are not distinguishable from the number.} On a \code{collar} or \code{TF24}
@@ -246,12 +212,15 @@ are fitting in \code{model}}; \code{.gradient_available_pars()} reports which
 parameters a given route can move.
 }
 
-\section{The maths, and why it is not just a finite difference}{
+\section{How the gradient is computed}{
 
-The reported outputs are evaluated at the profit-maximising collar potential
-\verb{psi*}, so a trait moves them two ways: directly, and by moving \verb{psi*}. At an
-interior optimum \code{dprofit/dpsi = 0}, and differentiating that condition gives
-\verb{psi*}'s response without re-solving the model:
+The reported outputs are evaluated at the solved decision variable \verb{psi*}
+(the collar potential, or \code{psi_leaf} on a leaf route), so a parameter moves
+them two ways: directly, and by moving \verb{psi*}. The solve records what kind
+of point \verb{psi*} is, and that decides how its response is taken.
+
+At an interior optimum \code{dprofit/dpsi = 0}, and differentiating that
+condition gives \verb{psi*}'s response without re-solving the model:
 
 \deqn{d\psi^*/d\theta = -M / H, \quad
       M = \partial^2 profit/\partial\psi\partial\theta, \quad
@@ -260,10 +229,16 @@ interior optimum \code{dprofit/dpsi = 0}, and differentiating that condition giv
 \deqn{dY/d\theta = \partial Y/\partial\theta|_\psi +
                    (\partial Y/\partial\psi)(d\psi^*/d\theta)}
 
-Both second derivatives are differences of \code{dprofit_droot_collar_psi()}, which
-is exact in \code{psi} and smooth in the traits -- \code{psi} is one of its arguments, so
-no argmax is involved and \code{M} is a first difference of an exact quantity. It is
-stable to seven significant figures across five decades of step size.
+At a pinned optimum \verb{psi*} is the bound that holds it, and its response is
+the bound's (see \emph{The active set}).
+
+Every term is exact. The outputs, the first-order condition and the bounds
+are closed forms in the parameters, and one forward pass of automatic
+differentiation carries their derivatives in every parameter at once. Only
+\code{H} is a difference, of the exact marginal \code{dprofit/dpsi} at the solved
+point. So a gradient costs the same whatever \code{pars} asks for, and its rows
+agree with a central difference of the whole solve to that difference's own
+precision: the package's tests hold every curve on every route to it.
 
 The second term is not a correction. For \code{TF24_cost_scale}, \code{TF24_beta2} and
 \code{stem_c} it is 100\% of the answer, and for \code{vcmax_25} 52\%.
@@ -276,42 +251,26 @@ is here because it is what a \strong{demographic} consumer bills: plant's carbon
 budget reads the leaf's carbon, not \code{assim_colimited_}, and without it no
 gradient from this package would reach a demographic model.
 
-It is also the cheapest of the five, because it is the objective. At an
-interior optimum \code{dprofit/dpsi = 0}, so the indirect term above vanishes
-identically and
+At an interior optimum \code{dprofit/dpsi = 0}, so the indirect term above
+vanishes identically and
 
 \deqn{dprofit/d\theta = \partial profit/\partial\theta|_{\psi^*}}
 
--- the direct partial alone, with no \code{dY/dpsi} and no \code{-M/H}. That is the
-envelope theorem, and it is the only place this package uses it.
-
-⚠️ \strong{The term this drops is noise, not an \code{h^2} truncation, and that is why
-dropping it matters.} \code{profit} is the maximum, so it is flat, and a central
-difference of it at \verb{psi*} divides the solve's ~1e-09 floor by a ~1e-06 step.
-Over the golden grid's 136 interior rows:\tabular{lll}{
-    \tab median \tab max \cr
-   \verb{\|dprofit/dpsi\|}, exact (forward AD) \tab 4.8e-15 \tab 5.4e-10 \cr
-   \verb{\|dprofit/dpsi\|}, central difference \tab 7.8e-10 \tab 2.1e-04 \cr
-   relative move in \code{dprofit/dtheta} if kept \tab 2.7e-10 \tab 8.0e-05 \cr
-}
-
-
-Eleven orders between the two instruments at the median, and the worst row
-sits in the band this package calls a real difference. So \code{dprofit/dtheta} is
-set from the direct term rather than computed through the composite, exactly
-as \code{collar} is set from \verb{dpsi*/dtheta} rather than differenced.
+-- the direct partial alone. That is the envelope theorem. The gradient
+reads profit at the held \verb{psi*} there, so the column is the direct term and
+\code{dY_dpsi["profit"]} is the analytic zero, not the solve's residual.
 
 ⚠️ \strong{The envelope does not survive the active set.} At a pinned optimum
-\verb{psi*} is a trait-dependent bound and \code{dprofit/dpsi} is not zero there, so the
-indirect term is real. This applies the identity only where \code{status} is
-\code{"interior"}; everywhere else \code{profit} goes through the same finite-difference
-fallback as the other four.
+\verb{psi*} is a trait-dependent bound and \code{dprofit/dpsi} is not zero there, so
+the indirect term is real and the gradient carries it through the bound.
 }
 
 \section{A collar potential you supply, instead of the one this solves for}{
 
 Pass \code{psi} and the outputs are evaluated at that collar rather than at the
-argmax. This is for a caller whose model \strong{tracks} the optimum instead of
+argmax; on a leaf route \code{psi} is the leaf potential, that route's decision
+variable, and everything below holds with it in the collar's place. This is
+for a caller whose model \strong{tracks} the optimum instead of
 finding it — plant's TF24f carries the collar potential as an ODE state,
 \code{dpsi/dt = k * dprofit/dpsi}, so at finite gain its \code{dprofit/dpsi} is
 deliberately non-zero and \emph{is} the acclimation rate.
@@ -324,27 +283,14 @@ so the indirect term is whatever the caller says it is:
 
 with \code{dpsi_dtheta} supplied — defaulting to zero, the partial at fixed
 collar. Nothing is derived from \code{-M/H}, so nothing needs stationarity, and
-\code{method} is refused because the two routes it chooses between are both about
-a solved optimum.
+\code{profit} is read at the collar you gave, with its exact \code{dprofit/dpsi}.
 
 \code{M}, \code{H} and \code{dY_dpsi} come back in the result, because a caller with a
 \emph{dynamic} \code{psi} cannot supply \code{dpsi_dtheta} as a constant: for the
 gradient-ascent law above it obeys \verb{ds/dt = k(M + H s)}, and those are its
 coefficients. Its fixed point is \code{-M/H}, which is what the solving path
-returns — the two agree in the large-gain limit.
-
-⚠️ \strong{\code{stationarity} is reported, and is used for exactly one thing.}
-It routes nothing; it measures how far the collar you supplied
-sits from the optimum. The one decision it makes is \code{profit}'s: at a
-stationary point the envelope theorem applies and the analytic zero is used,
-and away from one the exact \code{dprofit/dpsi} is used instead of differencing
-it. So \verb{psi = <the solved psi*>} with \code{dpsi_dtheta = -M/H} reproduces the
-solving path \strong{bit-for-bit}, which the tests assert.
-
-⚠️ \strong{An infeasible \code{psi} gets no gradient either}, reported as
-\code{"no-gradient"}. \code{dprofit/dpsi} is a sentinel \code{0.0} on the shut-down and
-reversed-gradient exits rather than a derivative, and this path never divides
-by \code{H}, so it would otherwise adopt that zero as the real thing.
+returns — the two agree in the large-gain limit. So \verb{psi = <the solved psi*>} with \code{dpsi_dtheta = -M/H} reproduces the solving path, to rounding,
+which the tests assert.
 
 ⚠️ \strong{A \code{psi} outside the feasible interval is refused, and gets no
 gradient.} The leaf does not project it onto the interval's end, which
@@ -352,51 +298,42 @@ would make the outputs move with the \emph{bound} rather than with \code{dpsi_dt
 \code{status} reports \code{"refused"}, \code{psi} in the result is the one you gave, and
 everything else is \code{NA}. This is reported rather than thrown because a fit
 reaches these points routinely: a trait perturbation moves the interval past
-a fixed \code{psi}. A \code{psi} inside the interval but within one step of an end is
-\code{"refused"} too, with its value, because \code{dY/dpsi} cannot be centred there.
+a fixed \code{psi}.
+
+⚠️ \strong{A feasible \code{psi} whose leaf potential lies in the stem curve's tail
+has a value and no gradient}, reported as \code{"no-gradient"}. That is the
+collar a shut leaf seats, and the last sliver before the dry end of the
+interval: there inverting the flux for the leaf potential divides by a
+conductance near \code{e^-40}, and every row would be rounding.
 }
 
-\section{The active set, which is the reason this function is careful}{
+\section{The active set}{
 
-Stationarity is the premise of the whole derivation, and it fails when the
-optimum is pinned to an end of the feasible collar interval. There \verb{psi*} is a
-bound, \code{dprofit} is not zero at the answer, and \code{-M/H} is not the bound's
-derivative. The formula does not fail loudly: measured at a boundary-soil point
-the true gradient is about \code{1e-08} and the bare composite returns \code{O(1)} --
-plausible-looking and wrong by seven orders of magnitude. About one operating
-point in six is pinned across this package's test grid, all at soil suctions of
-3-4 MPa, which is the dry end a drought calibration will visit.
+Stationarity is the premise of \code{-M/H}, and it fails when the optimum is
+pinned to an end of the feasible interval. There \verb{psi*} is a bound, and
+\code{-M/H} is not the bound's derivative. It does not fail loudly: measured at a
+boundary-soil point the true gradient is about \code{1e-08} and \code{-M/H} gives
+\code{O(1)}, plausible-looking and wrong by seven orders of magnitude. About one
+operating point in six is pinned across this package's test grid, all at
+soil suctions of 3-6 MPa, the dry end a drought calibration will visit.
 
-So the premise is \strong{tested rather than assumed}. The test is the implied
-Newton step \verb{|dprofit(psi*) / H|}, a distance in MPa: at a stationary point it
-is zero to solver precision, and at a pinned one it is not. Over the package's
-288-point grid the two populations are five orders of magnitude apart -- worst
-interior \code{5e-11}, smallest pinned \code{6e-06} -- so \code{stationarity_tol} sits in an
-empty band rather than on a judgement call.
+So the gradient does not test for stationarity; it reads what the solve
+found. The solve records whether it root-found the first-order condition
+inside the interval, or a bound held the optimum, and which: the wet end,
+where the leaf declines to open, or the dry end, where it transpires all
+its stem can carry. \code{status} reports it, \code{"interior"} or \code{"pinned"}, and at a
+pinned point the gradient differentiates the bound.
 
-When the premise does not hold, this falls back to a central finite difference
-of the whole solve, which respects the constraint by construction because it
-differences the constrained answer. That is the one thing the crude method does
-better, and \code{method} in the result says which was used.
+That matters beyond accuracy. The dry end -- \code{psi_crit} for the curves it
+bounds, the end of the stem curve for the rest -- does not appear in the
+profit function at all, so \code{-M/H} would return \strong{exactly zero} for a
+parameter that moves only the end. At a dry pin that end \emph{is} the binding
+constraint, and a zero would tell an optimiser the parameter does nothing.
+Placing the point on the bound carries the term.
 
-It is better in a second way, which is sharper than accuracy. The dry end of
-the feasible collar interval -- \code{psi_crit} for the curves it bounds, the end of
-the stem curve for the rest -- does not appear in the profit function at all,
-so the composite necessarily returns \strong{exactly zero} for it. At an interior
-optimum that is correct. At a dry pin it \emph{is} the binding constraint, and a
-zero is arguably a worse answer than a wildly wrong one: it tells an optimiser
-the parameter does nothing, and nothing about it looks suspicious. The
-difference of the solve gets it for free.
-
-There is a second guard behind that one, found by measurement rather than
-designed: a pinned optimum sits so close to its bound that the difference in
-\code{psi} cannot be centred there without stepping out of the interval, and that is
-detected too.
-Over this package's grid it catches every pinned point on its own, so forcing
-\code{method = "ift"} at one fails loudly instead of returning the wrong number.
-Do not read that as making the stationarity test redundant -- it fires only
-when the feasible interval is narrow, which is true of these points but not of
-pinned optima in general.
+\code{H} and \code{M} are \code{NA} at a pinned point. An interior point whose curvature is
+not clearly negative is \code{"no-gradient"}: there every row would amplify the
+solve's own error.
 }
 
 \section{Two of these are not traits}{
@@ -416,38 +353,25 @@ respect to plant state and not only with respect to traits.
 
 ⚠️ \strong{Both move the feasible collar interval, not just the profit function} —
 \code{resistance} directly and \code{leaf_specific_conductance_max} through the supply
-curve — so a perturbation can push a bound past \verb{psi*} more readily than a
-trait perturbation can. That is the case the refusal detector below exists for,
-and it fails loudly rather than quietly.
+curve — so at a pinned point their rows run through the bound, as a trait's
+do.
 }
 
-\section{What it costs, and when that beats differencing}{
+\section{What it costs}{
 
-Both routes are linear in a parameter count, and it is a \strong{different} count
-for each. With \code{N} observations:
+With \code{N} observations, a gradient costs
 
-\deqn{T_{FD} = 2\,P_{fit}\,T_{objective}}
-\deqn{T_{exact} = N\,(t_{construct} + t_{solve}) + 2\,P_{model}\,N\,t_{eval}}
+\deqn{T_{exact} = N\,(t_{construct} + t_{solve} + t_{pass})}
 
-An optimiser differences the \code{P_fit} parameters it is moving. This function is
-asked for the \code{P_model} parameters the leaf has — the length of \code{pars}. Those
-are equal only when the fit varies traits directly; a parameterisation in
-between (pooling, a hierarchy, any shared or derived parameter) makes
-\code{P_fit > P_model}, and then this route's cost does not follow the optimiser's
-dimension.
+where \code{t_pass} is one forward pass carrying every parameter, a few solves'
+worth, whatever \code{pars} asks for. Differencing the objective instead costs
+\verb{2 P_fit} solves per observation, for the \code{P_fit} parameters an optimiser
+moves. So the exact gradient wins once a fit moves more than a couple of
+parameters, and by more the more it moves; \code{vignette("fitting")} and the
+README's "Performance from R" give the measured figures.
 
-⚠️ \strong{So "is the exact gradient faster" has no answer independent of your
-parameterisation, and both regimes are measured.} \code{vignette("fitting")} fits
-72 observations with \code{P_fit == P_model} and this loses at every count it
-measures.
-A companion calibration study has \code{N = 1327}, \code{P_fit = 40},
-\code{P_model = 4}, wins 3.4x, and reaches the same optimum — with its
-57-parameter variant costing the same as its 40-parameter one, because
-\code{P_model} is 4 in both.
-
-⚠️ \strong{Always pass \code{pars}.} It is \code{P_model}, so the default — every trait plus
-\code{leaf_specific_conductance_max} on the multi-layer path — is the most expensive
-thing you can ask for, and a fit that reads four of them pays for the rest.
+\code{pars} selects rows, not work: asking for one parameter costs the same as
+asking for all of them.
 
 The intercept is a fresh \code{Leaf} per call. Pass \code{x} to reuse one across calls;
 without it, construction is most of a one-observation gradient.
@@ -463,8 +387,8 @@ the intercellular-CO2 root-find.
 \section{Reusing a leaf across gradients}{
 
 Constructing a \code{Leaf} is the largest single cost on this surface, and this
-function does it once per call: it is \strong{most of a one-parameter gradient} on a
-fresh leaf, paid once per observation by a fit that differentiates per
+function does it once per call: it is \strong{most of a gradient} on a fresh
+leaf, paid once per observation by a fit that differentiates per
 observation. The measured ratios are in the README's "Performance from R", the
 one place the package quotes them. Pass \code{x} to reuse one:
 
@@ -481,24 +405,22 @@ plausible answer for a point nobody asked about.
 \code{control} and \code{supply} are fixed when \code{x} is built, so passing them alongside it
 is an error rather than silently resolved.
 
-\strong{\code{x} is left solved at the base point}, not at the last perturbation — the
-state this function seats it in, restored on the way out including on an error.
-The restore costs one solve, a small fraction of the construction it saves.
+\strong{\code{x} is left solved at the base point}, on the model it seated, including
+after a prescribed \code{psi} or an error. The restore costs one solve, a small
+fraction of the construction it saves.
 }
 
 \examples{
 g <- leaf_gradient(psi_soil = 2.0, PPFD = 900)
-g$method
+g$status         # "interior"
 g$gradient[c("vcmax_25", "stem_P50"), ]
 
 # On the collar route, in dry soil at high VPD, the optimum pins against the
-# edge of the feasible range, the composite's premise fails, and the fallback
-# is used instead.
+# edge of the feasible range, and the gradient is the bound's.
 dry <- leaf_gradient(psi_soil = 4.5, PPFD = 900, atm_vpd = 3.0,
                      supply = leaf_supply_multilayer(), route = "collar")
-dry$method       # "fd"
 dry$status       # "pinned"
-dry$stationarity # how far from stationary the optimum is, in MPa
+dry$H            # NA: no curvature is taken off an interior point
 }
 \seealso{
 \code{\link[=leaf_solve]{leaf_solve()}} for the operating point itself, \code{\link[=set_traits]{set_traits()}}.

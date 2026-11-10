@@ -98,8 +98,7 @@ inline constexpr int par_CF77_lambda = 18;
 // TF24_floor's price of water at zero transpiration.
 inline constexpr int par_TF24_floor_lambda_o = 19;
 // Least-cost's unit-cost ratio beta (Prentice et al. 2014): dimensionless, not a
-// price. `gradient::step_for` takes a relative step only while |beta| >= 1; below
-// that its absolute step is a large perturbation (2x at beta = 0.5).
+// price.
 inline constexpr int par_LeastCost_beta = 20;
 // The thermal-damage inputs that reach the solve, refused unless
 // use_thermal_damage_ is on. Not the dynamics parameters: they move only
@@ -287,6 +286,12 @@ public:
       case SupplyKind::SinglePotential: return true;
     }
     unknown_supply_kind();
+  }
+  // The seated route's decision variable: the collar on the collar route, the
+  // leaf potential on a leaf route, where the upstream potential is the soil's.
+  // The derivative surface's draw and placement are taken at it.
+  double decision_psi() const {
+    return route_is_collar_ ? opt_root_psi_ : opt_psi_leaf_;
   }
   // The seated soil state and supply resistances as a view, on either path:
   // what a caller of the derivative surface builds its SupplyInputs from. It
@@ -1034,6 +1039,11 @@ public:
     // and takes its rows: the residual is zero at every collar there.
     bool no_conduction = false;
     S gravity_balance{};
+    // On the leaf route there is no walk: the stem's upstream end is the soil
+    // potential, held by the route and an input with rows of its own, and `at`
+    // is the leaf potential, the route's decision variable.
+    bool leaf_route = false;
+    S upstream{};
     // A copy of the supply it was drawn from, kept only where the seated curve
     // draws again at a reference collar for its normalisers (normalisers_at);
     // null otherwise, so no other curve pays for it. Owned, so it outlives
@@ -1056,13 +1066,16 @@ public:
       if (no_conduction) {
         f(gravity_balance);
       }
+      if (leaf_route) {
+        f(upstream);
+      }
     }
   };
   // Each optional row is a flag and a value; at double the flag pads to a double.
   static_assert(sizeof(SupplyDraw<double>) ==
                     sizeof(double) + sizeof(odelia::with_slope<double>) +
                         sizeof(std::vector<double>) * 2 +
-                        2 * (alignof(double) + sizeof(double)) +
+                        3 * (alignof(double) + sizeof(double)) +
                         sizeof(std::shared_ptr<const SupplyInputs<double>>),
                 "SupplyDraw gained or lost a member: update for_each_active, "
                 "then this count");
@@ -1081,6 +1094,13 @@ public:
     d.at = odelia::util::to_passive(collar);
     if (seated_curve_prepares_normalisers()) {
       d.inputs = std::make_shared<const SupplyInputs<S>>(supply);
+    }
+    // The leaf route reads the soil's potential and nothing of the supply's
+    // resistances: `collar` is the leaf potential there (decision_psi()).
+    if (!route_is_collar_) {
+      d.leaf_route = true;
+      d.upstream = supply.psi_soil[0];
+      return d;
     }
 
     // A shut leaf sits on its wet bound and is drawn like any other point.
@@ -1561,9 +1581,9 @@ public:
   // load-bearing: reordering moves the double results by an ULP.
   template <typename T, typename V = double>
   T arrh_curve(double Ea, const T& ref_value, const V& leaf_temp) const;
-  template <typename T, typename V = double>
+  template <typename T, typename V = double, typename D = double>
   T peak_arrh_curve(double Ea, const T& ref_value, const V& leaf_temp, double H_d,
-                    double d_S) const;
+                    const D& d_S) const;
 
   // --- Penman-Monteith leaf energy balance (minimal core) ---------------------
   // Recompute the temperature-dependent photosynthetic parameters (vcmax_,
@@ -1709,6 +1729,8 @@ public:
   template <typename T> T respiration_at(const leaf_pars<T>& pars) const;
   template <typename T> T electron_transport_at(const leaf_pars<T>& pars) const;
   template <typename T, typename V> T vcmax_at(const leaf_pars<T>& pars, const V& temp) const;
+  // The thermal-damage layer's shift of both optima, off the pack.
+  template <typename T> T damage_topt_shift_at(const leaf_pars<T>& pars) const;
   template <typename T, typename V> T jmax_at(const leaf_pars<T>& pars, const V& temp) const;
   template <typename T, typename V> T respiration_at(const leaf_pars<T>& pars, const V& temp) const;
   template <typename T, typename V> T electron_transport_at(const leaf_pars<T>& pars,
@@ -1985,6 +2007,10 @@ public:
   template <class S>
   S wet_bound_at(double bound_x, const SupplyDraw<S>& draw,
                  const leaf_pars<S>& pars) const;
+  // A leaf route's wet end: the leaf potential at which the stem carries the
+  // residual flux from the soil (leaf_wet_bound), with the soil from the draw.
+  template <class S>
+  S leaf_wet_end_at(const SupplyDraw<S>& draw, const leaf_pars<S>& pars) const;
   // The dry end: the continuity root with the stem held at dry_end_at<K>(),
   // which is where the curve enters.
   template <CostCurve K, class S>
@@ -2206,8 +2232,9 @@ public:
   static double softplus_(double x, double s);
   // The entropy term that moves a peaked Arrhenius optimum,
   // Topt = H_d / (d_S - R*ln(Ea/(H_d - Ea))), by delta_topt degrees.
-  double d_S_shifted(double Ea, double H_d, double d_S_base,
-                     double delta_topt) const;
+  // On any scalar, so the parameter pack moves it too.
+  template <class T>
+  T d_S_shifted(double Ea, double H_d, double d_S_base, const T& delta_topt) const;
   // The impairment rate, functional -> impaired, day^-1: k_i_ at the isokinetic
   // temperature k_i_Tiso_ moved by delta_impair degrees. Reads nothing of the
   // Vcmax or Jmax curves.
@@ -2244,9 +2271,6 @@ public:
   std::vector<double> damage_trajectory(const std::vector<double>& times,
                                         const std::vector<double>& leaf_temp,
                                         double A0, double I0, double D0) const;
-  // Throws, naming `who`, when use_thermal_damage_ is on: the paths that read
-  // capacities off the parameter pack (vcmax_at and the rest) do not apply it.
-  void refuse_thermal_damage(const char* who) const;
 
   // Sperry (2017) ProfitMax, both terms normalised as the paper defines them
   // (notes above optimise_psi_leaf_single in leaf_route.hpp): seeds |A|max
@@ -2273,13 +2297,13 @@ public:
   // would otherwise report a point assembled from two solves (hazard 8).
   void clear_collar_solve_state();
 
-  // --- WHICH KIND of operating point the collar solve found -------------------
+  // --- WHICH KIND of operating point the solve found, on either route --------
   // The kind changes what a derivative there means. Recorded by the branch
   // TAKEN, never inferred from a residual: dprofit_at_collar_psi's 0.0 sentinel
   // is indistinguishable from a stationary point.
   enum class OperatingPointKind {
-    // No solve since construction, set_traits, or an off-path psi_leaf
-    // optimiser; the operating point reads NA sentinels.
+    // No solve since construction or set_traits, or the closed form, which
+    // records no kind; the collar's outputs read NA sentinels.
     Unsolved,
     // Interior profit maximum: dprofit == 0 strictly inside the feasible interval.
     Interior,
@@ -2382,7 +2406,7 @@ public:
   long root_curve_builds_ = 0;
   // Where prepare_profitmax read |A|max: its reference collar, and ci at the peak
   // along the stem from it (psi_crit with the energy balance off), for
-  // normalisers_at; NaN with the damage layer on, which the surface refuses.
+  // normalisers_at.
   double profitmax_reference_psi_ = std::numeric_limits<double>::quiet_NaN();
   double profitmax_crit_ci_ = std::numeric_limits<double>::quiet_NaN();
   // Where |A| peaks along the stream from the reference collar, and whether the

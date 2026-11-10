@@ -1,193 +1,193 @@
-case	status	method	par	A	gc	psi_leaf	collar	profit
-interior-1layer	interior	ift	vcmax_25	0x1.5750244cd59afp-6	0x1.62c45f3b7193p-15	0x1.301d77ffa3564p-8	0x1.08eb84b1a68a5p-9	0x1.5955fb06dad55p-7
-interior-1layer	interior	ift	stem_P50	0x1.a1cbc63c29091p+1	0x1.b24b3b7727p-7	0x1.0f956a0bee46bp+0	0x1.444e5d2eef9edp-1	0x1.a0d05de52c5d9p+1
-interior-1layer	interior	ift	stem_c	-0x1.692a0bf3c2d77p+0	-0x1.776d051a5e36dp-8	-0x1.4c418da0147d8p-1	-0x1.1858c8148716bp-2	-0x1.f5a901dbf10cdp-4
-interior-1layer	interior	ift	R_d_25	-0x1.fda3d82198475p-3	-0x1.9121f5d939fa1p-12	-0x1.57dc5f96aba0ap-5	-0x1.2b8b0e450df3ap-6	-0x1.3cb15939e7239p-3
-interior-5layer	interior	ift	vcmax_25	0x1.a77aab400fcf3p-5	0x1.f4ceedff26978p-16	0x1.4a92e17affd58p-10	0x1.94b246e3558ap-11	0x1.91a9653c5faaap-5
-interior-5layer	interior	ift	stem_P50	0x1.00773b8ced816p+1	0x1.6ff0851f8031ap-6	0x1.62e8c3a63a133p-1	0x1.2953b1e6eaa92p-1	0x1.4a71f781e5ea6p+1
-interior-5layer	interior	ift	stem_c	-0x1.65e2433df4069p-1	-0x1.00b83cf1d9e48p-7	-0x1.7b7bc3772d6ccp-2	-0x1.9ee74307cc82bp-3	0x1.5e3fe3fae9cf5p-3
-interior-5layer	interior	ift	R_d_25	-0x1.5305eb9b03661p-1	-0x1.75a71947de8e8p-10	-0x1.ed481c5971161p-5	-0x1.2df195ba9519bp-5	-0x1.11e93ef9fc955p-1
-pinned-dry-1layer	pinned	fd	vcmax_25	0x1.1bfe372c3d8p-10	0x0p+0	0x0p+0	0x0p+0	0x1.1bfe373669aabp-10
-pinned-dry-1layer	pinned	fd	stem_P50	0x1.10c13dc4b04e3p+2	0x1.bba5b79edfbfp-7	0x1.229df2ba7ae53p+2	0x1.dee64c4bc1cb6p-3	0x1.10c13dc4c241dp+2
-pinned-dry-1layer	pinned	fd	stem_c	-0x1.d574cf6c76648p+1	-0x1.7dcb97df04697p-7	-0x1.16ec7dce48193p+3	-0x1.9c21fe23d9fdp-3	-0x1.d574cf6c76648p+1
-pinned-dry-1layer	pinned	fd	R_d_25	-0x1.3e8e2a132e38ep-5	0x0p+0	0x0p+0	0x0p+0	-0x1.3e8e2a132e38ep-5
-shutdown-1layer	no-gradient	fd	vcmax_25	0x0p+0	0x0p+0	0x0p+0	0x0p+0	0x0p+0
-shutdown-1layer	no-gradient	fd	stem_P50	0x0p+0	0x0p+0	0x0p+0	0x0p+0	0x0p+0
-shutdown-1layer	no-gradient	fd	stem_c	0x0p+0	0x0p+0	0x0p+0	0x0p+0	0x0p+0
-shutdown-1layer	no-gradient	fd	R_d_25	0x0p+0	0x0p+0	0x0p+0	0x0p+0	0x0p+0
-single-potential	interior	ift	vcmax_25	0x1.8dcf9123a0f0cp-11	0x1.8655cd4797183p-20	0x1.0f0fb3c0e903bp-11	0x1.f6badbf8566f5p-12	0x1.226a2fed42aabp-12
-single-potential	interior	ift	leaf_specific_conductance_max	0x1.61f350fea322p+11	0x1.1178858778f9fp+3	0x1.c6e145823e4edp+10	0x1.6037126d24bf3p+11	0x1.1bfef9cb20dfap+10
-single-potential	interior	ift	resistance	-0x1.f8dbf6dcf43ecp-14	-0x1.86110d492a913p-22	-0x1.33d7c6aede012p-14	-0x1.0e960bdd3f0bbp-14	-0x1.b3f5359b2p-15
-single-potential	interior	ift	R_d_25	-0x1.09104b0a89debp-5	-0x1.d8c7e2e4d6372p-15	-0x1.485072ccf18fep-6	-0x1.307528cd8569ap-6	-0x1.c056d5fea5aabp-7
-TF24-collar	interior	ift	vcmax_25	0x1.f4c6eebd4348cp-6	0x1.b43c01f79d90cp-15	0x1.56446bc149c95p-8	0x1.443919080ed9p-9	0x1.44170bfddb355p-6
-TF24-collar	interior	ift	stem_P50	0x1.5d0814899e5fep+1	0x1.aedfa4b858789p-7	0x1.ff52a0a6dd452p-1	0x1.403d1d2379069p-1	0x1.4ef116860176ap+1
-TF24-collar	interior	ift	R_d_25	-0x1.3fc92b0e1d0c9p-2	-0x1.9fb44f1d1a43ap-12	-0x1.4628d3a99e7bep-5	-0x1.34f6e5fa6199fp-6	-0x1.d73327940981dp-3
-TF24-collar	interior	ift	TF24_beta2	0x1.363187532c081p-2	0x1.7eedbafb57e4bp-10	0x1.2c719f3a760dep-3	0x1.1c9ac217db29fp-4	0x1.ce954393c27aap+0
-TF24-collar	interior	ift	TF24_cost_scale	-0x1.352adbbc4a972p-2	-0x1.7da977e633a98p-10	-0x1.2b7335290072ep-3	-0x1.1ba9c1a9cba78p-4	-0x1.3437dd8677156p-2
-TF24-leaf	interior	ift	vcmax_25	0x1.7906fe534dacbp-5	-0x1.5d235243b9e5ep-15	-0x1.617f29db0db88p-10	NaN	0x1.8ed95b81eecp-5
-TF24-leaf	interior	ift	stem_P50	0x1.f9cef43f94be1p+0	0x1.f9cb54293df94p-6	0x1.1d798053a36c9p-1	NaN	0x1.55fb1c457356ap+1
-TF24-leaf	interior	ift	R_d_25	-0x1.724ccc98ca055p-1	-0x1.957bba2c7e206p-10	-0x1.9a8ba60ccbc11p-5	NaN	-0x1.3f9cf851ee91dp-1
-TF24-leaf	interior	ift	TF24_beta2	0x1.20e7303d590a1p-2	0x1.20e51e21efe6dp-8	0x1.24806c7c2da1cp-3	NaN	0x1.c3e3503edcp+0
-TF24-leaf	interior	ift	TF24_cost_scale	-0x1.6ec64c7b5db11p-3	-0x1.6ec3ab7d1a74ep-9	-0x1.7357d8826621p-4	NaN	-0x1.12e5b533ebp-2
-CF77-collar	interior	ift	vcmax_25	0x1.4cdc4cbdca999p-4	0x1.38b4c20bfa5c4p-12	0x1.d1b235f913ec9p-5	0x1.d2103086a0a46p-7	0x1.ccc8147ae0755p-6
-CF77-collar	interior	ift	stem_P50	-0x1.7a43f6de81677p-31	-0x1.0fb71fee7b3ddp-38	-0x1.909fbef4b642p+0	-0x1.94f8463051cfap-33	0x0p+0
-CF77-collar	interior	ift	R_d_25	-0x1.63f79040d1457p-1	-0x1.27fec8543e365p-9	-0x1.b8cf414bdbf68p-2	-0x1.b928362c6312cp-4	-0x1.2bde1a81eb0abp-2
-CF77-collar	interior	ift	CF77_lambda_	-0x1.132cafe289b7ap-15	-0x1.8b538802cb6f8p-23	-0x1.265e73daa6068p-15	-0x1.2699db640cc5dp-17	-0x1.75f8ecb62aaabp-16
-CF77-leaf	interior	ift	vcmax_25	0x1.4cdc4cb56d9c7p-4	0x1.38b4c2071fc8cp-12	0x1.a01a4bbe31c71p-8	NaN	0x1.ccc8146b9e355p-6
-CF77-leaf	interior	ift	stem_P50	-0x1.3fc11b431a8d4p-29	-0x1.5318ebdd6b51p-43	-0x1.4ca315326e32cp-5	NaN	-0x1.f6a4787878788p-30
-CF77-leaf	interior	ift	R_d_25	-0x1.63f7904b11e7dp-1	-0x1.27fec85557055p-9	-0x1.89ddcd8df2c48p-5	NaN	-0x1.2bde1a971c639p-2
-CF77-leaf	interior	ift	CF77_lambda_	-0x1.132cafe207caap-15	-0x1.8b53880430bf8p-23	-0x1.07054c7114df3p-18	NaN	-0x1.75f8ecb5cp-16
-JS22-collar	interior	ift	vcmax_25	0x1.fc94fada90a35p-6	0x1.3fc6d5d8ff1dp-16	0x1.baf9a3fd10c39p-9	0x1.dc830e0351885p-11	0x1.c466116b58aaap-6
-JS22-collar	interior	ift	stem_P50	0x1.1cafa92b0e758p+1	0x1.9515cdf536777p-7	0x1.a490f6fe8b14ap-1	0x1.2dd11581e6b06p-1	0x1.e6f765066cf88p+0
-JS22-collar	interior	ift	R_d_25	-0x1.426a51bd11cf3p-2	-0x1.2dc29ea84ddc8p-13	-0x1.a20481176fd43p-6	-0x1.c1aa35a40c9f1p-8	-0x1.27e8091993d1dp-2
-JS22-collar	interior	ift	JS22_gamma	-0x1.5a2501bf1049cp+0	-0x1.ec89122383ccbp-8	-0x1.552553a56e16bp+0	-0x1.6ef9290d9f7aap-2	-0x1.14edc9d3eee8p+1
-JS22-leaf	interior	ift	vcmax_25	0x1.7a119c2395cbap-5	-0x1.4c7992a710ad8p-15	-0x1.50a028f25c218p-10	NaN	0x1.8ed95b6d966aap-5
-JS22-leaf	interior	ift	stem_P50	0x1.13b26bc48abe6p+0	0x1.13b071f0a3cb6p-6	0x1.a3f9a179a8446p-4	NaN	0x1.bfb11cde9516ap-1
-JS22-leaf	interior	ift	R_d_25	-0x1.6fe182836de55p-1	-0x1.82218e75788b4p-10	-0x1.86f3a0d89bcefp-5	NaN	-0x1.3f9cf8278bep-1
-JS22-leaf	interior	ift	JS22_gamma	-0x1.5b0528f396651p+1	-0x1.5b02ac4fb9b29p-5	-0x1.5f57b736420abp+0	NaN	-0x1.187fee1ded04p+2
-CMax-collar	interior	ift	vcmax_25	0x1.ee03002a74a51p-6	0x1.2c65d0313ad0cp-15	0x1.175dc56272f71p-8	0x1.bef83d0040f86p-10	0x1.7b80d2731b6p-6
-CMax-collar	interior	ift	stem_P50	0x1.d640ad49f7812p+0	0x1.346942c19d3a3p-7	0x1.204b2b06746aep-1	0x1.cae4a4260cdf9p-2	0x1.46acb24b84c97p+0
-CMax-collar	interior	ift	R_d_25	-0x1.3b5e93e35133fp-2	-0x1.19680c455320fp-12	-0x1.05b4631c6b8d1p-5	-0x1.a2b64a101d9cdp-7	-0x1.05bc1da5df872p-2
-CMax-collar	interior	ift	CMax_a	-0x1.13d584abe6f78p+1	-0x1.69ce8b46bb9d4p-7	-0x1.5079dd129fd2cp+0	-0x1.0d2bc3ac3d794p-1	-0x1.98317de21a6p+1
-CMax-collar	interior	ift	CMax_b	-0x1.01d69d774648ep-1	-0x1.5233bf7c57d4p-9	-0x1.3a86229976e78p-2	-0x1.f7384afb7b38fp-4	-0x1.0a4eb0dd987p+0
-CMax-leaf	interior	ift	vcmax_25	0x1.77c2a9c4a27d5p-5	-0x1.71687514a7941p-15	-0x1.7605151c28528p-10	NaN	0x1.8ed95b72ac8p-5
-CMax-leaf	interior	ift	stem_P50	0x1.1974f47799916p+0	0x1.1972f017397fap-6	0x1.d2a0d66673a3cp-4	NaN	0x1.bfb11cd11e65bp-1
-CMax-leaf	interior	ift	R_d_25	-0x1.753e2491fcd4bp-1	-0x1.ad064ed1bf0ecp-10	-0x1.b2617799a9e7bp-5	NaN	-0x1.3f9cf851ee91dp-1
-CMax-leaf	interior	ift	CMax_a	-0x1.1cdefbf19be7bp+1	-0x1.1cdcf1459028ap-5	-0x1.206b5ccd2fc11p+0	NaN	-0x1.123c209418e8p+2
-CMax-leaf	interior	ift	CMax_b	-0x1.705892d9e76adp-1	-0x1.7055ef05a252ap-7	-0x1.74ef21ad06ca3p-2	NaN	-0x1.0bf8530d2138p+1
-SOX-collar	interior	ift	vcmax_25	0x1.25b3d6e65caacp-6	0x1.f20dbad526039p-17	0x1.49c63015fb706p-10	0x1.71acb7b0d7227p-11	0x1.3dbe7f90fe8p-7
-SOX-collar	interior	ift	stem_P50	0x1.01ffb4d88a4b3p+1	0x1.21982fd4ab70fp-7	0x1.35a5d1c71a533p-1	0x1.ade57e3e2c106p-2	0x1.b18d099e3c926p+0
-SOX-collar	interior	ift	R_d_25	-0x1.95e0ae9d6542p-3	-0x1.55214d8333726p-15	-0x1.c3bdf917da358p-9	-0x1.fa66601e048bp-10	-0x1.01ff7069ab3e4p-3
-SOX-leaf	interior	ift	vcmax_25	0x1.7b955a499f092p-5	-0x1.e1566be45aaefp-18	-0x1.73e3d3af76561p-13	NaN	0x1.2269c59b653abp-5
-SOX-leaf	interior	ift	stem_P50	0x1.292c3ce283e83p+1	0x1.67720e74b74bep-6	0x1.95a8de5c6bcf6p-2	NaN	0x1.5d83453030444p+1
-SOX-leaf	interior	ift	R_d_25	-0x1.0f55283eaeff3p-1	-0x1.d9517147a4f72p-12	-0x1.6db1a8b220a22p-7	NaN	-0x1.73ac1e120731dp-2
-JW26-collar	interior	ift	vcmax_25	0x1.573aeba5ec20bp-6	0x1.419d26ac3c362p-16	0x1.c516c38157322p-10	0x1.ddaf9adbad626p-11	0x1.13d3ab2ce2655p-7
-JW26-collar	interior	ift	stem_P50	0x1.fd054cc83ef7ap+0	0x1.297fab44daae3p-7	0x1.3b6d45264de81p-1	0x1.b9de44cecf637p-2	0x1.4bae78587f9dbp+0
-JW26-collar	interior	ift	R_d_25	-0x1.bfd9abd70039p-3	-0x1.cd8ec833bc34cp-15	-0x1.451eead09000ap-8	-0x1.56c54f7536d3bp-9	-0x1.a94d571f8d7e4p-4
-JW26-leaf	interior	ift	vcmax_25	0x1.76f064c974dc8p-5	-0x1.661a8f559736bp-16	-0x1.1a8d279f0d8d3p-11	NaN	0x1.c908759def3aap-6
-JW26-leaf	interior	ift	stem_P50	0x1.f63d1ae0f9037p+0	0x1.40939249153e1p-6	0x1.5178af4b25068p-2	NaN	0x1.06252c6abb66ep+1
-JW26-leaf	interior	ift	R_d_25	-0x1.1e4936a485d36p-1	-0x1.388e3e75f8eb4p-11	-0x1.ed39d7409d317p-7	NaN	-0x1.29bdbf52f2c9dp-2
-ProfitMax-collar	interior	ift	vcmax_25	0x1.1f11e5f7206dfp-7	0x1.a3b46b42d4e8fp-18	0x1.e0651ef192432p-12	0x1.3704c56142eb2p-12	-0x1.d4f610b437p-13
-ProfitMax-collar	interior	ift	stem_P50	0x1.41c295afe42fcp+1	0x1.370fbe5b504a1p-7	0x1.509ae6b8fe164p-1	0x1.cd04d98f6026dp-2	0x1.7037e2c739e32p-4
-ProfitMax-collar	interior	ift	R_d_25	-0x1.1acfa0bd1610fp-4	0x1.9eb08600a1692p-13	0x1.daa79238ff1d4p-7	0x1.334d59e606856p-7	0x1.2badb20a21439p-8
-ProfitMax-leaf	interior	ift	vcmax_25	0x1.931f214bd6dd8p-5	0x1.4e70a581600ffp-16	0x1.026cf3ef1f2bcp-11	NaN	0x1.c85b60439bd55p-11
-ProfitMax-leaf	interior	ift	stem_P50	0x1.28a7ba26a712bp+1	0x1.66ef45b385654p-6	0x1.94d50f9404872p-2	NaN	0x1.e18ede264a5f2p-4
-ProfitMax-leaf	interior	ift	R_d_25	-0x1.0e57348a4d324p-1	-0x1.c53cd3c899ca4p-12	-0x1.5e38ca1fdf532p-7	NaN	0x1.9140a1d23ee39p-8
-TF24_floor-collar	interior	ift	vcmax_25	0x1.dbb326e08178fp-6	0x1.09531d00b5109p-14	0x1.602b9edd2788cp-8	0x1.89e07c38621eap-9	0x1.df70174360155p-7
-TF24_floor-collar	interior	ift	stem_P50	0x1.394e8efe5df8p+1	0x1.604417b0d67a7p-7	0x1.88acbf9294009p-1	0x1.057896707fabp-1	0x1.8c01db23364eep+0
-TF24_floor-collar	interior	ift	R_d_25	-0x1.3a8823f5de028p-2	-0x1.0e987f9b31fc5p-11	-0x1.672aaf4d5412fp-5	-0x1.91b3a8efb5135p-6	-0x1.8465068d40cc7p-3
-TF24_floor-collar	interior	ift	TF24_floor_lambda_o	-0x1.30955abf4a0b1p-17	-0x1.567531957276p-25	-0x1.c68cf6833b194p-19	-0x1.fc61b90d11fd2p-20	-0x1.d923a6f38p-17
-TF24_floor-leaf	interior	ift	vcmax_25	0x1.00f7130b092cfp-4	0x1.3c946f96d4285p-13	0x1.d945fae7bfc85p-9	NaN	0x1.72668324c64abp-5
-TF24_floor-leaf	interior	ift	stem_P50	0x1.4f6ae504c2d3fp+0	0x1.71e921e76dbfcp-7	0x1.34d32352fcb6ap-3	NaN	0x1.c62a5e6bdfe1fp-1
-TF24_floor-leaf	interior	ift	R_d_25	-0x1.66666bb164721p-1	-0x1.1876b07e4dc52p-9	-0x1.a347fb9ecf2d7p-5	NaN	-0x1.ce7d2ce02bf55p-2
-TF24_floor-leaf	interior	ift	TF24_floor_lambda_o	-0x1.77b421576dd6fp-16	-0x1.9e56f199b48adp-23	-0x1.35b5c59174a22p-18	NaN	-0x1.2c9f3099d5556p-15
-LeastCost-collar	interior	ift	vcmax_25	0x1.4d5d09bf88e51p-4	0x1.3965c5bf8a8c7p-12	0x1.97c9b34d1b626p-5	0x1.d2ec2b05ba25fp-7	-0x1.012dc59e01555p-2
-LeastCost-collar	interior	ift	stem_P50	-0x1.83df35bcce619p-32	0x1.0fbb75d3b2f7bp-38	-0x1.3712f050931ffp+0	0x1.206e13ec6d2c1p-31	-0x1.1f39696969697p-21
-LeastCost-collar	interior	ift	R_d_25	-0x1.860b5da4bbe1p-2	-0x1.1442bc548140dp-11	-0x1.67774bb5f35dap-4	-0x1.9b97e41d6fdbep-6	-0x1.52f55a9c2fd72p+7
-LeastCost-collar	interior	ift	LeastCost_beta	0x1.25cb1cc79796ap-1	0x1.9e2f51d25c6cap-9	0x1.0d77218ba4a48p-1	0x1.348a9900bea1ep-3	-0x1.3a2a9377094p+8
-LeastCost-leaf	interior	ift	vcmax_25	0x1.4d5d09ba79d4dp-4	0x1.3965c5b7c2342p-12	0x1.9f6053172dfcap-8	NaN	-0x1.012dc4a9dd555p-2
-LeastCost-leaf	interior	ift	stem_P50	-0x1.3a6b58cdfcf6fp-30	-0x1.7e6db1f6026bfp-36	-0x1.3ab5cbd022848p-5	NaN	0x1.d2bd4b4b4b4b6p-20
-LeastCost-leaf	interior	ift	R_d_25	-0x1.860b5d673827fp-2	-0x1.1442bbe49c986p-11	-0x1.6e27b8b1d9497p-7	NaN	-0x1.52f55a86fe7e4p+7
-LeastCost-leaf	interior	ift	LeastCost_beta	0x1.25cb1cc535043p-1	0x1.9e2f51d1b13ccp-9	0x1.127ad01f8f15dp-4	NaN	-0x1.3a2a9377094p+8
-damage-collar	interior	ift	vcmax_25	0x1.cc0e4c8bd1dc8p-6	0x1.57c665ba302b4p-14	0x1.9f701685c817ap-8	0x1.fdd8697d6c1dep-9	0x1.4e661756f6fabp-6
-damage-collar	interior	ift	A_	0x1.2c12fa12ee92ap+1	0x1.d5592371b84e3p-8	0x1.1b980c01053b2p-1	0x1.5c0a477eb75bfp-2	0x1.ac976dd80b28p+0
-damage-collar	interior	ift	D_	-0x1.943a1d268eb18p+1	-0x1.3bdbdac70622cp-7	-0x1.7db3c9716aef5p-1	-0x1.d47186dd3f2e1p-2	-0x1.20c61e863afcp+1
-damage-collar	interior	ift	topt_offset_	0x1.e41e9dfb76a03p-2	0x1.7a9b88605bb05p-10	0x1.c98813afb4559p-4	0x1.18c09cdb084e1p-4	0x1.59bb01c2a3p-2
-damage-collar	interior	ift	c_repair_maint_	-0x1.ea5e6c2401dabp-4	-0x1.2396cec222f11p-12	-0x1.605f93aca2c2fp-6	-0x1.b07316dd5594cp-7	-0x1.7fc96dae3c8p-4
-prescribed-collar	prescribed	prescribed	vcmax_25	0x1.07c6a069f06b6p-1	0x1.1413a161d2acp-9	0x1.59708c3f3ef8p-3	0x1.999999999999ap-4	0x1.2044bddf45461p-2
-prescribed-collar	prescribed	prescribed	stem_P50	-0x1.0194eb99fb1e2p+0	-0x1.1413a15f94393p-8	-0x1.bd48289087a08p-2	-0x1.999999999999ap-3	0x1.3adac31f5f9ddp-1
-prescribed-collar	prescribed	prescribed	stem_c	0x1.825f6172c088p+0	0x1.9e1d7212bc02p-8	0x1.d2ae9b9a6211p-2	0x1.3333333333333p-2	0x1.4673f827c3e4dp+0
-prescribed-collar	prescribed	prescribed	R_d_25	-0x1.58e6782832955p-3	0x0p+0	0x0p+0	0x0p+0	-0x1.58e6782832955p-3
-prescribed-ProfitMax-collar	prescribed	prescribed	vcmax_25	0x1.8c6d3206aed55p-7	0x0p+0	0x0p+0	0x0p+0	-0x1.2fa5342a3p-13
-prescribed-ProfitMax-collar	prescribed	prescribed	stem_P50	0x1.f6a4787878788p-30	0x1.1f39696969697p-39	-0x1.8f5e714522a1fp-4	0x0p+0	0x1.535aec6fd6281p-3
-prescribed-JS22-leaf	prescribed	prescribed	vcmax_25	0x1.36afbc7dd31p-5	0x0p+0	0x0p+0	NaN	0x1.36afbc7dd31p-5
-prescribed-JS22-leaf	prescribed	prescribed	stem_P50	0x1.d41f03a278a1fp-2	0x1.9cd154940045bp-9	0x0p+0	NaN	0x1.d41f03a278a1fp-2
-prescribed-JS22-leaf	prescribed	prescribed	JS22_gamma	0x0p+0	0x0p+0	0x0p+0	NaN	-0x1.0000000099bp+0
-TF24-collar-cuticle	interior	ift	vcmax_25	0x1.f115a3d5d6a9bp-6	0x1.b240e35e12082p-15	0x1.55737d9c77d0dp-8	0x1.42c16226ada7p-9	0x1.4082708b97b55p-6
-TF24-collar-cuticle	interior	ift	stem_P50	0x1.5ebcbf18d0f58p+1	0x1.af4962949493p-7	0x1.000bae4f0bb85p+0	0x1.408ce38c5f9bdp-1	0x1.50a3f5bfe3c44p+1
-TF24-collar-cuticle	interior	ift	R_d_25	-0x1.3e2d28a7d095p-2	-0x1.9e8fd025df9d8p-12	-0x1.45f7b887a8881p-5	-0x1.341ea513cf7f4p-6	-0x1.d3c8e7eb3a255p-3
-TF24-collar-cuticle	interior	ift	g_min	-0x1.70b7f011fa402p+6	-0x1.c565bb9ac5fe5p-2	0x1.557dded5f652ap+3	0x1.42cb31e1f57eap+2	-0x1.c90438c82f6ap+6
-TF24-collar-cuticle	interior	ift	TF24_beta2	0x1.2ff15b3e53ed6p-2	0x1.75bed74de1c3ap-10	0x1.25dfc045f7de7p-3	0x1.15c887bfb13b7p-4	0x1.cef4adf16d955p+0
-TF24-collar-cuticle	interior	ift	TF24_cost_scale	-0x1.36784d1d0f8a3p-2	-0x1.7dc587cc823f8p-10	-0x1.2c2f5798326bp-3	-0x1.1bbfa9647b0afp-4	-0x1.35b8f0a043p-2
-TF24-leaf-cuticle	interior	ift	vcmax_25	0x1.7971224cdeb5p-5	-0x1.5819f61f0007p-15	-0x1.5cfd13624446ap-10	NaN	0x1.8f04557131355p-5
-TF24-leaf-cuticle	interior	ift	stem_P50	0x1.fba555238c011p+0	0x1.fa07c0af509acp-6	0x1.1d684c3544c69p-1	NaN	0x1.57557e2b54508p+1
-TF24-leaf-cuticle	interior	ift	R_d_25	-0x1.7204b0e9d44f9p-1	-0x1.9516b306d9d6p-10	-0x1.9ad78e760b69ap-5	NaN	-0x1.3f3877f9a211dp-1
-TF24-leaf-cuticle	interior	ift	g_min	-0x1.4d8492a769123p+4	-0x1.4c74daf8a338bp-2	0x1.d18dcc146829dp+2	NaN	-0x1.19e2475ec1aap+5
-TF24-leaf-cuticle	interior	ift	TF24_beta2	0x1.1e7440fc93de4p-2	0x1.1d8ae1164b46cp-8	0x1.21991472fabfp-3	NaN	0x1.c445a34e91155p+0
-TF24-leaf-cuticle	interior	ift	TF24_cost_scale	-0x1.6fd2ba24a86b6p-3	-0x1.6ea70fa00b297p-9	-0x1.73dc2b3bc6124p-4	NaN	-0x1.13e0c820352abp-2
-CF77-collar-cuticle	interior	ift	vcmax_25	0x1.4cdc4cbbc5abdp-4	0x1.38b4c20d40e42p-12	0x1.e539cd9bcf11cp-5	0x1.d21beb910167ep-7	0x1.ccc81470b44aap-6
-CF77-collar-cuticle	interior	ift	stem_P50	-0x1.1bba1d24aec9ap-30	-0x1.979cf20ff9039p-38	-0x1.aec1e7203626cp+0	-0x1.2fc97eea5aa2p-32	0x0p+0
-CF77-collar-cuticle	interior	ift	R_d_25	-0x1.63f7903a73eb5p-1	-0x1.27fec84b9820dp-9	-0x1.cb4babf3a9354p-2	-0x1.b93350acfaa88p-4	-0x1.2bde1a81eb0abp-2
-CF77-collar-cuticle	interior	ift	g_min	0x1.061b8bdda1c9fp-25	-0x1.605a14756dec9p-35	0x1.b401cd8d1e0ecp+6	0x1.a2d45466a2891p+4	-0x1.872c35bcb90f4p+6
-CF77-collar-cuticle	interior	ift	CF77_lambda_	-0x1.132cafe49a7d2p-15	-0x1.8b5388066c50ap-23	-0x1.32b6b8904b29fp-15	-0x1.26a145a25f6a3p-17	-0x1.78b4f498eaaabp-16
-CF77-leaf-cuticle	interior	ift	vcmax_25	0x1.4cdc4cc41abe5p-4	0x1.38b4c20db28b1p-12	0x1.a08aed2bb5661p-8	NaN	0x1.ccc8149964f55p-6
-CF77-leaf-cuticle	interior	ift	stem_P50	-0x1.cccb7decdd06dp-30	-0x1.090462e4f9e07p-38	-0x1.51792fa830284p-5	NaN	-0x1.6707c3c3c3c3dp-30
-CF77-leaf-cuticle	interior	ift	R_d_25	-0x1.63f7906eee3b2p-1	-0x1.27fec855677d6p-9	-0x1.8a486a1b92aa3p-5	NaN	-0x1.2bde1ae1491abp-2
-CF77-leaf-cuticle	interior	ift	g_min	0x1.5372904ea2f28p-27	0x1.9b61f3b3d52dfp-33	0x1.764a70d3fc782p+3	NaN	-0x1.872c35bcf6184p+6
-CF77-leaf-cuticle	interior	ift	CF77_lambda_	-0x1.132cafe317975p-15	-0x1.8b53880827c56p-23	-0x1.074c7e30c1bfp-18	NaN	-0x1.78b4f498eaaabp-16
-JS22-collar-cuticle	interior	ift	vcmax_25	0x1.f882293412e6fp-6	0x1.3e4cff753e228p-16	0x1.b9ee060917907p-9	0x1.da50c605c400bp-11	0x1.c05306e47ccaap-6
-JS22-collar-cuticle	interior	ift	stem_P50	0x1.1e42feaf671b9p+1	0x1.9570d439284d8p-7	0x1.a51bf6fbd371cp-1	0x1.2e15617e6d8f4p-1	0x1.e9cc37dbec3c5p+0
-JS22-collar-cuticle	interior	ift	R_d_25	-0x1.4075aa6be2bafp-2	-0x1.2bf8a793bd21dp-13	-0x1.a07b28dcc37b9p-6	-0x1.bf007bd48d25cp-8	-0x1.25fc3a4aa22abp-2
-JS22-collar-cuticle	interior	ift	g_min	-0x1.736c76e3ac387p+6	-0x1.070770e692ab2p-1	0x1.8eebf7e443785p+2	0x1.ac27df92a37e4p+0	-0x1.8cc82853a52a4p+6
-JS22-collar-cuticle	interior	ift	JS22_gamma	-0x1.5af72783829cep+0	-0x1.eb6acea0b0ad2p-8	-0x1.552480eebd95ap+0	-0x1.6e2473ce800bep-2	-0x1.15c9c427999p+1
-JS22-leaf-cuticle	interior	ift	vcmax_25	0x1.7a810a021337fp-5	-0x1.47372f085cd31p-15	-0x1.4bd5f3d1fa4e1p-10	NaN	0x1.8f05c12b68caap-5
-JS22-leaf-cuticle	interior	ift	stem_P50	0x1.155cbf511d076p+0	0x1.147357ec88a02p-6	0x1.a4cea2226512cp-4	NaN	0x1.c2a539ac729a6p-1
-JS22-leaf-cuticle	interior	ift	R_d_25	-0x1.6f8a209bb933p-1	-0x1.8162a80f3268cp-10	-0x1.86d3b0431d6ebp-5	NaN	-0x1.3f351f92810e4p-1
-JS22-leaf-cuticle	interior	ift	g_min	-0x1.58beaddc69b95p+4	-0x1.579c9287b4d9dp-2	0x1.bae3f8000304ap+2	NaN	-0x1.19e9dc6dce2ep+5
-JS22-leaf-cuticle	interior	ift	JS22_gamma	-0x1.5bb90bd9d7b0ap+1	-0x1.5a946ef556993p-5	-0x1.5f793273f838ep+0	NaN	-0x1.196d62640584p+2
-CMax-collar-cuticle	interior	ift	vcmax_25	0x1.e9e6aa054d331p-6	0x1.2a8e70b2dcf5ep-15	0x1.163d616b18701p-8	0x1.bc3c114177ce2p-10	0x1.779b2812c92aap-6
-CMax-collar-cuticle	interior	ift	stem_P50	0x1.d9369c5b774ecp+0	0x1.3506e48928bc1p-7	0x1.20f67c8d1b36cp-1	0x1.cbd06cec35024p-2	0x1.48fc191a87db5p+0
-CMax-collar-cuticle	interior	ift	R_d_25	-0x1.397938555b53dp-2	-0x1.17d68fcf4d314p-12	-0x1.04cb9660433bfp-5	-0x1.a06207a33b4aep-7	-0x1.03e8b14462839p-2
-CMax-collar-cuticle	interior	ift	g_min	-0x1.78457bd4fb6cfp+6	-0x1.eb70a9fe22b3ep-2	0x1.06ef63e1a27b5p+3	0x1.a3cca556dc44ep+1	-0x1.ae46862f04fc8p+6
-CMax-collar-cuticle	interior	ift	CMax_a	-0x1.1465cc4b46adap+1	-0x1.68ff4103b1863p-7	-0x1.506e6f3120f7dp+0	-0x1.0c9245a962c34p-1	-0x1.998ba7429c58p+1
-CMax-collar-cuticle	interior	ift	CMax_b	-0x1.022a0854ef36bp-1	-0x1.512ec8ea256dp-9	-0x1.3a3cd3d0205c8p-2	-0x1.f5b559f054341p-4	-0x1.0af06aaf1acp+0
-CMax-leaf-cuticle	interior	ift	vcmax_25	0x1.7833f686811d4p-5	-0x1.6bcd377539b89p-15	-0x1.7101296be3f49p-10	NaN	0x1.8f02a46275d55p-5
-CMax-leaf-cuticle	interior	ift	stem_P50	0x1.1b283daf95ca6p+0	0x1.1a4a977e25778p-6	0x1.d39bc7a141adap-4	NaN	0x1.c2b501f4f9f4cp-1
-CMax-leaf-cuticle	interior	ift	R_d_25	-0x1.74e805103fc0bp-1	-0x1.ac0c737daff93p-10	-0x1.b22b9dd3e2172p-5	NaN	-0x1.3f3c73964b21dp-1
-CMax-leaf-cuticle	interior	ift	g_min	-0x1.40704cc48d6a9p+4	-0x1.3f7577a627331p-2	0x1.ebf75bcf3b158p+2	NaN	-0x1.19d940ab2299p+5
-CMax-leaf-cuticle	interior	ift	CMax_a	-0x1.1d45198094479p+1	-0x1.1c65cbe2c8c45p-5	-0x1.20770765bc736p+0	NaN	-0x1.12fefd992158p+2
-CMax-leaf-cuticle	interior	ift	CMax_b	-0x1.706779158b326p-1	-0x1.6f471814d2273p-7	-0x1.7487c40d119e2p-2	NaN	-0x1.0c763a5fecfp+1
-SOX-collar-cuticle	interior	ift	vcmax_25	0x1.22ca49258895p-6	0x1.ed5fec42fe0e9p-17	0x1.4788e650d2da4p-10	0x1.6e35efa662225p-11	0x1.392a906294ap-7
-SOX-collar-cuticle	interior	ift	stem_P50	0x1.02cdcf5017715p+1	0x1.21a8b449a84d3p-7	0x1.358dca28b30bap-1	0x1.ae00afd641591p-2	0x1.b2597b57ee9bdp+0
-SOX-collar-cuticle	interior	ift	R_d_25	-0x1.93161ef64adddp-3	-0x1.50e3f57de1ec2p-15	-0x1.bf4ce40fadc85p-9	-0x1.f41e51270e01bp-10	-0x1.fe98ecaf60072p-4
-SOX-collar-cuticle	interior	ift	g_min	-0x1.2ed4f3027a6dcp+6	-0x1.52ef9bcdf1b8p-2	0x1.282263db90683p+4	0x1.4b1a3960bf1aep+3	-0x1.4d9602a7be0e4p+6
-SOX-leaf-cuticle	interior	ift	vcmax_25	0x1.7b9de9a7c6fd8p-5	-0x1.c194a97abc306p-18	-0x1.5bb990b17ac4fp-13	NaN	0x1.21cf4f55966abp-5
-SOX-leaf-cuticle	interior	ift	stem_P50	0x1.2a26f88ebc774p+1	0x1.67b2aee644e98p-6	0x1.95b75068aabc6p-2	NaN	0x1.5e72db3f16bb5p+1
-SOX-leaf-cuticle	interior	ift	R_d_25	-0x1.0ee00870934cdp-1	-0x1.d7891b196967ap-12	-0x1.6cb4a7e093fccp-7	NaN	-0x1.729a91d0a6672p-2
-SOX-leaf-cuticle	interior	ift	g_min	-0x1.bda3a094bbf03p+4	-0x1.0cd09bc158b47p-2	0x1.c57ba33247bdbp+2	NaN	-0x1.5e3ee3cd71918p+5
-JW26-collar-cuticle	interior	ift	vcmax_25	0x1.543595558efcbp-6	0x1.3df2990708ee9p-16	0x1.c18e9ef47d443p-10	0x1.d8412d97b7719p-11	0x1.1060866d2a3abp-7
-JW26-collar-cuticle	interior	ift	stem_P50	0x1.ff2767f184517p+0	0x1.29f1e290eb70bp-7	0x1.3bb642c65b062p-1	0x1.ba8b457751d4bp-2	0x1.4c461828773c1p+0
-JW26-collar-cuticle	interior	ift	R_d_25	-0x1.bd2b1f3461edbp-3	-0x1.c6cc05c733dd5p-15	-0x1.4186cae2b8274p-8	-0x1.51c28ba52801fp-9	-0x1.a55459ecfcdp-4
-JW26-collar-cuticle	interior	ift	g_min	-0x1.0cb1aee18596cp+6	-0x1.393c87859b9ddp-2	0x1.5fb2b6599db3ep+4	0x1.71746f50597fdp+3	-0x1.e2af0bbf5bc62p+5
-JW26-leaf-cuticle	interior	ift	vcmax_25	0x1.7718c6fa7564fp-5	-0x1.5dd0bb0e26ae8p-16	-0x1.1465f8cd7922dp-11	NaN	0x1.c83102546a3p-6
-JW26-leaf-cuticle	interior	ift	stem_P50	0x1.f80613da8da16p+0	0x1.4115aef094a12p-6	0x1.51b635436af89p-2	NaN	0x1.06b4a6ac7994cp+1
-JW26-leaf-cuticle	interior	ift	R_d_25	-0x1.1deac95a52771p-1	-0x1.3768491dc6136p-11	-0x1.ec1a322b15abap-7	NaN	-0x1.28fcc8022f4abp-2
-JW26-leaf-cuticle	interior	ift	g_min	-0x1.3edc92a05dc54p+4	-0x1.9641ca780d306p-3	0x1.1b8873696c3b7p+3	NaN	-0x1.007c72e7342c4p+5
-ProfitMax-collar-cuticle	interior	ift	vcmax_25	0x1.15f74fa00bf36p-7	0x1.82a033d9ab02ap-18	0x1.bae6ecf689b61p-12	0x1.1e824a2ebe2e2p-12	-0x1.da4dc9d1888p-13
-ProfitMax-collar-cuticle	interior	ift	stem_P50	0x1.433c0deeaeb8ep+1	0x1.3768d93821c31p-7	0x1.510f573a40c7ap-1	0x1.cd8a3aa8de15bp-2	0x1.748047b4323b5p-4
-ProfitMax-collar-cuticle	interior	ift	R_d_25	-0x1.1216c3d2d3fcp-4	0x1.a16b174ba159ap-13	0x1.de2d3a294f1d2p-7	0x1.3553e6faf6caap-7	0x1.28a416726b439p-8
-ProfitMax-collar-cuticle	interior	ift	g_min	-0x1.aca20c86faf0fp+6	-0x1.9cf3bfeeb2412p-2	0x1.556ce653c2752p+3	0x1.b9bab99c9ed8fp+2	-0x1.0755904b70fc9p+3
-ProfitMax-leaf-cuticle	interior	ift	vcmax_25	0x1.934502951dfc6p-5	0x1.56a49f2ee2ffp-16	0x1.091457289a192p-11	NaN	0x1.c6a04578f7d55p-11
-ProfitMax-leaf-cuticle	interior	ift	stem_P50	0x1.2972b823bea69p+1	0x1.671474754a79fp-6	0x1.94aee3d29b688p-2	NaN	0x1.e3d08b2c203b6p-4
-ProfitMax-leaf-cuticle	interior	ift	R_d_25	-0x1.0dee09451912ep-1	-0x1.c384c0a1ca8c5p-12	-0x1.5d4f192b6f754p-7	NaN	0x1.915ca63f3238ep-8
-ProfitMax-leaf-cuticle	interior	ift	g_min	-0x1.85840908ed1ccp+4	-0x1.d6396017c5c49p-3	0x1.f9bda78360cd5p+2	NaN	-0x1.4bdc47cfa961p+1
-TF24_floor-collar-cuticle	interior	ift	vcmax_25	0x1.d7ccbbeaafbfp-6	0x1.077fc7c7c1cf5p-14	0x1.5e5ecde9ae9d2p-8	0x1.872c5e27d13dbp-9	0x1.d93c10e8c76aap-7
-TF24_floor-collar-cuticle	interior	ift	stem_P50	0x1.3b0b707332ddcp+1	0x1.60fa216869a0fp-7	0x1.89a508346729fp-1	0x1.0600ce692383ap-1	0x1.8f0525266367dp+0
-TF24_floor-collar-cuticle	interior	ift	R_d_25	-0x1.38fa2cfe304edp-2	-0x1.0db69e979352fp-11	-0x1.66a21db650f77p-5	-0x1.9066059436c59p-6	-0x1.8139c5030448ep-3
-TF24_floor-collar-cuticle	interior	ift	g_min	-0x1.6fbe598ad2859p+6	-0x1.9c0563c8f7e29p-2	0x1.8ec7623a25049p+3	0x1.bd38257a003d9p+2	-0x1.f594e52196efp+6
-TF24_floor-collar-cuticle	interior	ift	TF24_floor_lambda_o	-0x1.306ae79bab12dp-17	-0x1.551208ef44544p-25	-0x1.c583fcdd35c45p-19	-0x1.fa549cca7798p-20	-0x1.da996bd3d5556p-17
-TF24_floor-leaf-cuticle	interior	ift	vcmax_25	0x1.01154b1ce1b63p-4	0x1.3d4335506a13ap-13	0x1.daee03abaa4d7p-9	NaN	0x1.721f6c3b37055p-5
-TF24_floor-leaf-cuticle	interior	ift	stem_P50	0x1.5162795b9cc63p+0	0x1.738d6d953e8e5p-7	0x1.35dca29d52aa6p-3	NaN	0x1.c9c3d58f18188p-1
-TF24_floor-leaf-cuticle	interior	ift	R_d_25	-0x1.661c30231afcap-1	-0x1.17f7d176d2047p-9	-0x1.a319f0cbc8c53p-5	NaN	-0x1.cdff76ebae0e4p-2
-TF24_floor-leaf-cuticle	interior	ift	g_min	-0x1.0f1444bb7d2dcp+4	-0x1.2a8833c4280b2p-3	0x1.34e757d98e019p+3	NaN	-0x1.fe4b795153b18p+5
-TF24_floor-leaf-cuticle	interior	ift	TF24_floor_lambda_o	-0x1.7766794d53182p-16	-0x1.9d6b02fff4799p-23	-0x1.356f75cd1ca2dp-18	NaN	-0x1.2da05e014p-15
-LeastCost-collar-cuticle	interior	ift	vcmax_25	0x1.4bddcc674bb2bp-4	0x1.3749cd9e6d028p-12	0x1.b2698b4bc8412p-5	0x1.cfdf50bc8288cp-7	0x1.b6250dbe55555p-8
-LeastCost-collar-cuticle	interior	ift	stem_P50	-0x1.cf5d2edf9fed4p-32	-0x1.fc2d60ab0dca4p-39	-0x1.63c115b90b70dp+0	-0x1.5dd2878033331p-32	0x1.1f39696969697p-23
-LeastCost-collar-cuticle	interior	ift	R_d_25	-0x1.88d6362d86c82p-2	-0x1.175feddd5a12ap-11	-0x1.85e03c85c5c5cp-4	-0x1.a050d171b9bf2p-6	-0x1.51c17d9f9d372p+7
-LeastCost-collar-cuticle	interior	ift	g_min	0x1.a932d7f54550ap+6	0x1.2d535040dd864p-1	0x1.965136bfdbc3ep+7	0x1.b1df3b24c8ddap+5	-0x1.c71333c7eff48p+15
-LeastCost-collar-cuticle	interior	ift	LeastCost_beta	0x1.20bfa9e5d398p-1	0x1.994146f8e0d25p-9	0x1.1d905b416b148p-1	0x1.30edfdd41d52fp-3	-0x1.35099903038p+8
-LeastCost-leaf-cuticle	interior	ift	vcmax_25	0x1.4bddcc643d03ap-4	0x1.3749cd936ca6cp-12	0x1.9d77f33c1b88bp-8	NaN	0x1.b625366fp-8
-LeastCost-leaf-cuticle	interior	ift	stem_P50	0x1.cce58ab879f67p-32	0x1.11c58c51be9d5p-38	-0x1.446a97d1bb488p-5	NaN	-0x1.1f39696969697p-23
-LeastCost-leaf-cuticle	interior	ift	R_d_25	-0x1.88d636319ce81p-2	-0x1.175fed3058309p-11	-0x1.731450976c48dp-7	NaN	-0x1.51c17de9c9ee4p+7
-LeastCost-leaf-cuticle	interior	ift	g_min	0x1.a932d7ee0471p+6	0x1.2d535032d57ep-1	0x1.82ba5fbaeda9ap+4	NaN	-0x1.c71333c83c3fcp+15
-LeastCost-leaf-cuticle	interior	ift	LeastCost_beta	0x1.20bfa9e0bd7d7p-1	0x1.994146eb459e2p-9	0x1.0fcbe03ae9423p-4	NaN	-0x1.35099903038p+8
+case	status	par	A	gc	psi_leaf	collar	profit
+interior-1layer	interior	vcmax_25	0x1.57502444ed5e1p-6	0x1.62c45f3535518p-15	0x1.301d77fa22c6ap-8	0x1.08eb84ad01b2bp-9	0x1.5955fafd541e4p-7
+interior-1layer	interior	stem_P50	0x1.a1cbc63946852p+1	0x1.b24b3b7485aaep-7	0x1.0f956a0a486cp+0	0x1.444e5d2cfcabfp-1	0x1.a0d05de3b0133p+1
+interior-1layer	interior	stem_c	-0x1.692a0f0179c14p+0	-0x1.776d084744f5p-8	-0x1.4c41905a42e1cp-1	-0x1.1858ca7391c8dp-2	-0x1.f5a901b851c0cp-4
+interior-1layer	interior	R_d_25	-0x1.fda3d809f5ffp-3	-0x1.9121f6123e60ap-12	-0x1.57dc5fc75e8e7p-5	-0x1.2b8b0e6fa548p-6	-0x1.3cb1590701d08p-3
+interior-5layer	interior	vcmax_25	0x1.a77aab34813fdp-5	0x1.f4ceedc99bba9p-16	0x1.4a92e1565387bp-10	0x1.94b246b5cc275p-11	0x1.91a96531caad3p-5
+interior-5layer	interior	stem_P50	0x1.00773b90616c4p+1	0x1.6ff085207d8dcp-6	0x1.62e8c3a2f1a02p-1	0x1.2953b1e2e024cp-1	0x1.4a71f784019dfp+1
+interior-5layer	interior	stem_c	-0x1.65e242346d344p-1	-0x1.00b83c325e56ep-7	-0x1.7b7bc2733d4d2p-2	-0x1.9ee741d000bbp-3	0x1.5e3fe3eb6425dp-3
+interior-5layer	interior	R_d_25	-0x1.5305eb9ee638p-1	-0x1.75a7196810224p-10	-0x1.ed481c81f4f13p-5	-0x1.2df195d2e77b4p-5	-0x1.11e93ef80173ap-1
+pinned-dry-1layer	pinned	vcmax_25	0x1.1bfe36d090278p-10	0x0p+0	0x0p+0	0x0p+0	0x1.1bfe36d090278p-10
+pinned-dry-1layer	pinned	stem_P50	0x1.10c13dc77c42p+2	0x1.bba5b7a2ecb5cp-7	0x1.229df2ba3bc79p+2	0x1.dee64c51df0f3p-3	0x1.10c13dc77c42p+2
+pinned-dry-1layer	pinned	stem_c	-0x1.d574cf761a6fcp+1	-0x1.7dcb97e7307c3p-7	-0x1.16ec7dce0e6ebp+3	-0x1.9c21fe2a597bep-3	-0x1.d574cf761a6fcp+1
+pinned-dry-1layer	pinned	R_d_25	-0x1.3e8e2a0159cap-5	0x0p+0	0x0p+0	0x0p+0	-0x1.3e8e2a0159cap-5
+shutdown-1layer	pinned	vcmax_25	-0x1.83e0f83e0f83ep-58	0x0p+0	0x0p+0	0x0p+0	-0x1.83e0f83e0f83ep-58
+shutdown-1layer	pinned	stem_P50	0x0p+0	0x0p+0	0x0p+0	0x0p+0	0x1.0a57bbc9be1a4p-55
+shutdown-1layer	pinned	stem_c	0x0p+0	0x0p+0	0x0p+0	0x0p+0	-0x1.05b51994186cfp-54
+shutdown-1layer	pinned	R_d_25	0x1p-50	0x0p+0	0x0p+0	0x0p+0	0x1p-50
+single-potential	interior	vcmax_25	0x1.8dcf90fde232ap-11	0x1.8655cd1b3c78fp-20	0x1.0f0fb3a8f3901p-11	0x1.f6badbcc61bafp-12	0x1.226a2fdb68a16p-12
+single-potential	interior	leaf_specific_conductance_max	0x1.61f351456709bp+11	0x1.117885db43046p+3	0x1.c6e145e99dd5ap+10	0x1.6037129f6f778p+11	0x1.1bfefa08ca7ffp+10
+single-potential	interior	resistance	-0x1.f8dbf6d375c1p-14	-0x1.86110d42d53dap-22	-0x1.33d7c6b4bd9d2p-14	-0x1.0e960be2bce58p-14	-0x1.b3f5358b592fap-15
+single-potential	interior	R_d_25	-0x1.09104ac3c993p-5	-0x1.d8c7e3060a5a3p-15	-0x1.485072ec49db6p-6	-0x1.307528eae105cp-6	-0x1.c056d4b8f2ap-7
+TF24-collar	interior	vcmax_25	0x1.f4c6eebdbec56p-6	0x1.b43c01f96666ep-15	0x1.56446bc391c6fp-8	0x1.4439190a016d4p-9	0x1.44170bfd68be5p-6
+TF24-collar	interior	stem_P50	0x1.5d081484d608cp+1	0x1.aedfa4b6424cbp-7	0x1.ff52a0a4c1894p-1	0x1.403d1d20de278p-1	0x1.4ef116827ed37p+1
+TF24-collar	interior	R_d_25	-0x1.3fc92b065018cp-2	-0x1.9fb44f25d95d2p-12	-0x1.4628d3b15236cp-5	-0x1.34f6e60179544p-6	-0x1.d7332780b2458p-3
+TF24-collar	interior	TF24_beta2	0x1.36318750b0b6fp-2	0x1.7eedbaf7d4e9cp-10	0x1.2c719f387ab76p-3	0x1.1c9ac215ca9f9p-4	0x1.ce9543931b33ap+0
+TF24-collar	interior	TF24_cost_scale	-0x1.352adbbbd4e1ep-2	-0x1.7da977e5300a7p-10	-0x1.2b733528fa17fp-3	-0x1.1ba9c1a995d7fp-4	-0x1.3437dd870c066p-2
+TF24-leaf	interior	vcmax_25	0x1.7906fe46a08f1p-5	-0x1.5d23522fb956dp-15	-0x1.617f29c6f047bp-10	NaN	0x1.8ed95b7316b1bp-5
+TF24-leaf	interior	stem_P50	0x1.f9cef43042c0dp+0	0x1.f9cb542a73144p-6	0x1.1d7980561f0d4p-1	NaN	0x1.55fb1c41c28bcp+1
+TF24-leaf	interior	R_d_25	-0x1.724ccc92a403ap-1	-0x1.957bba402b378p-10	-0x1.9a8ba620e06e1p-5	NaN	-0x1.3f9cf84b74868p-1
+TF24-leaf	interior	TF24_beta2	0x1.20e730305a09p-2	0x1.20e51e2116c68p-8	0x1.24806c7b6ecbp-3	NaN	0x1.c3e3503eeeaa7p+0
+TF24-leaf	interior	TF24_cost_scale	-0x1.6ec64c6c72199p-3	-0x1.6ec3ab7d9af94p-9	-0x1.7357d8830d109p-4	NaN	-0x1.12e5b5354904dp-2
+CF77-collar	interior	vcmax_25	0x1.4cdc4cbdf0248p-4	0x1.38b4c20bdeb56p-12	0x1.d1b235f8e46fdp-5	0x1.d2103086bc5eep-7	0x1.ccc81482bd41fp-6
+CF77-collar	interior	stem_P50	0x1.a56e1c21a222ap-46	0x1.2eb8a7d5d58b6p-53	-0x1.909fbeefe1408p+0	0x1.c32e8657d53d2p-48	0x0p+0
+CF77-collar	interior	R_d_25	-0x1.63f79048660d4p-1	-0x1.27fec85391833p-9	-0x1.b8cf414ad4cdp-2	-0x1.b928362ba2ef7p-4	-0x1.2bde1a9552222p-2
+CF77-collar	interior	CF77_lambda_	-0x1.132cafe2fe053p-15	-0x1.8b5388069d4c6p-23	-0x1.265e73dd7a2d8p-15	-0x1.2699db6711105p-17	-0x1.75f8ecb653fecp-16
+CF77-leaf	interior	vcmax_25	0x1.4cdc4cbd564abp-4	0x1.38b4c20b01adap-12	0x1.a01a4bc2955fep-8	NaN	0x1.ccc81482bd3cep-6
+CF77-leaf	interior	stem_P50	0x1.242afff4d2b34p-35	0x1.a3bd6p-43	-0x1.4ca31529477a7p-5	NaN	0x1.a8p-49
+CF77-leaf	interior	R_d_25	-0x1.63f79047d46adp-1	-0x1.27fec852c049cp-9	-0x1.89ddcd89c49a6p-5	NaN	-0x1.2bde1a95521eap-2
+CF77-leaf	interior	CF77_lambda_	-0x1.132cafe23b86p-15	-0x1.8b53880585dc4p-23	-0x1.07054c717a141p-18	NaN	-0x1.75f8ecb653fa3p-16
+JS22-collar	interior	vcmax_25	0x1.fc94fad7c5609p-6	0x1.3fc6d5cc18078p-16	0x1.baf9a3ea43726p-9	0x1.dc830df03001p-11	0x1.c4661168a793bp-6
+JS22-collar	interior	stem_P50	0x1.1cafa91e8cc33p+1	0x1.9515cde97d2fp-7	0x1.a490f6e20305ep-1	0x1.2dd1157ae6102p-1	0x1.e6f764fe2fbb1p+0
+JS22-collar	interior	R_d_25	-0x1.426a51ff8de36p-2	-0x1.2dc29ea1c8b44p-13	-0x1.a204810d87526p-6	-0x1.c1aa359a6c7d5p-8	-0x1.27e8095cd03cep-2
+JS22-collar	interior	JS22_gamma	-0x1.5a2501b540264p+0	-0x1.ec891218de803p-8	-0x1.5525539d576bdp+0	-0x1.6ef92905c3d4ap-2	-0x1.14edc9d33076fp+1
+JS22-leaf	interior	vcmax_25	0x1.7a119c26a303dp-5	-0x1.4c7992c1b490fp-15	-0x1.50a0290d8d905p-10	NaN	0x1.8ed95b730754bp-5
+JS22-leaf	interior	stem_P50	0x1.13b26bc557b82p+0	0x1.13b071f130aa4p-6	0x1.a3f9a17b408aap-4	NaN	0x1.bfb11cdc3e2b9p-1
+JS22-leaf	interior	R_d_25	-0x1.6fe182a22c0c5p-1	-0x1.82218e3d91a3p-10	-0x1.86f3a0a043be7p-5	NaN	-0x1.3f9cf84b98336p-1
+JS22-leaf	interior	JS22_gamma	-0x1.5b0528fe3458ep+1	-0x1.5b02ac4e3edd8p-5	-0x1.5f57b734fd593p+0	NaN	-0x1.187fee1da7ad6p+2
+CMax-collar	interior	vcmax_25	0x1.ee030026ae603p-6	0x1.2c65d03073ff1p-15	0x1.175dc561c1dc7p-8	0x1.bef83cffdb203p-10	0x1.7b80d26f16d48p-6
+CMax-collar	interior	stem_P50	0x1.d640ad4725de2p+0	0x1.346942be50176p-7	0x1.204b2b0285875p-1	0x1.cae4a421ea87fp-2	0x1.46acb2490d68ep+0
+CMax-collar	interior	R_d_25	-0x1.3b5e93e2dbdep-2	-0x1.19680c6728351p-12	-0x1.05b4633be98dcp-5	-0x1.a2b64a432a616p-7	-0x1.05bc1d9eb6c42p-2
+CMax-collar	interior	CMax_a	-0x1.13d584ab115b7p+1	-0x1.69ce8b43ef312p-7	-0x1.5079dd100ef2ap+0	-0x1.0d2bc3aa9d4d2p-1	-0x1.98317de24c9b2p+1
+CMax-collar	interior	CMax_b	-0x1.01d69d7630e81p-1	-0x1.5233bf7954391p-9	-0x1.3a862296b218dp-2	-0x1.f7384af7d986ep-4	-0x1.0a4eb0dd341aap+0
+CMax-leaf	interior	vcmax_25	0x1.77c2a9c26d162p-5	-0x1.71687542488c1p-15	-0x1.76051549fe2fp-10	NaN	0x1.8ed95b731ea9bp-5
+CMax-leaf	interior	stem_P50	0x1.1974f47bde92ep+0	0x1.1972f015de82bp-6	0x1.d2a0d6615c22fp-4	NaN	0x1.bfb11cdbc9c2ep-1
+CMax-leaf	interior	R_d_25	-0x1.753e2494a4918p-1	-0x1.ad064f1f0b92cp-10	-0x1.b26177e781884p-5	NaN	-0x1.3f9cf84b62042p-1
+CMax-leaf	interior	CMax_a	-0x1.1cdefbf11f8d9p+1	-0x1.1cdcf1478319fp-5	-0x1.206b5ccee1426p+0	NaN	-0x1.123c2094a6af4p+2
+CMax-leaf	interior	CMax_b	-0x1.705892d96225p-1	-0x1.7055ef0842fcep-7	-0x1.74ef21af532f9p-2	NaN	-0x1.0bf8530c68784p+1
+SOX-collar	interior	vcmax_25	0x1.25b3d6e3da99bp-6	0x1.f20dbab7c0d9cp-17	0x1.49c63002a754bp-10	0x1.71acb79ac17fep-11	0x1.3dbe7f92db44ap-7
+SOX-collar	interior	stem_P50	0x1.01ffb4d8e6392p+1	0x1.21982fd2808d6p-7	0x1.35a5d1c4fb7f7p-1	0x1.ade57e3aa5125p-2	0x1.b18d099d35fe4p+0
+SOX-collar	interior	R_d_25	-0x1.95e0ae5c804c8p-3	-0x1.5521501d2a90fp-15	-0x1.c3bdfc89f1504p-9	-0x1.fa6663fa43701p-10	-0x1.01ff7026113acp-3
+SOX-leaf	interior	vcmax_25	0x1.7b955a51b129dp-5	-0x1.e1566c95ce7cdp-18	-0x1.73e3d438a1617p-13	NaN	0x1.2269c5a280bd8p-5
+SOX-leaf	interior	stem_P50	0x1.292c3ce17491ap+1	0x1.67720e751e3d5p-6	0x1.95a8de5c5edc7p-2	NaN	0x1.5d83452e1b508p+1
+SOX-leaf	interior	R_d_25	-0x1.0f552849dce0cp-1	-0x1.d9516fa7fe5c1p-12	-0x1.6db1a7710d715p-7	NaN	-0x1.73ac1e3f25cb1p-2
+JW26-collar	interior	vcmax_25	0x1.573aeba5d64e7p-6	0x1.419d2698345dap-16	0x1.c516c36639af1p-10	0x1.ddaf9abff4ddfp-11	0x1.13d3ab31359d1p-7
+JW26-collar	interior	stem_P50	0x1.fd054cc1cf594p+0	0x1.297fab42180aap-7	0x1.3b6d452605c1p-1	0x1.b9de44cf812efp-2	0x1.4bae78558d321p+0
+JW26-collar	interior	R_d_25	-0x1.bfd9ac0d783a4p-3	-0x1.cd8ec766c0175p-15	-0x1.451eea40f6a88p-8	-0x1.56c54ede70fb6p-9	-0x1.a94d57615aa06p-4
+JW26-leaf	interior	vcmax_25	0x1.76f064c0b640bp-5	-0x1.661a8f502a17p-16	-0x1.1a8d279b472b7p-11	NaN	0x1.c90875932e413p-6
+JW26-leaf	interior	stem_P50	0x1.f63d1adeddd5p+0	0x1.409392484ff3cp-6	0x1.5178af495cb1dp-2	NaN	0x1.06252c6a9e0e6p+1
+JW26-leaf	interior	R_d_25	-0x1.1e4936c16ebc2p-1	-0x1.388e3ea7b748ap-11	-0x1.ed39d78ffee74p-7	NaN	-0x1.29bdbf6f3d096p-2
+ProfitMax-collar	interior	vcmax_25	0x1.1f11e5e7e35bdp-7	0x1.a3b46ac1a0c62p-18	0x1.e0651e5eb00d1p-12	0x1.3704c5025a555p-12	-0x1.d4f610bd0e55ep-13
+ProfitMax-collar	interior	stem_P50	0x1.41c295b32dff5p+1	0x1.370fbe5d7b08ap-7	0x1.509ae6bc89244p-1	0x1.cd04d99548519p-2	0x1.7037e2cbdaf86p-4
+ProfitMax-collar	interior	R_d_25	-0x1.1acfa09620f08p-4	0x1.9eb0862dfd78fp-13	0x1.daa7926de80b8p-7	0x1.334d5a08772f3p-7	0x1.2badb23db1a8ep-8
+ProfitMax-leaf	interior	vcmax_25	0x1.931f214445e1ep-5	0x1.4e70a56f32e56p-16	0x1.026cf3e0fabefp-11	NaN	0x1.c85b60293de0ap-11
+ProfitMax-leaf	interior	stem_P50	0x1.28a7ba226faebp+1	0x1.66ef45b1dff25p-6	0x1.94d50f91f0007p-2	NaN	0x1.e18ede3555c6p-4
+ProfitMax-leaf	interior	R_d_25	-0x1.0e57347e6037p-1	-0x1.c53cd5541e397p-12	-0x1.5e38cb515c85dp-7	NaN	0x1.9140a381d6b1p-8
+TF24_floor-collar	interior	vcmax_25	0x1.dbb326d5b2556p-6	0x1.09531cfdcfc8cp-14	0x1.602b9ed95922ap-8	0x1.89e07c3351d95p-9	0x1.df70173136b9ap-7
+TF24_floor-collar	interior	stem_P50	0x1.394e8f02bfcfcp+1	0x1.604417b06fe16p-7	0x1.88acbf8f1c02bp-1	0x1.0578966e07202p-1	0x1.8c01db2d7971fp+0
+TF24_floor-collar	interior	R_d_25	-0x1.3a8823e791676p-2	-0x1.0e987f907400bp-11	-0x1.672aaf3f1bad1p-5	-0x1.91b3a8defafa3p-6	-0x1.84650679584ccp-3
+TF24_floor-collar	interior	TF24_floor_lambda_o	-0x1.30955ac067159p-17	-0x1.5675319578459p-25	-0x1.c68cf6834f185p-19	-0x1.fc61b90c1dd9ep-20	-0x1.d923a6f445adfp-17
+TF24_floor-leaf	interior	vcmax_25	0x1.00f7130db6671p-4	0x1.3c946f98d547ep-13	0x1.d945faeaa63d2p-9	NaN	0x1.726683284135bp-5
+TF24_floor-leaf	interior	stem_P50	0x1.4f6ae4fcd7042p+0	0x1.71e921e76644p-7	0x1.34d323519ec85p-3	NaN	0x1.c62a5e58a7c98p-1
+TF24_floor-leaf	interior	R_d_25	-0x1.66666b92ffb58p-1	-0x1.1876b05b0d909p-9	-0x1.a347fb6a068b7p-5	NaN	-0x1.ce7d2cc1a3be8p-2
+TF24_floor-leaf	interior	TF24_floor_lambda_o	-0x1.77b4215973f55p-16	-0x1.9e56f19927337p-23	-0x1.35b5c590fadbcp-18	NaN	-0x1.2c9f309a0ce67p-15
+LeastCost-collar	interior	vcmax_25	0x1.4d5d09bad1ef2p-4	0x1.3965c5b94cdc6p-12	0x1.97c9b34582091p-5	0x1.d2ec2afd17c23p-7	-0x1.012dc5641e8p-2
+LeastCost-collar	interior	stem_P50	-0x1.d65fe2fb45326p-47	-0x1.4b901cccc2996p-54	-0x1.3712f056f7c88p+0	-0x1.01131c61dfa84p-48	0x0p+0
+LeastCost-collar	interior	R_d_25	-0x1.860b5d8d4a5bcp-2	-0x1.1442bc3a589e1p-11	-0x1.67774b945f85fp-4	-0x1.9b97e3f70c8b6p-6	-0x1.52f55a8c58535p+7
+LeastCost-collar	interior	LeastCost_beta	0x1.25cb1cc41867fp-1	0x1.9e2f51cf15c47p-9	0x1.0d772189db428p-1	0x1.348a98febe326p-3	-0x1.3a2a9377630edp+8
+LeastCost-leaf	interior	vcmax_25	0x1.4d5d09ba79041p-4	0x1.3965c5b8cf815p-12	0x1.9f605317fb951p-8	NaN	-0x1.012dc5641e94p-2
+LeastCost-leaf	interior	stem_P50	0x1.85c0e7039aff9p-34	0x1.12bbe8p-41	-0x1.3ab5cb92038c5p-5	NaN	0x1.4p-42
+LeastCost-leaf	interior	R_d_25	-0x1.860b5d8d232bp-2	-0x1.1442bc39ea1e4p-11	-0x1.6e27b92263473p-7	NaN	-0x1.52f55a8c58536p+7
+LeastCost-leaf	interior	LeastCost_beta	0x1.25cb1cc3a2e4fp-1	0x1.9e2f51ce70195p-9	0x1.127ad01d02f69p-4	NaN	-0x1.3a2a9377630f4p+8
+damage-collar	interior	vcmax_25	0x1.cc0e4c90d2363p-6	0x1.57c665b95d19cp-14	0x1.9f7016841da63p-8	0x1.fdd8697bdd553p-9	0x1.4e66175d05cc7p-6
+damage-collar	interior	A_	0x1.2c12fa1207574p+1	0x1.d5592373617e9p-8	0x1.1b980c019127ap-1	0x1.5c0a477fb81d8p-2	0x1.ac976dd6a935dp+0
+damage-collar	interior	D_	-0x1.943a1d2db5b8dp+1	-0x1.3bdbdac63bd9p-7	-0x1.7db3c96fd904ep-1	-0x1.d47186dbc461bp-2	-0x1.20c61e8e5d92cp+1
+damage-collar	interior	topt_offset_	0x1.e41e9dafdc0f5p-2	0x1.7a9b881ded5d5p-10	0x1.c988135eb027dp-4	0x1.18c09ca99639cp-4	0x1.59bb01902583p-2
+damage-collar	interior	c_repair_maint_	-0x1.ea5e6bf756fd4p-4	-0x1.2396ce92fa3c6p-12	-0x1.605f937314093p-6	-0x1.b07316971c12bp-7	-0x1.7fc96d9372704p-4
+prescribed-collar	prescribed	vcmax_25	0x1.07c6a067f0427p-1	0x1.1413a1626a455p-9	0x1.59708c3f95ae1p-3	0x1.999999999999ap-4	0x1.2044bdded4611p-2
+prescribed-collar	prescribed	stem_P50	-0x1.0194eba00df9bp+0	-0x1.1413a1626a455p-8	-0x1.bd48289181df1p-2	-0x1.999999999999ap-3	0x1.3adac30f6fad5p-1
+prescribed-collar	prescribed	stem_c	0x1.825f617014f67p+0	0x1.9e1d72139f67fp-8	0x1.d2ae9b9bdc3dbp-2	0x1.3333333333333p-2	0x1.4673f827b6843p+0
+prescribed-collar	prescribed	R_d_25	-0x1.58e677f26d2dcp-3	0x0p+0	0x0p+0	0x0p+0	-0x1.58e677f26d2dcp-3
+prescribed-ProfitMax-collar	prescribed	vcmax_25	0x1.8c6d31f8922fcp-7	0x0p+0	0x0p+0	0x0p+0	-0x1.2fa5347750b4cp-13
+prescribed-ProfitMax-collar	prescribed	stem_P50	0x0p+0	0x0p+0	-0x1.8f5e7147b0c4p-4	0x0p+0	0x1.535aec6f8863dp-3
+prescribed-JS22-leaf	prescribed	vcmax_25	0x1.36afbc7fa7597p-5	0x0p+0	0x0p+0	NaN	0x1.36afbc7fa7597p-5
+prescribed-JS22-leaf	prescribed	stem_P50	0x1.d41f03d782ee5p-2	0x1.9cd154962924fp-9	0x0p+0	NaN	0x1.d41f03d782ee5p-2
+prescribed-JS22-leaf	prescribed	JS22_gamma	0x0p+0	0x0p+0	0x0p+0	NaN	-0x1p+0
+TF24-collar-cuticle	interior	vcmax_25	0x1.f115a3e3e7696p-6	0x1.b240e35e93079p-15	0x1.55737d9ee544cp-8	0x1.42c162296662cp-9	0x1.4082709a17ebbp-6
+TF24-collar-cuticle	interior	stem_P50	0x1.5ebcbf1254d06p+1	0x1.af496291ec25ep-7	0x1.000bae4f03963p+0	0x1.408ce38b7a6c7p-1	0x1.50a3f5bc2426dp+1
+TF24-collar-cuticle	interior	R_d_25	-0x1.3e2d288ab3ceap-2	-0x1.9e8fd041c4dap-12	-0x1.45f7b89f8816ap-5	-0x1.341ea52ac8c62p-6	-0x1.d3c8e7a64556p-3
+TF24-collar-cuticle	interior	g_min	-0x1.70b7f0129d1fcp+6	-0x1.c565bb9b3d3a8p-2	0x1.557dded679d95p+3	0x1.42cb31e2df23cp+2	-0x1.c90438c81bda1p+6
+TF24-collar-cuticle	interior	TF24_beta2	0x1.2ff15b3903864p-2	0x1.75bed748b3e3p-10	0x1.25dfc043a4e71p-3	0x1.15c887bddceb5p-4	0x1.cef4adf147337p+0
+TF24-collar-cuticle	interior	TF24_cost_scale	-0x1.36784d1b1130cp-2	-0x1.7dc587cb71188p-10	-0x1.2c2f579924d09p-3	-0x1.1bbfa965c043bp-4	-0x1.35b8f09ff91f3p-2
+TF24-leaf-cuticle	interior	vcmax_25	0x1.797122514c5cep-5	-0x1.5819f63562442p-15	-0x1.5cfd137884681p-10	NaN	0x1.8f045576e97c3p-5
+TF24-leaf-cuticle	interior	stem_P50	0x1.fba55519de2fap+0	0x1.fa07c0ac6b2a8p-6	0x1.1d684c327f532p-1	NaN	0x1.57557e281295dp+1
+TF24-leaf-cuticle	interior	R_d_25	-0x1.7204b0f38b568p-1	-0x1.9516b2fe11d2p-10	-0x1.9ad78e6c9b81cp-5	NaN	-0x1.3f387804b67dcp-1
+TF24-leaf-cuticle	interior	g_min	-0x1.4d8492a7678f5p+4	-0x1.4c74dafa27696p-2	0x1.d18dcc10c16ep+2	NaN	-0x1.19e2475d66e45p+5
+TF24-leaf-cuticle	interior	TF24_beta2	0x1.1e7440f9f7d98p-2	0x1.1d8ae1152ccb1p-8	0x1.21991471785b1p-3	NaN	0x1.c445a34f25f7ap+0
+TF24-leaf-cuticle	interior	TF24_cost_scale	-0x1.6fd2ba1ff8243p-3	-0x1.6ea70f9d45e2fp-9	-0x1.73dc2b387ba91p-4	NaN	-0x1.13e0c820f3ba4p-2
+CF77-collar-cuticle	interior	vcmax_25	0x1.4cdc4cbd5a101p-4	0x1.38b4c20b07198p-12	0x1.e539cd99a932fp-5	0x1.d21beb8e6ad1dp-7	0x1.ccc81482bd425p-6
+CF77-collar-cuticle	interior	stem_P50	-0x1.61e5818ca7f34p-46	-0x1.fc6bd78006e0ap-54	-0x1.aec1e71945a6ap+0	-0x1.7f9473c7f1056p-48	-0x1.6c39e429ceccp-56
+CF77-collar-cuticle	interior	R_d_25	-0x1.63f79047d7fecp-1	-0x1.27fec852c56dp-9	-0x1.cb4bac00088d6p-2	-0x1.b93350b85e04cp-4	-0x1.2bde1a9552238p-2
+CF77-collar-cuticle	interior	g_min	-0x1.3abf6fd7e9777p-27	-0x1.c42ecp-35	0x1.b401cd8e1a7p+6	0x1.a2d454671c394p+4	-0x1.872c35bcbcc8cp+6
+CF77-collar-cuticle	interior	CF77_lambda_	-0x1.132cafe2404a9p-15	-0x1.8b5388058cb9bp-23	-0x1.32b6b89070fd1p-15	-0x1.26a145a22ecebp-17	-0x1.78b4f49929e43p-16
+CF77-leaf-cuticle	interior	vcmax_25	0x1.4cdc4cbd88eabp-4	0x1.38b4c20b4a688p-12	0x1.a08aed28a208p-8	NaN	0x1.ccc81482bd42fp-6
+CF77-leaf-cuticle	interior	stem_P50	0x1.07f79a967c0d2p-36	0x1.7b394p-44	-0x1.51792fa2e5e66p-5	NaN	-0x1p-53
+CF77-leaf-cuticle	interior	R_d_25	-0x1.63f790480456ep-1	-0x1.27fec85305229p-9	-0x1.8a486a188536ep-5	NaN	-0x1.2bde1a955223p-2
+CF77-leaf-cuticle	interior	g_min	-0x1.24c3c0920f8c4p-28	-0x1.a4988p-36	0x1.764a70d1a87a9p+3	NaN	-0x1.872c35bcbcc94p+6
+CF77-leaf-cuticle	interior	CF77_lambda_	-0x1.132cafe27b84cp-15	-0x1.8b538805e1d0bp-23	-0x1.074c7e2f533bep-18	NaN	-0x1.78b4f49929e38p-16
+JS22-collar-cuticle	interior	vcmax_25	0x1.f882292977d73p-6	0x1.3e4cff723c9bp-16	0x1.b9ee060608129p-9	0x1.da50c602703dbp-11	0x1.c05306daae7eep-6
+JS22-collar-cuticle	interior	stem_P50	0x1.1e42fea318b66p+1	0x1.9570d428ec10ep-7	0x1.a51bf6de96e7p-1	0x1.2e156175fdb73p-1	0x1.e9cc37d5e9141p+0
+JS22-collar-cuticle	interior	R_d_25	-0x1.4075aa81d9548p-2	-0x1.2bf8a79c67156p-13	-0x1.a07b28e9d7692p-6	-0x1.bf007be28c31p-8	-0x1.25fc3a5ff58p-2
+JS22-collar-cuticle	interior	g_min	-0x1.736c76e446c1fp+6	-0x1.070770e70915p-1	0x1.8eebf7da799a8p+2	0x1.ac27df8818317p+0	-0x1.8cc8285370f39p+6
+JS22-collar-cuticle	interior	JS22_gamma	-0x1.5af72778a01b2p+0	-0x1.eb6ace93a0fd5p-8	-0x1.552480e688562p+0	-0x1.6e2473c5a86f7p-2	-0x1.15c9c4297be76p+1
+JS22-leaf-cuticle	interior	vcmax_25	0x1.7a8109fd5eebfp-5	-0x1.47372edd611b2p-15	-0x1.4bd5f3a60ebaap-10	NaN	0x1.8f05c123d0efcp-5
+JS22-leaf-cuticle	interior	stem_P50	0x1.155cbf40e98fp+0	0x1.147357eedae3p-6	0x1.a4cea230d356p-4	NaN	0x1.c2a539895acd7p-1
+JS22-leaf-cuticle	interior	R_d_25	-0x1.6f8a209d08a1p-1	-0x1.8162a836c2acap-10	-0x1.86d3b06ad932bp-5	NaN	-0x1.3f351f8f4effbp-1
+JS22-leaf-cuticle	interior	g_min	-0x1.58beaddda3dcap+4	-0x1.579c9286da0c8p-2	0x1.bae3f80154c75p+2	NaN	-0x1.19e9dc6dd224bp+5
+JS22-leaf-cuticle	interior	JS22_gamma	-0x1.5bb90bd85061fp+1	-0x1.5a946ef7158cbp-5	-0x1.5f79327563ff1p+0	NaN	-0x1.196d626443b32p+2
+CMax-collar-cuticle	interior	vcmax_25	0x1.e9e6a9f85cbf4p-6	0x1.2a8e70b275bcap-15	0x1.163d6169e722dp-8	0x1.bc3c113fedfbep-10	0x1.779b2805b6069p-6
+CMax-collar-cuticle	interior	stem_P50	0x1.d9369c5a023d6p+0	0x1.3506e488ef59dp-7	0x1.20f67c87dbb9fp-1	0x1.cbd06ce790396p-2	0x1.48fc1919fda6ep+0
+CMax-collar-cuticle	interior	R_d_25	-0x1.39793845b123p-2	-0x1.17d68fcb819fcp-12	-0x1.04cb965bf5c9bp-5	-0x1.a062079cb47c6p-7	-0x1.03e8b1354f84p-2
+CMax-collar-cuticle	interior	g_min	-0x1.78457bd517079p+6	-0x1.eb70a9fe7ede5p-2	0x1.06ef63df58cfdp+3	0x1.a3cca5538daa6p+1	-0x1.ae46862ef3f32p+6
+CMax-collar-cuticle	interior	CMax_a	-0x1.1465cc4ac0fe7p+1	-0x1.68ff4102188b3p-7	-0x1.506e6f2ea6fbep+0	-0x1.0c9245a7a141bp-1	-0x1.998ba7416f461p+1
+CMax-collar-cuticle	interior	CMax_b	-0x1.022a0855ce657p-1	-0x1.512ec8ea6e014p-9	-0x1.3a3cd3cf77d88p-2	-0x1.f5b559efb0e2dp-4	-0x1.0af06aae66614p+0
+CMax-leaf-cuticle	interior	vcmax_25	0x1.7833f6711559fp-5	-0x1.6bcd377741f8fp-15	-0x1.7101296d7a438p-10	NaN	0x1.8f02a44d0a728p-5
+CMax-leaf-cuticle	interior	stem_P50	0x1.1b283db8ba321p+0	0x1.1a4a977bd8242p-6	0x1.d39bc793fc433p-4	NaN	0x1.c2b5020b08154p-1
+CMax-leaf-cuticle	interior	R_d_25	-0x1.74e805186f002p-1	-0x1.ac0c738a5afbdp-10	-0x1.b22b9de02ca93p-5	NaN	-0x1.3f3c739d2f9f2p-1
+CMax-leaf-cuticle	interior	g_min	-0x1.40704cc543574p+4	-0x1.3f7577a607eb9p-2	0x1.ebf75bcedf72dp+2	NaN	-0x1.19d940aae2fecp+5
+CMax-leaf-cuticle	interior	CMax_a	-0x1.1d45197fd069ep+1	-0x1.1c65cbe3977c9p-5	-0x1.207707662f3cap+0	NaN	-0x1.12fefd98f4649p+2
+CMax-leaf-cuticle	interior	CMax_b	-0x1.706779151e31dp-1	-0x1.6f4718166c9d7p-7	-0x1.7487c40e37682p-2	NaN	-0x1.0c763a5fb0e46p+1
+SOX-collar-cuticle	interior	vcmax_25	0x1.22ca491f51bb7p-6	0x1.ed5fec5839043p-17	0x1.4788e65e8da02p-10	0x1.6e35efb59dcc1p-11	0x1.392a9057c1f2dp-7
+SOX-collar-cuticle	interior	stem_P50	0x1.02cdcf4eabdf3p+1	0x1.21a8b44aea351p-7	0x1.358dca26e200ap-1	0x1.ae00afd1acf74p-2	0x1.b2597b59875ap+0
+SOX-collar-cuticle	interior	R_d_25	-0x1.93161f11052ccp-3	-0x1.50e3f54bc6ebcp-15	-0x1.bf4ce3cca7867p-9	-0x1.f41e50dbf481fp-10	-0x1.fe98ecdf1077dp-4
+SOX-collar-cuticle	interior	g_min	-0x1.2ed4f3059b5e2p+6	-0x1.52ef9bcfdcd56p-2	0x1.282263d8aa412p+4	0x1.4b1a395d6610fp+3	-0x1.4d9602a7bd76cp+6
+SOX-leaf-cuticle	interior	vcmax_25	0x1.7b9de9bc21556p-5	-0x1.c194aa2239ceep-18	-0x1.5bb99132da67bp-13	NaN	0x1.21cf4f66575bdp-5
+SOX-leaf-cuticle	interior	stem_P50	0x1.2a26f881c1832p+1	0x1.67b2aee659296p-6	0x1.95b75066e5175p-2	NaN	0x1.5e72db369f84fp+1
+SOX-leaf-cuticle	interior	R_d_25	-0x1.0ee008701e7bdp-1	-0x1.d78919f15b53bp-12	-0x1.6cb4a6fb6ad67p-7	NaN	-0x1.729a91e360594p-2
+SOX-leaf-cuticle	interior	g_min	-0x1.bda3a099b5599p+4	-0x1.0cd09bc25c8aap-2	0x1.c57ba33081e6cp+2	NaN	-0x1.5e3ee3cd8ad8p+5
+JW26-collar-cuticle	interior	vcmax_25	0x1.5435955e49b79p-6	0x1.3df298f5de91cp-16	0x1.c18e9edad8e32p-10	0x1.d8412d7c5d165p-11	0x1.106086796c6dp-7
+JW26-collar-cuticle	interior	stem_P50	0x1.ff2767f078fdfp+0	0x1.29f1e28fceddp-7	0x1.3bb642c4105bep-1	0x1.ba8b4573edbb6p-2	0x1.4c4618276ee4p+0
+JW26-collar-cuticle	interior	R_d_25	-0x1.bd2b1f1f0ee6p-3	-0x1.c6cc065ed2c25p-15	-0x1.4186cb4cedf1ep-8	-0x1.51c28c146e5dcp-9	-0x1.a55459cf07b17p-4
+JW26-collar-cuticle	interior	g_min	-0x1.0cb1aee3091dcp+6	-0x1.393c87877b554p-2	0x1.5fb2b655deb3bp+4	0x1.71746f4c16b9p+3	-0x1.e2af0bbf9c783p+5
+JW26-leaf-cuticle	interior	vcmax_25	0x1.7718c70ef37cap-5	-0x1.5dd0bb27a6a0bp-16	-0x1.1465f8e18006ap-11	NaN	0x1.c831026d37274p-6
+JW26-leaf-cuticle	interior	stem_P50	0x1.f80613dfc914ap+0	0x1.4115aeee627cp-6	0x1.51b6353ed6d76p-2	NaN	0x1.06b4a6b00a95ep+1
+JW26-leaf-cuticle	interior	R_d_25	-0x1.1deac957babd8p-1	-0x1.37684920e2c99p-11	-0x1.ec1a322fc9763p-7	NaN	-0x1.28fcc801fca44p-2
+JW26-leaf-cuticle	interior	g_min	-0x1.3edc92a260427p+4	-0x1.9641ca77f7a9ep-3	0x1.1b887369578cbp+3	NaN	-0x1.007c72e5f6514p+5
+ProfitMax-collar-cuticle	interior	vcmax_25	0x1.15f74faff978fp-7	0x1.82a0341e075b1p-18	0x1.bae6ed41059e1p-12	0x1.1e824a5e9a25p-12	-0x1.da4dc98b80448p-13
+ProfitMax-collar-cuticle	interior	stem_P50	0x1.433c0dee9a5a6p+1	0x1.3768d93a2ffddp-7	0x1.510f57382c33bp-1	0x1.cd8a3aa62842ap-2	0x1.748047b4a705p-4
+ProfitMax-collar-cuticle	interior	R_d_25	-0x1.1216c357219ap-4	0x1.a16b176c6e7c4p-13	0x1.de2d3a4ac0bd1p-7	0x1.3553e7103fbf1p-7	0x1.28a416b92a398p-8
+ProfitMax-collar-cuticle	interior	g_min	-0x1.aca20c86211cfp+6	-0x1.9cf3bfed6e7dcp-2	0x1.556ce653b3d7bp+3	0x1.b9bab99c0c2a4p+2	-0x1.0755904b337fap+3
+ProfitMax-leaf-cuticle	interior	vcmax_25	0x1.9345029d47ce7p-5	0x1.56a49f59fe0cp-16	0x1.09145749015a9p-11	NaN	0x1.c6a045b326c6ap-11
+ProfitMax-leaf-cuticle	interior	stem_P50	0x1.2972b81cc575dp+1	0x1.671474763f7ecp-6	0x1.94aee3d25cb9ap-2	NaN	0x1.e3d08b1ec0bfep-4
+ProfitMax-leaf-cuticle	interior	R_d_25	-0x1.0dee094d7e1f8p-1	-0x1.c384c0d83975dp-12	-0x1.5d4f19544d4d9p-7	NaN	0x1.915ca5df196p-8
+ProfitMax-leaf-cuticle	interior	g_min	-0x1.8584090b8c779p+4	-0x1.d63960155b4a6p-3	0x1.f9bda78377142p+2	NaN	-0x1.4bdc47cef6cc2p+1
+TF24_floor-collar-cuticle	interior	vcmax_25	0x1.d7ccbbece5a63p-6	0x1.077fc7cabf316p-14	0x1.5e5ecded63755p-8	0x1.872c5e2c5ab2bp-9	0x1.d93c10e747a0bp-7
+TF24_floor-collar-cuticle	interior	stem_P50	0x1.3b0b7073f41d6p+1	0x1.60fa2168d214bp-7	0x1.89a5083375386p-1	0x1.0600ce6981f01p-1	0x1.8f0525269bd9dp+0
+TF24_floor-collar-cuticle	interior	R_d_25	-0x1.38fa2d119a6e8p-2	-0x1.0db69e871efacp-11	-0x1.66a21da029631p-5	-0x1.9066057be3385p-6	-0x1.8139c5383bc7cp-3
+TF24_floor-collar-cuticle	interior	g_min	-0x1.6fbe598b49733p+6	-0x1.9c0563c964cfap-2	0x1.8ec76238a9814p+3	0x1.bd382578ccc0ap+2	-0x1.f594e521d34a5p+6
+TF24_floor-collar-cuticle	interior	TF24_floor_lambda_o	-0x1.306ae79d08189p-17	-0x1.551208f05f177p-25	-0x1.c583fcde549a7p-19	-0x1.fa549ccc3c023p-20	-0x1.da996bd424a58p-17
+TF24_floor-leaf-cuticle	interior	vcmax_25	0x1.01154b1ecb301p-4	0x1.3d43354974334p-13	0x1.daee03a1a7a0ep-9	NaN	0x1.721f6c42ca14ap-5
+TF24_floor-leaf-cuticle	interior	stem_P50	0x1.51627960a4a1ap+0	0x1.738d6d9707441p-7	0x1.35dca29e26682p-3	NaN	0x1.c9c3d59734793p-1
+TF24_floor-leaf-cuticle	interior	R_d_25	-0x1.661c2ff35cc88p-1	-0x1.17f7d1723d923p-9	-0x1.a319f0c54a143p-5	NaN	-0x1.cdff769164f36p-2
+TF24_floor-leaf-cuticle	interior	g_min	-0x1.0f1444c161043p+4	-0x1.2a8833c85f8eep-3	0x1.34e757d83530ep+3	NaN	-0x1.fe4b7950c78abp+5
+TF24_floor-leaf-cuticle	interior	TF24_floor_lambda_o	-0x1.7766794a83443p-16	-0x1.9d6b02fe8d6a2p-23	-0x1.356f75cc541e9p-18	NaN	-0x1.2da05e015cf26p-15
+LeastCost-collar-cuticle	interior	vcmax_25	0x1.4bddcc657aacdp-4	0x1.3749cd9b86859p-12	0x1.b2698b4917cd9p-5	0x1.cfdf50b9af696p-7	0x1.b624a9e846p-8
+LeastCost-collar-cuticle	interior	stem_P50	-0x1.525229c09398ep-51	-0x1.df8406c077652p-59	-0x1.63c115b2ff0dp+0	-0x1.9fb95c560a42ep-52	-0x1.55edb537c4b4p-47
+LeastCost-collar-cuticle	interior	R_d_25	-0x1.88d63625151c8p-2	-0x1.175fecf8ed713p-11	-0x1.85e03b4837ebdp-4	-0x1.a050d01eadaadp-6	-0x1.51c17deff0d8dp+7
+LeastCost-collar-cuticle	interior	g_min	0x1.a932d7eae223ap+6	0x1.2d53503278e9cp-1	0x1.965136b711d53p+7	0x1.b1df3b1b71978p+5	-0x1.c71333c7b3dadp+15
+LeastCost-collar-cuticle	interior	LeastCost_beta	0x1.20bfa9e0fedc2p-1	0x1.994146ed28edp-9	0x1.1d905b3a226ddp-1	0x1.30edfdcc5e1e8p-3	-0x1.35099903799b3p+8
+LeastCost-leaf-cuticle	interior	vcmax_25	0x1.4bddcc659d38p-4	0x1.3749cd9bb77c5p-12	0x1.9d77f346fd073p-8	NaN	0x1.b624a9e83p-8
+LeastCost-leaf-cuticle	interior	stem_P50	0x1.b6b0ea2df15e5p-34	0x1.36e32p-41	-0x1.446a97e123d32p-5	NaN	0x1.5p-41
+LeastCost-leaf-cuticle	interior	R_d_25	-0x1.88d63625249ep-2	-0x1.175fecf919652p-11	-0x1.7314504dec771p-7	NaN	-0x1.51c17deff0d7dp+7
+LeastCost-leaf-cuticle	interior	g_min	0x1.a932d7eb63658p+6	0x1.2d535032d4829p-1	0x1.82ba5fbac918cp+4	NaN	-0x1.c71333c7b3dbcp+15
+LeastCost-leaf-cuticle	interior	LeastCost_beta	0x1.20bfa9e12c47cp-1	0x1.994146ed694d5p-9	0x1.0fcbe03c3e88cp-4	NaN	-0x1.35099903799b8p+8

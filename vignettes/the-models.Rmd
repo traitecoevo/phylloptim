@@ -989,7 +989,7 @@ The root curve obeys the identical homogeneity identity and takes the same `(roo
 
 `leaf_gradient()` and `leaf_gradient_batch()` return exact derivatives of a solved operating point with respect to the parameters. `model` and `route` select which optimum is differentiated: every curve in the table above, on the collar route or the leaf route. `leaf_gradient()` is the batch with one observation.
 
-## The composite
+## The implicit function theorem
 
 The reported outputs are evaluated *at* the optimum ψ*, so a parameter moves them in two ways: directly, and by moving ψ* itself. At an interior optimum `dJ/dψ = 0`, and differentiating that condition gives ψ*'s response without re-solving:
 
@@ -1002,6 +1002,8 @@ $$\frac{dY}{d\theta}=\left.\frac{\partial Y}{\partial\theta}\right|_{\psi}
 
 The second term is not a correction. For the cost parameters it is the whole answer.
 
+Every term is exact. The outputs, `dJ/dψ` and the bounds are closed forms in the parameters, and one pass of forward-mode automatic differentiation carries their derivatives in every parameter at once, so a gradient costs the same whatever it is asked for. Only `H` is a difference, of the exact `dJ/dψ` at ψ*. `vignette("derivative-surface")` has the machinery.
+
 ## The link makes one derivative serve every model
 
 `M` and `H` are second derivatives of `J = h(A) − C`, so both need `dJ/dψ`. That is where the benefit link earns its place:
@@ -1012,13 +1014,11 @@ That is one expression, with `h'` the only per-model term: `1`, `1/A`, or `1/|A|
 
 ## The envelope theorem, and where it stops
 
-At a stationary point `dJ/dψ = 0` identically, so the objective's own indirect term vanishes and `dJ/dθ` is the direct partial alone. That column is *assigned* rather than computed through the composite, because `J` is flat at its maximum: a central difference of it would divide the solve's 1e-09 floor by a 1e-06 step.
+At a stationary point `dJ/dψ = 0` identically, so the objective's own indirect term vanishes and `dJ/dθ` is the direct partial alone. The gradient reads `J` at the held ψ* there, so that column is the direct partial exactly.
 
-The envelope theorem does not survive a boundary. Where the optimum is a bound, ψ* is a parameter-dependent bound, `dJ/dψ` is not zero there, and `−M/H` is not the bound's derivative. The composite's premise is therefore tested rather than assumed, by an implied Newton step `|dJ/dψ ÷ H|` measured in MPa. Where the test fails, the gradient falls back to differencing the whole solve, which respects the constraint by construction.
+The envelope theorem does not survive a boundary. Where the optimum is a bound, ψ* is a parameter-dependent bound, `dJ/dψ` is not zero there, and `−M/H` is not the bound's derivative. So the premise is not tested numerically: the solve records which kind of point it found, and at a bound the gradient differentiates the bound itself, the wet end where uptake meets the residual flux or the dry end of the stem.
 
-Every route reaches the composite under `method = "auto"`, because every route now root-finds `dJ/dψ = 0`. Measured over 427 interior rows across six curves, the residual `|dJ/dψ|` at the returned ψ* has a median of 1.2e-15, against 4.4e-05 when those routes refined on bracket width instead.
-
-That is also what lets one finite-difference step serve every route. At `h = 1e-06`, a difference of the solve now matches the composite to 2.5e-05 for SOX and 5.1e-11 for TF24, where the same step once returned 0.1855 against a true 0.0551, and the wrong sign for JW26.
+Every route root-finds `dJ/dψ = 0`, so a point classified interior is a root. Measured over 427 interior rows across six curves, the residual `|dJ/dψ|` at the returned ψ* has a median of 1.2e-15, against 4.4e-05 when those routes refined on bracket width instead.
 
 `ProfitMax` is the one curve where the two routes answer different questions, and the next section is about that.
 
@@ -1026,7 +1026,7 @@ That is also what lets one finite-difference step serve every route. At `h = 1e-
 
 Pass `psi` and the outputs are evaluated at that potential instead of at the argmax. This is for a caller whose model *tracks* the optimum rather than finding it. There ψ does not move with θ, so there is no indirect term for any output and no envelope identity to invoke: the answer is the direct partial.
 
-The exception is a `psi` at or past an end of the feasible interval, which is refused: the end is a function of the parameters, so a derivative there would be the bound's. The returned status tag says so.
+The exceptions are at the dry end. A `psi` outside the feasible interval is refused rather than moved onto the end, whose derivative would be the bound's; one inside it whose leaf potential lies in the stem curve's tail has a value and no gradient, because every row there would be rounding. The returned status says which.
 
 ## A partial is not always a total
 
@@ -1034,9 +1034,7 @@ ProfitMax normalises by `|A|max`, the largest assimilation available on the supp
 
 Because it is an optimum, there are two things `dY/dθ` could mean for this curve, and they are different numbers. Holding `|A|max` fixed across a perturbation gives a **partial** derivative at a fixed normaliser. Letting it move with the parameters gives the **total**. At `psi_soil` 1.5 and PPFD 1500, for `vcmax_25`, the partial is 0.0766 and the total 0.0579: the difference is 32% of the answer, so this is not a rounding distinction.
 
-`method = "auto"` returns the total, which is what a fit needs. The model re-solves `|A|max` at every parameter vector, so an optimiser fed the partial would stop where the partial vanishes rather than where the objective does. The composite therefore re-solves `|A|max` per perturbation and lets it follow the parameters, giving 0.057885, against 0.057888 from differencing the whole solve and 0.057884 from a step-swept reference.
-
-`method = "ift"` remains available for anyone who wants the partial deliberately. No other curve carries this distinction, because no other curve normalises by a quantity that is itself solved for.
+The gradient returns the total, which is what a fit needs. The model re-solves `|A|max` at every parameter vector, so an optimiser fed the partial would stop where the partial vanishes rather than where the objective does. The gradient carries `|A|max` as a function of the parameters, through its own first-order condition, giving 0.057885, which a difference of the whole solve reproduces to seven figures at relative steps from 1e-06 to 1e-03. No other curve carries this distinction, because no other curve normalises by a quantity that is itself solved for.
 
 ## The energy-balance term
 
@@ -1076,7 +1074,7 @@ Differencing anything computed by a solver divides that solver's tolerance by th
 
 The V's position is a property of the solver rather than of the model, and that is the part that catches people. How well a solver locates its argmax sets how small a step can still move it.
 
-A root-find on `dJ/dψ = 0` locates ψ* to about 1e-15, so a 1e-06 relative parameter step moves it far more than the solve's own precision, and the floor sits near 1e-06. A search refining on bracket *width* locates ψ* only to about 1e-06 of the bracket, which is 4e-06 MPa on a 4.4 MPa one, and the same step then differences pure quantisation. Measured on `SOX` for `vcmax_25`, against a composite that is flat at 0.0551 across six decades:
+A root-find on `dJ/dψ = 0` locates ψ* to about 1e-15, so a 1e-06 relative parameter step moves it far more than the solve's own precision, and the floor sits near 1e-06. A search refining on bracket *width* locates ψ* only to about 1e-06 of the bracket, which is 4e-06 MPa on a 4.4 MPa one, and the same step then differences pure quantisation. Measured on `SOX` for `vcmax_25`, against an exact gradient of 0.0551:
 
 | relative step | width-refined | root-found |
 |---|---|---|
@@ -1084,9 +1082,9 @@ A root-find on `dJ/dψ = 0` locates ψ* to about 1e-15, so a 1e-06 relative para
 | 1e-03 | 0.0552 | 0.0551 |
 | 1e-02 | 0.0551 | 0.0551 |
 
-At 1e-06 the width-refined difference also gets the sign wrong for `JW26`. The lesson is that a single step is not a verification: two bugs can be reported against a correct composite on the strength of one, and were.
+At 1e-06 the width-refined difference also gets the sign wrong for `JW26`. The lesson is that a single step is not a verification: two bugs can be reported against a correct gradient on the strength of one, and were.
 
-Every route in the package root-finds, so one step of 1e-06 serves all of them. Each route nonetheless carries its own `fd_step`, so the value travels with the solver rather than with the caller. Re-sweep if a solver changes, because the number is not a constant of the model.
+Every route in the package root-finds, so a step of 1e-06 sits on the floor for all of them, and the package's own referee of the gradient sweeps it anyway. Re-sweep if a solver changes, because the number is not a constant of the model.
 
 ## A scan's argmax cannot feed a parameter gradient
 

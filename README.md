@@ -208,14 +208,14 @@ A model that differentiates a run containing the leaf (plant's stand gradient is
 
 ```cpp
 l.find_root_collar_psi();                                     // the solve, at double
-auto draw = l.supply_draw_at<S>(S(l.opt_root_psi_), supply);  // the soil's draw at the solved collar
+auto draw = l.supply_draw_at<S>(S(l.decision_psi()), supply); // the soil's draw at the solved point
 S    psi  = l.operating_collar<K, S>(draw, pars, curvature);  // the collar, carrying its rows
 auto out  = l.billed_outputs_at<K, S>(psi, draw, pars);       // profit, carbon, per-layer uptake, residual flux
 ```
 
 `out.carbon` is what a plant grows on: `A` less the part of the curve's cost that is carbon spent, which is `profit` on TF24 and `A` on a curve whose cost is a price or a risk term. `l.physical_outputs_at<K, S>(psi, draw, pars)` also returns the point's `A`, `E`, `psi_leaf`, `ci` and `gc`, for a model fitted to what a leaf is observed to do.
 
-`l.operating_point_kind()` says which condition placed the point, and decides what `operating_collar` does; a consumer branches on it. The preconditions, the kinds, and a compiled example are at the top of `inst/include/phylloptim/leaf_derivative_surface.hpp`; `vignette("derivative-surface")` explains the design. The surface serves every curve on the collar route, on either supply path and with the energy balance on or off; it refuses the leaf route and a leaf with the thermal-damage layer on.
+`l.operating_point_kind()` says which condition placed the point, and decides what `operating_collar` does; a consumer branches on it. The preconditions, the kinds, and a compiled example are at the top of `inst/include/phylloptim/leaf_derivative_surface.hpp`; `vignette("derivative-surface")` explains the design. The surface serves every curve on either route and either supply path, with the energy balance on or off; on a leaf route the decision variable is the leaf potential (`decision_psi()`) and the soil is an input. With the thermal-damage layer on it carries the layer too, whose inputs are slots of the pack.
 
 A consumer that records on an adjoint tape also compiles with `-DXAD_NO_THREADLOCAL -DXAD_USE_STRONG_INLINE`, matching odelia's and every other package sharing that tape, and links odelia's `src/Tape.cpp` once (an R package gets it from odelia's DLL). The defines are not carried by the CMake target; a mismatch is not diagnosed.
 
@@ -405,7 +405,7 @@ traits, which is what a gradient-based optimiser or a Hamiltonian sampler wants:
 g <- leaf_gradient(psi_soil = 2.0, PPFD = 900,
                    pars = c("vcmax_25", "stem_P50", "TF24_cost_scale"))
 g$gradient   # rows: parameters.  columns: A, gc, psi_leaf, collar, profit
-g$method     # "ift" or "fd" -- see below
+g$status     # "interior" or "pinned" -- see below
 
 # any of the nine models, on either route -- and `leaf_solve()` takes both too.
 # The default is TF24_floor, plant's model, on the leaf route.
@@ -436,11 +436,11 @@ These are not finite differences of the solve. The outputs are evaluated at the
 profit-maximising collar potential, so a trait moves them both directly and by
 moving that optimum — and for `TF24_cost_scale`, `TF24_beta2`, `stem_P50` and
 `stem_c` the second route is **100%** of the answer. Differentiating the optimality
-condition rather than the solved output gets both terms exactly.
+condition rather than the solved output gets both terms exactly, and one forward
+pass of automatic differentiation carries every parameter at once.
 
-`profit` is the exception, and it is the cheapest column for the reason it is the
-exception: it *is* the objective, so at an interior optimum the second route
-contributes nothing and its gradient is the direct partial alone. That is the
+`profit` is the exception: it *is* the objective, so at an interior optimum the
+second route contributes nothing and its gradient is the direct partial alone. That is the
 envelope theorem, and the only place this package uses it.
 
 If your model **tracks** the optimum instead of finding it, pass the collar
@@ -456,24 +456,19 @@ leaf_gradient(psi_soil = 2.0, PPFD = 900, pars = c("vcmax_25", "stem_P50"),
 `M`, `H` and `dY_dpsi` come back so a caller integrating its own sensitivity of
 `psi` has the coefficients. This is what plant's TF24f needs, and giving back the
 collar the solver found, with the response it derived, reproduces the solving
-path exactly.
+path to rounding.
 
 That derivation assumes the optimum is interior, and at the dry end it often is
 not: with the optimum pinned to the edge of the feasible range the formula returns
-a confidently wrong number, off by up to seven orders of magnitude. So the
-assumption is **tested** at every point and the function falls back to
-differencing the solve where it fails. `g$method` reports which route ran and
-`g$status` reports why.
+a confidently wrong number, off by up to seven orders of magnitude. So the solve
+records which kind of point it found, and at a pinned one the gradient
+differentiates the bound that holds the leaf instead. `g$status` reports which.
 
-Whether this is *faster* than letting your optimiser difference the objective
-depends on your parameterisation, and the two counts that decide it are easy to
-conflate. Differencing costs `2 ×` the number of parameters **the optimiser is
-moving**; this costs one pass plus a term in the number of parameters **the leaf
-has** — `length(pars)`. They are equal only if you fit traits directly. Pooling, a
-hierarchy, or any derived parameter makes the first much larger than the second,
-which is where this route wins; `vignette("fitting")` measures both regimes and
-`?leaf_gradient` has the cost model. ⚠️ **Always pass `pars`** — the default is all
-sixteen on the multi-layer path, which is the most expensive request there is.
+A gradient costs one solve and one pass whatever `pars` asks for, so it beats
+letting your optimiser difference the objective, which costs `2 ×` the number of
+parameters **the optimiser is moving**, once a fit moves more than a couple of
+parameters. `pars` selects rows, not work. `vignette("fitting")` measures it and
+`?leaf_gradient` has the cost model.
 
 **For a fit, use `leaf_gradient_batch()`.** `leaf_gradient()` is the same call
 with one observation, so a loop over it crosses the R boundary once per
@@ -512,8 +507,9 @@ This section is the one place the package quotes what things cost; the
 vignettes, the help pages and the developer guide link here. The figures are
 **ratios to a trivial `.Call`** (reading one field of a `Leaf`) measured in the
 same process, because a ratio travels between machines and runs and a
-microsecond figure does not. They come from `tools/bench_user_cost.R` at 0.29.0
-(`tools/bench_history.sh` runs it per commit into
+microsecond figure does not. They come from `tools/bench_user_cost.R`, the
+gradient rows at 0.36.0 after the gradient moved onto the derivative surface
+(#261) and the rest at 0.29.0 (`tools/bench_history.sh` runs it per commit into
 [`tools/cost-baseline.tsv`](tools/cost-baseline.tsv)); re-run it rather than
 editing a number here.
 
@@ -523,10 +519,10 @@ editing a number here.
 | driving one leaf by hand: `set_drivers()`, solve, read three fields | 12 |
 | one row of a vectorised `leaf_solve()` | 22 |
 | constructing a `Leaf` with `leaf_model()` | **~260** |
-| `leaf_gradient()`, one parameter, fresh leaf | 320 |
-| `leaf_gradient()`, one parameter, reusing a leaf (`x =`) | 67 |
-| `leaf_gradient_batch()`, per observation, four parameters | **8.0** |
-| the same gradient as an R loop over `leaf_gradient()`, reusing a leaf | 78 |
+| `leaf_gradient()`, any number of parameters, fresh leaf | 340 |
+| `leaf_gradient()`, any number of parameters, reusing a leaf (`x =`) | 77 |
+| `leaf_gradient_batch()`, per observation, four parameters | **6.6** |
+| the same gradient as an R loop over `leaf_gradient()`, reusing a leaf | 84 |
 
 Four things follow:
 
@@ -540,24 +536,23 @@ Four things follow:
   interface is the one to reach for in an inner loop.
 - **The lever is making fewer R calls per row.** If you need a fit's inner loop
   faster than this, the thing to remove is the boundary — which means C++, or
-  `leaf_gradient_batch()`, which crosses it once per call and is about 10× the
+  `leaf_gradient_batch()`, which crosses it once per call and is about 13× the
   R loop per observation.
 - **Construct once and reuse.** Constructing a `Leaf` costs about as much as a
   hundred solves from R, and most of it is R-side object construction over the
   active bindings rather than the vulnerability tables. Re-traiting and
   re-driving an existing leaf costs about four solves, which is why
   `leaf_solve(reuse = TRUE)` is the default, why [`set_traits()`](#trait-gradients)
-  exists, and why construction is about four-fifths of a one-parameter
-  `leaf_gradient()` on a fresh leaf.
+  exists, and why construction is about four-fifths of a `leaf_gradient()` on a
+  fresh leaf.
 
 One C++ cost is worth knowing because it surprises people: **`set_traits()` is
 almost free unless it moves `stem_c` or `root_c` to a value the leaf has not seen
 recently, and then costs about 17 C++ solves**, because each curve's vulnerability
 table depends on its `c` alone and a new `c` needs a new table. Most of that is the
 incomplete gamma function seeding the knots, not the table machinery. A leaf keeps
-the last eight tables it built, so a gradient's perturbations of `c` build each
-table once per batch rather than once per observation, and a P50 moves nothing in
-a table.
+the last eight tables it built, and a P50 moves nothing in a table. A gradient
+builds none: it perturbs nothing.
 
 The solver's own costs, model by model, are the table in `vignette("the-models")`.
 
