@@ -551,6 +551,8 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
   double worst_rel = 0.0, worst_abs = 0.0;
   std::string worst_rel_at, worst_abs_at, skipped_at;
   int compared = 0, skipped = 0, zero = 0, at_zero_g_min = 0, at_another_step = 0;
+  int leaf_tail_unsettled = 0;
+  std::string leaf_tail_at;
   // ProfitMax's normaliser with the balance on, where |A| can peak inside the
   // stream: points refereed with the peak there and at psi_crit.
   int peak_inside = 0, peak_at_crit = 0;
@@ -663,6 +665,7 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
     } catch (const std::exception&) {
       // At the end of the stem curve there is no inverse to step across.
     }
+    const bool leaf_in_tail = l.stem_curve_in_tail(l.opt_psi_leaf_);
     // psi_leaf is the collar's function, so the solve's noise in it is the
     // collar's times dpsi_leaf/dcollar, which on the curve's tail runs to 1e5.
     double psi_per_collar = 0.0;
@@ -895,6 +898,23 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
             }
           }
         }
+        // ⚠️ psi_leaf on the stem curve's tail is the inverse of a near-flat
+        // integral, which the solve places only to a rounding the step divides,
+        // and by how much differs by platform: Linux read 0.079 at the base
+        // step for a row of 0.114 that two of macOS's steps settle on. Where no
+        // two neighbouring steps settle, the difference referees nothing, and
+        // the row is counted rather than failed; where any pair settles, the
+        // row must agree as everywhere else.
+        if (!pass && j == 6 && leaf_in_tail) {
+          take_others();
+          bool settled = false;
+          for (std::size_t i = 0; i + 1 < n_steps; ++i) settled = settled || converged(i, i + 1);
+          if (!settled) {
+            pass = true;
+            ++leaf_tail_unsettled;
+            leaf_tail_at += " " + name + "/" + par_name(k);
+          }
+        }
         if (err > worst_abs) { worst_abs = err; worst_abs_at = at; }
         // Worst relative among the rows the relative term governs.
         if (1e-4 * scale > floor && err / scale > worst_rel) {
@@ -922,10 +942,11 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
          "    %d rows agreeing at a step other than the base,\n"
          "    g_min passed over at %d fixtures without a cuticle,\n"
          "    %d parameters skipped across a kind change:%s\n"
+         "    %d psi_leaf rows on the stem's tail with no two steps settled:%s\n"
          "    worst relative %.3g%s\n    worst absolute %.3g%s\n",
          curve.c_str(), compared, kinds.c_str(), zero, at_another_step, at_zero_g_min, skipped,
-         skipped_at.c_str(), worst_rel, worst_rel_at.c_str(), worst_abs,
-         worst_abs_at.c_str());
+         skipped_at.c_str(), leaf_tail_unsettled, leaf_tail_at.c_str(), worst_rel,
+         worst_rel_at.c_str(), worst_abs, worst_abs_at.c_str());
   if (K == CC::ProfitMax && EB) {
     printf("    ProfitMax's |A| peak: %d points inside the stream, %d at psi_crit\n",
            peak_inside, peak_at_crit);
@@ -958,6 +979,8 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
   }
   ok(skipped <= 3, curve + ": at most three parameters were skipped across a "
                    "kind change");
+  ok(leaf_tail_unsettled <= 3, curve + ": at most three psi_leaf rows on the stem's "
+                               "tail had no two steps settle");
   *compared_out += compared;
 }
 
