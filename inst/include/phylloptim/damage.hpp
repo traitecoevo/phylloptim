@@ -48,19 +48,55 @@ template <class T> inline T softplus(const T& x, const T& s) {
 // Rate k at Tref_K (kelvin) on a centred Arrhenius, Ea in J mol^-1; exactly k at
 // Ea = 0. Unclamped: a clamp binds in ordinary use (high Ea below 25 C) and zeroes
 // the derivative there. Only an overflow is refused.
-template <class T, class U>
+template <class T, class U, class L = double>
 inline T centred_arrhenius(const T& k, const T& Ea, const U& Tref_K,
-                           double leaf_temp) {
+                           const L& leaf_temp) {
   const T arg =
       (Ea / gas_constant) * (1.0 / Tref_K - 1.0 / (leaf_temp + C_to_K));
   const T rate = k * exp(arg);
   if (std::isinf(to_passive(rate))) {
     util::stop("thermal damage: a centred Arrhenius rate overflowed at leaf "
-               "temperature " + util::format_double(leaf_temp) + " C (Ea " +
+               "temperature " + util::format_double(to_passive(leaf_temp)) + " C (Ea " +
                util::format_double(to_passive(Ea)) + " J/mol, reference " +
                util::format_double(to_passive(Tref_K)) + " K)");
   }
   return rate;
+}
+
+// --- what the layer does to the solve, on any scalar ------------------------
+// Written once, so Leaf::update_temperature_dependent_params at double and the
+// parameter pack's vcmax_at, jmax_at and respiration_at compute the same
+// expressions in the same order, bit for bit at double.
+
+// The shift of both capacities' temperature optimum at an acclimation state A.
+template <class T>
+inline T topt_shift(const T& topt_offset, const T& dTopt_max, const T& A,
+                    const T& K_A) {
+  return topt_offset + dTopt_max * A / (A + K_A);
+}
+
+// The functional fraction F = 1 - I - D that scales both capacities, held above
+// zero by a softplus floor of width `floor`, exact in F where F > ~3.4e-5.
+template <class T>
+inline T functional_fraction(const T& I, const T& D, double floor) {
+  const T F = 1.0 - I - D;
+  return to_passive(F) > 0.0 ? T(F + floor * log1p(exp(-F / floor)))
+                             : T(floor * log1p(exp(F / floor)));
+}
+
+// The maintenance costs added to R_d: standing costs for acclimation, repair
+// capacity and protection, and an activity cost for repair done at k_rec_eff.
+// Protection is signed: the default k_i equals k_i_baseline, so a max(0, .)
+// would put the defaults on a corner.
+template <class T>
+inline T maintenance(const T& c_acclim, const T& A, const T& c_repair,
+                     const T& k_rec, const T& c_protect, const T& k_i_baseline,
+                     const T& k_i, const T& c_flux, const T& k_rec_eff,
+                     const T& I) {
+  const T protection = k_i_baseline - k_i;
+  const T repair_flux = k_rec_eff * I;
+  return c_acclim * A + c_repair * k_rec + c_protect * protection +
+         c_flux * repair_flux;
 }
 
 // The acclimation shift of the impairment's isokinetic temperature, smooth through

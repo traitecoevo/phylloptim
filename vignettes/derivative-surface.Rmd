@@ -84,7 +84,7 @@ The calls assume, and mostly do not check:
 - `pars` and `supply` hold, in value, the leaf's seated traits (`passive_pars()`) and its seated soil state and root network;
 - `supply` has the shape `Leaf::held_supply()` gives on the leaf's supply path: each layer's potential and resistances on the multi-layer path, or the one soil potential and the series resistance (`r_R_V_sum[0]`, the pack's `par_resistance`) on the single-potential path;
 - on ProfitMax, whose normalisers draw the supply again at its reference collar, the draw keeps its own copy of `supply` for that; no other curve's does;
-- the thermal-damage layer is off (both calls refuse it): the surface applies none of the damage layer.
+- with the thermal-damage layer on, its inputs are the pack's slots `par_A` to `par_c_repair_flux`: the capacities on the pack apply its shifted optimum, its functional fraction and its maintenance costs, as the solve's members do.
 
 With the energy balance on, the surface follows it on every curve: leaf temperature moves with the stem's flux and with the light that heats the leaf, and the capacities, the deficit, the cuticle and the first-order condition's temperature term carry its rows. ProfitMax's |A|max, which can then peak inside the stream rather than at `psi_crit`, takes its rows at that peak.
 

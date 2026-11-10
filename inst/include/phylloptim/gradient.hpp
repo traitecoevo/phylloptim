@@ -528,8 +528,7 @@ inline void gradient_fd(Leaf& l, const double* theta, const Drivers& d,
 
 // Both routes carry the thermal-damage layer: they difference the solve's own
 // dprofit and outputs, needing only its inputs in `theta` (seated by apply()).
-// The derivative surface (operating_collar, billed_outputs_at) refuses it,
-// because the parameter pack's kernels do not apply the layer.
+// The derivative surface carries it too, through the pack's capacities.
 
 // --- one observation ---------------------------------------------------------
 //

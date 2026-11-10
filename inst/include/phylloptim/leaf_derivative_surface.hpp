@@ -51,7 +51,8 @@
 //   - `curvature` is profit_curvature_at_collar<K>() at an Interior point, and is
 //     not read at any other kind or at double; operating_collar refuses one that
 //     is not negative or lies inside Leaf::interior_curvature_floor;
-//   - the thermal-damage layer is off (checked): the kernels read do not apply it;
+//   - with the thermal-damage layer on, its inputs are the pack's slots par_A to
+//     par_c_repair_flux, which the capacities read (vcmax_at and the rest);
 //   - with the energy balance on, leaf temperature follows the stem's flux and
 //     the light, and its terms are carried on every curve (HeldBalance).
 //
@@ -685,7 +686,6 @@ inline Out Leaf::outputs_at(const S& collar, const SupplyDraw<S>& draw,
   const bool from_price = carbon_from_price && collar_route;
   // The stem's upstream end: the collar, or on a leaf route the soil.
   const S& up = collar_route ? collar : draw.upstream;
-  refuse_thermal_damage(who);
   check_surface_curve<K>(who);
   check_draw(to_passive(collar), draw);
   // Placed coordinates hold only at an interior point and at the collar
@@ -1180,7 +1180,6 @@ inline S Leaf::operating_collar(const SupplyDraw<S>& draw, const leaf_pars<S>& p
                                 double interior_curvature, HeldCoords<S>* placed) {
   // Refused at every kind, not only where the kernels are read: a surface that
   // answers at some kinds and not others is one a caller cannot plan around.
-  refuse_thermal_damage("Leaf::operating_collar");
   check_surface_curve<K>("Leaf::operating_collar");
   // The route's decision variable: the collar, or on a leaf route the leaf
   // potential, whose kinds are placed by the same conditions in it.

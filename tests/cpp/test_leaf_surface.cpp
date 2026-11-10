@@ -427,7 +427,7 @@ void test_tf24_floor_rows_at_a_price() {
 // to the tolerance below, and every read parameter must be compared somewhere,
 // so a wrong row in any of them fails.
 template <phylloptim::Leaf::CostCurve K, bool EB = false, bool Single = false,
-          bool LeafRoute = false>
+          bool LeafRoute = false, bool Damage = false>
 void referee_every_parameter_at_every_kind(int* compared_out) {
   using T = odelia::ode::tangent_scalar<double>;
   using Kind = phylloptim::Leaf::OperatingPointKind;
@@ -435,10 +435,14 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
   namespace pl = phylloptim;
   const std::string curve =
       pl::Leaf::curve_name(static_cast<int>(K)) + (EB ? " with the energy balance" : "") +
-      (Single ? " on the single potential" : "") + (LeafRoute ? " on the leaf route" : "");
+      (Single ? " on the single potential" : "") + (LeafRoute ? " on the leaf route" : "") +
+      (Damage ? " with thermal damage" : "");
   // With the energy balance on, as make_pm_leaf seats it: daylight NIR fixed at
   // the fixture's light, so PPFD's row is the light's alone.
+  // The thermal-damage layer's gate is seated with the balance, before the
+  // drivers, which seat the block that reads its inputs.
   const auto seat_balance = [&](pl::Leaf& leaf, double ppfd) {
+    leaf.use_thermal_damage_ = Damage;
     leaf.use_energy_balance_ = EB;
     if (EB) {
       leaf.wind_speed_ = 2.0;
@@ -491,6 +495,11 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
     fixtures.push_back({{6.0}, 100.0, 0.5, Kind::BoundaryDry});
     fixtures.push_back({{6.0}, 100.0, 0.5, Kind::BoundaryDry, 5e-4});
   }
+  // With the damage layer on too, its lower capacity moves that pin wetter.
+  if (EB && Damage) {
+    fixtures.push_back({{6.5}, 200.0, 0.5, Kind::BoundaryDry});
+    fixtures.push_back({{6.5}, 200.0, 0.5, Kind::BoundaryDry, 5e-4});
+  }
   // On the single potential, one soil potential behind a series resistance:
   // each fixture's first layer, and a bright leaf on a moist soil, where that
   // supply reaches its dry pin. The leaf route runs on one layer of either
@@ -509,7 +518,7 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
   const double price = LeafRoute ? 1e1 : 1e3;
   // A slot some curve owns is read only by its owner, and TF24's two by
   // TF24_floor too, whose hydraulic half is TF24's; the single path's
-  // resistance and the damage layer, which the surface refuses, by none.
+  // resistance and the damage layer, off in these fixtures, by none.
   const auto owns = [](const auto& parameters, int k) {
     for (const auto& q : parameters) if (q.slot == k) return true;
     return false;
@@ -518,7 +527,8 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
     // The series resistance is read on the single potential's collar route
     // alone: the leaf route holds the stem's upstream end at the soil.
     if (k == pl::par_resistance) return !(Single && !LeafRoute);
-    if (k >= pl::par_A && k < pl::par_PPFD) return true;
+    // The damage layer's slots, read with its gate on alone.
+    if (k >= pl::par_A && k < pl::par_PPFD) return !Damage;
     // NIR reaches the solve only through the energy balance.
     if (k == pl::par_NIR) return !EB;
     bool owned = false;
@@ -593,6 +603,7 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
     };
     pl::Leaf base = fixture::multilayer_leaf();
     if (Single) base.set_supply_single();
+    if (Damage) set_atls_inputs(base);
     seat_balance(base, fx.ppfd);
     base.set_physiology(Single ? fixture::series_resistance(1e3) : network, fx.ppfd,
                         fx.psi_soil, depth, 0.000157 / 5.0,
@@ -950,6 +961,22 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
   *compared_out += compared;
 }
 
+// Every curve with the thermal-damage layer on, at set_atls_inputs' values.
+template <bool EB, bool LeafRoute>
+void referee_every_curve_with_thermal_damage(int* compared) {
+  using CC = phylloptim::Leaf::CostCurve;
+  constexpr bool S = LeafRoute;  // the leaf route on the single potential
+  referee_every_parameter_at_every_kind<CC::TF24, EB, S, LeafRoute, true>(compared);
+  referee_every_parameter_at_every_kind<CC::TF24_floor, EB, S, LeafRoute, true>(compared);
+  referee_every_parameter_at_every_kind<CC::CF77, EB, S, LeafRoute, true>(compared);
+  referee_every_parameter_at_every_kind<CC::JS22, EB, S, LeafRoute, true>(compared);
+  referee_every_parameter_at_every_kind<CC::CMax, EB, S, LeafRoute, true>(compared);
+  referee_every_parameter_at_every_kind<CC::SOX, EB, S, LeafRoute, true>(compared);
+  referee_every_parameter_at_every_kind<CC::JW26, EB, S, LeafRoute, true>(compared);
+  referee_every_parameter_at_every_kind<CC::LeastCost, EB, S, LeafRoute, true>(compared);
+  referee_every_parameter_at_every_kind<CC::ProfitMax, EB, S, LeafRoute, true>(compared);
+}
+
 // Every curve on the leaf route, for one setting of the balance and the supply.
 template <bool EB, bool Single>
 void referee_every_curve_on_the_leaf_route(int* compared) {
@@ -1012,6 +1039,11 @@ void test_supplied_rows_match_a_resolve_at_every_kind() {
   referee_every_curve_on_the_leaf_route<true, true>(&compared);
   referee_every_curve_on_the_leaf_route<false, false>(&compared);
   referee_every_curve_on_the_leaf_route<true, false>(&compared);
+  // With the thermal-damage layer on: the collar route with the balance off and
+  // on, and the leaf route.
+  referee_every_curve_with_thermal_damage<false, false>(&compared);
+  referee_every_curve_with_thermal_damage<true, false>(&compared);
+  referee_every_curve_with_thermal_damage<false, true>(&compared);
   ok(compared >= 3300, "the referee compared at least 3300 rows");
 }
 

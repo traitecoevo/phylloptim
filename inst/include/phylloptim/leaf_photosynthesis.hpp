@@ -19,13 +19,17 @@ inline T Leaf::arrh_curve(double Ea, const T& ref_value, const V& leaf_temp) con
   return ref_value*exp(Ea*((leaf_temp+C_to_K) - (25 + C_to_K))/((25 + C_to_K)*gas_constant*(leaf_temp+C_to_K)));
 }
 
-template <typename T, typename V>
+// d_S carries rows only where the thermal-damage layer moves the optimum; a
+// double d_S keeps the gate-off arithmetic as it was.
+template <typename T, typename V, typename D>
 inline T Leaf::peak_arrh_curve(double Ea, const T& ref_value, const V& leaf_temp,
-                               double H_d, double d_S) const {
+                               double H_d, const D& d_S) const {
   using std::exp;
+  using Arg2 = std::conditional_t<std::is_same_v<D, double>, double, T>;
+  using Arg3 = std::conditional_t<std::is_same_v<D, double>, V, T>;
   T arrh = arrh_curve<T, V>(Ea, ref_value, leaf_temp);
-  double arg2 = 1 + std::exp((d_S*(25 + C_to_K) - H_d)/(gas_constant*(25 + C_to_K)));
-  V arg3 = 1 + exp((d_S*(leaf_temp + C_to_K) - H_d)/(gas_constant*(leaf_temp + C_to_K)));
+  Arg2 arg2 = 1 + exp((d_S*(25 + C_to_K) - H_d)/(gas_constant*(25 + C_to_K)));
+  Arg3 arg3 = 1 + exp((d_S*(leaf_temp + C_to_K) - H_d)/(gas_constant*(leaf_temp + C_to_K)));
 
   return arrh * arg2/arg3;
 }
@@ -62,22 +66,16 @@ inline void Leaf::update_temperature_dependent_params(double leaf_temp) {
     // The ATLS layer (see use_thermal_damage_). One shift moves both capacity
     // optima; the impairment has its own. A itself, for delta_impair's reason.
     const double A = A_;
-    const double delta_topt = topt_offset_ + dTopt_max_ * A / (A + K_A_);
+    const double delta_topt = damage::topt_shift(topt_offset_, dTopt_max_, A, K_A_);
     const double vcmax_dS =
         d_S_shifted(vcmax_ha_, vcmax_H_d_, vcmax_d_S_, delta_topt);
     const double jmax_dS = d_S_shifted(jmax_ha_, jmax_H_d_, jmax_d_S_, delta_topt);
     vcmax_ = peak_arrh_curve(vcmax_ha_, vcmax_25, leaf_temp, vcmax_H_d_, vcmax_dS);
     jmax_ = peak_arrh_curve(jmax_ha_, jmax_25, leaf_temp, jmax_H_d_, jmax_dS);
     // Only the functional area F photosynthesises, so both capacities scale by
-    // F; reversible deactivation is already in the peaked Arrhenius. F is held
-    // above zero by a softplus floor of width damage_surv_floor, exact in F where
-    // F > ~3.4e-5: a min/max floor puts a corner in every output.
-    {
-      const double F = 1.0 - I_ - D_;
-      const double f = damage_surv_floor;
-      functional_ = F > 0.0 ? F + f * std::log1p(std::exp(-F / f))
-                            : f * std::log1p(std::exp(F / f));
-    }
+    // F; reversible deactivation is already in the peaked Arrhenius. A softplus
+    // floor holds F above zero: a min/max floor puts a corner in every output.
+    functional_ = damage::functional_fraction(I_, D_, damage_surv_floor);
     vcmax_ *= functional_;
     jmax_ *= functional_;
     k_imp_eff_ = k_imp_eff(leaf_temp, delta_impair_at(A));
@@ -110,15 +108,10 @@ inline void Leaf::update_temperature_dependent_params(double leaf_temp) {
   R_d_ = R_d_25 * std::pow(q10, (leaf_temp - 25.0) / 10.0);
   if (use_thermal_damage_) {
     // The layer's maintenance costs, added to R_d rather than folded into it so
-    // gate-off arithmetic is untouched: standing costs for acclimation, repair
-    // capacity and protection, and an activity cost for repair done. Protection
-    // is signed: the default k_i_ equals k_i_baseline_, so a max(0, .) would put
-    // the defaults on a corner.
-    const double acclim_load = A_;
-    const double protection = k_i_baseline_ - k_i_;
-    const double repair_flux = k_rec_eff_ * I_;
-    R_d_ += c_acclim_maint_ * acclim_load + c_repair_maint_ * k_rec_ +
-            c_protect_maint_ * protection + c_repair_flux_ * repair_flux;
+    // gate-off arithmetic is untouched.
+    R_d_ += damage::maintenance(c_acclim_maint_, A_, c_repair_maint_, k_rec_,
+                                c_protect_maint_, k_i_baseline_, k_i_,
+                                c_repair_flux_, k_rec_eff_, I_);
   }
   km_ = (kc_*umol_per_mol_to_Pa_)*(1 + (atm_o2_kpa_*kPa_to_Pa)/(ko_*umol_per_mol_to_Pa_));
   electron_transport_ = electron_transport();
@@ -415,18 +408,32 @@ inline void Leaf::set_leaf_states_rates_from_psi_leaf(double psi_leaf, double ps
 // equal the members bit for bit (passive_pars builds the pack; responses are at
 // photo_temp_), which test_leaf asserts on both temperature paths.
 
-// These three responses do not apply the thermal-damage layer, so each refuses
-// a leaf with it on rather than disagree with the member it twins.
+// With the thermal-damage layer on, the three responses apply it from the
+// pack's slots, by the same expressions (damage.hpp) the members are formed by:
+// the shifted optimum, the functional fraction and the maintenance costs.
 template <typename T>
 inline T Leaf::vcmax_at(const leaf_pars<T>& pars) const {
   return vcmax_at<T, double>(pars, photo_temp_);
 }
 
+template <typename T>
+inline T Leaf::damage_topt_shift_at(const leaf_pars<T>& pars) const {
+  return damage::topt_shift<T>(pars[par_topt_offset], pars[par_dTopt_max],
+                               pars[par_A], pars[par_K_A]);
+}
+
 template <typename T, typename V>
 inline T Leaf::vcmax_at(const leaf_pars<T>& pars, const V& temp) const {
-  refuse_thermal_damage("Leaf::vcmax_at");
-  return peak_arrh_curve<T, V>(vcmax_ha_, pars[par_vcmax_25], temp,
-                               vcmax_H_d_, vcmax_d_S_);
+  if (!use_thermal_damage_) {
+    return peak_arrh_curve<T, V>(vcmax_ha_, pars[par_vcmax_25], temp,
+                                 vcmax_H_d_, vcmax_d_S_);
+  }
+  const T dS = d_S_shifted<T>(vcmax_ha_, vcmax_H_d_, vcmax_d_S_,
+                              damage_topt_shift_at<T>(pars));
+  const T v = peak_arrh_curve<T, V, T>(vcmax_ha_, pars[par_vcmax_25], temp,
+                                       vcmax_H_d_, dS);
+  return v * damage::functional_fraction<T>(pars[par_I], pars[par_D],
+                                            damage_surv_floor);
 }
 
 template <typename T>
@@ -436,9 +443,17 @@ inline T Leaf::jmax_at(const leaf_pars<T>& pars) const {
 
 template <typename T, typename V>
 inline T Leaf::jmax_at(const leaf_pars<T>& pars, const V& temp) const {
-  refuse_thermal_damage("Leaf::jmax_at");
-  T j = peak_arrh_curve<T, V>(jmax_ha_, pars[par_jmax_25], temp, jmax_H_d_,
+  T j;
+  if (!use_thermal_damage_) {
+    j = peak_arrh_curve<T, V>(jmax_ha_, pars[par_jmax_25], temp, jmax_H_d_,
                               jmax_d_S_);
+  } else {
+    const T dS = d_S_shifted<T>(jmax_ha_, jmax_H_d_, jmax_d_S_,
+                                damage_topt_shift_at<T>(pars));
+    j = peak_arrh_curve<T, V, T>(jmax_ha_, pars[par_jmax_25], temp, jmax_H_d_, dS);
+    j = j * damage::functional_fraction<T>(pars[par_I], pars[par_D],
+                                           damage_surv_floor);
+  }
   // At a fixed temperature the thermal cost reads no trait, so it is a factor,
   // not a term with rows.
   if (use_thermal_cost_) {
@@ -460,9 +475,19 @@ inline T Leaf::respiration_at(const leaf_pars<T>& pars) const {
 template <typename T, typename V>
 inline T Leaf::respiration_at(const leaf_pars<T>& pars, const V& temp) const {
   using std::pow;
-  refuse_thermal_damage("Leaf::respiration_at");
   const V q10 = rd_q10_intercept_ - rd_q10_slope_ * (temp + 25.0) / 2.0;
-  return pars[par_R_d_25] * T(pow(q10, (temp - 25.0) / 10.0));
+  const T r = pars[par_R_d_25] * T(pow(q10, (temp - 25.0) / 10.0));
+  if (!use_thermal_damage_) {
+    return r;
+  }
+  // Repair's rate at this temperature, as k_rec_eff_ is at the member's.
+  const T k_rec_eff = damage::centred_arrhenius<T, double, V>(
+      pars[par_k_rec], pars[par_k_rec_Ea], damage::damage_Tref + C_to_K, temp);
+  return r + damage::maintenance<T>(pars[par_c_acclim_maint], pars[par_A],
+                                    pars[par_c_repair_maint], pars[par_k_rec],
+                                    pars[par_c_protect_maint],
+                                    pars[par_k_i_baseline], pars[par_k_i],
+                                    pars[par_c_repair_flux], k_rec_eff, pars[par_I]);
 }
 
 template <typename T>
