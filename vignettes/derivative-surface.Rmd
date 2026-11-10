@@ -13,32 +13,29 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 
 A model that contains this leaf and is itself differentiated, such as plant's stand gradient or a C++ fit of the model to observations, needs the derivative of the leaf's operating point with respect to its traits and its soil. This vignette is how the leaf supplies it: the three calls a consumer makes, what each operating point does, why the derivative comes from the implicit function theorem rather than from recording the solve, and what a consumer must not get wrong. It contains no runnable R; the C++ below is compiled and run by `tests/cpp/test_leaf.cpp`.
 
-## Two routes to a derivative
+## One surface, two consumers
 
-The package has two, and they answer different questions.
+The package differentiates the operating point one way, and two kinds of caller read it.
 
-| | `leaf_gradient()` and `gradient::batch` | the derivative surface |
+| | `leaf_gradient()` and `gradient::batch` | a C++ model reading the surface |
 |---|---|---|
-| caller | R, or C++ calibrating a leaf against data | a C++ model that differentiates a run containing the leaf |
-| scalar | `double`; derivatives are returned as numbers | the caller's: `double`, a tangent, or an adjoint on the caller's tape |
-| method | implicit function theorem, with the curvature by finite difference | implicit function theorem, with every row from automatic differentiation of closed forms |
-| curves | all nine | all nine |
+| caller | R, or C++ calibrating a leaf against data | a C++ model that differentiates a run containing the leaf, such as plant's stand gradient |
+| scalar | a forward scalar with one lane per parameter and one for the decision variable; derivatives are returned as numbers | the caller's: `double`, a tangent, or an adjoint on the caller's tape |
+| method | implicit function theorem, with every row from automatic differentiation of closed forms | the same |
+| curves and routes | all nine, on both routes and both supplies | the same |
 | outputs | A, gc, psi_leaf, collar, profit | profit, carbon, each layer's water uptake and the residual (cuticular) flux; with `physical_outputs_at`, also A, E, psi_leaf, ci and gc |
-| classification | a status (`interior`, `pinned`, ...) from a stationarity test | a kind (`interior`, `boundary-soil`, ...) written by the branch the solve took |
+| classification | a status, derived from the kind | a kind (`interior`, `boundary-soil`, ...) written by the branch the solve took |
 
-The two classifications are decided differently and are not interchangeable: a status reads the converged numbers, and a kind records which exit the solve took. Only `prescribed` appears in both. So one kind can be reported under more than one status. On a sweep of 1,920 solved points (`psi_soil` 0.5-14 MPa, PPFD 0-1500, VPD 0.5-4 kPa, 25 and 40 C, 1 and 3 layers, `g_min` 0 and 5e-4) the solving path reported:
+`gradient::at` is a thin reader of the surface: it seats the parameters, solves, makes one pass through the three calls below, and reads the requested lanes. Its status is the kind, coarsened:
 
-| kind (C++) | status (R) | points |
-|---|---|---|
-| `interior` | `interior` | 453 |
-| `interior` | `pinned` | 12 |
-| `boundary-soil` | `pinned` | 1086 |
-| `boundary-soil` | `no-gradient` | 155, all with `g_min > 0` |
-| `boundary-dry` | `pinned` | 94 |
-| `hydraulic-shutdown` | `pinned` | 60 |
-| `hydraulic-shutdown` | `no-gradient` | 60 |
+| kind (C++) | status (R) |
+|---|---|
+| `interior` | `interior`, or `no-gradient` where the curvature is not below `-interior_curvature_floor` |
+| `boundary-soil`, `boundary-dry`, `hydraulic-shutdown` | `pinned` |
+| `solver-refused`, `non-finite-gradient`, `unsolved` | `no-gradient` |
+| `prescribed` | not reached on the solving path |
 
-An `interior` kind reads as `pinned` where the implied Newton step exceeds `stationarity_tol` or the stencil about the collar leaves the feasible interval; a bound reads as `no-gradient` where the curvature there is not negative. `solver-refused` and `non-finite-gradient` were not reached on the sweep, and `unsolved` is never reported. `prescribed`, `refused` and `no-gradient` are the statuses of the path that takes `psi`: there the kind is always `prescribed`, and `refused` means the collar, or the stencil about it, fell outside the feasible interval. The rest of this vignette is about the second route.
+ProfitMax with no objective (no light, or no stream to normalise over) is `no-gradient` whatever its kind. `prescribed`, `refused` and `no-gradient` are the statuses of the path that takes `psi`: `refused` means the collar fell outside the feasible interval, and `no-gradient` that the leaf potential it implies lies in the stem curve's tail, where every row would be rounding. The rest of this vignette is about the surface itself.
 
 ## Terms
 

@@ -14,8 +14,8 @@
 # price, whatever the stem) is noise on both sides, so agreement is measured
 # against a floor of 1e-5 of the output per unit of the parameter.
 #
-# Measured on macOS/arm64: worst 5.2e-4 (CF77's g_min on the leaf route, an
-# output at that floor), 99th percentile 1.3e-4, median 2e-9, over 195 rows.
+# Measured on macOS/arm64: worst 4.7e-5 (CF77's gc in g_min on the leaf route,
+# an output near that floor), median 7e-10, over 195 rows.
 
 referee_outputs <- c("A", "gc", "psi_leaf", "collar", "profit")
 
@@ -152,8 +152,8 @@ test_that("every curve's gradient on every route agrees with a difference of its
               nrow(unique(d[c("curve", "setup")])), nrow(d),
               sum(d$status == "interior"), sum(d$status == "pinned"),
               w$worst, w$curve, w$setup, w$output, w$par, stats::median(d$worst)))
-  # Hazard 16: the rows must reach the assertion, and the composite must run on
-  # most of them rather than the finite-difference arm.
+  # Hazard 16: the rows must reach the assertion, and most of them must be
+  # interior, where the implicit function theorem places the point.
   expect_identical(nrow(unique(d[c("curve", "setup")])), 27L)
   expect_gte(sum(d$status == "interior"), 170L)
   expect_gte(min(d$steps), 3L)

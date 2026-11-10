@@ -438,7 +438,7 @@ void test_thermal_damage_on_the_pack() {
   Drivers d;
   d.PPFD = 1500.0;
   // 35 C, not 25: the gradient check below needs a finite difference clean enough
-  // to referee the composite. At 25 C differencing the solve has a floor of ~2e-4
+  // to referee the gradient. At 25 C differencing the solve has a floor of ~2e-4
   // relative for inputs that only shift respiration a little (c_repair_flux_ moves
   // profit ~12x less per step than R_d_25, whose own floor there is 1.8e-5 with the
   // layer OFF); at 35 C every column agrees to ~1e-9.
@@ -512,10 +512,9 @@ void test_thermal_damage_on_the_pack() {
   phylloptim::gradient::Settings s;
   s.model = {phylloptim::Leaf::CostCurve::TF24,
              phylloptim::gradient::Route::Collar};
-  phylloptim::gradient::Result r;
-  // The trait gradient CARRIES the layer: both routes difference the solve's own
-  // dprofit and outputs, which read the block the layer writes. So with the gate
-  // on it runs, and the IFT composite agrees with differencing the solve.
+  // The trait gradient carries the layer, through the surface's pack, and
+  // agrees with a central difference of the whole solve, which shares nothing
+  // with the rows but the model.
   // The gate-on leaf's own theta: its damage slots carry the inputs it was given.
   double theta_on[phylloptim::gradient::n_theta];
   {
@@ -524,27 +523,38 @@ void test_thermal_damage_on_the_pack() {
       theta_on[i] = p_on[std::size_t(i)];
     }
   }
-  // A trait, a damage state and a cost-carried input, through both routes.
+  // A trait, a damage state and a cost-carried input.
   const int pars_on[] = {phylloptim::par_vcmax_25,
                          phylloptim::par_I,
                          phylloptim::par_c_repair_flux};
   phylloptim::gradient::Result r_on;
   phylloptim::gradient::at(on, theta_on, gd, false, pars_on, 3, s, r_on);
-  ok(r_on.status != phylloptim::gradient::Status::Error,
-     "gradient::at runs with the gate on");
+  ok(r_on.status == phylloptim::gradient::Status::Interior,
+     "gradient::at runs with the gate on, at an interior point");
   {
-    phylloptim::gradient::Settings sfd = s;
-    sfd.method = phylloptim::gradient::Method::Fd;
-    phylloptim::gradient::Result rfd;
-    phylloptim::gradient::at(on, theta_on, gd, false, pars_on, 3, sfd, rfd);
     double worst = 0.0;
-    for (std::size_t k = 0; k < r_on.grad.size(); ++k) {
-      const double scale = std::max(1.0, std::abs(rfd.grad[k]));
-      worst = std::max(worst, std::abs(r_on.grad[k] - rfd.grad[k]) / scale);
+    for (std::size_t k = 0; k < 3; ++k) {
+      const int p = pars_on[k];
+      const double h = std::max(std::abs(theta_on[p]), 1.0) * 1e-5;
+      double th[phylloptim::gradient::n_theta];
+      double up[phylloptim::gradient::n_outputs], dn[phylloptim::gradient::n_outputs];
+      for (int side = 0; side < 2; ++side) {
+        std::copy(theta_on, theta_on + phylloptim::gradient::n_theta, th);
+        th[p] += side == 0 ? h : -h;
+        phylloptim::gradient::apply(on, th, gd, false);
+        phylloptim::gradient::route_seat(on, s.model);
+        on.find_root_collar_psi();
+        phylloptim::gradient::outputs(on, side == 0 ? up : dn);
+      }
+      for (int j = 0; j < phylloptim::gradient::n_outputs; ++j) {
+        const double fd = (up[j] - dn[j]) / (2.0 * h);
+        const double row = r_on.grad[k * phylloptim::gradient::n_outputs + std::size_t(j)];
+        worst = std::max(worst, std::abs(row - fd) / std::max(1.0, std::abs(fd)));
+      }
     }
-    printf("    gate on: IFT against differencing the solve, worst %.3e\n", worst);
+    printf("    gate on: the gradient against differencing the solve, worst %.3e\n", worst);
     ok(worst < 1e-6,
-       "with the gate on, the IFT composite agrees with differencing the solve");
+       "with the gate on, the gradient agrees with differencing the solve");
     // dA/dI: impaired area does not photosynthesise, so A must FALL with I.
     ok(r_on.grad[1 * phylloptim::gradient::n_outputs + 0] < 0.0,
        "assimilation falls as the impaired fraction rises");

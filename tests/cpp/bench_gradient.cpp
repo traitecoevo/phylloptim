@@ -1,46 +1,25 @@
 // Timing harness for a TRAIT GRADIENT, with no R in the way.
 //
 //   make -C tests/cpp bench_gradient && ./bench_gradient [reps]
+//   ./bench_gradient --count <arm> <reps>
 //
-// Written because a projection and a measurement disagreed. Computing dA/dtheta
-// by the implicit function theorem -- one solve plus 2N cheap gradient
-// evaluations instead of 2N re-solves -- projects 12x. Measured in the R layer
-// the composite came out 6% SLOWER, because an R call costs ~1.8 us against the
-// 0.26 us of C++ work it wraps.
+// The gradient is one forward pass of the derivative surface carrying a lane
+// per slot of theta (gradient.hpp), so its cost is flat in the number of
+// parameters asked for. The arms put it beside the alternative a caller has,
+// a central difference of the whole solve, at one interior point: TF24 on the
+// collar route over one layer, the drivers of plant's tests/testthat/test-leaf.r.
+// Every arm seats theta and solves first, so "less none" is the gradient alone.
 //
-// That is a statement about the R boundary and NOT about the composite, and the
-// distinction matters because **plant links these headers directly**. So the
-// arithmetic has to be done again with the boundary removed, which is what this
-// measures. The composite does win here, by rather less than 12x, and for four
-// of the traits by almost nothing at all -- for a reason neither the projection
-// nor the R measurement anticipated.
+// `--count <arm> <reps>` runs one arm alone, for the instructions retired that
+// `/usr/bin/time -l` (macOS) or `perf stat` reports: a count repeats where
+// wall-clock drifts.
 //
-// WHAT THE TWO ARMS ARE. Both perturb one trait by a relative 1e-6 either side
-// and both pay set_traits + set_physiology per perturbation, because a trait
-// change genuinely requires re-deriving the temperature-dependent block:
+// This harness does NOT check the gradient: test-gradient-referee.R and the
+// surface's referees in test_leaf do. The printed checksum folds in every value
+// the arms compute, so a change that moved the arithmetic shows here too.
 //
-//   FD   2 x [set_traits, set_physiology, find_root_collar_psi]
-//   IFT  2 x [set_traits, set_physiology, dprofit at the UNPERTURBED psi*,
-//             evaluate_root_collar_psi at that same psi*]
-//
-// The second evaluation in the IFT arm is the direct term dA/dtheta|_psi, and it
-// is the line item 11d's route-2 table omitted -- it costed a perturbation as one
-// `dprofit` and nothing else. It is not optional: the composite is
-// dA/dtheta = dA/dtheta|_psi + (dA/dpsi)(dpsi*/dtheta), and dropping the first
-// term is not an approximation, it is a different quantity.
-//
-// This harness does NOT check the gradient. tests/testthat/test-gradient.R does
-// that, against arbitrated references and over the whole golden grid, including
-// the active-set cases this ignores entirely -- it runs at one interior point
-// because it is measuring cost, not correctness. Do not read a speedup here as
-// evidence that the composite is usable at a given operating point; that is what
-// leaf_gradient()'s stationarity test is for.
-//
-// Reports min-of-N over interleaved rounds, for the reasons bench_solve.cpp
-// gives at greater length: the minimum is the least-contaminated estimate, and
-// sequential A-then-B is not good enough at this effect size. The printed
-// checksum folds in every value both arms compute, so a change that perturbed
-// the arithmetic is caught here rather than read as a speed difference.
+// tools/bench_history.sh reads the `vcmax_25` line: the difference of the
+// solve, then the gradient, each in microseconds less the seat and solve.
 
 #include <phylloptim.hpp>
 
@@ -50,387 +29,183 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <string>
 #include <vector>
 
 namespace {
 
-// The default trait vector, in set_traits' argument order.
-//
-// Eleven of the fifteen traits. `R_d_25`, `JS22_gamma`, `CMax_a` and `CMax_b` are
-// left at their defaults because none needs a table rebuild, so all four land in
-// the cheap bucket this table already has examples of -- adding them would lengthen
-// the output without changing the finding. `beta_R_H` and `beta_R_V` are not here at all -- they left
-// with the root-architecture model in #33, and a gradient in either is now taken
-// where the network is built, exactly, because root_network_from_carbon is
-// homogeneous of degree 1 in each.
-//
-// ⚠️ ONE COUNT FOR ALL THREE USERS OF IT, and that is the fix for a real bug
-// rather than a tidy-up. `Traits::v`, `kNames` and the timing loop each carried
-// the number separately, and the loop's copy was a literal `13` against an
-// 11-element array. So it read `kBase.v[11..12]` and `kNames[11..12]` out of
-// bounds and handed the latter to `printf("%s")`.
-//
-// It survived every trait-count change since -- the vector has been 14, then 12,
-// now 15 -- because nothing compared the three numbers. And it was invisible in
-// the ordinary way: the read is only fatal when the address space happens to put
-// something unmapped after the globals, so it ran clean under `lldb` (which
-// disables ASLR) and segfaulted when run directly. It also *looked* like a crash
-// during initialisation, because a piped stdout is block-buffered and the whole
-// report was still sitting in the buffer when the process died.
-//
-// `-fsanitize=address` names it in one line: "global-buffer-overflow ... 0 bytes
-// after global variable 'kBase'". Reach for that before reading a stack trace.
-constexpr int kNTraits = 11;
+namespace pl = phylloptim;
+namespace gr = phylloptim::gradient;
+using clock_type = std::chrono::steady_clock;
 
-struct Traits {
-  double v[kNTraits];
-};
-
-const Traits kBase{{96.0, 2.680147, 3.4, 2.680147, 3.4, 1.5,
-                    157.44, 0.30 / 0.85, 0.7, 0.99, 7.5}};
-
-const char *kNames[kNTraits] = {"vcmax_25",  "stem_c",     "stem_P50",
-                          "root_c",    "root_P50",   "TF24_beta2",
-                          "jmax_25",   "phi_J",      "curv_elec",
-                          "curv_colim", "cost_scale"};
-
-static_assert(sizeof(kBase.v) / sizeof(kBase.v[0]) == kNTraits,
-              "kBase must have exactly kNTraits entries");
-static_assert(sizeof(kNames) / sizeof(kNames[0]) == kNTraits,
-              "kNames must have exactly kNTraits entries");
-
-// Whether perturbing this trait needs a vulnerability table at a new c: stem_c
-// owns the stem's, root_c the root's. The traits arm below changes c every rep,
-// so every table there is new; a leaf reuses recent tables (Leaf::table_for), so
-// a real gradient builds each perturbed table once. A P50 only rescales the
-// argument.
-bool rebuilds_a_table(int i) {
-  return i == 1 || i == 3;
-}
-
-void apply_traits(phylloptim::Leaf &l, const Traits &t) {
-  // R_d_25 last, at the class default, so the benchmark measures the default
-  // configuration.
-  l.set_traits(t.v[0], t.v[1], t.v[2], t.v[3], t.v[4], t.v[5],
-               t.v[6], t.v[7], t.v[8], t.v[9], t.v[10], 1.44,
-               /*JS22_gamma=*/1.0, /*CMax_a=*/0.6, /*CMax_b=*/0.0,
-               /*g_min=*/0.0);
-}
-
-// One interior operating point. Drivers from plant's tests/testthat/test-leaf.r,
-// as everywhere else in this suite.
 const double kTheta = 0.000157, kKs = 1.0, kH = 5.0, kAreaLeaf = 0.05;
 
-void set_drivers(phylloptim::Leaf &l) {
+gr::Drivers drivers() {
   std::vector<double> root{1.0 / kAreaLeaf}, psi_soil{2.0}, depth{1.0};
-  l.set_physiology(fixture::root_network(root, depth), 900.0, psi_soil, depth, kKs * kTheta / kH, 2.0, 40.0,
-                   25.0, 21.0, 101.3);
+  gr::Drivers d;
+  d.root_network = fixture::root_network(root, depth);
+  d.PPFD = 900.0;
+  d.psi_soil = psi_soil;
+  d.soil_depth = depth;
+  d.atm_vpd = 2.0;
+  d.ca = 40.0;
+  d.leaf_temp = 25.0;
+  d.atm_o2_kpa = 21.0;
+  d.atm_kpa = 101.3;
+  return d;
 }
 
-using clock_type = std::chrono::steady_clock;
+// theta at the leaf's defaults, varied per rep in TF24_beta2 by an
+// inconsequential amount so nothing can be hoisted out of a timed loop.
+void fill_theta(const pl::Leaf& l, double* theta, long r) {
+  const pl::leaf_pars<double> p = l.passive_pars();
+  for (int j = 0; j < gr::n_theta; ++j) theta[j] = p[std::size_t(j)];
+  theta[pl::par_kmax] = kKs * kTheta / kH;
+  theta[pl::par_g_min] = 0.0;
+  theta[pl::par_TF24_beta2] *= 1.0 + double(r) * 1e-12;
+}
+
+enum class Kind { None, Gradient, Difference };
+
+struct Arm {
+  const char* label;
+  Kind kind;
+  int npars;  // the first npars slots, every one TF24 reads up to 17
+};
+
+const Arm arms[] = {
+    {"none (seat + solve)", Kind::None, 0},
+    {"gradient, 1 par", Kind::Gradient, 1},
+    {"gradient, 4 pars", Kind::Gradient, 4},
+    {"gradient, 17 pars", Kind::Gradient, 17},
+    {"difference of the solve, 1 par", Kind::Difference, 1},
+    {"difference of the solve, 4 pars", Kind::Difference, 4},
+    {"difference of the solve, 17 pars", Kind::Difference, 17},
+};
+constexpr int n_arms = int(sizeof(arms) / sizeof(arms[0]));
+
+gr::Settings settings() {
+  gr::Settings s;
+  s.model = {pl::Leaf::CostCurve::TF24, gr::Route::Collar};
+  return s;
+}
+
+double one(pl::Leaf& l, const Arm& arm, long r, const gr::Drivers& d) {
+  double theta[gr::n_theta];
+  fill_theta(l, theta, r);
+  int pars[gr::n_theta];
+  for (int i = 0; i < arm.npars; ++i) pars[i] = i;
+  const gr::Settings s = settings();
+  if (arm.kind == Kind::Gradient) {
+    gr::Result res;
+    gr::at(l, theta, d, false, pars, std::size_t(arm.npars), s, res);
+    double sum = 0.0;
+    for (double v : res.grad) sum += v;
+    return sum;
+  }
+  gr::apply(l, theta, d, false);
+  gr::route_seat(l, s.model);
+  l.find_root_collar_psi();
+  double sum = l.profit_;
+  if (arm.kind == Kind::Difference) {
+    double th[gr::n_theta], up[gr::n_outputs], dn[gr::n_outputs];
+    for (int k = 0; k < arm.npars; ++k) {
+      // A slot at zero (g_min, CMax_b) may not go negative: a forward step.
+      const bool forward = theta[k] == 0.0;
+      const double h = std::max(std::abs(theta[k]), 1.0) * 1e-6;
+      for (int side = 0; side < 2; ++side) {
+        std::copy(theta, theta + gr::n_theta, th);
+        th[k] += side == 0 ? h : (forward ? 0.0 : -h);
+        gr::apply(l, th, d, false);
+        l.find_root_collar_psi();
+        gr::outputs(l, side == 0 ? up : dn);
+      }
+      for (int j = 0; j < gr::n_outputs; ++j) {
+        sum += (up[j] - dn[j]) / (forward ? h : 2.0 * h);
+      }
+    }
+  }
+  return sum;
+}
 
 double us_per(clock_type::time_point a, clock_type::time_point b, long n) {
   return std::chrono::duration<double, std::micro>(b - a).count() / double(n);
 }
 
-// The perturbation is varied by an inconsequential amount per iteration so that
-// no part of either loop can be hoisted out of the timed region. bench_solve's
-// header explains why that matters; the tell, when it goes wrong, is a
-// suspiciously round zero.
-double perturbed(const Traits &t, int idx, int sign, long r) {
-  return t.v[idx] * (1.0 + double(sign) * 1e-6 * (1.0 + double(r) * 1e-9));
-}
-
-double fd_arm(phylloptim::Leaf &l, int idx, long reps, double &sink) {
-  const auto t0 = clock_type::now();
-  for (long r = 0; r < reps; ++r) {
-    for (int sign = -1; sign <= 1; sign += 2) {
-      Traits t = kBase;
-      t.v[idx] = perturbed(kBase, idx, sign, r);
-      apply_traits(l, t);
-      set_drivers(l);
-      l.find_root_collar_psi();
-      sink += l.assim_colimited_;
-    }
+const Arm* find(const char* name) {
+  for (const Arm& a : arms) {
+    if (std::string(a.label).rfind(name, 0) == 0) return &a;
   }
-  return us_per(t0, clock_type::now(), reps);
-}
-
-double ift_arm(phylloptim::Leaf &l, int idx, double psi_star, long reps,
-               double &sink) {
-  const auto t0 = clock_type::now();
-  for (long r = 0; r < reps; ++r) {
-    for (int sign = -1; sign <= 1; sign += 2) {
-      Traits t = kBase;
-      t.v[idx] = perturbed(kBase, idx, sign, r);
-      apply_traits(l, t);
-      set_drivers(l);
-      // The mixed partial, and then the direct term at the same fixed collar.
-      sink += l.dprofit_droot_collar_psi(psi_star);
-      sink += l.evaluate_root_collar_psi(psi_star);
-      sink += l.assim_colimited_;
-    }
-  }
-  return us_per(t0, clock_type::now(), reps);
-}
-
-// The same composite, but moving stem_P50 through perturb_stem_P50 instead of
-// set_traits -- so the solved physiology is not cleared and set_physiology is
-// not needed, since nothing it derives depends on stem_b.
-double ift_arm_rescaled_stem_curve(phylloptim::Leaf &l, double psi_star,
-                                   long reps, double &sink) {
-  const auto t0 = clock_type::now();
-  for (long r = 0; r < reps; ++r) {
-    for (int sign = -1; sign <= 1; sign += 2) {
-      l.perturb_stem_P50(perturbed(kBase, 2, sign, r));
-      sink += l.dprofit_droot_collar_psi(psi_star);
-      sink += l.evaluate_root_collar_psi(psi_star);
-      sink += l.assim_colimited_;
-    }
-  }
-  const double us = us_per(t0, clock_type::now(), reps);
-  apply_traits(l, kBase);  // set_traits is the way back; it forces the rebuild
-  set_drivers(l);
-  return us;
+  return nullptr;
 }
 
 }  // namespace
 
-int main(int argc, char **argv) {
-  const long reps = argc > 1 ? std::atol(argv[1]) : 3000;
-  const long per_round = reps / 3 > 0 ? reps / 3 : 1;
-
-  phylloptim::Leaf l = fixture::multilayer_leaf();
-  apply_traits(l, kBase);
-  set_drivers(l);
-  l.find_root_collar_psi();
-  const double psi_star = l.opt_root_psi_;
+int main(int argc, char** argv) {
+  pl::Leaf l = fixture::multilayer_leaf();
+  const gr::Drivers d = drivers();
   double sink = 0.0;
 
-  // Component costs first, because they are what explain the table below rather
-  // than merely accompanying it.
-  {
-    auto t0 = clock_type::now();
-    for (long r = 0; r < reps; ++r) {
-      set_drivers(l);
-      sink += l.assim_max_;
+  if (argc == 4 && std::strcmp(argv[1], "--count") == 0) {
+    const Arm* arm = find(argv[2]);
+    if (arm == nullptr) {
+      fprintf(stderr, "no arm starts with '%s'\n", argv[2]);
+      return 2;
     }
-    printf("  set_physiology              %8.3f us\n", us_per(t0, clock_type::now(), reps));
-
-    t0 = clock_type::now();
-    for (long r = 0; r < reps; ++r) {
-      l.find_root_collar_psi();
-      sink += l.opt_root_psi_;
-    }
-    printf("  find_root_collar_psi       %8.3f us\n", us_per(t0, clock_type::now(), reps));
-
-    t0 = clock_type::now();
-    for (long r = 0; r < reps; ++r) {
-      sink += l.dprofit_droot_collar_psi(psi_star + double(r) * 1e-15);
-    }
-    printf("  dprofit_droot_collar_psi   %8.3f us\n", us_per(t0, clock_type::now(), reps));
-
-    t0 = clock_type::now();
-    for (long r = 0; r < reps; ++r) {
-      sink += l.evaluate_root_collar_psi(psi_star + double(r) * 1e-15);
-    }
-    printf("  evaluate_root_collar_psi   %8.3f us\n", us_per(t0, clock_type::now(), reps));
-
-    Traits t = kBase;
-    t0 = clock_type::now();
-    for (long r = 0; r < reps; ++r) {
-      t.v[0] = kBase.v[0] + double(r) * 1e-9;  // vcmax_25: no table
-      apply_traits(l, t);
-      sink += l.vcmax_25;
-    }
-    printf("  set_traits, no rebuild     %8.3f us\n", us_per(t0, clock_type::now(), reps));
-
-    t = kBase;
-    t0 = clock_type::now();
-    for (long r = 0; r < reps; ++r) {
-      t.v[1] = kBase.v[1] + double(r) * 1e-9;  // stem_c: rebuilds the stem table
-      apply_traits(l, t);
-      sink += l.stem_b;
-    }
-    printf("  set_traits, table rebuild  %8.3f us   <-- the finding\n",
-           us_per(t0, clock_type::now(), reps));
-
-    // And a P50, which rebuilds nothing whichever route moves it; this route also
-    // leaves the solved physiology alone.
-    t0 = clock_type::now();
-    for (long r = 0; r < reps; ++r) {
-      l.perturb_stem_P50(kBase.v[2] + double(r) * 1e-9);
-      sink += l.stem_b;
-    }
-    printf("  perturb_stem_P50, no rebuild %8.3f us\n",
-           us_per(t0, clock_type::now(), reps));
-    apply_traits(l, kBase);
-    set_drivers(l);
-    l.find_root_collar_psi();
+    const long n = std::atol(argv[3]);
+    for (long r = 0; r < n; ++r) sink += one(l, *arm, r, d);
+    printf("%s x %ld: checksum %.6f\n", arm->label, n, sink);
+    return 0;
   }
 
-  printf("\n%-15s %10s %10s %9s  %s\n", "trait", "FD", "IFT", "speedup",
-         "rebuilds a table");
-  double fd_all = 0.0, ift_all = 0.0, fd_cheap = 0.0, ift_cheap = 0.0;
-  int n_cheap = 0;
-  for (int i = 0; i < kNTraits; ++i) {
-    double fd = 1e300, ift = 1e300;
-    for (int round = 0; round < 3; ++round) {
-      // Reset to the base state before each arm so neither inherits the other's
-      // caches, then interleave -- see bench_solve.cpp on why sequential is not
-      // good enough.
-      apply_traits(l, kBase);
-      set_drivers(l);
-      l.find_root_collar_psi();
-      const double a = fd_arm(l, i, per_round, sink);
-      apply_traits(l, kBase);
-      set_drivers(l);
-      l.find_root_collar_psi();
-      const double b = ift_arm(l, i, psi_star, per_round, sink);
-      if (a < fd) {
-        fd = a;
-      }
-      if (b < ift) {
-        ift = b;
-      }
-    }
-    printf("%-15s %10.3f %10.3f %8.2fx  %s\n", kNames[i], fd, ift, fd / ift,
-           rebuilds_a_table(i) ? "yes" : "");
-    fd_all += fd;
-    ift_all += ift;
-    if (!rebuilds_a_table(i)) {
-      fd_cheap += fd;
-      ift_cheap += ift;
-      ++n_cheap;
-    }
-  }
-
-  printf("\n  %d of the %d traits  FD %8.1f us   IFT %8.1f us   %.2fx\n",
-         kNTraits, phylloptim::n_traits,
-         fd_all, ift_all, fd_all / ift_all);
-  printf("  the %2d with no rebuild  FD %8.1f us   IFT %8.1f us   %.2fx\n",
-         n_cheap, fd_cheap, ift_cheap, fd_cheap / ift_cheap);
-  printf("  the %2d that rebuild     FD %8.1f us   IFT %8.1f us   %.2fx\n",
-         kNTraits - n_cheap, fd_all - fd_cheap, ift_all - ift_cheap,
-         (fd_all - fd_cheap) / (ift_all - ift_cheap));
-  // stem_P50 again, moved by perturb_stem_P50 rather than set_traits. Interleaved
-  // with its set_traits arm rather than compared against the table above, because the
-  // two have to be measured in one run to be comparable at this effect size.
-  double reb = 0.0, resc = 0.0;
+  const long reps = argc > 1 ? std::atol(argv[1]) : 3000;
+  const long per_round = std::max(1L, reps / 3);
+  // Min of three interleaved rounds: the least-contaminated estimate, and
+  // sequential A-then-B is not good enough at these effect sizes.
+  double best[n_arms];
+  for (int a = 0; a < n_arms; ++a) best[a] = 1e300;
   for (int round = 0; round < 3; ++round) {
-    const double a = ift_arm(l, 2, psi_star, per_round, sink);
-    const double b = ift_arm_rescaled_stem_curve(l, psi_star, per_round, sink);
-    reb = round == 0 ? a : std::min(reb, a);
-    resc = round == 0 ? b : std::min(resc, b);
+    for (int a = 0; a < n_arms; ++a) {
+      const auto t0 = clock_type::now();
+      for (long r = 0; r < per_round; ++r) sink += one(l, arms[a], r, d);
+      best[a] = std::min(best[a], us_per(t0, clock_type::now(), per_round));
+    }
   }
-  printf("\n  stem_P50, IFT: set_traits %8.3f us   perturb %8.3f us   %.2fx\n",
-         reb, resc, reb / resc);
+  printf("%-36s %10s %12s\n", "arm (TF24, collar, 1 layer)", "us", "less none");
+  for (int a = 0; a < n_arms; ++a) {
+    printf("%-36s %10.2f %12.2f\n", arms[a].label, best[a], best[a] - best[0]);
+  }
+  // The line bench_history.sh reads: difference of the solve, then the gradient.
+  printf("\nvcmax_25 %10.3f %10.3f\n", best[4] - best[0], best[1] - best[0]);
 
-  // --- and the same identity per OBSERVATION, which is the number to quote ----
-  //
-  // ⚠️ THE TWO FIGURES ARE NOT THE SAME MEASUREMENT, and #74 exists because one
-  // was quoted for the other. Above is per PERTURBATION: two of them, and nothing
-  // else. Here is per observation through `gradient::batch`, which is what a
-  // calibration actually pays -- the perturbations plus one solve, one restore and
-  // the fixed cost of the composite. Say which one you mean.
+  // Per observation through the batch, which is what a calibration pays: the
+  // seat, the solve and the pass, for 20 observations at once.
   {
-    const double kmax = kKs * kTheta / kH;
-    double theta[phylloptim::gradient::n_theta] = {
-        kBase.v[0], kBase.v[1], kBase.v[2],  kBase.v[3], kBase.v[4],
-        kBase.v[5], kBase.v[6], kBase.v[7],  kBase.v[8], kBase.v[9],
-        // ⚠️ POSITIONAL and silently short-fillable -- see test_leaf.cpp's copy of
-        // this array for what adding a trait did to it. Count against `n_theta`.
-        kBase.v[10], 1.44,      /*JS22_gamma=*/1.0,
-        /*CMax_a=*/0.6, /*CMax_b=*/0.0, /*g_min=*/0.0, kmax, 0.0};
-    // ⚠️ THE ZERO-FILLED TAIL IS `resistance`, THE THREE MODEL-OWNED SLOTS
-    // (`CF77_lambda_`, `TF24_floor_lambda_o`, `LeastCost_beta`) AND THE FIFTEEN
-    // THERMAL-DAMAGE INPUTS. This benchmark differentiates `vcmax_25` on the
-    // collar route with the layer off, which reads none of them. The short
-    // initialiser zero-fills the rest, which is why the assertion below is what
-    // makes it safe.
-    static_assert(phylloptim::gradient::n_theta == 35,
-                  "theta above is positional and deliberately short; recount it "
-                  "against n_theta and update this assertion together");
-
-    std::vector<double> root{1.0 / kAreaLeaf}, psi_soil{2.0}, depth{1.0};
-    phylloptim::gradient::Drivers gd;
-    gd.root_network = fixture::root_network(root, depth);
-    gd.PPFD = 900.0;
-    gd.psi_soil = psi_soil;
-    gd.soil_depth = depth;
-    gd.atm_vpd = 2.0;
-    gd.ca = 40.0;
-    gd.leaf_temp = 25.0;
-    gd.atm_o2_kpa = 21.0;
-    gd.atm_kpa = 101.3;
     const std::size_t n_obs = 20;
-    const std::vector<phylloptim::gradient::Drivers> obs(n_obs, gd);
-
-    struct Arm {
-      const char *label;
-      int par;
-      bool fast;
-      double g_min = 0.0;
-    };
-    const Arm arms[] = {
-        {"vcmax_25 (no table anywhere)", 0, true},
-        {"stem_P50, fast_stem_curve on", phylloptim::par_stem_P50, true},
-        {"stem_P50, fast_stem_curve off", phylloptim::par_stem_P50, false},
-        {"stem_c (reuses its tables)", phylloptim::par_stem_c, true},
-        // With a cuticle: every arm above runs at its exact-zero default.
-        {"vcmax_25, g_min 5e-4", 0, true, 5e-4}};
-
-    printf("\n%-32s %10s %12s\n", "pars", "us/obs", "rebuilds/obs");
-    const long batch_reps = std::max(1L, per_round / 20);
-    for (const Arm &arm : arms) {
-      phylloptim::gradient::Settings s;
-      s.model = {phylloptim::Leaf::CostCurve::TF24,
-                 phylloptim::gradient::Route::Collar};
-      s.fast_stem_curve = arm.fast;
-      const int pars[1] = {arm.par};
-      theta[phylloptim::par_g_min] = arm.g_min;
-      double best = 1e300;
-      long builds = 0;
+    const std::vector<gr::Drivers> obs(n_obs, d);
+    const gr::Settings s = settings();
+    printf("\n%-24s %10s\n", "batch, 20 observations", "us/obs");
+    for (int npars : {1, 4, 17}) {
+      int pars[gr::n_theta];
+      for (int i = 0; i < npars; ++i) pars[i] = i;
+      double best_obs = 1e300;
+      const long batch_reps = std::max(1L, per_round / 20);
       for (int round = 0; round < 3; ++round) {
-        apply_traits(l, kBase);
-        set_drivers(l);
-        l.find_root_collar_psi();
-        const long before = l.stem_curve_builds_;
         const auto t0 = clock_type::now();
         for (long r = 0; r < batch_reps; ++r) {
-          // Vary theta per rep for the reason `perturbed()` documents -- but in
-          // `TF24_beta2`, NOT in the parameter being differentiated, and not in
-          // `stem_c`, which would rebuild the stem table each rep -- a rebuild the
-          // model genuinely owes, which would read like a leftover of the bug this
-          // arm exists to measure. `TF24_beta2` owns no table.
-          theta[phylloptim::par_TF24_beta2] =
-              kBase.v[7] * (1.0 + double(r) * 1e-12);
-          const std::vector<phylloptim::gradient::Result> g =
-              phylloptim::gradient::batch(l, theta, 1, obs, false, pars, 1, s);
+          double theta[gr::n_theta];
+          fill_theta(l, theta, r);
+          const std::vector<gr::Result> g =
+              gr::batch(l, theta, 1, obs, false, pars, std::size_t(npars), s);
           sink += g[0].grad[0];
         }
-        const double us =
-            us_per(t0, clock_type::now(), long(n_obs) * batch_reps);
-        best = std::min(best, us);
-        builds = l.stem_curve_builds_ - before;
+        best_obs = std::min(best_obs,
+                            us_per(t0, clock_type::now(), long(n_obs) * batch_reps));
       }
-      printf("%-32s %10.2f %12.2f\n", arm.label, best,
-             double(builds) / double(long(n_obs) * batch_reps));
+      printf("%-24s %10.2f\n", (std::to_string(npars) + " pars").c_str(), best_obs);
     }
-    printf(
-        "\nstem_b's per-observation cost used to carry one rebuild that no\n"
-        "perturbation asked for: the end-of-observation restore went through\n"
-        "set_traits while the shortcut still had stem_b displaced, and that is\n"
-        "exactly the case set_traits is required to rebuild for. `apply()` now\n"
-        "undoes the displacement with the shortcut first, so the restore has\n"
-        "nothing to rebuild -- rebuilds/obs above is the assertion. #74.\n");
   }
-
-  printf(
-      "\nThe two that rebuild a table are stem_c and root_c, here because the\n"
-      "traits arm moves c every rep; a gradient at a fixed c reuses its tables\n"
-      "(the batch arm above). The P50s rebuild nothing: each table is built in\n"
-      "psi/b and depends on c alone.\n");
   printf("\nchecksum %.6f\n", sink);
   return 0;
 }

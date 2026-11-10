@@ -4148,8 +4148,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // gradient_batch_run
-Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, SEXP drivers, Rcpp::NumericMatrix theta, Rcpp::IntegerVector pars, double step, double stationarity_tol, std::string method, bool fast_stem_curve, SEXP psi, SEXP dpsi_dtheta, int curve, bool collar, double fd_step);
-RcppExport SEXP _phylloptim_gradient_batch_run(SEXP obj_SEXP, SEXP driversSEXP, SEXP thetaSEXP, SEXP parsSEXP, SEXP stepSEXP, SEXP stationarity_tolSEXP, SEXP methodSEXP, SEXP fast_stem_curveSEXP, SEXP psiSEXP, SEXP dpsi_dthetaSEXP, SEXP curveSEXP, SEXP collarSEXP, SEXP fd_stepSEXP) {
+Rcpp::List gradient_batch_run(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, SEXP drivers, Rcpp::NumericMatrix theta, Rcpp::IntegerVector pars, SEXP psi, SEXP dpsi_dtheta, int curve, bool collar);
+RcppExport SEXP _phylloptim_gradient_batch_run(SEXP obj_SEXP, SEXP driversSEXP, SEXP thetaSEXP, SEXP parsSEXP, SEXP psiSEXP, SEXP dpsi_dthetaSEXP, SEXP curveSEXP, SEXP collarSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -4157,16 +4157,11 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< SEXP >::type drivers(driversSEXP);
     Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type theta(thetaSEXP);
     Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type pars(parsSEXP);
-    Rcpp::traits::input_parameter< double >::type step(stepSEXP);
-    Rcpp::traits::input_parameter< double >::type stationarity_tol(stationarity_tolSEXP);
-    Rcpp::traits::input_parameter< std::string >::type method(methodSEXP);
-    Rcpp::traits::input_parameter< bool >::type fast_stem_curve(fast_stem_curveSEXP);
     Rcpp::traits::input_parameter< SEXP >::type psi(psiSEXP);
     Rcpp::traits::input_parameter< SEXP >::type dpsi_dtheta(dpsi_dthetaSEXP);
     Rcpp::traits::input_parameter< int >::type curve(curveSEXP);
     Rcpp::traits::input_parameter< bool >::type collar(collarSEXP);
-    Rcpp::traits::input_parameter< double >::type fd_step(fd_stepSEXP);
-    rcpp_result_gen = Rcpp::wrap(gradient_batch_run(obj_, drivers, theta, pars, step, stationarity_tol, method, fast_stem_curve, psi, dpsi_dtheta, curve, collar, fd_step));
+    rcpp_result_gen = Rcpp::wrap(gradient_batch_run(obj_, drivers, theta, pars, psi, dpsi_dtheta, curve, collar));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -4549,7 +4544,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_gradient_output_names", (DL_FUNC) &_phylloptim_gradient_output_names, 0},
     {"_phylloptim_gradient_batch_prepare", (DL_FUNC) &_phylloptim_gradient_batch_prepare, 9},
     {"_phylloptim_gradient_batch_check", (DL_FUNC) &_phylloptim_gradient_batch_check, 1},
-    {"_phylloptim_gradient_batch_run", (DL_FUNC) &_phylloptim_gradient_batch_run, 13},
+    {"_phylloptim_gradient_batch_run", (DL_FUNC) &_phylloptim_gradient_batch_run, 8},
     {"_phylloptim_root_network_from_carbon", (DL_FUNC) &_phylloptim_root_network_from_carbon, 4},
     {NULL, NULL, 0}
 };

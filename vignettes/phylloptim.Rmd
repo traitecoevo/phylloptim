@@ -375,8 +375,9 @@ computed rather than written out, for the reason the hidden chunk below records.
 other. So `dY/dvcmax_25` is a partial derivative at fixed respiration. A fit that
 wants respiration to follow Vcmax moves both and adds the two columns.
 
-Selecting fewer parameters genuinely costs less. The work is one solve plus two
-cheap evaluations per parameter, so it scales with what you ask for.
+Selecting fewer parameters costs no less. The work is one solve plus one pass
+that carries the derivative in every parameter at once, so asking for one
+parameter costs what asking for all of them does.
 
 ```{r}
 #| echo: false
@@ -401,8 +402,8 @@ tibble::tibble(
   knitr::kable()
 ```
 
-So in a calibration, name only the parameters you are fitting. Asking for all of
-them when you fit three is several times the work.
+So name the parameters you are fitting for the shape of the result, not for
+speed.
 
 The five outputs are not selectable. Every call returns the derivative of `A`,
 `gc`, `psi_leaf`, `collar` and `profit` with respect to each requested parameter,
@@ -426,17 +427,16 @@ the section are on the collar route over the multi-layer supply:
 collar <- list(supply = leaf_supply_multilayer(), route = "collar")
 g <- leaf_gradient(psi_soil = 2.0, PPFD = 900, pars = "vcmax_25", psi = 2.7,
                    supply = collar$supply, route = collar$route)
-c(status = g$status, method = g$method)
+g$status
 ```
 
 `psi` is exogenous, so the answer is the partial derivative at fixed collar, plus
-`dpsi_dtheta` if the collar you imposed itself moves with the traits.
-`stationarity` still comes back, and on this path it says how far the point you
-chose sits from the optimum. `M`, `H` and `dY_dpsi` come back too, so a caller
-integrating its own sensitivity of `psi` has the coefficients.
+`dpsi_dtheta` if the collar you imposed itself moves with the traits. `M` and
+`dY_dpsi` come back too, so a caller integrating its own sensitivity of `psi`
+has the coefficients.
 
 Hand back the collar the solver found, with the response it derived, and the two
-paths agree exactly:
+paths agree to rounding:
 
 ```{r}
 a <- leaf_gradient(psi_soil = 2.0, PPFD = 900, pars = "vcmax_25",
@@ -444,14 +444,15 @@ a <- leaf_gradient(psi_soil = 2.0, PPFD = 900, pars = "vcmax_25",
 b <- leaf_gradient(psi_soil = 2.0, PPFD = 900, pars = "vcmax_25",
                    psi = a$psi, dpsi_dtheta = -a$M / a$H,
                    supply = collar$supply, route = collar$route)
-identical(a$gradient, b$gradient)
+all.equal(a$gradient, b$gradient, tolerance = 1e-12)
 ```
 
 A `psi` outside the feasible collar interval is refused: the leaf does not move it
 onto the interval's end, where the outputs would follow the *bound* rather than
 your `dpsi_dtheta`. `status` reports `"refused"`, `g$psi` is the one you gave, and
-everything else is `NA`. A `psi` within one step of an end is `"refused"` too,
-with its value but no gradient, because `dY/dpsi` cannot be centred there.
+everything else is `NA`. A feasible `psi` whose leaf potential lies in the
+stem curve's tail, just inside the dry end, is `"no-gradient"`: it has a value,
+but every row would be rounding there.
 
 Naming something that cannot be differentiated is an error rather than a silent
 omission, and the message says what is available instead:
@@ -464,26 +465,27 @@ leaf_gradient(psi_soil = 2.0, PPFD = 900, pars = "resistance",
 These are not finite differences of the solve. The outputs are read at the
 profit-maximising collar potential, so a trait moves them twice over: directly,
 and by moving the optimum itself. Differentiating the optimality condition
-`dprofit/dψ = 0`, rather than the solved output, captures both terms.
+`dprofit/dψ = 0`, rather than the solved output, captures both terms, and one
+pass of automatic differentiation carries every parameter at once.
 
 For `TF24_cost_scale`, `TF24_beta2`, `stem_P50` and `stem_c` the second term is
 the entire answer. Change any of them and assimilation moves only because the leaf
 chooses a different operating point.
 
-The interesting part is where the derivation stops being valid. It assumes the
+The interesting part is where that derivation stops being valid. It assumes the
 optimum is interior, and in dry soil it often is not: the leaf ends up at the very
 edge of the range of collar potentials it can physically occupy. There
 `dprofit/dψ` is not zero at the answer, and the formula is not merely imprecise
-but wrong by orders of magnitude, without failing loudly. The assumption is
-therefore tested at every point, and `leaf_gradient()` differences the solve
-instead where it does not hold:
+but wrong by orders of magnitude, without failing loudly. The solve records which
+kind of point it found, and at a pinned one `leaf_gradient()` differentiates the
+bound that holds the leaf instead:
 
 ```{r, fig.height = 3.4}
 sweep <- lapply(seq(1.0, 5.0, by = 0.125), function(p) {
   g <- leaf_gradient(psi_soil = p, PPFD = 900, atm_vpd = 3.0, pars = "stem_P50",
                      supply = collar$supply, route = collar$route)
   tibble(psi_soil = p, dA_dstem_P50 = g$gradient["stem_P50", "A"],
-         method = g$method, status = g$status)
+         status = g$status)
 }) |> bind_rows()
 
 ggplot(sweep, aes(psi_soil, dA_dstem_P50)) +
@@ -503,20 +505,16 @@ units of assimilation per MPa of `stem_P50`. The sensitivity rises as the soil
 dries, because vulnerability matters more when water is scarce, peaks near 2.9 MPa,
 eases off, and then falls away sharply. Past about 3.9 MPa the optimum is a bound:
 the leaf is stuck at the wettest collar potential it can physically reach, and a
-stem trait it has no freedom to exploit stops mattering at all.
-
-Two things about that flat tail are worth stating plainly. The true gradient there
-is smaller than the 5e-05 the plotted points reach, so what is drawn is the finite
-difference's own noise about zero, which is why it wobbles in sign. Read it as
-zero rather than as a small effect.
+stem trait it has no freedom to exploit stops mattering at all. The tail is
+exactly zero.
 
 The transition itself is a genuine kink in trait space, and a real
 non-differentiable set. It belongs to the constrained problem rather than to this
 implementation. A gradient-based fit that wanders across it is optimising through
 a corner, and no amount of care in the derivative changes that. What
 `leaf_gradient()` can do is tell you when you are there, which a naive finite
-difference cannot: `status` marks these points, and `g$stationarity` reports the
-measured distance from stationarity that the classification rests on.
+difference cannot: `status` marks these points, from the kind of point the solve
+recorded.
 
 ## A faster method: the closed form
 

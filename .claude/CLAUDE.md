@@ -53,7 +53,7 @@ Family context lives in [`plant-meta`](https://github.com/traitecoevo/plant-meta
 | `leaf_medlyn.hpp` | the Medlyn model, which is not a `CostCurve`, and `g1_eff` |
 | `leaf_model.hpp` | `Leaf` whole: the ten headers above, in order. plant and `gradient.hpp` include it |
 | `closed_form.hpp` | `Leaf::optimise_closed`, out of line because it needs the complete `Leaf`; `<phylloptim.hpp>` includes it and `leaf_model.hpp` does not |
-| `gradient.hpp` | `n_theta`, the (curve, route) `Model`, the IFT composite and `batch`: every trait gradient, `leaf_gradient()`'s included |
+| `gradient.hpp` | `n_theta`, the (curve, route) `Model`, one forward pass of the derivative surface per observation, and `batch`: every trait gradient, `leaf_gradient()`'s included |
 
 **A member is defined in its subsystem's `leaf_*.hpp`, and a consumer includes `leaf_model.hpp`, never a part.** A part alone parses, but a member it calls and does not define is a link error. Order within `leaf_model.hpp` does not matter, because the templates are instantiated at the end of the translation unit; the two solves include `leaf_cost_curves.hpp` only so that each parses alone. Moving a definition between parts changes no code: Apple clang's objects stay byte-identical, and gcc's differ only in how it numbers its constant labels (#216).
 
@@ -203,7 +203,7 @@ YAML 1.1 reads `1e-3` as a string: write a float with a point and a signed expon
 Each was taken by the package owner; reopening one is a decision for them, not a refactor. Four are requirements every change keeps:
 
 - **Every curve runs on both routes**, collar and leaf, and none is restricted to one.
-- **Every curve has gradients**, through the trait gradient and through the derivative surface.
+- **Every curve has gradients**, through the derivative surface, which the trait gradient reads.
 - **The R bindings stay.** The per-curve bound methods are frozen (no new curve adds one), not removed; `$curve_cost()`, `$curve_profit()` and `$curve_lambda()` take any curve by name.
 - **Common infrastructure, not code per curve**: a new curve is its `Curve<K>`, and the routes, gradients, bindings and registry follow from it.
 
@@ -211,10 +211,11 @@ The rest:
 
 - **D1. The closed form stays, frozen.** TF24, CF77 and TF24_floor carry `ClosedForm::Implemented`; no new curve adds a closed-form solver, and the closed form is never under a gradient (hazard 3). Collapsing duplication inside `closed_form.hpp` is allowed.
 - **D2. Medlyn stays outside the curve dispatch**, as an empirical-conductance diagnostic: the USO form is not a cost the solve maximises, and no λ maps onto `g1`.
-- **D3. One set of defaults everywhere**: `TF24_floor` at `lambda_o = 0` (TF24 bit for bit), the leaf route, the single-potential supply, in `Leaf`, `gradient::Settings` and every R entry point. The collar route and the multi-layer supply are asked for. Renamed or removed names get no alias.
+- **D3. One set of defaults everywhere**: `TF24_floor` at `lambda_o = 0` (TF24 bit for bit), the leaf route, the single-potential supply, in `Leaf`, `gradient::Model` and every R entry point. The collar route and the multi-layer supply are asked for. Renamed or removed names get no alias.
 - **D4. One λ.** `$lambda` is the seated curve's on its route, `C′/(h′(A)·E′)` from the cost's slopes and the link; no curve holds its own. It is NA where the link has no slope and at a shut collar, and carries the stem table's slope error (about 1e-12) on curves whose cost reads E.
 - **D5. `find_root_collar_psi()` solves the seated curve.**
 - **D6. The derivative surface bills carbon beside the objective**: `carbon` is A less the part of the curve's cost that is carbon spent (`Curve<K>::carbon_cost`; only TF24's hydraulic cost is), and `profit` is the objective with the collar held (envelope theorem). plant books `carbon`.
+- **D7. One gradient machinery** (#261). The trait gradient reads the derivative surface: one forward pass at `xad::fwd<double, n_theta + 1>`, a lane per slot of theta and one on the decision variable, whatever `pars` asks for, with no dispatch on the lane count. There is no differencing fallback: both routes' solves write `operating_point_kind_`, and `gradient::Status` is derived from it. The surface takes two potentials, the decision variable and the upstream one, which coincide on the collar route; `operating_collar` keeps its name and returns the route's decision variable. The removed R arguments (`method`, `step`, `stationarity_tol`, `fast_stem_curve`) get no aliases.
 - **Simplicity over the last bit.** A change that collapses duplicated code by moving goldens at rounding level does so, and states the move split by cause, rather than contorting the code to stay bit-identical. A change that claims to move nothing is still held to bit-identity.
 
 ## Invariants and what not to touch
