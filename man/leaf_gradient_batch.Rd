@@ -29,9 +29,9 @@ one.}
 \item{theta}{the model parameters as a matrix, for the case where they vary
 by observation. See the section above.}
 
-\item{psi}{one collar water potential per observation to evaluate at
-(positive magnitudes, MPa) instead of solving for the profit-maximising
-one. See \code{\link[=leaf_gradient]{leaf_gradient()}}'s section on it. Recycling a single value across
+\item{psi}{one decision variable per observation to evaluate at (positive
+magnitudes, MPa) instead of solving for the profit-maximising one: the
+collar potential on the collar route, the leaf potential on a leaf route. See \code{\link[=leaf_gradient]{leaf_gradient()}}'s section on it. Recycling a single value across
 the batch is deliberately not offered — rows sharing an imposed collar is a
 coincidence rather than a design, and broadcasting one would make a length
 mismatch look intentional.}
@@ -58,7 +58,7 @@ or with \code{psi} one of \code{"prescribed"}, \code{"refused"}, \code{"no-gradi
 \item{\code{M}}{an \code{n} × \code{length(pars)} matrix of mixed partials
 \verb{d2profit/dpsi dtheta}, \code{NA} where \code{\link[=leaf_gradient]{leaf_gradient()}} has none}
 \item{\code{dY_dpsi}}{an \code{n} × 5 matrix of \code{dY/dpsi} at fixed traits}
-\item{\code{psi}}{the collar each row was evaluated at}
+\item{\code{psi}}{the decision variable each row was evaluated at}
 \item{\code{message}}{\code{""}, or why that row failed}
 }
 }

@@ -358,6 +358,24 @@ test_that("leaf_gradient() works on the single-potential supply path", {
   expect_equal(g$gradient, solve_difference(a, pars), tolerance = 1e-6)
 })
 
+test_that("a network rooted above the bottom of the soil profile is differentiated", {
+  # A network is sized to its deepest rooted layer, so it can be shorter than
+  # the soil profile it is given. The pass builds the soil and the network at
+  # their own lengths; indexing one by the other read past the network's end.
+  net <- root_network_from_carbon(c(20, 0, 0), soil_depth = c(0.5, 1, 1.5))
+  expect_length(net$r_R_H_min, 1L)
+  a <- list(psi_soil = c(1, 2, 3), soil_depth = c(0.5, 1, 1.5), PPFD = 900,
+            root_network = net, supply = leaf_supply_multilayer(),
+            model = "TF24", route = "collar")
+  pars <- c("vcmax_25", "root_P50")
+  g <- do.call(leaf_gradient, c(a, list(pars = pars)))
+  expect_identical(g$status, "interior")
+  b <- a
+  b$psi_soil <- list(a$psi_soil)
+  b$soil_depth <- list(a$soil_depth)
+  expect_equal(g$gradient, solve_difference(b, pars), tolerance = 1e-6)
+})
+
 test_that("leaf_gradient() leaves the traits it was given", {
   # The perturbation loop mutates one Leaf, so it has to put it back. The Leaf is
   # internal, so what this really checks is that two calls agree -- a loop that
