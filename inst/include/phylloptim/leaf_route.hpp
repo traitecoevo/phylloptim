@@ -270,6 +270,14 @@ inline std::vector<double> Leaf::dprofit_dpsi_leaf_checked(double psi_leaf) {
 // difference objectives, a normalised profit for ProfitMax, carbon times a factor
 // for the products. Compare argmaxes across curves, never `profit_`.
 // ============================================================================
+// Every exit records which condition placed the point, as the collar solve
+// does, because the derivative surface switches on it: the one feasible
+// potential and ProfitMax with no objective are hydraulic-shutdown, a dark
+// log-link leaf and an optimum at the wet end are boundary-soil, one at the dry
+// end is boundary-dry, a root of the first-order condition is interior, and an
+// argmax resolved only to a width (a grid point, the fallback, or the narrowed
+// end at psi_crit) is solver-refused. Recorded, never inferred: the kind
+// writes no number.
 template <Leaf::CostCurve K>
 inline void Leaf::optimise_psi_leaf_single() {
   clear_collar_solve_state();
@@ -296,11 +304,13 @@ inline void Leaf::optimise_psi_leaf_single() {
   if constexpr (Curve<K>::prepares_normalisers) {
     if ((PPFD_ < 1.5e-8) | (psi_wet > psi_crit)) {
       set_profitmax_degenerate_state(psi_wet, psi_soil);
+      operating_point_kind_ = OperatingPointKind::HydraulicShutdown;
       return;
     }
     prepare_profitmax();
     if (!profitmax_has_objective()) {
       set_profitmax_degenerate_state(psi_wet, psi_soil);
+      operating_point_kind_ = OperatingPointKind::HydraulicShutdown;
       return;
     }
   } else if (psi_wet > psi_dry || !(stem_curve_complement(psi_soil) > 0.0)) {
@@ -309,6 +319,7 @@ inline void Leaf::optimise_psi_leaf_single() {
     // potential, and this is it.
     profit_ = profit_psi_leaf_for<K>(psi_wet, psi_soil);
     lambda_emergent_ = lambda_for<K>(psi_wet, psi_soil);
+    operating_point_kind_ = OperatingPointKind::HydraulicShutdown;
     return;
   }
   // A log-link objective with A <= 0 at the dry end has no maximum, and the
@@ -317,6 +328,7 @@ inline void Leaf::optimise_psi_leaf_single() {
     if (dark_under_log_link<K>(psi_dry, psi_soil)) {
       profit_ = profit_psi_leaf_for<K>(psi_wet, psi_soil);
       lambda_emergent_ = lambda_for<K>(psi_wet, psi_soil);
+      operating_point_kind_ = OperatingPointKind::BoundarySoil;
       return;
     }
   }
@@ -354,9 +366,28 @@ inline void Leaf::optimise_psi_leaf_single() {
                      static_cast<int>(std::ceil(cells * (hi - psi_wet) /
                                                 (psi_crit - psi_wet))));
   }
+  util::ArgmaxSource source = util::ArgmaxSource::Lo;
   opt_psi_leaf_ = util::maximise_over_closed_interval_foc(
       objective, dobjective, psi_wet, hi, cells, collar_root_tol,
-      static_cast<size_t>(ci_niter), &profit_opt);
+      static_cast<size_t>(ci_niter), &profit_opt, &source);
+  switch (source) {
+    case util::ArgmaxSource::Lo:
+      operating_point_kind_ = OperatingPointKind::BoundarySoil;
+      break;
+    case util::ArgmaxSource::Hi:
+      // At psi_crit narrowed short of the dry end profit was falling, so an
+      // argmax there is not a pin.
+      operating_point_kind_ = hi == psi_dry ? OperatingPointKind::BoundaryDry
+                                            : OperatingPointKind::SolverRefused;
+      break;
+    case util::ArgmaxSource::Root:
+      operating_point_kind_ = OperatingPointKind::Interior;
+      break;
+    case util::ArgmaxSource::Grid:
+    case util::ArgmaxSource::Fallback:
+      operating_point_kind_ = OperatingPointKind::SolverRefused;
+      break;
+  }
   // An argmax at psi_dry for a curve that is not bounded at psi_crit is the end
   // of the stem curve: the leaf transpires all the stem can carry, as on the
   // collar route (see maximise_profit_over_collar).

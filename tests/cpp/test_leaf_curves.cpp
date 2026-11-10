@@ -272,7 +272,8 @@ void test_profitmax_writes_hydraulic_cost_on_every_exit() {
       const std::string at = std::string(collar ? " (collar" : " (leaf") +
                              " route, PPFD " + std::to_string(int(ppfd)) + ")";
       if (ppfd == 0.0 && !collar) {
-        ok(l.operating_point_kind() == phylloptim::Leaf::OperatingPointKind::Unsolved,
+        ok(l.operating_point_kind() ==
+               phylloptim::Leaf::OperatingPointKind::HydraulicShutdown,
            "the dark leaf takes the degenerate exit" + at);
       }
       ok(std::isnan(l.hydraulic_cost_), "ProfitMax reports hydraulic_cost_ as NA" + at);

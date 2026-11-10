@@ -53,6 +53,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <cstdlib>
 #include <map>
 #include <optional>
 #include <cstdio>
@@ -203,7 +205,7 @@ Pairing forward_side(pl::Leaf l, const std::vector<double>& u,
     odelia::ode::set_direction(*f[k], u[k]);
   }
   const auto supply = in.supply();
-  const auto draw = l.supply_draw_at<T>(T(l.opt_root_psi_), supply);
+  const auto draw = l.supply_draw_at<T>(T(l.decision_psi()), supply);
   pl::Leaf::HeldCoords<T> held;
   pl::Leaf::HeldCoords<T>* h = handoff ? &held : nullptr;
   const T collar = l.operating_collar<K, T>(draw, in.pars, curvature, h);
@@ -242,7 +244,7 @@ Pairing reverse_side(pl::Leaf l, const std::vector<double>& u,
   tape.newRecording();
 
   const auto supply = in.supply();
-  auto draw = l.supply_draw_at<A>(A(l.opt_root_psi_), supply);
+  auto draw = l.supply_draw_at<A>(A(l.decision_psi()), supply);
   pl::Leaf::HeldCoords<A> held;
   pl::Leaf::HeldCoords<A>* h = handoff ? &held : nullptr;
   A collar = l.operating_collar<K, A>(draw, in.pars, curvature, h);
@@ -309,9 +311,13 @@ Arm arm_of(pl::Leaf::OperatingPointKind kind) {
 
 // A control below this is "silent": holding the collar passive changed nothing.
 // The identity itself passes below 1e-10, so a live control at this floor still
-// sits three orders above what the check can resolve. Scaled by the terms too,
-// for the reason the identity is.
-const double kControlFloor = 1e-7;
+// sits two orders above what the check can resolve. Scaled by the terms too,
+// for the reason the identity is. The smallest live control is printed; on a
+// leaf route pinned at an end the decision's own lane is small beside the rest
+// (4e-8 at the soil, g_min = 0, with the energy balance on).
+const double kControlFloor = 1e-8;
+double smallest_control = std::numeric_limits<double>::infinity();
+std::string smallest_control_at;
 int seen_carry = 0, seen_shut = 0, seen_residual = 0;
 // The handoff against solving the coordinates again in billed_outputs_at: the same rows
 // summed in another order on the reverse side, so equal to rounding there and
@@ -322,6 +328,8 @@ int handoff_forward_differs = 0;
 // kinds it ran on, and operating_collar places each by a different condition, so every
 // kind that carries rows is asserted reached, not just the arm.
 std::map<std::string, int> seen_kind;
+// Interior points flatter than operating_collar's floor, which it refuses.
+std::map<std::string, int> flat_interior;
 
 template <pl::Leaf::CostCurve K>
 void check_solved(pl::Leaf l, const std::string& at, unsigned long seed) {
@@ -356,13 +364,42 @@ void check_solved(pl::Leaf l, const std::string& at, unsigned long seed) {
   const Arm arm = arm_of(l.operating_point_kind());
   if (arm == Arm::Refuses) return;
   if (!fixture::surface_has_objective(l)) return;
+  // Taking the curvature moves the leaf and must put the solved point back,
+  // every output bit for bit (hazard 8): the surface reads those members.
+  const pl::Leaf before = l;
   const double curvature =
       l.operating_point_kind() == pl::Leaf::OperatingPointKind::Interior
           ? l.profit_curvature_at_collar<K>()
           : std::numeric_limits<double>::quiet_NaN();
+  {
+    const auto same = [](double a, double b) {
+      return (std::isnan(a) && std::isnan(b)) || a == b;
+    };
+    ok(same(before.opt_psi_leaf_, l.opt_psi_leaf_) &&
+           same(before.opt_root_psi_, l.opt_root_psi_) &&
+           same(before.profit_, l.profit_) &&
+           same(before.assim_colimited_, l.assim_colimited_) &&
+           same(before.transpiration_, l.transpiration_) &&
+           same(before.stom_cond_CO2_, l.stom_cond_CO2_) &&
+           same(before.ci_, l.ci_) && same(before.Tleaf_, l.Tleaf_) &&
+           same(before.residual_flux_, l.residual_flux_) &&
+           same(before.lambda_emergent(), l.lambda_emergent()) &&
+           before.operating_point_kind() == l.operating_point_kind(),
+       "the curvature puts the solved point back (" + curve + "): " + at);
+  }
   if (l.operating_point_kind() == pl::Leaf::OperatingPointKind::Interior &&
       !std::isfinite(curvature)) {
     return;  // no curvature to divide by; operating_collar would refuse too
+  }
+  // An interior point flatter than operating_collar's floor is refused there.
+  if (l.operating_point_kind() == pl::Leaf::OperatingPointKind::Interior &&
+      !(curvature < -pl::Leaf::interior_curvature_floor)) {
+    ++flat_interior[l.model_route() + " " + l.supply_kind_name() + " " + curve];
+    if (std::getenv("FLAT_TRACE")) {
+      printf("FLAT %s %s curvature %.3g psi_leaf %.4g profit %.4g\n", curve.c_str(),
+             at.c_str(), curvature, l.opt_psi_leaf_, l.profit_);
+    }
+    return;
   }
 
   // Through the coordinates operating_collar hands to billed_outputs_at, which is how plant
@@ -400,12 +437,17 @@ void check_solved(pl::Leaf l, const std::string& at, unsigned long seed) {
   // the outputs read depends on where its collar sits.
   const bool nothing_moves =
       l.operating_point_kind() == pl::Leaf::OperatingPointKind::HydraulicShutdown;
+  char moved_s[32];
+  std::snprintf(moved_s, sizeof moved_s, "%.3e", moved);
+  if (!nothing_moves && moved < smallest_control) {
+    smallest_control = moved;
+    smallest_control_at = curve + " " + at;
+  }
   ok(nothing_moves || moved > kControlFloor,
      "CONTROL: holding the collar must change the answer where it is placed "
-     "by a rule -- kind=" +
+     "by a rule (" + curve + "): " + at + " kind=" +
          std::string(l.operating_point_kind_name(l.operating_point_kind())) +
-         " g_min=" + std::to_string(l.g_min) +
-         " moved=" + std::to_string(moved));
+         " moved=" + moved_s);
   // Scaled by the larger side's terms. Two outputs can carry near-opposite rows
   // in one input (profit and the carbon billed from it, apart by the price),
   // which cancel inside that input's reverse row before the reverse side sums
@@ -416,7 +458,7 @@ void check_solved(pl::Leaf l, const std::string& at, unsigned long seed) {
   ++compared;
   if (rel > worst) worst = rel;
   if (cancel > worst_cancel) worst_cancel = cancel;
-  ++seen_kind[l.supply_kind_name() + " " + curve + " " +
+  ++seen_kind[l.model_route() + " " + l.supply_kind_name() + " " + curve + " " +
               l.operating_point_kind_name(l.operating_point_kind())];
   char rel_s[32];
   std::snprintf(rel_s, sizeof rel_s, "%.3e", rel);
@@ -427,8 +469,11 @@ void check_solved(pl::Leaf l, const std::string& at, unsigned long seed) {
 }
 
 // The curves the surface serves, each run on the same leaf and seed; a price on
-// TF24_floor small enough that its points land on TF24's kinds.
+// TF24_floor small enough that its points land on TF24's kinds. Smaller on the
+// leaf route, whose flux is the stem's alone: there 1e3 moves TF24's dry pins
+// to an interior optimum (psi_soil 7, PPFD 1500), and 10 keeps them.
 const double kFloorPrice = 1e3;
+const double kFloorPriceLeafRoute = 1e1;
 using CC = pl::Leaf::CostCurve;
 template <class F>
 void for_each_surface_curve(F&& f) {
@@ -453,12 +498,12 @@ std::vector<std::string> surface_curve_names() {
 // Seats curve K on a copy of the leaf and solves it; empty where the solve
 // throws, as ProfitMax's collar solve does with no stream to normalise over.
 template <CC K>
-std::optional<pl::Leaf> solved_on(const pl::Leaf& base) {
+std::optional<pl::Leaf> solved_on(const pl::Leaf& base, bool leaf_route = false) {
   pl::Leaf l = base;
-  l.TF24_floor_lambda_o = kFloorPrice;
-  l.set_model(K, true);
+  l.TF24_floor_lambda_o = leaf_route ? kFloorPriceLeafRoute : kFloorPrice;
+  l.set_model(K, !leaf_route);
   try {
-    l.find_root_collar_psi();
+    l.optimise();
   } catch (const pl::util::infeasible_error&) {
     return std::nullopt;
   }
@@ -466,14 +511,16 @@ std::optional<pl::Leaf> solved_on(const pl::Leaf& base) {
 }
 
 void check(int layers, double psi0, double ppfd, double leaf_temp,
-           unsigned long seed, double g_min, bool single = false) {
+           unsigned long seed, double g_min, bool single = false,
+           bool leaf_route = false) {
   const pl::Leaf base = set_up(layers, psi0, ppfd, leaf_temp, g_min, false, single);
   for_each_surface_curve([&](auto tag) {
     constexpr CC K = decltype(tag)::value;
-    const std::optional<pl::Leaf> l = solved_on<K>(base);
+    const std::optional<pl::Leaf> l = solved_on<K>(base, leaf_route);
     if (!l) return;
     check_solved<K>(*l,
-                    std::string(single ? "single " : "") +
+                    std::string(leaf_route ? "leaf route " : "") +
+                        std::string(single ? "single " : "") +
                         "layers=" + std::to_string(layers) + " psi_soil=" +
                         std::to_string(psi0) + " ppfd=" + std::to_string(ppfd) +
                         " T=" + std::to_string(leaf_temp) +
@@ -484,14 +531,16 @@ void check(int layers, double psi0, double ppfd, double leaf_temp,
 
 // The same with the energy balance on.
 void check_energy_balance(int layers, double psi0, double ppfd, double leaf_temp,
-                          unsigned long seed, double g_min, bool single = false) {
+                          unsigned long seed, double g_min, bool single = false,
+                          bool leaf_route = false) {
   const pl::Leaf base = set_up(layers, psi0, ppfd, leaf_temp, g_min, true, single);
   for_each_surface_curve([&](auto tag) {
     constexpr CC K = decltype(tag)::value;
-    const std::optional<pl::Leaf> l = solved_on<K>(base);
+    const std::optional<pl::Leaf> l = solved_on<K>(base, leaf_route);
     if (!l) return;
     check_solved<K>(*l,
-                    std::string(single ? "single " : "") +
+                    std::string(leaf_route ? "leaf route " : "") +
+                        std::string(single ? "single " : "") +
                         "energy balance layers=" + std::to_string(layers) +
                         " psi_soil=" + std::to_string(psi0) +
                         " ppfd=" + std::to_string(ppfd) +
@@ -505,24 +554,29 @@ void check_energy_balance(int layers, double psi0, double ppfd, double leaf_temp
 // asserted to land on its kind before it is compared: a fixture that drifted to
 // another kind would narrow the check without failing it.
 void check_kind(const std::vector<double>& psi_soil, double ppfd, double vpd,
-                pl::Leaf::OperatingPointKind want, unsigned long seed) {
+                pl::Leaf::OperatingPointKind want, unsigned long seed,
+                bool leaf_route = false, bool single = false) {
   pl::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
+  if (single) l.set_supply_single();
   std::vector<double> depth, root;
   for (std::size_t i = 0; i < psi_soil.size(); ++i) {
     depth.push_back(1.0 * double(i + 1));
     root.push_back(1.0 / 0.05 / double(psi_soil.size()));
   }
-  l.set_physiology(fixture::root_network(root, depth), ppfd, psi_soil, depth,
-                   0.000157 / 5.0, vpd, 40.0, 25.0, 21.0, 101.3);
-  const std::string at = std::string(pl::Leaf::operating_point_kind_name(want)) +
+  l.set_physiology(single ? fixture::series_resistance(kSeriesResistance)
+                          : fixture::root_network(root, depth),
+                   ppfd, psi_soil, depth, 0.000157 / 5.0, vpd, 40.0, 25.0, 21.0, 101.3);
+  const std::string at = std::string(leaf_route ? "leaf route " : "") +
+                         std::string(single ? "single " : "") +
+                         std::string(pl::Leaf::operating_point_kind_name(want)) +
                          " fixture psi_soil=" + std::to_string(psi_soil[0]) +
                          " ppfd=" + std::to_string(ppfd) +
                          " vpd=" + std::to_string(vpd);
   for_each_surface_curve([&](auto tag) {
     constexpr CC K = decltype(tag)::value;
-    const std::optional<pl::Leaf> c = solved_on<K>(l);
+    const std::optional<pl::Leaf> c = solved_on<K>(l, leaf_route);
     // Checked at whatever kind it lands on: each fixture reaches its kind on some
     // curves, and the coverage asserted in main() is per curve.
     if (c) check_solved<K>(*c, at, seed);
@@ -573,6 +627,22 @@ int main() {
       }
     }
   }
+  // The leaf route, which holds the stem's upstream end at the soil: on the
+  // single potential and on one layer of the multi-layer supply, the two it
+  // runs on, with the energy balance off and on.
+  for (double g_min : {0.0, 5e-4}) {
+    for (bool single : {true, false}) {
+      for (double psi0 : {0.5, 1.0, 2.0, 3.0, 5.0, 7.0, 16.0}) {
+        for (double ppfd : {1.0, 100.0, 1500.0}) {
+          for (double leaf_temp : {25.0, 40.0}) {
+            check(1, psi0, ppfd, leaf_temp, seed += 7919, g_min, single, true);
+            check_energy_balance(1, psi0, ppfd, leaf_temp, seed += 7919, g_min,
+                                 single, true);
+          }
+        }
+      }
+    }
+  }
   using K = pl::Leaf::OperatingPointKind;
   // The dry pin: a soil dry enough that the leaf transpires all its stem can
   // carry, the continuity root with the stem at the end of its curve (#183).
@@ -584,6 +654,13 @@ int main() {
   check_kind({0.5}, 100.0, 0.5, K::Interior, seed += 7919);
   check_kind({0.5}, 500.0, 2.0, K::BoundaryDry, seed += 7919);
   check_kind({0.3}, 1.0, 0.5, K::BoundarySoil, seed += 7919);
+  // The same one-layer fixtures on the leaf route, on both supplies.
+  for (bool single : {false, true}) {
+    check_kind({6.0}, 500.0, 0.5, K::BoundaryDry, seed += 7919, true, single);
+    check_kind({0.5}, 100.0, 0.5, K::Interior, seed += 7919, true, single);
+    check_kind({0.5}, 500.0, 2.0, K::BoundaryDry, seed += 7919, true, single);
+    check_kind({0.3}, 1.0, 0.5, K::BoundarySoil, seed += 7919, true, single);
+  }
   printf("    %d operating points compared | worst relative %.3e\n", compared,
          worst);
   // Reported because it is what the scaling above is for: a sweep that stopped
@@ -599,6 +676,11 @@ int main() {
   printf("    arms reached: %d placed by a rule, %d of them shut, %d with a "
          "residual conductance\n",
          seen_carry, seen_shut, seen_residual);
+  printf("    smallest live control %.3e (%s)\n", smallest_control,
+         smallest_control_at.c_str());
+  printf("    interior points refused as flatter than the floor:");
+  for (const auto& [name, count] : flat_interior) printf(" %s %d,", name.c_str(), count);
+  printf("\n");
   printf("    kinds reached:");
   for (const auto& [name, count] : seen_kind) printf(" %s %d,", name.c_str(), count);
   printf("\n");
@@ -610,12 +692,13 @@ int main() {
   for_each_surface_curve([&](auto tag) {
     constexpr CC K = decltype(tag)::value;
     const std::string curve = pl::Leaf::curve_name(static_cast<int>(K));
-    for (const char* supply : {"multilayer", "single"}) {
+    for (const char* where : {"collar multilayer", "collar single", "leaf single",
+                              "leaf multilayer"}) {
       for (pl::Leaf::OperatingPointKind kind : fixture::surface_kinds(K)) {
         const std::string name = pl::Leaf::operating_point_kind_name(kind);
-        ok(seen_kind[std::string(supply) + " " + curve + " " + name] > 0,
+        ok(seen_kind[std::string(where) + " " + curve + " " + name] > 0,
            "the identity was checked at a " + name + " point on " + curve +
-               " (" + supply + " supply)");
+               " (" + where + ")");
       }
     }
   });

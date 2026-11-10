@@ -6,7 +6,7 @@
 // the operating point's derivative, at whatever scalar it holds, from three
 // member templates:
 //
-//   SupplyDraw<S>  draw = leaf.supply_draw_at<S>(S(leaf.opt_root_psi_), supply);
+//   SupplyDraw<S>  draw = leaf.supply_draw_at<S>(S(leaf.decision_psi()), supply);
 //   HeldCoords<S>  held;
 //   S              psi  = leaf.operating_collar<K, S>(draw, pars, curvature, &held);
 //   BilledOutputs<S> out  = leaf.billed_outputs_at<K, S>(psi, draw, pars, &held);
@@ -15,6 +15,12 @@
 // from the implicit function theorem at the converged point; nothing the
 // root-find did is recorded. S is double, a tangent
 // (odelia::ode::tangent_scalar) or an adjoint (odelia::ode::adjoint_scalar).
+//
+// On either route: the decision variable is the collar on the collar route and
+// the leaf potential on a leaf route (decision_psi()), where the stem's upstream
+// end is the soil, an input the draw carries, and there is no supply walk.
+// operating_collar returns the route's decision variable; the names are the
+// collar route's.
 //
 // `out.profit` is the objective that placed the point, taken with the collar
 // held at an interior point (the envelope theorem), so it needs no curvature;
@@ -100,6 +106,9 @@ inline void Leaf::held_coords_at(double sigma_star, double ci_star,
   // whose slope is not 1/G'(sigma), so a live collar would carry two values of
   // dsigma/dcollar. The residuals carry the trait rows, the slopes the collar's.
   const S held(to_passive(collar));
+  // The stem's upstream end: the held collar, or on a leaf route the soil,
+  // an input of its own (the decision variable there is the leaf potential).
+  const S& up = route_is_collar_ ? held : draw.upstream;
   const double gc_per_flux =
       atm_kpa_ * kg_to_mol_h2o / vpd_leaf_ / H2O_CO2_stom_diff_ratio_;
   const Leaf& leaf = *this;
@@ -111,11 +120,14 @@ inline void Leaf::held_coords_at(double sigma_star, double ci_star,
   // ⚠️ Every active input the residual reads must be in implicit_value's list:
   // the residual is rewound, so one left out is a row that reads as an exact
   // zero (hazard 18). `held` is passive and carries none.
+  // On a leaf route the stem IS the decision variable, held like the collar.
   // At a dry pin the stem is held at the curve's end, a function of the traits:
   // T1's slope there is kmax e^-40, and dividing by it amplifies rounding. A shut
   // leaf's stem seated at its collar IS the collar (V = 1 in the channel):
   // inverting T1 there divides by a conductivity of ~1e-20.
-  if (leaf_held_at_dry_pin(sigma_star)) {
+  if (!route_is_collar_) {
+    sigma_h = held;
+  } else if (leaf_held_at_dry_pin(sigma_star)) {
     sigma_h = stem_curve_end_at<S>(pars);
   } else if (leaf_held_at_collar(sigma_star, to_passive(collar))) {
     sigma_h = held;
@@ -135,7 +147,7 @@ inline void Leaf::held_coords_at(double sigma_star, double ci_star,
   // In dprofit_at_collar_psi's operation order, which the marginal must match;
   // the reported stom_cond_CO2_ associates the same product differently, so it
   // equals this to rounding.
-  const S stem_flux = transpiration_at<S>(sigma_h, held, pars);
+  const S stem_flux = transpiration_at<S>(sigma_h, up, pars);
   // Where nothing conducts (a shut leaf at g_min = 0, on its wet bound) the
   // stomatal term carries no row: the collar's channel is skipped there, so
   // nothing would cancel the held collar's partial in stem_flux.
@@ -146,7 +158,7 @@ inline void Leaf::held_coords_at(double sigma_star, double ci_star,
     balance.temp = leaf_temperature_at<S>(stem_flux, pars);
     cap = photo_capacity_at<S>(pars, balance.temp);
     balance.gc_per_flux = gc_per_flux_on<S>(balance.temp);
-    balance.r_star = residual_flux_at<S>(held, pars, draw,
+    balance.r_star = residual_flux_at<S>(up, pars, draw,
                                          residual_demand_per_g_on<S>(balance.temp));
     balance.E_s = stem_flux - balance.r_star;
     const S cuticle =
@@ -159,7 +171,7 @@ inline void Leaf::held_coords_at(double sigma_star, double ci_star,
     gc = split.first;
     balance.bl_slope = split.second;
   } else {
-    const S r_star = residual_flux_at<S>(held, pars, draw);
+    const S r_star = residual_flux_at<S>(up, pars, draw);
     const S cuticle = pars[par_g_min] * S(g_min_co2_ratio_ * g_min_factor(Tleaf_));
     gc = stom_cond_CO2_ == 0.0
              ? cuticle
@@ -392,6 +404,10 @@ inline Leaf::CollarCoords<S> Leaf::collar_channel_at(
     bool collar_moves) const {
   using odelia::util::to_passive;
   const S held(to_passive(collar));
+  // As in held_coords_at: on a leaf route the stem's upstream end is the soil,
+  // and the decision variable moves the stem one for one and nothing upstream.
+  const bool collar_route = route_is_collar_;
+  const S& up = collar_route ? held : draw.upstream;
   const double gc_per_flux =
       atm_kpa_ * kg_to_mol_h2o / vpd_leaf_ / H2O_CO2_stom_diff_ratio_;
   const double inv_atm = 1.0 / (atm_kpa_ * kPa_to_Pa);
@@ -413,8 +429,8 @@ inline Leaf::CollarCoords<S> Leaf::collar_channel_at(
   // solve drove dprofit_at_collar_psi's table assembly to zero (a closed-form
   // value makes M non-zero there); its rows are the curve's (closed_form_rows.hpp).
   const S& kmax = pars[par_kmax];
-  const S f_p = curve_with_closed_form_rows<S>(stem_curve_integral_deriv(to_passive(collar)),
-                               held, pars[par_stem_P50], pars[par_stem_c]);
+  const S f_p = curve_with_closed_form_rows<S>(stem_curve_integral_deriv(to_passive(up)),
+                               up, pars[par_stem_P50], pars[par_stem_c]);
   const S f_sigma = curve_with_closed_form_rows<S>(stem_curve_integral_deriv(sigma_star),
                                    sigma_h, pars[par_stem_P50],
                                    pars[par_stem_c]);
@@ -434,7 +450,8 @@ inline Leaf::CollarCoords<S> Leaf::collar_channel_at(
   // its channel is an exact zero, which formed would be e^40 times terms of
   // order e^-40, platform-dependent rounding. A stem seated at a shut leaf's
   // collar moves with it one for one.
-  const S V = leaf_held_at_dry_pin(sigma_star)
+  const S V = !collar_route ? S(1.0)
+              : leaf_held_at_dry_pin(sigma_star)
                   ? S(0.0)
                   : leaf_held_at_collar(sigma_star, to_passive(collar))
                         ? S(1.0)
@@ -445,41 +462,53 @@ inline Leaf::CollarCoords<S> Leaf::collar_channel_at(
   // The conductance partials are kmax * f at each end. The residual flux moves
   // with the collar through its ceiling, appended as dprofit_at_collar_psi
   // appends it: the solve's number, with every row; an exact zero at g_min = 0.
+  // On a leaf route the decision variable is not the upstream potential, so the
+  // conductance and the residual flux have no partial in it through that end.
   S dgc_dsigma = gc_const * kmax * f_sigma;
-  S dgc_dp = -gc_const * kmax * f_p;
+  S dgc_dp = collar_route ? S(-gc_const * kmax * f_p) : S(0.0);
   ResidualFluxSlopes<S> residual{S(0.0), S(1.0)};
-  S drstar_dpsi = S(residual_flux_dpsi_upstream(to_passive(collar), Tleaf_));
+  S drstar_dpsi =
+      collar_route ? S(residual_flux_dpsi_upstream(to_passive(collar), Tleaf_)) : S(0.0);
   if (g_min > 0.0) {
     const S per_g = use_energy_balance_
                         ? residual_demand_per_g_on<S>(balance.temp)
                         : S(g_min_factor(Tleaf_) * vpd_leaf_ / atm_kpa_ / kg_to_mol_h2o);
-    residual = residual_flux_slopes_at<S>(held, f_p, pars, draw, per_g);
-    drstar_dpsi = drstar_dpsi + (residual.d_collar - S(to_passive(residual.d_collar)));
+    residual = residual_flux_slopes_at<S>(up, f_p, pars, draw, per_g);
+    if (collar_route) {
+      drstar_dpsi = drstar_dpsi + (residual.d_collar - S(to_passive(residual.d_collar)));
+    }
   }
-  dgc_dp = dgc_dp - gc_const * drstar_dpsi;
+  if (collar_route) {
+    dgc_dp = dgc_dp - gc_const * drstar_dpsi;
+  }
 
   // The same condition governs the slope: with no conductance at all ci is
-  // placed by A(ci) = 0, which the collar does not enter, and gc is the cuticle's.
+  // placed by A(ci) = 0 and gc is the cuticle's, so neither moves with the
+  // stem's flux, though with the energy balance on ci follows leaf temperature,
+  // which does.
   S dci_dp = S(0.0);
   S dgc_dcollar = S(0.0);
   S bl_slope = S(1.0);
   // The coordinates' total slopes with leaf temperature moving: values only,
   // since the step they multiply is zero in value and carries the rows.
   double dci_total = 0.0, dgc_total = 0.0;
-  if (!no_coordinate && stom_cond_CO2_ != 0.0) {
+  const bool conducts = stom_cond_CO2_ != 0.0;
+  if (!no_coordinate && (conducts || use_energy_balance_)) {
     // The partials above are before the boundary layer's split; gc is after it.
-    if (use_energy_balance_) {
+    if (conducts && use_energy_balance_) {
       bl_slope = balance.bl_slope;
       dgc_dsigma = dgc_dsigma * bl_slope;
       dgc_dp = dgc_dp * bl_slope;
     }
     const S A_prime = assim_slope_at<S>(ci_h, cap);
     const S g_ci = A_prime * umol_to_mol + gc * inv;
-    const S ca_minus_ci = S(ca_) - ci_h;
-    const S dci_dsigma = (dgc_dsigma * ca_minus_ci * inv) / g_ci;
-    const S dci_dp_expl = (dgc_dp * ca_minus_ci * inv) / g_ci;
-    dci_dp = dci_dsigma * V + dci_dp_expl;
-    dgc_dcollar = dgc_dsigma * V + dgc_dp;
+    if (conducts) {
+      const S ca_minus_ci = S(ca_) - ci_h;
+      const S dci_dsigma = (dgc_dsigma * ca_minus_ci * inv) / g_ci;
+      const S dci_dp_expl = (dgc_dp * ca_minus_ci * inv) / g_ci;
+      dci_dp = dci_dsigma * V + dci_dp_expl;
+      dgc_dcollar = dgc_dsigma * V + dgc_dp;
+    }
     if (use_energy_balance_) {
       // Leaf temperature moves with the stem's flux, kmax (f_sigma V - f_p) per
       // unit collar, and moves ci and gc at fixed flux: A's own slope in T over
@@ -488,7 +517,8 @@ inline Leaf::CollarCoords<S> Leaf::collar_channel_at(
       (void)leaf_temp_from_E(transpiration_, &dT_dE);
       const double dT_dcollar =
           dT_dE * (to_passive(kmax) *
-                   (to_passive(f_sigma) * to_passive(V) - to_passive(f_p)));
+                   (to_passive(f_sigma) * to_passive(V) -
+                    (collar_route ? to_passive(f_p) : 0.0)));
       const double t = to_passive(balance.temp), h = temp_fd_step;
       leaf_pars<double> pp;
       for (std::size_t i = 0; i < pp.size(); ++i) pp[i] = to_passive(pars[i]);
@@ -503,7 +533,7 @@ inline Leaf::CollarCoords<S> Leaf::collar_channel_at(
           (((vpd_leaf_ > vpd_leaf_min)
                 ? -gc_s * saturation_vapour_pressure_slope(t) / vpd_leaf_
                 : 0.0) +
-           residual_cond_temp_deriv(to_passive(collar), t, gc_const_v)) *
+           residual_cond_temp_deriv(to_passive(up), t, gc_const_v)) *
           to_passive(bl_slope);
       const double dci_dT =
           (dgc_dT * (ca_ - ci_v) * inv_atm - A_T * umol_to_mol) / to_passive(g_ci);
@@ -569,8 +599,9 @@ inline S Leaf::profit_at(const S& collar, const SupplyDraw<S>& draw,
   const CollarCoords<S> at = collar_coords_at<S>(opt_psi_leaf_, ci_, collar,
                                                  draw, pars, cap, collar_moves);
   PhotoCapacity<S> store;
+  const S& up = route_is_collar_ ? collar : draw.upstream;
   return profit_from_coords<K, S>(
-      collar, pars, collar_moves ? live_capacity_at<S>(collar, pars, at, cap, store) : cap,
+      up, pars, collar_moves ? live_capacity_at<S>(up, pars, at, cap, store) : cap,
       at.sigma.value, at.ci.value, norms);
 }
 
@@ -648,6 +679,12 @@ inline Out Leaf::outputs_at(const S& collar, const SupplyDraw<S>& draw,
   // collar's channel at an interior point. Anywhere else carbon is read off the
   // coordinates at the live collar, as the physical outputs are.
   constexpr bool carbon_from_price = !physical && C::price_reads_flux_only;
+  // A leaf route has no draw to price: its flux is the stem's at the live leaf
+  // potential, so carbon is read off the coordinates there.
+  const bool collar_route = route_is_collar_;
+  const bool from_price = carbon_from_price && collar_route;
+  // The stem's upstream end: the collar, or on a leaf route the soil.
+  const S& up = collar_route ? collar : draw.upstream;
   refuse_thermal_damage(who);
   check_surface_curve<K>(who);
   check_draw(to_passive(collar), draw);
@@ -678,8 +715,9 @@ inline Out Leaf::outputs_at(const S& collar, const SupplyDraw<S>& draw,
   const S step = collar - S(draw.at);
   odelia::util::check_length(draw.duptake_dp.size(), draw.uptake.size());
   // Built, not copied and overwritten: a copy records a statement per layer.
-  out.uptake.reserve(draw.uptake.size());
-  for (std::size_t j = 0; j < draw.uptake.size(); ++j) {
+  // On a leaf route the one layer gives what the stem carries (below).
+  out.uptake.reserve(collar_route ? draw.uptake.size() : 1);
+  for (std::size_t j = 0; collar_route && j < draw.uptake.size(); ++j) {
     out.uptake.push_back(draw.uptake[j] + S(draw.duptake_dp[j]) * step);
   }
 
@@ -689,12 +727,12 @@ inline Out Leaf::outputs_at(const S& collar, const SupplyDraw<S>& draw,
                              const CollarCoords<S>& at) {
     PhotoCapacity<S> store;
     const PhotoCapacity<S>& cap =
-        live_capacity_at<S>(collar, pars, at, held_cap, store);
+        live_capacity_at<S>(up, pars, at, held_cap, store);
     const S A = assim_at_coords<S>(cap, at.ci.value);
     out.carbon = A - C::template scalar_carbon_cost<S>(*this, at.sigma.value, pars);
     if constexpr (physical) {
       out.A = A;
-      out.E = transpiration_at<S>(at.sigma.value, collar, pars);
+      out.E = transpiration_at<S>(at.sigma.value, up, pars);
       out.psi_leaf = at.sigma.value;
       out.ci = at.ci.value;
       out.gc = at.gc.value;
@@ -711,12 +749,13 @@ inline Out Leaf::outputs_at(const S& collar, const SupplyDraw<S>& draw,
     if (reuse) {
       // The same coordinates profit_at would solve for at the held collar: the
       // residuals see a held collar there too, so these are its numbers and rows.
-      out.profit = profit_from_coords<K, S>(collar_held, pars, placed->cap,
-                                            placed->sigma, placed->ci, norms);
+      out.profit = profit_from_coords<K, S>(collar_route ? collar_held : up, pars,
+                                            placed->cap, placed->sigma, placed->ci,
+                                            norms);
     } else {
       out.profit = profit_at<K, S>(collar_held, draw, pars, false, norms);
     }
-    if constexpr (!carbon_from_price) {
+    if (!from_price) {
       // The channel added to the held coordinates leaves every value as it is
       // (the step is zero) and adds the collar's rows.
       if (reuse) {
@@ -737,24 +776,39 @@ inline Out Leaf::outputs_at(const S& collar, const SupplyDraw<S>& draw,
                                                    draw, pars, cap, true);
     PhotoCapacity<S> store;
     out.profit = profit_from_coords<K, S>(
-        collar, pars, live_capacity_at<S>(collar, pars, at, cap, store),
+        up, pars, live_capacity_at<S>(up, pars, at, cap, store),
         at.sigma.value, at.ci.value, norms);
-    if constexpr (!carbon_from_price) {
+    if (!from_price) {
       from_live(cap, at);
     }
   }
   if constexpr (carbon_from_price) {
-    // The flux at the live collar from the draw's own slope: the stem carries
-    // what the soil delivers at every collar, so it is the price's flux too.
-    out.carbon = out.profit +
-                 C::template scalar_price<S>(
-                     *this, draw.E_up.value + draw.E_up.slope * step, pars);
+    if (from_price) {
+      // The flux at the live collar from the draw's own slope: the stem carries
+      // what the soil delivers at every collar, so it is the price's flux too.
+      out.carbon = out.profit +
+                   C::template scalar_price<S>(
+                       *this, draw.E_up.value + draw.E_up.slope * step, pars);
+    }
   }
   // The residual flux at the LIVE collar: the envelope theorem is profit's,
   // and the cuticle's loss moves with the collar through the stem's ceiling.
   // An exact zero carrying the g_min row at g_min = 0.
   // With the energy balance on, the demand is at the leaf temperature of the
   // draw's flux carried to the live collar.
+  // On a leaf route the stem's flux at the live leaf potential is the soil's
+  // too (the soil is the stem's upstream end), so it is the one layer's uptake.
+  if (!collar_route) {
+    const S E_live = transpiration_at<S>(collar, up, pars);
+    out.uptake.push_back(E_live * S(1.0 / kg_per_mol_h2o));
+    out.residual_flux =
+        use_energy_balance_
+            ? residual_flux_at<S>(up, pars, draw,
+                                  residual_demand_per_g_on<S>(
+                                      leaf_temperature_at<S>(E_live, pars)))
+            : residual_flux_at<S>(up, pars, draw);
+    return out;
+  }
   if (use_energy_balance_) {
     out.residual_flux = residual_flux_at<S>(
         collar, pars, draw,
@@ -776,7 +830,8 @@ inline S Leaf::dprofit_dcollar_at(const S& collar, const SupplyDraw<S>& draw,
   PhotoCapacity<S> cap = photo_capacity_at<S>(pars);
   const CollarCoords<S> at =
       collar_coords_at<S>(opt_psi_leaf_, ci_, collar, draw, pars, cap, true);
-  return dprofit_dcollar_from_coords<K, S>(collar, pars, cap, at, norms);
+  return dprofit_dcollar_from_coords<K, S>(route_is_collar_ ? collar : draw.upstream,
+                                           pars, cap, at, norms);
 }
 
 template <Leaf::CostCurve K, class S>
@@ -794,7 +849,8 @@ inline S Leaf::dprofit_dcollar_at(const S& collar, const SupplyDraw<S>& draw,
   const CollarCoords<S> at =
       collar_channel_at<S>(opt_psi_leaf_, collar, draw, pars, held.cap,
                            held.sigma, held.gc, held.ci, held.balance, true);
-  return dprofit_dcollar_from_coords<K, S>(collar, pars, held.cap, at, norms);
+  return dprofit_dcollar_from_coords<K, S>(route_is_collar_ ? collar : draw.upstream,
+                                           pars, held.cap, at, norms);
 }
 
 template <Leaf::CostCurve K, class S>
@@ -849,10 +905,13 @@ inline S Leaf::dprofit_dcollar_from_coords(const S& collar, const leaf_pars<S>& 
         C_prime * at.sigma.slope;
   }
   // The cost's direct dependence on the collar, at the LIVE collar, so the
-  // term's own dM/dcollar reaches the implicit row.
+  // term's own dM/dcollar reaches the implicit row. On a leaf route the
+  // upstream potential is held, so the marginal in the leaf potential has none.
   if constexpr (C::cost_reads_upstream) {
-    M = M - C::template scalar_cost_slope_upstream<S>(*this, at.sigma.value,
-                                                      collar, pars);
+    if (route_is_collar_) {
+      M = M - C::template scalar_cost_slope_upstream<S>(*this, at.sigma.value,
+                                                        collar, pars);
+    }
   }
   // The temperature path, appended as dprofit_at_collar_psi appends it.
   {
@@ -1036,6 +1095,57 @@ inline S Leaf::wet_bound_at(double bound_x, const SupplyDraw<S>& draw,
   return wet;
 }
 
+// A leaf route's wet end (leaf_wet_bound): the leaf potential at which the stem
+// carries exactly the residual flux from the soil, the soil itself at g_min = 0.
+// The value is the solve's; the rows are the implicit function's in the traits
+// and the soil, with the residual flux's temperature following the flux where
+// the energy balance is on. At g_min = 0 that is still the residual's root, so
+// the g_min row is the slope from above, as the collar's wet bound reports it.
+template <class S>
+inline S Leaf::leaf_wet_end_at(const SupplyDraw<S>& draw,
+                               const leaf_pars<S>& pars) const {
+  using odelia::util::to_passive;
+  const double x = opt_psi_leaf_;
+  const S& up = draw.upstream;
+  const Leaf& leaf = *this;
+  // dF/dx: the stem's flux slope, less the residual flux's through leaf
+  // temperature, as wet_bound_at forms it for the collar.
+  const double dflux_dx =
+      to_passive(pars[par_kmax]) * stem_curve_integral_deriv(x);
+  // A soil past the end of the stem curve conducts nothing: the leaf sits at
+  // the soil, which carries its row.
+  if (!(dflux_dx > 0.0)) {
+    return S(x) + (up - S(to_passive(up)));
+  }
+  double dres_dx = dflux_dx;
+  if (use_energy_balance_) {
+    // At the flux the solve seated at the wet end.
+    double dT_dE = 0.0;
+    const double t_b = leaf_temp_from_E(transpiration_, &dT_dE);
+    const double r = residual_demand_at(t_b);
+    const double E_inf = supply_ceiling(to_passive(up));
+    const double r1 = residual_cap(r, E_inf);
+    const double drstar_dr = residual_root_cap_ddemand(r1, r) *
+                                 residual_cap_ddemand(r, E_inf) +
+                             residual_root_cap_dceiling_dr(r1, r);
+    dres_dx -= drstar_dr * residual_demand_dT(t_b) * dT_dE * dflux_dx;
+  }
+  // ⚠️ The soil (in the draw) and the pack are the residual's active inputs,
+  // and both are listed (hazard 18).
+  return odelia::implicit_value<S>(
+      x, dres_dx,
+      [&](const S& y) -> S {
+        const S E = leaf.template transpiration_at<S>(y, up, pars);
+        return E - (use_energy_balance_
+                        ? leaf.template residual_flux_at<S>(
+                              up, pars, draw,
+                              leaf.template residual_demand_per_g_on<S>(
+                                  leaf.template leaf_temperature_at<S>(E, pars)))
+                        : leaf.template residual_flux_at<S>(up, pars, draw));
+      },
+      draw, pars);
+}
+
 template <Leaf::CostCurve K, class S>
 inline S Leaf::dry_end_collar_at(double bound_x, const SupplyDraw<S>& draw,
                                  const leaf_pars<S>& pars) const {
@@ -1072,13 +1182,16 @@ inline S Leaf::operating_collar(const SupplyDraw<S>& draw, const leaf_pars<S>& p
   // answers at some kinds and not others is one a caller cannot plan around.
   refuse_thermal_damage("Leaf::operating_collar");
   check_surface_curve<K>("Leaf::operating_collar");
-  check_draw(opt_root_psi_, draw);
+  // The route's decision variable: the collar, or on a leaf route the leaf
+  // potential, whose kinds are placed by the same conditions in it.
+  const double decision = decision_psi();
+  check_draw(decision, draw);
   // Unplaced until the interior arm places it, so coordinates left from an
   // earlier point can never be read at this one.
   if (placed != nullptr) {
     placed->at = std::numeric_limits<double>::quiet_NaN();
   }
-  S collar = S(opt_root_psi_);
+  S collar = S(decision);
   switch (operating_point_kind_) {
     case OperatingPointKind::Interior: {
       // Closed by the residual like every other kind: dM/dp is what the theorem
@@ -1114,20 +1227,20 @@ inline S Leaf::operating_collar(const SupplyDraw<S>& draw, const leaf_pars<S>& p
         const Normalisers<S> norms = normalisers_at<K, S>(draw, pars);
         const auto solve = [&](const auto& residual, const auto&... inputs) {
           if constexpr (Curve<K>::prepares_normalisers) {
-            return odelia::implicit_value<S>(opt_root_psi_, curvature, residual,
+            return odelia::implicit_value<S>(decision, curvature, residual,
                                              inputs..., norms);
           } else {
-            return odelia::implicit_value<S>(opt_root_psi_, curvature, residual,
+            return odelia::implicit_value<S>(decision, curvature, residual,
                                              inputs...);
           }
         };
         if (placed != nullptr) {
-          const S at = S(opt_root_psi_);
+          const S at = S(decision);
           placed->cap = photo_capacity_at<S>(pars);
           held_coords_at<S>(opt_psi_leaf_, ci_, at, draw, pars, placed->cap,
                             placed->sigma, placed->gc, placed->ci,
                             placed->balance);
-          placed->at = opt_root_psi_;
+          placed->at = decision;
           const HeldCoords<S>& h = *placed;
           collar = solve(
               [&](const S& y) -> S {
@@ -1148,13 +1261,22 @@ inline S Leaf::operating_collar(const SupplyDraw<S>& draw, const leaf_pars<S>& p
     }
     // A shut leaf sits ON the wet bound: the collar at which uptake meets the
     // residual flux, so the bound is the point and it moves with the soil.
+    // On a leaf route the wet end is where the stem carries the residual flux
+    // from the soil, and the dry end is the stem's own, a function of the traits
+    // whose value is the solve's.
     case OperatingPointKind::BoundarySoil:
     case OperatingPointKind::HydraulicShutdown:
-      collar = wet_bound_at<S>(opt_root_psi_, draw, pars);
+      collar = route_is_collar_ ? wet_bound_at<S>(opt_root_psi_, draw, pars)
+                                : leaf_wet_end_at<S>(draw, pars);
       break;
     case OperatingPointKind::BoundaryDry:
       // The continuity root: T1 with the stem held at its dry end.
-      collar = dry_end_collar_at<K, S>(opt_root_psi_, draw, pars);
+      if (route_is_collar_) {
+        collar = dry_end_collar_at<K, S>(opt_root_psi_, draw, pars);
+      } else {
+        const S end = dry_end_at<K, S>(pars);
+        collar = S(decision) + (end - S(odelia::util::to_passive(end)));
+      }
       break;
     default:
       util::stop(std::string("Leaf::operating_collar: no operating point to place at "
@@ -1166,6 +1288,30 @@ inline S Leaf::operating_collar(const SupplyDraw<S>& draw, const leaf_pars<S>& p
 
 template <Leaf::CostCurve K>
 inline double Leaf::profit_curvature_at_collar() {
+  // On a leaf route, the curvature of profit in the leaf potential with the
+  // soil held: a difference of the route's own marginal, as the collar's below.
+  if (!route_is_collar_) {
+    const double p0 = opt_psi_leaf_;
+    const double soil = supply_psi_soil_scalar();
+    const OperatingPointKind kind0 = operating_point_kind_;
+    const double h = 1e-5;
+    bool up_ok = false, down_ok = false, here_ok = false;
+    const double up = dprofit_dpsi_leaf<K>(p0 + h, soil, &up_ok);
+    const double down = dprofit_dpsi_leaf<K>(p0 - h, soil, &down_ok);
+    const double here =
+        (up_ok && down_ok) ? 0.0 : dprofit_dpsi_leaf<K>(p0, soil, &here_ok);
+    // Back to the point the solve placed: the marginal reseats the
+    // temperature block, and the evaluation tags the point prescribed.
+    evaluate_psi_leaf<K>(p0);
+    operating_point_kind_ = kind0;
+    const bool have_up = up_ok && std::isfinite(up);
+    const bool have_down = down_ok && std::isfinite(down);
+    const bool have_here = here_ok && std::isfinite(here);
+    if (have_up && have_down) return (up - down) / (2.0 * h);
+    if (have_here && have_up) return (up - here) / h;
+    if (have_here && have_down) return (here - down) / h;
+    return std::numeric_limits<double>::quiet_NaN();
+  }
   const double p0 = opt_root_psi_;
   // An absolute step: the collar runs 0.5 to 6 MPa, and steps 1e-04 to 1e-06
   // agree to seven figures (1e-02 is truncation, 1e-07 round-off). Within
