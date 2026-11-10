@@ -427,16 +427,14 @@ void test_thermal_damage_fd_helpers_restore_the_block() {
      "the repair-flux cost's temperature response reaches dR_d/dT");
 }
 
-// Every derivative path that reads the capacities off the parameter pack, the
-// trait gradient, and the closed form refuse a leaf with the layer on; each is
-// checked for its message, and each beside a control that runs with the gate
-// off. Two paths deliberately do NOT refuse, and are checked to run: the supply
-// draw, which reads no capacity, and the marginal's curvature, which differences
-// the solve's own dprofit.
-void test_thermal_damage_refusals() {
-  printf("thermal damage: the derivative paths that cannot carry it refuse\n");
+// With the layer on, the parameter pack's capacities are the solve's members bit
+// for bit, at the member's temperature and at a scalar one, and the derivative
+// surface answers; test_leaf_surface's referee holds its rows to a difference of
+// the solve for every curve. The trait gradient carries the layer, and the
+// closed form refuses it, beside a control that runs with the gate off.
+void test_thermal_damage_on_the_pack() {
+  printf("thermal damage: the parameter pack carries it\n");
   using CC = phylloptim::Leaf::CostCurve;
-  const std::string refused = "refused with use_thermal_damage_ on";
   Drivers d;
   d.PPFD = 1500.0;
   // 35 C, not 25: the gradient check below needs a finite difference clean enough
@@ -455,37 +453,43 @@ void test_thermal_damage_refusals() {
   ok(on.operating_point_kind() ==
          phylloptim::Leaf::OperatingPointKind::Interior,
      "the gate-on fixture is an interior point");
-  ok(std::isfinite(profit_row_at_current_point(l, phylloptim::par_vcmax_25)),
-     "control: the derivative surface answers with the gate off");
-
-  ok(throws_with([&] { profit_row_at_current_point(on, phylloptim::par_vcmax_25); },
-                 "Leaf::operating_collar: " + refused),
-     "operating_collar refuses");
+  ok(std::isfinite(profit_row_at_current_point(on, phylloptim::par_vcmax_25)),
+     "the derivative surface answers with the gate on");
   const phylloptim::leaf_pars<double> pars = on.passive_pars();
-  const auto on_supply = on.roots_.held_supply();
+
+  // The pack's capacities against the members, bit for bit, the energy balance
+  // off and on (on: at the leaf temperature the balance placed).
+  int compared = 0;
+  for (bool eb : {false, true}) {
+    for (double temp : {25.0, 35.0, 42.0}) {
+      Drivers dt = d;
+      dt.leaf_temp = temp;
+      phylloptim::Leaf q = make_thermal_leaf(dt, psi, depth, eb, true, set_atls_inputs);
+      q.find_root_collar_psi();
+      const phylloptim::leaf_pars<double> p = q.passive_pars();
+      const std::string at = std::string(eb ? " (energy balance)" : "") + " at " +
+                             std::to_string(int(temp)) + " C";
+      ok(q.vcmax_at<double>(p) == q.vcmax_, "vcmax_at is the member" + at);
+      ok(q.jmax_at<double>(p) == q.jmax_, "jmax_at is the member" + at);
+      ok(q.respiration_at<double>(p) == q.R_d_, "respiration_at is the member" + at);
+      const phylloptim::Leaf::PhotoCapacity<double> cap =
+          q.photo_capacity_at<double>(p, q.photo_temp_);
+      ok(cap.vcmax == q.vcmax_ && cap.respiration == q.R_d_ &&
+             cap.transport == q.electron_transport(),
+         "the capacity at a scalar temperature is the members" + at);
+      ++compared;
+    }
+  }
+  ok(compared == 6, "the pack was compared at six points");
+  const auto on_supply = on.held_supply();
   const auto draw = on.supply_draw_at<double>(on.opt_root_psi_, on_supply);
-  ok(std::isfinite(draw.E_up.value), "supply_draw_at reads no capacity, and runs");
-  ok(std::isfinite(on.profit_curvature_at_collar<CC::TF24>()),
-     "profit_curvature_at_collar differences the solve's own dprofit, and runs");
-  ok(throws_with([&] { on.operating_collar<CC::TF24, double>(draw, pars); },
-                 "Leaf::operating_collar: " + refused),
-     "operating_collar refuses at double too");
-  ok(throws_with([&] { on.billed_outputs_at<CC::TF24, double>(on.opt_root_psi_, draw, pars); },
-                 "Leaf::billed_outputs_at: " + refused),
-     "billed_outputs_at refuses");
-  ok(throws_with([&] { on.vcmax_at<double>(pars); }, "Leaf::vcmax_at: " + refused),
-     "vcmax_at refuses");
-  ok(throws_with([&] { on.jmax_at<double>(pars); }, "Leaf::jmax_at: " + refused),
-     "jmax_at refuses");
-  ok(throws_with([&] { on.respiration_at<double>(pars); },
-                 "Leaf::respiration_at: " + refused),
-     "respiration_at refuses");
-  ok(throws_with([&] { on.photo_capacity_at<double>(pars); },
-                 "Leaf::vcmax_at: " + refused),
-     "photo_capacity_at refuses, through vcmax_at");
-  ok(throws_with([&] { on.photo_capacity_at<double>(pars, on.photo_temp_); },
-                 "Leaf::vcmax_at: " + refused),
-     "and at a scalar leaf temperature too");
+  ok(on.operating_collar<CC::TF24, double>(draw, pars) == on.opt_root_psi_ &&
+         on.billed_outputs_at<CC::TF24, double>(on.opt_root_psi_, draw, pars).profit ==
+             on.profit_,
+     "at double the surface is the solve's point and profit with the gate on");
+  // Impaired area does not photosynthesise: profit falls as I rises.
+  ok(profit_row_at_current_point(on, phylloptim::par_I) < 0.0,
+     "profit falls as the impaired fraction rises");
 
   // The trait gradient, both entry points.
   double theta[phylloptim::gradient::n_theta];
@@ -578,5 +582,5 @@ void run_thermal_damage() {
   test_thermal_damage_dprofit_is_the_solves_own();
   test_thermal_damage_has_no_corners();
   test_thermal_damage_fd_helpers_restore_the_block();
-  test_thermal_damage_refusals();
+  test_thermal_damage_on_the_pack();
 }

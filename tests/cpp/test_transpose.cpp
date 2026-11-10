@@ -98,13 +98,34 @@ const double kTheta = 0.5, kKs = 2.0, kH = 5.0, kAreaLeaf = 1.0;
 // suite's single-path value (test_leaf's make_single_leaf).
 const double kSeriesResistance = 1.0e3;
 
+// The thermal-damage layer's inputs away from their defaults, as test_leaf's
+// set_atls_inputs seats them, so every slot the solve reads carries a row.
+void seat_thermal_damage(pl::Leaf& l) {
+  l.use_thermal_damage_ = true;
+  l.topt_offset_ = 2.5;
+  l.k_i_ = 5.0;
+  l.k_i_baseline_ = 8.0;
+  l.k_rec_ = 0.4;
+  l.k_rec_Ea_ = 3e4;
+  l.dTopt_max_ = 4.0;
+  l.K_A_ = 2.0;
+  l.A_ = 1.5;
+  l.I_ = 0.2;
+  l.D_ = 0.15;
+  l.c_acclim_maint_ = 0.05;
+  l.c_repair_maint_ = 0.3;
+  l.c_protect_maint_ = 0.4;
+  l.c_repair_flux_ = 0.8;
+}
+
 pl::Leaf set_up(int layers, double psi0, double ppfd, double leaf_temp,
                 double g_min = 0.0, bool energy_balance = false,
-                bool single = false) {
+                bool single = false, bool damage = false) {
   pl::Leaf l = fixture::multilayer_leaf();
   l.setup_transpiration(100);
   l.setup_root_vulnerability(100);
   if (single) l.set_supply_single();
+  if (damage) seat_thermal_damage(l);
   // With the balance on, as test_leaf seats it: daylight NIR at the light.
   if (energy_balance) {
     l.use_energy_balance_ = true;
@@ -328,6 +349,8 @@ int handoff_forward_differs = 0;
 // kinds it ran on, and operating_collar places each by a different condition, so every
 // kind that carries rows is asserted reached, not just the arm.
 std::map<std::string, int> seen_kind;
+// Compared points with the thermal-damage layer on, per curve and kind.
+std::map<std::string, int> seen_damage;
 // Interior points flatter than operating_collar's floor, which it refuses.
 std::map<std::string, int> flat_interior;
 
@@ -460,6 +483,9 @@ void check_solved(pl::Leaf l, const std::string& at, unsigned long seed) {
   if (cancel > worst_cancel) worst_cancel = cancel;
   ++seen_kind[l.model_route() + " " + l.supply_kind_name() + " " + curve + " " +
               l.operating_point_kind_name(l.operating_point_kind())];
+  if (l.use_thermal_damage_) {
+    ++seen_damage[curve + " " + l.operating_point_kind_name(l.operating_point_kind())];
+  }
   char rel_s[32];
   std::snprintf(rel_s, sizeof rel_s, "%.3e", rel);
   ok(rel < 1e-10, "transpose identity (" + curve + "): " + at + " kind=" +
@@ -512,14 +538,16 @@ std::optional<pl::Leaf> solved_on(const pl::Leaf& base, bool leaf_route = false)
 
 void check(int layers, double psi0, double ppfd, double leaf_temp,
            unsigned long seed, double g_min, bool single = false,
-           bool leaf_route = false) {
-  const pl::Leaf base = set_up(layers, psi0, ppfd, leaf_temp, g_min, false, single);
+           bool leaf_route = false, bool damage = false) {
+  const pl::Leaf base =
+      set_up(layers, psi0, ppfd, leaf_temp, g_min, false, single, damage);
   for_each_surface_curve([&](auto tag) {
     constexpr CC K = decltype(tag)::value;
     const std::optional<pl::Leaf> l = solved_on<K>(base, leaf_route);
     if (!l) return;
     check_solved<K>(*l,
-                    std::string(leaf_route ? "leaf route " : "") +
+                    std::string(damage ? "thermal damage " : "") +
+                        std::string(leaf_route ? "leaf route " : "") +
                         std::string(single ? "single " : "") +
                         "layers=" + std::to_string(layers) + " psi_soil=" +
                         std::to_string(psi0) + " ppfd=" + std::to_string(ppfd) +
@@ -532,14 +560,16 @@ void check(int layers, double psi0, double ppfd, double leaf_temp,
 // The same with the energy balance on.
 void check_energy_balance(int layers, double psi0, double ppfd, double leaf_temp,
                           unsigned long seed, double g_min, bool single = false,
-                          bool leaf_route = false) {
-  const pl::Leaf base = set_up(layers, psi0, ppfd, leaf_temp, g_min, true, single);
+                          bool leaf_route = false, bool damage = false) {
+  const pl::Leaf base =
+      set_up(layers, psi0, ppfd, leaf_temp, g_min, true, single, damage);
   for_each_surface_curve([&](auto tag) {
     constexpr CC K = decltype(tag)::value;
     const std::optional<pl::Leaf> l = solved_on<K>(base, leaf_route);
     if (!l) return;
     check_solved<K>(*l,
-                    std::string(leaf_route ? "leaf route " : "") +
+                    std::string(damage ? "thermal damage " : "") +
+                        std::string(leaf_route ? "leaf route " : "") +
                         std::string(single ? "single " : "") +
                         "energy balance layers=" + std::to_string(layers) +
                         " psi_soil=" + std::to_string(psi0) +
@@ -643,6 +673,24 @@ int main() {
       }
     }
   }
+  // The thermal-damage layer, on the collar route (one and three layers) and on
+  // the leaf route, with the energy balance off and on.
+  for (double g_min : {0.0, 5e-4}) {
+    for (int layers : {1, 3}) {
+      for (double psi0 : {0.5, 1.0, 2.0, 3.0, 5.0, 7.0, 16.0}) {
+        for (double ppfd : {100.0, 1500.0}) {
+          for (double leaf_temp : {25.0, 40.0}) {
+            check(layers, psi0, ppfd, leaf_temp, seed += 7919, g_min, false, false, true);
+            check_energy_balance(layers, psi0, ppfd, leaf_temp, seed += 7919, g_min,
+                                 false, false, true);
+            if (layers == 1) {
+              check(1, psi0, ppfd, leaf_temp, seed += 7919, g_min, true, true, true);
+            }
+          }
+        }
+      }
+    }
+  }
   using K = pl::Leaf::OperatingPointKind;
   // The dry pin: a soil dry enough that the leaf transpires all its stem can
   // carry, the continuity root with the stem at the end of its curve (#183).
@@ -678,6 +726,9 @@ int main() {
          seen_carry, seen_shut, seen_residual);
   printf("    smallest live control %.3e (%s)\n", smallest_control,
          smallest_control_at.c_str());
+  printf("    with thermal damage:");
+  for (const auto& [name, count] : seen_damage) printf(" %s %d,", name.c_str(), count);
+  printf("\n");
   printf("    interior points refused as flatter than the floor:");
   for (const auto& [name, count] : flat_interior) printf(" %s %d,", name.c_str(), count);
   printf("\n");
@@ -688,6 +739,11 @@ int main() {
   ok(compared >= 20 * int(surface_curve_names().size()),
      "the sweep reached at least 20 operating points per curve");
   ok(seen_shut > 0, "the sweep reached a shut leaf");
+  for_each_surface_curve([&](auto tag) {
+    const std::string curve = pl::Leaf::curve_name(static_cast<int>(decltype(tag)::value));
+    ok(seen_damage[curve + " interior"] > 0,
+       "the identity was checked with thermal damage at an interior point on " + curve);
+  });
   ok(seen_residual > 0, "the sweep reached a leaf with a residual conductance");
   for_each_surface_curve([&](auto tag) {
     constexpr CC K = decltype(tag)::value;

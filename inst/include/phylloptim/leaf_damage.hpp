@@ -23,8 +23,9 @@ inline double Leaf::softplus_(double x, double s) {
 // Inverts the peaked Arrhenius optimum Topt = H_d/(d_S - corr), corr =
 // R*ln(Ea/(H_d - Ea)), for the d_S that puts it delta_topt higher. The optimum
 // exists only for 0 < Ea < H_d, so outside it is refused, not a NaN capacity.
-inline double Leaf::d_S_shifted(double Ea, double H_d, double d_S_base,
-                                double delta_topt) const {
+template <class T>
+inline T Leaf::d_S_shifted(double Ea, double H_d, double d_S_base,
+                           const T& delta_topt) const {
   if (!(Ea > 0.0 && H_d > Ea)) {
     util::stop("the thermal-damage layer moves the peaked Arrhenius optimum, "
                "which exists only for 0 < Ea < H_d; got Ea = " +
@@ -34,12 +35,13 @@ inline double Leaf::d_S_shifted(double Ea, double H_d, double d_S_base,
   const double Topt0_K = H_d / (d_S_base - corr);
   // Refused outside [250, 350] K rather than clamped there, as the impairment's
   // isokinetic temperature is (damage::k_imp).
-  const double Topt_K = Topt0_K + delta_topt;
-  if (Topt_K < 250.0 || Topt_K > 350.0) {
+  using odelia::util::to_passive;
+  const T Topt_K = Topt0_K + delta_topt;
+  if (to_passive(Topt_K) < 250.0 || to_passive(Topt_K) > 350.0) {
     util::stop("the thermal-damage layer moves the peaked Arrhenius optimum to " +
-               util::format_double(Topt_K) + " K, outside [250, 350] K; "
+               util::format_double(to_passive(Topt_K)) + " K, outside [250, 350] K; "
                "topt_offset_ + dTopt_max_ * A/(A + K_A_) = " +
-               util::format_double(delta_topt) + " K");
+               util::format_double(to_passive(delta_topt)) + " K");
   }
   return H_d / Topt_K + corr;
 }
@@ -195,18 +197,6 @@ inline std::vector<double> Leaf::damage_trajectory_gradient(
         }
       });
   return out;
-}
-
-inline void Leaf::refuse_thermal_damage(const char* who) const {
-  if (use_thermal_damage_) {
-    util::stop(std::string(who) +
-               ": refused with use_thermal_damage_ on. The derivative surface "
-               "takes Vcmax, Jmax and R_d from the traits through a temperature "
-               "response that does not apply the thermal-damage layer -- its "
-               "shifted optimum, its functional fraction and its maintenance costs -- "
-               "so its rows would describe a different model from the one the "
-               "solve ran. Set use_thermal_damage_ to false.");
-  }
 }
 
 } // namespace phylloptim

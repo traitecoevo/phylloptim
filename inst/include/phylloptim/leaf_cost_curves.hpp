@@ -1414,9 +1414,7 @@ inline void Leaf::prepare_profitmax() {
       profitmax_A_max_ = std::abs(a_crit);
       profitmax_peak_psi_ = psi_crit;
       profitmax_peak_negated_ = a_crit < 0.0;
-      profitmax_crit_ci_ = use_thermal_damage_
-                               ? std::numeric_limits<double>::quiet_NaN()
-                               : ci_;
+      profitmax_crit_ci_ = ci_;
       return;
     }
   }
@@ -1464,13 +1462,12 @@ inline void Leaf::prepare_profitmax() {
   profitmax_A_max_ = a_max;
   profitmax_peak_psi_ = peak;
   profitmax_peak_negated_ = negated;
-  // The surface reads |A|max at the peak, on its scalar, so it needs ci there;
-  // with the damage layer on it refuses.
+  // The surface reads |A|max at the peak, on its scalar, so it needs ci there.
   profitmax_crit_ci_ = std::numeric_limits<double>::quiet_NaN();
-  if (!use_energy_balance_ && !use_thermal_damage_ && width > 0.0) {
+  if (!use_energy_balance_ && width > 0.0) {
     set_leaf_states_rates_from_psi_leaf(psi_crit, psi_soil);
     profitmax_crit_ci_ = ci_;
-  } else if (use_energy_balance_ && !use_thermal_damage_ && std::isfinite(peak)) {
+  } else if (use_energy_balance_ && std::isfinite(peak)) {
     // With the balance on |A| can peak inside the stream; the surface reads it
     // at the peak, so it needs ci there.
     set_leaf_states_rates_from_psi_leaf(peak, psi_soil);

@@ -1582,9 +1582,9 @@ public:
   // load-bearing: reordering moves the double results by an ULP.
   template <typename T, typename V = double>
   T arrh_curve(double Ea, const T& ref_value, const V& leaf_temp) const;
-  template <typename T, typename V = double>
+  template <typename T, typename V = double, typename D = double>
   T peak_arrh_curve(double Ea, const T& ref_value, const V& leaf_temp, double H_d,
-                    double d_S) const;
+                    const D& d_S) const;
 
   // --- Penman-Monteith leaf energy balance (minimal core) ---------------------
   // Recompute the temperature-dependent photosynthetic parameters (vcmax_,
@@ -1730,6 +1730,8 @@ public:
   template <typename T> T respiration_at(const leaf_pars<T>& pars) const;
   template <typename T> T electron_transport_at(const leaf_pars<T>& pars) const;
   template <typename T, typename V> T vcmax_at(const leaf_pars<T>& pars, const V& temp) const;
+  // The thermal-damage layer's shift of both optima, off the pack.
+  template <typename T> T damage_topt_shift_at(const leaf_pars<T>& pars) const;
   template <typename T, typename V> T jmax_at(const leaf_pars<T>& pars, const V& temp) const;
   template <typename T, typename V> T respiration_at(const leaf_pars<T>& pars, const V& temp) const;
   template <typename T, typename V> T electron_transport_at(const leaf_pars<T>& pars,
@@ -2231,8 +2233,9 @@ public:
   static double softplus_(double x, double s);
   // The entropy term that moves a peaked Arrhenius optimum,
   // Topt = H_d / (d_S - R*ln(Ea/(H_d - Ea))), by delta_topt degrees.
-  double d_S_shifted(double Ea, double H_d, double d_S_base,
-                     double delta_topt) const;
+  // On any scalar, so the parameter pack moves it too.
+  template <class T>
+  T d_S_shifted(double Ea, double H_d, double d_S_base, const T& delta_topt) const;
   // The impairment rate, functional -> impaired, day^-1: k_i_ at the isokinetic
   // temperature k_i_Tiso_ moved by delta_impair degrees. Reads nothing of the
   // Vcmax or Jmax curves.
@@ -2269,9 +2272,6 @@ public:
   std::vector<double> damage_trajectory(const std::vector<double>& times,
                                         const std::vector<double>& leaf_temp,
                                         double A0, double I0, double D0) const;
-  // Throws, naming `who`, when use_thermal_damage_ is on: the paths that read
-  // capacities off the parameter pack (vcmax_at and the rest) do not apply it.
-  void refuse_thermal_damage(const char* who) const;
 
   // Sperry (2017) ProfitMax, both terms normalised as the paper defines them
   // (notes above optimise_psi_leaf_single in leaf_route.hpp): seeds |A|max
@@ -2407,7 +2407,7 @@ public:
   long root_curve_builds_ = 0;
   // Where prepare_profitmax read |A|max: its reference collar, and ci at the peak
   // along the stem from it (psi_crit with the energy balance off), for
-  // normalisers_at; NaN with the damage layer on, which the surface refuses.
+  // normalisers_at.
   double profitmax_reference_psi_ = std::numeric_limits<double>::quiet_NaN();
   double profitmax_crit_ci_ = std::numeric_limits<double>::quiet_NaN();
   // Where |A| peaks along the stream from the reference collar, and whether the
