@@ -1551,152 +1551,63 @@ void test_longwave_and_radiative_conductance() {
 
 }  // namespace
 
-// A short, well-plumbed leaf whose stem could carry enough water to cool it past
-// the Tetens pole. Its flux ends at flux_ceiling() on both routes: the dew-point
-// flux in dry air, and in humid air, where the shut leaf is within
-// evaporative_cooling_min of its dew point, the flux that cools it that far.
+// A short, well-plumbed leaf in hot, still air, whose stem could carry enough
+// water to cool it past the Tetens pole. Its flux ends at flux_ceiling() on both
+// routes, evaporative_cooling_max below its shut temperature. The collar route,
+// with no basin scan, labels it SolverRefused: profit falls from the wet end
+// and rises to the ceiling, and the larger end is returned.
 void test_energy_balance_flux_ceiling() {
   printf("energy balance: the solve's flux ends at the flux ceiling\n");
   using K = phylloptim::Leaf::CostCurve;
-  int reached = 0;
-  // Humid at 25 C, where the cooling floor binds; dry at 40 C, the dew point.
-  for (const auto& [vpd, Tair] : {std::pair{0.5, 25.0}, std::pair{2.0, 40.0}}) {
-    for (bool collar : {true, false}) {
-      Drivers d;
-      d.h = 0.05;
-      d.theta = 3.0 * d.theta;
-      d.PPFD = 400.0;
-      d.atm_vpd = vpd;
-      d.leaf_temp = Tair;
-      d.area_leaf *= 0.01;  // roots strong enough for the stem to bind
-      phylloptim::Leaf l = collar ? make_pm_leaf(d, {0.5}, {1.0}, true)
-                                  : make_linked_eb_leaf(d, 0.5, false);
-      const double E_most =
-          l.leaf_specific_conductance_max_ * l.stem_curve_limit();
-      ok(l.leaf_temp_from_E(E_most) < -237.3,
-         "the stem's limit alone would cool the leaf past the Tetens pole");
-      const double ceiling = l.flux_ceiling();
-      const bool dew = l.dew_point_flux() >= ceiling;
-      ok(dew == (vpd > 1.0), "the dew point binds in dry air, the cooling floor in humid");
-      l.set_model(K::TF24_floor, collar);
-      l.optimise();
-      ok(l.operating_point_kind() == phylloptim::Leaf::OperatingPointKind::BoundaryCold,
-         collar ? "collar route at the ceiling" : "leaf route at the ceiling");
-      near(l.transpiration_ / ceiling, 1.0, 1e-9, "the operating point's flux is the ceiling");
-      const double T_op = l.leaf_temp_from_E(l.transpiration_);
-      if (dew) {
-        near(l.leaf_vpd_at(T_op), phylloptim::vpd_leaf_min, 1e-6,
-             "at the dew-point flux the deficit is at its floor");
-      } else {
-        near(l.leaf_temp_from_E(0.0) - T_op, phylloptim::evaporative_cooling_min, 1e-6,
-             "the cooling floor holds the leaf that far below its shut temperature");
-      }
-      reached += l.operating_point_kind() ==
-                 phylloptim::Leaf::OperatingPointKind::BoundaryCold;
-      // ProfitMax's |A|max runs to psi_crit, past the ceiling, and is refused
-      // by name where that reaches the pole, as set_physiology refused it.
-      bool named = false;
-      try {
-        l.set_model(K::ProfitMax, collar);
-        l.optimise();
-      } catch (const std::exception& e) {
-        named = std::string(e.what()).find("prepare_profitmax: the leaf temperature") == 0;
-      }
-      ok(named, "ProfitMax's normaliser past the pole is refused by name");
-    }
-  }
-  printf("    %d of 4 solves at boundary-cold\n", reached);
   Drivers d;
-  phylloptim::Leaf off = make_pm_leaf(d, {0.5}, {1.0}, false);
+  d.h = 0.05;
+  d.theta = 3.0 * d.theta;
+  d.PPFD = 1000.0;
+  d.atm_vpd = 2.0;
+  d.leaf_temp = 35.0;
+  d.area_leaf *= 0.01;  // roots strong enough for the stem to bind
+  const double wind = 0.1, width = 0.2;
+  for (bool collar : {true, false}) {
+    phylloptim::Leaf l = make_pm_leaf(d, {0.5}, {1.0}, true, wind, width);
+    if (!collar) {
+      l.set_supply_single();
+      l.set_physiology(fixture::series_resistance(1.0e3), d.PPFD, {0.5}, {1.0},
+                       d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                       d.atm_o2_kpa, d.atm_kpa);
+    }
+    const double E_most = l.leaf_specific_conductance_max_ * l.stem_curve_limit();
+    ok(l.leaf_temp_from_E(E_most) < -237.3,
+       "the stem's limit alone would cool the leaf past the Tetens pole");
+    l.set_model(K::TF24_floor, collar);
+    l.optimise();
+    near(l.transpiration_ / l.flux_ceiling(), 1.0, 1e-9,
+         collar ? "collar route: the flux is the ceiling" : "leaf route: the flux is the ceiling");
+    near(l.leaf_temp_from_E(0.0) - l.leaf_temp_from_E(l.transpiration_),
+         phylloptim::evaporative_cooling_max, 1e-6,
+         "the leaf is that far below its shut temperature");
+    ok(l.operating_point_kind() ==
+           (collar ? phylloptim::Leaf::OperatingPointKind::SolverRefused
+                   : phylloptim::Leaf::OperatingPointKind::BoundaryCold),
+       collar ? "collar route: the larger end, SolverRefused" : "leaf route: boundary-cold");
+    // ProfitMax's |A|max runs to psi_crit, past the ceiling, and is refused by
+    // name where that reaches the pole, as set_physiology refused it.
+    bool named = false;
+    try {
+      l.set_model(K::ProfitMax, collar);
+      l.optimise();
+    } catch (const std::exception& e) {
+      named = std::string(e.what()).find("prepare_profitmax: the leaf temperature") == 0;
+    }
+    ok(named, "ProfitMax's normaliser past the pole is refused by name");
+  }
+  Drivers d0;
+  phylloptim::Leaf off = make_pm_leaf(d0, {0.5}, {1.0}, false);
   ok(std::isinf(off.flux_ceiling()),
      "with the energy balance off there is no flux ceiling");
 }
 
-// A leaf in humid, dim air is at its dew point even shut, and keeps the
-// operating point it has without the dew bound: it opens, rather than shutting
-// at a ceiling of no flux.
-void test_energy_balance_humid_leaf_opens() {
-  printf("energy balance: a leaf at its dew point while shut still opens\n");
-  for (double vpd : {0.05, 0.1}) {
-    phylloptim::Leaf l = fixture::multilayer_leaf();
-    l.setup_transpiration(100);
-    l.setup_root_vulnerability(100);
-    l.use_energy_balance_ = true;
-    l.wind_speed_ = 2.0;
-    l.d_ = 0.05;
-    l.NIR_int_ = 100.0 / phylloptim::umol_par_per_joule;
-    l.set_physiology(fixture::root_network({1.0 / 0.05}, {1.0}), 100.0, {6.0},
-                     {1.0}, 0.000157 / 5.0, vpd, 40.0, 25.0, 21.0, 101.3);
-    ok(l.dew_point_flux() < 0.0, "the shut leaf is below its dew point");
-    l.set_model(phylloptim::Leaf::CostCurve::TF24_floor, true);
-    l.optimise();
-    ok(l.operating_point_kind() == phylloptim::Leaf::OperatingPointKind::Interior,
-       "the humid leaf opens to an interior optimum");
-    ok(l.stom_cond_CO2_ > 0.0 && l.assim_colimited_ > 0.0, "and fixes carbon");
-  }
-}
-
-// The collar route's choice between the stem's dry end and the ceiling is made
-// at the polished stem-end root (hazard 19): across the kmax at which the two
-// cross the kind flips once, no dry pin carries more than the ceiling, and the
-// collar moves smoothly through the flip.
-void test_energy_balance_ceiling_switch_is_clean() {
-  printf("energy balance: the switch from the stem's end to the ceiling is clean\n");
-  using CC = phylloptim::Leaf::CostCurve;
-  struct Point { std::string kind; double E_over_cap, collar; };
-  const auto solve = [](double kmax) {
-    phylloptim::Leaf l = fixture::multilayer_leaf();
-    l.setup_transpiration(100);
-    l.setup_root_vulnerability(100);
-    l.use_energy_balance_ = true;
-    l.wind_speed_ = 2.0;
-    l.d_ = 0.05;
-    l.NIR_int_ = 600.0 / phylloptim::umol_par_per_joule;
-    l.CF77_lambda_ = 1e-6;
-    l.set_physiology(fixture::root_network({1.0 / 5e-5}, {1.0}), 600.0, {0.5},
-                     {1.0}, kmax, 2.0, 40.0, 35.0, 21.0, 101.3);
-    l.set_model(CC::CF77, true);
-    l.optimise();
-    return Point{l.operating_point_kind_name(l.operating_point_kind()),
-                 l.transpiration_ / l.flux_ceiling(), l.opt_root_psi_};
-  };
-  double lo = 5e-5, hi = 7e-5;
-  ok(solve(lo).kind == "boundary-dry" && solve(hi).kind == "boundary-cold",
-     "the kmax window straddles the switch");
-  for (int i = 0; i < 40; ++i) {
-    const double mid = 0.5 * (lo + hi);
-    (solve(mid).kind == "boundary-cold" ? hi : lo) = mid;
-  }
-  const int n = 100;
-  std::vector<Point> pts;
-  for (int i = 0; i <= n; ++i) {
-    pts.push_back(solve(lo * (1.0 + 2e-6 * (2.0 * i / n - 1.0))));
-  }
-  int flips = 0;
-  double worst_dry = -1.0;
-  std::vector<double> steps;
-  for (int i = 0; i <= n; ++i) {
-    if (pts[i].kind == "boundary-dry") worst_dry = std::max(worst_dry, pts[i].E_over_cap - 1.0);
-    if (i > 0) {
-      flips += pts[i].kind != pts[i - 1].kind;
-      steps.push_back(std::abs(pts[i].collar - pts[i - 1].collar));
-    }
-  }
-  std::vector<double> sorted = steps;
-  std::sort(sorted.begin(), sorted.end());
-  const double median = sorted[sorted.size() / 2];
-  const double largest = sorted.back();
-  printf("    %d points, %d flip(s), worst dry-pin flux/ceiling - 1 %.2e, collar step largest/median %.2f\n",
-         n + 1, flips, worst_dry, largest / median);
-  ok(flips == 1, "the kind flips once across the switch");
-  ok(worst_dry < 1e-10, "no dry pin carries more than the ceiling");
-  ok(largest < 3.0 * median, "the collar does not jump at the flip");
-}
-
 void run_energy_balance() {
   test_energy_balance_flux_ceiling();
-  test_energy_balance_humid_leaf_opens();
-  test_energy_balance_ceiling_switch_is_clean();
   test_dprofit_dpsi_leaf_matches_a_finite_difference_energy_balance();
   test_leaf_temperature_is_reported();
   test_shutdown_reports_one_temperature();

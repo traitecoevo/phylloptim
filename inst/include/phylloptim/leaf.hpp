@@ -1611,14 +1611,11 @@ public:
   // E in kg H2O m^-2 s^-1: affine in E, so `dT_dE` (when non-null) is a constant.
   // Not clamped: check_leaf_temperature_range refuses drivers that would need it.
   double leaf_temp_from_E(double E, double* dT_dE = nullptr) const;
-  // The flux at which leaf_temp_from_E puts the leaf where its deficit reaches
-  // vpd_leaf_min, kg H2O m^-2 s^-1; non-positive where even a shut leaf is there.
-  double dew_point_flux() const;
   // The largest flux an operating point can have, kg H2O m^-2 s^-1: with the
-  // energy balance on, the larger of dew_point_flux() and the flux that cools
-  // the leaf evaporative_cooling_min below its shut temperature; +inf off it,
-  // so that path is unchanged. Read at each solve rather than cached, as a
-  // caller may re-seat the radiation budget after set_physiology.
+  // energy balance on, the flux that cools the leaf evaporative_cooling_max
+  // below its shut temperature; +inf off it, so that path is unchanged. Read at
+  // each solve rather than cached, as a caller may re-seat the radiation budget
+  // after set_physiology.
   double flux_ceiling() const;
   // Refuses a leaf whose temperature can run, over the fluxes the solve can
   // reach, from `coldest` to `hottest` deg C, if either end is past what the
@@ -2335,8 +2332,7 @@ public:
     BoundaryDry,
     // Shutdown on water: no collar both carries more than the residual flux and
     // keeps the stem short of its dry end, so the leaf sits shut at the wet bound
-    // (hazard 18). Light never shuts a leaf; with the energy balance on, air so
-    // humid that the shut leaf is already at the dew point never does.
+    // (hazard 18). Light and heat never shut a leaf.
     HydraulicShutdown,
     // The collar was imposed (evaluate_root_collar_psi / profit_at_collar_psi),
     // not optimised; dprofit there is the acclimation rate, not a residual.

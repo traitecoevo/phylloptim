@@ -144,12 +144,10 @@ inline constexpr double aerodynamic_resistance_coef = 200.0;
 // leaf, the one that sat there, is shut at its wet bound.
 inline constexpr double vpd_leaf_min = 0.01;
 
-// The least a leaf may cool itself below its shut temperature by transpiring,
-// K, whatever the dew point (flux_ceiling). A leaf whose shut temperature is
-// within this of its dew point keeps the fluxes it would have without the dew
-// bound: optima there cool the leaf by at most 2 K (measured over every curve
-// and route across light, humidity, soil and g_min).
-inline constexpr double evaporative_cooling_min = 5.0;
+// The most a leaf may cool itself below its shut temperature by transpiring,
+// K (flux_ceiling). Well past what real leaves do, so it bounds only a leaf
+// whose stem could otherwise cool it towards the Tetens pole.
+inline constexpr double evaporative_cooling_max = 25.0;
 
 
 } // namespace phylloptim
