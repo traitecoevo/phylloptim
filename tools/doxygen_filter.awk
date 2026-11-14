@@ -34,7 +34,7 @@
 #      one unreadable line. A run of lines indented relative to the surrounding
 #      prose is reproduced exactly instead.
 #
-#      ⚠️ ONE RUN PER COMMENT BLOCK. Doxygen 1.9 -- which is what CI installs --
+#      ⚠️ ONE RUN PER COMMENT BLOCK. Doxygen 1.9 -- which CI installed until Ubuntu 26.04 --
 #      handles the FIRST `\verbatim` in a block and then drops the second one's
 #      OPEN, reporting `unexpected command endverbatim` at its close. The line it
 #      names is in the filtered stream and lands in unrelated code, so it reads

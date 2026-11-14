@@ -207,10 +207,13 @@ registry_line_map <- function(header, filter) {
 #' member: its qualified name, kind, file and line (declaration), body span,
 #' the anchor of its page in the HTML render, its initializer where it has one
 #' (a constexpr's value), and the symbols it references. Lines are the source's,
-#' through [registry_line_map()]. A function's references include the `Leaf`
-#' members it reads through a `Leaf&` parameter (`l.TF24_cost_scale`, as each
-#' curve's `Curve<K>` does), read from its body: Doxygen 1.9.8, which CI runs,
-#' records none of them.
+#' through [registry_line_map()]. A function's references include the members
+#' it reads through a receiver whose type is a class walked here, read from its
+#' body: through a parameter (`l.TF24_cost_scale`, as each curve's `Curve<K>`
+#' does through its `Leaf&`) or through a data member of its own class
+#' (`roots_.root_P50`). Doxygen records these in some versions and not others
+#' (1.9.8 none through a parameter, 1.15 none through a member), so a render
+#' that does is not relied on.
 #'
 #' Needs a render with `GENERATE_XML = YES` and `REFERENCES_RELATION = YES`,
 #' which the package's `Doxyfile` sets: `doxygen` at the package root writes
@@ -264,9 +267,9 @@ registry_locations <- function(xml_dir,
       init <- text_of(m, "./initializer")
       refs <- xml2::xml_find_all(m, "./references")
       params <- xml2::xml_find_all(m, "./param")
-      leaf_params <- xml2::xml_text(xml2::xml_find_first(params, "./declname"))[
-        grepl("^\\s*(const\\s*)?Leaf\\s*&\\s*$",
-              xml2::xml_text(xml2::xml_find_first(params, "./type")))]
+      param_names <- xml2::xml_text(xml2::xml_find_first(params, "./declname"))
+      param_types <- xml2::xml_text(xml2::xml_find_first(params, "./type"))
+      keep_param <- !is.na(param_names) & !is.na(param_types)
       # An enum's values are children of its memberdef, and a function that
       # reads one (the damage layer indexes its parameter pack by them) refers
       # to the value's id, so they are named here too.
@@ -284,11 +287,15 @@ registry_locations <- function(xml_dir,
         url = paste0(refid, ".html#", anchor),
         initializer = if (is.na(init)) NA_character_ else trimws(sub("^=", "", trimws(init))),
         references = I(list(xml2::xml_attr(refs, "refid"))),
-        leaf_params = I(list(leaf_params[!is.na(leaf_params)])),
+        owner = cname,
+        type = text_of(m, "./type"),
+        param_names = I(list(param_names[keep_param])),
+        param_types = I(list(param_types[keep_param])),
         stringsAsFactors = FALSE)
     }
   }
   out <- do.call(rbind, rows)
+  classes <- unique(out$owner[out$compound %in% refids[kinds %in% c("class", "struct")]])
   # References come as member ids; name them. One that is not a member of a
   # compound walked here (a std:: function, say) is dropped.
   by_id <- stats::setNames(out$symbol, out$id)
@@ -311,20 +318,36 @@ registry_locations <- function(xml_dir,
   out$line <- mapply(remap, out$file, out$line)
   out$body_start <- mapply(remap, out$body_file, out$body_start)
   out$body_end <- mapply(remap, out$body_file, out$body_end)
-  # Members read through a Leaf& parameter, from the body's text.
-  leaf_members <- out$symbol[startsWith(out$symbol, "phylloptim::Leaf::")]
-  for (i in which(lengths(out$leaf_params) > 0L & !is.na(out$body_start) &
-                  !is.na(out$body_end))) {
+  # Members read through a receiver of a walked class's type, from the body's
+  # text: a parameter (`l.TF24_cost_scale` through a `Leaf&`) or a data member of
+  # the function's own class (`roots_.root_P50`). Whether Doxygen records these
+  # differs between versions, so they are always added here.
+  class_of <- function(type) {
+    if (is.na(type)) return(NA_character_)
+    bare <- sub("^const(?=[A-Za-z_:])", "", gsub("[&*[:space:]]", "", type), perl = TRUE)
+    hit <- classes[classes == bare | endsWith(classes, paste0("::", bare))]
+    if (length(hit) == 1L) hit else NA_character_
+  }
+  member_class <- vapply(ifelse(out$kind == "variable", out$type, NA_character_),
+                         class_of, "", USE.NAMES = FALSE)
+  for (i in which(out$kind == "function" & !is.na(out$body_start) & !is.na(out$body_end))) {
+    receivers <- c(
+      stats::setNames(vapply(out$param_types[[i]], class_of, "", USE.NAMES = FALSE),
+                      out$param_names[[i]]),
+      stats::setNames(member_class, sub(".*::", "", out$symbol))[
+        out$owner == out$owner[i] & !is.na(member_class)])
+    receivers <- receivers[!is.na(receivers) & !duplicated(names(receivers))]
+    if (!length(receivers)) next
     body <- readLines(file.path(include_dir, out$body_file[i]),
                       warn = FALSE)[out$body_start[i]:out$body_end[i]]
     body <- sub("//.*$", "", body)
-    pattern <- paste0("\\b(", paste(out$leaf_params[[i]], collapse = "|"),
+    pattern <- paste0("\\b(", paste(names(receivers), collapse = "|"),
                       ")\\s*\\.\\s*([A-Za-z_][A-Za-z_0-9]*)")
     read <- unlist(regmatches(body, gregexpr(pattern, body, perl = TRUE)))
-    read <- paste0("phylloptim::Leaf::", sub(".*\\.\\s*", "", read))
-    out$references[[i]] <- unique(c(out$references[[i]], read[read %in% leaf_members]))
+    read <- paste0(receivers[sub("\\s*\\..*$", "", read)], "::", sub(".*\\.\\s*", "", read))
+    out$references[[i]] <- unique(c(out$references[[i]], read[read %in% out$symbol]))
   }
-  out$leaf_params <- NULL
+  out$owner <- out$type <- out$param_names <- out$param_types <- NULL
   rownames(out) <- NULL
   out
 }

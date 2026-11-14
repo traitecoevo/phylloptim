@@ -905,10 +905,20 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
         auto& seen = per_par_kind[name];
         seen.resize(pl::n_leaf_pars, 0);
         ++seen[std::size_t(k)];
+        // On a miss, every step's difference: the V that decides it.
+        std::string sweep;
+        if (!pass) {
+          for (std::size_t i = 0; i < n_steps; ++i) {
+            sweep += "\n        h " + pl::util::format_double(h_base * step_factor[i]) + ": " +
+                     (step_ok[i] ? pl::util::format_double(at_step[i].fd[j]) : "kind change");
+          }
+          sweep += "\n        relative tolerance " + pl::util::format_double(rel_tol) +
+                   ", noise floor at the base " + pl::util::format_double(floor);
+        }
         ok(pass,
            "the supplied row matches a difference of the solve at some step" + at +
                ": row " + pl::util::format_double(rows[j]) + ", difference at the base step " +
-               pl::util::format_double(base.fd[j]));
+               pl::util::format_double(base.fd[j]) + sweep);
       }
     }
   }
