@@ -1739,7 +1739,20 @@ equations:
     reads: [latent_heat_vap, vol_heat_cap_air]
     writes: [Tleaf_]
     kind: closed_form
-    note: 'Explicit, not iterated: $E$ is fixed by the hydraulic supply at the candidate potential and the balance gives the temperature at which the leaf sheds the rest as sensible heat and extra longwave. The one place $T_\mathrm{leaf}$ and $dT_\mathrm{leaf}/dE$ are computed. No clamp: set_physiology refuses drivers under which the leaf, between $E = 0$ and $E = K_{max} G(\infty)$, would reach the Tetens pole or a non-positive $Q_{10}$ of $R_d$ (check_leaf_temperature_range).'
+    note: 'Explicit, not iterated: $E$ is fixed by the hydraulic supply at the candidate potential and the balance gives the temperature at which the leaf sheds the rest as sensible heat and extra longwave. The one place $T_\mathrm{leaf}$ and $dT_\mathrm{leaf}/dE$ are computed. No clamp: set_physiology refuses drivers under which the leaf, between $E = 0$ and the smaller of $E = K_{max} G(\infty)$ and $E_\mathrm{dew}$ (dew_point_flux), would reach the Tetens pole or a non-positive $Q_{10}$ of $R_d$ (check_leaf_temperature_range).'
+  dew_point_flux:
+    section: energy_balance
+    title: The dew-point flux, where the solve's flux ends
+    latex: |
+      E_\mathrm{dew} = \frac{R_{n,\mathrm{iso}} - (\rho c_p / r_a + g_\mathrm{rad})\,(T_\mathrm{dew} - T_\mathrm{air})}{\lambda_v}, \qquad
+      T_\mathrm{dew} = \frac{237.3\, L}{17.27 - L}, \qquad
+      L = \ln \frac{e_s(T_\mathrm{air}) - D_\mathrm{air} + D_\min}{0.6108}
+    code: phylloptim::Leaf::dew_point_flux
+    also: [phylloptim::Leaf::flux_ceiling, phylloptim::Leaf::leaf_dry_bound, phylloptim::Leaf::cap_dry_bound]
+    reads: [tetens_a, tetens_b, tetens_c, atm_vpd, vpd_leaf_min, latent_heat_vap, vol_heat_cap_air]
+    writes: []
+    kind: closed_form
+    note: 'leaf_temperature inverted at $T_\mathrm{dew}$, where the deficit at the leaf reaches its floor $D_\min$: colder, the leaf condenses rather than transpires, so no operating point has a larger flux. With the energy balance on, the solve''s dry bound is the nearer of the stem''s dry end and this flux: on the leaf route the potential at which the stem carries $E_\mathrm{dew}$ from the soil, on the collar route the collar whose uptake is $E_\mathrm{dew}$. An optimum there is boundary-dew, which the derivative surface does not place yet. Off the energy balance the bound is $+\infty$.'
   energy_balance_foc:
     section: energy_balance
     title: The energy-balance term of the first-order condition

@@ -325,6 +325,8 @@ Arm arm_of(pl::Leaf::OperatingPointKind kind) {
     case pl::Leaf::OperatingPointKind::Prescribed:
     case pl::Leaf::OperatingPointKind::SolverRefused:
     case pl::Leaf::OperatingPointKind::NonFiniteGradient:
+    // The derivative surface does not place the dew-point bound yet.
+    case pl::Leaf::OperatingPointKind::BoundaryDew:
       return Arm::Refuses;
   }
   return Arm::Refuses;

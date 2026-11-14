@@ -195,6 +195,20 @@ inline double Leaf::leaf_temp_from_E(double E, double* dT_dE) const {
   return Tleaf;
 }
 
+// leaf_temp_from_E inverted at the temperature where leaf_vpd_at reaches
+// vpd_leaf_min, the Tetens form solved for T at esat = e_air + vpd_leaf_min.
+// Below that temperature the leaf condenses rather than transpires, so no
+// operating point has a larger flux. A cold, humid, dark leaf can be there
+// shut, which makes the result non-positive.
+inline double Leaf::dew_point_flux() const {
+  const double e_target =
+      saturation_vapour_pressure(Tair_) - atm_vpd_ + vpd_leaf_min;
+  const double L = std::log(e_target / 0.6108);
+  const double T_dew = 237.3 * L / (17.27 - L);
+  const double g_total = vol_heat_cap_air / ra_ + g_rad_;
+  return (Rn_ - g_total * (T_dew - Tair_)) / latent_heat_vap;
+}
+
 // Refuses, never clamps, a leaf temperature range the model cannot evaluate:
 // R_d's Q10, intercept - slope*(T + 25)/2, must be positive for its power to be
 // real, and the Tetens form has a pole at -237.3 C. Q10 is linear in T, so
