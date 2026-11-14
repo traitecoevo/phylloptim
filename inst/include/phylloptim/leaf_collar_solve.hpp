@@ -37,7 +37,7 @@ inline double Leaf::E_column_zero(double x, const std::vector<double>& psi_soil)
 }
 
 // The dry bound's residual at collar `x`, rising with the collar: the
-// continuity residual with the stem at dry_end_, or, where the dew-point flux
+// continuity residual with the stem at dry_end_, or, where flux_ceiling()
 // binds first (dry_bound_flux_cap_ finite), uptake less that flux.
 inline double Leaf::dry_bound_target(double x, const std::vector<double>& psi_soil) {
   if (std::isfinite(dry_bound_flux_cap_)) {
@@ -46,10 +46,12 @@ inline double Leaf::dry_bound_target(double x, const std::vector<double>& psi_so
   return E_column(x, psi_soil, dry_end_);
 }
 
-// The dry bound with the dew-point flux applied: `collar_at_dry_end` where the
-// stem's flux there does not exceed flux_ceiling(), else the collar whose
-// uptake is that flux, with dry_bound_flux_cap_ set. NaN where the ceiling is
-// below the uptake at the wettest layer, so no collar is cool enough to open.
+// The dry bound with flux_ceiling() applied: `collar_at_dry_end` where the
+// stem's flux there does not exceed the ceiling, else the collar whose uptake
+// is the ceiling, with dry_bound_flux_cap_ set. NaN where the ceiling is below
+// the uptake at the wettest layer, so no collar is cool enough to open. Which
+// bound applies is decided at the polished stem-end root (hazard 19); the
+// returned stem end stays the caller's, polished later only if it answers.
 inline double Leaf::cap_dry_bound(double collar_at_dry_end, double wettest,
                                   double E_up_at_wettest) {
   dry_bound_flux_cap_ = std::numeric_limits<double>::infinity();
@@ -57,7 +59,9 @@ inline double Leaf::cap_dry_bound(double collar_at_dry_end, double wettest,
   if (!std::isfinite(cap)) {
     return collar_at_dry_end;
   }
-  const double f_hi = E_column_zero(collar_at_dry_end, supply_psi_soil()) - cap;
+  const double stem_end =
+      polish_bracket_bound(collar_at_dry_end, supply_psi_soil(), 1);
+  const double f_hi = E_column_zero(stem_end, supply_psi_soil()) - cap;
   if (!(f_hi > 0.0)) {
     return collar_at_dry_end;
   }
@@ -69,7 +73,7 @@ inline double Leaf::cap_dry_bound(double collar_at_dry_end, double wettest,
   const auto target = [&](double x) -> double {
     return E_column_zero(x, supply_psi_soil()) - cap;
   };
-  return util::uniroot_smooth(target, wettest, collar_at_dry_end, f_lo, f_hi,
+  return util::uniroot_smooth(target, wettest, stem_end, f_lo, f_hi,
                               bracket_tol, ci_niter);
 }
 
@@ -399,7 +403,7 @@ inline bool Leaf::prepare_collar_solve(double& bound_a, double& bound_b,
   // holds the optimum wherever profit already falls there, and
   // maximise_profit_over_collar extends it otherwise. Where it holds no interval
   // the end of the stem curve is tried before the leaf is called shut.
-  // A first bracket the dew-point flux already bounds is final: extending the
+  // A first bracket flux_ceiling() already bounds is final: extending the
   // stem's end only raises the flux the cap already cuts.
   if constexpr (!cost_domain_ends_at_psi_crit<K>()) {
     if (first_bracket && bracket(psi_crit)) {
@@ -840,7 +844,7 @@ inline double Leaf::replay_operating_point_for(double collar,
       // that end for its curvature: seat it as the solve did, under the solve's
       // own test, bracket tolerance included, so the two take the same stencil.
       if (kind == OperatingPointKind::BoundaryDry ||
-          kind == OperatingPointKind::BoundaryDew ||
+          kind == OperatingPointKind::BoundaryCold ||
           (kind == OperatingPointKind::Interior &&
            bound_b - collar < dry_end_neighbourhood + bracket_tol_at(bound_b))) {
         dry_bound_root_ = polish_bracket_bound(bound_b, supply_psi_soil(), 1);

@@ -1,6 +1,8 @@
 # phylloptim 0.37.0
 
-- With the energy balance on, a solve's flux ends at the dew point: the flux that cools the leaf until its deficit reaches `vpd_leaf_min`, past which it condenses rather than transpires. `set_physiology` checks the leaf temperature range up to that flux rather than up to the stem's limit `k_max G(inf)`, so a short, well-plumbed leaf is no longer refused for a temperature below the Tetens pole that no operating point reaches (traitecoevo/plant#785). An optimum on the new bound is `"boundary-dew"`, for which the trait gradient is `"no-gradient"` for now. With the energy balance off nothing changes. With it on, only dark leaves in hot air move in the golden files: a leaf potential cooling the leaf below the dew point is now refused, and a narrower bracket finds a slightly higher profit at a few points that were shut ([#266](https://github.com/traitecoevo/phylloptim/issues/266)).
+- With the energy balance on, a solve's flux ends at a ceiling: the dew-point flux, past which the leaf condenses rather than transpires, or where the shut leaf is within 5 K of its dew point, the flux that cools it 5 K below its shut temperature. `set_physiology` checks the leaf temperature range up to that ceiling rather than up to the stem's limit `k_max G(inf)`, so a short, well-plumbed leaf is no longer refused for a temperature below the Tetens pole that no operating point reaches (traitecoevo/plant#785).
+- An optimum on the ceiling is `"boundary-cold"`, for which the trait gradient is `"no-gradient"` for now. ProfitMax still normalises over the stream to `psi_crit`, and refuses by name a leaf whose stream there is past the pole.
+- No golden number moves, with the energy balance on or off.
 
 # phylloptim 0.36.0
 

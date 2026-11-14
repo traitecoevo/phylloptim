@@ -209,18 +209,31 @@ inline double Leaf::dew_point_flux() const {
   return (Rn_ - g_total * (T_dew - Tair_)) / latent_heat_vap;
 }
 
+// The dew point bounds the flux only where the shut leaf is more than
+// evaporative_cooling_min above it. Nearer, it would leave the leaf no flux to
+// open with, so the leaf may cool that far below its shut temperature instead.
+// The larger of two fluxes, so the bound is continuous in the drivers.
+inline double Leaf::flux_ceiling() const {
+  if (!use_energy_balance_) {
+    return std::numeric_limits<double>::infinity();
+  }
+  const double g_total = vol_heat_cap_air / ra_ + g_rad_;
+  return std::max(dew_point_flux(),
+                  evaporative_cooling_min * g_total / latent_heat_vap);
+}
+
 // Refuses, never clamps, a leaf temperature range the model cannot evaluate:
 // R_d's Q10, intercept - slope*(T + 25)/2, must be positive for its power to be
 // real, and the Tetens form has a pole at -237.3 C. Q10 is linear in T, so
 // testing both ends tests the range.
-inline void Leaf::check_leaf_temperature_range(double coldest,
-                                               double hottest) const {
+inline void Leaf::check_leaf_temperature_range(double coldest, double hottest,
+                                               const char* where) const {
   const auto q10_at = [&](double t) {
     return rd_q10_intercept_ - rd_q10_slope_ * (t + 25.0) / 2.0;
   };
   if (!(coldest > -237.3) || !(q10_at(coldest) > 0.0) ||
       !(q10_at(hottest) > 0.0)) {
-    util::stop("set_physiology: the leaf temperature can run from " +
+    util::stop(std::string(where) + ": the leaf temperature can run from " +
                util::format_double(coldest) + " to " +
                util::format_double(hottest) +
                " C over the fluxes this solve can reach, and the model is "

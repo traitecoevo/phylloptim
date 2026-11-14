@@ -122,20 +122,20 @@ inline double Leaf::dprofit_dpsi_leaf(double psi_leaf, double psi_upstream,
                     bl_slope);
 }
 
-// The dew-point flux is a bound in the flux, which the stem turns into a leaf
-// potential: the one carrying it from the soil. A ceiling at or below zero is
-// the soil itself, short of the wet end, so the leaf has one feasible point.
+// flux_ceiling() is a bound in the flux, which the stem turns into a leaf
+// potential: the one carrying it from the soil. The ceiling is positive, so
+// that potential is drier than the soil.
 template <Leaf::CostCurve K>
-inline double Leaf::leaf_dry_bound(double psi_soil, bool* dew) {
+inline double Leaf::leaf_dry_bound(double psi_soil, bool* capped) {
   const double end = dry_end<K>();
-  *dew = false;
+  *capped = false;
   const double cap = flux_ceiling();
   if (!std::isfinite(cap) || !(end > psi_soil) ||
       !(transpiration(end, psi_soil) > cap)) {
     return end;
   }
-  *dew = true;
-  return cap > 0.0 ? transpiration_to_psi_leaf(cap, psi_soil) : psi_soil;
+  *capped = true;
+  return transpiration_to_psi_leaf(cap, psi_soil);
 }
 
 // The operating point at a prescribed psi_leaf. See the declaration for why a
@@ -162,9 +162,8 @@ inline double Leaf::evaluate_psi_leaf(double target_psi_leaf) {
 
   // A soil too dry for the stem to carry more than the cuticle's loss short of
   // its dry end leaves one feasible potential, and the target is irrelevant to it.
-  bool dew = false;
-  const double psi_dry = leaf_dry_bound<K>(psi_soil, &dew);
-  (void)dew;
+  bool capped = false;
+  const double psi_dry = leaf_dry_bound<K>(psi_soil, &capped);
   if (psi_wet > psi_dry) {
     opt_psi_leaf_ = psi_wet;
     profit_ = profit_psi_leaf_for<K>(psi_wet, psi_soil);
@@ -312,9 +311,9 @@ inline void Leaf::optimise_psi_leaf_single() {
   opt_psi_leaf_ = psi_wet;
 
   // The dry end: psi_crit for a curve whose own domain ends there, the end of
-  // the stem curve for every other, or nearer, the dew-point bound.
-  bool dew = false;
-  const double psi_dry = leaf_dry_bound<K>(psi_soil, &dew);
+  // the stem curve for every other, or nearer, flux_ceiling()'s.
+  bool capped = false;
+  const double psi_dry = leaf_dry_bound<K>(psi_soil, &capped);
 
   // ProfitMax divides by |A|max, so it is seeded here, and with unusable
   // normalisers there is no objective at the wet end to evaluate. A dark leaf is
@@ -397,7 +396,7 @@ inline void Leaf::optimise_psi_leaf_single() {
       // At psi_crit narrowed short of the dry end profit was falling, so an
       // argmax there is not a pin.
       operating_point_kind_ = hi != psi_dry ? OperatingPointKind::SolverRefused
-                              : dew         ? OperatingPointKind::BoundaryDew
+                              : capped      ? OperatingPointKind::BoundaryCold
                                             : OperatingPointKind::BoundaryDry;
       break;
     case util::ArgmaxSource::Root:

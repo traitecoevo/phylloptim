@@ -1430,8 +1430,8 @@ public:
   template <CostCurve K> double benefit_link_deriv(double A) const;
   template <CostCurve K> void optimise_psi_leaf_single();
   // The leaf route's dry bound from `psi_soil`: dry_end<K>(), or nearer, the
-  // potential at which the stem carries flux_ceiling(), with `*dew` saying which.
-  template <CostCurve K> double leaf_dry_bound(double psi_soil, bool* dew);
+  // potential at which the stem carries flux_ceiling(), with `*capped` saying which.
+  template <CostCurve K> double leaf_dry_bound(double psi_soil, bool* capped);
   // ProfitMax's shut state: with |A|max <= 0 its objective A/|A|max is undefined,
   // so it is zeroed, and the leaf's own state is the evaluator's at the wet end,
   // written rather than left stale (hazard 8).
@@ -1576,7 +1576,7 @@ public:
   double find_psi_leaf_from_psi_root(double psi_root, const std::vector<double>& psi_soil);
   double E_column(double x, const std::vector<double>& psi_soil, double psi_leaf);
   double E_column_zero(double x, const std::vector<double>& psi_soil);
-  // The dry bound's residual and its placement under the dew-point flux; see
+  // The dry bound's residual and its placement under flux_ceiling(); see
   // leaf_collar_solve.hpp.
   double dry_bound_target(double x, const std::vector<double>& psi_soil);
   double cap_dry_bound(double collar_at_dry_end, double wettest,
@@ -1614,18 +1614,17 @@ public:
   // The flux at which leaf_temp_from_E puts the leaf where its deficit reaches
   // vpd_leaf_min, kg H2O m^-2 s^-1; non-positive where even a shut leaf is there.
   double dew_point_flux() const;
-  // The largest flux an operating point can have: dew_point_flux() with the
-  // energy balance on, +inf off it, so that path is unchanged. Read at each
-  // solve rather than cached, as a caller may re-seat the radiation budget
-  // after set_physiology.
-  double flux_ceiling() const {
-    return use_energy_balance_ ? dew_point_flux()
-                               : std::numeric_limits<double>::infinity();
-  }
+  // The largest flux an operating point can have, kg H2O m^-2 s^-1: with the
+  // energy balance on, the larger of dew_point_flux() and the flux that cools
+  // the leaf evaporative_cooling_min below its shut temperature; +inf off it,
+  // so that path is unchanged. Read at each solve rather than cached, as a
+  // caller may re-seat the radiation budget after set_physiology.
+  double flux_ceiling() const;
   // Refuses a leaf whose temperature can run, over the fluxes the solve can
   // reach, from `coldest` to `hottest` deg C, if either end is past what the
   // model can evaluate: R_d's Q10 not positive, or the Tetens pole.
-  void check_leaf_temperature_range(double coldest, double hottest) const;
+  void check_leaf_temperature_range(double coldest, double hottest,
+                                    const char* where = "set_physiology") const;
 
   // transpiration functions
 
@@ -2337,7 +2336,7 @@ public:
     // Shutdown on water: no collar both carries more than the residual flux and
     // keeps the stem short of its dry end, so the leaf sits shut at the wet bound
     // (hazard 18). Light never shuts a leaf; with the energy balance on, air so
-    // humid that the shut leaf is already at the dew point does.
+    // humid that the shut leaf is already at the dew point never does.
     HydraulicShutdown,
     // The collar was imposed (evaluate_root_collar_psi / profit_at_collar_psi),
     // not optimised; dprofit there is the acclimation rate, not a residual.
@@ -2347,11 +2346,10 @@ public:
     SolverRefused,
     // A partial derivative came back non-finite where feasibility said it could not.
     NonFiniteGradient,
-    // Constrained optimum at the dew-point bound: with the energy balance on,
-    // the flux that cools the leaf until its deficit closes (dew_point_flux),
-    // where it is nearer than the stem's dry end. Appended last: plant sizes
-    // per-kind tallies from the last enumerator.
-    BoundaryDew,
+    // Constrained optimum at the coldest the leaf may be: with the energy
+    // balance on, the flux_ceiling() where it is nearer than the stem's dry end.
+    // Appended last: plant sizes per-kind tallies from the last enumerator.
+    BoundaryCold,
   };
 
   // This leaf's clamp sites plus the supply model's, one list, summed on read so
@@ -2375,12 +2373,12 @@ public:
   // Counted from the last enumerator, so an appended kind is inside it; size a
   // per-kind tally from here, never from a repeated literal.
   static constexpr std::size_t operating_point_kind_count =
-      static_cast<std::size_t>(OperatingPointKind::BoundaryDew) + 1;
+      static_cast<std::size_t>(OperatingPointKind::BoundaryCold) + 1;
 
-  // The kind of a constrained optimum at the collar's dry bound: BoundaryDew
-  // where the dew-point flux placed it, else BoundaryDry.
+  // The kind of a constrained optimum at the collar's dry bound: BoundaryCold
+  // where flux_ceiling() placed it, else BoundaryDry.
   OperatingPointKind dry_bound_kind() const {
-    return std::isfinite(dry_bound_flux_cap_) ? OperatingPointKind::BoundaryDew
+    return std::isfinite(dry_bound_flux_cap_) ? OperatingPointKind::BoundaryCold
                                               : OperatingPointKind::BoundaryDry;
   }
 
@@ -2467,7 +2465,7 @@ inline const char* Leaf::operating_point_kind_name(OperatingPointKind kind) {
     case OperatingPointKind::Prescribed:        return "prescribed";
     case OperatingPointKind::SolverRefused:     return "solver-refused";
     case OperatingPointKind::NonFiniteGradient: return "non-finite-gradient";
-    case OperatingPointKind::BoundaryDew:       return "boundary-dew";
+    case OperatingPointKind::BoundaryCold:      return "boundary-cold";
   }
   return "unknown";
 }
@@ -2871,14 +2869,14 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
              : aerodynamic_resistance_fixed;
    // The leaf temperatures the solve can reach: with the balance on, from the
    // shut leaf (E = 0, hottest) to the coolest flux the solve may use, the
-   // smaller of k_max G(inf) and the dew-point flux, at which the solve's dry
+   // smaller of k_max G(inf) and flux_ceiling(), at which the solve's dry
    // bound also stops; off it, the driver.
    if (use_energy_balance_) {
      const double E_most = stem_curve_
                                ? leaf_specific_conductance_max_ * stem_curve_limit()
                                : 0.0;
      check_leaf_temperature_range(
-         leaf_temp_from_E(std::max(0.0, std::min(E_most, dew_point_flux()))),
+         leaf_temp_from_E(std::min(E_most, flux_ceiling())),
          leaf_temp_from_E(0.0));
    } else {
      check_leaf_temperature_range(leaf_temp_, leaf_temp_);
