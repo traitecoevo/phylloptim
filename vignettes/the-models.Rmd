@@ -191,7 +191,7 @@ The feasible interval runs from the wet bound, where the stomata are closed and 
 
 : The four kinds of operating point the reference grid reaches, and what each says about the leaf.
 
-The solve records eight kinds in all; the others are rarer or are refusals. `vignette("derivative-surface")` lists them with what each means for a derivative.
+The solve records nine kinds in all; the others are rarer or are refusals. One is `boundary-cold`: with the energy balance on, transpiration may cool the leaf at most 25 K below its temperature when shut, and an optimum on that limit is named for it. `vignette("derivative-surface")` lists them with what each means for a derivative.
 
 `boundary-soil` is the stressed case, despite sitting at the wet end of the interval. That is why the two are named for the bound rather than for the moisture: `ψ_soil` is the least-tension end, so "wet" reads as the comfortable case, whereas in fact it describes what a leaf does when carbon cannot pay for water. The reference grid makes the direction plain: warming the leaf from 25 °C to 40 °C takes `boundary-soil` from 45 rows to 116, and `boundary-dry` from 11 rows to none.
 
