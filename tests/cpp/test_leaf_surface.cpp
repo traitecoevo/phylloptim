@@ -954,7 +954,8 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
   // the energy balance on one of 240 drivers (soil 4-13 MPa, light 10-900,
   // deficit 0.3-2 kPa) pinned TF24_floor there and none TF24. A difference
   // across that is not a derivative, so their dry pin is not required here;
-  // CF77's and LeastCost's, at psi_crit, are, and test_transpose reaches TF24's.
+  // CF77's and LeastCost's, at psi_crit, are. test_transpose does not require
+  // it either: whether a fixture reaches it there is a tie to rounding.
   for (Kind want : fixture::surface_kinds(K)) {
     if (LeafRoute && want == Kind::BoundaryDry &&
         (K == CC::TF24 || K == CC::TF24_floor)) {
