@@ -195,18 +195,28 @@ inline double Leaf::leaf_temp_from_E(double E, double* dT_dE) const {
   return Tleaf;
 }
 
+// The flux that cools the leaf evaporative_cooling_max below its shut
+// temperature: leaf_temp_from_E is affine in E with slope -lambda/g_total.
+inline double Leaf::flux_ceiling() const {
+  if (!use_energy_balance_) {
+    return std::numeric_limits<double>::infinity();
+  }
+  const double g_total = vol_heat_cap_air / ra_ + g_rad_;
+  return evaporative_cooling_max * g_total / latent_heat_vap;
+}
+
 // Refuses, never clamps, a leaf temperature range the model cannot evaluate:
 // R_d's Q10, intercept - slope*(T + 25)/2, must be positive for its power to be
 // real, and the Tetens form has a pole at -237.3 C. Q10 is linear in T, so
 // testing both ends tests the range.
-inline void Leaf::check_leaf_temperature_range(double coldest,
-                                               double hottest) const {
+inline void Leaf::check_leaf_temperature_range(double coldest, double hottest,
+                                               const char* where) const {
   const auto q10_at = [&](double t) {
     return rd_q10_intercept_ - rd_q10_slope_ * (t + 25.0) / 2.0;
   };
   if (!(coldest > -237.3) || !(q10_at(coldest) > 0.0) ||
       !(q10_at(hottest) > 0.0)) {
-    util::stop("set_physiology: the leaf temperature can run from " +
+    util::stop(std::string(where) + ": the leaf temperature can run from " +
                util::format_double(coldest) + " to " +
                util::format_double(hottest) +
                " C over the fluxes this solve can reach, and the model is "

@@ -230,7 +230,9 @@ inline Status status_of(Leaf::OperatingPointKind kind) {
     case Leaf::OperatingPointKind::Prescribed:        return Status::Prescribed;
     case Leaf::OperatingPointKind::Unsolved:
     case Leaf::OperatingPointKind::SolverRefused:
-    case Leaf::OperatingPointKind::NonFiniteGradient: return Status::NoGradient;
+    case Leaf::OperatingPointKind::NonFiniteGradient:
+    // The derivative surface does not place the flux ceiling yet.
+    case Leaf::OperatingPointKind::BoundaryCold:      return Status::NoGradient;
   }
   return Status::NoGradient;  // unreachable
 }

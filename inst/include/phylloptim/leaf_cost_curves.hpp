@@ -1434,6 +1434,14 @@ inline void Leaf::prepare_profitmax() {
   const auto dA_of = [&](double psi, bool* ok) {
     return dprofit_dpsi_leaf<CostCurve::TF24, false>(psi, psi_soil, ok);
   };
+  // |A|max is Sperry's scale over the whole stream to psi_crit, past
+  // flux_ceiling() too, which can be colder than set_physiology checked: so
+  // the stream's cold end is checked here, and refused by name.
+  if (use_energy_balance_ && width > 0.0) {
+    check_leaf_temperature_range(
+        leaf_temp_from_E(transpiration(psi_crit, psi_soil)),
+        leaf_temp_from_E(0.0), "prepare_profitmax");
+  }
   const double lo = psi_wet + 1e-9 * width;   // the open end: closure excluded
   double a_hi = -std::numeric_limits<double>::infinity();
   double peak = std::numeric_limits<double>::quiet_NaN();

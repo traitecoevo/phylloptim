@@ -144,6 +144,11 @@ inline constexpr double aerodynamic_resistance_coef = 200.0;
 // leaf, the one that sat there, is shut at its wet bound.
 inline constexpr double vpd_leaf_min = 0.01;
 
+// The most a leaf may cool itself below its shut temperature by transpiring,
+// K (flux_ceiling). Well past what real leaves do, so it bounds only a leaf
+// whose stem could otherwise cool it towards the Tetens pole.
+inline constexpr double evaporative_cooling_max = 25.0;
+
 
 } // namespace phylloptim
 

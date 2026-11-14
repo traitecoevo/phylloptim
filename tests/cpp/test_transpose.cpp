@@ -325,6 +325,8 @@ Arm arm_of(pl::Leaf::OperatingPointKind kind) {
     case pl::Leaf::OperatingPointKind::Prescribed:
     case pl::Leaf::OperatingPointKind::SolverRefused:
     case pl::Leaf::OperatingPointKind::NonFiniteGradient:
+    // The derivative surface does not place the flux ceiling yet.
+    case pl::Leaf::OperatingPointKind::BoundaryCold:
       return Arm::Refuses;
   }
   return Arm::Refuses;

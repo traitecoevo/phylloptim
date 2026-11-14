@@ -1551,7 +1551,63 @@ void test_longwave_and_radiative_conductance() {
 
 }  // namespace
 
+// A short, well-plumbed leaf in hot, still air, whose stem could carry enough
+// water to cool it past the Tetens pole. Its flux ends at flux_ceiling() on both
+// routes, evaporative_cooling_max below its shut temperature. The collar route,
+// with no basin scan, labels it SolverRefused: profit falls from the wet end
+// and rises to the ceiling, and the larger end is returned.
+void test_energy_balance_flux_ceiling() {
+  printf("energy balance: the solve's flux ends at the flux ceiling\n");
+  using K = phylloptim::Leaf::CostCurve;
+  Drivers d;
+  d.h = 0.05;
+  d.theta = 3.0 * d.theta;
+  d.PPFD = 1000.0;
+  d.atm_vpd = 2.0;
+  d.leaf_temp = 35.0;
+  d.area_leaf *= 0.01;  // roots strong enough for the stem to bind
+  const double wind = 0.1, width = 0.2;
+  for (bool collar : {true, false}) {
+    phylloptim::Leaf l = make_pm_leaf(d, {0.5}, {1.0}, true, wind, width);
+    if (!collar) {
+      l.set_supply_single();
+      l.set_physiology(fixture::series_resistance(1.0e3), d.PPFD, {0.5}, {1.0},
+                       d.K_s * d.theta / d.h, d.atm_vpd, d.ca, d.leaf_temp,
+                       d.atm_o2_kpa, d.atm_kpa);
+    }
+    const double E_most = l.leaf_specific_conductance_max_ * l.stem_curve_limit();
+    ok(l.leaf_temp_from_E(E_most) < -237.3,
+       "the stem's limit alone would cool the leaf past the Tetens pole");
+    l.set_model(K::TF24_floor, collar);
+    l.optimise();
+    near(l.transpiration_ / l.flux_ceiling(), 1.0, 1e-9,
+         collar ? "collar route: the flux is the ceiling" : "leaf route: the flux is the ceiling");
+    near(l.leaf_temp_from_E(0.0) - l.leaf_temp_from_E(l.transpiration_),
+         phylloptim::evaporative_cooling_max, 1e-6,
+         "the leaf is that far below its shut temperature");
+    ok(l.operating_point_kind() ==
+           (collar ? phylloptim::Leaf::OperatingPointKind::SolverRefused
+                   : phylloptim::Leaf::OperatingPointKind::BoundaryCold),
+       collar ? "collar route: the larger end, SolverRefused" : "leaf route: boundary-cold");
+    // ProfitMax's |A|max runs to psi_crit, past the ceiling, and is refused by
+    // name where that reaches the pole, as set_physiology refused it.
+    bool named = false;
+    try {
+      l.set_model(K::ProfitMax, collar);
+      l.optimise();
+    } catch (const std::exception& e) {
+      named = std::string(e.what()).find("prepare_profitmax: the leaf temperature") == 0;
+    }
+    ok(named, "ProfitMax's normaliser past the pole is refused by name");
+  }
+  Drivers d0;
+  phylloptim::Leaf off = make_pm_leaf(d0, {0.5}, {1.0}, false);
+  ok(std::isinf(off.flux_ceiling()),
+     "with the energy balance off there is no flux ceiling");
+}
+
 void run_energy_balance() {
+  test_energy_balance_flux_ceiling();
   test_dprofit_dpsi_leaf_matches_a_finite_difference_energy_balance();
   test_leaf_temperature_is_reported();
   test_shutdown_reports_one_temperature();
