@@ -230,7 +230,9 @@ inline Status status_of(Leaf::OperatingPointKind kind) {
     case Leaf::OperatingPointKind::Prescribed:        return Status::Prescribed;
     case Leaf::OperatingPointKind::Unsolved:
     case Leaf::OperatingPointKind::SolverRefused:
-    case Leaf::OperatingPointKind::NonFiniteGradient: return Status::NoGradient;
+    case Leaf::OperatingPointKind::NonFiniteGradient:
+    // The derivative surface does not place the dew-point bound yet.
+    case Leaf::OperatingPointKind::BoundaryDew:       return Status::NoGradient;
   }
   return Status::NoGradient;  // unreachable
 }

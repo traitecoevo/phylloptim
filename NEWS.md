@@ -1,3 +1,7 @@
+# phylloptim 0.37.0
+
+- With the energy balance on, a solve's flux ends at the dew point: the flux that cools the leaf until its deficit reaches `vpd_leaf_min`, past which it condenses rather than transpires. `set_physiology` checks the leaf temperature range up to that flux rather than up to the stem's limit `k_max G(inf)`, so a short, well-plumbed leaf is no longer refused for a temperature below the Tetens pole that no operating point reaches (traitecoevo/plant#785). An optimum on the new bound is `"boundary-dew"`, for which the trait gradient is `"no-gradient"` for now. With the energy balance off nothing changes. With it on, only dark leaves in hot air move in the golden files: a leaf potential cooling the leaf below the dew point is now refused, and a narrower bracket finds a slightly higher profit at a few points that were shut ([#266](https://github.com/traitecoevo/phylloptim/issues/266)).
+
 # phylloptim 0.36.0
 
 - **Breaking:** the trait gradient is one forward pass of the derivative surface, on every curve, both routes, both supplies and with the thermal-damage layer on. `leaf_gradient()` and `leaf_gradient_batch()` lose `method`, `step`, `stationarity_tol` and `fast_stem_curve`, and their results lose `method` and `stationarity`, with no aliases: there is no difference to tune and no fallback to choose. A gradient costs the same whatever `pars` asks for.

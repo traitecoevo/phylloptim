@@ -1551,7 +1551,46 @@ void test_longwave_and_radiative_conductance() {
 
 }  // namespace
 
+// A short, well-plumbed leaf whose stem could carry enough water to cool it past
+// the Tetens pole: no operating point gets there, since the leaf condenses below
+// the dew point first. The solve's flux ends at the dew-point flux on both
+// routes, so set_physiology accepts the leaf and every solve stays at or above
+// the dew point.
+void test_energy_balance_flux_ends_at_the_dew_point() {
+  printf("energy balance: the solve's flux ends at the dew point\n");
+  Drivers d;
+  d.h = 0.05;
+  d.theta = 3.0 * d.theta;
+  d.PPFD = 50.0;
+  using K = phylloptim::Leaf::CostCurve;
+  for (bool collar : {true, false}) {
+    phylloptim::Leaf l = collar ? make_pm_leaf(d, {0.5}, {1.0}, true)
+                                : make_linked_eb_leaf(d, 0.5, false);
+    const char* route = collar ? "collar" : "leaf";
+    const double E_most =
+        l.leaf_specific_conductance_max_ * l.stem_curve_limit();
+    ok(l.leaf_temp_from_E(E_most) < -237.3,
+       "the stem's limit alone would cool the leaf past the Tetens pole");
+    const double E_dew = l.dew_point_flux();
+    ok(E_dew > 0.0 && E_dew < E_most, "the dew-point flux is the nearer bound");
+    near(l.leaf_vpd_at(l.leaf_temp_from_E(E_dew)), phylloptim::vpd_leaf_min,
+         1e-9, "at the dew-point flux the deficit is at its floor");
+    if (collar) {
+      l.find_root_collar_psi();
+    } else {
+      l.template optimise_psi_leaf_single<K::TF24_floor>();
+    }
+    ok(std::isfinite(l.profit_), route);
+    ok(l.transpiration_ <= E_dew * (1.0 + 1e-9),
+       "the operating point's flux is at most the dew-point flux");
+  }
+  phylloptim::Leaf off = make_pm_leaf(d, {0.5}, {1.0}, false);
+  ok(std::isinf(off.flux_ceiling()),
+     "with the energy balance off there is no flux ceiling");
+}
+
 void run_energy_balance() {
+  test_energy_balance_flux_ends_at_the_dew_point();
   test_dprofit_dpsi_leaf_matches_a_finite_difference_energy_balance();
   test_leaf_temperature_is_reported();
   test_shutdown_reports_one_temperature();
