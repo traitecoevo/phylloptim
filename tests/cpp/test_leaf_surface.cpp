@@ -664,16 +664,21 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
       // At the end of the stem curve there is no inverse to step across.
     }
     // psi_leaf is the collar's function, so the solve's noise in it is the
-    // collar's times dpsi_leaf/dcollar, which on the curve's tail runs to 1e5.
+    // collar's times dpsi_leaf/dcollar, which on the curve's tail runs past 1e6.
+    // A collar within a step of the stem's limit throws on the dry side, and a
+    // zero here would drop the term exactly where it is largest, so the step
+    // shrinks until both sides lie on the curve.
     double psi_per_collar = 0.0;
-    try {
-      const double dp = 1e-6;
-      psi_per_collar = std::abs(
-          (probe.find_psi_leaf_from_psi_root(probe.opt_root_psi_ + dp, probe.supply_psi_soil()) -
-           probe.find_psi_leaf_from_psi_root(probe.opt_root_psi_ - dp, probe.supply_psi_soil())) /
-          (2.0 * dp));
-      if (!std::isfinite(psi_per_collar)) psi_per_collar = 0.0;
-    } catch (const std::exception&) {
+    for (const double dp : {1e-6, 1e-7, 1e-8}) {
+      try {
+        psi_per_collar = std::abs(
+            (probe.find_psi_leaf_from_psi_root(probe.opt_root_psi_ + dp, probe.supply_psi_soil()) -
+             probe.find_psi_leaf_from_psi_root(probe.opt_root_psi_ - dp, probe.supply_psi_soil())) /
+            (2.0 * dp));
+        if (!std::isfinite(psi_per_collar)) psi_per_collar = 0.0;
+        break;
+      } catch (const std::exception&) {
+      }
     }
     if (K == CC::ProfitMax && EB) {
       (l.profitmax_peak_psi_ == l.psi_crit ? peak_at_crit : peak_inside) += 1;
