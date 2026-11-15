@@ -32,7 +32,7 @@ The package differentiates the operating point one way, and two kinds of caller 
 |---|---|
 | `interior` | `interior`, or `no-gradient` where the curvature is not below `-interior_curvature_floor` |
 | `boundary-soil`, `boundary-dry`, `hydraulic-shutdown` | `pinned` |
-| `solver-refused`, `non-finite-gradient`, `unsolved` | `no-gradient` |
+| `solver-refused`, `non-finite-gradient`, `unsolved`, `boundary-cold` | `no-gradient` |
 | `prescribed` | not reached on the solving path |
 
 ProfitMax with no objective (no light, or no stream to normalise over) is `no-gradient` whatever its kind. `prescribed`, `refused` and `no-gradient` are the statuses of the path that takes `psi`: `refused` means the collar fell outside the feasible interval, and `no-gradient` that the leaf potential it implies lies in the stem curve's tail, where every row would be rounding. The rest of this vignette is about the surface itself.

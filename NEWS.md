@@ -2,7 +2,7 @@
 
 - With the energy balance on, transpiration may cool a leaf at most 25 K below its temperature when shut. `set_physiology` checks the leaf temperature range up to that flux rather than up to the stem's limit `k_max G(inf)`, so a short, well-plumbed leaf is no longer refused for a temperature below the Tetens pole (traitecoevo/plant#785, #267).
 - An optimum on the limit is `"boundary-cold"`, for which the trait gradient is `"no-gradient"` for now; a prescribed point past it is refused. ProfitMax still normalises over the stream to `psi_crit`, and refuses by name a leaf whose stream there reaches the pole.
-- Results move only where the solve cooled a leaf more than 25 K; the golden files do not move.
+- Results move only where the stem could cool a leaf more than 25 K, a well-plumbed leaf in hot, still air; the golden files do not move.
 
 # phylloptim 0.36.0
 
