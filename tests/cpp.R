@@ -120,7 +120,7 @@ for (prog in c("test_leaf", "test_supplied_rows", "test_golden", "test_primitive
     paste0(prog, ".cpp")
   }
   message("\n== ", paste(src, collapse = " "))
-  status <- system2(cxx, c(cxxstd, "-O2", "-Wall", "-Wextra",
+  status <- system2(cxx, c(cxxstd, "-O2", "-ffp-contract=on", "-Wall", "-Wextra",
                            "-Wno-unused-parameter", includes,
                            shQuote(src), "-o", shQuote(prog)))
   if (status != 0) {

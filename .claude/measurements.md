@@ -56,6 +56,10 @@ Two things follow that matter beyond these files:
 
 **Bit-exactness depends on the optimisation level too.** Measured on macOS/arm64: bit-identical at `-O1`, `-O2` and `-O3`; **not** at `-O0`, which misses by 3.47e-15 (~13 ULP) because it does not contract `a*b + c` into an FMA. That is in the reassociation band, so **a debug build failing `test_golden` by ~1e-15 has found nothing.** The Makefile defaults to `-O2`; CMake's default is flagless, i.e. `-O0`, which is why `CMakeLists.txt` forces `Release`.
 
+### Contraction mode
+
+**The suite's bit-identity checks hold under contraction within one expression, and not under gcc's default.** clang's default is `-ffp-contract=on`, which fuses `a*b + c` only inside one expression, so an inlined copy of a function rounds as every other copy does. gcc's default is `fast`, which also fuses across statements after inlining, so two copies of the same expression inlined into different callers can round differently. Ubuntu 26.04's g++ 15 targets `x86-64-v3`, which has FMA, so `ubuntu-latest` met this in November 2026: 428 checks of the form "a surface value IS the solve's" failed by an ulp, under both `-std=c++20` and `-std=gnu++20`. Measured with Homebrew g++-16 on arm64: 437 failures at the default, none at `on` or `off`. Every test build passes `-ffp-contract=on` (the Makefile's `FP`, CMake's `PHYLLOPTIM_TEST_OPTIONS`, `tests/cpp.R`), which is a no-op for clang and leaves the macOS golden files bit-identical. A consumer that builds with gcc's default gets the same model to an ulp; only the identities between copies are lost.
+
 ### A worst RELATIVE row is usually a cancellation artefact of the metric
 
 A relative difference divides by the value, so wherever a reported quantity nearly cancels — a dim, hot leaf whose assimilation barely clears respiration — the metric is amplified by the cancellation and says nothing about the model. The worst relative rows have repeatedly been such rows (an `assim` of 4e-7 against a grid median of 1.44), and the worst absolute row is usually a different one.

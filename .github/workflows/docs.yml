@@ -74,7 +74,7 @@ jobs:
           done
           exit $status
 
-      # ⚠️ Doxygen 1.9 -- the version this runner installs -- handles the FIRST
+      # ⚠️ Doxygen 1.9 -- which this runner installed until Ubuntu 26.04 -- handles the FIRST
       # `\verbatim` in a comment block and drops the second one's OPEN, then
       # reports `unexpected command endverbatim` at its close. The line it names
       # is in the FILTERED stream and lands in unrelated code: in the case that

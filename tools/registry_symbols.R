@@ -12,9 +12,10 @@
 # did not follow fails here. Every resolved line maps back to the source
 # through the filter's line map, which refuses a header whose code lines the
 # filter altered. Every parameter an equation `reads` is referenced by the
-# equation's function (Doxygen's REFERENCES_RELATION, plus the Leaf members a
-# function reads through a `Leaf&` parameter, from its body, which Doxygen 1.9.8
-# does not record; see registry_locations()), so an equation that
+# equation's function (Doxygen's REFERENCES_RELATION, plus the members a
+# function reads through a parameter or data member of a class type, from its
+# body, which Doxygen records in some versions only; see registry_locations()),
+# so an equation that
 # quietly stopped reading a parameter, or started reading one not registered,
 # fails here. And every `literal:` is a number written in the body of the
 # function its entry names, so a constant changed on one side only fails here. The second argument, if given, receives the resolved registry:
@@ -36,7 +37,7 @@ locations <- registry_locations(xml_dir,
                                 filter = file.path(root, "tools", "doxygen_filter.awk"))
 res <- registry_resolve(raw, locations = locations, unreferenced = "none")
 # What Doxygen records as a function's references differs between versions (CI
-# runs 1.9.8), so on a failure print what this one recorded for each function
+# runs whatever the runner's apt has), so on a failure print what this one recorded for each function
 # involved: the next fix is then a matter of reading the log, not of guessing.
 if (nrow(res$unreferenced)) {
   eq <- res$equations

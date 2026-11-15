@@ -29,10 +29,13 @@ Walks the compounds Doxygen's \code{index.xml} lists and returns one row per
 member: its qualified name, kind, file and line (declaration), body span,
 the anchor of its page in the HTML render, its initializer where it has one
 (a constexpr's value), and the symbols it references. Lines are the source's,
-through \code{\link[=registry_line_map]{registry_line_map()}}. A function's references include the \code{Leaf}
-members it reads through a \verb{Leaf&} parameter (\code{l.TF24_cost_scale}, as each
-curve's \verb{Curve<K>} does), read from its body: Doxygen 1.9.8, which CI runs,
-records none of them.
+through \code{\link[=registry_line_map]{registry_line_map()}}. A function's references include the members
+it reads through a receiver whose type is a class walked here, read from its
+body: through a parameter (\code{l.TF24_cost_scale}, as each curve's \verb{Curve<K>}
+does through its \verb{Leaf&}) or through a data member of its own class
+(\code{roots_.root_P50}). Doxygen records these in some versions and not others
+(1.9.8 none through a parameter, 1.15 none through a member), so a render
+that does is not relied on.
 }
 \details{
 Needs a render with \code{GENERATE_XML = YES} and \code{REFERENCES_RELATION = YES},
