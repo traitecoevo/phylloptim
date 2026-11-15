@@ -155,6 +155,9 @@ option(PHYLLOPTIM_BUILD_TESTS "Build the C++ test suite" ${PHYLLOPTIM_IS_TOP_LEV
 if(PHYLLOPTIM_BUILD_TESTS)
   enable_testing()
 
+  # FMA contraction within one expression only, as tests/cpp/Makefile says why.
+  set(PHYLLOPTIM_TEST_OPTIONS -Wall -Wextra -Wno-unused-parameter -ffp-contract=on)
+
   foreach(prog test_leaf test_supplied_rows test_golden test_primitives bench_solve)
     add_executable(${prog} tests/cpp/${prog}.cpp)
     if(prog STREQUAL "test_leaf")
@@ -163,7 +166,7 @@ if(PHYLLOPTIM_BUILD_TESTS)
       target_sources(${prog} PRIVATE ${leaf_parts})
     endif()
     target_link_libraries(${prog} PRIVATE phylloptim::phylloptim)
-    target_compile_options(${prog} PRIVATE -Wall -Wextra -Wno-unused-parameter)
+    target_compile_options(${prog} PRIVATE ${PHYLLOPTIM_TEST_OPTIONS})
   endforeach()
 
   add_test(NAME leaf_unit COMMAND test_leaf
@@ -181,7 +184,7 @@ if(PHYLLOPTIM_BUILD_TESTS)
     add_executable(test_transpose tests/cpp/test_transpose.cpp
                    "${PHYLLOPTIM_ODELIA_INCLUDE_DIR}/../../src/Tape.cpp")
     target_link_libraries(test_transpose PRIVATE phylloptim::phylloptim)
-    target_compile_options(test_transpose PRIVATE -Wall -Wextra -Wno-unused-parameter)
+    target_compile_options(test_transpose PRIVATE ${PHYLLOPTIM_TEST_OPTIONS})
     target_compile_definitions(test_transpose PRIVATE
                                XAD_NO_THREADLOCAL XAD_USE_STRONG_INLINE)
     add_test(NAME leaf_transpose COMMAND test_transpose

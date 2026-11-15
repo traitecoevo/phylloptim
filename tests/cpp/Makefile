@@ -19,6 +19,11 @@ OPT      ?= -O2
 # -Werror=switch only: operating_point_kind_name switches over OperatingPointKind
 # with no default, so a kind added without a name stops this build.
 WARN     ?= -Wall -Wextra -Wno-unused-parameter -Werror=switch
+# FMA contraction within one expression only, which is clang's default. gcc's
+# default, `fast`, also fuses across statements after inlining, so two inlined
+# copies of one expression can round differently and the suite's bit-identity
+# checks (a surface value IS the solve's) fail. Not overridable, unlike OPT.
+FP       = -ffp-contract=on
 
 PHYLLOPTIM_INC   ?= ../../inst/include
 BH_INC     ?= $(shell Rscript -e 'cat(system.file("include", package="BH"))' 2>/dev/null)
@@ -115,20 +120,20 @@ smoothness: test_leaf
 # One program from several sources, a part per subsystem sharing leaf_harness.hpp.
 LEAF_SOURCES = test_leaf.cpp $(wildcard test_leaf_*.cpp)
 test_leaf: $(LEAF_SOURCES) $(HEADERS)
-	$(CXX) $(CXXSTD) $(OPT) $(WARN) $(INCLUDES) $(LEAF_SOURCES) -o $@
+	$(CXX) $(CXXSTD) $(OPT) $(FP) $(WARN) $(INCLUDES) $(LEAF_SOURCES) -o $@
 
 # The one row this surface SUPPLIES rather than records, against a difference of
 # the function it claims to describe. A difference of anything downstream is
 # identically zero on that column, so this is the only place it can be caught.
 test_supplied_rows: test_supplied_rows.cpp $(HEADERS)
-	$(CXX) $(CXXSTD) $(OPT) $(WARN) $(INCLUDES) $< -o $@
+	$(CXX) $(CXXSTD) $(OPT) $(FP) $(WARN) $(INCLUDES) $< -o $@
 
 # The transpose identity, which needs no reference gradient: one tangent against
 # one sweep. It is the only thing here that can see a wrong SUPPLIED row, and the
 # only one that can referee the collar responses at the shipped spline
 # resolution. The one program here that links the tape.
 test_transpose: test_transpose.cpp $(HEADERS)
-	$(CXX) $(CXXSTD) $(OPT) $(WARN) $(XADFLAGS) $(INCLUDES) $< $(TAPE_SRC) -o $@
+	$(CXX) $(CXXSTD) $(OPT) $(FP) $(WARN) $(XADFLAGS) $(INCLUDES) $< $(TAPE_SRC) -o $@
 
 # Not in `all`: it answers a design question rather than guarding a property --
 # what the boundary and its kernels cost the tape, region by region and kernel by
@@ -136,19 +141,19 @@ test_transpose: test_transpose.cpp $(HEADERS)
 # how a design choice gets priced before it is made, and it is seconds where the
 # century stand is minutes.
 probe_tape_regions: probe_tape_regions.cpp $(HEADERS)
-	$(CXX) $(CXXSTD) $(OPT) $(WARN) $(XADFLAGS) $(INCLUDES) $< $(TAPE_SRC) -o $@
+	$(CXX) $(CXXSTD) $(OPT) $(FP) $(WARN) $(XADFLAGS) $(INCLUDES) $< $(TAPE_SRC) -o $@
 
 test_golden: test_golden.cpp $(HEADERS)
-	$(CXX) $(CXXSTD) $(OPT) $(WARN) $(INCLUDES) $< -o $@
+	$(CXX) $(CXXSTD) $(OPT) $(FP) $(WARN) $(INCLUDES) $< -o $@
 
 test_primitives: test_primitives.cpp $(HEADERS)
-	$(CXX) $(CXXSTD) $(OPT) $(WARN) $(INCLUDES) $< -o $@
+	$(CXX) $(CXXSTD) $(OPT) $(FP) $(WARN) $(INCLUDES) $< -o $@
 
 bench_solve: bench_solve.cpp $(HEADERS)
-	$(CXX) $(CXXSTD) $(OPT) $(WARN) $(INCLUDES) $< -o $@
+	$(CXX) $(CXXSTD) $(OPT) $(FP) $(WARN) $(INCLUDES) $< -o $@
 
 bench_gradient: bench_gradient.cpp $(HEADERS)
-	$(CXX) $(CXXSTD) $(OPT) $(WARN) $(INCLUDES) $< -o $@
+	$(CXX) $(CXXSTD) $(OPT) $(FP) $(WARN) $(INCLUDES) $< -o $@
 
 # Regenerate the golden file. Only ever run this deliberately: it overwrites the
 # recorded behaviour, so a refactor that changed results would be rubber-stamped.
