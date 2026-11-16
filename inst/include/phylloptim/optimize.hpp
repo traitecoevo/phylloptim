@@ -20,14 +20,15 @@
 namespace phylloptim {
 namespace util {
 
-// A root-find whose bracket still missed its tolerance after max_iterations is
-// infeasible ("root_find_iterations"): a well-formed call reaches it where the
-// state leaves the target unable to converge. Ends that bracket no root stay
+// A root-find that ended with its bracket wider than its tolerance, having
+// spent max_iterations or reached adjacent doubles, is infeasible
+// ("root_find_iterations"): a well-formed call reaches it where the state
+// leaves the target unable to converge. Ends that bracket no root stay
 // odelia's BracketError, the caller's error.
 [[noreturn, gnu::cold, gnu::noinline]] inline void
 stop_root_find_iterations(const odelia::util::RootFindError& e) {
   stop_infeasible("root_find_iterations",
-                  std::string("exceeded max_iterations: ") + e.what());
+                  std::string("did not converge: ") + e.what());
 }
 
 // odelia's root-finders at a tolerance of `tol`, absolute and relative, with

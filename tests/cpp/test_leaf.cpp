@@ -2971,14 +2971,14 @@ void test_a_bisection_that_spends_its_budget_is_refused() {
   printf("a bisection that spends its budget is refused\n");
   const auto f = [](double x) { return x - 0.3; };
   ok(throws_with([&] { phylloptim::util::bisect(f, 0.0, 1.0, 1e-12, 3); },
-                 "[phylloptim:infeasible:root_find_iterations] exceeded max_iterations"),
+                 "[phylloptim:infeasible:root_find_iterations] did not converge"),
      "three halvings do not reach 1e-12, and the bisection says so");
   near(phylloptim::util::bisect(f, 0.0, 1.0, 1e-12, 100), 0.3, 1e-12,
        "with budget to spare it finds the root");
   const auto g = [](double x) { return x * x - 0.3; };
   ok(throws_with([&] {
        phylloptim::util::toms748(g, 0.0, 1.0, -0.3, 0.7, 1e-15, 2);
-     }, "[phylloptim:infeasible:root_find_iterations] exceeded max_iterations"),
+     }, "[phylloptim:infeasible:root_find_iterations] did not converge"),
      "and so is a TOMS748 search");
 }
 
