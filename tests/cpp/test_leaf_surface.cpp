@@ -1585,6 +1585,203 @@ void test_held_coordinates_move_no_row() {
      "coordinates handed over");
 }
 
+// The curvature probes the marginal either side of the solved collar and puts
+// the leaf back on the bracket it already holds. What it leaves must be what
+// the solve left, number for number, or the billed outputs read another point.
+void test_the_curvature_leaves_its_point_as_it_found_it() {
+  printf("profit_curvature_at_collar leaves the leaf as the solve left it\n");
+  using K = phylloptim::Leaf::CostCurve;
+  int points = 0, differ = 0;
+  auto snapshot = [](const phylloptim::Leaf& l) {
+    std::vector<double> v{l.profit_, l.opt_psi_leaf_, l.opt_root_psi_,
+                          l.transpiration_, l.E_up_, l.stom_cond_CO2_,
+                          l.assim_colimited_, l.Tleaf_,
+                          static_cast<double>(l.operating_point_kind())};
+    for (double c : l.soil_consumption_) v.push_back(c);
+    return v;
+  };
+  for (int layers : {1, 3}) {
+    for (double psi0 : {0.5, 1.0, 2.0, 4.0}) {
+      for (double ppfd : {100.0, 900.0}) {
+        Drivers d;
+        d.PPFD = ppfd;
+        std::vector<double> psi_soil, soil_depth;
+        for (int i = 0; i < layers; ++i) {
+          psi_soil.push_back(psi0 + 0.35 * i);
+          soil_depth.push_back(1.0 * (i + 1));
+        }
+        phylloptim::Leaf tf = make_leaf(d, psi_soil, soil_depth);
+        tf.TF24_floor_lambda_o = kPriceForFOC;
+        tf.set_model(K::TF24_floor, true);
+        tf.optimise();
+        if (tf.operating_point_kind() !=
+            phylloptim::Leaf::OperatingPointKind::Interior) {
+          continue;
+        }
+        // As solved, and as a replay puts it back: the solve may hold its first
+        // bracket, a replay never does, so the two restore differently.
+        for (bool replayed : {false, true}) {
+          if (replayed) {
+            tf.replay_operating_point(tf.opt_root_psi_, tf.operating_point_kind());
+          }
+          const std::vector<double> before = snapshot(tf);
+          const double first = tf.profit_curvature_at_collar<K::TF24_floor>();
+          const std::vector<double> after = snapshot(tf);
+          const double second = tf.profit_curvature_at_collar<K::TF24_floor>();
+          ++points;
+          bool same = before.size() == after.size() &&
+                      (first == second || (std::isnan(first) && std::isnan(second)));
+          for (std::size_t i = 0; same && i < before.size(); ++i) {
+            same = before[i] == after[i] ||
+                   (std::isnan(before[i]) && std::isnan(after[i]));
+          }
+          if (!same) {
+            ++differ;
+            printf("    differs at psi_soil=%g ppfd=%g layers=%d replayed=%d\n",
+                   psi0, ppfd, layers, int(replayed));
+          }
+        }
+      }
+    }
+  }
+  printf("    %d interior points, solved and replayed\n", points);
+  ok(points > 0, "the sweep reaches interior points (test is not vacuous)");
+  ok(differ == 0,
+     "every output, and a second curvature, is as the solve left it");
+}
+
+// At a prescribed collar a caller reads the marginal and then bills at the same
+// collar. Placing the held coordinates once and handing them to both must move
+// no value and no tangent row: only the collar's channel is added at billing.
+template <phylloptim::Leaf::CostCurve K>
+void compare_prescribed_handoff(phylloptim::Leaf& l, const std::string& at,
+                                HandoffTally& tally) {
+  using T = odelia::ode::tangent_scalar<double>;
+  if (!fixture::surface_has_objective(l)) return;
+  ++tally.other;
+  std::vector<int> directions{phylloptim::par_vcmax_25, phylloptim::par_stem_P50,
+                              phylloptim::par_root_P50, phylloptim::par_kmax, -1};
+  for (int direction : directions) {
+    phylloptim::leaf_pars<T> pars;
+    const phylloptim::leaf_pars<double> seated = l.passive_pars();
+    for (std::size_t i = 0; i < pars.size(); ++i) pars[i] = T(seated[i]);
+    std::vector<T> soil, r_h, r_v;
+    for (int i = 0; i < l.supply_n_layers(); ++i) {
+      soil.push_back(T(l.roots_.psi_soil_[std::size_t(i)]));
+      r_h.push_back(T(l.roots_.network_.r_R_H_min[std::size_t(i)]));
+      r_v.push_back(T(l.roots_.network_.r_R_V_sum[std::size_t(i)]));
+    }
+    odelia::ode::set_direction(direction < 0 ? soil[0] : pars[std::size_t(direction)],
+                               1.0);
+    const phylloptim::SupplyInputs<T> supply{soil, r_h, r_v,
+                                         pars[phylloptim::par_root_P50],
+                                         pars[phylloptim::par_root_c]};
+    const double p = l.opt_root_psi_;
+    const auto draw = l.supply_draw_at<T>(T(p), supply);
+    // A prescribed collar moves with what prescribes it, so it carries a row.
+    T collar(p);
+    odelia::ode::set_direction(collar, 0.7);
+    const T marginal = l.dprofit_dcollar_at<K, T>(T(p), draw, pars);
+    const auto billed = l.billed_outputs_at<K, T>(collar, draw, pars);
+    phylloptim::Leaf::HeldCoords<T> held;
+    l.place_held_coords<T>(collar, draw, pars, held);
+    const T marginal_h = l.dprofit_dcollar_at<K, T>(T(p), draw, pars, held);
+    const auto billed_h = l.billed_outputs_at<K, T>(collar, draw, pars, &held);
+    auto same = [](const T& a, const T& b) {
+      return odelia::util::to_passive(a) == odelia::util::to_passive(b) &&
+             odelia::ode::derivative_along(a) == odelia::ode::derivative_along(b);
+    };
+    bool all_same = held.placed() && same(marginal, marginal_h) &&
+                    same(billed.profit, billed_h.profit) &&
+                    same(billed.carbon, billed_h.carbon) &&
+                    same(billed.residual_flux, billed_h.residual_flux) &&
+                    billed.uptake.size() == billed_h.uptake.size();
+    for (std::size_t j = 0; all_same && j < billed.uptake.size(); ++j) {
+      all_same = same(billed.uptake[j], billed_h.uptake[j]);
+    }
+    ++tally.rows;
+    if (!all_same) {
+      ++tally.differ;
+      printf("    differs along %d at %s: carbon row %.17g vs %.17g\n", direction,
+             at.c_str(), odelia::ode::derivative_along(billed.carbon),
+             odelia::ode::derivative_along(billed_h.carbon));
+    }
+  }
+}
+
+void test_held_coordinates_at_a_prescribed_collar_move_no_row() {
+  printf("coordinates placed at a prescribed collar move no number and no row\n");
+  using K = phylloptim::Leaf::CostCurve;
+  HandoffTally tally;
+  for (int layers : {1, 3}) {
+    for (double psi0 : {0.5, 1.0, 2.0, 4.0}) {
+      for (double ppfd : {100.0, 900.0}) {
+        for (double temp : {25.0, 40.0}) {
+          Drivers d;
+          d.PPFD = ppfd;
+          d.leaf_temp = temp;
+          std::vector<double> psi_soil, soil_depth;
+          for (int i = 0; i < layers; ++i) {
+            psi_soil.push_back(psi0 + 0.35 * i);
+            soil_depth.push_back(1.0 * (i + 1));
+          }
+          const std::string at = "psi_soil=" + std::to_string(psi0) +
+                                 " ppfd=" + std::to_string(ppfd) +
+                                 " T=" + std::to_string(temp) +
+                                 " layers=" + std::to_string(layers);
+          for (bool floor : {false, true}) {
+            phylloptim::Leaf l = make_leaf(d, psi_soil, soil_depth);
+            if (floor) {
+              l.TF24_floor_lambda_o = kPriceForFOC;
+              l.set_model(K::TF24_floor, true);
+            }
+            l.find_root_collar_psi();
+            if (l.operating_point_kind() !=
+                phylloptim::Leaf::OperatingPointKind::Interior) {
+              continue;
+            }
+            // Off the optimum, where a tracking caller sits.
+            try {
+              l.evaluate_root_collar_psi(l.opt_root_psi_ * 0.98);
+            } catch (const phylloptim::util::infeasible_error&) {
+              continue;
+            }
+            if (floor) {
+              compare_prescribed_handoff<K::TF24_floor>(l, "TF24_floor " + at, tally);
+            } else {
+              compare_prescribed_handoff<K::TF24>(l, "TF24 " + at, tally);
+            }
+          }
+        }
+      }
+    }
+  }
+  printf("    %d rows at %d prescribed points\n", tally.rows, tally.other);
+  ok(tally.other > 0, "the sweep reaches prescribed points (test is not vacuous)");
+  ok(tally.differ == 0,
+     "the marginal and every billed output, value and row, are the same with "
+     "the coordinates placed once");
+
+  // Placed only at a prescribed collar: an interior point places its own.
+  using T = odelia::ode::tangent_scalar<double>;
+  Drivers d;
+  phylloptim::Leaf in = make_leaf(d, {1.0}, {1.0});
+  in.find_root_collar_psi();
+  phylloptim::leaf_pars<T> pars;
+  const phylloptim::leaf_pars<double> seated = in.passive_pars();
+  for (std::size_t i = 0; i < pars.size(); ++i) pars[i] = T(seated[i]);
+  std::vector<T> soil{T(in.roots_.psi_soil_[0])},
+      r_h{T(in.roots_.network_.r_R_H_min[0])}, r_v{T(in.roots_.network_.r_R_V_sum[0])};
+  const phylloptim::SupplyInputs<T> supply{soil, r_h, r_v,
+                                       pars[phylloptim::par_root_P50],
+                                       pars[phylloptim::par_root_c]};
+  const auto draw = in.supply_draw_at<T>(T(in.opt_root_psi_), supply);
+  phylloptim::Leaf::HeldCoords<T> held;
+  ok(throws_with([&] { in.place_held_coords<T>(T(in.opt_root_psi_), draw, pars, held); },
+                 "Leaf::place_held_coords: coordinates are placed at a prescribed collar"),
+     "place_held_coords refuses a point that is not prescribed");
+}
+
 // Coordinates are handed over only where they mean something, and refused,
 // by name, where reading them would answer for another point.
 void test_held_coordinates_are_refused_off_their_point() {
@@ -1650,7 +1847,7 @@ void test_held_coordinates_are_refused_off_their_point() {
   ok(throws_with([&] {
        bound.billed_outputs_at<CC::TF24, T>(T(bound.opt_root_psi_), draw_b, sb.pars, &held);
      },
-                 "were placed at an interior point and are being read at one that is"),
+                 "were placed at an interior or prescribed point and are being read at one that is"),
      "billed_outputs_at refuses coordinates placed at an interior point at another kind");
 
   // operating_collar unplaces what it is handed before deciding, so coordinates left
@@ -2082,6 +2279,8 @@ void run_surface() {
   test_a_dry_pin_meets_the_interior_answer_continuously();
   test_held_coordinates_move_no_row();
   test_held_coordinates_are_refused_off_their_point();
+  test_held_coordinates_at_a_prescribed_collar_move_no_row();
+  test_the_curvature_leaves_its_point_as_it_found_it();
   test_supplied_rows_match_a_resolve_at_every_kind();
   test_shut_leaf_seated_at_its_collar_bills_the_roots_nothing();
   test_surface_refuses_a_curve_it_was_not_solved_on();

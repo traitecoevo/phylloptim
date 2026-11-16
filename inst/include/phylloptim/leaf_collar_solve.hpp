@@ -408,10 +408,12 @@ inline bool Leaf::prepare_collar_solve(double& bound_a, double& bound_b,
   if constexpr (!cost_domain_ends_at_psi_crit<K>()) {
     if (first_bracket && bracket(psi_crit)) {
       dry_end_provisional_ = !std::isfinite(dry_bound_flux_cap_);
+      bracket_from_first_ = true;
       return true;
     }
   }
   dry_end_provisional_ = false;
+  bracket_from_first_ = false;
   if (!bracket(dry_end<K>())) {
     set_shut_state<K>();
     return false;
@@ -824,6 +826,20 @@ inline double Leaf::evaluate_root_collar_psi_for(double target_opt_root_psi){
     }
 
     return profit_at_collar_psi<K>(target_opt_root_psi, bound_a, bound_b);
+}
+
+// The point a probe of the marginal moved the model from, put back. The probes
+// change no bracket state, so a bracket prepared without the first bracket is
+// what preparing again would give, and only the outputs are evaluated again.
+// One a search took from the first bracket is prepared again, as before.
+template <Leaf::CostCurve K>
+inline void Leaf::restore_collar_point(double collar) {
+  if (bracket_from_first_) {
+    evaluate_root_collar_psi_for<K>(collar);
+    return;
+  }
+  begin_collar_point<K>();
+  profit_at_collar_psi<K>(collar, collar, collar);
 }
 
 template <Leaf::CostCurve K>
