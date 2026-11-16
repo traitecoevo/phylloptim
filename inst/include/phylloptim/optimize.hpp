@@ -4,16 +4,69 @@
 
 // One-dimensional optimisers. `maximise_over_closed_interval_foc` is the one
 // solver every route uses. `brent_fmin` and `golden_section_max` terminate on
-// bracket width and evaluate only strictly interior points.
+// bracket width and evaluate only strictly interior points. The root-finders
+// are odelia's.
 
-#include <phylloptim/uniroot.hpp>
+#include <phylloptim/util.hpp>
+#include <odelia/root_find.hpp>
 #include <cfloat>  // DBL_EPSILON
 #include <cmath>
+#include <cstddef>
 #include <limits>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace phylloptim {
 namespace util {
+
+// A root-find that ended with its bracket wider than its tolerance, having
+// spent max_iterations or reached adjacent doubles, is infeasible
+// ("root_find_iterations"): a well-formed call reaches it where the state
+// leaves the target unable to converge. Ends that bracket no root stay
+// odelia's BracketError, the caller's error.
+[[noreturn, gnu::cold, gnu::noinline]] inline void
+stop_root_find_iterations(const odelia::util::RootFindError& e) {
+  stop_infeasible("root_find_iterations",
+                  std::string("did not converge: ") + e.what());
+}
+
+// odelia's root-finders at a tolerance of `tol`, absolute and relative, with
+// that refusal made infeasible. toms748 for a target smooth across the bracket
+// handed in, taking f at both ends, which the caller evaluated to choose it;
+// bisect for one with no smoothness to exploit.
+template <typename Function>
+std::pair<double, double> toms748_bracket(Function&& f, double min, double max,
+                                          double f_min, double f_max,
+                                          double tol, size_t max_iterations) {
+  try {
+    return odelia::root::toms748_bracket(f, min, max, f_min, f_max,
+                                         {tol, tol, max_iterations});
+  } catch (const odelia::util::RootFindError& e) {
+    stop_root_find_iterations(e);
+  }
+}
+
+template <typename Function>
+double toms748(Function&& f, double min, double max, double f_min, double f_max,
+               double tol, size_t max_iterations) {
+  try {
+    return odelia::root::toms748(f, min, max, f_min, f_max,
+                                 {tol, tol, max_iterations});
+  } catch (const odelia::util::RootFindError& e) {
+    stop_root_find_iterations(e);
+  }
+}
+
+template <typename Function>
+double bisect(Function&& f, double min, double max, double tol,
+              size_t max_iterations) {
+  try {
+    return odelia::root::bisect(f, min, max, {tol, tol, max_iterations});
+  } catch (const odelia::util::RootFindError& e) {
+    stop_root_find_iterations(e);
+  }
+}
 
 // Minimise f over [ax, bx] (requires ax <= bx). Returns the argmin; on return
 // fmin (if non-null) holds f at the argmin. `tol` is the absolute tolerance on
@@ -231,7 +284,7 @@ double maximise_over_closed_interval_foc(Function f, Deriv df, double lo, double
   }
   if (ok_a && ok_b && std::isfinite(da) && std::isfinite(db) &&
       da > 0.0 && db < 0.0) {
-    const double x = util::uniroot_smooth(
+    const double x = util::toms748(
         [&](double v) { bool ok = false; return df(v, &ok); }, xa, xb, da, db, tol,
         max_iterations);
     consider(x, f(x), ArgmaxSource::Root);

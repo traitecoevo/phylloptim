@@ -60,8 +60,9 @@ endif()
 #
 # Two, both header-only:
 #
-#   Boost   the TOMS748 root finder. Whatever your platform packages.
-#   odelia  the spline interpolator and the vendored XAD forward-mode AD.
+#   Boost   the incomplete gamma functions. Whatever your platform packages.
+#   odelia  the spline interpolator, the root-finders and the vendored XAD
+#           forward-mode AD; 0.11.2 or later, which has the root-finders.
 #           https://github.com/traitecoevo/odelia -- an R package by
 #           distribution, but the headers used here are plain C++, so a git
 #           checkout is enough and nothing needs installing or building.
@@ -74,18 +75,18 @@ endif()
 # it emits a policy warning on 3.30+; config mode has shipped with Boost since
 # 1.70. Where there is no BoostConfig.cmake -- some distribution packages still
 # install only the headers -- fall back to an include directory, which is all
-# this uses: one root finder, header-only, nothing to link.
+# this uses: special functions, header-only, nothing to link.
 find_package(Boost QUIET CONFIG)
 
 set(PHYLLOPTIM_BOOST_INCLUDE_DIR "" CACHE PATH
     "Path to Boost's headers; only needed if find_package(Boost CONFIG) fails")
 
 if(NOT Boost_FOUND)
-  if(NOT EXISTS "${PHYLLOPTIM_BOOST_INCLUDE_DIR}/boost/math/tools/toms748_solve.hpp")
+  if(NOT EXISTS "${PHYLLOPTIM_BOOST_INCLUDE_DIR}/boost/math/special_functions/gamma.hpp")
     message(FATAL_ERROR
       "Boost not found by find_package(Boost CONFIG), and "
       "PHYLLOPTIM_BOOST_INCLUDE_DIR (${PHYLLOPTIM_BOOST_INCLUDE_DIR}) does not contain "
-      "boost/math/tools/toms748_solve.hpp.\n"
+      "boost/math/special_functions/gamma.hpp.\n"
       "Install Boost's headers and either let CMake find them or pass "
       "-DPHYLLOPTIM_BOOST_INCLUDE_DIR=/path/to/boost/headers")
   endif()
@@ -94,7 +95,7 @@ endif()
 set(PHYLLOPTIM_ODELIA_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../odelia/inst/include"
     CACHE PATH "Path to odelia's inst/include")
 
-if(NOT EXISTS "${PHYLLOPTIM_ODELIA_INCLUDE_DIR}/odelia/interpolator.hpp")
+if(NOT EXISTS "${PHYLLOPTIM_ODELIA_INCLUDE_DIR}/odelia/root_find.hpp")
   message(FATAL_ERROR
     "odelia headers not found under PHYLLOPTIM_ODELIA_INCLUDE_DIR "
     "(${PHYLLOPTIM_ODELIA_INCLUDE_DIR}).\n"

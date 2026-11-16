@@ -75,7 +75,8 @@ leaf_infeasible_codes <- function() {
       paste("no leaf potential carries the residual (cuticular) flux from this",
             "upstream potential, so a leaf route has no wet bound to start from"),
     root_find_iterations =
-      paste("a one-dimensional solver hit max_iterations without converging"),
+      paste("a one-dimensional root-find ended with its bracket wider than its",
+            "tolerance, at max_iterations or on adjacent doubles"),
     prescribed_potential =
       paste("a prescribed collar or leaf potential lies outside its feasible",
             "interval; it is refused rather than moved onto the interval's end"),

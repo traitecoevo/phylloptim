@@ -72,7 +72,7 @@ inline void Leaf::solve_medlyn_ci_numerical(){
     ci_ = ci_peak;
   } else {
     try {
-      ci_ = util::uniroot(target, ci_peak, hi, ci_abs_tol, ci_niter);
+      ci_ = util::bisect(target, ci_peak, hi, ci_abs_tol, ci_niter);
     } catch (const std::exception& e) {
       util::stop_infeasible("ci_solve", "solve_medlyn_ci_numerical failed: " + std::string(e.what()) +
                  "; ci_peak=" + util::to_string(ci_peak) +

@@ -1,13 +1,11 @@
 Package: phylloptim
 Title: Leaf Gas Exchange with Explicit Plant Hydraulics
-Version: 0.37.0
+Version: 0.38.0
 Authors@R: c(
     person("Isaac", "Towers", , "", "aut",
             comment = "Author of the leaf gas exchange and hydraulics model"),
     person("Daniel", "Falster", , "daniel.falster@unsw.edu.au", c("aut", "cre"),
-            comment = c(ORCID = "0000-0002-9814-092X")),
-    person("Rich", "FitzJohn", , "", "ctb",
-            comment = "Root-finding utilities (uniroot.hpp)")
+            comment = c(ORCID = "0000-0002-9814-092X"))
     )
 Maintainer: Daniel Falster <daniel.falster@unsw.edu.au>
 Description: An implementation of leaf-level gas exchange in which stomatal
@@ -37,7 +35,7 @@ Imports:
     Rcpp,
     stats,
     utils
-LinkingTo: Rcpp, BH, odelia (>= 0.10.0)
+LinkingTo: Rcpp, BH, odelia (>= 0.11.2)
 Suggests:
     codetools,
     dplyr,

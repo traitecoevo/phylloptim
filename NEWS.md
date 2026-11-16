@@ -1,3 +1,9 @@
+# phylloptim 0.38.0
+
+- The root-finders are odelia's (`odelia::root`, odelia 0.11.2), and `uniroot.hpp` is gone. Its `util::uniroot`, `util::uniroot_smooth` and `util::uniroot_smooth_bracket` become `util::bisect`, `util::toms748` and `util::toms748_bracket`, with the same arguments; each call keeps its method, so no number moves. The `DESCRIPTION` credit for `uniroot.hpp` goes with the file.
+- A root-find is refused when its final bracket still misses the tolerance, not when it has used `max_iterations`: one converging on its last allowed iteration now returns, and a bisection that stopped short of the tolerance is refused. The refusal is still infeasible with code `root_find_iterations`, its message now `did not converge` with odelia's reason. A bracket with no sign change is odelia's `BracketError`, a `std::domain_error`: what Boost's TOMS748 raised, where Boost's bisection raised a `std::runtime_error`. The one bisection, the Medlyn ci solve, catches `std::exception`, so it sees either.
+- Needs odelia 0.11.2, which carries the root-finders.
+
 # phylloptim 0.37.0
 
 - With the energy balance on, transpiration may cool a leaf at most 25 K below its temperature when shut. `set_physiology` checks the leaf temperature range up to that flux rather than up to the stem's limit `k_max G(inf)`, so a short, well-plumbed leaf is no longer refused for a temperature below the Tetens pole (traitecoevo/plant#785, #267).

@@ -177,7 +177,7 @@ jobs:
         with:
           extra-packages: |
             any::pkgdown
-            github::traitecoevo/odelia@v0.10.0
+            github::traitecoevo/odelia@v0.11.2
             local::.
           needs: website
 
