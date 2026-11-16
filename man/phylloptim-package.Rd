@@ -61,10 +61,5 @@ Authors:
   \item Isaac Towers (Author of the leaf gas exchange and hydraulics model)
 }
 
-Other contributors:
-\itemize{
-  \item Rich FitzJohn (Root-finding utilities (uniroot.hpp)) [contributor]
-}
-
 }
 \keyword{package}
