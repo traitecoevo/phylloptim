@@ -1,3 +1,7 @@
+# phylloptim 0.39.0
+
+- A caller of the derivative surface can share work it repeated. `profit_curvature_at_collar` puts the leaf back on the bracket it already holds, rather than preparing it again, wherever that bracket is not a search's provisional first one, as after a replay. `place_held_coords` places the held coordinates at a prescribed collar, so that the marginal there and `billed_outputs_at` read one placement. `operating_collar` takes the interior curvature floor as an argument, defaulting to `Leaf::interior_curvature_floor`. No number moves (#274).
+
 # phylloptim 0.38.0
 
 - The root-finders are odelia's (`odelia::root`, odelia 0.11.2), and `uniroot.hpp` is gone. Its `util::uniroot`, `util::uniroot_smooth` and `util::uniroot_smooth_bracket` become `util::bisect`, `util::toms748` and `util::toms748_bracket`, with the same arguments; each call keeps its method, so no number moves. The `DESCRIPTION` credit for `uniroot.hpp` goes with the file.
