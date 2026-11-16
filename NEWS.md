@@ -1,6 +1,6 @@
 # phylloptim 0.38.0
 
-- The root-finders are odelia's (`odelia::root`, odelia 0.11.2), and `uniroot.hpp` is gone. Its `util::uniroot`, `util::uniroot_smooth` and `util::uniroot_smooth_bracket` become `util::bisect`, `util::toms748` and `util::toms748_bracket`, with the same arguments; each call keeps its method, so no number moves.
+- The root-finders are odelia's (`odelia::root`, odelia 0.11.2), and `uniroot.hpp` is gone. Its `util::uniroot`, `util::uniroot_smooth` and `util::uniroot_smooth_bracket` become `util::bisect`, `util::toms748` and `util::toms748_bracket`, with the same arguments; each call keeps its method, so no number moves. The `DESCRIPTION` credit for `uniroot.hpp` goes with the file.
 - A root-find is refused when its final bracket still misses the tolerance, not when it has used `max_iterations`: one converging on its last allowed iteration now returns, and a bisection that stopped short of the tolerance is refused. The refusal is still infeasible with code `root_find_iterations`. A bracket with no sign change is odelia's `BracketError`, a `std::domain_error` as Boost's was.
 - Needs odelia 0.11.2, which carries the root-finders.
 
