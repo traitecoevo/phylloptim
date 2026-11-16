@@ -231,7 +231,7 @@ inline double Leaf::solve_ci(double gc) {
                                        : 0.5 * (a + b);
       }
     }
-    return util::uniroot_smooth(target, lo, hi, f_lo, f_hi, ci_root_tol,
+    return util::toms748(target, lo, hi, f_lo, f_hi, ci_root_tol,
                                 ci_niter);
   } catch (const std::exception& e) {
     util::stop_infeasible("ci_solve", "solve_ci failed: " + std::string(e.what()) +

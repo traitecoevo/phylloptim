@@ -73,7 +73,7 @@ inline double Leaf::cap_dry_bound(double collar_at_dry_end, double wettest,
   const auto target = [&](double x) -> double {
     return E_column_zero(x, supply_psi_soil()) - cap;
   };
-  return util::uniroot_smooth(target, wettest, stem_end, f_lo, f_hi,
+  return util::toms748(target, wettest, stem_end, f_lo, f_hi,
                               bracket_tol, ci_niter);
 }
 
@@ -91,7 +91,7 @@ inline double Leaf::find_root_psi(double wettest_soil_layer, const std::vector<d
       // The wet end of the final bracket, not its midpoint: the target rises
       // with the collar, and past the root the soil can deliver more than
       // G(inf), which no leaf potential carries and the inverse refuses.
-      return util::uniroot_smooth_bracket(target, wettest_soil_layer, end,
+      return util::toms748_bracket(target, wettest_soil_layer, end,
                                           f_wettest, f_crit, bracket_tol,
                                           ci_niter)
           .first;
@@ -107,7 +107,7 @@ inline double Leaf::find_root_psi(double wettest_soil_layer, const std::vector<d
     return E_column_zero(x, psi_soil);
   };
   try {
-    return util::uniroot_smooth(target, wettest_soil_layer, end, f_wettest,
+    return util::toms748(target, wettest_soil_layer, end, f_wettest,
                                 f_crit, bracket_tol, ci_niter);
   } catch (const std::exception& e) {
     util::stop_infeasible("collar_bracket",
@@ -160,9 +160,9 @@ inline double Leaf::polish_bracket_bound(double x0,
       if (std::isfinite(fx) && fx * f0 <= 0.0) {
         const std::pair<double, double> r =
             side < 0.0
-                ? util::uniroot_smooth_bracket(target, x, x0, fx, f0, bound_root_tol,
+                ? util::toms748_bracket(target, x, x0, fx, f0, bound_root_tol,
                                                static_cast<size_t>(ci_niter))
-                : util::uniroot_smooth_bracket(target, x0, x, f0, fx, bound_root_tol,
+                : util::toms748_bracket(target, x0, x, f0, fx, bound_root_tol,
                                                static_cast<size_t>(ci_niter));
         // The continuity root from its feasible side, for the reason
         // find_root_psi takes it; the wet bound from the middle of its bracket.
@@ -215,7 +215,7 @@ inline double Leaf::find_wet_bound(double wettest_soil_layer,
                           "; last=" + util::to_string(hi));
   }
   try {
-    return util::uniroot_smooth(target, lo, hi, f_lo, f_hi, bracket_tol,
+    return util::toms748(target, lo, hi, f_lo, f_hi, bracket_tol,
                                 ci_niter);
   } catch (const std::exception& e) {
     util::stop_infeasible("collar_bracket",
@@ -254,7 +254,7 @@ inline double Leaf::find_shut_wet_bound() {
     return hi;
   }
   try {
-    return util::uniroot_smooth(target, lo, hi, f_lo, f_hi, bound_root_tol,
+    return util::toms748(target, lo, hi, f_lo, f_hi, bound_root_tol,
                                 static_cast<size_t>(ci_niter));
   } catch (const std::exception& e) {
     util::stop_infeasible("collar_bracket",
@@ -287,7 +287,7 @@ inline double Leaf::leaf_wet_bound(double psi_upstream) {
                           "the stem cannot carry the residual flux from "
                           "psi_upstream=" + util::to_string(psi_upstream));
   }
-  return util::uniroot_smooth(target, lo, hi, f_lo, f_hi, bound_root_tol,
+  return util::toms748(target, lo, hi, f_lo, f_hi, bound_root_tol,
                               static_cast<size_t>(ci_niter));
 }
 
@@ -705,12 +705,12 @@ inline double Leaf::maximise_profit_over_collar(double bound_a, double bound_b) 
       return dprofit(end - std::exp(s));
     };
     // 1e-10 in the logarithm is 1e-12 MPa at the neighbourhood's outer edge.
-    const double s = util::uniroot_smooth(
+    const double s = util::toms748(
         in_log_distance, std::log(dry_pin_resolution), std::log(end - root_lo),
         f_in, f_root_lo, 1e-10, static_cast<size_t>(ci_niter));
     root = end - std::exp(s);
   } else {
-    root = util::uniroot_smooth(dprofit, root_lo, hi, f_root_lo, f_hi,
+    root = util::toms748(dprofit, root_lo, hi, f_root_lo, f_hi,
                                 collar_root_tol, static_cast<size_t>(ci_niter));
   }
   if constexpr (!bounded) {

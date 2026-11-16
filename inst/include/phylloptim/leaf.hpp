@@ -4,7 +4,6 @@
 
 #include <phylloptim/constants.hpp>
 #include <phylloptim/util.hpp>
-#include <phylloptim/uniroot.hpp>
 #include <phylloptim/optimize.hpp>
 #include <phylloptim/quadrature.hpp>
 #include <phylloptim/roots.hpp>
