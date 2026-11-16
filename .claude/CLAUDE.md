@@ -35,7 +35,7 @@ Family context lives in [`plant-meta`](https://github.com/traitecoevo/plant-meta
 |---|---|
 | `util.hpp`, `constants.hpp` | R-free `stop()` and sentinels; physical constants |
 | `clamp_sites.hpp` | the `clamp_site` enum: the one bound a solved path keeps, the stomatal corner `E_s >= 0`, counted |
-| `quadrature.hpp`, `uniroot.hpp`, `optimize.hpp` | adaptive Simpson; Boost root-finders; `maximise_over_closed_interval_foc`, the one solver |
+| `quadrature.hpp`, `optimize.hpp` | adaptive Simpson; `maximise_over_closed_interval_foc`, the one solver, and `toms748`/`bisect`, odelia's root-finders with their refusal made infeasible |
 | `vulnerability.hpp` | `VulnerabilityTable` (the C2 table both curves read), the closed-form integral and its inverse, `vulnerability_derivatives_at` |
 | `closed_form_rows.hpp` | a table's value with the closed form's trait rows, for both curves |
 | `roots.hpp` | `RootNetwork`, `root_network_from_carbon`, `SupplyInputs`, `CollarConductance`, `MultiLayerRoots` (the one uptake walk), `layer_thicknesses()` (soil depths to layer widths). Nothing here calls `root_network_from_carbon`: since #33 the caller runs the root model and hands `set_physiology` the resistances |
