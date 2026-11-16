@@ -65,7 +65,7 @@ jobs:
           extra-packages: |
             any::rcmdcheck
             github::richfitz/RcppR6
-            github::traitecoevo/odelia@c3235a9
+            github::traitecoevo/odelia@v0.11.2
           needs: check
           install-pandoc: true
 
