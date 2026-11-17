@@ -168,6 +168,9 @@ inline double Leaf::leaf_vpd_at(double leaf_temp) const {
   const double d =
       atm_vpd_ + (saturation_vapour_pressure(leaf_temp) -
                   saturation_vapour_pressure(Tair_));
+  if (d < vpd_leaf_min) {
+    clamps.note(CLAMP_VPD_LEAF_FLOOR);
+  }
   return std::max(d, vpd_leaf_min);
 }
 

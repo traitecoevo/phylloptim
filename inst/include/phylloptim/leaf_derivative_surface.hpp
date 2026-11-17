@@ -37,7 +37,8 @@
 //
 //   - the draw is taken at the solved collar (checked: operating_collar and
 //     billed_outputs_at refuse another);
-//   - `held`, if passed, comes from operating_collar at this point (checked:
+//   - `held`, if passed, comes from operating_collar at this interior point, or
+//     from place_held_coords at this prescribed collar (checked:
 //     billed_outputs_at refuses one placed at another collar or kind);
 //   - nothing moves the leaf between the solve and billed_outputs_at;
 //   - `pars` and `supply` hold, in value, the seated traits (passive_pars()) and
@@ -50,7 +51,8 @@
 //     series resistance in r_R_V_sum[0] (the pack's par_resistance);
 //   - `curvature` is profit_curvature_at_collar<K>() at an Interior point, and is
 //     not read at any other kind or at double; operating_collar refuses one that
-//     is not negative or lies inside Leaf::interior_curvature_floor;
+//     is not negative or lies inside its `curvature_floor` argument
+//     (Leaf::interior_curvature_floor unless a caller passes its own);
 //   - with the thermal-damage layer on, its inputs are the pack's slots par_A to
 //     par_c_repair_flux, which the capacities read (vcmax_at and the rest);
 //   - with the energy balance on, leaf temperature follows the stem's flux and
@@ -228,8 +230,12 @@ inline S Leaf::leaf_vpd_on(const S& temp) const {
   }
   const S d = atm_vpd_ + (saturation_vapour_pressure_on<S>(temp) -
                           saturation_vapour_pressure(Tair_));
-  // leaf_vpd_at's floor, which a slope does not cross.
-  return !(odelia::util::to_passive(d) < vpd_leaf_min) ? d : S(vpd_leaf_min);
+  // leaf_vpd_at's floor, which a slope does not cross, counted as it is there.
+  if (odelia::util::to_passive(d) < vpd_leaf_min) {
+    clamps.note(CLAMP_VPD_LEAF_FLOOR);
+    return S(vpd_leaf_min);
+  }
+  return d;
 }
 
 template <class S>
@@ -395,6 +401,21 @@ inline S Leaf::ci_at_conductance(double ci_star, const S& gc,
                      return A * umol_to_mol - gc * (S(leaf.ca_) - c) * S(inv_atm);
                    },
                    cap, gc);
+}
+
+template <class S>
+inline void Leaf::place_held_coords(const S& collar, const SupplyDraw<S>& draw,
+                                    const leaf_pars<S>& pars,
+                                    HeldCoords<S>& placed) const {
+  if (operating_point_kind_ != OperatingPointKind::Prescribed) {
+    util::stop(std::string("Leaf::place_held_coords: coordinates are placed at "
+                           "a prescribed collar, and this point is ") +
+               operating_point_kind_name(operating_point_kind_));
+  }
+  placed.cap = photo_capacity_at<S>(pars);
+  held_coords_at<S>(opt_psi_leaf_, ci_, collar, draw, pars, placed.cap,
+                    placed.sigma, placed.gc, placed.ci, placed.balance);
+  placed.at = odelia::util::to_passive(collar);
 }
 
 template <class S>
@@ -688,14 +709,16 @@ inline Out Leaf::outputs_at(const S& collar, const SupplyDraw<S>& draw,
   const S& up = collar_route ? collar : draw.upstream;
   check_surface_curve<K>(who);
   check_draw(to_passive(collar), draw);
-  // Placed coordinates hold only at an interior point and at the collar
-  // operating_collar placed them at; either check failing means the leaf moved
+  // Placed coordinates hold only at an interior or prescribed point and at the
+  // collar they were placed at; either check failing means the leaf moved
   // between the calls, and they would answer for another point.
   const bool reuse = placed != nullptr && placed->placed();
   if (reuse) {
-    if (operating_point_kind_ != OperatingPointKind::Interior) {
+    if (operating_point_kind_ != OperatingPointKind::Interior &&
+        operating_point_kind_ != OperatingPointKind::Prescribed) {
       util::stop(std::string(who) + ": the held coordinates were "
-                 "placed at an interior point and are being read at one that is " +
+                 "placed at an interior or prescribed point and are being read "
+                 "at one that is " +
                  operating_point_kind_name(operating_point_kind_));
     }
     if (placed->at != to_passive(collar)) {
@@ -771,15 +794,28 @@ inline Out Leaf::outputs_at(const S& collar, const SupplyDraw<S>& draw,
       }
     }
   } else {
-    PhotoCapacity<S> cap = photo_capacity_at<S>(pars);
-    const CollarCoords<S> at = collar_coords_at<S>(opt_psi_leaf_, ci_, collar,
-                                                   draw, pars, cap, true);
-    PhotoCapacity<S> store;
-    out.profit = profit_from_coords<K, S>(
-        up, pars, live_capacity_at<S>(up, pars, at, cap, store),
-        at.sigma.value, at.ci.value, norms);
-    if (!from_price) {
-      from_live(cap, at);
+    const auto at_live = [&](const PhotoCapacity<S>& cap,
+                             const CollarCoords<S>& at) {
+      PhotoCapacity<S> store;
+      out.profit = profit_from_coords<K, S>(
+          up, pars, live_capacity_at<S>(up, pars, at, cap, store),
+          at.sigma.value, at.ci.value, norms);
+      if (!from_price) {
+        from_live(cap, at);
+      }
+    };
+    if (reuse) {
+      // Placed at this prescribed collar (place_held_coords): the held half of
+      // collar_coords_at, so only the collar's channel is added.
+      at_live(placed->cap,
+              collar_channel_at<S>(opt_psi_leaf_, collar, draw, pars, placed->cap,
+                                   placed->sigma, placed->gc, placed->ci,
+                                   placed->balance, true));
+    } else {
+      PhotoCapacity<S> cap = photo_capacity_at<S>(pars);
+      const CollarCoords<S> at = collar_coords_at<S>(opt_psi_leaf_, ci_, collar,
+                                                     draw, pars, cap, true);
+      at_live(cap, at);
     }
   }
   if constexpr (carbon_from_price) {
@@ -1177,7 +1213,8 @@ inline S Leaf::dry_end_collar_at(double bound_x, const SupplyDraw<S>& draw,
 // condition is first order and composes here.
 template <Leaf::CostCurve K, class S>
 inline S Leaf::operating_collar(const SupplyDraw<S>& draw, const leaf_pars<S>& pars,
-                                double interior_curvature, HeldCoords<S>* placed) {
+                                double interior_curvature, HeldCoords<S>* placed,
+                                double curvature_floor) {
   // Refused at every kind, not only where the kernels are read: a surface that
   // answers at some kinds and not others is one a caller cannot plan around.
   check_surface_curve<K>("Leaf::operating_collar");
@@ -1211,11 +1248,11 @@ inline S Leaf::operating_collar(const SupplyDraw<S>& draw, const leaf_pars<S>& p
                      ", which is not negative, so the implicit function "
                      "theorem has nothing to divide by");
         }
-        if (curvature > -interior_curvature_floor) {
+        if (curvature > -curvature_floor) {
           util::stop("Leaf::operating_collar: the profit curvature at this interior "
                      "point is " + util::format_double(curvature) +
                      ", inside the floor of " +
-                     util::format_double(interior_curvature_floor) +
+                     util::format_double(curvature_floor) +
                      ", so the collar rows would divide by too little to answer");
         }
         // The coordinates are placed before the residual, which is rewound, so
@@ -1334,10 +1371,9 @@ inline double Leaf::profit_curvature_at_collar() {
     bool ok1 = false, ok2 = false;
     const double coarse = slope_in_log_distance(0.2, &ok1);
     const double fine = slope_in_log_distance(0.1, &ok2);
-    // Back to the point the solve placed, with the bounds it polished: the
-    // restore prepares the solve again, which clears them.
+    // Back to the point the solve placed, with the bounds it polished.
     const double dry0 = dry_bound_root_;
-    evaluate_root_collar_psi_for<K>(p0);
+    restore_collar_point<K>(p0);
     operating_point_kind_ = kind0;
     dry_bound_root_ = dry0;
     wet_bound_root_ = wet0;
@@ -1357,11 +1393,10 @@ inline double Leaf::profit_curvature_at_collar() {
   // sweep. A one-sided difference is the same derivative, one order lower.
   const double here =
       (up_ok && down_ok) ? 0.0 : dprofit_at_collar_psi<K>(p0, &here_ok);
-  // Back to the point the solve placed. evaluate_root_collar_psi restores every
-  // number but tags the point `prescribed`, so the kind is put back by hand:
-  // operating_collar switches on it and would throw.
+  // Back to the point the solve placed. The restore tags it `prescribed`, so the
+  // kind is put back by hand: operating_collar switches on it and would throw.
   const double dry0 = dry_bound_root_;
-  evaluate_root_collar_psi_for<K>(p0);
+  restore_collar_point<K>(p0);
   operating_point_kind_ = kind0;
   dry_bound_root_ = dry0;
   wet_bound_root_ = wet0;

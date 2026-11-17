@@ -1440,6 +1440,8 @@ public:
   // unset parameters, and seed a normalised curve's normalisers. The solve, a
   // prescribed collar and a replay share it, so none can skip either.
   template <CostCurve K> void begin_collar_point();
+  // Re-evaluate the outputs at `collar` on the bracket already prepared.
+  template <CostCurve K> void restore_collar_point(double collar);
   template <CostCurve K> double cost_deriv(double psi_leaf,
                                            double psi_upstream);
   template <CostCurve K> static constexpr bool cost_reads_upstream();
@@ -1680,10 +1682,11 @@ public:
                 "PhotoCapacity gained or lost a member: update for_each_active, "
                 "then this count");
 
-  // The coordinates operating_collar placed at an interior collar, with their
-  // rows, for billed_outputs_at to read instead of solving again. They live on
-  // the caller's tape: a reset or new recording in between leaves them dangling.
-  // `at` is the collar they were placed at; NaN at double and any kind but interior.
+  // The coordinates operating_collar placed at an interior collar, or
+  // place_held_coords at a prescribed one, with their rows, for the outputs to
+  // read instead of solving again. They live on the caller's tape: a reset or
+  // new recording in between leaves them dangling. `at` is the collar they were
+  // placed at; NaN where none were placed.
   template <class S>
   struct HeldCoords {
     double at = std::numeric_limits<double>::quiet_NaN();
@@ -2003,16 +2006,24 @@ public:
   // The collar this solve left, at the caller's scalar; the kind chooses which
   // condition closes the system. Not const: the interior arm takes the curvature
   // by moving the model and back, unless passed as `interior_curvature`. `placed`
-  // receives the interior arm's coordinates for billed_outputs_at.
+  // receives the interior arm's coordinates for billed_outputs_at. An interior
+  // curvature inside `curvature_floor` is refused.
   template <CostCurve K, class S>
   S operating_collar(const SupplyDraw<S>& draw, const leaf_pars<S>& pars,
                      double interior_curvature =
                          std::numeric_limits<double>::quiet_NaN(),
-                     HeldCoords<S>* placed = nullptr);
+                     HeldCoords<S>* placed = nullptr,
+                     double curvature_floor = interior_curvature_floor);
+  // The held half of the coordinates at a prescribed collar, for a caller that
+  // reads the marginal there (dprofit_dcollar_at's held form) and then bills at
+  // the same collar, so the two share one placement.
+  template <class S>
+  void place_held_coords(const S& collar, const SupplyDraw<S>& draw,
+                         const leaf_pars<S>& pars, HeldCoords<S>& placed) const;
 
-  // The smallest |dM/dp| operating_collar's interior arm divides by; nearer
-  // zero, every collar row is amplification. Equal to plant's default
-  // gradient_curvature_floor, so the two guards refuse the same points.
+  // The default smallest |dM/dp| operating_collar's interior arm divides by;
+  // nearer zero, every collar row is amplification. A caller with a floor of
+  // its own passes it to operating_collar, so one number decides.
   static constexpr double interior_curvature_floor = 1e-3;
 
   // The conditions that pin a collar, one per bound, each an ordinary implicit
@@ -2410,6 +2421,9 @@ private:
   // Whether dry_end_ is psi_crit standing in as a first bracket for a curve it
   // does not bound (prepare_collar_solve's first_bracket).
   bool dry_end_provisional_ = false;
+  // Whether the bracket held is an open one prepared without the first bracket,
+  // which preparing again would reproduce (restore_collar_point).
+  bool bracket_reusable_ = false;
   // flux_ceiling() where it bounds this solve's collar before the stem's dry
   // end does, else +inf. Finite, the dry bound is the collar whose uptake is this flux,
   // and every helper that solves or polishes that bound reads it.

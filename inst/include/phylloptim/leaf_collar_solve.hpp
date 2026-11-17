@@ -270,8 +270,9 @@ inline double Leaf::find_shut_wet_bound() {
 // a leaf that declines to open sits exactly here.
 inline double Leaf::leaf_wet_bound(double psi_upstream) {
   // A leaf route has no roots upstream of psi_soil, so it clears the roots'
-  // ceiling a previous collar solve seated.
+  // ceiling a previous collar solve seated, and with it the bracket.
   residual_root_ceiling_ = std::numeric_limits<double>::infinity();
+  bracket_reusable_ = false;
   if (g_min == 0.0) {
     return psi_upstream;
   }
@@ -341,6 +342,7 @@ inline bool Leaf::prepare_collar_solve(double& bound_a, double& bound_b,
   // ⚠️ Cleared first, so a path that declines to classify reports Unsolved
   // rather than the previous plant's kind (hazard 8).
   operating_point_kind_ = OperatingPointKind::Unsolved;
+  bracket_reusable_ = false;
   wet_bound_root_ = std::numeric_limits<double>::quiet_NaN();
   dry_bound_root_ = std::numeric_limits<double>::quiet_NaN();
   dry_bound_flux_cap_ = std::numeric_limits<double>::infinity();
@@ -416,6 +418,7 @@ inline bool Leaf::prepare_collar_solve(double& bound_a, double& bound_b,
     set_shut_state<K>();
     return false;
   }
+  bracket_reusable_ = true;
   return true;
 }
 
@@ -824,6 +827,22 @@ inline double Leaf::evaluate_root_collar_psi_for(double target_opt_root_psi){
     }
 
     return profit_at_collar_psi<K>(target_opt_root_psi, bound_a, bound_b);
+}
+
+// The point a probe of the marginal moved the model from, put back. The probes
+// change no bracket state, so an open bracket prepared without the provisional
+// first one is what preparing again would give, and only the outputs are
+// evaluated again. Any other is prepared again: a search's first bracket, a
+// shut leaf, which preparing seats, and a normalised curve, whose normalisers
+// prepare a bracket of their own and clear the roots' residual ceiling.
+template <Leaf::CostCurve K>
+inline void Leaf::restore_collar_point(double collar) {
+  if (Curve<K>::prepares_normalisers || !bracket_reusable_) {
+    evaluate_root_collar_psi_for<K>(collar);
+    return;
+  }
+  begin_collar_point<K>();
+  profit_at_collar_psi<K>(collar, collar, collar);
 }
 
 template <Leaf::CostCurve K>
