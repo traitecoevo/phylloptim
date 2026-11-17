@@ -1,6 +1,6 @@
 # phylloptim 0.39.0
 
-- A caller of the derivative surface can share work it repeated. `profit_curvature_at_collar` puts the leaf back on the bracket it already holds, rather than preparing it again, wherever that bracket is not a search's provisional first one, as after a replay. `place_held_coords` places the held coordinates at a prescribed collar, so that the marginal there and `billed_outputs_at` read one placement. `operating_collar` takes the interior curvature floor as an argument, defaulting to `Leaf::interior_curvature_floor`. No number moves (#274).
+- A caller of the derivative surface can share work it repeated. `profit_curvature_at_collar` puts the leaf back on the bracket it already holds, rather than preparing it again, wherever that bracket is not a search's provisional first one, as after a replay. `place_held_coords` places the held coordinates at a prescribed collar, so that the marginal there and `billed_outputs_at` read one placement. `operating_collar` takes the interior curvature floor as an argument, defaulting to `Leaf::interior_curvature_floor`. The vapour deficit's floor at `vpd_leaf_min` is counted as a clamp site, `vpd_leaf_floor`, so a consumer can see where a leaf reached the dew point. No number moves (#275).
 - In plant, a TF24 stand gradient takes about 7% fewer instructions with these, and a TF24f one about 6%.
 
 # phylloptim 0.38.0

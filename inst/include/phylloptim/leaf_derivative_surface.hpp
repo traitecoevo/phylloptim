@@ -230,8 +230,12 @@ inline S Leaf::leaf_vpd_on(const S& temp) const {
   }
   const S d = atm_vpd_ + (saturation_vapour_pressure_on<S>(temp) -
                           saturation_vapour_pressure(Tair_));
-  // leaf_vpd_at's floor, which a slope does not cross.
-  return !(odelia::util::to_passive(d) < vpd_leaf_min) ? d : S(vpd_leaf_min);
+  // leaf_vpd_at's floor, which a slope does not cross, counted as it is there.
+  if (odelia::util::to_passive(d) < vpd_leaf_min) {
+    clamps.note(CLAMP_VPD_LEAF_FLOOR);
+    return S(vpd_leaf_min);
+  }
+  return d;
 }
 
 template <class S>
@@ -705,8 +709,8 @@ inline Out Leaf::outputs_at(const S& collar, const SupplyDraw<S>& draw,
   const S& up = collar_route ? collar : draw.upstream;
   check_surface_curve<K>(who);
   check_draw(to_passive(collar), draw);
-  // Placed coordinates hold only at an interior point and at the collar
-  // operating_collar placed them at; either check failing means the leaf moved
+  // Placed coordinates hold only at an interior or prescribed point and at the
+  // collar they were placed at; either check failing means the leaf moved
   // between the calls, and they would answer for another point.
   const bool reuse = placed != nullptr && placed->placed();
   if (reuse) {

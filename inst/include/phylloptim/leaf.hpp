@@ -1682,10 +1682,11 @@ public:
                 "PhotoCapacity gained or lost a member: update for_each_active, "
                 "then this count");
 
-  // The coordinates operating_collar placed at an interior collar, with their
-  // rows, for billed_outputs_at to read instead of solving again. They live on
-  // the caller's tape: a reset or new recording in between leaves them dangling.
-  // `at` is the collar they were placed at; NaN at double and any kind but interior.
+  // The coordinates operating_collar placed at an interior collar, or
+  // place_held_coords at a prescribed one, with their rows, for the outputs to
+  // read instead of solving again. They live on the caller's tape: a reset or
+  // new recording in between leaves them dangling. `at` is the collar they were
+  // placed at; NaN where none were placed.
   template <class S>
   struct HeldCoords {
     double at = std::numeric_limits<double>::quiet_NaN();
@@ -2420,9 +2421,9 @@ private:
   // Whether dry_end_ is psi_crit standing in as a first bracket for a curve it
   // does not bound (prepare_collar_solve's first_bracket).
   bool dry_end_provisional_ = false;
-  // Whether the bracket held was prepared from that first bracket, which
-  // preparing without it would not reproduce (restore_collar_point).
-  bool bracket_from_first_ = false;
+  // Whether the bracket held is an open one prepared without the first bracket,
+  // which preparing again would reproduce (restore_collar_point).
+  bool bracket_reusable_ = false;
   // flux_ceiling() where it bounds this solve's collar before the stem's dry
   // end does, else +inf. Finite, the dry bound is the collar whose uptake is this flux,
   // and every helper that solves or polishes that bound reads it.

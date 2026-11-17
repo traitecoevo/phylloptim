@@ -1610,10 +1610,22 @@ void test_the_curvature_leaves_its_point_as_it_found_it() {
           psi_soil.push_back(psi0 + 0.35 * i);
           soil_depth.push_back(1.0 * (i + 1));
         }
+        for (bool profitmax : {false, true}) {
         phylloptim::Leaf tf = make_leaf(d, psi_soil, soil_depth);
-        tf.TF24_floor_lambda_o = kPriceForFOC;
-        tf.set_model(K::TF24_floor, true);
-        tf.optimise();
+        if (profitmax) {
+          // A normalised curve, with a cuticle whose residual the roots cap:
+          // its normalisers prepare a bracket of their own.
+          tf.g_min = 5e-3;
+          tf.set_model(K::ProfitMax, true);
+        } else {
+          tf.TF24_floor_lambda_o = kPriceForFOC;
+          tf.set_model(K::TF24_floor, true);
+        }
+        try {
+          tf.optimise();
+        } catch (const phylloptim::util::infeasible_error&) {
+          continue;
+        }
         if (tf.operating_point_kind() !=
             phylloptim::Leaf::OperatingPointKind::Interior) {
           continue;
@@ -1624,10 +1636,14 @@ void test_the_curvature_leaves_its_point_as_it_found_it() {
           if (replayed) {
             tf.replay_operating_point(tf.opt_root_psi_, tf.operating_point_kind());
           }
+          const auto curvature = [&] {
+            return profitmax ? tf.profit_curvature_at_collar<K::ProfitMax>()
+                             : tf.profit_curvature_at_collar<K::TF24_floor>();
+          };
           const std::vector<double> before = snapshot(tf);
-          const double first = tf.profit_curvature_at_collar<K::TF24_floor>();
+          const double first = curvature();
           const std::vector<double> after = snapshot(tf);
-          const double second = tf.profit_curvature_at_collar<K::TF24_floor>();
+          const double second = curvature();
           ++points;
           bool same = before.size() == after.size() &&
                       (first == second || (std::isnan(first) && std::isnan(second)));
@@ -1637,9 +1653,11 @@ void test_the_curvature_leaves_its_point_as_it_found_it() {
           }
           if (!same) {
             ++differ;
-            printf("    differs at psi_soil=%g ppfd=%g layers=%d replayed=%d\n",
-                   psi0, ppfd, layers, int(replayed));
+            printf("    differs at psi_soil=%g ppfd=%g layers=%d replayed=%d "
+                   "profitmax=%d\n", psi0, ppfd, layers, int(replayed),
+                   int(profitmax));
           }
+        }
         }
       }
     }
@@ -1648,6 +1666,26 @@ void test_the_curvature_leaves_its_point_as_it_found_it() {
   ok(points > 0, "the sweep reaches interior points (test is not vacuous)");
   ok(differ == 0,
      "every output, and a second curvature, is as the solve left it");
+}
+
+// The vapour deficit held at its floor is counted, and only there.
+void test_the_vapour_deficit_floor_is_counted() {
+  printf("the vapour deficit's floor is a counted clamp site\n");
+  Drivers d;
+  phylloptim::Leaf l = make_leaf(d, {1.0}, {1.0});
+  l.use_energy_balance_ = true;
+  const std::size_t before = l.clamp_count(phylloptim::CLAMP_VPD_LEAF_FLOOR);
+  const double warm = l.leaf_vpd_at(l.Tair_);
+  ok(warm > phylloptim::vpd_leaf_min &&
+         l.clamp_count(phylloptim::CLAMP_VPD_LEAF_FLOOR) == before,
+     "a leaf at air temperature reads the deficit unfloored and counts nothing");
+  const double cold = l.leaf_vpd_at(l.Tair_ - 30.0);
+  ok(cold == phylloptim::vpd_leaf_min &&
+         l.clamp_count(phylloptim::CLAMP_VPD_LEAF_FLOOR) == before + 1,
+     "a leaf below the dew point reads the floor, counted once");
+  ok(std::string(phylloptim::clamp_site_name(phylloptim::CLAMP_VPD_LEAF_FLOOR)) ==
+         "vpd_leaf_floor",
+     "the site is named");
 }
 
 // At a prescribed collar a caller reads the marginal and then bills at the same
@@ -2281,6 +2319,7 @@ void run_surface() {
   test_held_coordinates_are_refused_off_their_point();
   test_held_coordinates_at_a_prescribed_collar_move_no_row();
   test_the_curvature_leaves_its_point_as_it_found_it();
+  test_the_vapour_deficit_floor_is_counted();
   test_supplied_rows_match_a_resolve_at_every_kind();
   test_shut_leaf_seated_at_its_collar_bills_the_roots_nothing();
   test_surface_refuses_a_curve_it_was_not_solved_on();
