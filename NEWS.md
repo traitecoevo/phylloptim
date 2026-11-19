@@ -2,7 +2,7 @@
 
 - `Leaf::marginal_slope_at<K>(psi, a, b, coordinate)` is the one difference of the marginal profit's slope in the collar. In the potential (`SlopeCoordinate::Potential`) it is the curvature's stencil, and `profit_curvature_at_collar` is now that call. In the collar's logit position between the interval's ends a and b (`SlopeCoordinate::Position`), its probes keep 3e-6 MPa clear of every rooted layer's potential, where uptake has a kink, and never straddle one. Either leaves the leaf as it found it.
 - plant's TF24f takes its tracked collar's slope from it rather than from a copy of the stencil (traitecoevo/plant#822). `Leaf::collar_at_position` is the position's collar.
-- No number moves: the curvature is bit-identical, and the golden files do not move.
+- No number moves: the curvature is bit-identical, and the golden files do not move (#276).
 
 # phylloptim 0.39.0
 
