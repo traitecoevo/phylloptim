@@ -1789,6 +1789,59 @@ void test_the_position_slope_keeps_clear_of_a_kink() {
   ok(differ == 0, "the position's probes leave the leaf as they found it");
 }
 
+// Next to an end a step in the position is a small fraction of the clearance in
+// the collar. Here the collar is 2e-4 MPa from the wet end and 1.5e-6 MPa
+// from a layer's potential, so every probe at the base step, and at ten times
+// it, falls inside the clearance, and the stencil answers only at a hundred
+// times it, from the side away from the kink. Its nearest probe is then just
+// outside the clearance, where the marginal is still noisy, so it is held to
+// a difference on that side to 5e-3 only. An end itself has no position.
+void test_the_position_slope_widens_its_step_beside_a_kink() {
+  printf("marginal_slope_at: the position's step widens beside a kink, and an "
+         "end has none\n");
+  using K = phylloptim::Leaf::CostCurve;
+  using SC = phylloptim::Leaf::SlopeCoordinate;
+  auto leaf_with = [](double kink, double& a, double& b) {
+    Drivers d;
+    d.PPFD = 1500.0;
+    phylloptim::Leaf l = make_leaf(d, {1.0, kink}, {0.5, 1.0});
+    l.TF24_floor_lambda_o = kPriceForFOC;
+    l.set_model(K::TF24_floor, true);
+    double at;
+    seat_on_polished_interval<K::TF24_floor>(l, 0.5, a, b, at);
+    return l;
+  };
+  // The second layer's potential placed 2.015e-4 MPa inside the wet end, which
+  // moves with it.
+  double lo = 1.002, hi = 1.01, a = 0.0, b = 0.0;
+  for (int i = 0; i < 60; ++i) {
+    const double mid = 0.5 * (lo + hi);
+    leaf_with(mid, a, b);
+    (mid - a < 2.015e-4 ? lo : hi) = mid;
+  }
+  phylloptim::Leaf l = leaf_with(hi, a, b);
+  const double at = hi - 1.5e-6;
+  l.profit_at_collar_psi<K::TF24_floor>(at, a, b);
+  // The base step in the collar, and the nearest probe at each width.
+  const double dpsi_dz = (at - a) * (b - at) / (b - a);
+  printf("    collar %.3e MPa from the wet end; probes %.1e, %.1e and %.1e MPa "
+         "apart\n", at - a, 1e-4 * dpsi_dz, 1e-3 * dpsi_dz, 1e-2 * dpsi_dz);
+  ok(1.5e-6 + 1e-3 * 3.0 * dpsi_dz < phylloptim::Leaf::marginal_kink_clearance &&
+         1.5e-6 + 1e-2 * dpsi_dz > phylloptim::Leaf::marginal_kink_clearance,
+     "only the widest step clears the kink (test is not vacuous)");
+  const double position = l.marginal_slope_at<K::TF24_floor>(at, a, b, SC::Position);
+  auto M = [&](double p) { return l.dprofit_droot_collar_psi(p); };
+  const double h = 1e-5;
+  const double ref = (2.5 * M(at - h) - 4.0 * M(at - 2.0 * h) + 1.5 * M(at - 3.0 * h)) / h;
+  printf("    widened %.8g against %.8g on the far side: %.1e\n", position, ref,
+         std::abs(position - ref) / std::abs(ref));
+  ok(std::abs(position - ref) < 5e-3 * std::abs(ref),
+     "the widened stencil answers with the slope on the collar's side");
+  ok(std::isnan(l.marginal_slope_at<K::TF24_floor>(a, a, b, SC::Position)) &&
+         std::isnan(l.marginal_slope_at<K::TF24_floor>(b, a, b, SC::Position)),
+     "at either end the position has no slope");
+}
+
 // The vapour deficit held at its floor is counted, and only there.
 void test_the_vapour_deficit_floor_is_counted() {
   printf("the vapour deficit's floor is a counted clamp site\n");
@@ -2442,6 +2495,7 @@ void run_surface() {
   test_the_curvature_leaves_its_point_as_it_found_it();
   test_the_slope_is_one_slope_in_either_coordinate();
   test_the_position_slope_keeps_clear_of_a_kink();
+  test_the_position_slope_widens_its_step_beside_a_kink();
   test_the_vapour_deficit_floor_is_counted();
   test_supplied_rows_match_a_resolve_at_every_kind();
   test_shut_leaf_seated_at_its_collar_bills_the_roots_nothing();

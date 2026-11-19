@@ -1332,7 +1332,9 @@ inline double Leaf::profit_curvature_at_collar() {
 // the step h: central where both neighbours answer, else one-sided against the
 // point's own, read only then. One side is enough: a point within h of a
 // reachable bound has a neighbour where the marginal refuses, and a NaN makes
-// plant refuse the whole sweep. NaN where neither side answers.
+// plant refuse the whole sweep. NaN where neither side answers, the convention
+// duptake_dpsi uses at a kink: a caller that cannot get a slope has to know
+// that, not be handed a zero it will divide by.
 template <class Marginal>
 inline double marginal_first_difference(Marginal&& m, double h) {
   bool up_ok = false, down_ok = false, here_ok = false;
@@ -1387,6 +1389,10 @@ inline double Leaf::marginal_slope_at(double at, double a, double b,
     return dprofit_at_collar_psi<K>(psi, ok);
   };
   if (coordinate == SlopeCoordinate::Position) {
+    // An end has no finite position, and its probes would all land on it.
+    if (!(at > a && at < b)) {
+      return std::numeric_limits<double>::quiet_NaN();
+    }
     const double slope = position_slope<K>(at, a, b, marginal);
     restore();
     return slope;
@@ -1422,8 +1428,6 @@ inline double Leaf::marginal_slope_at(double at, double a, double b,
       [&](double dx, bool* ok) { return marginal(at + dx, ok); },
       potential_slope_step);
   restore();
-  // The convention duptake_dpsi uses at a kink: a caller that cannot get a
-  // slope here has to know that, not be handed a zero it will divide by.
   return slope;
 }
 

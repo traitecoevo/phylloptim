@@ -2005,17 +2005,18 @@ public:
   //     rooted layer's potential, where uptake has a kink, or across one.
   enum class SlopeCoordinate { Potential, Position };
   static constexpr double potential_slope_step = 1e-5;
-  // 1e-3 and 1e-4 give a tracking caller's gradient the same columns to 1e-6.
   static constexpr double position_slope_step = 1e-4;
-  // In MPa: twice the width of the noise in the marginal next to a layer's
-  // potential. Not wider: a drying layer's potential follows the collar.
+  // In MPa. The marginal is noisy near a kink, more so the nearer a probe is
+  // to the layer's potential: the clearance keeps probes off the kink itself,
+  // and does not bound the error of a probe just outside it. Not wider: a
+  // drying layer's potential follows the collar.
   static constexpr double marginal_kink_clearance = 3e-6;
 
   // dM/dp at `at`, M the route's marginal, as a difference of M: a tangent is
   // wrong by a factor of eight, because dci/dcollar cancels below the table's
   // fit error. a and b are the collar interval's ends, of which Potential reads
-  // only b, NaN where none was polished; Position is collar route only. NaN
-  // where no stencil answers. Not const: the probes move the model, and the
+  // only b, NaN where none was polished; Position is collar route only, and
+  // NaN unless a < at < b. NaN where no stencil answers. Not const: the probes move the model, and the
   // point, its kind and its polished ends are put back (hazard 8).
   template <CostCurve K>
   double marginal_slope_at(double at, double a, double b,
