@@ -1668,6 +1668,127 @@ void test_the_curvature_leaves_its_point_as_it_found_it() {
      "every output, and a second curvature, is as the solve left it");
 }
 
+// The leaf at a prescribed collar on the polished interval [a, b], as a caller
+// tracking the collar seats it. False where the leaf is shut.
+template <phylloptim::Leaf::CostCurve K>
+bool seat_on_polished_interval(phylloptim::Leaf& l, double u, double& a,
+                               double& b, double& at) {
+  if (!l.prepare_collar_solve<K>(a, b)) return false;
+  a = l.polish_bracket_bound(a, l.supply_psi_soil(), 0);
+  b = l.polish_bracket_bound(b, l.supply_psi_soil(), 1);
+  at = a + u * (b - a);
+  l.profit_at_collar_psi<K>(at, a, b);
+  return true;
+}
+
+// Both coordinates difference one marginal, so away from the kinks in uptake
+// they are one slope, to the differences' own error, ends included: the
+// position's step there is a step in the log of the distance to the end, and
+// the potential's dry-end stencil is one too.
+void test_the_slope_is_one_slope_in_either_coordinate() {
+  printf("marginal_slope_at: the potential and the position give one slope\n");
+  using K = phylloptim::Leaf::CostCurve;
+  using SC = phylloptim::Leaf::SlopeCoordinate;
+  int rows = 0, unanswered = 0;
+  double worst = 0.0;
+  for (int layers : {1, 3, 5}) {
+    for (double psi0 : {0.3, 0.8, 1.5, 2.5}) {
+      for (double ppfd : {50.0, 400.0, 1500.0}) {
+        for (double u : {1e-6, 1e-4, 0.05, 0.5, 0.95, 0.9999, 1.0 - 1e-6}) {
+          Drivers d;
+          d.PPFD = ppfd;
+          std::vector<double> psi_soil, soil_depth;
+          for (int i = 0; i < layers; ++i) {
+            psi_soil.push_back(psi0 + 0.4 * i);
+            soil_depth.push_back(0.5 * (i + 1));
+          }
+          phylloptim::Leaf l = make_leaf(d, psi_soil, soil_depth);
+          l.TF24_floor_lambda_o = kPriceForFOC;
+          l.set_model(K::TF24_floor, true);
+          double a, b, at;
+          if (!seat_on_polished_interval<K::TF24_floor>(l, u, a, b, at)) continue;
+          bool near_kink = false;
+          for (double s : psi_soil) near_kink |= std::abs(s - at) < 1e-3;
+          if (near_kink) continue;
+          const double potential =
+              l.marginal_slope_at<K::TF24_floor>(at, a, b, SC::Potential);
+          const double position =
+              l.marginal_slope_at<K::TF24_floor>(at, a, b, SC::Position);
+          if (!std::isfinite(potential) || !std::isfinite(position)) {
+            ++unanswered;
+            continue;
+          }
+          ++rows;
+          worst = std::max(worst, std::abs(position - potential) / std::abs(potential));
+        }
+      }
+    }
+  }
+  printf("    %d points, %d unanswered, worst relative difference %.2e\n", rows,
+         unanswered, worst);
+  ok(rows > 100, "the sweep reaches points in both coordinates (test is not vacuous)");
+  ok(unanswered == 0, "both coordinates answer at every point");
+  ok(worst < 1e-4, "the two coordinates agree to 1e-4, ends included");
+}
+
+// Uptake has a kink at each rooted layer's potential, and the marginal is
+// noisy within about 1.5e-6 MPa of one. The position's probes keep clear of it
+// and never straddle it, so they read the slope on the collar's own side; the
+// potential's do neither, and one landing 5e-7 MPa from a kink reads 1e-3 off.
+void test_the_position_slope_keeps_clear_of_a_kink() {
+  printf("marginal_slope_at: the position's probes keep clear of a kink\n");
+  using K = phylloptim::Leaf::CostCurve;
+  using SC = phylloptim::Leaf::SlopeCoordinate;
+  int rows = 0, differ = 0;
+  double worst = 0.0, potential_worst = 0.0;
+  auto snapshot = [](const phylloptim::Leaf& l) {
+    std::vector<double> v{l.profit_, l.opt_psi_leaf_, l.opt_root_psi_,
+                          l.transpiration_, l.E_up_, l.assim_colimited_,
+                          static_cast<double>(l.operating_point_kind())};
+    for (double c : l.soil_consumption_) v.push_back(c);
+    return v;
+  };
+  for (double kink : {1.6, 2.0, 2.4}) {
+    // A probe of the potential's 5e-7 MPa from the kink; a collar the
+    // position's central stencil would straddle it from, on either side.
+    for (double offset : {-1e-5 + 5e-7, -4e-6, 4e-6}) {
+      Drivers d;
+      d.PPFD = 1500.0;
+      phylloptim::Leaf l = make_leaf(d, {1.0, kink}, {0.5, 1.0});
+      l.TF24_floor_lambda_o = kPriceForFOC;
+      l.set_model(K::TF24_floor, true);
+      double a, b, at;
+      if (!seat_on_polished_interval<K::TF24_floor>(l, 0.5, a, b, at)) continue;
+      at = kink + offset;
+      if (!(at > a && at < b)) continue;
+      l.profit_at_collar_psi<K::TF24_floor>(at, a, b);
+      const std::vector<double> before = snapshot(l);
+      const double position =
+          l.marginal_slope_at<K::TF24_floor>(at, a, b, SC::Position);
+      differ += snapshot(l) != before;
+      const double potential =
+          l.marginal_slope_at<K::TF24_floor>(at, a, b, SC::Potential);
+      // The referee: the quadratic through three points 2e-5 MPa apart on the
+      // collar's side, away from the kink, read back at the collar.
+      const double side = offset < 0.0 ? -1.0 : 1.0, h = 2e-5;
+      auto M = [&](double p) { return l.dprofit_droot_collar_psi(p); };
+      const double ref = -side * (2.5 * M(at + side * h) - 4.0 * M(at + 2.0 * side * h) +
+                                  1.5 * M(at + 3.0 * side * h)) / h;
+      ++rows;
+      worst = std::max(worst, std::abs(position - ref) / std::abs(ref));
+      potential_worst = std::max(potential_worst, std::abs(potential - ref) / std::abs(ref));
+    }
+  }
+  printf("    %d collars next to a kink: position worst %.2e, potential worst "
+         "%.2e, against a difference on the collar's side\n",
+         rows, worst, potential_worst);
+  ok(rows == 9, "every collar lies inside its interval (test is not vacuous)");
+  ok(potential_worst > 1e-4,
+     "a stencil that reaches the kink reads the slope wrong here");
+  ok(worst < 2e-5, "the position's slope is the slope on the collar's side");
+  ok(differ == 0, "the position's probes leave the leaf as they found it");
+}
+
 // The vapour deficit held at its floor is counted, and only there.
 void test_the_vapour_deficit_floor_is_counted() {
   printf("the vapour deficit's floor is a counted clamp site\n");
@@ -2319,6 +2440,8 @@ void run_surface() {
   test_held_coordinates_are_refused_off_their_point();
   test_held_coordinates_at_a_prescribed_collar_move_no_row();
   test_the_curvature_leaves_its_point_as_it_found_it();
+  test_the_slope_is_one_slope_in_either_coordinate();
+  test_the_position_slope_keeps_clear_of_a_kink();
   test_the_vapour_deficit_floor_is_counted();
   test_supplied_rows_match_a_resolve_at_every_kind();
   test_shut_leaf_seated_at_its_collar_bills_the_roots_nothing();

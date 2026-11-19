@@ -1324,59 +1324,93 @@ inline S Leaf::operating_collar(const SupplyDraw<S>& draw, const leaf_pars<S>& p
 
 template <Leaf::CostCurve K>
 inline double Leaf::profit_curvature_at_collar() {
-  // On a leaf route, the curvature of profit in the leaf potential with the
-  // soil held: a difference of the route's own marginal, as the collar's below.
+  return marginal_slope_at<K>(decision_psi(), wet_bound_root_, dry_bound_root_,
+                              SlopeCoordinate::Potential);
+}
+
+// A first difference of the marginal m(dx, &ok), read dx from the point, over
+// the step h: central where both neighbours answer, else one-sided against the
+// point's own, read only then. One side is enough: a point within h of a
+// reachable bound has a neighbour where the marginal refuses, and a NaN makes
+// plant refuse the whole sweep. NaN where neither side answers.
+template <class Marginal>
+inline double marginal_first_difference(Marginal&& m, double h) {
+  bool up_ok = false, down_ok = false, here_ok = false;
+  const double up = m(h, &up_ok);
+  const double down = m(-h, &down_ok);
+  const double here = (up_ok && down_ok) ? 0.0 : m(0.0, &here_ok);
+  const bool have_up = up_ok && std::isfinite(up);
+  const bool have_down = down_ok && std::isfinite(down);
+  const bool have_here = here_ok && std::isfinite(here);
+  if (have_up && have_down) return (up - down) / (2.0 * h);
+  if (have_here && have_up) return (up - here) / h;
+  if (have_here && have_down) return (here - down) / h;
+  return std::numeric_limits<double>::quiet_NaN();
+}
+
+template <Leaf::CostCurve K>
+inline double Leaf::marginal_slope_at(double at, double a, double b,
+                                      SlopeCoordinate coordinate) {
+  const OperatingPointKind kind0 = operating_point_kind_;
+  // On a leaf route, the slope in the leaf potential with the soil held.
   if (!route_is_collar_) {
-    const double p0 = opt_psi_leaf_;
+    if (coordinate != SlopeCoordinate::Potential) {
+      util::stop("Leaf::marginal_slope_at: a leaf route has no collar interval "
+                 "to take a position in");
+    }
     const double soil = supply_psi_soil_scalar();
-    const OperatingPointKind kind0 = operating_point_kind_;
-    const double h = 1e-5;
-    bool up_ok = false, down_ok = false, here_ok = false;
-    const double up = dprofit_dpsi_leaf<K>(p0 + h, soil, &up_ok);
-    const double down = dprofit_dpsi_leaf<K>(p0 - h, soil, &down_ok);
-    const double here =
-        (up_ok && down_ok) ? 0.0 : dprofit_dpsi_leaf<K>(p0, soil, &here_ok);
-    // Back to the point the solve placed: the marginal reseats the
-    // temperature block, and the evaluation tags the point prescribed.
-    evaluate_psi_leaf<K>(p0);
+    const double slope = marginal_first_difference(
+        [&](double dx, bool* ok) {
+          return dprofit_dpsi_leaf<K>(at + dx, soil, ok);
+        },
+        potential_slope_step);
+    // The marginal reseats the temperature block, and the evaluation tags the
+    // point prescribed.
+    evaluate_psi_leaf<K>(at);
     operating_point_kind_ = kind0;
-    const bool have_up = up_ok && std::isfinite(up);
-    const bool have_down = down_ok && std::isfinite(down);
-    const bool have_here = here_ok && std::isfinite(here);
-    if (have_up && have_down) return (up - down) / (2.0 * h);
-    if (have_here && have_up) return (up - here) / h;
-    if (have_here && have_down) return (here - down) / h;
-    return std::numeric_limits<double>::quiet_NaN();
+    return slope;
   }
-  const double p0 = opt_root_psi_;
+  // The soil's caches, which the probes read, seated for the leaf's own soil:
+  // a caller may reach here after other work on the leaf.
+  supply_begin_solve();
+  const double wet0 = wet_bound_root_;
+  const double dry0 = dry_bound_root_;
+  // The restore tags the point prescribed, so the kind is put back by hand:
+  // operating_collar switches on it and would throw.
+  const auto restore = [&] {
+    restore_collar_point<K>(at);
+    operating_point_kind_ = kind0;
+    dry_bound_root_ = dry0;
+    wet_bound_root_ = wet0;
+  };
+  const auto marginal = [&](double psi, bool* ok) {
+    return dprofit_at_collar_psi<K>(psi, ok);
+  };
+  if (coordinate == SlopeCoordinate::Position) {
+    const double slope = position_slope<K>(at, a, b, marginal);
+    restore();
+    return slope;
+  }
   // An absolute step: the collar runs 0.5 to 6 MPa, and steps 1e-04 to 1e-06
   // agree to seven figures (1e-02 is truncation, 1e-07 round-off). Within
   // dry_end_neighbourhood of the dry end a step across the distance reads the
   // wrong decade's slope; the marginal is near linear in the log of the
   // distance, so it is differenced there, extrapolated against the half step,
   // with both points inside the end (hazard 19).
-  const OperatingPointKind kind0 = operating_point_kind_;
-  const double wet0 = wet_bound_root_;
-  const double to_dry = std::isfinite(dry_bound_root_)
-                            ? dry_bound_root_ - p0
-                            : std::numeric_limits<double>::infinity();
+  const double to_dry =
+      std::isfinite(b) ? b - at : std::numeric_limits<double>::infinity();
   if (to_dry > 0.0 && to_dry < dry_end_neighbourhood) {
     auto slope_in_log_distance = [&](double hs, bool* ok) -> double {
       bool in_ok = false, out_ok = false;
-      const double in = dprofit_at_collar_psi<K>(dry_bound_root_ - to_dry * std::exp(-hs), &in_ok);
-      const double out = dprofit_at_collar_psi<K>(dry_bound_root_ - to_dry * std::exp(hs), &out_ok);
+      const double in = marginal(b - to_dry * std::exp(-hs), &in_ok);
+      const double out = marginal(b - to_dry * std::exp(hs), &out_ok);
       *ok = in_ok && out_ok && std::isfinite(in) && std::isfinite(out);
       return (in - out) / (2.0 * hs);
     };
     bool ok1 = false, ok2 = false;
     const double coarse = slope_in_log_distance(0.2, &ok1);
     const double fine = slope_in_log_distance(0.1, &ok2);
-    // Back to the point the solve placed, with the bounds it polished.
-    const double dry0 = dry_bound_root_;
-    restore_collar_point<K>(p0);
-    operating_point_kind_ = kind0;
-    dry_bound_root_ = dry0;
-    wet_bound_root_ = wet0;
+    restore();
     if (ok1 && ok2) {
       // The quotient above is -dM/ds, its inner point lying at the smaller
       // distance, and dM/dpsi = dM/ds * ds/dpsi with s = ln(end - psi), so
@@ -1384,37 +1418,72 @@ inline double Leaf::profit_curvature_at_collar() {
       return ((4.0 * fine - coarse) / 3.0) / to_dry;
     }
   }
-  const double h = 1e-5;
-  bool up_ok = false, down_ok = false, here_ok = false;
-  const double up = dprofit_at_collar_psi<K>(p0 + h, &up_ok);
-  const double down = dprofit_at_collar_psi<K>(p0 - h, &down_ok);
-  // One side is enough: an interior collar within h of a reachable bound has a
-  // neighbour where dprofit refuses, and a NaN makes plant refuse the whole
-  // sweep. A one-sided difference is the same derivative, one order lower.
-  const double here =
-      (up_ok && down_ok) ? 0.0 : dprofit_at_collar_psi<K>(p0, &here_ok);
-  // Back to the point the solve placed. The restore tags it `prescribed`, so the
-  // kind is put back by hand: operating_collar switches on it and would throw.
-  const double dry0 = dry_bound_root_;
-  restore_collar_point<K>(p0);
-  operating_point_kind_ = kind0;
-  dry_bound_root_ = dry0;
-  wet_bound_root_ = wet0;
-  const bool have_up = up_ok && std::isfinite(up);
-  const bool have_down = down_ok && std::isfinite(down);
-  const bool have_here = here_ok && std::isfinite(here);
-  if (have_up && have_down) {
-    return (up - down) / (2.0 * h);
+  const double slope = marginal_first_difference(
+      [&](double dx, bool* ok) { return marginal(at + dx, ok); },
+      potential_slope_step);
+  restore();
+  // The convention duptake_dpsi uses at a kink: a caller that cannot get a
+  // slope here has to know that, not be handed a zero it will divide by.
+  return slope;
+}
+
+// The Position stencil: dM/dz at fixed ends over dpsi/dz. Each rooted layer's
+// uptake has a kink at the layer's own potential, where the root conductivity's
+// mean over the span from soil to collar is 0/0; the marginal's slope jumps
+// there, and the marginal is noisy next to one (a probe on one read 4% low). So
+// a stencil is used only if every probe keeps marginal_kink_clearance from every
+// kink and none lies across one from `at`: the central one, else three points
+// out on one side, which leave out the marginal at `at`, as that may itself sit
+// in the noise. Next to an end a step in z is a small fraction of the clearance
+// in the collar, so where no stencil keeps clear the step widens tenfold, twice.
+// A layer's gravity balance, where its flow changes sign, is smooth.
+template <Leaf::CostCurve K, class Marginal>
+inline double Leaf::position_slope(double at, double a, double b,
+                                   Marginal& marginal) {
+  const double z = std::log((at - a) / (b - at));
+  const std::vector<double>& soil = supply_psi_soil();
+  const std::size_t rooted = static_cast<std::size_t>(std::max(
+      0, std::min(roots_.max_soil_layer, static_cast<int>(soil.size()))));
+  const auto usable = [&](std::initializer_list<double> steps) {
+    for (const double dz : steps) {
+      const double c = collar_at_position(z + dz, a, b);
+      for (std::size_t i = 0; i < rooted; ++i) {
+        if (std::abs(soil[i] - c) < marginal_kink_clearance ||
+            (soil[i] - at) * (soil[i] - c) <= 0.0) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+  // The point itself at dz = 0, not its logit taken back to a collar.
+  const auto in_z = [&](double dz, bool* ok) {
+    return marginal(dz == 0.0 ? at : collar_at_position(z + dz, a, b), ok);
+  };
+  double dM_dz = std::numeric_limits<double>::quiet_NaN();
+  for (double step = position_slope_step; step <= 100.0 * position_slope_step;
+       step *= 10.0) {
+    if (usable({step, -step})) {
+      dM_dz = marginal_first_difference(in_z, step);
+      break;
+    }
+    // Second order from the side away from the kink, by the quadratic through
+    // the three points one, two and three steps out, read back at the point.
+    const double side = usable({-step, -2.0 * step, -3.0 * step})  ? -1.0
+                        : usable({step, 2.0 * step, 3.0 * step}) ? 1.0
+                                                                  : 0.0;
+    if (side != 0.0) {
+      bool ok1 = false, ok2 = false, ok3 = false;
+      const double m1 = in_z(side * step, &ok1);
+      const double m2 = in_z(side * 2.0 * step, &ok2);
+      const double m3 = in_z(side * 3.0 * step, &ok3);
+      if (ok1 && ok2 && ok3) {
+        dM_dz = -side * (2.5 * m1 - 4.0 * m2 + 1.5 * m3) / step;
+      }
+      break;
+    }
   }
-  if (have_here && have_up) {
-    return (up - here) / h;
-  }
-  if (have_here && have_down) {
-    return (here - down) / h;
-  }
-  // The same convention duptake_dpsi uses at a kink: a caller that cannot get a
-  // curvature here has to know that, not be handed a zero it will divide by.
-  return std::numeric_limits<double>::quiet_NaN();
+  return dM_dz / ((b - a) / (2.0 + std::exp(z) + std::exp(-z)));
 }
 
 } // namespace phylloptim

@@ -199,6 +199,7 @@ read the operating point's rows at its own scalar type:
 | `operating_collar<K, S>(draw, pars, H, &held)` | the decision variable placed from the kind the solve recorded |
 | `physical_outputs_at<K, S>(x, draw, pars, &held)` | A, gc, psi_leaf and profit at that placement |
 | `profit_curvature_at_collar<K>()` | `H`, the curvature the implicit function theorem divides by |
+| `marginal_slope_at<K>(psi, a, b, coordinate)` | the marginal's slope at any collar in [a, b], differenced in the potential (as `H` is) or in the collar's logit position between a and b, with probes kept clear of uptake's kinks |
 | `dprofit_droot_collar_psi(psi, &feasible)` | dprofit/dψ at a given collar potential, at double |
 
 **Pass the `feasible` flag.** `dprofit_droot_collar_psi` returns `0.0` on its
