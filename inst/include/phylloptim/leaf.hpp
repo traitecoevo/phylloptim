@@ -1996,12 +1996,41 @@ public:
                                 const CollarCoords<S>& at,
                                 const Normalisers<S>& norms = {}) const;
 
-  // dM/dp at the solved point, the curvature the interior derivation divides by,
-  // as a first difference of M: a tangent is wrong by a factor of eight, because
-  // dci/dcollar cancels below the table's fit error. Not const: it moves the
-  // model to p0 +/- h and restores the operating point (hazard 8).
+  // The coordinate marginal_slope_at differences the marginal in.
+  //   Potential: the decision variable, a step of potential_slope_step; within
+  //     dry_end_neighbourhood of the dry end b, the log of the distance to it.
+  //   Position: the collar's logit position between the ends a and b, a step of
+  //     position_slope_step, which near either end is a step in the log of the
+  //     distance to it. No probe lands within marginal_kink_clearance of a
+  //     rooted layer's potential, where uptake has a kink, or across one.
+  enum class SlopeCoordinate { Potential, Position };
+  static constexpr double potential_slope_step = 1e-5;
+  static constexpr double position_slope_step = 1e-4;
+  // In MPa. The marginal is noisy near a kink, more so the nearer a probe is
+  // to the layer's potential: the clearance keeps probes off the kink itself,
+  // and does not bound the error of a probe just outside it. Not wider: a
+  // drying layer's potential follows the collar.
+  static constexpr double marginal_kink_clearance = 3e-6;
+
+  // dM/dp at `at`, M the route's marginal, as a difference of M: a tangent is
+  // wrong by a factor of eight, because dci/dcollar cancels below the table's
+  // fit error. a and b are the collar interval's ends, of which Potential reads
+  // only b, NaN where none was polished; Position is collar route only, and
+  // NaN unless a < at < b. NaN where no stencil answers. Not const: the probes move the model, and the
+  // point, its kind and its polished ends are put back (hazard 8).
+  template <CostCurve K>
+  double marginal_slope_at(double at, double a, double b,
+                           SlopeCoordinate coordinate);
+  // The curvature the interior derivation divides by: marginal_slope_at in the
+  // potential, at the seated point and the dry end the solve polished.
   template <CostCurve K>
   double profit_curvature_at_collar();
+  // The collar at logit position z between a and b, written from the nearer
+  // end, so the distance to that end keeps its precision.
+  static double collar_at_position(double z, double a, double b) {
+    return z > 0.0 ? b - (b - a) / (1.0 + std::exp(z))
+                   : a + (b - a) / (1.0 + std::exp(-z));
+  }
 
   // The collar this solve left, at the caller's scalar; the kind chooses which
   // condition closes the system. Not const: the interior arm takes the curvature
@@ -2407,6 +2436,9 @@ public:
   static const char* operating_point_kind_name(OperatingPointKind kind);
 
 private:
+  // marginal_slope_at's Position stencil, before the point is put back.
+  template <CostCurve K, class Marginal>
+  double position_slope(double at, double a, double b, Marginal& marginal);
   // Where this model replaces a value by a bound: a row severed by a clamp and an
   // honest zero are the same number, so the only way to see one is to count it.
   clamp_counter clamps;
@@ -2437,7 +2469,7 @@ private:
   // inside) back to it, so the row is the root's derivative, not the step's.
   double wet_bound_root_ = std::numeric_limits<double>::quiet_NaN();
   // The dry end polished to collar precision where the solve read it, or NaN.
-  // profit_curvature_at_collar measures from it, as the marginal steepens there.
+  // marginal_slope_at measures from it, as the marginal steepens there.
   double dry_bound_root_ = std::numeric_limits<double>::quiet_NaN();
   // table_for's ring (recent_tables_size, above). Kept last: see there.
   std::array<std::shared_ptr<const VulnerabilityTable>, recent_tables_size> recent_tables_;
