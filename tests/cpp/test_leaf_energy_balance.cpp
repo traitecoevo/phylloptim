@@ -1606,7 +1606,52 @@ void test_energy_balance_flux_ceiling() {
      "with the energy balance off there is no flux ceiling");
 }
 
+// A negative conductance is refused by name, on either path. With the balance
+// on it would have made the most-transpiring temperature the hottest, and the
+// range check would have refused that instead, naming neither the conductance
+// nor the ends correctly. Zero, a leaf with no stem, is seated.
+void test_set_physiology_refuses_a_negative_conductance() {
+  printf("set_physiology refuses a negative conductance by name\n");
+  Drivers d;
+  for (bool gate : {false, true}) {
+    phylloptim::Leaf l = make_pm_leaf(d, {0.5}, {1.0}, gate);
+    const auto seat = [&](double k) {
+      l.set_physiology(fixture::root_network({1.0 / d.area_leaf}, {1.0}),
+                       d.PPFD, {0.5}, {1.0}, k, d.atm_vpd, d.ca, d.leaf_temp,
+                       d.atm_o2_kpa, d.atm_kpa);
+    };
+    const std::string on = gate ? " (energy balance on)" : " (energy balance off)";
+    ok(throws_with([&] { seat(-1e-3); },
+                   "set_physiology: leaf_specific_conductance_max must be >= 0"),
+       "a negative conductance is refused by name" + on);
+    ok(!throws_with([&] { seat(0.0); }, ""), "a zero conductance is seated" + on);
+  }
+}
+
+// The range check takes its ends in either order and names them by value, and a
+// NaN at either end is refused.
+void test_leaf_temperature_range_reads_either_order() {
+  printf("the leaf temperature range check reads its ends in either order\n");
+  Drivers d;
+  const phylloptim::Leaf l = make_pm_leaf(d, {0.5}, {1.0}, true);
+  for (bool swap : {false, true}) {
+    const double a = swap ? 30.0 : -300.0, b = swap ? -300.0 : 30.0;
+    ok(throws_with([&] { l.check_leaf_temperature_range(a, b); },
+                   "set_physiology: the leaf temperature can run from -300 to 30 C"),
+       swap ? "hot end first: named cold to hot" : "cold end first: named cold to hot");
+  }
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  ok(throws_with([&] { l.check_leaf_temperature_range(nan, 30.0); }, "can run from"),
+     "a NaN first end is refused");
+  ok(throws_with([&] { l.check_leaf_temperature_range(30.0, nan); }, "can run from"),
+     "a NaN second end is refused");
+  ok(!throws_with([&] { l.check_leaf_temperature_range(30.0, 10.0); }, ""),
+     "an evaluable range is accepted in either order");
+}
+
 void run_energy_balance() {
+  test_set_physiology_refuses_a_negative_conductance();
+  test_leaf_temperature_range_reads_either_order();
   test_energy_balance_flux_ceiling();
   test_dprofit_dpsi_leaf_matches_a_finite_difference_energy_balance();
   test_leaf_temperature_is_reported();
