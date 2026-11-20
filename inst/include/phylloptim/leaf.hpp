@@ -1619,9 +1619,10 @@ public:
   // after set_physiology.
   double flux_ceiling() const;
   // Refuses a leaf whose temperature can run, over the fluxes the solve can
-  // reach, from `coldest` to `hottest` deg C, if either end is past what the
-  // model can evaluate: R_d's Q10 not positive, or the Tetens pole.
-  void check_leaf_temperature_range(double coldest, double hottest,
+  // reach, between `end_a` and `end_b` deg C (in either order), if either end
+  // is past what the model can evaluate: R_d's Q10 not positive, or the Tetens
+  // pole.
+  void check_leaf_temperature_range(double end_a, double end_b,
                                     const char* where = "set_physiology") const;
 
   // transpiration functions
@@ -2803,6 +2804,14 @@ inline void Leaf::set_physiology(const RootNetwork& root_network, double PPFD, c
       !std::isfinite(leaf_temp) ||
       !std::isfinite(atm_o2_kpa) || !std::isfinite(atm_kpa)) {
     util::stop("set_physiology received non-finite scalar input");
+  }
+  // A conductance is a magnitude: a negative one runs the stem's flux backwards
+  // and, with the energy balance on, makes the leaf's most-transpiring
+  // temperature its hottest. Zero is a leaf with no stem, which shuts.
+  if (leaf_specific_conductance_max < 0.0) {
+    util::stop("set_physiology: leaf_specific_conductance_max must be >= 0 "
+               "(kg m^-2 s^-1 MPa^-1, per unit leaf area); got " +
+               util::format_double(leaf_specific_conductance_max));
   }
   // A real atmosphere's deficit: positive and short of saturation at the air
   // temperature (off the energy balance, leaf_temp), so e_s(Tair) - D > 0.

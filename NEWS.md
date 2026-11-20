@@ -1,3 +1,8 @@
+# phylloptim 0.40.1
+
+- `set_physiology` refuses a negative `leaf_specific_conductance_max` by name. With the energy balance on, it used to refuse the leaf temperature range that conductance implied. Zero is still seated: a leaf with no stem shuts. No number moves (traitecoevo/plant#832).
+- The leaf temperature range refusal names its ends coldest first, whichever order they reach it in. It used to label a reversed pair's hot end as the cold one.
+
 # phylloptim 0.40.0
 
 - `Leaf::marginal_slope_at<K>(psi, a, b, coordinate)` is the one difference of the marginal profit's slope in the collar. In the potential (`SlopeCoordinate::Potential`) it is the curvature's stencil, and `profit_curvature_at_collar` is now that call. In the collar's logit position between the interval's ends a and b (`SlopeCoordinate::Position`), its probes keep 3e-6 MPa clear of every rooted layer's potential, where uptake has a kink, and never straddle one. Either leaves the leaf as it found it.

@@ -211,22 +211,29 @@ inline double Leaf::flux_ceiling() const {
 // Refuses, never clamps, a leaf temperature range the model cannot evaluate:
 // R_d's Q10, intercept - slope*(T + 25)/2, must be positive for its power to be
 // real, and the Tetens form has a pole at -237.3 C. Q10 is linear in T, so
-// testing both ends tests the range.
-inline void Leaf::check_leaf_temperature_range(double coldest, double hottest,
+// testing both ends tests the range. The ends may come in either order, and
+// each is tested against every limit, so a NaN at either is refused; the
+// message names them by value.
+inline void Leaf::check_leaf_temperature_range(double end_a, double end_b,
                                                const char* where) const {
   const auto q10_at = [&](double t) {
     return rd_q10_intercept_ - rd_q10_slope_ * (t + 25.0) / 2.0;
   };
-  if (!(coldest > -237.3) || !(q10_at(coldest) > 0.0) ||
-      !(q10_at(hottest) > 0.0)) {
+  const auto evaluable = [&](double t) {
+    return t > -237.3 && q10_at(t) > 0.0;
+  };
+  if (!evaluable(end_a) || !evaluable(end_b)) {
+    const bool a_colder = end_a < end_b;
+    const double cold = a_colder ? end_a : end_b;
+    const double hot = a_colder ? end_b : end_a;
     util::stop(std::string(where) + ": the leaf temperature can run from " +
-               util::format_double(coldest) + " to " +
-               util::format_double(hottest) +
+               util::format_double(cold) + " to " +
+               util::format_double(hot) +
                " C over the fluxes this solve can reach, and the model is "
                "evaluable only above the Tetens pole (-237.3 C) and where R_d's "
                "Q10, rd_q10_intercept_ - rd_q10_slope_*(T + 25)/2, is positive "
-               "(Q10 " + util::format_double(q10_at(coldest)) + " at the cold "
-               "end, " + util::format_double(q10_at(hottest)) + " at the hot)");
+               "(Q10 " + util::format_double(q10_at(cold)) + " at the cold "
+               "end, " + util::format_double(q10_at(hot)) + " at the hot)");
   }
 }
 
