@@ -1017,11 +1017,23 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
     // from the same E_up_ and psi.
     dpsileaf_dpsi = (1.0 / f_leaf) * dEpsileaf_dpsi;
   } else {
-    // NaN from the supply means "use finite differences" (hazard 6).
+    // NaN from the supply means "use finite differences" (hazard 6). A probe
+    // past the continuity root has no leaf potential, which is the exit above
+    // reached a step away, so it exits the same way rather than throwing.
     const double h = 1e-6;
-    dpsileaf_dpsi =
-        (find_psi_leaf_from_psi_root(psi + h, supply_psi_soil()) -
-         find_psi_leaf_from_psi_root(psi - h, supply_psi_soil())) / (2.0 * h);
+    const auto psi_leaf_at = [&](double x, double& out) {
+      E_from_Soil_to_Root_Collar(x, supply_psi_soil());
+      if (!stem_carries(E_up_, x)) {
+        return false;
+      }
+      out = transpiration_to_psi_leaf(E_up_, x);
+      return true;
+    };
+    double up = 0.0, down = 0.0;
+    if (!psi_leaf_at(psi + h, up) || !psi_leaf_at(psi - h, down)) {
+      return 0.0;
+    }
+    dpsileaf_dpsi = (up - down) / (2.0 * h);
   }
 
 

@@ -575,6 +575,52 @@ void test_gradient_reports_feasibility() {
      "and the sentinel is still 0.0 for a caller that does not ask");
 }
 
+// The difference the gradient falls back on at a kink in the uptake (hazard 6)
+// reads the leaf potential a step either side of the collar. Within that step of
+// the continuity root one probe has none: the soil delivers more than the stem
+// can carry. That is the no-gradient exit the collar itself takes past the root,
+// so the probe takes it too rather than throwing, which ended a pinned run that
+// could not shrink its step. The second layer's soil is put at the collar to make
+// the kink, just inside the root, which it leaves where it was: a layer at the
+// collar carries nothing.
+void test_gradient_difference_stops_at_continuity_root() {
+  printf("the kink's difference stops at the continuity root rather than throwing\n");
+  Drivers d;
+  const std::vector<double> depth{0.2, 0.6};
+  const double step = 1e-6;  // dprofit's differencing step
+  const auto carries = [](phylloptim::Leaf &l, double x) {
+    l.E_from_Soil_to_Root_Collar(x, l.roots_.psi_soil_);
+    return l.stem_carries(l.E_up_, x);
+  };
+  // A fixed point: the root moves with the layer, by a sixth as much.
+  double collar = 1.3, moved = 1.0;
+  for (int i = 0; i < 50 && moved > 1e-12; ++i) {
+    phylloptim::Leaf at = make_leaf(d, {0.5, collar}, depth);
+    double lo = 0.6, hi = 3.0;
+    while (hi - lo > 1e-13) {
+      const double mid = 0.5 * (lo + hi);
+      (carries(at, mid) ? lo : hi) = mid;
+    }
+    moved = std::abs(lo - 0.5 * step - collar);
+    collar = lo - 0.5 * step;
+  }
+  phylloptim::Leaf l = make_leaf(d, {0.5, collar}, depth);
+  ok(carries(l, collar) && !carries(l, collar + step),
+     "the collar carries and a step drier does not");
+  ok(std::isnan(l.dE_from_soil_dpsi_collar(collar, l.roots_.psi_soil_)),
+     "and the uptake has no slope there, so the gradient differences");
+  bool feasible = true;
+  double g = 1.0;
+  bool threw = false;
+  try {
+    g = l.dprofit_droot_collar_psi(collar, &feasible);
+  } catch (const phylloptim::util::infeasible_error &) {
+    threw = true;
+  }
+  ok(!threw, "the difference does not throw");
+  ok(g == 0.0 && !feasible, "and reports no gradient, as past the root");
+}
+
 // The AD derivative and the forward model are instantiations of ONE
 // body, so they cannot be derivatives of different functions. That was not true
 // before: `detail::assim_colimited_ad` associated the electron-limited term
@@ -3363,6 +3409,7 @@ int main(int argc, char **argv) {
   test_gradient_needs_no_prior_solve();
   test_gradient_is_zero_in_reversed_gradient_state();
   test_gradient_reports_feasibility();
+  test_gradient_difference_stops_at_continuity_root();
   test_ad_kernels_are_the_model_not_a_mirror();
   test_collar_solve_satisfies_its_own_first_order_condition();
   test_collar_solve_handles_a_pinned_optimum();
