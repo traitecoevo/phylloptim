@@ -323,6 +323,7 @@ inline void Leaf::set_shut_state() {
   // its gravity-balance kink).
   lambda_emergent_ = lambda_collar_for<K>();
   operating_point_kind_ = OperatingPointKind::HydraulicShutdown;
+  note_vpd_seat();
   if (!std::isfinite(profit_)) {
     util::stop_infeasible("collar_solve",
                           "profit is not finite at the shut state; collar=" +
@@ -772,6 +773,7 @@ inline void Leaf::find_root_collar_psi_for(){
     // On the single-layer solvers' axis: the collar is the free variable, so the
     // marginal cost carries the soil-to-collar series-resistance correction.
     lambda_emergent_ = lambda_collar_for<K>();
+    note_vpd_seat();
 
     if(!std::isfinite(profit_)){
         util::stop_infeasible("collar_solve", "non-finite profit; opt_psi_leaf_=" + util::to_string(opt_psi_leaf_) +
@@ -933,6 +935,7 @@ inline double Leaf::profit_at_collar_psi(double target_opt_root_psi,
              "; bound_a=" + util::to_string(bound_a) +
              "; bound_b=" + util::to_string(bound_b));
     }
+    note_vpd_seat();
     return profit_;
 }
 

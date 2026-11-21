@@ -1,3 +1,7 @@
+# phylloptim 0.40.2
+
+- The vapour deficit's floor has a second clamp site, `vpd_leaf_seated`, appended after `vpd_leaf_floor`: the deficit a solve leaves the leaf with at `vpd_leaf_min`, counted once per operating point placed (a solve, a replay or a prescribed collar) and once per placement of the held coordinates on the derivative surface. `vpd_leaf_floor` keeps counting every read that floors, on every candidate a search tries, which on a leaf at the dew point is about a thousand times the seated count; a consumer reporting how often a leaf reached the dew point reads the new site. For C++ users `CLAMP_SITE_COUNT` is 3; a consumer mirroring the list by position picks the site up by appending. No number moves (#278).
+
 # phylloptim 0.40.1
 
 - `set_physiology` refuses a negative `leaf_specific_conductance_max` by name. With the energy balance on, it used to refuse the leaf temperature range that conductance implied. Zero is still seated: a leaf with no stem shuts. No number moves (traitecoevo/plant#832).

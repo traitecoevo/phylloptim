@@ -161,6 +161,8 @@ inline void Leaf::held_coords_at(double sigma_star, double ci_star,
     balance.temp = leaf_temperature_at<S>(stem_flux, pars);
     cap = photo_capacity_at<S>(pars, balance.temp);
     balance.gc_per_flux = gc_per_flux_on<S>(balance.temp);
+    // The seat as this path places it, at the member the solve left.
+    note_vpd_seat();
     balance.r_star = residual_flux_at<S>(up, pars, draw,
                                          residual_demand_per_g_on<S>(balance.temp));
     balance.E_s = stem_flux - balance.r_star;

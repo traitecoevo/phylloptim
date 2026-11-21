@@ -1608,6 +1608,9 @@ public:
   // is defined. Not in update_temperature_dependent_params, whose differences at
   // T +/- h must not move it; the VPD route into the derivative is dgc_dT's.
   void set_leaf_vpd(double leaf_temp);
+  // Count the seated deficit on its floor. Called where a solve places the
+  // operating point it leaves the leaf at, after that point's set_leaf_vpd.
+  void note_vpd_seat() const;
   // Explicit energy balance, Tleaf = Tair + (Rn - lambda*E) / (rho*cp/ra + g_rad),
   // E in kg H2O m^-2 s^-1: affine in E, so `dT_dE` (when non-null) is a constant.
   // Not clamped: check_leaf_temperature_range refuses drivers that would need it.

@@ -182,6 +182,15 @@ inline void Leaf::set_leaf_vpd(double leaf_temp) {
   g_min_leaf_ = g_min_at(leaf_temp);
 }
 
+// set_leaf_vpd runs on every candidate a search tries, so leaf_vpd_at's count
+// is the search's incidence of the floor. The state's incidence is this: the
+// deficit the solve left seated, counted where each solve places its point.
+inline void Leaf::note_vpd_seat() const {
+  if (use_energy_balance_ && vpd_leaf_ == vpd_leaf_min) {
+    clamps.note(CLAMP_VPD_LEAF_SEATED);
+  }
+}
+
 // Explicit leaf energy balance: Tleaf = Tair + (Rn - lambda*E) / (rho*cp/ra + g_rad),
 // with E the hydraulically pinned transpiration (kg H2O m^-2 s^-1). The one place
 // Tleaf and dTleaf/dE are computed: a second copy is how a radiative term gets

@@ -34,7 +34,7 @@ Family context lives in [`plant-meta`](https://github.com/traitecoevo/plant-meta
 | header | holds |
 |---|---|
 | `util.hpp`, `constants.hpp` | R-free `stop()` and sentinels; physical constants |
-| `clamp_sites.hpp` | the `clamp_site` enum: the one bound a solved path keeps, the stomatal corner `E_s >= 0`, counted |
+| `clamp_sites.hpp` | the `clamp_site` enum: the bounds a solved path keeps, counted: the stomatal corner `E_s >= 0`, and the vapour deficit's floor as every floored read (`vpd_leaf_floor`, the search's incidence) and as the seated state (`vpd_leaf_seated`); append only, plant mirrors it by position |
 | `quadrature.hpp`, `optimize.hpp` | adaptive Simpson; `maximise_over_closed_interval_foc`, the one solver, and `toms748`/`bisect`, odelia's root-finders with their refusal made infeasible |
 | `vulnerability.hpp` | `VulnerabilityTable` (the C2 table both curves read), the closed-form integral and its inverse, `vulnerability_derivatives_at` |
 | `closed_form_rows.hpp` | a table's value with the closed form's trait rows, for both curves |

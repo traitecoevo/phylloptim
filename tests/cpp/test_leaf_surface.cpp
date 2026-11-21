@@ -1862,6 +1862,71 @@ void test_the_vapour_deficit_floor_is_counted() {
      "the site is named");
 }
 
+// The floor's two sites answer different questions: every read that floors is
+// the search's incidence, and the seat a solve leaves the leaf on is the state's.
+// A leaf driven to the dew point counts the seat once per solve, however many
+// candidates the search floored on the way; an ordinary leaf counts it never.
+void test_the_seated_vapour_deficit_floor_is_counted_once_per_solve() {
+  printf("the seated vapour deficit floor is counted once per solve\n");
+  using CC = phylloptim::Leaf::CostCurve;
+  using Kind = phylloptim::Leaf::OperatingPointKind;
+  constexpr int floor = phylloptim::CLAMP_VPD_LEAF_FLOOR;
+  constexpr int seated = phylloptim::CLAMP_VPD_LEAF_SEATED;
+  ok(std::string(phylloptim::clamp_site_name(seated)) == "vpd_leaf_seated",
+     "the site is named");
+  ok(seated == phylloptim::CLAMP_SITE_COUNT - 1,
+     "the site is appended: a consumer mirrors the list by position");
+
+  // Warm, humid air on a short, well-plumbed, strongly rooted leaf in bright
+  // light: the optimum transpires enough to cool the leaf below the dew point.
+  Drivers dew;
+  dew.leaf_temp = 30.0;
+  dew.atm_vpd = 1.0;
+  dew.PPFD = 1500.0;
+  dew.h = 0.5;
+  dew.theta = 3.0 * dew.theta;
+  dew.area_leaf *= 0.01;
+  phylloptim::Leaf l = make_pm_leaf(dew, {0.5}, {1.0}, true);
+  l.clear_clamp_counts();
+  l.find_root_collar_psi();
+  ok(l.operating_point_kind() == Kind::Interior && l.vpd_leaf_ == phylloptim::vpd_leaf_min,
+     "the fixture is an interior optimum seated on the floor");
+  ok(l.clamp_count(seated) == 1, "the solve counts the seat once");
+  ok(l.clamp_count(floor) > 1,
+     "and the candidate site more: the search floored on the way");
+  printf("    solve: floor %zu, seated %zu\n", l.clamp_count(floor), l.clamp_count(seated));
+
+  const double collar = l.opt_root_psi_;
+  l.clear_clamp_counts();
+  l.replay_operating_point(collar, Kind::Interior);
+  ok(l.clamp_count(seated) == 1, "a replay seats the point once");
+  l.clear_clamp_counts();
+  l.evaluate_root_collar_psi(collar);
+  ok(l.clamp_count(seated) == 1, "a prescribed collar seats the point once");
+
+  // On the tape the seat is counted where the held coordinates are placed: the
+  // curvature's probes put the point back first (one seat), then the surface
+  // places it for the collar's residual and the billing shares the placement.
+  l.replay_operating_point(collar, Kind::Interior);
+  l.clear_clamp_counts();
+  (void)profit_row_at_current_point(l, phylloptim::par_kmax);
+  ok(l.clamp_count(seated) == 2,
+     "the surface counts the seat at its placement, after the curvature's restore");
+  ok(l.clamp_count(floor) > l.clamp_count(seated),
+     "the on-tape reads count the floor more often than the seat");
+  printf("    surface: floor %zu, seated %zu\n", l.clamp_count(floor), l.clamp_count(seated));
+
+  Drivers d;
+  phylloptim::Leaf plain = make_pm_leaf(d, {0.5}, {1.0}, true);
+  plain.clear_clamp_counts();
+  plain.find_root_collar_psi();
+  ok(plain.vpd_leaf_ > phylloptim::vpd_leaf_min && plain.clamp_count(seated) == 0,
+     "an ordinary solve, off the floor, counts the seat never");
+  plain.replay_operating_point(plain.opt_root_psi_, plain.operating_point_kind());
+  (void)profit_row_at_current_point(plain, phylloptim::par_kmax);
+  ok(plain.clamp_count(seated) == 0, "nor does its replay or its surface");
+}
+
 // At a prescribed collar a caller reads the marginal and then bills at the same
 // collar. Placing the held coordinates once and handing them to both must move
 // no value and no tangent row: only the collar's channel is added at billing.
@@ -2497,6 +2562,7 @@ void run_surface() {
   test_the_position_slope_keeps_clear_of_a_kink();
   test_the_position_slope_widens_its_step_beside_a_kink();
   test_the_vapour_deficit_floor_is_counted();
+  test_the_seated_vapour_deficit_floor_is_counted_once_per_solve();
   test_supplied_rows_match_a_resolve_at_every_kind();
   test_shut_leaf_seated_at_its_collar_bills_the_roots_nothing();
   test_surface_refuses_a_curve_it_was_not_solved_on();
