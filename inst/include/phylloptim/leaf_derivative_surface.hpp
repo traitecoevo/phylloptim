@@ -161,6 +161,9 @@ inline void Leaf::held_coords_at(double sigma_star, double ci_star,
     balance.temp = leaf_temperature_at<S>(stem_flux, pars);
     cap = photo_capacity_at<S>(pars, balance.temp);
     balance.gc_per_flux = gc_per_flux_on<S>(balance.temp);
+    // The seat as the surface places it: the held point is the solve's, so at
+    // double its deficit is the member the solve left. Once per placement.
+    note_vpd_seat();
     balance.r_star = residual_flux_at<S>(up, pars, draw,
                                          residual_demand_per_g_on<S>(balance.temp));
     balance.E_s = stem_flux - balance.r_star;
@@ -1366,9 +1369,9 @@ inline double Leaf::marginal_slope_at(double at, double a, double b,
           return dprofit_dpsi_leaf<K>(at + dx, soil, ok);
         },
         potential_slope_step);
-    // The marginal reseats the temperature block, and the evaluation tags the
-    // point prescribed.
-    evaluate_psi_leaf<K>(at);
+    // The marginal reseats the temperature block, and the placement tags the
+    // point prescribed; a point put back is not a seat counted again.
+    place_psi_leaf<K>(at);
     operating_point_kind_ = kind0;
     return slope;
   }

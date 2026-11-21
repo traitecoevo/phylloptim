@@ -747,8 +747,16 @@ inline void Leaf::begin_collar_point() {
   }
 }
 
+// The solve counts its seat on return; the point itself is placed by
+// solve_collar_point, which a restore may run without counting.
 template <Leaf::CostCurve K>
 inline void Leaf::find_root_collar_psi_for(){
+  solve_collar_point<K>();
+  note_vpd_seat();
+}
+
+template <Leaf::CostCurve K>
+inline void Leaf::solve_collar_point(){
   begin_collar_point<K>();
     double bound_a, bound_b;
     if (!prepare_collar_solve<K>(bound_a, bound_b, true)) {
@@ -809,6 +817,13 @@ inline double Leaf::dprofit_droot_collar_psi(double opt_root_psi, bool* feasible
 
 template <Leaf::CostCurve K>
 inline double Leaf::evaluate_root_collar_psi_for(double target_opt_root_psi){
+    const double out = place_collar_point<K>(target_opt_root_psi);
+    note_vpd_seat();
+    return out;
+}
+
+template <Leaf::CostCurve K>
+inline double Leaf::place_collar_point(double target_opt_root_psi){
     begin_collar_point<K>();
     double bound_a, bound_b;
     if (!prepare_collar_solve<K>(bound_a, bound_b)) {
@@ -835,10 +850,11 @@ inline double Leaf::evaluate_root_collar_psi_for(double target_opt_root_psi){
 // evaluated again. Any other is prepared again: a search's first bracket, a
 // shut leaf, which preparing seats, and a normalised curve, whose normalisers
 // prepare a bracket of their own and clear the roots' residual ceiling.
+// Puts back a point already counted as a seat, so counts none.
 template <Leaf::CostCurve K>
 inline void Leaf::restore_collar_point(double collar) {
   if (Curve<K>::prepares_normalisers || !bracket_reusable_) {
-    evaluate_root_collar_psi_for<K>(collar);
+    place_collar_point<K>(collar);
     return;
   }
   begin_collar_point<K>();
@@ -894,6 +910,8 @@ inline double Leaf::replay_operating_point_for(double collar,
       lambda_emergent_ = lambda_collar_for<K>();
       out = profit_;
     }
+    // At the final seat, the dry pin's where there is one, as the solve counts.
+    note_vpd_seat();
     return out;
 }
 

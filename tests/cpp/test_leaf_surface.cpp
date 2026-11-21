@@ -1862,6 +1862,155 @@ void test_the_vapour_deficit_floor_is_counted() {
      "the site is named");
 }
 
+// The floor's two sites answer different questions: every read that floors is
+// the search's incidence, and the seat a solve leaves the leaf on is the state's.
+// A leaf driven to the dew point counts the seat once per solve, whatever the
+// solve's kind and however many candidates the search floored on the way, once
+// more per replay or prescribed point, and once as the surface places it; a
+// restore after a probe counts none. An ordinary leaf counts it never.
+namespace {
+
+// Warm, humid air on a short, well-plumbed, strongly rooted leaf in bright
+// light: the optimum transpires enough to cool the leaf below the dew point.
+Drivers dew_point_drivers() {
+  Drivers d;
+  d.leaf_temp = 30.0;
+  d.atm_vpd = 1.0;
+  d.PPFD = 1500.0;
+  d.h = 0.5;
+  d.theta = 3.0 * d.theta;
+  d.area_leaf *= 0.01;
+  return d;
+}
+
+// Air a hair off saturation and nearly dark: a leaf that opens or not sits on
+// the floor, so the soil alone picks the kind of its seat.
+Drivers saturated_air_drivers() {
+  Drivers d;
+  d.atm_vpd = 0.005;
+  d.PPFD = 1.0;
+  return d;
+}
+
+// The solve's own count, then a replay's, a prescribed point's and the
+// surface's, each after clearing: one apiece, on both routes where both apply.
+void check_seat_counted_once(phylloptim::Leaf& l, phylloptim::Leaf::OperatingPointKind kind,
+                             const std::string& what) {
+  using Kind = phylloptim::Leaf::OperatingPointKind;
+  constexpr int seated = phylloptim::CLAMP_VPD_LEAF_SEATED;
+  l.clear_clamp_counts();
+  l.optimise();
+  ok(l.operating_point_kind() == kind && l.vpd_leaf_ == phylloptim::vpd_leaf_min,
+     what + ": the fixture seats the kind it is here for, on the floor");
+  ok(l.clamp_count(seated) == 1, what + ": the solve counts the seat once");
+  const bool collar = l.model_route() == "collar";
+  if (collar) {
+    const double at = l.opt_root_psi_;
+    l.clear_clamp_counts();
+    l.replay_operating_point(at, kind);
+    ok(l.clamp_count(seated) == 1, what + ": a replay seats the point once");
+    l.clear_clamp_counts();
+    l.evaluate_root_collar_psi(at);
+    ok(l.clamp_count(seated) == 1, what + ": a prescribed collar seats the point once");
+    l.replay_operating_point(at, kind);
+  } else {
+    l.clear_clamp_counts();
+    l.evaluate_psi_leaf_at(l.opt_psi_leaf_);
+    ok(l.clamp_count(seated) == 1, what + ": a prescribed potential seats the point once");
+    l.clear_clamp_counts();
+    l.optimise();
+  }
+  if (collar && l.model_curve() == "TF24" &&
+      (kind == Kind::Interior || kind == Kind::BoundarySoil ||
+       kind == Kind::HydraulicShutdown)) {
+    // The curvature's probes put the point back, uncounted; operating_collar
+    // places it once and the billing shares the placement.
+    l.clear_clamp_counts();
+    (void)profit_row_at_current_point(l, phylloptim::par_kmax);
+    ok(l.clamp_count(seated) == 1,
+       what + ": the surface counts the seat once, at its one placement");
+    ok(l.clamp_count(phylloptim::CLAMP_VPD_LEAF_FLOOR) > 1,
+       what + ": the on-tape reads count the floor more often than the seat");
+  }
+}
+
+}  // namespace
+
+void test_the_seated_vapour_deficit_floor_is_counted_once_per_seat() {
+  printf("the seated vapour deficit floor is counted once per seat\n");
+  using CC = phylloptim::Leaf::CostCurve;
+  using Kind = phylloptim::Leaf::OperatingPointKind;
+  constexpr int floor = phylloptim::CLAMP_VPD_LEAF_FLOOR;
+  constexpr int seated = phylloptim::CLAMP_VPD_LEAF_SEATED;
+  ok(std::string(phylloptim::clamp_site_name(seated)) == "vpd_leaf_seated",
+     "the site is named");
+  ok(seated == phylloptim::CLAMP_SITE_COUNT - 1,
+     "the site is appended: a consumer mirrors the list by position");
+
+  // An interior optimum on the collar route, then on the leaf route.
+  {
+    phylloptim::Leaf l = make_pm_leaf(dew_point_drivers(), {0.5}, {1.0}, true);
+    check_seat_counted_once(l, Kind::Interior, "interior, collar route");
+    l.clear_clamp_counts();
+    l.optimise();
+    ok(l.clamp_count(floor) > 1,
+       "interior, collar route: the candidate site counts more, the search floored on the way");
+    printf("    collar solve: floor %zu, seated %zu\n", l.clamp_count(floor),
+           l.clamp_count(seated));
+    l.clear_clamp_counts();
+    (void)l.profit_curvature_at_collar<CC::TF24>();
+    ok(l.clamp_count(seated) == 0,
+       "the curvature's probes put the point back without counting a seat");
+  }
+  {
+    phylloptim::Leaf l = make_pm_leaf(dew_point_drivers(), {0.5}, {1.0}, true);
+    l.set_model(CC::TF24, false);
+    check_seat_counted_once(l, Kind::Interior, "interior, leaf route");
+    l.clear_clamp_counts();
+    l.optimise();
+    ok(l.clamp_count(floor) > 1,
+       "interior, leaf route: the candidate site counts more");
+    printf("    leaf-route solve: floor %zu, seated %zu\n", l.clamp_count(floor),
+           l.clamp_count(seated));
+  }
+  // A dark leaf at its wet bound, and one shut on dry soil, on both routes: the
+  // kind does not change the count.
+  {
+    phylloptim::Leaf l = make_pm_leaf(saturated_air_drivers(), {10.0}, {1.0}, true);
+    check_seat_counted_once(l, Kind::BoundarySoil, "boundary-soil, collar route");
+  }
+  {
+    phylloptim::Leaf l = make_pm_leaf(saturated_air_drivers(), {20.0}, {1.0}, true);
+    check_seat_counted_once(l, Kind::HydraulicShutdown, "shut, collar route");
+  }
+  {
+    phylloptim::Leaf l = make_pm_leaf(saturated_air_drivers(), {20.0}, {1.0}, true);
+    l.set_model(CC::TF24, false);
+    check_seat_counted_once(l, Kind::HydraulicShutdown, "shut, leaf route");
+  }
+  // ProfitMax's degenerate exit, a shut leaf placed without an objective.
+  {
+    phylloptim::Leaf l = make_pm_leaf(saturated_air_drivers(), {20.0}, {1.0}, true);
+    l.set_model(CC::ProfitMax, true);
+    check_seat_counted_once(l, Kind::HydraulicShutdown, "ProfitMax degenerate, collar route");
+  }
+  {
+    phylloptim::Leaf l = make_pm_leaf(saturated_air_drivers(), {10.0}, {1.0}, true);
+    l.set_model(CC::ProfitMax, false);
+    check_seat_counted_once(l, Kind::HydraulicShutdown, "ProfitMax degenerate, leaf route");
+  }
+
+  Drivers d;
+  phylloptim::Leaf plain = make_pm_leaf(d, {0.5}, {1.0}, true);
+  plain.clear_clamp_counts();
+  plain.find_root_collar_psi();
+  ok(plain.vpd_leaf_ > phylloptim::vpd_leaf_min && plain.clamp_count(seated) == 0,
+     "an ordinary solve, off the floor, counts the seat never");
+  plain.replay_operating_point(plain.opt_root_psi_, plain.operating_point_kind());
+  (void)profit_row_at_current_point(plain, phylloptim::par_kmax);
+  ok(plain.clamp_count(seated) == 0, "nor does its replay or its surface");
+}
+
 // At a prescribed collar a caller reads the marginal and then bills at the same
 // collar. Placing the held coordinates once and handing them to both must move
 // no value and no tangent row: only the collar's channel is added at billing.
@@ -2497,6 +2646,7 @@ void run_surface() {
   test_the_position_slope_keeps_clear_of_a_kink();
   test_the_position_slope_widens_its_step_beside_a_kink();
   test_the_vapour_deficit_floor_is_counted();
+  test_the_seated_vapour_deficit_floor_is_counted_once_per_seat();
   test_supplied_rows_match_a_resolve_at_every_kind();
   test_shut_leaf_seated_at_its_collar_bills_the_roots_nothing();
   test_surface_refuses_a_curve_it_was_not_solved_on();

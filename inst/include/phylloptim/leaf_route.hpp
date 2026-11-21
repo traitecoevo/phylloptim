@@ -142,6 +142,13 @@ inline double Leaf::leaf_dry_bound(double psi_soil, bool* capped) {
 // gradient here differs from one at an optimum.
 template <Leaf::CostCurve K>
 inline double Leaf::evaluate_psi_leaf(double target_psi_leaf) {
+  const double out = place_psi_leaf<K>(target_psi_leaf);
+  note_vpd_seat();
+  return out;
+}
+
+template <Leaf::CostCurve K>
+inline double Leaf::place_psi_leaf(double target_psi_leaf) {
   clear_collar_solve_state();
 
   if (!supply_is_single_layer()) {
@@ -297,6 +304,12 @@ inline std::vector<double> Leaf::dprofit_dpsi_leaf_checked(double psi_leaf) {
 // writes no number.
 template <Leaf::CostCurve K>
 inline void Leaf::optimise_psi_leaf_single() {
+  solve_psi_leaf<K>();
+  note_vpd_seat();
+}
+
+template <Leaf::CostCurve K>
+inline void Leaf::solve_psi_leaf() {
   clear_collar_solve_state();
 
   if (!supply_is_single_layer()) {
