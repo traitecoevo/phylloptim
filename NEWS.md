@@ -1,6 +1,6 @@
 # phylloptim 0.40.3
 
-- The collar gradient's finite difference at a kink in the uptake no longer throws when one of its probes falls past the continuity root, where the soil delivers more than the stem can carry. It takes the no-gradient exit the collar itself takes there, as `dprofit_at_collar_psi`'s guard intended. A run that rejects and retries a step never saw the throw; plant's invasion replay, which takes a recorded step as it is, died on it within decades of a pulsed TF24 stand.
+- The collar gradient's finite difference at a kink in the uptake no longer throws when one of its probes falls past the continuity root, where the soil delivers more than the stem can carry. It takes the no-gradient exit the collar itself takes there, as `dprofit_at_collar_psi`'s guard intended. A run that rejects and retries a step never saw the throw; plant's invasion replay, which takes a recorded step as it is, died on it within decades of a pulsed TF24 stand (#282).
 
 # phylloptim 0.40.2
 
