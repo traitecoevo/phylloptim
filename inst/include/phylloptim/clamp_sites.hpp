@@ -28,10 +28,14 @@ enum clamp_site {
   CLAMP_STOMATAL_FLUX = 0,
   // The vapour deficit held at vpd_leaf_min, where a leaf cooled by the energy
   // balance reaches the dew point: every read that floors it, on every candidate
-  // a search tries, so about a thousand times the seated site's count.
+  // a search tries.
   CLAMP_VPD_LEAF_FLOOR,
-  // The deficit a solve leaves the leaf with on that floor: once per operating
-  // point placed, and once per placement of its held coordinates on the tape.
+  // The deficit a solve leaves the leaf with on that floor: once as each solve,
+  // replay or prescribed point returns, whatever its kind, and once as the
+  // derivative surface places the held coordinates at that point, at any
+  // scalar. A restore after a probe counts none. The surface places once per
+  // operating_collar or outputs call that is handed no HeldCoords, so a caller
+  // sharing one placement between them counts one, a caller sharing none two.
   CLAMP_VPD_LEAF_SEATED,
   CLAMP_SITE_COUNT
 };

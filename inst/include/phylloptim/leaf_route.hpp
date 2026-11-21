@@ -142,6 +142,13 @@ inline double Leaf::leaf_dry_bound(double psi_soil, bool* capped) {
 // gradient here differs from one at an optimum.
 template <Leaf::CostCurve K>
 inline double Leaf::evaluate_psi_leaf(double target_psi_leaf) {
+  const double out = place_psi_leaf<K>(target_psi_leaf);
+  note_vpd_seat();
+  return out;
+}
+
+template <Leaf::CostCurve K>
+inline double Leaf::place_psi_leaf(double target_psi_leaf) {
   clear_collar_solve_state();
 
   if (!supply_is_single_layer()) {
@@ -169,7 +176,6 @@ inline double Leaf::evaluate_psi_leaf(double target_psi_leaf) {
     profit_ = profit_psi_leaf_for<K>(psi_wet, psi_soil);
     lambda_emergent_ = lambda_for<K>(psi_wet, psi_soil);
     operating_point_kind_ = OperatingPointKind::Prescribed;
-    note_vpd_seat();
     return profit_;
   }
 
@@ -188,7 +194,6 @@ inline double Leaf::evaluate_psi_leaf(double target_psi_leaf) {
   profit_ = profit_psi_leaf_for<K>(psi, psi_soil);
   lambda_emergent_ = lambda_for<K>(psi, psi_soil);
   operating_point_kind_ = OperatingPointKind::Prescribed;
-  note_vpd_seat();
   return profit_;
 }
 
@@ -299,6 +304,12 @@ inline std::vector<double> Leaf::dprofit_dpsi_leaf_checked(double psi_leaf) {
 // writes no number.
 template <Leaf::CostCurve K>
 inline void Leaf::optimise_psi_leaf_single() {
+  solve_psi_leaf<K>();
+  note_vpd_seat();
+}
+
+template <Leaf::CostCurve K>
+inline void Leaf::solve_psi_leaf() {
   clear_collar_solve_state();
 
   if (!supply_is_single_layer()) {
@@ -340,7 +351,6 @@ inline void Leaf::optimise_psi_leaf_single() {
     profit_ = profit_psi_leaf_for<K>(psi_wet, psi_soil);
     lambda_emergent_ = lambda_for<K>(psi_wet, psi_soil);
     operating_point_kind_ = OperatingPointKind::HydraulicShutdown;
-    note_vpd_seat();
     return;
   }
   // A log-link objective with A <= 0 at the dry end has no maximum, and the
@@ -350,7 +360,6 @@ inline void Leaf::optimise_psi_leaf_single() {
       profit_ = profit_psi_leaf_for<K>(psi_wet, psi_soil);
       lambda_emergent_ = lambda_for<K>(psi_wet, psi_soil);
       operating_point_kind_ = OperatingPointKind::BoundarySoil;
-      note_vpd_seat();
       return;
     }
   }
@@ -416,7 +425,6 @@ inline void Leaf::optimise_psi_leaf_single() {
   // collar route (see maximise_profit_over_collar).
   profit_ = profit_psi_leaf_for<K>(opt_psi_leaf_, psi_soil);
   lambda_emergent_ = lambda_for<K>(opt_psi_leaf_, psi_soil);
-  note_vpd_seat();
   (void)profit_opt;
 }
 

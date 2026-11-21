@@ -1317,6 +1317,11 @@ public:
   double evaluate_root_collar_psi(double target_opt_root_psi);
   template <CostCurve K>
   double evaluate_root_collar_psi_for(double target_opt_root_psi);
+  // The same placement without counting the seat, for a restore.
+  template <CostCurve K>
+  double place_collar_point(double target_opt_root_psi);
+  // find_root_collar_psi_for's solve without counting the seat.
+  template <CostCurve K> void solve_collar_point();
   // evaluate_root_collar_psi once prepare_collar_solve has run this step, so
   // evaluations share one prepare; refuses a target outside [bound_a, bound_b].
   template <CostCurve K>
@@ -1428,6 +1433,8 @@ public:
   template <CostCurve K> static constexpr BenefitLink benefit_link();
   template <CostCurve K> double benefit_link_deriv(double A) const;
   template <CostCurve K> void optimise_psi_leaf_single();
+  // Its solve without counting the seat.
+  template <CostCurve K> void solve_psi_leaf();
   // The leaf route's dry bound from `psi_soil`: dry_end<K>(), or nearer, the
   // potential at which the stem carries flux_ceiling(), with `*capped` saying which.
   template <CostCurve K> double leaf_dry_bound(double psi_soil, bool* capped);
@@ -1481,6 +1488,9 @@ public:
 
   template <CostCurve K>
   double evaluate_psi_leaf(double target_psi_leaf);
+  // The same placement without counting the seat, for a restore.
+  template <CostCurve K>
+  double place_psi_leaf(double target_psi_leaf);
   // Calls `read` with the temperature block at leaf_temp + temp_fd_step,
   // then at leaf_temp - temp_fd_step, and restores every member the block
   // writes; a member added to update_temperature_dependent_params must be
@@ -1608,8 +1618,9 @@ public:
   // is defined. Not in update_temperature_dependent_params, whose differences at
   // T +/- h must not move it; the VPD route into the derivative is dgc_dT's.
   void set_leaf_vpd(double leaf_temp);
-  // Count the seated deficit on its floor. Called where a solve places the
-  // operating point it leaves the leaf at, after that point's set_leaf_vpd.
+  // Count the seated deficit on its floor: once as each solve, replay or
+  // prescribed point returns, and once as the surface places the held
+  // coordinates. A restore puts back a point already counted and counts none.
   void note_vpd_seat() const;
   // Explicit energy balance, Tleaf = Tair + (Rn - lambda*E) / (rho*cp/ra + g_rad),
   // E in kg H2O m^-2 s^-1: affine in E, so `dT_dE` (when non-null) is a constant.

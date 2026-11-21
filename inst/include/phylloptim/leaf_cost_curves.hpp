@@ -1520,7 +1520,6 @@ inline void Leaf::set_profitmax_degenerate_state(double psi_leaf,
   thermal_cost_ = 0;
   hydraulic_cost_ = util::na_value;  // as profit_psi_leaf_for's arm (hazard 8)
   lambda_emergent_ = util::na_value;
-  note_vpd_seat();
 }
 
 // --- runtime curve selection --------------------------------------------------
