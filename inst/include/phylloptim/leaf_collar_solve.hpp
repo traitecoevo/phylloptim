@@ -1017,23 +1017,16 @@ inline double Leaf::dprofit_at_collar_psi(double opt_root_psi, bool* feasible) {
     // from the same E_up_ and psi.
     dpsileaf_dpsi = (1.0 / f_leaf) * dEpsileaf_dpsi;
   } else {
-    // NaN from the supply means "use finite differences" (hazard 6). A probe
-    // past the continuity root has no leaf potential, which is the exit above
-    // reached a step away, so it exits the same way rather than throwing.
+    // NaN from the supply means "use finite differences" (hazard 6): of the
+    // uptake alone, which is defined past the continuity root, so a probe there
+    // cannot refuse; the stem's slopes stay analytic, as in the branch above.
     const double h = 1e-6;
-    const auto psi_leaf_at = [&](double x, double& out) {
-      E_from_Soil_to_Root_Collar(x, supply_psi_soil());
-      if (!stem_carries(E_up_, x)) {
-        return false;
-      }
-      out = transpiration_to_psi_leaf(E_up_, x);
-      return true;
-    };
-    double up = 0.0, down = 0.0;
-    if (!psi_leaf_at(psi + h, up) || !psi_leaf_at(psi - h, down)) {
-      return 0.0;
-    }
-    dpsileaf_dpsi = (up - down) / (2.0 * h);
+    E_from_Soil_to_Root_Collar(psi + h, supply_psi_soil());
+    const double E_hi = E_up_;
+    E_from_Soil_to_Root_Collar(psi - h, supply_psi_soil());
+    const double dEup_fd = (E_hi - E_up_) / (2.0 * h);
+    dpsileaf_dpsi =
+        (1.0 / f_leaf) * (dEup_fd / leaf_specific_conductance_max_ + f_psi);
   }
 
 

@@ -1,6 +1,7 @@
 # phylloptim 0.40.3
 
-- The collar gradient's finite difference at a kink in the uptake no longer throws when one of its probes falls past the continuity root, where the soil delivers more than the stem can carry. It takes the no-gradient exit the collar itself takes there, as `dprofit_at_collar_psi`'s guard intended. A run that rejects and retries a step never saw the throw; plant's invasion replay, which takes a recorded step as it is, died on it within decades of a pulsed TF24 stand (#282).
+- At a kink in the uptake, the collar gradient differences the uptake rather than the leaf potential, keeping the stem's slopes analytic. Within a step of the continuity root the old difference asked for a leaf potential the stem could not carry and threw; a run that retries the step moved on, but plant's invasion replay, which cannot, died on it (#282).
+- Results move only at such a kink: the golden files are bit-identical, and a plant TF24 stand that reached one moved its fitness by 2e-6.
 
 # phylloptim 0.40.2
 

@@ -2188,7 +2188,7 @@ equations:
     reads: [ca, atm_kpa, umol_to_mol, kPa_to_Pa, leaf_specific_conductance_max, use_energy_balance_]
     writes: []
     kind: derivative
-    note: 'The collar potential is the decision variable and $\psi_\mathrm{leaf}$ follows by continuity (leaf_from_collar), whose slope is the second fraction: $E_\mathrm{up}''$ is the soil-to-collar conductance (analytic, with a 1e-6 central difference of the transport at a layer kink, and the no-gradient exit where a probe of it falls past the continuity root). $\partial C/\partial \psi_r$ is non-zero only for a curve whose cost reads the upstream potential (JS22). The same sentinels as the leaf route. The residual flux reads the collar through its ceiling, so $\partial g_c/\partial \psi_r$ gains $-\frac{g_c}{E}\,\partial r^*/\partial \psi_r$ (residual_flux), appended; an exact zero at $g_\min = 0$.'
+    note: 'The collar potential is the decision variable and $\psi_\mathrm{leaf}$ follows by continuity (leaf_from_collar), whose slope is the second fraction: $E_\mathrm{up}''$ is the soil-to-collar conductance (analytic, with a 1e-6 central difference of the transport at a layer kink). $\partial C/\partial \psi_r$ is non-zero only for a curve whose cost reads the upstream potential (JS22). The same sentinels as the leaf route. The residual flux reads the collar through its ceiling, so $\partial g_c/\partial \psi_r$ gains $-\frac{g_c}{E}\,\partial r^*/\partial \psi_r$ (residual_flux), appended; an exact zero at $g_\min = 0$.'
 
   continuity_root:
     section: solve
