@@ -176,11 +176,9 @@ inline double Leaf::residual_demand_at(double leaf_temp) const {
 
 inline double Leaf::residual_demand_dT(double leaf_temp) const {
   const double D = leaf_vpd_at(leaf_temp);
-  // The deficit's slope is the saturation curve's, and zero on its floor --
-  // the same rule dprofit_energy_balance_term applies to the stomatal part.
-  const double dD_dT = (use_energy_balance_ && D > vpd_leaf_min)
-                           ? saturation_vapour_pressure_slope(leaf_temp)
-                           : 0.0;
+  // The deficit's slope through its soft floor, as dprofit_energy_balance_term
+  // reads it for the stomatal part.
+  const double dD_dT = leaf_vpd_slope_at(leaf_temp);
   return (g_min * g_min_factor_temp_deriv(leaf_temp) * D +
           g_min_at(leaf_temp) * dD_dT) /
          atm_kpa_ / kg_to_mol_h2o;

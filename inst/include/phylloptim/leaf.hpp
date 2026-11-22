@@ -134,6 +134,60 @@ static_assert(n_leaf_pars == par_NIR + 1,
 // where used, so a direction in stem_P50 reaches them by the chain rule.
 template <class S> using leaf_pars = std::array<S, n_leaf_pars>;
 
+// The soft maximum of d and the split's floor, d + softplus(d0 - d) at width w,
+// and its slope in d, the logistic of (d - d0)/w. Written so neither overflows:
+// e = exp(-|z|) is at most 1 whichever side of the floor d is.
+template <class T>
+inline std::pair<T, T> bl_co2_split_soft_floor(const T& d) {
+  using std::exp;
+  using std::log1p;
+  using odelia::util::to_passive;
+  const double s = 1.0 / bl_co2_split_floor_width;
+  const T z = T(s) * (T(bl_co2_split_floor) - d);
+  const bool above = to_passive(z) <= 0.0;
+  const T e = above ? T(exp(z)) : T(exp(-z));
+  const T d_s = above ? T(d + log1p(e) / T(s))
+                      : T(T(bl_co2_split_floor) + log1p(e) / T(s));
+  const T dds_dd = above ? T(T(1.0) / (T(1.0) + e)) : T(e / (T(1.0) + e));
+  return {d_s, dds_dd};
+}
+
+// The floored d at a split conductance g_c: d_s at the g_c,hat the split took
+// to g_c, found as the root of g_c,hat / d_s(1 - k g_c,hat) - g_c. The split is
+// rising in g_c,hat, with d_s at most 1 + w log 2, so the root lies in
+// [0, g_c (1 + w)]: Newton from the plain series' g_c / (1 + k g_c), bisecting
+// whenever a step leaves the bracket. Solved at double, then one Newton step at
+// T, which carries the root's derivative in g_c without recording the search.
+template <class T>
+inline T bl_co2_split_floored_d_at(const T& gc, double k) {
+  using odelia::util::to_passive;
+  const double g = to_passive(gc);
+  if (!(g > 0.0)) {
+    return bl_co2_split_soft_floor(T(1.0)).first;
+  }
+  auto residual = [&](double x, double& slope) {
+    const auto [d_s, dds_dd] = bl_co2_split_soft_floor(1.0 - k * x);
+    slope = 1.0 / d_s + x * k * dds_dd / (d_s * d_s);
+    return x / d_s - g;
+  };
+  double lo = 0.0, hi = g * (1.0 + bl_co2_split_floor_width);
+  double x = g / (1.0 + k * g), slope = 1.0;
+  for (int i = 0; i < 100; ++i) {
+    const double f = residual(x, slope);
+    if (f == 0.0) break;
+    (f < 0.0 ? lo : hi) = x;
+    double next = x - f / slope;
+    if (!(next > lo && next < hi)) next = 0.5 * (lo + hi);
+    const bool done = std::abs(next - x) <= 4e-16 * x;
+    x = next;
+    if (done) break;
+  }
+  residual(x, slope);
+  const T x_T = T(x) - (T(x) / bl_co2_split_soft_floor(T(1.0) - T(k) * T(x)).first - gc) /
+                       T(slope);
+  return bl_co2_split_soft_floor(T(T(1.0) - T(k) * x_T)).first;
+}
+
 class Leaf {
 public:
   Leaf();
@@ -503,8 +557,12 @@ public:
   double g_min_at(double leaf_temp) const {
     return g_min == 0.0 ? 0.0 : g_min * g_min_factor(leaf_temp);
   }
-  // The leaf-to-air deficit at a leaf temperature, as set_leaf_vpd seats it.
+  // The leaf-to-air deficit at a leaf temperature, as set_leaf_vpd seats it,
+  // and its slope in leaf temperature (zero off the energy balance).
   double leaf_vpd_at(double leaf_temp) const;
+  double leaf_vpd_slope_at(double leaf_temp) const;
+  // The soft floor on a deficit d, at any scalar: {D, dD/dd}.
+  template <class S> static std::pair<S, S> vpd_soft_floor(const S& d);
   // The most the stem can ever carry from an upstream potential:
   // kmax (G(inf) - G(psi_up)).
   double supply_ceiling(double psi_upstream) const;
@@ -1618,7 +1676,7 @@ public:
   // is defined. Not in update_temperature_dependent_params, whose differences at
   // T +/- h must not move it; the VPD route into the derivative is dgc_dT's.
   void set_leaf_vpd(double leaf_temp);
-  // Count the seated deficit on its floor: once as each solve, replay or
+  // Count a deficit seated below vpd_leaf_min: once as each solve, replay or
   // prescribed point returns, and once as the surface places the held
   // coordinates. A restore puts back a point already counted and counts none.
   void note_vpd_seat() const;
@@ -1867,6 +1925,7 @@ public:
   template <class S> S saturation_vapour_pressure_on(const S& temp) const;
   template <class S> S saturation_vapour_pressure_slope_on(const S& temp) const;
   template <class S> S leaf_vpd_on(const S& temp) const;
+  template <class S> S leaf_vpd_slope_on(const S& temp) const;
   template <class S> S gc_per_flux_on(const S& temp) const;
   template <class S> S g_min_factor_on(const S& temp) const;
   // The residual flux's demand per unit g_min: the cuticle's factor times the
@@ -2183,13 +2242,14 @@ public:
   // Conductance to water vapour, mol H2O m^-2 s^-1, from the solved CO2
   // conductance; an accessor (hazard 5). With the energy balance on it is the
   // total leaf-to-air conductance, recovered past the boundary layer's split as
-  // g_c / (1 + k g_c): compare a measured gs with stom_cond_stomatal_H2O().
+  // g_c d_s, the floored d at g_c: compare a measured gs with
+  // stom_cond_stomatal_H2O().
   double stom_cond_H2O() const {
     if (!use_energy_balance_) {
       return stom_cond_CO2_ * H2O_CO2_stom_diff_ratio_;
     }
-    return stom_cond_CO2_ /
-           (1.0 + boundary_layer_co2_excess() * stom_cond_CO2_) *
+    return stom_cond_CO2_ *
+           bl_co2_split_floored_d_at(stom_cond_CO2_, boundary_layer_co2_excess()) *
            H2O_CO2_stom_diff_ratio_;
   }
   // Boundary-layer conductance to water vapour, mol H2O m^-2 s^-1: the molar
@@ -2202,8 +2262,8 @@ public:
   // only with the energy balance on, so the gate-off path stays bit-identical.
   double boundary_layer_co2_excess() const;
   template <class T> std::pair<T, T> boundary_layer_split_CO2(const T& gc_hat) const;
-  // The split's slope at a solved conductance, (1 + k g_c)^2, for the derivative
-  // surface; exact above the floor, where every solved point is, refused below.
+  // The split's slope at a solved conductance, for the derivative surface: the
+  // split's own, at the g_c,hat that g_c came from; refused on the floor.
   template <class T> T boundary_layer_split_slope_at(const T& gc) const;
   // Stomatal conductance to water vapour, 1/g_s = 1/g_total - 1/g_b, mol H2O
   // m^-2 s^-1. Refuses where g_total >= g_b; the refusal is here, not in the

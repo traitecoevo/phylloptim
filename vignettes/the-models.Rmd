@@ -806,7 +806,9 @@ $$T_{\rm leaf}=T_{\rm air}+\frac{R_{n,\rm iso}-\lambda_v E}{\rho c_p/r_a+g_R},\q
 
 with no clamp: `set_drivers()` refuses drivers under which a leaf the solve can reach would be past what the model can evaluate. $R_{n,\rm iso}$ is the isothermal net radiation, absorbed shortwave less $(1-\varepsilon_a)\sigma T_{\rm air}^4$ with a Brutsaert sky emissivity $\varepsilon_a$ that rises with air temperature and humidity and is held below 1 by a soft minimum of width 0.002, so the longwave term goes to zero smoothly where the fit passes unity. The leaf's own emission, which goes as $T_{\rm leaf}^4$, is linearised about $T_{\rm air}$ into the radiative conductance $g_R$, which is what keeps the balance explicit: $T_{\rm leaf}$ is affine in `E`, so `dT/dE = −λ_v/(\rho c_p/r_a + g_R)` everywhere. Warming the leaf also raises its own vapour pressure, so the deficit driving diffusion is not the atmospheric one:
 
-$$D_{\rm leaf}=\max\!\big(D_{\rm air}+e_s(T_{\rm leaf})-e_s(T_{\rm air}),\;D_{\min}\big)$$
+$$D_{\rm leaf}=D_{\min}+w_D\ln\!\big(1+e^{(d-D_{\min})/w_D}\big),\qquad d=D_{\rm air}+e_s(T_{\rm leaf})-e_s(T_{\rm air})$$
+
+a soft maximum of the deficit and a floor $D_{\min}$ = 0.01 kPa, of width $w_D$ = 0.005 kPa, that keeps a leaf cooled past its dew point from reporting a negative conductance. It is smooth because an optimum can sit there; it is $d$ to the last bit more than 0.19 kPa above the floor.
 
 That closes a feedback loop: `E` sets `T_leaf`, which sets `D_leaf`, which sets `g_c`, which sets `E`. It is why the energy-balance path is solved rather than evaluated, and why every derivative on it carries a `dT/dE` term.
 

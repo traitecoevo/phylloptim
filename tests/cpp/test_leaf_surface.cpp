@@ -1922,7 +1922,8 @@ void test_the_position_slope_beside_a_layer_and_an_end() {
      "at either end the position has no slope");
 }
 
-// The vapour deficit held at its floor is counted, and only there.
+// A read of the deficit below vpd_leaf_min, where the soft floor holds it, is
+// counted, and only there.
 void test_the_vapour_deficit_floor_is_counted() {
   printf("the vapour deficit's floor is a counted clamp site\n");
   Drivers d;
@@ -1930,13 +1931,13 @@ void test_the_vapour_deficit_floor_is_counted() {
   l.use_energy_balance_ = true;
   const std::size_t before = l.clamp_count(phylloptim::CLAMP_VPD_LEAF_FLOOR);
   const double warm = l.leaf_vpd_at(l.Tair_);
-  ok(warm > phylloptim::vpd_leaf_min &&
+  ok(warm == l.atm_vpd_ &&
          l.clamp_count(phylloptim::CLAMP_VPD_LEAF_FLOOR) == before,
      "a leaf at air temperature reads the deficit unfloored and counts nothing");
   const double cold = l.leaf_vpd_at(l.Tair_ - 30.0);
   ok(cold == phylloptim::vpd_leaf_min &&
          l.clamp_count(phylloptim::CLAMP_VPD_LEAF_FLOOR) == before + 1,
-     "a leaf below the dew point reads the floor, counted once");
+     "a leaf far below the dew point reads the floor itself, counted once");
   ok(std::string(phylloptim::clamp_site_name(phylloptim::CLAMP_VPD_LEAF_FLOOR)) ==
          "vpd_leaf_floor",
      "the site is named");
@@ -1980,8 +1981,9 @@ void check_seat_counted_once(phylloptim::Leaf& l, phylloptim::Leaf::OperatingPoi
   constexpr int seated = phylloptim::CLAMP_VPD_LEAF_SEATED;
   l.clear_clamp_counts();
   l.optimise();
-  ok(l.operating_point_kind() == kind && l.vpd_leaf_ == phylloptim::vpd_leaf_min,
-     what + ": the fixture seats the kind it is here for, on the floor");
+  ok(l.operating_point_kind() == kind &&
+         l.vpd_leaf_ < phylloptim::Leaf::vpd_soft_floor(phylloptim::vpd_leaf_min).first,
+     what + ": the fixture seats the kind it is here for, past the dew point");
   ok(l.clamp_count(seated) == 1, what + ": the solve counts the seat once");
   const bool collar = l.model_route() == "collar";
   if (collar) {
@@ -2084,11 +2086,100 @@ void test_the_seated_vapour_deficit_floor_is_counted_once_per_seat() {
   phylloptim::Leaf plain = make_pm_leaf(d, {0.5}, {1.0}, true);
   plain.clear_clamp_counts();
   plain.find_root_collar_psi();
-  ok(plain.vpd_leaf_ > phylloptim::vpd_leaf_min && plain.clamp_count(seated) == 0,
+  ok(plain.vpd_leaf_ > phylloptim::Leaf::vpd_soft_floor(phylloptim::vpd_leaf_min).first &&
+         plain.clamp_count(seated) == 0,
      "an ordinary solve, off the floor, counts the seat never");
   plain.replay_operating_point(plain.opt_root_psi_, plain.operating_point_kind());
   (void)profit_row_at_current_point(plain, phylloptim::par_kmax);
   ok(plain.clamp_count(seated) == 0, "nor does its replay or its surface");
+}
+
+// An interior optimum walked through the dew point by the air's deficit, from a
+// leaf well below it, through the deficit's soft floor, to one above it. The
+// collar's row is the implicit function theorem on the marginal, so it holds
+// only where the marginal is differentiable; with a hard floor the optimum sat
+// on its kink over a range of drivers and the row read 0.007 where a re-solve
+// read zero. Each row is held to the best of three steps (hazard 15). With a
+// cuticle too, whose residual flux reads the deficit's slope.
+void test_rows_through_the_dew_point() {
+  printf("the collar and profit rows through the dew point match a re-solve\n");
+  using Kind = phylloptim::Leaf::OperatingPointKind;
+  const double d0 = phylloptim::vpd_leaf_min, w = phylloptim::vpd_leaf_floor_width;
+  for (double g_min : {0.0, 5e-4}) {
+  const auto solved = [g_min](double vpd, double ks_scale) {
+    Drivers d = dew_point_drivers();
+    d.atm_vpd = vpd;
+    d.K_s *= ks_scale;
+    phylloptim::Leaf l = make_pm_leaf(d, {0.5}, {1.0}, true);
+    l.g_min = g_min;
+    l.optimise();
+    return l;
+  };
+  int compared = 0, below = 0, in_band = 0, above = 0;
+  double worst_collar = 0.0, worst_profit = 0.0;
+  for (int i = 0; i <= 30; ++i) {
+    const double vpd = 1.10 + 0.005 * i;
+    phylloptim::Leaf l = solved(vpd, 1.0);
+    const std::string at = " at atm_vpd " + std::to_string(vpd) +
+                           " g_min " + std::to_string(g_min);
+    if (l.operating_point_kind() != Kind::Interior) {
+      ok(false, "the fixture solves to an interior optimum" + at);
+      continue;
+    }
+    const double raw = l.atm_vpd_ + l.saturation_vapour_pressure(l.Tleaf_) -
+                       l.saturation_vapour_pressure(l.Tair_);
+    below += raw < d0 - 4.0 * w;
+    in_band += std::abs(raw - d0) <= 4.0 * w;
+    above += raw > d0 + 4.0 * w;
+    // A step in kmax is a step in K_s, which set_physiology scales into it.
+    double collar_row = 0.0;
+    {
+      using T = odelia::ode::tangent_scalar<double>;
+      phylloptim::leaf_pars<T> pars;
+      const phylloptim::leaf_pars<double> seated = l.passive_pars();
+      for (std::size_t k = 0; k < pars.size(); ++k) pars[k] = T(seated[k]);
+      odelia::ode::set_direction(pars[phylloptim::par_kmax], 1.0);
+      std::vector<T> soil, r_h, r_v;
+      for (int k = 0; k < l.supply_n_layers(); ++k) {
+        soil.push_back(T(l.roots_.psi_soil_[std::size_t(k)]));
+        r_h.push_back(T(l.roots_.network_.r_R_H_min[std::size_t(k)]));
+        r_v.push_back(T(l.roots_.network_.r_R_V_sum[std::size_t(k)]));
+      }
+      const phylloptim::SupplyInputs<T> supply{soil, r_h, r_v,
+                                               pars[phylloptim::par_root_P50],
+                                               pars[phylloptim::par_root_c]};
+      const auto draw = l.supply_draw_at<T>(T(l.opt_root_psi_), supply);
+      const double curvature =
+          l.profit_curvature_at_collar<phylloptim::Leaf::CostCurve::TF24>();
+      collar_row = odelia::ode::derivative_along(
+          l.operating_collar<phylloptim::Leaf::CostCurve::TF24, T>(draw, pars, curvature));
+    }
+    const double profit_row = profit_row_at_current_point(l, phylloptim::par_kmax);
+    double err_collar = std::numeric_limits<double>::infinity(), err_profit = err_collar;
+    for (double rel : {1e-3, 1e-4, 1e-5}) {
+      const phylloptim::Leaf up = solved(vpd, 1.0 + rel), dn = solved(vpd, 1.0 - rel);
+      const double h = rel * l.leaf_specific_conductance_max_;
+      const double fd_collar = (up.opt_root_psi_ - dn.opt_root_psi_) / (2 * h);
+      const double fd_profit = (up.profit_ - dn.profit_) / (2 * h);
+      err_collar = std::min(err_collar, std::abs(collar_row - fd_collar) /
+                                            std::max(std::abs(fd_collar), 1e-2));
+      err_profit = std::min(err_profit, std::abs(profit_row - fd_profit) /
+                                            std::max(std::abs(fd_profit), 1e-12));
+    }
+    ok(err_collar < 1e-4, "the collar row matches a re-solve" + at + ": " +
+                              std::to_string(err_collar));
+    ok(err_profit < 1e-6, "the profit row matches a re-solve" + at + ": " +
+                              std::to_string(err_profit));
+    worst_collar = std::max(worst_collar, err_collar);
+    worst_profit = std::max(worst_profit, err_profit);
+    ++compared;
+  }
+  printf("    g_min %g: %d interior optima, %d below the dew point, %d within 4 widths "
+         "of the floor, %d above | worst collar row %.1e, profit row %.1e\n",
+         g_min, compared, below, in_band, above, worst_collar, worst_profit);
+  ok(below >= 3 && in_band >= 5 && above >= 3,
+     "the sweep reached a leaf below, on and above the floor (hazard 16)");
+  }
 }
 
 // At a prescribed collar a caller reads the marginal and then bills at the same
@@ -2728,6 +2819,7 @@ void run_surface() {
   test_the_uptake_rows_through_a_layer_potential();
   test_the_vapour_deficit_floor_is_counted();
   test_the_seated_vapour_deficit_floor_is_counted_once_per_seat();
+  test_rows_through_the_dew_point();
   test_supplied_rows_match_a_resolve_at_every_kind();
   test_shut_leaf_seated_at_its_collar_bills_the_roots_nothing();
   test_surface_refuses_a_curve_it_was_not_solved_on();

@@ -92,17 +92,13 @@ inline double Leaf::dprofit_energy_balance_term(
       drstar_dpsi;
   const double tau = dT_dE * dE_dpsi;
 
-  // dgc/dTleaf at fixed E. Stomatal part: -gc_s * esat'(Tleaf)/D, negative (a
-  // hotter leaf has a larger deficit) and zero on the deficit's floor; the
-  // residual's part is appended. Both pass through the boundary layer's split,
-  // which reads no leaf temperature.
+  // dgc/dTleaf at fixed E. Stomatal part: -gc_s * (dD/dTleaf)/D, negative (a
+  // hotter leaf has a larger deficit) and fading to zero on the deficit's soft
+  // floor; the residual's part is appended. Both pass through the boundary
+  // layer's split, which reads no leaf temperature.
   const double gc_s = gc_const * E_s;
   const double dgc_dT =
-      (((vpd_leaf_ > vpd_leaf_min)
-            ? -gc_s * saturation_vapour_pressure_slope(Tleaf) / vpd_leaf_
-            : 0.0) +
-       dgc_dT_residual) *
-      bl_slope;
+      (-gc_s * leaf_vpd_slope_at(Tleaf) / vpd_leaf_ + dgc_dT_residual) * bl_slope;
 
   // dA/dTleaf total times tau: dA/dpsi along the temperature path, benefit-side
   // only. A cost that reads Tleaf (ProfitMax's thermal cost, LeastCost's
@@ -158,11 +154,13 @@ inline double Leaf::saturation_vapour_pressure_slope(double temp) const {
 //   vpd_leaf = esat(Tleaf) - e_air = atm_vpd + [esat(Tleaf) - esat(Tair)]
 //
 // In that association, so off the energy-balance path the bracket is exactly
-// +0.0 and the result bit-identical. Held at `vpd_leaf_min`, a kept exception to
-// the no-clamp rule: below it the leaf condenses, and a conductance formed from
-// the deficit would be infinite or negative.
+// +0.0 and the result bit-identical. Through vpd_soft_floor: below the dew point
+// the leaf condenses, and a conductance formed from d would be infinite or
+// negative. A read with d under vpd_leaf_min is counted as the floor's.
 inline double Leaf::leaf_vpd_at(double leaf_temp) const {
-  if (!use_energy_balance_) {
+  // [[likely]] keeps the gate-off path as it was (hazard 5): unmarked, the
+  // floor's code here slowed bench_solve's gate-off cuticle arms.
+  if (!use_energy_balance_) [[likely]] {
     return atm_vpd_;
   }
   const double d =
@@ -171,7 +169,45 @@ inline double Leaf::leaf_vpd_at(double leaf_temp) const {
   if (d < vpd_leaf_min) {
     clamps.note(CLAMP_VPD_LEAF_FLOOR);
   }
-  return std::max(d, vpd_leaf_min);
+  return vpd_soft_floor(d).first;
+}
+
+// dD/dTleaf: the saturation curve's slope through the floor's. Counts nothing,
+// so reading a slope beside a value does not count the floor twice.
+inline double Leaf::leaf_vpd_slope_at(double leaf_temp) const {
+  if (!use_energy_balance_) [[likely]] {
+    return 0.0;
+  }
+  const double d =
+      atm_vpd_ + (saturation_vapour_pressure(leaf_temp) -
+                  saturation_vapour_pressure(Tair_));
+  return saturation_vapour_pressure_slope(leaf_temp) * vpd_soft_floor(d).second;
+}
+
+// The soft maximum of d and vpd_leaf_min at width w, d0 + w softplus((d - d0)/w),
+// and its slope in d, the logistic of (d - d0)/w: C-infinity, above d0 always.
+// Written so neither overflows (e = exp(-|z|) <= 1). Past 40 widths e < 5e-18
+// and both are d and 1 to the last bit, so they are returned as such, and a leaf
+// that far from the dew point keeps its value and its tangent rows exactly.
+template <class S>
+inline std::pair<S, S> Leaf::vpd_soft_floor(const S& d) {
+  using std::exp;
+  using std::log1p;
+  using odelia::util::to_passive;
+  const S z = (d - S(vpd_leaf_min)) * S(1.0 / vpd_leaf_floor_width);
+  const double zv = to_passive(z);
+  if (zv > 40.0) {
+    return {d, S(1.0)};
+  }
+  const bool above = zv >= 0.0;
+  const S e = above ? S(exp(-z)) : S(exp(z));
+  // A division, which no build contracts into the sum (gcc's default fuses a
+  // product across statements): the scalar forms must give the double form's
+  // value bit for bit.
+  const S excess = log1p(e) / S(1.0 / vpd_leaf_floor_width);
+  const S D = above ? S(d + excess) : S(vpd_leaf_min + excess);
+  const S slope = above ? S(1.0 / (1.0 + e)) : S(e / (1.0 + e));
+  return {D, slope};
 }
 
 // Also seats the residual conductance at the same temperature: it is read
@@ -184,9 +220,11 @@ inline void Leaf::set_leaf_vpd(double leaf_temp) {
 
 // set_leaf_vpd runs on every candidate a search tries, so leaf_vpd_at's count
 // is the search's incidence of the floor. The state's incidence is this: the
-// deficit the solve left seated, counted where each solve places its point.
+// deficit the solve left seated, counted where each solve places its point. D
+// rises with d, so D below its value at d = vpd_leaf_min is d below it, to
+// rounding.
 inline void Leaf::note_vpd_seat() const {
-  if (use_energy_balance_ && vpd_leaf_ == vpd_leaf_min) {
+  if (use_energy_balance_ && vpd_leaf_ < vpd_soft_floor(vpd_leaf_min).first) {
     clamps.note(CLAMP_VPD_LEAF_SEATED);
   }
 }
@@ -264,21 +302,9 @@ inline double Leaf::boundary_layer_co2_excess() const {
 
 template <class T>
 inline std::pair<T, T> Leaf::boundary_layer_split_CO2(const T& gc_hat) const {
-  using std::exp;
-  using std::log1p;
-  using odelia::util::to_passive;
   const double k = boundary_layer_co2_excess();
-  const double s = 1.0 / bl_co2_split_floor_width;
   const T d = T(1.0) - T(k) * gc_hat;
-  // The soft maximum of d and the floor, d + softplus(d0 - d) at width w, and
-  // its slope in d, the logistic of (d - d0)/w. Written so neither overflows:
-  // e = exp(-|z|) is at most 1 whichever side of the floor d is.
-  const T z = T(s) * (T(bl_co2_split_floor) - d);
-  const bool above = to_passive(z) <= 0.0;
-  const T e = above ? T(exp(z)) : T(exp(-z));
-  const T d_s = above ? T(d + log1p(e) / T(s))
-                      : T(T(bl_co2_split_floor) + log1p(e) / T(s));
-  const T dds_dd = above ? T(T(1.0) / (T(1.0) + e)) : T(e / (T(1.0) + e));
+  const auto [d_s, dds_dd] = bl_co2_split_soft_floor(d);
   const T gc = gc_hat / d_s;
   const T slope = T(1.0) / d_s + gc_hat * T(k) * dds_dd / (d_s * d_s);
   return {gc, slope};
@@ -288,17 +314,18 @@ template <class T>
 inline T Leaf::boundary_layer_split_slope_at(const T& gc) const {
   using odelia::util::to_passive;
   const double k = boundary_layer_co2_excess();
-  const T phi = T(1.0) + T(k) * gc;
-  // d = 1/phi above the floor; within 30 widths of it the floor has moved the
-  // value and this form would not be its slope.
-  if (!(1.0 / to_passive(phi) >
-        bl_co2_split_floor + 30.0 * bl_co2_split_floor_width)) {
+  // Physical points have d >= r_b / r_s, 0.84 at the default ratio; one whose
+  // plain-series d is under 0.4 is far past what the boundary layer carries.
+  if (!(1.0 / (1.0 + k * to_passive(gc)) > bl_co2_split_floor + 0.3)) {
     util::stop("the boundary layer's split of the CO2 path is on its soft floor "
                "at this operating point (g_c = " + util::to_string(to_passive(gc)) +
                "): the transpiration is more than the boundary layer can carry, "
                "so the point is not a physical one to differentiate.");
   }
-  return phi * phi;
+  const T d_s = bl_co2_split_floored_d_at(gc, k);
+  const T gc_hat = gc * d_s;
+  const T dds_dd = bl_co2_split_soft_floor(T(T(1.0) - T(k) * gc_hat)).second;
+  return T(1.0) / d_s + gc_hat * T(k) * dds_dd / (d_s * d_s);
 }
 
 inline double Leaf::stom_cond_stomatal_H2O() const {

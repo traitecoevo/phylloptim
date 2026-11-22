@@ -478,10 +478,19 @@ parameters:
     symbol: 'D_\min'
     units: 'kPa'
     class: constant
-    meaning: 'floor on the leaf-to-air deficit, so a leaf cooled below the dew point cannot report a negative conductance. Kept by decision: it binds at candidate points only, at no solved point since a dark LeastCost leaf is shut at its wet bound (measured over the golden drivers with the energy balance on: 4 solved points before, 0 after)'
+    meaning: 'soft floor on the leaf-to-air deficit, so a leaf cooled below the dew point cannot report a negative conductance: the deficit approaches it from above and never goes below it. A leaf can operate there (an interior optimum can sit past the dew point), so the floor is smooth; a hard one put a kink in the marginal profit'
     source: code
     placeholder: true
     code: phylloptim::vpd_leaf_min
+  vpd_leaf_floor_width:
+    section: vapour
+    symbol: 'w_D'
+    units: 'kPa'
+    class: constant
+    meaning: 'width of the soft floor $D_\min$; the deficit is $d$ to the last bit wherever $d > D_\min + 37\,w_D$, and $D_\min$ itself wherever $d < D_\min - 40\,w_D$'
+    source: code
+    placeholder: true
+    code: phylloptim::vpd_leaf_floor_width
   evaporative_cooling_max:
     section: energy_balance
     symbol: '\Delta T_\max'
@@ -516,7 +525,7 @@ parameters:
     symbol: 'w_d'
     units: '–'
     class: constant
-    meaning: 'width of the soft floor $d_0$; the split is the plain series to the last bit wherever $d > d_0 + 30\,w_d$'
+    meaning: 'width of the soft floor $d_0$; at every physical point ($d \ge r_b/r_s$) the floor moves the split by at most 2.1e-8 of itself'
     source: code (#122)
     placeholder: true
     code: phylloptim::bl_co2_split_floor_width
@@ -1583,13 +1592,13 @@ equations:
     title: Leaf-to-air deficit
     latex: |
       D_\mathrm{leaf} = \begin{cases} D_\mathrm{air} & g_\mathrm{EB} = 0 \\
-      \max\!\big(D_\mathrm{air} + [e_s(T_\mathrm{leaf}) - e_s(T_\mathrm{air})],\; D_\min\big) & g_\mathrm{EB} = 1 \end{cases}
+      D_\min + w_D \ln\!\big(1 + e^{(d - D_\min)/w_D}\big), \quad d = D_\mathrm{air} + [e_s(T_\mathrm{leaf}) - e_s(T_\mathrm{air})] & g_\mathrm{EB} = 1 \end{cases}
     code: phylloptim::Leaf::set_leaf_vpd
-    also: [phylloptim::Leaf::leaf_vpd_at]
-    reads: [use_energy_balance_, atm_vpd, vpd_leaf_min]
+    also: [phylloptim::Leaf::leaf_vpd_at, phylloptim::Leaf::leaf_vpd_slope_at, phylloptim::Leaf::vpd_soft_floor]
+    reads: [use_energy_balance_, atm_vpd, vpd_leaf_min, vpd_leaf_floor_width]
     writes: [vpd_leaf_, g_min_leaf_]
     kind: closed_form
-    note: 'The bracketing is deliberate: at $T_\mathrm{leaf} = T_\mathrm{air}$ it is an exact zero and the prescribed path is bit-identical.'
+    note: 'The bracketing is deliberate: at $T_\mathrm{leaf} = T_\mathrm{air}$ it is an exact zero and the prescribed path is bit-identical. The soft maximum of $d$ and $D_\min$ is C-infinity, its slope in $d$ the logistic of $(d - D_\min)/w_D$, which leaf_vpd_slope_at multiplies by $\Delta(T_\mathrm{leaf})$. A read with $d < D_\min$ is counted (the clamp sites vpd_leaf_floor and vpd_leaf_seated).'
   stomatal_conductance:
     section: vapour
     title: Conductance to CO₂ from the transpiration
@@ -1619,12 +1628,12 @@ equations:
     latex: |
       \frac{1}{g_c} = \frac{1}{\hat g_c} - \frac{r_s - r_b}{g_{bw}}, \qquad r_b = r_s^{2/3}, \qquad g_c = \frac{\hat g_c}{\max_{\mathrm{soft}}(d,\, d_0)}, \quad d = 1 - \frac{(r_s - r_b)\,\hat g_c}{g_{bw}}
     code: phylloptim::Leaf::boundary_layer_split_CO2
-    also: [phylloptim::Leaf::boundary_layer_co2_excess, phylloptim::Leaf::boundary_layer_split_slope_at, phylloptim::Leaf::boundary_layer_cond_H2O]
+    also: [phylloptim::Leaf::boundary_layer_co2_excess, phylloptim::Leaf::boundary_layer_split_slope_at, phylloptim::Leaf::boundary_layer_cond_H2O, phylloptim::bl_co2_split_soft_floor, phylloptim::bl_co2_split_floored_d_at]
     reads: [H2O_CO2_stom_diff_ratio_, bl_co2_split_floor, bl_co2_split_floor_width]
     writes: [stom_cond_CO2_]
     kind: closed_form
     cite: Sabot-2022
-    note: 'With the energy balance on only (#122). $\hat g_c$ (stomatal_conductance) treats the whole leaf-to-air path as stomatal, at $r_s$; the boundary layer''s share diffuses at $r_b = r_s^{2/3}$, the laminar-layer scaling of Sabot et al. (2022) eq 10 (their 1.35 = 1.57$^{2/3}$). E is unchanged: the hydraulics set it, and the boundary layer changes what it says about CO₂. Every partial of $g_c$ is $d g_c / d\hat g_c$ times the same partial of $\hat g_c$, because $g_{bw}$ reads only drivers. The soft maximum is the plain series to the last bit at every physical point ($d \ge r_b/r_s$); it engages only where the deficit is on vpd_leaf_min.'
+    note: 'With the energy balance on only (#122). $\hat g_c$ (stomatal_conductance) treats the whole leaf-to-air path as stomatal, at $r_s$; the boundary layer''s share diffuses at $r_b = r_s^{2/3}$, the laminar-layer scaling of Sabot et al. (2022) eq 10 (their 1.35 = 1.57$^{2/3}$). E is unchanged: the hydraulics set it, and the boundary layer changes what it says about CO₂. Every partial of $g_c$ is $d g_c / d\hat g_c$ times the same partial of $\hat g_c$, because $g_{bw}$ reads only drivers. The soft maximum moves the plain series by at most 2.1e-8 at every physical point ($d \ge r_b/r_s$); it carries the split only past what the boundary layer can carry, as for a leaf at or past its dew point, or a well-plumbed leaf in still air.'
   stomatal_conductance_stomatal:
     section: vapour
     title: Stomatal conductance with the boundary layer removed
@@ -1766,10 +1775,10 @@ equations:
     latex: |
       \Delta_\mathrm{EB} = \tau\, \frac{A_T\, g_c / P \;+\; A'\, (\partial g_c/\partial T)\,(c_a - c_i)/P}{g_{ci}}, \qquad
       \tau = \frac{dT_\mathrm{leaf}}{dE}\, \frac{dE}{d\psi}, \qquad
-      \frac{\partial g_c}{\partial T} = -\, g_c\, \frac{\Delta(T_\mathrm{leaf})}{D_\mathrm{leaf}} \quad (0 \text{ on the floor } D_\min)
+      \frac{\partial g_c}{\partial T} = -\, g_c\, \frac{d D_\mathrm{leaf}/d T_\mathrm{leaf}}{D_\mathrm{leaf}}
     code: phylloptim::Leaf::dprofit_energy_balance_term
-    also: [phylloptim::Curve< Leaf::CostCurve::ProfitMax >::less_cost_temperature_slope, phylloptim::Curve< Leaf::CostCurve::LeastCost >::less_cost_temperature_slope, phylloptim::Leaf::temp_deriv, phylloptim::Leaf::vcmax_temp_deriv, phylloptim::Leaf::thermal_cost_temp_deriv]
-    reads: [fd_step, ca, vpd_leaf_min, use_energy_balance_]
+    also: [phylloptim::Curve< Leaf::CostCurve::ProfitMax >::less_cost_temperature_slope, phylloptim::Curve< Leaf::CostCurve::LeastCost >::less_cost_temperature_slope, phylloptim::Leaf::temp_deriv, phylloptim::Leaf::vcmax_temp_deriv, phylloptim::Leaf::thermal_cost_temp_deriv, phylloptim::Leaf::leaf_vpd_slope_at]
+    reads: [fd_step, ca, use_energy_balance_]
     writes: []
     kind: derivative
     note: '$A_T = \partial A/\partial T_\mathrm{leaf}$ at fixed $c_i$ is a central difference of the temperature block with the fixed step $h$. The term is not observable on its own: it reaches the outputs only through the leaf-route derivative.'
@@ -2647,11 +2656,11 @@ equations:
     latex: |
       g_{s,\mathrm{H_2O}} = 1.67\, \hat g_c
     code: phylloptim::Leaf::stom_cond_H2O
-    also: [phylloptim::Leaf::boundary_layer_co2_excess]
+    also: [phylloptim::Leaf::boundary_layer_co2_excess, phylloptim::bl_co2_split_floored_d_at]
     reads: [H2O_CO2_stom_diff_ratio_, use_energy_balance_]
     writes: []
     kind: closed_form
-    note: 'mol H₂O m⁻² s⁻¹ (#56); bound as `gs_H2O`. The ratio is the settable diffusion ratio. The total leaf-to-air conductance: with the energy balance on, $\hat g_c$ is recovered from the stored $g_c$ as $g_c / (1 + k g_c)$ (boundary_layer_co2_split).'
+    note: 'mol H₂O m⁻² s⁻¹ (#56); bound as `gs_H2O`. The ratio is the settable diffusion ratio. The total leaf-to-air conductance: with the energy balance on, $\hat g_c$ is recovered from the stored $g_c$ as $g_c\,d_s$, the floored $d$ at $g_c$ (bl_co2_split_floored_d_at), which inverts the split exactly, on its soft floor too.'
 
   # --- Medlyn route, soil moisture and the closed form ---------------------------
   # --- medlyn -------------------------------------------------------------------
