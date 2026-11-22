@@ -777,10 +777,14 @@ public:
         }
         out_p[i] = E_i;
         E_up += E_i;
-      } else if (std::is_same_v<T, double> &&
-                 std::abs((collar_psi - soil_at) - zg_p[i]) < kink_tol) {
-        out_p[i] = T(0.0);
       } else {
+        // A collar at the layer's gravity balance takes this arm too: num / r_R
+        // passes through zero there, smoothly. ⚠️ No band around the balance
+        // may read zero instead. It makes the uptake flat across the band, so
+        // the zero-uptake collar is wherever a root-find stops inside it, and a
+        // shut leaf's step in from that collar lands with no flow or with some
+        // as the iterate moves (hazard 19).
+        //
         // Named so both arms are lvalues and the selection binds rather than
         // copies; T(0.0) records nothing either way.
         const T zero(0.0);
