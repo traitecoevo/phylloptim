@@ -152,17 +152,40 @@ inline std::pair<T, T> bl_co2_split_soft_floor(const T& d) {
   return {d_s, dds_dd};
 }
 
-// The floored d at a split conductance g_c: the d_s with d_s = softmax(1 - k g_c
-// d_s), since g_c,hat = g_c d_s. A contraction wherever the split is physical
-// (its factor k g_c dd_s/dd is under 0.2 there), so from the plain series'
-// 1/(1 + k g_c), which is within the floor's 2e-8 of it, a few steps converge.
+// The floored d at a split conductance g_c: d_s at the g_c,hat the split took
+// to g_c, found as the root of g_c,hat / d_s(1 - k g_c,hat) - g_c. The split is
+// rising in g_c,hat, with d_s at most 1 + w log 2, so the root lies in
+// [0, g_c (1 + w)]: Newton from the plain series' g_c / (1 + k g_c), bisecting
+// whenever a step leaves the bracket. Solved at double, then one Newton step at
+// T, which carries the root's derivative in g_c without recording the search.
 template <class T>
 inline T bl_co2_split_floored_d_at(const T& gc, double k) {
-  T d_s = T(1.0) / (T(1.0) + T(k) * gc);
-  for (int i = 0; i < 6; ++i) {
-    d_s = bl_co2_split_soft_floor(T(T(1.0) - T(k) * gc * d_s)).first;
+  using odelia::util::to_passive;
+  const double g = to_passive(gc);
+  if (!(g > 0.0)) {
+    return bl_co2_split_soft_floor(T(1.0)).first;
   }
-  return d_s;
+  auto residual = [&](double x, double& slope) {
+    const auto [d_s, dds_dd] = bl_co2_split_soft_floor(1.0 - k * x);
+    slope = 1.0 / d_s + x * k * dds_dd / (d_s * d_s);
+    return x / d_s - g;
+  };
+  double lo = 0.0, hi = g * (1.0 + bl_co2_split_floor_width);
+  double x = g / (1.0 + k * g), slope = 1.0;
+  for (int i = 0; i < 100; ++i) {
+    const double f = residual(x, slope);
+    if (f == 0.0) break;
+    (f < 0.0 ? lo : hi) = x;
+    double next = x - f / slope;
+    if (!(next > lo && next < hi)) next = 0.5 * (lo + hi);
+    const bool done = std::abs(next - x) <= 4e-16 * x;
+    x = next;
+    if (done) break;
+  }
+  residual(x, slope);
+  const T x_T = T(x) - (T(x) / bl_co2_split_soft_floor(T(1.0) - T(k) * T(x)).first - gc) /
+                       T(slope);
+  return bl_co2_split_soft_floor(T(T(1.0) - T(k) * x_T)).first;
 }
 
 class Leaf {

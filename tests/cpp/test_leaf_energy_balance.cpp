@@ -864,9 +864,9 @@ void test_energy_balance_stomatal_decoupling() {
      "the leaf-to-air deficit outgrows the flux, so gs falls where E rises");
 }
 
-// The boundary layer's split of the CO2 path (#122): the plain series wherever
-// the total conductance is below the boundary layer's own, which is every
-// physical point; finite and rising past it, where only a candidate on
+// The boundary layer's split of the CO2 path (#122): the plain series to its
+// soft floor's 2.1e-8 wherever the total conductance is below the boundary
+// layer's own, which is every physical point; finite and rising past it, where only a candidate on
 // vpd_leaf_min goes; and with the slope the hand-written partials are scaled by.
 void test_boundary_layer_split_of_the_co2_path() {
   printf("the boundary layer's split of the CO2 path (#122)\n");
@@ -920,6 +920,19 @@ void test_boundary_layer_split_of_the_co2_path() {
       (2e-6 / k);
   near(l.boundary_layer_split_CO2(1.0 / k).second / fd_floor, 1.0, 1e-6,
        "and its slope is the derivative of its value on the floor too");
+
+  // Undoing the split recovers the total conductance everywhere, the floor
+  // included, where the split's slope in the floored d exceeds one and a fixed
+  // point on d_s would not converge.
+  double worst_inverse = 0.0;
+  for (double mult : {1e-3, 0.3, 0.9, 0.99, 1.0, 1.01, 1.1, 2.0, 10.0, 1e3}) {
+    const double gc_hat = mult / k;
+    const double gc = l.boundary_layer_split_CO2(gc_hat).first;
+    const double back = gc * phylloptim::bl_co2_split_floored_d_at(gc, k);
+    worst_inverse = std::max(worst_inverse, std::abs(back / gc_hat - 1.0));
+  }
+  ok(worst_inverse < 1e-13, "undoing the split recovers g_c,hat, on the floor too "
+                            "(worst " + std::to_string(worst_inverse) + ")");
   printf("    %d physical rows, worst slope error %.2e\n", rows, worst_slope);
 }
 

@@ -525,7 +525,7 @@ parameters:
     symbol: 'w_d'
     units: '–'
     class: constant
-    meaning: 'width of the soft floor $d_0$; at every physical point ($d \ge r_b/r_s$) the floor moves the split by at most 2e-8 of itself'
+    meaning: 'width of the soft floor $d_0$; at every physical point ($d \ge r_b/r_s$) the floor moves the split by at most 2.1e-8 of itself'
     source: code (#122)
     placeholder: true
     code: phylloptim::bl_co2_split_floor_width
@@ -1628,12 +1628,12 @@ equations:
     latex: |
       \frac{1}{g_c} = \frac{1}{\hat g_c} - \frac{r_s - r_b}{g_{bw}}, \qquad r_b = r_s^{2/3}, \qquad g_c = \frac{\hat g_c}{\max_{\mathrm{soft}}(d,\, d_0)}, \quad d = 1 - \frac{(r_s - r_b)\,\hat g_c}{g_{bw}}
     code: phylloptim::Leaf::boundary_layer_split_CO2
-    also: [phylloptim::Leaf::boundary_layer_co2_excess, phylloptim::Leaf::boundary_layer_split_slope_at, phylloptim::Leaf::boundary_layer_cond_H2O]
+    also: [phylloptim::Leaf::boundary_layer_co2_excess, phylloptim::Leaf::boundary_layer_split_slope_at, phylloptim::Leaf::boundary_layer_cond_H2O, phylloptim::bl_co2_split_soft_floor, phylloptim::bl_co2_split_floored_d_at]
     reads: [H2O_CO2_stom_diff_ratio_, bl_co2_split_floor, bl_co2_split_floor_width]
     writes: [stom_cond_CO2_]
     kind: closed_form
     cite: Sabot-2022
-    note: 'With the energy balance on only (#122). $\hat g_c$ (stomatal_conductance) treats the whole leaf-to-air path as stomatal, at $r_s$; the boundary layer''s share diffuses at $r_b = r_s^{2/3}$, the laminar-layer scaling of Sabot et al. (2022) eq 10 (their 1.35 = 1.57$^{2/3}$). E is unchanged: the hydraulics set it, and the boundary layer changes what it says about CO₂. Every partial of $g_c$ is $d g_c / d\hat g_c$ times the same partial of $\hat g_c$, because $g_{bw}$ reads only drivers. The soft maximum moves the plain series by at most 2e-8 at every physical point ($d \ge r_b/r_s$); it carries the split only past what the boundary layer can carry, as for a leaf at or past its dew point, or a well-plumbed leaf in still air.'
+    note: 'With the energy balance on only (#122). $\hat g_c$ (stomatal_conductance) treats the whole leaf-to-air path as stomatal, at $r_s$; the boundary layer''s share diffuses at $r_b = r_s^{2/3}$, the laminar-layer scaling of Sabot et al. (2022) eq 10 (their 1.35 = 1.57$^{2/3}$). E is unchanged: the hydraulics set it, and the boundary layer changes what it says about CO₂. Every partial of $g_c$ is $d g_c / d\hat g_c$ times the same partial of $\hat g_c$, because $g_{bw}$ reads only drivers. The soft maximum moves the plain series by at most 2.1e-8 at every physical point ($d \ge r_b/r_s$); it carries the split only past what the boundary layer can carry, as for a leaf at or past its dew point, or a well-plumbed leaf in still air.'
   stomatal_conductance_stomatal:
     section: vapour
     title: Stomatal conductance with the boundary layer removed
@@ -2656,11 +2656,11 @@ equations:
     latex: |
       g_{s,\mathrm{H_2O}} = 1.67\, \hat g_c
     code: phylloptim::Leaf::stom_cond_H2O
-    also: [phylloptim::Leaf::boundary_layer_co2_excess]
+    also: [phylloptim::Leaf::boundary_layer_co2_excess, phylloptim::bl_co2_split_floored_d_at]
     reads: [H2O_CO2_stom_diff_ratio_, use_energy_balance_]
     writes: []
     kind: closed_form
-    note: 'mol H₂O m⁻² s⁻¹ (#56); bound as `gs_H2O`. The ratio is the settable diffusion ratio. The total leaf-to-air conductance: with the energy balance on, $\hat g_c$ is recovered from the stored $g_c$ as $g_c / (1 + k g_c)$ (boundary_layer_co2_split).'
+    note: 'mol H₂O m⁻² s⁻¹ (#56); bound as `gs_H2O`. The ratio is the settable diffusion ratio. The total leaf-to-air conductance: with the energy balance on, $\hat g_c$ is recovered from the stored $g_c$ as $g_c\,d_s$, the floored $d$ at $g_c$ (bl_co2_split_floored_d_at), which inverts the split exactly, on its soft floor too.'
 
   # --- Medlyn route, soil moisture and the closed form ---------------------------
   # --- medlyn -------------------------------------------------------------------

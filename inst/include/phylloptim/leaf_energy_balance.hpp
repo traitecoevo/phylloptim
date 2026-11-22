@@ -314,8 +314,8 @@ template <class T>
 inline T Leaf::boundary_layer_split_slope_at(const T& gc) const {
   using odelia::util::to_passive;
   const double k = boundary_layer_co2_excess();
-  // Physical points have d >= r_b / r_s, 0.84 at the default ratio; a point
-  // whose plain-series d is under 0.4 is one the floor carries.
+  // Physical points have d >= r_b / r_s, 0.84 at the default ratio; one whose
+  // plain-series d is under 0.4 is far past what the boundary layer carries.
   if (!(1.0 / (1.0 + k * to_passive(gc)) > bl_co2_split_floor + 0.3)) {
     util::stop("the boundary layer's split of the CO2 path is on its soft floor "
                "at this operating point (g_c = " + util::to_string(to_passive(gc)) +

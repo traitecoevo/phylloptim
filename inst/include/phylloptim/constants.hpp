@@ -78,8 +78,8 @@ inline constexpr double bl_vapour_heat_ratio = 1.075;
 // d = 1 - (r_s - r_b) g_c,hat / g_bw (Leaf::boundary_layer_split_CO2). Wherever
 // the total conductance is below the boundary layer's own, d >= r_b / r_s (0.84 at
 // the default ratio); past it the floor keeps the conductance finite instead of
-// passing a pole. At this width the floor moves the split by at most 2e-8 of
-// itself at those points. A narrower floor left them exact, but its band was
+// passing a pole. At this width the floor moves the split by at most 2.1e-8
+// of itself at those points. A narrower floor left them exact, but its band was
 // stiff: a leaf driven onto it gave a stand's tracked collar a rate Jacobian of
 // -730 per year against steps of 0.007 yr, and the stand gradient diverged.
 inline constexpr double bl_co2_split_floor = 0.1;
