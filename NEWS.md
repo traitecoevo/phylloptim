@@ -1,3 +1,8 @@
+# phylloptim 0.40.3
+
+- At a kink in the uptake, the collar gradient differences the uptake rather than the leaf potential, keeping the stem's slopes analytic. Within a step of the continuity root the old difference asked for a leaf potential the stem could not carry and threw; a run that retries the step moved on, but plant's invasion replay, which cannot, died on it (#282).
+- Results move only at such a kink: the golden files are bit-identical, and a plant TF24 stand that reached one moved its fitness by 2e-6.
+
 # phylloptim 0.40.2
 
 - The vapour deficit's floor has a second clamp site, `vpd_leaf_seated`, appended after `vpd_leaf_floor`: the deficit a solve leaves the leaf with at `vpd_leaf_min`, counted once as each solve, replay or prescribed point returns, whatever its kind, and once as the derivative surface places the held coordinates at that point. A restore after a probe (the curvature's, `marginal_slope_at`'s) puts back a point already counted and counts none, so an interior and a boundary seat each count one on the solve and one on the surface; a caller that hands the surface no `HeldCoords` to share between `operating_collar` and its outputs call places twice and counts two. `vpd_leaf_floor` keeps counting every read that floors, on every candidate a search tries, which on plant's robustness sweep ran about a thousand times the number of solves that seated a leaf there; a consumer reporting how often a leaf reached the dew point reads the new site. For C++ users `CLAMP_SITE_COUNT` is 3; a consumer mirroring the list by position picks the site up by appending. No number moves (#278).
