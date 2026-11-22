@@ -55,6 +55,7 @@ int failures = 0;
 int compared = 0;
 double worst_ratio = 0.0;   // |analytic - differenced| / that row's own floor
 double worst_sum = 0.0;
+double worst_beside = 0.0;  // relative, beside a layer's own potential
 
 void ok(bool cond, const std::string& what) {
   if (!cond) {
@@ -145,6 +146,32 @@ void check(const std::vector<double>& psi_soil,
      "the per-layer rows sum to the aggregate at " + std::to_string(collar));
 }
 
+// Each layer's row with the collar beside that layer's own potential, where a
+// short span's mean conductivity is a quadrature rather than a difference of G.
+// Held to a relative bound, not to the difference's floor: noise in the uptake
+// there would widen that floor and pass itself.
+void check_beside_a_layer(double offset) {
+  Drivers d;
+  const std::vector<double> soil{1.0, 2.0, 3.0}, depth{0.5, 1.0, 1.5};
+  pl::Leaf l = make_leaf(d, soil, depth, soil.size());
+  l.find_root_collar_psi();
+  const double collar = soil[1] + offset;
+  std::vector<double> rows;
+  l.roots_.duptake_dpsi(collar, l.roots_.psi_soil_, rows);
+  for (std::size_t j = 0; j < rows.size(); ++j) {
+    const double h = 1e-5;
+    const double dj = (uptake_of(l, collar + h, j) -
+                       uptake_of(l, collar - h, j)) / (2.0 * h);
+    ++compared;
+    const double rel = std::abs(rows[j] - dj) / std::abs(dj);
+    worst_beside = std::max(worst_beside, rel);
+    ok(rel < 1e-6, "d(uptake_" + std::to_string(j) + ")/d(collar) " +
+                       std::to_string(offset) + " MPa from layer 1: supplied " +
+                       std::to_string(rows[j]) + ", differenced " +
+                       std::to_string(dj));
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -160,6 +187,10 @@ int main() {
       if (soils[k].size() > 1) check(soils[k], depths[k], collar, 1);
     }
   }
+  for (double offset : {-1e-4, -1e-6, -3e-8, 3e-8, 1e-7, 1e-6, 1e-5, 1e-3}) {
+    check_beside_a_layer(offset);
+  }
+  printf("    beside a layer's potential: worst relative gap %.2e\n", worst_beside);
   printf("    %d layer rows compared | worst gap %.2fx the reference's own floor"
          " | rows-to-aggregate %.3e\n", compared, worst_ratio, worst_sum);
   // A row not reached is a row not checked, and the sweep is what reaches them.

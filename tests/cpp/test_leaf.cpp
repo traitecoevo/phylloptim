@@ -1090,8 +1090,8 @@ void test_soil_conductance_is_positive() {
     near(S, (up - dn) / (2.0 * h), 1e-5,
          "conductance matches a central difference at " + std::to_string(layers) + " layers");
     // The collar objective's one walk gives what the two calls give, bit for
-    // bit: at the solved collar, and on a layer's own potential, a kink where
-    // the slope is NaN (hazard 6).
+    // bit: at the solved collar, and on a layer's own potential, where the
+    // slope is the uptake's slope and not a kink.
     const auto same = [](double a, double b) {
       return a == b || (std::isnan(a) && std::isnan(b));
     };
@@ -1114,7 +1114,11 @@ void test_soil_conductance_is_positive() {
              same(sa, sb),
          "and so through the Leaf" + at);
       if (collar != l.opt_root_psi_) {
-        ok(std::isnan(s2), "the slope on a layer's potential is NaN" + at);
+        double hi = 0.0, lo = 0.0;
+        l.roots_.uptake_at(collar + h, l.roots_.psi_soil_, buf, hi);
+        l.roots_.uptake_at(collar - h, l.roots_.psi_soil_, buf, lo);
+        near(s2, (hi - lo) / (2.0 * h), 1e-5,
+             "the slope on a layer's potential is a central difference's" + at);
       }
     }
   }

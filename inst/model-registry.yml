@@ -2093,7 +2093,7 @@ equations:
     writes: [E_up_, soil_consumption_]
     kind: closed_form
     cite: Potkay-2021
-    note: 'Per rooted layer ($i \le L$ = max_soil_layer) in parallel to the collar: the horizontal resistance is $r_{H,\min}$ over the MEAN root conductivity across the span between the collar and the layer ($\psi_\mathrm{lo}, \psi_\mathrm{hi}$ its ends), from two reads of the root integral; conductivity is 1 at negative (positive-pressure) potentials. $E_i < 0$ is a layer gaining water (hydraulic redistribution). soil_consumption_ keeps $E_i$ in mol m⁻² s⁻¹ and E_up_ is in kg (the unit split is deliberate); unrooted layers stay 0.'
+    note: 'Per rooted layer ($i \le L$ = max_soil_layer) in parallel to the collar: the horizontal resistance is $r_{H,\min}$ over the MEAN root conductivity across the span between the collar and the layer ($\psi_\mathrm{lo}, \psi_\mathrm{hi}$ its ends), from two reads of the root integral, or, for a span shorter than 2e-3 MPa between positive potentials, by Simpson''s rule on the integral''s slope, which is smooth through equal potentials where the difference of two reads keeps none of its digits; conductivity is 1 at negative (positive-pressure) potentials. $E_i < 0$ is a layer gaining water (hydraulic redistribution). soil_consumption_ keeps $E_i$ in mol m⁻² s⁻¹ and E_up_ is in kg (the unit split is deliberate); unrooted layers stay 0.'
   single_series_supply:
     section: supply
     title: Single-potential supply
