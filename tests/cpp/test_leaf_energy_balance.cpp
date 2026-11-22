@@ -884,7 +884,8 @@ void test_boundary_layer_split_of_the_co2_path() {
   for (double frac : {0.0, 1e-3, 0.05, 0.25, 0.5, 0.9, 0.999}) {
     const double gc_hat = frac * g_bw / r_s;
     const auto split = l.boundary_layer_split_CO2(gc_hat);
-    exact += split.first == gc_hat / (1.0 - k * gc_hat);
+    const double plain = gc_hat / (1.0 - k * gc_hat);
+    exact += std::abs(split.first - plain) <= 3e-8 * plain;
     const double h = 1e-6 * std::max(gc_hat, 1e-3);
     const double fd = (l.boundary_layer_split_CO2(gc_hat + h).first -
                        l.boundary_layer_split_CO2(gc_hat - h).first) /
@@ -897,7 +898,7 @@ void test_boundary_layer_split_of_the_co2_path() {
     ++rows;
   }
   ok(exact == rows, "at every physical point the split is the plain series, "
-                    "bit for bit (" + std::to_string(exact) + " of " +
+                    "to 3e-8 (" + std::to_string(exact) + " of " +
                     std::to_string(rows) + ")");
   ok(worst_slope < 1e-7, "and its slope is the derivative of its value");
 
@@ -1067,11 +1068,12 @@ void test_leaf_to_air_vpd() {
   near(on.stom_cond_H2O(), g_w, 1e-12,
        "the total conductance is the transpiration divided by the deficit it sees");
   // And to CO2 the boundary layer's share of that series diffuses at
-  // r_s^(2/3), not r_s (#122): 1/g_c = r_s/g_w - (r_s - r_s^(2/3))/g_bw.
+  // r_s^(2/3), not r_s: 1/g_c = r_s/g_w - (r_s - r_s^(2/3))/g_bw, to the
+  // split's soft floor, which moves it by at most 3e-8.
   const double r_s = phylloptim::H2O_CO2_stom_diff_ratio;
   const double g_bw = on.boundary_layer_cond_H2O();
   near(1.0 / on.stom_cond_CO2_,
-       r_s / g_w - (r_s - std::pow(r_s, 2.0 / 3.0)) / g_bw, 1e-12,
+       r_s / g_w - (r_s - std::pow(r_s, 2.0 / 3.0)) / g_bw, 3e-8,
        "1/g_c is the series of the stomatal and boundary-layer resistances");
   ok(on.stom_cond_CO2_ > g_w / r_s,
      "which conducts more CO2 than the whole path at the stomatal ratio");

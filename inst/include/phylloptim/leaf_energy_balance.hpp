@@ -302,21 +302,9 @@ inline double Leaf::boundary_layer_co2_excess() const {
 
 template <class T>
 inline std::pair<T, T> Leaf::boundary_layer_split_CO2(const T& gc_hat) const {
-  using std::exp;
-  using std::log1p;
-  using odelia::util::to_passive;
   const double k = boundary_layer_co2_excess();
-  const double s = 1.0 / bl_co2_split_floor_width;
   const T d = T(1.0) - T(k) * gc_hat;
-  // The soft maximum of d and the floor, d + softplus(d0 - d) at width w, and
-  // its slope in d, the logistic of (d - d0)/w. Written so neither overflows:
-  // e = exp(-|z|) is at most 1 whichever side of the floor d is.
-  const T z = T(s) * (T(bl_co2_split_floor) - d);
-  const bool above = to_passive(z) <= 0.0;
-  const T e = above ? T(exp(z)) : T(exp(-z));
-  const T d_s = above ? T(d + log1p(e) / T(s))
-                      : T(T(bl_co2_split_floor) + log1p(e) / T(s));
-  const T dds_dd = above ? T(T(1.0) / (T(1.0) + e)) : T(e / (T(1.0) + e));
+  const auto [d_s, dds_dd] = bl_co2_split_soft_floor(d);
   const T gc = gc_hat / d_s;
   const T slope = T(1.0) / d_s + gc_hat * T(k) * dds_dd / (d_s * d_s);
   return {gc, slope};
@@ -326,17 +314,18 @@ template <class T>
 inline T Leaf::boundary_layer_split_slope_at(const T& gc) const {
   using odelia::util::to_passive;
   const double k = boundary_layer_co2_excess();
-  const T phi = T(1.0) + T(k) * gc;
-  // d = 1/phi above the floor; within 30 widths of it the floor has moved the
-  // value and this form would not be its slope.
-  if (!(1.0 / to_passive(phi) >
-        bl_co2_split_floor + 30.0 * bl_co2_split_floor_width)) {
+  // Physical points have d >= r_b / r_s, 0.84 at the default ratio; a point
+  // whose plain-series d is under 0.4 is one the floor carries.
+  if (!(1.0 / (1.0 + k * to_passive(gc)) > bl_co2_split_floor + 0.3)) {
     util::stop("the boundary layer's split of the CO2 path is on its soft floor "
                "at this operating point (g_c = " + util::to_string(to_passive(gc)) +
                "): the transpiration is more than the boundary layer can carry, "
                "so the point is not a physical one to differentiate.");
   }
-  return phi * phi;
+  const T d_s = bl_co2_split_floored_d_at(gc, k);
+  const T gc_hat = gc * d_s;
+  const T dds_dd = bl_co2_split_soft_floor(T(T(1.0) - T(k) * gc_hat)).second;
+  return T(1.0) / d_s + gc_hat * T(k) * dds_dd / (d_s * d_s);
 }
 
 inline double Leaf::stom_cond_stomatal_H2O() const {

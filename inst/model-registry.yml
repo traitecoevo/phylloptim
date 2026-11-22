@@ -525,7 +525,7 @@ parameters:
     symbol: 'w_d'
     units: '–'
     class: constant
-    meaning: 'width of the soft floor $d_0$; the split is the plain series to the last bit wherever $d > d_0 + 30\,w_d$'
+    meaning: 'width of the soft floor $d_0$; at every physical point ($d \ge r_b/r_s$) the floor moves the split by at most 2e-8 of itself'
     source: code (#122)
     placeholder: true
     code: phylloptim::bl_co2_split_floor_width
@@ -1633,7 +1633,7 @@ equations:
     writes: [stom_cond_CO2_]
     kind: closed_form
     cite: Sabot-2022
-    note: 'With the energy balance on only (#122). $\hat g_c$ (stomatal_conductance) treats the whole leaf-to-air path as stomatal, at $r_s$; the boundary layer''s share diffuses at $r_b = r_s^{2/3}$, the laminar-layer scaling of Sabot et al. (2022) eq 10 (their 1.35 = 1.57$^{2/3}$). E is unchanged: the hydraulics set it, and the boundary layer changes what it says about CO₂. Every partial of $g_c$ is $d g_c / d\hat g_c$ times the same partial of $\hat g_c$, because $g_{bw}$ reads only drivers. The soft maximum is the plain series to the last bit at every physical point ($d \ge r_b/r_s$); it engages only past what the boundary layer can carry, as for a leaf at or past its dew point, or a well-plumbed leaf in still air.'
+    note: 'With the energy balance on only (#122). $\hat g_c$ (stomatal_conductance) treats the whole leaf-to-air path as stomatal, at $r_s$; the boundary layer''s share diffuses at $r_b = r_s^{2/3}$, the laminar-layer scaling of Sabot et al. (2022) eq 10 (their 1.35 = 1.57$^{2/3}$). E is unchanged: the hydraulics set it, and the boundary layer changes what it says about CO₂. Every partial of $g_c$ is $d g_c / d\hat g_c$ times the same partial of $\hat g_c$, because $g_{bw}$ reads only drivers. The soft maximum moves the plain series by at most 2e-8 at every physical point ($d \ge r_b/r_s$); it carries the split only past what the boundary layer can carry, as for a leaf at or past its dew point, or a well-plumbed leaf in still air.'
   stomatal_conductance_stomatal:
     section: vapour
     title: Stomatal conductance with the boundary layer removed
