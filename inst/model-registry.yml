@@ -2081,11 +2081,13 @@ equations:
     section: supply
     title: Multi-layer root uptake
     latex: |
-      E_i = \frac{\psi_c - \psi_{s,i} - \rho_w g z_i}{r_{H,\min,i}\,\Delta\psi_i / I_i + r_{V,\Sigma,i}}, \qquad
+      E_i = \frac{\psi_c - \psi_{s,i} - \rho_w g z_i}{r_{H,\min,i} / \bar f_i + r_{V,\Sigma,i}}, \qquad
       E_\mathrm{up} = M_w \sum_{i \le L} E_i \\
       \Delta\psi_i = |\psi_c - \psi_{s,i}|,\quad
+      \bar f_i = \tfrac{1}{6}\left[\hat f_r(\psi_\mathrm{lo}) + 4 \hat f_r\!\left(\tfrac{\psi_\mathrm{lo} + \psi_\mathrm{hi}}{2}\right) + \hat f_r(\psi_\mathrm{hi})\right] \ \text{if } \Delta\psi_i < \min(2 \times 10^{-3}, 10^{-2} \psi_\mathrm{lo}), \\
+      \text{else } \bar f_i = I_i / \Delta\psi_i,\quad
       I_i = \hat F_r(\psi_\mathrm{hi}) - \hat F_r(\max(\psi_\mathrm{lo}, 0)) + \max(0, -\psi_\mathrm{lo}) \\
-      E_i = \frac{-\rho_w g z_i}{r_{H,\min,i}/\hat f_r(\psi_c) + r_{V,\Sigma,i}} \ \text{if } |\psi_c - \psi_{s,i}| < 10^{-8}, \qquad
+      \text{and otherwise } E_i = \frac{-\rho_w g z_i}{r_{H,\min,i}/\hat f_r(\psi_c) + r_{V,\Sigma,i}} \ \text{if } |\psi_c - \psi_{s,i}| < 10^{-8}, \qquad
       E_i = 0 \ \text{if } |\psi_c - \psi_{s,i} - \rho_w g z_i| < 10^{-8}
     code: phylloptim::MultiLayerRoots::uptake_impl
     also: [phylloptim::MultiLayerRoots::uptake_at, phylloptim::MultiLayerRoots::supply_over, phylloptim::MultiLayerRoots::held_supply, phylloptim::MultiLayerRoots::set_soil_state, phylloptim::MultiLayerRoots::set_root_network, phylloptim::Leaf::E_from_Soil_to_Root_Collar]
@@ -2093,7 +2095,7 @@ equations:
     writes: [E_up_, soil_consumption_]
     kind: closed_form
     cite: Potkay-2021
-    note: 'Per rooted layer ($i \le L$ = max_soil_layer) in parallel to the collar: the horizontal resistance is $r_{H,\min}$ over the MEAN root conductivity across the span between the collar and the layer ($\psi_\mathrm{lo}, \psi_\mathrm{hi}$ its ends), from two reads of the root integral; conductivity is 1 at negative (positive-pressure) potentials. $E_i < 0$ is a layer gaining water (hydraulic redistribution). soil_consumption_ keeps $E_i$ in mol m⁻² s⁻¹ and E_up_ is in kg (the unit split is deliberate); unrooted layers stay 0.'
+    note: 'Per rooted layer ($i \le L$ = max_soil_layer) in parallel to the collar: the horizontal resistance is $r_{H,\min}$ over the MEAN root conductivity across the span between the collar and the layer ($\psi_\mathrm{lo}, \psi_\mathrm{hi}$ its ends), from two reads of the root integral, or, for a span shorter than 2e-3 MPa and than 1e-2 of its lower end, by Simpson''s rule on the integral''s slope, which is smooth through equal potentials where the difference of two reads keeps none of its digits; a span past the end of the curve conducts nothing either way; conductivity is 1 at negative (positive-pressure) potentials. $E_i < 0$ is a layer gaining water (hydraulic redistribution). soil_consumption_ keeps $E_i$ in mol m⁻² s⁻¹ and E_up_ is in kg (the unit split is deliberate); unrooted layers stay 0.'
   single_series_supply:
     section: supply
     title: Single-potential supply

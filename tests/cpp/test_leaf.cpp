@@ -579,9 +579,10 @@ void test_gradient_reports_feasibility() {
 // a step either side of the collar. Within that step of the continuity root the
 // drier probe is past it, where the stem carries no leaf potential; the uptake
 // is still defined there, so the gradient is the analytic branch's with only the
-// kinked term differenced. The second layer's soil is put at the collar to make
-// the kink, half a step inside the root, by a fixed point: the root moves with
-// the layer, by a sixth as much.
+// kinked term differenced. The second layer's soil is put at the collar's
+// gravity balance (the collar less the layer's head, longer than the uptake's
+// quadrature span) to make the kink, half a step inside the root, by a fixed
+// point: the root moves with the layer, by a sixth as much.
 void test_gradient_difference_crosses_continuity_root() {
   printf("the kink's difference holds a step from the continuity root\n");
   Drivers d;
@@ -591,9 +592,10 @@ void test_gradient_difference_crosses_continuity_root() {
     l.E_from_Soil_to_Root_Collar(x, l.roots_.psi_soil_);
     return l.stem_carries(l.E_up_, x);
   };
+  const double head = make_leaf(d, {0.5, 1.3}, depth).roots_.grav_head_z_[1];
   double collar = 1.3, moved = 1.0;
   for (int i = 0; i < 50 && moved > 1e-12; ++i) {
-    phylloptim::Leaf at = make_leaf(d, {0.5, collar}, depth);
+    phylloptim::Leaf at = make_leaf(d, {0.5, collar - head}, depth);
     double lo = 0.6, hi = 3.0;
     while (hi - lo > 1e-13) {
       const double mid = 0.5 * (lo + hi);
@@ -602,7 +604,8 @@ void test_gradient_difference_crosses_continuity_root() {
     moved = std::abs(lo - 0.5 * step - collar);
     collar = lo - 0.5 * step;
   }
-  phylloptim::Leaf l = make_leaf(d, {0.5, collar}, depth);
+  phylloptim::Leaf l = make_leaf(d, {0.5, collar - head}, depth);
+  ok(head > 2e-3, "the layer's head is longer than the quadrature span");
   ok(carries(l, collar) && !carries(l, collar + step),
      "the collar carries and a step drier does not");
   ok(std::isnan(l.dE_from_soil_dpsi_collar(collar, l.roots_.psi_soil_)),
@@ -1090,8 +1093,8 @@ void test_soil_conductance_is_positive() {
     near(S, (up - dn) / (2.0 * h), 1e-5,
          "conductance matches a central difference at " + std::to_string(layers) + " layers");
     // The collar objective's one walk gives what the two calls give, bit for
-    // bit: at the solved collar, and on a layer's own potential, a kink where
-    // the slope is NaN (hazard 6).
+    // bit: at the solved collar, and on a layer's own potential, where the
+    // slope is the uptake's slope and not a kink.
     const auto same = [](double a, double b) {
       return a == b || (std::isnan(a) && std::isnan(b));
     };
@@ -1114,7 +1117,12 @@ void test_soil_conductance_is_positive() {
              same(sa, sb),
          "and so through the Leaf" + at);
       if (collar != l.opt_root_psi_) {
-        ok(std::isnan(s2), "the slope on a layer's potential is NaN" + at);
+        double hi = 0.0, lo = 0.0;
+        l.roots_.uptake_at(collar + h, l.roots_.psi_soil_, buf, hi);
+        l.roots_.uptake_at(collar - h, l.roots_.psi_soil_, buf, lo);
+        const double fd = (hi - lo) / (2.0 * h);
+        ok(std::abs(s2 - fd) < 1e-6 * std::abs(fd),
+           "the slope on a layer's potential is a central difference's" + at);
       }
     }
   }

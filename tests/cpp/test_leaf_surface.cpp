@@ -1731,12 +1731,12 @@ void test_the_slope_is_one_slope_in_either_coordinate() {
   ok(worst < 1e-4, "the two coordinates agree to 1e-4, ends included");
 }
 
-// Uptake has a kink at each rooted layer's potential, and the marginal is
-// noisy within about 1.5e-6 MPa of one. The position's probes keep clear of it
-// and never straddle it, so they read the slope on the collar's own side; the
-// potential's do neither, and one landing 5e-7 MPa from a kink reads 1e-3 off.
-void test_the_position_slope_keeps_clear_of_a_kink() {
-  printf("marginal_slope_at: the position's probes keep clear of a kink\n");
+// A rooted layer's potential is not a kink: the mean conductivity over a short
+// span is a quadrature, so the marginal is smooth through it. Both coordinates'
+// stencils read the slope a difference on either side reads, with probes
+// landing next to the layer's potential and straddling it.
+void test_the_marginal_slope_is_smooth_at_a_layer_potential() {
+  printf("marginal_slope_at: the slope is smooth through a layer's potential\n");
   using K = phylloptim::Leaf::CostCurve;
   using SC = phylloptim::Leaf::SlopeCoordinate;
   int rows = 0, differ = 0;
@@ -1748,18 +1748,19 @@ void test_the_position_slope_keeps_clear_of_a_kink() {
     for (double c : l.soil_consumption_) v.push_back(c);
     return v;
   };
-  for (double kink : {1.6, 2.0, 2.4}) {
-    // A probe of the potential's 5e-7 MPa from the kink; a collar the
-    // position's central stencil would straddle it from, on either side.
-    for (double offset : {-1e-5 + 5e-7, -4e-6, 4e-6}) {
+  for (double layer : {1.6, 2.0, 2.4}) {
+    // A probe of the potential's 5e-7 MPa from the layer's potential; collars
+    // the position's stencil straddles it from, on either side; and one 3e-8
+    // MPa from it.
+    for (double offset : {-1e-5 + 5e-7, -4e-6, 4e-6, 3e-8}) {
       Drivers d;
       d.PPFD = 1500.0;
-      phylloptim::Leaf l = make_leaf(d, {1.0, kink}, {0.5, 1.0});
+      phylloptim::Leaf l = make_leaf(d, {1.0, layer}, {0.5, 1.0});
       l.TF24_floor_lambda_o = kPriceForFOC;
       l.set_model(K::TF24_floor, true);
       double a, b, at;
       if (!seat_on_polished_interval<K::TF24_floor>(l, 0.5, a, b, at)) continue;
-      at = kink + offset;
+      at = layer + offset;
       if (!(at > a && at < b)) continue;
       l.profit_at_collar_psi<K::TF24_floor>(at, a, b);
       const std::vector<double> before = snapshot(l);
@@ -1768,8 +1769,8 @@ void test_the_position_slope_keeps_clear_of_a_kink() {
       differ += snapshot(l) != before;
       const double potential =
           l.marginal_slope_at<K::TF24_floor>(at, a, b, SC::Potential);
-      // The referee: the quadratic through three points 2e-5 MPa apart on the
-      // collar's side, away from the kink, read back at the collar.
+      // The referee: the quadratic through three points 2e-5 MPa apart on one
+      // side, read back at the collar, from the side away from the layer.
       const double side = offset < 0.0 ? -1.0 : 1.0, h = 2e-5;
       auto M = [&](double p) { return l.dprofit_droot_collar_psi(p); };
       const double ref = -side * (2.5 * M(at + side * h) - 4.0 * M(at + 2.0 * side * h) +
@@ -1779,32 +1780,113 @@ void test_the_position_slope_keeps_clear_of_a_kink() {
       potential_worst = std::max(potential_worst, std::abs(potential - ref) / std::abs(ref));
     }
   }
-  printf("    %d collars next to a kink: position worst %.2e, potential worst "
-         "%.2e, against a difference on the collar's side\n",
+  printf("    %d collars beside a layer's potential: position worst %.2e, "
+         "potential worst %.2e, against a difference on one side\n",
          rows, worst, potential_worst);
-  ok(rows == 9, "every collar lies inside its interval (test is not vacuous)");
-  ok(potential_worst > 1e-4,
-     "a stencil that reaches the kink reads the slope wrong here");
-  ok(worst < 2e-5, "the position's slope is the slope on the collar's side");
+  ok(rows == 12, "every collar lies inside its interval (test is not vacuous)");
+  ok(worst < 2e-5, "the position's slope is the one-sided slope");
+  ok(potential_worst < 2e-5, "and so is the potential's, whose probes reach the layer");
   ok(differ == 0, "the position's probes leave the leaf as they found it");
 }
 
-// Next to an end a step in the position is a small fraction of the clearance in
-// the collar. Here the collar is 2e-4 MPa from the wet end and 1.5e-6 MPa
-// from a layer's potential, so every probe at the base step, and at ten times
-// it, falls inside the clearance, and the stencil answers only at a hundred
-// times it, from the side away from the kink. Its nearest probe is then just
-// outside the clearance, where the marginal is still noisy, so it is held to
-// a difference on that side to 5e-3 only. An end itself has no position.
-void test_the_position_slope_widens_its_step_beside_a_kink() {
-  printf("marginal_slope_at: the position's step widens beside a kink, and an "
-         "end has none\n");
+// The uptake's rows on the tape in the collar and in a layer's soil potential,
+// against a difference of the double walk: with the collar on that layer's
+// potential, beside it, and past the span the quadrature arm covers. And the
+// walk is continuous where the arm begins, at its absolute bound and at its
+// bound relative to the potential.
+void test_the_uptake_rows_through_a_layer_potential() {
+  printf("the uptake's rows through a layer's potential, against a difference\n");
+  using T = odelia::ode::tangent_scalar<double>;
+  Drivers d;
+  const std::vector<double> soil0{1e-3, 2.0, 3.0};
+  phylloptim::Leaf l = make_leaf(d, soil0, {0.5, 1.0, 1.5});
+  l.find_root_collar_psi();
+  const std::size_t n = soil0.size();
+  const auto& net = l.roots_.network_;
+  auto walk = [&](double collar, const std::vector<double>& soil) {
+    std::vector<double> lay(n, 0.0);
+    double total = 0.0;
+    l.roots_.uptake_at(collar, soil, lay, total);
+    return lay;
+  };
+  // Direction 0 is the collar, k + 1 layer k's soil.
+  auto rows_on_tape = [&](double collar, std::size_t direction) {
+    std::vector<T> soil, r_h, r_v;
+    for (std::size_t i = 0; i < n; ++i) {
+      soil.push_back(T(soil0[i]));
+      r_h.push_back(T(net.r_R_H_min[i]));
+      r_v.push_back(T(net.r_R_V_sum[i]));
+    }
+    T c(collar);
+    if (direction == 0) odelia::ode::set_direction(c, 1.0);
+    else odelia::ode::set_direction(soil[direction - 1], 1.0);
+    const phylloptim::SupplyInputs<T> supply{soil, r_h, r_v, T(l.roots_.root_P50),
+                                             T(l.roots_.root_c)};
+    std::vector<T> lay(n, T(0.0));
+    T total(0.0);
+    l.roots_.uptake_at<T>(c, supply, lay, total);
+    std::vector<double> out;
+    for (const T& v : lay) out.push_back(odelia::ode::derivative_along(v));
+    return out;
+  };
+  double worst = 0.0;
+  int compared = 0;
+  for (double offset : {0.0, 3e-8, -1e-6, 1e-4, 5e-3}) {
+    const double collar = soil0[1] + offset;
+    for (std::size_t dir = 0; dir <= n; ++dir) {
+      const std::vector<double> ad = rows_on_tape(collar, dir);
+      const double h = 1e-6;
+      std::vector<double> up_soil = soil0, dn_soil = soil0;
+      double up_c = collar, dn_c = collar;
+      if (dir == 0) { up_c += h; dn_c -= h; }
+      else { up_soil[dir - 1] += h; dn_soil[dir - 1] -= h; }
+      const std::vector<double> up = walk(up_c, up_soil), dn = walk(dn_c, dn_soil);
+      double scale = 0.0;
+      std::vector<double> fd(n);
+      for (std::size_t j = 0; j < n; ++j) {
+        fd[j] = (up[j] - dn[j]) / (2.0 * h);
+        scale = std::max(scale, std::abs(fd[j]));
+      }
+      for (std::size_t j = 0; j < n; ++j) {
+        ++compared;
+        worst = std::max(worst, std::abs(ad[j] - fd[j]) / scale);
+      }
+    }
+  }
+  printf("    %d rows compared, worst %.2e of the direction's largest row\n",
+         compared, worst);
+  ok(compared == 60, "every row was compared (test is not vacuous)");
+  ok(worst < 1e-7, "the rows on the tape are the walk's derivative");
+  // Continuity where the arm begins: 2e-3 from the second layer, and 1e-2 of
+  // the first layer's 1e-3 MPa. A step of 1e-12 MPa across either moves each
+  // layer's draw by its slope times the step, to rounding.
+  double jump = 0.0;
+  for (const auto& [layer, edge] : {std::pair<std::size_t, double>{1, 2e-3},
+                                    std::pair<std::size_t, double>{0, 1e-5}}) {
+    const double eps = 1e-12;
+    const double inside = soil0[layer] + edge * (1.0 - eps);
+    const double outside = soil0[layer] + edge * (1.0 + eps);
+    const double a = walk(inside, soil0)[layer], b = walk(outside, soil0)[layer];
+    const double slope = rows_on_tape(soil0[layer] + edge, 0)[layer];
+    jump = std::max(jump, std::abs(b - a - slope * (outside - inside)) / std::abs(a));
+  }
+  printf("    the draw's jump where the arm begins: %.2e of itself\n", jump);
+  ok(jump < 1e-10, "the walk is continuous where the quadrature arm begins");
+}
+
+// Next to an end a step in the position is a small step in the collar. Here the
+// collar is 2e-4 MPa from the wet end and 1.5e-8 MPa from a layer's potential,
+// and the base step's probes straddle that potential. An end itself has no
+// position.
+void test_the_position_slope_beside_a_layer_and_an_end() {
+  printf("marginal_slope_at: the position's slope beside a layer's potential "
+         "and an end, and none at an end\n");
   using K = phylloptim::Leaf::CostCurve;
   using SC = phylloptim::Leaf::SlopeCoordinate;
-  auto leaf_with = [](double kink, double& a, double& b) {
+  auto leaf_with = [](double layer, double& a, double& b) {
     Drivers d;
     d.PPFD = 1500.0;
-    phylloptim::Leaf l = make_leaf(d, {1.0, kink}, {0.5, 1.0});
+    phylloptim::Leaf l = make_leaf(d, {1.0, layer}, {0.5, 1.0});
     l.TF24_floor_lambda_o = kPriceForFOC;
     l.set_model(K::TF24_floor, true);
     double at;
@@ -1820,23 +1902,21 @@ void test_the_position_slope_widens_its_step_beside_a_kink() {
     (mid - a < 2.015e-4 ? lo : hi) = mid;
   }
   phylloptim::Leaf l = leaf_with(hi, a, b);
-  const double at = hi - 1.5e-6;
+  const double at = hi - 1.5e-8;
   l.profit_at_collar_psi<K::TF24_floor>(at, a, b);
-  // The base step in the collar, and the nearest probe at each width.
   const double dpsi_dz = (at - a) * (b - at) / (b - a);
-  printf("    collar %.3e MPa from the wet end; probes %.1e, %.1e and %.1e MPa "
-         "apart\n", at - a, 1e-4 * dpsi_dz, 1e-3 * dpsi_dz, 1e-2 * dpsi_dz);
-  ok(1.5e-6 + 1e-3 * 3.0 * dpsi_dz < phylloptim::Leaf::marginal_kink_clearance &&
-         1.5e-6 + 1e-2 * dpsi_dz > phylloptim::Leaf::marginal_kink_clearance,
-     "only the widest step clears the kink (test is not vacuous)");
+  printf("    collar %.3e MPa from the wet end; probes %.1e MPa apart\n", at - a,
+         phylloptim::Leaf::position_slope_step * dpsi_dz);
+  ok(phylloptim::Leaf::position_slope_step * dpsi_dz > 1.5e-8,
+     "the probes straddle the layer's potential (test is not vacuous)");
   const double position = l.marginal_slope_at<K::TF24_floor>(at, a, b, SC::Position);
   auto M = [&](double p) { return l.dprofit_droot_collar_psi(p); };
   const double h = 1e-5;
   const double ref = (2.5 * M(at - h) - 4.0 * M(at - 2.0 * h) + 1.5 * M(at - 3.0 * h)) / h;
-  printf("    widened %.8g against %.8g on the far side: %.1e\n", position, ref,
+  printf("    position %.8g against %.8g on one side: %.1e\n", position, ref,
          std::abs(position - ref) / std::abs(ref));
-  ok(std::abs(position - ref) < 5e-3 * std::abs(ref),
-     "the widened stencil answers with the slope on the collar's side");
+  ok(std::abs(position - ref) < 1e-4 * std::abs(ref),
+     "the position's slope is the slope on either side");
   ok(std::isnan(l.marginal_slope_at<K::TF24_floor>(a, a, b, SC::Position)) &&
          std::isnan(l.marginal_slope_at<K::TF24_floor>(b, a, b, SC::Position)),
      "at either end the position has no slope");
@@ -2643,8 +2723,9 @@ void run_surface() {
   test_held_coordinates_at_a_prescribed_collar_move_no_row();
   test_the_curvature_leaves_its_point_as_it_found_it();
   test_the_slope_is_one_slope_in_either_coordinate();
-  test_the_position_slope_keeps_clear_of_a_kink();
-  test_the_position_slope_widens_its_step_beside_a_kink();
+  test_the_marginal_slope_is_smooth_at_a_layer_potential();
+  test_the_position_slope_beside_a_layer_and_an_end();
+  test_the_uptake_rows_through_a_layer_potential();
   test_the_vapour_deficit_floor_is_counted();
   test_the_seated_vapour_deficit_floor_is_counted_once_per_seat();
   test_supplied_rows_match_a_resolve_at_every_kind();

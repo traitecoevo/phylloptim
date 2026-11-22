@@ -2016,16 +2016,10 @@ public:
   //     dry_end_neighbourhood of the dry end b, the log of the distance to it.
   //   Position: the collar's logit position between the ends a and b, a step of
   //     position_slope_step, which near either end is a step in the log of the
-  //     distance to it. No probe lands within marginal_kink_clearance of a
-  //     rooted layer's potential, where uptake has a kink, or across one.
+  //     distance to it.
   enum class SlopeCoordinate { Potential, Position };
   static constexpr double potential_slope_step = 1e-5;
   static constexpr double position_slope_step = 1e-4;
-  // In MPa. The marginal is noisy near a kink, more so the nearer a probe is
-  // to the layer's potential: the clearance keeps probes off the kink itself,
-  // and does not bound the error of a probe just outside it. Not wider: a
-  // drying layer's potential follows the collar.
-  static constexpr double marginal_kink_clearance = 3e-6;
 
   // dM/dp at `at`, M the route's marginal, as a difference of M: a tangent is
   // wrong by a factor of eight, because dci/dcollar cancels below the table's

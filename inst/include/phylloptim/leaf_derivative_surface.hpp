@@ -1434,62 +1434,18 @@ inline double Leaf::marginal_slope_at(double at, double a, double b,
   return slope;
 }
 
-// The Position stencil: dM/dz at fixed ends over dpsi/dz. Each rooted layer's
-// uptake has a kink at the layer's own potential, where the root conductivity's
-// mean over the span from soil to collar is 0/0; the marginal's slope jumps
-// there, and the marginal is noisy next to one (a probe on one read 4% low). So
-// a stencil is used only if every probe keeps marginal_kink_clearance from every
-// kink and none lies across one from `at`: the central one, else three points
-// out on one side, which leave out the marginal at `at`, as that may itself sit
-// in the noise. Next to an end a step in z is a small fraction of the clearance
-// in the collar, so where no stencil keeps clear the step widens tenfold, twice.
-// A layer's gravity balance, where its flow changes sign, is smooth.
+// The Position stencil: dM/dz at fixed ends over dpsi/dz, central. The
+// marginal is smooth through a rooted layer's potential (the uptake walk's
+// quadrature arm), so a probe may land on one or across one.
 template <Leaf::CostCurve K, class Marginal>
 inline double Leaf::position_slope(double at, double a, double b,
                                    Marginal& marginal) {
   const double z = std::log((at - a) / (b - at));
-  const std::vector<double>& soil = supply_psi_soil();
-  const std::size_t rooted = static_cast<std::size_t>(std::max(
-      0, std::min(roots_.max_soil_layer, static_cast<int>(soil.size()))));
-  const auto usable = [&](std::initializer_list<double> steps) {
-    for (const double dz : steps) {
-      const double c = collar_at_position(z + dz, a, b);
-      for (std::size_t i = 0; i < rooted; ++i) {
-        if (std::abs(soil[i] - c) < marginal_kink_clearance ||
-            (soil[i] - at) * (soil[i] - c) <= 0.0) {
-          return false;
-        }
-      }
-    }
-    return true;
-  };
   // The point itself at dz = 0, not its logit taken back to a collar.
   const auto in_z = [&](double dz, bool* ok) {
     return marginal(dz == 0.0 ? at : collar_at_position(z + dz, a, b), ok);
   };
-  double dM_dz = std::numeric_limits<double>::quiet_NaN();
-  for (double step = position_slope_step; step <= 100.0 * position_slope_step;
-       step *= 10.0) {
-    if (usable({step, -step})) {
-      dM_dz = marginal_first_difference(in_z, step);
-      break;
-    }
-    // Second order from the side away from the kink, by the quadratic through
-    // the three points one, two and three steps out, read back at the point.
-    const double side = usable({-step, -2.0 * step, -3.0 * step})  ? -1.0
-                        : usable({step, 2.0 * step, 3.0 * step}) ? 1.0
-                                                                  : 0.0;
-    if (side != 0.0) {
-      bool ok1 = false, ok2 = false, ok3 = false;
-      const double m1 = in_z(side * step, &ok1);
-      const double m2 = in_z(side * 2.0 * step, &ok2);
-      const double m3 = in_z(side * 3.0 * step, &ok3);
-      if (ok1 && ok2 && ok3) {
-        dM_dz = -side * (2.5 * m1 - 4.0 * m2 + 1.5 * m3) / step;
-      }
-      break;
-    }
-  }
+  const double dM_dz = marginal_first_difference(in_z, position_slope_step);
   return dM_dz / ((b - a) / (2.0 + std::exp(z) + std::exp(-z)));
 }
 
