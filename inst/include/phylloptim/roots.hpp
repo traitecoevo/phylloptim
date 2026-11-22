@@ -267,7 +267,6 @@ public:
   std::shared_ptr<const VulnerabilityTable> vulnerability_;
   InverseScale inv_b_;
 
-
   // --- soil geometry -------------------------------------------------------
   // Initialised to the sentinels clear() assigns, so a bare MultiLayerRoots is
   // never indeterminate.
@@ -476,11 +475,10 @@ public:
   // d(E_up)/d(T_collar): a conductance, positive by construction. The total is in
   // kg, the per-layer terms in mol, as the draws are.
   //
-  // ⚠️ NaN when any layer sits on a branch kink (T_collar == 0, or, where the
-  // span is too long for uptake_impl's quadrature arm or not positive,
-  // T_collar == T_soil[i] or the gravity balance), and the caller then takes a
-  // central difference (hazard 6); an alternative supply path must keep that rather than
-  // throw or return 0. Refuses where the uptake refuses. On the hot path, so its
+  // ⚠️ NaN when any layer sits on a branch kink (T_collar == 0, or, outside
+  // uptake_impl's quadrature arm, T_collar == T_soil[i] or the gravity
+  // balance), and the caller then takes a central difference (hazard 6). An
+  // alternative supply path must keep that rather than throw or return 0. Refuses where the uptake refuses. On the hot path, so its
   // vectors are scratch this object keeps.
   double duptake_dpsi(double T_collar,
                       const std::vector<double>& psi_soil) const {
@@ -621,13 +619,15 @@ public:
     // slope's kink width, one condition, since where the span vanishes the
     // general branch divides by nothing and its replacement has another slope.
     const double kink_tol = 1e-8;
-    // In MPa. A layer whose span from soil to collar is shorter than this, both
-    // ends positive, takes its mean conductivity by Simpson's rule on G' rather
-    // than as (G(hi) - G(lo)) / span. That difference loses the digits the span
-    // is short of, and its rows in the collar and the soil lose them twice: the
-    // slope reads 6x wrong at 1e-8 MPa and 1e-3 at 1e-6. Here the two forms
-    // agree to 3e-14 in the mean and 3e-11 in its slope.
+    // A layer whose span from soil to collar is shorter than quadrature_span
+    // (MPa) and than quadrature_share of its lower end takes its mean
+    // conductivity by Simpson's rule on G' rather than as (G(hi) - G(lo)) /
+    // span. That difference keeps fewer digits the shorter the span, and its
+    // derivative fewer still; Simpson's error grows with the span, and faster
+    // near zero, where the curve is not smooth for c < 2. Between them the two
+    // forms agree to 3e-11 in the mean.
     const double quadrature_span = 2e-3;
+    const double quadrature_share = 1e-2;
     if (!std::isfinite(collar_psi)) {
       util::stop_infeasible("uptake",
           "E_from_Soil_to_Root_Collar invalid input; T_collar=" +
@@ -685,8 +685,10 @@ public:
       hold_t psi_i = psi_p[i];
       const double soil_at = to_passive(psi_i);
       // A short span between positive potentials: the quadrature arm below.
-      const bool short_span = collar_psi > 0.0 && soil_at > 0.0 &&
-                              std::abs(collar_psi - soil_at) < quadrature_span;
+      const double span_at = std::abs(collar_psi - soil_at);
+      const bool short_span =
+          span_at < quadrature_span &&
+          span_at < quadrature_share * std::min(collar_psi, soil_at);
       // The collars the analytic slope is not valid across (duptake_dpsi's NaN
       // contract). The quadrature arm is smooth through equal potentials and
       // the gravity balance, so neither is one there.
@@ -699,10 +701,16 @@ public:
       const bool want_slope = conductance != nullptr && !at_a_kink;
       // Bound, not copied: both arms outlive the layer, and a copy of an active is
       // a recorded statement the sweep walks once per census metric.
-      hold_t T_src_min = (collar_psi < soil_at) ? Tc : psi_i;
+      // At equal potentials the collar is the lower end, so it keeps its rows.
+      hold_t T_src_min = (collar_psi <= soil_at) ? Tc : psi_i;
       hold_t T_src_max = (soil_at < collar_psi) ? Tc : psi_i;
 
       if (short_span) {
+        // A span past the end of the curve conducts nothing, as below.
+        if (!(root_vuln_complement_at(to_passive(T_src_min)) > 0.0)) {
+          out_p[i] = T(0.0);
+          continue;
+        }
         // The table's slope, not the closed form, so the mean agrees with the
         // G difference at the switch.
         auto f_table = [&](const T& x) -> T {
@@ -734,15 +742,17 @@ public:
           auto f_slope = [&](const T& x) -> T {
             using std::exp;
             using std::log;
-            const T b = at.root_P50 * exp(-std::log(std::log(2.0)) / at.root_c);
+            const T b = weibull_b_from_P50<T>(at.root_P50, at.root_c);
             const T xc = exp(at.root_c * log(x / b));
             return -exp(-xc) * at.root_c * xc / x;
           };
           const T df_mean_dT =
               (f_slope(Tc) + T(2.0) * f_slope(T(0.5) * (T_src_min + T_src_max))) /
               T(6.0);
-          const T dr_R_dT = -rH_p[i] * df_mean_dT / (f_mean * f_mean);
-          const T term = (r_R - num * dr_R_dT) / (r_R * r_R);
+          // Divided rather than squared: deep in the curve's tail the mean's
+          // square underflows and r_R's overflows.
+          const T dr_R_dT = -rH_p[i] * (df_mean_dT / f_mean) / f_mean;
+          const T term = (T(1.0) - num * (dr_R_dT / r_R)) / r_R;
           if (conductance->keep_per_layer) {
             conductance->per_layer[std::size_t(i)] = to_passive(term);
           }

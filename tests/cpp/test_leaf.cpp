@@ -1117,8 +1117,9 @@ void test_soil_conductance_is_positive() {
         double hi = 0.0, lo = 0.0;
         l.roots_.uptake_at(collar + h, l.roots_.psi_soil_, buf, hi);
         l.roots_.uptake_at(collar - h, l.roots_.psi_soil_, buf, lo);
-        near(s2, (hi - lo) / (2.0 * h), 1e-5,
-             "the slope on a layer's potential is a central difference's" + at);
+        const double fd = (hi - lo) / (2.0 * h);
+        ok(std::abs(s2 - fd) < 1e-6 * std::abs(fd),
+           "the slope on a layer's potential is a central difference's" + at);
       }
     }
   }

@@ -1789,6 +1789,91 @@ void test_the_marginal_slope_is_smooth_at_a_layer_potential() {
   ok(differ == 0, "the position's probes leave the leaf as they found it");
 }
 
+// The uptake's rows on the tape in the collar and in a layer's soil potential,
+// against a difference of the double walk: with the collar on that layer's
+// potential, beside it, and past the span the quadrature arm covers. And the
+// walk is continuous where the arm begins, at its absolute bound and at its
+// bound relative to the potential.
+void test_the_uptake_rows_through_a_layer_potential() {
+  printf("the uptake's rows through a layer's potential, against a difference\n");
+  using T = odelia::ode::tangent_scalar<double>;
+  Drivers d;
+  const std::vector<double> soil0{1e-3, 2.0, 3.0};
+  phylloptim::Leaf l = make_leaf(d, soil0, {0.5, 1.0, 1.5});
+  l.find_root_collar_psi();
+  const std::size_t n = soil0.size();
+  const auto& net = l.roots_.network_;
+  auto walk = [&](double collar, const std::vector<double>& soil) {
+    std::vector<double> lay(n, 0.0);
+    double total = 0.0;
+    l.roots_.uptake_at(collar, soil, lay, total);
+    return lay;
+  };
+  // Direction 0 is the collar, k + 1 layer k's soil.
+  auto rows_on_tape = [&](double collar, std::size_t direction) {
+    std::vector<T> soil, r_h, r_v;
+    for (std::size_t i = 0; i < n; ++i) {
+      soil.push_back(T(soil0[i]));
+      r_h.push_back(T(net.r_R_H_min[i]));
+      r_v.push_back(T(net.r_R_V_sum[i]));
+    }
+    T c(collar);
+    if (direction == 0) odelia::ode::set_direction(c, 1.0);
+    else odelia::ode::set_direction(soil[direction - 1], 1.0);
+    const phylloptim::SupplyInputs<T> supply{soil, r_h, r_v, T(l.roots_.root_P50),
+                                             T(l.roots_.root_c)};
+    std::vector<T> lay(n, T(0.0));
+    T total(0.0);
+    l.roots_.uptake_at<T>(c, supply, lay, total);
+    std::vector<double> out;
+    for (const T& v : lay) out.push_back(odelia::ode::derivative_along(v));
+    return out;
+  };
+  double worst = 0.0;
+  int compared = 0;
+  for (double offset : {0.0, 3e-8, -1e-6, 1e-4, 5e-3}) {
+    const double collar = soil0[1] + offset;
+    for (std::size_t dir = 0; dir <= n; ++dir) {
+      const std::vector<double> ad = rows_on_tape(collar, dir);
+      const double h = 1e-6;
+      std::vector<double> up_soil = soil0, dn_soil = soil0;
+      double up_c = collar, dn_c = collar;
+      if (dir == 0) { up_c += h; dn_c -= h; }
+      else { up_soil[dir - 1] += h; dn_soil[dir - 1] -= h; }
+      const std::vector<double> up = walk(up_c, up_soil), dn = walk(dn_c, dn_soil);
+      double scale = 0.0;
+      std::vector<double> fd(n);
+      for (std::size_t j = 0; j < n; ++j) {
+        fd[j] = (up[j] - dn[j]) / (2.0 * h);
+        scale = std::max(scale, std::abs(fd[j]));
+      }
+      for (std::size_t j = 0; j < n; ++j) {
+        ++compared;
+        worst = std::max(worst, std::abs(ad[j] - fd[j]) / scale);
+      }
+    }
+  }
+  printf("    %d rows compared, worst %.2e of the direction's largest row\n",
+         compared, worst);
+  ok(compared == 60, "every row was compared (test is not vacuous)");
+  ok(worst < 1e-7, "the rows on the tape are the walk's derivative");
+  // Continuity where the arm begins: 2e-3 from the second layer, and 1e-2 of
+  // the first layer's 1e-3 MPa. A step of 1e-12 MPa across either moves each
+  // layer's draw by its slope times the step, to rounding.
+  double jump = 0.0;
+  for (const auto& [layer, edge] : {std::pair<std::size_t, double>{1, 2e-3},
+                                    std::pair<std::size_t, double>{0, 1e-5}}) {
+    const double eps = 1e-12;
+    const double inside = soil0[layer] + edge * (1.0 - eps);
+    const double outside = soil0[layer] + edge * (1.0 + eps);
+    const double a = walk(inside, soil0)[layer], b = walk(outside, soil0)[layer];
+    const double slope = rows_on_tape(soil0[layer] + edge, 0)[layer];
+    jump = std::max(jump, std::abs(b - a - slope * (outside - inside)) / std::abs(a));
+  }
+  printf("    the draw's jump where the arm begins: %.2e of itself\n", jump);
+  ok(jump < 1e-10, "the walk is continuous where the quadrature arm begins");
+}
+
 // Next to an end a step in the position is a small step in the collar. Here the
 // collar is 2e-4 MPa from the wet end and 1.5e-8 MPa from a layer's potential,
 // and the base step's probes straddle that potential. An end itself has no
@@ -2640,6 +2725,7 @@ void run_surface() {
   test_the_slope_is_one_slope_in_either_coordinate();
   test_the_marginal_slope_is_smooth_at_a_layer_potential();
   test_the_position_slope_beside_a_layer_and_an_end();
+  test_the_uptake_rows_through_a_layer_potential();
   test_the_vapour_deficit_floor_is_counted();
   test_the_seated_vapour_deficit_floor_is_counted_once_per_seat();
   test_supplied_rows_match_a_resolve_at_every_kind();
