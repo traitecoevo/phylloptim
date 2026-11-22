@@ -478,10 +478,19 @@ parameters:
     symbol: 'D_\min'
     units: 'kPa'
     class: constant
-    meaning: 'floor on the leaf-to-air deficit, so a leaf cooled below the dew point cannot report a negative conductance. Kept by decision: it binds at candidate points only, at no solved point since a dark LeastCost leaf is shut at its wet bound (measured over the golden drivers with the energy balance on: 4 solved points before, 0 after)'
+    meaning: 'soft floor on the leaf-to-air deficit, so a leaf cooled below the dew point cannot report a negative conductance: the deficit approaches it from above and never reaches it. A leaf can operate there (an interior optimum can sit past the dew point), so the floor is smooth; a hard one put a kink in the marginal profit'
     source: code
     placeholder: true
     code: phylloptim::vpd_leaf_min
+  vpd_leaf_floor_width:
+    section: vapour
+    symbol: 'w_D'
+    units: 'kPa'
+    class: constant
+    meaning: 'width of the soft floor $D_\min$; the deficit is $d$ to the last bit wherever $d > D_\min + 37\,w_D$, and $D_\min$ itself wherever $d < D_\min - 40\,w_D$'
+    source: code
+    placeholder: true
+    code: phylloptim::vpd_leaf_floor_width
   evaporative_cooling_max:
     section: energy_balance
     symbol: '\Delta T_\max'
@@ -1583,13 +1592,13 @@ equations:
     title: Leaf-to-air deficit
     latex: |
       D_\mathrm{leaf} = \begin{cases} D_\mathrm{air} & g_\mathrm{EB} = 0 \\
-      \max\!\big(D_\mathrm{air} + [e_s(T_\mathrm{leaf}) - e_s(T_\mathrm{air})],\; D_\min\big) & g_\mathrm{EB} = 1 \end{cases}
+      D_\min + w_D \ln\!\big(1 + e^{(d - D_\min)/w_D}\big), \quad d = D_\mathrm{air} + [e_s(T_\mathrm{leaf}) - e_s(T_\mathrm{air})] & g_\mathrm{EB} = 1 \end{cases}
     code: phylloptim::Leaf::set_leaf_vpd
-    also: [phylloptim::Leaf::leaf_vpd_at]
-    reads: [use_energy_balance_, atm_vpd, vpd_leaf_min]
+    also: [phylloptim::Leaf::leaf_vpd_at, phylloptim::Leaf::leaf_vpd_slope_at, phylloptim::Leaf::vpd_soft_floor]
+    reads: [use_energy_balance_, atm_vpd, vpd_leaf_min, vpd_leaf_floor_width]
     writes: [vpd_leaf_, g_min_leaf_]
     kind: closed_form
-    note: 'The bracketing is deliberate: at $T_\mathrm{leaf} = T_\mathrm{air}$ it is an exact zero and the prescribed path is bit-identical.'
+    note: 'The bracketing is deliberate: at $T_\mathrm{leaf} = T_\mathrm{air}$ it is an exact zero and the prescribed path is bit-identical. The soft maximum of $d$ and $D_\min$ is C-infinity, its slope in $d$ the logistic of $(d - D_\min)/w_D$, which leaf_vpd_slope_at multiplies by $\Delta(T_\mathrm{leaf})$. A read with $d < D_\min$ is counted (the clamp sites vpd_leaf_floor and vpd_leaf_seated).'
   stomatal_conductance:
     section: vapour
     title: Conductance to CO₂ from the transpiration
@@ -1766,10 +1775,10 @@ equations:
     latex: |
       \Delta_\mathrm{EB} = \tau\, \frac{A_T\, g_c / P \;+\; A'\, (\partial g_c/\partial T)\,(c_a - c_i)/P}{g_{ci}}, \qquad
       \tau = \frac{dT_\mathrm{leaf}}{dE}\, \frac{dE}{d\psi}, \qquad
-      \frac{\partial g_c}{\partial T} = -\, g_c\, \frac{\Delta(T_\mathrm{leaf})}{D_\mathrm{leaf}} \quad (0 \text{ on the floor } D_\min)
+      \frac{\partial g_c}{\partial T} = -\, g_c\, \frac{d D_\mathrm{leaf}/d T_\mathrm{leaf}}{D_\mathrm{leaf}}
     code: phylloptim::Leaf::dprofit_energy_balance_term
-    also: [phylloptim::Curve< Leaf::CostCurve::ProfitMax >::less_cost_temperature_slope, phylloptim::Curve< Leaf::CostCurve::LeastCost >::less_cost_temperature_slope, phylloptim::Leaf::temp_deriv, phylloptim::Leaf::vcmax_temp_deriv, phylloptim::Leaf::thermal_cost_temp_deriv]
-    reads: [fd_step, ca, vpd_leaf_min, use_energy_balance_]
+    also: [phylloptim::Curve< Leaf::CostCurve::ProfitMax >::less_cost_temperature_slope, phylloptim::Curve< Leaf::CostCurve::LeastCost >::less_cost_temperature_slope, phylloptim::Leaf::temp_deriv, phylloptim::Leaf::vcmax_temp_deriv, phylloptim::Leaf::thermal_cost_temp_deriv, phylloptim::Leaf::leaf_vpd_slope_at]
+    reads: [fd_step, ca, use_energy_balance_]
     writes: []
     kind: derivative
     note: '$A_T = \partial A/\partial T_\mathrm{leaf}$ at fixed $c_i$ is a central difference of the temperature block with the fixed step $h$. The term is not observable on its own: it reaches the outputs only through the leaf-route derivative.'

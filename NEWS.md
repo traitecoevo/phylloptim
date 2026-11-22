@@ -1,3 +1,9 @@
+# phylloptim 0.42.0
+
+- With the energy balance on, the leaf-to-air vapour deficit's floor at the dew point is smooth: `vpd_leaf_min + w softplus((d - vpd_leaf_min) / w)` at `w = vpd_leaf_floor_width` (0.005 kPa), in place of `max(d, vpd_leaf_min)`. The hard floor was a kink in the marginal profit. An optimum could sit on it over a range of drivers, and the derivative surface's collar row there was wrong: 0.007 against a re-solve's zero. `Leaf::leaf_vpd_slope_at` is the deficit's slope in leaf temperature (traitecoevo/plant#819).
+- Results move only for a leaf whose deficit is between 0.17 kPa below and 0.2 kPa above the floor, about a kelvin either side of its dew point. The golden files are bit-identical, and so is plant's TF24 default baseline. Off the energy balance nothing moves.
+- `vpd_leaf_floor` and `vpd_leaf_seated` still count a deficit below `vpd_leaf_min`; a seated deficit is no longer exactly `vpd_leaf_min`.
+
 # phylloptim 0.41.0
 
 - A rooted layer's potential is no longer a kink in the uptake. A layer's mean root conductivity over a span shorter than 2e-3 MPa, and than 1e-2 of the span's lower potential, is Simpson's rule on the integral's slope rather than the difference of two reads of the integral over the span. That difference lost the digits the span was short of, and the mean's derivative in the collar and the soil lost them twice: 6x wrong at a span of 1e-8 MPa, 9% at 1e-7 and 1e-3 at 1e-6, against a long-double reference at the default curve. The marginal profit was noisy within micro-MPa of a layer's potential for the same reason. plant's TF24f stand gradient took those rows wherever a stage landed near a layer, and was 1.7% wrong on its test stand (traitecoevo/plant#871). A span past the end of the curve conducts nothing, as before.

@@ -1077,6 +1077,126 @@ void test_leaf_to_air_vpd() {
      "which conducts more CO2 than the whole path at the stomatal ratio");
 }
 
+// The deficit's soft floor at the dew point: above the floor always, smooth
+// through it, its slope the derivative of its value and its tangent the slope,
+// and the plain deficit to the last bit 40 widths above it. On a leaf, the
+// deficit's slope in leaf temperature is the difference of its value across
+// the dew point, and the scalar forms carry both as rows.
+void test_the_vapour_deficit_soft_floor() {
+  printf("the vapour deficit's soft floor at the dew point\n");
+  using T = odelia::ode::tangent_scalar<double>;
+  using L = phylloptim::Leaf;
+  const double d0 = phylloptim::vpd_leaf_min, w = phylloptim::vpd_leaf_floor_width;
+  const auto floor_at = [](double d) { return L::vpd_soft_floor(d); };
+
+  // The shape, on a grid a quarter-width apart from 60 widths below to 60 above.
+  int rows = 0, shaped = 0, sloped = 0;
+  double prev = 0.0, worst_slope = 0.0, worst_curvature = 0.0;
+  bool rising = true;
+  for (int i = -240; i <= 240; ++i) {
+    const double d = d0 + 0.25 * w * i;
+    const auto [D, s] = floor_at(d);
+    ++rows;
+    shaped += D >= d0 && D >= d && D - std::max(d, d0) <= w * std::log(2.0) * (1 + 1e-12) &&
+              s >= 0.0 && s <= 1.0;
+    rising = rising && (i == -240 || D >= prev);
+    prev = D;
+    const double h = 1e-4 * w;
+    const double fd = (floor_at(d + h).first - floor_at(d - h).first) / (2 * h);
+    worst_slope = std::max(worst_slope, std::abs(s - fd));
+    sloped += std::abs(s - fd) < 1e-7;
+    // The slope's own slope, as a tangent through the scalar form, against
+    // a difference of the slope: the floor is C2 and beyond, not just C1.
+    T dt(d);
+    odelia::ode::set_direction(dt, 1.0);
+    const auto on = L::vpd_soft_floor<T>(dt);
+    near(odelia::ode::derivative_along(on.first), s, 1e-15,
+         "the value's tangent is the slope at d = " + std::to_string(d));
+    near(odelia::util::to_passive(on.first), D, 0.0,
+         "the scalar form's value is the double form's at d = " + std::to_string(d));
+    const double fd2 = (floor_at(d + h).second - floor_at(d - h).second) / (2 * h);
+    worst_curvature =
+        std::max(worst_curvature, std::abs(odelia::ode::derivative_along(on.second) - fd2) /
+                                      (1.0 / w));
+  }
+  ok(shaped == rows, "between max(d, floor) and w ln 2 above it, slope in [0, 1] (" +
+                         std::to_string(shaped) + " of " + std::to_string(rows) + ")");
+  ok(rising, "and rising with d");
+  ok(sloped == rows, "its slope is the derivative of its value everywhere");
+  ok(worst_curvature < 1e-6, "and the slope's tangent the derivative of the slope");
+  // Through the branch between the two overflow-safe forms: one function.
+  const double eps = 1e-12 * w;
+  near(floor_at(d0 + eps).first, floor_at(d0 - eps).first, 1e-14,
+       "the value is continuous where the form switches");
+  near(floor_at(d0 + eps).second, floor_at(d0 - eps).second, 1e-11,
+       "and so is its slope");
+  near(floor_at(d0).second, 0.5, 0.0, "the slope is a half at the floor");
+
+  // Leaves far from the dew point keep their deficit: exactly beyond 40
+  // widths, where the form is cut, and already to the last bit below the cut.
+  int exact = 0, far = 0;
+  for (double z = 37.0; z <= 200.0; z += 0.25) {
+    const double d = d0 + z * w;
+    const auto [D, s] = floor_at(d);
+    ++far;
+    exact += D == d && s == 1.0;
+  }
+  ok(exact == far, "37 widths and more above the floor, the deficit and a unit slope "
+                   "to the last bit (" + std::to_string(exact) + " of " +
+                       std::to_string(far) + ")");
+  ok(floor_at(d0 - 40.0 * w).first == d0 && floor_at(-5.0).first == d0,
+     "40 widths below it, the floor itself");
+  printf("    relative move of the deficit at d = 0.05, 0.1, 0.15 kPa: %.1e %.1e %.1e; "
+         "none past %.3f kPa\n",
+         (floor_at(0.05).first - 0.05) / 0.05, (floor_at(0.1).first - 0.1) / 0.1,
+         (floor_at(0.15).first - 0.15) / 0.15, d0 + 37.0 * w);
+
+  // On a leaf, across its dew point: Tleaf from 1 K below to 1 K above it.
+  Drivers dr;
+  dr.atm_vpd = 0.5;
+  phylloptim::Leaf l = make_pm_leaf(dr, {1.0}, {1.0}, true);
+  const double dew = [&] {
+    double lo = l.Tair_ - 20.0, hi = l.Tair_;
+    for (int i = 0; i < 200; ++i) {
+      const double mid = 0.5 * (lo + hi);
+      (l.atm_vpd_ + l.saturation_vapour_pressure(mid) -
+           l.saturation_vapour_pressure(l.Tair_) < 0.0 ? lo : hi) = mid;
+    }
+    return hi;
+  }();
+  int temps = 0, through = 0;
+  double worst_T = 0.0, worst_T2 = 0.0;
+  for (double dT = -1.0; dT <= 1.0 + 1e-12; dT += 0.01) {
+    const double t = dew + dT;
+    const double h = 1e-5;
+    const double fd = (l.leaf_vpd_at(t + h) - l.leaf_vpd_at(t - h)) / (2 * h);
+    const double slope = l.leaf_vpd_slope_at(t);
+    worst_T = std::max(worst_T, std::abs(slope - fd) / std::max(std::abs(fd), 1e-3));
+    T tt(t);
+    odelia::ode::set_direction(tt, 1.0);
+    near(odelia::ode::derivative_along(l.leaf_vpd_on<T>(tt)), slope,
+         1e-12 * std::max(1.0, std::abs(slope)),
+         "the deficit's tangent in leaf temperature is its slope at " + std::to_string(t));
+    const double fd2 =
+        (l.leaf_vpd_slope_at(t + h) - l.leaf_vpd_slope_at(t - h)) / (2 * h);
+    const double d2 = odelia::ode::derivative_along(l.leaf_vpd_slope_on<T>(tt));
+    worst_T2 = std::max(worst_T2, std::abs(d2 - fd2) / std::max(std::abs(fd2), 1.0));
+    const double raw = l.atm_vpd_ + l.saturation_vapour_pressure(t) -
+                       l.saturation_vapour_pressure(l.Tair_);
+    through += std::abs(raw - d0) < 4.0 * w;
+    ++temps;
+  }
+  printf("    %d leaf temperatures across the dew point, %d within 4 widths of the floor; "
+         "worst slope %.1e, worst curvature %.1e\n", temps, through, worst_T, worst_T2);
+  ok(through >= 5, "the sweep crossed the floor's band (hazard 16)");
+  ok(worst_T < 1e-6, "dD/dTleaf is the difference of D across the dew point");
+  ok(worst_T2 < 1e-5, "and the slope's tangent the difference of the slope");
+
+  phylloptim::Leaf off = make_pm_leaf(dr, {1.0}, {1.0}, false);
+  ok(off.leaf_vpd_at(dew) == off.atm_vpd_ && off.leaf_vpd_slope_at(dew) == 0.0,
+     "gate off: the driver, with no slope");
+}
+
 // The objective whose derivative dprofit_dpsi_leaf<K> IS: the log of the product
 // for the two log links, the reported profit for everything else. NaN where the
 // log form does not exist, which the callers skip.
@@ -1669,6 +1789,7 @@ void run_energy_balance() {
   test_stomatal_conductance_excludes_the_boundary_layer();
   test_boundary_layer_bounds_the_total_conductance();
   test_leaf_to_air_vpd();
+  test_the_vapour_deficit_soft_floor();
   test_linked_dprofit_with_energy_balance_matches_a_finite_difference();
   test_linked_dprofit_with_energy_balance_is_the_identity_link_scaled();
   test_linked_optimum_with_energy_balance_is_stationary();

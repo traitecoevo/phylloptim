@@ -92,17 +92,13 @@ inline double Leaf::dprofit_energy_balance_term(
       drstar_dpsi;
   const double tau = dT_dE * dE_dpsi;
 
-  // dgc/dTleaf at fixed E. Stomatal part: -gc_s * esat'(Tleaf)/D, negative (a
-  // hotter leaf has a larger deficit) and zero on the deficit's floor; the
-  // residual's part is appended. Both pass through the boundary layer's split,
-  // which reads no leaf temperature.
+  // dgc/dTleaf at fixed E. Stomatal part: -gc_s * (dD/dTleaf)/D, negative (a
+  // hotter leaf has a larger deficit) and fading to zero on the deficit's soft
+  // floor; the residual's part is appended. Both pass through the boundary
+  // layer's split, which reads no leaf temperature.
   const double gc_s = gc_const * E_s;
   const double dgc_dT =
-      (((vpd_leaf_ > vpd_leaf_min)
-            ? -gc_s * saturation_vapour_pressure_slope(Tleaf) / vpd_leaf_
-            : 0.0) +
-       dgc_dT_residual) *
-      bl_slope;
+      (-gc_s * leaf_vpd_slope_at(Tleaf) / vpd_leaf_ + dgc_dT_residual) * bl_slope;
 
   // dA/dTleaf total times tau: dA/dpsi along the temperature path, benefit-side
   // only. A cost that reads Tleaf (ProfitMax's thermal cost, LeastCost's
@@ -158,11 +154,13 @@ inline double Leaf::saturation_vapour_pressure_slope(double temp) const {
 //   vpd_leaf = esat(Tleaf) - e_air = atm_vpd + [esat(Tleaf) - esat(Tair)]
 //
 // In that association, so off the energy-balance path the bracket is exactly
-// +0.0 and the result bit-identical. Held at `vpd_leaf_min`, a kept exception to
-// the no-clamp rule: below it the leaf condenses, and a conductance formed from
-// the deficit would be infinite or negative.
+// +0.0 and the result bit-identical. Through vpd_soft_floor: below the dew point
+// the leaf condenses, and a conductance formed from d would be infinite or
+// negative. A read with d under vpd_leaf_min is counted as the floor's.
 inline double Leaf::leaf_vpd_at(double leaf_temp) const {
-  if (!use_energy_balance_) {
+  // [[likely]] keeps the gate-off path as it was (hazard 5): unmarked, the
+  // floor's code here slowed bench_solve's gate-off cuticle arms.
+  if (!use_energy_balance_) [[likely]] {
     return atm_vpd_;
   }
   const double d =
@@ -171,7 +169,44 @@ inline double Leaf::leaf_vpd_at(double leaf_temp) const {
   if (d < vpd_leaf_min) {
     clamps.note(CLAMP_VPD_LEAF_FLOOR);
   }
-  return std::max(d, vpd_leaf_min);
+  return vpd_soft_floor(d).first;
+}
+
+// dD/dTleaf: the saturation curve's slope through the floor's. Counts nothing,
+// so reading a slope beside a value does not count the floor twice.
+inline double Leaf::leaf_vpd_slope_at(double leaf_temp) const {
+  if (!use_energy_balance_) [[likely]] {
+    return 0.0;
+  }
+  const double d =
+      atm_vpd_ + (saturation_vapour_pressure(leaf_temp) -
+                  saturation_vapour_pressure(Tair_));
+  return saturation_vapour_pressure_slope(leaf_temp) * vpd_soft_floor(d).second;
+}
+
+// The soft maximum of d and vpd_leaf_min at width w, d0 + w softplus((d - d0)/w),
+// and its slope in d, the logistic of (d - d0)/w: C-infinity, above d0 always.
+// Written so neither overflows (e = exp(-|z|) <= 1). Past 40 widths e < 5e-18
+// and both are d and 1 to the last bit, so they are returned as such, and a leaf
+// that far from the dew point keeps its value and its tangent rows exactly.
+template <class S>
+inline std::pair<S, S> Leaf::vpd_soft_floor(const S& d) {
+  using std::exp;
+  using std::log1p;
+  using odelia::util::to_passive;
+  const S z = (d - S(vpd_leaf_min)) * S(1.0 / vpd_leaf_floor_width);
+  const double zv = to_passive(z);
+  if (zv > 40.0) {
+    return {d, S(1.0)};
+  }
+  const bool above = zv >= 0.0;
+  const S e = above ? S(exp(-z)) : S(exp(z));
+  // Its own statement, so no build contracts it into the sum: the scalar forms
+  // must give the double form's value bit for bit.
+  const S excess = vpd_leaf_floor_width * log1p(e);
+  const S D = above ? S(d + excess) : S(vpd_leaf_min + excess);
+  const S slope = above ? S(1.0 / (1.0 + e)) : S(e / (1.0 + e));
+  return {D, slope};
 }
 
 // Also seats the residual conductance at the same temperature: it is read
@@ -184,9 +219,10 @@ inline void Leaf::set_leaf_vpd(double leaf_temp) {
 
 // set_leaf_vpd runs on every candidate a search tries, so leaf_vpd_at's count
 // is the search's incidence of the floor. The state's incidence is this: the
-// deficit the solve left seated, counted where each solve places its point.
+// deficit the solve left seated, counted where each solve places its point. D
+// rises with d, so D below its value at d = vpd_leaf_min is d below it.
 inline void Leaf::note_vpd_seat() const {
-  if (use_energy_balance_ && vpd_leaf_ == vpd_leaf_min) {
+  if (use_energy_balance_ && vpd_leaf_ < vpd_soft_floor(vpd_leaf_min).first) {
     clamps.note(CLAMP_VPD_LEAF_SEATED);
   }
 }

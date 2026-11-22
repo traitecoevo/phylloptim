@@ -137,12 +137,14 @@ inline constexpr double temp_fd_step = 1e-3;
 inline constexpr double aerodynamic_resistance_fixed = 50.0;
 // leaf boundary-layer coefficient C_ra, s^0.5 m^-1, in ra = C_ra*sqrt(d/U)
 inline constexpr double aerodynamic_resistance_coef = 200.0;
-// Floor on the leaf-to-air deficit Fick's law divides by, kPa. A leaf cooled below
-// the dew point has a negative deficit and would report a negative conductance;
-// the floor keeps such points finite and unattractive. It binds at candidate
-// points on the energy-balance routes, not at a solved point: a dark LeastCost
-// leaf, the one that sat there, is shut at its wet bound.
+// Soft floor on the leaf-to-air deficit Fick's law divides by, kPa, and its
+// width: D = vpd_leaf_min + w softplus((d - vpd_leaf_min) / w) (Leaf::vpd_soft_floor).
+// A leaf cooled below the dew point has a negative deficit d and would report a
+// negative conductance; the floor keeps it finite. Soft, because a cohort can
+// settle where it engages, and a hard one is a kink in the marginal profit there.
+// D is d to the last bit wherever d > vpd_leaf_min + 40 w.
 inline constexpr double vpd_leaf_min = 0.01;
+inline constexpr double vpd_leaf_floor_width = 0.005;
 
 // The most a leaf may cool itself below its shut temperature by transpiring,
 // K (flux_ceiling). Well past what real leaves do; it binds only where the

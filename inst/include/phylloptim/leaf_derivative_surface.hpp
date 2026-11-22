@@ -233,12 +233,21 @@ inline S Leaf::leaf_vpd_on(const S& temp) const {
   }
   const S d = atm_vpd_ + (saturation_vapour_pressure_on<S>(temp) -
                           saturation_vapour_pressure(Tair_));
-  // leaf_vpd_at's floor, which a slope does not cross, counted as it is there.
+  // leaf_vpd_at's soft floor, its rows carried through it, counted as there.
   if (odelia::util::to_passive(d) < vpd_leaf_min) {
     clamps.note(CLAMP_VPD_LEAF_FLOOR);
-    return S(vpd_leaf_min);
   }
-  return d;
+  return vpd_soft_floor<S>(d).first;
+}
+
+template <class S>
+inline S Leaf::leaf_vpd_slope_on(const S& temp) const {
+  if (!use_energy_balance_) {
+    return S(0.0);
+  }
+  const S d = atm_vpd_ + (saturation_vapour_pressure_on<S>(temp) -
+                          saturation_vapour_pressure(Tair_));
+  return saturation_vapour_pressure_slope_on<S>(temp) * vpd_soft_floor<S>(d).second;
 }
 
 template <class S>
@@ -268,11 +277,9 @@ inline S Leaf::g_min_factor_temp_deriv_on(const S& temp) const {
 
 template <class S>
 inline S Leaf::residual_demand_per_g_dT_on(const S& temp) const {
-  // residual_demand_dT's rule: the deficit's slope is zero on its floor.
+  // residual_demand_dT's: the deficit's slope through its soft floor.
   const S D = leaf_vpd_on<S>(temp);
-  const S dD_dT = (use_energy_balance_ && odelia::util::to_passive(D) > vpd_leaf_min)
-                      ? saturation_vapour_pressure_slope_on<S>(temp)
-                      : S(0.0);
+  const S dD_dT = leaf_vpd_slope_on<S>(temp);
   return (g_min_factor_temp_deriv_on<S>(temp) * D + g_min_factor_on<S>(temp) * dD_dT) /
          atm_kpa_ / kg_to_mol_h2o;
 }
@@ -339,9 +346,7 @@ inline S Leaf::energy_balance_marginal_at(const S& collar, const leaf_pars<S>& p
   const S tau = dT_dE * dE_dpsi;
   const S gc_s = gc_const * at.balance.E_s;
   const S vpd = leaf_vpd_on<S>(T);
-  const S stomatal = (to_passive(vpd) > vpd_leaf_min)
-                         ? S(-gc_s * saturation_vapour_pressure_slope_on<S>(T) / vpd)
-                         : S(0.0);
+  const S stomatal = -gc_s * leaf_vpd_slope_on<S>(T) / vpd;
   const S& g = pars[par_g_min];
   const S residual_rows =
       -gc_const * at.drstar_ddemand * (g * residual_demand_per_g_dT_on<S>(T)) +
@@ -555,9 +560,7 @@ inline Leaf::CollarCoords<S> Leaf::collar_channel_at(
       const double gc_const_v = to_passive(balance.gc_per_flux);
       const double gc_s = gc_const_v * to_passive(balance.E_s);
       const double dgc_dT =
-          (((vpd_leaf_ > vpd_leaf_min)
-                ? -gc_s * saturation_vapour_pressure_slope(t) / vpd_leaf_
-                : 0.0) +
+          (-gc_s * leaf_vpd_slope_at(t) / vpd_leaf_ +
            residual_cond_temp_deriv(to_passive(up), t, gc_const_v)) *
           to_passive(bl_slope);
       const double dci_dT =

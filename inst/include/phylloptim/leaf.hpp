@@ -503,8 +503,12 @@ public:
   double g_min_at(double leaf_temp) const {
     return g_min == 0.0 ? 0.0 : g_min * g_min_factor(leaf_temp);
   }
-  // The leaf-to-air deficit at a leaf temperature, as set_leaf_vpd seats it.
+  // The leaf-to-air deficit at a leaf temperature, as set_leaf_vpd seats it,
+  // and its slope in leaf temperature (zero off the energy balance).
   double leaf_vpd_at(double leaf_temp) const;
+  double leaf_vpd_slope_at(double leaf_temp) const;
+  // The soft floor on a deficit d, at any scalar: {D, dD/dd}.
+  template <class S> static std::pair<S, S> vpd_soft_floor(const S& d);
   // The most the stem can ever carry from an upstream potential:
   // kmax (G(inf) - G(psi_up)).
   double supply_ceiling(double psi_upstream) const;
@@ -1618,7 +1622,7 @@ public:
   // is defined. Not in update_temperature_dependent_params, whose differences at
   // T +/- h must not move it; the VPD route into the derivative is dgc_dT's.
   void set_leaf_vpd(double leaf_temp);
-  // Count the seated deficit on its floor: once as each solve, replay or
+  // Count a deficit seated below vpd_leaf_min: once as each solve, replay or
   // prescribed point returns, and once as the surface places the held
   // coordinates. A restore puts back a point already counted and counts none.
   void note_vpd_seat() const;
@@ -1867,6 +1871,7 @@ public:
   template <class S> S saturation_vapour_pressure_on(const S& temp) const;
   template <class S> S saturation_vapour_pressure_slope_on(const S& temp) const;
   template <class S> S leaf_vpd_on(const S& temp) const;
+  template <class S> S leaf_vpd_slope_on(const S& temp) const;
   template <class S> S gc_per_flux_on(const S& temp) const;
   template <class S> S g_min_factor_on(const S& temp) const;
   // The residual flux's demand per unit g_min: the cuticle's factor times the

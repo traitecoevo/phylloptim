@@ -8,14 +8,14 @@
 
 namespace phylloptim {
 
-// Where this model replaces a value by a bound, counted. Two bounds: the stomatal
-// corner E_s >= 0, and the leaf-to-air vapour deficit held at vpd_leaf_min; every
-// other bound is a refusal at the entry point or a smooth form. The corner is
-// counted, not refused, because it is part of the model: the value function is
-// C1 there and the argmax has one-sided derivatives. The deficit's floor is a
-// kept exception (below it the leaf condenses), and the marginal profit has a
-// kink where it binds, so a consumer differentiating across it needs to know.
-// The floor has two sites: every read that floors, which is the search's
+// Where this model replaces a value by a bound, or a leaf reaches one, counted.
+// The stomatal corner E_s >= 0 is the one bound kept; every other is a refusal at
+// the entry point or a smooth form. The corner is counted, not refused, because
+// it is part of the model: the value function is C1 there and the argmax has
+// one-sided derivatives. The leaf-to-air vapour deficit's floor at the dew point
+// is a smooth form, counted where a leaf reaches it, the deficit below
+// vpd_leaf_min: below it the leaf would condense, which the model leaves out.
+// The floor has two sites: every read below it, which is the search's
 // incidence, and the seat a solve leaves the leaf at, which is the state's.
 //
 // A consumer keeping its own tally folds these in rather than sharing an enum: a
@@ -26,11 +26,11 @@ enum clamp_site {
   // residual flux: at the operating point only by rounding at the wet bound, but
   // routinely in the derivative probes just wet of it.
   CLAMP_STOMATAL_FLUX = 0,
-  // The vapour deficit held at vpd_leaf_min, where a leaf cooled by the energy
-  // balance reaches the dew point: every read that floors it, on every candidate
-  // a search tries.
+  // The vapour deficit read below vpd_leaf_min, where a leaf cooled by the
+  // energy balance reaches the dew point and the soft floor holds it: every such
+  // read, on every candidate a search tries.
   CLAMP_VPD_LEAF_FLOOR,
-  // The deficit a solve leaves the leaf with on that floor: once as each solve,
+  // The deficit a solve leaves the leaf with there: once as each solve,
   // replay or prescribed point returns, whatever its kind, and once as the
   // derivative surface places the held coordinates at that point, at any
   // scalar. A restore after a probe counts none. The surface places once per
