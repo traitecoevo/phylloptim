@@ -478,7 +478,7 @@ parameters:
     symbol: 'D_\min'
     units: 'kPa'
     class: constant
-    meaning: 'soft floor on the leaf-to-air deficit, so a leaf cooled below the dew point cannot report a negative conductance: the deficit approaches it from above and never reaches it. A leaf can operate there (an interior optimum can sit past the dew point), so the floor is smooth; a hard one put a kink in the marginal profit'
+    meaning: 'soft floor on the leaf-to-air deficit, so a leaf cooled below the dew point cannot report a negative conductance: the deficit approaches it from above and never goes below it. A leaf can operate there (an interior optimum can sit past the dew point), so the floor is smooth; a hard one put a kink in the marginal profit'
     source: code
     placeholder: true
     code: phylloptim::vpd_leaf_min
@@ -1633,7 +1633,7 @@ equations:
     writes: [stom_cond_CO2_]
     kind: closed_form
     cite: Sabot-2022
-    note: 'With the energy balance on only (#122). $\hat g_c$ (stomatal_conductance) treats the whole leaf-to-air path as stomatal, at $r_s$; the boundary layer''s share diffuses at $r_b = r_s^{2/3}$, the laminar-layer scaling of Sabot et al. (2022) eq 10 (their 1.35 = 1.57$^{2/3}$). E is unchanged: the hydraulics set it, and the boundary layer changes what it says about CO₂. Every partial of $g_c$ is $d g_c / d\hat g_c$ times the same partial of $\hat g_c$, because $g_{bw}$ reads only drivers. The soft maximum is the plain series to the last bit at every physical point ($d \ge r_b/r_s$); it engages only where the deficit is on vpd_leaf_min.'
+    note: 'With the energy balance on only (#122). $\hat g_c$ (stomatal_conductance) treats the whole leaf-to-air path as stomatal, at $r_s$; the boundary layer''s share diffuses at $r_b = r_s^{2/3}$, the laminar-layer scaling of Sabot et al. (2022) eq 10 (their 1.35 = 1.57$^{2/3}$). E is unchanged: the hydraulics set it, and the boundary layer changes what it says about CO₂. Every partial of $g_c$ is $d g_c / d\hat g_c$ times the same partial of $\hat g_c$, because $g_{bw}$ reads only drivers. The soft maximum is the plain series to the last bit at every physical point ($d \ge r_b/r_s$); it engages only past what the boundary layer can carry, as for a leaf at or past its dew point, or a well-plumbed leaf in still air.'
   stomatal_conductance_stomatal:
     section: vapour
     title: Stomatal conductance with the boundary layer removed

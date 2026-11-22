@@ -201,9 +201,10 @@ inline std::pair<S, S> Leaf::vpd_soft_floor(const S& d) {
   }
   const bool above = zv >= 0.0;
   const S e = above ? S(exp(-z)) : S(exp(z));
-  // Its own statement, so no build contracts it into the sum: the scalar forms
-  // must give the double form's value bit for bit.
-  const S excess = vpd_leaf_floor_width * log1p(e);
+  // A division, which no build contracts into the sum (gcc's default fuses a
+  // product across statements): the scalar forms must give the double form's
+  // value bit for bit.
+  const S excess = log1p(e) / S(1.0 / vpd_leaf_floor_width);
   const S D = above ? S(d + excess) : S(vpd_leaf_min + excess);
   const S slope = above ? S(1.0 / (1.0 + e)) : S(e / (1.0 + e));
   return {D, slope};
@@ -220,7 +221,8 @@ inline void Leaf::set_leaf_vpd(double leaf_temp) {
 // set_leaf_vpd runs on every candidate a search tries, so leaf_vpd_at's count
 // is the search's incidence of the floor. The state's incidence is this: the
 // deficit the solve left seated, counted where each solve places its point. D
-// rises with d, so D below its value at d = vpd_leaf_min is d below it.
+// rises with d, so D below its value at d = vpd_leaf_min is d below it, to
+// rounding.
 inline void Leaf::note_vpd_seat() const {
   if (use_energy_balance_ && vpd_leaf_ < vpd_soft_floor(vpd_leaf_min).first) {
     clamps.note(CLAMP_VPD_LEAF_SEATED);

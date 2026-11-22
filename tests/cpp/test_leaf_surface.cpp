@@ -1931,7 +1931,7 @@ void test_the_vapour_deficit_floor_is_counted() {
   l.use_energy_balance_ = true;
   const std::size_t before = l.clamp_count(phylloptim::CLAMP_VPD_LEAF_FLOOR);
   const double warm = l.leaf_vpd_at(l.Tair_);
-  ok(warm > phylloptim::vpd_leaf_min &&
+  ok(warm == l.atm_vpd_ &&
          l.clamp_count(phylloptim::CLAMP_VPD_LEAF_FLOOR) == before,
      "a leaf at air temperature reads the deficit unfloored and counts nothing");
   const double cold = l.leaf_vpd_at(l.Tair_ - 30.0);
@@ -2086,7 +2086,8 @@ void test_the_seated_vapour_deficit_floor_is_counted_once_per_seat() {
   phylloptim::Leaf plain = make_pm_leaf(d, {0.5}, {1.0}, true);
   plain.clear_clamp_counts();
   plain.find_root_collar_psi();
-  ok(plain.vpd_leaf_ > phylloptim::vpd_leaf_min && plain.clamp_count(seated) == 0,
+  ok(plain.vpd_leaf_ > phylloptim::Leaf::vpd_soft_floor(phylloptim::vpd_leaf_min).first &&
+         plain.clamp_count(seated) == 0,
      "an ordinary solve, off the floor, counts the seat never");
   plain.replay_operating_point(plain.opt_root_psi_, plain.operating_point_kind());
   (void)profit_row_at_current_point(plain, phylloptim::par_kmax);
@@ -2098,16 +2099,19 @@ void test_the_seated_vapour_deficit_floor_is_counted_once_per_seat() {
 // collar's row is the implicit function theorem on the marginal, so it holds
 // only where the marginal is differentiable; with a hard floor the optimum sat
 // on its kink over a range of drivers and the row read 0.007 where a re-solve
-// read zero. Each row is held to the best of three steps (hazard 15).
+// read zero. Each row is held to the best of three steps (hazard 15). With a
+// cuticle too, whose residual flux reads the deficit's slope.
 void test_rows_through_the_dew_point() {
   printf("the collar and profit rows through the dew point match a re-solve\n");
   using Kind = phylloptim::Leaf::OperatingPointKind;
   const double d0 = phylloptim::vpd_leaf_min, w = phylloptim::vpd_leaf_floor_width;
-  const auto solved = [](double vpd, double ks_scale) {
+  for (double g_min : {0.0, 5e-4}) {
+  const auto solved = [g_min](double vpd, double ks_scale) {
     Drivers d = dew_point_drivers();
     d.atm_vpd = vpd;
     d.K_s *= ks_scale;
     phylloptim::Leaf l = make_pm_leaf(d, {0.5}, {1.0}, true);
+    l.g_min = g_min;
     l.optimise();
     return l;
   };
@@ -2116,7 +2120,8 @@ void test_rows_through_the_dew_point() {
   for (int i = 0; i <= 30; ++i) {
     const double vpd = 1.10 + 0.005 * i;
     phylloptim::Leaf l = solved(vpd, 1.0);
-    const std::string at = " at atm_vpd " + std::to_string(vpd);
+    const std::string at = " at atm_vpd " + std::to_string(vpd) +
+                           " g_min " + std::to_string(g_min);
     if (l.operating_point_kind() != Kind::Interior) {
       ok(false, "the fixture solves to an interior optimum" + at);
       continue;
@@ -2159,7 +2164,7 @@ void test_rows_through_the_dew_point() {
       err_collar = std::min(err_collar, std::abs(collar_row - fd_collar) /
                                             std::max(std::abs(fd_collar), 1e-2));
       err_profit = std::min(err_profit, std::abs(profit_row - fd_profit) /
-                                            std::abs(fd_profit));
+                                            std::max(std::abs(fd_profit), 1e-12));
     }
     ok(err_collar < 1e-4, "the collar row matches a re-solve" + at + ": " +
                               std::to_string(err_collar));
@@ -2169,11 +2174,12 @@ void test_rows_through_the_dew_point() {
     worst_profit = std::max(worst_profit, err_profit);
     ++compared;
   }
-  printf("    %d interior optima: %d below the dew point, %d within 4 widths of the "
-         "floor, %d above | worst collar row %.1e, profit row %.1e\n",
-         compared, below, in_band, above, worst_collar, worst_profit);
+  printf("    g_min %g: %d interior optima, %d below the dew point, %d within 4 widths "
+         "of the floor, %d above | worst collar row %.1e, profit row %.1e\n",
+         g_min, compared, below, in_band, above, worst_collar, worst_profit);
   ok(below >= 3 && in_band >= 5 && above >= 3,
      "the sweep reached a leaf below, on and above the floor (hazard 16)");
+  }
 }
 
 // At a prescribed collar a caller reads the marginal and then bills at the same

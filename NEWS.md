@@ -1,7 +1,7 @@
 # phylloptim 0.42.0
 
 - With the energy balance on, the leaf-to-air vapour deficit's floor at the dew point is smooth: `vpd_leaf_min + w softplus((d - vpd_leaf_min) / w)` at `w = vpd_leaf_floor_width` (0.005 kPa), in place of `max(d, vpd_leaf_min)`. The hard floor was a kink in the marginal profit. An optimum could sit on it over a range of drivers, and the derivative surface's collar row there was wrong: 0.007 against a re-solve's zero. `Leaf::leaf_vpd_slope_at` is the deficit's slope in leaf temperature (#284, traitecoevo/plant#819).
-- Results move only for a leaf whose deficit is between 0.17 kPa below and 0.2 kPa above the floor, about a kelvin either side of its dew point. The golden files are bit-identical, and so is plant's TF24 default baseline. Off the energy balance nothing moves.
+- Results move only for a leaf whose deficit is between 0.18 kPa below the floor and 0.19 above it, about a kelvin either side of its dew point. The golden files are bit-identical, and so is plant's TF24 default baseline. Off the energy balance nothing moves.
 - `vpd_leaf_floor` and `vpd_leaf_seated` still count a deficit below `vpd_leaf_min`; a seated deficit is no longer exactly `vpd_leaf_min`.
 
 # phylloptim 0.41.0

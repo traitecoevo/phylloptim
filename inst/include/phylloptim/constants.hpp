@@ -142,7 +142,7 @@ inline constexpr double aerodynamic_resistance_coef = 200.0;
 // A leaf cooled below the dew point has a negative deficit d and would report a
 // negative conductance; the floor keeps it finite. Soft, because a cohort can
 // settle where it engages, and a hard one is a kink in the marginal profit there.
-// D is d to the last bit wherever d > vpd_leaf_min + 40 w.
+// D is d to the last bit wherever d > vpd_leaf_min + 37 w.
 inline constexpr double vpd_leaf_min = 0.01;
 inline constexpr double vpd_leaf_floor_width = 0.005;
 

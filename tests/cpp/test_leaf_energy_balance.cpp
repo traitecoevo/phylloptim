@@ -1174,6 +1174,10 @@ void test_the_vapour_deficit_soft_floor() {
     worst_T = std::max(worst_T, std::abs(slope - fd) / std::max(std::abs(fd), 1e-3));
     T tt(t);
     odelia::ode::set_direction(tt, 1.0);
+    near(odelia::util::to_passive(l.leaf_vpd_on<T>(tt)), l.leaf_vpd_at(t), 0.0,
+         "the scalar form's deficit is the double form's at " + std::to_string(t));
+    near(l.leaf_vpd_slope_on<double>(t), slope, 0.0,
+         "and its slope at double is leaf_vpd_slope_at's at " + std::to_string(t));
     near(odelia::ode::derivative_along(l.leaf_vpd_on<T>(tt)), slope,
          1e-12 * std::max(1.0, std::abs(slope)),
          "the deficit's tangent in leaf temperature is its slope at " + std::to_string(t));
