@@ -208,8 +208,8 @@ void test_light_reaches_carbon_with_a_row() {
 // metrics, with nothing refused.
 //
 // The two routes are separate claims. `duptake_dpsi` returns NaN deliberately
-// where its analytic branch is not valid, and a single-layer wet bound -- where
-// a shut leaf's collar sits at g_min = 0 -- is such a point; the
+// where its analytic branch is not valid (a zero collar, or equal potentials
+// outside the quadrature arm), and the draw then differences; the
 // coordinates additionally run the implicit function theorem, which has no
 // residual to invert where a leaf with no conductance nets zero at no ci.
 void test_every_answered_point_hands_over_finite_rows() {
@@ -1921,6 +1921,40 @@ void test_the_draw_is_linear_through_a_gravity_balance() {
   ok(worst < 1e-5, "the draw is the slope times the offset within 1e-8 MPa of the balance");
 }
 
+// Where `duptake_dpsi` has no analytic slope (hazard 6), `supply_draw_at`
+// differences every slope from its own function. On this supply the only such
+// collars are a zero collar and equal potentials outside the quadrature arm,
+// which needs a layer within 1e-8 MPa of a collar under about 1e-6 MPa.
+void test_the_draw_differences_at_a_kink() {
+  printf("the draw differences its slopes where the uptake has none\n");
+  Drivers d;
+  const std::vector<double> soil0{5e-7, 2.0, 3.0};
+  phylloptim::Leaf l = make_leaf(d, soil0, {0.5, 1.0, 1.5});
+  l.find_root_collar_psi();
+  const std::size_t n = soil0.size();
+  const auto& net = l.roots_.network_;
+  const double collar = soil0[0] + 7e-9;
+  ok(std::isnan(l.dE_from_soil_dpsi_collar(collar, soil0)),
+     "the uptake has no analytic slope at the collar (test is not vacuous)");
+  const phylloptim::SupplyInputs<double> supply{
+      soil0, net.r_R_H_min, net.r_R_V_sum, l.roots_.root_P50, l.roots_.root_c};
+  const auto draw = l.supply_draw_at<double>(collar, supply);
+  const double step = 1e-6;
+  std::vector<double> up_layer(n, 0.0), down_layer(n, 0.0);
+  double up = 0.0, down = 0.0;
+  l.roots_.uptake_at(collar + step, soil0, up_layer, up);
+  l.roots_.uptake_at(collar - step, soil0, down_layer, down);
+  bool finite = std::isfinite(draw.E_up.slope);
+  bool matches = draw.E_up.slope == (up - down) / (2.0 * step);
+  for (std::size_t j = 0; j < n; ++j) {
+    finite = finite && std::isfinite(draw.duptake_dp[j]);
+    matches = matches &&
+              draw.duptake_dp[j] == (up_layer[j] - down_layer[j]) / (2.0 * step);
+  }
+  ok(finite, "every slope the draw hands over is finite");
+  ok(matches, "and each is the central difference of its own uptake");
+}
+
 // Next to an end a step in the position is a small step in the collar. Here the
 // collar is 2e-4 MPa from the wet end and 1.5e-8 MPa from a layer's potential,
 // and the base step's probes straddle that potential. An end itself has no
@@ -2865,6 +2899,7 @@ void run_surface() {
   test_the_position_slope_beside_a_layer_and_an_end();
   test_the_uptake_rows_through_a_layer_potential();
   test_the_draw_is_linear_through_a_gravity_balance();
+  test_the_draw_differences_at_a_kink();
   test_the_vapour_deficit_floor_is_counted();
   test_the_seated_vapour_deficit_floor_is_counted_once_per_seat();
   test_rows_through_the_dew_point();

@@ -1195,8 +1195,8 @@ public:
     }
 
     // A kink is answered here, once: `duptake_dpsi` returns NaN where its analytic
-    // slope is not valid (hazard 6), as at a wet bound, and then every slope is
-    // differenced from its own function. A NaN left in one layer reaches plant as a
+    // slope is not valid (hazard 6), and then every slope is differenced from its
+    // own function. A NaN left in one layer reaches plant as a
     // NaN in every trait column sharing the adjoint accumulator.
     const bool at_a_kink =
         !std::isfinite(odelia::util::to_passive(d.E_up.slope)) ||

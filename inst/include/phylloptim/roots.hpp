@@ -477,9 +477,9 @@ public:
   //
   // ⚠️ NaN when any layer sits on a branch kink (T_collar == 0, or, outside
   // uptake_impl's quadrature arm, T_collar == T_soil[i]), and the caller then
-  // takes a central difference (hazard 6). An
-  // alternative supply path must keep that rather than throw or return 0. Refuses where the uptake refuses. On the hot path, so its
-  // vectors are scratch this object keeps.
+  // takes a central difference (hazard 6). An alternative supply path must keep
+  // that rather than throw or return 0. Refuses where the uptake refuses. On the
+  // hot path, so its vectors are scratch this object keeps.
   double duptake_dpsi(double T_collar,
                       const std::vector<double>& psi_soil) const {
     double E_up = 0.0;
