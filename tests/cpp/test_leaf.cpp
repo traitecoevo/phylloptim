@@ -575,16 +575,15 @@ void test_gradient_reports_feasibility() {
      "and the sentinel is still 0.0 for a caller that does not ask");
 }
 
-// At a kink in the uptake (hazard 6) the collar gradient differences the uptake
-// a step either side of the collar. Within that step of the continuity root the
-// drier probe is past it, where the stem carries no leaf potential; the uptake
-// is still defined there, so the gradient is the analytic branch's with only the
-// kinked term differenced. The second layer's soil is put at the collar's
-// gravity balance (the collar less the layer's head, longer than the uptake's
-// quadrature span) to make the kink, half a step inside the root, by a fixed
-// point: the root moves with the layer, by a sixth as much.
-void test_gradient_difference_crosses_continuity_root() {
-  printf("the kink's difference holds a step from the continuity root\n");
+// A layer's gravity balance half a differencing step inside the continuity
+// root, where the stem carries no leaf potential a step drier. The uptake is
+// smooth through the balance, so its slope there is analytic and the collar
+// gradient takes no probe past the root. The second layer's soil is put at the
+// collar's balance (the collar less the layer's head, longer than the uptake's
+// quadrature span) by a fixed point: the root moves with the layer, by a sixth
+// as much.
+void test_gradient_at_a_balance_beside_continuity_root() {
+  printf("the gradient at a gravity balance a step from the continuity root\n");
   Drivers d;
   const std::vector<double> depth{0.2, 0.6};
   const double step = 1e-6;  // dprofit's differencing step
@@ -608,8 +607,14 @@ void test_gradient_difference_crosses_continuity_root() {
   ok(head > 2e-3, "the layer's head is longer than the quadrature span");
   ok(carries(l, collar) && !carries(l, collar + step),
      "the collar carries and a step drier does not");
-  ok(std::isnan(l.dE_from_soil_dpsi_collar(collar, l.roots_.psi_soil_)),
-     "and the uptake has no slope there, so the gradient differences");
+  const double slope = l.dE_from_soil_dpsi_collar(collar, l.roots_.psi_soil_);
+  const double h = 1e-7;
+  l.E_from_Soil_to_Root_Collar(collar + h, l.roots_.psi_soil_);
+  const double up = l.E_up_;
+  l.E_from_Soil_to_Root_Collar(collar - h, l.roots_.psi_soil_);
+  const double fd = (up - l.E_up_) / (2.0 * h);
+  ok(std::isfinite(slope) && std::abs(slope - fd) < 1e-6 * std::abs(fd),
+     "the uptake's slope at the balance is analytic, and matches a difference");
   bool feasible = false;
   double g = 0.0;
   bool threw = false;
@@ -618,21 +623,21 @@ void test_gradient_difference_crosses_continuity_root() {
   } catch (const phylloptim::util::infeasible_error &) {
     threw = true;
   }
-  ok(!threw && feasible && std::isfinite(g), "the difference gives a gradient");
-  // Off the kink by a step, where the slope is analytic.
+  ok(!threw && feasible && std::isfinite(g), "the collar gradient answers there");
+  // A step wetter, off the balance.
   bool f_near = false;
   const double near = l.dprofit_droot_collar_psi(collar - step, &f_near);
   ok(f_near && std::abs(g - near) < 0.1 * std::abs(near),
-     "close to the analytic one a step wetter");
+     "close to the gradient a step wetter");
 }
 
-// The same kink swept across the dry end of the collar bracket, on a stand's
-// leaf: the solve decides a pin at the polished end itself, so a gradient
+// A layer's potential swept across the dry end of the collar bracket, on a
+// stand's leaf: the solve decides a pin at the polished end itself, so a gradient
 // there that refused or reported none would turn an interior optimum into a
 // pin past the maximum (hazard 19). Every point keeps the kind of its
 // neighbours.
 void test_kink_across_dry_end_keeps_the_solve() {
-  printf("a layer's kink crossing the dry end leaves the collar solve's kind alone\n");
+  printf("a layer's potential crossing the dry end leaves the collar solve's kind alone\n");
   using CC = phylloptim::Leaf::CostCurve;
   const std::vector<double> depth{0.3, 0.6, 0.9, 1.2, 1.5};
   const std::vector<double> soil0{4.21997, 0.092694683070275272,
@@ -688,9 +693,9 @@ void test_kink_across_dry_end_keeps_the_solve() {
     } catch (const phylloptim::util::infeasible_error &) {
     }
   }
-  printf("    21 kinks swept, %d solved, %d of the base's kind\n", reached, kept);
+  printf("    21 points swept, %d solved, %d of the base's kind\n", reached, kept);
   ok(reached == 21, "every point solves");
-  ok(kept == 21, "and keeps the kind of the solve without the kink");
+  ok(kept == 21, "and keeps the kind of the base solve");
 }
 
 // The AD derivative and the forward model are instantiations of ONE
@@ -3486,7 +3491,7 @@ int main(int argc, char **argv) {
   test_gradient_needs_no_prior_solve();
   test_gradient_is_zero_in_reversed_gradient_state();
   test_gradient_reports_feasibility();
-  test_gradient_difference_crosses_continuity_root();
+  test_gradient_at_a_balance_beside_continuity_root();
   test_kink_across_dry_end_keeps_the_solve();
   test_ad_kernels_are_the_model_not_a_mirror();
   test_collar_solve_satisfies_its_own_first_order_condition();
