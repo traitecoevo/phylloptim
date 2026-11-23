@@ -1875,11 +1875,9 @@ void test_the_uptake_rows_through_a_layer_potential() {
 }
 
 // A layer's draw passes through zero at its gravity balance, the collar where
-// the potential difference meets the head, on its own slope. A band of exact
-// zeros around the balance made the zero-uptake collar wherever a root-find
-// stopped inside it, and a shut leaf's step in from there landed with no flow
-// or with some as the iterate moved (hazard 19). Read beside, inside and past
-// where the band was, at double, against the tape's slope at the balance.
+// the potential difference meets the head, on its own slope, with no band of
+// exact zeros around it (hazard 19). Read at double at collars 2e-9 to 3e-8 MPa
+// either side, against the tape's slope at the balance.
 void test_the_draw_is_linear_through_a_gravity_balance() {
   printf("the draw through a layer's gravity balance is linear, not a band of zeros\n");
   using T = odelia::ode::tangent_scalar<double>;

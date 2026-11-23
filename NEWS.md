@@ -1,7 +1,7 @@
 # phylloptim 0.42.1
 
 - A rooted layer's uptake no longer reads exactly zero in a 1e-8 MPa band around its gravity balance; the general formula, which passes smoothly through zero, carries the balance too. Inside the band, a shut leaf's zero-uptake collar was wherever the root-find stopped, and its step in from there drew no flow or some as rounding fell (hazard 19). The tape never had the band, so forward and tangent differed there too (#286).
-- Results move for solves whose collar sits at a layer's balance: a leaf at its soil bound on several root layers, and prescribed points there. Near-zero quantities of a shut leaf (conductance, flux, hydraulic cost) move by up to 3.5e-3 relative; profit by at most 1e-5. Interior solves move at rounding level, and the recorded gradients by at most 1.3e-10.
+- Results move where the collar sits at a layer's balance, which in the golden grid is a layered supply with one layer at its soil bound (the single-layer and three-layer grids are bit-identical). There a leaf's near-zero quantities (conductance, flux, hydraulic cost, and profit where it is near zero) move by up to 3.5e-3 relative, and assimilation by under 1e-6. The open leaf's wet bound now stops at its bracket tolerance rather than on an exact zero, so a point placed from it moves more: the golden quarter-way points by up to 2e-3 in profit and 3e-4 in assimilation. Interior solves move at rounding level, and the recorded gradients by at most 1.3e-10.
 
 # phylloptim 0.42.0
 
