@@ -1,3 +1,8 @@
+# phylloptim 0.42.2
+
+- The uptake's slope in the collar is analytic at a layer's gravity balance, where the uptake is smooth; `duptake_dpsi` reports NaN only at a zero collar and at equal potentials outside the quadrature arm (#287).
+- A shut leaf whose wet bound sits on a single conducting layer's balance now reports `lambda_emergent`, where it reported NaN: 80 psi_leaf golden rows, each within 2.3e-13 of the same point on the other topologies. Nothing else moves.
+
 # phylloptim 0.42.1
 
 - A rooted layer's uptake no longer reads exactly zero in a 1e-8 MPa band around its gravity balance; the general formula, which passes smoothly through zero, carries the balance too. Inside the band, a shut leaf's zero-uptake collar was wherever the root-find stopped, and its step in from there drew no flow or some as rounding fell (hazard 19). The tape never had the band, so forward and tangent differed there too (#286).

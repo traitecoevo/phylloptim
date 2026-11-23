@@ -476,9 +476,8 @@ public:
   // kg, the per-layer terms in mol, as the draws are.
   //
   // ⚠️ NaN when any layer sits on a branch kink (T_collar == 0, or, outside
-  // uptake_impl's quadrature arm, T_collar == T_soil[i]) or at its gravity
-  // balance, where the uptake is smooth but the slope is still not taken
-  // analytically; the caller then takes a central difference (hazard 6). An
+  // uptake_impl's quadrature arm, T_collar == T_soil[i]), and the caller then
+  // takes a central difference (hazard 6). An
   // alternative supply path must keep that rather than throw or return 0. Refuses where the uptake refuses. On the hot path, so its
   // vectors are scratch this object keeps.
   double duptake_dpsi(double T_collar,
@@ -690,12 +689,11 @@ public:
       const bool short_span =
           span_at < quadrature_span &&
           span_at < quadrature_share * std::min(collar_psi, soil_at);
-      // The collars where duptake_dpsi reports NaN: a zero collar, and, outside
-      // the quadrature arm, equal potentials (a kink) and the gravity balance
-      // (smooth, but flagged too). The quadrature arm flags neither.
+      // The collars where duptake_dpsi reports NaN: a zero collar, and equal
+      // potentials outside the quadrature arm. The gravity balance is not one:
+      // the draw passes through zero there on its analytic slope.
       if (conductance != nullptr &&
-          ((!short_span && (std::abs(collar_psi - soil_at) < kink_tol ||
-                            std::abs((collar_psi - soil_at) - zg_p[i]) < kink_tol)) ||
+          ((!short_span && std::abs(collar_psi - soil_at) < kink_tol) ||
            std::abs(collar_psi) < kink_tol)) {
         at_a_kink = true;
       }

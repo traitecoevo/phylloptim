@@ -319,9 +319,8 @@ inline void Leaf::set_shut_state() {
     }
   }
   profit_ = profit_psi_leaf_for<K>(opt_psi_leaf_, collar);
-  // NA where the supply's conductance is unavailable, as at a one-layer wet
-  // bound on a gravity balance outside the uptake's quadrature arm, where
-  // duptake_dpsi reports NaN.
+  // NA where the supply's conductance is unavailable (duptake_dpsi reports NaN
+  // at a branch kink).
   lambda_emergent_ = lambda_collar_for<K>();
   operating_point_kind_ = OperatingPointKind::HydraulicShutdown;
   if (!std::isfinite(profit_)) {
