@@ -476,8 +476,9 @@ public:
   // kg, the per-layer terms in mol, as the draws are.
   //
   // ⚠️ NaN when any layer sits on a branch kink (T_collar == 0, or, outside
-  // uptake_impl's quadrature arm, T_collar == T_soil[i] or the gravity
-  // balance), and the caller then takes a central difference (hazard 6). An
+  // uptake_impl's quadrature arm, T_collar == T_soil[i]) or at its gravity
+  // balance, where the uptake is smooth but the slope is still not taken
+  // analytically; the caller then takes a central difference (hazard 6). An
   // alternative supply path must keep that rather than throw or return 0. Refuses where the uptake refuses. On the hot path, so its
   // vectors are scratch this object keeps.
   double duptake_dpsi(double T_collar,
@@ -689,9 +690,9 @@ public:
       const bool short_span =
           span_at < quadrature_span &&
           span_at < quadrature_share * std::min(collar_psi, soil_at);
-      // The collars the analytic slope is not valid across (duptake_dpsi's NaN
-      // contract). The quadrature arm is smooth through equal potentials and
-      // the gravity balance, so neither is one there.
+      // The collars where duptake_dpsi reports NaN: a zero collar, and, outside
+      // the quadrature arm, equal potentials (a kink) and the gravity balance
+      // (smooth, but flagged too). The quadrature arm flags neither.
       if (conductance != nullptr &&
           ((!short_span && (std::abs(collar_psi - soil_at) < kink_tol ||
                             std::abs((collar_psi - soil_at) - zg_p[i]) < kink_tol)) ||
@@ -777,10 +778,11 @@ public:
         }
         out_p[i] = E_i;
         E_up += E_i;
-      } else if (std::is_same_v<T, double> &&
-                 std::abs((collar_psi - soil_at) - zg_p[i]) < kink_tol) {
-        out_p[i] = T(0.0);
       } else {
+        // A collar at the layer's gravity balance takes this arm too, where
+        // num / r_R passes smoothly through zero. ⚠️ No band around it may read
+        // zero: the zero-uptake collar would be wherever a root-find stopped.
+        //
         // Named so both arms are lvalues and the selection binds rather than
         // copies; T(0.0) records nothing either way.
         const T zero(0.0);

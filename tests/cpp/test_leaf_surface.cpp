@@ -1874,6 +1874,53 @@ void test_the_uptake_rows_through_a_layer_potential() {
   ok(jump < 1e-10, "the walk is continuous where the quadrature arm begins");
 }
 
+// A layer's draw passes through zero at its gravity balance, the collar where
+// the potential difference meets the head, on its own slope, with no band of
+// exact zeros around it (hazard 19). Read at double at collars 2e-9 to 3e-8 MPa
+// either side, against the tape's slope at the balance.
+void test_the_draw_is_linear_through_a_gravity_balance() {
+  printf("the draw through a layer's gravity balance is linear, not a band of zeros\n");
+  using T = odelia::ode::tangent_scalar<double>;
+  Drivers d;
+  const std::vector<double> soil0{1e-3, 2.0, 3.0};
+  phylloptim::Leaf l = make_leaf(d, soil0, {0.5, 1.0, 1.5});
+  l.find_root_collar_psi();
+  const std::size_t n = soil0.size(), layer = 1;
+  const auto& net = l.roots_.network_;
+  const double balance = soil0[layer] + l.roots_.grav_head_z_[layer];
+  auto draw = [&](double collar) {
+    std::vector<double> lay(n, 0.0);
+    double total = 0.0;
+    l.roots_.uptake_at(collar, soil0, lay, total);
+    return lay[layer];
+  };
+  std::vector<T> soil, r_h, r_v;
+  for (std::size_t i = 0; i < n; ++i) {
+    soil.push_back(T(soil0[i]));
+    r_h.push_back(T(net.r_R_H_min[i]));
+    r_v.push_back(T(net.r_R_V_sum[i]));
+  }
+  T c(balance);
+  odelia::ode::set_direction(c, 1.0);
+  const phylloptim::SupplyInputs<T> supply{soil, r_h, r_v, T(l.roots_.root_P50),
+                                           T(l.roots_.root_c)};
+  std::vector<T> lay(n, T(0.0));
+  T total(0.0);
+  l.roots_.uptake_at<T>(c, supply, lay, total);
+  const double slope = odelia::ode::derivative_along(lay[layer]);
+  double worst = 0.0;
+  int nonzero = 0;
+  for (double offset : {-3e-8, -9e-9, -2e-9, 2e-9, 9e-9, 3e-8}) {
+    const double got = draw(balance + offset);
+    nonzero += (got != 0.0 && (got > 0.0) == (offset > 0.0));
+    worst = std::max(worst, std::abs(got - slope * offset) / std::abs(slope * offset));
+  }
+  printf("    slope at the balance %.3e; worst departure from it %.2e\n", slope, worst);
+  ok(slope > 0.0, "the draw rises through the balance (test is not vacuous)");
+  ok(nonzero == 6, "every collar beside the balance draws, with the offset's sign");
+  ok(worst < 1e-5, "the draw is the slope times the offset within 1e-8 MPa of the balance");
+}
+
 // Next to an end a step in the position is a small step in the collar. Here the
 // collar is 2e-4 MPa from the wet end and 1.5e-8 MPa from a layer's potential,
 // and the base step's probes straddle that potential. An end itself has no
@@ -2817,6 +2864,7 @@ void run_surface() {
   test_the_marginal_slope_is_smooth_at_a_layer_potential();
   test_the_position_slope_beside_a_layer_and_an_end();
   test_the_uptake_rows_through_a_layer_potential();
+  test_the_draw_is_linear_through_a_gravity_balance();
   test_the_vapour_deficit_floor_is_counted();
   test_the_seated_vapour_deficit_floor_is_counted_once_per_seat();
   test_rows_through_the_dew_point();
