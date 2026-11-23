@@ -490,6 +490,11 @@ inline void Leaf::optimise_closed() {
   }
   // The solvers' own stop, so the two cannot drift.
   closed_form::require_prescribed_temperature(*this, "the closed form");
+  if (light_depth_ != 0.0) {
+    util::stop("the closed form is refused with light_depth_ > 0: it inverts the "
+               "single-layer leaf's assimilation and its validity guard was "
+               "measured on it. Use method \"exact\", or set light_depth_ to 0.");
+  }
   if (use_thermal_damage_) {
     util::stop("the closed form is refused with use_thermal_damage_ on: it has "
                "not been checked against the exact solve with the thermal-damage "

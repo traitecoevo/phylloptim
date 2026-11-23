@@ -1395,6 +1395,15 @@ void Leaf__alpha_PAR___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, do
 }
 
 // [[Rcpp::export]]
+double Leaf__light_depth___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
+  return obj_->light_depth_;
+}
+// [[Rcpp::export]]
+void Leaf__light_depth___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value) {
+  obj_->light_depth_ = value;
+}
+
+// [[Rcpp::export]]
 double Leaf__alpha_NIR___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_) {
   return obj_->alpha_NIR_;
 }

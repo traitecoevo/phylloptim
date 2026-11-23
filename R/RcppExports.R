@@ -1265,6 +1265,14 @@ Leaf__alpha_PAR___set <- function(obj_, value) {
     invisible(.Call('_phylloptim_Leaf__alpha_PAR___set', PACKAGE = 'phylloptim', obj_, value))
 }
 
+Leaf__light_depth___get <- function(obj_) {
+    .Call('_phylloptim_Leaf__light_depth___get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__light_depth___set <- function(obj_, value) {
+    invisible(.Call('_phylloptim_Leaf__light_depth___set', PACKAGE = 'phylloptim', obj_, value))
+}
+
 Leaf__alpha_NIR___get <- function(obj_) {
     .Call('_phylloptim_Leaf__alpha_NIR___get', PACKAGE = 'phylloptim', obj_)
 }

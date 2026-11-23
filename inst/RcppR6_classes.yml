@@ -471,6 +471,7 @@ Leaf:
     wind_speed_: {type: double, access: field}
     # Leaf absorptances and the intercepted near-infrared (energy balance only).
     alpha_PAR_: {type: double, access: field}
+    light_depth_: {type: double, access: field}
     alpha_NIR_: {type: double, access: field}
     NIR_int_: {type: double, access: field}
     # The energy balance's radiation budget. set_drivers() re-seats all four, so

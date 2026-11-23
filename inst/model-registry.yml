@@ -317,6 +317,15 @@ parameters:
     source: code default; no citation recorded
     placeholder: true
     code: phylloptim::Leaf::alpha_PAR_
+  light_depth_:
+    section: biochemistry
+    symbol: '\tau'
+    units: '–'
+    class: hyperparameter
+    meaning: 'optical depth of the photosynthetic tissue; 0 is the single-layer leaf. Positive: light falls as $e^{-t}$ through layers sharing $c_i$, $\alpha_\mathrm{PAR}$ is the stack''s absorptance and $\theta_J$ each layer''s curvature'
+    source: 'leaf-optimality project (Falster), 2026; closed form checked against a layer sum'
+    placeholder: true
+    code: phylloptim::Leaf::light_depth_
   curv_fact_elec_trans:
     section: biochemistry
     symbol: '\theta_J'
@@ -1540,6 +1549,23 @@ equations:
     kind: closed_form
     cite: Farquhar-1980
     note: 'Net of dark respiration; $c_i$ in Pa.'
+  assimilation_attenuated:
+    section: biochemistry
+    title: Assimilation of a leaf with light attenuating through it
+    latex: |
+      A_s = \frac{W_c + W_m - \sqrt{(W_c + W_m)^2 - 4\,\theta\, W_c W_m}}{2\,\theta}, \quad
+      W_m = \frac{J_{max}}{4}\,\frac{c_i - \Gamma^* c_P}{c_i + 2\,\Gamma^* c_P}, \quad
+      A_L = \frac{\phi_J\,\alpha_\mathrm{PAR}\,Q}{4\,(1 - e^{-\tau})}\,\frac{c_i - \Gamma^* c_P}{c_i + 2\,\Gamma^* c_P} \\
+      s = A_s/\tau, \quad b = s(1 - 2\theta_J), \quad
+      F(y) = \frac{y - R - b\ln(y + b + R) + s\ln(s^2 + b y + s R)}{2\theta_J}, \quad R = \sqrt{y^2 + 2by + s^2} \\
+      A = F(A_L) - F(A_L e^{-\tau}) - R_d
+    code: phylloptim::Leaf::assim_attenuated_kernel
+    also: [phylloptim::Leaf::attenuated_profile]
+    reads: [curv_fact_colim, curv_fact_elec_trans, phi_J, alpha_PAR_, light_depth_]
+    writes: []
+    kind: closed_form
+    cite: Farquhar-1980
+    note: 'Used in place of the single-layer form where light_depth_ > 0: the integral over layers sharing $c_i$ of a non-rectangular hyperbola of curvature $\theta_J$ between each layer''s light and its capacity. Exact against a layer sum.'
   thermal_cost:
     section: biochemistry
     title: Instantaneous thermal cost

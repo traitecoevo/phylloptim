@@ -3628,6 +3628,28 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// Leaf__light_depth___get
+double Leaf__light_depth___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__light_depth___get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__light_depth___get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__light_depth___set
+void Leaf__light_depth___set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value);
+RcppExport SEXP _phylloptim_Leaf__light_depth___set(SEXP obj_SEXP, SEXP valueSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    Rcpp::traits::input_parameter< double >::type value(valueSEXP);
+    Leaf__light_depth___set(obj_, value);
+    return R_NilValue;
+END_RCPP
+}
 // Leaf__alpha_NIR___get
 double Leaf__alpha_NIR___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
 RcppExport SEXP _phylloptim_Leaf__alpha_NIR___get(SEXP obj_SEXP) {
@@ -4497,6 +4519,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__wind_speed___set", (DL_FUNC) &_phylloptim_Leaf__wind_speed___set, 2},
     {"_phylloptim_Leaf__alpha_PAR___get", (DL_FUNC) &_phylloptim_Leaf__alpha_PAR___get, 1},
     {"_phylloptim_Leaf__alpha_PAR___set", (DL_FUNC) &_phylloptim_Leaf__alpha_PAR___set, 2},
+    {"_phylloptim_Leaf__light_depth___get", (DL_FUNC) &_phylloptim_Leaf__light_depth___get, 1},
+    {"_phylloptim_Leaf__light_depth___set", (DL_FUNC) &_phylloptim_Leaf__light_depth___set, 2},
     {"_phylloptim_Leaf__alpha_NIR___get", (DL_FUNC) &_phylloptim_Leaf__alpha_NIR___get, 1},
     {"_phylloptim_Leaf__alpha_NIR___set", (DL_FUNC) &_phylloptim_Leaf__alpha_NIR___set, 2},
     {"_phylloptim_Leaf__NIR_int___get", (DL_FUNC) &_phylloptim_Leaf__NIR_int___get, 1},

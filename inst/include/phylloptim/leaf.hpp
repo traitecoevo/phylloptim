@@ -665,6 +665,12 @@ public:
   // upstream; alpha_NIR_ reaches only the energy balance. A gas-exchange fit
   // identifies only phi_J * alpha_PAR_: fix alpha_PAR_ and phi_J is per absorbed photon.
   double alpha_PAR_ = 0.85;  // PAR absorptance, unitless
+  // Optical depth of the photosynthetic tissue, unitless. Zero is the single-layer
+  // leaf. Positive: light falls as exp(-t) through a stack of layers that share c_i,
+  // alpha_PAR_ stays the stack's absorptance, curv_fact_elec_trans is each layer's
+  // curvature (must be < 1) and the closed form is refused. See
+  // assim_attenuated_kernel.
+  double light_depth_ = 0.0;
   double alpha_NIR_ = 0.20;  // near-infrared absorptance, unitless
   // Intercepted near-infrared per unit leaf area, W m^-2, for the energy balance.
   // No default: it depends on the light source (about PPFD_ / umol_par_per_joule in
@@ -1738,6 +1744,12 @@ public:
     T respiration;
     G gamma;
     G km;
+    // Read only where depth > 0: the absorbed photon flux phi_J alpha_PAR PPFD, and
+    // each layer's curvature. There `transport` holds Jmax, not J.
+    T light;
+    T layer_curvature;
+    // light_depth_: a setting, never a row, so it is not visited.
+    double depth;
 
     // ⚠️ Hazard 17: every member that carries a row is visited here, or its
     // columns read exactly zero. The member count is asserted below.
@@ -1749,9 +1761,15 @@ public:
       f(respiration);
       f(gamma);
       f(km);
+      // Read only where depth > 0; elsewhere their columns are exactly zero, and
+      // visiting them would add two directions to every implicit node.
+      if (depth > 0.0) {
+        f(light);
+        f(layer_curvature);
+      }
     }
   };
-  static_assert(sizeof(PhotoCapacity<double>) == 6 * sizeof(double),
+  static_assert(sizeof(PhotoCapacity<double>) == 9 * sizeof(double),
                 "PhotoCapacity gained or lost a member: update for_each_active, "
                 "then this count");
 
@@ -1792,6 +1810,13 @@ public:
       const T& ci, const PhotoCapacity<U, G>& cap) const;
   template <typename T, typename U, typename G> T assim_electron_limited_kernel(
       const T& ci, const PhotoCapacity<U, G>& cap) const;
+  template <typename T, typename U, typename G> T assim_single_layer_kernel(
+      const T& ci, const PhotoCapacity<U, G>& cap) const;
+  template <typename T, typename U, typename G> T assim_attenuated_kernel(
+      T ci, U vcmax, U jmax, U curvature, G gamma, G km, U light, U layer_curvature,
+      double depth) const;
+  template <typename T, typename U> T attenuated_profile(
+      const T& saturated, const T& light_limited, double depth, const U& curvature) const;
   template <typename T, typename U, typename G> T assim_colimited_kernel(
       const T& ci, const PhotoCapacity<U, G>& cap) const;
   // The curve parameters take their own scalar U, so pow(tangent, double) pays
