@@ -1,3 +1,8 @@
+# phylloptim 0.42.1
+
+- A rooted layer's uptake no longer reads exactly zero in a 1e-8 MPa band around its gravity balance; the general formula, which passes smoothly through zero, carries the balance too. Inside the band, a shut leaf's zero-uptake collar was wherever the root-find stopped, and its step in from there drew no flow or some as rounding fell (hazard 19). The tape never had the band, so forward and tangent differed there too (#285).
+- Results move for solves whose collar sits at a layer's balance: a leaf at its soil bound on several root layers, and prescribed points there. Near-zero quantities of a shut leaf (conductance, flux, hydraulic cost) move by up to 3.5e-3 relative; profit by at most 1e-5. Interior solves move at rounding level, and the recorded gradients by at most 1.3e-10.
+
 # phylloptim 0.42.0
 
 - With the energy balance on, the leaf-to-air vapour deficit's floor at the dew point is smooth: `vpd_leaf_min + w softplus((d - vpd_leaf_min) / w)` at `w = vpd_leaf_floor_width` (0.005 kPa), in place of `max(d, vpd_leaf_min)`. The hard floor was a kink in the marginal profit. An optimum could sit on it over a range of drivers, and the derivative surface's collar row there was wrong: 0.007 against a re-solve's zero. `Leaf::leaf_vpd_slope_at` is the deficit's slope in leaf temperature (#284, traitecoevo/plant#819).
