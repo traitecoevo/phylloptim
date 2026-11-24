@@ -1543,7 +1543,7 @@ equations:
       W_j = \frac{J}{4}\,\frac{c_i - \Gamma^* c_P}{c_i + 2\,\Gamma^* c_P}, \qquad
       A = \frac{W_c + W_j - \sqrt{(W_c + W_j)^2 - 4\,\theta\, W_c W_j}}{2\,\theta} - R_d
     code: phylloptim::Leaf::assim_colimited
-    also: [phylloptim::Leaf::assim_colimited_kernel, phylloptim::Leaf::assim_rubisco_limited_kernel, phylloptim::Leaf::assim_electron_limited_kernel, phylloptim::Leaf::photo_capacity, phylloptim::Leaf::photo_capacity_as]
+    also: [phylloptim::Leaf::assim_colimited_kernel, phylloptim::Leaf::assim_rubisco_limited_kernel, phylloptim::Leaf::assim_electron_limited_kernel, phylloptim::Leaf::photo_capacity, phylloptim::Leaf::photo_capacity_as, phylloptim::Leaf::assim_single_layer_kernel, phylloptim::Leaf::assim_colimited_as]
     reads: [curv_fact_colim, atm_kpa]
     writes: [assim_colimited_]
     kind: closed_form
@@ -1561,11 +1561,11 @@ equations:
       A = F(A_L) - F(A_L e^{-\tau}) - R_d
     code: phylloptim::Leaf::assim_attenuated_kernel
     also: [phylloptim::Leaf::attenuated_profile, phylloptim::Leaf::photo_capacity_as, phylloptim::Leaf::photo_capacity_at]
-    reads: [curv_fact_colim, curv_fact_elec_trans, phi_J, alpha_PAR_, light_depth_]
+    reads: [curv_fact_colim, curv_fact_elec_trans, phi_J, alpha_PAR_, PPFD, atm_kpa, light_depth_]
     writes: []
     kind: closed_form
     cite: Farquhar-1980
-    note: 'Used in place of the single-layer form where light_depth_ > 0: the integral over layers sharing $c_i$ of a non-rectangular hyperbola of curvature $\theta_J$ between each layer''s light and its capacity. Exact against a layer sum for $\tau \ge 10^{-2}$; below, the difference of $F$ cancels. As $\tau \to 0$ it does not tend to the single-layer form, which colimits light with $J_{max}$ before Rubisco: here Rubisco and $J_{max}$ are colimited first.'
+    note: 'Used in place of the single-layer form where light_depth_ > 0: the integral over layers sharing $c_i$ of a non-rectangular hyperbola of curvature $\theta_J$ between each layer''s light and its capacity. Exact against a layer sum for $\tau \ge 10^{-2}$; below, the difference of $F$ cancels. $F(A_L) - F(A_L e^{-\tau})$ is homogeneous of degree 1 in $(A_s, A_L)$, so the code evaluates it with the common factor $c_i - \Gamma^* c_P$ taken outside, which keeps $A$ smooth through $\Gamma^*$. As $\tau \to 0$ it does not tend to the single-layer form, which colimits light with $J_{max}$ before Rubisco: here Rubisco and $J_{max}$ are colimited first.'
   thermal_cost:
     section: biochemistry
     title: Instantaneous thermal cost
@@ -2152,7 +2152,7 @@ equations:
       c_i \in [\Gamma^* c_P,\; c_a] \ \text{if } A(c_a) \ge 0, \quad
       c_i \in \big[c_a,\; c_a + 2|A(c_a)|\,10^{-6}\, 10^{3} P / g_c\big] \ \text{otherwise}
     code: phylloptim::Leaf::solve_ci
-    also: [phylloptim::Leaf::psi_leaf_to_ci, phylloptim::Leaf::assim_minus_stom_cond_CO2, phylloptim::Leaf::assim_saturated, phylloptim::Leaf::assim_saturated_kernel]
+    also: [phylloptim::Leaf::psi_leaf_to_ci, phylloptim::Leaf::assim_minus_stom_cond_CO2, phylloptim::Leaf::assim_saturated, phylloptim::Leaf::assim_saturated_kernel, phylloptim::Leaf::solve_ci_as, phylloptim::Leaf::assim_saturated_as]
     reads: [ca, atm_kpa, umol_to_mol, kPa_to_Pa]
     writes: [ci_]
     kind: closed_form

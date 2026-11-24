@@ -85,6 +85,10 @@ test_that("bad settings are refused by name", {
   l <- leaf_model(); set_drivers(l, psi_soil = 0.5, PPFD = 800)
   l$light_depth_ <- -1
   expect_error(l$optimise(), "light_depth_")
+  # and by the same drivers again, a hit on the temperature cache
+  l <- leaf_model(); set_drivers(l, psi_soil = 0.5, PPFD = 800)
+  l$light_depth_ <- NaN
+  expect_error(set_drivers(l, psi_soil = 0.5, PPFD = 800), "light_depth_")
   # the single layer's electron-limited rate is not the attenuated leaf's
   expect_error(attenuated_leaf(2)$assim_electron_limited(25), "light_depth_")
 })

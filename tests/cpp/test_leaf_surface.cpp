@@ -175,10 +175,23 @@ void test_attenuated_leaf_is_one_leaf_on_every_path() {
         xad::derivative(ci_ad) = 1.0;
         near(l.assim_slope_at<double>(ci, cap), xad::derivative(l.assim_colimited_kernel(ci_ad)),
              0.0, "dA/dci" + at);
-        near(l.assim_slope(ci), xad::derivative(l.assim_colimited_kernel(ci_ad)), 0.0,
-             "the first-order conditions' A'" + at);
-        near(l.assim_saturated_kernel<double, double>(l.photo_capacity<double>()),
-             l.assim_saturated(), 0.0, "the saturated rate on both paths" + at);
+        near(l.assim_saturated_kernel<double, double>(cap), l.assim_saturated(), 0.0,
+             "the saturated rate on both paths" + at);
+        // The capacity at a scalar leaf temperature, which the energy-balance
+        // surface reads, at the block's own temperature.
+        const phylloptim::Leaf::PhotoCapacity<double> at_T =
+            l.photo_capacity_at<double>(p, l.photo_temp_);
+        near(l.assim_colimited_kernel<double>(ci, at_T), l.assim_colimited(ci), 0.0,
+             "colimited assimilation at a scalar temperature" + at);
+        // Smooth through Gamma*, the bottom of the ci solve's bracket: a finite
+        // slope there, and a value continuous across it.
+        const double gs = l.gamma_ * l.umol_per_mol_to_Pa_;
+        AD g_ad = gs;
+        xad::derivative(g_ad) = 1.0;
+        ok(std::isfinite(xad::derivative(l.assim_colimited_kernel(g_ad))),
+           "a finite slope at Gamma*" + at);
+        near(l.assim_colimited(gs * (1 + 1e-9)), l.assim_colimited(gs * (1 - 1e-9)),
+             1e-6, "no jump across Gamma*" + at);
         const double far = l.assim_colimited(1e9);
         near(far, l.assim_saturated(), 1e-6 * std::abs(far), "the saturated rate is the limit" + at);
         using LM = phylloptim::Leaf::LayerModel;
@@ -205,8 +218,8 @@ void test_attenuated_leaf_is_one_leaf_on_every_path() {
      "closed_form::solve_CF77 refuses it");
   ok(throws_with([&] { phylloptim::closed_form::solve_TF24_floor(l, 1.0); }, "light_depth_"),
      "closed_form::solve_TF24_floor refuses it");
-  // Set after the drivers, a bad depth meets optimise(); a cache hit in
-  // set_physiology does not skip the check.
+  // Set after the drivers, a bad depth is refused by the first evaluation that
+  // reads it.
   for (double bad : {-1.0, std::numeric_limits<double>::quiet_NaN(),
                      std::numeric_limits<double>::infinity()}) {
     phylloptim::Leaf b = make_pm_leaf(d, {1.0}, {1.0}, false);

@@ -323,23 +323,31 @@ inline T Leaf::assim_electron_limited_kernel(const T& ci,
 
 template <typename T>
 inline T Leaf::assim_electron_limited_kernel(T ci) const {
+  // The single layer's rate. An attenuated leaf has no electron-limited rate of
+  // its own: each layer is limited by its light, and only the integral is defined.
+  if (light_depth_ != 0.0) {
+    util::stop("assim_electron_limited is refused with light_depth_ > 0: the "
+               "attenuated leaf's light limitation differs layer by layer; use "
+               "assim_colimited");
+  }
   return assim_electron_limited_kernel<T, double, double>(ci, photo_capacity<double>());
 }
 
 // A leaf of `depth` optical depth whose layers share c_i: `saturated` is its rate
 // if every layer were capacity-limited, `light_limited` its rate if every absorbed
 // photon were used. Each layer follows a non-rectangular hyperbola of `curvature`
-// between its light and its capacity; this is that integral over the layers,
-// closed form and branch-free (derivation: leaf-optimality, R/leaf_photosynthesis.R).
-// Exact against a layer sum; tends to the sharp-layer form as curvature -> 1.
+// between its light and its capacity; this is that integral over the layers, in
+// closed form. Exact against a layer sum; tends to the sharp-layer form as
+// curvature -> 1. Homogeneous of degree 1 in the two rates, so a common factor
+// can be taken outside it.
 template <typename T, typename U>
 inline T Leaf::attenuated_profile(const T& saturated, const T& light_limited,
                                   double depth, const U& curvature) const {
   using std::exp;
   using std::log;
   using std::sqrt;
-  // At or below Gamma* both rates are <= 0 and the layers are dark; the CO2 solve
-  // reads the bound c_i = Gamma*, where this returns the saturated rate, zero.
+  // Only a leaf with no capacity: the kernels pass rates with (c_i - Gamma*)
+  // taken outside, positive at every c_i.
   if (!(odelia::util::to_passive(saturated) > 0.0)) {
     return saturated;
   }
@@ -357,20 +365,22 @@ inline T Leaf::attenuated_profile(const T& saturated, const T& light_limited,
 
 // The attenuated leaf at c_i, net of respiration: its saturated rate is the
 // Rubisco- and Jmax-limited rates colimited as usual (cap.transport holds Jmax),
-// its light-limited rate the absorbed photon flux's.
+// its light-limited rate the absorbed photon flux's. Both carry (c_i - Gamma*),
+// taken outside the profile, so the rate is smooth through Gamma* with no branch
+// on c_i (hazard 3).
 template <typename T, typename U, typename G>
 inline T Leaf::assim_attenuated_kernel(const T& ci,
                                        const PhotoCapacity<U, G>& cap) const {
   const T gp = cap.gamma * umol_per_mol_to_Pa_;
-  const T rubisco = cap.vcmax * (ci - gp) / (ci + cap.km);
-  const T w_j = (ci - gp) / (4 * (ci + 2 * gp));
+  const T rubisco = cap.vcmax / (ci + cap.km);
+  const T w_j = 1.0 / (4 * (ci + 2 * gp));
   const T jmax_limited = cap.transport * w_j;
   const T saturated = (rubisco + jmax_limited -
                        sqrt(pow(rubisco + jmax_limited, 2) -
                             4 * cap.curvature * rubisco * jmax_limited)) /
                       (2 * cap.curvature);
-  return attenuated_profile<T, U>(saturated, T(cap.light * w_j), cap.depth,
-                                  cap.layer_curvature) -
+  return (ci - gp) * attenuated_profile<T, U>(saturated, T(cap.light * w_j),
+                                              cap.depth, cap.layer_curvature) -
          cap.respiration;
 }
 
@@ -476,13 +486,6 @@ inline double Leaf::assim_rubisco_limited(double ci_) {
 
 //calculate the light-limited assimilation rate, returns umol m^-2 s^-1
 inline double Leaf::assim_electron_limited(double ci_) {
-  // The single layer's rate. An attenuated leaf has no electron-limited rate of
-  // its own: each layer is limited by its light, and only the integral is defined.
-  if (light_depth_ != 0.0) {
-    util::stop("assim_electron_limited is refused with light_depth_ > 0: the "
-               "attenuated leaf's light limitation differs layer by layer; use "
-               "assim_colimited");
-  }
   return assim_electron_limited_kernel(ci_);
 }
 
@@ -656,6 +659,7 @@ template <typename T>
 inline Leaf::PhotoCapacity<T> Leaf::photo_capacity_at(
     const leaf_pars<T>& pars) const {
   if (light_depth_ != 0.0) [[unlikely]] {
+    check_light_depth();
     return {vcmax_at<T>(pars), jmax_at<T, double>(pars, photo_temp_),
             pars[par_curv_fact_colim], respiration_at<T>(pars), T(gamma_), T(km_),
             pars[par_phi_J] * alpha_PAR_ * pars[par_PPFD],
@@ -674,6 +678,7 @@ inline Leaf::PhotoCapacity<T> Leaf::photo_capacity_at(const leaf_pars<T>& pars,
   const T km = (kc * umol_per_mol_to_Pa_) *
                (1 + (atm_o2_kpa_ * kPa_to_Pa) / (ko * umol_per_mol_to_Pa_));
   if (light_depth_ != 0.0) [[unlikely]] {
+    check_light_depth();
     return {vcmax_at<T, T>(pars, temp), jmax_at<T, T>(pars, temp),
             pars[par_curv_fact_colim], respiration_at<T, T>(pars, temp), gamma, km,
             pars[par_phi_J] * alpha_PAR_ * pars[par_PPFD],
