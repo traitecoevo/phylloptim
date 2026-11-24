@@ -1826,6 +1826,10 @@ public:
       const T& ci, const PhotoCapacity<U, G>& cap) const;
   template <typename T, typename U> T attenuated_profile(
       const T& saturated, const T& light_limited, double depth, const U& curvature) const;
+  // Two rates colimited by a non-rectangular hyperbola of `curvature`: the smaller
+  // root of curvature A^2 - (a + b) A + a b = 0.
+  template <typename T, typename U> static T colimit(const T& a, const T& b,
+                                                     const U& curvature);
   template <typename T, typename U, typename G> T assim_colimited_kernel(
       const T& ci, const PhotoCapacity<U, G>& cap) const;
 
@@ -1883,6 +1887,10 @@ public:
   template <typename T> PhotoCapacity<T> photo_capacity_at(const leaf_pars<T>& pars) const;
   template <typename T> PhotoCapacity<T> photo_capacity_at(const leaf_pars<T>& pars,
                                                            const T& temp) const;
+  // The members only the attenuated leaf reads, off the pack, after
+  // check_light_depth(); `transport` must already hold Jmax.
+  template <typename T> void add_layers_at(PhotoCapacity<T>& cap,
+                                           const leaf_pars<T>& pars) const;
   template <typename T> PhotoCapacity<T> photo_capacity() const;
   // Net assimilation as ci -> infinity: the colimited capacity less respiration,
   // what a leaf with no conductance nets where A reaches zero at no ci (the

@@ -374,14 +374,17 @@ inline T Leaf::assim_attenuated_kernel(const T& ci,
   const T gp = cap.gamma * umol_per_mol_to_Pa_;
   const T rubisco = cap.vcmax / (ci + cap.km);
   const T w_j = 1.0 / (4 * (ci + 2 * gp));
-  const T jmax_limited = cap.transport * w_j;
-  const T saturated = (rubisco + jmax_limited -
-                       sqrt(pow(rubisco + jmax_limited, 2) -
-                            4 * cap.curvature * rubisco * jmax_limited)) /
-                      (2 * cap.curvature);
+  const T saturated = colimit(rubisco, T(cap.transport * w_j), cap.curvature);
   return (ci - gp) * attenuated_profile<T, U>(saturated, T(cap.light * w_j),
                                               cap.depth, cap.layer_curvature) -
          cap.respiration;
+}
+
+// assim_single_layer_kernel and assim_saturated_as<Single> keep this expression
+// written out: their association is what the golden files pin.
+template <typename T, typename U>
+inline T Leaf::colimit(const T& a, const T& b, const U& curvature) {
+  return (a + b - sqrt(pow(a + b, 2) - 4 * curvature * a * b)) / (2 * curvature);
 }
 
 template <typename T, typename U, typename G>
@@ -426,11 +429,8 @@ inline T Leaf::assim_saturated_as(const PhotoCapacity<U>& cap) const {
   const T rubisco = T(cap.vcmax);
   const T electron = T(cap.transport / 4);
   if constexpr (L == LayerModel::Attenuated) {
-    const T saturated = (rubisco + electron -
-                         sqrt(pow(rubisco + electron, 2) -
-                              4 * cap.curvature * rubisco * electron)) /
-                        (2 * cap.curvature);
-    return attenuated_profile<T, U>(saturated, T(cap.light / 4), cap.depth,
+    return attenuated_profile<T, U>(colimit(rubisco, electron, cap.curvature),
+                                    T(cap.light / 4), cap.depth,
                                     cap.layer_curvature) - cap.respiration;
   } else {
     return (rubisco + electron -
@@ -658,15 +658,25 @@ inline T Leaf::electron_transport_at(const leaf_pars<T>& pars, const V& temp) co
 template <typename T>
 inline Leaf::PhotoCapacity<T> Leaf::photo_capacity_at(
     const leaf_pars<T>& pars) const {
-  if (light_depth_ != 0.0) [[unlikely]] {
-    check_light_depth();
-    return {vcmax_at<T>(pars), jmax_at<T, double>(pars, photo_temp_),
-            pars[par_curv_fact_colim], respiration_at<T>(pars), T(gamma_), T(km_),
-            pars[par_phi_J] * alpha_PAR_ * pars[par_PPFD],
-            pars[par_curv_fact_elec_trans], light_depth_};
+  const bool layered = light_depth_ != 0.0;
+  PhotoCapacity<T> cap{vcmax_at<T>(pars),
+                       layered ? jmax_at<T, double>(pars, photo_temp_)
+                               : electron_transport_at<T>(pars),
+                       pars[par_curv_fact_colim], respiration_at<T>(pars), T(gamma_),
+                       T(km_)};
+  if (layered) [[unlikely]] {
+    add_layers_at(cap, pars);
   }
-  return {vcmax_at<T>(pars), electron_transport_at<T>(pars),
-          pars[par_curv_fact_colim], respiration_at<T>(pars), T(gamma_), T(km_)};
+  return cap;
+}
+
+template <typename T>
+inline void Leaf::add_layers_at(PhotoCapacity<T>& cap,
+                                const leaf_pars<T>& pars) const {
+  check_light_depth();
+  cap.light = pars[par_phi_J] * alpha_PAR_ * pars[par_PPFD];
+  cap.layer_curvature = pars[par_curv_fact_elec_trans];
+  cap.depth = light_depth_;
 }
 
 template <typename T>
@@ -677,15 +687,16 @@ inline Leaf::PhotoCapacity<T> Leaf::photo_capacity_at(const leaf_pars<T>& pars,
   const T kc = arrh_curve<T, T>(kc_ha_, T(kc_25_), temp);
   const T km = (kc * umol_per_mol_to_Pa_) *
                (1 + (atm_o2_kpa_ * kPa_to_Pa) / (ko * umol_per_mol_to_Pa_));
-  if (light_depth_ != 0.0) [[unlikely]] {
-    check_light_depth();
-    return {vcmax_at<T, T>(pars, temp), jmax_at<T, T>(pars, temp),
-            pars[par_curv_fact_colim], respiration_at<T, T>(pars, temp), gamma, km,
-            pars[par_phi_J] * alpha_PAR_ * pars[par_PPFD],
-            pars[par_curv_fact_elec_trans], light_depth_};
+  const bool layered = light_depth_ != 0.0;
+  PhotoCapacity<T> cap{vcmax_at<T, T>(pars, temp),
+                       layered ? jmax_at<T, T>(pars, temp)
+                               : electron_transport_at<T, T>(pars, temp),
+                       pars[par_curv_fact_colim], respiration_at<T, T>(pars, temp),
+                       gamma, km};
+  if (layered) [[unlikely]] {
+    add_layers_at(cap, pars);
   }
-  return {vcmax_at<T, T>(pars, temp), electron_transport_at<T, T>(pars, temp),
-          pars[par_curv_fact_colim], respiration_at<T, T>(pars, temp), gamma, km};
+  return cap;
 }
 
 // The members as each layer model reads them: the single-layer leaf's six, or
@@ -794,38 +805,24 @@ inline T Leaf::assim_slope_at(const T& ci, const PhotoCapacity<T>& cap) const {
   }
 }
 
-// The attenuated leaf's: light and the layers' curvature join the walk.
+// The attenuated leaf's: every member the kernel reads joins the walk. Off the
+// ci solve's path, so at double too.
 template <typename T>
 inline T Leaf::assim_attenuated_slope_at(const T& ci,
                                          const PhotoCapacity<T>& cap) const {
   const double depth = cap.depth;
-  if constexpr (std::is_same_v<T, double>) {
-    const double gamma = cap.gamma, km = cap.km;
-    return kernel_slope_at<T>(
-        [this, gamma, km, depth]<class U>(const U& c, const U& vcmax,
-                                          const U& transport, const U& curvature,
-                                          const U& respiration, const U& light,
-                                          const U& layer_curvature) -> U {
-          return assim_attenuated_kernel<U, U, double>(
-              c, PhotoCapacity<U, double>{vcmax, transport, curvature, respiration,
-                                          gamma, km, light, layer_curvature, depth});
-        },
-        "assimilation in intercellular CO2", ci, cap.vcmax, cap.transport,
-        cap.curvature, cap.respiration, cap.light, cap.layer_curvature);
-  } else {
-    return kernel_slope_at<T>(
-        [this, depth]<class U>(const U& c, const U& vcmax, const U& transport,
-                               const U& curvature, const U& respiration,
-                               const U& gamma, const U& km, const U& light,
-                               const U& layer_curvature) -> U {
-          return assim_attenuated_kernel<U, U, U>(
-              c, PhotoCapacity<U>{vcmax, transport, curvature, respiration, gamma,
-                                  km, light, layer_curvature, depth});
-        },
-        "assimilation in intercellular CO2", ci, cap.vcmax, cap.transport,
-        cap.curvature, cap.respiration, cap.gamma, cap.km, cap.light,
-        cap.layer_curvature);
-  }
+  return kernel_slope_at<T>(
+      [this, depth]<class U>(const U& c, const U& vcmax, const U& transport,
+                             const U& curvature, const U& respiration, const U& gamma,
+                             const U& km, const U& light,
+                             const U& layer_curvature) -> U {
+        return assim_attenuated_kernel<U, U, U>(
+            c, PhotoCapacity<U>{vcmax, transport, curvature, respiration, gamma, km,
+                                light, layer_curvature, depth});
+      },
+      "assimilation in intercellular CO2", ci, cap.vcmax, cap.transport,
+      cap.curvature, cap.respiration, cap.gamma, cap.km, cap.light,
+      cap.layer_curvature);
 }
 
 } // namespace phylloptim

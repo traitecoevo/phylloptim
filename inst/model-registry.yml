@@ -1560,7 +1560,7 @@ equations:
       F(y) = \frac{y - R - b\ln(y + b + R) + s\ln(s^2 + b y + s R)}{2\theta_J}, \quad R = \sqrt{y^2 + 2by + s^2} \\
       A = F(A_L) - F(A_L e^{-\tau}) - R_d
     code: phylloptim::Leaf::assim_attenuated_kernel
-    also: [phylloptim::Leaf::attenuated_profile, phylloptim::Leaf::photo_capacity_as, phylloptim::Leaf::photo_capacity_at]
+    also: [phylloptim::Leaf::attenuated_profile, phylloptim::Leaf::colimit, phylloptim::Leaf::photo_capacity_as, phylloptim::Leaf::photo_capacity_at, phylloptim::Leaf::add_layers_at]
     reads: [curv_fact_colim, curv_fact_elec_trans, phi_J, alpha_PAR_, PPFD, atm_kpa, light_depth_]
     writes: []
     kind: closed_form
