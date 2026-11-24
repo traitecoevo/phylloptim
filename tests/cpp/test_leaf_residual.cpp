@@ -614,7 +614,7 @@ void test_smoothness_sweep() {
       phylloptim::Leaf l = make(d, psi_soil, depth, c.g_min, c.eb, false,
                                 std::numeric_limits<double>::quiet_NaN(),
                                 c.damage ? +[](phylloptim::Leaf &x) { x.use_thermal_damage_ = true; set_atls_inputs(x); }
-                                : c.attenuated ? +[](phylloptim::Leaf &x) { x.light_depth_ = 2.0; }
+                                : c.attenuated ? +[](phylloptim::Leaf &x) { x.light_depth = 2.0; }
                                          : static_cast<void (*)(phylloptim::Leaf &)>(nullptr));
       l.find_root_collar_psi();
       SweepPoint p{l.profit_, l.assim_colimited_, l.transpiration_, l.opt_psi_leaf_,
@@ -889,7 +889,7 @@ void test_rows_where_the_roots_cap_binds() {
                  l.roots_.root_c,
                  std::isnan(g_perturbed_root_P50) ? l.roots_.root_P50 : g_perturbed_root_P50,
                  l.TF24_beta2, l.jmax_25, l.phi_J, l.curv_fact_elec_trans, l.curv_fact_colim,
-                 l.TF24_cost_scale, l.R_d_25, l.JS22_gamma, l.CMax_a, l.CMax_b, l.g_min);
+                 l.TF24_cost_scale, l.R_d_25, l.JS22_gamma, l.CMax_a, l.CMax_b, l.g_min, l.light_depth);
   };
   int compared = 0;
   double worst = 0.0, worst_r = 0.0;

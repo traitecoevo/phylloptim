@@ -111,6 +111,19 @@
 ##'   leaf temperature on a smooth curve whose three parameters are fields on
 ##'   the `Leaf` (`$g_min_k_low_`, `$g_min_k_high_`, `$g_min_T_trans_`,
 ##'   `$g_min_T_width_`); their defaults are placeholders, inert at 25 C.
+##' @param light_depth the optical depth of the photosynthetic tissue
+##'   (unitless). 0, the default, is the single-layer leaf. Positive: light
+##'   falls as `exp(-t)` through a stack of layers that share `c_i`,
+##'   `$alpha_PAR_` is the stack's absorptance and `curv_fact_elec_trans` each
+##'   layer's curvature, which must then lie in (0, 1). The closed-form
+##'   optimisers refuse such a leaf.
+##'
+##'   ⚠️ **The leaf is not continuous at 0.** The stack colimits Rubisco with
+##'   Jmax before light, the single layer light with Jmax before Rubisco, so as
+##'   the depth falls to 0 the rate tends to a different leaf's. So
+##'   [leaf_gradient()] differentiates with respect to `light_depth` only where
+##'   it is positive. The closed form is accurate to 1e-10 for depths of 0.01
+##'   and more; below that its difference of two terms cancels.
 ##'
 ##' @section The root-resistance constants are not traits:
 ##' `beta_R_H` and `beta_R_V` parameterise the root-architecture model, which the
@@ -145,7 +158,8 @@ leaf_traits <- function(vcmax_25 = 96,
                         JS22_gamma = 0.4717887793,
                         CMax_a = 0.6385596982,
                         CMax_b = 0.0,
-                        g_min = 0.0) {
+                        g_min = 0.0,
+                        light_depth = 0.0) {
   out <- list(vcmax_25 = vcmax_25, stem_c = stem_c, stem_P50 = stem_P50,
               root_c = root_c, root_P50 = root_P50, TF24_beta2 = TF24_beta2,
               jmax_25 = jmax_25, phi_J = phi_J,
@@ -153,13 +167,21 @@ leaf_traits <- function(vcmax_25 = 96,
               curv_fact_colim = curv_fact_colim,
               TF24_cost_scale = TF24_cost_scale,
               R_d_25 = R_d_25, JS22_gamma = JS22_gamma,
-              CMax_a = CMax_a, CMax_b = CMax_b, g_min = g_min)
+              CMax_a = CMax_a, CMax_b = CMax_b, g_min = g_min,
+              light_depth = light_depth)
   .check_scalars(out, "leaf_traits")
   if (R_d_25 < 0) {
     stop("leaf_traits(): R_d_25 must be non-negative", call. = FALSE)
   }
   if (g_min < 0) {
     stop("leaf_traits(): g_min must be non-negative", call. = FALSE)
+  }
+  if (light_depth < 0) {
+    stop("leaf_traits(): light_depth must be non-negative", call. = FALSE)
+  }
+  if (light_depth > 0 && !(curv_fact_elec_trans > 0 && curv_fact_elec_trans < 1)) {
+    stop("leaf_traits(): with light_depth > 0, curv_fact_elec_trans is each ",
+         "layer's curvature and must lie in (0, 1)", call. = FALSE)
   }
   structure(out, class = c("leaf_traits", "list"))
 }
@@ -429,6 +451,7 @@ leaf_model <- function(traits = leaf_traits(), control = leaf_control(),
   l$CMax_a <- traits$CMax_a
   l$CMax_b <- traits$CMax_b
   l$g_min <- traits$g_min
+  l$light_depth <- traits$light_depth
   l$initialize_integrator(control$integration_rule, control$integration_tol)
   # After the integrator, so this does not rely on set_supply_single (which
   # clears the solved state) leaving the integrator tolerance alone.

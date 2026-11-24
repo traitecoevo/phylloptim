@@ -317,15 +317,15 @@ parameters:
     source: code default; no citation recorded
     placeholder: true
     code: phylloptim::Leaf::alpha_PAR_
-  light_depth_:
+  light_depth:
     section: biochemistry
     symbol: '\tau'
     units: '–'
-    class: hyperparameter
-    meaning: 'optical depth of the photosynthetic tissue; 0 is the single-layer leaf. Positive: light falls as $e^{-t}$ through layers sharing $c_i$, $\alpha_\mathrm{PAR}$ is the stack''s absorptance and $\theta_J$ each layer''s curvature'
+    class: trait
+    meaning: 'optical depth of the photosynthetic tissue; 0, the default, is the single-layer leaf. Positive: light falls as $e^{-t}$ through layers sharing $c_i$, $\alpha_\mathrm{PAR}$ is the stack''s absorptance and $\theta_J$ each layer''s curvature. Differentiable only where positive: the leaf is not continuous at 0'
     source: 'leaf-optimality project (Falster), 2026; closed form checked against a layer sum'
     placeholder: true
-    code: phylloptim::Leaf::light_depth_
+    code: phylloptim::Leaf::light_depth
   curv_fact_elec_trans:
     section: biochemistry
     symbol: '\theta_J'
@@ -1561,11 +1561,11 @@ equations:
       A = F(A_L) - F(A_L e^{-\tau}) - R_d
     code: phylloptim::Leaf::assim_attenuated_kernel
     also: [phylloptim::Leaf::attenuated_profile, phylloptim::Leaf::colimit, phylloptim::Leaf::photo_capacity_as, phylloptim::Leaf::photo_capacity_at, phylloptim::Leaf::add_layers_at]
-    reads: [curv_fact_colim, curv_fact_elec_trans, phi_J, alpha_PAR_, PPFD, atm_kpa, light_depth_]
+    reads: [curv_fact_colim, curv_fact_elec_trans, phi_J, alpha_PAR_, PPFD, atm_kpa, light_depth]
     writes: []
     kind: closed_form
     cite: Farquhar-1980
-    note: 'Used in place of the single-layer form where light_depth_ > 0: the integral over layers sharing $c_i$ of a non-rectangular hyperbola of curvature $\theta_J$ between each layer''s light and its capacity. Exact against a layer sum for $\tau \ge 10^{-2}$; below, the difference of $F$ cancels. $F(A_L) - F(A_L e^{-\tau})$ is homogeneous of degree 1 in $(A_s, A_L)$, so the code evaluates it with the common factor $c_i - \Gamma^* c_P$ taken outside, which keeps $A$ smooth through $\Gamma^*$. As $\tau \to 0$ it does not tend to the single-layer form, which colimits light with $J_{max}$ before Rubisco: here Rubisco and $J_{max}$ are colimited first.'
+    note: 'Used in place of the single-layer form where light_depth > 0: the integral over layers sharing $c_i$ of a non-rectangular hyperbola of curvature $\theta_J$ between each layer''s light and its capacity. Exact against a layer sum for $\tau \ge 10^{-2}$; below, the difference of $F$ cancels. $F(A_L) - F(A_L e^{-\tau})$ is homogeneous of degree 1 in $(A_s, A_L)$, so the code evaluates it with the common factor $c_i - \Gamma^* c_P$ taken outside, which keeps $A$ smooth through $\Gamma^*$. As $\tau \to 0$ it does not tend to the single-layer form, which colimits light with $J_{max}$ before Rubisco: here Rubisco and $J_{max}$ are colimited first.'
   thermal_cost:
     section: biochemistry
     title: Instantaneous thermal cost

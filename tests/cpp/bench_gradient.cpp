@@ -71,8 +71,16 @@ enum class Kind { None, Gradient, Difference };
 struct Arm {
   const char* label;
   Kind kind;
-  int npars;  // the first npars slots, every one TF24 reads up to 17
+  int npars;  // the first npars slots TF24 reads, up to 17
 };
+
+// The first n slots TF24 reads at this leaf: not light_depth, which is 0 here,
+// where it has no derivative.
+void first_slots(int* pars, int n) {
+  for (int i = 0, k = 0; k < n; ++i) {
+    if (i != pl::par_light_depth) pars[k++] = i;
+  }
+}
 
 const Arm arms[] = {
     {"none (seat + solve)", Kind::None, 0},
@@ -95,7 +103,7 @@ double one(pl::Leaf& l, const Arm& arm, long r, const gr::Drivers& d) {
   double theta[gr::n_theta];
   fill_theta(l, theta, r);
   int pars[gr::n_theta];
-  for (int i = 0; i < arm.npars; ++i) pars[i] = i;
+  first_slots(pars, arm.npars);
   const gr::Settings s = settings();
   if (arm.kind == Kind::Gradient) {
     gr::Result res;
@@ -110,7 +118,8 @@ double one(pl::Leaf& l, const Arm& arm, long r, const gr::Drivers& d) {
   double sum = l.profit_;
   if (arm.kind == Kind::Difference) {
     double th[gr::n_theta], up[gr::n_outputs], dn[gr::n_outputs];
-    for (int k = 0; k < arm.npars; ++k) {
+    for (int i = 0; i < arm.npars; ++i) {
+      const int k = pars[i];
       // A slot at zero (g_min, CMax_b) may not go negative: a forward step.
       const bool forward = theta[k] == 0.0;
       const double h = std::max(std::abs(theta[k]), 1.0) * 1e-6;
@@ -188,7 +197,7 @@ int main(int argc, char** argv) {
     printf("\n%-24s %10s\n", "batch, 20 observations", "us/obs");
     for (int npars : {1, 4, 17}) {
       int pars[gr::n_theta];
-      for (int i = 0; i < npars; ++i) pars[i] = i;
+      first_slots(pars, npars);
       double best_obs = 1e300;
       const long batch_reps = std::max(1L, per_round / 20);
       for (int round = 0; round < 3; ++round) {

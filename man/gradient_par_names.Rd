@@ -10,7 +10,7 @@ gradient_par_names()
 A character vector, one entry per differentiable parameter.
 }
 \description{
-The sixteen \code{\link[=leaf_traits]{leaf_traits()}} in \code{set_traits()}'s argument order, then
+The seventeen \code{\link[=leaf_traits]{leaf_traits()}} in \code{set_traits()}'s argument order, then
 \code{leaf_specific_conductance_max}, \code{resistance}, the parameters the cost
 curves own (\code{\link[=cost_curve_parameters]{cost_curve_parameters()}}) and the thermal-damage inputs.
 Exported so that R's own copy of this order can be compared against it in a

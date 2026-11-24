@@ -349,6 +349,10 @@ Leaf:
     # assigns it after construction). Default 0, at which every term it enters
     # is an exact zero.
     g_min: {type: double, access: field}
+    # Optical depth of the photosynthetic tissue: the seventeenth trait, a
+    # `set_traits()` argument, and a field for the reason g_min is one. Default 0,
+    # the single-layer leaf.
+    light_depth: {type: double, access: field}
     # The cuticle's CO2:H2O conductance ratio and the three numbers of its
     # temperature response (a low slope, an extra slope above a transition, the
     # transition and its width). Parameters, not traits: no gradient row, and
@@ -471,7 +475,6 @@ Leaf:
     wind_speed_: {type: double, access: field}
     # Leaf absorptances and the intercepted near-infrared (energy balance only).
     alpha_PAR_: {type: double, access: field}
-    light_depth_: {type: double, access: field}
     alpha_NIR_: {type: double, access: field}
     NIR_int_: {type: double, access: field}
     # The energy balance's radiation budget. set_drivers() re-seats all four, so
@@ -624,7 +627,7 @@ Leaf:
       args: [stem_P50: double]
     set_traits:
       return_type: void
-      args: [vcmax_25: double, stem_c: double, stem_P50: double, root_c: double, root_P50: double, TF24_beta2: double, jmax_25: double, phi_J: double, curv_fact_elec_trans: double, curv_fact_colim: double, TF24_cost_scale: double, R_d_25: double, JS22_gamma: double, CMax_a: double, CMax_b: double, g_min: double]
+      args: [vcmax_25: double, stem_c: double, stem_P50: double, root_c: double, root_P50: double, TF24_beta2: double, jmax_25: double, phi_J: double, curv_fact_elec_trans: double, curv_fact_colim: double, TF24_cost_scale: double, R_d_25: double, JS22_gamma: double, CMax_a: double, CMax_b: double, g_min: double, light_depth: double]
 
     # --- transpiration and conductance ---------------------------------------
     proportion_of_conductivity:

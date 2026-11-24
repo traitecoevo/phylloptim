@@ -120,15 +120,20 @@ inline void Leaf::update_temperature_dependent_params(double leaf_temp) {
 // Not in the cached temperature block: neither field is in photo_temp_key(), so
 // a cache hit would skip it.
 [[gnu::cold, gnu::noinline]] inline void Leaf::check_light_depth() const {
-  if (!(std::isfinite(light_depth_) && light_depth_ > 0.0)) {
-    util::stop("light_depth_ must be zero or a finite positive optical depth; got " +
-               util::format_double(light_depth_));
+  check_light_depth(light_depth, curv_fact_elec_trans);
+}
+
+[[gnu::cold]] inline void Leaf::check_light_depth(double depth,
+                                                  double layer_curvature) {
+  if (!(std::isfinite(depth) && depth > 0.0)) {
+    util::stop("light_depth must be zero or a finite positive optical depth; got " +
+               util::format_double(depth));
   }
   // At 1 each layer's rate has a corner, and so does the leaf's (hazard 3).
-  if (!(curv_fact_elec_trans > 0.0 && curv_fact_elec_trans < 1.0)) {
-    util::stop("with light_depth_ > 0, curv_fact_elec_trans is each layer's "
+  if (!(layer_curvature > 0.0 && layer_curvature < 1.0)) {
+    util::stop("with light_depth > 0, curv_fact_elec_trans is each layer's "
                "curvature and must lie in (0, 1); got " +
-               util::format_double(curv_fact_elec_trans));
+               util::format_double(layer_curvature));
   }
 }
 
@@ -261,7 +266,7 @@ inline double Leaf::solve_ci_as(double gc) {
 // evaluation of the root-find. Out of line, as the solve it forwards to is: its
 // callers then inline as they do with no choice to make (bench_solve).
 [[gnu::noinline]] inline double Leaf::solve_ci(double gc) {
-  if (light_depth_ != 0.0) [[unlikely]] {
+  if (light_depth != 0.0) [[unlikely]] {
     return util::out_of_line([this, gc] {
       check_light_depth();
       return solve_ci_as<LayerModel::Attenuated>(gc);
@@ -325,8 +330,8 @@ template <typename T>
 inline T Leaf::assim_electron_limited_kernel(T ci) const {
   // The single layer's rate. An attenuated leaf has no electron-limited rate of
   // its own: each layer is limited by its light, and only the integral is defined.
-  if (light_depth_ != 0.0) {
-    util::stop("assim_electron_limited is refused with light_depth_ > 0: the "
+  if (light_depth != 0.0) {
+    util::stop("assim_electron_limited is refused with light_depth > 0: the "
                "attenuated leaf's light limitation differs layer by layer; use "
                "assim_colimited");
   }
@@ -342,7 +347,7 @@ inline T Leaf::assim_electron_limited_kernel(T ci) const {
 // can be taken outside it.
 template <typename T, typename U>
 inline T Leaf::attenuated_profile(const T& saturated, const T& light_limited,
-                                  double depth, const U& curvature) const {
+                                  const U& depth, const U& curvature) const {
   using std::exp;
   using std::log;
   using std::sqrt;
@@ -405,7 +410,7 @@ inline T Leaf::assim_single_layer_kernel(const T& ci,
 template <typename T, typename U, typename G>
 inline T Leaf::assim_colimited_kernel(const T& ci,
                                       const PhotoCapacity<U, G>& cap) const {
-  if (cap.depth != 0.0) [[unlikely]] {
+  if (odelia::util::to_passive(cap.depth) != 0.0) [[unlikely]] {
     return assim_attenuated_kernel<T, U, G>(ci, cap);
   }
   return assim_single_layer_kernel<T, U, G>(ci, cap);
@@ -443,7 +448,7 @@ inline T Leaf::assim_saturated_as(const PhotoCapacity<U>& cap) const {
 
 template <typename T, typename U>
 inline T Leaf::assim_saturated_kernel(const PhotoCapacity<U>& cap) const {
-  if (cap.depth != 0.0) [[unlikely]] {
+  if (odelia::util::to_passive(cap.depth) != 0.0) [[unlikely]] {
     return assim_saturated_as<LayerModel::Attenuated, T, U>(cap);
   }
   return assim_saturated_as<LayerModel::Single, T, U>(cap);
@@ -455,7 +460,7 @@ inline double Leaf::assim_saturated_as() const {
 }
 
 inline double Leaf::assim_saturated() const {
-  if (light_depth_ != 0.0) [[unlikely]] {
+  if (light_depth != 0.0) [[unlikely]] {
     return util::out_of_line([this] {
       check_light_depth();
       return assim_saturated_as<LayerModel::Attenuated>();
@@ -471,7 +476,7 @@ inline T Leaf::assim_colimited_as(T ci) const {
 
 template <typename T>
 inline T Leaf::assim_colimited_kernel(T ci) const {
-  if (light_depth_ != 0.0) [[unlikely]] {
+  if (light_depth != 0.0) [[unlikely]] {
     return util::out_of_line([this, ci] {
       check_light_depth();
       return assim_colimited_as<LayerModel::Attenuated, T>(ci);
@@ -658,7 +663,7 @@ inline T Leaf::electron_transport_at(const leaf_pars<T>& pars, const V& temp) co
 template <typename T>
 inline Leaf::PhotoCapacity<T> Leaf::photo_capacity_at(
     const leaf_pars<T>& pars) const {
-  const bool layered = light_depth_ != 0.0;
+  const bool layered = light_depth != 0.0;
   PhotoCapacity<T> cap{vcmax_at<T>(pars),
                        layered ? jmax_at<T, double>(pars, photo_temp_)
                                : electron_transport_at<T>(pars),
@@ -676,7 +681,7 @@ inline void Leaf::add_layers_at(PhotoCapacity<T>& cap,
   check_light_depth();
   cap.light = pars[par_phi_J] * alpha_PAR_ * pars[par_PPFD];
   cap.layer_curvature = pars[par_curv_fact_elec_trans];
-  cap.depth = light_depth_;
+  cap.depth = pars[par_light_depth];
 }
 
 template <typename T>
@@ -687,7 +692,7 @@ inline Leaf::PhotoCapacity<T> Leaf::photo_capacity_at(const leaf_pars<T>& pars,
   const T kc = arrh_curve<T, T>(kc_ha_, T(kc_25_), temp);
   const T km = (kc * umol_per_mol_to_Pa_) *
                (1 + (atm_o2_kpa_ * kPa_to_Pa) / (ko * umol_per_mol_to_Pa_));
-  const bool layered = light_depth_ != 0.0;
+  const bool layered = light_depth != 0.0;
   PhotoCapacity<T> cap{vcmax_at<T, T>(pars, temp),
                        layered ? jmax_at<T, T>(pars, temp)
                                : electron_transport_at<T, T>(pars, temp),
@@ -705,7 +710,7 @@ template <Leaf::LayerModel L, typename T>
 inline Leaf::PhotoCapacity<T> Leaf::photo_capacity_as() const {
   if constexpr (L == LayerModel::Attenuated) {
     return {T(vcmax_), T(jmax_), T(curv_fact_colim), T(R_d_), T(gamma_), T(km_),
-            T(phi_J * alpha_PAR_ * PPFD_), T(curv_fact_elec_trans), light_depth_};
+            T(phi_J * alpha_PAR_ * PPFD_), T(curv_fact_elec_trans), T(light_depth)};
   } else {
     return {T(vcmax_), T(electron_transport_), T(curv_fact_colim), T(R_d_),
             T(gamma_), T(km_)};
@@ -714,7 +719,7 @@ inline Leaf::PhotoCapacity<T> Leaf::photo_capacity_as() const {
 
 template <typename T>
 inline Leaf::PhotoCapacity<T> Leaf::photo_capacity() const {
-  return light_depth_ != 0.0 ? photo_capacity_as<LayerModel::Attenuated, T>()
+  return light_depth != 0.0 ? photo_capacity_as<LayerModel::Attenuated, T>()
                             : photo_capacity_as<LayerModel::Single, T>();
 }
 
@@ -776,7 +781,7 @@ inline double Leaf::assim_slope(double ci) const {
 
 template <typename T>
 inline T Leaf::assim_slope_at(const T& ci, const PhotoCapacity<T>& cap) const {
-  if (cap.depth != 0.0) [[unlikely]] {
+  if (odelia::util::to_passive(cap.depth) != 0.0) [[unlikely]] {
     return assim_attenuated_slope_at<T>(ci, cap);
   }
   // At double, Gamma* and Km are constants of the slope, kept as doubles: lifted
@@ -810,19 +815,18 @@ inline T Leaf::assim_slope_at(const T& ci, const PhotoCapacity<T>& cap) const {
 template <typename T>
 inline T Leaf::assim_attenuated_slope_at(const T& ci,
                                          const PhotoCapacity<T>& cap) const {
-  const double depth = cap.depth;
   return kernel_slope_at<T>(
-      [this, depth]<class U>(const U& c, const U& vcmax, const U& transport,
-                             const U& curvature, const U& respiration, const U& gamma,
-                             const U& km, const U& light,
-                             const U& layer_curvature) -> U {
+      [this]<class U>(const U& c, const U& vcmax, const U& transport,
+                      const U& curvature, const U& respiration, const U& gamma,
+                      const U& km, const U& light, const U& layer_curvature,
+                      const U& depth) -> U {
         return assim_attenuated_kernel<U, U, U>(
             c, PhotoCapacity<U>{vcmax, transport, curvature, respiration, gamma, km,
                                 light, layer_curvature, depth});
       },
       "assimilation in intercellular CO2", ci, cap.vcmax, cap.transport,
       cap.curvature, cap.respiration, cap.gamma, cap.km, cap.light,
-      cap.layer_curvature);
+      cap.layer_curvature, cap.depth);
 }
 
 } // namespace phylloptim

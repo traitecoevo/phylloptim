@@ -135,11 +135,11 @@ inline void require_prescribed_temperature(const Leaf &l, const char *who) {
 // reason: each solver inverts the single-layer leaf's assimilation, and its
 // guard was measured on it.
 inline void require_single_layer(const Leaf &l, const char *who) {
-  if (l.light_depth_ != 0.0) {
+  if (l.light_depth != 0.0) {
     util::stop(std::string(who) +
-               " is refused with light_depth_ > 0: it inverts the single-layer "
+               " is refused with light_depth > 0: it inverts the single-layer "
                "leaf's assimilation and its validity guard was measured on it. "
-               "Use method \"exact\", or set light_depth_ to 0.");
+               "Use method \"exact\", or set light_depth to 0.");
   }
 }
 

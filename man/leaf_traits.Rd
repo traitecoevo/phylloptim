@@ -20,7 +20,8 @@ leaf_traits(
   JS22_gamma = 0.4717887793,
   CMax_a = 0.6385596982,
   CMax_b = 0,
-  g_min = 0
+  g_min = 0,
+  light_depth = 0
 )
 }
 \arguments{
@@ -102,6 +103,20 @@ the fitted quantity and is untouched by this trait. \code{g_min} rises with
 leaf temperature on a smooth curve whose three parameters are fields on
 the \code{Leaf} (\verb{$g_min_k_low_}, \verb{$g_min_k_high_}, \verb{$g_min_T_trans_},
 \verb{$g_min_T_width_}); their defaults are placeholders, inert at 25 C.}
+
+\item{light_depth}{the optical depth of the photosynthetic tissue
+(unitless). 0, the default, is the single-layer leaf. Positive: light
+falls as \code{exp(-t)} through a stack of layers that share \code{c_i},
+\verb{$alpha_PAR_} is the stack's absorptance and \code{curv_fact_elec_trans} each
+layer's curvature, which must then lie in (0, 1). The closed-form
+optimisers refuse such a leaf.
+
+⚠️ \strong{The leaf is not continuous at 0.} The stack colimits Rubisco with
+Jmax before light, the single layer light with Jmax before Rubisco, so as
+the depth falls to 0 the rate tends to a different leaf's. So
+\code{\link[=leaf_gradient]{leaf_gradient()}} differentiates with respect to \code{light_depth} only where
+it is positive. The closed form is accurate to 1e-10 for depths of 0.01
+and more; below that its difference of two terms cancels.}
 }
 \value{
 A \code{leaf_traits} object; a named list.

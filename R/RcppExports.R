@@ -25,8 +25,8 @@ Leaf__perturb_stem_P50 <- function(obj_, stem_P50) {
     invisible(.Call('_phylloptim_Leaf__perturb_stem_P50', PACKAGE = 'phylloptim', obj_, stem_P50))
 }
 
-Leaf__set_traits <- function(obj_, vcmax_25, stem_c, stem_P50, root_c, root_P50, TF24_beta2, jmax_25, phi_J, curv_fact_elec_trans, curv_fact_colim, TF24_cost_scale, R_d_25, JS22_gamma, CMax_a, CMax_b, g_min) {
-    invisible(.Call('_phylloptim_Leaf__set_traits', PACKAGE = 'phylloptim', obj_, vcmax_25, stem_c, stem_P50, root_c, root_P50, TF24_beta2, jmax_25, phi_J, curv_fact_elec_trans, curv_fact_colim, TF24_cost_scale, R_d_25, JS22_gamma, CMax_a, CMax_b, g_min))
+Leaf__set_traits <- function(obj_, vcmax_25, stem_c, stem_P50, root_c, root_P50, TF24_beta2, jmax_25, phi_J, curv_fact_elec_trans, curv_fact_colim, TF24_cost_scale, R_d_25, JS22_gamma, CMax_a, CMax_b, g_min, light_depth) {
+    invisible(.Call('_phylloptim_Leaf__set_traits', PACKAGE = 'phylloptim', obj_, vcmax_25, stem_c, stem_P50, root_c, root_P50, TF24_beta2, jmax_25, phi_J, curv_fact_elec_trans, curv_fact_colim, TF24_cost_scale, R_d_25, JS22_gamma, CMax_a, CMax_b, g_min, light_depth))
 }
 
 Leaf__proportion_of_conductivity <- function(obj_, psi) {
@@ -773,6 +773,14 @@ Leaf__g_min__set <- function(obj_, value) {
     invisible(.Call('_phylloptim_Leaf__g_min__set', PACKAGE = 'phylloptim', obj_, value))
 }
 
+Leaf__light_depth__get <- function(obj_) {
+    .Call('_phylloptim_Leaf__light_depth__get', PACKAGE = 'phylloptim', obj_)
+}
+
+Leaf__light_depth__set <- function(obj_, value) {
+    invisible(.Call('_phylloptim_Leaf__light_depth__set', PACKAGE = 'phylloptim', obj_, value))
+}
+
 Leaf__g_min_co2_ratio___get <- function(obj_) {
     .Call('_phylloptim_Leaf__g_min_co2_ratio___get', PACKAGE = 'phylloptim', obj_)
 }
@@ -1265,14 +1273,6 @@ Leaf__alpha_PAR___set <- function(obj_, value) {
     invisible(.Call('_phylloptim_Leaf__alpha_PAR___set', PACKAGE = 'phylloptim', obj_, value))
 }
 
-Leaf__light_depth___get <- function(obj_) {
-    .Call('_phylloptim_Leaf__light_depth___get', PACKAGE = 'phylloptim', obj_)
-}
-
-Leaf__light_depth___set <- function(obj_, value) {
-    invisible(.Call('_phylloptim_Leaf__light_depth___set', PACKAGE = 'phylloptim', obj_, value))
-}
-
 Leaf__alpha_NIR___get <- function(obj_) {
     .Call('_phylloptim_Leaf__alpha_NIR___get', PACKAGE = 'phylloptim', obj_)
 }
@@ -1435,7 +1435,7 @@ Leaf__H2O_CO2_stom_diff_ratio___set <- function(obj_, value) {
 
 #' The differentiable parameters, in the order C++ indexes them
 #'
-#' The sixteen [leaf_traits()] in `set_traits()`'s argument order, then
+#' The seventeen [leaf_traits()] in `set_traits()`'s argument order, then
 #' `leaf_specific_conductance_max`, `resistance`, the parameters the cost
 #' curves own ([cost_curve_parameters()]) and the thermal-damage inputs.
 #' Exported so that R's own copy of this order can be compared against it in a

@@ -75,8 +75,9 @@ differentiate at}
 \item{supply}{how water reaches the root collar: \code{\link[=leaf_supply_singlelayer]{leaf_supply_singlelayer()}}
 (the default) or \code{\link[=leaf_supply_multilayer]{leaf_supply_multilayer()}}}
 
-\item{pars}{what to differentiate with respect to. Any of the sixteen
-\code{\link[=leaf_traits]{leaf_traits()}} names, plus \code{"leaf_specific_conductance_max"}, on the
+\item{pars}{what to differentiate with respect to. Any of the seventeen
+\code{\link[=leaf_traits]{leaf_traits()}} names (\code{light_depth} only on a leaf where it is positive:
+the leaf is not continuous in it at 0), plus \code{"leaf_specific_conductance_max"}, on the
 single-potential path's collar route only \code{"resistance"} (the leaf route
 never reads it), on \code{model = "CF77"} only
 \code{"CF77_lambda_"}, on \code{model = "TF24_floor"} only \code{"TF24_floor_lambda_o"},

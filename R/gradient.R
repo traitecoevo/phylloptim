@@ -20,7 +20,7 @@
 ##' `R_d_` are derived from the traits inside `set_physiology()`, so they are
 ##' genuinely unknown until the drivers are re-supplied.
 ##'
-##' The reason it is a function rather than sixteen assignable fields is that
+##' The reason it is a function rather than seventeen assignable fields is that
 ##' `leaf$vcmax_25 <- x` could not be made correct. Three separate pieces of
 ##' derived state go stale on a bare trait write: the two pre-integrated
 ##' vulnerability tables, the solved operating point, and -- least visibly --
@@ -53,7 +53,8 @@ set_traits <- function(x, traits) {
                traits$root_c, traits$root_P50, traits$TF24_beta2,
                traits$jmax_25, traits$phi_J, traits$curv_fact_elec_trans,
                traits$curv_fact_colim, traits$TF24_cost_scale, traits$R_d_25,
-               traits$JS22_gamma, traits$CMax_a, traits$CMax_b, traits$g_min)
+               traits$JS22_gamma, traits$CMax_a, traits$CMax_b, traits$g_min,
+               traits$light_depth)
   invisible(x)
 }
 
@@ -314,8 +315,9 @@ set_traits <- function(x, traits) {
 ##' @param route `"collar"` or `"leaf"`, the potential the curve is maximised
 ##'   over; `NULL` (the default) is the leaf route. See *Choosing which model
 ##'   to differentiate*.
-##' @param pars what to differentiate with respect to. Any of the sixteen
-##'   [leaf_traits()] names, plus `"leaf_specific_conductance_max"`, on the
+##' @param pars what to differentiate with respect to. Any of the seventeen
+##'   [leaf_traits()] names (`light_depth` only on a leaf where it is positive:
+##'   the leaf is not continuous in it at 0), plus `"leaf_specific_conductance_max"`, on the
 ##'   single-potential path's collar route only `"resistance"` (the leaf route
 ##'   never reads it), on `model = "CF77"` only
 ##'   `"CF77_lambda_"`, on `model = "TF24_floor"` only `"TF24_floor_lambda_o"`,
@@ -457,6 +459,9 @@ leaf_gradient <- function(psi_soil,
   # The thermal-damage layer's inputs are parameters ONLY on a leaf with its gate
   # on, which only a reused leaf can have: one built here has it off.
   damage <- !is.null(x) && isTRUE(x$use_thermal_damage_)
+  # `light_depth` is a parameter only where it is positive: `traits`', since
+  # theta, not `x`, carries it to the leaf.
+  attenuated <- traits$light_depth > 0
 
   # Resolved here rather than in set_drivers() because `resistance` can be
   # differentiated, so theta must hold the value the solve uses. The same
@@ -475,7 +480,7 @@ leaf_gradient <- function(psi_soil,
                              .owned_value(model, f, x)
                            }, numeric(1)), owned),
                            damage = if (damage) .gradient_damage_values(x))
-  pars <- .gradient_pars(pars, single, model, damage, m$route)
+  pars <- .gradient_pars(pars, single, model, damage, m$route, attenuated)
   # Checked here, unconditionally, so a bad value is refused at every psi.
   dpsi_dtheta <- .gradient_dpsi_dtheta(dpsi_dtheta, pars, !is.null(psi))
 
@@ -626,10 +631,11 @@ leaf_gradient <- function(psi_soil,
 }
 
 .gradient_available_pars <- function(single, model = "TF24_floor", damage = FALSE,
-                                     route = "leaf") {
+                                     route = "leaf", attenuated = FALSE) {
   nms <- .gradient_par_names()
   if (!single || !identical(route, "collar")) nms <- setdiff(nms, "resistance")
   if (!damage) nms <- setdiff(nms, .gradient_damage_pars)
+  if (!attenuated) nms <- setdiff(nms, "light_depth")
   excluded <- .gradient_model_pars(model)
   if (is.null(excluded)) {
     stop("no gradient route for model \"", model, "\". Available: ",
@@ -640,18 +646,25 @@ leaf_gradient <- function(psi_soil,
 
 # The parameters to differentiate: every one available by default, and a named
 # one refused, with the reason, if this model on this route does not read it.
-.gradient_pars <- function(pars, single, model, damage, route) {
+.gradient_pars <- function(pars, single, model, damage, route, attenuated = FALSE) {
   if (is.null(pars)) {
-    pars <- .gradient_available_pars(single, model, damage, route)
+    pars <- .gradient_available_pars(single, model, damage, route, attenuated)
   }
-  .gradient_check_pars(pars, single, model, damage, route)
+  .gradient_check_pars(pars, single, model, damage, route, attenuated)
   pars
 }
 
 .gradient_check_pars <- function(pars, single, model = "TF24_floor", damage = FALSE,
-                                 route = "leaf") {
-  unknown <- setdiff(pars, .gradient_available_pars(single, model, damage, route))
+                                 route = "leaf", attenuated = FALSE) {
+  unknown <- setdiff(pars, .gradient_available_pars(single, model, damage, route,
+                                                    attenuated))
   if (length(unknown)) {
+    if ("light_depth" %in% unknown && !attenuated) {
+      stop("`pars` names `light_depth`, which is 0 here: the single-layer leaf, ",
+           "at which the leaf is not continuous in it (the attenuated stack is a ",
+           "different leaf, not a perturbation of this one). Differentiate it at ",
+           "a positive light_depth in leaf_traits().", call. = FALSE)
+    }
     off <- intersect(unknown, .gradient_damage_pars)
     if (length(off) && !damage) {
       stop("`pars` names `", off[[1L]], "`, an input of the thermal-damage layer, ",

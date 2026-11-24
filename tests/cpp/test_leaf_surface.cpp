@@ -144,7 +144,7 @@ void test_pack_kernels_are_the_models_own() {
          std::to_string(widest_gap));
 }
 
-// The attenuated leaf (light_depth_ > 0) is one leaf on every path: the forward
+// The attenuated leaf (light_depth > 0) is one leaf on every path: the forward
 // model's kernel, the derivative surface's pack kernel and their slopes are the
 // same numbers, the saturated rate is the colimited one's limit, and whatever
 // inverts or reports the single layer refuses it by name. The forward model
@@ -160,7 +160,7 @@ void test_attenuated_leaf_is_one_leaf_on_every_path() {
         Drivers d;
         d.PPFD = ppfd;
         phylloptim::Leaf l = make_pm_leaf(d, {1.0, 1.35, 1.7}, {1.0, 2.0, 3.0}, gate);
-        l.light_depth_ = depth;
+        l.light_depth = depth;
         l.find_root_collar_psi();
         const double ci = l.ci_;
         if (!std::isfinite(ci)) continue;
@@ -207,28 +207,28 @@ void test_attenuated_leaf_is_one_leaf_on_every_path() {
 
   Drivers d;
   phylloptim::Leaf l = make_pm_leaf(d, {1.0}, {1.0}, false);
-  l.light_depth_ = 2.0;
-  ok(throws_with([&] { l.assim_electron_limited(20.0); }, "light_depth_"),
+  l.light_depth = 2.0;
+  ok(throws_with([&] { l.assim_electron_limited(20.0); }, "light_depth"),
      "assim_electron_limited refuses the attenuated leaf");
-  ok(throws_with([&] { phylloptim::closed_form::solve(l, 1.0); }, "light_depth_"),
+  ok(throws_with([&] { phylloptim::closed_form::solve(l, 1.0); }, "light_depth"),
      "closed_form::solve refuses it");
-  ok(throws_with([&] { phylloptim::closed_form::solve_exact_beta2(l, 1.0); }, "light_depth_"),
+  ok(throws_with([&] { phylloptim::closed_form::solve_exact_beta2(l, 1.0); }, "light_depth"),
      "closed_form::solve_exact_beta2 refuses it");
-  ok(throws_with([&] { phylloptim::closed_form::solve_CF77(l, 1.0); }, "light_depth_"),
+  ok(throws_with([&] { phylloptim::closed_form::solve_CF77(l, 1.0); }, "light_depth"),
      "closed_form::solve_CF77 refuses it");
-  ok(throws_with([&] { phylloptim::closed_form::solve_TF24_floor(l, 1.0); }, "light_depth_"),
+  ok(throws_with([&] { phylloptim::closed_form::solve_TF24_floor(l, 1.0); }, "light_depth"),
      "closed_form::solve_TF24_floor refuses it");
   // Set after the drivers, a bad depth is refused by the first evaluation that
   // reads it.
   for (double bad : {-1.0, std::numeric_limits<double>::quiet_NaN(),
                      std::numeric_limits<double>::infinity()}) {
     phylloptim::Leaf b = make_pm_leaf(d, {1.0}, {1.0}, false);
-    b.light_depth_ = bad;
-    ok(throws_with([&] { b.optimise(); }, "light_depth_"),
-       "optimise refuses light_depth_ = " + std::to_string(bad));
+    b.light_depth = bad;
+    ok(throws_with([&] { b.optimise(); }, "light_depth"),
+       "optimise refuses light_depth = " + std::to_string(bad));
   }
   phylloptim::Leaf c = make_pm_leaf(d, {1.0}, {1.0}, false);
-  c.light_depth_ = 2.0;
+  c.light_depth = 2.0;
   c.curv_fact_elec_trans = 1.0;
   ok(throws_with([&] { c.optimise(); }, "curv_fact_elec_trans"),
      "with depth > 0, optimise refuses a layer curvature of 1");
@@ -547,6 +547,8 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
     double ppfd, vpd;
     Kind want;
     double g_min = 0.0;
+    double light_depth = 0.0;
+    bool twin = true;  // also run on an attenuated leaf
   };
   // Golden-grid drivers: layers 0.25 MPa apart; the pinned rows test-gradient.R
   // names, a leaf in the dark (a net source sitting on its wet bound, with a
@@ -581,9 +583,16 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
       {{7.2}, 900.0, 2.0, Kind::BoundarySoil, 2e-2}};
   // With the energy balance on, the cooling a wide-open leaf earns moves the dry
   // pin: dim light on a dry soil reaches it.
+  // The attenuated leaf reaches it at 150: at 100, CMax's leaf on the single
+  // potential leaves the pin for an interior point on the stem curve's tail
+  // (A 3.6e-3, psi_leaf past psi_crit), where the solve's noise in A, 2.4e-10,
+  // is 670 times the floor below; its dA/djmax_25 agrees with a least-squares
+  // slope over 801 solves to 4e-5 and with the difference at no step.
   if (EB) {
-    fixtures.push_back({{6.0}, 100.0, 0.5, Kind::BoundaryDry});
-    fixtures.push_back({{6.0}, 100.0, 0.5, Kind::BoundaryDry, 5e-4});
+    fixtures.push_back({{6.0}, 100.0, 0.5, Kind::BoundaryDry, 0.0, 0.0, false});
+    fixtures.push_back({{6.0}, 100.0, 0.5, Kind::BoundaryDry, 5e-4, 0.0, false});
+    fixtures.push_back({{6.0}, 150.0, 0.5, Kind::BoundaryDry, 0.0, 2.0, false});
+    fixtures.push_back({{6.0}, 150.0, 0.5, Kind::BoundaryDry, 5e-4, 2.0, false});
   }
   // With the damage layer on too, its lower capacity moves that pin wetter.
   if (EB && Damage) {
@@ -597,11 +606,21 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
   if (Single || LeafRoute) {
     std::vector<Fixture> one;
     for (const Fixture& fx : fixtures) {
-      one.push_back({{fx.psi_soil[0]}, fx.ppfd, fx.vpd, fx.want, fx.g_min});
+      one.push_back({{fx.psi_soil[0]}, fx.ppfd, fx.vpd, fx.want, fx.g_min,
+                     fx.light_depth, fx.twin});
     }
     one.push_back({{2.0}, 1500.0, 2.0, Kind::BoundaryDry});
     one.push_back({{2.0}, 1500.0, 2.0, Kind::BoundaryDry, 5e-4});
     fixtures = one;
+  }
+  // Every fixture again on an attenuated leaf, where light_depth carries a row
+  // and the kernel reads the light and each layer's curvature.
+  const std::size_t n_single_layer = fixtures.size();
+  for (std::size_t i = 0; i < n_single_layer; ++i) {
+    if (!fixtures[i].twin) continue;
+    Fixture fx = fixtures[i];
+    fx.light_depth = 2.0;
+    fixtures.push_back(fx);
   }
   // TF24_floor at a small price, so its fixtures stay on TF24's kinds; smaller
   // on the leaf route, where 1e3 moves TF24's dry pins to an interior optimum.
@@ -641,6 +660,7 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
   double worst_rel = 0.0, worst_abs = 0.0;
   std::string worst_rel_at, worst_abs_at, skipped_at;
   int compared = 0, skipped = 0, zero = 0, at_zero_g_min = 0, at_another_step = 0;
+  int at_zero_depth = 0, depth_compared = 0;
   // ProfitMax's normaliser with the balance on, where |A| can peak inside the
   // stream: points refereed with the peak there and at psi_crit.
   int peak_inside = 0, peak_at_crit = 0;
@@ -663,7 +683,7 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
                    p[pl::par_curv_fact_elec_trans], p[pl::par_curv_fact_colim],
                    p[pl::par_TF24_cost_scale], p[pl::par_R_d_25],
                    p[pl::par_JS22_gamma], p[pl::par_CMax_a], p[pl::par_CMax_b],
-                   p[pl::par_g_min]);
+                   p[pl::par_g_min], p[pl::par_light_depth]);
       l.CF77_lambda_ = p[pl::par_CF77_lambda];
       l.TF24_floor_lambda_o = p[pl::par_TF24_floor_lambda_o];
       l.LeastCost_beta = p[pl::par_LeastCost_beta];
@@ -700,6 +720,7 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
                         fx.vpd, 40.0, 25.0, 21.0, 101.3);
     pl::leaf_pars<double> p0 = base.passive_pars();
     p0[pl::par_g_min] = fx.g_min;
+    p0[pl::par_light_depth] = fx.light_depth;
     p0[pl::par_TF24_floor_lambda_o] = price;
     // The single path's series resistance; on the layered path nothing reads it.
     p0[pl::par_resistance] = 1e3;
@@ -774,6 +795,11 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
       (l.profitmax_peak_psi_ == l.psi_crit ? peak_at_crit : peak_inside) += 1;
     }
     for (int k = 0; k < pl::n_leaf_pars; ++k) {
+      // At light_depth 0 the leaf is not continuous in it: a step is another leaf.
+      if (k == pl::par_light_depth && fx.light_depth == 0.0) {
+        ++at_zero_depth;
+        continue;
+      }
       // At g_min = 0 the collar solve steps 1e-6 of the bracket inside the wet
       // bound, and at any g_min > 0 it sits on it (hazard 18), so a forward
       // difference carries that step over h (-4.3e-6 MPa / h in the collar
@@ -921,7 +947,8 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
       for (std::size_t j = 0; j < rows.size(); ++j) {
         const std::string at =
             " (" + curve + ") at " + name +
-            (fx.g_min > 0.0 ? " with a cuticle" : "") + " d" +
+            (fx.g_min > 0.0 ? " with a cuticle" : "") +
+            (fx.light_depth > 0.0 ? " attenuated" : "") + " d" +
             (j < n_named ? std::string(output_name[j])
                          : "uptake[" + std::to_string(j - n_named) + "]") +
             "/d" + par_name(k);
@@ -997,6 +1024,7 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
           worst_rel_at = at;
         }
         ++compared;
+        if (k == pl::par_light_depth) ++depth_compared;
         auto& seen = per_par_kind[name];
         seen.resize(pl::n_leaf_pars, 0);
         ++seen[std::size_t(k)];
@@ -1025,12 +1053,15 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
   }
   printf("    %s: %d rows compared (%s ), %d unread rows exactly zero,\n"
          "    %d rows agreeing at a step other than the base,\n"
-         "    g_min passed over at %d fixtures without a cuticle,\n"
+         "    g_min passed over at %d fixtures without a cuticle, light_depth at %d\n"
+         "    single-layer fixtures and compared in %d rows,\n"
          "    %d parameters skipped across a kind change:%s\n"
          "    worst relative %.3g%s\n    worst absolute %.3g%s\n",
-         curve.c_str(), compared, kinds.c_str(), zero, at_another_step, at_zero_g_min, skipped,
+         curve.c_str(), compared, kinds.c_str(), zero, at_another_step, at_zero_g_min,
+         at_zero_depth, depth_compared, skipped,
          skipped_at.c_str(), worst_rel, worst_rel_at.c_str(), worst_abs,
          worst_abs_at.c_str());
+  ok(depth_compared > 0, curve + ": light_depth's rows were compared at an attenuated leaf");
   if (K == CC::ProfitMax && EB) {
     printf("    ProfitMax's |A| peak: %d points inside the stream, %d at psi_crit\n",
            peak_inside, peak_at_crit);
@@ -1202,7 +1233,7 @@ void test_shut_leaf_seated_at_its_collar_bills_the_roots_nothing() {
                    p[pl::par_curv_fact_elec_trans], p[pl::par_curv_fact_colim],
                    p[pl::par_TF24_cost_scale], p[pl::par_R_d_25],
                    p[pl::par_JS22_gamma], p[pl::par_CMax_a], p[pl::par_CMax_b],
-                   p[pl::par_g_min]);
+                   p[pl::par_g_min], p[pl::par_light_depth]);
       l.set_physiology(network, 900.0, psi_soil, depth, p[pl::par_kmax], 2.0,
                        40.0, 25.0, 21.0, 101.3);
       l.find_root_collar_psi();
@@ -1445,7 +1476,7 @@ void test_a_dry_pin_meets_the_interior_answer_continuously() {
     // plant's TF24 traits, in set_traits' order.
     l.set_traits(96.0, 2.04, 2.8887256653360196, 2.680147, 3.4, 1.5, 157.44,
                  0.35294117647058826, 0.7, 0.99, 7.5, 1.44, 0.4717887793,
-                 0.6385596982, 0.0, 0.0);
+                 0.6385596982, 0.0, 0.0, 0.0);
     std::vector<double> soil = soil0;
     soil[0] = top;
     l.set_physiology(net, ppfd, soil, depth, kmax, 1.0, 40.0, 25.0, 21.0, 101.3);

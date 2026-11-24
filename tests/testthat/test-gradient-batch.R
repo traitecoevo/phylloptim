@@ -85,11 +85,11 @@ test_that("the parameter enumeration is the same order in R and in C++", {
               "c_repair_flux_")
   expect_identical(gradient_par_names(), r_side)
   # And the count, which is what a positional trait call would silently break:
-  # sixteen traits, the five that are not traits (two drivers, three model-owned
+  # seventeen traits, the five that are not traits (two drivers, three model-owned
   # slots), then the fourteen inputs of the thermal-damage layer that reach the
   # solve.
-  expect_length(gradient_par_names(), 35L)
-  expect_identical(gradient_par_names()[1:16], names(leaf_traits()))
+  expect_length(gradient_par_names(), 36L)
+  expect_identical(gradient_par_names()[1:17], names(leaf_traits()))
 })
 
 test_that("leaf_gradient() is the batch's one observation across the grid", {
@@ -405,7 +405,8 @@ test_that("`pars` order does not change any gradient (#72)", {
   solo <- leaf_gradient_batch(b, pars = "stem_P50",
                               model = "TF24",
                               route = "collar")$gradient[1, "stem_P50", ]
-  for (p in setdiff(names(leaf_traits()), "stem_P50")) {
+  # Not light_depth: at 0, the default, it is refused (test-light-attenuation.R).
+  for (p in setdiff(names(leaf_traits()), c("stem_P50", "light_depth"))) {
     got <- leaf_gradient_batch(b, pars = c(p, "stem_P50"),
                                model = "TF24",
                                route = "collar")$gradient[1, "stem_P50", ]
