@@ -15,7 +15,8 @@
 # against a floor of 1e-5 of the output per unit of the parameter.
 #
 # Measured on macOS/arm64: worst 4.7e-5 (CF77's gc in g_min on the leaf route,
-# an output near that floor), median 7e-10, over 195 rows.
+# an output near that floor), median 7e-10, over 195 rows; on the attenuated
+# leaf worst 2.9e-4 (the same output on the collar route), median 9e-10, over 330.
 
 referee_outputs <- c("A", "gc", "psi_leaf", "collar", "profit")
 
@@ -26,8 +27,14 @@ referee_prices <- list(CF77 = list(CF77_lambda = 3e5),
                        LeastCost = list(LeastCost_beta = 5))
 
 # g_min away from zero: centred at zero, the difference would step onto a
-# negative residual conductance, which the leaf refuses.
+# negative residual conductance, which the leaf refuses. The attenuated leaf is
+# refereed in light_depth and every trait its kernel reads as well.
 referee_traits <- leaf_traits(g_min = 0.002)
+referee_layers <- list(
+  single = list(traits = referee_traits, pars = NULL),
+  attenuated = list(traits = leaf_traits(g_min = 0.002, light_depth = 2),
+                    pars = c("light_depth", "jmax_25", "phi_J",
+                             "curv_fact_elec_trans", "curv_fact_colim")))
 
 referee_setups <- list(
   collar_multi = list(supply = leaf_supply_multilayer(), route = "collar",
@@ -52,8 +59,8 @@ referee_drivers <- function(su, resistance = su$resistance) {
 }
 
 # The five outputs, solved by leaf_solve() with one parameter set to `value`.
-referee_solve <- function(curve, su, par = NULL, value = NULL) {
-  tr <- referee_traits
+referee_solve <- function(curve, su, par = NULL, value = NULL,
+                          tr = referee_traits) {
   prices <- referee_prices[[curve]]
   kmax <- kmax_default
   resistance <- su$resistance
@@ -77,8 +84,8 @@ referee_solve <- function(curve, su, par = NULL, value = NULL) {
 
 # A parameter's base value, and the scale its step is relative to: the
 # gradient's own rule (relative, floored at 1 but for the two drivers).
-referee_value <- function(curve, su, par) {
-  if (par %in% names(referee_traits)) return(referee_traits[[par]])
+referee_value <- function(curve, su, par, tr = referee_traits) {
+  if (par %in% names(tr)) return(tr[[par]])
   if (par == "leaf_specific_conductance_max") return(kmax_default)
   if (par == "resistance") return(su$resistance)
   given <- referee_prices[[curve]][[phylloptim:::.owned_argument(par)]]
@@ -96,26 +103,28 @@ referee_scale <- function(par, value) {
 test_that("every curve's gradient on every route agrees with a difference of its solve", {
   params <- cost_curve_parameters()
   rows <- list()
-  for (curve in cost_curve_names()) {
+  for (layer in names(referee_layers)) for (curve in cost_curve_names()) {
+    tr <- referee_layers[[layer]]$traits
     for (sn in names(referee_setups)) {
       su <- referee_setups[[sn]]
       pars <- c("vcmax_25", "stem_P50", "stem_c", "R_d_25", "g_min",
                 "leaf_specific_conductance_max",
                 params$parameter[params$curve == curve],
                 if (identical(su$route, "collar") && !is.null(su$resistance))
-                  "resistance")
-      x <- leaf_model(referee_traits, supply = su$supply)
+                  "resistance",
+                referee_layers[[layer]]$pars)
+      x <- leaf_model(tr, supply = su$supply)
       for (f in names(referee_prices[[curve]])) {
         x[[if (f == "CF77_lambda") "CF77_lambda_" else f]] <-
           referee_prices[[curve]][[f]]
       }
       g <- do.call(leaf_gradient,
                    c(referee_drivers(su),
-                     list(x = x, traits = referee_traits, pars = pars,
+                     list(x = x, traits = tr, pars = pars,
                           model = curve, route = su$route)))
-      y0 <- referee_solve(curve, su)
+      y0 <- referee_solve(curve, su, tr = tr)
       for (p in pars) {
-        v0 <- referee_value(curve, su, p)
+        v0 <- referee_value(curve, su, p, tr)
         scale <- referee_scale(p, v0)
         floor_y <- 1e-5 * abs(y0) / scale
         gp <- g$gradient[p, referee_outputs]
@@ -129,8 +138,8 @@ test_that("every curve's gradient on every route agrees with a difference of its
           # A large step can leave the range the solve brackets; the leaf
           # refuses that as infeasible, and the step is skipped.
           fd <- tryCatch(
-            (referee_solve(curve, su, p, v0 + h) -
-             referee_solve(curve, su, p, v0 - h)) / (2 * h),
+            (referee_solve(curve, su, p, v0 + h, tr) -
+             referee_solve(curve, su, p, v0 - h, tr)) / (2 * h),
             phylloptim_infeasible = function(e) NULL)
           if (is.null(fd)) next
           steps <- steps + 1L
@@ -140,26 +149,31 @@ test_that("every curve's gradient on every route agrees with a difference of its
           best <- pmin(best, err)
         }
         rows[[length(rows) + 1L]] <- data.frame(
-          curve = curve, setup = sn, status = g$status, par = p, steps = steps,
+          layer = layer, curve = curve, setup = sn, status = g$status, par = p,
+          steps = steps,
           worst = max(best), output = referee_outputs[which.max(best)])
       }
     }
   }
   d <- do.call(rbind, rows)
-  w <- d[which.max(d$worst), ]
-  cat(sprintf(paste0("\nreferee: %d pairs, %d rows (%d interior, %d pinned); ",
-                     "worst %.3g (%s %s, %s in %s), median %.3g\n"),
-              nrow(unique(d[c("curve", "setup")])), nrow(d),
-              sum(d$status == "interior"), sum(d$status == "pinned"),
-              w$worst, w$curve, w$setup, w$output, w$par, stats::median(d$worst)))
-  # Hazard 16: the rows must reach the assertion, and most of them must be
-  # interior, where the implicit function theorem places the point.
-  expect_identical(nrow(unique(d[c("curve", "setup")])), 27L)
-  expect_gte(sum(d$status == "interior"), 170L)
+  for (layer in names(referee_layers)) {
+    dl <- d[d$layer == layer, ]
+    w <- dl[which.max(dl$worst), ]
+    cat(sprintf(paste0("\nreferee, %s: %d pairs, %d rows (%d interior, %d pinned); ",
+                       "worst %.3g (%s %s, %s in %s), median %.3g\n"),
+                layer, nrow(unique(dl[c("curve", "setup")])), nrow(dl),
+                sum(dl$status == "interior"), sum(dl$status == "pinned"),
+                w$worst, w$curve, w$setup, w$output, w$par, stats::median(dl$worst)))
+    # Hazard 16: the rows must reach the assertion, and most of them must be
+    # interior, where the implicit function theorem places the point.
+    expect_identical(nrow(unique(dl[c("curve", "setup")])), 27L)
+    expect_gte(sum(dl$status == "interior"), 170L)
+  }
+  expect_gte(sum(d$par == "light_depth" & d$status == "interior"), 20L)
   expect_gte(min(d$steps), 3L)
   bad <- d[d$worst > 5e-3, ]
   expect_identical(nrow(bad), 0L,
                    label = paste("rows off the solve:",
-                                 paste(bad$curve, bad$setup, bad$par,
+                                 paste(bad$layer, bad$curve, bad$setup, bad$par,
                                        collapse = "; ")))
 })

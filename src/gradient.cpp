@@ -53,7 +53,7 @@ DriverBatch* checked(SEXP drivers) {
 
 //' The differentiable parameters, in the order C++ indexes them
 //'
-//' The sixteen [leaf_traits()] in `set_traits()`'s argument order, then
+//' The seventeen [leaf_traits()] in `set_traits()`'s argument order, then
 //' `leaf_specific_conductance_max`, `resistance`, the parameters the cost
 //' curves own ([cost_curve_parameters()]) and the thermal-damage inputs.
 //' Exported so that R's own copy of this order can be compared against it in a

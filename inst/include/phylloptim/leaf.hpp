@@ -56,7 +56,7 @@ namespace phylloptim {
 
 // --- the parameter enumeration, which R indexes into -------------------------
 //
-// The sixteen traits in `Leaf::set_traits`' argument order, then the non-traits:
+// The seventeen traits in `Leaf::set_traits`' argument order, then the non-traits:
 // `kmax`, `resistance`, three model-owned slots, the thermal-damage inputs that
 // reach the solve, and the two light drivers `PPFD` and `NIR`. Everything before
 // `PPFD` is what a calibration fits, `gradient::n_theta`; `n_leaf_pars` also
@@ -64,8 +64,8 @@ namespace phylloptim {
 //
 // ⚠️ R indexes these positions, so a reordering silently differentiates the wrong
 // parameter (hazard 13); `test-gradient-batch.R` compares the names with R's.
-inline constexpr int n_traits = 16;
-inline constexpr int n_leaf_pars = 37;
+inline constexpr int n_traits = 17;
+inline constexpr int n_leaf_pars = 38;
 
 // The first `n_traits` are `set_traits`' arguments in its order, which is also
 // `leaf_traits()`'; the non-traits after them take a relative step.
@@ -86,44 +86,47 @@ inline constexpr int par_CMax_a = 13;
 inline constexpr int par_CMax_b = 14;
 // Residual (cuticular) conductance to water vapour at 25 C, mol H2O m^-2 s^-1.
 inline constexpr int par_g_min = 15;
+// Optical depth of the photosynthetic tissue (see light_depth): 0 is the single
+// layer, at which the leaf is not continuous in it, so its row is NA there.
+inline constexpr int par_light_depth = 16;
 // The non-traits. A new fitted slot goes before `par_PPFD`: `gradient::n_theta`
 // is `par_PPFD`, so a slot appended last is outside every caller's theta.
-inline constexpr int par_kmax = 16;
-inline constexpr int par_resistance = 17;
+inline constexpr int par_kmax = 17;
+inline constexpr int par_resistance = 18;
 // The model-owned slots, each one curve's parameter: R's `.gradient_model_pars()`
 // offers each for its curve alone and refuses it by name elsewhere (hazard 13).
 // CF77's marginal value of water.
-inline constexpr int par_CF77_lambda = 18;
+inline constexpr int par_CF77_lambda = 19;
 // TF24_floor's price of water at zero transpiration.
-inline constexpr int par_TF24_floor_lambda_o = 19;
+inline constexpr int par_TF24_floor_lambda_o = 20;
 // Least-cost's unit-cost ratio beta (Prentice et al. 2014): dimensionless, not a
 // price.
-inline constexpr int par_LeastCost_beta = 20;
+inline constexpr int par_LeastCost_beta = 21;
 // The thermal-damage inputs that reach the solve, refused unless
 // use_thermal_damage_ is on. Not the dynamics parameters: they move only
 // damage_rates(), so a slot would read an exact zero; their gradient is
 // damage_trajectory_gradient().
-inline constexpr int par_A = 21;
-inline constexpr int par_I = 22;
-inline constexpr int par_D = 23;
-inline constexpr int par_topt_offset = 24;
-inline constexpr int par_dTopt_max = 25;
-inline constexpr int par_K_A = 26;
-inline constexpr int par_k_i = 27;
-inline constexpr int par_k_i_baseline = 28;
-inline constexpr int par_k_rec = 29;
-inline constexpr int par_k_rec_Ea = 30;
-inline constexpr int par_c_acclim_maint = 31;
-inline constexpr int par_c_repair_maint = 32;
-inline constexpr int par_c_protect_maint = 33;
-inline constexpr int par_c_repair_flux = 34;
+inline constexpr int par_A = 22;
+inline constexpr int par_I = 23;
+inline constexpr int par_D = 24;
+inline constexpr int par_topt_offset = 25;
+inline constexpr int par_dTopt_max = 26;
+inline constexpr int par_K_A = 27;
+inline constexpr int par_k_i = 28;
+inline constexpr int par_k_i_baseline = 29;
+inline constexpr int par_k_rec = 30;
+inline constexpr int par_k_rec_Ea = 31;
+inline constexpr int par_c_acclim_maint = 32;
+inline constexpr int par_c_repair_maint = 33;
+inline constexpr int par_c_protect_maint = 34;
+inline constexpr int par_c_repair_flux = 35;
 // The intercepted PPFD per unit leaf area (see PPFD_): a driver, never fitted, and
 // light's only route to carbon, so a kernel reading the `PPFD_` member instead
 // gives every trait that moves light a zero row.
-inline constexpr int par_PPFD = 35;
+inline constexpr int par_PPFD = 36;
 // The intercepted near-infrared per unit leaf area, W m^-2 (see NIR_int_): a
 // driver, read only by the energy balance; NA where NIR_int_ is unset.
-inline constexpr int par_NIR = 36;
+inline constexpr int par_NIR = 37;
 static_assert(n_leaf_pars == par_NIR + 1,
               "the pack ends at par_NIR; move n_leaf_pars with it");
 
@@ -665,6 +668,16 @@ public:
   // upstream; alpha_NIR_ reaches only the energy balance. A gas-exchange fit
   // identifies only phi_J * alpha_PAR_: fix alpha_PAR_ and phi_J is per absorbed photon.
   double alpha_PAR_ = 0.85;  // PAR absorptance, unitless
+  // Optical depth of the photosynthetic tissue, unitless: a trait, set_traits'
+  // last. Zero is the single-layer leaf.
+  // Positive: light falls as exp(-t) through a stack of layers that share c_i,
+  // alpha_PAR_ stays the stack's absorptance, curv_fact_elec_trans is each layer's
+  // curvature (must be < 1) and the closed form is refused. See
+  // assim_attenuated_kernel. Not continuous at 0: the stack colimits Rubisco with
+  // Jmax before light, the single layer light with Jmax before Rubisco, so as the
+  // depth falls to 0 the rate tends to a different leaf's. Accurate to 1e-10 for
+  // depths of 1e-2 and more; below, attenuated_profile's difference cancels.
+  double light_depth = 0.0;
   double alpha_NIR_ = 0.20;  // near-infrared absorptance, unitless
   // Intercepted near-infrared per unit leaf area, W m^-2, for the energy balance.
   // No default: it depends on the light source (about PPFD_ / umol_par_per_joule in
@@ -903,7 +916,7 @@ public:
                   double TF24_beta2, double jmax_25, double phi_J,
                   double curv_fact_elec_trans, double curv_fact_colim,
                   double TF24_cost_scale, double R_d_25, double JS22_gamma,
-                  double CMax_a, double CMax_b, double g_min);
+                  double CMax_a, double CMax_b, double g_min, double light_depth);
 
   // The critical point is a quantile of the stem curve: the conductivity fraction
   // left there, 0.05 giving P95, also Sperry's k_crit = f * kmax. Moving it is not
@@ -1668,6 +1681,12 @@ public:
   // layer's k_imp_eff_, k_rec_eff_, functional_) at a leaf temperature. With the
   // energy balance on it runs per operating point, bypassing the photo_temp cache.
   void update_temperature_dependent_params(double leaf_temp);
+  // Refuses a light_depth that is not a finite positive number, and a
+  // curv_fact_elec_trans outside (0, 1). Run by set_traits and by the attenuated
+  // arm of each forward entry (LayerModel), so a depth written to the field
+  // directly is refused at the first evaluation.
+  void check_light_depth() const;
+  static void check_light_depth(double depth, double layer_curvature);
   // Saturation vapour pressure es(T) (kPa) and its slope (kPa K^-1), Tetens.
   double saturation_vapour_pressure(double temp) const;
   double saturation_vapour_pressure_slope(double temp) const;
@@ -1738,6 +1757,12 @@ public:
     T respiration;
     G gamma;
     G km;
+    // Read only where depth != 0: the absorbed photon flux phi_J alpha_PAR PPFD,
+    // each layer's curvature, and light_depth. There `transport` holds Jmax, not J.
+    // Initialised, so a capacity built from the six above is the single-layer leaf's.
+    T light{};
+    T layer_curvature{};
+    T depth{};
 
     // ⚠️ Hazard 17: every member that carries a row is visited here, or its
     // columns read exactly zero. The member count is asserted below.
@@ -1749,9 +1774,16 @@ public:
       f(respiration);
       f(gamma);
       f(km);
+      // Read only where depth != 0; elsewhere their columns are exactly zero, and
+      // visiting them would add three directions to every implicit node.
+      if (odelia::util::to_passive(depth) != 0.0) {
+        f(light);
+        f(layer_curvature);
+        f(depth);
+      }
     }
   };
-  static_assert(sizeof(PhotoCapacity<double>) == 6 * sizeof(double),
+  static_assert(sizeof(PhotoCapacity<double>) == 9 * sizeof(double),
                 "PhotoCapacity gained or lost a member: update for_each_active, "
                 "then this count");
 
@@ -1792,8 +1824,37 @@ public:
       const T& ci, const PhotoCapacity<U, G>& cap) const;
   template <typename T, typename U, typename G> T assim_electron_limited_kernel(
       const T& ci, const PhotoCapacity<U, G>& cap) const;
+  // Net assimilation at a capacity: the single-layer leaf's, the attenuated
+  // leaf's (cap.depth != 0), and whichever of the two the capacity names.
+  template <typename T, typename U, typename G> T assim_single_layer_kernel(
+      const T& ci, const PhotoCapacity<U, G>& cap) const;
+  template <typename T, typename U, typename G> T assim_attenuated_kernel(
+      const T& ci, const PhotoCapacity<U, G>& cap) const;
+  template <typename T, typename U> T attenuated_profile(
+      const T& saturated, const T& light_limited, const U& depth,
+      const U& curvature) const;
+  // Two rates colimited by a non-rectangular hyperbola of `curvature`: the smaller
+  // root of curvature A^2 - (a + b) A + a b = 0.
+  template <typename T, typename U> static T colimit(const T& a, const T& b,
+                                                     const U& curvature);
   template <typename T, typename U, typename G> T assim_colimited_kernel(
       const T& ci, const PhotoCapacity<U, G>& cap) const;
+
+  // Which leaf a kernel integrates over: one layer, or the stack a nonzero
+  // light_depth asks for. The forward model tests light_depth where it enters the kernel
+  // (solve_ci, assim_colimited_kernel(ci), assim_saturated) and runs one
+  // instantiation of what follows; the attenuated one is out of line. ⚠️ Hazard 5:
+  // a test inside the kernel instead stops the kernel inlining into the
+  // single-layer solve (bench_solve).
+  enum class LayerModel { Single, Attenuated };
+  template <LayerModel L, typename T> PhotoCapacity<T> photo_capacity_as() const;
+  template <LayerModel L, typename T, typename U, typename G> T assim_colimited_as(
+      const T& ci, const PhotoCapacity<U, G>& cap) const;
+  template <LayerModel L, typename T> T assim_colimited_as(T ci) const;
+  template <LayerModel L, typename T, typename U> T assim_saturated_as(
+      const PhotoCapacity<U>& cap) const;
+  template <LayerModel L> double assim_saturated_as() const;
+  template <LayerModel L> double solve_ci_as(double gc);
   // The curve parameters take their own scalar U, so pow(tangent, double) pays
   // no log for an exponent that does not move.
   template <typename T, typename U> T proportion_of_conductivity_kernel(
@@ -1833,6 +1894,10 @@ public:
   template <typename T> PhotoCapacity<T> photo_capacity_at(const leaf_pars<T>& pars) const;
   template <typename T> PhotoCapacity<T> photo_capacity_at(const leaf_pars<T>& pars,
                                                            const T& temp) const;
+  // The members only the attenuated leaf reads, off the pack, after
+  // check_light_depth(); `transport` must already hold Jmax.
+  template <typename T> void add_layers_at(PhotoCapacity<T>& cap,
+                                           const leaf_pars<T>& pars) const;
   template <typename T> PhotoCapacity<T> photo_capacity() const;
   // Net assimilation as ci -> infinity: the colimited capacity less respiration,
   // what a leaf with no conductance nets where A reaches zero at no ci (the
@@ -1855,6 +1920,8 @@ public:
   // hand-written twin that could disagree with it by a finite, plausible amount.
   template <typename T>
   T assim_slope_at(const T& ci, const PhotoCapacity<T>& cap) const;
+  template <typename T>
+  T assim_attenuated_slope_at(const T& ci, const PhotoCapacity<T>& cap) const;
   // dA/dci at double on the seated capacity, by one forward pass through the
   // kernel assim_colimited() instantiates: the first-order conditions' A'. Not
   // assim_slope_at, whose general form costs the collar solve a tenth.
@@ -2673,13 +2740,17 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_P50_,
                              double curv_fact_colim_,
                              double TF24_cost_scale_, double R_d_25_,
                              double JS22_gamma_, double CMax_a_,
-                             double CMax_b_, double g_min_) {
+                             double CMax_b_, double g_min_,
+                             double light_depth_) {
   check_psi_magnitudes(stem_P50_, stem_c_, root_P50_, root_c_);
   // A negative residual conductance would move water into the leaf through
   // its cuticle; refused rather than clamped, like every other sign here.
   if (!(g_min_ >= 0.0)) {
     util::stop("g_min must be a finite, non-negative residual conductance in "
                "mol H2O m^-2 s^-1; got " + util::to_string(g_min_));
+  }
+  if (light_depth_ != 0.0) {
+    check_light_depth(light_depth_, curv_fact_elec_trans_);
   }
 
   // Both scale parameters and both critical potentials derive from the traits.
@@ -2712,6 +2783,7 @@ inline void Leaf::set_traits(double vcmax_25_, double stem_c_, double stem_P50_,
   CMax_a = CMax_a_;
   CMax_b = CMax_b_;
   g_min = g_min_;
+  light_depth = light_depth_;
 
   roots_.root_c = root_c_;
   roots_.root_P50 = root_P50_;
@@ -2773,6 +2845,7 @@ inline leaf_pars<double> Leaf::passive_pars() const {
   p[par_CMax_a] = CMax_a;
   p[par_CMax_b] = CMax_b;
   p[par_g_min] = g_min;
+  p[par_light_depth] = light_depth;
   p[par_kmax] = leaf_specific_conductance_max_;
   // The single path's series resistance. On the layered route the resistances
   // are per layer and this slot reads nothing; it carries the first layer's.

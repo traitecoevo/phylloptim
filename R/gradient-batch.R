@@ -153,7 +153,8 @@ print.leaf_batch <- function(x, ...) {
               x$n, if (x$n == 1L) "" else "s", x$supply_kind))
   single <- identical(x$supply_kind, "single")
   cat(sprintf("  differentiable: %s%s\n",
-              paste(.gradient_available_pars(single, route = "collar"),
+              paste(.gradient_available_pars(single, route = "collar",
+                                             attenuated = isTRUE(x$traits$light_depth > 0)),
                     collapse = ", "),
               if (single) " (`resistance` on the collar route only)" else ""))
   invisible(x)
@@ -279,7 +280,6 @@ leaf_gradient_batch <- function(batch,
   # The thermal-damage inputs are parameters only with the batch leaf's gate on.
   damage <- isTRUE(batch$leaf$use_thermal_damage_)
   par_names <- .gradient_par_names()
-  pars <- .gradient_pars(pars, single, model, damage, m$route)
 
   if (is.null(theta)) {
     if (is.null(traits)) {
@@ -299,6 +299,10 @@ leaf_gradient_batch <- function(batch,
   }
 
   .gradient_check_theta_prices(theta, model, par_names)
+  # `light_depth` is a parameter only where it is positive; a row at 0 returns
+  # NA for it.
+  attenuated <- any(theta[, match("light_depth", par_names)] > 0, na.rm = TRUE)
+  pars <- .gradient_pars(pars, single, model, damage, m$route, attenuated)
 
   psi <- .gradient_check_psi_batch(psi, batch$n)
   dpsi_dtheta <- .gradient_dpsi_dtheta_batch(dpsi_dtheta, pars, batch$n,

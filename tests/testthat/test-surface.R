@@ -17,13 +17,13 @@ test_that("leaf_traits() and leaf_control() partition the C++ constructor", {
   covered <- c(names(leaf_traits()), names(leaf_control()))
 
   expect_setequal(setdiff(ctor_args, covered), character(0))
-  # `R_d_25`, `JS22_gamma`, the two `CMax` parameters and `g_min` are traits the
-  # constructor does not take: plant's own RcppR6 bindings pin this constructor by
+  # `R_d_25`, `JS22_gamma`, the two `CMax` parameters, `g_min` and `light_depth`
+  # are traits the constructor does not take: plant's own RcppR6 bindings pin this constructor by
   # arity, so `leaf_model()` assigns the fields afterwards. The test below checks
   # those assignments really happen.
   expect_setequal(setdiff(covered, ctor_args),
                   c("R_d_25", "JS22_gamma", "CMax_a", "CMax_b", "g_min",
-                    "integration_rule", "integration_tol"))
+                    "light_depth", "integration_rule", "integration_tol"))
   expect_length(intersect(names(leaf_traits()), names(leaf_control())), 0)
 
   # And the split is the one the issue asked for: tolerances on the control
@@ -80,18 +80,19 @@ test_that("every trait can be read back from the object (#95)", {
   # ⚠️ Read-only, and that is hazard 10 rather than tidiness: changing a trait means
   # rebuilding up to two vulnerability splines and clearing the solved operating
   # point, so a bare write would leave the object describing two different curves.
-  # `R_d_25`, `JS22_gamma`, `CMax_a`, `CMax_b` and `g_min` are the documented
-  # exceptions -- settable because plant's bindings pin the generated constructor
+  # `R_d_25`, `JS22_gamma`, `CMax_a`, `CMax_b`, `g_min` and `light_depth` are the
+  # documented exceptions -- settable because plant's bindings pin the generated constructor
   # by arity, so `leaf_model()` applies them afterwards.
   #
   # ⚠️ Settable is only SAFE for these because nothing is derived from any of
-  # them. `JS22_gamma` is read at call time by `hydraulic_cost_JS22` and `g_min`
-  # by the solve -- no spline, no temperature cache, no precomputation -- so a
+  # them. `JS22_gamma` is read at call time by `hydraulic_cost_JS22`, and `g_min`
+  # and `light_depth` by the solve -- no spline, no temperature cache, no precomputation -- so a
   # bare write cannot leave the object describing two different models the way
   # a bare `stem_P50` write would. Do not read this exemption as permission for
   # the next trait.
   for (nm in setdiff(names(traits),
-                     c("R_d_25", "JS22_gamma", "CMax_a", "CMax_b", "g_min"))) {
+                     c("R_d_25", "JS22_gamma", "CMax_a", "CMax_b", "g_min",
+                       "light_depth"))) {
     expect_error(l[[nm]] <- 1, "read-only", label = paste(nm, "rejects a write"))
   }
 

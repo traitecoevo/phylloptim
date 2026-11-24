@@ -498,8 +498,8 @@ void test_light_compensation_corner() {
 // The acceptance sweep of #183, which every PR that touches the solve runs
 // (`make -C tests/cpp smoothness`): second differences of the solved outputs
 // and of two derivative rows across psi_soil, PPFD, VPD and Tair, with the
-// energy balance off and on, 1 and 3 layers, g_min zero and positive, and the
-// thermal-damage layer on. A slope jump is read as a fraction of the sweep's
+// energy balance off and on, 1 and 3 layers, g_min zero and positive, the
+// thermal-damage layer on, and light attenuating through the leaf. A slope jump is read as a fraction of the sweep's
 // largest slope, and asserted below 0.05 everywhere except across the one
 // corner: a triple of points that straddles a change of kind, which on these
 // sweeps is only the stomatal corner E_s >= 0, where a leaf at its wet bound
@@ -597,11 +597,12 @@ void sweep_kinks(const std::vector<double> &x, const std::vector<SweepPoint> &o,
 
 void test_smoothness_sweep() {
   printf("residual conductance: the #183 second-difference sweep\n");
-  struct Config { bool eb; int layers; bool damage; double g_min; };
+  struct Config { bool eb; int layers; bool damage; double g_min; bool attenuated = false; };
   const Config configs[] = {{false, 1, false, kGmin}, {false, 3, false, kGmin},
                             {true, 1, false, kGmin},  {true, 3, false, kGmin},
                             {false, 1, true, kGmin},  {true, 1, true, kGmin},
-                            {false, 1, false, 0.0},   {true, 1, false, 0.0}};
+                            {false, 1, false, 0.0},   {true, 1, false, 0.0},
+                            {false, 1, false, kGmin, true}, {true, 1, false, kGmin, true}};
   g_sweep_asserted = g_sweep_corner = 0;
   std::map<std::string, long> kinds;
   for (const Config &c : configs) {
@@ -613,6 +614,7 @@ void test_smoothness_sweep() {
       phylloptim::Leaf l = make(d, psi_soil, depth, c.g_min, c.eb, false,
                                 std::numeric_limits<double>::quiet_NaN(),
                                 c.damage ? +[](phylloptim::Leaf &x) { x.use_thermal_damage_ = true; set_atls_inputs(x); }
+                                : c.attenuated ? +[](phylloptim::Leaf &x) { x.light_depth = 2.0; }
                                          : static_cast<void (*)(phylloptim::Leaf &)>(nullptr));
       l.find_root_collar_psi();
       SweepPoint p{l.profit_, l.assim_colimited_, l.transpiration_, l.opt_psi_leaf_,
@@ -630,7 +632,8 @@ void test_smoothness_sweep() {
     };
     const std::string where = std::string(c.eb ? "EB on, " : "EB off, ") + std::to_string(c.layers) +
                               (c.damage ? " layer, damage on" : " layers") +
-                              (c.g_min > 0.0 ? "" : ", g_min 0");
+                              (c.g_min > 0.0 ? "" : ", g_min 0") +
+                              (c.attenuated ? ", light depth 2" : "");
     auto run = [&](const char *driver, double from, double to, double step,
                    std::function<SweepPoint(double)> at) {
       std::vector<double> x;
@@ -886,7 +889,7 @@ void test_rows_where_the_roots_cap_binds() {
                  l.roots_.root_c,
                  std::isnan(g_perturbed_root_P50) ? l.roots_.root_P50 : g_perturbed_root_P50,
                  l.TF24_beta2, l.jmax_25, l.phi_J, l.curv_fact_elec_trans, l.curv_fact_colim,
-                 l.TF24_cost_scale, l.R_d_25, l.JS22_gamma, l.CMax_a, l.CMax_b, l.g_min);
+                 l.TF24_cost_scale, l.R_d_25, l.JS22_gamma, l.CMax_a, l.CMax_b, l.g_min, l.light_depth);
   };
   int compared = 0;
   double worst = 0.0, worst_r = 0.0;

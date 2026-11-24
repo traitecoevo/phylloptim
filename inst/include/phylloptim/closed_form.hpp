@@ -131,6 +131,18 @@ inline void require_prescribed_temperature(const Leaf &l, const char *who) {
   }
 }
 
+// The attenuated leaf's refusal, beside the energy balance's and for the same
+// reason: each solver inverts the single-layer leaf's assimilation, and its
+// guard was measured on it.
+inline void require_single_layer(const Leaf &l, const char *who) {
+  if (l.light_depth != 0.0) {
+    util::stop(std::string(who) +
+               " is refused with light_depth > 0: it inverts the single-layer "
+               "leaf's assimilation and its validity guard was measured on it. "
+               "Use method \"exact\", or set light_depth to 0.");
+  }
+}
+
 struct Solution {
   double psi_leaf;      // MPa, positive magnitude
   double ci;            // Pa
@@ -248,6 +260,7 @@ inline double newton_on_supply(Leaf &l, double psi, double psi_upstream,
 // at 1 (note 1).
 inline Solution solve(Leaf &l, double psi_upstream, int newton_steps = 1) {
   require_prescribed_temperature(l, "closed_form::solve");
+  require_single_layer(l, "closed_form::solve");
   const double kmax = l.leaf_specific_conductance_max_;
   const double sqrt_D = std::sqrt(l.vpd_leaf_);
   const double Q = uso_group(l);
@@ -276,6 +289,7 @@ inline Solution solve(Leaf &l, double psi_upstream, int newton_steps = 1) {
 // the n = 0 arm, not a preferred value: 1/stem_c is 0.373 at the default stem_c.
 inline Solution solve_exact_beta2(Leaf &l, double psi_upstream) {
   require_prescribed_temperature(l, "closed_form::solve_exact_beta2");
+  require_single_layer(l, "closed_form::solve_exact_beta2");
   const double sqrt_D = std::sqrt(l.vpd_leaf_);
   const double Q = uso_group(l);
   const double xi = std::sqrt(Q * l.stem_b * l.leaf_specific_conductance_max_ /
@@ -297,6 +311,7 @@ inline bool beta2_is_exact(const Leaf &l, double tol = 1e-12) {
 // collapse (`uso_group`) still approximates ci under Rubisco-bound colimitation.
 inline Solution solve_CF77(Leaf &l, double psi_upstream) {
   require_prescribed_temperature(l, "closed_form::solve_CF77");
+  require_single_layer(l, "closed_form::solve_CF77");
   const double sqrt_D = std::sqrt(l.vpd_leaf_);
   const double xi = std::sqrt(uso_group(l) / l.cf77_price());
   const double ci = l.ca_ * xi / (xi + sqrt_D);
@@ -320,6 +335,7 @@ inline Solution solve_CF77(Leaf &l, double psi_upstream) {
 inline Solution solve_TF24_floor(Leaf &l, double psi_upstream,
                               int newton_steps = 1) {
   require_prescribed_temperature(l, "closed_form::solve_TF24_floor");
+  require_single_layer(l, "closed_form::solve_TF24_floor");
   const double sqrt_D = std::sqrt(l.vpd_leaf_);
   const double Q = uso_group(l);
 
@@ -490,6 +506,7 @@ inline void Leaf::optimise_closed() {
   }
   // The solvers' own stop, so the two cannot drift.
   closed_form::require_prescribed_temperature(*this, "the closed form");
+  closed_form::require_single_layer(*this, "the closed form");
   if (use_thermal_damage_) {
     util::stop("the closed form is refused with use_thermal_damage_ on: it has "
                "not been checked against the exact solve with the thermal-damage "

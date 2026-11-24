@@ -404,7 +404,7 @@ inline phylloptim::Leaf make(const Drivers &d, const std::vector<double> &psi_so
   l.set_traits(l.vcmax_25, l.stem_c, l.stem_P50, l.roots_.root_c,
                l.roots_.root_P50, l.TF24_beta2, l.jmax_25, l.phi_J,
                l.curv_fact_elec_trans, l.curv_fact_colim, l.TF24_cost_scale,
-               l.R_d_25, l.JS22_gamma, l.CMax_a, l.CMax_b, g_min);
+               l.R_d_25, l.JS22_gamma, l.CMax_a, l.CMax_b, g_min, 0.0);
   if (std::isfinite(rho)) l.g_min_co2_ratio_ = rho;
   l.use_energy_balance_ = eb;
   l.NIR_int_ = d.PPFD / phylloptim::umol_par_per_joule;

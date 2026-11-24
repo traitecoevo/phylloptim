@@ -789,8 +789,8 @@ test_that("the setter's positional trait call cannot drift in arity", {
   # gradient's slots take their order from the C++ enumeration. A trait added to
   # one list and not the others would silently pass the wrong value for every
   # argument after it, so the three lists are asserted to agree.
-  expect_length(leaf_traits(), 16L)
-  expect_length(formals(leaf_model(supply = leaf_supply_multilayer())$set_traits), 16L)
+  expect_length(leaf_traits(), 17L)
+  expect_length(formals(leaf_model(supply = leaf_supply_multilayer())$set_traits), 17L)
   expect_identical(names(leaf_traits()), names(formals(leaf_model(supply = leaf_supply_multilayer())$set_traits)))
   expect_identical(names(leaf_traits()),
                    gradient_par_names()[seq_along(leaf_traits())])

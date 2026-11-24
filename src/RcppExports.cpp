@@ -101,8 +101,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // Leaf__set_traits
-void Leaf__set_traits(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double vcmax_25, double stem_c, double stem_P50, double root_c, double root_P50, double TF24_beta2, double jmax_25, double phi_J, double curv_fact_elec_trans, double curv_fact_colim, double TF24_cost_scale, double R_d_25, double JS22_gamma, double CMax_a, double CMax_b, double g_min);
-RcppExport SEXP _phylloptim_Leaf__set_traits(SEXP obj_SEXP, SEXP vcmax_25SEXP, SEXP stem_cSEXP, SEXP stem_P50SEXP, SEXP root_cSEXP, SEXP root_P50SEXP, SEXP TF24_beta2SEXP, SEXP jmax_25SEXP, SEXP phi_JSEXP, SEXP curv_fact_elec_transSEXP, SEXP curv_fact_colimSEXP, SEXP TF24_cost_scaleSEXP, SEXP R_d_25SEXP, SEXP JS22_gammaSEXP, SEXP CMax_aSEXP, SEXP CMax_bSEXP, SEXP g_minSEXP) {
+void Leaf__set_traits(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double vcmax_25, double stem_c, double stem_P50, double root_c, double root_P50, double TF24_beta2, double jmax_25, double phi_J, double curv_fact_elec_trans, double curv_fact_colim, double TF24_cost_scale, double R_d_25, double JS22_gamma, double CMax_a, double CMax_b, double g_min, double light_depth);
+RcppExport SEXP _phylloptim_Leaf__set_traits(SEXP obj_SEXP, SEXP vcmax_25SEXP, SEXP stem_cSEXP, SEXP stem_P50SEXP, SEXP root_cSEXP, SEXP root_P50SEXP, SEXP TF24_beta2SEXP, SEXP jmax_25SEXP, SEXP phi_JSEXP, SEXP curv_fact_elec_transSEXP, SEXP curv_fact_colimSEXP, SEXP TF24_cost_scaleSEXP, SEXP R_d_25SEXP, SEXP JS22_gammaSEXP, SEXP CMax_aSEXP, SEXP CMax_bSEXP, SEXP g_minSEXP, SEXP light_depthSEXP) {
 BEGIN_RCPP
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
@@ -122,7 +122,8 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type CMax_a(CMax_aSEXP);
     Rcpp::traits::input_parameter< double >::type CMax_b(CMax_bSEXP);
     Rcpp::traits::input_parameter< double >::type g_min(g_minSEXP);
-    Leaf__set_traits(obj_, vcmax_25, stem_c, stem_P50, root_c, root_P50, TF24_beta2, jmax_25, phi_J, curv_fact_elec_trans, curv_fact_colim, TF24_cost_scale, R_d_25, JS22_gamma, CMax_a, CMax_b, g_min);
+    Rcpp::traits::input_parameter< double >::type light_depth(light_depthSEXP);
+    Leaf__set_traits(obj_, vcmax_25, stem_c, stem_P50, root_c, root_P50, TF24_beta2, jmax_25, phi_J, curv_fact_elec_trans, curv_fact_colim, TF24_cost_scale, R_d_25, JS22_gamma, CMax_a, CMax_b, g_min, light_depth);
     return R_NilValue;
 END_RCPP
 }
@@ -2275,6 +2276,28 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// Leaf__light_depth__get
+double Leaf__light_depth__get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
+RcppExport SEXP _phylloptim_Leaf__light_depth__get(SEXP obj_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    rcpp_result_gen = Rcpp::wrap(Leaf__light_depth__get(obj_));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Leaf__light_depth__set
+void Leaf__light_depth__set(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_, double value);
+RcppExport SEXP _phylloptim_Leaf__light_depth__set(SEXP obj_SEXP, SEXP valueSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< phylloptim::RcppR6::RcppR6<phylloptim::Leaf> >::type obj_(obj_SEXP);
+    Rcpp::traits::input_parameter< double >::type value(valueSEXP);
+    Leaf__light_depth__set(obj_, value);
+    return R_NilValue;
+END_RCPP
+}
 // Leaf__g_min_co2_ratio___get
 double Leaf__g_min_co2_ratio___get(phylloptim::RcppR6::RcppR6<phylloptim::Leaf> obj_);
 RcppExport SEXP _phylloptim_Leaf__g_min_co2_ratio___get(SEXP obj_SEXP) {
@@ -4187,7 +4210,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__initialize_integrator", (DL_FUNC) &_phylloptim_Leaf__initialize_integrator, 3},
     {"_phylloptim_Leaf__set_physiology", (DL_FUNC) &_phylloptim_Leaf__set_physiology, 11},
     {"_phylloptim_Leaf__perturb_stem_P50", (DL_FUNC) &_phylloptim_Leaf__perturb_stem_P50, 2},
-    {"_phylloptim_Leaf__set_traits", (DL_FUNC) &_phylloptim_Leaf__set_traits, 17},
+    {"_phylloptim_Leaf__set_traits", (DL_FUNC) &_phylloptim_Leaf__set_traits, 18},
     {"_phylloptim_Leaf__proportion_of_conductivity", (DL_FUNC) &_phylloptim_Leaf__proportion_of_conductivity, 2},
     {"_phylloptim_Leaf__arrh_curve", (DL_FUNC) &_phylloptim_Leaf__arrh_curve, 4},
     {"_phylloptim_Leaf__peak_arrh_curve", (DL_FUNC) &_phylloptim_Leaf__peak_arrh_curve, 6},
@@ -4374,6 +4397,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_phylloptim_Leaf__CMax_b__set", (DL_FUNC) &_phylloptim_Leaf__CMax_b__set, 2},
     {"_phylloptim_Leaf__g_min__get", (DL_FUNC) &_phylloptim_Leaf__g_min__get, 1},
     {"_phylloptim_Leaf__g_min__set", (DL_FUNC) &_phylloptim_Leaf__g_min__set, 2},
+    {"_phylloptim_Leaf__light_depth__get", (DL_FUNC) &_phylloptim_Leaf__light_depth__get, 1},
+    {"_phylloptim_Leaf__light_depth__set", (DL_FUNC) &_phylloptim_Leaf__light_depth__set, 2},
     {"_phylloptim_Leaf__g_min_co2_ratio___get", (DL_FUNC) &_phylloptim_Leaf__g_min_co2_ratio___get, 1},
     {"_phylloptim_Leaf__g_min_co2_ratio___set", (DL_FUNC) &_phylloptim_Leaf__g_min_co2_ratio___set, 2},
     {"_phylloptim_Leaf__g_min_k_low___get", (DL_FUNC) &_phylloptim_Leaf__g_min_k_low___get, 1},

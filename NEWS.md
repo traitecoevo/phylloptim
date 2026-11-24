@@ -1,3 +1,10 @@
+# phylloptim 0.43.0
+
+- A seventeenth trait, `light_depth` (`leaf_traits(light_depth = )`), the optical depth of the photosynthetic tissue; 0, the default, is the single-layer leaf. Above 0, light falls as exp(-t) through a stack of layers that share c_i, and assimilation is the closed-form integral over the stack, each layer a non-rectangular hyperbola of `curv_fact_elec_trans`, which must then lie in (0, 1), between its light and its capacity (#290).
+- Every route and supply solves it, and `leaf_gradient()` differentiates it with respect to every trait, `light_depth` included where it is positive; the leaf is not continuous at 0. The closed-form optimisers refuse it.
+- For C++ users, `set_traits()` takes `light_depth` as its seventeenth argument and the parameter numbering after `par_g_min` shifts by one (`n_theta` is 36).
+- At the default nothing moves: the golden files are bit-identical.
+
 # phylloptim 0.42.2
 
 - The uptake's slope in the collar is analytic at a layer's gravity balance, where the uptake is smooth; `duptake_dpsi` reports NaN only at a zero collar and at equal potentials outside the quadrature arm (#288).

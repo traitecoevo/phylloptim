@@ -52,7 +52,8 @@ inline constexpr SlotName slots_no_curve_owns[] = {
     {par_root_P50, "root_P50"},       {par_jmax_25, "jmax_25"},
     {par_phi_J, "phi_J"},             {par_curv_fact_elec_trans, "curv_fact_elec_trans"},
     {par_curv_fact_colim, "curv_fact_colim"}, {par_R_d_25, "R_d_25"},
-    {par_g_min, "g_min"},             {par_kmax, "leaf_specific_conductance_max"},
+    {par_g_min, "g_min"},             {par_light_depth, "light_depth"},
+    {par_kmax, "leaf_specific_conductance_max"},
     {par_resistance, "resistance"},   {par_A, "A_"},
     {par_I, "I_"},                    {par_D, "D_"},
     {par_topt_offset, "topt_offset_"}, {par_dTopt_max, "dTopt_max_"},
@@ -300,7 +301,8 @@ inline void apply(Leaf& l, const double* theta, const Drivers& d, bool single) {
                theta[par_phi_J], theta[par_curv_fact_elec_trans],
                theta[par_curv_fact_colim], theta[par_TF24_cost_scale],
                theta[par_R_d_25], theta[par_JS22_gamma],
-               theta[par_CMax_a], theta[par_CMax_b], theta[par_g_min]);
+               theta[par_CMax_a], theta[par_CMax_b], theta[par_g_min],
+               theta[par_light_depth]);
   // Not traits and nothing is derived from them, so written directly. Only a
   // set slot is written: on a model that does not own a slot it is NA, and
   // writing it would overwrite the leaf's aligned default.
@@ -418,6 +420,11 @@ inline void surface_rows(Leaf& l, const int* pars, std::size_t npars,
   }
   for (std::size_t k = 0; k < npars; ++k) {
     const int slot = pars[k];
+    // At light_depth 0 the leaf is not continuous in it: its lane reads zero, which
+    // is no derivative, so its row and M stay NA.
+    if (slot == par_light_depth && l.light_depth == 0.0) {
+      continue;
+    }
     const double dpsi = prescribed == nullptr || prescribed->dpsi_dtheta == nullptr
                             ? 0.0
                             : prescribed->dpsi_dtheta[k];
