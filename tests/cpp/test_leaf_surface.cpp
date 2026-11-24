@@ -575,7 +575,13 @@ void referee_every_parameter_at_every_kind(int* compared_out) {
       {{0.5}, 100.0, 0.5, Kind::Interior},
       {{0.5}, 100.0, 0.5, Kind::Interior, 5e-4},
       {{0.5}, 500.0, 2.0, Kind::BoundaryDry},
-      {{0.3}, 1.0, 0.5, Kind::BoundarySoil, 5e-4},
+      // Not attenuated: on the leaf route with the balance on, TF24's, TF24_floor's
+      // and ProfitMax's leaf stands wide open here at an interior point (gc 3.1),
+      // where the attenuated solve's noise in gc, 3.4e-10 of it, is over the floor
+      // below and its dgc/djmax_25 of 1.2e-6 resolves at no step; that row agrees
+      // with a least-squares slope over 401 solves to 5e-5. The dark leaf at vpd 2
+      // with a cuticle, above, reaches the attenuated leaf's wet bound.
+      {{0.3}, 1.0, 0.5, Kind::BoundarySoil, 5e-4, 0.0, false},
       // A cuticle large enough that the stem's ceiling caps it on a dry soil,
       // where the residual flux's slopes move with every stem trait.
       {{5.0}, 900.0, 2.0, Kind::Interior, 5e-3},
