@@ -1543,7 +1543,7 @@ equations:
       W_j = \frac{J}{4}\,\frac{c_i - \Gamma^* c_P}{c_i + 2\,\Gamma^* c_P}, \qquad
       A = \frac{W_c + W_j - \sqrt{(W_c + W_j)^2 - 4\,\theta\, W_c W_j}}{2\,\theta} - R_d
     code: phylloptim::Leaf::assim_colimited
-    also: [phylloptim::Leaf::assim_colimited_kernel, phylloptim::Leaf::assim_rubisco_limited_kernel, phylloptim::Leaf::assim_electron_limited_kernel, phylloptim::Leaf::photo_capacity]
+    also: [phylloptim::Leaf::assim_colimited_kernel, phylloptim::Leaf::assim_rubisco_limited_kernel, phylloptim::Leaf::assim_electron_limited_kernel, phylloptim::Leaf::photo_capacity, phylloptim::Leaf::photo_capacity_as]
     reads: [curv_fact_colim, atm_kpa]
     writes: [assim_colimited_]
     kind: closed_form
@@ -1560,12 +1560,12 @@ equations:
       F(y) = \frac{y - R - b\ln(y + b + R) + s\ln(s^2 + b y + s R)}{2\theta_J}, \quad R = \sqrt{y^2 + 2by + s^2} \\
       A = F(A_L) - F(A_L e^{-\tau}) - R_d
     code: phylloptim::Leaf::assim_attenuated_kernel
-    also: [phylloptim::Leaf::attenuated_profile]
+    also: [phylloptim::Leaf::attenuated_profile, phylloptim::Leaf::photo_capacity_as, phylloptim::Leaf::photo_capacity_at]
     reads: [curv_fact_colim, curv_fact_elec_trans, phi_J, alpha_PAR_, light_depth_]
     writes: []
     kind: closed_form
     cite: Farquhar-1980
-    note: 'Used in place of the single-layer form where light_depth_ > 0: the integral over layers sharing $c_i$ of a non-rectangular hyperbola of curvature $\theta_J$ between each layer''s light and its capacity. Exact against a layer sum.'
+    note: 'Used in place of the single-layer form where light_depth_ > 0: the integral over layers sharing $c_i$ of a non-rectangular hyperbola of curvature $\theta_J$ between each layer''s light and its capacity. Exact against a layer sum for $\tau \ge 10^{-2}$; below, the difference of $F$ cancels. As $\tau \to 0$ it does not tend to the single-layer form, which colimits light with $J_{max}$ before Rubisco: here Rubisco and $J_{max}$ are colimited first.'
   thermal_cost:
     section: biochemistry
     title: Instantaneous thermal cost

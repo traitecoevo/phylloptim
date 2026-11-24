@@ -1,3 +1,9 @@
+# phylloptim 0.43.0
+
+- New `Leaf` field `light_depth_`, the optical depth of the photosynthetic tissue; 0, the default, is the single-layer leaf. Above 0, light falls as exp(-t) through a stack of layers that share c_i, and assimilation is the closed-form integral over the stack, each layer a non-rectangular hyperbola of `curv_fact_elec_trans` between its light and its capacity. `alpha_PAR_` stays the stack's absorptance (#290).
+- The solve and the trait gradient read it on both routes. The closed-form optimisers refuse a leaf with `light_depth_ > 0`, and there `curv_fact_elec_trans` must lie in (0, 1).
+- At the default nothing moves: the golden files are bit-identical.
+
 # phylloptim 0.42.2
 
 - The uptake's slope in the collar is analytic at a layer's gravity balance, where the uptake is smooth; `duptake_dpsi` reports NaN only at a zero collar and at equal potentials outside the quadrature arm (#288).

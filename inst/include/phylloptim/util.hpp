@@ -51,6 +51,13 @@ inline std::string infeasible_token(const std::string &code) {
 
 template <typename T> std::string to_string(T x) { return std::to_string(x); }
 
+// Runs `f` as a call rather than inline. For an arm a hot function rarely takes:
+// inlined, the arm's size counts against the function wherever it is itself
+// inlined, and its callers stop inlining it.
+template <class F> [[gnu::noinline]] decltype(auto) out_of_line(F&& f) {
+  return f();
+}
+
 // A double in an error message, to six significant figures as odelia's and
 // plant's util::format_double do; `to_string` gives six decimals, so 1e-22 reads
 // "0.000000". For reading, not for reconstructing a double.

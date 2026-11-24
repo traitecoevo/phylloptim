@@ -669,7 +669,10 @@ public:
   // leaf. Positive: light falls as exp(-t) through a stack of layers that share c_i,
   // alpha_PAR_ stays the stack's absorptance, curv_fact_elec_trans is each layer's
   // curvature (must be < 1) and the closed form is refused. See
-  // assim_attenuated_kernel.
+  // assim_attenuated_kernel. Not continuous at 0: the stack colimits Rubisco with
+  // Jmax before light, the single layer light with Jmax before Rubisco, so as the
+  // depth falls to 0 the rate tends to a different leaf's. Accurate to 1e-10 for
+  // depths of 1e-2 and more; below, attenuated_profile's difference cancels.
   double light_depth_ = 0.0;
   double alpha_NIR_ = 0.20;  // near-infrared absorptance, unitless
   // Intercepted near-infrared per unit leaf area, W m^-2, for the energy balance.
@@ -1674,6 +1677,10 @@ public:
   // layer's k_imp_eff_, k_rec_eff_, functional_) at a leaf temperature. With the
   // energy balance on it runs per operating point, bypassing the photo_temp cache.
   void update_temperature_dependent_params(double leaf_temp);
+  // Refuses a light_depth_ that is not a finite positive number, and a
+  // curv_fact_elec_trans outside (0, 1). Run by the attenuated arm of each forward
+  // entry (LayerModel), so whenever the depth is set, the first evaluation refuses it.
+  void check_light_depth() const;
   // Saturation vapour pressure es(T) (kPa) and its slope (kPa K^-1), Tetens.
   double saturation_vapour_pressure(double temp) const;
   double saturation_vapour_pressure_slope(double temp) const;
@@ -1744,12 +1751,13 @@ public:
     T respiration;
     G gamma;
     G km;
-    // Read only where depth > 0: the absorbed photon flux phi_J alpha_PAR PPFD, and
-    // each layer's curvature. There `transport` holds Jmax, not J.
-    T light;
-    T layer_curvature;
+    // Read only where depth != 0: the absorbed photon flux phi_J alpha_PAR PPFD, and
+    // each layer's curvature. There `transport` holds Jmax, not J. Initialised, so
+    // a capacity built from the six above is the single-layer leaf's.
+    T light{};
+    T layer_curvature{};
     // light_depth_: a setting, never a row, so it is not visited.
-    double depth;
+    double depth = 0.0;
 
     // ⚠️ Hazard 17: every member that carries a row is visited here, or its
     // columns read exactly zero. The member count is asserted below.
@@ -1761,9 +1769,9 @@ public:
       f(respiration);
       f(gamma);
       f(km);
-      // Read only where depth > 0; elsewhere their columns are exactly zero, and
+      // Read only where depth != 0; elsewhere their columns are exactly zero, and
       // visiting them would add two directions to every implicit node.
-      if (depth > 0.0) {
+      if (depth != 0.0) {
         f(light);
         f(layer_curvature);
       }
@@ -1810,15 +1818,32 @@ public:
       const T& ci, const PhotoCapacity<U, G>& cap) const;
   template <typename T, typename U, typename G> T assim_electron_limited_kernel(
       const T& ci, const PhotoCapacity<U, G>& cap) const;
+  // Net assimilation at a capacity: the single-layer leaf's, the attenuated
+  // leaf's (cap.depth != 0), and whichever of the two the capacity names.
   template <typename T, typename U, typename G> T assim_single_layer_kernel(
       const T& ci, const PhotoCapacity<U, G>& cap) const;
   template <typename T, typename U, typename G> T assim_attenuated_kernel(
-      T ci, U vcmax, U jmax, U curvature, G gamma, G km, U light, U layer_curvature,
-      double depth) const;
+      const T& ci, const PhotoCapacity<U, G>& cap) const;
   template <typename T, typename U> T attenuated_profile(
       const T& saturated, const T& light_limited, double depth, const U& curvature) const;
   template <typename T, typename U, typename G> T assim_colimited_kernel(
       const T& ci, const PhotoCapacity<U, G>& cap) const;
+
+  // Which leaf a kernel integrates over: one layer, or the stack a nonzero
+  // light_depth_ asks for. The forward model tests light_depth_ where it enters the kernel
+  // (solve_ci, assim_colimited_kernel(ci), assim_saturated) and runs one
+  // instantiation of what follows; the attenuated one is out of line. ⚠️ Hazard 5:
+  // a test inside the kernel instead stops the kernel inlining into the
+  // single-layer solve (bench_solve).
+  enum class LayerModel { Single, Attenuated };
+  template <LayerModel L, typename T> PhotoCapacity<T> photo_capacity_as() const;
+  template <LayerModel L, typename T, typename U, typename G> T assim_colimited_as(
+      const T& ci, const PhotoCapacity<U, G>& cap) const;
+  template <LayerModel L, typename T> T assim_colimited_as(T ci) const;
+  template <LayerModel L, typename T, typename U> T assim_saturated_as(
+      const PhotoCapacity<U>& cap) const;
+  template <LayerModel L> double assim_saturated_as() const;
+  template <LayerModel L> double solve_ci_as(double gc);
   // The curve parameters take their own scalar U, so pow(tangent, double) pays
   // no log for an exponent that does not move.
   template <typename T, typename U> T proportion_of_conductivity_kernel(
@@ -1880,6 +1905,8 @@ public:
   // hand-written twin that could disagree with it by a finite, plausible amount.
   template <typename T>
   T assim_slope_at(const T& ci, const PhotoCapacity<T>& cap) const;
+  template <typename T>
+  T assim_attenuated_slope_at(const T& ci, const PhotoCapacity<T>& cap) const;
   // dA/dci at double on the seated capacity, by one forward pass through the
   // kernel assim_colimited() instantiates: the first-order conditions' A'. Not
   // assim_slope_at, whose general form costs the collar solve a tenth.

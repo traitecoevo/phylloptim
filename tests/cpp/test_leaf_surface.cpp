@@ -144,6 +144,83 @@ void test_pack_kernels_are_the_models_own() {
          std::to_string(widest_gap));
 }
 
+// The attenuated leaf (light_depth_ > 0) is one leaf on every path: the forward
+// model's kernel, the derivative surface's pack kernel and their slopes are the
+// same numbers, the saturated rate is the colimited one's limit, and whatever
+// inverts or reports the single layer refuses it by name. The forward model
+// chooses its kernel where it enters (Leaf::LayerModel) and the surface per
+// capacity, so nothing else ties the two together.
+void test_attenuated_leaf_is_one_leaf_on_every_path() {
+  printf("an attenuated leaf is one leaf on the forward path and the surface\n");
+  using AD = xad::fwd<double>::active_type;
+  int compared = 0;
+  for (bool gate : {false, true}) {
+    for (double depth : {0.5, 3.0}) {
+      for (double ppfd : {100.0, 1500.0}) {
+        Drivers d;
+        d.PPFD = ppfd;
+        phylloptim::Leaf l = make_pm_leaf(d, {1.0, 1.35, 1.7}, {1.0, 2.0, 3.0}, gate);
+        l.light_depth_ = depth;
+        l.find_root_collar_psi();
+        const double ci = l.ci_;
+        if (!std::isfinite(ci)) continue;
+        ++compared;
+        const std::string at = " at depth=" + std::to_string(depth) +
+                               " ppfd=" + std::to_string(ppfd) + (gate ? " eb=1" : " eb=0");
+        const phylloptim::leaf_pars<double> p = l.passive_pars();
+        const phylloptim::Leaf::PhotoCapacity<double> cap = l.photo_capacity_at<double>(p);
+        near(l.assim_colimited_kernel<double>(ci, cap), l.assim_colimited(ci), 0.0,
+             "colimited assimilation" + at);
+        AD ci_ad = ci;
+        xad::derivative(ci_ad) = 1.0;
+        near(l.assim_slope_at<double>(ci, cap), xad::derivative(l.assim_colimited_kernel(ci_ad)),
+             0.0, "dA/dci" + at);
+        near(l.assim_slope(ci), xad::derivative(l.assim_colimited_kernel(ci_ad)), 0.0,
+             "the first-order conditions' A'" + at);
+        near(l.assim_saturated_kernel<double, double>(l.photo_capacity<double>()),
+             l.assim_saturated(), 0.0, "the saturated rate on both paths" + at);
+        const double far = l.assim_colimited(1e9);
+        near(far, l.assim_saturated(), 1e-6 * std::abs(far), "the saturated rate is the limit" + at);
+        using LM = phylloptim::Leaf::LayerModel;
+        near(l.assim_colimited(ci), l.assim_colimited_as<LM::Attenuated, double>(ci), 0.0,
+             "the forward model runs the attenuated kernel" + at);
+        ok(l.assim_colimited(ci) != l.assim_colimited_as<LM::Single, double>(ci),
+           "and not the single layer's" + at);
+      }
+    }
+  }
+  ok(compared >= 6, "the sweep reached at least 6 attenuated operating points, got " +
+                        std::to_string(compared));
+
+  Drivers d;
+  phylloptim::Leaf l = make_pm_leaf(d, {1.0}, {1.0}, false);
+  l.light_depth_ = 2.0;
+  ok(throws_with([&] { l.assim_electron_limited(20.0); }, "light_depth_"),
+     "assim_electron_limited refuses the attenuated leaf");
+  ok(throws_with([&] { phylloptim::closed_form::solve(l, 1.0); }, "light_depth_"),
+     "closed_form::solve refuses it");
+  ok(throws_with([&] { phylloptim::closed_form::solve_exact_beta2(l, 1.0); }, "light_depth_"),
+     "closed_form::solve_exact_beta2 refuses it");
+  ok(throws_with([&] { phylloptim::closed_form::solve_CF77(l, 1.0); }, "light_depth_"),
+     "closed_form::solve_CF77 refuses it");
+  ok(throws_with([&] { phylloptim::closed_form::solve_TF24_floor(l, 1.0); }, "light_depth_"),
+     "closed_form::solve_TF24_floor refuses it");
+  // Set after the drivers, a bad depth meets optimise(); a cache hit in
+  // set_physiology does not skip the check.
+  for (double bad : {-1.0, std::numeric_limits<double>::quiet_NaN(),
+                     std::numeric_limits<double>::infinity()}) {
+    phylloptim::Leaf b = make_pm_leaf(d, {1.0}, {1.0}, false);
+    b.light_depth_ = bad;
+    ok(throws_with([&] { b.optimise(); }, "light_depth_"),
+       "optimise refuses light_depth_ = " + std::to_string(bad));
+  }
+  phylloptim::Leaf c = make_pm_leaf(d, {1.0}, {1.0}, false);
+  c.light_depth_ = 2.0;
+  c.curv_fact_elec_trans = 1.0;
+  ok(throws_with([&] { c.optimise(); }, "curv_fact_elec_trans"),
+     "with depth > 0, optimise refuses a layer curvature of 1");
+}
+
 // Light reaches carbon with a ROW, and the row is the right size.
 //
 // ⚠️ AN EXACT ZERO IS THE FAILURE THIS EXISTS FOR, not a small number. The pack
@@ -2886,6 +2963,7 @@ void run_surface() {
   test_outputs_agree_with_the_solve();
   test_surface_reduces_tf24_floor_to_tf24();
   test_pack_kernels_are_the_models_own();
+  test_attenuated_leaf_is_one_leaf_on_every_path();
   test_light_reaches_carbon_with_a_row();
   test_every_answered_point_hands_over_finite_rows();
   test_a_replay_hands_over_the_rows_its_solve_did();

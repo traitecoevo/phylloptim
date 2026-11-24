@@ -36,6 +36,20 @@ test_that("the attenuated kernel is the integral over layers", {
   }
 })
 
+test_that("respiration is subtracted once, after the integral over layers", {
+  l <- leaf_model(leaf_traits(curv_fact_elec_trans = 0.9))
+  l$light_depth_ <- 2
+  set_drivers(l, psi_soil = 0.5, PPFD = 600)
+  expect_gt(l$R_d_, 0)
+  ci <- 25
+  gs <- l$gamma_ * l$atm_kpa_ * 1e-3
+  wj <- (ci - gs) / (4 * (ci + 2 * gs)); wc <- (ci - gs) / (ci + l$km_)
+  a <- l$vcmax_ * wc; m <- l$jmax_ * wj; th <- l$curv_fact_colim
+  A_sat <- (a + m - sqrt((a + m)^2 - 4 * th * a * m)) / (2 * th)
+  A_L <- l$phi_J * l$alpha_PAR_ * 600 * wj
+  expect_equal(l$assim_colimited(ci), layer_sum(A_sat, A_L, 2, 0.9) - l$R_d_, tolerance = 1e-6)
+})
+
 test_that("depth concentrates light in the upper layers", {
   ci <- 25
   # in weak light every layer is light-limited and the leaf uses all it absorbs
@@ -64,21 +78,38 @@ test_that("the solve runs with attenuation on, and the closed form refuses it", 
 
 test_that("bad settings are refused by name", {
   expect_error(attenuated_leaf(-1), "light_depth_")
+  expect_error(attenuated_leaf(NaN), "light_depth_")
+  expect_error(attenuated_leaf(Inf), "light_depth_")
   expect_error(attenuated_leaf(2, theta_layer = 1), "curv_fact_elec_trans")
+  # set after the drivers, a bad depth is refused when the leaf is solved
+  l <- leaf_model(); set_drivers(l, psi_soil = 0.5, PPFD = 800)
+  l$light_depth_ <- -1
+  expect_error(l$optimise(), "light_depth_")
+  # the single layer's electron-limited rate is not the attenuated leaf's
+  expect_error(attenuated_leaf(2)$assim_electron_limited(25), "light_depth_")
 })
 
 test_that("the trait gradient matches a difference of the solve with attenuation on", {
-  tr <- leaf_traits(curv_fact_elec_trans = 0.9, R_d_25 = 0)
-  solve_A <- function(v) {
-    l <- leaf_model(leaf_traits(curv_fact_elec_trans = 0.9, R_d_25 = 0, vcmax_25 = v, jmax_25 = 157.44))
+  # every trait the attenuated kernel reads: the capacities, the light (phi_J),
+  # each layer's curvature and respiration
+  pars <- c("vcmax_25", "jmax_25", "phi_J", "curv_fact_elec_trans", "curv_fact_colim",
+            "R_d_25")
+  base <- leaf_traits(curv_fact_elec_trans = 0.9, curv_fact_colim = 0.95)
+  solve_A <- function(tr) {
+    l <- leaf_model(tr)
     l$light_depth_ <- 3
     set_drivers(l, psi_soil = 0.5, PPFD = 900)
     l$optimise()
     operating_point(l)$A
   }
-  l <- leaf_model(tr); l$light_depth_ <- 3
-  g <- leaf_gradient(psi_soil = 0.5, PPFD = 900, x = l, traits = tr, pars = "vcmax_25")
-  h <- 1e-3 * 96
-  fd <- (solve_A(96 + h) - solve_A(96 - h)) / (2 * h)
-  expect_equal(g$gradient["vcmax_25", "A"], fd, tolerance = 1e-4)
+  l <- leaf_model(base); l$light_depth_ <- 3
+  g <- leaf_gradient(psi_soil = 0.5, PPFD = 900, x = l, traits = base, pars = pars)
+  for (p in pars) {
+    h <- 1e-3 * base[[p]]
+    up <- base; up[[p]] <- base[[p]] + h
+    dn <- base; dn[[p]] <- base[[p]] - h
+    fd <- (solve_A(up) - solve_A(dn)) / (2 * h)
+    expect_true(fd != 0, info = p)
+    expect_equal(g$gradient[p, "A"], fd, tolerance = 1e-4, info = p)
+  }
 })
